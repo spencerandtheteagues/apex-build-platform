@@ -1,0 +1,1087 @@
+// APEX.BUILD State Management
+// Zustand-based store for application state
+
+import { create } from 'zustand'
+import { devtools, subscribeWithSelector } from 'zustand/middleware'
+import { immer } from 'zustand/middleware/immer'
+import {
+  User,
+  Project,
+  File,
+  AIRequest,
+  AIUsage,
+  Execution,
+  CollabRoom,
+  CursorPosition,
+  ChatMessage,
+  Theme,
+  EditorState,
+  Notification,
+  AIConversation,
+  TerminalSession,
+} from '@/types'
+import { themes, getTheme } from '@/styles/themes'
+import apiService from '@/services/api'
+import websocketService from '@/services/websocket'
+
+// Auth slice
+interface AuthState {
+  user: User | null
+  isAuthenticated: boolean
+  isLoading: boolean
+  error: string | null
+}
+
+interface AuthActions {
+  login: (username: string, password: string) => Promise<void>
+  register: (data: {
+    username: string
+    email: string
+    password: string
+    full_name?: string
+  }) => Promise<void>
+  logout: () => Promise<void>
+  refreshUser: () => Promise<void>
+  updateProfile: (data: Partial<User>) => Promise<void>
+  clearError: () => void
+}
+
+// Projects slice
+interface ProjectsState {
+  projects: Project[]
+  currentProject: Project | null
+  isLoading: boolean
+  error: string | null
+}
+
+interface ProjectsActions {
+  fetchProjects: () => Promise<void>
+  createProject: (data: {
+    name: string
+    description?: string
+    language: string
+    framework?: string
+    is_public?: boolean
+    environment?: Record<string, any>
+  }) => Promise<Project>
+  selectProject: (id: number) => Promise<void>
+  updateProject: (id: number, data: Partial<Project>) => Promise<void>
+  deleteProject: (id: number) => Promise<void>
+  clearCurrentProject: () => void
+}
+
+// Files slice
+interface FilesState {
+  files: File[]
+  fileTree: any[]
+  openFiles: File[]
+  activeFileId: number | null
+  isLoading: boolean
+  error: string | null
+}
+
+interface FilesActions {
+  fetchFiles: (projectId: number) => Promise<void>
+  createFile: (projectId: number, data: {
+    path: string
+    name: string
+    type: 'file' | 'directory'
+    content?: string
+    mime_type?: string
+  }) => Promise<File>
+  updateFile: (id: number, content: string) => Promise<void>
+  deleteFile: (id: number) => Promise<void>
+  openFile: (file: File) => void
+  closeFile: (id: number) => void
+  setActiveFile: (id: number) => void
+  buildFileTree: () => void
+}
+
+// Editor slice
+interface EditorSliceState extends EditorState {
+  isAIGenerating: boolean
+  aiConversations: AIConversation[]
+}
+
+interface EditorActions {
+  setCursorPosition: (line: number, column: number) => void
+  setSelection: (startLine: number, startColumn: number, endLine: number, endColumn: number) => void
+  toggleAIAssistant: () => void
+  setAIProvider: (provider: 'claude' | 'gpt4' | 'gemini' | 'auto') => void
+  setTheme: (theme: string) => void
+  addAIConversation: (conversation: AIConversation) => void
+  updateAIConversation: (id: string, messages: any[]) => void
+}
+
+// Collaboration slice
+interface CollaborationState {
+  room: CollabRoom | null
+  connectedUsers: User[]
+  cursors: CursorPosition[]
+  chat: ChatMessage[]
+  isConnected: boolean
+  isConnecting: boolean
+}
+
+interface CollaborationActions {
+  joinRoom: (projectId: number) => Promise<void>
+  leaveRoom: () => Promise<void>
+  sendChatMessage: (message: string) => void
+  updateCursor: (fileId: number, line: number, column: number) => void
+}
+
+// AI slice
+interface AIState {
+  usage: AIUsage | null
+  history: AIRequest[]
+  isLoading: boolean
+}
+
+interface AIActions {
+  generateAI: (data: {
+    capability: string
+    prompt: string
+    code?: string
+    language?: string
+    context?: Record<string, any>
+  }) => Promise<any>
+  fetchUsage: () => Promise<void>
+  fetchHistory: () => Promise<void>
+  rateResponse: (requestId: string, rating: number, feedback?: string) => Promise<void>
+}
+
+// UI slice
+interface UIState {
+  theme: Theme
+  sidebarOpen: boolean
+  terminalOpen: boolean
+  aiPanelOpen: boolean
+  loading: boolean
+  notifications: Notification[]
+  terminals: TerminalSession[]
+  activeTerminalId: string | null
+}
+
+interface UIActions {
+  toggleSidebar: () => void
+  toggleTerminal: () => void
+  toggleAIPanel: () => void
+  setLoading: (loading: boolean) => void
+  addNotification: (notification: Omit<Notification, 'id' | 'timestamp'>) => void
+  removeNotification: (id: string) => void
+  clearNotifications: () => void
+  createTerminal: (projectId?: number) => string
+  closeTerminal: (id: string) => void
+  setActiveTerminal: (id: string) => void
+  updateTerminalOutput: (id: string, output: string) => void
+}
+
+// Combined store interface
+interface StoreState
+  extends AuthState,
+    ProjectsState,
+    FilesState,
+    EditorSliceState,
+    CollaborationState,
+    AIState,
+    UIState {}
+
+interface StoreActions
+  extends AuthActions,
+    ProjectsActions,
+    FilesActions,
+    EditorActions,
+    CollaborationActions,
+    AIActions,
+    UIActions {}
+
+// Create the store
+export const useStore = create<StoreState & StoreActions>()(
+  devtools(
+    subscribeWithSelector(
+      immer((set, get) => ({
+        // Initial state
+        // Auth
+        user: apiService.getCurrentUser(),
+        isAuthenticated: apiService.isAuthenticated(),
+        isLoading: false,
+        error: null,
+
+        // Projects
+        projects: [],
+        currentProject: null,
+
+        // Files
+        files: [],
+        fileTree: [],
+        openFiles: [],
+        activeFileId: null,
+
+        // Editor
+        activeFile: undefined,
+        cursorPosition: { line: 1, column: 1 },
+        selection: undefined,
+        isAIAssistantOpen: false,
+        aiProvider: 'auto' as const,
+        theme: 'cyberpunk',
+        isAIGenerating: false,
+        aiConversations: [],
+
+        // Collaboration
+        room: null,
+        connectedUsers: [],
+        cursors: [],
+        chat: [],
+        isConnected: false,
+        isConnecting: false,
+
+        // AI
+        usage: null,
+        history: [],
+
+        // UI
+        theme: getTheme('cyberpunk'),
+        sidebarOpen: true,
+        terminalOpen: false,
+        aiPanelOpen: false,
+        loading: false,
+        notifications: [],
+        terminals: [],
+        activeTerminalId: null,
+
+        // Auth actions
+        login: async (username: string, password: string) => {
+          set((state) => {
+            state.isLoading = true
+            state.error = null
+          })
+
+          try {
+            const response = await apiService.login({ username, password })
+            const user = response.user as User
+
+            set((state) => {
+              state.user = user
+              state.isAuthenticated = true
+              state.isLoading = false
+            })
+
+            // Connect WebSocket
+            const token = response.tokens.access_token
+            await websocketService.connect(token)
+
+            get().addNotification({
+              type: 'success',
+              title: 'Login Successful',
+              message: `Welcome back, ${user.username}!`,
+            })
+          } catch (error: any) {
+            set((state) => {
+              state.error = error.response?.data?.error || error.message
+              state.isLoading = false
+            })
+
+            get().addNotification({
+              type: 'error',
+              title: 'Login Failed',
+              message: error.response?.data?.error || error.message,
+            })
+            throw error
+          }
+        },
+
+        register: async (data) => {
+          set((state) => {
+            state.isLoading = true
+            state.error = null
+          })
+
+          try {
+            const response = await apiService.register(data)
+            const user = response.user as User
+
+            set((state) => {
+              state.user = user
+              state.isAuthenticated = true
+              state.isLoading = false
+            })
+
+            // Connect WebSocket
+            const token = response.tokens.access_token
+            await websocketService.connect(token)
+
+            get().addNotification({
+              type: 'success',
+              title: 'Registration Successful',
+              message: `Welcome to APEX.BUILD, ${user.username}!`,
+            })
+          } catch (error: any) {
+            set((state) => {
+              state.error = error.response?.data?.error || error.message
+              state.isLoading = false
+            })
+
+            get().addNotification({
+              type: 'error',
+              title: 'Registration Failed',
+              message: error.response?.data?.error || error.message,
+            })
+            throw error
+          }
+        },
+
+        logout: async () => {
+          try {
+            await apiService.logout()
+            websocketService.disconnect()
+
+            set((state) => {
+              state.user = null
+              state.isAuthenticated = false
+              state.projects = []
+              state.currentProject = null
+              state.files = []
+              state.openFiles = []
+              state.room = null
+              state.connectedUsers = []
+              state.isConnected = false
+            })
+
+            get().addNotification({
+              type: 'info',
+              title: 'Logged Out',
+              message: 'You have been logged out successfully.',
+            })
+          } catch (error: any) {
+            console.error('Logout error:', error)
+          }
+        },
+
+        refreshUser: async () => {
+          try {
+            const user = await apiService.getUserProfile()
+            set((state) => {
+              state.user = user
+            })
+          } catch (error: any) {
+            console.error('Failed to refresh user:', error)
+          }
+        },
+
+        updateProfile: async (data) => {
+          try {
+            const user = await apiService.updateUserProfile(data)
+            set((state) => {
+              state.user = user
+            })
+
+            get().addNotification({
+              type: 'success',
+              title: 'Profile Updated',
+              message: 'Your profile has been updated successfully.',
+            })
+          } catch (error: any) {
+            get().addNotification({
+              type: 'error',
+              title: 'Update Failed',
+              message: error.response?.data?.error || error.message,
+            })
+            throw error
+          }
+        },
+
+        clearError: () => {
+          set((state) => {
+            state.error = null
+          })
+        },
+
+        // Projects actions
+        fetchProjects: async () => {
+          set((state) => {
+            state.isLoading = true
+          })
+
+          try {
+            const projects = await apiService.getProjects()
+            set((state) => {
+              state.projects = projects
+              state.isLoading = false
+            })
+          } catch (error: any) {
+            set((state) => {
+              state.error = error.message
+              state.isLoading = false
+            })
+          }
+        },
+
+        createProject: async (data) => {
+          try {
+            const project = await apiService.createProject(data)
+            set((state) => {
+              state.projects.unshift(project)
+            })
+
+            get().addNotification({
+              type: 'success',
+              title: 'Project Created',
+              message: `${project.name} has been created successfully.`,
+            })
+
+            return project
+          } catch (error: any) {
+            get().addNotification({
+              type: 'error',
+              title: 'Creation Failed',
+              message: error.response?.data?.error || error.message,
+            })
+            throw error
+          }
+        },
+
+        selectProject: async (id: number) => {
+          set((state) => {
+            state.isLoading = true
+          })
+
+          try {
+            const project = await apiService.getProject(id)
+            set((state) => {
+              state.currentProject = project
+              state.isLoading = false
+            })
+
+            // Fetch files for the project
+            await get().fetchFiles(id)
+
+            get().addNotification({
+              type: 'info',
+              title: 'Project Loaded',
+              message: `${project.name} is now active.`,
+            })
+          } catch (error: any) {
+            set((state) => {
+              state.error = error.message
+              state.isLoading = false
+            })
+
+            get().addNotification({
+              type: 'error',
+              title: 'Failed to Load Project',
+              message: error.response?.data?.error || error.message,
+            })
+          }
+        },
+
+        updateProject: async (id: number, data) => {
+          try {
+            const project = await apiService.updateProject(id, data)
+            set((state) => {
+              const index = state.projects.findIndex((p) => p.id === id)
+              if (index !== -1) {
+                state.projects[index] = project
+              }
+              if (state.currentProject?.id === id) {
+                state.currentProject = project
+              }
+            })
+
+            get().addNotification({
+              type: 'success',
+              title: 'Project Updated',
+              message: `${project.name} has been updated.`,
+            })
+          } catch (error: any) {
+            get().addNotification({
+              type: 'error',
+              title: 'Update Failed',
+              message: error.response?.data?.error || error.message,
+            })
+            throw error
+          }
+        },
+
+        deleteProject: async (id: number) => {
+          try {
+            await apiService.deleteProject(id)
+            set((state) => {
+              state.projects = state.projects.filter((p) => p.id !== id)
+              if (state.currentProject?.id === id) {
+                state.currentProject = null
+                state.files = []
+                state.openFiles = []
+              }
+            })
+
+            get().addNotification({
+              type: 'success',
+              title: 'Project Deleted',
+              message: 'Project has been deleted successfully.',
+            })
+          } catch (error: any) {
+            get().addNotification({
+              type: 'error',
+              title: 'Deletion Failed',
+              message: error.response?.data?.error || error.message,
+            })
+            throw error
+          }
+        },
+
+        clearCurrentProject: () => {
+          set((state) => {
+            state.currentProject = null
+            state.files = []
+            state.openFiles = []
+            state.activeFileId = null
+          })
+        },
+
+        // Files actions
+        fetchFiles: async (projectId: number) => {
+          set((state) => {
+            state.isLoading = true
+          })
+
+          try {
+            const files = await apiService.getFiles(projectId)
+            set((state) => {
+              state.files = files
+              state.isLoading = false
+            })
+            get().buildFileTree()
+          } catch (error: any) {
+            set((state) => {
+              state.error = error.message
+              state.isLoading = false
+            })
+          }
+        },
+
+        createFile: async (projectId: number, data) => {
+          try {
+            const file = await apiService.createFile(projectId, data)
+            set((state) => {
+              state.files.push(file)
+            })
+            get().buildFileTree()
+
+            get().addNotification({
+              type: 'success',
+              title: 'File Created',
+              message: `${file.name} has been created.`,
+            })
+
+            return file
+          } catch (error: any) {
+            get().addNotification({
+              type: 'error',
+              title: 'Creation Failed',
+              message: error.response?.data?.error || error.message,
+            })
+            throw error
+          }
+        },
+
+        updateFile: async (id: number, content: string) => {
+          try {
+            const file = await apiService.updateFile(id, { content })
+            set((state) => {
+              const index = state.files.findIndex((f) => f.id === id)
+              if (index !== -1) {
+                state.files[index] = file
+              }
+              const openIndex = state.openFiles.findIndex((f) => f.id === id)
+              if (openIndex !== -1) {
+                state.openFiles[openIndex] = file
+              }
+            })
+
+            // Send file change to collaboration room
+            if (websocketService.isConnected()) {
+              websocketService.sendFileChange(id, content, 1, 1)
+            }
+          } catch (error: any) {
+            get().addNotification({
+              type: 'error',
+              title: 'Save Failed',
+              message: error.response?.data?.error || error.message,
+            })
+            throw error
+          }
+        },
+
+        deleteFile: async (id: number) => {
+          try {
+            await apiService.deleteFile(id)
+            set((state) => {
+              state.files = state.files.filter((f) => f.id !== id)
+              state.openFiles = state.openFiles.filter((f) => f.id !== id)
+              if (state.activeFileId === id) {
+                state.activeFileId = state.openFiles[0]?.id || null
+              }
+            })
+            get().buildFileTree()
+
+            get().addNotification({
+              type: 'success',
+              title: 'File Deleted',
+              message: 'File has been deleted successfully.',
+            })
+          } catch (error: any) {
+            get().addNotification({
+              type: 'error',
+              title: 'Deletion Failed',
+              message: error.response?.data?.error || error.message,
+            })
+            throw error
+          }
+        },
+
+        openFile: (file: File) => {
+          set((state) => {
+            if (!state.openFiles.find((f) => f.id === file.id)) {
+              state.openFiles.push(file)
+            }
+            state.activeFileId = file.id
+            state.activeFile = file
+          })
+        },
+
+        closeFile: (id: number) => {
+          set((state) => {
+            state.openFiles = state.openFiles.filter((f) => f.id !== id)
+            if (state.activeFileId === id) {
+              state.activeFileId = state.openFiles[0]?.id || null
+              state.activeFile = state.openFiles[0]
+            }
+          })
+        },
+
+        setActiveFile: (id: number) => {
+          set((state) => {
+            state.activeFileId = id
+            state.activeFile = state.openFiles.find((f) => f.id === id)
+          })
+        },
+
+        buildFileTree: () => {
+          // Build file tree structure for UI
+          const { files } = get()
+          // Implementation for building nested file tree would go here
+          // For now, simple structure
+          set((state) => {
+            state.fileTree = files
+          })
+        },
+
+        // Editor actions
+        setCursorPosition: (line: number, column: number) => {
+          set((state) => {
+            state.cursorPosition = { line, column }
+          })
+
+          // Send cursor update to collaboration
+          const { activeFileId } = get()
+          if (activeFileId && websocketService.isConnected()) {
+            websocketService.sendCursorUpdate(activeFileId, line, column)
+          }
+        },
+
+        setSelection: (startLine: number, startColumn: number, endLine: number, endColumn: number) => {
+          set((state) => {
+            state.selection = { startLine, startColumn, endLine, endColumn }
+          })
+        },
+
+        toggleAIAssistant: () => {
+          set((state) => {
+            state.isAIAssistantOpen = !state.isAIAssistantOpen
+            state.aiPanelOpen = state.isAIAssistantOpen
+          })
+        },
+
+        setAIProvider: (provider) => {
+          set((state) => {
+            state.aiProvider = provider
+          })
+        },
+
+        setTheme: (theme: string) => {
+          const themeConfig = getTheme(theme)
+          set((state) => {
+            state.theme = theme
+            state.theme = themeConfig
+          })
+        },
+
+        addAIConversation: (conversation: AIConversation) => {
+          set((state) => {
+            state.aiConversations.push(conversation)
+          })
+        },
+
+        updateAIConversation: (id: string, messages: any[]) => {
+          set((state) => {
+            const conversation = state.aiConversations.find((c) => c.id === id)
+            if (conversation) {
+              conversation.messages = messages
+              conversation.updated_at = new Date().toISOString()
+            }
+          })
+        },
+
+        // Collaboration actions
+        joinRoom: async (projectId: number) => {
+          set((state) => {
+            state.isConnecting = true
+          })
+
+          try {
+            const roomData = await apiService.joinCollabRoom(projectId)
+
+            if (!websocketService.isConnected()) {
+              const token = localStorage.getItem('apex_access_token')
+              if (token) {
+                await websocketService.connect(token)
+              }
+            }
+
+            await websocketService.joinRoom(roomData.room_id)
+
+            set((state) => {
+              state.room = { id: 0, room_id: roomData.room_id, project_id: projectId } as CollabRoom
+              state.isConnected = true
+              state.isConnecting = false
+            })
+
+            get().addNotification({
+              type: 'success',
+              title: 'Collaboration Started',
+              message: 'You are now collaborating in real-time!',
+            })
+          } catch (error: any) {
+            set((state) => {
+              state.isConnecting = false
+            })
+
+            get().addNotification({
+              type: 'error',
+              title: 'Collaboration Failed',
+              message: error.message,
+            })
+          }
+        },
+
+        leaveRoom: async () => {
+          try {
+            await websocketService.leaveRoom()
+            set((state) => {
+              state.room = null
+              state.connectedUsers = []
+              state.cursors = []
+              state.isConnected = false
+            })
+          } catch (error: any) {
+            console.error('Failed to leave room:', error)
+          }
+        },
+
+        sendChatMessage: (message: string) => {
+          if (websocketService.isConnected()) {
+            websocketService.sendChatMessage(message)
+          }
+        },
+
+        updateCursor: (fileId: number, line: number, column: number) => {
+          if (websocketService.isConnected()) {
+            websocketService.sendCursorUpdate(fileId, line, column)
+          }
+        },
+
+        // AI actions
+        generateAI: async (data) => {
+          set((state) => {
+            state.isLoading = true
+            state.isAIGenerating = true
+          })
+
+          try {
+            const response = await apiService.generateAI(data)
+
+            set((state) => {
+              state.isLoading = false
+              state.isAIGenerating = false
+            })
+
+            // Broadcast AI request to collaboration room
+            if (websocketService.isConnected()) {
+              websocketService.broadcastAIRequest(response.request_id, data.capability)
+            }
+
+            return response
+          } catch (error: any) {
+            set((state) => {
+              state.isLoading = false
+              state.isAIGenerating = false
+            })
+
+            get().addNotification({
+              type: 'error',
+              title: 'AI Request Failed',
+              message: error.response?.data?.error || error.message,
+            })
+            throw error
+          }
+        },
+
+        fetchUsage: async () => {
+          try {
+            const usage = await apiService.getAIUsage()
+            set((state) => {
+              state.usage = usage
+            })
+          } catch (error: any) {
+            console.error('Failed to fetch AI usage:', error)
+          }
+        },
+
+        fetchHistory: async () => {
+          try {
+            const history = await apiService.getAIHistory()
+            set((state) => {
+              state.history = history
+            })
+          } catch (error: any) {
+            console.error('Failed to fetch AI history:', error)
+          }
+        },
+
+        rateResponse: async (requestId: string, rating: number, feedback?: string) => {
+          try {
+            await apiService.rateAIResponse(requestId, rating, feedback)
+
+            get().addNotification({
+              type: 'success',
+              title: 'Rating Submitted',
+              message: 'Thank you for your feedback!',
+            })
+          } catch (error: any) {
+            get().addNotification({
+              type: 'error',
+              title: 'Rating Failed',
+              message: error.response?.data?.error || error.message,
+            })
+          }
+        },
+
+        // UI actions
+        toggleSidebar: () => {
+          set((state) => {
+            state.sidebarOpen = !state.sidebarOpen
+          })
+        },
+
+        toggleTerminal: () => {
+          set((state) => {
+            state.terminalOpen = !state.terminalOpen
+          })
+        },
+
+        toggleAIPanel: () => {
+          set((state) => {
+            state.aiPanelOpen = !state.aiPanelOpen
+          })
+        },
+
+        setLoading: (loading: boolean) => {
+          set((state) => {
+            state.loading = loading
+          })
+        },
+
+        addNotification: (notification) => {
+          const id = Math.random().toString(36).substr(2, 9)
+          const timestamp = new Date().toISOString()
+
+          set((state) => {
+            state.notifications.push({
+              ...notification,
+              id,
+              timestamp,
+            })
+          })
+
+          // Auto-remove after duration
+          const duration = notification.duration || 5000
+          setTimeout(() => {
+            get().removeNotification(id)
+          }, duration)
+        },
+
+        removeNotification: (id: string) => {
+          set((state) => {
+            state.notifications = state.notifications.filter((n) => n.id !== id)
+          })
+        },
+
+        clearNotifications: () => {
+          set((state) => {
+            state.notifications = []
+          })
+        },
+
+        createTerminal: (projectId?: number) => {
+          const id = Math.random().toString(36).substr(2, 9)
+          const terminal: TerminalSession = {
+            id,
+            name: `Terminal ${get().terminals.length + 1}`,
+            status: 'running',
+            output: [],
+            input: '',
+            project_id: projectId,
+            created_at: new Date().toISOString(),
+          }
+
+          set((state) => {
+            state.terminals.push(terminal)
+            state.activeTerminalId = id
+            state.terminalOpen = true
+          })
+
+          return id
+        },
+
+        closeTerminal: (id: string) => {
+          set((state) => {
+            state.terminals = state.terminals.filter((t) => t.id !== id)
+            if (state.activeTerminalId === id) {
+              state.activeTerminalId = state.terminals[0]?.id || null
+            }
+            if (state.terminals.length === 0) {
+              state.terminalOpen = false
+            }
+          })
+        },
+
+        setActiveTerminal: (id: string) => {
+          set((state) => {
+            state.activeTerminalId = id
+          })
+        },
+
+        updateTerminalOutput: (id: string, output: string) => {
+          set((state) => {
+            const terminal = state.terminals.find((t) => t.id === id)
+            if (terminal) {
+              terminal.output.push(output)
+            }
+          })
+        },
+      }))
+    ),
+    {
+      name: 'apex-build-store',
+    }
+  )
+)
+
+// Selectors for common state combinations
+export const useAuth = () => useStore((state) => ({
+  user: state.user,
+  isAuthenticated: state.isAuthenticated,
+  isLoading: state.isLoading,
+  error: state.error,
+  login: state.login,
+  register: state.register,
+  logout: state.logout,
+  refreshUser: state.refreshUser,
+  updateProfile: state.updateProfile,
+  clearError: state.clearError,
+}))
+
+export const useProjects = () => useStore((state) => ({
+  projects: state.projects,
+  currentProject: state.currentProject,
+  isLoading: state.isLoading,
+  fetchProjects: state.fetchProjects,
+  createProject: state.createProject,
+  selectProject: state.selectProject,
+  updateProject: state.updateProject,
+  deleteProject: state.deleteProject,
+}))
+
+export const useFiles = () => useStore((state) => ({
+  files: state.files,
+  openFiles: state.openFiles,
+  activeFileId: state.activeFileId,
+  activeFile: state.activeFile,
+  isLoading: state.isLoading,
+  fetchFiles: state.fetchFiles,
+  createFile: state.createFile,
+  updateFile: state.updateFile,
+  deleteFile: state.deleteFile,
+  openFile: state.openFile,
+  closeFile: state.closeFile,
+  setActiveFile: state.setActiveFile,
+}))
+
+export const useEditor = () => useStore((state) => ({
+  cursorPosition: state.cursorPosition,
+  selection: state.selection,
+  isAIAssistantOpen: state.isAIAssistantOpen,
+  aiProvider: state.aiProvider,
+  theme: state.theme,
+  isAIGenerating: state.isAIGenerating,
+  setCursorPosition: state.setCursorPosition,
+  setSelection: state.setSelection,
+  toggleAIAssistant: state.toggleAIAssistant,
+  setAIProvider: state.setAIProvider,
+  setTheme: state.setTheme,
+}))
+
+export const useCollaboration = () => useStore((state) => ({
+  room: state.room,
+  connectedUsers: state.connectedUsers,
+  cursors: state.cursors,
+  chat: state.chat,
+  isConnected: state.isConnected,
+  isConnecting: state.isConnecting,
+  joinRoom: state.joinRoom,
+  leaveRoom: state.leaveRoom,
+  sendChatMessage: state.sendChatMessage,
+  updateCursor: state.updateCursor,
+}))
+
+export const useAI = () => useStore((state) => ({
+  usage: state.usage,
+  history: state.history,
+  isLoading: state.isLoading,
+  generateAI: state.generateAI,
+  fetchUsage: state.fetchUsage,
+  fetchHistory: state.fetchHistory,
+  rateResponse: state.rateResponse,
+}))
+
+export const useUI = () => useStore((state) => ({
+  theme: state.theme,
+  sidebarOpen: state.sidebarOpen,
+  terminalOpen: state.terminalOpen,
+  aiPanelOpen: state.aiPanelOpen,
+  loading: state.loading,
+  notifications: state.notifications,
+  terminals: state.terminals,
+  activeTerminalId: state.activeTerminalId,
+  toggleSidebar: state.toggleSidebar,
+  toggleTerminal: state.toggleTerminal,
+  toggleAIPanel: state.toggleAIPanel,
+  setLoading: state.setLoading,
+  addNotification: state.addNotification,
+  removeNotification: state.removeNotification,
+  createTerminal: state.createTerminal,
+  closeTerminal: state.closeTerminal,
+  setActiveTerminal: state.setActiveTerminal,
+}))
+
+export default useStore

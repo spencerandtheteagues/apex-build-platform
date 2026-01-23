@@ -1,0 +1,397 @@
+/* APEX.BUILD Global Styles */
+/* Cyberpunk cloud development platform */
+
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+/* Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+/* CSS Custom Properties for Cyberpunk Theme */
+:root {
+  /* Colors */
+  --color-primary: #00f5ff;
+  --color-secondary: #ff0080;
+  --color-accent: #39ff14;
+  --color-background: #0a0a0f;
+  --color-surface: #1a1a2e;
+  --color-text: #ffffff;
+  --color-text-secondary: #a0a0a0;
+  --color-border: #333366;
+
+  /* Effects */
+  --effect-glow: 0 0 20px currentColor;
+  --effect-blur: blur(0.5px);
+  --effect-shadow: 0 8px 32px rgba(0, 245, 255, 0.1);
+
+  /* Animations */
+  --transition-fast: 150ms ease;
+  --transition-normal: 300ms ease;
+  --transition-slow: 500ms ease;
+
+  /* Typography */
+  --font-mono: 'Fira Code', 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+}
+
+/* Base Styles */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background: var(--color-background);
+  color: var(--color-text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* Code Elements */
+code {
+  font-family: var(--font-mono);
+}
+
+pre {
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* Selection */
+::selection {
+  background: var(--color-primary);
+  color: var(--color-background);
+  text-shadow: none;
+}
+
+::-moz-selection {
+  background: var(--color-primary);
+  color: var(--color-background);
+  text-shadow: none;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #00f5ff, #0080ff);
+  border-radius: 4px;
+  transition: background var(--transition-normal);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #00d4ff, #0066cc);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Firefox scrollbar */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: #00f5ff rgba(0, 0, 0, 0.1);
+}
+
+/* Focus Styles */
+*:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+*:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Utility Classes */
+.cyberpunk-glow {
+  box-shadow: var(--effect-glow);
+}
+
+.cyberpunk-blur {
+  backdrop-filter: var(--effect-blur);
+}
+
+.cyberpunk-gradient {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+}
+
+.cyberpunk-text-gradient {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.cyberpunk-border {
+  border: 1px solid;
+  border-image: linear-gradient(135deg, var(--color-primary), var(--color-secondary)) 1;
+}
+
+/* Animations */
+@keyframes cyberpunk-pulse {
+  0%, 100% {
+    opacity: 1;
+    text-shadow: 0 0 10px var(--color-primary);
+  }
+  50% {
+    opacity: 0.8;
+    text-shadow: 0 0 20px var(--color-primary);
+  }
+}
+
+@keyframes cyberpunk-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px var(--color-primary);
+  }
+  50% {
+    box-shadow: 0 0 20px var(--color-primary);
+  }
+}
+
+@keyframes cyberpunk-flicker {
+  0%, 100% { opacity: 1; }
+  10%, 90% { opacity: 0.8; }
+  20%, 80% { opacity: 1; }
+  30%, 70% { opacity: 0.9; }
+  40%, 60% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes cyberpunk-scan {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes cyberpunk-matrix-rain {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100vh);
+    opacity: 0;
+  }
+}
+
+.animate-cyberpunk-pulse {
+  animation: cyberpunk-pulse 2s ease-in-out infinite;
+}
+
+.animate-cyberpunk-glow {
+  animation: cyberpunk-glow 3s ease-in-out infinite;
+}
+
+.animate-cyberpunk-flicker {
+  animation: cyberpunk-flicker 0.15s linear infinite;
+}
+
+.animate-cyberpunk-scan {
+  animation: cyberpunk-scan 2s linear infinite;
+}
+
+/* Line Clamp */
+.line-clamp-1 {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Glass Morphism */
+.glass-morphism {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-morphism-dark {
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Holographic Effects */
+.holographic {
+  background: linear-gradient(
+    45deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.1) 50%,
+    transparent 70%
+  );
+  animation: cyberpunk-scan 3s ease-in-out infinite;
+}
+
+/* Neon Text */
+.neon-text {
+  text-shadow:
+    0 0 5px currentColor,
+    0 0 10px currentColor,
+    0 0 20px currentColor,
+    0 0 40px currentColor;
+}
+
+.neon-text-cyan {
+  color: #00f5ff;
+  text-shadow:
+    0 0 5px #00f5ff,
+    0 0 10px #00f5ff,
+    0 0 20px #00f5ff,
+    0 0 40px #00f5ff;
+}
+
+.neon-text-pink {
+  color: #ff0080;
+  text-shadow:
+    0 0 5px #ff0080,
+    0 0 10px #ff0080,
+    0 0 20px #ff0080,
+    0 0 40px #ff0080;
+}
+
+.neon-text-green {
+  color: #39ff14;
+  text-shadow:
+    0 0 5px #39ff14,
+    0 0 10px #39ff14,
+    0 0 20px #39ff14,
+    0 0 40px #39ff14;
+}
+
+/* Grid Background */
+.grid-background {
+  background-image:
+    linear-gradient(rgba(0, 245, 255, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 245, 255, 0.1) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Monaco Editor Overrides */
+.monaco-editor {
+  font-family: var(--font-mono) !important;
+}
+
+.monaco-editor .cursor {
+  color: var(--color-primary) !important;
+}
+
+.monaco-editor .selected-text {
+  background: rgba(0, 245, 255, 0.2) !important;
+}
+
+/* React Resizable Panels */
+[data-panel-resize-handle-enabled] {
+  background: rgba(0, 245, 255, 0.1);
+  transition: background var(--transition-normal);
+}
+
+[data-panel-resize-handle-enabled]:hover {
+  background: rgba(0, 245, 255, 0.3);
+}
+
+/* Prose Styles for AI Content */
+.prose {
+  max-width: none;
+}
+
+.prose pre {
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(0, 245, 255, 0.2);
+  border-radius: 8px;
+}
+
+.prose code {
+  background: rgba(0, 245, 255, 0.1);
+  color: var(--color-primary);
+  padding: 0.125rem 0.25rem;
+  border-radius: 4px;
+  font-size: 0.875em;
+}
+
+.prose pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+/* Loading Animations */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ping {
+  75%, 100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+.animate-ping {
+  animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Print Styles */
+@media print {
+  * {
+    -webkit-print-color-adjust: exact;
+    color-adjust: exact;
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "name": "apex-build-frontend",
+  "version": "1.0.0",
+  "description": "APEX.BUILD - Multi-AI Cloud Development Platform Frontend",
+  "private": true,
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.8.0",
+    "typescript": "^4.9.5",
+    "@types/react": "^18.0.28",
+    "@types/react-dom": "^18.0.11",
+    "@types/node": "^18.14.2",
+
+    "@monaco-editor/react": "^4.4.6",
+    "monaco-editor": "^0.44.0",
+
+    "framer-motion": "^10.7.0",
+    "styled-components": "^5.3.8",
+    "@types/styled-components": "^5.1.26",
+
+    "axios": "^1.3.4",
+    "socket.io-client": "^4.6.1",
+    "@types/socket.io-client": "^3.0.0",
+
+    "zustand": "^4.3.6",
+    "react-hot-toast": "^2.4.0",
+    "react-icons": "^4.7.1",
+    "react-syntax-highlighter": "^15.5.0",
+    "@types/react-syntax-highlighter": "^15.5.6",
+
+    "uuid": "^9.0.0",
+    "@types/uuid": "^9.0.1",
+    "lodash": "^4.17.21",
+    "@types/lodash": "^4.14.191",
+
+    "react-split-pane": "^0.1.92",
+    "@types/react-split-pane": "^0.1.3",
+    "react-virtualized": "^9.22.3",
+    "@types/react-virtualized": "^9.21.21",
+
+    "date-fns": "^2.29.3",
+    "clsx": "^1.2.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^3.1.0",
+    "vite": "^4.1.0",
+    "@types/uuid": "^9.0.1",
+    "eslint": "^8.35.0",
+    "@typescript-eslint/eslint-plugin": "^5.54.0",
+    "@typescript-eslint/parser": "^5.54.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.3.4",
+    "prettier": "^2.8.4",
+    "@testing-library/react": "^14.0.0",
+    "@testing-library/jest-dom": "^5.16.5",
+    "@testing-library/user-event": "^14.4.3",
+    "vitest": "^0.29.2",
+    "jsdom": "^21.1.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}
