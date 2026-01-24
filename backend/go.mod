@@ -9,8 +9,8 @@ require (
 	github.com/gorilla/websocket v1.5.1
 	github.com/joho/godotenv v1.4.0
 	golang.org/x/crypto v0.19.0
-	golang.org/x/oauth2 v0.34.0
-	golang.org/x/time v0.14.0
+	golang.org/x/oauth2 v0.21.0
+	golang.org/x/time v0.5.0
 	gorm.io/driver/postgres v1.5.6
 	gorm.io/gorm v1.30.0
 )

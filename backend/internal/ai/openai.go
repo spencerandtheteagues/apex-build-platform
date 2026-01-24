@@ -238,11 +238,11 @@ func (o *OpenAIClient) makeRequest(ctx context.Context, req *openAIRequest) (*op
 func (o *OpenAIClient) getModelForCapability(capability AICapability) string {
 	switch capability {
 	case CapabilityCodeGeneration, CapabilityRefactoring, CapabilityTesting:
-		return "gpt-4-turbo"  // Best for complex code tasks
+		return "gpt-4o"  // GPT-4o flagship for complex code tasks
 	case CapabilityCodeCompletion:
-		return "gpt-4"        // Fast enough for completions
+		return "gpt-4o-mini"  // Fast for completions
 	default:
-		return "gpt-4"        // Default to GPT-4
+		return "gpt-4o"  // Default to GPT-4o flagship
 	}
 }
 
@@ -266,7 +266,7 @@ func (o *OpenAIClient) GetProvider() AIProvider {
 // Health checks if OpenAI API is accessible
 func (o *OpenAIClient) Health(ctx context.Context) error {
 	testReq := &openAIRequest{
-		Model: "gpt-4",
+		Model: "gpt-4o",
 		Messages: []openAIMessage{
 			{Role: "user", Content: "Hello"},
 		},
