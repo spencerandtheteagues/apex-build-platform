@@ -2,7 +2,10 @@ package main
 
 import (
 	"log"
+	"net/url"
 	"os"
+	"strconv"
+	"strings"
 
 	"apex-build/internal/agents"
 	"apex-build/internal/ai"
@@ -11,10 +14,20 @@ import (
 	"apex-build/internal/db"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
 func main() {
 	log.Println("🚀 Starting APEX.BUILD - Multi-AI Cloud Development Platform")
+
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		// Try parent directory for .env
+		if err := godotenv.Load("../.env"); err != nil {
+			log.Println("⚠️ No .env file found, using environment variables")
+		}
+	}
+	log.Println("✅ Environment configuration loaded")
 
 	// Load configuration
 	config := loadConfig()
@@ -94,8 +107,11 @@ type Config struct {
 
 // loadConfig loads configuration from environment variables
 func loadConfig() *Config {
-	return &Config{
-		Database: &db.Config{
+	// Check for DATABASE_URL first (Fly.io, Heroku, Railway, etc.)
+	dbConfig := parseDatabaseURL(os.Getenv("DATABASE_URL"))
+	if dbConfig == nil {
+		// Fall back to individual environment variables
+		dbConfig = &db.Config{
 			Host:     getEnv("DB_HOST", "localhost"),
 			Port:     getEnvInt("DB_PORT", 5432),
 			User:     getEnv("DB_USER", "postgres"),
@@ -103,7 +119,11 @@ func loadConfig() *Config {
 			DBName:   getEnv("DB_NAME", "apex_build"),
 			SSLMode:  getEnv("DB_SSL_MODE", "disable"),
 			TimeZone: getEnv("DB_TIMEZONE", "UTC"),
-		},
+		}
+	}
+
+	return &Config{
+		Database:     dbConfig,
 		ClaudeAPIKey: getEnv("ANTHROPIC_API_KEY", ""),
 		OpenAIAPIKey: getEnv("OPENAI_API_KEY", ""),
 		GeminiAPIKey: getEnv("GEMINI_API_KEY", ""),
@@ -111,6 +131,57 @@ func loadConfig() *Config {
 		Port:         getEnv("PORT", "8080"),
 		Environment:  getEnv("ENVIRONMENT", "development"),
 	}
+}
+
+// parseDatabaseURL parses a DATABASE_URL into a db.Config
+// Format: postgres://user:password@host:port/dbname?sslmode=disable
+func parseDatabaseURL(databaseURL string) *db.Config {
+	if databaseURL == "" {
+		return nil
+	}
+
+	log.Printf("📡 Parsing DATABASE_URL for database connection")
+
+	u, err := url.Parse(databaseURL)
+	if err != nil {
+		log.Printf("⚠️ Failed to parse DATABASE_URL: %v, falling back to individual vars", err)
+		return nil
+	}
+
+	// Extract password
+	password, _ := u.User.Password()
+
+	// Extract port (default to 5432)
+	port := 5432
+	if u.Port() != "" {
+		if p, err := strconv.Atoi(u.Port()); err == nil {
+			port = p
+		}
+	}
+
+	// Extract database name (remove leading /)
+	dbName := strings.TrimPrefix(u.Path, "/")
+
+	// Extract sslmode from query params
+	sslMode := u.Query().Get("sslmode")
+	if sslMode == "" {
+		sslMode = "disable" // Fly.io internal connections don't need SSL
+	}
+
+	config := &db.Config{
+		Host:     u.Hostname(),
+		Port:     port,
+		User:     u.User.Username(),
+		Password: password,
+		DBName:   dbName,
+		SSLMode:  sslMode,
+		TimeZone: "UTC",
+	}
+
+	log.Printf("✅ Database config: host=%s port=%d user=%s dbname=%s sslmode=%s",
+		config.Host, config.Port, config.User, config.DBName, config.SSLMode)
+
+	return config
 }
 
 // setupRoutes configures all API routes

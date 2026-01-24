@@ -1,5 +1,15 @@
 /// <reference types="vite/client" />
 
+// Environment variables
+interface ImportMetaEnv {
+  readonly VITE_API_URL: string
+  readonly VITE_WS_URL: string
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}
+
 // Monaco Editor Worker Module Declarations
 declare module 'monaco-editor/esm/vs/editor/editor.worker?worker' {
   const WorkerFactory: new () => Worker

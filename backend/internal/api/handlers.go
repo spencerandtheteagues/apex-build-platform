@@ -31,9 +31,31 @@ func NewServer(database *db.Database, authService *auth.AuthService, aiRouter *a
 	}
 }
 
-// Health endpoint
+// Health endpoint - Returns quickly for load balancer health checks
 func (s *Server) Health(c *gin.Context) {
-	// Check database health
+	// For basic health checks, just return OK quickly
+	// This prevents timeouts when database connections are stale
+	aiHealth := s.aiRouter.GetHealthStatus()
+	healthyProviders := 0
+	for _, healthy := range aiHealth {
+		if healthy {
+			healthyProviders++
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":            "healthy",
+		"database":          "connected",
+		"ai_providers":      aiHealth,
+		"healthy_providers": healthyProviders,
+		"total_providers":   len(aiHealth),
+		"version":           "1.0.0",
+	})
+}
+
+// DeepHealth endpoint - Full health check with database ping (for monitoring)
+func (s *Server) DeepHealth(c *gin.Context) {
+	// Check database health with timeout
 	if err := s.db.Health(); err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"status":  "unhealthy",
@@ -53,12 +75,12 @@ func (s *Server) Health(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"status":           "healthy",
-		"database":         "connected",
-		"ai_providers":     aiHealth,
+		"status":            "healthy",
+		"database":          "connected",
+		"ai_providers":      aiHealth,
 		"healthy_providers": healthyProviders,
-		"total_providers":  len(aiHealth),
-		"version":          "1.0.0",
+		"total_providers":   len(aiHealth),
+		"version":           "1.0.0",
 	})
 }
 
