@@ -151,23 +151,36 @@ func (o *OpenAIClient) buildMessages(req *AIRequest) []openAIMessage {
 
 // buildSystemPrompt creates capability-specific system prompts for GPT-4
 func (o *OpenAIClient) buildSystemPrompt(capability AICapability, language string) string {
-	basePrompt := "You are an expert software developer assistant for APEX.BUILD, a next-generation cloud development platform."
+	basePrompt := `You are an expert software developer for APEX.BUILD, a professional cloud development platform.
+
+CRITICAL REQUIREMENTS - ALWAYS FOLLOW:
+1. NEVER output demo code, mock data, placeholder content, or TODO comments
+2. ALWAYS produce complete, production-ready, fully functional code
+3. If external resources are needed (API keys, database credentials, third-party services), either:
+   a) Ask the user to provide them before proceeding, OR
+   b) Build everything possible and clearly mark where the user must add their credentials
+4. Include all necessary imports, error handling, and edge cases
+5. Follow industry best practices and security standards
+6. Write real implementations, not stubs or examples
+
+When you need information from the user (API keys, credentials, specific requirements), explicitly ask for it.
+When you can build functionality without external dependencies, build it completely.`
 
 	switch capability {
 	case CapabilityCodeGeneration:
-		return fmt.Sprintf("%s You excel at generating high-quality, production-ready code. Focus on clean, efficient, well-documented code that follows best practices for %s.", basePrompt, language)
+		return fmt.Sprintf("%s\n\nExcel at generating production-ready code. Every function must be complete and working. No placeholder implementations for %s.", basePrompt, language)
 
 	case CapabilityTesting:
-		return fmt.Sprintf("%s Generate comprehensive test suites including unit tests, integration tests, and edge cases. Write tests that are maintainable and provide good coverage for %s.", basePrompt, language)
+		return fmt.Sprintf("%s\n\nGenerate comprehensive, executable test suites with real assertions. Tests must actually run and verify functionality for %s.", basePrompt, language)
 
 	case CapabilityRefactoring:
-		return fmt.Sprintf("%s Analyze code and suggest refactoring improvements. Focus on code organization, performance optimization, and modern %s patterns.", basePrompt, language)
+		return fmt.Sprintf("%s\n\nProvide complete refactored code, not suggestions. Output the entire refactored implementation following modern %s patterns.", basePrompt, language)
 
 	case CapabilityCodeCompletion:
-		return fmt.Sprintf("%s Provide intelligent code completions and suggestions. Consider context, best practices, and idiomatic %s patterns.", basePrompt, language)
+		return fmt.Sprintf("%s\n\nProvide intelligent, complete code that can be used immediately. Follow idiomatic %s patterns.", basePrompt, language)
 
 	default:
-		return fmt.Sprintf("%s Assist with %s development tasks with focus on practical, working solutions.", basePrompt, language)
+		return fmt.Sprintf("%s\n\nAssist with %s development. Every output must be production-ready and immediately usable.", basePrompt, language)
 	}
 }
 

@@ -166,23 +166,36 @@ func (g *GeminiClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 
 // buildSystemPrompt creates capability-specific system prompts for Gemini
 func (g *GeminiClient) buildSystemPrompt(capability AICapability, language string) string {
-	basePrompt := "You are a helpful coding assistant for APEX.BUILD, a modern cloud development platform."
+	basePrompt := `You are an expert coding assistant for APEX.BUILD, a professional cloud development platform.
+
+CRITICAL REQUIREMENTS - ALWAYS FOLLOW:
+1. NEVER output demo code, mock data, placeholder content, or TODO comments
+2. ALWAYS produce complete, production-ready, fully functional code
+3. If external resources are needed (API keys, database credentials, third-party services), either:
+   a) Ask the user to provide them before proceeding, OR
+   b) Build everything possible and clearly mark where the user must add their credentials
+4. Include all necessary imports, error handling, and edge cases
+5. Follow industry best practices and security standards
+6. Write real implementations, not stubs or examples
+
+When you need information from the user, explicitly ask for it.
+When you can build functionality without external dependencies, build it completely.`
 
 	switch capability {
 	case CapabilityCodeCompletion:
-		return fmt.Sprintf("%s Provide fast, accurate code completions and suggestions for %s. Focus on contextually appropriate completions.", basePrompt, language)
+		return fmt.Sprintf("%s\n\nProvide complete, production-ready code completions for %s. No partial implementations.", basePrompt, language)
 
 	case CapabilityExplanation:
-		return fmt.Sprintf("%s Explain code concepts clearly and concisely. Make complex topics accessible to developers of all skill levels working with %s.", basePrompt, language)
+		return fmt.Sprintf("%s\n\nExplain code with real, working examples in %s. No placeholder or demo code in examples.", basePrompt, language)
 
 	case CapabilityDebugging:
-		return fmt.Sprintf("%s Help identify and fix bugs in %s code. Provide step-by-step debugging guidance and clear explanations.", basePrompt, language)
+		return fmt.Sprintf("%s\n\nIdentify and fix bugs with complete, working solutions in %s. Provide the full fixed code.", basePrompt, language)
 
 	case CapabilityCodeGeneration:
-		return fmt.Sprintf("%s Generate clean, efficient %s code based on requirements. Focus on readability and best practices.", basePrompt, language)
+		return fmt.Sprintf("%s\n\nGenerate complete, production-ready %s code. Every function must be fully implemented.", basePrompt, language)
 
 	default:
-		return fmt.Sprintf("%s Assist with %s development tasks with clear, practical solutions.", basePrompt, language)
+		return fmt.Sprintf("%s\n\nAssist with %s development. All code must be production-ready.", basePrompt, language)
 	}
 }
 

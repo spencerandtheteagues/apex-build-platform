@@ -163,19 +163,41 @@ func (a *AIRouterAdapter) GenerateCode(
 
 %s
 
-Requirements:
-- Complete, working implementation with NO placeholders or TODOs
-- Include all necessary imports
-- Follow best practices and conventions
-- Add meaningful error handling
-- Include comments for complex logic
+MANDATORY REQUIREMENTS:
+1. Complete, fully functional implementation - NO demos, mocks, placeholders, or TODOs
+2. Include ALL necessary imports, dependencies, and type definitions
+3. Implement proper error handling for all edge cases
+4. Follow industry best practices and security standards
+5. Add comments only for complex business logic
+6. If this requires external API keys or credentials:
+   - Use environment variables (process.env.API_KEY pattern)
+   - Add clear comments indicating where users must provide their own keys
+   - Build ALL other functionality completely
+
+FORBIDDEN:
+- Demo data or mock responses
+- Placeholder functions that return fake data
+- TODO comments
+- Incomplete implementations
+- "Example" or "sample" code that doesn't work
 
 Output only the code, no explanations.`, language, description)
 
 	if opts.SystemPrompt == "" {
-		opts.SystemPrompt = fmt.Sprintf(`You are an expert %s developer. Generate clean, production-ready code.
-Never use placeholders, TODOs, or incomplete implementations.
-Always provide fully working code that can be used immediately.`, language)
+		opts.SystemPrompt = fmt.Sprintf(`You are a senior %s developer building production applications for APEX.BUILD.
+
+ABSOLUTE RULES:
+1. NEVER output demo code, mock data, or placeholders under any circumstances
+2. Every function you write must be complete and production-ready
+3. If you need API keys or credentials from the user, use environment variable patterns and clearly mark them
+4. If you can build functionality without external dependencies, build it completely
+5. Real implementations only - no stubs, no examples, no "this would be" code
+
+When external resources are needed (API keys, database credentials, third-party services):
+- Build as much as possible without them
+- Use environment variable patterns for credentials
+- Add ONE clear comment indicating what the user needs to provide
+- Continue building all other functionality completely`, language)
 	}
 
 	return a.Generate(ctx, provider, prompt, opts)

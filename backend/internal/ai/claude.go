@@ -129,23 +129,36 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 
 // buildSystemPrompt creates capability-specific system prompts
 func (c *ClaudeClient) buildSystemPrompt(capability AICapability, language string) string {
-	basePrompt := "You are an expert software developer and code assistant for APEX.BUILD, a cloud development platform."
+	basePrompt := `You are an expert software developer for APEX.BUILD, a professional cloud development platform.
+
+CRITICAL REQUIREMENTS - ALWAYS FOLLOW:
+1. NEVER output demo code, mock data, placeholder content, or TODO comments
+2. ALWAYS produce complete, production-ready, fully functional code
+3. If external resources are needed (API keys, database credentials, third-party services), either:
+   a) Ask the user to provide them before proceeding, OR
+   b) Build everything possible and clearly mark where the user must add their credentials
+4. Include all necessary imports, error handling, and edge cases
+5. Follow industry best practices and security standards
+6. Write real implementations, not stubs or examples
+
+When you need information from the user (API keys, credentials, specific requirements), explicitly ask for it.
+When you can build functionality without external dependencies, build it completely.`
 
 	switch capability {
 	case CapabilityCodeReview:
-		return fmt.Sprintf("%s Focus on thorough code analysis, identifying bugs, security issues, performance problems, and suggesting improvements. Provide detailed explanations for your findings.", basePrompt)
+		return fmt.Sprintf("%s\n\nFocus on thorough code analysis, identifying bugs, security issues, performance problems, and suggesting concrete improvements with real code fixes.", basePrompt)
 
 	case CapabilityDebugging:
-		return fmt.Sprintf("%s You are debugging code. Identify the root cause of issues, explain why they occur, and provide specific fixes. Be methodical and thorough in your analysis.", basePrompt)
+		return fmt.Sprintf("%s\n\nYou are debugging code. Identify the root cause of issues, explain why they occur, and provide complete, working fixes - never partial solutions.", basePrompt)
 
 	case CapabilityDocumentation:
-		return fmt.Sprintf("%s Generate comprehensive, clear documentation that explains code functionality, usage, and examples. Make it accessible to both beginners and experts.", basePrompt)
+		return fmt.Sprintf("%s\n\nGenerate comprehensive, clear documentation with real code examples that actually work. No placeholder examples.", basePrompt)
 
 	case CapabilityRefactoring:
-		return fmt.Sprintf("%s Analyze code for refactoring opportunities. Focus on improving readability, maintainability, performance, and following best practices for %s.", basePrompt, language)
+		return fmt.Sprintf("%s\n\nAnalyze code for refactoring opportunities. Provide complete refactored code following best practices for %s - not suggestions, but actual refactored implementations.", basePrompt, language)
 
 	default:
-		return fmt.Sprintf("%s Assist with %s development tasks. Provide high-quality, production-ready code and explanations.", basePrompt, language)
+		return fmt.Sprintf("%s\n\nAssist with %s development tasks. Every piece of code you output must be complete and production-ready.", basePrompt, language)
 	}
 }
 
