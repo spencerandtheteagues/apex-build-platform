@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 import { Eye, EyeOff } from 'lucide-react'
 
 const inputVariants = cva(
-  'flex w-full rounded-lg border bg-transparent px-3 py-2 text-sm transition-all duration-300 placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
+  'flex w-full rounded-lg border bg-transparent px-3 py-2 text-sm transition-colors duration-200 placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
   {
     variants: {
       variant: {

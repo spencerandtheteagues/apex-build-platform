@@ -7,30 +7,30 @@ import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
 
 const buttonVariants = cva(
-  'relative inline-flex items-center justify-center rounded-lg font-medium transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 overflow-hidden group',
+  'relative inline-flex items-center justify-center rounded-lg font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 overflow-hidden group',
   {
     variants: {
       variant: {
-        // Primary - Electric cyan with neon glow
-        primary: 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-400 hover:to-blue-500 shadow-lg shadow-cyan-500/25 hover:shadow-cyan-400/40 border border-cyan-400/30',
+        // Primary - Demon red with scary glow
+        primary: 'bg-gradient-to-r from-red-600 to-red-900 text-white hover:from-red-500 hover:to-red-800 shadow-lg shadow-red-600/30 hover:shadow-red-500/50 border border-red-500/30',
 
-        // Secondary - Hot pink accent
-        secondary: 'bg-gradient-to-r from-pink-500 to-purple-600 text-white hover:from-pink-400 hover:to-purple-500 shadow-lg shadow-pink-500/25 hover:shadow-pink-400/40 border border-pink-400/30',
+        // Secondary - Dark crimson accent
+        secondary: 'bg-gradient-to-r from-red-700 to-rose-900 text-white hover:from-red-600 hover:to-rose-800 shadow-lg shadow-red-700/25 hover:shadow-red-600/40 border border-red-600/30',
 
-        // Success - Acid green
-        success: 'bg-gradient-to-r from-green-400 to-emerald-500 text-black hover:from-green-300 hover:to-emerald-400 shadow-lg shadow-green-400/25 hover:shadow-green-300/40 border border-green-400/30',
+        // Success - Blood green (dark tinted)
+        success: 'bg-gradient-to-r from-green-600 to-emerald-700 text-white hover:from-green-500 hover:to-emerald-600 shadow-lg shadow-green-600/25 hover:shadow-green-500/40 border border-green-500/30',
 
-        // Danger - Electric red
-        danger: 'bg-gradient-to-r from-red-500 to-pink-600 text-white hover:from-red-400 hover:to-pink-500 shadow-lg shadow-red-500/25 hover:shadow-red-400/40 border border-red-400/30',
+        // Danger - Intense red
+        danger: 'bg-gradient-to-r from-red-500 to-red-700 text-white hover:from-red-400 hover:to-red-600 shadow-lg shadow-red-500/30 hover:shadow-red-400/50 border border-red-400/30',
 
-        // Ghost - Transparent with neon border
-        ghost: 'bg-transparent border-2 border-cyan-400/50 text-cyan-400 hover:bg-cyan-400/10 hover:border-cyan-300 shadow-lg shadow-cyan-500/10',
+        // Ghost - Transparent with red border
+        ghost: 'bg-transparent border-2 border-red-500/50 text-red-400 hover:bg-red-500/10 hover:border-red-400 shadow-lg shadow-red-600/10',
 
-        // Outline - Neon outline style
-        outline: 'bg-transparent border border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white hover:border-gray-600',
+        // Outline - Dark outline style
+        outline: 'bg-transparent border border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white hover:border-red-900/50',
 
-        // Link - Text link style
-        link: 'text-cyan-400 underline-offset-4 hover:underline hover:text-cyan-300',
+        // Link - Red link style
+        link: 'text-red-400 underline-offset-4 hover:underline hover:text-red-300',
       },
       size: {
         xs: 'h-7 px-2 text-xs',
@@ -43,7 +43,7 @@ const buttonVariants = cva(
       glow: {
         none: '',
         subtle: 'before:absolute before:inset-0 before:bg-gradient-to-r before:from-transparent before:via-white/10 before:to-transparent before:translate-x-[-100%] hover:before:translate-x-[100%] before:transition-transform before:duration-1000',
-        intense: 'before:absolute before:inset-0 before:bg-gradient-to-r before:from-transparent before:via-white/20 before:to-transparent before:translate-x-[-100%] hover:before:translate-x-[100%] before:transition-transform before:duration-700 after:absolute after:inset-0 after:bg-gradient-to-r after:from-transparent after:via-cyan-400/20 after:to-transparent after:opacity-0 hover:after:opacity-100 after:transition-opacity after:duration-300',
+        intense: 'before:absolute before:inset-0 before:bg-gradient-to-r before:from-transparent before:via-white/20 before:to-transparent before:translate-x-[-100%] hover:before:translate-x-[100%] before:transition-transform before:duration-700 after:absolute after:inset-0 after:bg-gradient-to-r after:from-transparent after:via-red-500/20 after:to-transparent after:opacity-0 hover:after:opacity-100 after:transition-opacity after:duration-300',
       },
     },
     defaultVariants: {

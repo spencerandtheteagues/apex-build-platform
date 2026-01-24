@@ -252,11 +252,11 @@ func (g *GeminiClient) makeRequest(ctx context.Context, url string, req *geminiR
 func (g *GeminiClient) getModelForCapability(capability AICapability) string {
 	switch capability {
 	case CapabilityCodeCompletion:
-		return "gemini-1.5-flash"  // Fast for real-time completions
+		return "gemini-2.0-flash-exp"  // Fast for real-time completions
 	case CapabilityExplanation:
-		return "gemini-1.5-pro"    // Better for detailed explanations
+		return "gemini-1.5-pro"        // Better for detailed explanations
 	default:
-		return "gemini-1.5-pro"    // Default to pro model
+		return "gemini-2.0-flash-exp"  // Default to flash model
 	}
 }
 
@@ -291,7 +291,7 @@ func (g *GeminiClient) Health(ctx context.Context) error {
 		},
 	}
 
-	url := fmt.Sprintf("%s/gemini-1.5-flash:generateContent?key=%s", g.baseURL, g.apiKey)
+	url := fmt.Sprintf("%s/gemini-2.0-flash-exp:generateContent?key=%s", g.baseURL, g.apiKey)
 	_, err := g.makeRequest(ctx, url, testReq)
 	return err
 }
@@ -328,12 +328,12 @@ func (g *GeminiClient) calculateCost(inputTokens, outputTokens int, model string
 	case "gemini-1.5-pro":
 		inputCostPer1K = 0.00125   // $0.00125 per 1K input tokens
 		outputCostPer1K = 0.00375  // $0.00375 per 1K output tokens
-	case "gemini-1.5-flash":
+	case "gemini-2.0-flash-exp":
 		inputCostPer1K = 0.000075  // $0.000075 per 1K input tokens
 		outputCostPer1K = 0.0003   // $0.0003 per 1K output tokens
 	default:
-		inputCostPer1K = 0.00125
-		outputCostPer1K = 0.00375
+		inputCostPer1K = 0.000075
+		outputCostPer1K = 0.0003
 	}
 
 	inputCost := float64(inputTokens) / 1000.0 * inputCostPer1K

@@ -253,16 +253,20 @@ func (r *AIRouter) monitorHealth() {
 
 // performHealthChecks checks health of all providers
 func (r *AIRouter) performHealthChecks() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	var wg sync.WaitGroup
 
 	for provider, client := range r.clients {
+		wg.Add(1)
 		go func(p AIProvider, c AIClient) {
+			defer wg.Done()
 			healthy := true
 
 			if err := c.Health(ctx); err != nil {
 				log.Printf("Health check failed for provider %s: %v", p, err)
 				healthy = false
+			} else {
+				log.Printf("Health check passed for provider %s", p)
 			}
 
 			r.mu.Lock()
@@ -270,6 +274,9 @@ func (r *AIRouter) performHealthChecks() {
 			r.mu.Unlock()
 		}(provider, client)
 	}
+
+	wg.Wait()
+	cancel()
 }
 
 // GetProviderUsage returns usage statistics for all providers

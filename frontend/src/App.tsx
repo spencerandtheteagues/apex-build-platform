@@ -1,6 +1,5 @@
 // APEX.BUILD Main Application
-// 22nd Century Steampunk Cloud Development Platform
-// Designed to EXCEED Replit in every way
+// Dark Demon Theme - Cloud Development Platform
 
 import React, { useState } from 'react'
 import { useStore } from './hooks/useStore'
@@ -112,7 +111,7 @@ function App() {
   // Loading screen
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-cyan-950 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-black via-gray-950 to-red-950/20 flex items-center justify-center">
         <LoadingOverlay
           isVisible={true}
           text="Initializing APEX.BUILD..."
@@ -125,22 +124,22 @@ function App() {
   // Authentication screen
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-cyan-950 flex items-center justify-center p-4">
-        {/* Background effects - simplified for performance */}
+      <div className="min-h-screen bg-gradient-to-br from-black via-gray-950 to-red-950/20 flex items-center justify-center p-4">
+        {/* Background effects - demon theme */}
         <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-cyan-500/5 rounded-full" />
-          <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-pink-500/5 rounded-full" />
+          <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-red-600/5 rounded-full" />
+          <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-red-900/5 rounded-full" />
         </div>
 
-        <Card variant="cyberpunk" glow="intense" className="w-full max-w-md relative z-10">
+        <Card variant="cyberpunk" glow="intense" className="w-full max-w-md relative z-10 border-red-900/30">
           <CardHeader className="text-center">
             <div className="flex items-center justify-center gap-3 mb-4">
-              <div className="w-12 h-12 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-lg flex items-center justify-center">
+              <div className="w-12 h-12 bg-gradient-to-br from-red-600 to-red-900 rounded-lg flex items-center justify-center shadow-lg shadow-red-900/50">
                 <Zap className="w-6 h-6 text-white" />
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-white">APEX.BUILD</h1>
-                <p className="text-xs text-cyan-400">Cloud Development Platform</p>
+                <p className="text-xs text-red-400">Cloud Development Platform</p>
               </div>
             </div>
 
@@ -250,7 +249,7 @@ function App() {
                   <button
                     type="button"
                     onClick={switchAuthMode}
-                    className="text-cyan-400 hover:text-cyan-300 transition-colors underline"
+                    className="text-red-400 hover:text-red-300 transition-colors underline"
                   >
                     {isAuthMode === 'login' ? 'Sign up' : 'Sign in'}
                   </button>
@@ -274,16 +273,16 @@ function App() {
   return (
     <div className="h-screen flex flex-col bg-black">
       {/* Top Navigation */}
-      <div className="h-12 bg-black/90 border-b border-cyan-500/20 flex items-center justify-between px-4 z-50 relative">
+      <div className="h-12 bg-black/90 border-b border-red-900/30 flex items-center justify-between px-4 z-50 relative">
         {/* Logo */}
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className="w-8 h-8 bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+            <div className="w-8 h-8 bg-gradient-to-br from-red-600 to-red-900 rounded-lg flex items-center justify-center shadow-lg shadow-red-900/30">
               <Zap className="w-5 h-5 text-white" />
             </div>
-            <div className="absolute -inset-0.5 bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-600 rounded-lg blur opacity-50 animate-pulse" />
+            <div className="absolute -inset-0.5 bg-gradient-to-br from-red-600 to-red-900 rounded-lg opacity-30" style={{ filter: 'blur(4px)' }} />
           </div>
-          <span className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
+          <span className="text-xl font-bold bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
             APEX.BUILD
           </span>
         </div>
@@ -294,7 +293,7 @@ function App() {
             onClick={() => setCurrentView('builder')}
             className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
               currentView === 'builder'
-                ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-cyan-400 border border-cyan-500/30'
+                ? 'bg-red-900/20 text-red-400 border border-red-900/50 shadow-sm shadow-red-900/20'
                 : 'text-gray-400 hover:text-white hover:bg-gray-800'
             }`}
           >
@@ -305,7 +304,7 @@ function App() {
             onClick={() => setCurrentView('ide')}
             className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
               currentView === 'ide'
-                ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-cyan-400 border border-cyan-500/30'
+                ? 'bg-red-900/20 text-red-400 border border-red-900/50 shadow-sm shadow-red-900/20'
                 : 'text-gray-400 hover:text-white hover:bg-gray-800'
             }`}
           >
@@ -318,7 +317,7 @@ function App() {
         {user && (
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-400">{user.username}</span>
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400 to-purple-600 flex items-center justify-center text-white text-sm font-bold">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-red-900/30">
               {user.username?.charAt(0).toUpperCase()}
             </div>
           </div>

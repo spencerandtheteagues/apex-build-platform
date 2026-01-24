@@ -1,6 +1,5 @@
 // APEX.BUILD App Builder - The Heart of the Platform
-// This is where users describe their app and watch AI agents build it in real-time
-// Designed to EXCEED Replit's Agent interface in every way
+// Dark Demon Theme - AI-Powered App Generation
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { cn } from '@/lib/utils'
@@ -279,24 +278,31 @@ export const AppBuilder: React.FC = () => {
     addSystemMessage(`Starting ${buildMode} build for: "${appDescription}"`)
 
     try {
-      const response = await apiService.post('/api/v1/build/start', {
+      // Use the Agent Orchestration System
+      const response = await apiService.startBuild({
         description: appDescription,
         mode: buildMode,
       })
 
+      const buildId = response.build_id
+
       setBuildState({
-        id: response.build_id,
+        id: buildId,
         status: 'planning',
-        progress: 0,
+        progress: 5,
         agents: [],
         tasks: [],
         checkpoints: [],
         description: appDescription,
       })
 
-      connectWebSocket(response.build_id)
+      // Connect to WebSocket for real-time updates
+      connectWebSocket(buildId)
+      addSystemMessage(`Build started! Connecting to real-time updates...`)
+
     } catch (error: any) {
-      addSystemMessage(`Error: ${error.message}`)
+      const errorMsg = error.response?.data?.error || error.response?.data?.details || error.message
+      addSystemMessage(`Error: ${errorMsg}`)
       setIsBuilding(false)
     }
   }
@@ -344,7 +350,7 @@ export const AppBuilder: React.FC = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'working': return 'text-cyan-400'
+      case 'working': return 'text-red-400'
       case 'completed': return 'text-green-400'
       case 'error': return 'text-red-400'
       default: return 'text-gray-400'
@@ -353,21 +359,21 @@ export const AppBuilder: React.FC = () => {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'working': return <Circle className="w-3 h-3 animate-pulse fill-cyan-400 text-cyan-400" />
+      case 'working': return <Circle className="w-3 h-3 animate-pulse fill-red-400 text-red-400" />
       case 'completed': return <CheckCircle2 className="w-3 h-3 text-green-400" />
-      case 'error': return <AlertCircle className="w-3 h-3 text-red-400" />
+      case 'error': return <AlertCircle className="w-3 h-3 text-orange-400" />
       default: return <Circle className="w-3 h-3 text-gray-500" />
     }
   }
 
   return (
     <div className="h-full overflow-y-auto bg-black text-white">
-      {/* Simplified background - removed heavy blur effects for performance */}
+      {/* Demon theme background */}
       <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute inset-0 bg-gradient-to-b from-cyan-900/10 via-black to-black" />
-        {/* Static gradient accents instead of animated blur */}
-        <div className="absolute top-0 left-1/4 w-64 h-64 bg-cyan-500/3 rounded-full" />
-        <div className="absolute bottom-0 right-1/4 w-64 h-64 bg-pink-500/3 rounded-full" />
+        <div className="absolute inset-0 bg-gradient-to-b from-red-950/10 via-black to-black" />
+        {/* Static red gradient accents */}
+        <div className="absolute top-0 left-1/4 w-64 h-64 bg-red-900/5 rounded-full" />
+        <div className="absolute bottom-0 right-1/4 w-64 h-64 bg-red-800/5 rounded-full" />
       </div>
 
       <div className="relative z-10 max-w-7xl mx-auto px-4 py-8">
@@ -375,14 +381,14 @@ export const AppBuilder: React.FC = () => {
         <div className="text-center mb-12">
           <div className="flex items-center justify-center gap-3 mb-4">
             <div className="relative">
-              <div className="w-16 h-16 bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-cyan-500/30">
+              <div className="w-16 h-16 bg-gradient-to-br from-red-600 to-red-900 rounded-2xl flex items-center justify-center shadow-lg shadow-red-900/50">
                 <Rocket className="w-8 h-8 text-white" />
               </div>
-              {/* Simplified glow effect for performance */}
-              <div className="absolute -inset-1 bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-600 rounded-2xl opacity-30" style={{ filter: 'blur(8px)' }} />
+              {/* Demon glow effect */}
+              <div className="absolute -inset-1 bg-gradient-to-br from-red-600 to-red-900 rounded-2xl opacity-30" style={{ filter: 'blur(8px)' }} />
             </div>
           </div>
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent mb-2">
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-red-400 via-red-500 to-red-600 bg-clip-text text-transparent mb-2">
             Build Your App
           </h1>
           <p className="text-gray-400 text-lg">
@@ -394,7 +400,7 @@ export const AppBuilder: React.FC = () => {
         {!buildState ? (
           // App Description Input
           <div className="max-w-3xl mx-auto">
-            <Card variant="cyberpunk" glow="intense" className="border-2 border-cyan-500/30">
+            <Card variant="cyberpunk" glow="intense" className="border-2 border-red-900/30">
               <CardContent className="p-8">
                 {/* Build Mode Toggle */}
                 <div className="flex items-center justify-center gap-4 mb-6">
@@ -403,7 +409,7 @@ export const AppBuilder: React.FC = () => {
                     className={cn(
                       'flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-300',
                       buildMode === 'fast'
-                        ? 'bg-cyan-500/20 border-2 border-cyan-400 text-cyan-400'
+                        ? 'bg-red-900/20 border-2 border-red-600 text-red-400 shadow-sm shadow-red-900/30'
                         : 'bg-gray-800/50 border-2 border-gray-700 text-gray-400 hover:border-gray-600'
                     )}
                   >
@@ -416,7 +422,7 @@ export const AppBuilder: React.FC = () => {
                     className={cn(
                       'flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-300',
                       buildMode === 'full'
-                        ? 'bg-purple-500/20 border-2 border-purple-400 text-purple-400'
+                        ? 'bg-red-900/20 border-2 border-red-500 text-red-400 shadow-sm shadow-red-900/30'
                         : 'bg-gray-800/50 border-2 border-gray-700 text-gray-400 hover:border-gray-600'
                     )}
                   >
@@ -440,8 +446,8 @@ For example:
                     className={cn(
                       'w-full h-48 bg-gray-900/80 border-2 rounded-xl px-4 py-3',
                       'text-white placeholder-gray-500',
-                      'focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20',
-                      'resize-none transition-all duration-300',
+                      'focus:outline-none focus:border-red-600 focus:ring-2 focus:ring-red-900/30',
+                      'resize-none transition-colors duration-200',
                       'border-gray-700 hover:border-gray-600'
                     )}
                   />
@@ -457,10 +463,9 @@ For example:
                   size="lg"
                   className={cn(
                     'w-full h-14 text-lg font-bold',
-                    'bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500',
-                    'hover:from-cyan-400 hover:via-blue-400 hover:to-purple-400',
-                    'shadow-lg shadow-cyan-500/30 hover:shadow-cyan-400/50',
-                    'transition-all duration-300',
+                    'bg-gradient-to-r from-red-700 via-red-600 to-red-700',
+                    'hover:from-red-600 hover:via-red-500 hover:to-red-600',
+                    'shadow-lg shadow-red-900/50 hover:shadow-red-800/60',
                     'disabled:opacity-50 disabled:cursor-not-allowed'
                   )}
                 >
@@ -510,7 +515,7 @@ For example:
               <Card variant="cyberpunk" className="border border-gray-800">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg flex items-center gap-2">
-                    <Bot className="w-5 h-5 text-cyan-400" />
+                    <Bot className="w-5 h-5 text-red-400" />
                     Build Status
                   </CardTitle>
                 </CardHeader>
@@ -519,11 +524,11 @@ For example:
                   <div className="mb-4">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm text-gray-400">Progress</span>
-                      <span className="text-sm font-mono text-cyan-400">{buildState.progress}%</span>
+                      <span className="text-sm font-mono text-red-400">{buildState.progress}%</span>
                     </div>
                     <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full transition-all duration-500"
+                        className="h-full bg-gradient-to-r from-red-600 to-red-900 rounded-full transition-all duration-500"
                         style={{ width: `${buildState.progress}%` }}
                       />
                     </div>
@@ -550,7 +555,7 @@ For example:
               <Card variant="cyberpunk" className="border border-gray-800">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg flex items-center gap-2">
-                    <Cpu className="w-5 h-5 text-purple-400" />
+                    <Cpu className="w-5 h-5 text-orange-500" />
                     AI Agents ({buildState.agents.length})
                   </CardTitle>
                 </CardHeader>
@@ -562,7 +567,7 @@ For example:
                         className={cn(
                           'p-3 rounded-lg border transition-all duration-300',
                           agent.status === 'working'
-                            ? 'bg-cyan-500/10 border-cyan-500/30'
+                            ? 'bg-red-600/10 border-red-600/30'
                             : 'bg-gray-900/50 border-gray-800'
                         )}
                       >
@@ -652,7 +657,7 @@ For example:
                 <CardHeader className="pb-2 border-b border-gray-800 shrink-0">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-lg flex items-center gap-2">
-                      <MessageSquare className="w-5 h-5 text-cyan-400" />
+                      <MessageSquare className="w-5 h-5 text-red-400" />
                       Build Activity
                     </CardTitle>
                     <Button
@@ -675,10 +680,10 @@ For example:
                         {msg.role !== 'user' && (
                           <div className={cn(
                             'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
-                            msg.role === 'lead' ? 'bg-purple-500/20' : 'bg-gray-800'
+                            msg.role === 'lead' ? 'bg-red-900/20' : 'bg-gray-800'
                           )}>
                             {msg.role === 'lead' ? (
-                              <Bot className="w-4 h-4 text-purple-400" />
+                              <Bot className="w-4 h-4 text-orange-500" />
                             ) : (
                               <Terminal className="w-4 h-4 text-gray-400" />
                             )}
@@ -687,9 +692,9 @@ For example:
                         <div className={cn(
                           'max-w-[80%] rounded-lg px-4 py-2',
                           msg.role === 'user'
-                            ? 'bg-cyan-500/20 text-cyan-100'
+                            ? 'bg-red-600/20 text-cyan-100'
                             : msg.role === 'lead'
-                            ? 'bg-purple-500/10 text-gray-200'
+                            ? 'bg-red-900/10 text-gray-200'
                             : 'bg-gray-800/50 text-gray-400 text-sm'
                         )}>
                           <p>{msg.content}</p>
@@ -719,7 +724,7 @@ For example:
                           onChange={(e) => setChatInput(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && sendChatMessage()}
                           placeholder="Message the lead agent..."
-                          className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+                          className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-red-600"
                         />
                         <Button onClick={sendChatMessage} disabled={!chatInput.trim()}>
                           <Send className="w-4 h-4" />
@@ -749,8 +754,8 @@ For example:
                           <Button
                             variant="outline"
                             className={cn(
-                              "border-cyan-500 text-cyan-400",
-                              showPreview && "bg-cyan-500/20"
+                              "border-red-600 text-red-400",
+                              showPreview && "bg-red-600/20"
                             )}
                             onClick={() => setShowPreview(!showPreview)}
                           >
@@ -768,11 +773,11 @@ For example:
 
                   {/* Live Preview Panel */}
                   {showPreview && (
-                    <Card variant="cyberpunk" className="border border-cyan-500/30">
+                    <Card variant="cyberpunk" className="border border-red-600/30">
                       <CardHeader className="pb-2 border-b border-gray-800">
                         <div className="flex items-center justify-between">
                           <CardTitle className="text-lg flex items-center gap-2">
-                            <Eye className="w-5 h-5 text-cyan-400" />
+                            <Eye className="w-5 h-5 text-red-400" />
                             Live Preview
                           </CardTitle>
                           {previewUrl && (
@@ -780,7 +785,7 @@ For example:
                               href={previewUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+                              className="text-xs text-red-400 hover:text-cyan-300 flex items-center gap-1"
                             >
                               <ExternalLink className="w-3 h-3" />
                               Open in new tab
@@ -812,7 +817,7 @@ For example:
                                 <div className="space-y-1 max-h-32 overflow-y-auto">
                                   {generatedFiles.map((file, idx) => (
                                     <div key={idx} className="flex items-center gap-2 text-xs">
-                                      <FileCode className="w-3 h-3 text-cyan-400" />
+                                      <FileCode className="w-3 h-3 text-red-400" />
                                       <span className="text-gray-300 truncate">{file.path}</span>
                                     </div>
                                   ))}

@@ -1,0 +1,44 @@
+# Fly.io Dockerfile for APEX.BUILD Frontend
+# Optimized multi-stage build
+
+# Stage 1: Build
+FROM node:18-alpine AS builder
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json ./
+
+# Install all dependencies (including dev)
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Set production environment variables for build
+ENV NODE_ENV=production
+ENV VITE_API_URL=https://apex-build-api.fly.dev/api/v1
+ENV VITE_WS_URL=wss://apex-build-api.fly.dev/ws
+
+# Build the application
+RUN npm run build
+
+# Stage 2: Production with nginx
+FROM nginx:alpine
+
+# Copy built assets
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Copy Fly.io nginx config
+COPY nginx.fly.conf /etc/nginx/nginx.conf
+
+# Create required directories
+RUN mkdir -p /tmp/client_temp /tmp/proxy_temp /tmp/fastcgi_temp /tmp/uwsgi_temp /tmp/scgi_temp \
+    && chmod -R 777 /tmp \
+    && chmod -R 755 /var/log/nginx \
+    && chmod -R 755 /var/cache/nginx
+
+# Expose port
+EXPOSE 8080
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]

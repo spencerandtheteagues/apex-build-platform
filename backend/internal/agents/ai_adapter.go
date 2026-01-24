@@ -5,6 +5,7 @@ package agents
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"apex-build/internal/ai"
@@ -22,8 +23,11 @@ func NewAIRouterAdapter(router *ai.AIRouter) *AIRouterAdapter {
 
 // Generate executes an AI generation request using the specified provider
 func (a *AIRouterAdapter) Generate(ctx context.Context, provider AIProvider, prompt string, opts GenerateOptions) (string, error) {
+	log.Printf("AIRouterAdapter.Generate called with provider: %s", provider)
+
 	// Map agent provider to AI router capability
 	capability := a.mapProviderToCapability(provider, opts)
+	log.Printf("Mapped to capability: %s", capability)
 
 	// Build the full prompt with system prompt
 	fullPrompt := prompt
@@ -52,6 +56,7 @@ func (a *AIRouterAdapter) Generate(ctx context.Context, provider AIProvider, pro
 	default:
 		aiProvider = ai.ProviderClaude
 	}
+	log.Printf("Mapped agent provider %s to AI provider %s", provider, aiProvider)
 
 	// Create AI request
 	request := &ai.AIRequest{
@@ -62,12 +67,17 @@ func (a *AIRouterAdapter) Generate(ctx context.Context, provider AIProvider, pro
 		Provider:    aiProvider,
 	}
 
+	log.Printf("Calling AI router.Generate with capability=%s, provider=%s, prompt_length=%d",
+		capability, aiProvider, len(fullPrompt))
+
 	// Execute the request using Generate method
 	response, err := a.router.Generate(ctx, request)
 	if err != nil {
+		log.Printf("AI generation failed: %v", err)
 		return "", fmt.Errorf("AI generation failed: %w", err)
 	}
 
+	log.Printf("AI generation succeeded, response length: %d", len(response.Content))
 	return response.Content, nil
 }
 

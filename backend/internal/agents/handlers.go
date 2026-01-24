@@ -3,6 +3,7 @@
 package agents
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -62,16 +63,14 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 		return
 	}
 
-	// Start the build process
-	if err := h.manager.StartBuild(build.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to start build",
-			"details": err.Error(),
-		})
-		return
-	}
+	// Start the build process asynchronously
+	go func() {
+		if err := h.manager.StartBuild(build.ID); err != nil {
+			log.Printf("Error starting build %s: %v", build.ID, err)
+		}
+	}()
 
-	// Return build info with WebSocket URL
+	// Return build info immediately with WebSocket URL
 	c.JSON(http.StatusCreated, BuildResponse{
 		BuildID:      build.ID,
 		WebSocketURL: "/ws/build/" + build.ID,

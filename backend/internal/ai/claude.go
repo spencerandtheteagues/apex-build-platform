@@ -75,7 +75,7 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 
 	// Create Claude API request
 	claudeReq := &claudeRequest{
-		Model:     "claude-3-5-sonnet-20241022",  // Latest Claude model
+		Model:     "claude-sonnet-4-20250514",  // Latest Claude model
 		MaxTokens: c.getMaxTokens(req),
 		Messages: []claudeMessage{
 			{
@@ -229,7 +229,7 @@ func (c *ClaudeClient) GetProvider() AIProvider {
 // Health checks if Claude API is accessible
 func (c *ClaudeClient) Health(ctx context.Context) error {
 	testReq := &claudeRequest{
-		Model:     "claude-3-5-sonnet-20241022",
+		Model:     "claude-sonnet-4-20250514",
 		MaxTokens: 10,
 		Messages: []claudeMessage{
 			{

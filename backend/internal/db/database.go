@@ -99,6 +99,68 @@ func (d *Database) Migrate() error {
 	}
 
 	log.Println("✅ Database migrations completed successfully")
+
+	// Seed admin user
+	if err := d.seedAdminUser(); err != nil {
+		log.Printf("⚠️ Admin user seeding: %v", err)
+	}
+
+	return nil
+}
+
+// seedAdminUser creates the platform owner/admin account
+func (d *Database) seedAdminUser() error {
+	// Check if admin already exists
+	var existingUser models.User
+	result := d.DB.Where("email = ?", "spencerandtheteagues@gmail.com").First(&existingUser)
+
+	// Password: TheStarshipKey! - bcrypt hashed
+	passwordHash := "$2a$10$gkuvs.57YtZctLHfPY8Jr.OKcM725LVvlFV7/8agtpyyEBDNiTvA."
+
+	if result.Error == nil {
+		// User exists, ensure admin privileges and password are set
+		existingUser.PasswordHash = passwordHash
+		existingUser.IsAdmin = true
+		existingUser.IsSuperAdmin = true
+		existingUser.HasUnlimitedCredits = true
+		existingUser.BypassBilling = true
+		existingUser.BypassRateLimits = true
+		existingUser.SubscriptionType = "owner"
+		existingUser.IsActive = true
+		existingUser.IsVerified = true
+		existingUser.CreditBalance = 999999999.99
+
+		if err := d.DB.Save(&existingUser).Error; err != nil {
+			return fmt.Errorf("failed to update admin privileges: %w", err)
+		}
+		log.Println("👑 Admin user privileges and password updated: spencerandtheteagues@gmail.com")
+		return nil
+	}
+
+	// Create new admin user
+	adminUser := models.User{
+		Username:            "spencer",
+		Email:               "spencerandtheteagues@gmail.com",
+		PasswordHash:        passwordHash,
+		FullName:            "Spencer Teague",
+		IsActive:            true,
+		IsVerified:          true,
+		IsAdmin:             true,
+		IsSuperAdmin:        true,
+		HasUnlimitedCredits: true,
+		BypassBilling:       true,
+		BypassRateLimits:    true,
+		SubscriptionType:    "owner",
+		CreditBalance:       999999999.99,
+		PreferredTheme:      "cyberpunk",
+		PreferredAI:         "auto",
+	}
+
+	if err := d.DB.Create(&adminUser).Error; err != nil {
+		return fmt.Errorf("failed to create admin user: %w", err)
+	}
+
+	log.Println("👑 Admin user created: spencerandtheteagues@gmail.com")
 	return nil
 }
 

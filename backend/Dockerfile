@@ -1,8 +1,8 @@
 # APEX.BUILD Backend Dockerfile
 # Multi-stage build for Go application
 
-# Build stage - using Go 1.24
-FROM golang:1.24-alpine AS builder
+# Build stage - using Go 1.22
+FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
 

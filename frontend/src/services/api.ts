@@ -286,6 +286,61 @@ export class ApiService {
     await this.client.post(`/ai/rate/${requestId}`, { rating, feedback })
   }
 
+  // Build endpoints (Agent Orchestration System)
+  async startBuild(data: {
+    description: string
+    mode: 'fast' | 'full'
+  }): Promise<{
+    build_id: string
+    websocket_url: string
+    status: string
+  }> {
+    const response = await this.client.post('/build/start', data)
+    return response.data
+  }
+
+  async getBuildStatus(buildId: string): Promise<any> {
+    const response = await this.client.get(`/build/${buildId}/status`)
+    return response.data
+  }
+
+  async getBuildDetails(buildId: string): Promise<any> {
+    const response = await this.client.get(`/build/${buildId}`)
+    return response.data
+  }
+
+  async sendBuildMessage(buildId: string, message: string): Promise<void> {
+    await this.client.post(`/build/${buildId}/message`, { message })
+  }
+
+  async getBuildCheckpoints(buildId: string): Promise<any[]> {
+    const response = await this.client.get(`/build/${buildId}/checkpoints`)
+    return response.data.checkpoints || []
+  }
+
+  async rollbackBuild(buildId: string, checkpointId: string): Promise<void> {
+    await this.client.post(`/build/${buildId}/rollback/${checkpointId}`)
+  }
+
+  async getBuildAgents(buildId: string): Promise<any[]> {
+    const response = await this.client.get(`/build/${buildId}/agents`)
+    return response.data.agents || []
+  }
+
+  async getBuildTasks(buildId: string): Promise<any[]> {
+    const response = await this.client.get(`/build/${buildId}/tasks`)
+    return response.data.tasks || []
+  }
+
+  async getBuildFiles(buildId: string): Promise<any[]> {
+    const response = await this.client.get(`/build/${buildId}/files`)
+    return response.data.files || []
+  }
+
+  async cancelBuild(buildId: string): Promise<void> {
+    await this.client.post(`/build/${buildId}/cancel`)
+  }
+
   // Code execution endpoints
   async executeCode(data: {
     project_id: number

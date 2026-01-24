@@ -1,5 +1,5 @@
 // APEX.BUILD IDE Layout
-// Complete cyberpunk development environment interface
+// Dark Demon Theme - Complete development environment interface
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { cn } from '@/lib/utils'
@@ -18,14 +18,7 @@ import { AIAssistant } from '@/components/ai/AIAssistant'
 import { FileTree } from '@/components/explorer/FileTree'
 import { ProjectDashboard } from '@/components/project/ProjectDashboard'
 import { ProjectList } from '@/components/project/ProjectList'
-import {
-  Sidebar,
-  SidebarLeft,
-  SidebarRight,
-  Panel,
-  PanelGroup,
-  PanelResizeHandle,
-} from 'react-resizable-panels'
+// Note: react-resizable-panels not needed - using custom div-based layout
 import {
   Menu,
   X,
@@ -329,7 +322,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
                 <label className="text-sm font-medium text-gray-300">Theme</label>
                 <select
                   value={theme.id}
-                  className="w-full mt-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white focus:border-cyan-400 focus:outline-none"
+                  className="w-full mt-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white focus:border-red-500 focus:outline-none"
                 >
                   <option value="cyberpunk">Cyberpunk</option>
                   <option value="matrix">Matrix</option>
@@ -353,7 +346,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
           <div className="h-full flex flex-col bg-black/90 border border-gray-700/50 rounded-lg">
             <div className="flex items-center justify-between px-4 py-2 bg-gray-900/80 border-b border-gray-700/50 rounded-t-lg">
               <div className="flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-cyan-400" />
+                <Terminal className="w-4 h-4 text-red-500" />
                 <span className="text-sm font-medium text-white">Terminal</span>
               </div>
               <Button
@@ -368,14 +361,14 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
 
             <div className="flex-1 p-4 font-mono text-sm overflow-auto" ref={terminalRef}>
               {terminalOutput.map((line, index) => (
-                <div key={index} className="text-green-400 whitespace-pre-wrap">
+                <div key={index} className="text-red-400 whitespace-pre-wrap">
                   {line}
                 </div>
               ))}
             </div>
 
             <div className="flex items-center p-4 border-t border-gray-700/50">
-              <span className="text-green-400 font-mono text-sm mr-2">$</span>
+              <span className="text-red-400 font-mono text-sm mr-2">$</span>
               <input
                 type="text"
                 value={terminalInput}
@@ -385,7 +378,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
                     executeTerminalCommand(terminalInput.trim())
                   }
                 }}
-                className="flex-1 bg-transparent text-green-400 font-mono text-sm focus:outline-none"
+                className="flex-1 bg-transparent text-red-400 font-mono text-sm focus:outline-none"
                 placeholder="Enter command..."
               />
             </div>
@@ -448,7 +441,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
                       className={cn(
                         'flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors group min-w-0',
                         isActive
-                          ? 'bg-gray-800 border-b-2 border-cyan-400'
+                          ? 'bg-gray-800 border-b-2 border-red-500'
                           : 'hover:bg-gray-800/50'
                       )}
                       onClick={() => setActiveFile(file)}
@@ -461,7 +454,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
                         {file.name}
                       </span>
                       {hasUnsavedChanges && (
-                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full" />
+                        <div className="w-1.5 h-1.5 bg-red-500 rounded-full" />
                       )}
                       <button
                         onClick={(e) => {
@@ -517,7 +510,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
         {/* Left side */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-gradient-to-br from-cyan-400 to-blue-600 rounded" />
+            <div className="w-6 h-6 bg-gradient-to-br from-red-500 to-red-900 rounded" />
             <span className="text-lg font-bold text-white">APEX.BUILD</span>
           </div>
 

@@ -111,19 +111,26 @@ func (am *AgentManager) CreateBuild(userID uint, req *BuildRequest) (*Build, err
 
 // StartBuild begins the build process
 func (am *AgentManager) StartBuild(buildID string) error {
+	log.Printf("StartBuild called for build %s", buildID)
+
 	am.mu.Lock()
 	build, exists := am.builds[buildID]
 	am.mu.Unlock()
 
 	if !exists {
+		log.Printf("Build %s not found in manager", buildID)
 		return fmt.Errorf("build %s not found", buildID)
 	}
+
+	log.Printf("Build %s found, updating status to planning", buildID)
 
 	// Update status
 	build.mu.Lock()
 	build.Status = BuildPlanning
 	build.UpdatedAt = time.Now()
 	build.mu.Unlock()
+
+	log.Printf("Build %s status updated, broadcasting", buildID)
 
 	// Broadcast build started
 	am.broadcast(buildID, &WSMessage{
@@ -294,11 +301,14 @@ func (am *AgentManager) taskDispatcher() {
 
 // executeTask runs a task using the appropriate AI agent
 func (am *AgentManager) executeTask(task *Task) {
+	log.Printf("executeTask called for task %s (type: %s, assignedTo: %s)", task.ID, task.Type, task.AssignedTo)
+
 	am.mu.RLock()
 	agent, exists := am.agents[task.AssignedTo]
 	am.mu.RUnlock()
 
 	if !exists {
+		log.Printf("Agent %s not found for task %s", task.AssignedTo, task.ID)
 		am.resultQueue <- &TaskResult{
 			TaskID:  task.ID,
 			Success: false,
@@ -306,6 +316,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		}
 		return
 	}
+	log.Printf("Found agent %s (role: %s, provider: %s)", agent.ID, agent.Role, agent.Provider)
 
 	// Get the build for context
 	am.mu.RLock()
@@ -313,6 +324,7 @@ func (am *AgentManager) executeTask(task *Task) {
 	am.mu.RUnlock()
 
 	if !buildExists {
+		log.Printf("Build %s not found for agent %s", agent.BuildID, agent.ID)
 		am.resultQueue <- &TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
@@ -321,15 +333,18 @@ func (am *AgentManager) executeTask(task *Task) {
 		}
 		return
 	}
+	log.Printf("Found build %s for task execution", build.ID)
 
 	// Build the prompt based on task type
 	prompt := am.buildTaskPrompt(task, build, agent)
 	systemPrompt := am.getSystemPrompt(agent.Role)
+	log.Printf("Built prompt for task (prompt_length: %d, system_prompt_length: %d)", len(prompt), len(systemPrompt))
 
 	// Execute using AI router
 	ctx, cancel := context.WithTimeout(am.ctx, 5*time.Minute)
 	defer cancel()
 
+	log.Printf("Calling AI router for task %s with provider %s", task.ID, agent.Provider)
 	response, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
 		MaxTokens:    8000,
 		Temperature:  0.7,
@@ -337,6 +352,7 @@ func (am *AgentManager) executeTask(task *Task) {
 	})
 
 	if err != nil {
+		log.Printf("AI generation failed for task %s: %v", task.ID, err)
 		am.resultQueue <- &TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
@@ -345,6 +361,8 @@ func (am *AgentManager) executeTask(task *Task) {
 		}
 		return
 	}
+
+	log.Printf("AI generation succeeded for task %s (response_length: %d)", task.ID, len(response))
 
 	// Parse the response into task output
 	output := am.parseTaskOutput(task.Type, response)
@@ -355,6 +373,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		Success: true,
 		Output:  output,
 	}
+	log.Printf("Task %s completed successfully", task.ID)
 }
 
 // resultProcessor handles completed task results

@@ -24,13 +24,21 @@ type User struct {
 	IsActive   bool `json:"is_active" gorm:"default:true"`
 	IsVerified bool `json:"is_verified" gorm:"default:false"`
 
+	// Admin and special privileges
+	IsAdmin           bool `json:"is_admin" gorm:"default:false"`
+	IsSuperAdmin      bool `json:"is_super_admin" gorm:"default:false"`
+	HasUnlimitedCredits bool `json:"has_unlimited_credits" gorm:"default:false"`
+	BypassBilling     bool `json:"bypass_billing" gorm:"default:false"`
+	BypassRateLimits  bool `json:"bypass_rate_limits" gorm:"default:false"`
+
 	// Subscription and billing
-	SubscriptionType string    `json:"subscription_type" gorm:"default:'free'"` // free, pro, team
+	SubscriptionType string    `json:"subscription_type" gorm:"default:'free'"` // free, pro, team, enterprise, owner
 	SubscriptionEnd  time.Time `json:"subscription_end"`
 
 	// Usage tracking for AI services
 	MonthlyAIRequests int     `json:"monthly_ai_requests" gorm:"default:0"`
 	MonthlyAICost     float64 `json:"monthly_ai_cost" gorm:"default:0.0"`
+	CreditBalance     float64 `json:"credit_balance" gorm:"default:0.0"`
 
 	// Preferences
 	PreferredTheme string `json:"preferred_theme" gorm:"default:'cyberpunk'"` // cyberpunk, matrix, synthwave, neonCity
