@@ -11,9 +11,10 @@ services:
   # Backend API Service
   - type: web
     name: apex-backend
-    runtime: docker
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    runtime: go
+    rootDir: backend
+    buildCommand: go build -o apex-server ./cmd/main.go
+    startCommand: ./apex-server
     plan: free
     healthCheckPath: /health
     envVars:
