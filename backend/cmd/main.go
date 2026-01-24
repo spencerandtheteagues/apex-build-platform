@@ -39,6 +39,11 @@ func main() {
 	}
 	defer database.Close()
 
+	// Run database seeds (create admin accounts)
+	if err := database.RunSeeds(); err != nil {
+		log.Printf("⚠️ Database seeding had issues: %v", err)
+	}
+
 	// Initialize authentication service
 	authService := auth.NewAuthService(config.JWTSecret)
 
@@ -295,6 +300,19 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 
 			// Build/Agent endpoints (the core of APEX.BUILD)
 			buildHandler.RegisterRoutes(protected)
+
+			// Admin endpoints (requires admin privileges)
+			admin := protected.Group("/admin")
+			admin.Use(server.AdminMiddleware())
+			{
+				admin.GET("/dashboard", server.AdminDashboard)
+				admin.GET("/users", server.AdminGetUsers)
+				admin.GET("/users/:id", server.AdminGetUser)
+				admin.PUT("/users/:id", server.AdminUpdateUser)
+				admin.DELETE("/users/:id", server.AdminDeleteUser)
+				admin.POST("/users/:id/credits", server.AdminAddCredits)
+				admin.GET("/stats", server.AdminGetSystemStats)
+			}
 		}
 	}
 

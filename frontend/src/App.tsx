@@ -5,11 +5,12 @@ import React, { useState } from 'react'
 import { useStore } from './hooks/useStore'
 import { IDELayout } from './components/ide/IDELayout'
 import { AppBuilder } from './components/builder/AppBuilder'
+import { AdminDashboard } from './components/admin/AdminDashboard'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input } from './components/ui'
-import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2 } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield } from 'lucide-react'
 import './styles/globals.css'
 
-type AppView = 'builder' | 'ide'
+type AppView = 'builder' | 'ide' | 'admin'
 
 function App() {
   const [currentView, setCurrentView] = useState<AppView>('builder')
@@ -311,6 +312,20 @@ function App() {
             <Code2 className="w-4 h-4" />
             <span className="text-sm font-medium">IDE</span>
           </button>
+          {/* Admin button - only show for admin users */}
+          {(user?.is_admin || user?.is_super_admin) && (
+            <button
+              onClick={() => setCurrentView('admin')}
+              className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
+                currentView === 'admin'
+                  ? 'bg-purple-900/20 text-purple-400 border border-purple-900/50 shadow-sm shadow-purple-900/20'
+                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+              }`}
+            >
+              <Shield className="w-4 h-4" />
+              <span className="text-sm font-medium">Admin</span>
+            </button>
+          )}
         </div>
 
         {/* User Info */}
@@ -328,6 +343,8 @@ function App() {
       <div className="flex-1 overflow-hidden">
         {currentView === 'builder' ? (
           <AppBuilder />
+        ) : currentView === 'admin' ? (
+          <AdminDashboard />
         ) : (
           <IDELayout />
         )}
