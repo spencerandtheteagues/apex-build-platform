@@ -291,6 +291,21 @@ func (a *AuthService) ExtractUserFromToken(tokenString string) (uint, error) {
 	return claims.UserID, nil
 }
 
+// ValidateRefreshToken validates a refresh token and returns the user ID
+func (a *AuthService) ValidateRefreshToken(refreshToken string) (uint, error) {
+	claims, err := a.ValidateToken(refreshToken)
+	if err != nil {
+		return 0, fmt.Errorf("invalid refresh token: %w", err)
+	}
+
+	// Verify that this is actually a refresh token by checking the ID prefix
+	if claims.ID == "" || len(claims.ID) < 7 || claims.ID[:7] != "refresh" {
+		return 0, ErrInvalidToken
+	}
+
+	return claims.UserID, nil
+}
+
 // TokenInfo represents token information for API responses
 type TokenInfo struct {
 	UserID    uint      `json:"user_id"`

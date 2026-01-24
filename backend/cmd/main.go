@@ -254,7 +254,12 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 		{
 			auth.POST("/register", server.Register)
 			auth.POST("/login", server.Login)
+			auth.POST("/refresh", server.RefreshToken)
+			auth.POST("/logout", server.Logout)
 		}
+
+		// Public pricing endpoint (no auth required)
+		v1.GET("/pricing", server.GetPricingInfo)
 
 		// Protected routes (authentication required)
 		protected := v1.Group("/")
@@ -285,12 +290,40 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 				files.PUT("/:id", server.UpdateFile)
 			}
 
+			// Code execution endpoint
+			protected.POST("/execute", server.ExecuteCode)
+
 			// User profile endpoints
 			user := protected.Group("/user")
 			{
 				user.GET("/profile", server.GetUserProfile)
 				user.PUT("/profile", server.UpdateUserProfile)
 			}
+
+			// Credits and billing endpoints
+			credits := protected.Group("/credits")
+			{
+				credits.GET("", server.GetUserCredits)
+				credits.POST("/purchase", server.PurchaseCredits)
+				credits.POST("/deduct", server.DeductCredits)
+			}
+
+			// Build tracking endpoints
+			protected.POST("/build/record", server.RecordBuild)
+			protected.POST("/download/record", server.RecordDownload)
+
+			// Secret management endpoints
+			protected.POST("/projects/:projectId/secrets", server.CreateSecret)
+			protected.GET("/projects/:projectId/secrets", server.GetSecrets)
+			protected.DELETE("/secrets/:id", server.DeleteSecret)
+
+			// Version history endpoints
+			protected.POST("/projects/:projectId/versions", server.CreateVersion)
+			protected.GET("/projects/:projectId/versions", server.GetVersions)
+			protected.GET("/versions/:id", server.GetVersion)
+
+			// Repository cloning endpoint
+			protected.POST("/clone", server.CloneRepository)
 
 			// Build/Agent endpoints (the core of APEX.BUILD)
 			buildHandler.RegisterRoutes(protected)
