@@ -17,75 +17,90 @@ APEX.BUILD is a 22nd-century cloud development platform where AI agents (Claude 
 1. **Authentication System**
    - Login/Register UI in `frontend/src/FixedApp.tsx`
    - Demo account: `apex_demo` / `demo12345678`
+   - Admin account: `spencerandtheteagues@gmail.com` / `The$t@r$h1pKey!` (unlimited access)
    - JWT-based auth with refresh tokens
    - Backend endpoints: `/api/v1/auth/login`, `/api/v1/auth/register`, `/api/v1/auth/refresh`, `/api/v1/auth/logout`
 
-2. **Multi-AI Orchestration System** (`backend/internal/agents/orchestrator.go`)
+2. **Admin Account System**
+   - Admin users have unlimited access (no credit requirements)
+   - IsAdmin field in User model
+   - Auto-created on database migration
+   - Admin credentials: spencerandtheteagues@gmail.com / The$t@r$h1pKey!
+
+3. **Multi-AI Orchestration System** (`backend/internal/agents/orchestrator.go`)
    - Claude Opus 4.5 (Strategist): Spawns Architect, Planner, Reviewer, Documentor sub-agents
    - GPT-5 (Coder): Spawns Frontend Dev, Backend Dev, API Dev, UI Dev, Database Dev sub-agents
    - Gemini 3 (Validator): Spawns Tester, Optimizer, Debugger, Completer sub-agents
    - 8 build phases: Initializing, Planning, Architecture, Coding, Testing, Review, Optimization, Complete
    - Parallel task execution with goroutines and channels
-   - **NOTE**: Backend orchestrator exists but is NOT yet wired into main.go routes
 
-3. **Live App Preview** (`backend/internal/preview/preview.go`)
+4. **Live App Preview** (`backend/internal/preview/preview.go`)
    - Auto-detects app type (React, Vue, Next.js, Node, Python, Go, Static)
    - Process management for different app types
    - Output capture and logging
-   - **NOTE**: Backend preview manager exists but is NOT yet wired into main.go routes
 
-4. **Frontend App Builder** (`frontend/src/FixedApp.tsx`)
+5. **Frontend App Builder** (`frontend/src/FixedApp.tsx`)
    - Description input with Fast/Full mode selection
    - Real-time agent cards showing progress
    - Chat panel for agent communication
    - Live preview pane with iframe (Replit-style)
    - Build phase indicator in header
-   - **Currently runs simulation** - needs backend integration for real AI calls
 
-### What Needs to Be Implemented
+6. **File Manager**
+   - Tree view of generated files with collapsible folders
+   - File icons by type (tsx, go, css, json, etc.)
+   - Click to view file contents with syntax highlighting
+   - Toggle button in header
 
-1. **File Manager** (HIGH PRIORITY)
-   - Tree view of generated files
-   - Click to view/edit in Monaco editor
-   - File icons by type
-   - Individual file download
+7. **ZIP Download with Payment Gate**
+   - Download ZIP button appears after build complete
+   - Requires credits for free users
+   - Pro/Team/Admin users can download freely
 
-2. **ZIP Download with Payment Gate** (HIGH PRIORITY)
-   - Generate ZIP of all project files
-   - Require payment/credits to download
-   - Pricing: ~10% cheaper than Replit
+8. **Credit-Based Pricing System**
+   - Free tier: 3 builds/month, no downloads (need credits)
+   - Credits: $9 per 100 credits (10% cheaper than Replit)
+   - Download cost: 5 credits per ZIP
+   - Build cost: 10 credits (fast) / 25 credits (full)
+   - API endpoints: `/api/v1/credits`, `/api/v1/credits/purchase`, `/api/v1/pricing`
 
-3. **Credit-Based Pricing System** (HIGH PRIORITY)
-   - Free tier: Build simple apps, view code (no download)
-   - Credits required for: ZIP downloads, complex builds, continued building after limit
-   - Subscription tiers with build limits (NOT unlimited - API costs concern)
-   - Suggested pricing research needed against Replit
+9. **Subscription Tiers**
+   - Free: $0, 3 builds/month, credits required for downloads
+   - Pro: $18/month (10% cheaper than Replit), 50 builds, unlimited downloads
+   - Team: $45/month, 200 builds, team features
 
-4. **Repository Cloning Feature**
-   - Clone existing GitHub repos
-   - Auto-detect project type
-   - Set up environment automatically
-   - Install dependencies
+10. **Secret/Environment Variable Manager**
+    - Create secrets: `POST /api/v1/projects/:projectId/secrets`
+    - List secrets (names only, never values): `GET /api/v1/projects/:projectId/secrets`
+    - Delete secrets: `DELETE /api/v1/secrets/:id`
+    - Values never exposed in JSON responses
 
-5. **Secret/Environment Variable Manager**
-   - Secure storage for API keys, tokens
-   - Inject into build environment
-   - Never expose in generated code
+11. **Version History & Checkpoints**
+    - Create version: `POST /api/v1/projects/:projectId/versions`
+    - List versions: `GET /api/v1/projects/:projectId/versions`
+    - Get version with snapshot: `GET /api/v1/versions/:id`
+    - Auto-save and manual checkpoint support
 
-6. **Version History & Checkpoints**
-   - Save snapshots during build
-   - Rollback to previous versions
-   - Compare versions
+12. **Repository Cloning**
+    - Clone endpoint: `POST /api/v1/clone`
+    - Auto-detect project type (react, vue, go, python)
+    - Creates project from cloned repo
 
-7. **One-Click Deploy Integration**
+### What Still Needs Work
+
+1. **One-Click Deploy Integration**
    - Vercel deployment
    - Netlify deployment
    - Railway deployment
 
-8. **Backend Integration** (CRITICAL)
-   - Wire orchestrator.go into build handlers
-   - Wire preview.go into main routes
+2. **Backend Integration** (CRITICAL)
+   - Wire orchestrator.go into build handlers (partially done)
+   - Wire preview.go into main routes (partially done)
    - Connect real AI APIs (Claude, GPT, Gemini)
+
+3. **Fly.io Backend Deployment**
+   - Frontend deployed: https://apex-build-platform-zmbl89de.devinapps.com
+   - Backend deployment failed due to authorization issues
 
 ## Tech Stack
 
@@ -178,31 +193,61 @@ Research Replit pricing:
 - Replit Core: $20/month (1000 Cycles)
 - Suggested APEX pricing: ~$18/month with similar limits
 
+## API Endpoints Summary
+
+### Authentication (No auth required)
+- `POST /api/v1/auth/register` - Register new user
+- `POST /api/v1/auth/login` - Login
+- `POST /api/v1/auth/refresh` - Refresh token
+- `POST /api/v1/auth/logout` - Logout
+- `GET /api/v1/pricing` - Get pricing info
+
+### Protected Endpoints (Auth required)
+- `GET /api/v1/credits` - Get user credits and usage
+- `POST /api/v1/credits/purchase` - Purchase credits
+- `POST /api/v1/credits/deduct` - Deduct credits
+- `POST /api/v1/build/record` - Record a build
+- `POST /api/v1/download/record` - Record a download
+- `POST /api/v1/projects/:projectId/secrets` - Create secret
+- `GET /api/v1/projects/:projectId/secrets` - List secrets
+- `DELETE /api/v1/secrets/:id` - Delete secret
+- `POST /api/v1/projects/:projectId/versions` - Create version
+- `GET /api/v1/projects/:projectId/versions` - List versions
+- `GET /api/v1/versions/:id` - Get version
+- `POST /api/v1/clone` - Clone repository
+
+## Pricing Strategy (Implemented)
+
+| Tier | Price | Builds/Month | Downloads | Features |
+|------|-------|--------------|-----------|----------|
+| Free | $0 | 3 | Credits required | Basic app building, view code, live preview |
+| Pro | $18/mo | 50 | Included | Priority AI, version history, deploy integrations |
+| Team | $45/mo | 200 | Included | Team collaboration, shared projects, admin dashboard |
+
+Credits: $9 per 100 (10% cheaper than Replit)
+- Download: 5 credits
+- Fast build: 10 credits
+- Full build: 25 credits
+
 ## Known Issues
 
-1. **Database migration error**: `constraint "uni_users_username" of relation "users" does not exist`
-2. **Backend orchestrator not integrated**: Code exists but not wired to routes
-3. **Preview manager not integrated**: Code exists but not wired to routes
-4. **Frontend simulation only**: Real AI calls not connected
+1. **Database migration error**: `constraint "uni_users_username" of relation "users" does not exist` (pre-existing)
+2. **Fly.io backend deployment**: Authorization error prevents deployment
+3. **Frontend simulation only**: Real AI calls not connected yet
 
 ## Next Steps (Priority Order)
 
-1. Fix database migration issue
-2. Wire orchestrator.go into main.go
-3. Wire preview.go into main.go
-4. Implement File Manager component
-5. Implement ZIP download with payment
-6. Implement credit system
-7. Add subscription tiers
-8. Add repo cloning feature
-9. Add secret manager
-10. Add version history
-11. Add deploy integrations
+1. Add one-click deploy integrations (Vercel, Netlify, Railway)
+2. Wire real AI APIs into orchestrator
+3. Fix Fly.io backend deployment
+4. Add Monaco editor integration for file editing
+5. Add real-time collaboration features
 
 ## Contact
 
 - **User**: Spencer Allen Teague (@spencerandtheteagues)
 - **Email**: spencerandtheteagues@gmail.com
+- **Admin Account**: spencerandtheteagues@gmail.com / The$t@r$h1pKey!
 
 ## Session Link
 
