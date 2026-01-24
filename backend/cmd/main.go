@@ -254,6 +254,8 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 		{
 			auth.POST("/register", server.Register)
 			auth.POST("/login", server.Login)
+			auth.POST("/refresh", server.RefreshToken)
+			auth.POST("/logout", server.Logout)
 		}
 
 		// Protected routes (authentication required)
@@ -284,6 +286,9 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 			{
 				files.PUT("/:id", server.UpdateFile)
 			}
+
+			// Code execution endpoint
+			protected.POST("/execute", server.ExecuteCode)
 
 			// User profile endpoints
 			user := protected.Group("/user")

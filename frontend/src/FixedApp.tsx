@@ -1,8 +1,10 @@
 import React, { useState, forwardRef, useImperativeHandle, useRef, useEffect, useCallback } from 'react';
 import { FixedIDE } from './components/FixedIDE';
 import { SteampunkDashboard } from './components/SteampunkDashboard';
+import { apiService } from './services/api';
+import type { User } from './types';
 
-type ViewType = 'dashboard' | 'ide' | 'projects' | 'settings' | 'builder';
+type ViewType = 'dashboard' | 'ide' | 'projects' | 'settings' | 'builder' | 'auth';
 
 interface FixedAppHandle {
   setCurrentView: (view: ViewType) => void;
@@ -11,6 +13,322 @@ interface FixedAppHandle {
 // API Configuration
 const API_BASE = 'http://localhost:8080';
 const WS_BASE = 'ws://localhost:8080';
+
+// Authentication Page Component
+const AuthPage: React.FC<{
+  onAuthSuccess: (user: User) => void;
+  onSkip: () => void;
+}> = ({ onAuthSuccess, onSkip }) => {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      if (mode === 'login') {
+        const response = await apiService.login({ username, password });
+        if (response.user) {
+          onAuthSuccess(response.user as User);
+        }
+      } else {
+        const response = await apiService.register({ username, email, password, full_name: fullName });
+        if (response.user) {
+          onAuthSuccess(response.user as User);
+        }
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Authentication failed';
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDemoLogin = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      let response;
+      try {
+        response = await apiService.login({ username: 'apex_demo', password: 'demo12345678' });
+      } catch {
+        response = await apiService.register({
+          username: 'apex_demo',
+          email: 'demo@apex.build',
+          password: 'demo12345678',
+          full_name: 'Demo User'
+        });
+      }
+      if (response.user) {
+        onAuthSuccess(response.user as User);
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Demo login failed';
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #0a0a0f 0%, #001133 50%, #0a0a0f 100%)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '20px',
+      fontFamily: 'monospace'
+    }}>
+      <div style={{
+        width: '100%',
+        maxWidth: '450px',
+        background: 'rgba(21, 21, 32, 0.95)',
+        border: '2px solid #00f5ff',
+        borderRadius: '16px',
+        padding: '40px',
+        boxShadow: '0 0 40px rgba(0, 245, 255, 0.3), inset 0 0 20px rgba(0, 245, 255, 0.05)'
+      }}>
+        <div style={{ textAlign: 'center', marginBottom: '30px' }}>
+          <h1 style={{
+            fontSize: '2.5rem',
+            color: '#00f5ff',
+            textShadow: '0 0 20px #00f5ff',
+            marginBottom: '10px'
+          }}>
+            APEX.BUILD
+          </h1>
+          <p style={{ color: '#888', fontSize: '14px' }}>
+            Multi-AI Cloud Development Platform
+          </p>
+        </div>
+
+        <div style={{
+          display: 'flex',
+          marginBottom: '30px',
+          background: 'rgba(0, 0, 0, 0.3)',
+          borderRadius: '8px',
+          padding: '4px'
+        }}>
+          <button
+            onClick={() => setMode('login')}
+            style={{
+              flex: 1,
+              padding: '12px',
+              background: mode === 'login' ? 'linear-gradient(135deg, #00f5ff, #0080ff)' : 'transparent',
+              border: 'none',
+              borderRadius: '6px',
+              color: '#fff',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease'
+            }}
+          >
+            Login
+          </button>
+          <button
+            onClick={() => setMode('register')}
+            style={{
+              flex: 1,
+              padding: '12px',
+              background: mode === 'register' ? 'linear-gradient(135deg, #8b00ff, #ff0080)' : 'transparent',
+              border: 'none',
+              borderRadius: '6px',
+              color: '#fff',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease'
+            }}
+          >
+            Register
+          </button>
+        </div>
+
+        {error && (
+          <div style={{
+            background: 'rgba(255, 0, 80, 0.2)',
+            border: '1px solid #ff0080',
+            borderRadius: '8px',
+            padding: '12px',
+            marginBottom: '20px',
+            color: '#ff6b9d'
+          }}>
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ display: 'block', color: '#00f5ff', marginBottom: '8px', fontSize: '14px' }}>
+              Username
+            </label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              style={{
+                width: '100%',
+                padding: '14px',
+                background: 'rgba(0, 0, 0, 0.5)',
+                border: '1px solid rgba(0, 245, 255, 0.3)',
+                borderRadius: '8px',
+                color: '#fff',
+                fontSize: '16px',
+                outline: 'none',
+                boxSizing: 'border-box'
+              }}
+              placeholder="Enter your username"
+            />
+          </div>
+
+          {mode === 'register' && (
+            <>
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', color: '#00f5ff', marginBottom: '8px', fontSize: '14px' }}>
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '14px',
+                    background: 'rgba(0, 0, 0, 0.5)',
+                    border: '1px solid rgba(0, 245, 255, 0.3)',
+                    borderRadius: '8px',
+                    color: '#fff',
+                    fontSize: '16px',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                  placeholder="Enter your email"
+                />
+              </div>
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', color: '#00f5ff', marginBottom: '8px', fontSize: '14px' }}>
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '14px',
+                    background: 'rgba(0, 0, 0, 0.5)',
+                    border: '1px solid rgba(0, 245, 255, 0.3)',
+                    borderRadius: '8px',
+                    color: '#fff',
+                    fontSize: '16px',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                  placeholder="Enter your full name (optional)"
+                />
+              </div>
+            </>
+          )}
+
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ display: 'block', color: '#00f5ff', marginBottom: '8px', fontSize: '14px' }}>
+              Password
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={8}
+              style={{
+                width: '100%',
+                padding: '14px',
+                background: 'rgba(0, 0, 0, 0.5)',
+                border: '1px solid rgba(0, 245, 255, 0.3)',
+                borderRadius: '8px',
+                color: '#fff',
+                fontSize: '16px',
+                outline: 'none',
+                boxSizing: 'border-box'
+              }}
+              placeholder={mode === 'register' ? 'Min 8 characters' : 'Enter your password'}
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              width: '100%',
+              padding: '16px',
+              background: loading ? 'rgba(100, 100, 100, 0.5)' : 'linear-gradient(135deg, #00f5ff, #8b00ff)',
+              border: 'none',
+              borderRadius: '8px',
+              color: '#fff',
+              fontSize: '18px',
+              fontWeight: 'bold',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              boxShadow: loading ? 'none' : '0 4px 20px rgba(0, 245, 255, 0.4)',
+              transition: 'all 0.3s ease'
+            }}
+          >
+            {loading ? 'Please wait...' : (mode === 'login' ? 'Login' : 'Create Account')}
+          </button>
+        </form>
+
+        <div style={{
+          marginTop: '30px',
+          paddingTop: '20px',
+          borderTop: '1px solid rgba(0, 245, 255, 0.2)',
+          textAlign: 'center'
+        }}>
+          <button
+            onClick={handleDemoLogin}
+            disabled={loading}
+            style={{
+              width: '100%',
+              padding: '14px',
+              background: 'rgba(57, 255, 20, 0.1)',
+              border: '1px solid #39ff14',
+              borderRadius: '8px',
+              color: '#39ff14',
+              fontSize: '16px',
+              fontWeight: 'bold',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              marginBottom: '15px',
+              transition: 'all 0.3s ease'
+            }}
+          >
+            Try Demo Account
+          </button>
+          <button
+            onClick={onSkip}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#888',
+              fontSize: '14px',
+              cursor: 'pointer',
+              textDecoration: 'underline'
+            }}
+          >
+            Continue without account
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // Inline App Builder Component - Connected to real backend
 const InlineAppBuilder: React.FC<{ onBack: () => void }> = ({ onBack }) => {
@@ -628,6 +946,32 @@ const InlineAppBuilder: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
 export const FixedApp = forwardRef<FixedAppHandle>((props, ref) => {
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    const savedUser = apiService.getCurrentUser();
+    if (savedUser && apiService.isAuthenticated()) {
+      setUser(savedUser);
+      setIsAuthenticated(true);
+    }
+  }, []);
+
+  const handleAuthSuccess = (authenticatedUser: User) => {
+    setUser(authenticatedUser);
+    setIsAuthenticated(true);
+    setCurrentView('dashboard');
+  };
+
+  const handleLogout = async () => {
+    try {
+      await apiService.logout();
+    } catch {
+    }
+    setUser(null);
+    setIsAuthenticated(false);
+    setCurrentView('dashboard');
+  };
 
   useImperativeHandle(ref, () => ({
     setCurrentView
@@ -946,23 +1290,83 @@ export const FixedApp = forwardRef<FixedAppHandle>((props, ref) => {
   // Render based on current view
   const renderView = () => {
     switch (currentView) {
+      case 'auth':
+        return <AuthPage onAuthSuccess={handleAuthSuccess} onSkip={() => setCurrentView('dashboard')} />;
       case 'ide':
         return <FixedIDE onBackToDashboard={() => setCurrentView('dashboard')} />;
       case 'builder':
         return <InlineAppBuilder onBack={() => setCurrentView('dashboard')} />;
       case 'projects':
-        return <SteampunkDashboard onNavigate={(view) => setCurrentView(view)} />;
+        return <SteampunkDashboard onNavigate={(view: ViewType) => setCurrentView(view)} />;
       case 'settings':
-        return <SteampunkDashboard onNavigate={(view) => setCurrentView(view)} />;
+        return <SteampunkDashboard onNavigate={(view: ViewType) => setCurrentView(view)} />;
       default:
-        return <SteampunkDashboard onNavigate={(view) => setCurrentView(view)} />;
+        return <SteampunkDashboard onNavigate={(view: ViewType) => setCurrentView(view)} />;
     }
   };
 
   return (
-    <>
+    <div style={{ position: 'relative' }}>
+      {isAuthenticated && user && (
+        <div style={{
+          position: 'fixed',
+          top: '10px',
+          right: '20px',
+          zIndex: 1000,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '15px',
+          background: 'rgba(21, 21, 32, 0.95)',
+          padding: '8px 16px',
+          borderRadius: '8px',
+          border: '1px solid rgba(0, 245, 255, 0.3)'
+        }}>
+          <span style={{ color: '#00f5ff', fontSize: '14px' }}>
+            {user.username}
+          </span>
+          <button
+            onClick={handleLogout}
+            style={{
+              background: 'transparent',
+              border: '1px solid #ff0080',
+              color: '#ff0080',
+              padding: '6px 12px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            Logout
+          </button>
+        </div>
+      )}
+      {!isAuthenticated && currentView !== 'auth' && (
+        <div style={{
+          position: 'fixed',
+          top: '10px',
+          right: '20px',
+          zIndex: 1000
+        }}>
+          <button
+            onClick={() => setCurrentView('auth')}
+            style={{
+              background: 'linear-gradient(135deg, #00f5ff, #8b00ff)',
+              border: 'none',
+              color: '#fff',
+              padding: '10px 20px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              fontSize: '14px',
+              boxShadow: '0 4px 15px rgba(0, 245, 255, 0.3)'
+            }}
+          >
+            Login / Register
+          </button>
+        </div>
+      )}
       {renderView()}
-    </>
+    </div>
   );
 });
 

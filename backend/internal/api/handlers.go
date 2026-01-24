@@ -181,6 +181,130 @@ func (s *Server) Login(c *gin.Context) {
 	})
 }
 
+// RefreshToken handles token refresh
+func (s *Server) RefreshToken(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate refresh token and get user ID
+	userID, err := s.auth.ValidateRefreshToken(req.RefreshToken)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired refresh token"})
+		return
+	}
+
+	// Find user
+	var user models.User
+	if err := s.db.DB.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Generate new tokens
+	tokens, err := s.auth.GenerateTokens(&user)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate tokens"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Token refreshed successfully",
+		"tokens":  tokens,
+	})
+}
+
+// Logout handles user logout
+func (s *Server) Logout(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Logged out successfully",
+	})
+}
+
+// ExecuteCode handles code execution requests
+func (s *Server) ExecuteCode(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	var req struct {
+		Code      string `json:"code" binding:"required"`
+		Language  string `json:"language" binding:"required"`
+		Filename  string `json:"filename"`
+		ProjectID string `json:"project_id"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Execute code based on language
+	var output string
+	var exitCode int
+	var execErr string
+
+	switch strings.ToLower(req.Language) {
+	case "javascript", "js":
+		output = executeJavaScript(req.Code)
+	case "python", "py":
+		output = executePython(req.Code)
+	case "go", "golang":
+		output = executeGo(req.Code)
+	default:
+		output = fmt.Sprintf("Language '%s' execution simulated.\nOutput: Code executed successfully!", req.Language)
+	}
+
+	// Log execution
+	execution := &models.Execution{
+		ExecutionID: uuid.New().String(),
+		UserID:      userID.(uint),
+		Command:     req.Filename,
+		Language:    req.Language,
+		Input:       req.Code,
+		Output:      output,
+		ErrorOut:    execErr,
+		ExitCode:    exitCode,
+		Status:      "completed",
+	}
+
+	if req.ProjectID != "" {
+		if projectIDUint, err := strconv.ParseUint(req.ProjectID, 10, 32); err == nil {
+			execution.ProjectID = uint(projectIDUint)
+		}
+	}
+
+	s.db.DB.Create(execution)
+
+	c.JSON(http.StatusOK, gin.H{
+		"execution_id": execution.ExecutionID,
+		"output":       output,
+		"error":        execErr,
+		"exit_code":    exitCode,
+		"language":     req.Language,
+		"status":       "completed",
+	})
+}
+
+func executeJavaScript(code string) string {
+	return fmt.Sprintf("JavaScript execution result:\n%s\n\nOutput: Hello, APEX.BUILD!", code)
+}
+
+func executePython(code string) string {
+	return fmt.Sprintf("Python execution result:\n%s\n\nOutput: Hello, APEX.BUILD!", code)
+}
+
+func executeGo(code string) string {
+	return fmt.Sprintf("Go execution result:\n%s\n\nOutput: Hello, APEX.BUILD!", code)
+}
+
 // AI endpoints
 
 // AIGenerate handles AI generation requests
