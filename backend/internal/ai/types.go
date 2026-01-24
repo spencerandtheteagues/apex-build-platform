@@ -18,42 +18,62 @@ const (
 type AICapability string
 
 const (
-	CapabilityCodeGeneration   AICapability = "code_generation"
-	CapabilityCodeReview      AICapability = "code_review"
-	CapabilityCodeCompletion  AICapability = "code_completion"
-	CapabilityDebugging       AICapability = "debugging"
-	CapabilityExplanation     AICapability = "explanation"
-	CapabilityRefactoring     AICapability = "refactoring"
-	CapabilityTesting         AICapability = "testing"
-	CapabilityDocumentation   AICapability = "documentation"
+	CapabilityCodeGeneration       AICapability = "code_generation"
+	CapabilityNaturalLanguageToCode AICapability = "natural_language_to_code"
+	CapabilityCodeReview          AICapability = "code_review"
+	CapabilityCodeCompletion      AICapability = "code_completion"
+	CapabilityDebugging           AICapability = "debugging"
+	CapabilityExplanation         AICapability = "explanation"
+	CapabilityRefactoring         AICapability = "refactoring"
+	CapabilityTesting             AICapability = "testing"
+	CapabilityDocumentation       AICapability = "documentation"
+	CapabilityArchitecture        AICapability = "architecture"
 )
 
 // AIRequest represents a request to an AI provider
 type AIRequest struct {
-	ID          string            `json:"id"`
-	Provider    AIProvider        `json:"provider"`
-	Capability  AICapability      `json:"capability"`
-	Prompt      string            `json:"prompt"`
-	Code        string            `json:"code,omitempty"`
-	Language    string            `json:"language,omitempty"`
-	Context     map[string]interface{} `json:"context,omitempty"`
-	MaxTokens   int               `json:"max_tokens,omitempty"`
-	Temperature float32           `json:"temperature,omitempty"`
-	UserID      string            `json:"user_id"`
-	ProjectID   string            `json:"project_id,omitempty"`
-	CreatedAt   time.Time         `json:"created_at"`
+	ID                 string                 `json:"id"`
+	Provider           AIProvider             `json:"provider"`
+	Capability         AICapability           `json:"capability"`
+	Prompt             string                 `json:"prompt"`
+	Code               string                 `json:"code,omitempty"`
+	Language           string                 `json:"language,omitempty"`
+	Context            map[string]interface{} `json:"context,omitempty"`
+	MaxTokens          int                    `json:"max_tokens,omitempty"`
+	Temperature        float32                `json:"temperature,omitempty"`
+	UserID             string                 `json:"user_id"`
+	ProjectID          string                 `json:"project_id,omitempty"`
+	CreatedAt          time.Time              `json:"created_at"`
+	MaxResponseTime    time.Duration          `json:"max_response_time,omitempty"`
+	QualityRequirement float64                `json:"quality_requirement,omitempty"`
+	MaxCost            float64                `json:"max_cost,omitempty"`
+}
+
+// GetCacheKey generates a cache key for the request
+func (r *AIRequest) GetCacheKey() string {
+	return r.ID + "_" + string(r.Provider) + "_" + string(r.Capability)
 }
 
 // AIResponse represents a response from an AI provider
 type AIResponse struct {
-	ID          string            `json:"id"`
-	Provider    AIProvider        `json:"provider"`
-	Content     string            `json:"content"`
-	Usage       *Usage            `json:"usage,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	Error       string            `json:"error,omitempty"`
-	Duration    time.Duration     `json:"duration"`
-	CreatedAt   time.Time         `json:"created_at"`
+	ID             string                 `json:"id"`
+	Provider       AIProvider             `json:"provider"`
+	Content        string                 `json:"content"`
+	Usage          *Usage                 `json:"usage,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	Error          string                 `json:"error,omitempty"`
+	Duration       time.Duration          `json:"duration"`
+	CreatedAt      time.Time              `json:"created_at"`
+	Quality        float64                `json:"quality,omitempty"`
+	GenerationTime time.Duration          `json:"generation_time,omitempty"`
+}
+
+// Cost returns the cost of the response based on usage
+func (r *AIResponse) Cost() float64 {
+	if r.Usage != nil {
+		return r.Usage.Cost
+	}
+	return 0.0
 }
 
 // Usage represents token/cost usage for an AI request
@@ -115,14 +135,16 @@ type RouterConfig struct {
 func DefaultRouterConfig() *RouterConfig {
 	return &RouterConfig{
 		DefaultProviders: map[AICapability]AIProvider{
-			CapabilityCodeGeneration:  ProviderGPT4,    // GPT-4 excels at code generation
-			CapabilityCodeReview:      ProviderClaude,  // Claude excellent at analysis
-			CapabilityCodeCompletion:  ProviderGemini,  // Gemini fast for completions
-			CapabilityDebugging:       ProviderClaude,  // Claude great at debugging
-			CapabilityExplanation:     ProviderGemini,  // Gemini good at explanations
-			CapabilityRefactoring:     ProviderGPT4,    // GPT-4 handles complex refactoring
-			CapabilityTesting:         ProviderGPT4,    // GPT-4 writes comprehensive tests
-			CapabilityDocumentation:   ProviderClaude,  // Claude excels at documentation
+			CapabilityCodeGeneration:       ProviderGPT4,    // GPT-4 excels at code generation
+			CapabilityNaturalLanguageToCode: ProviderClaude,  // Claude Opus 4.5 best for natural language to code
+			CapabilityCodeReview:           ProviderClaude,  // Claude excellent at analysis
+			CapabilityCodeCompletion:       ProviderGemini,  // Gemini fast for completions
+			CapabilityDebugging:            ProviderClaude,  // Claude great at debugging
+			CapabilityExplanation:          ProviderGemini,  // Gemini good at explanations
+			CapabilityRefactoring:          ProviderGPT4,    // GPT-4 handles complex refactoring
+			CapabilityTesting:              ProviderGPT4,    // GPT-4 writes comprehensive tests
+			CapabilityDocumentation:        ProviderClaude,  // Claude excels at documentation
+			CapabilityArchitecture:         ProviderClaude,  // Claude best for architecture design
 		},
 		FallbackOrder: map[AIProvider][]AIProvider{
 			ProviderClaude: {ProviderGPT4, ProviderGemini},

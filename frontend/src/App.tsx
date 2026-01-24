@@ -1,14 +1,19 @@
 // APEX.BUILD Main Application
-// Cyberpunk cloud development platform
+// 22nd Century Steampunk Cloud Development Platform
+// Designed to EXCEED Replit in every way
 
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import { useStore } from './hooks/useStore'
 import { IDELayout } from './components/ide/IDELayout'
+import { AppBuilder } from './components/builder/AppBuilder'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input } from './components/ui'
-import { User, Mail, Lock, Eye, EyeOff, Zap } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2 } from 'lucide-react'
 import './styles/globals.css'
 
+type AppView = 'builder' | 'ide'
+
 function App() {
+  const [currentView, setCurrentView] = useState<AppView>('builder')
   const [isAuthMode, setIsAuthMode] = useState<'login' | 'register'>('login')
   const [authData, setAuthData] = useState({
     username: '',
@@ -24,18 +29,9 @@ function App() {
     user,
     isAuthenticated,
     isLoading,
-    apiService,
-    theme,
     login,
     register,
-    checkAuth,
-    setTheme
   } = useStore()
-
-  // Check authentication status on app load
-  useEffect(() => {
-    checkAuth()
-  }, [checkAuth])
 
   // Handle authentication
   const handleAuth = async (e: React.FormEvent) => {
@@ -45,10 +41,7 @@ function App() {
 
     try {
       if (isAuthMode === 'login') {
-        await login({
-          username: authData.username,
-          password: authData.password,
-        })
+        await login(authData.username, authData.password)
       } else {
         // Validate registration data
         const errors: Record<string, string> = {}
@@ -119,7 +112,7 @@ function App() {
   // Loading screen
   if (isLoading) {
     return (
-      <div className={`min-h-screen bg-gradient-to-br ${theme.colors.background} flex items-center justify-center`}>
+      <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-cyan-950 flex items-center justify-center">
         <LoadingOverlay
           isVisible={true}
           text="Initializing APEX.BUILD..."
@@ -278,10 +271,69 @@ function App() {
     )
   }
 
-  // Main application
+  // Main application with view switching
   return (
-    <div className="h-screen overflow-hidden bg-gray-950">
-      <IDELayout />
+    <div className="h-screen overflow-hidden bg-black">
+      {/* Top Navigation */}
+      <div className="h-12 bg-black/90 border-b border-cyan-500/20 flex items-center justify-between px-4 z-50 relative">
+        {/* Logo */}
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <div className="w-8 h-8 bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+              <Zap className="w-5 h-5 text-white" />
+            </div>
+            <div className="absolute -inset-0.5 bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-600 rounded-lg blur opacity-50 animate-pulse" />
+          </div>
+          <span className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
+            APEX.BUILD
+          </span>
+        </div>
+
+        {/* View Toggle */}
+        <div className="flex items-center gap-2 bg-gray-900/50 rounded-lg p-1 border border-gray-800">
+          <button
+            onClick={() => setCurrentView('builder')}
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
+              currentView === 'builder'
+                ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-cyan-400 border border-cyan-500/30'
+                : 'text-gray-400 hover:text-white hover:bg-gray-800'
+            }`}
+          >
+            <Rocket className="w-4 h-4" />
+            <span className="text-sm font-medium">Build App</span>
+          </button>
+          <button
+            onClick={() => setCurrentView('ide')}
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
+              currentView === 'ide'
+                ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-cyan-400 border border-cyan-500/30'
+                : 'text-gray-400 hover:text-white hover:bg-gray-800'
+            }`}
+          >
+            <Code2 className="w-4 h-4" />
+            <span className="text-sm font-medium">IDE</span>
+          </button>
+        </div>
+
+        {/* User Info */}
+        {user && (
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-400">{user.username}</span>
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400 to-purple-600 flex items-center justify-center text-white text-sm font-bold">
+              {user.username?.charAt(0).toUpperCase()}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Main Content */}
+      <div className="h-[calc(100vh-48px)]">
+        {currentView === 'builder' ? (
+          <AppBuilder />
+        ) : (
+          <IDELayout />
+        )}
+      </div>
     </div>
   )
 }

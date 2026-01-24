@@ -1,0 +1,68 @@
+# APEX.BUILD Production Dockerfile
+# Multi-stage build for optimized production image
+
+# Build stage
+FROM golang:1.25-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata gcc musl-dev
+
+# Set working directory
+WORKDIR /build
+
+# Copy go mod and sum files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build arguments
+ARG GO_VERSION=1.25
+ARG BUILD_DATE
+ARG VERSION=2.0.0
+ARG COMMIT_HASH=production
+
+# Build the application
+RUN CGO_ENABLED=1 GOOS=linux go build \
+    -ldflags="-s -w -X main.BuildDate=${BUILD_DATE} -X main.Version=${VERSION} -X main.CommitHash=${COMMIT_HASH}" \
+    -a -installsuffix cgo \
+    -o apex-build-server \
+    main.go
+
+# Production stage
+FROM alpine:latest
+
+# Install runtime dependencies
+RUN apk --no-cache add ca-certificates curl tzdata
+
+# Create app user
+RUN adduser -D -s /bin/sh appuser
+
+# Set working directory
+WORKDIR /app
+
+# Copy binary from builder stage
+COPY --from=builder /build/apex-build-server /app/
+
+# Copy any necessary config files
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Create necessary directories
+RUN mkdir -p /app/uploads /app/logs && \
+    chown -R appuser:appuser /app
+
+# Switch to app user
+USER appuser
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Run the application
+CMD ["./apex-build-server"]

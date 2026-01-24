@@ -1,0 +1,51 @@
+# Production Dockerfile for APEX.BUILD Backend
+# Multi-stage build for optimized Go binary
+
+# Stage 1: Build
+FROM golang:1.21-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Set working directory
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the binary with optimizations
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags='-w -s -extldflags "-static"' \
+    -a -installsuffix cgo \
+    -o apex-build \
+    ./main.go
+
+# Stage 2: Production
+FROM scratch AS production
+
+# Copy CA certificates for HTTPS requests
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Copy timezone data
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+# Copy the binary
+COPY --from=builder /app/apex-build /apex-build
+
+# Create directories for uploads and logs
+# Note: In scratch image, we need to create these at runtime or mount them
+
+# Expose port
+EXPOSE 8080
+
+# Health check (will be handled by Docker Compose)
+# HEALTHCHECK is not available in scratch images
+
+# Run the binary
+ENTRYPOINT ["/apex-build"]

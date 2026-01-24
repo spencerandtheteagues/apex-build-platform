@@ -21,6 +21,9 @@ var (
 
 // AuthService handles authentication and authorization
 type AuthService struct {
+	jwtService      *JWTService
+	passwordService *PasswordService
+	oauthService    *OAuthService
 	jwtSecret       []byte
 	tokenExpiry     time.Duration
 	refreshExpiry   time.Duration
@@ -58,13 +61,18 @@ type RegisterRequest struct {
 	FullName string `json:"full_name" binding:"max=100"`
 }
 
-// NewAuthService creates a new authentication service
+// NewAuthService creates a new authentication service with enhanced security
 func NewAuthService(jwtSecret string) *AuthService {
+	refreshSecret := jwtSecret + "_refresh" // Separate secret for refresh tokens
+
 	return &AuthService{
-		jwtSecret:     []byte(jwtSecret),
-		tokenExpiry:   24 * time.Hour,    // Access token expires in 24 hours
-		refreshExpiry: 30 * 24 * time.Hour, // Refresh token expires in 30 days
-		bcryptCost:    12,               // Strong bcrypt cost
+		jwtService:      NewJWTService(jwtSecret, refreshSecret, "apex-build"),
+		passwordService: NewPasswordService(),
+		oauthService:    NewOAuthService(),
+		jwtSecret:       []byte(jwtSecret),
+		tokenExpiry:     15 * time.Minute,   // Short-lived access tokens
+		refreshExpiry:   7 * 24 * time.Hour, // 7 day refresh tokens
+		bcryptCost:      12,                 // Strong bcrypt cost (legacy fallback)
 	}
 }
 

@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "eldercare-app-17d19"
+  },
+  "targets": {
+    "eldercare-app-17d19": {
+      "hosting": {
+        "apex-build": [
+          "apex-build"
+        ]
+      }
+    }
+  }
+}

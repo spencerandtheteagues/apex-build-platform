@@ -223,7 +223,6 @@ export const useStore = create<StoreState & StoreActions>()(
         selection: undefined,
         isAIAssistantOpen: false,
         aiProvider: 'auto' as const,
-        theme: 'cyberpunk',
         isAIGenerating: false,
         aiConversations: [],
 

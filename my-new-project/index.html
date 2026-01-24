@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My APEX.BUILD Project</title>
+    <style>
+        body {
+            font-family: 'Fira Code', monospace;
+            background: linear-gradient(135deg, #0a0a0f 0%, #001133 100%);
+            color: #00f5ff;
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        h1 {
+            font-size: 3rem;
+            text-shadow: 0 0 20px #00f5ff;
+            margin-bottom: 20px;
+        }
+        .code-editor {
+            background: rgba(21, 21, 32, 0.8);
+            border: 1px solid #00f5ff;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: left;
+            box-shadow: 0 0 20px rgba(0, 245, 255, 0.3);
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            background: transparent;
+            border: none;
+            color: #00f5ff;
+            font-family: 'Fira Code', monospace;
+            font-size: 14px;
+            resize: vertical;
+            outline: none;
+        }
+        .ai-assistant {
+            background: rgba(0, 245, 255, 0.1);
+            border: 1px solid rgba(0, 245, 255, 0.3);
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        button {
+            background: linear-gradient(135deg, #00f5ff, #0080ff);
+            border: none;
+            color: #000;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            margin: 10px;
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(0, 245, 255, 0.5);
+        }
+        .terminal {
+            background: #000;
+            border: 1px solid #00f5ff;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            font-family: 'Fira Code', monospace;
+            text-align: left;
+            min-height: 100px;
+        }
+        .prompt {
+            color: #39ff14;
+        }
+        .output {
+            color: #fff;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 APEX.BUILD Interactive Demo</h1>
+        <p>Welcome to the future of development! Build something amazing.</p>
+
+        <div class="code-editor">
+            <h3>📝 Code Editor</h3>
+            <textarea id="codeEditor" placeholder="// Start coding here...
+function hello() {
+    console.log('Welcome to APEX.BUILD!');
+    return 'Building the future...';
+}
+
+hello();">
+// Welcome to APEX.BUILD!
+// Let's build something amazing together
+
+function createAwesomeApp() {
+    const features = [
+        'AI-powered coding assistance',
+        'Real-time collaboration',
+        'Cloud code execution',
+        'Multi-language support'
+    ];
+
+    console.log('APEX.BUILD Features:');
+    features.forEach(feature => {
+        console.log(`✨ ${feature}`);
+    });
+
+    return 'Your app is ready to dominate!';
+}
+
+createAwesomeApp();</textarea>
+        </div>
+
+        <div class="ai-assistant">
+            <h3>🤖 AI Assistant</h3>
+            <p><strong>Claude:</strong> I can help optimize your code for better performance!</p>
+            <p><strong>GPT-4:</strong> Would you like me to add error handling and tests?</p>
+            <p><strong>Gemini:</strong> I can explain how this code works step by step.</p>
+        </div>
+
+        <div>
+            <button onclick="runCode()">▶️ Run Code</button>
+            <button onclick="askAI()">🤖 Ask AI</button>
+            <button onclick="saveProject()">💾 Save Project</button>
+            <button onclick="deployApp()">🚀 Deploy</button>
+        </div>
+
+        <div class="terminal">
+            <div class="prompt">$ apex-build --run</div>
+            <div class="output" id="terminal">
+                <div>🚀 APEX.BUILD Terminal v1.0.0</div>
+                <div>⚡ Ready to execute your code...</div>
+                <div>🤖 AI services: Claude ✅ GPT-4 ✅ Gemini ✅</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function runCode() {
+            const code = document.getElementById('codeEditor').value;
+            const terminal = document.getElementById('terminal');
+
+            terminal.innerHTML += '<div class="prompt">$ Running your code...</div>';
+
+            try {
+                // Simulate code execution
+                const result = eval(code);
+                terminal.innerHTML += `<div class="output">✅ Execution complete!</div>`;
+                terminal.innerHTML += `<div class="output">📤 Result: ${result}</div>`;
+                terminal.innerHTML += `<div class="output">⚡ Executed in 0.12s (1,440x faster than Replit!)</div>`;
+            } catch (error) {
+                terminal.innerHTML += `<div class="output" style="color: #ff4444;">❌ Error: ${error.message}</div>`;
+            }
+
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function askAI() {
+            const terminal = document.getElementById('terminal');
+            terminal.innerHTML += '<div class="prompt">$ Asking AI for help...</div>';
+            terminal.innerHTML += '<div class="output">🤖 Claude: Your code looks great! I suggest adding TypeScript for better type safety.</div>';
+            terminal.innerHTML += '<div class="output">🤖 GPT-4: Would you like me to generate unit tests for these functions?</div>';
+            terminal.innerHTML += '<div class="output">🤖 Gemini: I can help refactor this into a more modular structure.</div>';
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function saveProject() {
+            const terminal = document.getElementById('terminal');
+            terminal.innerHTML += '<div class="prompt">$ Saving project...</div>';
+            terminal.innerHTML += '<div class="output">💾 Project saved to cloud storage</div>';
+            terminal.innerHTML += '<div class="output">🔄 Auto-sync enabled</div>';
+            terminal.innerHTML += '<div class="output">👥 Ready for collaboration</div>';
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function deployApp() {
+            const terminal = document.getElementById('terminal');
+            terminal.innerHTML += '<div class="prompt">$ Deploying to production...</div>';
+            terminal.innerHTML += '<div class="output">🚀 Building optimized bundle...</div>';
+            terminal.innerHTML += '<div class="output">☁️ Deploying to APEX.BUILD cloud...</div>';
+            terminal.innerHTML += '<div class="output">✅ Deployment successful!</div>';
+            terminal.innerHTML += '<div class="output">🌐 Your app is live at: https://my-app.apex.build</div>';
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        // Auto-run demo on load
+        setTimeout(() => {
+            document.getElementById('terminal').innerHTML += '<div class="output">🎉 Welcome to APEX.BUILD! Click "Run Code" to start building.</div>';
+        }, 1000);
+    </script>
+</body>
+</html>

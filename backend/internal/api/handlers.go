@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -194,7 +195,7 @@ func (s *Server) AIGenerate(c *gin.Context) {
 		Context:     request.Context,
 		MaxTokens:   request.MaxTokens,
 		Temperature: request.Temperature,
-		UserID:      userID.(uint),
+		UserID:      fmt.Sprintf("%v", userID),
 		ProjectID:   request.ProjectID,
 	}
 
@@ -394,7 +395,7 @@ func (s *Server) GetProject(c *gin.Context) {
 
 // CreateFile creates a new file in a project
 func (s *Server) CreateFile(c *gin.Context) {
-	projectID := c.Param("projectId")
+	projectID := c.Param("id")
 	userID, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
@@ -446,7 +447,7 @@ func (s *Server) CreateFile(c *gin.Context) {
 
 // GetFiles returns files for a project
 func (s *Server) GetFiles(c *gin.Context) {
-	projectID := c.Param("projectId")
+	projectID := c.Param("id")
 	userID, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})

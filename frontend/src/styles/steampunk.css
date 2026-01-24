@@ -1,0 +1,496 @@
+/* APEX.BUILD 22nd Century Steampunk Theme
+ * Black backgrounds, neon glows, brass accents
+ * Every effect designed to exceed expectations
+ */
+
+/* ===== CSS Custom Properties ===== */
+:root {
+  /* Primary Colors */
+  --color-black: #000000;
+  --color-black-soft: #0a0a0a;
+  --color-black-muted: #121212;
+
+  /* Neon Colors */
+  --color-neon-cyan: #00FFFF;
+  --color-neon-cyan-dark: #00CED1;
+  --color-neon-pink: #FF00FF;
+  --color-neon-pink-dark: #C71585;
+  --color-neon-green: #00FF00;
+  --color-neon-green-dark: #32CD32;
+  --color-neon-purple: #9D00FF;
+  --color-neon-purple-dark: #7B00B8;
+
+  /* Brass/Copper Accents */
+  --color-brass: #CD7F32;
+  --color-brass-light: #D4A574;
+  --color-copper: #B87333;
+  --color-bronze: #8B4513;
+
+  /* Glow Colors */
+  --glow-cyan: 0 0 10px var(--color-neon-cyan), 0 0 20px var(--color-neon-cyan), 0 0 30px var(--color-neon-cyan-dark);
+  --glow-pink: 0 0 10px var(--color-neon-pink), 0 0 20px var(--color-neon-pink), 0 0 30px var(--color-neon-pink-dark);
+  --glow-green: 0 0 10px var(--color-neon-green), 0 0 20px var(--color-neon-green), 0 0 30px var(--color-neon-green-dark);
+  --glow-purple: 0 0 10px var(--color-neon-purple), 0 0 20px var(--color-neon-purple), 0 0 30px var(--color-neon-purple-dark);
+
+  /* Timing */
+  --transition-fast: 150ms;
+  --transition-normal: 300ms;
+  --transition-slow: 500ms;
+}
+
+/* ===== Global Styles ===== */
+body {
+  background-color: var(--color-black);
+  color: #ffffff;
+  font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ===== Scrollbar Styling ===== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-black-soft);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--color-neon-cyan-dark), var(--color-neon-purple-dark));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--color-neon-cyan), var(--color-neon-purple));
+}
+
+/* ===== Keyframe Animations ===== */
+
+/* Neon pulse glow */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px currentColor, 0 0 10px currentColor, 0 0 15px currentColor;
+    filter: brightness(1);
+  }
+  50% {
+    box-shadow: 0 0 10px currentColor, 0 0 20px currentColor, 0 0 30px currentColor;
+    filter: brightness(1.2);
+  }
+}
+
+/* Text glow pulse */
+@keyframes text-glow-pulse {
+  0%, 100% {
+    text-shadow: 0 0 5px currentColor, 0 0 10px currentColor;
+  }
+  50% {
+    text-shadow: 0 0 10px currentColor, 0 0 20px currentColor, 0 0 30px currentColor;
+  }
+}
+
+/* Electric spark */
+@keyframes spark {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+/* Scanline effect */
+@keyframes scanline {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+/* Glitch effect */
+@keyframes glitch {
+  0%, 100% {
+    transform: translate(0);
+  }
+  20% {
+    transform: translate(-2px, 2px);
+  }
+  40% {
+    transform: translate(-2px, -2px);
+  }
+  60% {
+    transform: translate(2px, 2px);
+  }
+  80% {
+    transform: translate(2px, -2px);
+  }
+}
+
+/* Color glitch */
+@keyframes color-glitch {
+  0%, 100% {
+    filter: hue-rotate(0deg);
+  }
+  50% {
+    filter: hue-rotate(10deg);
+  }
+}
+
+/* Gear rotation */
+@keyframes gear-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Reverse gear rotation */
+@keyframes gear-spin-reverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+/* Steam/smoke rise */
+@keyframes steam-rise {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.3;
+  }
+  100% {
+    transform: translateY(-50px) scale(1.5);
+    opacity: 0;
+  }
+}
+
+/* Energy pulse */
+@keyframes energy-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+/* Shimmer effect */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Float animation */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* Circuit pattern flow */
+@keyframes circuit-flow {
+  0% {
+    stroke-dashoffset: 1000;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* ===== Animation Classes ===== */
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-text-glow {
+  animation: text-glow-pulse 2s ease-in-out infinite;
+}
+
+.animate-spark {
+  animation: spark 0.6s ease-out forwards;
+}
+
+.animate-scanline {
+  animation: scanline 8s linear infinite;
+}
+
+.animate-glitch {
+  animation: glitch 0.3s ease-in-out;
+}
+
+.animate-color-glitch {
+  animation: color-glitch 0.5s ease-in-out;
+}
+
+.animate-gear {
+  animation: gear-spin 10s linear infinite;
+}
+
+.animate-gear-reverse {
+  animation: gear-spin-reverse 8s linear infinite;
+}
+
+.animate-steam {
+  animation: steam-rise 3s ease-out infinite;
+}
+
+.animate-energy-pulse {
+  animation: energy-pulse 1.5s ease-out infinite;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.1),
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* ===== Effect Classes ===== */
+
+/* Neon text */
+.text-neon-cyan {
+  color: var(--color-neon-cyan);
+  text-shadow: 0 0 5px var(--color-neon-cyan), 0 0 10px var(--color-neon-cyan-dark);
+}
+
+.text-neon-pink {
+  color: var(--color-neon-pink);
+  text-shadow: 0 0 5px var(--color-neon-pink), 0 0 10px var(--color-neon-pink-dark);
+}
+
+.text-neon-green {
+  color: var(--color-neon-green);
+  text-shadow: 0 0 5px var(--color-neon-green), 0 0 10px var(--color-neon-green-dark);
+}
+
+.text-neon-purple {
+  color: var(--color-neon-purple);
+  text-shadow: 0 0 5px var(--color-neon-purple), 0 0 10px var(--color-neon-purple-dark);
+}
+
+/* Glowing borders */
+.border-glow-cyan {
+  border-color: var(--color-neon-cyan);
+  box-shadow: 0 0 5px var(--color-neon-cyan), inset 0 0 5px var(--color-neon-cyan);
+}
+
+.border-glow-pink {
+  border-color: var(--color-neon-pink);
+  box-shadow: 0 0 5px var(--color-neon-pink), inset 0 0 5px var(--color-neon-pink);
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-dark {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(15px);
+  -webkit-backdrop-filter: blur(15px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Brass accent borders */
+.border-brass {
+  border: 2px solid var(--color-brass);
+  box-shadow: 0 0 10px rgba(205, 127, 50, 0.3);
+}
+
+/* Scanline overlay */
+.scanline-overlay {
+  position: relative;
+  overflow: hidden;
+}
+
+.scanline-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.1) 0px,
+    rgba(0, 0, 0, 0.1) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  pointer-events: none;
+}
+
+/* Circuit pattern background */
+.bg-circuit {
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%2300FFFF' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* Holographic gradient */
+.bg-holographic {
+  background: linear-gradient(
+    45deg,
+    rgba(0, 255, 255, 0.1) 0%,
+    rgba(255, 0, 255, 0.1) 25%,
+    rgba(0, 255, 0, 0.1) 50%,
+    rgba(157, 0, 255, 0.1) 75%,
+    rgba(0, 255, 255, 0.1) 100%
+  );
+  background-size: 400% 400%;
+  animation: holographic 15s ease infinite;
+}
+
+@keyframes holographic {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+/* ===== Interactive Effects ===== */
+
+/* Hover lift */
+.hover-lift {
+  transition: transform var(--transition-normal) ease, box-shadow var(--transition-normal) ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+/* Hover glow */
+.hover-glow-cyan:hover {
+  box-shadow: var(--glow-cyan);
+}
+
+.hover-glow-pink:hover {
+  box-shadow: var(--glow-pink);
+}
+
+/* Click ripple effect */
+.ripple {
+  position: relative;
+  overflow: hidden;
+}
+
+.ripple::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.5);
+  opacity: 0;
+  border-radius: 100%;
+  transform: scale(1) translate(-50%, -50%);
+  transform-origin: 50% 50%;
+}
+
+.ripple:active::after {
+  opacity: 1;
+  transform: scale(50) translate(-50%, -50%);
+  transition: transform 0.5s, opacity 0.5s;
+}
+
+/* ===== Special Components ===== */
+
+/* Energy indicator */
+.energy-indicator {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-neon-cyan);
+  box-shadow: 0 0 10px var(--color-neon-cyan);
+}
+
+.energy-indicator::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: inherit;
+  animation: energy-pulse 1.5s ease-out infinite;
+}
+
+/* Pressure gauge */
+.pressure-gauge {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  border: 3px solid var(--color-brass);
+  border-radius: 50%;
+  background: radial-gradient(circle, #1a1a1a, #0a0a0a);
+}
+
+.pressure-gauge::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 40%;
+  background: var(--color-neon-green);
+  transform-origin: bottom center;
+  animation: gauge-needle 3s ease-in-out infinite;
+}
+
+@keyframes gauge-needle {
+  0%, 100% {
+    transform: translate(-50%, -100%) rotate(-45deg);
+  }
+  50% {
+    transform: translate(-50%, -100%) rotate(45deg);
+  }
+}
+
+/* ===== Selection Styles ===== */
+::selection {
+  background: var(--color-neon-cyan);
+  color: var(--color-black);
+}
+
+::-moz-selection {
+  background: var(--color-neon-cyan);
+  color: var(--color-black);
+}

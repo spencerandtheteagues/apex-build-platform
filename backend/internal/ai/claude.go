@@ -8,8 +8,6 @@ import (
 	"io"
 	"net/http"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // ClaudeClient implements the Claude/Anthropic API client

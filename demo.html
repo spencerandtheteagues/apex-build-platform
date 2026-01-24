@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>APEX.BUILD - Cyberpunk Cloud Development Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --color-primary: #00f5ff;
+            --color-secondary: #ff0080;
+            --color-accent: #39ff14;
+            --color-background: #0a0a0f;
+            --color-surface: #1a1a2e;
+            --font-mono: 'Fira Code', 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: linear-gradient(135deg, #0a0a0f 0%, #001133 100%);
+            color: white;
+            overflow-x: hidden;
+        }
+
+        .cyberpunk-glow {
+            box-shadow: 0 0 20px currentColor;
+        }
+
+        .neon-text {
+            text-shadow: 0 0 5px currentColor, 0 0 10px currentColor, 0 0 20px currentColor;
+        }
+
+        .glass-morphism {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 5px var(--color-primary); }
+            50% { box-shadow: 0 0 20px var(--color-primary); }
+        }
+
+        @keyframes matrix-scan {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        .animate-pulse-glow {
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+
+        .animate-matrix-scan {
+            animation: matrix-scan 3s linear infinite;
+        }
+
+        .holographic {
+            background: linear-gradient(45deg, transparent 30%, rgba(255, 255, 255, 0.1) 50%, transparent 70%);
+        }
+
+        .corner-accent::before,
+        .corner-accent::after {
+            content: '';
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border: 2px solid;
+            border-color: var(--color-primary);
+            opacity: 0.3;
+        }
+
+        .corner-accent::before {
+            top: 0;
+            left: 0;
+            border-right: none;
+            border-bottom: none;
+        }
+
+        .corner-accent::after {
+            bottom: 0;
+            right: 0;
+            border-left: none;
+            border-top: none;
+        }
+
+        .monaco-editor {
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid rgba(0, 245, 255, 0.3);
+            border-radius: 8px;
+            font-family: var(--font-mono);
+            padding: 16px;
+            min-height: 300px;
+            overflow: auto;
+        }
+
+        .file-tree {
+            font-family: var(--font-mono);
+        }
+
+        .terminal {
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid rgba(57, 255, 20, 0.3);
+            border-radius: 8px;
+            font-family: var(--font-mono);
+            padding: 16px;
+            color: #39ff14;
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+    <!-- Background Effects -->
+    <div class="absolute inset-0 overflow-hidden pointer-events-none">
+        <div class="absolute top-1/4 left-1/4 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl"></div>
+        <div class="absolute bottom-1/4 right-1/4 w-64 h-64 bg-pink-500/10 rounded-full blur-3xl"></div>
+        <div class="absolute top-1/2 left-1/2 w-32 h-32 bg-green-400/10 rounded-full blur-2xl transform -translate-x-1/2 -translate-y-1/2"></div>
+    </div>
+
+    <!-- Top Bar -->
+    <div class="h-12 bg-gray-900/95 backdrop-blur-md border-b border-gray-800 flex items-center justify-between px-4 relative z-10">
+        <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2">
+                <div class="w-6 h-6 bg-gradient-to-br from-cyan-400 to-blue-600 rounded animate-pulse-glow"></div>
+                <span class="text-lg font-bold text-white neon-text" style="color: var(--color-primary);">APEX.BUILD</span>
+            </div>
+            <div class="flex items-center gap-1">
+                <button class="px-3 py-1 bg-cyan-900/30 border border-cyan-400/50 rounded text-cyan-300 hover:bg-cyan-800/50 transition-all">
+                    📁 Projects
+                </button>
+                <button class="px-3 py-1 hover:bg-gray-800/50 rounded text-gray-400 hover:text-white transition-all">
+                    📊 Dashboard
+                </button>
+                <button class="px-3 py-1 hover:bg-gray-800/50 rounded text-gray-400 hover:text-white transition-all">
+                    💻 Editor
+                </button>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <div class="px-3 py-1 bg-gray-800 rounded flex items-center gap-2">
+                <span class="text-sm text-gray-300">MyProject</span>
+                <span class="px-1.5 py-0.5 bg-cyan-500/20 text-cyan-300 text-xs rounded">JS</span>
+            </div>
+            <div class="w-8 h-8 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-full animate-pulse-glow"></div>
+        </div>
+    </div>
+
+    <!-- Main IDE Layout -->
+    <div class="flex h-screen pt-12">
+        <!-- Left Sidebar -->
+        <div class="w-80 bg-gray-900/80 border-r border-gray-800 flex flex-col">
+            <!-- Sidebar Tabs -->
+            <div class="h-10 bg-gray-800/50 border-b border-gray-700/50 flex items-center">
+                <button class="px-3 py-2 bg-cyan-900/30 border-b-2 border-cyan-400 text-cyan-300 text-sm">
+                    📁 Explorer
+                </button>
+                <button class="px-3 py-2 text-gray-400 hover:text-white text-sm">
+                    🔍 Search
+                </button>
+                <button class="px-3 py-2 text-gray-400 hover:text-white text-sm">
+                    🌿 Git
+                </button>
+            </div>
+
+            <!-- File Tree -->
+            <div class="flex-1 p-4 file-tree">
+                <div class="space-y-1 text-sm">
+                    <div class="flex items-center gap-2 text-gray-300 hover:bg-gray-800/50 p-1 rounded cursor-pointer">
+                        <span class="text-cyan-400">📁</span>
+                        <span>src/</span>
+                    </div>
+                    <div class="ml-4 space-y-1">
+                        <div class="flex items-center gap-2 text-gray-300 hover:bg-gray-800/50 p-1 rounded cursor-pointer">
+                            <span>📜</span>
+                            <span>App.tsx</span>
+                        </div>
+                        <div class="flex items-center gap-2 text-gray-300 hover:bg-gray-800/50 p-1 rounded cursor-pointer bg-cyan-900/30 border-l-2 border-cyan-400">
+                            <span>🔷</span>
+                            <span>main.ts</span>
+                        </div>
+                        <div class="flex items-center gap-2 text-gray-300 hover:bg-gray-800/50 p-1 rounded cursor-pointer">
+                            <span>🎨</span>
+                            <span>styles.css</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 text-gray-300 hover:bg-gray-800/50 p-1 rounded cursor-pointer">
+                        <span class="text-cyan-400">📁</span>
+                        <span>components/</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-gray-300 hover:bg-gray-800/50 p-1 rounded cursor-pointer">
+                        <span>📋</span>
+                        <span>package.json</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Editor Area -->
+        <div class="flex-1 flex flex-col">
+            <!-- File Tabs -->
+            <div class="flex items-center bg-gray-900/80 border-b border-gray-700/50 px-1 py-1">
+                <div class="flex items-center gap-2 px-3 py-2 bg-gray-800 border-b-2 border-cyan-400 cursor-pointer group">
+                    <span class="text-xs">TS</span>
+                    <span class="text-sm text-white">main.ts</span>
+                    <div class="w-1.5 h-1.5 bg-cyan-400 rounded-full"></div>
+                    <button class="ml-1 opacity-0 group-hover:opacity-100 hover:bg-gray-700 rounded transition-all p-1">
+                        ✕
+                    </button>
+                </div>
+                <div class="flex items-center gap-2 px-3 py-2 hover:bg-gray-800/50 cursor-pointer text-gray-400">
+                    <span class="text-xs">CSS</span>
+                    <span class="text-sm">styles.css</span>
+                </div>
+            </div>
+
+            <!-- Monaco Editor -->
+            <div class="flex-1 p-4">
+                <div class="monaco-editor">
+                    <div class="text-cyan-400 mb-2">// APEX.BUILD - Next Generation Development Platform</div>
+                    <div class="text-gray-400 mb-1">1</div>
+                    <div class="text-pink-400 mb-1">2   <span class="text-blue-400">import</span> { <span class="text-green-400">createApp</span> } <span class="text-blue-400">from</span> <span class="text-green-400">'vue'</span></div>
+                    <div class="text-gray-400 mb-1">3   <span class="text-blue-400">import</span> <span class="text-green-400">App</span> <span class="text-blue-400">from</span> <span class="text-green-400">'./App.vue'</span></div>
+                    <div class="text-gray-400 mb-1">4   <span class="text-blue-400">import</span> { <span class="text-green-400">aiService</span> } <span class="text-blue-400">from</span> <span class="text-green-400">'./services/ai'</span></div>
+                    <div class="text-gray-400 mb-1">5</div>
+                    <div class="text-gray-400 mb-1">6   <span class="text-cyan-400">// Multi-AI Integration: Claude + GPT-4 + Gemini</span></div>
+                    <div class="text-gray-400 mb-1">7   <span class="text-blue-400">const</span> <span class="text-white">app</span> = <span class="text-yellow-400">createApp</span>(<span class="text-green-400">App</span>)</div>
+                    <div class="text-gray-400 mb-1">8   <span class="text-white">app</span>.<span class="text-yellow-400">use</span>(<span class="text-white">aiService</span>)</div>
+                    <div class="text-gray-400 mb-1">9</div>
+                    <div class="text-gray-400 mb-1">10  <span class="text-cyan-400">// Cyberpunk theme initialization</span></div>
+                    <div class="text-gray-400 mb-1">11  <span class="text-white">app</span>.<span class="text-yellow-400">mount</span>(<span class="text-green-400">'#app'</span>)  <span class="animate-pulse">|</span></div>
+
+                    <!-- AI Suggestions Overlay -->
+                    <div class="absolute top-32 left-32 bg-gray-900 border border-cyan-400/50 rounded-lg p-3 animate-pulse-glow">
+                        <div class="text-xs text-cyan-400 mb-1">🤖 AI Suggestion (Claude)</div>
+                        <div class="text-xs text-gray-300">Add error handling for AI service initialization</div>
+                        <div class="flex gap-2 mt-2">
+                            <button class="px-2 py-1 bg-cyan-500/20 text-cyan-300 rounded text-xs">Accept</button>
+                            <button class="px-2 py-1 bg-gray-700 text-gray-300 rounded text-xs">Ignore</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Terminal -->
+            <div class="h-60 border-t border-gray-800">
+                <div class="h-10 bg-gray-800/50 border-b border-gray-700/50 flex items-center justify-between">
+                    <div class="flex">
+                        <button class="px-3 py-2 bg-green-900/30 border-b-2 border-green-400 text-green-300 text-sm">
+                            💻 Terminal
+                        </button>
+                        <button class="px-3 py-2 text-gray-400 hover:text-white text-sm">
+                            📄 Output
+                        </button>
+                    </div>
+                </div>
+                <div class="terminal flex-1">
+                    <div>🚀 APEX.BUILD Terminal v1.0.0</div>
+                    <div>⚡ Welcome to the future of development</div>
+                    <div></div>
+                    <div>$ npm run dev</div>
+                    <div>✅ Starting development server...</div>
+                    <div>✅ AI services initialized: Claude ✓ GPT-4 ✓ Gemini ✓</div>
+                    <div>🌐 Local: http://localhost:3000</div>
+                    <div>⚡ <span class="animate-pulse">1,440x faster than Replit</span></div>
+                    <div class="mt-2">$ <span class="animate-pulse">_</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Sidebar -->
+        <div class="w-80 bg-gray-900/80 border-l border-gray-800 flex flex-col">
+            <!-- Sidebar Tabs -->
+            <div class="h-10 bg-gray-800/50 border-b border-gray-700/50 flex items-center">
+                <button class="px-3 py-2 bg-green-900/30 border-b-2 border-green-400 text-green-300 text-sm">
+                    🧠 AI
+                </button>
+                <button class="px-3 py-2 text-gray-400 hover:text-white text-sm">
+                    👥 Collab
+                </button>
+                <button class="px-3 py-2 text-gray-400 hover:text-white text-sm">
+                    ⚙️ Settings
+                </button>
+            </div>
+
+            <!-- AI Assistant -->
+            <div class="flex-1 flex flex-col">
+                <div class="p-4 border-b border-gray-700/50">
+                    <h3 class="text-lg font-semibold text-white mb-2 flex items-center gap-2">
+                        🤖 AI Assistant
+                    </h3>
+                    <div class="flex gap-1 mb-3">
+                        <button class="px-2 py-1 bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 rounded text-xs">Claude</button>
+                        <button class="px-2 py-1 bg-gray-700 text-gray-400 rounded text-xs">GPT-4</button>
+                        <button class="px-2 py-1 bg-gray-700 text-gray-400 rounded text-xs">Gemini</button>
+                        <button class="px-2 py-1 bg-pink-500/20 text-pink-300 border border-pink-400/50 rounded text-xs">Auto</button>
+                    </div>
+                </div>
+
+                <!-- Chat Messages -->
+                <div class="flex-1 p-4 space-y-3 overflow-y-auto">
+                    <div class="flex gap-3">
+                        <div class="w-8 h-8 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-full flex items-center justify-center text-white text-sm">
+                            U
+                        </div>
+                        <div class="flex-1">
+                            <div class="bg-cyan-900/30 rounded-lg p-3 border border-cyan-400/30">
+                                <div class="text-sm text-gray-100">Can you help me optimize this React component for better performance?</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <div class="w-8 h-8 bg-gradient-to-br from-green-400 to-emerald-600 rounded-full flex items-center justify-center text-white text-sm">
+                            AI
+                        </div>
+                        <div class="flex-1">
+                            <div class="text-xs text-gray-400 mb-1 flex items-center gap-2">
+                                <span>Claude</span>
+                                <span class="px-1 py-0.5 bg-cyan-500/20 text-cyan-300 rounded">code_optimization</span>
+                                <span>2s ago</span>
+                            </div>
+                            <div class="bg-gray-800/50 rounded-lg p-3 border border-gray-700/50">
+                                <div class="text-sm text-gray-100 mb-3">I'll help you optimize that React component! Here are several improvements:</div>
+
+                                <div class="bg-gray-900/70 rounded border border-gray-700/50 overflow-hidden">
+                                    <div class="flex items-center justify-between px-3 py-2 bg-gray-800/50 border-b border-gray-700/50">
+                                        <span class="text-xs text-gray-400">Optimized Component</span>
+                                        <div class="flex gap-1">
+                                            <button class="text-gray-400 hover:text-white text-xs">📋 Copy</button>
+                                            <button class="text-gray-400 hover:text-white text-xs">📁 Insert</button>
+                                        </div>
+                                    </div>
+                                    <pre class="p-3 text-xs text-gray-100 overflow-x-auto font-mono">
+<span class="text-blue-400">const</span> <span class="text-yellow-400">OptimizedComponent</span> = <span class="text-blue-400">memo</span>(({ items }) => {
+  <span class="text-blue-400">const</span> memoizedItems = <span class="text-yellow-400">useMemo</span>(() =>
+    items.<span class="text-yellow-400">filter</span>(item => item.active), [items]
+  )
+
+  <span class="text-blue-400">return</span> <span class="text-green-400">&lt;div&gt;</span>...
+})</pre>
+                                </div>
+
+                                <div class="mt-2 flex items-center gap-3 text-xs text-gray-400">
+                                    <span>1,247 tokens</span>
+                                    <span>$0.003</span>
+                                    <span>1.8s</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Input -->
+                <div class="p-4 border-t border-gray-700/50">
+                    <div class="flex gap-1 mb-2">
+                        <button class="px-2 py-1 bg-cyan-500/20 text-cyan-300 rounded text-xs">💻 Generate</button>
+                        <button class="px-2 py-1 bg-gray-700 text-gray-400 rounded text-xs">🐛 Debug</button>
+                        <button class="px-2 py-1 bg-gray-700 text-gray-400 rounded text-xs">🔄 Refactor</button>
+                        <button class="px-2 py-1 bg-gray-700 text-gray-400 rounded text-xs">📝 Explain</button>
+                    </div>
+                    <div class="flex gap-2">
+                        <input
+                            type="text"
+                            placeholder="Ask AI to help with your code..."
+                            class="flex-1 bg-gray-800/50 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder:text-gray-400 focus:border-cyan-400 focus:outline-none text-sm"
+                        />
+                        <button class="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-lg hover:from-cyan-400 hover:to-blue-500 transition-all text-sm">
+                            ▶
+                        </button>
+                    </div>
+                    <div class="flex justify-between mt-2 text-xs text-gray-400">
+                        <span>Shift+Enter for new line, Enter to send</span>
+                        <span>Provider: Auto-Select</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div class="fixed top-16 right-4 bg-green-900/90 border border-green-400/50 rounded-lg p-4 max-w-sm animate-pulse-glow">
+        <div class="flex items-center gap-3">
+            <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+            <div>
+                <div class="text-sm font-medium text-white">AI Response Complete</div>
+                <div class="text-xs text-green-300">Claude generated optimized code in 1.8s</div>
+            </div>
+            <button class="text-gray-400 hover:text-white ml-auto">✕</button>
+        </div>
+    </div>
+
+    <!-- Performance Stats -->
+    <div class="fixed bottom-4 right-4 bg-gray-900/90 border border-cyan-400/50 rounded-lg p-4">
+        <div class="text-sm font-medium text-white mb-2">🚀 Platform Performance</div>
+        <div class="space-y-1 text-xs">
+            <div class="flex justify-between">
+                <span class="text-gray-400">AI Response:</span>
+                <span class="text-green-400">1.8s (1,440x faster than Replit)</span>
+            </div>
+            <div class="flex justify-between">
+                <span class="text-gray-400">Memory:</span>
+                <span class="text-cyan-400">45MB (vs 2.1GB Replit)</span>
+            </div>
+            <div class="flex justify-between">
+                <span class="text-gray-400">Cost:</span>
+                <span class="text-pink-400">$0.003/request (vs $15/day Replit)</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Add some interactive effects
+        document.addEventListener('DOMContentLoaded', function() {
+            // Simulate typing in terminal
+            const terminal = document.querySelector('.terminal div:last-child');
+            if (terminal) {
+                let text = '';
+                const fullText = '$ apex build --optimize --ai-assist';
+                let i = 0;
+
+                function typeWriter() {
+                    if (i < fullText.length) {
+                        text += fullText.charAt(i);
+                        terminal.innerHTML = text + '<span class="animate-pulse">_</span>';
+                        i++;
+                        setTimeout(typeWriter, 100);
+                    }
+                }
+
+                setTimeout(typeWriter, 2000);
+            }
+
+            // Add glow effects to buttons on hover
+            const buttons = document.querySelectorAll('button');
+            buttons.forEach(button => {
+                button.addEventListener('mouseenter', function() {
+                    this.style.boxShadow = '0 0 10px rgba(0, 245, 255, 0.5)';
+                });
+                button.addEventListener('mouseleave', function() {
+                    this.style.boxShadow = '';
+                });
+            });
+
+            // Add holographic scan effect
+            const editor = document.querySelector('.monaco-editor');
+            if (editor) {
+                setInterval(() => {
+                    const scan = document.createElement('div');
+                    scan.className = 'absolute inset-0 holographic animate-matrix-scan pointer-events-none';
+                    scan.style.opacity = '0.1';
+                    editor.appendChild(scan);
+
+                    setTimeout(() => {
+                        editor.removeChild(scan);
+                    }, 3000);
+                }, 5000);
+            }
+        });
+    </script>
+</body>
+</html>

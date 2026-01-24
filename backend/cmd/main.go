@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 
+	"apex-build/internal/agents"
 	"apex-build/internal/ai"
 	"apex-build/internal/api"
 	"apex-build/internal/auth"
@@ -40,11 +41,19 @@ func main() {
 	log.Printf("   - OpenAI API: %s", getStatusIcon(config.OpenAIAPIKey != ""))
 	log.Printf("   - Gemini API: %s", getStatusIcon(config.GeminiAPIKey != ""))
 
+	// Initialize Agent Orchestration System
+	aiAdapter := agents.NewAIRouterAdapter(aiRouter)
+	agentManager := agents.NewAgentManager(aiAdapter)
+	wsHub := agents.NewWSHub(agentManager)
+	buildHandler := agents.NewBuildHandler(agentManager, wsHub)
+
+	log.Println("✅ Agent Orchestration System initialized")
+
 	// Initialize API server
 	server := api.NewServer(database, authService, aiRouter)
 
 	// Setup routes
-	router := setupRoutes(server)
+	router := setupRoutes(server, buildHandler, wsHub)
 
 	// Start server
 	port := config.Port
@@ -105,7 +114,7 @@ func loadConfig() *Config {
 }
 
 // setupRoutes configures all API routes
-func setupRoutes(server *api.Server) *gin.Engine {
+func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *agents.WSHub) *gin.Engine {
 	// Set gin mode based on environment
 	if os.Getenv("ENVIRONMENT") == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -195,8 +204,8 @@ func setupRoutes(server *api.Server) *gin.Engine {
 				projects.GET("/:id", server.GetProject)
 
 				// File endpoints under projects
-				projects.POST("/:projectId/files", server.CreateFile)
-				projects.GET("/:projectId/files", server.GetFiles)
+				projects.POST("/:id/files", server.CreateFile)
+				projects.GET("/:id/files", server.GetFiles)
 			}
 
 			// File endpoints
@@ -211,8 +220,14 @@ func setupRoutes(server *api.Server) *gin.Engine {
 				user.GET("/profile", server.GetUserProfile)
 				user.PUT("/profile", server.UpdateUserProfile)
 			}
+
+			// Build/Agent endpoints (the core of APEX.BUILD)
+			buildHandler.RegisterRoutes(protected)
 		}
 	}
+
+	// WebSocket endpoint for real-time build updates
+	router.GET("/ws/build/:buildId", wsHub.HandleWebSocket)
 
 	return router
 }

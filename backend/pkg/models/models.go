@@ -72,8 +72,7 @@ type Project struct {
 	BuildConfig map[string]interface{} `json:"build_config" gorm:"serializer:json"` // Build and run configuration
 
 	// Collaboration
-	CollabRoomID *uint      `json:"collab_room_id"`
-	CollabRoom   CollabRoom `json:"collab_room" gorm:"foreignKey:CollabRoomID"`
+	CollabRoomID *uint `json:"collab_room_id"`
 
 	// Relationships
 	Files       []File       `json:"files" gorm:"foreignKey:ProjectID"`
@@ -217,9 +216,9 @@ type CollabRoom struct {
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
 	// Room identification
-	RoomID    string `json:"room_id" gorm:"uniqueIndex;not null"` // UUID for WebSocket connections
-	ProjectID uint   `json:"project_id" gorm:"not null"`
-	Project   Project `json:"project" gorm:"foreignKey:ProjectID"`
+	RoomID    string   `json:"room_id" gorm:"uniqueIndex;not null"` // UUID for WebSocket connections
+	ProjectID uint     `json:"project_id" gorm:"not null"`
+	Project   *Project `json:"project" gorm:"foreignKey:ProjectID"`
 
 	// Room state
 	IsActive      bool `json:"is_active" gorm:"default:true"`
@@ -244,12 +243,11 @@ type CursorPosition struct {
 	UpdatedAt time.Time `json:"updated_at"`
 
 	// Position tracking
-	RoomID    uint      `json:"room_id" gorm:"not null"`
-	Room      CollabRoom `json:"room" gorm:"foreignKey:RoomID"`
-	UserID    uint      `json:"user_id" gorm:"not null"`
-	User      User      `json:"user" gorm:"foreignKey:UserID"`
-	FileID    uint      `json:"file_id" gorm:"not null"`
-	File      File      `json:"file" gorm:"foreignKey:FileID"`
+	RoomID    uint `json:"room_id" gorm:"not null"`
+	UserID    uint `json:"user_id" gorm:"not null"`
+	User      User `json:"user" gorm:"foreignKey:UserID"`
+	FileID    uint `json:"file_id" gorm:"not null"`
+	File      File `json:"file" gorm:"foreignKey:FileID"`
 
 	// Cursor coordinates
 	Line   int `json:"line" gorm:"not null"`
@@ -274,10 +272,9 @@ type ChatMessage struct {
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
 	// Message details
-	RoomID    uint       `json:"room_id" gorm:"not null"`
-	Room      CollabRoom `json:"room" gorm:"foreignKey:RoomID"`
-	UserID    uint       `json:"user_id" gorm:"not null"`
-	User      User       `json:"user" gorm:"foreignKey:UserID"`
+	RoomID    uint `json:"room_id" gorm:"not null"`
+	UserID    uint `json:"user_id" gorm:"not null"`
+	User      User `json:"user" gorm:"foreignKey:UserID"`
 	Message   string     `json:"message" gorm:"not null"`
 	Type      string     `json:"type" gorm:"default:'text'"` // text, system, code, file
 

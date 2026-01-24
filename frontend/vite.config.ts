@@ -16,38 +16,28 @@ export default defineConfig({
       '@styles': path.resolve(__dirname, './src/styles'),
     },
   },
-  server: {
-    port: 3000,
-    host: true,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        secure: false,
-      },
-      '/ws': {
-        target: 'ws://localhost:8080',
-        ws: true,
-        changeOrigin: true,
-      },
-    },
-  },
   build: {
-    outDir: 'dist',
     sourcemap: true,
     rollupOptions: {
       output: {
         manualChunks: {
-          vendor: ['react', 'react-dom'],
-          router: ['react-router-dom'],
-          editor: ['@monaco-editor/react', 'monaco-editor'],
-          animation: ['framer-motion'],
-          ui: ['styled-components', 'react-icons'],
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          monaco: ['monaco-editor', '@monaco-editor/react'],
+          ui: ['framer-motion', 'lucide-react'],
         },
       },
     },
   },
-  define: {
-    __APP_VERSION__: JSON.stringify(process.env.npm_package_version),
+  optimizeDeps: {
+    include: [
+      'react',
+      'react-dom',
+      'react-router-dom',
+      'monaco-editor',
+      '@monaco-editor/react',
+    ],
+  },
+  worker: {
+    format: 'es',
   },
 })
