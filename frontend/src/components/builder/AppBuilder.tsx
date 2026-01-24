@@ -84,6 +84,16 @@ interface ChatMessage {
   timestamp: Date
 }
 
+interface AIThought {
+  id: string
+  agentId: string
+  agentRole: string
+  provider: string
+  type: 'thinking' | 'action' | 'output' | 'error'
+  content: string
+  timestamp: Date
+}
+
 interface BuildState {
   id: string
   status: 'idle' | 'planning' | 'in_progress' | 'testing' | 'reviewing' | 'completed' | 'failed'
@@ -110,6 +120,11 @@ export const AppBuilder: React.FC = () => {
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
+
+  // AI Activity state - real-time thinking and actions
+  const [aiThoughts, setAiThoughts] = useState<AIThought[]>([])
+  const [showAiActivity, setShowAiActivity] = useState(true)
+  const aiActivityRef = useRef<HTMLDivElement>(null)
 
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null)
@@ -257,7 +272,42 @@ export const AppBuilder: React.FC = () => {
           timestamp: new Date(),
         }])
         break
+
+      // AI Activity tracking - real-time thinking
+      case 'agent:thinking':
+        addAiThought(message.agent_id, data.agent_role, data.provider, 'thinking', data.content)
+        break
+
+      case 'agent:action':
+        addAiThought(message.agent_id, data.agent_role, data.provider, 'action', data.content)
+        break
+
+      case 'agent:output':
+        addAiThought(message.agent_id, data.agent_role, data.provider, 'output', data.content)
+        break
     }
+  }
+
+  // Add AI thought to activity panel
+  const addAiThought = (agentId: string, agentRole: string, provider: string, type: AIThought['type'], content: string) => {
+    const thought: AIThought = {
+      id: Date.now().toString() + Math.random(),
+      agentId,
+      agentRole,
+      provider,
+      type,
+      content,
+      timestamp: new Date(),
+    }
+    setAiThoughts(prev => {
+      // Keep last 100 thoughts to prevent memory issues
+      const updated = [...prev, thought]
+      return updated.slice(-100)
+    })
+    // Auto-scroll activity panel
+    setTimeout(() => {
+      aiActivityRef.current?.scrollTo({ top: aiActivityRef.current.scrollHeight, behavior: 'smooth' })
+    }, 50)
   }
 
   // Add system message to chat
@@ -633,6 +683,78 @@ For example:
                   </CardContent>
                 </Card>
               )}
+
+              {/* AI Activity Panel - Real-time Thinking & Actions */}
+              <Card variant="cyberpunk" className="border border-purple-900/50">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Bot className="w-5 h-5 text-purple-400 animate-pulse" />
+                      AI Thinking
+                    </CardTitle>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => setShowAiActivity(!showAiActivity)}
+                    >
+                      <Eye className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </CardHeader>
+                {showAiActivity && (
+                  <CardContent>
+                    <div
+                      ref={aiActivityRef}
+                      className="space-y-2 max-h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-purple-900 scrollbar-track-gray-900"
+                    >
+                      {aiThoughts.length === 0 ? (
+                        <div className="text-center text-gray-500 py-4">
+                          <Bot className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">Waiting for AI activity...</p>
+                        </div>
+                      ) : (
+                        aiThoughts.map((thought) => (
+                          <div
+                            key={thought.id}
+                            className={cn(
+                              'p-2 rounded-lg text-sm border-l-2 transition-all',
+                              thought.type === 'thinking' && 'bg-purple-900/20 border-purple-500',
+                              thought.type === 'action' && 'bg-cyan-900/20 border-cyan-500',
+                              thought.type === 'output' && 'bg-green-900/20 border-green-500',
+                              thought.type === 'error' && 'bg-red-900/20 border-red-500'
+                            )}
+                          >
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs font-medium text-gray-400">
+                                {getAgentEmoji(thought.agentRole)} {thought.agentRole}
+                              </span>
+                              <Badge variant="outline" size="xs" className="text-[10px]">
+                                {thought.provider}
+                              </Badge>
+                              <span className="text-[10px] text-gray-600">
+                                {thought.timestamp.toLocaleTimeString()}
+                              </span>
+                            </div>
+                            <p className={cn(
+                              'text-xs',
+                              thought.type === 'thinking' && 'text-purple-300 italic',
+                              thought.type === 'action' && 'text-cyan-300',
+                              thought.type === 'output' && 'text-green-300 font-mono',
+                              thought.type === 'error' && 'text-red-300'
+                            )}>
+                              {thought.type === 'thinking' && '💭 '}
+                              {thought.type === 'action' && '⚡ '}
+                              {thought.type === 'output' && '✅ '}
+                              {thought.type === 'error' && '❌ '}
+                              {thought.content}
+                            </p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </CardContent>
+                )}
+              </Card>
             </div>
 
             {/* Middle Column - Activity & Chat */}
