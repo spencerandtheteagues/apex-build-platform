@@ -1,0 +1,28 @@
+# Environment
+.env
+.env.*
+
+# Build artifacts
+apex-build
+apex-server
+main
+test-server
+*.exe
+*.out
+
+# Logs
+logs/
+*.log
+
+# Uploads
+uploads/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
