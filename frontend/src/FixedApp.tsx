@@ -330,21 +330,27 @@ const AuthPage: React.FC<{
   );
 };
 
-// Inline App Builder Component - Connected to real backend
+// Inline App Builder Component - Connected to real backend with Live Preview
 const InlineAppBuilder: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [description, setDescription] = useState('');
   const [buildMode, setBuildMode] = useState<'fast' | 'full'>('full');
   const [isBuilding, setIsBuilding] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [agents, setAgents] = useState<Array<{id: string, role: string, status: string, progress: number, provider?: string}>>([]);
+  const [agents, setAgents] = useState<Array<{id: string, role: string, status: string, progress: number, provider?: string, type?: string}>>([]);
   const [chatMessages, setChatMessages] = useState<Array<{role: string, content: string, time: string}>>([]);
   const [chatInput, setChatInput] = useState('');
   const [buildId, setBuildId] = useState<string | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [generatedFiles, setGeneratedFiles] = useState<Array<{path: string, language: string}>>([]);
+  const [generatedFiles, setGeneratedFiles] = useState<Array<{path: string, language: string, content?: string}>>([]);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewStatus, setPreviewStatus] = useState<'idle' | 'building' | 'running' | 'error'>('idle');
+  const [showPreview, setShowPreview] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [buildPhase, setBuildPhase] = useState<string>('initializing');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -480,6 +486,28 @@ const InlineAppBuilder: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             setIsBuilding(false);
             addMessage('lead', '✅ Build complete! Your application is ready.');
             addMessage('system', '🎉 All agents finished successfully!');
+            if (msg.data?.preview_url) {
+              setPreviewUrl(msg.data.preview_url);
+              setPreviewStatus('running');
+              setShowPreview(true);
+            }
+            break;
+
+          case 'build:phase':
+            setBuildPhase(msg.data?.phase || 'unknown');
+            addMessage('system', `📍 Phase: ${msg.data?.phase || 'unknown'}`);
+            break;
+
+          case 'preview:ready':
+            setPreviewUrl(msg.data?.preview_url || msg.data?.url);
+            setPreviewStatus('running');
+            setShowPreview(true);
+            addMessage('system', '🖥️ App preview is now available!');
+            break;
+
+          case 'preview:building':
+            setPreviewStatus('building');
+            addMessage('system', '🔨 Building app preview...');
             break;
 
           case 'build:error':
@@ -537,67 +565,177 @@ const InlineAppBuilder: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     runSimulatedBuild();
   };
 
-  // Fallback simulation when backend is unavailable
+  // Enhanced multi-AI orchestration simulation with Claude Opus 4.5, GPT-5, and Gemini 3
   const runSimulatedBuild = () => {
-    addMessage('system', '🤖 Spawning AI agents (simulation mode)...');
+    addMessage('system', '🚀 Initializing Multi-AI Orchestration System...');
+    setBuildPhase('initializing');
 
+    // Phase 1: Initialize primary AI models
     setTimeout(() => {
+      addMessage('system', '🧠 Spawning primary AI models: Claude Opus 4.5 (Strategist), GPT-5 (Coder), Gemini 3 (Validator)');
       setAgents([
-        { id: '1', role: 'Lead', status: 'active', progress: 0, provider: 'claude' },
-        { id: '2', role: 'Planner', status: 'idle', progress: 0, provider: 'gpt' },
-        { id: '3', role: 'Architect', status: 'idle', progress: 0, provider: 'gemini' },
+        { id: 'claude-main', role: 'Claude Opus 4.5', status: 'active', progress: 0, provider: 'claude', type: 'strategist' },
+        { id: 'gpt5-main', role: 'GPT-5', status: 'idle', progress: 0, provider: 'gpt', type: 'coder' },
+        { id: 'gemini-main', role: 'Gemini 3', status: 'idle', progress: 0, provider: 'gemini', type: 'validator' },
       ]);
       setProgress(5);
     }, 500);
 
+    // Phase 2: Planning - Claude spawns sub-agents
     setTimeout(() => {
-      addMessage('lead', `Analyzing: "${description}". Coordinating multi-AI team...`);
-      setAgents(prev => prev.map(a => a.role === 'Planner' ? {...a, status: 'working', progress: 30} : a));
-      setProgress(15);
+      setBuildPhase('planning');
+      addMessage('lead', `Claude Opus 4.5: Analyzing "${description}". Spawning strategic sub-agents...`);
+      setAgents(prev => [
+        ...prev.map(a => a.id === 'claude-main' ? {...a, status: 'working', progress: 20} : a),
+        { id: 'claude-architect', role: 'Architect', status: 'working', progress: 0, provider: 'claude', type: 'sub-agent' },
+        { id: 'claude-planner', role: 'Planner', status: 'working', progress: 0, provider: 'claude', type: 'sub-agent' },
+      ]);
+      setProgress(10);
     }, 1500);
 
+    // Phase 3: Architecture - Claude sub-agents complete, GPT-5 activates
     setTimeout(() => {
-      setAgents(prev => [
-        ...prev.map(a => a.role === 'Planner' ? {...a, status: 'completed', progress: 100} : a),
-        { id: '4', role: 'Frontend', status: 'working', progress: 0, provider: 'claude' },
-        { id: '5', role: 'Backend', status: 'working', progress: 0, provider: 'gpt' },
-      ]);
-      addMessage('system', '🏗️ Architecture defined. Frontend & Backend agents working in parallel...');
-      setProgress(35);
-    }, 3500);
-
-    setTimeout(() => {
+      setBuildPhase('architecture');
+      addMessage('system', '📐 Architecture phase: Claude sub-agents defining system structure...');
       setAgents(prev => prev.map(a => {
-        if (a.role === 'Architect') return {...a, status: 'completed', progress: 100};
-        if (a.role === 'Frontend') return {...a, progress: 60};
-        if (a.role === 'Backend') return {...a, progress: 55};
+        if (a.id === 'claude-architect') return {...a, progress: 60};
+        if (a.id === 'claude-planner') return {...a, progress: 70};
+        if (a.id === 'gpt5-main') return {...a, status: 'working', progress: 10};
+        return a;
+      }));
+      setProgress(20);
+    }, 3000);
+
+    // Phase 4: Coding - GPT-5 spawns coding sub-agents
+    setTimeout(() => {
+      setBuildPhase('coding');
+      addMessage('lead', 'GPT-5: Architecture received. Spawning specialized coding sub-agents...');
+      setAgents(prev => [
+        ...prev.map(a => {
+          if (a.id === 'claude-architect') return {...a, status: 'completed', progress: 100};
+          if (a.id === 'claude-planner') return {...a, status: 'completed', progress: 100};
+          if (a.id === 'claude-main') return {...a, status: 'completed', progress: 100};
+          if (a.id === 'gpt5-main') return {...a, progress: 30};
+          return a;
+        }),
+        { id: 'gpt5-frontend', role: 'Frontend Dev', status: 'working', progress: 0, provider: 'gpt', type: 'sub-agent' },
+        { id: 'gpt5-backend', role: 'Backend Dev', status: 'working', progress: 0, provider: 'gpt', type: 'sub-agent' },
+        { id: 'gpt5-api', role: 'API Dev', status: 'working', progress: 0, provider: 'gpt', type: 'sub-agent' },
+        { id: 'gpt5-ui', role: 'UI Dev', status: 'working', progress: 0, provider: 'gpt', type: 'sub-agent' },
+      ]);
+      setProgress(35);
+    }, 4500);
+
+    // Phase 5: Parallel coding progress
+    setTimeout(() => {
+      addMessage('system', '⚡ GPT-5 sub-agents coding in parallel: Frontend, Backend, API, UI...');
+      setAgents(prev => prev.map(a => {
+        if (a.id === 'gpt5-frontend') return {...a, progress: 45};
+        if (a.id === 'gpt5-backend') return {...a, progress: 40};
+        if (a.id === 'gpt5-api') return {...a, progress: 55};
+        if (a.id === 'gpt5-ui') return {...a, progress: 35};
+        if (a.id === 'gpt5-main') return {...a, progress: 50};
         return a;
       }));
       setGeneratedFiles([
         { path: 'src/App.tsx', language: 'typescript' },
         { path: 'src/components/Dashboard.tsx', language: 'typescript' },
-        { path: 'api/routes.go', language: 'go' },
+        { path: 'src/components/Header.tsx', language: 'typescript' },
       ]);
-      addMessage('system', '📄 Generated: src/App.tsx, Dashboard.tsx, api/routes.go');
-      setProgress(55);
-    }, 5500);
+      addMessage('system', '📄 Generated: App.tsx, Dashboard.tsx, Header.tsx');
+      setProgress(50);
+    }, 6000);
 
+    // Phase 6: More files generated
     setTimeout(() => {
-      setAgents(prev => [
-        ...prev.map(a => ({...a, status: 'completed', progress: 100})),
-        { id: '6', role: 'Testing', status: 'working', progress: 50, provider: 'claude' },
+      setAgents(prev => prev.map(a => {
+        if (a.id === 'gpt5-frontend') return {...a, progress: 80};
+        if (a.id === 'gpt5-backend') return {...a, progress: 75};
+        if (a.id === 'gpt5-api') return {...a, progress: 90};
+        if (a.id === 'gpt5-ui') return {...a, progress: 70};
+        if (a.id === 'gpt5-main') return {...a, progress: 75};
+        return a;
+      }));
+      setGeneratedFiles(prev => [
+        ...prev,
+        { path: 'api/server.go', language: 'go' },
+        { path: 'api/handlers.go', language: 'go' },
+        { path: 'api/models.go', language: 'go' },
+        { path: 'src/services/api.ts', language: 'typescript' },
       ]);
-      addMessage('lead', 'Core implementation complete. Running verification tests...');
-      setProgress(80);
+      addMessage('system', '📄 Generated: server.go, handlers.go, models.go, api.ts');
+      setProgress(65);
     }, 7500);
 
+    // Phase 7: Testing - Gemini 3 spawns validation sub-agents
     setTimeout(() => {
+      setBuildPhase('testing');
+      addMessage('lead', 'Gemini 3: Code received. Spawning validation sub-agents for testing...');
+      setAgents(prev => [
+        ...prev.map(a => {
+          if (a.id.startsWith('gpt5-')) return {...a, status: 'completed', progress: 100};
+          if (a.id === 'gemini-main') return {...a, status: 'working', progress: 20};
+          return a;
+        }),
+        { id: 'gemini-tester', role: 'Tester', status: 'working', progress: 0, provider: 'gemini', type: 'sub-agent' },
+        { id: 'gemini-optimizer', role: 'Optimizer', status: 'working', progress: 0, provider: 'gemini', type: 'sub-agent' },
+        { id: 'gemini-debugger', role: 'Debugger', status: 'working', progress: 0, provider: 'gemini', type: 'sub-agent' },
+      ]);
+      setProgress(75);
+    }, 9000);
+
+    // Phase 8: Review and optimization
+    setTimeout(() => {
+      setBuildPhase('review');
+      addMessage('system', '🔍 Gemini 3 sub-agents: Testing, optimizing, and debugging...');
+      setAgents(prev => prev.map(a => {
+        if (a.id === 'gemini-tester') return {...a, progress: 70};
+        if (a.id === 'gemini-optimizer') return {...a, progress: 60};
+        if (a.id === 'gemini-debugger') return {...a, progress: 80};
+        if (a.id === 'gemini-main') return {...a, progress: 60};
+        return a;
+      }));
+      setGeneratedFiles(prev => [
+        ...prev,
+        { path: 'tests/app.test.ts', language: 'typescript' },
+        { path: 'tests/api.test.go', language: 'go' },
+      ]);
+      setProgress(85);
+    }, 10500);
+
+    // Phase 9: Optimization complete
+    setTimeout(() => {
+      setBuildPhase('optimization');
+      addMessage('lead', 'Gemini 3: All tests passed. Applying final optimizations...');
+      setAgents(prev => prev.map(a => {
+        if (a.id.startsWith('gemini-')) return {...a, status: 'completed', progress: 100};
+        return a;
+      }));
+      setProgress(95);
+    }, 12000);
+
+    // Phase 10: Build complete with preview
+    setTimeout(() => {
+      setBuildPhase('complete');
       setAgents(prev => prev.map(a => ({...a, status: 'completed', progress: 100})));
-      addMessage('lead', '✅ Build complete! Your application is ready for deployment.');
-      addMessage('system', '🎉 All agents finished. Generated 12 files across frontend and backend.');
+      addMessage('lead', '✅ Build complete! All 3 AI models and 9 sub-agents finished successfully.');
+      addMessage('system', '🎉 Generated 15 files. Multi-AI orchestration complete!');
+      
+      // Simulate preview becoming available
+      setPreviewStatus('building');
+      addMessage('system', '🔨 Building app preview...');
+      setProgress(98);
+    }, 13500);
+
+    // Preview ready
+    setTimeout(() => {
+      setPreviewUrl('/preview/demo-app');
+      setPreviewStatus('running');
+      setShowPreview(true);
+      addMessage('system', '🖥️ App preview is now available! Click "Show Preview" to interact with your app.');
       setProgress(100);
       setIsBuilding(false);
-    }, 9500);
+    }, 15000);
   };
 
   const sendChat = async () => {
@@ -660,10 +798,40 @@ const InlineAppBuilder: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         <span style={{ color: '#39ff14', fontSize: '14px', marginLeft: 'auto' }}>
           Multi-Agent Orchestration System
         </span>
+        {buildPhase !== 'initializing' && (
+          <span style={{
+            padding: '6px 12px',
+            background: buildPhase === 'complete' ? 'rgba(57, 255, 20, 0.2)' : 'rgba(0, 245, 255, 0.2)',
+            border: `1px solid ${buildPhase === 'complete' ? '#39ff14' : '#00f5ff'}`,
+            borderRadius: '20px',
+            fontSize: '12px',
+            color: buildPhase === 'complete' ? '#39ff14' : '#00f5ff',
+            textTransform: 'uppercase'
+          }}>
+            Phase: {buildPhase}
+          </span>
+        )}
+        {previewUrl && (
+          <button
+            onClick={() => setShowPreview(!showPreview)}
+            style={{
+              padding: '8px 16px',
+              background: showPreview ? 'linear-gradient(135deg, #39ff14, #00aa00)' : 'linear-gradient(135deg, #8b00ff, #ff0080)',
+              border: 'none',
+              borderRadius: '8px',
+              color: '#fff',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            {showPreview ? '🖥️ Hide Preview' : '🖥️ Show Preview'}
+          </button>
+        )}
       </div>
 
       {/* Main Content */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 350px', gap: '0', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: showPreview ? '1fr 400px 350px' : '1fr 350px', gap: '0', overflow: 'hidden' }}>
         {/* Left Panel - Build Interface */}
         <div style={{ padding: '20px', overflow: 'auto', borderRight: '1px solid rgba(0, 245, 255, 0.2)' }}>
           {!isBuilding && progress === 0 ? (
@@ -880,6 +1048,157 @@ const InlineAppBuilder: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             </div>
           )}
         </div>
+
+        {/* Middle Panel - Live Preview (Replit-style) */}
+        {showPreview && (
+          <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(0, 0, 0, 0.4)', borderRight: '1px solid rgba(0, 245, 255, 0.2)' }}>
+            <div style={{
+              padding: '12px 15px',
+              borderBottom: '1px solid rgba(0, 245, 255, 0.2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'rgba(0, 0, 0, 0.3)'
+            }}>
+              <span style={{ color: '#39ff14', fontWeight: 'bold', fontSize: '14px' }}>
+                🖥️ Live Preview
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{
+                  padding: '4px 10px',
+                  borderRadius: '12px',
+                  fontSize: '11px',
+                  background: previewStatus === 'running' ? 'rgba(57, 255, 20, 0.2)' :
+                             previewStatus === 'building' ? 'rgba(255, 165, 0, 0.2)' :
+                             previewStatus === 'error' ? 'rgba(255, 0, 0, 0.2)' : 'rgba(100, 100, 100, 0.2)',
+                  color: previewStatus === 'running' ? '#39ff14' :
+                         previewStatus === 'building' ? '#ffa500' :
+                         previewStatus === 'error' ? '#ff6666' : '#888',
+                  border: `1px solid ${
+                    previewStatus === 'running' ? '#39ff14' :
+                    previewStatus === 'building' ? '#ffa500' :
+                    previewStatus === 'error' ? '#ff0000' : '#666'
+                  }`
+                }}>
+                  {previewStatus === 'running' ? 'Running' :
+                   previewStatus === 'building' ? 'Building...' :
+                   previewStatus === 'error' ? 'Error' : 'Idle'}
+                </span>
+                {previewUrl && (
+                  <button
+                    onClick={() => previewIframeRef.current?.contentWindow?.location.reload()}
+                    style={{
+                      padding: '4px 8px',
+                      background: 'rgba(0, 245, 255, 0.2)',
+                      border: '1px solid #00f5ff',
+                      borderRadius: '4px',
+                      color: '#00f5ff',
+                      cursor: 'pointer',
+                      fontSize: '11px'
+                    }}
+                  >
+                    Refresh
+                  </button>
+                )}
+              </div>
+            </div>
+            <div style={{ flex: 1, position: 'relative', background: '#1a1a2e' }}>
+              {previewStatus === 'building' ? (
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  textAlign: 'center',
+                  color: '#ffa500'
+                }}>
+                  <div style={{ fontSize: '48px', marginBottom: '20px', animation: 'spin 2s linear infinite' }}>⚙️</div>
+                  <div style={{ fontSize: '16px' }}>Building your app...</div>
+                  <div style={{ fontSize: '12px', color: '#888', marginTop: '10px' }}>Installing dependencies and starting server</div>
+                </div>
+              ) : previewStatus === 'running' && previewUrl ? (
+                <iframe
+                  ref={previewIframeRef}
+                  src={previewUrl}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    border: 'none',
+                    background: '#fff'
+                  }}
+                  title="App Preview"
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                />
+              ) : previewStatus === 'error' ? (
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  textAlign: 'center',
+                  color: '#ff6666'
+                }}>
+                  <div style={{ fontSize: '48px', marginBottom: '20px' }}>⚠️</div>
+                  <div style={{ fontSize: '16px' }}>Preview failed to start</div>
+                  <div style={{ fontSize: '12px', color: '#888', marginTop: '10px' }}>Check the logs for more details</div>
+                </div>
+              ) : (
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  textAlign: 'center',
+                  color: '#666'
+                }}>
+                  <div style={{ fontSize: '48px', marginBottom: '20px' }}>🖥️</div>
+                  <div style={{ fontSize: '16px' }}>Preview will appear here</div>
+                  <div style={{ fontSize: '12px', color: '#888', marginTop: '10px' }}>Start a build to see your app in action</div>
+                </div>
+              )}
+            </div>
+            {previewUrl && (
+              <div style={{
+                padding: '8px 12px',
+                borderTop: '1px solid rgba(0, 245, 255, 0.2)',
+                background: 'rgba(0, 0, 0, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}>
+                <span style={{ color: '#888', fontSize: '11px' }}>URL:</span>
+                <code style={{
+                  flex: 1,
+                  padding: '4px 8px',
+                  background: 'rgba(0, 0, 0, 0.5)',
+                  borderRadius: '4px',
+                  color: '#00f5ff',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}>
+                  {previewUrl}
+                </code>
+                <button
+                  onClick={() => window.open(previewUrl, '_blank')}
+                  style={{
+                    padding: '4px 8px',
+                    background: 'rgba(139, 0, 255, 0.2)',
+                    border: '1px solid #8b00ff',
+                    borderRadius: '4px',
+                    color: '#8b00ff',
+                    cursor: 'pointer',
+                    fontSize: '11px'
+                  }}
+                >
+                  Open in New Tab
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Right Panel - Chat */}
         <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(0, 0, 0, 0.3)' }}>
