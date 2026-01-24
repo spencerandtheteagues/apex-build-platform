@@ -139,9 +139,24 @@ export const AppBuilder: React.FC = () => {
 
   // Connect to WebSocket when build starts
   const connectWebSocket = useCallback((buildId: string) => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws/build/${buildId}`
+    // Use VITE_WS_URL for WebSocket connection to backend
+    // Falls back to constructing from API URL or window.location
+    let wsUrl: string
+    if (import.meta.env.VITE_WS_URL) {
+      wsUrl = `${import.meta.env.VITE_WS_URL}/ws/build/${buildId}`
+    } else if (import.meta.env.VITE_API_URL) {
+      // Derive WebSocket URL from API URL
+      const apiUrl = import.meta.env.VITE_API_URL.replace('/api/v1', '')
+      const wsProtocol = apiUrl.startsWith('https') ? 'wss' : 'ws'
+      const wsHost = apiUrl.replace(/^https?:\/\//, '')
+      wsUrl = `${wsProtocol}://${wsHost}/ws/build/${buildId}`
+    } else {
+      // Local development fallback
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      wsUrl = `${protocol}//${window.location.host}/ws/build/${buildId}`
+    }
 
+    console.log('Connecting to WebSocket:', wsUrl)
     const ws = new WebSocket(wsUrl)
 
     ws.onopen = () => {
