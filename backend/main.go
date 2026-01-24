@@ -1,3 +1,6 @@
+//go:build ignore
+// +build ignore
+
 // APEX.BUILD Production Server
 // Real cloud development platform to beat Replit
 
