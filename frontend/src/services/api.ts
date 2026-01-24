@@ -19,11 +19,21 @@ import {
   AIProvider,
 } from '@/types'
 
+// Get API URL from environment or use default
+const getApiUrl = (): string => {
+  // Check for Vite environment variable
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL
+  }
+  // Fallback to relative URL for development
+  return '/api/v1'
+}
+
 export class ApiService {
   private client: AxiosInstance
   private baseURL: string
 
-  constructor(baseURL: string = '/api/v1') {
+  constructor(baseURL: string = getApiUrl()) {
     this.baseURL = baseURL
     this.client = axios.create({
       baseURL,
