@@ -194,6 +194,79 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
     setViewMode('dashboard')
   }, [])
 
+  // Handle file creation
+  const handleFileCreate = useCallback(async (parentPath: string, name: string, type: 'file' | 'directory') => {
+    if (!currentProject) return
+
+    try {
+      const fullPath = parentPath === '/' ? `/${name}` : `${parentPath}/${name}`
+      const newFile = await apiService.createFile({
+        project_id: currentProject.id,
+        name: name,
+        path: fullPath,
+        type: type,
+        content: type === 'file' ? '' : undefined
+      })
+
+      setTerminalOutput(prev => [...prev, `✅ Created ${type}: ${fullPath}`])
+
+      // If it's a file, open it in the editor
+      if (type === 'file') {
+        handleFileSelect(newFile)
+      }
+    } catch (error) {
+      console.error('Failed to create file:', error)
+      setTerminalOutput(prev => [...prev, `❌ Failed to create ${type}: ${error}`])
+    }
+  }, [currentProject, apiService, handleFileSelect])
+
+  // Handle file deletion
+  const handleFileDelete = useCallback(async (file: File) => {
+    try {
+      await apiService.deleteFile(file.id)
+
+      // Close the file if it's open
+      setOpenFiles(prev => prev.filter(f => f.id !== file.id))
+      if (activeFile?.id === file.id) {
+        const remainingFiles = openFiles.filter(f => f.id !== file.id)
+        setActiveFile(remainingFiles[remainingFiles.length - 1] || null)
+      }
+
+      setTerminalOutput(prev => [...prev, `🗑️ Deleted: ${file.path}`])
+    } catch (error) {
+      console.error('Failed to delete file:', error)
+      setTerminalOutput(prev => [...prev, `❌ Failed to delete: ${error}`])
+    }
+  }, [apiService, activeFile, openFiles])
+
+  // Handle file rename
+  const handleFileRename = useCallback(async (file: File, newName: string) => {
+    try {
+      const pathParts = file.path.split('/')
+      pathParts[pathParts.length - 1] = newName
+      const newPath = pathParts.join('/')
+
+      await apiService.updateFile(file.id, {
+        name: newName,
+        path: newPath
+      })
+
+      // Update in open files
+      setOpenFiles(prev => prev.map(f =>
+        f.id === file.id ? { ...f, name: newName, path: newPath } : f
+      ))
+
+      if (activeFile?.id === file.id) {
+        setActiveFile({ ...activeFile, name: newName, path: newPath })
+      }
+
+      setTerminalOutput(prev => [...prev, `✏️ Renamed: ${file.name} → ${newName}`])
+    } catch (error) {
+      console.error('Failed to rename file:', error)
+      setTerminalOutput(prev => [...prev, `❌ Failed to rename: ${error}`])
+    }
+  }, [apiService, activeFile])
+
   // Terminal command execution
   const executeTerminalCommand = useCallback(async (command: string) => {
     setTerminalOutput(prev => [...prev, `$ ${command}`])
@@ -230,6 +303,9 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
           <FileTree
             projectId={currentProject?.id}
             onFileSelect={handleFileSelect}
+            onFileCreate={handleFileCreate}
+            onFileDelete={handleFileDelete}
+            onFileRename={handleFileRename}
             className="h-full border-0"
           />
         )

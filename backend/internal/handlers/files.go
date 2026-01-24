@@ -4,6 +4,7 @@
 package handlers
 
 import (
+	"archive/zip"
 	"net/http"
 	"strconv"
 
@@ -437,6 +438,96 @@ func (h *Handler) DeleteFile(c *gin.Context) {
 		Success: true,
 		Message: "File deleted successfully",
 	})
+}
+
+// DownloadProject exports all project files as a zip archive
+func (h *Handler) DownloadProject(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, StandardResponse{
+			Success: false,
+			Error:   "User not authenticated",
+			Code:    "NOT_AUTHENTICATED",
+		})
+		return
+	}
+
+	projectIDStr := c.Param("id")
+	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, StandardResponse{
+			Success: false,
+			Error:   "Invalid project ID",
+			Code:    "INVALID_PROJECT_ID",
+		})
+		return
+	}
+
+	// Verify user has access to the project
+	var project models.Project
+	result := h.DB.Where("id = ? AND (owner_id = ? OR is_public = ?)", uint(projectID), userID, true).
+		First(&project)
+
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, StandardResponse{
+				Success: false,
+				Error:   "Project not found or access denied",
+				Code:    "PROJECT_NOT_FOUND",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, StandardResponse{
+			Success: false,
+			Error:   "Database error",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Get all files for the project
+	var files []models.File
+	if err := h.DB.Where("project_id = ?", uint(projectID)).Find(&files).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, StandardResponse{
+			Success: false,
+			Error:   "Failed to fetch files",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Create zip archive in memory
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", "attachment; filename=\""+project.Name+".zip\"")
+
+	zipWriter := zip.NewWriter(c.Writer)
+	defer zipWriter.Close()
+
+	for _, file := range files {
+		// Skip directories, only include actual files
+		if file.Type == "directory" {
+			continue
+		}
+
+		// Remove leading slash from path for zip entry
+		path := file.Path
+		if len(path) > 0 && path[0] == '/' {
+			path = path[1:]
+		}
+
+		// Create file in zip
+		w, err := zipWriter.Create(path)
+		if err != nil {
+			// Log error but continue with other files
+			continue
+		}
+
+		// Write file content
+		if _, err := w.Write([]byte(file.Content)); err != nil {
+			continue
+		}
+	}
 }
 
 // getMimeType determines MIME type based on file extension

@@ -273,6 +273,7 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 				projects.POST("", server.CreateProject)
 				projects.GET("", server.GetProjects)
 				projects.GET("/:id", server.GetProject)
+				projects.GET("/:id/download", server.DownloadProject)
 
 				// File endpoints under projects
 				projects.POST("/:id/files", server.CreateFile)

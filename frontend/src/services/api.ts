@@ -406,6 +406,32 @@ export class ApiService {
     return response.data
   }
 
+  // Project export/download functionality
+  async downloadProjectAsZip(projectId: number): Promise<Blob> {
+    const response = await this.client.get(`/projects/${projectId}/download`, {
+      responseType: 'blob'
+    })
+    return response.data
+  }
+
+  // Download and save project as zip file
+  async exportProject(projectId: number, projectName: string): Promise<void> {
+    try {
+      const blob = await this.downloadProjectAsZip(projectId)
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${projectName.replace(/[^a-z0-9]/gi, '_')}.zip`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Failed to export project:', error)
+      throw error
+    }
+  }
+
   // Utility methods
   isAuthenticated(): boolean {
     const token = this.getAuthToken()

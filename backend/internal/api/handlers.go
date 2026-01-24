@@ -1,6 +1,7 @@
 package api
 
 import (
+	"archive/zip"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -495,6 +496,64 @@ func (s *Server) GetFiles(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"files": files,
 	})
+}
+
+// DownloadProject exports all project files as a zip archive
+func (s *Server) DownloadProject(c *gin.Context) {
+	projectID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	// Verify project access
+	var project models.Project
+	query := s.db.DB.Where("id = ?", projectID)
+	query = query.Where("owner_id = ? OR is_public = ?", userID, true)
+
+	if err := query.First(&project).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	// Get all files for the project
+	var files []models.File
+	if err := s.db.DB.Where("project_id = ?", projectID).Find(&files).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch files"})
+		return
+	}
+
+	// Create zip archive
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.zip\"", project.Name))
+
+	zipWriter := zip.NewWriter(c.Writer)
+	defer zipWriter.Close()
+
+	for _, file := range files {
+		// Skip directories
+		if file.Type == "directory" {
+			continue
+		}
+
+		// Remove leading slash from path
+		path := file.Path
+		if len(path) > 0 && path[0] == '/' {
+			path = path[1:]
+		}
+
+		// Create file entry in zip
+		w, err := zipWriter.Create(path)
+		if err != nil {
+			continue
+		}
+
+		// Write content
+		if _, err := w.Write([]byte(file.Content)); err != nil {
+			continue
+		}
+	}
 }
 
 // UpdateFile updates a file's content
