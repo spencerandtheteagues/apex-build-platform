@@ -76,7 +76,32 @@ type Task struct {
 	StartedAt    *time.Time        `json:"started_at,omitempty"`
 	CompletedAt  *time.Time        `json:"completed_at,omitempty"`
 	Error        string            `json:"error,omitempty"`
+
+	// Retry mechanism - persist until success
+	RetryCount    int            `json:"retry_count"`     // Number of attempts made
+	MaxRetries    int            `json:"max_retries"`     // Maximum retry attempts (default: 5)
+	ErrorHistory  []ErrorAttempt `json:"error_history,omitempty"` // History of errors for learning
+	RetryStrategy RetryStrategy  `json:"retry_strategy"`  // How to retry on failure
 }
+
+// ErrorAttempt tracks a failed attempt for learning
+type ErrorAttempt struct {
+	AttemptNumber int       `json:"attempt_number"`
+	Error         string    `json:"error"`
+	Timestamp     time.Time `json:"timestamp"`
+	Context       string    `json:"context,omitempty"` // What was tried
+	Analysis      string    `json:"analysis,omitempty"` // AI analysis of what went wrong
+}
+
+// RetryStrategy defines how to handle failures
+type RetryStrategy string
+
+const (
+	RetryImmediate  RetryStrategy = "immediate"   // Retry immediately with same approach
+	RetryWithFix    RetryStrategy = "with_fix"    // Analyze error and adjust approach
+	RetryDifferent  RetryStrategy = "different"   // Try a completely different approach
+	RetryEscalate   RetryStrategy = "escalate"    // Ask for human help
+)
 
 // TaskType categorizes the kind of work a task involves
 type TaskType string

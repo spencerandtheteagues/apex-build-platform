@@ -388,7 +388,7 @@ func (am *AgentManager) resultProcessor() {
 	}
 }
 
-// processResult handles a task result
+// processResult handles a task result with retry logic
 func (am *AgentManager) processResult(result *TaskResult) {
 	am.mu.RLock()
 	agent, agentExists := am.agents[result.AgentID]
@@ -400,48 +400,139 @@ func (am *AgentManager) processResult(result *TaskResult) {
 	}
 
 	agent.mu.Lock()
+	task := agent.CurrentTask
+
 	if result.Success {
 		agent.Status = StatusCompleted
-		if agent.CurrentTask != nil {
-			agent.CurrentTask.Status = TaskCompleted
+		if task != nil {
+			task.Status = TaskCompleted
 			now := time.Now()
-			agent.CurrentTask.CompletedAt = &now
-			agent.CurrentTask.Output = result.Output
+			task.CompletedAt = &now
+			task.Output = result.Output
+		}
+		agent.UpdatedAt = time.Now()
+		agent.mu.Unlock()
+
+		// Broadcast success
+		am.broadcast(agent.BuildID, &WSMessage{
+			Type:      WSAgentCompleted,
+			BuildID:   agent.BuildID,
+			AgentID:   agent.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"task_id": result.TaskID,
+				"success": true,
+				"output":  result.Output,
+			},
+		})
+
+		// Handle task completion - may trigger next tasks
+		if task != nil {
+			am.handleTaskCompletion(agent.BuildID, task, result.Output)
 		}
 	} else {
-		agent.Status = StatusError
-		agent.Error = result.Error.Error()
-		if agent.CurrentTask != nil {
-			agent.CurrentTask.Status = TaskFailed
-			agent.CurrentTask.Error = result.Error.Error()
+		// FAILURE HANDLING - Learn from error and retry
+		if task == nil {
+			agent.Status = StatusError
+			agent.Error = result.Error.Error()
+			agent.mu.Unlock()
+			return
 		}
-	}
-	agent.UpdatedAt = time.Now()
-	task := agent.CurrentTask
-	agent.mu.Unlock()
 
-	// Broadcast completion or error
-	msgType := WSAgentCompleted
-	if !result.Success {
-		msgType = WSAgentError
-	}
+		// Set default max retries if not set
+		if task.MaxRetries == 0 {
+			task.MaxRetries = 5 // Default: try up to 5 times
+		}
 
-	am.broadcast(agent.BuildID, &WSMessage{
-		Type:      msgType,
-		BuildID:   agent.BuildID,
-		AgentID:   agent.ID,
-		Timestamp: time.Now(),
-		Data: map[string]any{
-			"task_id": result.TaskID,
-			"success": result.Success,
-			"output":  result.Output,
-			"error":   getErrorString(result.Error),
-		},
-	})
+		// Track the error for learning
+		errorAttempt := ErrorAttempt{
+			AttemptNumber: task.RetryCount + 1,
+			Error:         result.Error.Error(),
+			Timestamp:     time.Now(),
+			Context:       fmt.Sprintf("Attempt %d of %d", task.RetryCount+1, task.MaxRetries),
+		}
+		task.ErrorHistory = append(task.ErrorHistory, errorAttempt)
+		task.RetryCount++
 
-	// Handle task completion - may trigger next tasks
-	if result.Success && task != nil {
-		am.handleTaskCompletion(agent.BuildID, task, result.Output)
+		// Check if we should retry
+		if task.RetryCount < task.MaxRetries {
+			// Analyze error and prepare for retry
+			log.Printf("Task %s failed (attempt %d/%d): %v. Retrying...",
+				task.ID, task.RetryCount, task.MaxRetries, result.Error)
+
+			// Set status back to pending for retry
+			task.Status = TaskPending
+			task.Error = "" // Clear error for retry
+			task.RetryStrategy = RetryWithFix // Use learning-based retry
+
+			agent.Status = StatusWorking
+			agent.Error = ""
+			agent.UpdatedAt = time.Now()
+			agent.mu.Unlock()
+
+			// Broadcast retry attempt
+			am.broadcast(agent.BuildID, &WSMessage{
+				Type:      "agent:retrying",
+				BuildID:   agent.BuildID,
+				AgentID:   agent.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"task_id":       result.TaskID,
+					"attempt":       task.RetryCount,
+					"max_retries":   task.MaxRetries,
+					"error":         result.Error.Error(),
+					"error_history": task.ErrorHistory,
+					"message":       fmt.Sprintf("Learning from error, retrying (%d/%d)...", task.RetryCount, task.MaxRetries),
+				},
+			})
+
+			// Broadcast thinking about the error
+			am.broadcast(agent.BuildID, &WSMessage{
+				Type:      "agent:thinking",
+				BuildID:   agent.BuildID,
+				AgentID:   agent.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"agent_role": agent.Role,
+					"provider":   agent.Provider,
+					"content":    fmt.Sprintf("Analyzing error: %s. Adjusting approach for retry attempt %d...", result.Error.Error(), task.RetryCount+1),
+				},
+			})
+
+			// Re-queue the task with error context for learning
+			task.Input["previous_errors"] = task.ErrorHistory
+			task.Input["retry_guidance"] = "Previous attempt failed. Analyze the error and try a different approach."
+
+			// Put task back in queue
+			am.taskQueue <- task
+		} else {
+			// Max retries exceeded - mark as failed
+			log.Printf("Task %s failed after %d attempts. Giving up.", task.ID, task.RetryCount)
+
+			agent.Status = StatusError
+			agent.Error = fmt.Sprintf("Failed after %d attempts: %s", task.RetryCount, result.Error.Error())
+			task.Status = TaskFailed
+			task.Error = agent.Error
+			agent.UpdatedAt = time.Now()
+			agent.mu.Unlock()
+
+			// Broadcast final failure
+			am.broadcast(agent.BuildID, &WSMessage{
+				Type:      WSAgentError,
+				BuildID:   agent.BuildID,
+				AgentID:   agent.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"task_id":       result.TaskID,
+					"success":       false,
+					"error":         agent.Error,
+					"error_history": task.ErrorHistory,
+					"attempts":      task.RetryCount,
+					"max_retries":   task.MaxRetries,
+					"message":       "Task failed after multiple retry attempts. Consider breaking down the task or providing more guidance.",
+				},
+			})
+		}
 	}
 }
 
