@@ -258,6 +258,9 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 			auth.POST("/logout", server.Logout)
 		}
 
+		// Public pricing endpoint (no auth required)
+		v1.GET("/pricing", server.GetPricingInfo)
+
 		// Protected routes (authentication required)
 		protected := v1.Group("/")
 		protected.Use(server.AuthMiddleware())
@@ -296,6 +299,18 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 				user.GET("/profile", server.GetUserProfile)
 				user.PUT("/profile", server.UpdateUserProfile)
 			}
+
+			// Credits and billing endpoints
+			credits := protected.Group("/credits")
+			{
+				credits.GET("", server.GetUserCredits)
+				credits.POST("/purchase", server.PurchaseCredits)
+				credits.POST("/deduct", server.DeductCredits)
+			}
+
+			// Build tracking endpoints
+			protected.POST("/build/record", server.RecordBuild)
+			protected.POST("/download/record", server.RecordDownload)
 
 			// Build/Agent endpoints (the core of APEX.BUILD)
 			buildHandler.RegisterRoutes(protected)

@@ -668,6 +668,293 @@ func (s *Server) UpdateFile(c *gin.Context) {
 	})
 }
 
+// Credits and Billing endpoints
+
+// GetUserCredits returns the current user's credit balance and usage info
+func (s *Server) GetUserCredits(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	var user models.User
+	if err := s.db.DB.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"credits":           user.Credits,
+		"lifetime_credits":  user.LifetimeCredits,
+		"free_builds_used":  user.FreeBuildsUsed,
+		"free_builds_limit": user.FreeBuildsLimit,
+		"total_builds":      user.TotalBuilds,
+		"total_downloads":   user.TotalDownloads,
+		"subscription_type": user.SubscriptionType,
+		"is_admin":          user.IsAdmin,
+		"can_build":         user.CanBuild(),
+		"can_download":      user.CanDownload(),
+		"is_unlimited":      user.IsUnlimited(),
+	})
+}
+
+// PurchaseCredits handles credit purchases (simulated for now)
+func (s *Server) PurchaseCredits(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	var req struct {
+		Amount int `json:"amount" binding:"required,min=10"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: minimum 10 credits"})
+		return
+	}
+
+	var user models.User
+	if err := s.db.DB.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Add credits to user account
+	user.Credits += req.Amount
+	user.LifetimeCredits += req.Amount
+
+	if err := s.db.DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update credits"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":          "Credits purchased successfully",
+		"credits_added":    req.Amount,
+		"new_balance":      user.Credits,
+		"lifetime_credits": user.LifetimeCredits,
+	})
+}
+
+// DeductCredits deducts credits for an action (internal use)
+func (s *Server) DeductCredits(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	var req struct {
+		Amount int    `json:"amount" binding:"required,min=1"`
+		Reason string `json:"reason" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var user models.User
+	if err := s.db.DB.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Admin users don't need credits
+	if user.IsUnlimited() {
+		c.JSON(http.StatusOK, gin.H{
+			"message":     "Action completed (unlimited user)",
+			"deducted":    0,
+			"new_balance": user.Credits,
+		})
+		return
+	}
+
+	// Check if user has enough credits
+	if !user.DeductCredits(req.Amount) {
+		c.JSON(http.StatusPaymentRequired, gin.H{
+			"error":           "Insufficient credits",
+			"required":        req.Amount,
+			"current_balance": user.Credits,
+		})
+		return
+	}
+
+	if err := s.db.DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to deduct credits"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":     fmt.Sprintf("Credits deducted for: %s", req.Reason),
+		"deducted":    req.Amount,
+		"new_balance": user.Credits,
+	})
+}
+
+// GetPricingInfo returns the pricing structure
+func (s *Server) GetPricingInfo(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"pricing": gin.H{
+			"free_tier": gin.H{
+				"price":            0,
+				"builds_per_month": 3,
+				"downloads":        "credits_required",
+				"features":         []string{"Basic app building", "View generated code", "Live preview"},
+			},
+			"pro_tier": gin.H{
+				"price":            18, // 10% cheaper than Replit's $20
+				"builds_per_month": 50,
+				"downloads":        "included",
+				"features":         []string{"50 builds/month", "Unlimited downloads", "Priority AI processing", "Version history", "Deploy integrations"},
+			},
+			"team_tier": gin.H{
+				"price":            45, // 10% cheaper than Replit's $50
+				"builds_per_month": 200,
+				"downloads":        "included",
+				"features":         []string{"200 builds/month", "Team collaboration", "Shared projects", "Admin dashboard", "Priority support"},
+			},
+		},
+		"credits": gin.H{
+			"price_per_100":    9, // $9 per 100 credits (10% cheaper than Replit)
+			"download_cost":    5, // 5 credits per ZIP download
+			"build_cost":       10, // 10 credits per build (after free tier)
+			"complex_build":    25, // 25 credits for complex/full builds
+		},
+	})
+}
+
+// RecordBuild records a build and deducts credits if necessary
+func (s *Server) RecordBuild(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	var req struct {
+		BuildType string `json:"build_type"` // "fast" or "full"
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		req.BuildType = "fast"
+	}
+
+	var user models.User
+	if err := s.db.DB.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Check if user can build
+	if !user.CanBuild() {
+		c.JSON(http.StatusPaymentRequired, gin.H{
+			"error":            "Build limit reached",
+			"free_builds_used": user.FreeBuildsUsed,
+			"free_builds_limit": user.FreeBuildsLimit,
+			"credits":          user.Credits,
+			"message":          "Please purchase credits or upgrade to Pro to continue building",
+		})
+		return
+	}
+
+	// Determine credit cost
+	creditCost := 0
+	if !user.IsUnlimited() {
+		if user.SubscriptionType == "free" {
+			if user.FreeBuildsUsed < user.FreeBuildsLimit {
+				// Use free build
+				user.FreeBuildsUsed++
+			} else {
+				// Charge credits
+				creditCost = 10
+				if req.BuildType == "full" {
+					creditCost = 25
+				}
+				if !user.DeductCredits(creditCost) {
+					c.JSON(http.StatusPaymentRequired, gin.H{
+						"error":    "Insufficient credits",
+						"required": creditCost,
+						"balance":  user.Credits,
+					})
+					return
+				}
+			}
+		}
+	}
+
+	user.TotalBuilds++
+
+	if err := s.db.DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to record build"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":           "Build recorded",
+		"credits_deducted":  creditCost,
+		"credits_remaining": user.Credits,
+		"total_builds":      user.TotalBuilds,
+		"free_builds_used":  user.FreeBuildsUsed,
+		"free_builds_limit": user.FreeBuildsLimit,
+	})
+}
+
+// RecordDownload records a download and deducts credits if necessary
+func (s *Server) RecordDownload(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	var user models.User
+	if err := s.db.DB.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Check if user can download
+	if !user.CanDownload() {
+		c.JSON(http.StatusPaymentRequired, gin.H{
+			"error":    "Download requires credits",
+			"required": 5,
+			"balance":  user.Credits,
+			"message":  "Please purchase credits or upgrade to Pro to download",
+		})
+		return
+	}
+
+	// Deduct credits for download (5 credits)
+	creditCost := 5
+	if !user.IsUnlimited() && user.SubscriptionType == "free" {
+		if !user.DeductCredits(creditCost) {
+			c.JSON(http.StatusPaymentRequired, gin.H{
+				"error":    "Insufficient credits",
+				"required": creditCost,
+				"balance":  user.Credits,
+			})
+			return
+		}
+	} else {
+		creditCost = 0
+	}
+
+	user.TotalDownloads++
+
+	if err := s.db.DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to record download"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":           "Download authorized",
+		"credits_deducted":  creditCost,
+		"credits_remaining": user.Credits,
+		"total_downloads":   user.TotalDownloads,
+	})
+}
+
 // Middleware
 
 // AuthMiddleware validates JWT tokens
