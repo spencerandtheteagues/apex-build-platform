@@ -341,3 +341,59 @@ type UserCollabRoom struct {
 	Role        string    `json:"role" gorm:"default:'member'"` // owner, admin, member, viewer
 	IsActive    bool      `json:"is_active" gorm:"default:true"`
 }
+
+// Secret represents an environment variable or secret for a project
+type Secret struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	ProjectID uint    `json:"project_id" gorm:"not null"`
+	Project   Project `json:"project" gorm:"foreignKey:ProjectID"`
+	UserID    uint    `json:"user_id" gorm:"not null"`
+	User      User    `json:"user" gorm:"foreignKey:UserID"`
+
+	Name        string `json:"name" gorm:"not null"`
+	Value       string `json:"-" gorm:"not null"` // Never expose in JSON
+	Description string `json:"description"`
+	IsEncrypted bool   `json:"is_encrypted" gorm:"default:true"`
+}
+
+// ProjectVersion represents a version/checkpoint of a project
+type ProjectVersion struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	ProjectID   uint    `json:"project_id" gorm:"not null"`
+	Project     Project `json:"project" gorm:"foreignKey:ProjectID"`
+	UserID      uint    `json:"user_id" gorm:"not null"`
+	User        User    `json:"user" gorm:"foreignKey:UserID"`
+
+	Version     int    `json:"version" gorm:"not null"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Snapshot    string `json:"snapshot" gorm:"type:text"` // JSON snapshot of all files
+	IsAutoSave  bool   `json:"is_auto_save" gorm:"default:false"`
+}
+
+// ClonedRepo represents a cloned repository
+type ClonedRepo struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	ProjectID uint    `json:"project_id" gorm:"not null"`
+	Project   Project `json:"project" gorm:"foreignKey:ProjectID"`
+	UserID    uint    `json:"user_id" gorm:"not null"`
+	User      User    `json:"user" gorm:"foreignKey:UserID"`
+
+	RepoURL     string `json:"repo_url" gorm:"not null"`
+	Branch      string `json:"branch" gorm:"default:'main'"`
+	CommitHash  string `json:"commit_hash"`
+	ClonedAt    time.Time `json:"cloned_at"`
+	LastSynced  time.Time `json:"last_synced"`
+	ProjectType string `json:"project_type"` // react, vue, next, node, python, go, etc.
+}

@@ -312,6 +312,19 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 			protected.POST("/build/record", server.RecordBuild)
 			protected.POST("/download/record", server.RecordDownload)
 
+			// Secret management endpoints
+			protected.POST("/projects/:projectId/secrets", server.CreateSecret)
+			protected.GET("/projects/:projectId/secrets", server.GetSecrets)
+			protected.DELETE("/secrets/:id", server.DeleteSecret)
+
+			// Version history endpoints
+			protected.POST("/projects/:projectId/versions", server.CreateVersion)
+			protected.GET("/projects/:projectId/versions", server.GetVersions)
+			protected.GET("/versions/:id", server.GetVersion)
+
+			// Repository cloning endpoint
+			protected.POST("/clone", server.CloneRepository)
+
 			// Build/Agent endpoints (the core of APEX.BUILD)
 			buildHandler.RegisterRoutes(protected)
 		}

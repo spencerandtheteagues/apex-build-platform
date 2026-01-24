@@ -955,6 +955,324 @@ func (s *Server) RecordDownload(c *gin.Context) {
 	})
 }
 
+// Secret Management endpoints
+
+// CreateSecret creates a new secret/env variable for a project
+func (s *Server) CreateSecret(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	projectID, err := strconv.ParseUint(c.Param("projectId"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	var req struct {
+		Name        string `json:"name" binding:"required"`
+		Value       string `json:"value" binding:"required"`
+		Description string `json:"description"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	secret := &models.Secret{
+		ProjectID:   uint(projectID),
+		UserID:      userID.(uint),
+		Name:        req.Name,
+		Value:       req.Value,
+		Description: req.Description,
+		IsEncrypted: true,
+	}
+
+	if err := s.db.DB.Create(secret).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create secret"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Secret created successfully",
+		"secret": gin.H{
+			"id":          secret.ID,
+			"name":        secret.Name,
+			"description": secret.Description,
+			"created_at":  secret.CreatedAt,
+		},
+	})
+}
+
+// GetSecrets returns all secrets for a project (names only, not values)
+func (s *Server) GetSecrets(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	projectID, err := strconv.ParseUint(c.Param("projectId"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	var secrets []models.Secret
+	if err := s.db.DB.Where("project_id = ? AND user_id = ?", projectID, userID).Find(&secrets).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch secrets"})
+		return
+	}
+
+	// Return only names and descriptions, never values
+	result := make([]gin.H, len(secrets))
+	for i, secret := range secrets {
+		result[i] = gin.H{
+			"id":          secret.ID,
+			"name":        secret.Name,
+			"description": secret.Description,
+			"created_at":  secret.CreatedAt,
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"secrets": result})
+}
+
+// DeleteSecret deletes a secret
+func (s *Server) DeleteSecret(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	secretID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid secret ID"})
+		return
+	}
+
+	result := s.db.DB.Where("id = ? AND user_id = ?", secretID, userID).Delete(&models.Secret{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete secret"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Secret deleted successfully"})
+}
+
+// Version History endpoints
+
+// CreateVersion creates a new version/checkpoint for a project
+func (s *Server) CreateVersion(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	projectID, err := strconv.ParseUint(c.Param("projectId"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	var req struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Snapshot    string `json:"snapshot" binding:"required"`
+		IsAutoSave  bool   `json:"is_auto_save"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get the next version number
+	var lastVersion models.ProjectVersion
+	var versionNum int = 1
+	if err := s.db.DB.Where("project_id = ?", projectID).Order("version desc").First(&lastVersion).Error; err == nil {
+		versionNum = lastVersion.Version + 1
+	}
+
+	version := &models.ProjectVersion{
+		ProjectID:   uint(projectID),
+		UserID:      userID.(uint),
+		Version:     versionNum,
+		Name:        req.Name,
+		Description: req.Description,
+		Snapshot:    req.Snapshot,
+		IsAutoSave:  req.IsAutoSave,
+	}
+
+	if err := s.db.DB.Create(version).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create version"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Version created successfully",
+		"version": gin.H{
+			"id":          version.ID,
+			"version":     version.Version,
+			"name":        version.Name,
+			"description": version.Description,
+			"created_at":  version.CreatedAt,
+			"is_auto_save": version.IsAutoSave,
+		},
+	})
+}
+
+// GetVersions returns all versions for a project
+func (s *Server) GetVersions(c *gin.Context) {
+	projectID, err := strconv.ParseUint(c.Param("projectId"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	var versions []models.ProjectVersion
+	if err := s.db.DB.Where("project_id = ?", projectID).Order("version desc").Find(&versions).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch versions"})
+		return
+	}
+
+	result := make([]gin.H, len(versions))
+	for i, v := range versions {
+		result[i] = gin.H{
+			"id":          v.ID,
+			"version":     v.Version,
+			"name":        v.Name,
+			"description": v.Description,
+			"created_at":  v.CreatedAt,
+			"is_auto_save": v.IsAutoSave,
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"versions": result})
+}
+
+// GetVersion returns a specific version with its snapshot
+func (s *Server) GetVersion(c *gin.Context) {
+	versionID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid version ID"})
+		return
+	}
+
+	var version models.ProjectVersion
+	if err := s.db.DB.First(&version, versionID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Version not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"version": gin.H{
+			"id":          version.ID,
+			"version":     version.Version,
+			"name":        version.Name,
+			"description": version.Description,
+			"snapshot":    version.Snapshot,
+			"created_at":  version.CreatedAt,
+			"is_auto_save": version.IsAutoSave,
+		},
+	})
+}
+
+// Repository Cloning endpoints
+
+// CloneRepository clones a GitHub repository
+func (s *Server) CloneRepository(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	var req struct {
+		RepoURL string `json:"repo_url" binding:"required"`
+		Branch  string `json:"branch"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.Branch == "" {
+		req.Branch = "main"
+	}
+
+	// Detect project type from repo URL
+	projectType := detectProjectType(req.RepoURL)
+
+	// Create a new project for the cloned repo
+	project := &models.Project{
+		Name:        extractRepoName(req.RepoURL),
+		Description: fmt.Sprintf("Cloned from %s", req.RepoURL),
+		Language:    projectType,
+		OwnerID:     userID.(uint),
+	}
+
+	if err := s.db.DB.Create(project).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create project"})
+		return
+	}
+
+	// Record the cloned repo
+	clonedRepo := &models.ClonedRepo{
+		ProjectID:   project.ID,
+		UserID:      userID.(uint),
+		RepoURL:     req.RepoURL,
+		Branch:      req.Branch,
+		ProjectType: projectType,
+	}
+
+	if err := s.db.DB.Create(clonedRepo).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to record cloned repo"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message":      "Repository clone initiated",
+		"project_id":   project.ID,
+		"project_name": project.Name,
+		"repo_url":     req.RepoURL,
+		"branch":       req.Branch,
+		"project_type": projectType,
+	})
+}
+
+// Helper functions for repo cloning
+func detectProjectType(repoURL string) string {
+	// Simple detection based on common patterns
+	url := strings.ToLower(repoURL)
+	if strings.Contains(url, "react") || strings.Contains(url, "next") {
+		return "react"
+	}
+	if strings.Contains(url, "vue") {
+		return "vue"
+	}
+	if strings.Contains(url, "go") || strings.Contains(url, "golang") {
+		return "go"
+	}
+	if strings.Contains(url, "python") || strings.Contains(url, "django") || strings.Contains(url, "flask") {
+		return "python"
+	}
+	return "unknown"
+}
+
+func extractRepoName(repoURL string) string {
+	parts := strings.Split(repoURL, "/")
+	if len(parts) > 0 {
+		name := parts[len(parts)-1]
+		name = strings.TrimSuffix(name, ".git")
+		return name
+	}
+	return "cloned-project"
+}
+
 // Middleware
 
 // AuthMiddleware validates JWT tokens
