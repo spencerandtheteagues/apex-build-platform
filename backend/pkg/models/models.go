@@ -23,14 +23,23 @@ type User struct {
 	// Account status
 	IsActive   bool `json:"is_active" gorm:"default:true"`
 	IsVerified bool `json:"is_verified" gorm:"default:false"`
+	IsAdmin    bool `json:"is_admin" gorm:"default:false"` // Admin users have unlimited access
 
 	// Subscription and billing
-	SubscriptionType string    `json:"subscription_type" gorm:"default:'free'"` // free, pro, team
+	SubscriptionType string    `json:"subscription_type" gorm:"default:'free'"` // free, pro, team, admin
 	SubscriptionEnd  time.Time `json:"subscription_end"`
+
+	// Credits system (for pay-per-use features)
+	Credits          int     `json:"credits" gorm:"default:0"`           // Available credits
+	LifetimeCredits  int     `json:"lifetime_credits" gorm:"default:0"`  // Total credits ever purchased
+	FreeBuildsUsed   int     `json:"free_builds_used" gorm:"default:0"`  // Free builds used this month
+	FreeBuildsLimit  int     `json:"free_builds_limit" gorm:"default:3"` // Free builds allowed per month
 
 	// Usage tracking for AI services
 	MonthlyAIRequests int     `json:"monthly_ai_requests" gorm:"default:0"`
 	MonthlyAICost     float64 `json:"monthly_ai_cost" gorm:"default:0.0"`
+	TotalBuilds       int     `json:"total_builds" gorm:"default:0"`      // Total apps built
+	TotalDownloads    int     `json:"total_downloads" gorm:"default:0"`   // Total ZIP downloads
 
 	// Preferences
 	PreferredTheme string `json:"preferred_theme" gorm:"default:'cyberpunk'"` // cyberpunk, matrix, synthwave, neonCity
@@ -41,6 +50,47 @@ type User struct {
 	Sessions    []Session    `json:"sessions" gorm:"foreignKey:UserID"`
 	AIRequests  []AIRequest  `json:"ai_requests" gorm:"foreignKey:UserID"`
 	CollabRooms []CollabRoom `json:"collab_rooms" gorm:"many2many:user_collab_rooms;"`
+}
+
+// IsUnlimited returns true if user has unlimited access (admin or special subscription)
+func (u *User) IsUnlimited() bool {
+	return u.IsAdmin || u.SubscriptionType == "admin"
+}
+
+// CanBuild returns true if user can start a new build
+func (u *User) CanBuild() bool {
+	if u.IsUnlimited() {
+		return true
+	}
+	if u.SubscriptionType == "pro" || u.SubscriptionType == "team" {
+		return true // Pro/Team users can build (within their limits)
+	}
+	// Free users: check if they have free builds left or credits
+	return u.FreeBuildsUsed < u.FreeBuildsLimit || u.Credits > 0
+}
+
+// CanDownload returns true if user can download ZIP files
+func (u *User) CanDownload() bool {
+	if u.IsUnlimited() {
+		return true
+	}
+	if u.SubscriptionType == "pro" || u.SubscriptionType == "team" {
+		return true
+	}
+	// Free users need credits to download
+	return u.Credits >= 5 // 5 credits per download
+}
+
+// DeductCredits deducts credits from user account
+func (u *User) DeductCredits(amount int) bool {
+	if u.IsUnlimited() {
+		return true // No deduction for unlimited users
+	}
+	if u.Credits >= amount {
+		u.Credits -= amount
+		return true
+	}
+	return false
 }
 
 // Project represents a coding project

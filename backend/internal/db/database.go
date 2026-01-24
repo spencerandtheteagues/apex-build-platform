@@ -7,6 +7,7 @@ import (
 
 	"apex-build/pkg/models"
 
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -99,6 +100,59 @@ func (d *Database) Migrate() error {
 	}
 
 	log.Println("✅ Database migrations completed successfully")
+
+	// Create admin account if it doesn't exist
+	if err := d.createAdminAccount(); err != nil {
+		log.Printf("⚠️ Warning: Could not create admin account: %v", err)
+	}
+
+	return nil
+}
+
+// createAdminAccount creates the admin account if it doesn't exist
+func (d *Database) createAdminAccount() error {
+	adminEmail := "spencerandtheteagues@gmail.com"
+	adminPassword := "The$t@r$h1pKey!"
+
+	// Check if admin already exists
+	var existingUser models.User
+	result := d.DB.Where("email = ?", adminEmail).First(&existingUser)
+	if result.Error == nil {
+		// Admin exists, ensure they have admin privileges
+		if !existingUser.IsAdmin {
+			existingUser.IsAdmin = true
+			existingUser.SubscriptionType = "admin"
+			d.DB.Save(&existingUser)
+			log.Println("✅ Updated existing user to admin status")
+		}
+		return nil
+	}
+
+	// Hash the password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash admin password: %w", err)
+	}
+
+	// Create admin user
+	adminUser := &models.User{
+		Username:         adminEmail,
+		Email:            adminEmail,
+		PasswordHash:     string(hashedPassword),
+		FullName:         "Spencer Allen Teague",
+		IsActive:         true,
+		IsVerified:       true,
+		IsAdmin:          true,
+		SubscriptionType: "admin",
+		Credits:          999999999, // Unlimited credits
+		FreeBuildsLimit:  999999999, // Unlimited builds
+	}
+
+	if err := d.DB.Create(adminUser).Error; err != nil {
+		return fmt.Errorf("failed to create admin user: %w", err)
+	}
+
+	log.Println("✅ Admin account created successfully: " + adminEmail)
 	return nil
 }
 
