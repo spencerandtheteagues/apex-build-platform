@@ -125,10 +125,10 @@ User Agent: ${navigator.userAgent}
       // Default cyberpunk error UI
       return (
         <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-red-950 flex items-center justify-center p-4">
-          {/* Background effects */}
-          <div className="absolute inset-0 overflow-hidden pointer-events-none">
-            <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-red-500/10 rounded-full blur-3xl animate-pulse" />
-            <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-orange-500/10 rounded-full blur-3xl animate-pulse" />
+          {/* Background effects - simplified for performance */}
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-red-500/5 rounded-full" />
+            <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-orange-500/5 rounded-full" />
           </div>
 
           <Card variant="cyberpunk" className="w-full max-w-2xl relative z-10 border-red-500/50">

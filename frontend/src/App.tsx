@@ -126,11 +126,10 @@ function App() {
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-cyan-950 flex items-center justify-center p-4">
-        {/* Background effects */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl" />
-          <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-pink-500/10 rounded-full blur-3xl" />
-          <div className="absolute top-1/2 left-1/2 w-32 h-32 bg-green-400/10 rounded-full blur-2xl transform -translate-x-1/2 -translate-y-1/2" />
+        {/* Background effects - simplified for performance */}
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-cyan-500/5 rounded-full" />
+          <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-pink-500/5 rounded-full" />
         </div>
 
         <Card variant="cyberpunk" glow="intense" className="w-full max-w-md relative z-10">
@@ -273,7 +272,7 @@ function App() {
 
   // Main application with view switching
   return (
-    <div className="h-screen overflow-hidden bg-black">
+    <div className="h-screen flex flex-col bg-black">
       {/* Top Navigation */}
       <div className="h-12 bg-black/90 border-b border-cyan-500/20 flex items-center justify-between px-4 z-50 relative">
         {/* Logo */}
@@ -327,7 +326,7 @@ function App() {
       </div>
 
       {/* Main Content */}
-      <div className="h-[calc(100vh-48px)]">
+      <div className="flex-1 overflow-hidden">
         {currentView === 'builder' ? (
           <AppBuilder />
         ) : (

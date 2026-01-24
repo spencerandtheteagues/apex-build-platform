@@ -104,6 +104,9 @@ export const AppBuilder: React.FC = () => {
   const [buildState, setBuildState] = useState<BuildState | null>(null)
   const [isBuilding, setIsBuilding] = useState(false)
   const [showChat, setShowChat] = useState(true)
+  const [showPreview, setShowPreview] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [generatedFiles, setGeneratedFiles] = useState<Array<{ path: string; content: string; language: string }>>([])
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
@@ -213,6 +216,12 @@ export const AppBuilder: React.FC = () => {
 
       case 'file:created':
         addSystemMessage(`Created: ${data.path}`)
+        // Track generated files for preview
+        setGeneratedFiles(prev => [...prev, {
+          path: data.path,
+          content: data.content || '',
+          language: data.language || 'text'
+        }])
         break
 
       case 'build:checkpoint':
@@ -235,6 +244,10 @@ export const AppBuilder: React.FC = () => {
         setIsBuilding(false)
         addSystemMessage('Build completed successfully!')
         setBuildState(prev => prev ? { ...prev, status: 'completed', progress: 100 } : null)
+        // Set preview URL if provided by backend
+        if (data.preview_url) {
+          setPreviewUrl(data.preview_url)
+        }
         break
 
       case 'lead:response':
@@ -348,17 +361,13 @@ export const AppBuilder: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      {/* Animated background */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-cyan-900/20 via-black to-black" />
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-cyan-500/5 rounded-full blur-3xl animate-pulse" />
-        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-pink-500/5 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
-
-        {/* Circuit pattern overlay */}
-        <div className="absolute inset-0 opacity-5" style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%2300FFFF' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
-        }} />
+    <div className="h-full overflow-y-auto bg-black text-white">
+      {/* Simplified background - removed heavy blur effects for performance */}
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute inset-0 bg-gradient-to-b from-cyan-900/10 via-black to-black" />
+        {/* Static gradient accents instead of animated blur */}
+        <div className="absolute top-0 left-1/4 w-64 h-64 bg-cyan-500/3 rounded-full" />
+        <div className="absolute bottom-0 right-1/4 w-64 h-64 bg-pink-500/3 rounded-full" />
       </div>
 
       <div className="relative z-10 max-w-7xl mx-auto px-4 py-8">
@@ -369,7 +378,8 @@ export const AppBuilder: React.FC = () => {
               <div className="w-16 h-16 bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-cyan-500/30">
                 <Rocket className="w-8 h-8 text-white" />
               </div>
-              <div className="absolute -inset-1 bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-600 rounded-2xl blur-lg opacity-50 animate-pulse" />
+              {/* Simplified glow effect for performance */}
+              <div className="absolute -inset-1 bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-600 rounded-2xl opacity-30" style={{ filter: 'blur(8px)' }} />
             </div>
           </div>
           <h1 className="text-4xl font-bold bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent mb-2">
@@ -720,31 +730,101 @@ For example:
                 </CardContent>
               </Card>
 
-              {/* Actions */}
+              {/* Actions and Preview */}
               {buildState.status === 'completed' && (
-                <Card variant="cyberpunk" className="border border-green-500/30 bg-green-500/5">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <CheckCircle2 className="w-8 h-8 text-green-400" />
-                        <div>
-                          <h3 className="font-bold text-white">Build Complete!</h3>
-                          <p className="text-sm text-gray-400">Your app is ready to preview</p>
+                <>
+                  <Card variant="cyberpunk" className="border border-green-500/30 bg-green-500/5">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <CheckCircle2 className="w-8 h-8 text-green-400" />
+                          <div>
+                            <h3 className="font-bold text-white">Build Complete!</h3>
+                            <p className="text-sm text-gray-400">
+                              {generatedFiles.length} files generated
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            className={cn(
+                              "border-cyan-500 text-cyan-400",
+                              showPreview && "bg-cyan-500/20"
+                            )}
+                            onClick={() => setShowPreview(!showPreview)}
+                          >
+                            <Eye className="w-4 h-4 mr-2" />
+                            {showPreview ? 'Hide Preview' : 'Show Preview'}
+                          </Button>
+                          <Button className="bg-green-500 hover:bg-green-400">
+                            <ExternalLink className="w-4 h-4 mr-2" />
+                            Open in IDE
+                          </Button>
                         </div>
                       </div>
-                      <div className="flex gap-2">
-                        <Button variant="outline" className="border-cyan-500 text-cyan-400">
-                          <Eye className="w-4 h-4 mr-2" />
-                          Preview
-                        </Button>
-                        <Button className="bg-green-500 hover:bg-green-400">
-                          <ExternalLink className="w-4 h-4 mr-2" />
-                          Open in IDE
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+
+                  {/* Live Preview Panel */}
+                  {showPreview && (
+                    <Card variant="cyberpunk" className="border border-cyan-500/30">
+                      <CardHeader className="pb-2 border-b border-gray-800">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <Eye className="w-5 h-5 text-cyan-400" />
+                            Live Preview
+                          </CardTitle>
+                          {previewUrl && (
+                            <a
+                              href={previewUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              Open in new tab
+                            </a>
+                          )}
+                        </div>
+                      </CardHeader>
+                      <CardContent className="p-0">
+                        {previewUrl ? (
+                          <iframe
+                            src={previewUrl}
+                            className="w-full h-[500px] bg-white rounded-b-lg"
+                            title="App Preview"
+                            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                          />
+                        ) : (
+                          <div className="h-[500px] flex flex-col items-center justify-center bg-gray-900/50 rounded-b-lg">
+                            <FileCode className="w-12 h-12 text-gray-600 mb-4" />
+                            <p className="text-gray-400 text-center mb-2">
+                              Preview not available yet
+                            </p>
+                            <p className="text-gray-500 text-sm text-center max-w-md">
+                              The generated app needs to be deployed to view.
+                              Click "Open in IDE" to view the code and run it locally.
+                            </p>
+                            {generatedFiles.length > 0 && (
+                              <div className="mt-4 p-4 bg-gray-800/50 rounded-lg max-w-md w-full">
+                                <p className="text-xs text-gray-400 mb-2">Generated files:</p>
+                                <div className="space-y-1 max-h-32 overflow-y-auto">
+                                  {generatedFiles.map((file, idx) => (
+                                    <div key={idx} className="flex items-center gap-2 text-xs">
+                                      <FileCode className="w-3 h-3 text-cyan-400" />
+                                      <span className="text-gray-300 truncate">{file.path}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+                </>
               )}
             </div>
           </div>
