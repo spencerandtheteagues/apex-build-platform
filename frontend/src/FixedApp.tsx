@@ -348,6 +348,9 @@ const InlineAppBuilder: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [showPreview, setShowPreview] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [buildPhase, setBuildPhase] = useState<string>('initializing');
+  const [showFileManager, setShowFileManager] = useState(false);
+  const [fileContents, setFileContents] = useState<Record<string, string>>({});
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['src', 'backend']));
   const chatEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
@@ -766,6 +769,188 @@ const InlineAppBuilder: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     }, 1500);
   };
 
+  // File Manager helper functions
+  const getFileIcon = (filename: string): string => {
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    const icons: Record<string, string> = {
+      'tsx': '⚛️', 'ts': '📘', 'jsx': '⚛️', 'js': '📒',
+      'go': '🐹', 'py': '🐍', 'rs': '🦀', 'java': '☕',
+      'css': '🎨', 'scss': '🎨', 'html': '🌐', 'json': '📋',
+      'md': '📝', 'yaml': '⚙️', 'yml': '⚙️', 'toml': '⚙️',
+      'sql': '🗃️', 'graphql': '◈', 'proto': '📡',
+      'test': '🧪', 'spec': '🧪', 'dockerfile': '🐳'
+    };
+    if (filename.includes('.test.') || filename.includes('.spec.')) return '🧪';
+    if (filename.toLowerCase() === 'dockerfile') return '🐳';
+    return icons[ext] || '📄';
+  };
+
+  const getFileTree = () => {
+    const tree: Record<string, string[]> = {};
+    generatedFiles.forEach(file => {
+      const parts = file.path.split('/');
+      if (parts.length > 1) {
+        const folder = parts.slice(0, -1).join('/');
+        if (!tree[folder]) tree[folder] = [];
+        tree[folder].push(file.path);
+      } else {
+        if (!tree['root']) tree['root'] = [];
+        tree['root'].push(file.path);
+      }
+    });
+    return tree;
+  };
+
+  const toggleFolder = (folder: string) => {
+    setExpandedFolders(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(folder)) {
+        newSet.delete(folder);
+      } else {
+        newSet.add(folder);
+      }
+      return newSet;
+    });
+  };
+
+  const handleFileClick = (filePath: string) => {
+    setSelectedFile(filePath);
+    setShowFileManager(true);
+    // Generate sample content if not already loaded
+    if (!fileContents[filePath]) {
+      const sampleContents: Record<string, string> = {
+        'src/App.tsx': `import React from 'react';
+import { Dashboard } from './components/Dashboard';
+import { AuthProvider } from './contexts/AuthContext';
+
+function App() {
+  return (
+    <AuthProvider>
+      <div className="app">
+        <Dashboard />
+      </div>
+    </AuthProvider>
+  );
+}
+
+export default App;`,
+        'src/components/Dashboard.tsx': `import React, { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+
+export const Dashboard: React.FC = () => {
+  const { user } = useAuth();
+  const [data, setData] = useState([]);
+
+  useEffect(() => {
+    // Fetch dashboard data
+    fetchDashboardData();
+  }, []);
+
+  return (
+    <div className="dashboard">
+      <h1>Welcome, {user?.name}</h1>
+      {/* Dashboard content */}
+    </div>
+  );
+};`,
+        'backend/main.go': `package main
+
+import (
+    "log"
+    "net/http"
+    "github.com/gin-gonic/gin"
+)
+
+func main() {
+    r := gin.Default()
+    
+    r.GET("/api/health", func(c *gin.Context) {
+        c.JSON(http.StatusOK, gin.H{"status": "healthy"})
+    })
+    
+    log.Println("Server starting on :8080")
+    r.Run(":8080")
+}`,
+        'backend/handlers/api.go': `package handlers
+
+import (
+    "net/http"
+    "github.com/gin-gonic/gin"
+)
+
+func GetUsers(c *gin.Context) {
+    // Implementation
+    c.JSON(http.StatusOK, gin.H{"users": []})
+}
+
+func CreateUser(c *gin.Context) {
+    // Implementation
+    c.JSON(http.StatusCreated, gin.H{"message": "created"})
+}`,
+        'src/styles/main.css': `.app {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0a0a0f 0%, #001133 100%);
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+}
+
+.dashboard {
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(0, 245, 255, 0.2);
+  border-radius: 12px;
+  padding: 1.5rem;
+}`,
+        'package.json': `{
+  "name": "generated-app",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}`,
+        'README.md': `# Generated Application
+
+Built with APEX.BUILD Multi-AI Orchestration System
+
+## Features
+- Modern React frontend
+- Go backend API
+- Real-time updates
+- Authentication system
+
+## Getting Started
+\`\`\`bash
+npm install
+npm run dev
+\`\`\`
+`
+      };
+      // Find matching content or generate placeholder
+      const content = sampleContents[filePath] || `// ${filePath}\n// Generated by APEX.BUILD\n\n// TODO: Implementation`;
+      setFileContents(prev => ({ ...prev, [filePath]: content }));
+    }
+  };
+
+  const downloadZip = async () => {
+    addMessage('system', '📦 Preparing ZIP download...');
+    // In production, this would call the backend to generate and download the ZIP
+    // For now, simulate the download process
+    setTimeout(() => {
+      addMessage('system', '💳 ZIP download requires credits. Please upgrade to Pro or purchase credits.');
+    }, 1000);
+  };
+
   return (
     <div style={{ height: '100vh', background: 'linear-gradient(135deg, #0a0a0f 0%, #001133 100%)', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
@@ -828,10 +1013,155 @@ const InlineAppBuilder: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             {showPreview ? '🖥️ Hide Preview' : '🖥️ Show Preview'}
           </button>
         )}
+        {generatedFiles.length > 0 && (
+          <button
+            onClick={() => setShowFileManager(!showFileManager)}
+            style={{
+              padding: '8px 16px',
+              background: showFileManager ? 'linear-gradient(135deg, #ffa500, #ff6600)' : 'linear-gradient(135deg, #00f5ff, #0080ff)',
+              border: 'none',
+              borderRadius: '8px',
+              color: '#fff',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            {showFileManager ? '📁 Hide Files' : '📁 File Manager'}
+          </button>
+        )}
+        {generatedFiles.length > 0 && buildPhase === 'complete' && (
+          <button
+            onClick={downloadZip}
+            style={{
+              padding: '8px 16px',
+              background: 'linear-gradient(135deg, #39ff14, #00aa00)',
+              border: 'none',
+              borderRadius: '8px',
+              color: '#000',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            📦 Download ZIP
+          </button>
+        )}
       </div>
 
       {/* Main Content */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: showPreview ? '1fr 400px 350px' : '1fr 350px', gap: '0', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: showFileManager ? (showPreview ? '250px 1fr 400px 350px' : '250px 1fr 350px') : (showPreview ? '1fr 400px 350px' : '1fr 350px'), gap: '0', overflow: 'hidden' }}>
+        {/* File Manager Panel */}
+        {showFileManager && (
+          <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(0, 0, 0, 0.5)', borderRight: '1px solid rgba(0, 245, 255, 0.2)', overflow: 'hidden' }}>
+            <div style={{
+              padding: '12px 15px',
+              borderBottom: '1px solid rgba(0, 245, 255, 0.2)',
+              background: 'rgba(0, 0, 0, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <span style={{ color: '#ffa500', fontWeight: 'bold', fontSize: '14px' }}>
+                📁 Files ({generatedFiles.length})
+              </span>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: '10px' }}>
+              {Object.entries(getFileTree()).map(([folder, files]) => (
+                <div key={folder} style={{ marginBottom: '8px' }}>
+                  {folder !== 'root' && (
+                    <div
+                      onClick={() => toggleFolder(folder)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '6px 8px',
+                        cursor: 'pointer',
+                        borderRadius: '4px',
+                        background: 'rgba(0, 245, 255, 0.05)',
+                        marginBottom: '4px'
+                      }}
+                    >
+                      <span style={{ color: '#ffa500', fontSize: '12px' }}>
+                        {expandedFolders.has(folder) ? '📂' : '📁'}
+                      </span>
+                      <span style={{ color: '#00f5ff', fontSize: '13px', fontFamily: 'monospace' }}>
+                        {folder}
+                      </span>
+                    </div>
+                  )}
+                  {(folder === 'root' || expandedFolders.has(folder)) && files.map(filePath => {
+                    const fileName = filePath.split('/').pop() || filePath;
+                    return (
+                      <div
+                        key={filePath}
+                        onClick={() => handleFileClick(filePath)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '6px 8px',
+                          paddingLeft: folder !== 'root' ? '24px' : '8px',
+                          cursor: 'pointer',
+                          borderRadius: '4px',
+                          background: selectedFile === filePath ? 'rgba(0, 245, 255, 0.2)' : 'transparent',
+                          border: selectedFile === filePath ? '1px solid rgba(0, 245, 255, 0.3)' : '1px solid transparent',
+                          marginBottom: '2px'
+                        }}
+                      >
+                        <span style={{ fontSize: '12px' }}>{getFileIcon(fileName)}</span>
+                        <span style={{
+                          color: selectedFile === filePath ? '#00f5ff' : '#ccc',
+                          fontSize: '12px',
+                          fontFamily: 'monospace',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {fileName}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+            {selectedFile && fileContents[selectedFile] && (
+              <div style={{
+                borderTop: '1px solid rgba(0, 245, 255, 0.2)',
+                background: 'rgba(0, 0, 0, 0.4)',
+                maxHeight: '300px',
+                overflow: 'auto'
+              }}>
+                <div style={{
+                  padding: '8px 12px',
+                  borderBottom: '1px solid rgba(0, 245, 255, 0.1)',
+                  background: 'rgba(0, 0, 0, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}>
+                  <span style={{ color: '#00f5ff', fontSize: '12px', fontFamily: 'monospace' }}>
+                    {selectedFile}
+                  </span>
+                </div>
+                <pre style={{
+                  margin: 0,
+                  padding: '12px',
+                  fontSize: '11px',
+                  fontFamily: 'Monaco, Consolas, monospace',
+                  color: '#e0e0e0',
+                  lineHeight: '1.5',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word'
+                }}>
+                  {fileContents[selectedFile]}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
         {/* Left Panel - Build Interface */}
         <div style={{ padding: '20px', overflow: 'auto', borderRight: '1px solid rgba(0, 245, 255, 0.2)' }}>
           {!isBuilding && progress === 0 ? (
