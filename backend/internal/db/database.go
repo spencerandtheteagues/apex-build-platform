@@ -5,6 +5,8 @@ import (
 	"log"
 	"time"
 
+	"apex-build/internal/mcp"
+	"apex-build/internal/secrets"
 	"apex-build/pkg/models"
 
 	"gorm.io/driver/postgres"
@@ -87,6 +89,11 @@ func (d *Database) Migrate() error {
 		&models.CursorPosition{},
 		&models.ChatMessage{},
 		&models.UserCollabRoom{},
+		// Secrets management
+		&secrets.Secret{},
+		&secrets.SecretAuditLog{},
+		// MCP server integration
+		&mcp.ExternalMCPServer{},
 	)
 
 	if err != nil {
@@ -197,6 +204,15 @@ func (d *Database) createIndexes() error {
 	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cursor_positions_room_active ON cursor_positions(room_id) WHERE is_active = true")
 	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_messages_room_date ON chat_messages(room_id, created_at DESC) WHERE deleted_at IS NULL")
 
+	// Secrets indexes
+	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_secrets_user_name ON secrets(user_id, name)")
+	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_secrets_project ON secrets(project_id) WHERE project_id IS NOT NULL")
+	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_secret_audit_logs_secret ON secret_audit_logs(secret_id, created_at DESC)")
+
+	// MCP server indexes
+	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_external_mcp_servers_user ON external_mcp_servers(user_id)")
+	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_external_mcp_servers_project ON external_mcp_servers(project_id) WHERE project_id IS NOT NULL")
+
 	return nil
 }
 
@@ -221,6 +237,11 @@ func (d *Database) Close() error {
 		return err
 	}
 	return sqlDB.Close()
+}
+
+// GetDB returns the underlying GORM database instance
+func (d *Database) GetDB() *gorm.DB {
+	return d.DB
 }
 
 // GetStats returns database connection statistics

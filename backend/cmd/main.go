@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/url"
 	"os"
@@ -12,6 +13,9 @@ import (
 	"apex-build/internal/api"
 	"apex-build/internal/auth"
 	"apex-build/internal/db"
+	"apex-build/internal/handlers"
+	"apex-build/internal/mcp"
+	"apex-build/internal/secrets"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -67,11 +71,77 @@ func main() {
 
 	log.Println("✅ Agent Orchestration System initialized")
 
+	// Initialize Secrets Manager
+	masterKey := os.Getenv("SECRETS_MASTER_KEY")
+	if masterKey == "" {
+		// Generate a key if not set (for development)
+		var err error
+		masterKey, err = secrets.GenerateMasterKey()
+		if err != nil {
+			log.Printf("⚠️ Failed to generate master key: %v", err)
+		}
+		log.Println("⚠️ SECRETS_MASTER_KEY not set - using generated key (set in production!)")
+	}
+
+	secretsManager, err := secrets.NewSecretsManager(masterKey)
+	if err != nil {
+		log.Printf("⚠️ Failed to initialize secrets manager: %v", err)
+	} else {
+		log.Println("✅ Secrets Manager initialized with AES-256 encryption")
+	}
+
+	// Initialize MCP Server (APEX.BUILD as MCP provider)
+	mcpServer := mcp.NewMCPServer("APEX.BUILD", "1.0.0")
+
+	// Register built-in tools
+	mcpServer.RegisterTool(mcp.Tool{
+		Name:        "generate_code",
+		Description: "Generate code using APEX.BUILD's multi-AI system",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"language":    map[string]string{"type": "string", "description": "Programming language"},
+				"description": map[string]string{"type": "string", "description": "What to generate"},
+			},
+			"required": []string{"language", "description"},
+		},
+	}, func(ctx context.Context, args map[string]interface{}) (*mcp.ToolCallResult, error) {
+		lang := args["language"].(string)
+		desc := args["description"].(string)
+
+		// Use AI router for generation
+		response, err := aiRouter.Generate(ctx, &ai.AIRequest{
+			Capability: ai.CapabilityCodeGeneration,
+			Prompt:     desc,
+			Language:   lang,
+		})
+		if err != nil {
+			return &mcp.ToolCallResult{
+				Content: []mcp.ContentBlock{{Type: "text", Text: err.Error()}},
+				IsError: true,
+			}, nil
+		}
+
+		return &mcp.ToolCallResult{
+			Content: []mcp.ContentBlock{{Type: "text", Text: response.Content}},
+		}, nil
+	})
+
+	log.Println("✅ MCP Server initialized with built-in tools")
+
+	// Initialize MCP Connection Manager (for connecting to external MCP servers)
+	mcpConnManager := mcp.NewMCPConnectionManager()
+	log.Println("✅ MCP Connection Manager ready for external integrations")
+
+	// Initialize Secrets and MCP handlers
+	secretsHandler := handlers.NewSecretsHandler(database.GetDB(), secretsManager)
+	mcpHandler := handlers.NewMCPHandler(database.GetDB(), mcpServer, mcpConnManager, secretsManager)
+
 	// Initialize API server
 	server := api.NewServer(database, authService, aiRouter)
 
 	// Setup routes
-	router := setupRoutes(server, buildHandler, wsHub)
+	router := setupRoutes(server, buildHandler, wsHub, secretsHandler, mcpHandler)
 
 	// Start server
 	port := config.Port
@@ -190,7 +260,7 @@ func parseDatabaseURL(databaseURL string) *db.Config {
 }
 
 // setupRoutes configures all API routes
-func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *agents.WSHub) *gin.Engine {
+func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *agents.WSHub, secretsHandler *handlers.SecretsHandler, mcpHandler *handlers.MCPHandler) *gin.Engine {
 	// Set gin mode based on environment
 	if os.Getenv("ENVIRONMENT") == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -301,6 +371,39 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 			// Build/Agent endpoints (the core of APEX.BUILD)
 			buildHandler.RegisterRoutes(protected)
 
+			// Secrets Management endpoints
+			secretsRoutes := protected.Group("/secrets")
+			{
+				secretsRoutes.GET("", secretsHandler.ListSecrets)
+				secretsRoutes.POST("", secretsHandler.CreateSecret)
+				secretsRoutes.GET("/:id", secretsHandler.GetSecret)
+				secretsRoutes.PUT("/:id", secretsHandler.UpdateSecret)
+				secretsRoutes.DELETE("/:id", secretsHandler.DeleteSecret)
+				secretsRoutes.POST("/:id/rotate", secretsHandler.RotateSecret)
+				secretsRoutes.GET("/:id/audit", secretsHandler.GetAuditLog)
+			}
+
+			// Project-specific secrets (environment variables)
+			protected.GET("/projects/:projectId/secrets", secretsHandler.GetProjectSecrets)
+
+			// MCP Server Management endpoints
+			mcpRoutes := protected.Group("/mcp")
+			{
+				// External MCP server management
+				mcpRoutes.GET("/servers", mcpHandler.ListExternalServers)
+				mcpRoutes.POST("/servers", mcpHandler.AddExternalServer)
+				mcpRoutes.DELETE("/servers/:id", mcpHandler.DeleteExternalServer)
+				mcpRoutes.POST("/servers/:id/connect", mcpHandler.ConnectToServer)
+				mcpRoutes.POST("/servers/:id/disconnect", mcpHandler.DisconnectFromServer)
+
+				// Tool execution on connected MCP servers
+				mcpRoutes.POST("/servers/:id/tools/call", mcpHandler.CallTool)
+				mcpRoutes.GET("/servers/:id/resources", mcpHandler.ReadResource)
+
+				// Aggregated tools across all connected servers
+				mcpRoutes.GET("/tools", mcpHandler.GetAvailableTools)
+			}
+
 			// Admin endpoints (requires admin privileges)
 			admin := protected.Group("/admin")
 			admin.Use(server.AdminMiddleware())
@@ -318,6 +421,9 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 
 	// WebSocket endpoint for real-time build updates
 	router.GET("/ws/build/:buildId", wsHub.HandleWebSocket)
+
+	// MCP WebSocket endpoint (for APEX.BUILD as MCP server)
+	router.GET("/mcp/ws", mcpHandler.HandleMCPWebSocket)
 
 	return router
 }
