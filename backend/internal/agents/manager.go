@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -147,16 +149,31 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	// Spawn the lead agent first
 	leadAgent, err := am.spawnAgent(buildID, RoleLead, ProviderClaude)
 	if err != nil {
+		am.broadcast(buildID, &WSMessage{
+			Type:      WSBuildError,
+			BuildID:   buildID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"error":   "Failed to spawn lead agent",
+				"details": err.Error(),
+			},
+		})
 		return fmt.Errorf("failed to spawn lead agent: %w", err)
 	}
 
-	// Create planning task
+	// Update lead agent status
+	leadAgent.mu.Lock()
+	leadAgent.Status = StatusWorking
+	leadAgent.mu.Unlock()
+
+	// Create planning task with proper initialization
 	planTask := &Task{
 		ID:          uuid.New().String(),
 		Type:        TaskPlan,
 		Description: fmt.Sprintf("Create comprehensive build plan for: %s", build.Description),
 		Priority:    100,
 		Status:      TaskPending,
+		MaxRetries:  5,
 		Input: map[string]any{
 			"description": build.Description,
 			"mode":        string(build.Mode),
@@ -166,24 +183,48 @@ func (am *AgentManager) StartBuild(buildID string) error {
 
 	// Assign to lead agent
 	planTask.AssignedTo = leadAgent.ID
+	planTask.Status = TaskInProgress
+	now := time.Now()
+	planTask.StartedAt = &now
+
+	// Set current task on agent
+	leadAgent.mu.Lock()
+	leadAgent.CurrentTask = planTask
+	leadAgent.mu.Unlock()
+
 	build.mu.Lock()
 	build.Tasks = append(build.Tasks, planTask)
 	build.mu.Unlock()
 
+	// Broadcast agent working
+	am.broadcast(buildID, &WSMessage{
+		Type:      WSAgentWorking,
+		BuildID:   buildID,
+		AgentID:   leadAgent.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"task_id":     planTask.ID,
+			"task_type":   string(planTask.Type),
+			"description": planTask.Description,
+			"agent_role":  string(leadAgent.Role),
+			"provider":    string(leadAgent.Provider),
+		},
+	})
+
 	// Queue the planning task
 	am.taskQueue <- planTask
 
-	log.Printf("Build %s started with lead agent %s", buildID, leadAgent.ID)
+	log.Printf("Build %s started with lead agent %s, planning task %s queued", buildID, leadAgent.ID, planTask.ID)
 	return nil
 }
 
 // spawnAgent creates a new AI agent with a specific role
 func (am *AgentManager) spawnAgent(buildID string, role AgentRole, provider AIProvider) (*Agent, error) {
 	am.mu.Lock()
-	defer am.mu.Unlock()
 
 	build, exists := am.builds[buildID]
 	if !exists {
+		am.mu.Unlock()
 		return nil, fmt.Errorf("build %s not found", buildID)
 	}
 
@@ -207,7 +248,10 @@ func (am *AgentManager) spawnAgent(buildID string, role AgentRole, provider AIPr
 	build.Agents[agentID] = agent
 	build.mu.Unlock()
 
-	// Broadcast agent spawned
+	// Release lock BEFORE broadcasting to avoid deadlock
+	am.mu.Unlock()
+
+	// Broadcast agent spawned (outside of lock)
 	am.broadcast(buildID, &WSMessage{
 		Type:      WSAgentSpawned,
 		BuildID:   buildID,
@@ -335,6 +379,21 @@ func (am *AgentManager) executeTask(task *Task) {
 	}
 	log.Printf("Found build %s for task execution", build.ID)
 
+	// Broadcast that the agent is thinking
+	am.broadcast(agent.BuildID, &WSMessage{
+		Type:      "agent:thinking",
+		BuildID:   agent.BuildID,
+		AgentID:   agent.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"agent_role": agent.Role,
+			"provider":   agent.Provider,
+			"task_id":    task.ID,
+			"task_type":  string(task.Type),
+			"content":    fmt.Sprintf("%s agent is analyzing the task...", agent.Role),
+		},
+	})
+
 	// Build the prompt based on task type
 	prompt := am.buildTaskPrompt(task, build, agent)
 	systemPrompt := am.getSystemPrompt(agent.Role)
@@ -343,6 +402,21 @@ func (am *AgentManager) executeTask(task *Task) {
 	// Execute using AI router
 	ctx, cancel := context.WithTimeout(am.ctx, 5*time.Minute)
 	defer cancel()
+
+	// Broadcast that the agent is generating
+	am.broadcast(agent.BuildID, &WSMessage{
+		Type:      "agent:generating",
+		BuildID:   agent.BuildID,
+		AgentID:   agent.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"agent_role": agent.Role,
+			"provider":   agent.Provider,
+			"task_id":    task.ID,
+			"task_type":  string(task.Type),
+			"content":    fmt.Sprintf("%s agent is generating code with %s...", agent.Role, agent.Provider),
+		},
+	})
 
 	log.Printf("Calling AI router for task %s with provider %s", task.ID, agent.Provider)
 	response, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
@@ -353,6 +427,23 @@ func (am *AgentManager) executeTask(task *Task) {
 
 	if err != nil {
 		log.Printf("AI generation failed for task %s: %v", task.ID, err)
+
+		// Broadcast the error
+		am.broadcast(agent.BuildID, &WSMessage{
+			Type:      "agent:generation_failed",
+			BuildID:   agent.BuildID,
+			AgentID:   agent.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"agent_role":   agent.Role,
+				"provider":     agent.Provider,
+				"task_id":      task.ID,
+				"error":        err.Error(),
+				"retry_count":  task.RetryCount,
+				"max_retries":  task.MaxRetries,
+			},
+		})
+
 		am.resultQueue <- &TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
@@ -367,13 +458,29 @@ func (am *AgentManager) executeTask(task *Task) {
 	// Parse the response into task output
 	output := am.parseTaskOutput(task.Type, response)
 
+	// Broadcast code generated with file count
+	am.broadcast(agent.BuildID, &WSMessage{
+		Type:      WSCodeGenerated,
+		BuildID:   agent.BuildID,
+		AgentID:   agent.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"agent_role":  agent.Role,
+			"provider":    agent.Provider,
+			"task_id":     task.ID,
+			"task_type":   string(task.Type),
+			"files_count": len(output.Files),
+			"files":       output.Files,
+		},
+	})
+
 	am.resultQueue <- &TaskResult{
 		TaskID:  task.ID,
 		AgentID: agent.ID,
 		Success: true,
 		Output:  output,
 	}
-	log.Printf("Task %s completed successfully", task.ID)
+	log.Printf("Task %s completed successfully with %d files generated", task.ID, len(output.Files))
 }
 
 // resultProcessor handles completed task results
@@ -570,25 +677,71 @@ func (am *AgentManager) handleTaskCompletion(buildID string, task *Task, output 
 
 // handlePlanCompletion processes the build plan and spawns the agent team
 func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
-	// Parse the plan from output
-	// In reality, this would parse the AI response into a structured plan
+	log.Printf("handlePlanCompletion called for build %s", build.ID)
+
+	// Broadcast planning phase completion
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"phase":    "planning_complete",
+			"message":  "Build plan created successfully",
+			"progress": 10,
+		},
+	})
+
+	// Store plan messages as the build plan
+	if output != nil && len(output.Messages) > 0 {
+		build.mu.Lock()
+		build.Plan = &BuildPlan{
+			ID:        uuid.New().String(),
+			BuildID:   build.ID,
+			CreatedAt: time.Now(),
+		}
+		build.mu.Unlock()
+	}
 
 	build.mu.Lock()
 	build.Status = BuildInProgress
+	build.Progress = 15
 	build.UpdatedAt = time.Now()
 	build.mu.Unlock()
 
 	// Spawn the full agent team
 	if err := am.SpawnAgentTeam(build.ID); err != nil {
 		log.Printf("Error spawning agent team: %v", err)
+		am.broadcast(build.ID, &WSMessage{
+			Type:      WSBuildError,
+			BuildID:   build.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"error":   "Failed to spawn agent team",
+				"details": err.Error(),
+			},
+		})
 		return
 	}
+
+	// Broadcast agent team spawned
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"phase":    "agents_spawned",
+			"message":  "Agent team assembled and ready",
+			"progress": 20,
+		},
+	})
 
 	// Create checkpoint for planning phase
 	am.createCheckpoint(build, "Planning Complete", "Build plan created and agent team spawned")
 
 	// Queue initial tasks for each agent based on the plan
 	am.queuePlanTasks(build)
+
+	log.Printf("Build %s transitioned to in_progress with full agent team", build.ID)
 }
 
 // handleFileGeneration processes a generated file
@@ -755,35 +908,86 @@ func (am *AgentManager) collectGeneratedFiles(build *Build) []GeneratedFile {
 
 // queuePlanTasks creates and queues tasks based on the build plan
 func (am *AgentManager) queuePlanTasks(build *Build) {
-	// This would parse the plan and create appropriate tasks
-	// For now, create a basic set of tasks for the agents
+	log.Printf("queuePlanTasks called for build %s", build.ID)
 
-	build.mu.Lock()
-	agents := build.Agents
-	build.mu.Unlock()
+	build.mu.RLock()
+	agents := make(map[string]*Agent)
+	for k, v := range build.Agents {
+		agents[k] = v
+	}
+	description := build.Description
+	build.mu.RUnlock()
 
+	// Sort agents by priority to ensure proper ordering
+	type agentPriority struct {
+		agent    *Agent
+		priority int
+	}
+	sortedAgents := make([]agentPriority, 0)
 	for _, agent := range agents {
 		if agent.Role == RoleLead {
 			continue // Lead already has a task
 		}
+		sortedAgents = append(sortedAgents, agentPriority{
+			agent:    agent,
+			priority: am.getPriorityForRole(agent.Role),
+		})
+	}
+
+	// Sort by priority (higher first)
+	for i := 0; i < len(sortedAgents)-1; i++ {
+		for j := i + 1; j < len(sortedAgents); j++ {
+			if sortedAgents[j].priority > sortedAgents[i].priority {
+				sortedAgents[i], sortedAgents[j] = sortedAgents[j], sortedAgents[i]
+			}
+		}
+	}
+
+	// Create and assign tasks to agents
+	for _, ap := range sortedAgents {
+		agent := ap.agent
 
 		task := &Task{
 			ID:          uuid.New().String(),
 			Type:        am.getTaskTypeForRole(agent.Role),
-			Description: am.getTaskDescriptionForRole(agent.Role, build.Description),
-			Priority:    am.getPriorityForRole(agent.Role),
+			Description: am.getTaskDescriptionForRole(agent.Role, description),
+			Priority:    ap.priority,
 			Status:      TaskPending,
-			CreatedAt:   time.Now(),
+			MaxRetries:  5,
+			Input: map[string]any{
+				"app_description": description,
+				"agent_role":      string(agent.Role),
+			},
+			CreatedAt: time.Now(),
 		}
 
 		build.mu.Lock()
 		build.Tasks = append(build.Tasks, task)
 		build.mu.Unlock()
 
+		// Broadcast task created
+		am.broadcast(build.ID, &WSMessage{
+			Type:      "task:created",
+			BuildID:   build.ID,
+			AgentID:   agent.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"task_id":     task.ID,
+				"task_type":   string(task.Type),
+				"description": task.Description,
+				"priority":    task.Priority,
+				"agent_role":  string(agent.Role),
+			},
+		})
+
 		if err := am.AssignTask(agent.ID, task); err != nil {
 			log.Printf("Failed to assign task to agent %s: %v", agent.ID, err)
+		} else {
+			log.Printf("Assigned task %s (%s) to agent %s (%s)", task.ID, task.Type, agent.ID, agent.Role)
 		}
 	}
+
+	log.Printf("Queued %d tasks for build %s", len(sortedAgents), build.ID)
 }
 
 // GetBuild retrieves a build by ID
@@ -987,15 +1191,40 @@ Description: %s
 
 App being built: %s
 %s
+OUTPUT FORMAT - CRITICAL:
+For EVERY file you create, use this EXACT format:
+
+// File: path/to/filename.ext
+`+"```"+`language
+[complete file content here]
+`+"```"+`
+
+Example:
+// File: src/components/App.tsx
+`+"```"+`typescript
+import React from 'react';
+export const App: React.FC = () => {
+  return <div>Hello World</div>;
+};
+`+"```"+`
+
+// File: src/api/server.ts
+`+"```"+`typescript
+import express from 'express';
+const app = express();
+// complete implementation...
+`+"```"+`
+
 MANDATORY REQUIREMENTS:
 1. Output COMPLETE, PRODUCTION-READY code only
-2. NEVER use placeholder data, mock responses, TODO comments, or demo content
-3. If external API keys or credentials are needed:
+2. Mark EVERY file with "// File: path/filename" comment before its code block
+3. NEVER use placeholder data, mock responses, TODO comments, or demo content
+4. If external API keys or credentials are needed:
    - Use environment variable patterns (e.g., process.env.API_KEY)
    - Add ONE clear comment indicating what the user must provide
    - Build ALL other functionality completely without waiting
-4. Include all imports, error handling, and edge cases
-5. Every function must be fully implemented and working
+5. Include all imports, error handling, and edge cases
+6. Every function must be fully implemented and working
 
 FORBIDDEN OUTPUTS:
 - "// TODO: implement this"
@@ -1124,12 +1353,243 @@ func (am *AgentManager) getPriorityForRole(role AgentRole) int {
 }
 
 func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *TaskOutput {
-	// Parse the AI response into structured output
-	// This would extract files, messages, etc. from the response
-	return &TaskOutput{
-		Messages: []string{response},
-		Files:    make([]GeneratedFile, 0), // Would parse actual files
+	output := &TaskOutput{
+		Messages: []string{},
+		Files:    make([]GeneratedFile, 0),
 	}
+
+	// Parse the AI response to extract code blocks and files
+	// Look for patterns like ```language\n...code...\n``` or file markers
+	lines := strings.Split(response, "\n")
+	var currentFile *GeneratedFile
+	var codeBuffer strings.Builder
+	inCodeBlock := false
+	currentLanguage := ""
+
+	for i, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		// Check for file path markers like "// File: path/to/file.ts" or "# File: path/to/file.py"
+		if strings.HasPrefix(trimmedLine, "// File:") || strings.HasPrefix(trimmedLine, "# File:") ||
+			strings.HasPrefix(trimmedLine, "/* File:") || strings.HasPrefix(trimmedLine, "<!-- File:") {
+			// Save previous file if any
+			if currentFile != nil && codeBuffer.Len() > 0 {
+				currentFile.Content = strings.TrimSpace(codeBuffer.String())
+				currentFile.Size = int64(len(currentFile.Content))
+				output.Files = append(output.Files, *currentFile)
+			}
+
+			// Extract file path
+			filePath := ""
+			if strings.HasPrefix(trimmedLine, "// File:") {
+				filePath = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "// File:"))
+			} else if strings.HasPrefix(trimmedLine, "# File:") {
+				filePath = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "# File:"))
+			} else if strings.HasPrefix(trimmedLine, "/* File:") {
+				filePath = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "/* File:"))
+				filePath = strings.TrimSuffix(filePath, "*/")
+			} else if strings.HasPrefix(trimmedLine, "<!-- File:") {
+				filePath = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "<!-- File:"))
+				filePath = strings.TrimSuffix(filePath, "-->")
+			}
+
+			if filePath != "" {
+				currentFile = &GeneratedFile{
+					Path:     strings.TrimSpace(filePath),
+					Language: am.detectLanguage(filePath),
+					IsNew:    true,
+				}
+				codeBuffer.Reset()
+			}
+			continue
+		}
+
+		// Check for code block start
+		if strings.HasPrefix(trimmedLine, "```") {
+			if !inCodeBlock {
+				// Starting a code block
+				inCodeBlock = true
+				currentLanguage = strings.TrimPrefix(trimmedLine, "```")
+				currentLanguage = strings.TrimSpace(currentLanguage)
+
+				// If we don't have a current file, create one from the code block
+				if currentFile == nil && currentLanguage != "" {
+					ext := am.languageToExtension(currentLanguage)
+					currentFile = &GeneratedFile{
+						Path:     fmt.Sprintf("generated_%d.%s", len(output.Files)+1, ext),
+						Language: currentLanguage,
+						IsNew:    true,
+					}
+				}
+				continue
+			} else {
+				// Ending a code block
+				inCodeBlock = false
+				if currentFile != nil && codeBuffer.Len() > 0 {
+					currentFile.Content = strings.TrimSpace(codeBuffer.String())
+					currentFile.Size = int64(len(currentFile.Content))
+					output.Files = append(output.Files, *currentFile)
+					currentFile = nil
+					codeBuffer.Reset()
+				}
+				continue
+			}
+		}
+
+		// Add line to buffer if in code block or if we have a current file
+		if inCodeBlock || currentFile != nil {
+			if codeBuffer.Len() > 0 {
+				codeBuffer.WriteString("\n")
+			}
+			codeBuffer.WriteString(line)
+		} else if i < 5 || i > len(lines)-5 {
+			// Add non-code content as messages (first and last few lines typically explanations)
+			if trimmedLine != "" {
+				output.Messages = append(output.Messages, trimmedLine)
+			}
+		}
+	}
+
+	// Handle any remaining file content
+	if currentFile != nil && codeBuffer.Len() > 0 {
+		currentFile.Content = strings.TrimSpace(codeBuffer.String())
+		currentFile.Size = int64(len(currentFile.Content))
+		output.Files = append(output.Files, *currentFile)
+	}
+
+	// If no files were extracted but we have response content, treat the whole response as a single file
+	if len(output.Files) == 0 && len(response) > 100 {
+		// Try to detect if it's code and create a file
+		if am.looksLikeCode(response) {
+			lang := am.detectLanguageFromContent(response)
+			output.Files = append(output.Files, GeneratedFile{
+				Path:     fmt.Sprintf("generated_1.%s", am.languageToExtension(lang)),
+				Content:  response,
+				Language: lang,
+				Size:     int64(len(response)),
+				IsNew:    true,
+			})
+		} else {
+			output.Messages = []string{response}
+		}
+	}
+
+	return output
+}
+
+// detectLanguage determines the programming language from a file path
+func (am *AgentManager) detectLanguage(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".js", ".jsx":
+		return "javascript"
+	case ".py":
+		return "python"
+	case ".go":
+		return "go"
+	case ".rs":
+		return "rust"
+	case ".java":
+		return "java"
+	case ".html":
+		return "html"
+	case ".css":
+		return "css"
+	case ".sql":
+		return "sql"
+	case ".json":
+		return "json"
+	case ".yaml", ".yml":
+		return "yaml"
+	case ".md":
+		return "markdown"
+	case ".sh":
+		return "bash"
+	default:
+		return "text"
+	}
+}
+
+// languageToExtension converts a language name to file extension
+func (am *AgentManager) languageToExtension(lang string) string {
+	lang = strings.ToLower(lang)
+	switch lang {
+	case "typescript", "tsx":
+		return "ts"
+	case "javascript", "jsx":
+		return "js"
+	case "python":
+		return "py"
+	case "go", "golang":
+		return "go"
+	case "rust":
+		return "rs"
+	case "java":
+		return "java"
+	case "html":
+		return "html"
+	case "css":
+		return "css"
+	case "sql":
+		return "sql"
+	case "json":
+		return "json"
+	case "yaml":
+		return "yaml"
+	case "markdown", "md":
+		return "md"
+	case "bash", "shell", "sh":
+		return "sh"
+	default:
+		return "txt"
+	}
+}
+
+// looksLikeCode checks if content appears to be code
+func (am *AgentManager) looksLikeCode(content string) bool {
+	codeIndicators := []string{
+		"function ", "const ", "let ", "var ", "import ", "export ",
+		"class ", "interface ", "type ", "def ", "async ", "await ",
+		"return ", "if (", "for (", "while (", "package ", "func ",
+		"public ", "private ", "protected ", "struct ", "enum ",
+	}
+	contentLower := strings.ToLower(content)
+	for _, indicator := range codeIndicators {
+		if strings.Contains(contentLower, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+// detectLanguageFromContent attempts to determine language from code content
+func (am *AgentManager) detectLanguageFromContent(content string) string {
+	contentLower := strings.ToLower(content)
+
+	if strings.Contains(content, "import React") || strings.Contains(content, "from 'react'") ||
+		strings.Contains(content, "interface ") && strings.Contains(content, ": ") {
+		return "typescript"
+	}
+	if strings.Contains(content, "package main") || strings.Contains(content, "func ") && strings.Contains(content, "{}") {
+		return "go"
+	}
+	if strings.Contains(content, "def ") && strings.Contains(content, ":") && !strings.Contains(content, "{") {
+		return "python"
+	}
+	if strings.Contains(contentLower, "function ") || strings.Contains(contentLower, "const ") ||
+		strings.Contains(contentLower, "let ") {
+		return "javascript"
+	}
+	if strings.Contains(content, "fn ") && strings.Contains(content, "-> ") {
+		return "rust"
+	}
+	if strings.Contains(content, "public class ") || strings.Contains(content, "private class ") {
+		return "java"
+	}
+
+	return "text"
 }
 
 func truncate(s string, maxLen int) string {

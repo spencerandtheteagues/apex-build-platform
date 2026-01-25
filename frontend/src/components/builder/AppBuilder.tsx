@@ -106,7 +106,11 @@ interface BuildState {
 
 type BuildMode = 'fast' | 'full'
 
-export const AppBuilder: React.FC = () => {
+interface AppBuilderProps {
+  onNavigateToIDE?: () => void
+}
+
+export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   // Build state
   const [buildMode, setBuildMode] = useState<BuildMode>('full')
   const [appDescription, setAppDescription] = useState('')
@@ -116,6 +120,8 @@ export const AppBuilder: React.FC = () => {
   const [showPreview, setShowPreview] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [generatedFiles, setGeneratedFiles] = useState<Array<{ path: string; content: string; language: string }>>([])
+  const [createdProjectId, setCreatedProjectId] = useState<number | null>(null)
+  const [isCreatingProject, setIsCreatingProject] = useState(false)
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
@@ -129,57 +135,97 @@ export const AppBuilder: React.FC = () => {
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const wsReconnectAttempts = useRef(0)
+  const maxWsReconnectAttempts = 5
 
-  const { user } = useStore()
+  const { user, createProject, setCurrentProject } = useStore()
 
   // Scroll chat to bottom on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatMessages])
 
-  // Connect to WebSocket when build starts
-  const connectWebSocket = useCallback((buildId: string) => {
-    // Use VITE_WS_URL for WebSocket connection to backend
-    // Falls back to constructing from API URL or window.location
-    let wsUrl: string
+  // Cleanup WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close()
+        wsRef.current = null
+      }
+    }
+  }, [])
+
+  // Build WebSocket URL helper
+  const buildWebSocketUrl = useCallback((buildId: string): string => {
     if (import.meta.env.VITE_WS_URL) {
-      wsUrl = `${import.meta.env.VITE_WS_URL}/ws/build/${buildId}`
+      // VITE_WS_URL should be like "ws://localhost:8080" (without /ws)
+      const baseWsUrl = import.meta.env.VITE_WS_URL.replace(/\/ws\/?$/, '').replace(/\/$/, '')
+      return `${baseWsUrl}/ws/build/${buildId}`
     } else if (import.meta.env.VITE_API_URL) {
       // Derive WebSocket URL from API URL
-      const apiUrl = import.meta.env.VITE_API_URL.replace('/api/v1', '')
+      const apiUrl = import.meta.env.VITE_API_URL.replace('/api/v1', '').replace(/\/$/, '')
       const wsProtocol = apiUrl.startsWith('https') ? 'wss' : 'ws'
       const wsHost = apiUrl.replace(/^https?:\/\//, '')
-      wsUrl = `${wsProtocol}://${wsHost}/ws/build/${buildId}`
+      return `${wsProtocol}://${wsHost}/ws/build/${buildId}`
     } else {
       // Local development fallback
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      wsUrl = `${protocol}//${window.location.host}/ws/build/${buildId}`
+      return `${protocol}//${window.location.host}/ws/build/${buildId}`
+    }
+  }, [])
+
+  // Connect to WebSocket when build starts with retry logic
+  const connectWebSocket = useCallback((buildId: string) => {
+    const wsUrl = buildWebSocketUrl(buildId)
+    console.log('Connecting to WebSocket:', wsUrl)
+
+    // Close existing connection if any
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.close()
     }
 
-    console.log('Connecting to WebSocket:', wsUrl)
     const ws = new WebSocket(wsUrl)
 
     ws.onopen = () => {
       console.log('WebSocket connected')
+      wsReconnectAttempts.current = 0
       addSystemMessage('Connected to build server')
     }
 
     ws.onmessage = (event) => {
-      const message = JSON.parse(event.data)
-      handleWebSocketMessage(message)
+      try {
+        const message = JSON.parse(event.data)
+        handleWebSocketMessage(message)
+      } catch (e) {
+        console.error('Failed to parse WebSocket message:', e)
+      }
     }
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error)
-      addSystemMessage('Connection error - retrying...')
     }
 
-    ws.onclose = () => {
-      console.log('WebSocket disconnected')
+    ws.onclose = (event) => {
+      console.log('WebSocket disconnected, code:', event.code)
+
+      // Only attempt reconnect if build is still in progress
+      if (isBuilding && wsReconnectAttempts.current < maxWsReconnectAttempts) {
+        wsReconnectAttempts.current++
+        const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts.current - 1), 10000)
+        addSystemMessage(`Connection lost. Reconnecting in ${delay / 1000}s...`)
+
+        setTimeout(() => {
+          if (isBuilding) {
+            connectWebSocket(buildId)
+          }
+        }, delay)
+      } else if (wsReconnectAttempts.current >= maxWsReconnectAttempts) {
+        addSystemMessage('Connection failed after multiple attempts. Please refresh to retry.')
+      }
     }
 
     wsRef.current = ws
-  }, [])
+  }, [buildWebSocketUrl, isBuilding])
 
   // Handle incoming WebSocket messages
   const handleWebSocketMessage = (message: any) => {
@@ -335,11 +381,16 @@ export const AppBuilder: React.FC = () => {
     }])
   }
 
-  // Start the build
+  // Start the build with comprehensive error handling
   const startBuild = async () => {
     if (!appDescription.trim()) return
 
     setIsBuilding(true)
+    setGeneratedFiles([])
+    setAiThoughts([])
+    setChatMessages([])
+    wsReconnectAttempts.current = 0
+
     addSystemMessage(`Starting ${buildMode} build for: "${appDescription}"`)
 
     try {
@@ -348,6 +399,10 @@ export const AppBuilder: React.FC = () => {
         description: appDescription,
         mode: buildMode,
       })
+
+      if (!response || !response.build_id) {
+        throw new Error('Invalid response from build API - no build_id returned')
+      }
 
       const buildId = response.build_id
 
@@ -363,12 +418,39 @@ export const AppBuilder: React.FC = () => {
 
       // Connect to WebSocket for real-time updates
       connectWebSocket(buildId)
-      addSystemMessage(`Build started! Connecting to real-time updates...`)
+      addSystemMessage(`Build started! Build ID: ${buildId}`)
 
     } catch (error: any) {
-      const errorMsg = error.response?.data?.error || error.response?.data?.details || error.message
+      console.error('Build start failed:', error)
+
+      // Extract error message from various error formats
+      let errorMsg = 'Unknown error occurred'
+      if (error.response?.data?.error) {
+        errorMsg = error.response.data.error
+      } else if (error.response?.data?.details) {
+        errorMsg = error.response.data.details
+      } else if (error.response?.data?.message) {
+        errorMsg = error.response.data.message
+      } else if (error.message) {
+        errorMsg = error.message
+      }
+
+      // Check for specific error types
+      if (error.response?.status === 401) {
+        errorMsg = 'Authentication required. Please log in to start a build.'
+      } else if (error.response?.status === 403) {
+        errorMsg = 'You do not have permission to start builds.'
+      } else if (error.response?.status === 429) {
+        errorMsg = 'Too many requests. Please wait a moment before trying again.'
+      } else if (error.response?.status >= 500) {
+        errorMsg = 'Server error. Please try again later.'
+      } else if (!error.response && error.message?.includes('Network')) {
+        errorMsg = 'Network error. Please check your connection and try again.'
+      }
+
       addSystemMessage(`Error: ${errorMsg}`)
       setIsBuilding(false)
+      setBuildState(null)
     }
   }
 
@@ -392,6 +474,65 @@ export const AppBuilder: React.FC = () => {
     }
 
     setChatInput('')
+  }
+
+  // Create project from generated files and open in IDE
+  const openInIDE = async () => {
+    if (generatedFiles.length === 0) {
+      addSystemMessage('No files to create project from')
+      return
+    }
+
+    setIsCreatingProject(true)
+    try {
+      // Extract project name from description or use default
+      const projectName = appDescription.slice(0, 50).replace(/[^a-zA-Z0-9\s-]/g, '').trim() || 'Generated App'
+
+      // Determine language from generated files
+      const extensions = generatedFiles.map(f => f.path.split('.').pop()?.toLowerCase() || '')
+      let language = 'javascript'
+      if (extensions.some(e => ['tsx', 'ts'].includes(e))) language = 'typescript'
+      else if (extensions.some(e => ['py'].includes(e))) language = 'python'
+      else if (extensions.some(e => ['go'].includes(e))) language = 'go'
+      else if (extensions.some(e => ['rs'].includes(e))) language = 'rust'
+
+      // Create the project
+      const project = await createProject({
+        name: projectName,
+        description: appDescription,
+        language,
+        is_public: false,
+      })
+
+      if (project) {
+        // Save files to the project
+        for (const file of generatedFiles) {
+          try {
+            await apiService.createFile(project.id, {
+              path: file.path,
+              content: file.content,
+              language: file.language,
+            })
+          } catch (err) {
+            console.error(`Failed to save file ${file.path}:`, err)
+          }
+        }
+
+        setCreatedProjectId(project.id)
+        setCurrentProject(project)
+        addSystemMessage(`Project "${projectName}" created with ${generatedFiles.length} files!`)
+
+        // Navigate to IDE
+        if (onNavigateToIDE) {
+          onNavigateToIDE()
+        }
+      }
+    } catch (error: any) {
+      console.error('Failed to create project:', error)
+      addSystemMessage(`Failed to create project: ${error.message || 'Unknown error'}`)
+    } finally {
+      setIsCreatingProject(false)
+    }
   }
 
   // Helper functions
@@ -899,9 +1040,22 @@ For example:
                             <Eye className="w-4 h-4 mr-2" />
                             {showPreview ? 'Hide Preview' : 'Show Preview'}
                           </Button>
-                          <Button className="bg-green-500 hover:bg-green-400">
-                            <ExternalLink className="w-4 h-4 mr-2" />
-                            Open in IDE
+                          <Button
+                            className="bg-green-500 hover:bg-green-400"
+                            onClick={openInIDE}
+                            disabled={isCreatingProject || generatedFiles.length === 0}
+                          >
+                            {isCreatingProject ? (
+                              <>
+                                <Clock className="w-4 h-4 mr-2 animate-spin" />
+                                Creating Project...
+                              </>
+                            ) : (
+                              <>
+                                <ExternalLink className="w-4 h-4 mr-2" />
+                                Open in IDE
+                              </>
+                            )}
                           </Button>
                         </div>
                       </div>

@@ -473,7 +473,7 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 			}
 
 			// Project-specific secrets (environment variables)
-			protected.GET("/projects/:projectId/secrets", secretsHandler.GetProjectSecrets)
+			protected.GET("/projects/:id/secrets", secretsHandler.GetProjectSecrets)
 
 			// MCP Server Management endpoints
 			mcpRoutes := protected.Group("/mcp")

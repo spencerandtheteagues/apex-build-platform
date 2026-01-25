@@ -3,6 +3,8 @@ package db
 import (
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	"apex-build/internal/git"
@@ -11,6 +13,7 @@ import (
 	"apex-build/pkg/models"
 
 	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -33,12 +36,6 @@ type Config struct {
 
 // NewDatabase creates a new database connection
 func NewDatabase(config *Config) (*Database, error) {
-	dsn := fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
-		config.Host, config.Port, config.User, config.Password,
-		config.DBName, config.SSLMode, config.TimeZone,
-	)
-
 	// Configure GORM with custom logger
 	gormConfig := &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
@@ -47,7 +44,27 @@ func NewDatabase(config *Config) (*Database, error) {
 		},
 	}
 
-	db, err := gorm.Open(postgres.Open(dsn), gormConfig)
+	var db *gorm.DB
+	var err error
+
+	// Check for SQLite mode (for local development)
+	dbURL := os.Getenv("DATABASE_URL")
+	if strings.HasPrefix(dbURL, "sqlite://") || os.Getenv("USE_SQLITE") == "true" {
+		sqlitePath := strings.TrimPrefix(dbURL, "sqlite://")
+		if sqlitePath == "" || sqlitePath == dbURL {
+			sqlitePath = "./apex_build.db"
+		}
+		log.Printf("📦 Using SQLite database: %s", sqlitePath)
+		db, err = gorm.Open(sqlite.Open(sqlitePath), gormConfig)
+	} else {
+		dsn := fmt.Sprintf(
+			"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
+			config.Host, config.Port, config.User, config.Password,
+			config.DBName, config.SSLMode, config.TimeZone,
+		)
+		db, err = gorm.Open(postgres.Open(dsn), gormConfig)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}

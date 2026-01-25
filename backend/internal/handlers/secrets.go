@@ -309,7 +309,7 @@ func (h *SecretsHandler) RotateSecret(c *gin.Context) {
 // GetProjectSecrets gets all secrets for a specific project as environment variables
 func (h *SecretsHandler) GetProjectSecrets(c *gin.Context) {
 	userID := c.GetUint("userID")
-	projectID, err := strconv.ParseUint(c.Param("projectId"), 10, 32)
+	projectID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
 		return

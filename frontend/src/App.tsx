@@ -342,7 +342,7 @@ function App() {
       {/* Main Content */}
       <div className="flex-1 overflow-hidden">
         {currentView === 'builder' ? (
-          <AppBuilder />
+          <AppBuilder onNavigateToIDE={() => setCurrentView('ide')} />
         ) : currentView === 'admin' ? (
           <AdminDashboard />
         ) : (
