@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -16,6 +17,7 @@ type OpenAIClient struct {
 	baseURL    string
 	httpClient *http.Client
 	usage      *ProviderUsage
+	usageMu    sync.RWMutex // Protects usage statistics
 }
 
 // OpenAI API request/response structures
@@ -91,7 +93,7 @@ func (o *OpenAIClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	// Make API request
 	resp, err := o.makeRequest(ctx, openAIReq)
 	if err != nil {
-		o.usage.ErrorCount++
+		o.incrementErrorCount()
 		return &AIResponse{
 			ID:        req.ID,
 			Provider:  ProviderGPT4,
@@ -290,9 +292,21 @@ func (o *OpenAIClient) Health(ctx context.Context) error {
 	return err
 }
 
-// GetUsage returns current usage statistics
+// GetUsage returns current usage statistics (thread-safe copy)
 func (o *OpenAIClient) GetUsage() *ProviderUsage {
-	return o.usage
+	o.usageMu.RLock()
+	defer o.usageMu.RUnlock()
+
+	// Return a copy to prevent data races
+	return &ProviderUsage{
+		Provider:     o.usage.Provider,
+		RequestCount: o.usage.RequestCount,
+		TotalTokens:  o.usage.TotalTokens,
+		TotalCost:    o.usage.TotalCost,
+		AvgLatency:   o.usage.AvgLatency,
+		ErrorCount:   o.usage.ErrorCount,
+		LastUsed:     o.usage.LastUsed,
+	}
 }
 
 // getMaxTokens determines appropriate max tokens based on request
@@ -317,19 +331,25 @@ func (o *OpenAIClient) getMaxTokens(req *AIRequest) int {
 
 // calculateCost estimates cost based on OpenAI pricing
 func (o *OpenAIClient) calculateCost(inputTokens, outputTokens int, model string) float64 {
-	// OpenAI pricing (as of 2024)
+	// OpenAI pricing (as of 2024-2025)
 	var inputCostPer1K, outputCostPer1K float64
 
 	switch model {
+	case "gpt-4o":
+		inputCostPer1K = 0.0025  // $0.0025 per 1K input tokens
+		outputCostPer1K = 0.01   // $0.01 per 1K output tokens
+	case "gpt-4o-mini":
+		inputCostPer1K = 0.00015 // $0.00015 per 1K input tokens
+		outputCostPer1K = 0.0006 // $0.0006 per 1K output tokens
 	case "gpt-4-turbo":
-		inputCostPer1K = 0.01   // $0.01 per 1K input tokens
-		outputCostPer1K = 0.03  // $0.03 per 1K output tokens
+		inputCostPer1K = 0.01    // $0.01 per 1K input tokens
+		outputCostPer1K = 0.03   // $0.03 per 1K output tokens
 	case "gpt-4":
-		inputCostPer1K = 0.03   // $0.03 per 1K input tokens
-		outputCostPer1K = 0.06  // $0.06 per 1K output tokens
+		inputCostPer1K = 0.03    // $0.03 per 1K input tokens
+		outputCostPer1K = 0.06   // $0.06 per 1K output tokens
 	default:
-		inputCostPer1K = 0.01
-		outputCostPer1K = 0.03
+		inputCostPer1K = 0.0025  // Default to GPT-4o pricing
+		outputCostPer1K = 0.01
 	}
 
 	inputCost := float64(inputTokens) / 1000.0 * inputCostPer1K
@@ -338,11 +358,21 @@ func (o *OpenAIClient) calculateCost(inputTokens, outputTokens int, model string
 	return inputCost + outputCost
 }
 
-// updateUsage updates internal usage statistics
+// updateUsage updates internal usage statistics (thread-safe)
 func (o *OpenAIClient) updateUsage(totalTokens int, cost float64, duration time.Duration) {
+	o.usageMu.Lock()
+	defer o.usageMu.Unlock()
+
 	o.usage.RequestCount++
 	o.usage.TotalTokens += int64(totalTokens)
 	o.usage.TotalCost += cost
 	o.usage.AvgLatency = (o.usage.AvgLatency*float64(o.usage.RequestCount-1) + duration.Seconds()) / float64(o.usage.RequestCount)
 	o.usage.LastUsed = time.Now()
+}
+
+// incrementErrorCount safely increments the error count
+func (o *OpenAIClient) incrementErrorCount() {
+	o.usageMu.Lock()
+	defer o.usageMu.Unlock()
+	o.usage.ErrorCount++
 }

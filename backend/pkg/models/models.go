@@ -31,9 +31,13 @@ type User struct {
 	BypassBilling     bool `json:"bypass_billing" gorm:"default:false"`
 	BypassRateLimits  bool `json:"bypass_rate_limits" gorm:"default:false"`
 
-	// Subscription and billing
-	SubscriptionType string    `json:"subscription_type" gorm:"default:'free'"` // free, pro, team, enterprise, owner
-	SubscriptionEnd  time.Time `json:"subscription_end"`
+	// Subscription and billing (Stripe integration)
+	StripeCustomerID   string    `json:"stripe_customer_id" gorm:"index"`
+	SubscriptionID     string    `json:"subscription_id" gorm:"index"`
+	SubscriptionStatus string    `json:"subscription_status" gorm:"default:'inactive'"` // active, canceled, past_due, trialing, inactive
+	SubscriptionType   string    `json:"subscription_type" gorm:"default:'free'"`       // free, pro, team, enterprise
+	SubscriptionEnd    time.Time `json:"subscription_end"`
+	BillingCycleStart  time.Time `json:"billing_cycle_start"`
 
 	// Usage tracking for AI services
 	MonthlyAIRequests int     `json:"monthly_ai_requests" gorm:"default:0"`

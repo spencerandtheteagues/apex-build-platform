@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -16,6 +17,7 @@ type ClaudeClient struct {
 	baseURL    string
 	httpClient *http.Client
 	usage      *ProviderUsage
+	usageMu    sync.RWMutex // Protects usage statistics
 }
 
 // Claude API request/response structures
@@ -90,7 +92,7 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	// Make API request
 	resp, err := c.makeRequest(ctx, claudeReq)
 	if err != nil {
-		c.usage.ErrorCount++
+		c.incrementErrorCount()
 		return &AIResponse{
 			ID:        req.ID,
 			Provider:  ProviderClaude,
@@ -256,11 +258,6 @@ func (c *ClaudeClient) Health(ctx context.Context) error {
 	return err
 }
 
-// GetUsage returns current usage statistics
-func (c *ClaudeClient) GetUsage() *ProviderUsage {
-	return c.usage
-}
-
 // getMaxTokens determines appropriate max tokens based on request
 func (c *ClaudeClient) getMaxTokens(req *AIRequest) int {
 	if req.MaxTokens > 0 {
@@ -293,11 +290,38 @@ func (c *ClaudeClient) calculateCost(inputTokens, outputTokens int) float64 {
 	return inputCost + outputCost
 }
 
-// updateUsage updates internal usage statistics
+// updateUsage updates internal usage statistics (thread-safe)
 func (c *ClaudeClient) updateUsage(totalTokens int, cost float64, duration time.Duration) {
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+
 	c.usage.RequestCount++
 	c.usage.TotalTokens += int64(totalTokens)
 	c.usage.TotalCost += cost
 	c.usage.AvgLatency = (c.usage.AvgLatency*float64(c.usage.RequestCount-1) + duration.Seconds()) / float64(c.usage.RequestCount)
 	c.usage.LastUsed = time.Now()
+}
+
+// incrementErrorCount safely increments the error count
+func (c *ClaudeClient) incrementErrorCount() {
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	c.usage.ErrorCount++
+}
+
+// GetUsage returns current usage statistics (thread-safe copy)
+func (c *ClaudeClient) GetUsage() *ProviderUsage {
+	c.usageMu.RLock()
+	defer c.usageMu.RUnlock()
+
+	// Return a copy to prevent data races
+	return &ProviderUsage{
+		Provider:     c.usage.Provider,
+		RequestCount: c.usage.RequestCount,
+		TotalTokens:  c.usage.TotalTokens,
+		TotalCost:    c.usage.TotalCost,
+		AvgLatency:   c.usage.AvgLatency,
+		ErrorCount:   c.usage.ErrorCount,
+		LastUsed:     c.usage.LastUsed,
+	}
 }

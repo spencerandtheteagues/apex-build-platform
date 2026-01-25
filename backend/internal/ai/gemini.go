@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -16,6 +17,7 @@ type GeminiClient struct {
 	baseURL    string
 	httpClient *http.Client
 	usage      *ProviderUsage
+	usageMu    sync.RWMutex // Protects usage statistics
 }
 
 // Gemini API request/response structures
@@ -127,7 +129,7 @@ func (g *GeminiClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	// Make API request
 	resp, err := g.makeRequest(ctx, url, geminiReq)
 	if err != nil {
-		g.usage.ErrorCount++
+		g.incrementErrorCount()
 		return &AIResponse{
 			ID:        req.ID,
 			Provider:  ProviderGemini,
@@ -309,9 +311,21 @@ func (g *GeminiClient) Health(ctx context.Context) error {
 	return err
 }
 
-// GetUsage returns current usage statistics
+// GetUsage returns current usage statistics (thread-safe copy)
 func (g *GeminiClient) GetUsage() *ProviderUsage {
-	return g.usage
+	g.usageMu.RLock()
+	defer g.usageMu.RUnlock()
+
+	// Return a copy to prevent data races
+	return &ProviderUsage{
+		Provider:     g.usage.Provider,
+		RequestCount: g.usage.RequestCount,
+		TotalTokens:  g.usage.TotalTokens,
+		TotalCost:    g.usage.TotalCost,
+		AvgLatency:   g.usage.AvgLatency,
+		ErrorCount:   g.usage.ErrorCount,
+		LastUsed:     g.usage.LastUsed,
+	}
 }
 
 // getMaxTokens determines appropriate max tokens based on request
@@ -355,11 +369,21 @@ func (g *GeminiClient) calculateCost(inputTokens, outputTokens int, model string
 	return inputCost + outputCost
 }
 
-// updateUsage updates internal usage statistics
+// updateUsage updates internal usage statistics (thread-safe)
 func (g *GeminiClient) updateUsage(totalTokens int, cost float64, duration time.Duration) {
+	g.usageMu.Lock()
+	defer g.usageMu.Unlock()
+
 	g.usage.RequestCount++
 	g.usage.TotalTokens += int64(totalTokens)
 	g.usage.TotalCost += cost
 	g.usage.AvgLatency = (g.usage.AvgLatency*float64(g.usage.RequestCount-1) + duration.Seconds()) / float64(g.usage.RequestCount)
 	g.usage.LastUsed = time.Now()
+}
+
+// incrementErrorCount safely increments the error count
+func (g *GeminiClient) incrementErrorCount() {
+	g.usageMu.Lock()
+	defer g.usageMu.Unlock()
+	g.usage.ErrorCount++
 }

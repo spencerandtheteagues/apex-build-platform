@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"apex-build/internal/git"
 	"apex-build/internal/mcp"
 	"apex-build/internal/secrets"
 	"apex-build/pkg/models"
@@ -94,6 +95,8 @@ func (d *Database) Migrate() error {
 		&secrets.SecretAuditLog{},
 		// MCP server integration
 		&mcp.ExternalMCPServer{},
+		// Git integration
+		&git.Repository{},
 	)
 
 	if err != nil {

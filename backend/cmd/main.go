@@ -13,9 +13,16 @@ import (
 	"apex-build/internal/api"
 	"apex-build/internal/auth"
 	"apex-build/internal/db"
+	"apex-build/internal/deploy"
+	"apex-build/internal/deploy/providers"
+	"apex-build/internal/git"
 	"apex-build/internal/handlers"
 	"apex-build/internal/mcp"
+	"apex-build/internal/payments"
+	"apex-build/internal/preview"
+	"apex-build/internal/search"
 	"apex-build/internal/secrets"
+	"apex-build/internal/websocket"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -136,12 +143,94 @@ func main() {
 	// Initialize Secrets and MCP handlers
 	secretsHandler := handlers.NewSecretsHandler(database.GetDB(), secretsManager)
 	mcpHandler := handlers.NewMCPHandler(database.GetDB(), mcpServer, mcpConnManager, secretsManager)
+	templatesHandler := handlers.NewTemplatesHandler(database.GetDB())
+
+	log.Println("✅ Project Templates System initialized (15+ starter templates)")
+
+	// Initialize Code Search Engine
+	searchEngine := search.NewSearchEngine(database.GetDB())
+	searchHandler := handlers.NewSearchHandler(searchEngine)
+
+	log.Println("✅ Code Search Engine initialized (full-text, regex, symbol search)")
+
+	// Initialize Live Preview Server
+	previewServer := preview.NewPreviewServer(database.GetDB())
+	previewHandler := handlers.NewPreviewHandler(database.GetDB(), previewServer)
+
+	log.Println("✅ Live Preview Server initialized (hot reload support)")
+
+	// Initialize Git Integration Service
+	gitService := git.NewGitService(database.GetDB())
+	gitHandler := handlers.NewGitHandler(database.GetDB(), gitService, secretsManager)
+
+	log.Println("✅ Git Integration initialized (GitHub support)")
+
+	// Initialize Stripe Payment Service
+	stripeSecretKey := os.Getenv("STRIPE_SECRET_KEY")
+	paymentHandler := handlers.NewPaymentHandlers(database.GetDB(), stripeSecretKey)
+
+	if stripeSecretKey != "" && stripeSecretKey != "sk_test_xxx" {
+		log.Println("✅ Stripe Payment Integration initialized")
+		log.Printf("   - Plans: Free, Pro ($12/mo), Team ($29/mo), Enterprise ($99/mo)")
+	} else {
+		log.Println("⚠️  Stripe not configured - payment features disabled")
+		log.Println("   Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET to enable")
+	}
+
+	// Log available plans
+	plans := payments.GetAllPlans()
+	log.Printf("✅ Subscription Plans configured: %d plans available", len(plans))
+
+	// Initialize WebSocket Hub for real-time updates
+	wsHubRT := websocket.NewHub()
+	go wsHubRT.Run()
+	log.Println("✅ WebSocket Hub initialized for real-time updates")
+
+	// Initialize base Handler for dependent handlers
+	baseHandler := handlers.NewHandler(database.GetDB(), aiRouter, authService, wsHubRT)
+
+	// Initialize Code Execution Engine
+	projectsDir := os.Getenv("PROJECTS_DIR")
+	if projectsDir == "" {
+		projectsDir = "/tmp/apex-build-projects"
+	}
+	executionHandler, err := handlers.NewExecutionHandler(database.GetDB(), projectsDir)
+	if err != nil {
+		log.Printf("⚠️ Failed to initialize execution handler: %v", err)
+	} else {
+		log.Println("✅ Code Execution Engine initialized (10+ languages supported)")
+		log.Println("   - Languages: JavaScript, TypeScript, Python, Go, Rust, Java, C, C++, Ruby, PHP")
+	}
+
+	// Initialize One-Click Deployment Service
+	vercelToken := os.Getenv("VERCEL_TOKEN")
+	netlifyToken := os.Getenv("NETLIFY_TOKEN")
+	renderToken := os.Getenv("RENDER_TOKEN")
+	deployService := deploy.NewDeploymentService(database.GetDB(), vercelToken, netlifyToken, renderToken)
+
+	// Register deployment providers
+	if vercelToken != "" {
+		deployService.RegisterProvider(deploy.ProviderVercel, providers.NewVercelProvider(vercelToken))
+	}
+	if netlifyToken != "" {
+		deployService.RegisterProvider(deploy.ProviderNetlify, providers.NewNetlifyProvider(netlifyToken))
+	}
+	if renderToken != "" {
+		deployService.RegisterProvider(deploy.ProviderRender, providers.NewRenderProvider(renderToken))
+	}
+
+	deployHandler := handlers.NewDeployHandler(database.GetDB(), deployService)
+	log.Println("✅ One-Click Deployment initialized (Vercel, Netlify, Render)")
+
+	// Initialize Package Manager
+	packageHandler := handlers.NewPackageHandler(baseHandler)
+	log.Println("✅ Package Manager initialized (NPM, PyPI, Go Modules)")
 
 	// Initialize API server
 	server := api.NewServer(database, authService, aiRouter)
 
 	// Setup routes
-	router := setupRoutes(server, buildHandler, wsHub, secretsHandler, mcpHandler)
+	router := setupRoutes(server, buildHandler, wsHub, secretsHandler, mcpHandler, templatesHandler, searchHandler, previewHandler, gitHandler, paymentHandler, executionHandler, deployHandler, packageHandler)
 
 	// Start server
 	port := config.Port
@@ -260,7 +349,7 @@ func parseDatabaseURL(databaseURL string) *db.Config {
 }
 
 // setupRoutes configures all API routes
-func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *agents.WSHub, secretsHandler *handlers.SecretsHandler, mcpHandler *handlers.MCPHandler) *gin.Engine {
+func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *agents.WSHub, secretsHandler *handlers.SecretsHandler, mcpHandler *handlers.MCPHandler, templatesHandler *handlers.TemplatesHandler, searchHandler *handlers.SearchHandler, previewHandler *handlers.PreviewHandler, gitHandler *handlers.GitHandler, paymentHandler *handlers.PaymentHandlers, executionHandler *handlers.ExecutionHandler, deployHandler *handlers.DeployHandler, packageHandler *handlers.PackageHandler) *gin.Engine {
 	// Set gin mode based on environment
 	if os.Getenv("ENVIRONMENT") == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -404,6 +493,116 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 				mcpRoutes.GET("/tools", mcpHandler.GetAvailableTools)
 			}
 
+			// Project Templates endpoints
+			templates := protected.Group("/templates")
+			{
+				templates.GET("", templatesHandler.ListTemplates)
+				templates.GET("/categories", templatesHandler.GetCategories)
+				templates.GET("/:id", templatesHandler.GetTemplate)
+				templates.POST("/create-project", templatesHandler.CreateProjectFromTemplate)
+			}
+
+			// Code Search endpoints
+			searchRoutes := protected.Group("/search")
+			{
+				searchRoutes.POST("", searchHandler.Search)              // Full search with all options
+				searchRoutes.GET("/quick", searchHandler.QuickSearch)   // Quick search for autocomplete
+				searchRoutes.GET("/symbols", searchHandler.SearchSymbols) // Symbol search (functions, classes)
+				searchRoutes.GET("/files", searchHandler.SearchFiles)    // File name search
+				searchRoutes.POST("/replace", searchHandler.SearchAndReplace) // Search & replace
+				searchRoutes.GET("/history", searchHandler.GetSearchHistory)  // Search history
+				searchRoutes.DELETE("/history", searchHandler.ClearSearchHistory) // Clear history
+			}
+
+			// Live Preview endpoints
+			previewRoutes := protected.Group("/preview")
+			{
+				previewRoutes.POST("/start", previewHandler.StartPreview)       // Start preview server
+				previewRoutes.POST("/stop", previewHandler.StopPreview)         // Stop preview server
+				previewRoutes.GET("/status/:projectId", previewHandler.GetPreviewStatus) // Get status
+				previewRoutes.POST("/refresh", previewHandler.RefreshPreview)   // Trigger reload
+				previewRoutes.POST("/hot-reload", previewHandler.HotReload)     // Hot reload file
+				previewRoutes.GET("/list", previewHandler.ListPreviews)         // List active previews
+				previewRoutes.GET("/url/:projectId", previewHandler.GetPreviewURL) // Get preview URL
+			}
+
+			// Git Integration endpoints
+			gitRoutes := protected.Group("/git")
+			{
+				gitRoutes.POST("/connect", gitHandler.ConnectRepository)         // Connect to repo
+				gitRoutes.GET("/repo/:projectId", gitHandler.GetRepository)      // Get repo info
+				gitRoutes.DELETE("/repo/:projectId", gitHandler.DisconnectRepository) // Disconnect
+				gitRoutes.GET("/branches/:projectId", gitHandler.GetBranches)    // List branches
+				gitRoutes.GET("/commits/:projectId", gitHandler.GetCommits)      // Get commits
+				gitRoutes.GET("/status/:projectId", gitHandler.GetStatus)        // Working tree status
+				gitRoutes.POST("/commit", gitHandler.Commit)                     // Create commit
+				gitRoutes.POST("/push", gitHandler.Push)                         // Push to remote
+				gitRoutes.POST("/pull", gitHandler.Pull)                         // Pull from remote
+				gitRoutes.POST("/branch", gitHandler.CreateBranch)               // Create branch
+				gitRoutes.POST("/checkout", gitHandler.SwitchBranch)             // Switch branch
+				gitRoutes.GET("/pulls/:projectId", gitHandler.GetPullRequests)   // List PRs
+				gitRoutes.POST("/pulls", gitHandler.CreatePullRequest)           // Create PR
+			}
+
+			// Billing & Subscription endpoints (Stripe integration)
+			billing := protected.Group("/billing")
+			{
+				billing.POST("/checkout", paymentHandler.CreateCheckoutSession)      // Create Stripe checkout
+				billing.GET("/subscription", paymentHandler.GetSubscription)         // Get current subscription
+				billing.POST("/portal", paymentHandler.CreateBillingPortalSession)   // Stripe billing portal
+				billing.GET("/plans", paymentHandler.GetPlans)                       // List available plans
+				billing.GET("/usage", paymentHandler.GetUsage)                       // Get usage stats
+				billing.POST("/cancel", paymentHandler.CancelSubscription)           // Cancel subscription
+				billing.POST("/reactivate", paymentHandler.ReactivateSubscription)   // Reactivate subscription
+				billing.GET("/invoices", paymentHandler.GetInvoices)                 // Get invoice history
+				billing.GET("/payment-methods", paymentHandler.GetPaymentMethods)    // Get payment methods
+				billing.GET("/check-limit/:type", paymentHandler.CheckUsageLimit)    // Check usage limit
+				billing.GET("/config-status", paymentHandler.StripeConfigStatus)     // Check Stripe config
+			}
+
+			// Code Execution endpoints (the core of cloud IDE)
+			if executionHandler != nil {
+				execute := protected.Group("/execute")
+				{
+					execute.POST("", executionHandler.ExecuteCode)                  // Execute code snippet
+					execute.POST("/file", executionHandler.ExecuteFile)             // Execute a file
+					execute.POST("/project", executionHandler.ExecuteProject)       // Execute entire project
+					execute.GET("/languages", executionHandler.GetLanguages)        // Get supported languages
+					execute.GET("/:id", executionHandler.GetExecution)              // Get execution details
+					execute.GET("/history", executionHandler.GetExecutionHistory)   // Get execution history
+					execute.POST("/:id/stop", executionHandler.StopExecution)       // Stop running execution
+					execute.GET("/stats", executionHandler.GetExecutionStats)       // Get execution statistics
+				}
+
+				// Terminal endpoints (interactive shell)
+				terminal := protected.Group("/terminal")
+				{
+					terminal.POST("/sessions", executionHandler.CreateTerminalSession)         // Create new terminal
+					terminal.GET("/sessions", executionHandler.ListTerminalSessions)           // List all terminals
+					terminal.GET("/sessions/:id", executionHandler.GetTerminalSession)         // Get terminal info
+					terminal.DELETE("/sessions/:id", executionHandler.DeleteTerminalSession)   // Close terminal
+					terminal.POST("/sessions/:id/resize", executionHandler.ResizeTerminalSession) // Resize terminal
+					terminal.GET("/sessions/:id/history", executionHandler.GetTerminalHistory) // Get command history
+				}
+			}
+
+			// One-Click Deployment endpoints (Vercel, Netlify, Render)
+			deployRoutes := protected.Group("/deploy")
+			{
+				deployRoutes.POST("", deployHandler.StartDeployment)                           // Start deployment
+				deployRoutes.GET("/:id", deployHandler.GetDeployment)                          // Get deployment details
+				deployRoutes.GET("/:id/status", deployHandler.GetDeploymentStatus)             // Get status only
+				deployRoutes.GET("/:id/logs", deployHandler.GetDeploymentLogs)                 // Get deployment logs
+				deployRoutes.DELETE("/:id", deployHandler.CancelDeployment)                    // Cancel deployment
+				deployRoutes.POST("/:id/redeploy", deployHandler.Redeploy)                     // Redeploy
+				deployRoutes.GET("/providers", deployHandler.GetProviders)                     // List providers
+				deployRoutes.GET("/projects/:projectId/history", deployHandler.GetProjectDeployments) // Deployment history
+				deployRoutes.GET("/projects/:projectId/latest", deployHandler.GetLatestDeployment)    // Latest deployment
+			}
+
+			// Package Management endpoints (NPM, PyPI, Go Modules)
+			packageHandler.RegisterPackageRoutes(protected)
+
 			// Admin endpoints (requires admin privileges)
 			admin := protected.Group("/admin")
 			admin.Use(server.AdminMiddleware())
@@ -421,6 +620,11 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 
 	// WebSocket endpoint for real-time build updates
 	router.GET("/ws/build/:buildId", wsHub.HandleWebSocket)
+
+	// WebSocket endpoint for interactive terminal sessions
+	if executionHandler != nil {
+		router.GET("/ws/terminal/:sessionId", executionHandler.HandleTerminalWebSocket)
+	}
 
 	// MCP WebSocket endpoint (for APEX.BUILD as MCP server)
 	router.GET("/mcp/ws", mcpHandler.HandleMCPWebSocket)

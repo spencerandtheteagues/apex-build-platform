@@ -16,6 +16,7 @@ services:
     buildCommand: go build -o apex-server ./cmd/main.go
     startCommand: ./apex-server
     plan: free
+    autoDeploy: true
     healthCheckPath: /health
     envVars:
       - key: PORT
@@ -42,6 +43,7 @@ services:
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: ./frontend/dist
     plan: free
+    autoDeploy: true
     headers:
       - path: /*
         name: X-Frame-Options

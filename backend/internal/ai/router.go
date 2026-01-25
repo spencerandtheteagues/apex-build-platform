@@ -2,13 +2,21 @@ package ai
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log"
-	"math/rand"
+	"math/big"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+)
+
+const (
+	// MaxPromptLength prevents excessive API costs and OOM
+	MaxPromptLength = 100000
+	// MaxCodeLength limits code input size
+	MaxCodeLength = 50000
 )
 
 // AIRouter intelligently routes AI requests to the optimal provider
@@ -70,14 +78,38 @@ func NewAIRouter(claudeKey, openAIKey, geminiKey string) *AIRouter {
 
 // Generate routes an AI request to the optimal provider
 func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, error) {
+	// Validate input lengths to prevent abuse and excessive costs
+	if len(req.Prompt) > MaxPromptLength {
+		return nil, fmt.Errorf("prompt exceeds maximum length of %d characters", MaxPromptLength)
+	}
+	if len(req.Code) > MaxCodeLength {
+		return nil, fmt.Errorf("code exceeds maximum length of %d characters", MaxCodeLength)
+	}
+
 	// Set request ID if not provided
 	if req.ID == "" {
 		req.ID = uuid.New().String()
 	}
 
-	// Set default temperature if not provided
+	// Set creation time
+	if req.CreatedAt.IsZero() {
+		req.CreatedAt = time.Now()
+	}
+
+	// Set default temperature if not provided (with bounds)
 	if req.Temperature == 0 {
 		req.Temperature = 0.7
+	} else if req.Temperature < 0 {
+		req.Temperature = 0
+	} else if req.Temperature > 2.0 {
+		req.Temperature = 2.0
+	}
+
+	// Set reasonable max tokens default
+	if req.MaxTokens <= 0 {
+		req.MaxTokens = 2000
+	} else if req.MaxTokens > 8000 {
+		req.MaxTokens = 8000 // Cap to prevent excessive costs
 	}
 
 	// Select the best provider for this request
@@ -179,8 +211,8 @@ func (r *AIRouter) selectByLoadBalancing() (AIProvider, error) {
 		return "", fmt.Errorf("no healthy providers available")
 	}
 
-	// Select provider based on weighted random selection
-	randomValue := rand.Float64() * totalWeight
+	// Select provider based on weighted random selection using crypto/rand
+	randomValue := cryptoRandFloat64() * totalWeight
 	currentWeight := 0.0
 
 	for _, provider := range healthyProviders {
@@ -194,6 +226,18 @@ func (r *AIRouter) selectByLoadBalancing() (AIProvider, error) {
 	return healthyProviders[0], nil
 }
 
+// cryptoRandFloat64 generates a cryptographically secure random float64 between 0 and 1
+func cryptoRandFloat64() float64 {
+	// Generate a random 64-bit integer
+	max := big.NewInt(1 << 53) // Use 53 bits for float64 precision
+	n, err := rand.Int(rand.Reader, max)
+	if err != nil {
+		// Fallback to 0.5 on error (extremely unlikely)
+		return 0.5
+	}
+	return float64(n.Int64()) / float64(1<<53)
+}
+
 // checkRateLimit checks if a provider is within rate limits
 func (r *AIRouter) checkRateLimit(provider AIProvider) bool {
 	limiter, exists := r.rateLimits[provider]
@@ -204,10 +248,13 @@ func (r *AIRouter) checkRateLimit(provider AIProvider) bool {
 	limiter.mu.Lock()
 	defer limiter.mu.Unlock()
 
-	// Refill tokens based on time passed
+	// Refill tokens based on time passed (per-second granularity)
 	now := time.Now()
 	timePassed := now.Sub(limiter.lastRefill)
-	tokensToAdd := int(timePassed.Minutes()) * limiter.maxTokens
+
+	// Calculate tokens to add based on time passed (tokens per second = maxTokens / 60)
+	tokensPerSecond := float64(limiter.maxTokens) / 60.0
+	tokensToAdd := int(timePassed.Seconds() * tokensPerSecond)
 
 	if tokensToAdd > 0 {
 		limiter.tokens = min(limiter.maxTokens, limiter.tokens+tokensToAdd)
@@ -254,6 +301,8 @@ func (r *AIRouter) monitorHealth() {
 // performHealthChecks checks health of all providers
 func (r *AIRouter) performHealthChecks() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel() // Ensure cancel is called when function returns
+
 	var wg sync.WaitGroup
 
 	for provider, client := range r.clients {
@@ -262,7 +311,11 @@ func (r *AIRouter) performHealthChecks() {
 			defer wg.Done()
 			healthy := true
 
-			if err := c.Health(ctx); err != nil {
+			// Use a per-provider timeout to prevent one slow provider from blocking others
+			providerCtx, providerCancel := context.WithTimeout(ctx, 10*time.Second)
+			defer providerCancel()
+
+			if err := c.Health(providerCtx); err != nil {
 				log.Printf("Health check failed for provider %s: %v", p, err)
 				healthy = false
 			} else {
@@ -276,7 +329,6 @@ func (r *AIRouter) performHealthChecks() {
 	}
 
 	wg.Wait()
-	cancel()
 }
 
 // GetProviderUsage returns usage statistics for all providers

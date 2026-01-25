@@ -7,7 +7,9 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"apex-build/internal/ai"
 	"apex-build/internal/middleware"
@@ -17,6 +19,11 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// containsIgnoreCase is a case-insensitive substring check
+func containsIgnoreCase(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
 
 // AIGenerateRequest represents an AI generation request
 type AIGenerateRequest struct {
@@ -49,6 +56,46 @@ func (h *Handler) GenerateAI(c *gin.Context) {
 			Success: false,
 			Error:   "Invalid request format",
 			Code:    "INVALID_REQUEST",
+		})
+		return
+	}
+
+	// Validate prompt length and content
+	if !utf8.ValidString(req.Prompt) {
+		c.JSON(http.StatusBadRequest, StandardResponse{
+			Success: false,
+			Error:   "Prompt contains invalid characters",
+			Code:    "INVALID_PROMPT",
+		})
+		return
+	}
+
+	// Enforce prompt length limits
+	if len(req.Prompt) > ai.MaxPromptLength {
+		c.JSON(http.StatusBadRequest, StandardResponse{
+			Success: false,
+			Error:   "Prompt exceeds maximum length of 100,000 characters",
+			Code:    "PROMPT_TOO_LONG",
+		})
+		return
+	}
+
+	if len(req.Code) > ai.MaxCodeLength {
+		c.JSON(http.StatusBadRequest, StandardResponse{
+			Success: false,
+			Error:   "Code exceeds maximum length of 50,000 characters",
+			Code:    "CODE_TOO_LONG",
+		})
+		return
+	}
+
+	// Sanitize prompt - remove potentially dangerous content
+	req.Prompt = strings.TrimSpace(req.Prompt)
+	if req.Prompt == "" {
+		c.JSON(http.StatusBadRequest, StandardResponse{
+			Success: false,
+			Error:   "Prompt cannot be empty",
+			Code:    "EMPTY_PROMPT",
 		})
 		return
 	}
@@ -138,13 +185,30 @@ func (h *Handler) GenerateAI(c *gin.Context) {
 	duration := time.Since(startTime)
 
 	if err != nil {
-		// Log the failed request
+		// Log the failed request with full error details internally
 		h.logAIRequest(userID, aiReq, nil, err, duration)
+
+		// Return a sanitized error message to the user (don't leak internal details)
+		errorMsg := "AI generation failed. Please try again."
+		errorCode := "AI_GENERATION_FAILED"
+
+		// Provide user-friendly messages for common errors
+		errStr := err.Error()
+		if containsIgnoreCase(errStr, "rate limit") || containsIgnoreCase(errStr, "429") {
+			errorMsg = "AI service is currently busy. Please try again in a moment."
+			errorCode = "RATE_LIMITED"
+		} else if containsIgnoreCase(errStr, "timeout") || containsIgnoreCase(errStr, "deadline") {
+			errorMsg = "Request timed out. Please try with a shorter prompt."
+			errorCode = "TIMEOUT"
+		} else if containsIgnoreCase(errStr, "maximum length") {
+			errorMsg = errStr // This is safe to show
+			errorCode = "INPUT_TOO_LONG"
+		}
 
 		c.JSON(http.StatusInternalServerError, StandardResponse{
 			Success: false,
-			Error:   "AI generation failed: " + err.Error(),
-			Code:    "AI_GENERATION_FAILED",
+			Error:   errorMsg,
+			Code:    errorCode,
 		})
 		return
 	}
@@ -411,8 +475,9 @@ func getUserMonthlyLimit(subscriptionType string) int {
 	}
 }
 
-// getNextMonthStart returns the start of next month
+// getNextMonthStart returns the start of next month (handles December correctly)
 func getNextMonthStart() time.Time {
 	now := time.Now()
-	return time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, now.Location())
+	// Use AddDate to properly handle month overflow (December -> January)
+	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).AddDate(0, 1, 0)
 }
