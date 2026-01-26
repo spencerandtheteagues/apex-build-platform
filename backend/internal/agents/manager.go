@@ -214,8 +214,84 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	// Queue the planning task
 	am.taskQueue <- planTask
 
+	// Start build timeout goroutine - force complete after timeout
+	go am.buildTimeoutHandler(buildID, build.Mode)
+
 	log.Printf("Build %s started with lead agent %s, planning task %s queued", buildID, leadAgent.ID, planTask.ID)
 	return nil
+}
+
+// buildTimeoutHandler forces build completion after a timeout to ensure users get results
+func (am *AgentManager) buildTimeoutHandler(buildID string, mode BuildMode) {
+	// Fast build: 2 minutes, Full build: 5 minutes
+	timeout := 2 * time.Minute
+	if mode == ModeFull {
+		timeout = 5 * time.Minute
+	}
+
+	time.Sleep(timeout)
+
+	am.mu.RLock()
+	build, exists := am.builds[buildID]
+	am.mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	build.mu.RLock()
+	status := build.Status
+	build.mu.RUnlock()
+
+	// If build is still in progress, force complete it
+	if status == BuildPlanning || status == BuildInProgress {
+		log.Printf("Build %s timed out after %v, forcing completion", buildID, timeout)
+		am.forceCompleteBuild(buildID)
+	}
+}
+
+// forceCompleteBuild marks a build as complete even if some tasks are still pending
+func (am *AgentManager) forceCompleteBuild(buildID string) {
+	am.mu.RLock()
+	build, exists := am.builds[buildID]
+	am.mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	build.mu.Lock()
+	now := time.Now()
+	build.CompletedAt = &now
+	build.UpdatedAt = now
+	build.Status = BuildCompleted
+	build.Progress = 100
+
+	// Cancel any pending tasks
+	for _, task := range build.Tasks {
+		if task.Status == TaskPending || task.Status == TaskInProgress {
+			task.Status = TaskCancelled
+		}
+	}
+	build.mu.Unlock()
+
+	// Create final checkpoint with all generated files
+	am.createCheckpoint(build, "Build Complete (Timeout)", "Build completed with available results")
+
+	// Broadcast completion
+	am.broadcast(buildID, &WSMessage{
+		Type:      WSBuildCompleted,
+		BuildID:   buildID,
+		Timestamp: now,
+		Data: map[string]any{
+			"status":       string(BuildCompleted),
+			"progress":     100,
+			"timed_out":    true,
+			"files_count":  len(am.collectGeneratedFiles(build)),
+		},
+	})
+
+	log.Printf("Build %s force completed with %d files", buildID, len(am.collectGeneratedFiles(build)))
 }
 
 // spawnAgent creates a new AI agent with a specific role
