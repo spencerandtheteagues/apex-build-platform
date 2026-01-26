@@ -339,15 +339,17 @@ function App() {
         )}
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 overflow-hidden">
-        {currentView === 'builder' ? (
+      {/* Main Content - Keep all views mounted to preserve state */}
+      <div className="flex-1 overflow-hidden relative">
+        <div className={`absolute inset-0 ${currentView === 'builder' ? 'block' : 'hidden'}`}>
           <AppBuilder onNavigateToIDE={() => setCurrentView('ide')} />
-        ) : currentView === 'admin' ? (
-          <AdminDashboard />
-        ) : (
+        </div>
+        <div className={`absolute inset-0 ${currentView === 'ide' ? 'block' : 'hidden'}`}>
           <IDELayout />
-        )}
+        </div>
+        <div className={`absolute inset-0 ${currentView === 'admin' ? 'block' : 'hidden'}`}>
+          <AdminDashboard />
+        </div>
       </div>
     </div>
   )
