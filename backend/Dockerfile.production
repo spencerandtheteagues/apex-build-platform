@@ -2,7 +2,7 @@
 # Multi-stage build for optimized production image
 
 # Build stage
-FROM golang:1.25-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata gcc musl-dev
@@ -20,7 +20,7 @@ RUN go mod download
 COPY . .
 
 # Build arguments
-ARG GO_VERSION=1.25
+ARG GO_VERSION=1.23
 ARG BUILD_DATE
 ARG VERSION=2.0.0
 ARG COMMIT_HASH=production
@@ -30,7 +30,7 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
     -ldflags="-s -w -X main.BuildDate=${BUILD_DATE} -X main.Version=${VERSION} -X main.CommitHash=${COMMIT_HASH}" \
     -a -installsuffix cgo \
     -o apex-build-server \
-    main.go
+    ./cmd/main.go
 
 # Production stage
 FROM alpine:latest
