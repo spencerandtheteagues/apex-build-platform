@@ -530,7 +530,6 @@ export class ApiService {
     })
     return response.data.results
   }
-}
 
   // ========== COMMUNITY/SHARING MARKETPLACE ENDPOINTS ==========
 
