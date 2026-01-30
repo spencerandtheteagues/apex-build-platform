@@ -45,7 +45,7 @@ type UpdateSecretRequest struct {
 
 // ListSecrets returns all secrets for the authenticated user (metadata only, no values)
 func (h *SecretsHandler) ListSecrets(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Query("project_id")
 
 	var secretsList []secrets.Secret
@@ -79,7 +79,7 @@ func (h *SecretsHandler) ListSecrets(c *gin.Context) {
 
 // CreateSecret creates a new encrypted secret
 func (h *SecretsHandler) CreateSecret(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	var req CreateSecretRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -103,7 +103,7 @@ func (h *SecretsHandler) CreateSecret(c *gin.Context) {
 	// Verify project ownership if projectID provided
 	if req.ProjectID != nil {
 		var project models.Project
-		if err := h.db.Where("id = ? AND user_id = ?", *req.ProjectID, userID).First(&project).Error; err != nil {
+		if err := h.db.Where("id = ? AND owner_id = ?", *req.ProjectID, userID).First(&project).Error; err != nil {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Project not found or access denied"})
 			return
 		}
@@ -145,7 +145,7 @@ func (h *SecretsHandler) CreateSecret(c *gin.Context) {
 
 // GetSecret retrieves and decrypts a secret value
 func (h *SecretsHandler) GetSecret(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	secretID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid secret ID"})
@@ -153,7 +153,7 @@ func (h *SecretsHandler) GetSecret(c *gin.Context) {
 	}
 
 	var secret secrets.Secret
-	if err := h.db.Where("id = ? AND user_id = ?", secretID, userID).First(&secret).Error; err != nil {
+	if err := h.db.Where("id = ? AND owner_id = ?", secretID, userID).First(&secret).Error; err != nil {
 		h.logAccess(uint(secretID), userID, "read", c.ClientIP(), c.GetHeader("User-Agent"), false, "Not found")
 		c.JSON(http.StatusNotFound, gin.H{"error": "Secret not found"})
 		return
@@ -182,7 +182,7 @@ func (h *SecretsHandler) GetSecret(c *gin.Context) {
 
 // UpdateSecret updates an existing secret
 func (h *SecretsHandler) UpdateSecret(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	secretID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid secret ID"})
@@ -196,7 +196,7 @@ func (h *SecretsHandler) UpdateSecret(c *gin.Context) {
 	}
 
 	var secret secrets.Secret
-	if err := h.db.Where("id = ? AND user_id = ?", secretID, userID).First(&secret).Error; err != nil {
+	if err := h.db.Where("id = ? AND owner_id = ?", secretID, userID).First(&secret).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Secret not found"})
 		return
 	}
@@ -236,7 +236,7 @@ func (h *SecretsHandler) UpdateSecret(c *gin.Context) {
 
 // DeleteSecret removes a secret
 func (h *SecretsHandler) DeleteSecret(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	secretID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid secret ID"})
@@ -244,7 +244,7 @@ func (h *SecretsHandler) DeleteSecret(c *gin.Context) {
 	}
 
 	var secret secrets.Secret
-	if err := h.db.Where("id = ? AND user_id = ?", secretID, userID).First(&secret).Error; err != nil {
+	if err := h.db.Where("id = ? AND owner_id = ?", secretID, userID).First(&secret).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Secret not found"})
 		return
 	}
@@ -261,7 +261,7 @@ func (h *SecretsHandler) DeleteSecret(c *gin.Context) {
 
 // RotateSecret generates a new encryption for an existing secret
 func (h *SecretsHandler) RotateSecret(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	secretID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid secret ID"})
@@ -269,7 +269,7 @@ func (h *SecretsHandler) RotateSecret(c *gin.Context) {
 	}
 
 	var secret secrets.Secret
-	if err := h.db.Where("id = ? AND user_id = ?", secretID, userID).First(&secret).Error; err != nil {
+	if err := h.db.Where("id = ? AND owner_id = ?", secretID, userID).First(&secret).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Secret not found"})
 		return
 	}
@@ -308,7 +308,7 @@ func (h *SecretsHandler) RotateSecret(c *gin.Context) {
 
 // GetProjectSecrets gets all secrets for a specific project as environment variables
 func (h *SecretsHandler) GetProjectSecrets(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
@@ -317,7 +317,7 @@ func (h *SecretsHandler) GetProjectSecrets(c *gin.Context) {
 
 	// Verify project ownership
 	var project models.Project
-	if err := h.db.Where("id = ? AND user_id = ?", projectID, userID).First(&project).Error; err != nil {
+	if err := h.db.Where("id = ? AND owner_id = ?", projectID, userID).First(&project).Error; err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Project not found or access denied"})
 		return
 	}
@@ -352,7 +352,7 @@ func (h *SecretsHandler) GetProjectSecrets(c *gin.Context) {
 
 // GetAuditLog retrieves the access audit log for a secret
 func (h *SecretsHandler) GetAuditLog(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	secretID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid secret ID"})
@@ -361,7 +361,7 @@ func (h *SecretsHandler) GetAuditLog(c *gin.Context) {
 
 	// Verify ownership
 	var secret secrets.Secret
-	if err := h.db.Where("id = ? AND user_id = ?", secretID, userID).First(&secret).Error; err != nil {
+	if err := h.db.Where("id = ? AND owner_id = ?", secretID, userID).First(&secret).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Secret not found"})
 		return
 	}

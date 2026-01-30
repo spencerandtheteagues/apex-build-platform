@@ -85,7 +85,11 @@ const frameworkConfig: Record<string, { name: string; color: string }> = {
   vite: { name: 'Vite', color: '#646cff' },
 };
 
-export const GitHubImportWizard: React.FC = () => {
+interface GitHubImportWizardProps {
+  onClose?: () => void;
+}
+
+export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose }) => {
   const navigate = useNavigate();
 
   // State
@@ -268,20 +272,30 @@ export const GitHubImportWizard: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">
+    <div className="w-full max-w-2xl bg-gray-900 rounded-2xl border border-gray-700 shadow-2xl overflow-hidden">
+      {/* Header with close button */}
+      <div className="flex items-center justify-between p-6 border-b border-gray-700">
+        <div>
+          <h1 className="text-2xl font-bold text-white">
             Import from GitHub
           </h1>
-          <p className="text-gray-400">
+          <p className="text-gray-400 text-sm mt-1">
             Clone any public or private repository and start coding in seconds
           </p>
         </div>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+      </div>
 
-        {/* Main Card */}
-        <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-xl p-6 shadow-xl">
+      <div className="p-6">
           {/* URL Input Step */}
           {(step === 'url' || step === 'validating') && (
             <div className="space-y-4">
@@ -576,19 +590,18 @@ export const GitHubImportWizard: React.FC = () => {
               </button>
             </div>
           )}
-        </div>
 
-        {/* Footer help text */}
-        <div className="mt-6 text-center text-sm text-gray-500">
-          <p>
-            Tip: You can also paste URLs directly like{' '}
-            <code className="bg-gray-800 px-2 py-0.5 rounded text-cyan-400">
-              apex.build/import/github.com/owner/repo
-            </code>
-          </p>
+          {/* Footer help text */}
+          <div className="mt-6 text-center text-sm text-gray-500">
+            <p>
+              Tip: You can also paste URLs directly like{' '}
+              <code className="bg-gray-700 px-2 py-0.5 rounded text-cyan-400">
+                apex.build/import/github.com/owner/repo
+              </code>
+            </p>
+          </div>
         </div>
       </div>
-    </div>
   );
 };
 

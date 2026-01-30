@@ -31,8 +31,8 @@ func (b *BillingHandlers) GetPricing(c *gin.Context) {
 
 // CreateCheckoutSession creates a simplified checkout process
 func (b *BillingHandlers) CreateCheckoutSession(c *gin.Context) {
-	userID := c.GetString("user_id")
-	if userID == "" {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "User not authenticated",
 		})
@@ -62,8 +62,8 @@ func (b *BillingHandlers) CreateCheckoutSession(c *gin.Context) {
 
 // GetSubscription returns user's current subscription details
 func (b *BillingHandlers) GetSubscription(c *gin.Context) {
-	userID := c.GetString("user_id")
-	if userID == "" {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "User not authenticated",
 		})
@@ -86,8 +86,8 @@ func (b *BillingHandlers) GetSubscription(c *gin.Context) {
 
 // GetUsage returns user's current usage statistics
 func (b *BillingHandlers) GetUsage(c *gin.Context) {
-	userID := c.GetString("user_id")
-	if userID == "" {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "User not authenticated",
 		})
@@ -132,8 +132,8 @@ func (b *BillingHandlers) GetUsage(c *gin.Context) {
 
 // CancelSubscription handles subscription cancellation
 func (b *BillingHandlers) CancelSubscription(c *gin.Context) {
-	userID := c.GetString("user_id")
-	if userID == "" {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "User not authenticated",
 		})
@@ -149,8 +149,8 @@ func (b *BillingHandlers) CancelSubscription(c *gin.Context) {
 
 // UpdateSubscription handles subscription plan changes
 func (b *BillingHandlers) UpdateSubscription(c *gin.Context) {
-	userID := c.GetString("user_id")
-	if userID == "" {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "User not authenticated",
 		})
@@ -174,8 +174,8 @@ func (b *BillingHandlers) HandleStripeWebhook(c *gin.Context) {
 
 // GetInvoices returns user's billing history
 func (b *BillingHandlers) GetInvoices(c *gin.Context) {
-	userID := c.GetString("user_id")
-	if userID == "" {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "User not authenticated",
 		})
@@ -222,8 +222,8 @@ func (b *BillingHandlers) GetInvoices(c *gin.Context) {
 
 // GetPaymentMethods returns user's saved payment methods
 func (b *BillingHandlers) GetPaymentMethods(c *gin.Context) {
-	userID := c.GetString("user_id")
-	if userID == "" {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "User not authenticated",
 		})
@@ -251,8 +251,8 @@ func (b *BillingHandlers) GetPaymentMethods(c *gin.Context) {
 
 // CheckUsageLimit checks if user has exceeded usage limits
 func (b *BillingHandlers) CheckUsageLimit(c *gin.Context) {
-	userID := c.GetString("user_id")
-	if userID == "" {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "User not authenticated",
 		})

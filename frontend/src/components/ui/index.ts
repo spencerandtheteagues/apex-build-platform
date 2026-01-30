@@ -5,7 +5,7 @@ export { Button, buttonVariants } from './Button'
 export type { ButtonProps } from './Button'
 
 export { Input, inputVariants } from './Input'
-export type { InputProps } from './Input'
+export type { InputProps, AutocompleteOption } from './Input'
 
 export {
   Card,
@@ -59,3 +59,6 @@ export type { TextareaProps } from './textarea'
 
 export { Progress, IndeterminateProgress, progressVariants } from './progress'
 export type { ProgressProps } from './progress'
+
+export { AnimatedBackground } from './AnimatedBackground'
+export type { AnimatedBackgroundProps } from './AnimatedBackground'

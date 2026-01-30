@@ -279,6 +279,10 @@ func main() {
 	packageHandler := handlers.NewPackageHandler(baseHandler)
 	log.Println("✅ Package Manager initialized (NPM, PyPI, Go Modules)")
 
+	// Initialize Environment Handler (Nix-like reproducible environments - Replit parity)
+	environmentHandler := handlers.NewEnvironmentHandler(baseHandler)
+	log.Println("✅ Environment Configuration initialized (Nix-like reproducible environments)")
+
 	// Initialize Community/Sharing Marketplace
 	communityHandler := community.NewCommunityHandler(database.GetDB())
 
@@ -384,6 +388,7 @@ func main() {
 		commentsHandler,     // Code comments system (Replit parity)
 		autonomousHandler,   // Autonomous agent system (Replit parity)
 		paymentHandler, executionHandler, deployHandler, packageHandler,
+		environmentHandler,  // Environment configuration (Nix-like - Replit parity)
 		communityHandler, hostingHandler, databaseHandler, debuggingHandler,
 		completionsHandler, extensionsHandler, enterpriseHandler, collabHub,
 		optimizedHandler,
@@ -529,6 +534,7 @@ func setupRoutes(
 	autonomousHandler *autonomous.Handler,           // Autonomous agent system (Replit parity)
 	paymentHandler *handlers.PaymentHandlers, executionHandler *handlers.ExecutionHandler,
 	deployHandler *handlers.DeployHandler, packageHandler *handlers.PackageHandler,
+	environmentHandler *handlers.EnvironmentHandler, // Environment configuration (Nix-like - Replit parity)
 	communityHandler *community.CommunityHandler,
 	hostingHandler *handlers.HostingHandler, databaseHandler *handlers.DatabaseHandler,
 	debuggingHandler *handlers.DebuggingHandler, completionsHandler *handlers.CompletionsHandler,
@@ -546,6 +552,7 @@ func setupRoutes(
 	// Add middleware
 	router.Use(server.CORSMiddleware())
 	router.Use(gin.Recovery())
+	router.Use(middleware.SecurityHeaders())
 
 	// Health check endpoint
 	router.GET("/health", server.Health)
@@ -812,6 +819,9 @@ func setupRoutes(
 			// Package Management endpoints (NPM, PyPI, Go Modules)
 			packageHandler.RegisterPackageRoutes(protected)
 
+			// Environment Configuration endpoints (Nix-like reproducible environments)
+			environmentHandler.RegisterEnvironmentRoutes(protected)
+
 			// Community/Sharing Marketplace endpoints (protected actions)
 			communityHandler.RegisterProtectedRoutes(protected)
 
@@ -887,14 +897,8 @@ func getEnv(key, defaultValue string) string {
 
 func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
-		// Convert string to int (simplified for demo)
-		switch value {
-		case "5432":
-			return 5432
-		case "3306":
-			return 3306
-		default:
-			return defaultValue
+		if parsed, err := strconv.Atoi(value); err == nil {
+			return parsed
 		}
 	}
 	return defaultValue

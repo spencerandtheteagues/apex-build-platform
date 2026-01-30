@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,16 @@ import (
 	_ "github.com/lib/pq"
 	_ "modernc.org/sqlite"
 )
+
+// validIdentifier validates that a SQL identifier (table/column name) contains only safe characters
+var validIdentifier = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+func sanitizeIdentifier(name string) (string, error) {
+	if !validIdentifier.MatchString(name) {
+		return "", fmt.Errorf("invalid identifier: %q", name)
+	}
+	return name, nil
+}
 
 // DatabaseType represents the type of managed database
 type DatabaseType string
@@ -590,8 +601,14 @@ func (dm *DatabaseManager) GetTables(db *ManagedDatabase, password string) ([]Ta
 		if len(row) > 0 {
 			tableName := fmt.Sprintf("%v", row[0])
 
+			// Sanitize table name to prevent SQL injection
+			safeName, err := sanitizeIdentifier(tableName)
+			if err != nil {
+				continue // skip invalid table names
+			}
+
 			// Get row count
-			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)
+			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s", safeName)
 			countResult, _ := dm.ExecuteQuery(db, countQuery, password)
 			var rowCount int64
 			if countResult != nil && len(countResult.Rows) > 0 && len(countResult.Rows[0]) > 0 {
@@ -612,11 +629,17 @@ func (dm *DatabaseManager) GetTables(db *ManagedDatabase, password string) ([]Ta
 
 // GetTableSchema returns column information for a table
 func (dm *DatabaseManager) GetTableSchema(db *ManagedDatabase, tableName string, password string) ([]ColumnInfo, error) {
+	// Sanitize table name to prevent SQL injection
+	safeName, err := sanitizeIdentifier(tableName)
+	if err != nil {
+		return nil, fmt.Errorf("invalid table name: %w", err)
+	}
+
 	var query string
 
 	switch db.Type {
 	case DatabaseTypeSQLite:
-		query = fmt.Sprintf("PRAGMA table_info(%s)", tableName)
+		query = fmt.Sprintf("PRAGMA table_info(%s)", safeName)
 	case DatabaseTypePostgreSQL:
 		query = fmt.Sprintf(`
 			SELECT column_name, data_type, is_nullable, column_default,
@@ -629,7 +652,7 @@ func (dm *DatabaseManager) GetTableSchema(db *ManagedDatabase, tableName string,
 				WHERE tc.table_name = '%s' AND tc.constraint_type = 'PRIMARY KEY'
 			) pk ON c.column_name = pk.column_name
 			WHERE c.table_name = '%s'
-			ORDER BY c.ordinal_position`, tableName, tableName)
+			ORDER BY c.ordinal_position`, safeName, safeName)
 	default:
 		return nil, fmt.Errorf("unsupported database type")
 	}

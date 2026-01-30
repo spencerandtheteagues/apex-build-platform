@@ -36,6 +36,7 @@ export interface Project {
   environment?: Record<string, any>
   dependencies?: Record<string, any>
   build_config?: Record<string, any>
+  environment_config?: string // JSON-encoded EnvironmentConfig (Nix-like - Replit parity)
   provisioned_database_id?: number // Auto-provisioned PostgreSQL database ID (Replit parity)
   collab_room_id?: number
   created_at: string
@@ -785,4 +786,58 @@ export interface UpdateCommentRequest {
 
 export interface ReactionRequest {
   emoji: string
+}
+
+// Environment Configuration Types (Nix-like reproducible environments - Replit parity)
+
+export interface PackageDependency {
+  name: string
+  version?: string
+  source?: string
+}
+
+export interface EnvironmentConfig {
+  language: string
+  version: string
+  packages: PackageDependency[]
+  dev_packages: PackageDependency[]
+  system: string[]
+  env_vars: Record<string, string>
+  build_command?: string
+  start_command?: string
+  install_command?: string
+  options?: Record<string, any>
+}
+
+export interface RuntimeInfo {
+  id: string
+  name: string
+  description: string
+  versions: string[]
+  default: string
+  package_manager: string
+  icon: string
+}
+
+export interface EnvironmentPreset {
+  id: string
+  name: string
+  description: string
+  language: string
+  version: string
+  packages: PackageDependency[]
+  dev_packages: PackageDependency[]
+  system: string[]
+}
+
+export interface EnvironmentPackageInfo {
+  name: string
+  description: string
+  category: string
+}
+
+export interface DetectedEnvironment {
+  environment: EnvironmentConfig
+  confidence: number
+  suggestions: string[]
 }

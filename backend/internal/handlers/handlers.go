@@ -6,6 +6,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"apex-build/internal/ai"
 	"apex-build/internal/auth"
@@ -74,6 +75,17 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
+	// Check if user already exists BEFORE creating
+	var existingUser models.User
+	if err := h.DB.Where("email = ? OR username = ?", req.Email, req.Username).First(&existingUser).Error; err == nil {
+		c.JSON(http.StatusConflict, StandardResponse{
+			Success: false,
+			Error:   "User with this email or username already exists",
+			Code:    "USER_EXISTS",
+		})
+		return
+	}
+
 	// Create user
 	user, err := h.AuthService.CreateUser(&req)
 	if err != nil {
@@ -81,17 +93,6 @@ func (h *Handler) Register(c *gin.Context) {
 			Success: false,
 			Error:   err.Error(),
 			Code:    "USER_CREATION_FAILED",
-		})
-		return
-	}
-
-	// Check if user already exists
-	var existingUser models.User
-	if err := h.DB.Where("email = ? OR username = ?", user.Email, user.Username).First(&existingUser).Error; err == nil {
-		c.JSON(http.StatusConflict, StandardResponse{
-			Success: false,
-			Error:   "User with this email or username already exists",
-			Code:    "USER_EXISTS",
 		})
 		return
 	}
@@ -197,7 +198,7 @@ func (h *Handler) Login(c *gin.Context) {
 	}
 
 	// Update last login
-	h.DB.Model(&user).Updates(models.User{})
+	h.DB.Model(&user).Update("updated_at", time.Now())
 
 	c.JSON(http.StatusOK, StandardResponse{
 		Success: true,

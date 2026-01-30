@@ -1,44 +1,70 @@
-/* APEX.BUILD Global Styles */
-/* Dark Demon Theme - Cloud Development Platform */
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * APEX.BUILD Global Styles
+ * Futuristic Cyberpunk Cloud Development Platform
+ * ═══════════════════════════════════════════════════════════════════════════════ */
 
 /* Tailwind CSS v4 */
 @import "tailwindcss";
 
-/* Import Steampunk Theme */
+/* Import Theme Modules */
 @import './steampunk.css';
+@import './futuristic.css';
 
-/* Fonts */
-@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&family=Orbitron:wght@400;500;600;700;800;900&display=swap');
+/* Fonts - Extended Futuristic Typography */
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=Exo+2:wght@100;200;300;400;500;600;700;800;900&family=Share+Tech+Mono&display=swap');
 
-/* CSS Custom Properties for Demon Theme */
+/* CSS Custom Properties - Futuristic Cyberpunk Theme */
 :root {
-  /* Demon Theme Colors */
-  --color-primary: #cc0000;
-  --color-primary-light: #ff1a1a;
-  --color-primary-dark: #990000;
-  --color-secondary: #ff3333;
-  --color-accent: #ff6600;
-  --color-background: #0a0a0a;
-  --color-surface: #1a1a1a;
-  --color-text: #e0e0e0;
-  --color-text-secondary: #a0a0a0;
-  --color-border: #333333;
-  --color-glow: rgba(204, 0, 0, 0.3);
+  /* === PRIMARY THEME COLORS === */
+  --color-primary: #00f0ff;
+  --color-primary-light: #40f8ff;
+  --color-primary-dark: #00b8c4;
+  --color-secondary: #b400ff;
+  --color-secondary-light: #d24fff;
+  --color-secondary-dark: #8800c4;
+  --color-accent: #ff0040;
+  --color-accent-light: #ff4d7a;
+  --color-accent-dark: #c4002f;
 
-  /* Effects */
-  --effect-glow: 0 0 20px rgba(204, 0, 0, 0.5);
-  --effect-glow-strong: 0 0 40px rgba(204, 0, 0, 0.7);
+  /* === BACKGROUND SYSTEM === */
+  --color-background: #030308;
+  --color-background-elevated: #0a0a12;
+  --color-surface: #0f0f18;
+  --color-surface-elevated: #16162a;
+  --color-surface-hover: #1a1a35;
+
+  /* === TEXT COLORS === */
+  --color-text: #e8e8f0;
+  --color-text-secondary: #8888a0;
+  --color-text-muted: #5555668;
+
+  /* === BORDER COLORS === */
+  --color-border: rgba(0, 240, 255, 0.15);
+  --color-border-bright: rgba(0, 240, 255, 0.3);
+  --color-border-subtle: rgba(255, 255, 255, 0.05);
+
+  /* === GLOW EFFECTS === */
+  --color-glow: rgba(0, 240, 255, 0.3);
+  --color-glow-secondary: rgba(180, 0, 255, 0.3);
+  --color-glow-accent: rgba(255, 0, 64, 0.3);
+
+  /* === EFFECT PRESETS === */
+  --effect-glow: 0 0 20px rgba(0, 240, 255, 0.5);
+  --effect-glow-strong: 0 0 40px rgba(0, 240, 255, 0.7);
+  --effect-glow-purple: 0 0 20px rgba(180, 0, 255, 0.5);
   --effect-blur: blur(0.5px);
-  --effect-shadow: 0 8px 32px rgba(204, 0, 0, 0.15);
+  --effect-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --effect-shadow-glow: 0 8px 32px rgba(0, 240, 255, 0.15);
 
-  /* Animations */
-  --transition-fast: 150ms ease;
-  --transition-normal: 300ms ease;
-  --transition-slow: 500ms ease;
+  /* === ANIMATIONS === */
+  --transition-fast: 150ms cubic-bezier(0.23, 1, 0.32, 1);
+  --transition-normal: 300ms cubic-bezier(0.23, 1, 0.32, 1);
+  --transition-slow: 500ms cubic-bezier(0.23, 1, 0.32, 1);
 
-  /* Typography */
-  --font-mono: 'Fira Code', 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+  /* === TYPOGRAPHY === */
+  --font-mono: 'Fira Code', 'Share Tech Mono', 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  --font-display: 'Orbitron', 'Rajdhani', 'Exo 2', var(--font-sans);
 }
 
 /* Base Styles */
@@ -60,6 +86,13 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+
+  /* Futuristic background with subtle gradient */
+  background-image:
+    radial-gradient(ellipse at top, rgba(0, 240, 255, 0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at bottom right, rgba(180, 0, 255, 0.02) 0%, transparent 50%);
+  background-attachment: fixed;
+  min-height: 100vh;
 }
 
 /* Code Elements */
@@ -73,38 +106,40 @@ pre {
   word-wrap: break-word;
 }
 
-/* Selection */
+/* Selection - Cyberpunk glow effect */
 ::selection {
   background: var(--color-primary);
   color: var(--color-background);
-  text-shadow: none;
+  text-shadow: 0 0 10px var(--color-primary);
 }
 
 ::-moz-selection {
   background: var(--color-primary);
   color: var(--color-background);
-  text-shadow: none;
+  text-shadow: 0 0 10px var(--color-primary);
 }
 
-/* Scrollbar Styling */
+/* Scrollbar Styling - Thin Glowing Cyberpunk */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(135deg, #cc0000, #990000);
-  border-radius: 4px;
-  transition: background var(--transition-normal);
+  background: linear-gradient(180deg, var(--color-primary), var(--color-secondary));
+  border-radius: 3px;
+  box-shadow: 0 0 8px var(--color-primary);
+  transition: all var(--transition-normal);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(135deg, #ff1a1a, #cc0000);
+  background: linear-gradient(180deg, var(--color-primary-light), var(--color-secondary-light));
+  box-shadow: 0 0 12px var(--color-primary);
 }
 
 ::-webkit-scrollbar-corner {
@@ -114,22 +149,35 @@ pre {
 /* Firefox scrollbar */
 html {
   scrollbar-width: thin;
-  scrollbar-color: #cc0000 rgba(0, 0, 0, 0.1);
+  scrollbar-color: var(--color-primary) rgba(0, 0, 0, 0.3);
 }
 
-/* Focus Styles */
+/* Focus Styles - Glowing Cyberpunk */
 *:focus {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-primary), 0 0 15px rgba(0, 240, 255, 0.3);
 }
 
 *:focus:not(:focus-visible) {
-  outline: none;
+  box-shadow: none;
 }
 
-/* Utility Classes */
+*:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-primary), 0 0 15px rgba(0, 240, 255, 0.3);
+}
+
+/* Utility Classes - Cyberpunk Effects */
 .cyberpunk-glow {
   box-shadow: var(--effect-glow);
+}
+
+.cyberpunk-glow-strong {
+  box-shadow: var(--effect-glow-strong);
+}
+
+.cyberpunk-glow-purple {
+  box-shadow: var(--effect-glow-purple);
 }
 
 .cyberpunk-blur {
@@ -140,8 +188,19 @@ html {
   background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
 }
 
+.cyberpunk-gradient-accent {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+}
+
 .cyberpunk-text-gradient {
   background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.cyberpunk-text-gradient-fire {
+  background: linear-gradient(135deg, #ffe600, #ff6b00, #ff0040);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -150,6 +209,35 @@ html {
 .cyberpunk-border {
   border: 1px solid;
   border-image: linear-gradient(135deg, var(--color-primary), var(--color-secondary)) 1;
+}
+
+.cyberpunk-border-animated {
+  position: relative;
+  border: 1px solid transparent;
+  background: linear-gradient(var(--color-surface), var(--color-surface)) padding-box,
+              linear-gradient(135deg, var(--color-primary), var(--color-secondary), var(--color-primary)) border-box;
+  background-size: 100% 100%, 200% 200%;
+  animation: border-gradient-shift 4s linear infinite;
+}
+
+@keyframes border-gradient-shift {
+  0% { background-position: 0 0, 0% 50%; }
+  50% { background-position: 0 0, 100% 50%; }
+  100% { background-position: 0 0, 0% 50%; }
+}
+
+/* Futuristic card base */
+.cyber-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  box-shadow: var(--effect-shadow);
+  transition: all var(--transition-normal);
+}
+
+.cyber-panel:hover {
+  border-color: var(--color-border-bright);
+  box-shadow: var(--effect-shadow-glow);
 }
 
 /* Animations */
@@ -246,17 +334,36 @@ html {
   overflow: hidden;
 }
 
-/* Glass Morphism */
+/* Glass Morphism - Enhanced */
 .glass-morphism {
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(5, 5, 15, 0.6);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(0, 240, 255, 0.1);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
 .glass-morphism-dark {
-  background: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(30px) saturate(150%);
+  -webkit-backdrop-filter: blur(30px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+.glass-morphism-glow {
+  background: rgba(5, 5, 15, 0.7);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    0 0 20px rgba(0, 240, 255, 0.1),
+    inset 0 0 0 1px rgba(0, 240, 255, 0.05);
 }
 
 /* Holographic Effects */
@@ -270,7 +377,7 @@ html {
   animation: cyberpunk-scan 3s ease-in-out infinite;
 }
 
-/* Neon Text */
+/* Neon Text - Cyberpunk Glow System */
 .neon-text {
   text-shadow:
     0 0 5px currentColor,
@@ -279,87 +386,223 @@ html {
     0 0 40px currentColor;
 }
 
+.neon-text-cyan {
+  color: var(--color-primary);
+  text-shadow:
+    0 0 5px var(--color-primary),
+    0 0 10px var(--color-primary),
+    0 0 20px var(--color-primary),
+    0 0 40px rgba(0, 240, 255, 0.5);
+}
+
+.neon-text-purple {
+  color: var(--color-secondary);
+  text-shadow:
+    0 0 5px var(--color-secondary),
+    0 0 10px var(--color-secondary),
+    0 0 20px var(--color-secondary),
+    0 0 40px rgba(180, 0, 255, 0.5);
+}
+
 .neon-text-red {
-  color: #cc0000;
+  color: var(--color-accent);
   text-shadow:
-    0 0 5px #cc0000,
-    0 0 10px #cc0000,
-    0 0 20px #cc0000,
-    0 0 40px #cc0000;
+    0 0 5px var(--color-accent),
+    0 0 10px var(--color-accent),
+    0 0 20px var(--color-accent),
+    0 0 40px rgba(255, 0, 64, 0.5);
 }
 
-.neon-text-crimson {
-  color: #ff1a1a;
+.neon-text-pink {
+  color: #ff00a0;
   text-shadow:
-    0 0 5px #ff1a1a,
-    0 0 10px #ff1a1a,
-    0 0 20px #ff1a1a,
-    0 0 40px #ff1a1a;
+    0 0 5px #ff00a0,
+    0 0 10px #ff00a0,
+    0 0 20px #ff00a0,
+    0 0 40px rgba(255, 0, 160, 0.5);
 }
 
-.neon-text-orange {
-  color: #ff6600;
+.neon-text-green {
+  color: #00ff88;
   text-shadow:
-    0 0 5px #ff6600,
-    0 0 10px #ff6600,
-    0 0 20px #ff6600,
-    0 0 40px #ff6600;
+    0 0 5px #00ff88,
+    0 0 10px #00ff88,
+    0 0 20px #00ff88,
+    0 0 40px rgba(0, 255, 136, 0.5);
 }
 
-/* Grid Background */
+.neon-text-yellow {
+  color: #ffe600;
+  text-shadow:
+    0 0 5px #ffe600,
+    0 0 10px #ffe600,
+    0 0 20px #ffe600,
+    0 0 40px rgba(255, 230, 0, 0.5);
+}
+
+/* Pulsing neon text */
+.neon-text-pulse {
+  animation: neon-pulse 2s ease-in-out infinite;
+}
+
+@keyframes neon-pulse {
+  0%, 100% {
+    text-shadow:
+      0 0 5px currentColor,
+      0 0 10px currentColor;
+  }
+  50% {
+    text-shadow:
+      0 0 10px currentColor,
+      0 0 20px currentColor,
+      0 0 30px currentColor,
+      0 0 40px currentColor;
+  }
+}
+
+/* Grid Background - Cyberpunk */
 .grid-background {
   background-image:
-    linear-gradient(rgba(204, 0, 0, 0.1) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(204, 0, 0, 0.1) 1px, transparent 1px);
+    linear-gradient(rgba(0, 240, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 240, 255, 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.grid-background-dense {
+  background-image:
+    linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px);
   background-size: 20px 20px;
 }
 
-/* Monaco Editor Overrides */
+/* Perspective grid - retro futuristic */
+.grid-perspective {
+  position: relative;
+  overflow: hidden;
+}
+
+.grid-perspective::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: -50%;
+  right: -50%;
+  height: 60%;
+  background:
+    linear-gradient(180deg, transparent 0%, rgba(0, 240, 255, 0.05) 100%),
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 79px,
+      rgba(0, 240, 255, 0.1) 79px,
+      rgba(0, 240, 255, 0.1) 80px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 79px,
+      rgba(0, 240, 255, 0.1) 79px,
+      rgba(0, 240, 255, 0.1) 80px
+    );
+  transform: perspective(500px) rotateX(60deg);
+  transform-origin: center top;
+  pointer-events: none;
+}
+
+/* Monaco Editor Overrides - Cyberpunk Style */
 .monaco-editor {
   font-family: var(--font-mono) !important;
 }
 
 .monaco-editor .cursor {
   color: var(--color-primary) !important;
+  box-shadow: 0 0 10px var(--color-primary) !important;
 }
 
 .monaco-editor .selected-text {
-  background: rgba(204, 0, 0, 0.2) !important;
+  background: rgba(0, 240, 255, 0.15) !important;
 }
 
-/* React Resizable Panels */
+.monaco-editor .current-line {
+  background: rgba(0, 240, 255, 0.03) !important;
+  border-left: 2px solid rgba(0, 240, 255, 0.3) !important;
+}
+
+.monaco-editor .line-numbers {
+  color: rgba(0, 240, 255, 0.4) !important;
+}
+
+/* React Resizable Panels - Cyberpunk */
 [data-panel-resize-handle-enabled] {
-  background: rgba(204, 0, 0, 0.1);
-  transition: background var(--transition-normal);
+  background: rgba(0, 240, 255, 0.1);
+  transition: all var(--transition-normal);
 }
 
 [data-panel-resize-handle-enabled]:hover {
-  background: rgba(204, 0, 0, 0.3);
+  background: rgba(0, 240, 255, 0.3);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
 }
 
-/* Prose Styles for AI Content */
+[data-panel-resize-handle-enabled]:active {
+  background: rgba(0, 240, 255, 0.5);
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.5);
+}
+
+/* Prose Styles for AI Content - Cyberpunk Enhanced */
 .prose {
   max-width: none;
 }
 
 .prose pre {
-  background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(204, 0, 0, 0.2);
+  background: rgba(0, 5, 15, 0.8);
+  border: 1px solid rgba(0, 240, 255, 0.2);
   border-radius: 8px;
+  box-shadow:
+    0 0 20px rgba(0, 0, 0, 0.3),
+    inset 0 0 30px rgba(0, 240, 255, 0.02);
 }
 
 .prose code {
-  background: rgba(204, 0, 0, 0.1);
+  background: rgba(0, 240, 255, 0.1);
   color: var(--color-primary);
-  padding: 0.125rem 0.25rem;
+  padding: 0.125rem 0.375rem;
   border-radius: 4px;
   font-size: 0.875em;
+  border: 1px solid rgba(0, 240, 255, 0.15);
 }
 
 .prose pre code {
   background: transparent;
   padding: 0;
   color: inherit;
+  border: none;
+}
+
+.prose a {
+  color: var(--color-primary);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(0, 240, 255, 0.3);
+  transition: all var(--transition-normal);
+}
+
+.prose a:hover {
+  color: var(--color-primary-light);
+  border-bottom-color: var(--color-primary);
+  text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+}
+
+.prose h1, .prose h2, .prose h3, .prose h4 {
+  color: var(--color-text);
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+.prose blockquote {
+  border-left: 3px solid var(--color-primary);
+  background: rgba(0, 240, 255, 0.03);
+  padding: 1rem;
+  margin-left: 0;
+  font-style: italic;
 }
 
 /* Loading Animations */
@@ -517,4 +760,392 @@ html {
 
 .animate-float {
   animation: float 3s ease-in-out infinite;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * ADDITIONAL FUTURISTIC EFFECTS
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* Heading styles with futuristic font */
+h1, h2, h3 {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+/* Ambient particle container - add to body for floating particles */
+.ambient-particles {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.ambient-particles::before,
+.ambient-particles::after {
+  content: '';
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  background: var(--color-primary);
+  border-radius: 50%;
+  box-shadow: 0 0 10px var(--color-primary);
+  animation: float-ambient 20s ease-in-out infinite;
+}
+
+.ambient-particles::after {
+  left: 30%;
+  background: var(--color-secondary);
+  box-shadow: 0 0 10px var(--color-secondary);
+  animation-delay: -7s;
+  animation-duration: 25s;
+}
+
+@keyframes float-ambient {
+  0%, 100% {
+    transform: translateY(100vh) translateX(0) scale(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+    transform: translateY(90vh) translateX(10px) scale(1);
+  }
+  50% {
+    transform: translateY(50vh) translateX(-20px) scale(1.2);
+  }
+  90% {
+    opacity: 1;
+    transform: translateY(10vh) translateX(15px) scale(0.8);
+  }
+  100% {
+    transform: translateY(-5vh) translateX(0) scale(0);
+    opacity: 0;
+  }
+}
+
+/* Data stream effect - vertical flowing lines */
+.data-stream-bg {
+  position: relative;
+  overflow: hidden;
+}
+
+.data-stream-bg::before {
+  content: '';
+  position: absolute;
+  top: -100%;
+  left: 10%;
+  width: 1px;
+  height: 100px;
+  background: linear-gradient(to bottom, transparent, var(--color-primary), transparent);
+  animation: data-fall 3s linear infinite;
+  opacity: 0.3;
+}
+
+.data-stream-bg::after {
+  content: '';
+  position: absolute;
+  top: -100%;
+  right: 20%;
+  width: 1px;
+  height: 150px;
+  background: linear-gradient(to bottom, transparent, var(--color-secondary), transparent);
+  animation: data-fall 4s linear infinite;
+  animation-delay: -1.5s;
+  opacity: 0.3;
+}
+
+@keyframes data-fall {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(calc(100vh + 100%));
+  }
+}
+
+/* Scanline overlay for containers */
+.scanline-container {
+  position: relative;
+}
+
+.scanline-container::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 100;
+}
+
+/* Breathing border animation */
+.breathing-border {
+  position: relative;
+}
+
+.breathing-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--color-primary);
+  border-radius: inherit;
+  opacity: 0.5;
+  animation: border-breathe 3s ease-in-out infinite;
+}
+
+@keyframes border-breathe {
+  0%, 100% {
+    opacity: 0.3;
+    box-shadow: 0 0 5px var(--color-primary);
+  }
+  50% {
+    opacity: 0.8;
+    box-shadow: 0 0 20px var(--color-primary);
+  }
+}
+
+/* Holographic card effect */
+.holo-card {
+  position: relative;
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+.holo-card::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(0, 240, 255, 0.1) 60deg,
+    transparent 120deg,
+    rgba(180, 0, 255, 0.1) 180deg,
+    transparent 240deg,
+    rgba(255, 0, 160, 0.1) 300deg,
+    transparent 360deg
+  );
+  animation: holo-rotate 10s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes holo-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Electric arc effect */
+.electric-arc {
+  position: relative;
+}
+
+.electric-arc::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-primary) 20%,
+    var(--color-primary-light) 50%,
+    var(--color-primary) 80%,
+    transparent 100%
+  );
+  filter: blur(1px);
+  animation: electric-pulse 0.1s linear infinite;
+  opacity: 0.8;
+}
+
+@keyframes electric-pulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 0.4; }
+}
+
+/* Futuristic button base */
+.btn-futuristic {
+  position: relative;
+  padding: 12px 28px;
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.1), rgba(180, 0, 255, 0.1));
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  color: var(--color-primary);
+  font-family: var(--font-display);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+
+.btn-futuristic::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.btn-futuristic:hover {
+  color: #000;
+  border-color: var(--color-primary);
+  box-shadow:
+    0 0 20px rgba(0, 240, 255, 0.4),
+    inset 0 0 20px rgba(0, 240, 255, 0.1);
+  transform: translateY(-2px);
+}
+
+.btn-futuristic:hover::before {
+  opacity: 1;
+}
+
+.btn-futuristic span {
+  position: relative;
+  z-index: 1;
+}
+
+/* Glitch text effect */
+.glitch-text {
+  position: relative;
+}
+
+.glitch-text::before,
+.glitch-text::after {
+  content: attr(data-text);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.glitch-text::before {
+  color: var(--color-primary);
+  animation: glitch-1 2s infinite linear alternate-reverse;
+  clip-path: polygon(0 0, 100% 0, 100% 35%, 0 35%);
+}
+
+.glitch-text::after {
+  color: var(--color-secondary);
+  animation: glitch-2 3s infinite linear alternate-reverse;
+  clip-path: polygon(0 65%, 100% 65%, 100% 100%, 0 100%);
+}
+
+@keyframes glitch-1 {
+  0%, 100% { transform: translate(0); }
+  20% { transform: translate(-3px, 3px); }
+  40% { transform: translate(-3px, -3px); }
+  60% { transform: translate(3px, 3px); }
+  80% { transform: translate(3px, -3px); }
+}
+
+@keyframes glitch-2 {
+  0%, 100% { transform: translate(0); }
+  20% { transform: translate(3px, -3px); }
+  40% { transform: translate(3px, 3px); }
+  60% { transform: translate(-3px, -3px); }
+  80% { transform: translate(-3px, 3px); }
+}
+
+/* Cyber corner accents */
+.cyber-corners {
+  position: relative;
+}
+
+.cyber-corners::before,
+.cyber-corners::after {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--color-primary);
+}
+
+.cyber-corners::before {
+  top: -1px;
+  left: -1px;
+  border-right: none;
+  border-bottom: none;
+}
+
+.cyber-corners::after {
+  bottom: -1px;
+  right: -1px;
+  border-left: none;
+  border-top: none;
+}
+
+/* Status pulse indicator */
+.status-pulse {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-primary);
+}
+
+.status-pulse::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--color-primary);
+  animation: status-ring 1.5s ease-out infinite;
+}
+
+@keyframes status-ring {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+/* Tech border animation */
+.tech-border {
+  position: relative;
+  background: var(--color-surface);
+}
+
+.tech-border::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  background: linear-gradient(
+    90deg,
+    var(--color-primary),
+    var(--color-secondary),
+    var(--color-primary)
+  );
+  background-size: 200% 100%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: border-flow 3s linear infinite;
+}
+
+@keyframes border-flow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
 }

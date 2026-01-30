@@ -115,7 +115,7 @@ export const MobileNavigation: React.FC<MobileNavigationProps> = ({
         {/* Menu Header */}
         <div className="h-14 flex items-center justify-between px-4 border-b border-gray-800">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-red-600 to-red-900 rounded-lg flex items-center justify-center p-1">
+            <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-red-900 rounded-lg flex items-center justify-center p-1">
               <img src="/logo.png" alt="APEX" className="w-full h-full object-contain" />
             </div>
             <span className="text-lg font-bold text-white">APEX.BUILD</span>
@@ -159,7 +159,7 @@ export const MobileNavigation: React.FC<MobileNavigationProps> = ({
                   : 'hover:bg-gray-800 text-gray-300'
               )}
             >
-              <img src="/logo.png" alt="APEX" className="w-5 h-5 object-contain" />
+              <img src="/logo.png" alt="APEX" className="w-6 h-6 object-contain" />
               <span className="flex-1 text-left">Build App</span>
               <ChevronRight className="w-4 h-4 opacity-50" />
             </button>
@@ -295,7 +295,7 @@ export const MobileNavigation: React.FC<MobileNavigationProps> = ({
 
           {/* Logo */}
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-gradient-to-br from-red-600 to-red-900 rounded flex items-center justify-center p-0.5">
+            <div className="w-8 h-8 bg-gradient-to-br from-red-600 to-red-900 rounded flex items-center justify-center p-0.5">
               <img src="/logo.png" alt="APEX" className="w-full h-full object-contain" />
             </div>
             <span className="text-sm font-bold text-white">APEX.BUILD</span>
