@@ -83,6 +83,9 @@ type Project struct {
 	Dependencies map[string]interface{} `json:"dependencies" gorm:"serializer:json"` // Package.json, go.mod equivalent
 	BuildConfig map[string]interface{} `json:"build_config" gorm:"serializer:json"` // Build and run configuration
 
+	// Auto-provisioned database (Replit parity)
+	ProvisionedDatabaseID *uint `json:"provisioned_database_id,omitempty" gorm:"index"` // Auto-provisioned PostgreSQL DB
+
 	// Collaboration
 	CollabRoomID *uint `json:"collab_room_id"`
 

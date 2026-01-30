@@ -314,7 +314,10 @@ func main() {
 		log.Printf("⚠️ Managed Database service not available: %v", err)
 	} else {
 		databaseHandler = handlers.NewDatabaseHandler(database.GetDB(), dbManager, secretsManager)
+		// Initialize auto-provisioning dependencies for project creation
+		handlers.InitAutoProvisioningDeps(dbManager, secretsManager)
 		log.Println("✅ Managed Database Service initialized (PostgreSQL, Redis, SQLite)")
+		log.Println("✅ Auto-Provision PostgreSQL enabled for new projects")
 	}
 
 	// Initialize Debugging Service

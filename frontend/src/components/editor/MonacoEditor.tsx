@@ -1,10 +1,12 @@
 // APEX.BUILD Monaco Code Editor
-// Advanced code editor with multi-AI integration
+// Advanced code editor with multi-AI integration and multiplayer collaboration
 
-import React, { useEffect, useRef, useState, forwardRef } from 'react'
+import React, { useEffect, useRef, useState, forwardRef, useCallback } from 'react'
 import * as monaco from 'monaco-editor'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
+import { useCollaboration, RemoteCursor } from '@/hooks/useCollaboration'
+import { MultiplayerCursors, UserPresenceIndicator } from './MultiplayerCursors'
 import { File, AICapability, AIProvider } from '@/types'
 import { Button, Badge, Loading } from '@/components/ui'
 import {
@@ -16,7 +18,8 @@ import {
   Bug,
   RefreshCw,
   FileText,
-  Sparkles
+  Sparkles,
+  Users
 } from 'lucide-react'
 
 // Editor theme configurations
@@ -146,6 +149,10 @@ export interface MonacoEditorProps {
   readOnly?: boolean
   showAIPanel?: boolean
   onAIRequest?: (capability: AICapability, prompt: string, code: string) => void
+  // Collaboration props
+  enableCollaboration?: boolean
+  roomId?: string
+  projectId?: number
 }
 
 const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, MonacoEditorProps>(
@@ -159,6 +166,9 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
     readOnly = false,
     showAIPanel = true,
     onAIRequest,
+    enableCollaboration = true,
+    roomId,
+    projectId,
   }, ref) => {
     const editorRef = useRef<HTMLDivElement>(null)
     const [editor, setEditor] = useState<monaco.editor.IStandaloneCodeEditor | null>(null)
@@ -166,8 +176,46 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
     const [aiCapability, setAICapability] = useState<AICapability>('code_completion')
     const [aiPrompt, setAIPrompt] = useState('')
     const [showAIPrompt, setShowAIPrompt] = useState(false)
+    const [showCollaborators, setShowCollaborators] = useState(false)
+    const [followingUserId, setFollowingUserId] = useState<number | undefined>()
 
-    const { theme, currentProject } = useStore()
+    const { theme, currentProject, room } = useStore()
+
+    // Get file info for collaboration
+    const fileId = file?.id
+    const fileName = file?.name
+
+    // Use collaboration hook
+    const {
+      isConnected: isCollabConnected,
+      remoteCursors,
+      activeUsers,
+      updateCursor,
+      updateSelection,
+      clearSelection,
+      startTyping,
+      stopTyping,
+      followUser,
+      stopFollowing,
+      getAllCursors,
+      getCursorsForFile,
+    } = useCollaboration({
+      roomId: roomId || room?.room_id,
+      projectId: projectId || currentProject?.id,
+      fileId,
+      fileName,
+      onCursorUpdate: useCallback((cursor: RemoteCursor) => {
+        // If following this user, scroll to their position
+        if (followingUserId === cursor.userId && cursor.cursor && editor) {
+          editor.revealPositionInCenter(
+            new monaco.Position(cursor.cursor.line, cursor.cursor.column)
+          )
+        }
+      }, [followingUserId, editor]),
+    })
+
+    // Get cursors for current file as array
+    const fileCursors = fileId ? getCursorsForFile(fileId) : getAllCursors()
 
     // Initialize Monaco Editor
     useEffect(() => {
@@ -215,6 +263,35 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
       editorInstance.onDidChangeModelContent(() => {
         const currentValue = editorInstance.getValue()
         onChange?.(currentValue)
+
+        // Notify collaboration about typing
+        if (enableCollaboration) {
+          startTyping()
+        }
+      })
+
+      // Cursor position change handler for collaboration
+      editorInstance.onDidChangeCursorPosition((e) => {
+        if (enableCollaboration && fileId && fileName) {
+          updateCursor(e.position.lineNumber, e.position.column)
+        }
+      })
+
+      // Selection change handler for collaboration
+      editorInstance.onDidChangeCursorSelection((e) => {
+        if (enableCollaboration) {
+          const selection = e.selection
+          if (selection.isEmpty()) {
+            clearSelection()
+          } else {
+            updateSelection(
+              selection.startLineNumber,
+              selection.startColumn,
+              selection.endLineNumber,
+              selection.endColumn
+            )
+          }
+        }
       })
 
       // Keyboard shortcuts
@@ -322,6 +399,18 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
       console.log('Executing code:', { code, language, projectId: currentProject.id })
     }
 
+    // Handle follow user
+    const handleFollowUser = (userId: number) => {
+      setFollowingUserId(userId)
+      followUser(userId)
+    }
+
+    // Handle stop following
+    const handleStopFollowing = () => {
+      setFollowingUserId(undefined)
+      stopFollowing()
+    }
+
     return (
       <div className={cn('relative w-full h-full flex flex-col', className)}>
         {/* Editor Toolbar */}
@@ -334,7 +423,7 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
                   {getLanguageFromFile(file.name)}
                 </Badge>
                 {file.is_locked && (
-                  <Badge variant="warning" size="xs" icon="🔒">
+                  <Badge variant="warning" size="xs" icon="lock">
                     Locked
                   </Badge>
                 )}
@@ -343,6 +432,31 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
           </div>
 
           <div className="flex items-center space-x-2">
+            {/* Collaboration indicators */}
+            {enableCollaboration && isCollabConnected && activeUsers.length > 0 && (
+              <div className="flex items-center space-x-2 mr-2">
+                <UserPresenceIndicator
+                  users={fileCursors}
+                  maxVisible={3}
+                  size="sm"
+                  onUserClick={handleFollowUser}
+                />
+                <button
+                  onClick={() => setShowCollaborators(!showCollaborators)}
+                  className="flex items-center gap-1.5 px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-800 rounded transition-colors"
+                >
+                  <Users size={14} />
+                  <span>{activeUsers.length}</span>
+                </button>
+              </div>
+            )}
+
+            {enableCollaboration && isCollabConnected && (
+              <Badge variant="success" size="xs">
+                Live
+              </Badge>
+            )}
+
             {showAIPanel && (
               <>
                 <Button
@@ -421,6 +535,86 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
             className="w-full h-full"
             style={{ height: typeof height === 'string' ? height : `${height}px` }}
           />
+
+          {/* Multiplayer Cursors */}
+          {enableCollaboration && editor && (
+            <MultiplayerCursors
+              editor={editor}
+              cursors={fileCursors}
+              fileId={fileId}
+            />
+          )}
+
+          {/* Collaborators Panel */}
+          {showCollaborators && (
+            <div className="absolute top-2 right-2 w-72 bg-gray-900/95 backdrop-blur-md border border-gray-700 rounded-lg shadow-xl z-20">
+              <div className="flex items-center justify-between p-3 border-b border-gray-700">
+                <span className="text-sm font-medium text-white">Collaborators</span>
+                <button
+                  onClick={() => setShowCollaborators(false)}
+                  className="text-gray-400 hover:text-white"
+                >
+                  x
+                </button>
+              </div>
+              <div className="p-2 max-h-64 overflow-y-auto">
+                {activeUsers.map(user => (
+                  <div
+                    key={user.userId}
+                    className={cn(
+                      'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors',
+                      followingUserId === user.userId
+                        ? 'bg-cyan-500/20 border border-cyan-500/50'
+                        : 'hover:bg-gray-800/50'
+                    )}
+                  >
+                    <div
+                      className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium"
+                      style={{
+                        backgroundColor: user.color,
+                        color: user.color ? (parseInt(user.color.slice(1), 16) > 0x7fffff ? '#000' : '#fff') : '#fff',
+                      }}
+                    >
+                      {user.username.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-white truncate">{user.username}</div>
+                      <div className="text-xs text-gray-500 truncate">
+                        {user.fileName || 'No file open'}
+                      </div>
+                    </div>
+                    {user.isTyping && (
+                      <div className="flex gap-0.5">
+                        <span className="w-1 h-1 bg-green-400 rounded-full animate-bounce" />
+                        <span className="w-1 h-1 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-1 h-1 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                    )}
+                    {followingUserId === user.userId ? (
+                      <button
+                        onClick={handleStopFollowing}
+                        className="text-xs px-2 py-1 bg-cyan-500/20 text-cyan-400 rounded"
+                      >
+                        Following
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleFollowUser(user.userId)}
+                        className="text-xs px-2 py-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded"
+                      >
+                        Follow
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {activeUsers.length === 0 && (
+                  <div className="text-sm text-gray-500 text-center py-4">
+                    No other collaborators
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* AI Prompt Overlay */}
           {showAIPrompt && (

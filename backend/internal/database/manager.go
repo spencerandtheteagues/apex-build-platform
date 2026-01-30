@@ -57,6 +57,9 @@ type ManagedDatabase struct {
 	ConnectionURL  string         `json:"-"` // Computed, not stored
 	FilePath       string         `json:"-"` // For SQLite only
 
+	// Auto-provisioning flag (Replit parity)
+	IsAutoProvisioned bool `json:"is_auto_provisioned" gorm:"default:false"` // True if auto-created with project
+
 	// Usage metrics
 	StorageUsedMB  float64   `json:"storage_used_mb" gorm:"default:0"`
 	ConnectionCount int      `json:"connection_count" gorm:"default:0"`
@@ -691,6 +694,63 @@ func (dm *DatabaseManager) GetMetrics(db *ManagedDatabase, password string) (*Da
 	}
 
 	return metrics, nil
+}
+
+// AutoProvisionPostgreSQLForProject creates a PostgreSQL database automatically for a new project
+// This is used during project creation to provide Replit-like auto-provisioned database experience
+func (dm *DatabaseManager) AutoProvisionPostgreSQLForProject(projectID, userID uint, projectName string) (*ManagedDatabase, error) {
+	// Sanitize project name for database name (lowercase, alphanumeric + underscore only)
+	safeName := sanitizeDBName(projectName)
+	if safeName == "" {
+		safeName = "main"
+	}
+
+	// Create the managed database record
+	db := &ManagedDatabase{
+		ProjectID:         projectID,
+		UserID:            userID,
+		Name:              safeName,
+		Type:              DatabaseTypePostgreSQL,
+		Status:            DatabaseStatusProvisioning,
+		IsAutoProvisioned: true, // Mark as auto-provisioned
+		BackupEnabled:     true,
+		BackupSchedule:    "0 0 * * *", // Daily at midnight
+		MaxStorageMB:      100,         // Default 100MB for free tier
+		MaxConnections:    5,           // Default 5 connections
+	}
+
+	// Provision the actual database
+	if err := dm.CreateDatabase(db); err != nil {
+		return nil, fmt.Errorf("failed to provision database: %w", err)
+	}
+
+	return db, nil
+}
+
+// GetConnectionString returns the connection string for environment variable injection
+func (dm *DatabaseManager) GetConnectionString(db *ManagedDatabase, password string) string {
+	return dm.GetConnectionURL(db, password)
+}
+
+// sanitizeDBName ensures the database name is safe for PostgreSQL
+func sanitizeDBName(name string) string {
+	result := ""
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			result += string(r)
+		} else if r == ' ' || r == '-' {
+			result += "_"
+		}
+	}
+	// Ensure it doesn't start with a number
+	if len(result) > 0 && result[0] >= '0' && result[0] <= '9' {
+		result = "db_" + result
+	}
+	// Limit length
+	if len(result) > 32 {
+		result = result[:32]
+	}
+	return result
 }
 
 // Helper functions

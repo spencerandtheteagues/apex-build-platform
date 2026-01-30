@@ -1010,6 +1010,184 @@ export class ApiService {
     const response = await this.client.post<CodeReviewResponse>('/ai/code-review', data)
     return response.data
   }
+
+  // ========== ALWAYS-ON DEPLOYMENT ENDPOINTS (Replit parity) ==========
+
+  // Get always-on status for a deployment
+  async getAlwaysOnStatus(projectId: number, deploymentId: string): Promise<AlwaysOnStatus> {
+    const response = await this.client.get<ApiResponse<{ status: AlwaysOnStatus }>>(
+      `/projects/${projectId}/deployments/${deploymentId}/always-on`
+    )
+    return response.data.data!.status
+  }
+
+  // Enable or disable always-on for a deployment
+  async setAlwaysOn(
+    projectId: number,
+    deploymentId: string,
+    enabled: boolean,
+    keepAliveInterval?: number
+  ): Promise<{ success: boolean; always_on: boolean; message: string }> {
+    const response = await this.client.put<ApiResponse<{
+      success: boolean
+      always_on: boolean
+      message: string
+    }>>(`/projects/${projectId}/deployments/${deploymentId}/always-on`, {
+      always_on: enabled,
+      keep_alive_interval: keepAliveInterval || 60,
+    })
+    return response.data.data!
+  }
+
+  // Start a native deployment with always-on option
+  async startNativeDeployment(projectId: number, config: NativeDeploymentConfig): Promise<{
+    success: boolean
+    deployment: NativeDeployment
+    message: string
+    websocket_url: string
+  }> {
+    const response = await this.client.post(`/projects/${projectId}/deploy`, config)
+    return response.data
+  }
+
+  // Get deployments for a project
+  async getNativeDeployments(projectId: number, page: number = 1, limit: number = 20): Promise<{
+    deployments: NativeDeployment[]
+    total: number
+    page: number
+    limit: number
+  }> {
+    const response = await this.client.get(`/projects/${projectId}/deployments?page=${page}&limit=${limit}`)
+    return response.data
+  }
+
+  // Get a specific deployment
+  async getNativeDeployment(projectId: number, deploymentId: string): Promise<NativeDeployment> {
+    const response = await this.client.get<ApiResponse<{ deployment: NativeDeployment }>>(
+      `/projects/${projectId}/deployments/${deploymentId}`
+    )
+    return response.data.data!.deployment
+  }
+
+  // Get deployment logs
+  async getDeploymentLogs(projectId: number, deploymentId: string, limit: number = 100): Promise<DeploymentLog[]> {
+    const response = await this.client.get<ApiResponse<{ logs: DeploymentLog[] }>>(
+      `/projects/${projectId}/deployments/${deploymentId}/logs?limit=${limit}`
+    )
+    return response.data.data!.logs
+  }
+
+  // Stop a deployment
+  async stopNativeDeployment(projectId: number, deploymentId: string): Promise<void> {
+    await this.client.delete(`/projects/${projectId}/deployments/${deploymentId}`)
+  }
+
+  // Restart a deployment
+  async restartNativeDeployment(projectId: number, deploymentId: string): Promise<void> {
+    await this.client.post(`/projects/${projectId}/deployments/${deploymentId}/restart`)
+  }
+
+  // Get deployment metrics
+  async getDeploymentMetrics(projectId: number, deploymentId: string): Promise<DeploymentMetrics> {
+    const response = await this.client.get<ApiResponse<{ metrics: DeploymentMetrics }>>(
+      `/projects/${projectId}/deployments/${deploymentId}/metrics`
+    )
+    return response.data.data!.metrics
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Always-On Deployment types (Replit parity feature)
+// ---------------------------------------------------------------------------
+
+export interface AlwaysOnStatus {
+  always_on: boolean
+  always_on_enabled: string | null
+  last_keep_alive: string | null
+  keep_alive_interval: number
+  sleep_after_minutes: number
+  restart_count: number
+  max_restarts: number
+  container_status: 'healthy' | 'unhealthy' | 'starting' | 'stopped'
+  uptime_seconds: number
+}
+
+export interface NativeDeploymentConfig {
+  subdomain?: string
+  port?: number
+  build_command?: string
+  start_command?: string
+  install_command?: string
+  framework?: string
+  node_version?: string
+  python_version?: string
+  go_version?: string
+  memory_limit?: number
+  cpu_limit?: number
+  health_check_path?: string
+  auto_scale?: boolean
+  min_instances?: number
+  max_instances?: number
+  env_vars?: Record<string, string>
+  always_on?: boolean
+  keep_alive_interval?: number
+}
+
+export interface NativeDeployment {
+  id: string
+  project_id: number
+  user_id: number
+  subdomain: string
+  url: string
+  preview_url?: string
+  status: 'pending' | 'provisioning' | 'building' | 'deploying' | 'running' | 'stopped' | 'failed' | 'deleted'
+  container_status: 'healthy' | 'unhealthy' | 'starting' | 'stopped'
+  error_message?: string
+  container_port: number
+  build_command?: string
+  start_command?: string
+  framework?: string
+  memory_limit: number
+  cpu_limit: number
+  auto_scale: boolean
+  min_instances: number
+  max_instances: number
+  current_instances: number
+  always_on: boolean
+  always_on_enabled?: string
+  last_keep_alive?: string
+  keep_alive_interval: number
+  total_requests: number
+  avg_response_time: number
+  uptime_seconds: number
+  created_at: string
+  updated_at: string
+  deployed_at?: string
+  build_duration?: number
+  deploy_duration?: number
+}
+
+export interface DeploymentLog {
+  id: number
+  deployment_id: string
+  timestamp: string
+  level: 'debug' | 'info' | 'warn' | 'error'
+  source: string
+  message: string
+  metadata?: string
+}
+
+export interface DeploymentMetrics {
+  total_requests: number
+  avg_response_time: number
+  uptime_seconds: number
+  bandwidth_used: number
+  current_instances: number
+  container_status: string
+  last_request_at?: string
+  last_health_check?: string
+  memory_limit: number
+  cpu_limit: number
 }
 
 // ---------------------------------------------------------------------------

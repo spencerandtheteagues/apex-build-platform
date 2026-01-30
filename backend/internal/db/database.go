@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"apex-build/internal/database"
 	"apex-build/internal/git"
 	"apex-build/internal/mcp"
 	"apex-build/internal/secrets"
@@ -109,6 +110,8 @@ func (d *Database) Migrate() error {
 		&mcp.ExternalMCPServer{},
 		// Git integration
 		&git.Repository{},
+		// Managed Database Service (auto-provisioned PostgreSQL per project)
+		&database.ManagedDatabase{},
 	)
 
 	if err != nil {

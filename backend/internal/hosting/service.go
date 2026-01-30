@@ -23,12 +23,13 @@ import (
 
 // HostingService manages native .apex.app hosting
 type HostingService struct {
-	db              *gorm.DB
-	cloudflareAPI   *CloudflareAPI
-	containerMgr    *ContainerManager
-	logStreamer     *LogStreamer
-	healthChecker   *HealthChecker
-	mu              sync.RWMutex
+	db                *gorm.DB
+	cloudflareAPI     *CloudflareAPI
+	containerMgr      *ContainerManager
+	logStreamer       *LogStreamer
+	healthChecker     *HealthChecker
+	alwaysOnMonitor   *AlwaysOnMonitor
+	mu                sync.RWMutex
 	activeDeployments map[string]*NativeDeployment
 }
 
@@ -56,6 +57,13 @@ type LogStreamer struct {
 
 // HealthChecker monitors deployment health
 type HealthChecker struct {
+	service  *HostingService
+	ticker   *time.Ticker
+	stopChan chan struct{}
+}
+
+// AlwaysOnMonitor handles always-on deployments with keep-alive and auto-restart
+type AlwaysOnMonitor struct {
 	service  *HostingService
 	ticker   *time.Ticker
 	stopChan chan struct{}
@@ -105,8 +113,17 @@ func NewHostingService(db *gorm.DB) *HostingService {
 		stopChan: make(chan struct{}),
 	}
 
+	// Initialize always-on monitor
+	svc.alwaysOnMonitor = &AlwaysOnMonitor{
+		service:  svc,
+		stopChan: make(chan struct{}),
+	}
+
 	// Start health check loop
 	go svc.healthChecker.Start()
+
+	// Start always-on monitor loop
+	go svc.alwaysOnMonitor.Start()
 
 	return svc
 }
@@ -149,6 +166,20 @@ func (s *HostingService) StartDeployment(ctx context.Context, projectID, userID 
 		AutoScale:      config.AutoScale,
 		MinInstances:   config.MinInstances,
 		MaxInstances:   config.MaxInstances,
+		AlwaysOn:       config.AlwaysOn,
+	}
+
+	// Set always-on defaults
+	if config.AlwaysOn {
+		now := time.Now()
+		deployment.AlwaysOnEnabled = &now
+		deployment.KeepAliveInterval = config.KeepAliveInterval
+		if deployment.KeepAliveInterval == 0 {
+			deployment.KeepAliveInterval = 60 // Default 60 seconds
+		}
+		deployment.SleepAfterMinutes = 0 // Never sleep when always-on
+		deployment.RestartOnFailure = true
+		deployment.MaxRestarts = 10 // More restarts for always-on deployments
 	}
 
 	// Set defaults
@@ -211,6 +242,10 @@ type DeploymentConfig struct {
 	MaxInstances   int               `json:"max_instances"`
 	EnvVars        map[string]string `json:"env_vars"`
 	Files          []ProjectFile     `json:"files"`
+
+	// Always-On configuration (Replit parity feature)
+	AlwaysOn          bool `json:"always_on"`
+	KeepAliveInterval int  `json:"keep_alive_interval"` // seconds, default 60
 }
 
 // ProjectFile represents a file to be deployed
@@ -982,7 +1017,157 @@ func generateRandomSuffix(length int) string {
 	return hex.EncodeToString(bytes)[:length]
 }
 
+// Start begins the always-on monitor loop
+func (aom *AlwaysOnMonitor) Start() {
+	aom.ticker = time.NewTicker(15 * time.Second) // Check every 15 seconds
+
+	for {
+		select {
+		case <-aom.stopChan:
+			aom.ticker.Stop()
+			return
+		case <-aom.ticker.C:
+			aom.checkAlwaysOnDeployments()
+		}
+	}
+}
+
+// checkAlwaysOnDeployments monitors all always-on deployments
+func (aom *AlwaysOnMonitor) checkAlwaysOnDeployments() {
+	// Query all always-on deployments from database
+	var deployments []NativeDeployment
+	if err := aom.service.db.Where("always_on = ? AND status != ?", true, StatusDeleted).Find(&deployments).Error; err != nil {
+		return
+	}
+
+	for _, deployment := range deployments {
+		go aom.monitorDeployment(&deployment)
+	}
+}
+
+// monitorDeployment handles monitoring for a single always-on deployment
+func (aom *AlwaysOnMonitor) monitorDeployment(deployment *NativeDeployment) {
+	// Send keep-alive ping
+	now := time.Now()
+	deployment.LastKeepAlive = &now
+
+	// Check if deployment needs recovery
+	if deployment.NeedsCrashRecovery() {
+		aom.service.addLog(deployment.ID, "warn", "always-on", "Deployment crashed, initiating auto-restart...")
+		aom.service.autoRestartDeployment(deployment)
+		return
+	}
+
+	// Check if deployment is stopped but should be running
+	if deployment.Status == StatusStopped && deployment.AlwaysOn {
+		aom.service.addLog(deployment.ID, "info", "always-on", "Deployment stopped but always-on is enabled, restarting...")
+		aom.service.autoRestartDeployment(deployment)
+		return
+	}
+
+	// Check container health for running deployments
+	if deployment.Status == StatusRunning {
+		healthy := aom.service.checkHealth(deployment)
+		if !healthy {
+			deployment.ContainerStatus = ContainerUnhealthy
+			aom.service.addLog(deployment.ID, "warn", "always-on", "Container unhealthy, initiating restart...")
+			aom.service.autoRestartDeployment(deployment)
+		} else {
+			// Update keep-alive timestamp
+			aom.service.db.Model(deployment).Updates(map[string]interface{}{
+				"last_keep_alive":  &now,
+				"container_status": ContainerHealthy,
+			})
+		}
+	}
+}
+
+// autoRestartDeployment automatically restarts a crashed/stopped always-on deployment
+func (s *HostingService) autoRestartDeployment(deployment *NativeDeployment) {
+	// Increment restart count
+	deployment.RestartCount++
+	s.db.Model(deployment).Update("restart_count", deployment.RestartCount)
+
+	if deployment.RestartCount > deployment.MaxRestarts {
+		s.addLog(deployment.ID, "error", "always-on", "Maximum restart attempts exceeded, deployment requires manual intervention")
+		s.updateStatus(deployment, StatusFailed, "Maximum restart attempts exceeded")
+		return
+	}
+
+	s.addLog(deployment.ID, "info", "always-on", fmt.Sprintf("Auto-restart attempt %d/%d", deployment.RestartCount, deployment.MaxRestarts))
+
+	// Attempt to restart the container
+	if err := s.RestartDeployment(deployment.ID); err != nil {
+		s.addLog(deployment.ID, "error", "always-on", fmt.Sprintf("Auto-restart failed: %v", err))
+		// Will be retried on next monitor cycle
+	} else {
+		s.addLog(deployment.ID, "info", "always-on", "Auto-restart successful")
+		// Reset restart count on successful restart
+		s.db.Model(deployment).Update("restart_count", 0)
+	}
+}
+
+// SetAlwaysOn enables or disables always-on for a deployment
+func (s *HostingService) SetAlwaysOn(deploymentID string, enabled bool, keepAliveInterval int) error {
+	deployment, err := s.GetDeployment(deploymentID)
+	if err != nil {
+		return err
+	}
+
+	deployment.AlwaysOn = enabled
+
+	if enabled {
+		now := time.Now()
+		deployment.AlwaysOnEnabled = &now
+		deployment.LastKeepAlive = &now
+		if keepAliveInterval > 0 {
+			deployment.KeepAliveInterval = keepAliveInterval
+		} else {
+			deployment.KeepAliveInterval = 60
+		}
+		deployment.SleepAfterMinutes = 0
+		deployment.RestartOnFailure = true
+		deployment.MaxRestarts = 10
+
+		s.addLog(deploymentID, "info", "always-on", "Always-On enabled - deployment will run 24/7")
+
+		// If deployment is stopped, start it
+		if deployment.Status == StatusStopped {
+			go s.autoRestartDeployment(deployment)
+		}
+	} else {
+		deployment.AlwaysOnEnabled = nil
+		deployment.SleepAfterMinutes = 30 // Default sleep after 30 minutes of inactivity
+		s.addLog(deploymentID, "info", "always-on", "Always-On disabled - deployment may sleep after inactivity")
+	}
+
+	return s.db.Save(deployment).Error
+}
+
+// GetAlwaysOnStatus returns the always-on status for a deployment
+func (s *HostingService) GetAlwaysOnStatus(deploymentID string) (map[string]interface{}, error) {
+	deployment, err := s.GetDeployment(deploymentID)
+	if err != nil {
+		return nil, err
+	}
+
+	status := map[string]interface{}{
+		"always_on":           deployment.AlwaysOn,
+		"always_on_enabled":   deployment.AlwaysOnEnabled,
+		"last_keep_alive":     deployment.LastKeepAlive,
+		"keep_alive_interval": deployment.KeepAliveInterval,
+		"sleep_after_minutes": deployment.SleepAfterMinutes,
+		"restart_count":       deployment.RestartCount,
+		"max_restarts":        deployment.MaxRestarts,
+		"container_status":    deployment.ContainerStatus,
+		"uptime_seconds":      deployment.UptimeSeconds,
+	}
+
+	return status, nil
+}
+
 // Close cleanly shuts down the hosting service
 func (s *HostingService) Close() {
 	close(s.healthChecker.stopChan)
+	close(s.alwaysOnMonitor.stopChan)
 }

@@ -17,7 +17,8 @@ import {
   EyeOff,
   Copy,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Sparkles
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ManagedDatabase, CreateDatabaseRequest, DatabaseType } from '@/types'
@@ -151,12 +152,15 @@ export const DatabasePanel: React.FC<DatabasePanelProps> = ({
           <div className="text-center py-12 text-gray-500">
             <Database className="w-12 h-12 mx-auto mb-4 opacity-20" />
             <p>No databases provisioned for this project</p>
+            <p className="text-xs text-gray-600 mt-1">
+              New projects automatically get a PostgreSQL database
+            </p>
             <Button
               variant="link"
               className="text-cyan-400 mt-2"
               onClick={() => setView('create')}
             >
-              Create your first database
+              Create additional database
             </Button>
           </div>
         ) : (
@@ -180,7 +184,15 @@ export const DatabasePanel: React.FC<DatabasePanelProps> = ({
                     <Database size={20} />
                   </div>
                   <div>
-                    <h4 className="text-white font-medium">{db.name}</h4>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-white font-medium">{db.name}</h4>
+                      {db.is_auto_provisioned && (
+                        <Badge variant="primary" size="xs" className="flex items-center gap-1">
+                          <Sparkles size={10} />
+                          Auto
+                        </Badge>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2 mt-1">
                       <Badge variant="outline" size="xs" className="uppercase">{db.type}</Badge>
                       <span className="text-[10px] text-gray-500">{db.host}</span>
@@ -299,18 +311,28 @@ export const DatabasePanel: React.FC<DatabasePanelProps> = ({
               <Plus className="w-4 h-4 text-gray-400 rotate-45" />
             </button>
             <div>
-              <h3 className="text-white font-semibold">{selectedDb.name}</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-white font-semibold">{selectedDb.name}</h3>
+                {selectedDb.is_auto_provisioned && (
+                  <Badge variant="primary" size="xs" className="flex items-center gap-1">
+                    <Sparkles size={10} />
+                    Auto-provisioned
+                  </Badge>
+                )}
+              </div>
               <Badge variant="outline" size="xs" className="uppercase">{selectedDb.type}</Badge>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<Trash2 size={14} />}
-              className="text-gray-500 hover:text-red-400"
-              onClick={() => handleDelete(selectedDb.id)}
-            />
+            {!selectedDb.is_auto_provisioned && (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<Trash2 size={14} />}
+                className="text-gray-500 hover:text-red-400"
+                onClick={() => handleDelete(selectedDb.id)}
+              />
+            )}
           </div>
         </div>
 

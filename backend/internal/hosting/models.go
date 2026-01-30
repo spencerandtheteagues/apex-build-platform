@@ -91,6 +91,14 @@ type NativeDeployment struct {
 	MaxRestarts         int           `json:"max_restarts" gorm:"default:3"`
 	RestartCount        int           `json:"restart_count" gorm:"default:0"`
 
+	// Always-On configuration (Replit parity feature)
+	// When enabled, deployment stays running 24/7 with automatic restart on crash
+	AlwaysOn          bool       `json:"always_on" gorm:"default:false"`
+	AlwaysOnEnabled   *time.Time `json:"always_on_enabled_at,omitempty"`  // When always-on was enabled
+	LastKeepAlive     *time.Time `json:"last_keep_alive,omitempty"`       // Last keep-alive ping timestamp
+	KeepAliveInterval int        `json:"keep_alive_interval" gorm:"default:60"` // Keep-alive interval in seconds
+	SleepAfterMinutes int        `json:"sleep_after_minutes" gorm:"default:0"` // 0 = never sleep (always-on)
+
 	// DNS configuration
 	DNSRecordID     string `json:"dns_record_id,omitempty" gorm:"type:varchar(50)"`
 	DNSZoneID       string `json:"dns_zone_id,omitempty" gorm:"type:varchar(50)"`
@@ -256,6 +264,16 @@ func (Subdomain) TableName() string {
 // IsActive returns true if the deployment is running and healthy
 func (d *NativeDeployment) IsActive() bool {
 	return d.Status == StatusRunning && d.ContainerStatus == ContainerHealthy
+}
+
+// ShouldStayAwake returns true if the deployment should never sleep (always-on enabled)
+func (d *NativeDeployment) ShouldStayAwake() bool {
+	return d.AlwaysOn && d.SleepAfterMinutes == 0
+}
+
+// NeedsCrashRecovery returns true if the deployment crashed and should be auto-restarted
+func (d *NativeDeployment) NeedsCrashRecovery() bool {
+	return d.AlwaysOn && d.Status == StatusFailed && d.RestartCount < d.MaxRestarts
 }
 
 // GetFullURL returns the full URL for the deployment

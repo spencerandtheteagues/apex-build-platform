@@ -36,6 +36,7 @@ export interface Project {
   environment?: Record<string, any>
   dependencies?: Record<string, any>
   build_config?: Record<string, any>
+  provisioned_database_id?: number // Auto-provisioned PostgreSQL database ID (Replit parity)
   collab_room_id?: number
   created_at: string
   updated_at: string
@@ -693,6 +694,7 @@ export interface ManagedDatabase {
   next_backup?: string
   max_storage_mb: number
   max_connections: number
+  is_auto_provisioned?: boolean // True if auto-created with project (Replit parity)
   created_at: string
   updated_at: string
   credentials?: Record<string, string> // Only if requested with reveal=true

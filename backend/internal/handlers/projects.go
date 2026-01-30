@@ -7,12 +7,27 @@ import (
 	"net/http"
 	"strconv"
 
+	"apex-build/internal/database"
 	"apex-build/internal/middleware"
+	"apex-build/internal/secrets"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
+// Global references for auto-provisioning (set during app initialization)
+var (
+	globalDBManager      *database.DatabaseManager
+	globalSecretsManager *secrets.SecretsManager
+)
+
+// InitAutoProvisioningDeps initializes the global dependencies for auto-provisioning
+// This should be called during application startup after DatabaseManager and SecretsManager are created
+func InitAutoProvisioningDeps(dbManager *database.DatabaseManager, secretsMgr *secrets.SecretsManager) {
+	globalDBManager = dbManager
+	globalSecretsManager = secretsMgr
+}
 
 // GetProjects returns all projects for the authenticated user
 func (h *Handler) GetProjects(c *gin.Context) {
@@ -57,7 +72,7 @@ func (h *Handler) GetProjects(c *gin.Context) {
 	})
 }
 
-// CreateProject creates a new project
+// CreateProject creates a new project with auto-provisioned PostgreSQL database
 func (h *Handler) CreateProject(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
@@ -131,6 +146,10 @@ func (h *Handler) CreateProject(c *gin.Context) {
 	// Create default files based on language
 	h.createDefaultFiles(project.ID, req.Language, req.Framework)
 
+	// Auto-provision PostgreSQL database for the project (Replit parity feature)
+	// This runs in background and doesn't block project creation
+	go h.autoProvisionProjectDatabase(project.ID, userID, req.Name)
+
 	// Reload project with files
 	h.DB.Preload("Files").First(&project, project.ID)
 
@@ -139,6 +158,81 @@ func (h *Handler) CreateProject(c *gin.Context) {
 		"message": "Project created successfully",
 		"project": project,
 	})
+}
+
+// autoProvisionProjectDatabase provisions a PostgreSQL database for a new project
+// This is called asynchronously after project creation
+func (h *Handler) autoProvisionProjectDatabase(projectID, userID uint, projectName string) {
+	// Get database manager from context (injected via dependency)
+	// Since we can't inject dependencies easily here, we'll use a package-level variable
+	// that gets set during initialization
+	if globalDBManager == nil {
+		return // Database provisioning not available
+	}
+
+	if globalSecretsManager == nil {
+		return // Secrets manager not available
+	}
+
+	// Provision PostgreSQL database
+	managedDB, err := globalDBManager.AutoProvisionPostgreSQLForProject(projectID, userID, projectName)
+	if err != nil {
+		// Log error but don't fail - project creation should succeed even if DB provisioning fails
+		return
+	}
+
+	// Encrypt the password before storing
+	encryptedPassword, salt, _, err := globalSecretsManager.Encrypt(userID, managedDB.Password)
+	if err != nil {
+		return
+	}
+
+	// Store the raw password temporarily for the connection string before encrypting
+	rawPassword := managedDB.Password
+
+	managedDB.Password = encryptedPassword
+	managedDB.Salt = salt
+
+	// Save managed database to database
+	if err := h.DB.Create(managedDB).Error; err != nil {
+		return
+	}
+
+	// Update project with provisioned database ID
+	h.DB.Model(&models.Project{}).Where("id = ?", projectID).Update("provisioned_database_id", managedDB.ID)
+
+	// Create DATABASE_URL secret for the project
+	connectionURL := globalDBManager.GetConnectionString(managedDB, rawPassword)
+
+	// Create the secret using the secrets package
+	encryptedURL, urlSalt, keyFingerprint, err := globalSecretsManager.Encrypt(userID, connectionURL)
+	if err != nil {
+		return
+	}
+
+	// Import secrets package types
+	dbURLSecret := struct {
+		UserID         uint
+		ProjectID      *uint
+		Name           string
+		Description    string
+		Type           string
+		EncryptedValue string
+		Salt           string
+		KeyFingerprint string
+	}{
+		UserID:         userID,
+		ProjectID:      &projectID,
+		Name:           "DATABASE_URL",
+		Description:    "Auto-provisioned PostgreSQL connection string",
+		Type:           "database",
+		EncryptedValue: encryptedURL,
+		Salt:           urlSalt,
+		KeyFingerprint: keyFingerprint,
+	}
+
+	// Insert into secrets table
+	h.DB.Table("secrets").Create(&dbURLSecret)
 }
 
 // GetProject returns a specific project

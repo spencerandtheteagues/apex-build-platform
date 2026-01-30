@@ -50,6 +50,10 @@ type StartDeploymentRequest struct {
 	MinInstances   int               `json:"min_instances"`
 	MaxInstances   int               `json:"max_instances"`
 	EnvVars        map[string]string `json:"env_vars"`
+
+	// Always-On configuration (Replit parity feature)
+	AlwaysOn          bool `json:"always_on"`
+	KeepAliveInterval int  `json:"keep_alive_interval"` // seconds
 }
 
 // StartDeployment initiates a new native deployment
@@ -104,24 +108,26 @@ func (h *HostingHandler) StartDeployment(c *gin.Context) {
 
 	// Create deployment config
 	config := &hosting.DeploymentConfig{
-		ProjectName:     project.Name,
-		Subdomain:       req.Subdomain,
-		Port:            req.Port,
-		BuildCommand:    req.BuildCommand,
-		StartCommand:    req.StartCommand,
-		InstallCommand:  req.InstallCommand,
-		Framework:       req.Framework,
-		NodeVersion:     req.NodeVersion,
-		PythonVersion:   req.PythonVersion,
-		GoVersion:       req.GoVersion,
-		MemoryLimit:     req.MemoryLimit,
-		CPULimit:        req.CPULimit,
-		HealthCheckPath: req.HealthCheckPath,
-		AutoScale:       req.AutoScale,
-		MinInstances:    req.MinInstances,
-		MaxInstances:    req.MaxInstances,
-		EnvVars:         req.EnvVars,
-		Files:           projectFiles,
+		ProjectName:       project.Name,
+		Subdomain:         req.Subdomain,
+		Port:              req.Port,
+		BuildCommand:      req.BuildCommand,
+		StartCommand:      req.StartCommand,
+		InstallCommand:    req.InstallCommand,
+		Framework:         req.Framework,
+		NodeVersion:       req.NodeVersion,
+		PythonVersion:     req.PythonVersion,
+		GoVersion:         req.GoVersion,
+		MemoryLimit:       req.MemoryLimit,
+		CPULimit:          req.CPULimit,
+		HealthCheckPath:   req.HealthCheckPath,
+		AutoScale:         req.AutoScale,
+		MinInstances:      req.MinInstances,
+		MaxInstances:      req.MaxInstances,
+		EnvVars:           req.EnvVars,
+		Files:             projectFiles,
+		AlwaysOn:          req.AlwaysOn,
+		KeepAliveInterval: req.KeepAliveInterval,
 	}
 
 	// Auto-detect framework if not specified
@@ -787,6 +793,122 @@ func (h *HostingHandler) HandleDeploymentWebSocket(c *gin.Context) {
 	}
 }
 
+// SetAlwaysOn enables or disables always-on for a deployment
+// PUT /api/v1/projects/:id/deployments/:deploymentId/always-on
+func (h *HostingHandler) SetAlwaysOn(c *gin.Context) {
+	userID := c.GetUint("userID")
+	projectIDStr := c.Param("id")
+	deploymentID := c.Param("deploymentId")
+
+	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	// Verify project ownership
+	var project models.Project
+	if err := h.db.First(&project, uint(projectID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// Verify deployment belongs to project
+	deployment, err := h.service.GetDeployment(deploymentID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Deployment not found"})
+		return
+	}
+
+	if deployment.ProjectID != uint(projectID) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Deployment not found"})
+		return
+	}
+
+	var req struct {
+		AlwaysOn          bool `json:"always_on"`
+		KeepAliveInterval int  `json:"keep_alive_interval"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.service.SetAlwaysOn(deploymentID, req.AlwaysOn, req.KeepAliveInterval); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"always_on": req.AlwaysOn,
+		"message":   getAlwaysOnMessage(req.AlwaysOn),
+	})
+}
+
+// GetAlwaysOnStatus returns the always-on status for a deployment
+// GET /api/v1/projects/:id/deployments/:deploymentId/always-on
+func (h *HostingHandler) GetAlwaysOnStatus(c *gin.Context) {
+	userID := c.GetUint("userID")
+	projectIDStr := c.Param("id")
+	deploymentID := c.Param("deploymentId")
+
+	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	// Verify project ownership or public access
+	var project models.Project
+	if err := h.db.First(&project, uint(projectID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	if project.OwnerID != userID && !project.IsPublic {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// Verify deployment belongs to project
+	deployment, err := h.service.GetDeployment(deploymentID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Deployment not found"})
+		return
+	}
+
+	if deployment.ProjectID != uint(projectID) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Deployment not found"})
+		return
+	}
+
+	status, err := h.service.GetAlwaysOnStatus(deploymentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"status":  status,
+	})
+}
+
+// getAlwaysOnMessage returns a user-friendly message for always-on status change
+func getAlwaysOnMessage(enabled bool) string {
+	if enabled {
+		return "Always-On enabled. Your deployment will now run 24/7 with automatic restart on crash."
+	}
+	return "Always-On disabled. Your deployment may sleep after 30 minutes of inactivity."
+}
+
 // RegisterHostingRoutes registers all hosting routes
 func (h *HostingHandler) RegisterHostingRoutes(router *gin.RouterGroup) {
 	// Project deployment routes
@@ -802,6 +924,10 @@ func (h *HostingHandler) RegisterHostingRoutes(router *gin.RouterGroup) {
 	router.PUT("/projects/:id/deployments/:deploymentId/env", h.UpdateEnvVars)
 	router.GET("/projects/:id/deployments/:deploymentId/metrics", h.GetDeploymentMetrics)
 	router.POST("/projects/:id/redeploy", h.RedeployLatest)
+
+	// Always-On routes (Replit parity feature)
+	router.GET("/projects/:id/deployments/:deploymentId/always-on", h.GetAlwaysOnStatus)
+	router.PUT("/projects/:id/deployments/:deploymentId/always-on", h.SetAlwaysOn)
 
 	// Hosting management routes
 	router.GET("/hosting/check-subdomain", h.CheckSubdomain)
