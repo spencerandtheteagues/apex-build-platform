@@ -67,7 +67,7 @@ interface APEXButtonProps {
   glowColor?: string;
 }
 
-export const APEXButton: React.FC<APEXButtonProps> = ({
+const APEXButton: React.FC<APEXButtonProps> = ({
   variant = 'primary',
   size = 'md',
   children,
@@ -179,7 +179,7 @@ interface APEXCardProps {
   onClick?: () => void;
 }
 
-export const APEXCard: React.FC<APEXCardProps> = ({
+const APEXCard: React.FC<APEXCardProps> = ({
   variant = 'glass',
   children,
   className = '',
@@ -244,7 +244,7 @@ interface APEXInputProps {
   glowColor?: string;
 }
 
-export const APEXInput: React.FC<APEXInputProps> = ({
+const APEXInput: React.FC<APEXInputProps> = ({
   type = 'text',
   placeholder,
   value,
@@ -375,7 +375,7 @@ interface APEXTitleProps {
   glowColor?: string;
 }
 
-export const APEXTitle: React.FC<APEXTitleProps> = ({
+const APEXTitle: React.FC<APEXTitleProps> = ({
   level = 1,
   children,
   animated = false,
@@ -454,7 +454,7 @@ interface APEXNavProps {
   orientation?: 'horizontal' | 'vertical';
 }
 
-export const APEXNav: React.FC<APEXNavProps> = ({
+const APEXNav: React.FC<APEXNavProps> = ({
   items,
   orientation = 'horizontal'
 }) => {
@@ -521,7 +521,7 @@ interface APEXLoadingProps {
   color?: string;
 }
 
-export const APEXLoading: React.FC<APEXLoadingProps> = ({
+const APEXLoading: React.FC<APEXLoadingProps> = ({
   size = 'md',
   variant = 'spinner',
   color
@@ -612,7 +612,7 @@ export const APEXLoading: React.FC<APEXLoadingProps> = ({
 };
 
 // ===== 3D PARTICLE BACKGROUND COMPONENT =====
-export const APEXParticleBackground: React.FC<{ density?: number }> = ({
+const APEXParticleBackground: React.FC<{ density?: number }> = ({
   density = 100
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -728,7 +728,7 @@ interface APEXThemeContextType {
 
 const APEXThemeContext = React.createContext<APEXThemeContextType | undefined>(undefined);
 
-export const APEXThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const APEXThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setTheme] = useState<'cyberpunk' | 'matrix' | 'synthwave' | 'neonCity'>('cyberpunk');
 
   return (
@@ -738,7 +738,7 @@ export const APEXThemeProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   );
 };
 
-export const useAPEXTheme = () => {
+const useAPEXTheme = () => {
   const context = React.useContext(APEXThemeContext);
   if (!context) {
     throw new Error('useAPEXTheme must be used within APEXThemeProvider');
