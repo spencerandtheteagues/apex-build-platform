@@ -12,6 +12,8 @@ const (
 	ProviderClaude   AIProvider = "claude"
 	ProviderGPT4     AIProvider = "gpt4"
 	ProviderGemini   AIProvider = "gemini"
+	ProviderGrok     AIProvider = "grok"
+	ProviderOllama   AIProvider = "ollama"
 )
 
 // AICapability represents different AI use cases
@@ -34,6 +36,7 @@ const (
 type AIRequest struct {
 	ID                 string                 `json:"id"`
 	Provider           AIProvider             `json:"provider"`
+	Model              string                 `json:"model,omitempty"`     // Explicit model override (e.g. "grok-4-fast", "claude-sonnet-4-20250514")
 	Capability         AICapability           `json:"capability"`
 	Prompt             string                 `json:"prompt"`
 	Code               string                 `json:"code,omitempty"`
@@ -147,24 +150,32 @@ func DefaultRouterConfig() *RouterConfig {
 			CapabilityArchitecture:         ProviderClaude,  // Claude best for architecture design
 		},
 		FallbackOrder: map[AIProvider][]AIProvider{
-			ProviderClaude: {ProviderGPT4, ProviderGemini},
-			ProviderGPT4:   {ProviderClaude, ProviderGemini},
-			ProviderGemini: {ProviderGPT4, ProviderClaude},
+			ProviderClaude: {ProviderGPT4, ProviderGrok, ProviderOllama, ProviderGemini},
+			ProviderGPT4:   {ProviderClaude, ProviderGrok, ProviderOllama, ProviderGemini},
+			ProviderGemini: {ProviderGrok, ProviderOllama, ProviderGPT4, ProviderClaude},
+			ProviderGrok:   {ProviderOllama, ProviderGPT4, ProviderClaude, ProviderGemini},
+			ProviderOllama: {ProviderGrok, ProviderGPT4, ProviderClaude, ProviderGemini},
 		},
 		LoadBalancing: map[AIProvider]float64{
-			ProviderClaude: 0.4,
-			ProviderGPT4:   0.4,
-			ProviderGemini: 0.2,
+			ProviderClaude: 0.25,
+			ProviderGPT4:   0.25,
+			ProviderGrok:   0.20,
+			ProviderGemini: 0.15,
+			ProviderOllama: 0.15,
 		},
 		RateLimits: map[AIProvider]int{
 			ProviderClaude: 100,  // requests per minute
 			ProviderGPT4:   80,   // requests per minute
 			ProviderGemini: 120,  // requests per minute
+			ProviderGrok:   100,  // requests per minute
+			ProviderOllama: 1000, // Local — no real limit
 		},
 		CostThresholds: map[AIProvider]float64{
 			ProviderClaude: 0.10,  // max cost per request
 			ProviderGPT4:   0.15,  // max cost per request
 			ProviderGemini: 0.08,  // max cost per request
+			ProviderGrok:   0.05,  // max cost per request
+			ProviderOllama: 0.00,  // Free — runs locally
 		},
 	}
 }

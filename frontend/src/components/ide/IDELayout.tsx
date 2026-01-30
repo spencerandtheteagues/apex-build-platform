@@ -42,6 +42,7 @@ import { usePaneManager } from '@/hooks/usePaneManager'
 const MonacoEditor = lazy(() => import('@/components/editor/MonacoEditor').then(m => ({ default: m.MonacoEditor })))
 const DiffViewer = lazy(() => import('@/components/ide/DiffViewer').then(m => ({ default: m.DiffViewer })))
 const XTerminal = lazy(() => import('@/components/terminal/XTerminal').then(m => ({ default: m.default })))
+const LivePreview = lazy(() => import('@/components/preview/LivePreview').then(m => ({ default: m.default })))
 import {
   Menu,
   X,
@@ -61,6 +62,7 @@ import {
   Zap,
   Code,
   Search,
+  Monitor,
   GitBranch,
   Bell,
   User,
@@ -121,6 +123,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   const [activeLeftTab, setActiveLeftTab] = useState<'explorer' | 'search' | 'git' | 'history'>('explorer')
   const [activeRightTab, setActiveRightTab] = useState<'ai' | 'comments' | 'collab' | 'database' | 'settings'>('ai')
   const [activeBottomTab, setActiveBottomTab] = useState<'terminal' | 'output' | 'problems'>('terminal')
+  const [showPreview, setShowPreview] = useState(false)
 
   // Mobile-specific state
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('editor')
@@ -258,10 +261,26 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     try {
       await apiService.updateFile(fileId, { content })
       paneMarkFileSaved(fileId, paneId)
+
+      // Trigger preview hot reload when preview is active
+      if (showPreview && currentProject) {
+        const file = files.find(f => f.id === fileId)
+        if (file) {
+          try {
+            await apiService.post('/preview/hot-reload', {
+              project_id: currentProject.id,
+              file_path: file.path,
+              content: content
+            })
+          } catch {
+            // Preview might not be running - ignore silently
+          }
+        }
+      }
     } catch (error) {
       console.error('Failed to save file:', error)
     }
-  }, [paneMarkFileSaved])
+  }, [paneMarkFileSaved, showPreview, currentProject, files])
 
   // Handle AI request
   const handleAIRequest = useCallback(async (capability: AICapability, prompt: string, code: string) => {
@@ -633,9 +652,12 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
         )
       case 'editor':
         return (
-          <div className="h-full flex flex-col">
+          <div className="h-full flex">
             {/* Editor Area */}
-            <div className="flex-1 min-h-0">
+            <div className={cn(
+              'flex-1 min-h-0 min-w-0',
+              showPreview && currentProject && 'w-1/2'
+            )}>
               {showDiff && diffVersion && activeFile ? (
                 <Suspense fallback={<EditorLoadingFallback />}>
                   <DiffViewer
@@ -668,6 +690,19 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
                 />
               )}
             </div>
+
+            {/* Live Preview Pane */}
+            {showPreview && currentProject && (
+              <div className="w-1/2 border-l border-gray-800 min-w-0">
+                <Suspense fallback={<EditorLoadingFallback />}>
+                  <LivePreview
+                    projectId={currentProject.id}
+                    autoStart={true}
+                    className="h-full"
+                  />
+                </Suspense>
+              </div>
+            )}
           </div>
         )
       default:
@@ -787,6 +822,17 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
                 >
                   <span className="hidden sm:inline">Editor</span>
                 </Button>
+                {viewMode === 'editor' && (
+                  <Button
+                    size="sm"
+                    variant={showPreview ? 'primary' : 'ghost'}
+                    onClick={() => setShowPreview(!showPreview)}
+                    icon={<Monitor size={14} />}
+                    className="touch-target"
+                  >
+                    <span className="hidden sm:inline">Preview</span>
+                  </Button>
+                )}
               </>
             )}
           </div>

@@ -16,7 +16,7 @@ export interface User {
   monthly_ai_requests: number
   monthly_ai_cost: number
   preferred_theme: 'cyberpunk' | 'matrix' | 'synthwave' | 'neonCity'
-  preferred_ai: 'auto' | 'claude' | 'gpt4' | 'gemini'
+  preferred_ai: 'auto' | 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama'
   created_at: string
   updated_at: string
 }
@@ -71,7 +71,7 @@ export interface AIRequest {
   user?: User
   project_id?: number
   project?: Project
-  provider: 'claude' | 'gpt4' | 'gemini'
+  provider: AIProvider
   capability: AICapability
   prompt: string
   code?: string
@@ -99,7 +99,7 @@ export type AICapability =
   | 'testing'
   | 'documentation'
 
-export type AIProvider = 'claude' | 'gpt4' | 'gemini'
+export type AIProvider = 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama'
 
 export interface AIUsage {
   total_requests: number
@@ -840,4 +840,37 @@ export interface DetectedEnvironment {
   environment: EnvironmentConfig
   confidence: number
   suggestions: string[]
+}
+
+// BYOK (Bring Your Own Key) Types
+
+export interface BYOKKeyInfo {
+  provider: AIProvider
+  model_preference: string
+  is_active: boolean
+  is_valid: boolean
+  last_used?: string
+  usage_count: number
+  total_cost: number
+}
+
+export interface BYOKModelInfo {
+  id: string
+  name: string
+  speed: 'slow' | 'medium' | 'fast' | 'variable'
+  cost_tier: 'low' | 'medium' | 'high' | 'free'
+  description: string
+}
+
+export interface BYOKUsageSummary {
+  total_cost: number
+  total_tokens: number
+  total_requests: number
+  by_provider: Record<string, {
+    provider: string
+    cost: number
+    tokens: number
+    requests: number
+    byok_requests: number
+  }>
 }

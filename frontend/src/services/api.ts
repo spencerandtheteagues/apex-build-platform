@@ -476,6 +476,48 @@ export class ApiService {
     }
   }
 
+  // ========== GITHUB EXPORT ENDPOINTS ==========
+
+  // Export project to a new GitHub repository
+  async exportToGitHub(data: {
+    project_id: number
+    repo_name: string
+    description?: string
+    is_private?: boolean
+    token: string
+  }): Promise<{
+    success: boolean
+    data?: {
+      repo_url: string
+      repo_owner: string
+      repo_name: string
+      commit_sha: string
+      branch: string
+      file_count: number
+    }
+    error?: string
+    message?: string
+  }> {
+    const response = await this.client.post('/git/export', data)
+    return response.data
+  }
+
+  // Check if project has been exported to GitHub
+  async getExportStatus(projectId: number): Promise<{
+    success: boolean
+    exported: boolean
+    repository: {
+      remote_url: string
+      repo_owner: string
+      repo_name: string
+      branch: string
+      is_connected: boolean
+    } | null
+  }> {
+    const response = await this.client.get(`/git/export/status/${projectId}`)
+    return response.data
+  }
+
   // Utility methods
   isAuthenticated(): boolean {
     const token = this.getAuthToken()
@@ -995,6 +1037,87 @@ export class ApiService {
       { data: { emoji } }
     )
     return response.data.data!
+  }
+
+  // ========== BYOK (BRING YOUR OWN KEY) ENDPOINTS ==========
+
+  async saveAPIKey(provider: string, apiKey: string, modelPreference?: string): Promise<{
+    success: boolean
+    message: string
+    provider: string
+  }> {
+    const response = await this.client.post('/byok/keys', {
+      provider,
+      api_key: apiKey,
+      model_preference: modelPreference || '',
+    })
+    return response.data
+  }
+
+  async getAPIKeys(): Promise<{
+    success: boolean
+    data: Array<{
+      provider: string
+      model_preference: string
+      is_active: boolean
+      is_valid: boolean
+      last_used?: string
+      usage_count: number
+      total_cost: number
+    }>
+  }> {
+    const response = await this.client.get('/byok/keys')
+    return response.data
+  }
+
+  async deleteAPIKey(provider: string): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.delete(`/byok/keys/${provider}`)
+    return response.data
+  }
+
+  async validateAPIKey(provider: string): Promise<{
+    success: boolean
+    provider: string
+    valid: boolean
+    error_detail?: string
+  }> {
+    const response = await this.client.post(`/byok/keys/${provider}/validate`)
+    return response.data
+  }
+
+  async getBYOKUsage(month?: string): Promise<{
+    success: boolean
+    data: {
+      total_cost: number
+      total_tokens: number
+      total_requests: number
+      by_provider: Record<string, {
+        provider: string
+        cost: number
+        tokens: number
+        requests: number
+        byok_requests: number
+      }>
+    }
+    month: string
+  }> {
+    const params = month ? `?month=${month}` : ''
+    const response = await this.client.get(`/byok/usage${params}`)
+    return response.data
+  }
+
+  async getAvailableModels(): Promise<{
+    success: boolean
+    data: Record<string, Array<{
+      id: string
+      name: string
+      speed: string
+      cost_tier: string
+      description: string
+    }>>
+  }> {
+    const response = await this.client.get('/byok/models')
+    return response.data
   }
 
   // ========== AI CODE REVIEW ENDPOINTS ==========

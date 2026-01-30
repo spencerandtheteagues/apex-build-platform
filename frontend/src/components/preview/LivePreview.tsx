@@ -33,6 +33,7 @@ interface LivePreviewProps {
   projectId: number
   onFileChange?: (filePath: string, content: string) => void
   className?: string
+  autoStart?: boolean
 }
 
 type ViewportSize = 'mobile' | 'tablet' | 'desktop' | 'full'
@@ -44,7 +45,7 @@ const viewportSizes: Record<ViewportSize, { width: number; height: number; label
   full: { width: 0, height: 0, label: 'Full' }
 }
 
-export default function LivePreview({ projectId, onFileChange, className = '' }: LivePreviewProps) {
+export default function LivePreview({ projectId, onFileChange, className = '', autoStart = false }: LivePreviewProps) {
   const [status, setStatus] = useState<PreviewStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -83,8 +84,8 @@ export default function LivePreview({ projectId, onFileChange, className = '' }:
     return () => clearInterval(interval)
   }, [fetchStatus])
 
-  // Start preview
-  const startPreview = async () => {
+  // Start preview (wrapped in useCallback for dependency safety)
+  const startPreview = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -100,7 +101,16 @@ export default function LivePreview({ projectId, onFileChange, className = '' }:
     } finally {
       setLoading(false)
     }
-  }
+  }, [projectId])
+
+  // Auto-start preview when autoStart prop is true
+  const autoStartRef = useRef(false)
+  useEffect(() => {
+    if (autoStart && !autoStartRef.current && !status?.active && !loading) {
+      autoStartRef.current = true
+      startPreview()
+    }
+  }, [autoStart, status?.active, loading, startPreview])
 
   // Stop preview
   const stopPreview = async () => {
@@ -132,39 +142,25 @@ export default function LivePreview({ projectId, onFileChange, className = '' }:
     }
   }
 
-  // Hot reload when file changes
-  useEffect(() => {
-    if (!status?.active || !onFileChange) return
-
-    const handleHotReload = async (filePath: string, content: string) => {
-      try {
-        await api.post('/preview/hot-reload', {
-          project_id: projectId,
-          file_path: filePath,
-          content: content
-        })
-      } catch (err) {
-        // Fall back to full reload
-        refreshPreview()
-      }
-    }
-
-    // This would be called from the editor when files change
-    // For now, we'll rely on manual refresh
-  }, [status?.active, projectId])
-
   // Toggle fullscreen
   const toggleFullscreen = () => {
     if (!containerRef.current) return
 
     if (!document.fullscreenElement) {
       containerRef.current.requestFullscreen()
-      setIsFullscreen(true)
     } else {
       document.exitFullscreen()
-      setIsFullscreen(false)
     }
   }
+
+  // Sync fullscreen state with browser (handles Escape key exit)
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  }, [])
 
   // Open in new tab
   const openInNewTab = () => {

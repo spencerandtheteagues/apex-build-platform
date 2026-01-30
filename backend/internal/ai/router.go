@@ -38,7 +38,7 @@ type rateLimiter struct {
 }
 
 // NewAIRouter creates a new AI router with multiple providers
-func NewAIRouter(claudeKey, openAIKey, geminiKey string) *AIRouter {
+func NewAIRouter(claudeKey, openAIKey, geminiKey string, extraKeys ...string) *AIRouter {
 	clients := make(map[AIProvider]AIClient)
 
 	// Initialize all AI clients
@@ -50,6 +50,23 @@ func NewAIRouter(claudeKey, openAIKey, geminiKey string) *AIRouter {
 	}
 	if geminiKey != "" {
 		clients[ProviderGemini] = NewGeminiClient(geminiKey)
+	}
+	// Grok key is the first extra key if provided
+	grokKey := ""
+	if len(extraKeys) > 0 {
+		grokKey = extraKeys[0]
+	}
+	if grokKey != "" {
+		clients[ProviderGrok] = NewGrokClient(grokKey)
+	}
+
+	// Ollama URL is the second extra key if provided
+	ollamaURL := ""
+	if len(extraKeys) > 1 {
+		ollamaURL = extraKeys[1]
+	}
+	if ollamaURL != "" {
+		clients[ProviderOllama] = NewOllamaClient(ollamaURL)
 	}
 
 	config := DefaultRouterConfig()

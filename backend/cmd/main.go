@@ -70,17 +70,21 @@ func main() {
 	// Initialize authentication service
 	authService := auth.NewAuthService(config.JWTSecret)
 
-	// Initialize AI router with all three providers
+	// Initialize AI router with all providers (Claude, OpenAI, Gemini, Grok, Ollama)
 	aiRouter := ai.NewAIRouter(
 		config.ClaudeAPIKey,
 		config.OpenAIAPIKey,
 		config.GeminiAPIKey,
+		config.GrokAPIKey,
+		config.OllamaBaseURL, // Ollama local server (optional)
 	)
 
 	log.Println("✅ Multi-AI integration initialized:")
 	log.Printf("   - Claude API: %s", getStatusIcon(config.ClaudeAPIKey != ""))
 	log.Printf("   - OpenAI API: %s", getStatusIcon(config.OpenAIAPIKey != ""))
 	log.Printf("   - Gemini API: %s", getStatusIcon(config.GeminiAPIKey != ""))
+	log.Printf("   - Grok API:   %s", getStatusIcon(config.GrokAPIKey != ""))
+	log.Printf("   - Ollama:     %s", getOllamaStatus(config.OllamaBaseURL))
 
 	// Initialize Agent Orchestration System
 	aiAdapter := agents.NewAIRouterAdapter(aiRouter)
@@ -116,6 +120,11 @@ func main() {
 	} else {
 		log.Println("✅ Secrets Manager initialized with AES-256 encryption")
 	}
+
+	// Initialize BYOK (Bring Your Own Key) Manager
+	byokManager := ai.NewBYOKManager(database.GetDB(), secretsManager, aiRouter)
+	byokHandler := handlers.NewBYOKHandlers(byokManager)
+	log.Println("✅ BYOK Manager initialized (user-provided API keys, per-provider cost tracking)")
 
 	// Initialize MCP Server (APEX.BUILD as MCP provider)
 	mcpServer := mcp.NewMCPServer("APEX.BUILD", "1.0.0")
@@ -188,6 +197,10 @@ func main() {
 	// Initialize GitHub Import Handler (one-click repo import like replit.new)
 	importHandler := handlers.NewImportHandler(database.GetDB(), gitService, secretsManager)
 	log.Println("✅ GitHub Import Wizard initialized (one-click repo import)")
+
+	// Initialize GitHub Export Handler (export projects to GitHub repos)
+	exportHandler := handlers.NewExportHandler(database.GetDB(), gitService, secretsManager)
+	log.Println("✅ GitHub Export initialized (one-click export to GitHub)")
 
 	// Initialize Version History Handler (Replit parity feature)
 	versionHandler := handlers.NewVersionHandler(database.GetDB())
@@ -392,6 +405,8 @@ func main() {
 		communityHandler, hostingHandler, databaseHandler, debuggingHandler,
 		completionsHandler, extensionsHandler, enterpriseHandler, collabHub,
 		optimizedHandler,
+		byokHandler,         // BYOK API key management and model selection
+		exportHandler,       // GitHub export (push projects to GitHub)
 	)
 
 	// Start server
@@ -419,9 +434,11 @@ type Config struct {
 	Database *db.Config
 
 	// API Keys for AI providers
-	ClaudeAPIKey string
-	OpenAIAPIKey string
-	GeminiAPIKey string
+	ClaudeAPIKey  string
+	OpenAIAPIKey  string
+	GeminiAPIKey  string
+	GrokAPIKey    string
+	OllamaBaseURL string // Ollama local server URL (e.g., http://localhost:11434)
 
 	// Authentication
 	JWTSecret string
@@ -461,13 +478,15 @@ func loadConfig() *Config {
 	}
 
 	return &Config{
-		Database:     dbConfig,
-		ClaudeAPIKey: getEnv("ANTHROPIC_API_KEY", ""),
-		OpenAIAPIKey: getEnv("OPENAI_API_KEY", ""),
-		GeminiAPIKey: getEnv("GEMINI_API_KEY", ""),
-		JWTSecret:    jwtSecret,
-		Port:         getEnv("PORT", "8080"),
-		Environment:  environment,
+		Database:      dbConfig,
+		ClaudeAPIKey:  getEnv("ANTHROPIC_API_KEY", ""),
+		OpenAIAPIKey:  getEnv("OPENAI_API_KEY", ""),
+		GeminiAPIKey:  getEnv("GEMINI_API_KEY", ""),
+		GrokAPIKey:    getEnv("XAI_API_KEY", ""),
+		OllamaBaseURL: getEnv("OLLAMA_BASE_URL", ""), // Empty = disabled, or "http://localhost:11434"
+		JWTSecret:     jwtSecret,
+		Port:          getEnv("PORT", "8080"),
+		Environment:   environment,
 	}
 }
 
@@ -541,6 +560,8 @@ func setupRoutes(
 	extensionsHandler *handlers.ExtensionsHandler, enterpriseHandler *handlers.EnterpriseHandler,
 	collabHub *collaboration.CollabHub,
 	optimizedHandler *handlers.OptimizedHandler, // PERFORMANCE: Optimized handlers with caching
+	byokHandler *handlers.BYOKHandlers,          // BYOK API key management
+	exportHandler *handlers.ExportHandler,       // GitHub export
 ) *gin.Engine {
 	// Set gin mode based on environment
 	if os.Getenv("ENVIRONMENT") == "production" {
@@ -746,6 +767,8 @@ func setupRoutes(
 				gitRoutes.POST("/checkout", gitHandler.SwitchBranch)             // Switch branch
 				gitRoutes.GET("/pulls/:projectId", gitHandler.GetPullRequests)   // List PRs
 				gitRoutes.POST("/pulls", gitHandler.CreatePullRequest)           // Create PR
+				gitRoutes.POST("/export", exportHandler.ExportToGitHub)          // Export project to GitHub
+				gitRoutes.GET("/export/status/:projectId", exportHandler.GetExportStatus) // Check export status
 			}
 
 			// GitHub Repository Import Wizard (one-click import like replit.new/URL)
@@ -845,6 +868,17 @@ func setupRoutes(
 			// Enterprise endpoints (SSO, RBAC, Audit Logs, Organizations)
 			enterpriseHandler.RegisterEnterpriseRoutes(protected, v1)
 
+			// BYOK (Bring Your Own Key) endpoints
+			byok := protected.Group("/byok")
+			{
+				byok.POST("/keys", byokHandler.SaveKey)
+				byok.GET("/keys", byokHandler.GetKeys)
+				byok.DELETE("/keys/:provider", byokHandler.DeleteKey)
+				byok.POST("/keys/:provider/validate", byokHandler.ValidateKey)
+				byok.GET("/usage", byokHandler.GetUsage)
+				byok.GET("/models", byokHandler.GetModels)
+			}
+
 			// Admin endpoints (requires admin privileges)
 			admin := protected.Group("/admin")
 			admin.Use(server.AdminMiddleware())
@@ -909,4 +943,11 @@ func getStatusIcon(enabled bool) string {
 		return "✅ Enabled"
 	}
 	return "❌ Disabled (no API key)"
+}
+
+func getOllamaStatus(baseURL string) string {
+	if baseURL != "" {
+		return "✅ Enabled (" + baseURL + ")"
+	}
+	return "❌ Disabled (set OLLAMA_BASE_URL)"
 }

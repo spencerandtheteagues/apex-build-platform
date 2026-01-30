@@ -161,17 +161,20 @@ export const StatusBadge = ({ status, ...props }: { status: 'online' | 'offline'
 }
 
 // AI provider badge
-export const AIProviderBadge = ({ provider, ...props }: { provider: 'claude' | 'gpt4' | 'gemini' | 'auto' } & Omit<BadgeProps, 'variant' | 'children'>) => {
-  const config = {
-    claude: { variant: 'primary' as const, text: 'Claude' },
-    gpt4: { variant: 'success' as const, text: 'GPT-4' },
-    gemini: { variant: 'warning' as const, text: 'Gemini' },
-    auto: { variant: 'synthwave' as const, text: 'Auto' },
+export const AIProviderBadge = ({ provider, ...props }: { provider: 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama' | 'auto' } & Omit<BadgeProps, 'variant' | 'children'>) => {
+  const config: Record<string, { variant: BadgeProps['variant']; text: string }> = {
+    claude: { variant: 'primary', text: 'Claude' },
+    gpt4: { variant: 'success', text: 'GPT-4' },
+    gemini: { variant: 'warning', text: 'Gemini' },
+    grok: { variant: 'neonCity', text: 'Grok' },
+    ollama: { variant: 'info', text: 'Ollama' },
+    auto: { variant: 'synthwave', text: 'Auto' },
   }
 
+  const entry = config[provider] || config.auto
   return (
-    <Badge variant={config[provider].variant} {...props}>
-      {config[provider].text}
+    <Badge variant={entry.variant} {...props}>
+      {entry.text}
     </Badge>
   )
 }
