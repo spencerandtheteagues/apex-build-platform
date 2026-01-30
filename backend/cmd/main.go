@@ -12,12 +12,19 @@ import (
 	"apex-build/internal/ai"
 	"apex-build/internal/api"
 	"apex-build/internal/auth"
+	"apex-build/internal/collaboration"
 	"apex-build/internal/community"
+	"apex-build/internal/completions"
+	manageddb "apex-build/internal/database"
 	"apex-build/internal/db"
+	"apex-build/internal/debugging"
 	"apex-build/internal/deploy"
 	"apex-build/internal/deploy/providers"
+	"apex-build/internal/enterprise"
+	"apex-build/internal/extensions"
 	"apex-build/internal/git"
 	"apex-build/internal/handlers"
+	"apex-build/internal/hosting"
 	"apex-build/internal/mcp"
 	"apex-build/internal/payments"
 	"apex-build/internal/preview"
@@ -242,11 +249,93 @@ func main() {
 
 	log.Println("✅ Community Marketplace initialized (discover, share, fork projects)")
 
+	// Initialize Native Hosting Service
+	hostingService := hosting.NewHostingService(database.GetDB())
+	hostingHandler := handlers.NewHostingHandler(database.GetDB(), hostingService)
+	log.Println("✅ Native Hosting (.apex.app) initialized")
+
+	// Initialize Managed Database Service
+	dbManagerConfig := &manageddb.ManagerConfig{
+		BaseDir:       getEnv("DATABASE_MANAGED_DIR", "/tmp/apex-managed-dbs"),
+		PostgresHost:  getEnv("MANAGED_PG_HOST", "localhost"),
+		PostgresPort:  getEnvInt("MANAGED_PG_PORT", 5432),
+		RedisHost:     getEnv("MANAGED_REDIS_HOST", "localhost"),
+		RedisPort:     getEnvInt("MANAGED_REDIS_PORT", 6379),
+		EncryptionKey: getEnv("DB_ENCRYPTION_KEY", ""),
+	}
+	dbManager, err := manageddb.NewDatabaseManager(dbManagerConfig)
+	var databaseHandler *handlers.DatabaseHandler
+	if err != nil {
+		log.Printf("⚠️ Managed Database service not available: %v", err)
+	} else {
+		databaseHandler = handlers.NewDatabaseHandler(database.GetDB(), dbManager, secretsManager)
+		log.Println("✅ Managed Database Service initialized (PostgreSQL, Redis, SQLite)")
+	}
+
+	// Initialize Debugging Service
+	debugService := debugging.NewDebugService(database.GetDB())
+	debuggingHandler := handlers.NewDebuggingHandler(database.GetDB(), debugService)
+	log.Println("✅ Debugging Service initialized (breakpoints, stepping, watch expressions)")
+
+	// Initialize AI Completions Service
+	completionService := completions.NewCompletionService(database.GetDB(), aiRouter)
+	completionsHandler := handlers.NewCompletionsHandler(completionService)
+	log.Println("✅ AI Completions Service initialized (inline ghost-text, multi-provider)")
+
+	// Initialize Extensions Marketplace
+	extensionService := extensions.NewService(database.GetDB())
+	extensionsHandler := handlers.NewExtensionsHandler(extensionService)
+	// Run extensions migrations
+	database.GetDB().AutoMigrate(
+		&extensions.Extension{},
+		&extensions.ExtensionVersion{},
+		&extensions.ExtensionReview{},
+		&extensions.UserExtension{},
+	)
+	log.Println("✅ Extensions Marketplace initialized (discover, install, publish)")
+
+	// Initialize Enterprise Services (SAML SSO, SCIM, RBAC, Audit)
+	auditService := enterprise.NewAuditService(database.GetDB())
+	rbacService := enterprise.NewRBACService(database.GetDB())
+
+	baseURL := getEnv("BASE_URL", "https://apex.build")
+	samlConfig := &enterprise.ServiceProviderConfig{
+		EntityID:                    baseURL,
+		AssertionConsumerServiceURL: baseURL + "/api/v1/enterprise/sso/callback",
+		SingleLogoutServiceURL:     baseURL + "/api/v1/enterprise/sso/logout",
+	}
+	samlService := enterprise.NewSAMLService(database.GetDB(), samlConfig, auditService)
+	scimService := enterprise.NewSCIMService(database.GetDB(), auditService, rbacService)
+	enterpriseHandler := handlers.NewEnterpriseHandler(database.GetDB(), samlService, scimService, auditService, rbacService)
+
+	// Run enterprise migrations
+	database.GetDB().AutoMigrate(
+		&enterprise.Organization{},
+		&enterprise.OrganizationMember{},
+		&enterprise.Role{},
+		&enterprise.Permission{},
+		&enterprise.AuditLog{},
+		&enterprise.RateLimit{},
+		&enterprise.Invitation{},
+	)
+	log.Println("✅ Enterprise Features initialized (SSO/SAML, SCIM, RBAC, Audit Logs)")
+
+	// Initialize Real-Time Collaboration Hub
+	collabHub := collaboration.NewCollabHub()
+	go collabHub.Run()
+	log.Println("✅ Real-Time Collaboration initialized (OT, presence, cursor tracking)")
+
 	// Initialize API server
 	server := api.NewServer(database, authService, aiRouter)
 
 	// Setup routes
-	router := setupRoutes(server, buildHandler, wsHub, secretsHandler, mcpHandler, templatesHandler, searchHandler, previewHandler, gitHandler, paymentHandler, executionHandler, deployHandler, packageHandler, communityHandler)
+	router := setupRoutes(
+		server, buildHandler, wsHub, secretsHandler, mcpHandler,
+		templatesHandler, searchHandler, previewHandler, gitHandler,
+		paymentHandler, executionHandler, deployHandler, packageHandler,
+		communityHandler, hostingHandler, databaseHandler, debuggingHandler,
+		completionsHandler, extensionsHandler, enterpriseHandler, collabHub,
+	)
 
 	// Start server
 	port := config.Port
@@ -365,7 +454,19 @@ func parseDatabaseURL(databaseURL string) *db.Config {
 }
 
 // setupRoutes configures all API routes
-func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *agents.WSHub, secretsHandler *handlers.SecretsHandler, mcpHandler *handlers.MCPHandler, templatesHandler *handlers.TemplatesHandler, searchHandler *handlers.SearchHandler, previewHandler *handlers.PreviewHandler, gitHandler *handlers.GitHandler, paymentHandler *handlers.PaymentHandlers, executionHandler *handlers.ExecutionHandler, deployHandler *handlers.DeployHandler, packageHandler *handlers.PackageHandler, communityHandler *community.CommunityHandler) *gin.Engine {
+func setupRoutes(
+	server *api.Server, buildHandler *agents.BuildHandler, wsHub *agents.WSHub,
+	secretsHandler *handlers.SecretsHandler, mcpHandler *handlers.MCPHandler,
+	templatesHandler *handlers.TemplatesHandler, searchHandler *handlers.SearchHandler,
+	previewHandler *handlers.PreviewHandler, gitHandler *handlers.GitHandler,
+	paymentHandler *handlers.PaymentHandlers, executionHandler *handlers.ExecutionHandler,
+	deployHandler *handlers.DeployHandler, packageHandler *handlers.PackageHandler,
+	communityHandler *community.CommunityHandler,
+	hostingHandler *handlers.HostingHandler, databaseHandler *handlers.DatabaseHandler,
+	debuggingHandler *handlers.DebuggingHandler, completionsHandler *handlers.CompletionsHandler,
+	extensionsHandler *handlers.ExtensionsHandler, enterpriseHandler *handlers.EnterpriseHandler,
+	collabHub *collaboration.CollabHub,
+) *gin.Engine {
 	// Set gin mode based on environment
 	if os.Getenv("ENVIRONMENT") == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -625,6 +726,26 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 			// Community/Sharing Marketplace endpoints (protected actions)
 			communityHandler.RegisterProtectedRoutes(protected)
 
+			// Native Hosting endpoints (.apex.app)
+			hostingHandler.RegisterHostingRoutes(protected)
+
+			// Managed Database endpoints
+			if databaseHandler != nil {
+				databaseHandler.RegisterDatabaseRoutes(protected)
+			}
+
+			// Debugging endpoints
+			debuggingHandler.RegisterRoutes(protected)
+
+			// AI Completions endpoints
+			completionsHandler.RegisterCompletionRoutes(protected)
+
+			// Extensions Marketplace endpoints
+			extensionsHandler.RegisterExtensionRoutes(protected)
+
+			// Enterprise endpoints (SSO, RBAC, Audit Logs, Organizations)
+			enterpriseHandler.RegisterEnterpriseRoutes(protected, v1)
+
 			// Admin endpoints (requires admin privileges)
 			admin := protected.Group("/admin")
 			admin.Use(server.AdminMiddleware())
@@ -650,6 +771,15 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 
 	// MCP WebSocket endpoint (for APEX.BUILD as MCP server)
 	router.GET("/mcp/ws", mcpHandler.HandleMCPWebSocket)
+
+	// WebSocket endpoint for real-time collaboration
+	router.GET("/ws/collab", collabHub.HandleWebSocket)
+
+	// WebSocket endpoint for debugging sessions
+	router.GET("/ws/debug/:sessionId", debuggingHandler.HandleDebugWebSocket)
+
+	// WebSocket endpoint for deployment log streaming
+	router.GET("/ws/deploy/:deploymentId", hostingHandler.HandleDeploymentWebSocket)
 
 	return router
 }

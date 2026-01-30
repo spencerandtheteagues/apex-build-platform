@@ -268,8 +268,7 @@ func (s *CompletionService) GetCompletions(ctx context.Context, userID uint, req
 		Code:        req.Prefix,
 		Language:    req.Language,
 		MaxTokens:   maxTokens,
-		Temperature: temperature,
-		StopTokens:  s.getStopTokens(req),
+		Temperature: float32(temperature),
 	}
 
 	aiResp, err := s.aiRouter.Generate(ctx, aiReq)
@@ -280,19 +279,25 @@ func (s *CompletionService) GetCompletions(ctx context.Context, userID uint, req
 	// Parse completions from response
 	completions := s.parseCompletions(aiResp.Content, req)
 
+	// Extract usage info
+	var usage *CompletionUsage
+	if aiResp.Usage != nil {
+		usage = &CompletionUsage{
+			PromptTokens:     aiResp.Usage.PromptTokens,
+			CompletionTokens: aiResp.Usage.CompletionTokens,
+			TotalTokens:      aiResp.Usage.TotalTokens,
+			EstimatedCost:    aiResp.Usage.Cost,
+		}
+	}
+
 	response := &CompletionResponse{
 		ID:             uuid.New().String(),
 		Completions:    completions,
 		Provider:       string(aiResp.Provider),
-		Model:          aiResp.Model,
+		Model:          string(aiResp.Provider),
 		ProcessingTime: time.Since(startTime).Milliseconds(),
 		CachedHit:      false,
-		Usage: &CompletionUsage{
-			PromptTokens:     aiResp.PromptTokens,
-			CompletionTokens: aiResp.CompletionTokens,
-			TotalTokens:      aiResp.TotalTokens,
-			EstimatedCost:    aiResp.Cost,
-		},
+		Usage:          usage,
 	}
 
 	// Cache response

@@ -485,50 +485,23 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
     }
   }
 
+import XTerminal from '@/components/terminal/XTerminal'
+
+// ... existing imports
+
   // Render bottom panel content
   const renderBottomPanel = () => {
     switch (activeBottomTab) {
       case 'terminal':
         return (
-          <div className="h-full flex flex-col bg-black/90 border border-gray-700/50 rounded-lg">
-            <div className="flex items-center justify-between px-4 py-2 bg-gray-900/80 border-b border-gray-700/50 rounded-t-lg">
-              <div className="flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-red-500" />
-                <span className="text-sm font-medium text-white">Terminal</span>
-              </div>
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => setTerminalOutput(['APEX.BUILD Terminal v1.0.0', 'Welcome to the future of development', ''])}
-                icon={<RotateCcw size={12} />}
-              >
-                Clear
-              </Button>
-            </div>
-
-            <div className="flex-1 p-4 font-mono text-sm overflow-auto" ref={terminalRef}>
-              {terminalOutput.map((line, index) => (
-                <div key={index} className="text-red-400 whitespace-pre-wrap">
-                  {line}
-                </div>
-              ))}
-            </div>
-
-            <div className="flex items-center p-4 border-t border-gray-700/50">
-              <span className="text-red-400 font-mono text-sm mr-2">$</span>
-              <input
-                type="text"
-                value={terminalInput}
-                onChange={(e) => setTerminalInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && terminalInput.trim()) {
-                    executeTerminalCommand(terminalInput.trim())
-                  }
-                }}
-                className="flex-1 bg-transparent text-red-400 font-mono text-sm focus:outline-none touch-target"
-                placeholder="Enter command..."
-              />
-            </div>
+          <div className="h-full bg-black">
+            <XTerminal
+              projectId={currentProject?.id}
+              theme={theme.id}
+              onTitleChange={(title) => {
+                // Optional: update tab title
+              }}
+            />
           </div>
         )
       case 'output':

@@ -5,15 +5,16 @@
 import React, { useState, Suspense, lazy, memo } from 'react'
 import { useUser, useIsAuthenticated, useIsLoading, useLogin, useRegister } from './hooks/useStore'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input } from './components/ui'
-import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, Globe } from 'lucide-react'
 import './styles/globals.css'
 
 // Lazy load heavy components
 const IDELayout = lazy(() => import('./components/ide/IDELayout').then(m => ({ default: m.IDELayout })))
 const AppBuilder = lazy(() => import('./components/builder/AppBuilder').then(m => ({ default: m.AppBuilder })))
 const AdminDashboard = lazy(() => import('./components/admin/AdminDashboard').then(m => ({ default: m.AdminDashboard })))
+const ExplorePage = lazy(() => import('./pages/Explore').then(m => ({ default: m.ExplorePage })))
 
-type AppView = 'builder' | 'ide' | 'admin'
+type AppView = 'builder' | 'ide' | 'admin' | 'explore'
 
 // Loading fallback component
 const ViewLoadingFallback = memo(() => (
@@ -237,6 +238,17 @@ const Navigation = memo<NavigationProps>(({ currentView, user, onViewChange }) =
         <span className="text-sm font-medium">Build App</span>
       </button>
       <button
+        onClick={() => onViewChange('explore')}
+        className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
+          currentView === 'explore'
+            ? 'bg-purple-900/20 text-purple-400 border border-purple-900/50 shadow-sm shadow-purple-900/20'
+            : 'text-gray-400 hover:text-white hover:bg-gray-800'
+        }`}
+      >
+        <Globe className="w-4 h-4" />
+        <span className="text-sm font-medium">Explore</span>
+      </button>
+      <button
         onClick={() => onViewChange('ide')}
         className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
           currentView === 'ide'
@@ -422,6 +434,11 @@ function App() {
         <div className={`absolute inset-0 ${currentView === 'builder' ? 'block' : 'hidden'}`}>
           <Suspense fallback={<ViewLoadingFallback />}>
             <AppBuilder onNavigateToIDE={() => setCurrentView('ide')} />
+          </Suspense>
+        </div>
+        <div className={`absolute inset-0 ${currentView === 'explore' ? 'block' : 'hidden'}`}>
+          <Suspense fallback={<ViewLoadingFallback />}>
+            <ExplorePage />
           </Suspense>
         </div>
         <div className={`absolute inset-0 ${currentView === 'ide' ? 'block' : 'hidden'}`}>
