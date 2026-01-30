@@ -172,6 +172,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     files,
     isLoading,
     currentTheme: theme,
+    setTheme,
     collaborationUsers,
     connect,
     disconnect,
@@ -555,6 +556,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
                 <label className="text-sm font-medium text-gray-300">Theme</label>
                 <select
                   value={theme.id}
+                  onChange={(e) => setTheme(e.target.value)}
                   className="w-full mt-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white focus:border-red-500 focus:outline-none touch-target"
                 >
                   <option value="cyberpunk">Cyberpunk</option>

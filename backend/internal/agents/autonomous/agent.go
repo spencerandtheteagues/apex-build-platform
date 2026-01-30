@@ -225,6 +225,7 @@ func NewAutonomousAgent(aiProvider AIProvider, workDir string) *AutonomousAgent 
 	agent.planner = NewPlanner(aiProvider)
 	agent.executor = NewExecutor(aiProvider, workDir)
 	agent.validator = NewValidator(aiProvider)
+	agent.validator.SetWorkDir(workDir)
 
 	log.Println("Autonomous Agent initialized")
 	return agent

@@ -187,6 +187,68 @@ func (e *Executor) initializeProject(ctx context.Context, input map[string]inter
 		} else {
 			filesCreated = append(filesCreated, "tailwind.config.js")
 		}
+
+		// Create postcss.config.js (required for Tailwind)
+		postcssConfig := `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}`
+		if err := os.WriteFile(filepath.Join(e.workDir, "postcss.config.js"), []byte(postcssConfig), 0644); err != nil {
+			log.Printf("Executor: Warning - failed to create postcss.config.js: %v", err)
+		} else {
+			filesCreated = append(filesCreated, "postcss.config.js")
+		}
+	}
+
+	// Create vite.config.ts (required for Vite-based projects)
+	if techStack.Frontend == "React" || techStack.Frontend == "Vue" {
+		viteConfig := e.generateViteConfig(techStack)
+		if err := os.WriteFile(filepath.Join(e.workDir, "vite.config.ts"), []byte(viteConfig), 0644); err != nil {
+			log.Printf("Executor: Warning - failed to create vite.config.ts: %v", err)
+		} else {
+			filesCreated = append(filesCreated, "vite.config.ts")
+		}
+	}
+
+	// Create tsconfig.node.json (referenced by tsconfig.json)
+	tsconfigNode := `{
+  "compilerOptions": {
+    "composite": true,
+    "skipLibCheck": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "strict": true
+  },
+  "include": ["vite.config.ts"]
+}`
+	if err := os.WriteFile(filepath.Join(e.workDir, "tsconfig.node.json"), []byte(tsconfigNode), 0644); err != nil {
+		log.Printf("Executor: Warning - failed to create tsconfig.node.json: %v", err)
+	} else {
+		filesCreated = append(filesCreated, "tsconfig.node.json")
+	}
+
+	// Create index.html (required entry point for Vite)
+	if techStack.Frontend == "React" || techStack.Frontend == "Vue" {
+		indexHTML := `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>` + task.Description + `</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>`
+		if err := os.WriteFile(filepath.Join(e.workDir, "index.html"), []byte(indexHTML), 0644); err != nil {
+			log.Printf("Executor: Warning - failed to create index.html: %v", err)
+		} else {
+			filesCreated = append(filesCreated, "index.html")
+		}
 	}
 
 	log.Printf("Executor: Initialized project with %d files", len(filesCreated))
@@ -287,7 +349,20 @@ func (e *Executor) executeDeleteFile(ctx context.Context, step *PlanStep, task *
 	}, nil
 }
 
-// executeRunCommand runs a terminal command
+// allowedCommands is a whitelist of safe commands the executor can run
+var allowedCommands = map[string]bool{
+	"npm":    true,
+	"npx":    true,
+	"node":   true,
+	"go":     true,
+	"python": true,
+	"pip":    true,
+	"cargo":  true,
+	"tsc":    true,
+	"git":    true,
+}
+
+// executeRunCommand runs a terminal command (whitelisted only)
 func (e *Executor) executeRunCommand(ctx context.Context, step *PlanStep, task *AutonomousTask) (map[string]interface{}, error) {
 	command, ok := step.Input["command"].(string)
 	if !ok {
@@ -298,6 +373,11 @@ func (e *Executor) executeRunCommand(ctx context.Context, step *PlanStep, task *
 	parts := strings.Fields(command)
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("empty command")
+	}
+
+	// Validate command against whitelist to prevent command injection
+	if !allowedCommands[parts[0]] {
+		return nil, fmt.Errorf("command %q is not allowed", parts[0])
 	}
 
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
@@ -783,27 +863,46 @@ For EVERY file, use this format:
 
 func (e *Executor) generatePackageJSON(description string, stack *TechStack) string {
 	deps := []string{`"express": "^4.18.2"`, `"cors": "^2.8.5"`}
-	devDeps := []string{`"typescript": "^5.0.0"`, `"@types/node": "^20.0.0"`}
+	devDeps := []string{
+		`"typescript": "^5.3.0"`,
+		`"@types/node": "^20.0.0"`,
+		`"vitest": "^1.0.0"`,
+	}
 
 	if stack.Frontend == "React" {
-		deps = append(deps, `"react": "^18.2.0"`, `"react-dom": "^18.2.0"`)
-		devDeps = append(devDeps, `"@types/react": "^18.2.0"`, `"vite": "^5.0.0"`)
+		deps = append(deps, `"react": "^18.2.0"`, `"react-dom": "^18.2.0"`, `"react-router-dom": "^6.20.0"`)
+		devDeps = append(devDeps,
+			`"@types/react": "^18.2.0"`,
+			`"@types/react-dom": "^18.2.0"`,
+			`"@vitejs/plugin-react": "^4.2.0"`,
+			`"vite": "^5.0.0"`,
+		)
+	}
+
+	if stack.Frontend == "Vue" {
+		deps = append(deps, `"vue": "^3.3.0"`, `"vue-router": "^4.2.0"`)
+		devDeps = append(devDeps,
+			`"@vitejs/plugin-vue": "^4.5.0"`,
+			`"vite": "^5.0.0"`,
+		)
 	}
 
 	if stack.Styling == "Tailwind" {
-		devDeps = append(devDeps, `"tailwindcss": "^3.3.0"`, `"postcss": "^8.4.0"`, `"autoprefixer": "^10.4.0"`)
+		devDeps = append(devDeps, `"tailwindcss": "^3.4.0"`, `"postcss": "^8.4.0"`, `"autoprefixer": "^10.4.0"`)
 	}
 
 	return fmt.Sprintf(`{
   "name": "apex-generated-app",
   "version": "1.0.0",
+  "type": "module",
   "description": "%s",
   "main": "server/index.ts",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
     "server": "ts-node server/index.ts",
-    "test": "vitest",
+    "test": "vitest run",
     "lint": "eslint . --ext .ts,.tsx"
   },
   "dependencies": {
@@ -813,6 +912,45 @@ func (e *Executor) generatePackageJSON(description string, stack *TechStack) str
     %s
   }
 }`, strings.ReplaceAll(description, `"`, `\"`), strings.Join(deps, ",\n    "), strings.Join(devDeps, ",\n    "))
+}
+
+// generateViteConfig creates the Vite configuration file
+func (e *Executor) generateViteConfig(stack *TechStack) string {
+	if stack.Frontend == "React" {
+		return `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': '/src',
+    },
+  },
+})`
+	}
+	if stack.Frontend == "Vue" {
+		return `import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+
+export default defineConfig({
+  plugins: [vue()],
+  resolve: {
+    alias: {
+      '@': '/src',
+    },
+  },
+})`
+	}
+	return `import { defineConfig } from 'vite'
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      '@': '/src',
+    },
+  },
+})`
 }
 
 func (e *Executor) generateTsConfig() string {

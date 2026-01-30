@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -15,12 +16,79 @@ import (
 
 // Validator handles output validation and self-correction
 type Validator struct {
-	ai AIProvider
+	ai      AIProvider
+	workDir string
 }
 
 // NewValidator creates a new validator
 func NewValidator(ai AIProvider) *Validator {
 	return &Validator{ai: ai}
+}
+
+// SetWorkDir sets the working directory for build verification
+func (v *Validator) SetWorkDir(dir string) {
+	v.workDir = dir
+}
+
+// verifyBuild runs actual build commands to verify the project compiles
+func (v *Validator) verifyBuild(ctx context.Context) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+
+	// Check if package.json exists
+	packageJSONPath := filepath.Join(v.workDir, "package.json")
+	if _, err := os.Stat(packageJSONPath); os.IsNotExist(err) {
+		return issues // Not a Node.js project, skip
+	}
+
+	// Check if node_modules exists (deps installed)
+	nodeModulesPath := filepath.Join(v.workDir, "node_modules")
+	if _, err := os.Stat(nodeModulesPath); os.IsNotExist(err) {
+		// Try installing deps first
+		installCmd := exec.CommandContext(ctx, "npm", "install", "--prefer-offline")
+		installCmd.Dir = v.workDir
+		if output, err := installCmd.CombinedOutput(); err != nil {
+			issues = append(issues, ValidationIssue{
+				Type:        IssueSyntaxError,
+				Severity:    SeverityCritical,
+				File:        "package.json",
+				Description: fmt.Sprintf("npm install failed: %s", string(output)),
+			})
+			return issues
+		}
+	}
+
+	// Run TypeScript type check
+	tscCmd := exec.CommandContext(ctx, "npx", "tsc", "--noEmit")
+	tscCmd.Dir = v.workDir
+	if output, err := tscCmd.CombinedOutput(); err != nil {
+		issues = append(issues, ValidationIssue{
+			Type:        IssueSyntaxError,
+			Severity:    SeverityWarning,
+			File:        "tsconfig.json",
+			Description: fmt.Sprintf("TypeScript type check found errors: %s", truncateOutput(string(output), 500)),
+		})
+	}
+
+	// Run build
+	buildCmd := exec.CommandContext(ctx, "npm", "run", "build")
+	buildCmd.Dir = v.workDir
+	if output, err := buildCmd.CombinedOutput(); err != nil {
+		issues = append(issues, ValidationIssue{
+			Type:        IssueSyntaxError,
+			Severity:    SeverityCritical,
+			File:        "package.json",
+			Description: fmt.Sprintf("Build failed: %s", truncateOutput(string(output), 500)),
+		})
+	}
+
+	return issues
+}
+
+func truncateOutput(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "... (truncated)"
 }
 
 // ValidationResult contains the validation outcome
@@ -114,6 +182,12 @@ func (v *Validator) ValidateOutput(ctx context.Context, plan *ExecutionPlan, art
 		} else {
 			result.Issues = append(result.Issues, aiIssues...)
 		}
+	}
+
+	// Step 4: Run actual build verification if work directory exists
+	if v.workDir != "" {
+		buildIssues := v.verifyBuild(ctx)
+		result.Issues = append(result.Issues, buildIssues...)
 	}
 
 	// Calculate score and determine validity

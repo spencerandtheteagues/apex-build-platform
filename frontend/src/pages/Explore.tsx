@@ -59,8 +59,29 @@ export const ExplorePage = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [projects, setProjects] = useState<ProjectCard[]>([])
+  const [showFilters, setShowFilters] = useState(false)
+  const [likedProjects, setLikedProjects] = useState<Set<string>>(new Set())
 
   const { createProject, setCurrentProject } = useStore()
+
+  const handleLike = (projectId: string) => {
+    setLikedProjects(prev => {
+      const next = new Set(prev)
+      if (next.has(projectId)) {
+        next.delete(projectId)
+      } else {
+        next.add(projectId)
+      }
+      return next
+    })
+    setProjects(prev => prev.map(p =>
+      p.id === projectId ? { ...p, stars: p.stars + (likedProjects.has(projectId) ? -1 : 1) } : p
+    ))
+  }
+
+  const handlePublish = () => {
+    alert('To publish a project, open it in the IDE and use the Deploy menu.')
+  }
 
   // Fetch projects from API
   useEffect(() => {
@@ -112,9 +133,11 @@ export const ExplorePage = () => {
 
   const handleFork = async (projectId: string) => {
     try {
-      await apiService.forkProject(Number(projectId))
-      // In a real app, redirect to the new project or show toast
-      window.location.href = '/dashboard' // or wherever user projects are listed
+      const forked = await apiService.forkProject(Number(projectId))
+      if (forked) {
+        setCurrentProject(forked.project)
+        alert('Project forked successfully! You can now find it in your projects.')
+      }
     } catch (error) {
       console.error('Failed to fork project:', error)
       alert('Failed to fork project. Please try again.')
@@ -148,7 +171,7 @@ export const ExplorePage = () => {
           </div>
 
           <div className="flex gap-2">
-            <Button variant="outline" className="border-gray-700 hover:bg-gray-800">
+            <Button variant="outline" className="border-gray-700 hover:bg-gray-800" onClick={handlePublish}>
               <img src="/logo.png" alt="APEX" className="w-5 h-5 mr-2 object-contain" />
               Publish Project
             </Button>
@@ -192,7 +215,7 @@ export const ExplorePage = () => {
               <Star className="w-4 h-4 mr-2" />
               Popular
             </Button>
-            <Button variant="ghost" className="border border-gray-800">
+            <Button variant="ghost" className="border border-gray-800" onClick={() => setShowFilters(!showFilters)}>
               <Filter className="w-4 h-4 mr-2" />
               Filters
             </Button>
@@ -279,8 +302,8 @@ export const ExplorePage = () => {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <Button size="xs" variant="ghost" className="h-7 text-gray-400 hover:text-white">
-                        <Heart className="w-3.5 h-3.5" />
+                      <Button size="xs" variant="ghost" className="h-7 text-gray-400 hover:text-white" onClick={() => handleLike(project.id)}>
+                        <Heart className={cn("w-3.5 h-3.5", likedProjects.has(project.id) && "fill-red-500 text-red-500")} />
                       </Button>
                       <Button
                         size="xs"
