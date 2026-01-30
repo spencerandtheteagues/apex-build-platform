@@ -116,11 +116,15 @@ function App() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-black via-gray-950 to-red-950/20 flex items-center justify-center">
-        <LoadingOverlay
-          isVisible={true}
-          text="Initializing APEX.BUILD..."
-          variant="orb"
-        />
+        <div className="flex flex-col items-center space-y-6">
+          <div className="w-32 h-32 bg-gradient-to-br from-red-600 to-red-900 rounded-3xl flex items-center justify-center shadow-2xl shadow-red-900/50 p-4 animate-pulse">
+            <img src="/logo.png" alt="APEX Logo" className="w-full h-full object-contain" />
+          </div>
+          <div className="flex flex-col items-center gap-2">
+            <h2 className="text-2xl font-bold text-white tracking-wider">APEX.BUILD</h2>
+            <p className="text-red-400 text-sm animate-pulse">Initializing System...</p>
+          </div>
+        </div>
       </div>
     )
   }
@@ -138,8 +142,8 @@ function App() {
         <Card variant="cyberpunk" glow="intense" className="w-full max-w-md relative z-10 border-red-900/30">
           <CardHeader className="text-center">
             <div className="flex items-center justify-center gap-3 mb-4">
-              <div className="w-12 h-12 bg-gradient-to-br from-red-600 to-red-900 rounded-lg flex items-center justify-center shadow-lg shadow-red-900/50">
-                <Zap className="w-6 h-6 text-white" />
+              <div className="w-20 h-20 bg-gradient-to-br from-red-600 to-red-900 rounded-2xl flex items-center justify-center shadow-lg shadow-red-900/50 p-2">
+                <img src="/logo.png" alt="APEX Logo" className="w-full h-full object-contain" />
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-white">APEX.BUILD</h1>
@@ -281,8 +285,8 @@ function App() {
         {/* Logo */}
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className="w-8 h-8 bg-gradient-to-br from-red-600 to-red-900 rounded-lg flex items-center justify-center shadow-lg shadow-red-900/30">
-              <Zap className="w-5 h-5 text-white" />
+            <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-red-900 rounded-lg flex items-center justify-center shadow-lg shadow-red-900/30 p-1">
+              <img src="/logo.png" alt="APEX Logo" className="w-full h-full object-contain" />
             </div>
             <div className="absolute -inset-0.5 bg-gradient-to-br from-red-600 to-red-900 rounded-lg opacity-30" style={{ filter: 'blur(4px)' }} />
           </div>

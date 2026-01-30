@@ -13,6 +13,9 @@ const loadingVariants = cva(
         // Spinning circle loader
         spinner: 'rounded-full border-2 border-transparent border-t-current',
 
+        // Primary (alias for spinner)
+        primary: 'rounded-full border-2 border-transparent border-t-current',
+
         // Pulsing dots
         dots: 'flex space-x-1',
 
@@ -54,13 +57,15 @@ const loadingVariants = cva(
 )
 
 export interface LoadingProps
-  extends React.HTMLAttributes<HTMLDivElement>,
+  extends Omit<React.HTMLAttributes<HTMLDivElement>, 'color'>,
     VariantProps<typeof loadingVariants> {
   text?: string
+  label?: string // Alias for text
 }
 
 const Loading = forwardRef<HTMLDivElement, LoadingProps>(
-  ({ className, variant, size, color, text, ...props }, ref) => {
+  ({ className, variant, size, color, text, label, ...props }, ref) => {
+    const displayText = text || label
     const renderSpinner = () => {
       switch (variant) {
         case 'dots':
@@ -159,9 +164,9 @@ const Loading = forwardRef<HTMLDivElement, LoadingProps>(
         <div className={cn(loadingVariants({ color }))}>
           {renderSpinner()}
         </div>
-        {text && (
+        {displayText && (
           <span className="ml-3 text-sm font-medium animate-pulse">
-            {text}
+            {displayText}
           </span>
         )}
       </div>
