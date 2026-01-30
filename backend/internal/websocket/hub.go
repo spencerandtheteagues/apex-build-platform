@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +33,9 @@ type Hub struct {
 
 	// Unregister requests from clients
 	unregister chan *Client
+
+	// Shutdown channel for graceful termination
+	shutdown chan struct{}
 
 	// Mutex for thread safety
 	mu sync.RWMutex
@@ -99,27 +104,43 @@ type Message struct {
 }
 
 // WebSocket upgrader configuration
+// SECURITY: Strict origin checking - no empty origins in production
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// Allow connections from allowed origins
 		origin := r.Header.Get("Origin")
-		allowedOrigins := []string{
-			"http://localhost:3000",
-			"http://localhost:5173",
-			"http://127.0.0.1:3000",
-			"https://apex.build",
+
+		// Get allowed origins from environment or use defaults
+		allowedOriginsEnv := os.Getenv("CORS_ALLOWED_ORIGINS")
+		var allowedOrigins []string
+		if allowedOriginsEnv != "" {
+			allowedOrigins = strings.Split(allowedOriginsEnv, ",")
+		} else {
+			allowedOrigins = []string{
+				"http://localhost:3000",
+				"http://localhost:5173",
+				"http://127.0.0.1:3000",
+				"http://127.0.0.1:5173",
+				"https://apex.build",
+				"https://www.apex.build",
+				"https://apex-frontend-gigq.onrender.com",
+			}
 		}
 
 		for _, allowed := range allowedOrigins {
-			if origin == allowed {
+			if strings.TrimSpace(allowed) == origin {
 				return true
 			}
 		}
 
-		// For development, allow empty origin (Postman, etc.)
-		return origin == ""
+		// SECURITY: Only allow empty origin in non-production for testing tools
+		env := os.Getenv("ENVIRONMENT")
+		if origin == "" && env != "production" {
+			return true
+		}
+
+		return false
 	},
 }
 
@@ -131,13 +152,27 @@ func NewHub() *Hub {
 		broadcast:  make(chan []byte),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		shutdown:   make(chan struct{}),
 	}
 }
 
 // Run starts the hub's main loop
+// FIXED: Added shutdown channel support to prevent goroutine leaks
 func (h *Hub) Run() {
 	for {
 		select {
+		case <-h.shutdown:
+			// Graceful shutdown - close all client connections
+			h.mu.Lock()
+			for _, client := range h.clients {
+				close(client.send)
+			}
+			h.clients = make(map[uint]*Client)
+			h.rooms = make(map[string]map[*Client]bool)
+			h.mu.Unlock()
+			log.Println("WebSocket Hub shutdown complete")
+			return
+
 		case client := <-h.register:
 			h.registerClient(client)
 
@@ -148,6 +183,11 @@ func (h *Hub) Run() {
 			h.broadcastMessage(message)
 		}
 	}
+}
+
+// Shutdown gracefully stops the hub
+func (h *Hub) Shutdown() {
+	close(h.shutdown)
 }
 
 // registerClient handles client registration

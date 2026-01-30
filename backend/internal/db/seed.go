@@ -2,12 +2,27 @@ package db
 
 import (
 	"log"
+	"os"
 	"time"
 
 	"apex-build/pkg/models"
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+// SECURITY: Get seed passwords from environment variables
+func getSeedPassword(envVar, defaultDev string) string {
+	password := os.Getenv(envVar)
+	if password != "" {
+		return password
+	}
+	// Only use default in non-production
+	if os.Getenv("ENVIRONMENT") == "production" {
+		log.Printf("⚠️  WARNING: %s not set in production - seed user will not be created", envVar)
+		return ""
+	}
+	return defaultDev
+}
 
 // SeedAdminUser creates the default admin account if it doesn't exist
 func (d *Database) SeedAdminUser() error {
@@ -31,8 +46,13 @@ func (d *Database) SeedAdminUser() error {
 		return nil
 	}
 
-	// Hash password: TheStarshipKey
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("TheStarshipKey"), bcrypt.DefaultCost)
+	// SECURITY: Get password from environment variable
+	password := getSeedPassword("ADMIN_SEED_PASSWORD", "admin-dev-password")
+	if password == "" {
+		log.Println("⚠️  Skipping admin user creation - ADMIN_SEED_PASSWORD not set")
+		return nil
+	}
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
@@ -63,7 +83,6 @@ func (d *Database) SeedAdminUser() error {
 
 	log.Println("✅ Admin user created successfully")
 	log.Println("   Username: admin")
-	log.Println("   Password: TheStarshipKey")
 	log.Println("   Privileges: Full unlimited access")
 
 	return nil
@@ -91,8 +110,13 @@ func (d *Database) SeedSpencerUser() error {
 		return nil
 	}
 
-	// Hash password: TheStarshipKey!
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("TheStarshipKey!"), bcrypt.DefaultCost)
+	// SECURITY: Get password from environment variable
+	password := getSeedPassword("SPENCER_SEED_PASSWORD", "spencer-dev-password")
+	if password == "" {
+		log.Println("⚠️  Skipping spencer user creation - SPENCER_SEED_PASSWORD not set")
+		return nil
+	}
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}

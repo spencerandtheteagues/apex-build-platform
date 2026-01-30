@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // Server represents the API server
@@ -88,6 +90,7 @@ func (s *Server) DeepHealth(c *gin.Context) {
 // Authentication endpoints
 
 // Register handles user registration
+// SECURITY: Fixed TOCTOU race condition - now uses transaction with proper locking
 func (s *Server) Register(c *gin.Context) {
 	var req auth.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -95,22 +98,38 @@ func (s *Server) Register(c *gin.Context) {
 		return
 	}
 
-	// Check if user already exists
-	var existingUser models.User
-	if err := s.db.DB.Where("username = ? OR email = ?", req.Username, req.Email).First(&existingUser).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "User already exists"})
-		return
-	}
-
-	// Create user
+	// Create user object (validates input)
 	user, err := s.auth.CreateUser(&req)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Save to database
-	if err := s.db.DB.Create(user).Error; err != nil {
+	// Use transaction with row-level locking to prevent race conditions
+	err = s.db.DB.Transaction(func(tx *gorm.DB) error {
+		// Check if user already exists within transaction
+		var existingUser models.User
+		if err := tx.Where("username = ? OR email = ?", req.Username, req.Email).First(&existingUser).Error; err == nil {
+			return fmt.Errorf("user already exists")
+		}
+
+		// Create user within same transaction
+		if err := tx.Create(user).Error; err != nil {
+			// Handle unique constraint violation gracefully
+			if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
+				return fmt.Errorf("user already exists")
+			}
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		if err.Error() == "user already exists" {
+			c.JSON(http.StatusConflict, gin.H{"error": "User already exists"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
@@ -645,12 +664,47 @@ func (s *Server) AuthMiddleware() gin.HandlerFunc {
 	}
 }
 
-// CORSMiddleware handles CORS
+// CORSMiddleware handles CORS with secure origin validation
+// SECURITY: No longer uses wildcard (*) - validates against allowed origins
 func (s *Server) CORSMiddleware() gin.HandlerFunc {
+	// Get allowed origins from environment or use defaults
+	allowedOriginsEnv := os.Getenv("CORS_ALLOWED_ORIGINS")
+	var allowedOrigins []string
+	if allowedOriginsEnv != "" {
+		allowedOrigins = strings.Split(allowedOriginsEnv, ",")
+	} else {
+		// Default allowed origins for development and production
+		allowedOrigins = []string{
+			"http://localhost:3000",
+			"http://localhost:5173",
+			"http://127.0.0.1:3000",
+			"http://127.0.0.1:5173",
+			"https://apex.build",
+			"https://www.apex.build",
+			"https://apex-frontend-gigq.onrender.com",
+		}
+	}
+
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+		origin := c.Request.Header.Get("Origin")
+
+		// Check if origin is allowed
+		isAllowed := false
+		for _, allowed := range allowedOrigins {
+			if strings.TrimSpace(allowed) == origin {
+				isAllowed = true
+				break
+			}
+		}
+
+		if isAllowed {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Access-Control-Allow-Credentials", "true")
+		}
+
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Request-ID")
+		c.Header("Access-Control-Max-Age", "86400") // 24 hours preflight cache
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)

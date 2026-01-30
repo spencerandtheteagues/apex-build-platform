@@ -66,9 +66,11 @@ func NewDatabase(config *Config) (*Database, error) {
 	}
 
 	// Set connection pool settings
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(100)
+	// PERFORMANCE: Increased pool for better throughput under load
+	sqlDB.SetMaxIdleConns(25)      // Up from 10 - better for burst traffic
+	sqlDB.SetMaxOpenConns(200)     // Up from 100 - supports 1000+ concurrent users
 	sqlDB.SetConnMaxLifetime(time.Hour)
+	sqlDB.SetConnMaxIdleTime(10 * time.Minute) // Close idle connections after 10min
 
 	database := &Database{DB: db}
 

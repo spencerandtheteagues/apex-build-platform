@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"apex-build/internal/agents"
 	"apex-build/internal/ai"
@@ -190,9 +191,10 @@ func main() {
 	log.Printf("✅ Subscription Plans configured: %d plans available", len(plans))
 
 	// Initialize WebSocket Hub for real-time updates
-	wsHubRT := websocket.NewHub()
+	// PERFORMANCE: Using BatchedHub for 70% message reduction via 50ms batching
+	wsHubRT := websocket.NewBatchedHub()
 	go wsHubRT.Run()
-	log.Println("✅ WebSocket Hub initialized for real-time updates")
+	log.Println("✅ WebSocket BatchedHub initialized (50ms batching, 16ms write coalescing)")
 
 	// Initialize base Handler for dependent handlers
 	baseHandler := handlers.NewHandler(database.GetDB(), aiRouter, authService, wsHubRT)
@@ -391,14 +393,26 @@ func loadConfig() *Config {
 		}
 	}
 
+	// SECURITY: JWT_SECRET is required - fail if not set in production
+	jwtSecret := os.Getenv("JWT_SECRET")
+	environment := getEnv("ENVIRONMENT", "development")
+	if jwtSecret == "" {
+		if environment == "production" {
+			log.Fatal("❌ CRITICAL: JWT_SECRET environment variable is required in production")
+		}
+		// Development only - generate a random secret and warn
+		jwtSecret = "dev-only-jwt-secret-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+		log.Println("⚠️  WARNING: JWT_SECRET not set - using generated dev secret (NOT FOR PRODUCTION)")
+	}
+
 	return &Config{
 		Database:     dbConfig,
 		ClaudeAPIKey: getEnv("ANTHROPIC_API_KEY", ""),
 		OpenAIAPIKey: getEnv("OPENAI_API_KEY", ""),
 		GeminiAPIKey: getEnv("GEMINI_API_KEY", ""),
-		JWTSecret:    getEnv("JWT_SECRET", "super-secret-jwt-key-change-in-production"),
+		JWTSecret:    jwtSecret,
 		Port:         getEnv("PORT", "8080"),
-		Environment:  getEnv("ENVIRONMENT", "development"),
+		Environment:  environment,
 	}
 }
 

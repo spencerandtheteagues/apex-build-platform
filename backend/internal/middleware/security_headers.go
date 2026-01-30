@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -144,14 +145,19 @@ func GenerateCSRFToken() string {
 	return base64.StdEncoding.EncodeToString([]byte(token))
 }
 
-// getCSRFSecret returns the CSRF secret from environment or generates one
+// getCSRFSecret returns the CSRF secret from environment
+// SECURITY: Requires CSRF_SECRET or JWT_SECRET to be set
 func getCSRFSecret() string {
 	secret := os.Getenv("CSRF_SECRET")
 	if secret == "" {
 		secret = os.Getenv("JWT_SECRET") // Fallback to JWT secret
 	}
 	if secret == "" {
-		secret = "apex-build-csrf-secret-change-in-production"
+		// In production, this should never happen as JWT_SECRET is required
+		// Log warning for development environments
+		log.Println("⚠️  WARNING: CSRF_SECRET not set - CSRF protection may be weak")
+		// Generate a runtime secret (will change on restart, but better than hardcoded)
+		secret = "runtime-csrf-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	}
 	return secret
 }
