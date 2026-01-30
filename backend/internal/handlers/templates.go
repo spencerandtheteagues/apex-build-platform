@@ -66,7 +66,7 @@ func (h *TemplatesHandler) GetTemplate(c *gin.Context) {
 
 // CreateProjectFromTemplate creates a new project from a template
 func (h *TemplatesHandler) CreateProjectFromTemplate(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	var req struct {
 		TemplateID  string `json:"template_id" binding:"required"`

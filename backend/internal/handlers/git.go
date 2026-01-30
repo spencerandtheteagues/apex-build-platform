@@ -32,7 +32,7 @@ func NewGitHandler(db *gorm.DB, gitService *git.GitService, secretsManager *secr
 // ConnectRepository connects a project to a remote repository
 // POST /api/v1/git/connect
 func (h *GitHandler) ConnectRepository(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	var req struct {
 		ProjectID uint   `json:"project_id" binding:"required"`
@@ -127,7 +127,7 @@ func (h *GitHandler) GetRepository(c *gin.Context) {
 // GetBranches returns all branches for a repository
 // GET /api/v1/git/branches/:projectId
 func (h *GitHandler) GetBranches(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("projectId")
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {
@@ -153,7 +153,7 @@ func (h *GitHandler) GetBranches(c *gin.Context) {
 // GetCommits returns commit history
 // GET /api/v1/git/commits/:projectId
 func (h *GitHandler) GetCommits(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("projectId")
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {
@@ -215,7 +215,7 @@ func (h *GitHandler) GetStatus(c *gin.Context) {
 // Commit creates a new commit
 // POST /api/v1/git/commit
 func (h *GitHandler) Commit(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	var req struct {
 		ProjectID uint     `json:"project_id" binding:"required"`
@@ -258,7 +258,7 @@ func (h *GitHandler) Commit(c *gin.Context) {
 // Push pushes commits to remote
 // POST /api/v1/git/push
 func (h *GitHandler) Push(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	var req struct {
 		ProjectID uint `json:"project_id" binding:"required"`
@@ -285,7 +285,7 @@ func (h *GitHandler) Push(c *gin.Context) {
 // Pull pulls changes from remote
 // POST /api/v1/git/pull
 func (h *GitHandler) Pull(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	var req struct {
 		ProjectID uint `json:"project_id" binding:"required"`
@@ -324,7 +324,7 @@ func (h *GitHandler) Pull(c *gin.Context) {
 // CreateBranch creates a new branch
 // POST /api/v1/git/branch
 func (h *GitHandler) CreateBranch(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	var req struct {
 		ProjectID  uint   `json:"project_id" binding:"required"`
@@ -359,7 +359,7 @@ func (h *GitHandler) CreateBranch(c *gin.Context) {
 // SwitchBranch switches to a different branch
 // POST /api/v1/git/checkout
 func (h *GitHandler) SwitchBranch(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	var req struct {
 		ProjectID  uint   `json:"project_id" binding:"required"`
@@ -388,7 +388,7 @@ func (h *GitHandler) SwitchBranch(c *gin.Context) {
 // GetPullRequests lists pull requests
 // GET /api/v1/git/pulls/:projectId
 func (h *GitHandler) GetPullRequests(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("projectId")
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {
@@ -415,7 +415,7 @@ func (h *GitHandler) GetPullRequests(c *gin.Context) {
 // CreatePullRequest creates a new pull request
 // POST /api/v1/git/pulls
 func (h *GitHandler) CreatePullRequest(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	var req struct {
 		ProjectID uint   `json:"project_id" binding:"required"`
@@ -452,7 +452,7 @@ func (h *GitHandler) CreatePullRequest(c *gin.Context) {
 // DisconnectRepository disconnects a repository from a project
 // DELETE /api/v1/git/repo/:projectId
 func (h *GitHandler) DisconnectRepository(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("projectId")
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {

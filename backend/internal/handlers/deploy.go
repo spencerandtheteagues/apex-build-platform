@@ -29,7 +29,7 @@ func NewDeployHandler(db *gorm.DB, service *deploy.DeploymentService) *DeployHan
 // StartDeployment initiates a new deployment
 // POST /api/v1/deploy
 func (h *DeployHandler) StartDeployment(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	var req struct {
 		ProjectID    uint              `json:"project_id" binding:"required"`
@@ -151,7 +151,7 @@ func (h *DeployHandler) GetDeploymentLogs(c *gin.Context) {
 // CancelDeployment cancels an in-progress deployment
 // DELETE /api/v1/deploy/:id
 func (h *DeployHandler) CancelDeployment(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	deploymentID := c.Param("id")
 
 	// Verify ownership
@@ -180,7 +180,7 @@ func (h *DeployHandler) CancelDeployment(c *gin.Context) {
 // Redeploy redeployes a previous deployment
 // POST /api/v1/deploy/:id/redeploy
 func (h *DeployHandler) Redeploy(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	deploymentID := c.Param("id")
 
 	// Get original deployment
@@ -212,7 +212,7 @@ func (h *DeployHandler) Redeploy(c *gin.Context) {
 // GetProjectDeployments returns deployment history for a project
 // GET /api/v1/deploy/projects/:projectId/history
 func (h *DeployHandler) GetProjectDeployments(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("projectId")
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {

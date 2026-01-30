@@ -31,7 +31,7 @@ func (h *SearchHandler) Search(c *gin.Context) {
 
 	// Validate project access (user must own the project)
 	if query.ProjectID > 0 {
-		userID := c.GetUint("userID")
+		userID := c.GetUint("user_id")
 		if !h.userOwnsProject(userID, query.ProjectID) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to this project"})
 			return
@@ -72,7 +72,7 @@ func (h *SearchHandler) QuickSearch(c *gin.Context) {
 
 	// Validate project access
 	if query.ProjectID > 0 {
-		userID := c.GetUint("userID")
+		userID := c.GetUint("user_id")
 		if !h.userOwnsProject(userID, query.ProjectID) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 			return
@@ -112,7 +112,7 @@ func (h *SearchHandler) SearchSymbols(c *gin.Context) {
 
 	// Validate project access
 	if query.ProjectID > 0 {
-		userID := c.GetUint("userID")
+		userID := c.GetUint("user_id")
 		if !h.userOwnsProject(userID, query.ProjectID) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 			return
@@ -153,7 +153,7 @@ func (h *SearchHandler) SearchFiles(c *gin.Context) {
 
 	// Validate project access
 	if query.ProjectID > 0 {
-		userID := c.GetUint("userID")
+		userID := c.GetUint("user_id")
 		if !h.userOwnsProject(userID, query.ProjectID) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 			return
@@ -205,7 +205,7 @@ func (h *SearchHandler) SearchAndReplace(c *gin.Context) {
 	}
 
 	// Validate project access
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	if !h.userOwnsProject(userID, req.ProjectID) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to this project"})
 		return
@@ -241,7 +241,7 @@ func (h *SearchHandler) SearchAndReplace(c *gin.Context) {
 // GetSearchHistory handles GET /api/v1/search/history
 // Returns user's recent search queries
 func (h *SearchHandler) GetSearchHistory(c *gin.Context) {
-	// userID := c.GetUint("userID")
+	// userID := c.GetUint("user_id")
 	projectID, _ := strconv.ParseUint(c.Query("project_id"), 10, 32)
 
 	// TODO: Implement search history storage
@@ -256,7 +256,7 @@ func (h *SearchHandler) GetSearchHistory(c *gin.Context) {
 // ClearSearchHistory handles DELETE /api/v1/search/history
 // Clears user's search history
 func (h *SearchHandler) ClearSearchHistory(c *gin.Context) {
-	// userID := c.GetUint("userID")
+	// userID := c.GetUint("user_id")
 
 	// TODO: Implement search history storage
 	c.JSON(http.StatusOK, gin.H{

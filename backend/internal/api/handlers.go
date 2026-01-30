@@ -266,7 +266,7 @@ func (s *Server) AIGenerate(c *gin.Context) {
 	// Save request to database
 	dbRequest := &models.AIRequest{
 		RequestID:  aiReq.ID,
-		UserID:     userID.(uint),
+		UserID:     userID.(uint), // safe: middleware always sets as uint
 		Provider:   string(response.Provider),
 		Capability: string(aiReq.Capability),
 		Prompt:     aiReq.Prompt,

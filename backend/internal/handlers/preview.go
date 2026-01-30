@@ -29,7 +29,7 @@ func NewPreviewHandler(db *gorm.DB, server *preview.PreviewServer) *PreviewHandl
 // StartPreview starts a live preview session for a project
 // POST /api/v1/preview/start
 func (h *PreviewHandler) StartPreview(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	var req struct {
 		ProjectID    uint              `json:"project_id" binding:"required"`
@@ -88,7 +88,7 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 // StopPreview stops a live preview session
 // POST /api/v1/preview/stop
 func (h *PreviewHandler) StopPreview(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	var req struct {
 		ProjectID uint `json:"project_id" binding:"required"`
@@ -192,7 +192,7 @@ func (h *PreviewHandler) HotReload(c *gin.Context) {
 // ListPreviews returns all active preview sessions for a user
 // GET /api/v1/preview/list
 func (h *PreviewHandler) ListPreviews(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	// Get user's projects
 	var projects []models.Project

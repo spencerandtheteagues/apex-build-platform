@@ -59,7 +59,7 @@ type StartDeploymentRequest struct {
 // StartDeployment initiates a new native deployment
 // POST /api/v1/projects/:id/deploy
 func (h *HostingHandler) StartDeployment(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("id")
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {
@@ -153,7 +153,7 @@ func (h *HostingHandler) StartDeployment(c *gin.Context) {
 // GetDeployments returns all deployments for a project
 // GET /api/v1/projects/:id/deployments
 func (h *HostingHandler) GetDeployments(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("id")
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {
@@ -195,7 +195,7 @@ func (h *HostingHandler) GetDeployments(c *gin.Context) {
 // GetDeployment returns a specific deployment
 // GET /api/v1/projects/:id/deployments/:deploymentId
 func (h *HostingHandler) GetDeployment(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("id")
 	deploymentID := c.Param("deploymentId")
 
@@ -238,7 +238,7 @@ func (h *HostingHandler) GetDeployment(c *gin.Context) {
 // GetDeploymentLogs returns logs for a deployment
 // GET /api/v1/projects/:id/deployments/:deploymentId/logs
 func (h *HostingHandler) GetDeploymentLogs(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("id")
 	deploymentID := c.Param("deploymentId")
 
@@ -328,7 +328,7 @@ func (h *HostingHandler) StreamDeploymentLogs(c *gin.Context) {
 // StopDeployment stops a running deployment
 // DELETE /api/v1/projects/:id/deployments/:deploymentId
 func (h *HostingHandler) StopDeployment(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("id")
 	deploymentID := c.Param("deploymentId")
 
@@ -376,7 +376,7 @@ func (h *HostingHandler) StopDeployment(c *gin.Context) {
 // RestartDeployment restarts a deployment
 // POST /api/v1/projects/:id/deployments/:deploymentId/restart
 func (h *HostingHandler) RestartDeployment(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("id")
 	deploymentID := c.Param("deploymentId")
 
@@ -412,7 +412,7 @@ func (h *HostingHandler) RestartDeployment(c *gin.Context) {
 // DeleteDeployment permanently deletes a deployment
 // DELETE /api/v1/projects/:id/deployments/:deploymentId/delete
 func (h *HostingHandler) DeleteDeployment(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("id")
 	deploymentID := c.Param("deploymentId")
 
@@ -467,7 +467,7 @@ func (h *HostingHandler) CheckSubdomain(c *gin.Context) {
 // GetEnvVars returns environment variables for a deployment
 // GET /api/v1/projects/:id/deployments/:deploymentId/env
 func (h *HostingHandler) GetEnvVars(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("id")
 	deploymentID := c.Param("deploymentId")
 
@@ -504,7 +504,7 @@ func (h *HostingHandler) GetEnvVars(c *gin.Context) {
 // UpdateEnvVars updates environment variables for a deployment
 // PUT /api/v1/projects/:id/deployments/:deploymentId/env
 func (h *HostingHandler) UpdateEnvVars(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("id")
 	deploymentID := c.Param("deploymentId")
 
@@ -549,7 +549,7 @@ func (h *HostingHandler) UpdateEnvVars(c *gin.Context) {
 // GetDeploymentMetrics returns metrics for a deployment
 // GET /api/v1/projects/:id/deployments/:deploymentId/metrics
 func (h *HostingHandler) GetDeploymentMetrics(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("id")
 	deploymentID := c.Param("deploymentId")
 
@@ -586,7 +586,7 @@ func (h *HostingHandler) GetDeploymentMetrics(c *gin.Context) {
 // GetLatestDeployment returns the latest deployment for a project
 // GET /api/v1/projects/:id/deployments/latest
 func (h *HostingHandler) GetLatestDeployment(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("id")
 
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
@@ -622,7 +622,7 @@ func (h *HostingHandler) GetLatestDeployment(c *gin.Context) {
 // RedeployLatest redeploys using the latest configuration
 // POST /api/v1/projects/:id/redeploy
 func (h *HostingHandler) RedeployLatest(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("id")
 
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
@@ -796,7 +796,7 @@ func (h *HostingHandler) HandleDeploymentWebSocket(c *gin.Context) {
 // SetAlwaysOn enables or disables always-on for a deployment
 // PUT /api/v1/projects/:id/deployments/:deploymentId/always-on
 func (h *HostingHandler) SetAlwaysOn(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("id")
 	deploymentID := c.Param("deploymentId")
 
@@ -855,7 +855,7 @@ func (h *HostingHandler) SetAlwaysOn(c *gin.Context) {
 // GetAlwaysOnStatus returns the always-on status for a deployment
 // GET /api/v1/projects/:id/deployments/:deploymentId/always-on
 func (h *HostingHandler) GetAlwaysOnStatus(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("id")
 	deploymentID := c.Param("deploymentId")
 

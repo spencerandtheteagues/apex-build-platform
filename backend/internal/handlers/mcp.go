@@ -45,7 +45,7 @@ type AddExternalServerRequest struct {
 
 // ListExternalServers returns all configured MCP servers for the user
 func (h *MCPHandler) ListExternalServers(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Query("project_id")
 
 	var servers []mcp.ExternalMCPServer
@@ -94,7 +94,7 @@ func (h *MCPHandler) ListExternalServers(c *gin.Context) {
 
 // AddExternalServer adds a new external MCP server configuration
 func (h *MCPHandler) AddExternalServer(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	var req AddExternalServerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -165,7 +165,7 @@ func (h *MCPHandler) AddExternalServer(c *gin.Context) {
 
 // ConnectToServer connects to an external MCP server
 func (h *MCPHandler) ConnectToServer(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	serverID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server ID"})
@@ -238,7 +238,7 @@ func (h *MCPHandler) ConnectToServer(c *gin.Context) {
 
 // DisconnectFromServer disconnects from an external MCP server
 func (h *MCPHandler) DisconnectFromServer(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	serverID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server ID"})
@@ -264,7 +264,7 @@ func (h *MCPHandler) DisconnectFromServer(c *gin.Context) {
 
 // CallTool calls a tool on a connected MCP server
 func (h *MCPHandler) CallTool(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	serverID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server ID"})
@@ -309,7 +309,7 @@ func (h *MCPHandler) CallTool(c *gin.Context) {
 
 // ReadResource reads a resource from a connected MCP server
 func (h *MCPHandler) ReadResource(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	serverID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server ID"})
@@ -348,7 +348,7 @@ func (h *MCPHandler) ReadResource(c *gin.Context) {
 
 // DeleteExternalServer removes an MCP server configuration
 func (h *MCPHandler) DeleteExternalServer(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 	serverID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid server ID"})
@@ -385,7 +385,7 @@ func (h *MCPHandler) HandleMCPWebSocket(c *gin.Context) {
 
 // GetAvailableTools returns all tools available across all connected MCP servers
 func (h *MCPHandler) GetAvailableTools(c *gin.Context) {
-	userID := c.GetUint("userID")
+	userID := c.GetUint("user_id")
 
 	var servers []mcp.ExternalMCPServer
 	if err := h.db.Where("user_id = ? AND enabled = ?", userID, true).Find(&servers).Error; err != nil {
