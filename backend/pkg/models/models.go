@@ -427,3 +427,63 @@ type RefreshToken struct {
 	// If a used token is presented again, we revoke the entire family
 	FamilyID  string `json:"family_id" gorm:"index;not null;size:36"`  // UUID linking related tokens
 }
+
+// UserAPIKey stores user's own API keys for BYOK (Bring Your Own Key)
+// Keys are encrypted at rest via SecretsManager (AES-256-GCM)
+type UserAPIKey struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	// Ownership
+	UserID   uint   `json:"user_id" gorm:"not null;index;uniqueIndex:idx_user_provider"`
+	Provider string `json:"provider" gorm:"not null;size:20;uniqueIndex:idx_user_provider"` // claude, gpt4, gemini, grok
+
+	// Encrypted key storage (never expose raw key in JSON)
+	EncryptedKey   string `json:"-" gorm:"not null"`
+	KeySalt        string `json:"-" gorm:"not null"`
+	KeyFingerprint string `json:"-" gorm:"not null"`
+
+	// User preferences for this provider
+	ModelPreference string `json:"model_preference" gorm:"size:100"` // e.g. "grok-4-fast", "claude-sonnet-4-20250514"
+
+	// Status and tracking
+	IsActive   bool       `json:"is_active" gorm:"default:true"`
+	IsValid    bool       `json:"is_valid" gorm:"default:false"`   // Set after key validation
+	LastUsed   *time.Time `json:"last_used,omitempty"`
+	UsageCount int64      `json:"usage_count" gorm:"default:0"`
+	TotalCost  float64    `json:"total_cost" gorm:"default:0.0"`   // Tracked cost through this key
+}
+
+// AIUsageLog records every AI API call for transparent cost tracking
+type AIUsageLog struct {
+	ID        uint      `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time `json:"created_at" gorm:"index"`
+
+	// Request context
+	UserID    uint   `json:"user_id" gorm:"not null;index"`
+	ProjectID *uint  `json:"project_id,omitempty" gorm:"index"`
+	SessionID string `json:"session_id,omitempty" gorm:"index"`
+
+	// Provider and model details
+	Provider string `json:"provider" gorm:"not null;size:20;index"` // claude, gpt4, gemini, grok
+	Model    string `json:"model" gorm:"not null;size:100"`         // Exact model used
+	IsBYOK   bool   `json:"is_byok" gorm:"default:false"`          // Whether user's own key was used
+
+	// Token usage
+	InputTokens  int `json:"input_tokens" gorm:"default:0"`
+	OutputTokens int `json:"output_tokens" gorm:"default:0"`
+	TotalTokens  int `json:"total_tokens" gorm:"default:0"`
+
+	// Cost tracking (USD)
+	Cost float64 `json:"cost" gorm:"default:0.0"`
+
+	// Request metadata
+	Capability string        `json:"capability" gorm:"size:50"` // code_generation, code_review, etc.
+	Duration   time.Duration `json:"duration"`                  // Response time
+	Status     string        `json:"status" gorm:"size:20"`     // success, error, timeout
+
+	// For budget alerting
+	MonthKey string `json:"month_key" gorm:"size:7;index"` // "2026-01" for monthly aggregation
+}
