@@ -176,6 +176,10 @@ func main() {
 
 	log.Println("✅ Git Integration initialized (GitHub support)")
 
+	// Initialize GitHub Import Handler (one-click repo import like replit.new)
+	importHandler := handlers.NewImportHandler(database.GetDB(), gitService, secretsManager)
+	log.Println("✅ GitHub Import Wizard initialized (one-click repo import)")
+
 	// Initialize Stripe Payment Service
 	stripeSecretKey := os.Getenv("STRIPE_SECRET_KEY")
 	paymentHandler := handlers.NewPaymentHandlers(database.GetDB(), stripeSecretKey)
@@ -355,7 +359,7 @@ func main() {
 	// Setup routes
 	router := setupRoutes(
 		server, buildHandler, wsHub, secretsHandler, mcpHandler,
-		templatesHandler, searchHandler, previewHandler, gitHandler,
+		templatesHandler, searchHandler, previewHandler, gitHandler, importHandler,
 		paymentHandler, executionHandler, deployHandler, packageHandler,
 		communityHandler, hostingHandler, databaseHandler, debuggingHandler,
 		completionsHandler, extensionsHandler, enterpriseHandler, collabHub,
@@ -496,6 +500,7 @@ func setupRoutes(
 	secretsHandler *handlers.SecretsHandler, mcpHandler *handlers.MCPHandler,
 	templatesHandler *handlers.TemplatesHandler, searchHandler *handlers.SearchHandler,
 	previewHandler *handlers.PreviewHandler, gitHandler *handlers.GitHandler,
+	importHandler *handlers.ImportHandler, // GitHub repository import wizard
 	paymentHandler *handlers.PaymentHandlers, executionHandler *handlers.ExecutionHandler,
 	deployHandler *handlers.DeployHandler, packageHandler *handlers.PackageHandler,
 	communityHandler *community.CommunityHandler,
@@ -706,6 +711,9 @@ func setupRoutes(
 				gitRoutes.GET("/pulls/:projectId", gitHandler.GetPullRequests)   // List PRs
 				gitRoutes.POST("/pulls", gitHandler.CreatePullRequest)           // Create PR
 			}
+
+			// GitHub Repository Import Wizard (one-click import like replit.new/URL)
+			importHandler.RegisterImportRoutes(protected)
 
 			// Billing & Subscription endpoints (Stripe integration)
 			billing := protected.Group("/billing")

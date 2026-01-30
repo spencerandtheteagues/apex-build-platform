@@ -680,6 +680,63 @@ export class ApiService {
   async setProjectCategories(projectId: number, categories: string[]): Promise<void> {
     await this.client.put(`/projects/${projectId}/categories`, { categories })
   }
+
+  // ========== GITHUB IMPORT WIZARD ENDPOINTS ==========
+
+  // Validate GitHub URL and get repo info
+  async validateGitHubUrl(url: string, token?: string): Promise<{
+    valid: boolean
+    error?: string
+    hint?: string
+    private?: boolean
+    owner?: string
+    repo?: string
+    name?: string
+    description?: string
+    default_branch?: string
+    language?: string
+    size?: number
+    stars?: number
+    forks?: number
+    detected_stack?: {
+      language: string
+      framework: string
+      package_manager: string
+      entry_point: string
+    }
+  }> {
+    const response = await this.client.post('/projects/import/github/validate', { url, token })
+    return response.data
+  }
+
+  // Import GitHub repository
+  async importGitHubRepo(data: {
+    url: string
+    project_name?: string
+    description?: string
+    is_public?: boolean
+    token?: string
+  }): Promise<{
+    project_id: number
+    project_name: string
+    language: string
+    framework: string
+    detected_stack: {
+      language: string
+      framework: string
+      package_manager: string
+      entry_point: string
+    }
+    file_count: number
+    status: string
+    message: string
+    import_duration_ms: number
+    repository_url: string
+    default_branch: string
+  }> {
+    const response = await this.client.post('/projects/import/github', data)
+    return response.data
+  }
 }
 
 // Create singleton instance

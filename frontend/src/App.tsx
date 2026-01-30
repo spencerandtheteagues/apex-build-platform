@@ -5,7 +5,7 @@
 import React, { useState, Suspense, lazy, memo } from 'react'
 import { useUser, useIsAuthenticated, useIsLoading, useLogin, useRegister } from './hooks/useStore'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input } from './components/ui'
-import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, Globe, Building } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, Globe, Building, Github } from 'lucide-react'
 import { APEXParticleBackground } from './components/apex/ApexComponents'
 import './styles/globals.css'
 
@@ -15,8 +15,9 @@ const AppBuilder = lazy(() => import('./components/builder/AppBuilder').then(m =
 const AdminDashboard = lazy(() => import('./components/admin/AdminDashboard').then(m => ({ default: m.AdminDashboard })))
 const ExplorePage = lazy(() => import('./pages/Explore').then(m => ({ default: m.ExplorePage })))
 const OrganizationSettings = lazy(() => import('./components/enterprise/OrganizationSettings').then(m => ({ default: m.OrganizationSettings })))
+const GitHubImportWizard = lazy(() => import('./components/import/GitHubImportWizard').then(m => ({ default: m.GitHubImportWizard })))
 
-type AppView = 'builder' | 'ide' | 'admin' | 'explore' | 'enterprise'
+type AppView = 'builder' | 'ide' | 'admin' | 'explore' | 'enterprise' | 'import'
 
 // Loading fallback component
 const ViewLoadingFallback = memo(() => (
@@ -262,6 +263,17 @@ const Navigation = memo<NavigationProps>(({ currentView, user, onViewChange }) =
         <span className="text-sm font-medium">Enterprise</span>
       </button>
       <button
+        onClick={() => onViewChange('import')}
+        className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
+          currentView === 'import'
+            ? 'bg-cyan-900/20 text-cyan-400 border border-cyan-900/50 shadow-sm shadow-cyan-900/20'
+            : 'text-gray-400 hover:text-white hover:bg-gray-800'
+        }`}
+      >
+        <Github className="w-4 h-4" />
+        <span className="text-sm font-medium">Import</span>
+      </button>
+      <button
         onClick={() => onViewChange('ide')}
         className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
           currentView === 'ide'
@@ -470,6 +482,11 @@ function App() {
         <div className={`absolute inset-0 ${currentView === 'admin' ? 'block' : 'hidden'}`}>
           <Suspense fallback={<ViewLoadingFallback />}>
             <AdminDashboard />
+          </Suspense>
+        </div>
+        <div className={`absolute inset-0 ${currentView === 'import' ? 'block' : 'hidden'}`}>
+          <Suspense fallback={<ViewLoadingFallback />}>
+            <GitHubImportWizard />
           </Suspense>
         </div>
       </div>

@@ -574,3 +574,51 @@ export interface UserFollowInfo {
   avatar_url: string
   followed_at: string
 }
+
+// GitHub Import Wizard Types
+
+export interface DetectedStack {
+  language: string
+  framework: string
+  package_manager: string
+  entry_point: string
+}
+
+export interface GitHubRepoValidation {
+  valid: boolean
+  error?: string
+  hint?: string
+  private?: boolean
+  owner?: string
+  repo?: string
+  name?: string
+  description?: string
+  default_branch?: string
+  language?: string
+  size?: number
+  stars?: number
+  forks?: number
+  detected_stack?: DetectedStack
+}
+
+export interface GitHubImportRequest {
+  url: string
+  project_name?: string
+  description?: string
+  is_public?: boolean
+  token?: string
+}
+
+export interface GitHubImportResponse {
+  project_id: number
+  project_name: string
+  language: string
+  framework: string
+  detected_stack: DetectedStack
+  file_count: number
+  status: string
+  message: string
+  import_duration_ms: number
+  repository_url: string
+  default_branch: string
+}
