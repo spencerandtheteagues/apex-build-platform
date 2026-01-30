@@ -94,7 +94,7 @@ func (b *BillingHandlers) GetUsage(c *gin.Context) {
 		return
 	}
 
-	usage, err := b.billingService.GetUsage(c.Request.Context(), userID)
+	usage, err := b.billingService.GetUsage(c.Request.Context(), strconv.FormatUint(uint64(userID), 10))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to get usage data",
@@ -103,7 +103,7 @@ func (b *BillingHandlers) GetUsage(c *gin.Context) {
 	}
 
 	// Get user's plan
-	userPlan, err2 := b.billingService.GetUserPlan(c.Request.Context(), userID)
+	userPlan, err2 := b.billingService.GetUserPlan(c.Request.Context(), strconv.FormatUint(uint64(userID), 10))
 	if err2 != nil {
 		userPlan = billing.PlanFree // Default to free
 	}
@@ -292,7 +292,7 @@ func (b *BillingHandlers) CheckUsageLimit(c *gin.Context) {
 	// In real implementation, get user's plan from database
 	userPlan := billing.PlanFree
 
-	exceeded, err := b.billingService.CheckUsageLimit(c.Request.Context(), userID, userPlan, ut)
+	exceeded, err := b.billingService.CheckUsageLimit(c.Request.Context(), strconv.FormatUint(uint64(userID), 10), userPlan, ut)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to check usage limit",
