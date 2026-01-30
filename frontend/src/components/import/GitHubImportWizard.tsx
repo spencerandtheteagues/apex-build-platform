@@ -3,7 +3,6 @@
 // Similar to Replit's replit.new/URL feature
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import apiService from '@/services/api';
 
 // Types
@@ -90,8 +89,6 @@ interface GitHubImportWizardProps {
 }
 
 export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose }) => {
-  const navigate = useNavigate();
-
   // State
   const [step, setStep] = useState<ImportStep>('url');
   const [url, setUrl] = useState('');
@@ -231,11 +228,9 @@ export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose 
     setProgress(0);
   };
 
-  // Navigate to project
+  // Navigate to project (close wizard and let parent handle view switching)
   const handleOpenProject = () => {
-    if (importResult) {
-      navigate(`/ide/${importResult.project_id}`);
-    }
+    onClose?.();
   };
 
   // Render language badge
