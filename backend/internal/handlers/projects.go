@@ -50,12 +50,10 @@ func (h *Handler) GetProjects(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, PaginatedResponse{
-		StandardResponse: StandardResponse{
-			Success: true,
-			Data:    projects,
-		},
-		Pagination: getPaginationInfo(page, limit, total),
+	// Return projects directly in the format frontend expects
+	c.JSON(http.StatusOK, gin.H{
+		"projects":   projects,
+		"pagination": getPaginationInfo(page, limit, total),
 	})
 }
 
@@ -136,10 +134,10 @@ func (h *Handler) CreateProject(c *gin.Context) {
 	// Reload project with files
 	h.DB.Preload("Files").First(&project, project.ID)
 
-	c.JSON(http.StatusCreated, StandardResponse{
-		Success: true,
-		Data:    project,
-		Message: "Project created successfully",
+	// Return project directly in format frontend expects
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Project created successfully",
+		"project": project,
 	})
 }
 
@@ -190,9 +188,9 @@ func (h *Handler) GetProject(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, StandardResponse{
-		Success: true,
-		Data:    project,
+	// Return project directly in format frontend expects
+	c.JSON(http.StatusOK, gin.H{
+		"project": project,
 	})
 }
 

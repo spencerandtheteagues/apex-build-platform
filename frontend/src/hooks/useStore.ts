@@ -65,6 +65,7 @@ interface ProjectsActions {
     environment?: Record<string, any>
   }) => Promise<Project>
   selectProject: (id: number) => Promise<void>
+  setCurrentProject: (project: Project) => void  // Direct setter for current project
   updateProject: (id: number, data: Partial<Project>) => Promise<void>
   deleteProject: (id: number) => Promise<void>
   clearCurrentProject: () => void
@@ -117,6 +118,7 @@ interface EditorActions {
 interface CollaborationState {
   room: CollabRoom | null
   connectedUsers: User[]
+  collaborationUsers: User[]  // Alias for connectedUsers for component compatibility
   cursors: CursorPosition[]
   chat: ChatMessage[]
   isConnected: boolean
@@ -128,6 +130,8 @@ interface CollaborationActions {
   leaveRoom: () => Promise<void>
   sendChatMessage: (message: string) => void
   updateCursor: (fileId: number, line: number, column: number) => void
+  connect: (projectId: number) => Promise<void>  // Convenience method for joining collaboration
+  disconnect: () => Promise<void>  // Convenience method for leaving collaboration
 }
 
 // AI slice
@@ -152,7 +156,7 @@ interface AIActions {
 
 // UI slice
 interface UIState {
-  theme: Theme
+  currentTheme: Theme  // Renamed from 'theme' to avoid conflict with EditorState.theme
   sidebarOpen: boolean
   terminalOpen: boolean
   aiPanelOpen: boolean
@@ -229,6 +233,7 @@ export const useStore = create<StoreState & StoreActions>()(
         // Collaboration
         room: null,
         connectedUsers: [],
+        collaborationUsers: [],  // Alias for connectedUsers
         cursors: [],
         chat: [],
         isConnected: false,
@@ -239,7 +244,7 @@ export const useStore = create<StoreState & StoreActions>()(
         history: [],
 
         // UI
-        theme: getTheme('cyberpunk'),
+        currentTheme: getTheme('cyberpunk'),
         sidebarOpen: true,
         terminalOpen: false,
         aiPanelOpen: false,
@@ -471,6 +476,15 @@ export const useStore = create<StoreState & StoreActions>()(
               message: error.response?.data?.error || error.message,
             })
           }
+        },
+
+        // Direct setter for current project (synchronous, no API call)
+        setCurrentProject: (project: Project) => {
+          set((state) => {
+            state.currentProject = project
+          })
+          // Fetch files for the project
+          get().fetchFiles(project.id)
         },
 
         updateProject: async (id: number, data) => {
@@ -707,11 +721,11 @@ export const useStore = create<StoreState & StoreActions>()(
           })
         },
 
-        setTheme: (theme: string) => {
-          const themeConfig = getTheme(theme)
+        setTheme: (themeId: string) => {
+          const themeConfig = getTheme(themeId)
           set((state) => {
-            state.theme = theme
-            state.theme = themeConfig
+            state.theme = themeId
+            state.currentTheme = themeConfig
           })
         },
 
@@ -779,6 +793,7 @@ export const useStore = create<StoreState & StoreActions>()(
             set((state) => {
               state.room = null
               state.connectedUsers = []
+              state.collaborationUsers = []
               state.cursors = []
               state.isConnected = false
             })
@@ -797,6 +812,15 @@ export const useStore = create<StoreState & StoreActions>()(
           if (websocketService.isConnected()) {
             websocketService.sendCursorUpdate(fileId, line, column)
           }
+        },
+
+        // Convenience methods for connecting/disconnecting collaboration
+        connect: async (projectId: number) => {
+          await get().joinRoom(projectId)
+        },
+
+        disconnect: async () => {
+          await get().leaveRoom()
         },
 
         // AI actions
@@ -1007,6 +1031,7 @@ export const useProjects = () => useStore((state) => ({
   fetchProjects: state.fetchProjects,
   createProject: state.createProject,
   selectProject: state.selectProject,
+  setCurrentProject: state.setCurrentProject,
   updateProject: state.updateProject,
   deleteProject: state.deleteProject,
 }))
@@ -1031,7 +1056,8 @@ export const useEditor = () => useStore((state) => ({
   selection: state.selection,
   isAIAssistantOpen: state.isAIAssistantOpen,
   aiProvider: state.aiProvider,
-  theme: state.theme,
+  theme: state.currentTheme,  // Return Theme object for component compatibility
+  themeId: state.theme,       // Also expose raw theme string
   isAIGenerating: state.isAIGenerating,
   setCursorPosition: state.setCursorPosition,
   setSelection: state.setSelection,
@@ -1043,6 +1069,7 @@ export const useEditor = () => useStore((state) => ({
 export const useCollaboration = () => useStore((state) => ({
   room: state.room,
   connectedUsers: state.connectedUsers,
+  collaborationUsers: state.collaborationUsers,
   cursors: state.cursors,
   chat: state.chat,
   isConnected: state.isConnected,
@@ -1051,6 +1078,8 @@ export const useCollaboration = () => useStore((state) => ({
   leaveRoom: state.leaveRoom,
   sendChatMessage: state.sendChatMessage,
   updateCursor: state.updateCursor,
+  connect: state.connect,
+  disconnect: state.disconnect,
 }))
 
 export const useAI = () => useStore((state) => ({
@@ -1064,7 +1093,8 @@ export const useAI = () => useStore((state) => ({
 }))
 
 export const useUI = () => useStore((state) => ({
-  theme: state.theme,
+  theme: state.currentTheme,
+  currentTheme: state.currentTheme,
   sidebarOpen: state.sidebarOpen,
   terminalOpen: state.terminalOpen,
   aiPanelOpen: state.aiPanelOpen,

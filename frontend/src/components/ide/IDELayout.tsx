@@ -4,6 +4,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
+import apiService from '@/services/api'
+import websocketService from '@/services/websocket'
 import { File, AICapability } from '@/types'
 import {
   Button,
@@ -84,9 +86,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
     currentProject,
     files,
     isLoading,
-    apiService,
-    websocketService,
-    theme,
+    currentTheme: theme,
     collaborationUsers,
     connect,
     disconnect
@@ -96,7 +96,10 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
   useEffect(() => {
     if (currentProject && user) {
       connect(currentProject.id)
-      return () => disconnect()
+      return () => {
+        // Wrap async disconnect in a sync function
+        disconnect()
+      }
     }
   }, [currentProject, user, connect, disconnect])
 
@@ -200,15 +203,14 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
 
     try {
       const fullPath = parentPath === '/' ? `/${name}` : `${parentPath}/${name}`
-      const newFile = await apiService.createFile({
-        project_id: currentProject.id,
+      const newFile = await apiService.createFile(currentProject.id, {
         name: name,
         path: fullPath,
         type: type,
         content: type === 'file' ? '' : undefined
       })
 
-      setTerminalOutput(prev => [...prev, `✅ Created ${type}: ${fullPath}`])
+      setTerminalOutput(prev => [...prev, `Created ${type}: ${fullPath}`])
 
       // If it's a file, open it in the editor
       if (type === 'file') {
@@ -216,7 +218,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
       }
     } catch (error) {
       console.error('Failed to create file:', error)
-      setTerminalOutput(prev => [...prev, `❌ Failed to create ${type}: ${error}`])
+      setTerminalOutput(prev => [...prev, `Failed to create ${type}: ${error}`])
     }
   }, [currentProject, apiService, handleFileSelect])
 
@@ -232,10 +234,10 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
         setActiveFile(remainingFiles[remainingFiles.length - 1] || null)
       }
 
-      setTerminalOutput(prev => [...prev, `🗑️ Deleted: ${file.path}`])
+      setTerminalOutput(prev => [...prev, `Deleted: ${file.path}`])
     } catch (error) {
       console.error('Failed to delete file:', error)
-      setTerminalOutput(prev => [...prev, `❌ Failed to delete: ${error}`])
+      setTerminalOutput(prev => [...prev, `Failed to delete: ${error}`])
     }
   }, [apiService, activeFile, openFiles])
 
@@ -260,10 +262,10 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
         setActiveFile({ ...activeFile, name: newName, path: newPath })
       }
 
-      setTerminalOutput(prev => [...prev, `✏️ Renamed: ${file.name} → ${newName}`])
+      setTerminalOutput(prev => [...prev, `Renamed: ${file.name} -> ${newName}`])
     } catch (error) {
       console.error('Failed to rename file:', error)
-      setTerminalOutput(prev => [...prev, `❌ Failed to rename: ${error}`])
+      setTerminalOutput(prev => [...prev, `Failed to rename: ${error}`])
     }
   }, [apiService, activeFile])
 
@@ -276,7 +278,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
       if (command.startsWith('run') || command === 'start') {
         // Execute project
         if (currentProject) {
-          setTerminalOutput(prev => [...prev, '⚡ Executing project...'])
+          setTerminalOutput(prev => [...prev, 'Executing project...'])
           const execution = await apiService.executeCode({
             project_id: currentProject.id,
             command: 'npm start', // This would be determined by project type

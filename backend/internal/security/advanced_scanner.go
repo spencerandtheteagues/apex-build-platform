@@ -698,17 +698,111 @@ type (
 		LongTerm        []string `json:"long_term"`
 	}
 
-	// Additional stub types
-	VulnerabilityScanner, StaticCodeAnalyzer, DependencyScanner, SecretsDetector,
-	MalwareDetector, ThreatIntelligence, ComplianceChecker, PenetrationTester,
-	SecurityReportGenerator, SecurityAlertSystem, ForensicsEngine, IncidentHandler,
-	DependencyInfo, DependencyUpdate, LicenseCompliance, MalwareDetection,
-	ActiveThreat, AttackVector, ThreatActor, GeographicRisk, IndustryThreat,
-	EmergingThreat, ThreatTrends, RiskPrediction, MitigationStrategy,
-	ComplianceFramework, ComplianceGap, ComplianceChange, AuditEvent,
-	CertificationStatus, PenetrationTestResults, NetworkSecurityAnalysis,
-	AccessControlAnalysis, DataProtectionAnalysis, IncidentIndicator,
-	ForensicsFindings interface{}
+	// Vulnerability represents a detected security vulnerability
+	Vulnerability struct {
+		ID          string    `json:"id"`
+		Severity    string    `json:"severity"`
+		Type        string    `json:"type"`
+		Title       string    `json:"title"`
+		Description string    `json:"description"`
+		CWE         string    `json:"cwe"`
+		CVE         string    `json:"cve"`
+		CVSS        float64   `json:"cvss"`
+		File        string    `json:"file"`
+		Line        int       `json:"line"`
+		Remediation string    `json:"remediation"`
+		DetectedAt  time.Time `json:"detected_at"`
+	}
+
+	// DependencyScanResult represents the result of a dependency scan
+	DependencyScanResult struct {
+		Dependencies []string `json:"dependencies"`
+		Issues       []string `json:"issues"`
+	}
+
+	// MalwareScanResult represents the result of a malware scan
+	MalwareScanResult struct {
+		Clean bool `json:"clean"`
+	}
+
+	// ThreatLandscape represents the current threat landscape
+	ThreatLandscape struct {
+		Threats []string `json:"threats"`
+	}
+
+	// ComplianceResult represents compliance check results
+	ComplianceResult struct {
+		Compliant bool `json:"compliant"`
+	}
+
+	// PenTestResult represents penetration test results
+	PenTestResult struct {
+		Findings []string `json:"findings"`
+	}
+
+	// SecurityReport represents a security scan report
+	SecurityReport struct {
+		Summary string `json:"summary"`
+	}
+
+	// ForensicsReport represents a forensics analysis report
+	ForensicsReport struct {
+		Analysis string `json:"analysis"`
+	}
+
+	// SecurityIncident represents a security incident
+	SecurityIncident struct {
+		ID          string    `json:"id"`
+		Type        string    `json:"type"`
+		Description string    `json:"description"`
+		Timestamp   time.Time `json:"timestamp"`
+	}
+
+	// SecretFinding represents a detected secret in code
+	SecretFinding struct {
+		Type     string `json:"type"`
+		Location string `json:"location"`
+		Line     int    `json:"line"`
+		Value    string `json:"value"`
+	}
+
+	// Additional stub types - defined as structs for methods and composite literals
+	VulnerabilityScanner struct{}
+	StaticCodeAnalyzer struct{}
+	DependencyScanner struct{}
+	SecretsDetector struct{}
+	MalwareDetector struct{}
+	ThreatIntelligence struct{}
+	ComplianceChecker struct{}
+	PenetrationTester struct{}
+	SecurityReportGenerator struct{}
+	SecurityAlertSystem struct{}
+	ForensicsEngine struct{}
+	IncidentHandler struct{}
+	DependencyInfo struct{}
+	DependencyUpdate struct{}
+	LicenseCompliance struct{}
+	MalwareDetection struct{}
+	ActiveThreat struct{}
+	AttackVector struct{}
+	ThreatActor struct{}
+	GeographicRisk struct{}
+	IndustryThreat struct{}
+	EmergingThreat struct{}
+	ThreatTrends struct{}
+	RiskPrediction struct{}
+	MitigationStrategy struct{}
+	ComplianceFramework struct{}
+	ComplianceGap struct{}
+	ComplianceChange struct{}
+	AuditEvent struct{}
+	CertificationStatus struct{}
+	PenetrationTestResults struct{}
+	NetworkSecurityAnalysis struct{}
+	AccessControlAnalysis struct{}
+	DataProtectionAnalysis struct{}
+	IncidentIndicator struct{}
+	ForensicsFindings struct{}
 )
 
 // Stub constructors
@@ -728,3 +822,18 @@ func NewIncidentHandler() *IncidentHandler { return nil }
 // Stub methods
 func (sas *SecurityAlertSystem) LogScanError(scanID string, err error) {}
 func (sas *SecurityAlertSystem) SendCriticalAlert(result *SecurityScanResult) {}
+func (vs *VulnerabilityScanner) ScanForVulnerabilities(ctx context.Context, target *ScanTarget) ([]*Vulnerability, error) { return nil, nil }
+func (sca *StaticCodeAnalyzer) AnalyzeCodeSecurity(ctx context.Context, codePath string) ([]*CodeSecurityIssue, error) { return nil, nil }
+func (ds *DependencyScanner) ScanDependencies(ctx context.Context, projectPath string) (*DependencyScanResult, error) { return &DependencyScanResult{}, nil }
+func (sd *SecretsDetector) ScanForSecrets(ctx context.Context, codePath string) ([]*SecretFinding, error) { return nil, nil }
+func (md *MalwareDetector) ScanForMalware(ctx context.Context, target *ScanTarget) ([]*MalwareDetection, error) { return nil, nil }
+func (ti *ThreatIntelligence) GetThreatLandscape(ctx context.Context) (*ThreatLandscape, error) { return &ThreatLandscape{}, nil }
+func (ti *ThreatIntelligence) AnalyzeThreats(ctx context.Context, target *ScanTarget) (*ThreatAssessment, error) { return &ThreatAssessment{}, nil }
+func (cc *ComplianceChecker) CheckCompliance(ctx context.Context, target *ScanTarget) (*ComplianceStatus, error) { return &ComplianceStatus{}, nil }
+func (pt *PenetrationTester) RunPenetrationTest(ctx context.Context, target *ScanTarget) (*PenTestResult, error) { return &PenTestResult{}, nil }
+func (pt *PenetrationTester) PerformTests(ctx context.Context, target *ScanTarget) (*PenetrationTestResults, error) { return &PenetrationTestResults{}, nil }
+func (srg *SecurityReportGenerator) GenerateComprehensiveReport(result *SecurityScanResult) (*SecurityReport, error) { return &SecurityReport{}, nil }
+func (fe *ForensicsEngine) AnalyzeSecurityIncident(ctx context.Context, incident *SecurityIncident) (*ForensicsReport, error) { return &ForensicsReport{}, nil }
+func (ih *IncidentHandler) HandleSecurityIncident(ctx context.Context, incident *SecurityIncident) error { return nil }
+func (ds *DependencyScanner) AnalyzeDependencies(ctx context.Context, target *ScanTarget) (*DependencyAnalysis, error) { return &DependencyAnalysis{}, nil }
+func (sd *SecretsDetector) DetectSecrets(ctx context.Context, codePath string) ([]*SecretDetection, error) { return nil, nil }

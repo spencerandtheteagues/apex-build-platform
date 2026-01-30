@@ -539,17 +539,89 @@ type (
 		CacheImprovement        float64 `json:"cache_improvement"`
 	}
 
-	// Additional stub types
-	DatabaseOptimizations, CacheOptimizations, MemoryOptimizations,
-	ConnectionOptimizations, QueryOptimizations, IndexOptimizations,
-	NetworkOptimizations, GCOptimizations, ProfileResults, MemoryLeak,
-	ConnectionUsage, MemoryCache, RedisCache, CDNCache, CacheStrategy,
-	CacheInvalidator, CacheMetrics, ConnectionPool, QueryOptimizer,
-	IndexAnalyzer, StatisticsCollector, VacuumScheduler, PartitionManager,
-	CPUProfiler, MemoryProfiler, GoroutineProfiler, HeapProfiler,
-	TraceProfiler, MetricsCollector, FlameGraphGenerator, LoadBalancer,
-	CompressionManager, CDNManager, IndexOptimizer, PerformanceMonitor,
-	AlertSystem, MemoryPool interface{}
+	// Additional stub types - defined as structs to allow composite literals and methods
+	DatabaseOptimizations struct {
+		ConnectionPoolOptimized bool                   `json:"connection_pool_optimized"`
+		QueriesOptimized        bool                   `json:"queries_optimized"`
+		IndexesOptimized        bool                   `json:"indexes_optimized"`
+		VacuumScheduled         bool                   `json:"vacuum_scheduled"`
+		StatisticsUpdated       bool                   `json:"statistics_updated"`
+		ConnectionPoolDetails   interface{}            `json:"connection_pool_details"`
+		OptimizedQueries        interface{}            `json:"optimized_queries"`
+		IndexOptimizations      interface{}            `json:"index_optimizations"`
+	}
+	CacheOptimizations struct {
+		Optimized           bool        `json:"optimized"`
+		StrategiesOptimized bool        `json:"strategies_optimized"`
+		TTLsOptimized       bool        `json:"ttls_optimized"`
+		HitRatioImproved    bool        `json:"hit_ratio_improved"`
+		CacheWarmed         bool        `json:"cache_warmed"`
+		NewStrategies       interface{} `json:"new_strategies"`
+		OptimizedTTLs       interface{} `json:"optimized_ttls"`
+		WarmedKeys          []string    `json:"warmed_keys"`
+	}
+	MemoryOptimizations struct {
+		Optimized          bool          `json:"optimized"`
+		PoolsOptimized     bool          `json:"pools_optimized"`
+		PoolOptimizations  interface{}   `json:"pool_optimizations"`
+		GCOptimized        bool          `json:"gc_optimized"`
+		LeaksDetected      bool          `json:"leaks_detected"`
+		MemoryLeaks        []MemoryLeak `json:"memory_leaks"`
+	}
+	ConnectionOptimizations struct {
+		Optimized          bool          `json:"optimized"`
+		PoolResized        bool          `json:"pool_resized"`
+		NewSize            int           `json:"new_size"`
+		OldSize            int           `json:"old_size"`
+		TimeoutOptimized   bool          `json:"timeout_optimized"`
+		NewTimeout         time.Duration `json:"new_timeout"`
+		KeepAliveOptimized bool          `json:"keep_alive_optimized"`
+	}
+	QueryOptimizations struct {
+		Optimized      bool `json:"optimized"`
+		OptimizedCount int  `json:"optimized_count"`
+	}
+	IndexOptimizations struct {
+		Optimized       bool `json:"optimized"`
+		IndexesCreated  int  `json:"indexes_created"`
+	}
+	NetworkOptimizations struct {
+		Optimized          bool `json:"optimized"`
+		CompressionEnabled bool `json:"compression_enabled"`
+	}
+	GCOptimizations struct {
+		Optimized         bool `json:"optimized"`
+		SettingsOptimized bool `json:"settings_optimized"`
+	}
+	ProfileResults struct{}
+	MemoryLeak struct{}
+	// ConnectionUsage is defined below with full struct fields
+	MemoryCache struct{}
+	RedisCache struct{}
+	CDNCache struct{}
+	CacheStrategy struct{}
+	CacheInvalidator struct{}
+	CacheMetrics struct{}
+	ConnectionPool struct{}
+	QueryOptimizer struct{}
+	IndexAnalyzer struct{}
+	StatisticsCollector struct{}
+	VacuumScheduler struct{}
+	PartitionManager struct{}
+	CPUProfiler struct{}
+	MemoryProfiler struct{}
+	GoroutineProfiler struct{}
+	HeapProfiler struct{}
+	TraceProfiler struct{}
+	MetricsCollector struct{}
+	FlameGraphGenerator struct{}
+	LoadBalancer struct{}
+	CompressionManager struct{}
+	CDNManager struct{}
+	IndexOptimizer struct{}
+	PerformanceMonitor struct{}
+	AlertSystem struct{}
+	MemoryPool struct{}
 )
 
 // Stub constructors
@@ -566,7 +638,88 @@ func NewPerformanceProfiler() *PerformanceProfiler { return &PerformanceProfiler
 func NewPerformanceMonitor() *PerformanceMonitor { return &PerformanceMonitor{} }
 func NewAlertSystem() *AlertSystem { return nil }
 
-// Stub methods
+// Connection pool config type
+type ConnectionPoolConfig struct {
+	MaxConnections        int
+	CurrentMaxConnections int
+}
+
+// Index analysis type
+type IndexAnalysis struct {
+	MissingIndexes []string
+	UnusedIndexes  []string
+}
+
+// Stub methods for PerformanceProfiler
 func (pp *PerformanceProfiler) StartProfiling(ctx context.Context) (*ProfileResults, error) { return &ProfileResults{}, nil }
 func (pp *PerformanceProfiler) StopProfiling(ctx context.Context, profile *ProfileResults) (*ProfileResults, error) { return profile, nil }
+
+// Stub methods for PerformanceMonitor
 func (pm *PerformanceMonitor) CollectMetrics(ctx context.Context) (*PerformanceMetrics, error) { return &PerformanceMetrics{}, nil }
+
+// Stub methods for DatabaseOptimizer
+func (do *DatabaseOptimizer) OptimizeConnectionPool() *ConnectionPoolConfig { return &ConnectionPoolConfig{} }
+func (do *DatabaseOptimizer) FindSlowQueries(ctx context.Context) []string { return nil }
+func (do *DatabaseOptimizer) OptimizeQueries(ctx context.Context, queries []string) []string { return nil }
+func (do *DatabaseOptimizer) AnalyzeIndexes(ctx context.Context) *IndexAnalysis { return &IndexAnalysis{} }
+func (do *DatabaseOptimizer) OptimizeIndexes(ctx context.Context, analysis *IndexAnalysis) {}
+func (do *DatabaseOptimizer) ShouldUpdateStatistics() bool { return false }
+func (do *DatabaseOptimizer) UpdateStatistics(ctx context.Context) {}
+func (do *DatabaseOptimizer) ShouldVacuum() bool { return false }
+func (do *DatabaseOptimizer) ScheduleVacuum(ctx context.Context) {}
+
+// CacheUsage represents cache usage analysis
+type CacheUsage struct {
+	HitRatio float64
+}
+
+// TTLAnalysis represents TTL analysis results
+type TTLAnalysis struct {
+	SuboptimalTTLs []string
+}
+
+// Stub methods for CacheManager
+func (cm *CacheManager) AnalyzeUsage(ctx context.Context) *CacheUsage { return &CacheUsage{HitRatio: 0.9} }
+func (cm *CacheManager) OptimizeStrategies(usage *CacheUsage) interface{} { return nil }
+func (cm *CacheManager) AnalyzeTTL(ctx context.Context) *TTLAnalysis { return &TTLAnalysis{} }
+func (cm *CacheManager) OptimizeTTLs(analysis *TTLAnalysis) interface{} { return nil }
+func (cm *CacheManager) IdentifyCriticalKeys(usage *CacheUsage) []string { return nil }
+func (cm *CacheManager) WarmCache(ctx context.Context, keys []string) {}
+
+// PoolUsage represents memory pool usage
+type PoolUsage struct {
+	EfficiencyRatio float64
+}
+
+// Stub methods for MemoryPool
+func (mp *MemoryPool) AnalyzeUsage() *PoolUsage { return &PoolUsage{EfficiencyRatio: 0.9} }
+func (mp *MemoryPool) OptimizePools() {}
+
+// ConnectionUsage represents connection pool usage (full definition)
+type ConnectionUsage struct {
+	EfficiencyRatio            float64
+	CurrentSize                int
+	CurrentTimeout             time.Duration
+	AverageActiveConnections   int
+	PeakActiveConnections      int
+	AverageConnectionTime      float64
+	ConnectionReuseRatio       float64
+}
+
+// Stub methods for ConnectionPool
+func (cp *ConnectionPool) AnalyzeUsage() *ConnectionUsage {
+	return &ConnectionUsage{
+		EfficiencyRatio: 0.9,
+		CurrentSize: 10,
+		CurrentTimeout: time.Second * 30,
+		AverageActiveConnections: 5,
+		PeakActiveConnections: 10,
+		AverageConnectionTime: 1.0,
+		ConnectionReuseRatio: 0.9,
+	}
+}
+func (cp *ConnectionPool) ResizePool(size int) {}
+func (cp *ConnectionPool) SetTimeout(timeout time.Duration) {}
+func (cp *ConnectionPool) OptimizeKeepAlive() {}
+
+// Note: optimizeGCSettings is already defined above

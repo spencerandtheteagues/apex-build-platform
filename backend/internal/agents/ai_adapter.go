@@ -29,19 +29,37 @@ func (a *AIRouterAdapter) Generate(ctx context.Context, provider AIProvider, pro
 	capability := a.mapProviderToCapability(provider, opts)
 	log.Printf("Mapped to capability: %s", capability)
 
-	// Build the full prompt with system prompt
-	fullPrompt := prompt
+	// Build the full prompt with system prompt - format optimized for code generation
+	var fullPrompt string
 	if opts.SystemPrompt != "" {
-		fullPrompt = fmt.Sprintf("[System Instructions]\n%s\n\n[Task]\n%s", opts.SystemPrompt, prompt)
+		// Use a clear structure that AI models understand well
+		fullPrompt = fmt.Sprintf(`<system>
+%s
+</system>
+
+<task>
+%s
+</task>
+
+<output_format>
+For code files, use this exact format:
+// File: path/to/filename.ext
+`+"```"+`language
+[complete code here]
+`+"```"+`
+</output_format>`, opts.SystemPrompt, prompt)
+	} else {
+		fullPrompt = prompt
 	}
 
 	// Add context messages if provided
 	if len(opts.Context) > 0 {
-		contextStr := "\n[Previous Context]\n"
+		contextStr := "\n<previous_context>\n"
 		for _, msg := range opts.Context {
-			contextStr += fmt.Sprintf("%s: %s\n", msg.Role, msg.Content)
+			contextStr += fmt.Sprintf("<%s>\n%s\n</%s>\n", msg.Role, msg.Content, msg.Role)
 		}
-		fullPrompt = contextStr + "\n" + fullPrompt
+		contextStr += "</previous_context>\n\n"
+		fullPrompt = contextStr + fullPrompt
 	}
 
 	// Map agent provider to AI package provider
@@ -58,23 +76,45 @@ func (a *AIRouterAdapter) Generate(ctx context.Context, provider AIProvider, pro
 	}
 	log.Printf("Mapped agent provider %s to AI provider %s", provider, aiProvider)
 
+	// Ensure reasonable token limits
+	maxTokens := opts.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 4000
+	}
+	if maxTokens > 8000 {
+		maxTokens = 8000
+	}
+
+	temperature := opts.Temperature
+	if temperature <= 0 {
+		temperature = 0.7
+	}
+	if temperature > 1.5 {
+		temperature = 1.5
+	}
+
 	// Create AI request
 	request := &ai.AIRequest{
 		Capability:  capability,
 		Prompt:      fullPrompt,
-		MaxTokens:   opts.MaxTokens,
-		Temperature: float32(opts.Temperature),
+		MaxTokens:   maxTokens,
+		Temperature: float32(temperature),
 		Provider:    aiProvider,
 	}
 
-	log.Printf("Calling AI router.Generate with capability=%s, provider=%s, prompt_length=%d",
-		capability, aiProvider, len(fullPrompt))
+	log.Printf("Calling AI router.Generate with capability=%s, provider=%s, prompt_length=%d, max_tokens=%d",
+		capability, aiProvider, len(fullPrompt), maxTokens)
 
 	// Execute the request using Generate method
 	response, err := a.router.Generate(ctx, request)
 	if err != nil {
 		log.Printf("AI generation failed: %v", err)
 		return "", fmt.Errorf("AI generation failed: %w", err)
+	}
+
+	if response == nil || response.Content == "" {
+		log.Printf("AI generation returned empty response")
+		return "", fmt.Errorf("AI generation returned empty response")
 	}
 
 	log.Printf("AI generation succeeded, response length: %d", len(response.Content))

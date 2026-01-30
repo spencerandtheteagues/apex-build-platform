@@ -184,18 +184,21 @@ export class ApiService {
     is_public?: boolean
     environment?: Record<string, any>
   }): Promise<Project> {
-    const response = await this.client.post<ApiResponse<{ project: Project }>>('/projects', data)
-    return response.data.data!.project
+    const response = await this.client.post<{ message?: string; project: Project }>('/projects', data)
+    // Backend returns { message, project } directly, not wrapped in { data: { project } }
+    return response.data.project
   }
 
   async getProjects(): Promise<Project[]> {
-    const response = await this.client.get<ApiResponse<{ projects: Project[] }>>('/projects')
-    return response.data.data!.projects
+    const response = await this.client.get<{ projects: Project[] }>('/projects')
+    // Backend returns { projects } directly
+    return response.data.projects || []
   }
 
   async getProject(id: number): Promise<Project> {
-    const response = await this.client.get<ApiResponse<{ project: Project }>>(`/projects/${id}`)
-    return response.data.data!.project
+    const response = await this.client.get<{ project: Project }>(`/projects/${id}`)
+    // Backend returns { project } directly
+    return response.data.project
   }
 
   async updateProject(id: number, data: Partial<Project>): Promise<Project> {
@@ -234,7 +237,7 @@ export class ApiService {
     return response.data.data!.file
   }
 
-  async updateFile(id: number, data: { content: string }): Promise<File> {
+  async updateFile(id: number, data: { content?: string; name?: string; path?: string }): Promise<File> {
     const response = await this.client.put<ApiResponse<{ file: File }>>(`/files/${id}`, data)
     return response.data.data!.file
   }

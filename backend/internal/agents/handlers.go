@@ -26,28 +26,35 @@ func NewBuildHandler(manager *AgentManager, hub *WSHub) *BuildHandler {
 // StartBuild creates and starts a new build
 // POST /api/v1/build/start
 func (h *BuildHandler) StartBuild(c *gin.Context) {
+	log.Printf("StartBuild handler called")
+
 	// Get user ID from auth context
 	userID, exists := c.Get("user_id")
 	if !exists {
+		log.Printf("StartBuild: unauthorized - no user_id in context")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
 	uid := userID.(uint)
+	log.Printf("StartBuild: user_id=%d", uid)
 
 	// Parse request
 	var req BuildRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("StartBuild: invalid request body: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "invalid request",
 			"details": err.Error(),
 		})
 		return
 	}
+	log.Printf("StartBuild: description=%s, mode=%s", truncate(req.Description, 50), req.Mode)
 
 	// Validate description
 	if len(req.Description) < 10 {
+		log.Printf("StartBuild: description too short (%d chars)", len(req.Description))
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "description too short",
+			"error":   "description too short",
 			"details": "Please provide a more detailed description of the app you want to build",
 		})
 		return
@@ -56,26 +63,31 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 	// Create the build
 	build, err := h.manager.CreateBuild(uid, &req)
 	if err != nil {
+		log.Printf("StartBuild: failed to create build: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "failed to create build",
 			"details": err.Error(),
 		})
 		return
 	}
+	log.Printf("StartBuild: build created with ID %s", build.ID)
 
 	// Start the build process asynchronously
 	go func() {
+		log.Printf("StartBuild: starting async build process for %s", build.ID)
 		if err := h.manager.StartBuild(build.ID); err != nil {
 			log.Printf("Error starting build %s: %v", build.ID, err)
 		}
 	}()
 
 	// Return build info immediately with WebSocket URL
-	c.JSON(http.StatusCreated, BuildResponse{
+	response := BuildResponse{
 		BuildID:      build.ID,
 		WebSocketURL: "/ws/build/" + build.ID,
 		Status:       string(build.Status),
-	})
+	}
+	log.Printf("StartBuild: returning response for build %s", build.ID)
+	c.JSON(http.StatusCreated, response)
 }
 
 // GetBuildStatus returns the current status of a build
