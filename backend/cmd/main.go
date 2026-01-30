@@ -27,6 +27,7 @@ import (
 	"apex-build/internal/handlers"
 	"apex-build/internal/hosting"
 	"apex-build/internal/mcp"
+	"apex-build/internal/middleware"
 	"apex-build/internal/payments"
 	"apex-build/internal/preview"
 	"apex-build/internal/search"
@@ -544,8 +545,10 @@ func setupRoutes(
 	// API v1 routes
 	v1 := router.Group("/api/v1")
 	{
-		// Authentication routes (no auth required)
+		// Authentication routes (no auth required, but rate limited)
+		// SECURITY: Stricter rate limit (10 req/min) to prevent brute force attacks
 		auth := v1.Group("/auth")
+		auth.Use(middleware.AuthRateLimit())
 		{
 			auth.POST("/register", server.Register)
 			auth.POST("/login", server.Login)

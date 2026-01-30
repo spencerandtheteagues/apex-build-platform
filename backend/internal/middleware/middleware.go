@@ -338,6 +338,47 @@ func APIKeyAuth(validAPIKeys map[string]string) gin.HandlerFunc {
 	}
 }
 
+// AuthRateLimiter is a stricter rate limiter specifically for auth endpoints
+// SECURITY: Prevents brute force attacks on login/register endpoints
+var authRateLimiter *IPRateLimiter
+
+// InitAuthRateLimiter initializes the auth-specific rate limiter
+func InitAuthRateLimiter() {
+	// 10 requests per minute for auth endpoints (much stricter than general)
+	authRateLimiter = NewIPRateLimiter(rate.Limit(10)/60, 5)
+}
+
+// AuthRateLimit middleware for strict rate limiting on auth endpoints
+// SECURITY: 10 requests/minute with burst of 5 to prevent credential stuffing
+func AuthRateLimit() gin.HandlerFunc {
+	if authRateLimiter == nil {
+		InitAuthRateLimiter()
+	}
+
+	return func(c *gin.Context) {
+		clientIP := c.ClientIP()
+		limiter := authRateLimiter.GetLimiter(clientIP)
+
+		if !limiter.Allow() {
+			log.Printf("⚠️  Auth rate limit exceeded for IP: %s on path: %s", clientIP, c.Request.URL.Path)
+			c.JSON(http.StatusTooManyRequests, ErrorResponse{
+				Error: "Too many authentication attempts. Please try again later.",
+				Code:  "AUTH_RATE_LIMIT_EXCEEDED",
+				Details: map[string]interface{}{
+					"retry_after": "60s",
+					"limit":       "10 requests per minute",
+				},
+				Timestamp: time.Now().UTC(),
+				RequestID: c.GetHeader("X-Request-ID"),
+			})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
 // Maintenance middleware for maintenance mode
 func Maintenance(enabled bool, message string) gin.HandlerFunc {
 	return func(c *gin.Context) {
