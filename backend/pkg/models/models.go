@@ -295,6 +295,89 @@ type ChatMessage struct {
 	EditedAt *time.Time `json:"edited_at"`
 }
 
+// FileVersion represents a historical version of a file (Replit parity feature)
+// Enables version history with diff viewing and restore capabilities
+type FileVersion struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	// File relationship
+	FileID    uint   `json:"file_id" gorm:"not null;index"`
+	File      *File  `json:"file,omitempty" gorm:"foreignKey:FileID"`
+	ProjectID uint   `json:"project_id" gorm:"not null;index"`
+
+	// Version identification
+	Version     int    `json:"version" gorm:"not null"`          // Sequential version number
+	VersionHash string `json:"version_hash" gorm:"index"`        // SHA-256 hash for deduplication
+
+	// Content snapshot
+	Content   string `json:"content" gorm:"type:text"`           // Full file content at this version
+	Size      int64  `json:"size" gorm:"default:0"`              // Content size in bytes
+	LineCount int    `json:"line_count" gorm:"default:0"`        // Number of lines
+
+	// Change metadata
+	ChangeType    string `json:"change_type" gorm:"default:'edit'"` // create, edit, rename, restore
+	ChangeSummary string `json:"change_summary"`                    // Brief description of changes
+	LinesAdded    int    `json:"lines_added" gorm:"default:0"`      // Lines added from previous version
+	LinesRemoved  int    `json:"lines_removed" gorm:"default:0"`    // Lines removed from previous version
+
+	// Author information
+	AuthorID   uint   `json:"author_id" gorm:"not null"`
+	Author     *User  `json:"author,omitempty" gorm:"foreignKey:AuthorID"`
+	AuthorName string `json:"author_name"`                        // Cached for display
+
+	// File path at this version (captures renames)
+	FilePath string `json:"file_path" gorm:"not null"`
+	FileName string `json:"file_name" gorm:"not null"`
+
+	// Retention flags
+	IsPinned    bool `json:"is_pinned" gorm:"default:false"`     // Pinned versions are never auto-deleted
+	IsAutoSave  bool `json:"is_auto_save" gorm:"default:false"`  // Auto-save vs manual save
+}
+
+// CodeComment represents an inline code comment for collaboration (Replit parity feature)
+type CodeComment struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	// File relationship
+	FileID    uint    `json:"file_id" gorm:"not null;index"`
+	File      *File   `json:"file,omitempty" gorm:"foreignKey:FileID"`
+	ProjectID uint    `json:"project_id" gorm:"not null;index"`
+
+	// Position in file
+	StartLine   int `json:"start_line" gorm:"not null"`
+	EndLine     int `json:"end_line" gorm:"not null"`
+	StartColumn int `json:"start_column" gorm:"default:0"`
+	EndColumn   int `json:"end_column" gorm:"default:0"`
+
+	// Comment content
+	Content string `json:"content" gorm:"type:text;not null"`
+
+	// Thread management
+	ParentID  *uint          `json:"parent_id" gorm:"index"`          // For replies
+	Parent    *CodeComment   `json:"parent,omitempty" gorm:"foreignKey:ParentID"`
+	Replies   []CodeComment  `json:"replies,omitempty" gorm:"foreignKey:ParentID"`
+	ThreadID  string         `json:"thread_id" gorm:"index"`          // Groups comments in same thread
+
+	// Author
+	AuthorID   uint   `json:"author_id" gorm:"not null"`
+	Author     *User  `json:"author,omitempty" gorm:"foreignKey:AuthorID"`
+	AuthorName string `json:"author_name"`
+
+	// Status
+	IsResolved   bool       `json:"is_resolved" gorm:"default:false"`
+	ResolvedAt   *time.Time `json:"resolved_at"`
+	ResolvedByID *uint      `json:"resolved_by_id"`
+	ResolvedBy   *User      `json:"resolved_by,omitempty" gorm:"foreignKey:ResolvedByID"`
+
+	// Reactions (emoji reactions to comments)
+	Reactions map[string][]uint `json:"reactions" gorm:"serializer:json"` // emoji -> user IDs
+}
+
 // UserCollabRoom represents the many-to-many relationship between users and collaboration rooms
 type UserCollabRoom struct {
 	UserID      uint      `json:"user_id" gorm:"primarykey"`

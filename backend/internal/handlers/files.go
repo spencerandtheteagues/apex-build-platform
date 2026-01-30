@@ -245,7 +245,7 @@ func (h *Handler) GetFile(c *gin.Context) {
 	})
 }
 
-// UpdateFile updates a file's content
+// UpdateFile updates a file's content and automatically creates a version history entry
 func (h *Handler) UpdateFile(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
@@ -269,9 +269,11 @@ func (h *Handler) UpdateFile(c *gin.Context) {
 	}
 
 	var req struct {
-		Content  *string `json:"content"`
-		Name     *string `json:"name" binding:"omitempty,min=1,max=255"`
-		Path     *string `json:"path" binding:"omitempty,max=1000"`
+		Content       *string `json:"content"`
+		Name          *string `json:"name" binding:"omitempty,min=1,max=255"`
+		Path          *string `json:"path" binding:"omitempty,max=1000"`
+		CreateVersion *bool   `json:"create_version"` // Explicitly create version (default true for content changes)
+		VersionNote   string  `json:"version_note"`   // Optional note for version
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -325,6 +327,43 @@ func (h *Handler) UpdateFile(c *gin.Context) {
 		return
 	}
 
+	// Get user for version authorship
+	var user models.User
+	h.DB.First(&user, userID)
+
+	// Determine if we should create a version
+	shouldCreateVersion := req.Content != nil // Default: create version on content change
+	if req.CreateVersion != nil {
+		shouldCreateVersion = *req.CreateVersion
+	}
+
+	// Create version before updating (if content is changing)
+	var versionID uint
+	if shouldCreateVersion && req.Content != nil && *req.Content != file.Content {
+		// Determine change type
+		changeType := "edit"
+		changeSummary := req.VersionNote
+		if req.Name != nil && *req.Name != file.Name {
+			changeType = "rename"
+			if changeSummary == "" {
+				changeSummary = "Renamed file"
+			}
+		}
+		if changeSummary == "" {
+			changeSummary = "Content updated"
+		}
+
+		// Temporarily update file object for versioning
+		oldContent := file.Content
+		file.Content = *req.Content
+		file.Size = int64(len(*req.Content))
+
+		versionID = CreateFileVersion(h.DB, &file, userID, user.Username, changeType, changeSummary)
+
+		// Restore for actual update
+		file.Content = oldContent
+	}
+
 	// Prepare updates
 	updates := make(map[string]interface{})
 	updates["last_edit_by"] = userID
@@ -363,9 +402,18 @@ func (h *Handler) UpdateFile(c *gin.Context) {
 		return
 	}
 
+	response := map[string]interface{}{
+		"message": "File updated successfully",
+	}
+	if versionID > 0 {
+		response["version_id"] = versionID
+		response["version_created"] = true
+	}
+
 	c.JSON(http.StatusOK, StandardResponse{
 		Success: true,
 		Message: "File updated successfully",
+		Data:    response,
 	})
 }
 

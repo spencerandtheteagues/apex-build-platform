@@ -180,6 +180,10 @@ func main() {
 	importHandler := handlers.NewImportHandler(database.GetDB(), gitService, secretsManager)
 	log.Println("✅ GitHub Import Wizard initialized (one-click repo import)")
 
+	// Initialize Version History Handler (Replit parity feature)
+	versionHandler := handlers.NewVersionHandler(database.GetDB())
+	log.Println("✅ Version History System initialized (diff viewing, restore, pinning)")
+
 	// Initialize Stripe Payment Service
 	stripeSecretKey := os.Getenv("STRIPE_SECRET_KEY")
 	paymentHandler := handlers.NewPaymentHandlers(database.GetDB(), stripeSecretKey)
@@ -360,6 +364,7 @@ func main() {
 	router := setupRoutes(
 		server, buildHandler, wsHub, secretsHandler, mcpHandler,
 		templatesHandler, searchHandler, previewHandler, gitHandler, importHandler,
+		versionHandler, // Version history system (Replit parity)
 		paymentHandler, executionHandler, deployHandler, packageHandler,
 		communityHandler, hostingHandler, databaseHandler, debuggingHandler,
 		completionsHandler, extensionsHandler, enterpriseHandler, collabHub,
@@ -501,6 +506,7 @@ func setupRoutes(
 	templatesHandler *handlers.TemplatesHandler, searchHandler *handlers.SearchHandler,
 	previewHandler *handlers.PreviewHandler, gitHandler *handlers.GitHandler,
 	importHandler *handlers.ImportHandler, // GitHub repository import wizard
+	versionHandler *handlers.VersionHandler, // Version history system (Replit parity)
 	paymentHandler *handlers.PaymentHandlers, executionHandler *handlers.ExecutionHandler,
 	deployHandler *handlers.DeployHandler, packageHandler *handlers.PackageHandler,
 	communityHandler *community.CommunityHandler,
@@ -714,6 +720,10 @@ func setupRoutes(
 
 			// GitHub Repository Import Wizard (one-click import like replit.new/URL)
 			importHandler.RegisterImportRoutes(protected)
+
+			// Version History System (Replit parity feature)
+			// Enables viewing file versions, diffs, and restoring previous states
+			versionHandler.RegisterVersionRoutes(protected)
 
 			// Billing & Subscription endpoints (Stripe integration)
 			billing := protected.Group("/billing")

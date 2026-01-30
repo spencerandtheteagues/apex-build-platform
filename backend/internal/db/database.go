@@ -99,6 +99,9 @@ func (d *Database) Migrate() error {
 		&models.CursorPosition{},
 		&models.ChatMessage{},
 		&models.UserCollabRoom{},
+		// Version history system (Replit parity feature)
+		&models.FileVersion{},
+		&models.CodeComment{},
 		// Secrets management
 		&secrets.Secret{},
 		&secrets.SecretAuditLog{},
