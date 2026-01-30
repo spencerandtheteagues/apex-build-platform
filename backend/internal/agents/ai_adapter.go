@@ -470,8 +470,17 @@ func (a *AIRouterAdapter) GetAvailableProviders() []AIProvider {
 		if healthy, exists := healthStatus[aiProvider]; exists && healthy {
 			available = append(available, agentProvider)
 			log.Printf("Provider %s is available and healthy", agentProvider)
-		} else {
-			log.Printf("Provider %s is not available or unhealthy", agentProvider)
+		}
+	}
+
+	// If no healthy providers are reported yet, fall back to any configured providers.
+	// This avoids failing builds during startup or transient health-check gaps.
+	if len(available) == 0 {
+		for aiProvider, agentProvider := range providerMappings {
+			if _, exists := healthStatus[aiProvider]; exists {
+				available = append(available, agentProvider)
+				log.Printf("Provider %s is available (health unknown/unhealthy)", agentProvider)
+			}
 		}
 	}
 

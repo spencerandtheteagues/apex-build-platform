@@ -150,6 +150,11 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	// Get available providers and spawn lead agent with the best available
 	availableProviders := am.aiRouter.GetAvailableProviders()
 	if len(availableProviders) == 0 {
+		build.mu.Lock()
+		build.Status = BuildFailed
+		build.Error = "No AI providers available"
+		build.UpdatedAt = time.Now()
+		build.mu.Unlock()
 		am.broadcast(buildID, &WSMessage{
 			Type:      WSBuildError,
 			BuildID:   buildID,
@@ -1079,6 +1084,11 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 	// Spawn the full agent team
 	if err := am.SpawnAgentTeam(build.ID); err != nil {
 		log.Printf("Error spawning agent team: %v", err)
+		build.mu.Lock()
+		build.Status = BuildFailed
+		build.Error = fmt.Sprintf("Failed to spawn agent team: %v", err)
+		build.UpdatedAt = time.Now()
+		build.mu.Unlock()
 		am.broadcast(build.ID, &WSMessage{
 			Type:      WSBuildError,
 			BuildID:   build.ID,

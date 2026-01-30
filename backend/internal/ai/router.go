@@ -161,7 +161,7 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 		fallbacks := r.config.FallbackOrder[provider]
 		for _, fallbackProvider := range fallbacks {
 			if fallbackClient, exists := r.clients[fallbackProvider]; exists {
-				if r.checkRateLimit(fallbackProvider) && r.isHealthy(fallbackProvider) {
+				if r.checkRateLimit(fallbackProvider) && r.isHealthyOrUnknown(fallbackProvider) {
 					log.Printf("Falling back to provider %s", fallbackProvider)
 					fallbackResponse, fallbackErr := fallbackClient.Generate(ctx, req)
 					if fallbackErr == nil {
@@ -194,6 +194,25 @@ func (r *AIRouter) selectProvider(req *AIRequest) (AIProvider, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	// Respect explicit provider requests when possible (with fallbacks)
+	if req.Provider != "" {
+		requested := req.Provider
+		if r.isAvailable(requested) && r.isHealthyOrUnknown(requested) {
+			return requested, nil
+		}
+		if fallbacks, ok := r.config.FallbackOrder[requested]; ok {
+			for _, provider := range fallbacks {
+				if r.isAvailable(provider) && r.isHealthyOrUnknown(provider) {
+					return provider, nil
+				}
+			}
+		}
+		// Last resort: try requested provider if it's configured at all
+		if r.isAvailable(requested) {
+			return requested, nil
+		}
+	}
+
 	// Start with the default provider for this capability
 	defaultProvider, exists := r.config.DefaultProviders[req.Capability]
 	if !exists {
@@ -202,14 +221,14 @@ func (r *AIRouter) selectProvider(req *AIRequest) (AIProvider, error) {
 	}
 
 	// Check if default provider is healthy and available
-	if r.isHealthy(defaultProvider) && r.isAvailable(defaultProvider) {
+	if r.isHealthyOrUnknown(defaultProvider) && r.isAvailable(defaultProvider) {
 		return defaultProvider, nil
 	}
 
 	// If default provider is not available, try fallbacks
 	fallbacks := r.config.FallbackOrder[defaultProvider]
 	for _, provider := range fallbacks {
-		if r.isHealthy(provider) && r.isAvailable(provider) {
+		if r.isHealthyOrUnknown(provider) && r.isAvailable(provider) {
 			return provider, nil
 		}
 	}
@@ -225,7 +244,7 @@ func (r *AIRouter) selectByLoadBalancing() (AIProvider, error) {
 
 	// Collect healthy providers and their weights
 	for provider, weight := range r.config.LoadBalancing {
-		if r.isHealthy(provider) && r.isAvailable(provider) {
+		if r.isHealthyOrUnknown(provider) && r.isAvailable(provider) {
 			healthyProviders = append(healthyProviders, provider)
 			totalWeight += weight
 		}
@@ -301,6 +320,18 @@ func (r *AIRouter) isHealthy(provider AIProvider) bool {
 
 	health, exists := r.healthCheck[provider]
 	return exists && health
+}
+
+// isHealthyOrUnknown treats missing health as healthy to avoid blocking requests during startup.
+func (r *AIRouter) isHealthyOrUnknown(provider AIProvider) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	health, exists := r.healthCheck[provider]
+	if !exists {
+		return true
+	}
+	return health
 }
 
 // isAvailable checks if a provider client is available
