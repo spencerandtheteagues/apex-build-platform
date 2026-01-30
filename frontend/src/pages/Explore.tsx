@@ -61,89 +61,63 @@ export const ExplorePage = () => {
 
   const { createProject, setCurrentProject } = useStore()
 
-  // Mock data for initial render
+  // Fetch projects from API
   useEffect(() => {
-    setIsLoading(true)
-    // Simulate API call
-    setTimeout(() => {
-      setProjects([
-        {
-          id: '1',
-          title: 'Cyberpunk Portfolio Template',
-          description: 'A futuristic, neon-styled portfolio website template with React and Three.js animations.',
-          author: { name: 'NeonCoder', avatar: '' },
-          stars: 1240,
-          forks: 350,
-          views: 15000,
-          tags: ['React', 'Three.js', 'Portfolio', 'Cyberpunk'],
-          updatedAt: '2 hours ago',
-          verified: true
-        },
-        {
-          id: '2',
-          title: 'AI Chatbot Starter',
-          description: 'Full-stack AI chat application boilerplate using OpenAI API, Node.js, and WebSocket.',
-          author: { name: 'AIGuru', avatar: '' },
-          stars: 890,
-          forks: 210,
-          views: 8900,
-          tags: ['AI', 'Node.js', 'WebSocket', 'Chat'],
-          updatedAt: '5 hours ago',
-          verified: true
-        },
-        {
-          id: '3',
-          title: 'DeFi Dashboard',
-          description: 'Cryptocurrency dashboard with real-time price tracking, charts, and wallet integration.',
-          author: { name: 'CryptoKing', avatar: '' },
-          stars: 750,
-          forks: 120,
-          views: 6200,
-          tags: ['Web3', 'Crypto', 'Dashboard', 'React'],
-          updatedAt: '1 day ago'
-        },
-        {
-          id: '4',
-          title: 'E-commerce API',
-          description: 'Production-ready REST API for e-commerce with Stripe integration, inventory management, and auth.',
-          author: { name: 'BackendPro', avatar: '' },
-          stars: 620,
-          forks: 180,
-          views: 5400,
-          tags: ['Go', 'API', 'Stripe', 'E-commerce'],
-          updatedAt: '2 days ago',
-          verified: true
-        },
-        {
-          id: '5',
-          title: 'Multiplayer Game Server',
-          description: 'Scalable game server engine written in Rust with WebSocket and UDP support.',
-          author: { name: 'Rustacean', avatar: '' },
-          stars: 580,
-          forks: 90,
-          views: 4100,
-          tags: ['Rust', 'GameDev', 'Server', 'UDP'],
-          updatedAt: '3 days ago'
-        },
-        {
-          id: '6',
-          title: 'Mobile App Kit',
-          description: 'Cross-platform mobile app starter kit using React Native and Expo with pre-built UI components.',
-          author: { name: 'AppMaster', avatar: '' },
-          stars: 450,
-          forks: 130,
-          views: 3800,
-          tags: ['React Native', 'Mobile', 'iOS', 'Android'],
-          updatedAt: '1 week ago'
-        }
-      ])
-      setIsLoading(false)
-    }, 1000)
-  }, [activeTab])
+    const fetchProjects = async () => {
+      setIsLoading(true)
+      try {
+        // Map tab to sort order
+        let sort: 'trending' | 'recent' | 'stars' | 'forks' = 'trending'
+        if (activeTab === 'new') sort = 'recent'
+        if (activeTab === 'popular') sort = 'stars'
+
+        const response = await apiService.searchPublicProjects({
+          q: searchQuery,
+          sort,
+          limit: 12
+        })
+        
+        // Transform API response to UI model if necessary, or use directly if compatible
+        // Assuming API returns compatible ProjectWithStats objects
+        setProjects(response.projects.map(p => ({
+          id: String(p.id),
+          title: p.name,
+          description: p.description || 'No description provided',
+          author: { 
+            name: p.owner_username, 
+            avatar: p.owner_avatar_url || '' 
+          },
+          stars: p.stats?.stars || 0,
+          forks: p.stats?.forks || 0,
+          views: p.stats?.views || 0,
+          tags: p.topics || [p.language],
+          updatedAt: new Date(p.updated_at).toLocaleDateString(),
+          verified: p.is_verified
+        })))
+      } catch (error) {
+        console.error('Failed to fetch projects:', error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    // Debounce search
+    const timer = setTimeout(() => {
+      fetchProjects()
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [activeTab, searchQuery])
 
   const handleFork = async (projectId: string) => {
-    // Logic to fork project
-    console.log(`Forking project ${projectId}`)
+    try {
+      await apiService.forkProject(Number(projectId))
+      // In a real app, redirect to the new project or show toast
+      window.location.href = '/dashboard' // or wherever user projects are listed
+    } catch (error) {
+      console.error('Failed to fork project:', error)
+      alert('Failed to fork project. Please try again.')
+    }
   }
 
   return (
