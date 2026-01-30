@@ -3,12 +3,24 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
 )
+
+// escapeLikePattern escapes special characters in LIKE patterns to prevent SQL injection
+// via pattern matching. Characters %, _, [, and ] have special meaning in SQL LIKE clauses.
+func escapeLikePattern(input string) string {
+	// Escape backslash first (since it's the escape character)
+	input = strings.ReplaceAll(input, "\\", "\\\\")
+	// Escape LIKE wildcards
+	input = strings.ReplaceAll(input, "%", "\\%")
+	input = strings.ReplaceAll(input, "_", "\\_")
+	return input
+}
 
 // AdminMiddleware checks if the user is an admin
 func (s *Server) AdminMiddleware() gin.HandlerFunc {
@@ -110,8 +122,9 @@ func (s *Server) AdminGetUsers(c *gin.Context) {
 	query := s.db.DB.Model(&models.User{})
 
 	if search != "" {
-		query = query.Where("username LIKE ? OR email LIKE ? OR full_name LIKE ?",
-			"%"+search+"%", "%"+search+"%", "%"+search+"%")
+		escapedSearch := "%" + escapeLikePattern(search) + "%"
+		query = query.Where("username LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\' OR full_name LIKE ? ESCAPE '\\'",
+			escapedSearch, escapedSearch, escapedSearch)
 	}
 
 	query.Count(&total)

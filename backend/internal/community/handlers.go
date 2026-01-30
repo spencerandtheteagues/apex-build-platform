@@ -28,6 +28,15 @@ func NewCommunityHandler(db *gorm.DB) *CommunityHandler {
 	return &CommunityHandler{DB: db}
 }
 
+// escapeLikePattern escapes special characters in LIKE patterns to prevent SQL injection
+// via pattern matching. Characters %, _, and \ have special meaning in SQL LIKE clauses.
+func escapeLikePattern(input string) string {
+	input = strings.ReplaceAll(input, "\\", "\\\\")
+	input = strings.ReplaceAll(input, "%", "\\%")
+	input = strings.ReplaceAll(input, "_", "\\_")
+	return input
+}
+
 // Response types
 type StandardResponse struct {
 	Success bool        `json:"success"`
@@ -125,9 +134,9 @@ func (h *CommunityHandler) SearchProjects(c *gin.Context) {
 
 	// Text search
 	if query != "" {
-		searchTerm := "%" + strings.ToLower(query) + "%"
+		searchTerm := "%" + escapeLikePattern(strings.ToLower(query)) + "%"
 		dbQuery = dbQuery.Where(
-			"LOWER(name) LIKE ? OR LOWER(description) LIKE ?",
+			"LOWER(name) LIKE ? ESCAPE '\\' OR LOWER(description) LIKE ? ESCAPE '\\'",
 			searchTerm, searchTerm,
 		)
 	}

@@ -1,7 +1,8 @@
 // APEX.BUILD IDE Layout
 // Dark Demon Theme - Fully responsive development environment interface
+// Optimized with React.lazy for Monaco Editor and XTerminal
 
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
 import {
@@ -25,13 +26,16 @@ import {
   Loading,
   LoadingOverlay
 } from '@/components/ui'
-import { MonacoEditor } from '@/components/editor/MonacoEditor'
 import { AIAssistant } from '@/components/ai/AIAssistant'
 import { FileTree } from '@/components/explorer/FileTree'
 import { ProjectDashboard } from '@/components/project/ProjectDashboard'
 import { ProjectList } from '@/components/project/ProjectList'
 import { MobileNavigation, MobilePanelSwitcher } from '@/components/mobile'
-import XTerminal from '@/components/terminal/XTerminal'
+
+// Lazy load heavy components for better initial load performance
+// Monaco Editor is ~800KB-1.2MB, XTerminal is ~200KB
+const MonacoEditor = lazy(() => import('@/components/editor/MonacoEditor').then(m => ({ default: m.MonacoEditor })))
+const XTerminal = lazy(() => import('@/components/terminal/XTerminal').then(m => ({ default: m.default })))
 import {
   Menu,
   X,
@@ -60,7 +64,27 @@ import {
   PanelLeftClose,
   PanelRightClose,
   PanelBottomClose,
+  Database,
 } from 'lucide-react'
+
+// Loading fallback for lazy-loaded components
+const EditorLoadingFallback = () => (
+  <div className="flex items-center justify-center h-full bg-gray-900/50">
+    <div className="text-center">
+      <Loading size="lg" variant="primary" />
+      <p className="mt-3 text-sm text-gray-400">Loading editor...</p>
+    </div>
+  </div>
+)
+
+const TerminalLoadingFallback = () => (
+  <div className="flex items-center justify-center h-full bg-black">
+    <div className="text-center">
+      <Loading size="md" variant="primary" />
+      <p className="mt-2 text-xs text-gray-500">Loading terminal...</p>
+    </div>
+  </div>
+)
 
 export interface IDELayoutProps {
   className?: string
@@ -520,13 +544,15 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
       case 'terminal':
         return (
           <div className="h-full bg-black">
-            <XTerminal
-              projectId={currentProject?.id}
-              theme={theme.id}
-              onTitleChange={(title) => {
-                // Optional: update tab title
-              }}
-            />
+            <Suspense fallback={<TerminalLoadingFallback />}>
+              <XTerminal
+                projectId={currentProject?.id}
+                theme={theme.id}
+                onTitleChange={(title) => {
+                  // Optional: update tab title
+                }}
+              />
+            </Suspense>
           </div>
         )
       case 'output':
@@ -620,15 +646,17 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
             {/* Editor */}
             <div className="flex-1 min-h-0">
               {activeFile ? (
-                <MonacoEditor
-                  ref={editorRef}
-                  file={activeFile}
-                  value={fileContents.get(activeFile.id) || activeFile.content}
-                  onChange={handleFileChange}
-                  onSave={handleFileSave}
-                  onAIRequest={handleAIRequest}
-                  height="100%"
-                />
+                <Suspense fallback={<EditorLoadingFallback />}>
+                  <MonacoEditor
+                    ref={editorRef}
+                    file={activeFile}
+                    value={fileContents.get(activeFile.id) || activeFile.content}
+                    onChange={handleFileChange}
+                    onSave={handleFileSave}
+                    onAIRequest={handleAIRequest}
+                    height="100%"
+                  />
+                </Suspense>
               ) : (
                 <div className="h-full flex items-center justify-center text-center p-4">
                   <div>

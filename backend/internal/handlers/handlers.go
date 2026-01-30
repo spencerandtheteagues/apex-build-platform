@@ -274,8 +274,20 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 
 // Logout handles user logout
 func (h *Handler) Logout(c *gin.Context) {
-	// In a real implementation, you might want to blacklist the token
-	// For now, we'll just return success
+	// Get the raw token from context and blacklist it
+	token, exists := middleware.GetRawToken(c)
+	if exists && token != "" {
+		// Blacklist the token to prevent reuse
+		if err := h.AuthService.BlacklistToken(token); err != nil {
+			// Log error but don't fail the logout
+			c.JSON(http.StatusOK, StandardResponse{
+				Success: true,
+				Message: "Logged out successfully (token invalidation warning)",
+			})
+			return
+		}
+	}
+
 	c.JSON(http.StatusOK, StandardResponse{
 		Success: true,
 		Message: "Logged out successfully",

@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"apex-build/pkg/models"
@@ -13,11 +14,77 @@ import (
 
 var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrTokenExpired      = errors.New("token expired")
-	ErrInvalidToken      = errors.New("invalid token")
-	ErrUserNotFound      = errors.New("user not found")
-	ErrUserExists        = errors.New("user already exists")
+	ErrTokenExpired       = errors.New("token expired")
+	ErrInvalidToken       = errors.New("invalid token")
+	ErrTokenBlacklisted   = errors.New("token has been revoked")
+	ErrUserNotFound       = errors.New("user not found")
+	ErrUserExists         = errors.New("user already exists")
 )
+
+// TokenBlacklist manages revoked tokens with automatic TTL-based cleanup
+type TokenBlacklist struct {
+	tokens  map[string]time.Time // token -> expiration time
+	mu      sync.RWMutex
+	stopCh  chan struct{}
+}
+
+// Global token blacklist instance
+var tokenBlacklist *TokenBlacklist
+
+// initTokenBlacklist initializes the global token blacklist with cleanup
+func initTokenBlacklist() {
+	if tokenBlacklist != nil {
+		return
+	}
+	tokenBlacklist = &TokenBlacklist{
+		tokens: make(map[string]time.Time),
+		stopCh: make(chan struct{}),
+	}
+	go tokenBlacklist.cleanupRoutine()
+}
+
+// Add adds a token to the blacklist with its expiration time
+func (tb *TokenBlacklist) Add(token string, expiresAt time.Time) {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	tb.tokens[token] = expiresAt
+}
+
+// IsBlacklisted checks if a token is in the blacklist
+func (tb *TokenBlacklist) IsBlacklisted(token string) bool {
+	tb.mu.RLock()
+	defer tb.mu.RUnlock()
+	_, exists := tb.tokens[token]
+	return exists
+}
+
+// cleanupRoutine removes expired tokens from the blacklist every 5 minutes
+func (tb *TokenBlacklist) cleanupRoutine() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			tb.cleanup()
+		case <-tb.stopCh:
+			return
+		}
+	}
+}
+
+// cleanup removes tokens that have naturally expired
+func (tb *TokenBlacklist) cleanup() {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	now := time.Now()
+	for token, expiresAt := range tb.tokens {
+		if now.After(expiresAt) {
+			delete(tb.tokens, token)
+		}
+	}
+}
 
 // AuthService handles authentication and authorization
 type AuthService struct {
@@ -64,6 +131,9 @@ type RegisterRequest struct {
 // NewAuthService creates a new authentication service with enhanced security
 func NewAuthService(jwtSecret string) *AuthService {
 	refreshSecret := jwtSecret + "_refresh" // Separate secret for refresh tokens
+
+	// Initialize the global token blacklist
+	initTokenBlacklist()
 
 	return &AuthService{
 		jwtService:      NewJWTService(jwtSecret, refreshSecret, "apex-build"),
@@ -155,6 +225,11 @@ func (a *AuthService) GenerateTokens(user *models.User) (*TokenPair, error) {
 
 // ValidateToken validates and parses a JWT token
 func (a *AuthService) ValidateToken(tokenString string) (*JWTClaims, error) {
+	// Check if token is blacklisted (revoked on logout)
+	if tokenBlacklist != nil && tokenBlacklist.IsBlacklisted(tokenString) {
+		return nil, ErrTokenBlacklisted
+	}
+
 	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -179,6 +254,34 @@ func (a *AuthService) ValidateToken(tokenString string) (*JWTClaims, error) {
 	}
 
 	return claims, nil
+}
+
+// BlacklistToken adds a token to the blacklist to prevent reuse after logout
+// The token remains blacklisted until its natural expiration time
+func (a *AuthService) BlacklistToken(tokenString string) error {
+	if tokenBlacklist == nil {
+		initTokenBlacklist()
+	}
+
+	// Parse token to get expiration time (don't validate since we're blacklisting)
+	token, _ := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return a.jwtSecret, nil
+	})
+
+	var expiresAt time.Time
+	if token != nil {
+		if claims, ok := token.Claims.(*JWTClaims); ok && claims.ExpiresAt != nil {
+			expiresAt = claims.ExpiresAt.Time
+		}
+	}
+
+	// If we couldn't parse expiration, use default token expiry
+	if expiresAt.IsZero() {
+		expiresAt = time.Now().Add(a.tokenExpiry)
+	}
+
+	tokenBlacklist.Add(tokenString, expiresAt)
+	return nil
 }
 
 // RefreshTokens generates new tokens using a refresh token

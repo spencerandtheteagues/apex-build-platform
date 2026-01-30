@@ -5,7 +5,7 @@
 import React, { useState, Suspense, lazy, memo } from 'react'
 import { useUser, useIsAuthenticated, useIsLoading, useLogin, useRegister } from './hooks/useStore'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input } from './components/ui'
-import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, Globe } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, Globe, Building } from 'lucide-react'
 import { APEXParticleBackground } from './components/apex/ApexComponents'
 import './styles/globals.css'
 

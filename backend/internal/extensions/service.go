@@ -24,6 +24,15 @@ type Service struct {
 	httpClient *http.Client
 }
 
+// escapeLikePattern escapes special characters in LIKE patterns to prevent SQL injection
+// via pattern matching. Characters %, _, and \ have special meaning in SQL LIKE clauses.
+func escapeLikePattern(input string) string {
+	input = strings.ReplaceAll(input, "\\", "\\\\")
+	input = strings.ReplaceAll(input, "%", "\\%")
+	input = strings.ReplaceAll(input, "_", "\\_")
+	return input
+}
+
 // NewService creates a new extension service
 func NewService(db *gorm.DB) *Service {
 	return &Service{
@@ -79,9 +88,9 @@ func (s *Service) Search(ctx context.Context, params SearchParams) (*SearchResul
 
 	// Apply filters
 	if params.Query != "" {
-		searchQuery := "%" + strings.ToLower(params.Query) + "%"
+		searchQuery := "%" + escapeLikePattern(strings.ToLower(params.Query)) + "%"
 		query = query.Where(
-			"LOWER(name) LIKE ? OR LOWER(display_name) LIKE ? OR LOWER(description) LIKE ? OR LOWER(tags) LIKE ?",
+			"LOWER(name) LIKE ? ESCAPE '\\' OR LOWER(display_name) LIKE ? ESCAPE '\\' OR LOWER(description) LIKE ? ESCAPE '\\' OR LOWER(tags) LIKE ? ESCAPE '\\'",
 			searchQuery, searchQuery, searchQuery, searchQuery,
 		)
 	}
@@ -92,7 +101,8 @@ func (s *Service) Search(ctx context.Context, params SearchParams) (*SearchResul
 
 	if len(params.Tags) > 0 {
 		for _, tag := range params.Tags {
-			query = query.Where("tags LIKE ?", "%\""+tag+"\"%")
+			escapedTag := escapeLikePattern(tag)
+			query = query.Where("tags LIKE ? ESCAPE '\\'", "%\""+escapedTag+"\"%")
 		}
 	}
 

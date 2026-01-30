@@ -46,6 +46,8 @@ func RequireAuth(authService *auth.AuthService) gin.HandlerFunc {
 				code = "TOKEN_EXPIRED"
 			case auth.ErrInvalidToken:
 				code = "INVALID_TOKEN"
+			case auth.ErrTokenBlacklisted:
+				code = "TOKEN_REVOKED"
 			default:
 				code = "TOKEN_VALIDATION_FAILED"
 			}
@@ -64,6 +66,7 @@ func RequireAuth(authService *auth.AuthService) gin.HandlerFunc {
 		c.Set("email", claims.Email)
 		c.Set("role", claims.Role)
 		c.Set("token_claims", claims)
+		c.Set("raw_token", token) // Store raw token for logout blacklisting
 
 		c.Next()
 	}
@@ -232,4 +235,13 @@ func IsAuthenticated(c *gin.Context) bool {
 		return exists
 	}
 	return authenticated.(bool)
+}
+
+// GetRawToken retrieves the raw JWT token from context for logout blacklisting
+func GetRawToken(c *gin.Context) (string, bool) {
+	token, exists := c.Get("raw_token")
+	if !exists {
+		return "", false
+	}
+	return token.(string), true
 }

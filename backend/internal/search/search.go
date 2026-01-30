@@ -17,6 +17,15 @@ import (
 	"gorm.io/gorm"
 )
 
+// escapeLikePattern escapes special characters in LIKE patterns to prevent SQL injection
+// via pattern matching. Characters %, _, and \ have special meaning in SQL LIKE clauses.
+func escapeLikePattern(input string) string {
+	input = strings.ReplaceAll(input, "\\", "\\\\")
+	input = strings.ReplaceAll(input, "%", "\\%")
+	input = strings.ReplaceAll(input, "_", "\\_")
+	return input
+}
+
 // SearchEngine handles all code search operations
 type SearchEngine struct {
 	db    *gorm.DB
@@ -485,8 +494,8 @@ func (e *SearchEngine) getFilesToSearch(ctx context.Context, query *SearchQuery)
 		var conditions []string
 		var args []interface{}
 		for _, ext := range query.FileTypes {
-			conditions = append(conditions, "path LIKE ?")
-			args = append(args, "%"+ext)
+			conditions = append(conditions, "path LIKE ? ESCAPE '\\'")
+			args = append(args, "%"+escapeLikePattern(ext))
 		}
 		db = db.Where(strings.Join(conditions, " OR "), args...)
 	}
@@ -496,8 +505,8 @@ func (e *SearchEngine) getFilesToSearch(ctx context.Context, query *SearchQuery)
 		var conditions []string
 		var args []interface{}
 		for _, path := range query.Paths {
-			conditions = append(conditions, "path LIKE ?")
-			args = append(args, path+"%")
+			conditions = append(conditions, "path LIKE ? ESCAPE '\\'")
+			args = append(args, escapeLikePattern(path)+"%")
 		}
 		db = db.Where(strings.Join(conditions, " OR "), args...)
 	}
@@ -505,7 +514,7 @@ func (e *SearchEngine) getFilesToSearch(ctx context.Context, query *SearchQuery)
 	// Exclude paths
 	if len(query.ExcludePaths) > 0 {
 		for _, path := range query.ExcludePaths {
-			db = db.Where("path NOT LIKE ?", path+"%")
+			db = db.Where("path NOT LIKE ? ESCAPE '\\'", escapeLikePattern(path)+"%")
 		}
 	}
 

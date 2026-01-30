@@ -213,7 +213,8 @@ func main() {
 	}
 
 	// Initialize base Handler for dependent handlers
-	baseHandler := handlers.NewHandler(database.GetDB(), aiRouter, authService, wsHubRT)
+	// Note: BatchedHub embeds *Hub, so we pass the embedded Hub for Handler compatibility
+	baseHandler := handlers.NewHandler(database.GetDB(), aiRouter, authService, wsHubRT.Hub)
 
 	// Initialize OptimizedHandler with caching for better performance
 	// PERFORMANCE: Fixes N+1 queries with proper JOINs, adds cursor-based pagination
