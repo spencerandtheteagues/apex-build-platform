@@ -476,4 +476,109 @@ AUTONOMOUS_WORK_DIR=/tmp/apex-autonomous  # Agent workspace
 
 ---
 
-**Session completed:** 2026-01-30 08:30 UTC
+## Session Continuation: 2026-01-30 - Critical Bug Fix & IDE Enhancements
+
+**Commit:** `068ca87`
+
+### Critical Fix: Frontend Black Screen
+
+Fixed the frontend showing a black screen after login due to incorrect API URL configuration:
+
+**Problem:**
+- Production `.env` pointed to non-existent `apex-api.onrender.com`
+- Actual backend is at `apex-backend-5ypy.onrender.com`
+- Frontend API calls failing silently
+
+**Solution:**
+- Added runtime production URL detection in `api.ts` and `websocket.ts`
+- Auto-detects Render deployment via hostname
+- Falls back to correct production URLs when env vars not set
+
+```typescript
+// frontend/src/services/api.ts
+const getApiUrl = (): string => {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL
+  }
+  // Production detection
+  const hostname = window.location.hostname
+  if (hostname.includes('onrender.com') || hostname.includes('apex.build')) {
+    return 'https://apex-backend-5ypy.onrender.com/api/v1'
+  }
+  return '/api/v1'
+}
+```
+
+### New Feature: Split Pane Editor
+
+Added VS Code-style split pane editor functionality:
+
+**Files:**
+- `frontend/src/hooks/usePaneManager.ts` - State management
+- `frontend/src/components/ide/SplitPaneEditor.tsx` - UI component
+
+**Features:**
+- Horizontal and vertical splits
+- Maximum 4 panes (2x2 grid)
+- Drag-to-resize dividers
+- Independent file tabs per pane
+- Close pane functionality
+
+### New Feature: AI Code Review Service
+
+Added AI-powered real-time code review:
+
+**Backend:** `backend/internal/ai/codereview/review.go`
+
+**Features:**
+- Detects bugs, security issues, performance problems
+- Returns structured findings with line numbers
+- Quality score (0-100)
+- Code metrics (complexity, lines, etc.)
+- Quick review and security-focused modes
+
+**API Endpoint:** `POST /api/v1/ai/code-review`
+
+---
+
+## Updated Checklist
+
+### Security (Completed ✅)
+- [x] Token blacklisting on logout
+- [x] Rate limiting on auth endpoints
+- [x] SQL injection fix in LIKE clauses
+- [x] Refresh token rotation (already implemented)
+
+### Performance (Completed ✅)
+- [x] Wire OptimizedHandler into routes
+- [x] Connect Redis cache (with in-memory fallback)
+- [x] Add React.lazy() code splitting
+- [x] Lazy load Monaco Editor
+
+### Features (Replit Parity)
+- [x] Full terminal integration (xterm.js + pty) ✅
+- [x] Version history system ✅
+- [x] GitHub import wizard ✅
+- [x] Autonomous AI Agent ✅
+- [x] Inline code comments/threads ✅
+- [x] Split pane editor ✅
+- [x] AI code review ✅
+- [ ] Built-in PostgreSQL hosting (infrastructure)
+- [ ] Mobile app (React Native)
+
+---
+
+## Summary Statistics (Updated)
+
+| Metric | Value |
+|--------|-------|
+| Total Commits This Session | 8 |
+| Files Modified/Created | 50+ |
+| Lines of Code Added | ~15,000 |
+| New API Endpoints | 30+ |
+| New Frontend Components | 12 |
+| Replit Parity Features | 7 major |
+
+---
+
+**Session continues:** 2026-01-30
