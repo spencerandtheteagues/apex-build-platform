@@ -17,6 +17,12 @@ import {
   PaginatedResponse,
   AICapability,
   AIProvider,
+  ExploreData,
+  ProjectWithStats,
+  ProjectComment,
+  ProjectCategory,
+  UserPublicProfile,
+  UserFollowInfo,
 } from '@/types'
 
 // Get API URL from environment or use default
@@ -523,6 +529,157 @@ export class ApiService {
       ...options,
     })
     return response.data.results
+  }
+}
+
+  // ========== COMMUNITY/SHARING MARKETPLACE ENDPOINTS ==========
+
+  // Explore page data
+  async getExplore(): Promise<ExploreData> {
+    const response = await this.client.get<ExploreData>('/explore')
+    return response.data
+  }
+
+  // Search public projects
+  async searchPublicProjects(params: {
+    q?: string
+    category?: string
+    language?: string
+    sort?: 'trending' | 'recent' | 'stars' | 'forks'
+    page?: number
+    limit?: number
+  }): Promise<{ projects: ProjectWithStats[]; pagination: any }> {
+    const queryParams = new URLSearchParams()
+    if (params.q) queryParams.append('q', params.q)
+    if (params.category) queryParams.append('category', params.category)
+    if (params.language) queryParams.append('language', params.language)
+    if (params.sort) queryParams.append('sort', params.sort)
+    if (params.page) queryParams.append('page', params.page.toString())
+    if (params.limit) queryParams.append('limit', params.limit.toString())
+
+    const response = await this.client.get(`/explore/search?${queryParams.toString()}`)
+    return response.data
+  }
+
+  // Get projects by category
+  async getProjectsByCategory(slug: string, page: number = 1, limit: number = 20): Promise<{
+    category: ProjectCategory
+    projects: ProjectWithStats[]
+    pagination: any
+  }> {
+    const response = await this.client.get(`/explore/category/${slug}?page=${page}&limit=${limit}`)
+    return response.data
+  }
+
+  // Get all categories
+  async getCategories(): Promise<ProjectCategory[]> {
+    const response = await this.client.get<{ categories: ProjectCategory[] }>('/explore/categories')
+    return response.data.categories
+  }
+
+  // Get public project page
+  async getPublicProject(username: string, projectName: string): Promise<{
+    project: Project
+    stats: any
+    is_starred: boolean
+    is_fork: boolean
+    original_id?: number
+    categories: string[]
+    readme: string
+    comments: ProjectComment[]
+  }> {
+    const response = await this.client.get(`/project/${username}/${projectName}`)
+    return response.data
+  }
+
+  // Star/unstar project
+  async starProject(projectId: number): Promise<void> {
+    await this.client.post(`/projects/${projectId}/star`)
+  }
+
+  async unstarProject(projectId: number): Promise<void> {
+    await this.client.delete(`/projects/${projectId}/star`)
+  }
+
+  // Fork project
+  async forkProject(projectId: number): Promise<{ project: Project }> {
+    const response = await this.client.post(`/projects/${projectId}/fork`)
+    return response.data
+  }
+
+  // Comments
+  async getProjectComments(projectId: number, page: number = 1, limit: number = 20): Promise<{
+    comments: ProjectComment[]
+    pagination: any
+  }> {
+    const response = await this.client.get(`/projects/${projectId}/comments?page=${page}&limit=${limit}`)
+    return response.data
+  }
+
+  async createProjectComment(projectId: number, content: string, parentId?: number): Promise<{
+    comment: ProjectComment
+  }> {
+    const response = await this.client.post(`/projects/${projectId}/comments`, {
+      content,
+      parent_id: parentId,
+    })
+    return response.data
+  }
+
+  async deleteProjectComment(projectId: number, commentId: number): Promise<void> {
+    await this.client.delete(`/projects/${projectId}/comments/${commentId}`)
+  }
+
+  // User profiles
+  async getUserProfile(username: string): Promise<{ profile: UserPublicProfile }> {
+    const response = await this.client.get(`/users/${username}`)
+    return response.data
+  }
+
+  async getUserProjects(username: string, page: number = 1, limit: number = 20): Promise<{
+    projects: ProjectWithStats[]
+    pagination: any
+  }> {
+    const response = await this.client.get(`/users/${username}/projects?page=${page}&limit=${limit}`)
+    return response.data
+  }
+
+  async getUserStarredProjects(username: string, page: number = 1, limit: number = 20): Promise<{
+    projects: ProjectWithStats[]
+    pagination: any
+  }> {
+    const response = await this.client.get(`/users/${username}/starred?page=${page}&limit=${limit}`)
+    return response.data
+  }
+
+  // Follow/unfollow users
+  async followUser(username: string): Promise<void> {
+    await this.client.post(`/users/${username}/follow`)
+  }
+
+  async unfollowUser(username: string): Promise<void> {
+    await this.client.delete(`/users/${username}/follow`)
+  }
+
+  async getFollowers(username: string, page: number = 1, limit: number = 20): Promise<{
+    followers: UserFollowInfo[]
+    pagination: any
+  }> {
+    const response = await this.client.get(`/users/${username}/followers?page=${page}&limit=${limit}`)
+    return response.data
+  }
+
+  async getFollowing(username: string, page: number = 1, limit: number = 20): Promise<{
+    following: UserFollowInfo[]
+    pagination: any
+  }> {
+    const response = await this.client.get(`/users/${username}/following?page=${page}&limit=${limit}`)
+    return response.data
+  }
+
+  // Set project categories (owner only)
+  async setProjectCategories(projectId: number, categories: string[]): Promise<void> {
+    await this.client.put(`/projects/${projectId}/categories`, { categories })
   }
 }
 

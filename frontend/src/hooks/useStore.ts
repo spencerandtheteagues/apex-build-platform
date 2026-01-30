@@ -1,9 +1,10 @@
 // APEX.BUILD State Management
-// Zustand-based store for application state
+// Zustand-based store with shallow equality selectors for performance optimization
 
 import { create } from 'zustand'
 import { devtools, subscribeWithSelector } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
+import { useShallow } from 'zustand/react/shallow'
 import {
   User,
   Project,
@@ -1010,107 +1011,185 @@ export const useStore = create<StoreState & StoreActions>()(
   )
 )
 
-// Selectors for common state combinations
-export const useAuth = () => useStore((state) => ({
-  user: state.user,
-  isAuthenticated: state.isAuthenticated,
-  isLoading: state.isLoading,
-  error: state.error,
-  login: state.login,
-  register: state.register,
-  logout: state.logout,
-  refreshUser: state.refreshUser,
-  updateProfile: state.updateProfile,
-  clearError: state.clearError,
-}))
+// ============================================================================
+// OPTIMIZED SELECTORS WITH SHALLOW EQUALITY
+// These selectors use useShallow to prevent unnecessary re-renders
+// ============================================================================
 
-export const useProjects = () => useStore((state) => ({
-  projects: state.projects,
-  currentProject: state.currentProject,
-  isLoading: state.isLoading,
-  fetchProjects: state.fetchProjects,
-  createProject: state.createProject,
-  selectProject: state.selectProject,
-  setCurrentProject: state.setCurrentProject,
-  updateProject: state.updateProject,
-  deleteProject: state.deleteProject,
-}))
+// Individual atomic selectors for fine-grained subscriptions
+export const useUser = () => useStore((state) => state.user)
+export const useIsAuthenticated = () => useStore((state) => state.isAuthenticated)
+export const useIsLoading = () => useStore((state) => state.isLoading)
+export const useError = () => useStore((state) => state.error)
+export const useCurrentProject = () => useStore((state) => state.currentProject)
+export const useProjects = () => useStore((state) => state.projects)
+export const useFiles = () => useStore((state) => state.files)
+export const useOpenFiles = () => useStore((state) => state.openFiles)
+export const useActiveFileId = () => useStore((state) => state.activeFileId)
+export const useActiveFile = () => useStore((state) => state.activeFile)
+export const useCursorPosition = () => useStore((state) => state.cursorPosition)
+export const useCurrentTheme = () => useStore((state) => state.currentTheme)
+export const useSidebarOpen = () => useStore((state) => state.sidebarOpen)
+export const useTerminalOpen = () => useStore((state) => state.terminalOpen)
+export const useAiPanelOpen = () => useStore((state) => state.aiPanelOpen)
+export const useNotifications = () => useStore((state) => state.notifications)
+export const useTerminals = () => useStore((state) => state.terminals)
+export const useActiveTerminalId = () => useStore((state) => state.activeTerminalId)
+export const useIsConnected = () => useStore((state) => state.isConnected)
+export const useCollaborationUsers = () => useStore((state) => state.collaborationUsers)
+export const useConnectedUsers = () => useStore((state) => state.connectedUsers)
+export const useIsAIGenerating = () => useStore((state) => state.isAIGenerating)
+export const useAIUsage = () => useStore((state) => state.usage)
+export const useAIHistory = () => useStore((state) => state.history)
 
-export const useFiles = () => useStore((state) => ({
-  files: state.files,
-  openFiles: state.openFiles,
-  activeFileId: state.activeFileId,
-  activeFile: state.activeFile,
-  isLoading: state.isLoading,
-  fetchFiles: state.fetchFiles,
-  createFile: state.createFile,
-  updateFile: state.updateFile,
-  deleteFile: state.deleteFile,
-  openFile: state.openFile,
-  closeFile: state.closeFile,
-  setActiveFile: state.setActiveFile,
-}))
+// Action selectors (these don't need shallow comparison since functions are stable)
+export const useLogin = () => useStore((state) => state.login)
+export const useRegister = () => useStore((state) => state.register)
+export const useLogout = () => useStore((state) => state.logout)
+export const useRefreshUser = () => useStore((state) => state.refreshUser)
+export const useUpdateProfile = () => useStore((state) => state.updateProfile)
+export const useClearError = () => useStore((state) => state.clearError)
+export const useFetchProjects = () => useStore((state) => state.fetchProjects)
+export const useCreateProject = () => useStore((state) => state.createProject)
+export const useSelectProject = () => useStore((state) => state.selectProject)
+export const useSetCurrentProject = () => useStore((state) => state.setCurrentProject)
+export const useUpdateProject = () => useStore((state) => state.updateProject)
+export const useDeleteProject = () => useStore((state) => state.deleteProject)
+export const useFetchFiles = () => useStore((state) => state.fetchFiles)
+export const useCreateFile = () => useStore((state) => state.createFile)
+export const useUpdateFile = () => useStore((state) => state.updateFile)
+export const useDeleteFile = () => useStore((state) => state.deleteFile)
+export const useOpenFileAction = () => useStore((state) => state.openFile)
+export const useCloseFile = () => useStore((state) => state.closeFile)
+export const useSetActiveFile = () => useStore((state) => state.setActiveFile)
+export const useToggleSidebar = () => useStore((state) => state.toggleSidebar)
+export const useToggleTerminal = () => useStore((state) => state.toggleTerminal)
+export const useToggleAIPanel = () => useStore((state) => state.toggleAIPanel)
+export const useAddNotification = () => useStore((state) => state.addNotification)
+export const useRemoveNotification = () => useStore((state) => state.removeNotification)
+export const useSetTheme = () => useStore((state) => state.setTheme)
+export const useGenerateAI = () => useStore((state) => state.generateAI)
+export const useConnect = () => useStore((state) => state.connect)
+export const useDisconnect = () => useStore((state) => state.disconnect)
+export const useCreateTerminal = () => useStore((state) => state.createTerminal)
+export const useCloseTerminal = () => useStore((state) => state.closeTerminal)
+export const useSetActiveTerminal = () => useStore((state) => state.setActiveTerminal)
 
-export const useEditor = () => useStore((state) => ({
-  cursorPosition: state.cursorPosition,
-  selection: state.selection,
-  isAIAssistantOpen: state.isAIAssistantOpen,
-  aiProvider: state.aiProvider,
-  theme: state.currentTheme,  // Return Theme object for component compatibility
-  themeId: state.theme,       // Also expose raw theme string
-  isAIGenerating: state.isAIGenerating,
-  setCursorPosition: state.setCursorPosition,
-  setSelection: state.setSelection,
-  toggleAIAssistant: state.toggleAIAssistant,
-  setAIProvider: state.setAIProvider,
-  setTheme: state.setTheme,
-}))
+// Composite selectors with shallow equality for grouped state
+export const useAuth = () => useStore(
+  useShallow((state) => ({
+    user: state.user,
+    isAuthenticated: state.isAuthenticated,
+    isLoading: state.isLoading,
+    error: state.error,
+    login: state.login,
+    register: state.register,
+    logout: state.logout,
+    refreshUser: state.refreshUser,
+    updateProfile: state.updateProfile,
+    clearError: state.clearError,
+  }))
+)
 
-export const useCollaboration = () => useStore((state) => ({
-  room: state.room,
-  connectedUsers: state.connectedUsers,
-  collaborationUsers: state.collaborationUsers,
-  cursors: state.cursors,
-  chat: state.chat,
-  isConnected: state.isConnected,
-  isConnecting: state.isConnecting,
-  joinRoom: state.joinRoom,
-  leaveRoom: state.leaveRoom,
-  sendChatMessage: state.sendChatMessage,
-  updateCursor: state.updateCursor,
-  connect: state.connect,
-  disconnect: state.disconnect,
-}))
+export const useProjectsState = () => useStore(
+  useShallow((state) => ({
+    projects: state.projects,
+    currentProject: state.currentProject,
+    isLoading: state.isLoading,
+    fetchProjects: state.fetchProjects,
+    createProject: state.createProject,
+    selectProject: state.selectProject,
+    setCurrentProject: state.setCurrentProject,
+    updateProject: state.updateProject,
+    deleteProject: state.deleteProject,
+  }))
+)
 
-export const useAI = () => useStore((state) => ({
-  usage: state.usage,
-  history: state.history,
-  isLoading: state.isLoading,
-  generateAI: state.generateAI,
-  fetchUsage: state.fetchUsage,
-  fetchHistory: state.fetchHistory,
-  rateResponse: state.rateResponse,
-}))
+export const useFilesState = () => useStore(
+  useShallow((state) => ({
+    files: state.files,
+    openFiles: state.openFiles,
+    activeFileId: state.activeFileId,
+    activeFile: state.activeFile,
+    isLoading: state.isLoading,
+    fetchFiles: state.fetchFiles,
+    createFile: state.createFile,
+    updateFile: state.updateFile,
+    deleteFile: state.deleteFile,
+    openFile: state.openFile,
+    closeFile: state.closeFile,
+    setActiveFile: state.setActiveFile,
+  }))
+)
 
-export const useUI = () => useStore((state) => ({
-  theme: state.currentTheme,
-  currentTheme: state.currentTheme,
-  sidebarOpen: state.sidebarOpen,
-  terminalOpen: state.terminalOpen,
-  aiPanelOpen: state.aiPanelOpen,
-  loading: state.loading,
-  notifications: state.notifications,
-  terminals: state.terminals,
-  activeTerminalId: state.activeTerminalId,
-  toggleSidebar: state.toggleSidebar,
-  toggleTerminal: state.toggleTerminal,
-  toggleAIPanel: state.toggleAIPanel,
-  setLoading: state.setLoading,
-  addNotification: state.addNotification,
-  removeNotification: state.removeNotification,
-  createTerminal: state.createTerminal,
-  closeTerminal: state.closeTerminal,
-  setActiveTerminal: state.setActiveTerminal,
-}))
+export const useEditor = () => useStore(
+  useShallow((state) => ({
+    cursorPosition: state.cursorPosition,
+    selection: state.selection,
+    isAIAssistantOpen: state.isAIAssistantOpen,
+    aiProvider: state.aiProvider,
+    theme: state.currentTheme,  // Return Theme object for component compatibility
+    themeId: state.theme,       // Also expose raw theme string
+    isAIGenerating: state.isAIGenerating,
+    setCursorPosition: state.setCursorPosition,
+    setSelection: state.setSelection,
+    toggleAIAssistant: state.toggleAIAssistant,
+    setAIProvider: state.setAIProvider,
+    setTheme: state.setTheme,
+  }))
+)
+
+export const useCollaboration = () => useStore(
+  useShallow((state) => ({
+    room: state.room,
+    connectedUsers: state.connectedUsers,
+    collaborationUsers: state.collaborationUsers,
+    cursors: state.cursors,
+    chat: state.chat,
+    isConnected: state.isConnected,
+    isConnecting: state.isConnecting,
+    joinRoom: state.joinRoom,
+    leaveRoom: state.leaveRoom,
+    sendChatMessage: state.sendChatMessage,
+    updateCursor: state.updateCursor,
+    connect: state.connect,
+    disconnect: state.disconnect,
+  }))
+)
+
+export const useAI = () => useStore(
+  useShallow((state) => ({
+    usage: state.usage,
+    history: state.history,
+    isLoading: state.isLoading,
+    generateAI: state.generateAI,
+    fetchUsage: state.fetchUsage,
+    fetchHistory: state.fetchHistory,
+    rateResponse: state.rateResponse,
+  }))
+)
+
+export const useUI = () => useStore(
+  useShallow((state) => ({
+    theme: state.currentTheme,
+    currentTheme: state.currentTheme,
+    sidebarOpen: state.sidebarOpen,
+    terminalOpen: state.terminalOpen,
+    aiPanelOpen: state.aiPanelOpen,
+    loading: state.loading,
+    notifications: state.notifications,
+    terminals: state.terminals,
+    activeTerminalId: state.activeTerminalId,
+    toggleSidebar: state.toggleSidebar,
+    toggleTerminal: state.toggleTerminal,
+    toggleAIPanel: state.toggleAIPanel,
+    setLoading: state.setLoading,
+    addNotification: state.addNotification,
+    removeNotification: state.removeNotification,
+    createTerminal: state.createTerminal,
+    closeTerminal: state.closeTerminal,
+    setActiveTerminal: state.setActiveTerminal,
+  }))
+)
 
 export default useStore

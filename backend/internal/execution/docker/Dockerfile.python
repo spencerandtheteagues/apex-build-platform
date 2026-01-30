@@ -1,0 +1,42 @@
+# APEX.BUILD Python Sandbox Image
+# Minimal, secure Python execution environment
+
+FROM python:3.12-slim-bookworm
+
+# Security: Create unprivileged user
+RUN groupadd -r sandbox && useradd -r -g sandbox -d /home/sandbox -s /bin/false sandbox
+
+# Install minimal dependencies (no network tools, no shells beyond sh)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /var/cache/apt/archives/*
+
+# Create work directories
+RUN mkdir -p /work /tmp/sandbox \
+    && chown -R sandbox:sandbox /work /tmp/sandbox \
+    && chmod 1777 /tmp/sandbox
+
+# Remove unnecessary binaries that could be used for escape
+RUN rm -f /usr/bin/curl /usr/bin/wget /usr/bin/nc /usr/bin/netcat \
+    /usr/bin/ssh /usr/bin/scp /usr/bin/sftp 2>/dev/null || true
+
+# Set Python environment
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONHASHSEED=random \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install common safe packages
+RUN pip install --no-cache-dir \
+    numpy \
+    pandas \
+    && rm -rf ~/.cache/pip
+
+# Switch to unprivileged user
+USER sandbox
+WORKDIR /work
+
+# Default command
+CMD ["python3", "--version"]

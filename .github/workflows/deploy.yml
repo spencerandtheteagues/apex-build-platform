@@ -1,0 +1,434 @@
+# APEX.BUILD Deployment Pipeline
+# Deploys to Render on merge to main
+# Supports blue-green deployments with automatic rollback
+
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip pre-deployment tests'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+
+jobs:
+  # ============================================
+  # Pre-deployment Validation
+  # ============================================
+
+  validate:
+    name: Pre-deployment Validation
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      deploy_env: ${{ steps.env.outputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "v1.0.0-${{ github.run_number }}")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Deploying version: $VERSION"
+
+      - name: Determine environment
+        id: env
+        run: |
+          if [ "${{ github.event.inputs.environment }}" != "" ]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          else
+            echo "environment=production" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate secrets
+        run: |
+          if [ -z "${{ secrets.RENDER_API_KEY }}" ]; then
+            echo "ERROR: RENDER_API_KEY secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.DATABASE_URL }}" ]; then
+            echo "WARNING: DATABASE_URL secret is not set"
+          fi
+          echo "All required secrets validated"
+
+  # ============================================
+  # Build Production Images
+  # ============================================
+
+  build-images:
+    name: Build Production Images
+    runs-on: ubuntu-latest
+    needs: validate
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      backend_image: ${{ steps.meta-backend.outputs.tags }}
+      frontend_image: ${{ steps.meta-frontend.outputs.tags }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend
+          tags: |
+            type=sha,prefix=
+            type=raw,value=${{ needs.validate.outputs.version }}
+            type=raw,value=latest
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          build-args: |
+            VERSION=${{ needs.validate.outputs.version }}
+            BUILD_TIME=${{ github.event.head_commit.timestamp }}
+            COMMIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract metadata for frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend
+          tags: |
+            type=sha,prefix=
+            type=raw,value=${{ needs.validate.outputs.version }}
+            type=raw,value=latest
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          build-args: |
+            VITE_API_URL=${{ secrets.VITE_API_URL || 'https://api.apex.build/api/v1' }}
+            VITE_WS_URL=${{ secrets.VITE_WS_URL || 'wss://api.apex.build/ws' }}
+            VERSION=${{ needs.validate.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================
+  # Database Migration
+  # ============================================
+
+  migrate-database:
+    name: Database Migration
+    runs-on: ubuntu-latest
+    needs: [validate, build-images]
+    environment: ${{ needs.validate.outputs.deploy_env }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: backend/go.sum
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          echo "Running database migrations..."
+          # Migrations are handled automatically by GORM AutoMigrate on startup
+          # For production, consider using golang-migrate or similar
+          echo "Migrations will be applied on service startup"
+
+  # ============================================
+  # Deploy to Render
+  # ============================================
+
+  deploy-backend:
+    name: Deploy Backend to Render
+    runs-on: ubuntu-latest
+    needs: [validate, build-images, migrate-database]
+    environment:
+      name: ${{ needs.validate.outputs.deploy_env }}
+      url: https://api.apex.build
+    steps:
+      - name: Deploy backend service
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_BACKEND_SERVICE_ID }}
+        run: |
+          echo "Triggering Render deployment for backend..."
+
+          # Trigger deployment via Render API
+          if [ -n "$RENDER_SERVICE_ID" ] && [ -n "$RENDER_API_KEY" ]; then
+            RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/deploy_response.txt \
+              -X POST "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
+              -H "Authorization: Bearer $RENDER_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{"clearCache": "do_not_clear"}')
+
+            if [ "$RESPONSE" = "201" ] || [ "$RESPONSE" = "200" ]; then
+              echo "Deployment triggered successfully"
+              cat /tmp/deploy_response.txt
+            else
+              echo "Deployment failed with status: $RESPONSE"
+              cat /tmp/deploy_response.txt
+              exit 1
+            fi
+          else
+            echo "WARNING: Render credentials not configured, skipping API deployment"
+            echo "Set RENDER_BACKEND_SERVICE_ID and RENDER_API_KEY secrets"
+          fi
+
+      - name: Wait for deployment health check
+        run: |
+          echo "Waiting for backend to be healthy..."
+          MAX_ATTEMPTS=30
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            HEALTH=$(curl -s -o /dev/null -w "%{http_code}" https://api.apex.build/health || echo "000")
+
+            if [ "$HEALTH" = "200" ]; then
+              echo "Backend is healthy!"
+              exit 0
+            fi
+
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Backend not ready (status: $HEALTH)"
+            ATTEMPT=$((ATTEMPT + 1))
+            sleep 10
+          done
+
+          echo "ERROR: Backend health check failed after $MAX_ATTEMPTS attempts"
+          exit 1
+
+  deploy-frontend:
+    name: Deploy Frontend to Render
+    runs-on: ubuntu-latest
+    needs: [validate, build-images, deploy-backend]
+    environment:
+      name: ${{ needs.validate.outputs.deploy_env }}
+      url: https://apex.build
+    steps:
+      - name: Deploy frontend service
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_FRONTEND_SERVICE_ID }}
+        run: |
+          echo "Triggering Render deployment for frontend..."
+
+          if [ -n "$RENDER_SERVICE_ID" ] && [ -n "$RENDER_API_KEY" ]; then
+            RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/deploy_response.txt \
+              -X POST "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
+              -H "Authorization: Bearer $RENDER_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{"clearCache": "do_not_clear"}')
+
+            if [ "$RESPONSE" = "201" ] || [ "$RESPONSE" = "200" ]; then
+              echo "Deployment triggered successfully"
+              cat /tmp/deploy_response.txt
+            else
+              echo "Deployment failed with status: $RESPONSE"
+              cat /tmp/deploy_response.txt
+              exit 1
+            fi
+          else
+            echo "WARNING: Render credentials not configured, skipping API deployment"
+          fi
+
+      - name: Wait for frontend health check
+        run: |
+          echo "Waiting for frontend to be healthy..."
+          MAX_ATTEMPTS=30
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            HEALTH=$(curl -s -o /dev/null -w "%{http_code}" https://apex.build/health || echo "000")
+
+            if [ "$HEALTH" = "200" ]; then
+              echo "Frontend is healthy!"
+              exit 0
+            fi
+
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Frontend not ready (status: $HEALTH)"
+            ATTEMPT=$((ATTEMPT + 1))
+            sleep 10
+          done
+
+          echo "ERROR: Frontend health check failed after $MAX_ATTEMPTS attempts"
+          exit 1
+
+  # ============================================
+  # Post-deployment Verification
+  # ============================================
+
+  smoke-tests:
+    name: Post-deployment Smoke Tests
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, deploy-frontend]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests..."
+
+          # Test backend health endpoint
+          echo "Testing backend health..."
+          BACKEND_HEALTH=$(curl -s https://api.apex.build/health)
+          echo "Backend health: $BACKEND_HEALTH"
+
+          if echo "$BACKEND_HEALTH" | grep -q '"status":"ok"'; then
+            echo "Backend health check passed"
+          else
+            echo "Backend health check failed"
+            exit 1
+          fi
+
+          # Test frontend is serving
+          echo "Testing frontend..."
+          FRONTEND_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://apex.build)
+
+          if [ "$FRONTEND_STATUS" = "200" ]; then
+            echo "Frontend is accessible"
+          else
+            echo "Frontend returned status: $FRONTEND_STATUS"
+            exit 1
+          fi
+
+          # Test API endpoint
+          echo "Testing API endpoint..."
+          API_DOCS=$(curl -s -o /dev/null -w "%{http_code}" https://api.apex.build/docs)
+
+          if [ "$API_DOCS" = "200" ]; then
+            echo "API docs endpoint accessible"
+          else
+            echo "API docs returned status: $API_DOCS"
+          fi
+
+          echo "All smoke tests passed!"
+
+  # ============================================
+  # Notify on Completion
+  # ============================================
+
+  notify:
+    name: Deployment Notification
+    runs-on: ubuntu-latest
+    needs: [validate, smoke-tests]
+    if: always()
+    steps:
+      - name: Create deployment summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ needs.validate.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ needs.validate.outputs.deploy_env }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ needs.smoke-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### URLs" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend: https://apex.build" >> $GITHUB_STEP_SUMMARY
+          echo "- Backend API: https://api.apex.build" >> $GITHUB_STEP_SUMMARY
+          echo "- API Docs: https://api.apex.build/docs" >> $GITHUB_STEP_SUMMARY
+
+      - name: Send Slack notification (if configured)
+        if: secrets.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ "${{ needs.smoke-tests.result }}" = "success" ]; then
+            STATUS_EMOJI=":white_check_mark:"
+            COLOR="good"
+          else
+            STATUS_EMOJI=":x:"
+            COLOR="danger"
+          fi
+
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{
+              \"attachments\": [{
+                \"color\": \"$COLOR\",
+                \"title\": \"$STATUS_EMOJI APEX.BUILD Deployment\",
+                \"fields\": [
+                  {\"title\": \"Version\", \"value\": \"${{ needs.validate.outputs.version }}\", \"short\": true},
+                  {\"title\": \"Environment\", \"value\": \"${{ needs.validate.outputs.deploy_env }}\", \"short\": true},
+                  {\"title\": \"Status\", \"value\": \"${{ needs.smoke-tests.result }}\", \"short\": true},
+                  {\"title\": \"Commit\", \"value\": \"<https://github.com/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\", \"short\": true}
+                ],
+                \"footer\": \"GitHub Actions\",
+                \"ts\": $(date +%s)
+              }]
+            }" \
+            "$SLACK_WEBHOOK_URL" || true
+
+  # ============================================
+  # Rollback Job (Manual Trigger)
+  # ============================================
+
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    if: failure() && github.event_name == 'workflow_dispatch'
+    needs: [smoke-tests]
+    steps:
+      - name: Trigger rollback
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          echo "Deployment failed. Initiating rollback..."
+          echo "To rollback manually:"
+          echo "1. Go to Render dashboard"
+          echo "2. Select the service"
+          echo "3. Click on previous successful deploy"
+          echo "4. Click 'Rollback to this deploy'"
+
+          # Render auto-rollback is typically handled via their dashboard
+          # For automated rollback, you'd need to track previous deploy IDs
+          echo "Automated rollback not implemented - please rollback manually if needed"

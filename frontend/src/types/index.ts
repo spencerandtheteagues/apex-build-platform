@@ -473,3 +473,104 @@ export type WithTimestamp<T> = T & {
   created_at: string
   updated_at: string
 }
+
+// Community/Sharing Marketplace Types
+
+export interface ProjectStar {
+  id: number
+  user_id: number
+  project_id: number
+  created_at: string
+}
+
+export interface ProjectFork {
+  id: number
+  original_id: number
+  forked_id: number
+  user_id: number
+  created_at: string
+}
+
+export interface ProjectComment {
+  id: number
+  project_id: number
+  user_id: number
+  user?: User
+  parent_id?: number
+  content: string
+  is_edited: boolean
+  created_at: string
+  updated_at: string
+  replies?: ProjectComment[]
+}
+
+export interface ProjectCategory {
+  id: number
+  name: string
+  slug: string
+  description: string
+  icon: string
+  color: string
+  sort_order: number
+  created_at: string
+}
+
+export interface ProjectStats {
+  project_id: number
+  star_count: number
+  fork_count: number
+  view_count: number
+  comment_count: number
+  trend_score: number
+  updated_at: string
+}
+
+export interface UserStats {
+  user_id: number
+  follower_count: number
+  following_count: number
+  project_count: number
+  total_stars: number
+  total_forks: number
+  updated_at: string
+}
+
+export interface ProjectWithStats extends Project {
+  stats?: ProjectStats
+  is_starred?: boolean
+  is_fork?: boolean
+  original_id?: number
+  categories?: string[]
+}
+
+export interface UserPublicProfile {
+  id: number
+  username: string
+  full_name: string
+  avatar_url: string
+  bio?: string
+  website?: string
+  location?: string
+  joined_at: string
+  follower_count: number
+  following_count: number
+  project_count: number
+  total_stars: number
+  total_forks: number
+  is_following?: boolean
+}
+
+export interface ExploreData {
+  featured: ProjectWithStats[]
+  trending: ProjectWithStats[]
+  recent: ProjectWithStats[]
+  categories: ProjectCategory[]
+}
+
+export interface UserFollowInfo {
+  id: number
+  username: string
+  full_name: string
+  avatar_url: string
+  followed_at: string
+}

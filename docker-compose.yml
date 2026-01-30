@@ -1,31 +1,47 @@
+# APEX.BUILD Docker Compose Configuration
+# Complete development and local testing environment
+# Usage: docker-compose up -d
+
 version: '3.8'
 
 services:
-  # PostgreSQL Database
+  # ============================================
+  # Database Services
+  # ============================================
+
   postgres:
     image: postgres:15-alpine
     container_name: apex-postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: apex_build
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_DB: ${POSTGRES_DB:-apex_build}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apex_secret_2024}
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database/init:/docker-entrypoint-initdb.d
+      - ./database/init:/docker-entrypoint-initdb.d:ro
     networks:
       - apex-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d apex_build"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-apex_build}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # Redis Cache
   redis:
     image: redis:7-alpine
     container_name: apex-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
     volumes:
@@ -37,26 +53,40 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # APEX.BUILD Backend API
+  # ============================================
+  # Application Services
+  # ============================================
+
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
     container_name: apex-api
+    restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
-      # Database configuration
+      # Database
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-apex_secret_2024}@postgres:5432/${POSTGRES_DB:-apex_build}?sslmode=disable
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASSWORD: password
-      DB_NAME: apex_build
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-apex_secret_2024}
+      DB_NAME: ${POSTGRES_DB:-apex_build}
       DB_SSL_MODE: disable
-      DB_TIMEZONE: UTC
 
-      # AI API Keys (set these in .env file)
+      # Redis
+      REDIS_URL: redis://redis:6379
+
+      # AI API Keys
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -64,12 +94,28 @@ services:
       # Authentication
       JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-key-change-in-production}
 
-      # Server configuration
+      # Server
       PORT: 8080
-      ENVIRONMENT: development
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      GIN_MODE: ${GIN_MODE:-debug}
 
-      # Redis configuration
-      REDIS_URL: redis://redis:6379
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+
+      # Secrets encryption
+      SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY:-}
+
+      # External services
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      VERCEL_TOKEN: ${VERCEL_TOKEN:-}
+      NETLIFY_TOKEN: ${NETLIFY_TOKEN:-}
+      RENDER_TOKEN: ${RENDER_TOKEN:-}
+
+      # Feature flags
+      ENABLE_METRICS: ${ENABLE_METRICS:-true}
+      ENABLE_TRACING: ${ENABLE_TRACING:-false}
 
     depends_on:
       postgres:
@@ -79,77 +125,155 @@ services:
     networks:
       - apex-network
     volumes:
-      - ./backend:/app
-    restart: unless-stopped
+      - api_uploads:/app/uploads
+      - api_logs:/app/logs
+      - projects_data:/tmp/apex-build-projects
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
-  # APEX.BUILD Frontend (React)
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080/api/v1}
+        VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:8080/ws}
+        VERSION: ${VERSION:-dev}
     container_name: apex-frontend
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
-      REACT_APP_API_URL: http://localhost:8080/api/v1
-      REACT_APP_WS_URL: ws://localhost:8080/ws
-      NODE_ENV: development
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8080/api/v1}
+      VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:8080/ws}
+      NODE_ENV: ${NODE_ENV:-production}
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     networks:
       - apex-network
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # Nginx Reverse Proxy (Production-like setup)
-  nginx:
-    image: nginx:alpine
-    container_name: apex-nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - api
-      - frontend
-    networks:
-      - apex-network
-    restart: unless-stopped
+  # ============================================
+  # Development Tools (optional)
+  # ============================================
 
-  # Development Tools
-
-  # Adminer for database management
   adminer:
     image: adminer:latest
     container_name: apex-adminer
+    restart: unless-stopped
     ports:
       - "8081:8080"
-    networks:
-      - apex-network
     environment:
       ADMINER_DEFAULT_SERVER: postgres
       ADMINER_DESIGN: dracula
+    depends_on:
+      - postgres
+    networks:
+      - apex-network
+    profiles:
+      - dev-tools
 
-  # Redis Commander for Redis management
   redis-commander:
     image: rediscommander/redis-commander:latest
     container_name: apex-redis-commander
+    restart: unless-stopped
     ports:
       - "8082:8081"
     environment:
       REDIS_HOSTS: local:redis:6379
+    depends_on:
+      - redis
     networks:
       - apex-network
+    profiles:
+      - dev-tools
+
+  # ============================================
+  # Monitoring Stack (optional)
+  # ============================================
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: apex-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    networks:
+      - apex-network
+    profiles:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: apex-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    networks:
+      - apex-network
+    profiles:
+      - monitoring
+
+# ============================================
+# Volumes
+# ============================================
 
 volumes:
   postgres_data:
     driver: local
   redis_data:
     driver: local
+  api_uploads:
+    driver: local
+  api_logs:
+    driver: local
+  projects_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+# ============================================
+# Networks
+# ============================================
 
 networks:
   apex-network:

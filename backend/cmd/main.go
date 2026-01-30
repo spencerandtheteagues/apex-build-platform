@@ -12,6 +12,7 @@ import (
 	"apex-build/internal/ai"
 	"apex-build/internal/api"
 	"apex-build/internal/auth"
+	"apex-build/internal/community"
 	"apex-build/internal/db"
 	"apex-build/internal/deploy"
 	"apex-build/internal/deploy/providers"
@@ -226,11 +227,26 @@ func main() {
 	packageHandler := handlers.NewPackageHandler(baseHandler)
 	log.Println("✅ Package Manager initialized (NPM, PyPI, Go Modules)")
 
+	// Initialize Community/Sharing Marketplace
+	communityHandler := community.NewCommunityHandler(database.GetDB())
+
+	// Run community migrations
+	if err := community.AutoMigrate(database.GetDB()); err != nil {
+		log.Printf("⚠️ Community migration had issues: %v", err)
+	}
+
+	// Seed default categories
+	if err := community.SeedCategories(database.GetDB()); err != nil {
+		log.Printf("⚠️ Category seeding had issues: %v", err)
+	}
+
+	log.Println("✅ Community Marketplace initialized (discover, share, fork projects)")
+
 	// Initialize API server
 	server := api.NewServer(database, authService, aiRouter)
 
 	// Setup routes
-	router := setupRoutes(server, buildHandler, wsHub, secretsHandler, mcpHandler, templatesHandler, searchHandler, previewHandler, gitHandler, paymentHandler, executionHandler, deployHandler, packageHandler)
+	router := setupRoutes(server, buildHandler, wsHub, secretsHandler, mcpHandler, templatesHandler, searchHandler, previewHandler, gitHandler, paymentHandler, executionHandler, deployHandler, packageHandler, communityHandler)
 
 	// Start server
 	port := config.Port
@@ -349,7 +365,7 @@ func parseDatabaseURL(databaseURL string) *db.Config {
 }
 
 // setupRoutes configures all API routes
-func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *agents.WSHub, secretsHandler *handlers.SecretsHandler, mcpHandler *handlers.MCPHandler, templatesHandler *handlers.TemplatesHandler, searchHandler *handlers.SearchHandler, previewHandler *handlers.PreviewHandler, gitHandler *handlers.GitHandler, paymentHandler *handlers.PaymentHandlers, executionHandler *handlers.ExecutionHandler, deployHandler *handlers.DeployHandler, packageHandler *handlers.PackageHandler) *gin.Engine {
+func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *agents.WSHub, secretsHandler *handlers.SecretsHandler, mcpHandler *handlers.MCPHandler, templatesHandler *handlers.TemplatesHandler, searchHandler *handlers.SearchHandler, previewHandler *handlers.PreviewHandler, gitHandler *handlers.GitHandler, paymentHandler *handlers.PaymentHandlers, executionHandler *handlers.ExecutionHandler, deployHandler *handlers.DeployHandler, packageHandler *handlers.PackageHandler, communityHandler *community.CommunityHandler) *gin.Engine {
 	// Set gin mode based on environment
 	if os.Getenv("ENVIRONMENT") == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -419,6 +435,9 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 			auth.POST("/register", server.Register)
 			auth.POST("/login", server.Login)
 		}
+
+		// Community/Sharing Marketplace public endpoints (no auth required for viewing)
+		communityHandler.RegisterRoutes(v1)
 
 		// Protected routes (authentication required)
 		protected := v1.Group("/")
@@ -602,6 +621,9 @@ func setupRoutes(server *api.Server, buildHandler *agents.BuildHandler, wsHub *a
 
 			// Package Management endpoints (NPM, PyPI, Go Modules)
 			packageHandler.RegisterPackageRoutes(protected)
+
+			// Community/Sharing Marketplace endpoints (protected actions)
+			communityHandler.RegisterProtectedRoutes(protected)
 
 			// Admin endpoints (requires admin privileges)
 			admin := protected.Group("/admin")

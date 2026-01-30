@@ -1,0 +1,33 @@
+# APEX.BUILD Rust Sandbox Image
+# Minimal, secure Rust execution environment
+
+FROM rust:1.75-slim-bookworm
+
+# Security: Create unprivileged user
+RUN groupadd -r sandbox && useradd -r -g sandbox -d /home/sandbox -s /bin/false sandbox
+
+# Install minimal dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /var/cache/apt/archives/*
+
+# Create work directories
+RUN mkdir -p /work /tmp/sandbox /usr/local/cargo \
+    && chown -R sandbox:sandbox /work /tmp/sandbox /usr/local/cargo \
+    && chmod 1777 /tmp/sandbox
+
+# Remove unnecessary binaries
+RUN rm -f /usr/bin/curl /usr/bin/wget /usr/bin/nc /usr/bin/netcat \
+    /usr/bin/ssh /usr/bin/scp /usr/bin/sftp 2>/dev/null || true
+
+# Set Rust environment
+ENV CARGO_HOME=/tmp/.cargo \
+    RUSTFLAGS="-C opt-level=2"
+
+# Switch to unprivileged user
+USER sandbox
+WORKDIR /work
+
+# Default command
+CMD ["rustc", "--version"]

@@ -9,13 +9,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
+	osexec "os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -279,7 +277,7 @@ func NewContainerSandbox(config *ContainerSandboxConfig) (*ContainerSandbox, err
 
 // checkDockerAvailable verifies Docker daemon is accessible
 func (s *ContainerSandbox) checkDockerAvailable() bool {
-	cmd := exec.Command("docker", "info")
+	cmd := osexec.Command("docker", "info")
 	cmd.Env = append(os.Environ(), "DOCKER_HOST=unix://"+s.config.DockerSocket)
 	return cmd.Run() == nil
 }
@@ -410,7 +408,7 @@ func (s *ContainerSandbox) ensureImages() error {
 		imageName := fmt.Sprintf("%s-%s:latest", s.config.ImagePrefix, lang)
 
 		// Check if image exists
-		cmd := exec.Command("docker", "image", "inspect", imageName)
+		cmd := osexec.Command("docker", "image", "inspect", imageName)
 		if cmd.Run() == nil {
 			s.imageCacheMu.Lock()
 			s.imageCache[lang] = true
@@ -520,7 +518,7 @@ func (s *ContainerSandbox) buildImage(language, dockerfile string) error {
 	}
 
 	// Build image
-	cmd := exec.Command("docker", "build", "-t", imageName, "-f", dockerfilePath, tmpDir)
+	cmd := osexec.Command("docker", "build", "-t", imageName, "-f", dockerfilePath, tmpDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker build failed: %s", string(output))
@@ -732,7 +730,7 @@ func (s *ContainerSandbox) runContainer(ctx context.Context, exec *containerExec
 	args := s.buildDockerArgs(exec, filename, limits, imageName)
 
 	// Create docker command
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := osexec.CommandContext(ctx, "docker", args...)
 
 	// Setup stdio
 	var stdout, stderr bytes.Buffer
@@ -766,7 +764,7 @@ func (s *ContainerSandbox) runContainer(ctx context.Context, exec *containerExec
 		result.Killed = true
 		result.ExitCode = 137
 	} else if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		if exitErr, ok := err.(*osexec.ExitError); ok {
 			result.ExitCode = exitErr.ExitCode()
 			result.Status = "failed"
 		} else {
@@ -906,11 +904,11 @@ func (s *ContainerSandbox) forceKillContainer(containerID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	stopCmd := exec.CommandContext(ctx, "docker", "stop", "-t", "2", containerID)
+	stopCmd := osexec.CommandContext(ctx, "docker", "stop", "-t", "2", containerID)
 	stopCmd.Run()
 
 	// Then force remove
-	rmCmd := exec.Command("docker", "rm", "-f", containerID)
+	rmCmd := osexec.Command("docker", "rm", "-f", containerID)
 	rmCmd.Run()
 }
 
@@ -959,7 +957,7 @@ func (s *ContainerSandbox) cleanupLoop() {
 
 // cleanupOrphanedContainers removes any orphaned sandbox containers
 func (s *ContainerSandbox) cleanupOrphanedContainers() {
-	cmd := exec.Command("docker", "ps", "-a", "--filter", "name=apex-sandbox-", "--format", "{{.Names}}\t{{.Status}}")
+	cmd := osexec.Command("docker", "ps", "-a", "--filter", "name=apex-sandbox-", "--format", "{{.Names}}\t{{.Status}}")
 	output, err := cmd.Output()
 	if err != nil {
 		return
@@ -981,7 +979,7 @@ func (s *ContainerSandbox) cleanupOrphanedContainers() {
 
 		// Remove exited or created containers
 		if strings.Contains(status, "Exited") || strings.Contains(status, "Created") {
-			exec.Command("docker", "rm", "-f", containerName).Run()
+			osexec.Command("docker", "rm", "-f", containerName).Run()
 		}
 	}
 }
@@ -1123,7 +1121,7 @@ func (l *AuditLogger) Close() error {
 	return nil
 }
 
-// Helper to create exec.Cmd with context
-func (e *containerExecution) CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, name, args...)
+// CommandContext creates an exec.Cmd with context
+func (e *containerExecution) CommandContext(ctx context.Context, name string, args ...string) *osexec.Cmd {
+	return osexec.CommandContext(ctx, name, args...)
 }
