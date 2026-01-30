@@ -6,7 +6,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -105,6 +107,13 @@ func (am *AgentManager) CreateBuild(userID uint, req *BuildRequest) (*Build, err
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
+
+	// Apply guardrails for cost control
+	maxAgents, maxRetries, maxRequests, maxTokens := am.defaultBuildLimits(mode)
+	build.MaxAgents = maxAgents
+	build.MaxRetries = maxRetries
+	build.MaxRequests = maxRequests
+	build.MaxTokensPerRequest = maxTokens
 
 	am.builds[buildID] = build
 
@@ -218,7 +227,7 @@ func (am *AgentManager) StartBuild(buildID string) error {
 		Description: fmt.Sprintf("Create comprehensive build plan for: %s", build.Description),
 		Priority:    100,
 		Status:      TaskPending,
-		MaxRetries:  5,
+		MaxRetries:  build.MaxRetries,
 		Input: map[string]any{
 			"description": build.Description,
 			"mode":        string(build.Mode),
@@ -466,6 +475,13 @@ func (am *AgentManager) spawnAgent(buildID string, role AgentRole, provider AIPr
 
 // SpawnAgentTeam creates the full team of agents for a build
 func (am *AgentManager) SpawnAgentTeam(buildID string) error {
+	am.mu.RLock()
+	build, exists := am.builds[buildID]
+	am.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("build %s not found", buildID)
+	}
+
 	// Get available providers dynamically
 	availableProviders := am.aiRouter.GetAvailableProviders()
 
@@ -475,43 +491,53 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 
 	// Define all agent roles needed for a complete build
 	allRoles := []AgentRole{
-		RolePlanner,
 		RoleArchitect,
-		RoleFrontend,
-		RoleBackend,
 		RoleDatabase,
+		RoleBackend,
+		RoleFrontend,
 		RoleTesting,
 		RoleReviewer,
+		RolePlanner,
+	}
+
+	// Enforce max agents (excluding lead)
+	roles := allRoles
+	if build.MaxAgents > 0 {
+		allowed := build.MaxAgents - 1
+		if allowed < 0 {
+			allowed = 0
+		}
+		if allowed < len(allRoles) {
+			roles = allRoles[:allowed]
+		}
 	}
 
 	// Determine provider assignments based on availability
-	providerAssignments := am.assignProvidersToRoles(availableProviders, allRoles)
+	providerAssignments := am.assignProvidersToRoles(availableProviders, roles)
 
 	// Broadcast provider availability status
-	am.mu.RLock()
-	build, exists := am.builds[buildID]
-	am.mu.RUnlock()
-	if exists {
-		providerNames := make([]string, len(availableProviders))
-		for i, p := range availableProviders {
-			providerNames[i] = string(p)
-		}
-		am.broadcast(buildID, &WSMessage{
-			Type:      WSBuildProgress,
-			BuildID:   buildID,
-			Timestamp: time.Now(),
-			Data: map[string]any{
-				"phase":               "provider_check",
-				"available_providers": providerNames,
-				"provider_count":      len(availableProviders),
-				"message":             fmt.Sprintf("Using %d available AI provider(s): %v", len(availableProviders), providerNames),
-			},
-		})
-		_ = build // silence unused variable warning
+	providerNames := make([]string, len(availableProviders))
+	for i, p := range availableProviders {
+		providerNames[i] = string(p)
 	}
+	am.broadcast(buildID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   buildID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"phase":               "provider_check",
+			"available_providers": providerNames,
+			"provider_count":      len(availableProviders),
+			"message":             fmt.Sprintf("Using %d available AI provider(s): %v", len(availableProviders), providerNames),
+		},
+	})
 
 	// Spawn agents with dynamically assigned providers
-	for role, provider := range providerAssignments {
+	for _, role := range roles {
+		provider, ok := providerAssignments[role]
+		if !ok {
+			continue
+		}
 		_, err := am.spawnAgent(buildID, role, provider)
 		if err != nil {
 			log.Printf("Warning: failed to spawn %s agent with %s: %v", role, provider, err)
@@ -752,6 +778,56 @@ func (am *AgentManager) executeTask(task *Task) {
 	}
 	log.Printf("Found build %s for task execution", build.ID)
 
+	// Guardrails: stop if build already failed/cancelled
+	build.mu.Lock()
+	if build.Status == BuildFailed || build.Status == BuildCancelled {
+		build.mu.Unlock()
+		task.MaxRetries = 0
+		am.resultQueue <- &TaskResult{
+			TaskID:  task.ID,
+			AgentID: agent.ID,
+			Success: false,
+			Error:   fmt.Errorf("build not active"),
+		}
+		return
+	}
+
+	// Guardrails: enforce per-build request budget
+	if build.MaxRequests > 0 && build.RequestsUsed >= build.MaxRequests {
+		build.Status = BuildFailed
+		build.Error = "Build budget exceeded (request limit)"
+		build.UpdatedAt = time.Now()
+		build.mu.Unlock()
+
+		am.cancelPendingTasks(build)
+		am.broadcast(build.ID, &WSMessage{
+			Type:      WSBuildError,
+			BuildID:   build.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"error":        "Build budget exceeded",
+				"details":      "Maximum AI requests reached for this build",
+				"reason":       "budget_exceeded",
+				"max_requests": build.MaxRequests,
+				"used":         build.RequestsUsed,
+				"recoverable":  false,
+			},
+		})
+
+		task.MaxRetries = 0
+		am.resultQueue <- &TaskResult{
+			TaskID:  task.ID,
+			AgentID: agent.ID,
+			Success: false,
+			Error:   fmt.Errorf("build request budget exceeded"),
+		}
+		return
+	}
+
+	build.RequestsUsed++
+	build.UpdatedAt = time.Now()
+	build.mu.Unlock()
+
 	// Broadcast that the agent is thinking
 	am.broadcast(agent.BuildID, &WSMessage{
 		Type:      "agent:thinking",
@@ -792,8 +868,12 @@ func (am *AgentManager) executeTask(task *Task) {
 	})
 
 	log.Printf("Calling AI router for task %s with provider %s", task.ID, agent.Provider)
+	maxTokens := 8000
+	if build.MaxTokensPerRequest > 0 && build.MaxTokensPerRequest < maxTokens {
+		maxTokens = build.MaxTokensPerRequest
+	}
 	response, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
-		MaxTokens:    8000,
+		MaxTokens:    maxTokens,
 		Temperature:  0.7,
 		SystemPrompt: systemPrompt,
 	})
@@ -919,9 +999,9 @@ func (am *AgentManager) processResult(result *TaskResult) {
 			return
 		}
 
-		// Set default max retries if not set
-		if task.MaxRetries == 0 {
-			task.MaxRetries = 5 // Default: try up to 5 times
+		// MaxRetries == 0 means no retries
+		if task.MaxRetries < 0 {
+			task.MaxRetries = 0
 		}
 
 		// Track the error for learning
@@ -1159,6 +1239,18 @@ func (am *AgentManager) handleReviewCompletion(build *Build, output *TaskOutput)
 	// Create fix tasks if needed
 }
 
+// cancelPendingTasks marks all pending tasks as cancelled to stop further work
+func (am *AgentManager) cancelPendingTasks(build *Build) {
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	for _, task := range build.Tasks {
+		if task.Status == TaskPending {
+			task.Status = TaskCancelled
+		}
+	}
+}
+
 // updateBuildProgress calculates and updates overall build progress
 func (am *AgentManager) updateBuildProgress(build *Build) {
 	build.mu.Lock()
@@ -1331,7 +1423,7 @@ func (am *AgentManager) queuePlanTasks(build *Build) {
 			Description: am.getTaskDescriptionForRole(agent.Role, description),
 			Priority:    ap.priority,
 			Status:      TaskPending,
-			MaxRetries:  5,
+			MaxRetries:  build.MaxRetries,
 			Input: map[string]any{
 				"app_description": description,
 				"agent_role":      string(agent.Role),
@@ -1461,6 +1553,68 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 			"content": response,
 		},
 	})
+}
+
+// defaultBuildLimits returns guardrails based on build mode and environment overrides.
+func (am *AgentManager) defaultBuildLimits(mode BuildMode) (int, int, int, int) {
+	// Mode-based defaults
+	maxAgents := 6
+	maxRetries := 3
+	maxRequests := 48
+	maxTokens := 4000
+	if mode == ModeFast {
+		maxAgents = 4
+		maxRetries = 2
+		maxRequests = 24
+		maxTokens = 2000
+	}
+
+	// Global overrides
+	maxAgents = envInt("BUILD_MAX_AGENTS", maxAgents)
+	maxRetries = envInt("BUILD_MAX_RETRIES", maxRetries)
+	maxRequests = envInt("BUILD_MAX_REQUESTS", maxRequests)
+	maxTokens = envInt("BUILD_MAX_TOKENS", maxTokens)
+
+	// Mode-specific overrides
+	if mode == ModeFast {
+		maxAgents = envInt("BUILD_MAX_AGENTS_FAST", maxAgents)
+		maxRetries = envInt("BUILD_MAX_RETRIES_FAST", maxRetries)
+		maxRequests = envInt("BUILD_MAX_REQUESTS_FAST", maxRequests)
+		maxTokens = envInt("BUILD_MAX_TOKENS_FAST", maxTokens)
+	} else {
+		maxAgents = envInt("BUILD_MAX_AGENTS_FULL", maxAgents)
+		maxRetries = envInt("BUILD_MAX_RETRIES_FULL", maxRetries)
+		maxRequests = envInt("BUILD_MAX_REQUESTS_FULL", maxRequests)
+		maxTokens = envInt("BUILD_MAX_TOKENS_FULL", maxTokens)
+	}
+
+	// Sanity clamps (0 = unlimited for requests/tokens)
+	if maxAgents < 1 {
+		maxAgents = 1
+	}
+	if maxRetries < 0 {
+		maxRetries = 0
+	}
+	if maxRequests < 0 {
+		maxRequests = 0
+	}
+	if maxTokens < 0 {
+		maxTokens = 0
+	}
+
+	return maxAgents, maxRetries, maxRequests, maxTokens
+}
+
+func envInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 // Subscribe adds a channel to receive build updates
