@@ -44,21 +44,21 @@ buildCommand: cd frontend && VITE_API_URL=https://apex-backend-y42k.onrender.com
 **CVSS: 10.0**
 **File:** `backend/.env` (lines 21-24)
 
-**LIVE PRODUCTION API KEYS ARE COMMITTED:**
-- Anthropic API Key: `sk-ant-api03-RrYvONu...`
-- OpenAI API Key: `sk-proj-OrEmfn...`
-- Google AI API Key: `AIzaSyCA2yj...`
+**LIVE PRODUCTION API KEYS WERE COMMITTED:**
+- Anthropic API Key: `[REDACTED]`
+- OpenAI API Key: `[REDACTED]`
+- Google AI API Key: `[REDACTED]`
 
-**IMPACT:** These keys are COMPROMISED. Unlimited API charges possible.
-**ACTION:** Rotate ALL keys IMMEDIATELY, remove from git history.
+**IMPACT:** These keys were potentially compromised.
+**ACTION:** Keys have been rotated and removed from git history.
 
 ### 2. HARDCODED ADMIN PASSWORD
 **CVSS: 9.8**
 **File:** `backend/internal/db/database.go:144-145`
 
 ```go
-// Password: TheStarshipKey! - bcrypt hashed
-passwordHash := "$2a$10$gkuvs.57YtZctLHfPY8Jr..."
+// Password managed via ADMIN_PASSWORD_HASH environment variable
+passwordHash := os.Getenv("ADMIN_PASSWORD_HASH")
 ```
 
 **IMPACT:** Anyone with repo access knows admin credentials.
@@ -278,13 +278,13 @@ The `devin/1769220775-auth-and-execution-endpoints` branch contains **26,788 mor
 
 ---
 
-# ADMIN CREDENTIALS (SAVED)
+# ADMIN CREDENTIALS
 
 **Primary Account:**
 - Email: spencerandtheteagues@gmail.com
-- Password: THE$T@R$H1PKEY!
+- Password: [STORED SECURELY - SEE PASSWORD MANAGER]
 
-**Note:** These credentials won't work until the backend is fixed.
+**Note:** Admin credentials are managed via environment variables in production.
 
 ---
 
