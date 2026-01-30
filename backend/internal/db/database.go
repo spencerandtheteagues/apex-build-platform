@@ -141,8 +141,13 @@ func (d *Database) seedAdminUser() error {
 	var existingUser models.User
 	result := d.DB.Where("email = ?", "spencerandtheteagues@gmail.com").First(&existingUser)
 
-	// Password: TheStarshipKey! - bcrypt hashed
-	passwordHash := "$2a$10$gkuvs.57YtZctLHfPY8Jr.OKcM725LVvlFV7/8agtpyyEBDNiTvA."
+	// Admin password hash - credentials managed via environment variables
+	// Use ADMIN_PASSWORD_HASH env var in production
+	passwordHash := os.Getenv("ADMIN_PASSWORD_HASH")
+	if passwordHash == "" {
+		// Fallback hash for development only - change in production
+		passwordHash = "$2a$10$gkuvs.57YtZctLHfPY8Jr.OKcM725LVvlFV7/8agtpyyEBDNiTvA."
+	}
 
 	if result.Error == nil {
 		// User exists, ensure admin privileges and password are set

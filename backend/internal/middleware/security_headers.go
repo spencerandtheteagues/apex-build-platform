@@ -1,6 +1,15 @@
 package middleware
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -83,11 +92,68 @@ func CSRFProtection() gin.HandlerFunc {
 	}
 }
 
-// validateCSRFToken validates the CSRF token
+// validateCSRFToken validates the CSRF token using HMAC
+// Tokens are generated as: base64(timestamp:hmac(timestamp, secret))
 func validateCSRFToken(token string) bool {
-	// TODO: Implement proper CSRF token validation
-	// For now, accept any non-empty token
-	return len(token) > 0
+	if len(token) < 32 {
+		return false
+	}
+
+	// Decode the token
+	decoded, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		return false
+	}
+
+	parts := strings.SplitN(string(decoded), ":", 2)
+	if len(parts) != 2 {
+		return false
+	}
+
+	timestamp, signature := parts[0], parts[1]
+
+	// Check if token is expired (1 hour validity)
+	ts, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		return false
+	}
+
+	if time.Now().Unix()-ts > 3600 {
+		return false // Token expired
+	}
+
+	// Verify HMAC signature
+	secret := getCSRFSecret()
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(timestamp))
+	expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+	return hmac.Equal([]byte(signature), []byte(expectedSig))
+}
+
+// GenerateCSRFToken creates a new CSRF token
+func GenerateCSRFToken() string {
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	secret := getCSRFSecret()
+
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(timestamp))
+	signature := hex.EncodeToString(mac.Sum(nil))
+
+	token := timestamp + ":" + signature
+	return base64.StdEncoding.EncodeToString([]byte(token))
+}
+
+// getCSRFSecret returns the CSRF secret from environment or generates one
+func getCSRFSecret() string {
+	secret := os.Getenv("CSRF_SECRET")
+	if secret == "" {
+		secret = os.Getenv("JWT_SECRET") // Fallback to JWT secret
+	}
+	if secret == "" {
+		secret = "apex-build-csrf-secret-change-in-production"
+	}
+	return secret
 }
 
 // RateLimitHeaders adds rate limiting headers

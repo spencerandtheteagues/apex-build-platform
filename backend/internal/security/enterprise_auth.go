@@ -9,8 +9,8 @@ import (
 
 	"apex-build/pkg/models"
 
-	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/argon2"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // EnterpriseAuthService provides enterprise-grade authentication
@@ -318,11 +318,57 @@ func EnhancedPasswordHashing(password string) (string, error) {
 }
 
 // VerifyPassword verifies a password against its hash
+// Supports both bcrypt and Argon2id formats
 func VerifyPassword(password, encodedHash string) bool {
-	// Parse the encoded hash to extract parameters and values
-	// Implementation would parse the Argon2 format and verify
-	// For now, simplified implementation
-	return len(password) > 0 && len(encodedHash) > 0
+	if len(password) == 0 || len(encodedHash) == 0 {
+		return false
+	}
+
+	// Check if it's a bcrypt hash (starts with $2a$, $2b$, or $2y$)
+	if len(encodedHash) >= 4 && (encodedHash[:4] == "$2a$" || encodedHash[:4] == "$2b$" || encodedHash[:4] == "$2y$") {
+		err := bcrypt.CompareHashAndPassword([]byte(encodedHash), []byte(password))
+		return err == nil
+	}
+
+	// Check if it's an Argon2id hash
+	if len(encodedHash) >= 9 && encodedHash[:9] == "$argon2id" {
+		return verifyArgon2idPassword(password, encodedHash)
+	}
+
+	// Unknown hash format
+	return false
+}
+
+// verifyArgon2idPassword verifies a password against an Argon2id hash
+func verifyArgon2idPassword(password, encodedHash string) bool {
+	// Parse format: $argon2id$v=19$m=65536,t=3,p=4$salt$hash
+	var version int
+	var memory, time uint32
+	var threads uint8
+	var salt, hash string
+
+	_, err := fmt.Sscanf(encodedHash, "$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
+		&version, &memory, &time, &threads, &salt, &hash)
+	if err != nil {
+		return false
+	}
+
+	// Decode salt and expected hash
+	saltBytes, err := base64.RawStdEncoding.DecodeString(salt)
+	if err != nil {
+		return false
+	}
+
+	expectedHash, err := base64.RawStdEncoding.DecodeString(hash)
+	if err != nil {
+		return false
+	}
+
+	// Compute hash with same parameters
+	computedHash := argon2.IDKey([]byte(password), saltBytes, time, memory, threads, uint32(len(expectedHash)))
+
+	// Constant-time comparison to prevent timing attacks
+	return subtle.ConstantTimeCompare(computedHash, expectedHash) == 1
 }
 
 // requiresMFA determines if MFA is required based on user settings and risk
@@ -395,7 +441,7 @@ type (
 	RiskScorer   struct{}
 	MLModel      struct{}
 	GeoLocationService struct{}
-	ThreatIntelligence struct{}
+	ThreatIntel struct{}
 	TOTPConfig    struct{}
 	BatteryInfo   struct{}
 	NetworkInfo   struct{}

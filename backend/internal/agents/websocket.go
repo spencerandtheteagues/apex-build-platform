@@ -4,14 +4,57 @@ package agents
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 )
+
+// WebSocketClaims represents JWT claims for WebSocket authentication
+type WebSocketClaims struct {
+	UserID  uint   `json:"user_id"`
+	IsAdmin bool   `json:"is_admin"`
+	jwt.RegisteredClaims
+}
+
+// validateWebSocketToken validates a JWT token for WebSocket connections
+func validateWebSocketToken(tokenString string) (*WebSocketClaims, error) {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		return nil, errors.New("JWT_SECRET not configured")
+	}
+
+	token, err := jwt.ParseWithClaims(tokenString, &WebSocketClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return []byte(secret), nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if claims, ok := token.Claims.(*WebSocketClaims); ok && token.Valid {
+		return claims, nil
+	}
+
+	return nil, errors.New("invalid token claims")
+}
+
+// isUserAdmin checks if a user has admin privileges
+// In production, this should query the database
+func isUserAdmin(userID uint) bool {
+	// TODO: Implement proper admin check via database query
+	// For now, return false to enforce strict ownership
+	return false
+}
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -126,13 +169,17 @@ func (h *WSHub) Broadcast(buildID string, msg *WSMessage) {
 func (h *WSHub) HandleWebSocket(c *gin.Context) {
 	buildID := c.Param("buildId")
 	if buildID == "" {
+		log.Printf("WebSocket connection rejected: missing buildId")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "build_id is required"})
 		return
 	}
 
+	log.Printf("WebSocket connection request for build %s", buildID)
+
 	// Verify build exists
-	_, err := h.manager.GetBuild(buildID)
+	build, err := h.manager.GetBuild(buildID)
 	if err != nil {
+		log.Printf("WebSocket connection rejected: build %s not found", buildID)
 		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
 		return
 	}
@@ -140,13 +187,41 @@ func (h *WSHub) HandleWebSocket(c *gin.Context) {
 	// Upgrade to WebSocket
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		log.Printf("WebSocket upgrade failed: %v", err)
+		log.Printf("WebSocket upgrade failed for build %s: %v", buildID, err)
 		return
 	}
 
+	log.Printf("WebSocket connection established for build %s", buildID)
+
 	// Get user ID from context (set by auth middleware)
-	userID, _ := c.Get("user_id")
-	uid, _ := userID.(uint)
+	var uid uint
+	if userID, exists := c.Get("user_id"); exists {
+		uid, _ = userID.(uint)
+	} else {
+		// Check for token in query parameter for WebSocket connections
+		token := c.Query("token")
+		if token == "" {
+			log.Printf("WebSocket connection rejected: no authentication for build %s", buildID)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+			return
+		}
+		// Validate the token and extract user ID
+		// This should use the same JWT validation as the auth middleware
+		claims, err := validateWebSocketToken(token)
+		if err != nil {
+			log.Printf("WebSocket connection rejected: invalid token for build %s: %v", buildID, err)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			return
+		}
+		uid = claims.UserID
+	}
+
+	// Verify user has access to this build
+	if uid != build.UserID && !isUserAdmin(uid) {
+		log.Printf("WebSocket connection rejected: user %d not authorized for build %s (owner: %d)", uid, buildID, build.UserID)
+		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized for this build"})
+		return
+	}
 
 	wsConn := &WSConnection{
 		hub:     h,
@@ -168,21 +243,40 @@ func (h *WSHub) HandleWebSocket(c *gin.Context) {
 		for msg := range updateChan {
 			data, err := json.Marshal(msg)
 			if err != nil {
+				log.Printf("Failed to marshal WebSocket message for build %s: %v", buildID, err)
 				continue
 			}
 			select {
 			case wsConn.send <- data:
 			default:
+				log.Printf("WebSocket send buffer full for build %s, dropping message", buildID)
 			}
 		}
 	}()
 
+	// Send initial build state first
+	wsConn.sendBuildState()
+
+	// Send connection confirmation
+	confirmMsg := &WSMessage{
+		Type:      "connection:established",
+		BuildID:   buildID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"message":  "Connected to build stream",
+			"build_id": buildID,
+		},
+	}
+	if data, err := json.Marshal(confirmMsg); err == nil {
+		select {
+		case wsConn.send <- data:
+		default:
+		}
+	}
+
 	// Start connection handlers
 	go wsConn.writePump()
 	go wsConn.readPump(updateChan)
-
-	// Send initial build state
-	wsConn.sendBuildState()
 }
 
 // writePump sends messages to the WebSocket connection
@@ -292,11 +386,72 @@ func (c *WSConnection) handleMessage(message []byte) {
 func (c *WSConnection) sendBuildState() {
 	build, err := c.hub.manager.GetBuild(c.buildID)
 	if err != nil {
+		log.Printf("Failed to get build %s for state sync: %v", c.buildID, err)
 		return
 	}
 
 	build.mu.RLock()
 	defer build.mu.RUnlock()
+
+	// Convert agents map to a serializable format
+	agentsList := make([]map[string]any, 0, len(build.Agents))
+	for _, agent := range build.Agents {
+		agent.mu.RLock()
+		agentData := map[string]any{
+			"id":         agent.ID,
+			"role":       string(agent.Role),
+			"provider":   string(agent.Provider),
+			"status":     string(agent.Status),
+			"progress":   agent.Progress,
+			"created_at": agent.CreatedAt,
+			"updated_at": agent.UpdatedAt,
+			"error":      agent.Error,
+		}
+		if agent.CurrentTask != nil {
+			agentData["current_task"] = map[string]any{
+				"id":          agent.CurrentTask.ID,
+				"type":        string(agent.CurrentTask.Type),
+				"description": agent.CurrentTask.Description,
+				"status":      string(agent.CurrentTask.Status),
+			}
+		}
+		agent.mu.RUnlock()
+		agentsList = append(agentsList, agentData)
+	}
+
+	// Convert tasks to a serializable format
+	tasksList := make([]map[string]any, 0, len(build.Tasks))
+	for _, task := range build.Tasks {
+		taskData := map[string]any{
+			"id":          task.ID,
+			"type":        string(task.Type),
+			"description": task.Description,
+			"status":      string(task.Status),
+			"priority":    task.Priority,
+			"assigned_to": task.AssignedTo,
+			"created_at":  task.CreatedAt,
+			"error":       task.Error,
+		}
+		if task.Output != nil {
+			taskData["files_count"] = len(task.Output.Files)
+		}
+		tasksList = append(tasksList, taskData)
+	}
+
+	// Collect all generated files
+	allFiles := make([]map[string]any, 0)
+	for _, task := range build.Tasks {
+		if task.Output != nil {
+			for _, file := range task.Output.Files {
+				allFiles = append(allFiles, map[string]any{
+					"path":     file.Path,
+					"language": file.Language,
+					"size":     file.Size,
+					"is_new":   file.IsNew,
+				})
+			}
+		}
+	}
 
 	// Send build info
 	state := &WSMessage{
@@ -304,27 +459,35 @@ func (c *WSConnection) sendBuildState() {
 		BuildID:   build.ID,
 		Timestamp: time.Now(),
 		Data: map[string]any{
-			"status":       string(build.Status),
-			"mode":         string(build.Mode),
-			"description":  build.Description,
-			"progress":     build.Progress,
-			"agents":       build.Agents,
-			"tasks":        build.Tasks,
-			"checkpoints":  build.Checkpoints,
-			"created_at":   build.CreatedAt,
-			"updated_at":   build.UpdatedAt,
-			"completed_at": build.CompletedAt,
+			"status":        string(build.Status),
+			"mode":          string(build.Mode),
+			"description":   build.Description,
+			"progress":      build.Progress,
+			"agents":        agentsList,
+			"agents_count":  len(agentsList),
+			"tasks":         tasksList,
+			"tasks_count":   len(tasksList),
+			"files":         allFiles,
+			"files_count":   len(allFiles),
+			"checkpoints":   build.Checkpoints,
+			"created_at":    build.CreatedAt,
+			"updated_at":    build.UpdatedAt,
+			"completed_at":  build.CompletedAt,
+			"error":         build.Error,
 		},
 	}
 
 	data, err := json.Marshal(state)
 	if err != nil {
+		log.Printf("Failed to marshal build state for %s: %v", c.buildID, err)
 		return
 	}
 
 	select {
 	case c.send <- data:
+		log.Printf("Sent build state for %s (%d agents, %d tasks, %d files)", c.buildID, len(agentsList), len(tasksList), len(allFiles))
 	default:
+		log.Printf("Failed to send build state for %s: channel full", c.buildID)
 	}
 }
 
