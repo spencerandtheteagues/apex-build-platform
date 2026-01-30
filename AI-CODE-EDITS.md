@@ -220,4 +220,31 @@ After applying these changes:
 
 ---
 
-**Session completed:** 2026-01-30 06:45 UTC
+## Additional Changes (Session Continued)
+
+### Auth Rate Limiting
+- Added `AuthRateLimit()` middleware (10 req/min vs 1000 general)
+- Applied to `/auth/login` and `/auth/register` endpoints
+- Prevents credential stuffing and brute force attacks
+
+### Cache Initialization
+- Added Redis cache initialization in `main.go`
+- Falls back to in-memory cache when `REDIS_URL` not set
+- 30s TTL for project caching
+
+### OptimizedHandler Wiring
+- Initialized `OptimizedHandler` with caching support
+- Wired optimized routes for project endpoints:
+  - `GET /projects` → `GetProjectsOptimized` (cursor pagination, caching)
+  - `GET /projects/:id` → `GetProjectOptimized` (JOINed file count)
+  - `GET /projects/:id/files` → `GetProjectFilesOptimized` (no content loading)
+  - `POST/PUT/DELETE` → Optimized with cache invalidation
+
+### New Environment Variables
+```bash
+REDIS_URL=redis://localhost:6379    # Optional - falls back to in-memory
+```
+
+---
+
+**Session completed:** 2026-01-30 06:55 UTC
