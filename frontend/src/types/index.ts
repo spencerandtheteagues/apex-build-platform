@@ -575,6 +575,9 @@ export interface UserFollowInfo {
   followed_at: string
 }
 
+// AI Autonomous Agent Types
+export * from './agent'
+
 // GitHub Import Wizard Types
 
 export interface DetectedStack {
@@ -621,4 +624,62 @@ export interface GitHubImportResponse {
   import_duration_ms: number
   repository_url: string
   default_branch: string
+}
+
+// Code Comments Types (Replit parity feature)
+
+export interface CodeComment {
+  id: number
+  file_id: number
+  project_id: number
+  start_line: number
+  end_line: number
+  start_column: number
+  end_column: number
+  content: string
+  parent_id?: number
+  thread_id: string
+  author_id: number
+  author_name: string
+  is_resolved: boolean
+  resolved_at?: string
+  resolved_by_id?: number
+  reactions?: Record<string, number[]>
+  replies?: CodeComment[]
+  reply_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface CodeCommentThread {
+  thread_id: string
+  file_id: number
+  project_id: number
+  start_line: number
+  end_line: number
+  is_resolved: boolean
+  comment_count: number
+  comments: CodeComment[]
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateCommentRequest {
+  file_id: number
+  project_id: number
+  start_line: number
+  end_line: number
+  start_column?: number
+  end_column?: number
+  content: string
+  parent_id?: number
+  thread_id?: string
+}
+
+export interface UpdateCommentRequest {
+  content: string
+}
+
+export interface ReactionRequest {
+  emoji: string
 }

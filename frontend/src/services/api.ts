@@ -23,6 +23,10 @@ import {
   ProjectCategory,
   UserPublicProfile,
   UserFollowInfo,
+  CodeComment,
+  CodeCommentThread,
+  CreateCommentRequest,
+  UpdateCommentRequest,
 } from '@/types'
 
 // Get API URL from environment or use default
@@ -736,6 +740,103 @@ export class ApiService {
   }> {
     const response = await this.client.post('/projects/import/github', data)
     return response.data
+  }
+
+  // ========== CODE COMMENTS ENDPOINTS (Replit parity) ==========
+
+  // Create a new comment or reply
+  async createCodeComment(data: CreateCommentRequest): Promise<CodeComment> {
+    const response = await this.client.post<ApiResponse<CodeComment>>('/comments', data)
+    return response.data.data!
+  }
+
+  // Get all comments for a file
+  async getFileComments(fileId: number, options?: {
+    include_resolved?: boolean
+    line?: number
+  }): Promise<{ file_id: number; comments: CodeComment[]; total: number }> {
+    const params = new URLSearchParams()
+    if (options?.include_resolved !== undefined) {
+      params.append('include_resolved', options.include_resolved.toString())
+    }
+    if (options?.line) {
+      params.append('line', options.line.toString())
+    }
+    const query = params.toString() ? `?${params.toString()}` : ''
+    const response = await this.client.get<ApiResponse<{ file_id: number; comments: CodeComment[]; total: number }>>(
+      `/comments/file/${fileId}${query}`
+    )
+    return response.data.data!
+  }
+
+  // Get a specific thread
+  async getCommentThread(threadId: string): Promise<CodeCommentThread> {
+    const response = await this.client.get<ApiResponse<CodeCommentThread>>(
+      `/comments/thread/${threadId}`
+    )
+    return response.data.data!
+  }
+
+  // Get a single comment
+  async getCodeComment(commentId: number): Promise<CodeComment> {
+    const response = await this.client.get<ApiResponse<CodeComment>>(
+      `/comments/${commentId}`
+    )
+    return response.data.data!
+  }
+
+  // Update a comment
+  async updateCodeComment(commentId: number, data: UpdateCommentRequest): Promise<CodeComment> {
+    const response = await this.client.put<ApiResponse<CodeComment>>(
+      `/comments/${commentId}`,
+      data
+    )
+    return response.data.data!
+  }
+
+  // Delete a comment
+  async deleteCodeComment(commentId: number): Promise<void> {
+    await this.client.delete(`/comments/${commentId}`)
+  }
+
+  // Resolve a thread
+  async resolveCommentThread(commentId: number): Promise<{
+    thread_id: string
+    resolved_at: string
+    resolved_by: number
+  }> {
+    const response = await this.client.post<ApiResponse<{
+      thread_id: string
+      resolved_at: string
+      resolved_by: number
+    }>>(`/comments/${commentId}/resolve`)
+    return response.data.data!
+  }
+
+  // Unresolve a thread
+  async unresolveCommentThread(commentId: number): Promise<{ thread_id: string }> {
+    const response = await this.client.post<ApiResponse<{ thread_id: string }>>(
+      `/comments/${commentId}/unresolve`
+    )
+    return response.data.data!
+  }
+
+  // Add reaction to a comment
+  async addCommentReaction(commentId: number, emoji: string): Promise<Record<string, number[]>> {
+    const response = await this.client.post<ApiResponse<Record<string, number[]>>>(
+      `/comments/${commentId}/react`,
+      { emoji }
+    )
+    return response.data.data!
+  }
+
+  // Remove reaction from a comment
+  async removeCommentReaction(commentId: number, emoji: string): Promise<Record<string, number[]>> {
+    const response = await this.client.delete<ApiResponse<Record<string, number[]>>>(
+      `/comments/${commentId}/react`,
+      { data: { emoji } }
+    )
+    return response.data.data!
   }
 }
 

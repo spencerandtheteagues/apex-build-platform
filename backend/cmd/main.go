@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"apex-build/internal/agents"
+	"apex-build/internal/agents/autonomous"
 	"apex-build/internal/ai"
 	"apex-build/internal/api"
 	"apex-build/internal/auth"
@@ -88,6 +89,14 @@ func main() {
 	buildHandler := agents.NewBuildHandler(agentManager, wsHub)
 
 	log.Println("✅ Agent Orchestration System initialized")
+
+	// Initialize Autonomous Agent System (Replit parity feature)
+	autonomousWorkDir := getEnv("AUTONOMOUS_WORK_DIR", "/tmp/apex-autonomous")
+	autonomousAIAdapter := autonomous.NewAIAdapter(aiRouter)
+	autonomousAgent := autonomous.NewAutonomousAgent(autonomousAIAdapter, autonomousWorkDir)
+	autonomousHandler := autonomous.NewHandler(autonomousAgent)
+
+	log.Println("✅ Autonomous Agent System initialized (AI-driven build, test, deploy)")
 
 	// Initialize Secrets Manager
 	masterKey := os.Getenv("SECRETS_MASTER_KEY")
@@ -183,6 +192,10 @@ func main() {
 	// Initialize Version History Handler (Replit parity feature)
 	versionHandler := handlers.NewVersionHandler(database.GetDB())
 	log.Println("✅ Version History System initialized (diff viewing, restore, pinning)")
+
+	// Initialize Code Comments Handler (Replit parity feature)
+	commentsHandler := handlers.NewCommentsHandler(database.GetDB())
+	log.Println("✅ Code Comments System initialized (inline threads, reactions, resolve)")
 
 	// Initialize Stripe Payment Service
 	stripeSecretKey := os.Getenv("STRIPE_SECRET_KEY")
@@ -364,7 +377,9 @@ func main() {
 	router := setupRoutes(
 		server, buildHandler, wsHub, secretsHandler, mcpHandler,
 		templatesHandler, searchHandler, previewHandler, gitHandler, importHandler,
-		versionHandler, // Version history system (Replit parity)
+		versionHandler,      // Version history system (Replit parity)
+		commentsHandler,     // Code comments system (Replit parity)
+		autonomousHandler,   // Autonomous agent system (Replit parity)
 		paymentHandler, executionHandler, deployHandler, packageHandler,
 		communityHandler, hostingHandler, databaseHandler, debuggingHandler,
 		completionsHandler, extensionsHandler, enterpriseHandler, collabHub,
@@ -505,8 +520,10 @@ func setupRoutes(
 	secretsHandler *handlers.SecretsHandler, mcpHandler *handlers.MCPHandler,
 	templatesHandler *handlers.TemplatesHandler, searchHandler *handlers.SearchHandler,
 	previewHandler *handlers.PreviewHandler, gitHandler *handlers.GitHandler,
-	importHandler *handlers.ImportHandler, // GitHub repository import wizard
-	versionHandler *handlers.VersionHandler, // Version history system (Replit parity)
+	importHandler *handlers.ImportHandler,           // GitHub repository import wizard
+	versionHandler *handlers.VersionHandler,         // Version history system (Replit parity)
+	commentsHandler *handlers.CommentsHandler,       // Code comments system (Replit parity)
+	autonomousHandler *autonomous.Handler,           // Autonomous agent system (Replit parity)
 	paymentHandler *handlers.PaymentHandlers, executionHandler *handlers.ExecutionHandler,
 	deployHandler *handlers.DeployHandler, packageHandler *handlers.PackageHandler,
 	communityHandler *community.CommunityHandler,
@@ -634,6 +651,9 @@ func setupRoutes(
 			// Build/Agent endpoints (the core of APEX.BUILD)
 			buildHandler.RegisterRoutes(protected)
 
+			// Autonomous Agent endpoints (AI-driven build, test, deploy)
+			autonomousHandler.RegisterRoutes(protected)
+
 			// Secrets Management endpoints
 			secretsRoutes := protected.Group("/secrets")
 			{
@@ -725,6 +745,10 @@ func setupRoutes(
 			// Enables viewing file versions, diffs, and restoring previous states
 			versionHandler.RegisterVersionRoutes(protected)
 
+			// Code Comments System (Replit parity feature)
+			// Inline code comments, threads, reactions, and resolve functionality
+			commentsHandler.RegisterCommentRoutes(protected)
+
 			// Billing & Subscription endpoints (Stripe integration)
 			billing := protected.Group("/billing")
 			{
@@ -755,15 +779,16 @@ func setupRoutes(
 					execute.GET("/stats", executionHandler.GetExecutionStats)       // Get execution statistics
 				}
 
-				// Terminal endpoints (interactive shell)
+				// Terminal endpoints (interactive shell with full PTY support)
 				terminal := protected.Group("/terminal")
 				{
-					terminal.POST("/sessions", executionHandler.CreateTerminalSession)         // Create new terminal
-					terminal.GET("/sessions", executionHandler.ListTerminalSessions)           // List all terminals
-					terminal.GET("/sessions/:id", executionHandler.GetTerminalSession)         // Get terminal info
-					terminal.DELETE("/sessions/:id", executionHandler.DeleteTerminalSession)   // Close terminal
+					terminal.POST("/sessions", executionHandler.CreateTerminalSession)           // Create new terminal
+					terminal.GET("/sessions", executionHandler.ListTerminalSessions)             // List all terminals
+					terminal.GET("/sessions/:id", executionHandler.GetTerminalSession)           // Get terminal info
+					terminal.DELETE("/sessions/:id", executionHandler.DeleteTerminalSession)     // Close terminal
 					terminal.POST("/sessions/:id/resize", executionHandler.ResizeTerminalSession) // Resize terminal
-					terminal.GET("/sessions/:id/history", executionHandler.GetTerminalHistory) // Get command history
+					terminal.GET("/sessions/:id/history", executionHandler.GetTerminalHistory)   // Get command history
+					terminal.GET("/shells", executionHandler.GetAvailableShells)                 // List available shells
 				}
 			}
 
@@ -841,6 +866,9 @@ func setupRoutes(
 
 	// WebSocket endpoint for deployment log streaming
 	router.GET("/ws/deploy/:deploymentId", hostingHandler.HandleDeploymentWebSocket)
+
+	// WebSocket endpoint for autonomous agent real-time updates
+	autonomousHandler.RegisterWebSocketRoute(router)
 
 	return router
 }

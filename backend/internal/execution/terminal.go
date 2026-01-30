@@ -32,6 +32,7 @@ type TerminalSession struct {
 	IsActive    bool      `json:"is_active"`
 	Rows        uint16    `json:"rows"`
 	Cols        uint16    `json:"cols"`
+	Name        string    `json:"name"`
 
 	// Internal fields
 	cmd         *exec.Cmd
@@ -42,6 +43,7 @@ type TerminalSession struct {
 	history     []string
 	historyMu   sync.RWMutex
 	historyMax  int
+	customEnv   map[string]string
 }
 
 // TerminalManager manages terminal sessions
@@ -102,8 +104,79 @@ func NewTerminalManager() *TerminalManager {
 	}
 }
 
+// TerminalCreateOptions contains options for creating a terminal session
+type TerminalCreateOptions struct {
+	ProjectID   uint
+	UserID      uint
+	WorkDir     string
+	Shell       string // bash, zsh, sh, or custom path
+	Rows        uint16
+	Cols        uint16
+	Environment map[string]string
+	Name        string
+}
+
+// GetAvailableShells returns a list of available shells on the system
+func GetAvailableShells() []map[string]string {
+	shells := []map[string]string{}
+
+	shellPaths := []struct {
+		name string
+		path string
+	}{
+		{"bash", "/bin/bash"},
+		{"zsh", "/bin/zsh"},
+		{"sh", "/bin/sh"},
+		{"fish", "/usr/bin/fish"},
+		{"dash", "/bin/dash"},
+	}
+
+	for _, s := range shellPaths {
+		if _, err := os.Stat(s.path); err == nil {
+			shells = append(shells, map[string]string{
+				"name": s.name,
+				"path": s.path,
+			})
+		}
+	}
+
+	return shells
+}
+
+// ResolveShell resolves a shell name to its path
+func ResolveShell(shellName string) string {
+	switch shellName {
+	case "bash":
+		return "/bin/bash"
+	case "zsh":
+		return "/bin/zsh"
+	case "sh":
+		return "/bin/sh"
+	case "fish":
+		return "/usr/bin/fish"
+	case "dash":
+		return "/bin/dash"
+	default:
+		// If it's a path, use it directly
+		if shellName != "" && shellName[0] == '/' {
+			return shellName
+		}
+		// Default to bash
+		return "/bin/bash"
+	}
+}
+
 // CreateSession creates a new terminal session
 func (tm *TerminalManager) CreateSession(projectID, userID uint, workDir string) (*TerminalSession, error) {
+	return tm.CreateSessionWithOptions(TerminalCreateOptions{
+		ProjectID: projectID,
+		UserID:    userID,
+		WorkDir:   workDir,
+	})
+}
+
+// CreateSessionWithOptions creates a new terminal session with custom options
+func (tm *TerminalManager) CreateSessionWithOptions(opts TerminalCreateOptions) (*TerminalSession, error) {
 	tm.sessionsMu.Lock()
 	defer tm.sessionsMu.Unlock()
 
@@ -113,15 +186,25 @@ func (tm *TerminalManager) CreateSession(projectID, userID uint, workDir string)
 	}
 
 	// Determine shell
-	shell := os.Getenv("SHELL")
+	shell := opts.Shell
+	if shell == "" {
+		shell = os.Getenv("SHELL")
+	}
 	if shell == "" {
 		shell = "/bin/bash"
+	}
+	shell = ResolveShell(shell)
+
+	// Verify shell exists
+	if _, err := os.Stat(shell); os.IsNotExist(err) {
+		shell = "/bin/sh"
 		if _, err := os.Stat(shell); os.IsNotExist(err) {
-			shell = "/bin/sh"
+			return nil, fmt.Errorf("no shell available: tried %s and /bin/sh", opts.Shell)
 		}
 	}
 
 	// Validate work directory
+	workDir := opts.WorkDir
 	if workDir == "" {
 		workDir = os.TempDir()
 	}
@@ -131,20 +214,41 @@ func (tm *TerminalManager) CreateSession(projectID, userID uint, workDir string)
 		}
 	}
 
+	// Set default dimensions
+	rows := opts.Rows
+	cols := opts.Cols
+	if rows == 0 {
+		rows = 24
+	}
+	if cols == 0 {
+		cols = 80
+	}
+
+	// Generate session name
+	name := opts.Name
+	if name == "" {
+		name = fmt.Sprintf("Terminal %d", len(tm.sessions)+1)
+	}
+
 	session := &TerminalSession{
 		ID:         uuid.New().String(),
-		ProjectID:  projectID,
-		UserID:     userID,
+		ProjectID:  opts.ProjectID,
+		UserID:     opts.UserID,
 		WorkDir:    workDir,
 		Shell:      shell,
 		CreatedAt:  time.Now(),
 		LastActive: time.Now(),
 		IsActive:   true,
-		Rows:       24,
-		Cols:       80,
+		Rows:       rows,
+		Cols:       cols,
 		done:       make(chan struct{}),
 		history:    make([]string, 0, 1000),
 		historyMax: 1000,
+	}
+
+	// Store custom environment
+	if opts.Environment != nil {
+		session.customEnv = opts.Environment
 	}
 
 	tm.sessions[session.ID] = session
@@ -209,11 +313,25 @@ func (ts *TerminalSession) Start() error {
 	// Create command
 	ts.cmd = exec.Command(ts.Shell)
 	ts.cmd.Dir = ts.WorkDir
-	ts.cmd.Env = append(os.Environ(),
+
+	// Build environment
+	env := os.Environ()
+	env = append(env,
 		"TERM=xterm-256color",
+		"COLORTERM=truecolor",
 		fmt.Sprintf("APEX_PROJECT_ID=%d", ts.ProjectID),
 		fmt.Sprintf("APEX_SESSION_ID=%s", ts.ID),
+		fmt.Sprintf("APEX_TERMINAL_NAME=%s", ts.Name),
 	)
+
+	// Add custom environment variables
+	if ts.customEnv != nil {
+		for k, v := range ts.customEnv {
+			env = append(env, fmt.Sprintf("%s=%s", k, v))
+		}
+	}
+
+	ts.cmd.Env = env
 
 	// Start with PTY
 	ptmx, err := pty.StartWithSize(ts.cmd, &pty.Winsize{
@@ -487,8 +605,13 @@ func (h *TerminalHandler) CreateSessionHandler(c *gin.Context) {
 	}
 
 	var req struct {
-		ProjectID uint   `json:"project_id"`
-		WorkDir   string `json:"work_dir"`
+		ProjectID   uint              `json:"project_id"`
+		WorkDir     string            `json:"work_dir"`
+		Shell       string            `json:"shell"`
+		Name        string            `json:"name"`
+		Rows        uint16            `json:"rows"`
+		Cols        uint16            `json:"cols"`
+		Environment map[string]string `json:"environment"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -496,7 +619,16 @@ func (h *TerminalHandler) CreateSessionHandler(c *gin.Context) {
 		return
 	}
 
-	session, err := h.manager.CreateSession(req.ProjectID, userID.(uint), req.WorkDir)
+	session, err := h.manager.CreateSessionWithOptions(TerminalCreateOptions{
+		ProjectID:   req.ProjectID,
+		UserID:      userID.(uint),
+		WorkDir:     req.WorkDir,
+		Shell:       req.Shell,
+		Name:        req.Name,
+		Rows:        req.Rows,
+		Cols:        req.Cols,
+		Environment: req.Environment,
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -508,8 +640,23 @@ func (h *TerminalHandler) CreateSessionHandler(c *gin.Context) {
 			"session_id":  session.ID,
 			"project_id":  session.ProjectID,
 			"work_dir":    session.WorkDir,
+			"shell":       session.Shell,
+			"name":        session.Name,
+			"rows":        session.Rows,
+			"cols":        session.Cols,
 			"created_at":  session.CreatedAt,
 			"ws_endpoint": fmt.Sprintf("/ws/terminal/%s", session.ID),
+		},
+	})
+}
+
+// GetAvailableShellsHandler handles GET /api/v1/terminal/shells
+func (h *TerminalHandler) GetAvailableShellsHandler(c *gin.Context) {
+	shells := GetAvailableShells()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": map[string]interface{}{
+			"shells": shells,
 		},
 	})
 }
@@ -524,6 +671,17 @@ func (h *TerminalHandler) GetSessionHandler(c *gin.Context) {
 		return
 	}
 
+	// Get shell name from path
+	shellName := session.Shell
+	if idx := len(session.Shell) - 1; idx >= 0 {
+		for i := idx; i >= 0; i-- {
+			if session.Shell[i] == '/' {
+				shellName = session.Shell[i+1:]
+				break
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": map[string]interface{}{
@@ -532,11 +690,14 @@ func (h *TerminalHandler) GetSessionHandler(c *gin.Context) {
 			"user_id":     session.UserID,
 			"work_dir":    session.WorkDir,
 			"shell":       session.Shell,
+			"shell_name":  shellName,
+			"name":        session.Name,
 			"created_at":  session.CreatedAt,
 			"last_active": session.LastActive,
 			"is_active":   session.IsActive,
 			"rows":        session.Rows,
 			"cols":        session.Cols,
+			"ws_endpoint": fmt.Sprintf("/ws/terminal/%s", session.ID),
 		},
 	})
 }

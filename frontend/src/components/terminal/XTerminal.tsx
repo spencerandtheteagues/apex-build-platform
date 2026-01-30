@@ -19,8 +19,11 @@ export interface XTerminalProps {
   sessionId?: string;
   projectId?: number;
   workDir?: string;
+  shell?: string; // Shell to use: bash, zsh, sh, or path
+  name?: string; // Terminal name/title
   theme?: string;
   settings?: Partial<TerminalSettings>;
+  environment?: Record<string, string>;
   className?: string;
   onSessionCreate?: (session: TerminalSession) => void;
   onSessionEnd?: () => void;
@@ -49,8 +52,11 @@ export const XTerminal = forwardRef<XTerminalRef, XTerminalProps>(({
   sessionId,
   projectId,
   workDir,
+  shell,
+  name,
   theme = 'cyberpunk',
   settings: userSettings,
+  environment,
   className,
   onSessionCreate,
   onSessionEnd,
@@ -240,7 +246,13 @@ export const XTerminal = forwardRef<XTerminalRef, XTerminalProps>(({
         } else {
           // Create new session
           terminal.writeln('\x1b[36mCreating terminal session...\x1b[0m');
-          const newSession = await service.createSession(projectId, workDir);
+          const newSession = await service.createSession(projectId, workDir, {
+            shell,
+            name,
+            rows: terminal.rows,
+            cols: terminal.cols,
+            environment,
+          });
           setCurrentSession(newSession);
           onSessionCreate?.(newSession);
 
@@ -270,7 +282,7 @@ export const XTerminal = forwardRef<XTerminalRef, XTerminalProps>(({
       service.disconnect();
       serviceRef.current = null;
     };
-  }, [sessionId, projectId, workDir]);
+  }, [sessionId, projectId, workDir, shell, name, environment]);
 
   // Expose methods via ref
   useImperativeHandle(ref, () => ({

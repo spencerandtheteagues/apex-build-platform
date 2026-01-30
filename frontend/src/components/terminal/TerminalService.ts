@@ -11,6 +11,17 @@ export interface TerminalServiceCallbacks {
   onExit: (message: string) => void;
 }
 
+// Options for creating a terminal session
+export interface CreateSessionOptions {
+  projectId?: number;
+  workDir?: string;
+  shell?: string;
+  name?: string;
+  rows?: number;
+  cols?: number;
+  environment?: Record<string, string>;
+}
+
 export class TerminalService {
   private ws: WebSocket | null = null;
   private sessionId: string | null = null;
@@ -42,9 +53,15 @@ export class TerminalService {
   }
 
   // Create a new terminal session via REST API
-  async createSession(projectId?: number, workDir?: string): Promise<TerminalSession> {
+  async createSession(projectId?: number, workDir?: string, options?: Partial<CreateSessionOptions>): Promise<TerminalSession> {
     const token = localStorage.getItem('apex_access_token');
     const apiUrl = import.meta.env.VITE_API_URL || '/api/v1';
+
+    const requestBody: CreateSessionOptions = {
+      projectId: projectId || 0,
+      workDir: workDir || '',
+      ...options,
+    };
 
     const response = await fetch(`${apiUrl}/terminal/sessions`, {
       method: 'POST',
@@ -53,8 +70,13 @@ export class TerminalService {
         'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify({
-        project_id: projectId || 0,
-        work_dir: workDir || '',
+        project_id: requestBody.projectId,
+        work_dir: requestBody.workDir,
+        shell: requestBody.shell || '',
+        name: requestBody.name || '',
+        rows: requestBody.rows || 24,
+        cols: requestBody.cols || 80,
+        environment: requestBody.environment || {},
       }),
     });
 
@@ -66,16 +88,45 @@ export class TerminalService {
     const result = await response.json();
     return {
       id: result.data.session_id,
-      name: `Terminal`,
+      name: result.data.name || 'Terminal',
       projectId: result.data.project_id,
       workDir: result.data.work_dir,
-      shell: 'bash',
+      shell: result.data.shell || 'bash',
       status: 'connected',
       createdAt: result.data.created_at,
       lastActive: new Date().toISOString(),
-      rows: 24,
-      cols: 80,
+      rows: result.data.rows || 24,
+      cols: result.data.cols || 80,
     };
+  }
+
+  // Get available shells
+  async getAvailableShells(): Promise<Array<{ name: string; path: string }>> {
+    const token = localStorage.getItem('apex_access_token');
+    const apiUrl = import.meta.env.VITE_API_URL || '/api/v1';
+
+    try {
+      const response = await fetch(`${apiUrl}/terminal/shells`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        return [
+          { name: 'bash', path: '/bin/bash' },
+          { name: 'sh', path: '/bin/sh' },
+        ];
+      }
+
+      const result = await response.json();
+      return result.data?.shells || [];
+    } catch {
+      return [
+        { name: 'bash', path: '/bin/bash' },
+        { name: 'sh', path: '/bin/sh' },
+      ];
+    }
   }
 
   // Connect to terminal WebSocket

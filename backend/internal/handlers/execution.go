@@ -725,6 +725,12 @@ func (h *ExecutionHandler) GetTerminalHistory(c *gin.Context) {
 	handler.GetHistoryHandler(c)
 }
 
+// GetAvailableShells handles GET /api/v1/terminal/shells
+func (h *ExecutionHandler) GetAvailableShells(c *gin.Context) {
+	handler := execution.NewTerminalHandler(h.TerminalManager)
+	handler.GetAvailableShellsHandler(c)
+}
+
 // HandleTerminalWebSocket handles WebSocket /ws/terminal/:sessionId
 func (h *ExecutionHandler) HandleTerminalWebSocket(c *gin.Context) {
 	handler := execution.NewTerminalHandler(h.TerminalManager)

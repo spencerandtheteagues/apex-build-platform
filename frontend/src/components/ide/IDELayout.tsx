@@ -31,6 +31,7 @@ import { FileTree } from '@/components/explorer/FileTree'
 import { ProjectDashboard } from '@/components/project/ProjectDashboard'
 import { ProjectList } from '@/components/project/ProjectList'
 import { MobileNavigation, MobilePanelSwitcher } from '@/components/mobile'
+import { CodeComments } from '@/components/ide/CodeComments'
 
 // Lazy load heavy components for better initial load performance
 // Monaco Editor is ~800KB-1.2MB, XTerminal is ~200KB
@@ -65,6 +66,8 @@ import {
   PanelRightClose,
   PanelBottomClose,
   Database,
+  Bot,
+  MessageSquare,
 } from 'lucide-react'
 
 // Loading fallback for lazy-loaded components
@@ -88,13 +91,14 @@ const TerminalLoadingFallback = () => (
 
 export interface IDELayoutProps {
   className?: string
+  onNavigateToAgent?: () => void
 }
 
 type ViewMode = 'projects' | 'dashboard' | 'editor'
 type PanelState = 'collapsed' | 'normal' | 'expanded'
 type MobilePanel = 'explorer' | 'editor' | 'terminal' | 'ai' | 'settings'
 
-export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
+export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAgent }) => {
   // Responsive hooks
   const isMobile = useIsMobile()
   const isTablet = useIsTablet()
@@ -110,7 +114,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
   const [rightPanelState, setRightPanelState] = useState<PanelState>(isMobile ? 'collapsed' : 'normal')
   const [bottomPanelState, setBottomPanelState] = useState<PanelState>('collapsed')
   const [activeLeftTab, setActiveLeftTab] = useState<'explorer' | 'search' | 'git'>('explorer')
-  const [activeRightTab, setActiveRightTab] = useState<'ai' | 'collab' | 'database' | 'settings'>('ai')
+  const [activeRightTab, setActiveRightTab] = useState<'ai' | 'comments' | 'collab' | 'database' | 'settings'>('ai')
   const [activeBottomTab, setActiveBottomTab] = useState<'terminal' | 'output' | 'problems'>('terminal')
 
   // Mobile-specific state
@@ -454,6 +458,30 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
             }}
             className="h-full border-0"
           />
+        )
+      case 'comments':
+        return activeFile && currentProject && user ? (
+          <CodeComments
+            file={activeFile}
+            projectId={currentProject.id}
+            currentUserId={user.id}
+            currentUsername={user.username}
+            onCommentClick={(line) => {
+              const editor = editorRef.current
+              if (editor) {
+                editor.revealLineInCenter(line)
+                editor.setPosition({ lineNumber: line, column: 1 })
+              }
+            }}
+            className="h-full border-0"
+          />
+        ) : (
+          <Card variant="cyberpunk" padding="md" className="h-full border-0">
+            <div className="text-center text-gray-400">
+              <MessageSquare className="w-8 h-8 mx-auto mb-2" />
+              <p className="text-sm">Select a file to view comments</p>
+            </div>
+          </Card>
         )
       case 'collab':
         return (
@@ -975,6 +1003,15 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
                 </Button>
                 <Button
                   size="xs"
+                  variant={activeRightTab === 'comments' ? 'primary' : 'ghost'}
+                  onClick={() => setActiveRightTab('comments')}
+                  icon={<MessageSquare size={14} />}
+                  className="rounded-none border-0 touch-target"
+                >
+                  {rightPanelState !== 'collapsed' && 'Comments'}
+                </Button>
+                <Button
+                  size="xs"
                   variant={activeRightTab === 'collab' ? 'primary' : 'ghost'}
                   onClick={() => setActiveRightTab('collab')}
                   icon={<Users size={14} />}
@@ -1024,6 +1061,19 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
           />
         </div>
       </div>
+
+      {/* Floating AI Agent Button */}
+      {onNavigateToAgent && (
+        <button
+          onClick={onNavigateToAgent}
+          className="fixed bottom-20 right-6 w-14 h-14 bg-gradient-to-br from-cyan-500 to-purple-600 rounded-full shadow-lg shadow-cyan-500/30 hover:shadow-cyan-500/50 flex items-center justify-center transition-all hover:scale-110 active:scale-95 z-50 group"
+          title="Open AI Agent"
+        >
+          <Bot className="w-6 h-6 text-white" />
+          <span className="absolute -top-1 -right-1 w-4 h-4 bg-green-400 rounded-full border-2 border-gray-950 animate-pulse" />
+          <span className="absolute inset-0 rounded-full bg-cyan-400/20 animate-ping" />
+        </button>
+      )}
     </div>
   )
 }

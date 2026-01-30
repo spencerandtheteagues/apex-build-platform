@@ -5,7 +5,7 @@
 import React, { useState, Suspense, lazy, memo } from 'react'
 import { useUser, useIsAuthenticated, useIsLoading, useLogin, useRegister } from './hooks/useStore'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input } from './components/ui'
-import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, Globe, Building, Github } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, Globe, Building, Github, Bot } from 'lucide-react'
 import { APEXParticleBackground } from './components/apex/ApexComponents'
 import './styles/globals.css'
 
@@ -16,8 +16,9 @@ const AdminDashboard = lazy(() => import('./components/admin/AdminDashboard').th
 const ExplorePage = lazy(() => import('./pages/Explore').then(m => ({ default: m.ExplorePage })))
 const OrganizationSettings = lazy(() => import('./components/enterprise/OrganizationSettings').then(m => ({ default: m.OrganizationSettings })))
 const GitHubImportWizard = lazy(() => import('./components/import/GitHubImportWizard').then(m => ({ default: m.GitHubImportWizard })))
+const AgentPanel = lazy(() => import('./components/agent/AgentPanel').then(m => ({ default: m.AgentPanel })))
 
-type AppView = 'builder' | 'ide' | 'admin' | 'explore' | 'enterprise' | 'import'
+type AppView = 'builder' | 'ide' | 'admin' | 'explore' | 'enterprise' | 'import' | 'agent'
 
 // Loading fallback component
 const ViewLoadingFallback = memo(() => (
@@ -274,6 +275,17 @@ const Navigation = memo<NavigationProps>(({ currentView, user, onViewChange }) =
         <span className="text-sm font-medium">Import</span>
       </button>
       <button
+        onClick={() => onViewChange('agent')}
+        className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
+          currentView === 'agent'
+            ? 'bg-gradient-to-r from-cyan-900/20 to-purple-900/20 text-cyan-400 border border-cyan-500/30 shadow-sm shadow-cyan-500/20'
+            : 'text-gray-400 hover:text-white hover:bg-gray-800'
+        }`}
+      >
+        <Bot className="w-4 h-4" />
+        <span className="text-sm font-medium">AI Agent</span>
+      </button>
+      <button
         onClick={() => onViewChange('ide')}
         className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
           currentView === 'ide'
@@ -476,7 +488,7 @@ function App() {
         </div>
         <div className={`absolute inset-0 ${currentView === 'ide' ? 'block' : 'hidden'}`}>
           <Suspense fallback={<ViewLoadingFallback />}>
-            <IDELayout />
+            <IDELayout onNavigateToAgent={() => setCurrentView('agent')} />
           </Suspense>
         </div>
         <div className={`absolute inset-0 ${currentView === 'admin' ? 'block' : 'hidden'}`}>
@@ -487,6 +499,11 @@ function App() {
         <div className={`absolute inset-0 ${currentView === 'import' ? 'block' : 'hidden'}`}>
           <Suspense fallback={<ViewLoadingFallback />}>
             <GitHubImportWizard />
+          </Suspense>
+        </div>
+        <div className={`absolute inset-0 ${currentView === 'agent' ? 'block' : 'hidden'}`}>
+          <Suspense fallback={<ViewLoadingFallback />}>
+            <AgentPanel onNavigateToIDE={() => setCurrentView('ide')} />
           </Suspense>
         </div>
       </div>
