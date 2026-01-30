@@ -169,9 +169,12 @@ const InlineAppBuilder: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             break;
 
           case 'build:error':
+            addMessage('system', `❌ Build error: ${msg.data?.error || 'Unknown error'}`);
+            if (msg.data?.recoverable) {
+              break;
+            }
             setIsBuilding(false);
             setError(msg.data?.error || 'Build failed');
-            addMessage('system', `❌ Build error: ${msg.data?.error || 'Unknown error'}`);
             break;
 
           case 'file:created':

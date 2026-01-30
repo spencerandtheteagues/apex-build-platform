@@ -1054,6 +1054,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
       case 'build:error':
         addSystemMessage(`Build Error: ${data.error || 'Unknown error'}${data.details ? ` - ${data.details}` : ''}`)
+        if (data.recoverable) {
+          break
+        }
         setIsBuilding(false)
         setBuildState(prev => prev ? { ...prev, status: 'failed' } : null)
         break
