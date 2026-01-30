@@ -1201,7 +1201,6 @@ For example:
             </div>
           </div>
         )}
-      </div>
     </div>
   )
 }

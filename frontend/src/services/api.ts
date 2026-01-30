@@ -629,8 +629,8 @@ export class ApiService {
     await this.client.delete(`/projects/${projectId}/comments/${commentId}`)
   }
 
-  // User profiles
-  async getUserProfile(username: string): Promise<{ profile: UserPublicProfile }> {
+  // Public user profiles
+  async getPublicUserProfile(username: string): Promise<{ profile: UserPublicProfile }> {
     const response = await this.client.get(`/users/${username}`)
     return response.data
   }
