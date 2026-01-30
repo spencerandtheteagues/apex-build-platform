@@ -35,6 +35,13 @@ const getApiUrl = (): string => {
   if (import.meta.env.VITE_API_URL) {
     return import.meta.env.VITE_API_URL
   }
+
+  // Production detection - if running on Render or production domain
+  const hostname = typeof window !== 'undefined' ? window.location.hostname : ''
+  if (hostname.includes('onrender.com') || hostname.includes('apex.build') || hostname === 'apex-frontend-gigq.onrender.com') {
+    return 'https://apex-backend-5ypy.onrender.com/api/v1'
+  }
+
   // Fallback to relative URL for development
   return '/api/v1'
 }

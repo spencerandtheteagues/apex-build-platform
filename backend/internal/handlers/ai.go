@@ -481,3 +481,356 @@ func getNextMonthStart() time.Time {
 	// Use AddDate to properly handle month overflow (December -> January)
 	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).AddDate(0, 1, 0)
 }
+
+// CodeReviewRequest represents a request for AI-powered code review
+type CodeReviewRequest struct {
+	Code               string `json:"code" binding:"required"`
+	Language           string `json:"language,omitempty"`
+	Context            string `json:"context,omitempty"`
+	FileName           string `json:"file_name,omitempty"`
+	CheckBugs          *bool  `json:"check_bugs,omitempty"`
+	CheckSecurity      *bool  `json:"check_security,omitempty"`
+	CheckPerformance   *bool  `json:"check_performance,omitempty"`
+	CheckStyle         *bool  `json:"check_style,omitempty"`
+	CheckBestPractices *bool  `json:"check_best_practices,omitempty"`
+}
+
+// ReviewCode handles AI-powered code review requests
+func (h *Handler) ReviewCode(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, StandardResponse{
+			Success: false,
+			Error:   "User not authenticated",
+			Code:    "NOT_AUTHENTICATED",
+		})
+		return
+	}
+
+	var req CodeReviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, StandardResponse{
+			Success: false,
+			Error:   "Invalid request format. Code is required.",
+			Code:    "INVALID_REQUEST",
+		})
+		return
+	}
+
+	// Validate code length
+	if len(req.Code) > ai.MaxCodeLength {
+		c.JSON(http.StatusBadRequest, StandardResponse{
+			Success: false,
+			Error:   "Code exceeds maximum length of 50,000 characters",
+			Code:    "CODE_TOO_LONG",
+		})
+		return
+	}
+
+	if strings.TrimSpace(req.Code) == "" {
+		c.JSON(http.StatusBadRequest, StandardResponse{
+			Success: false,
+			Error:   "Code cannot be empty",
+			Code:    "EMPTY_CODE",
+		})
+		return
+	}
+
+	// Check if user has reached usage limits
+	var user models.User
+	if err := h.DB.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, StandardResponse{
+			Success: false,
+			Error:   "Failed to fetch user information",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	// Check monthly limits based on subscription
+	monthlyLimit := getUserMonthlyLimit(user.SubscriptionType)
+	if user.MonthlyAIRequests >= monthlyLimit {
+		c.JSON(http.StatusTooManyRequests, StandardResponse{
+			Success: false,
+			Error:   "Monthly AI usage limit exceeded. Upgrade your subscription for more requests.",
+			Code:    "USAGE_LIMIT_EXCEEDED",
+			Data: map[string]interface{}{
+				"current_usage": user.MonthlyAIRequests,
+				"monthly_limit": monthlyLimit,
+				"subscription":  user.SubscriptionType,
+			},
+		})
+		return
+	}
+
+	// Build the review prompt for AI
+	prompt := buildCodeReviewPrompt(req)
+
+	// Create AI request
+	aiReq := &ai.AIRequest{
+		ID:          uuid.New().String(),
+		Capability:  ai.CapabilityCodeReview,
+		Prompt:      prompt,
+		Code:        req.Code,
+		Language:    req.Language,
+		UserID:      strconv.Itoa(int(userID)),
+		CreatedAt:   time.Now(),
+		MaxTokens:   4000,
+		Temperature: 0.3, // Lower temperature for consistent analysis
+	}
+
+	// Make AI request with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	startTime := time.Now()
+	aiResp, err := h.AIRouter.Generate(ctx, aiReq)
+	duration := time.Since(startTime)
+
+	if err != nil {
+		// Log the failed request
+		h.logAIRequest(userID, aiReq, nil, err, duration)
+
+		errorMsg := "Code review failed. Please try again."
+		errorCode := "CODE_REVIEW_FAILED"
+
+		errStr := err.Error()
+		if containsIgnoreCase(errStr, "rate limit") || containsIgnoreCase(errStr, "429") {
+			errorMsg = "AI service is currently busy. Please try again in a moment."
+			errorCode = "RATE_LIMITED"
+		} else if containsIgnoreCase(errStr, "timeout") || containsIgnoreCase(errStr, "deadline") {
+			errorMsg = "Request timed out. Please try with a smaller code snippet."
+			errorCode = "TIMEOUT"
+		}
+
+		c.JSON(http.StatusInternalServerError, StandardResponse{
+			Success: false,
+			Error:   errorMsg,
+			Code:    errorCode,
+		})
+		return
+	}
+
+	// Log the successful request
+	h.logAIRequest(userID, aiReq, aiResp, nil, duration)
+
+	// Update user usage statistics
+	h.updateUserUsage(userID, aiResp.Usage)
+
+	// Parse the AI response into structured findings
+	findings, summary, score := parseCodeReviewResponse(aiResp.Content, req.Code)
+
+	// Calculate statistics
+	stats := calculateReviewStats(findings)
+
+	c.JSON(http.StatusOK, StandardResponse{
+		Success: true,
+		Data: map[string]interface{}{
+			"findings": findings,
+			"summary":  summary,
+			"score":    score,
+			"stats":    stats,
+			"duration": duration.Milliseconds(),
+			"provider": aiResp.Provider,
+		},
+		Message: "Code review completed successfully",
+	})
+}
+
+// ReviewFinding represents a single finding from the code review
+type ReviewFinding struct {
+	Type       string `json:"type"`
+	Severity   string `json:"severity"`
+	Line       int    `json:"line"`
+	EndLine    int    `json:"end_line,omitempty"`
+	Column     int    `json:"column,omitempty"`
+	EndColumn  int    `json:"end_column,omitempty"`
+	Message    string `json:"message"`
+	Suggestion string `json:"suggestion,omitempty"`
+	Code       string `json:"code,omitempty"`
+	RuleID     string `json:"rule_id,omitempty"`
+}
+
+// ReviewStats provides statistics about the review findings
+type ReviewStats struct {
+	TotalFindings int            `json:"total_findings"`
+	Errors        int            `json:"errors"`
+	Warnings      int            `json:"warnings"`
+	Info          int            `json:"info"`
+	ByType        map[string]int `json:"by_type"`
+}
+
+// buildCodeReviewPrompt constructs the prompt for the AI code review
+func buildCodeReviewPrompt(req CodeReviewRequest) string {
+	var sb strings.Builder
+
+	language := req.Language
+	if language == "" {
+		language = "code"
+	}
+
+	sb.WriteString("You are an expert code reviewer. Analyze the following ")
+	sb.WriteString(language)
+	sb.WriteString(" code and identify issues.\n\n")
+
+	sb.WriteString("Review the code for:\n")
+
+	// Default to checking all if none specified
+	checkAll := (req.CheckBugs == nil || !*req.CheckBugs) &&
+		(req.CheckSecurity == nil || !*req.CheckSecurity) &&
+		(req.CheckPerformance == nil || !*req.CheckPerformance) &&
+		(req.CheckStyle == nil || !*req.CheckStyle) &&
+		(req.CheckBestPractices == nil || !*req.CheckBestPractices)
+
+	if checkAll || (req.CheckBugs != nil && *req.CheckBugs) {
+		sb.WriteString("- BUGS: Logic errors, null/undefined references, off-by-one errors, race conditions\n")
+	}
+	if checkAll || (req.CheckSecurity != nil && *req.CheckSecurity) {
+		sb.WriteString("- SECURITY: SQL injection, XSS, CSRF, insecure data handling, hardcoded secrets\n")
+	}
+	if checkAll || (req.CheckPerformance != nil && *req.CheckPerformance) {
+		sb.WriteString("- PERFORMANCE: Inefficient algorithms, memory leaks, unnecessary computations, N+1 queries\n")
+	}
+	if checkAll || (req.CheckStyle != nil && *req.CheckStyle) {
+		sb.WriteString("- STYLE: Code formatting, naming conventions, readability issues\n")
+	}
+	if checkAll || (req.CheckBestPractices != nil && *req.CheckBestPractices) {
+		sb.WriteString("- BEST PRACTICES: Design patterns, error handling, code organization, maintainability\n")
+	}
+
+	if req.Context != "" {
+		sb.WriteString("\nContext (surrounding code):\n```\n")
+		sb.WriteString(req.Context)
+		sb.WriteString("\n```\n")
+	}
+
+	sb.WriteString("\nCode to review:\n```")
+	sb.WriteString(language)
+	sb.WriteString("\n")
+	sb.WriteString(req.Code)
+	sb.WriteString("\n```\n\n")
+
+	sb.WriteString(`Respond in the following JSON format ONLY (no markdown, no explanation outside JSON):
+{
+  "findings": [
+    {
+      "type": "bug|security|performance|style|best_practice|deprecation|complexity",
+      "severity": "error|warning|info",
+      "line": <line_number>,
+      "end_line": <end_line_number_or_same_as_line>,
+      "message": "<clear description of the issue>",
+      "suggestion": "<how to fix it with code example if applicable>",
+      "code": "<the problematic code snippet>"
+    }
+  ],
+  "summary": "<1-2 sentence overall assessment>",
+  "score": <0-100 quality score>
+}
+
+Important:
+- Line numbers must be accurate based on the code provided (1-indexed)
+- Only include real issues, not stylistic preferences unless they affect readability
+- Severity: error = must fix, warning = should fix, info = consider fixing
+- Be specific in messages and suggestions
+- Include code examples in suggestions when helpful`)
+
+	return sb.String()
+}
+
+// parseCodeReviewResponse parses the AI response into structured findings
+func parseCodeReviewResponse(content string, originalCode string) ([]ReviewFinding, string, int) {
+	content = strings.TrimSpace(content)
+
+	// Remove markdown code blocks if present
+	content = strings.TrimPrefix(content, "```json")
+	content = strings.TrimPrefix(content, "```")
+	content = strings.TrimSuffix(content, "```")
+	content = strings.TrimSpace(content)
+
+	// Parse the JSON response
+	var response struct {
+		Findings []ReviewFinding `json:"findings"`
+		Summary  string          `json:"summary"`
+		Score    int             `json:"score"`
+	}
+
+	if err := json.Unmarshal([]byte(content), &response); err != nil {
+		// Return empty findings if parsing fails
+		return []ReviewFinding{}, "Code review completed but response could not be parsed.", 70
+	}
+
+	// Validate and normalize findings
+	codeLines := strings.Split(originalCode, "\n")
+	maxLine := len(codeLines)
+
+	validFindings := make([]ReviewFinding, 0, len(response.Findings))
+	for _, f := range response.Findings {
+		// Validate line numbers
+		if f.Line < 1 {
+			f.Line = 1
+		}
+		if f.Line > maxLine {
+			f.Line = maxLine
+		}
+		if f.EndLine < f.Line {
+			f.EndLine = f.Line
+		}
+		if f.EndLine > maxLine {
+			f.EndLine = maxLine
+		}
+
+		// Validate severity
+		if f.Severity == "" {
+			f.Severity = "warning"
+		}
+
+		// Validate type
+		if f.Type == "" {
+			f.Type = "best_practice"
+		}
+
+		validFindings = append(validFindings, f)
+	}
+
+	// Validate score
+	score := response.Score
+	if score < 0 {
+		score = 0
+	}
+	if score > 100 {
+		score = 100
+	}
+
+	summary := response.Summary
+	if summary == "" {
+		if len(validFindings) == 0 {
+			summary = "No issues found. The code looks good!"
+		} else {
+			summary = "Found " + strconv.Itoa(len(validFindings)) + " issues in the code."
+		}
+	}
+
+	return validFindings, summary, score
+}
+
+// calculateReviewStats calculates statistics from the findings
+func calculateReviewStats(findings []ReviewFinding) ReviewStats {
+	stats := ReviewStats{
+		TotalFindings: len(findings),
+		ByType:        make(map[string]int),
+	}
+
+	for _, f := range findings {
+		switch f.Severity {
+		case "error":
+			stats.Errors++
+		case "warning":
+			stats.Warnings++
+		case "info":
+			stats.Info++
+		}
+		stats.ByType[f.Type]++
+	}
+
+	return stats
+}

@@ -386,3 +386,37 @@ type UserCollabRoom struct {
 	Role        string    `json:"role" gorm:"default:'member'"` // owner, admin, member, viewer
 	IsActive    bool      `json:"is_active" gorm:"default:true"`
 }
+
+// RefreshToken stores refresh tokens for secure token rotation
+// Each refresh token can only be used once (rotation) and is stored for revocation
+type RefreshToken struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	// Token identification
+	Token     string    `json:"-" gorm:"uniqueIndex;not null;size:512"` // The hashed refresh token
+	TokenHash string    `json:"-" gorm:"uniqueIndex;not null;size:64"`  // SHA-256 hash for lookup
+	UserID    uint      `json:"user_id" gorm:"not null;index"`
+	User      *User     `json:"user,omitempty" gorm:"foreignKey:UserID"`
+
+	// Token metadata
+	ExpiresAt time.Time `json:"expires_at" gorm:"not null;index"`
+	IssuedAt  time.Time `json:"issued_at" gorm:"not null"`
+
+	// Token state for rotation
+	Used      bool       `json:"used" gorm:"default:false;index"`       // Token has been used (rotated)
+	UsedAt    *time.Time `json:"used_at"`                               // When the token was used
+	Revoked   bool       `json:"revoked" gorm:"default:false;index"`    // Token has been revoked (logout/security)
+	RevokedAt *time.Time `json:"revoked_at"`                            // When the token was revoked
+
+	// Security tracking
+	IPAddress string `json:"ip_address"`                               // IP address that created this token
+	UserAgent string `json:"user_agent"`                               // User agent that created this token
+	DeviceID  string `json:"device_id" gorm:"index"`                   // Optional device identifier
+
+	// Token family for detecting token reuse attacks
+	// If a used token is presented again, we revoke the entire family
+	FamilyID  string `json:"family_id" gorm:"index;not null;size:36"`  // UUID linking related tokens
+}

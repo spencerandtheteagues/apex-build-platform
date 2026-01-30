@@ -71,6 +71,23 @@ export class WebSocketService {
     })
   }
 
+  // Get WebSocket URL for current environment
+  private getWsUrl(): string {
+    // Check for Vite environment variable
+    if (import.meta.env.VITE_WS_URL) {
+      return import.meta.env.VITE_WS_URL
+    }
+
+    // Production detection - if running on Render or production domain
+    const hostname = typeof window !== 'undefined' ? window.location.hostname : ''
+    if (hostname.includes('onrender.com') || hostname.includes('apex.build') || hostname === 'apex-frontend-gigq.onrender.com') {
+      return 'wss://apex-backend-5ypy.onrender.com'
+    }
+
+    // Fallback for local development
+    return ''
+  }
+
   // Connect to WebSocket server
   async connect(token: string): Promise<void> {
     if (this.socket?.connected || this.isConnecting) {
@@ -78,9 +95,10 @@ export class WebSocketService {
     }
 
     this.isConnecting = true
+    const wsUrl = this.getWsUrl()
 
     try {
-      this.socket = io('/ws', {
+      this.socket = io(wsUrl ? `${wsUrl}/ws` : '/ws', {
         auth: {
           token,
         },

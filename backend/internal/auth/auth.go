@@ -1,6 +1,10 @@
 package auth
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
@@ -10,15 +14,21 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 var (
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrTokenExpired       = errors.New("token expired")
-	ErrInvalidToken       = errors.New("invalid token")
-	ErrTokenBlacklisted   = errors.New("token has been revoked")
-	ErrUserNotFound       = errors.New("user not found")
-	ErrUserExists         = errors.New("user already exists")
+	ErrInvalidCredentials   = errors.New("invalid credentials")
+	ErrTokenExpired         = errors.New("token expired")
+	ErrInvalidToken         = errors.New("invalid token")
+	ErrTokenBlacklisted     = errors.New("token has been revoked")
+	ErrUserNotFound         = errors.New("user not found")
+	ErrUserExists           = errors.New("user already exists")
+	ErrRefreshTokenUsed     = errors.New("refresh token has already been used")
+	ErrRefreshTokenRevoked  = errors.New("refresh token has been revoked")
+	ErrRefreshTokenExpired  = errors.New("refresh token has expired")
+	ErrRefreshTokenNotFound = errors.New("refresh token not found")
+	ErrTokenFamilyCompromised = errors.New("token family compromised - possible token reuse attack")
 )
 
 // TokenBlacklist manages revoked tokens with automatic TTL-based cleanup
@@ -92,9 +102,11 @@ type AuthService struct {
 	passwordService *PasswordService
 	oauthService    *OAuthService
 	jwtSecret       []byte
+	refreshSecret   []byte
 	tokenExpiry     time.Duration
 	refreshExpiry   time.Duration
 	bcryptCost      int
+	db              *gorm.DB
 }
 
 // JWTClaims represents the JWT token claims
@@ -108,10 +120,19 @@ type JWTClaims struct {
 
 // TokenPair represents access and refresh tokens
 type TokenPair struct {
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	TokenType    string    `json:"token_type"`
+	AccessToken           string    `json:"access_token"`
+	RefreshToken          string    `json:"refresh_token,omitempty"` // Omit if using cookies
+	AccessTokenExpiresAt  time.Time `json:"access_token_expires_at"`
+	RefreshTokenExpiresAt time.Time `json:"refresh_token_expires_at,omitempty"`
+	TokenType             string    `json:"token_type"`
+}
+
+// RefreshTokenMetadata contains metadata for refresh token creation
+type RefreshTokenMetadata struct {
+	IPAddress string
+	UserAgent string
+	DeviceID  string
+	FamilyID  string // Empty for new family, set to reuse existing family
 }
 
 // LoginRequest represents a login request
@@ -140,10 +161,22 @@ func NewAuthService(jwtSecret string) *AuthService {
 		passwordService: NewPasswordService(),
 		oauthService:    NewOAuthService(),
 		jwtSecret:       []byte(jwtSecret),
+		refreshSecret:   []byte(refreshSecret),
 		tokenExpiry:     15 * time.Minute,   // Short-lived access tokens
 		refreshExpiry:   7 * 24 * time.Hour, // 7 day refresh tokens
 		bcryptCost:      12,                 // Strong bcrypt cost (legacy fallback)
+		db:              nil,                // Set via SetDB for database-backed refresh tokens
 	}
+}
+
+// SetDB sets the database connection for refresh token storage
+func (a *AuthService) SetDB(db *gorm.DB) {
+	a.db = db
+}
+
+// GetDB returns the database connection
+func (a *AuthService) GetDB() *gorm.DB {
+	return a.db
 }
 
 // HashPassword hashes a password using bcrypt
@@ -165,9 +198,17 @@ func (a *AuthService) CheckPassword(password, hash string) error {
 }
 
 // GenerateTokens generates access and refresh tokens for a user
+// This is the simple version that doesn't store refresh tokens in the database
 func (a *AuthService) GenerateTokens(user *models.User) (*TokenPair, error) {
+	return a.GenerateTokensWithMetadata(user, nil)
+}
+
+// GenerateTokensWithMetadata generates access and refresh tokens with optional metadata
+// If metadata is provided and database is configured, refresh tokens are stored for rotation
+func (a *AuthService) GenerateTokensWithMetadata(user *models.User, metadata *RefreshTokenMetadata) (*TokenPair, error) {
 	now := time.Now()
-	expiresAt := now.Add(a.tokenExpiry)
+	accessExpiresAt := now.Add(a.tokenExpiry)
+	refreshExpiresAt := now.Add(a.refreshExpiry)
 
 	// Create access token claims
 	accessClaims := &JWTClaims{
@@ -176,7 +217,7 @@ func (a *AuthService) GenerateTokens(user *models.User) (*TokenPair, error) {
 		Email:    user.Email,
 		Role:     a.getUserRole(user),
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			ExpiresAt: jwt.NewNumericDate(accessExpiresAt),
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),
 			Issuer:    "apex-build",
@@ -185,42 +226,80 @@ func (a *AuthService) GenerateTokens(user *models.User) (*TokenPair, error) {
 		},
 	}
 
-	// Create refresh token claims
-	refreshClaims := &JWTClaims{
-		UserID:   user.ID,
-		Username: user.Username,
-		Email:    user.Email,
-		Role:     a.getUserRole(user),
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(now.Add(a.refreshExpiry)),
-			IssuedAt:  jwt.NewNumericDate(now),
-			NotBefore: jwt.NewNumericDate(now),
-			Issuer:    "apex-build",
-			Subject:   fmt.Sprintf("user:%d", user.ID),
-			ID:        fmt.Sprintf("refresh:%d:%d", user.ID, now.Unix()),
-		},
-	}
-
-	// Generate tokens
+	// Generate access token
 	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
-	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
-
 	accessTokenString, err := accessToken.SignedString(a.jwtSecret)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign access token: %w", err)
 	}
 
-	refreshTokenString, err := refreshToken.SignedString(a.jwtSecret)
+	// Generate refresh token - use secure random bytes for better security
+	refreshTokenString, err := a.generateSecureRefreshToken()
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign refresh token: %w", err)
+		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
+	}
+
+	// If database is configured, store refresh token for rotation
+	if a.db != nil {
+		familyID := generateUUID()
+		if metadata != nil && metadata.FamilyID != "" {
+			familyID = metadata.FamilyID
+		}
+
+		tokenHash := hashToken(refreshTokenString)
+
+		refreshTokenRecord := &models.RefreshToken{
+			Token:     refreshTokenString, // Store the actual token (could be hashed if needed)
+			TokenHash: tokenHash,
+			UserID:    user.ID,
+			ExpiresAt: refreshExpiresAt,
+			IssuedAt:  now,
+			Used:      false,
+			Revoked:   false,
+			FamilyID:  familyID,
+		}
+
+		if metadata != nil {
+			refreshTokenRecord.IPAddress = metadata.IPAddress
+			refreshTokenRecord.UserAgent = metadata.UserAgent
+			refreshTokenRecord.DeviceID = metadata.DeviceID
+		}
+
+		if err := a.db.Create(refreshTokenRecord).Error; err != nil {
+			return nil, fmt.Errorf("failed to store refresh token: %w", err)
+		}
 	}
 
 	return &TokenPair{
-		AccessToken:  accessTokenString,
-		RefreshToken: refreshTokenString,
-		ExpiresAt:    expiresAt,
-		TokenType:    "Bearer",
+		AccessToken:           accessTokenString,
+		RefreshToken:          refreshTokenString,
+		AccessTokenExpiresAt:  accessExpiresAt,
+		RefreshTokenExpiresAt: refreshExpiresAt,
+		TokenType:             "Bearer",
 	}, nil
+}
+
+// generateSecureRefreshToken generates a cryptographically secure refresh token
+func (a *AuthService) generateSecureRefreshToken() (string, error) {
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(bytes), nil
+}
+
+// hashToken creates a SHA-256 hash of a token for secure storage and lookup
+func hashToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
+}
+
+// generateUUID generates a simple UUID for token family tracking
+func generateUUID() string {
+	bytes := make([]byte, 16)
+	rand.Read(bytes)
+	return fmt.Sprintf("%x-%x-%x-%x-%x",
+		bytes[0:4], bytes[4:6], bytes[6:8], bytes[8:10], bytes[10:16])
 }
 
 // ValidateToken validates and parses a JWT token
@@ -284,15 +363,21 @@ func (a *AuthService) BlacklistToken(tokenString string) error {
 	return nil
 }
 
-// RefreshTokens generates new tokens using a refresh token
+// RefreshTokens generates new tokens using a refresh token (legacy JWT-based)
 func (a *AuthService) RefreshTokens(refreshToken string, user *models.User) (*TokenPair, error) {
+	// First try database-backed rotation if available
+	if a.db != nil {
+		return a.RotateRefreshToken(refreshToken, nil)
+	}
+
+	// Fall back to JWT-based refresh tokens
 	claims, err := a.ValidateToken(refreshToken)
 	if err != nil {
 		return nil, fmt.Errorf("invalid refresh token: %w", err)
 	}
 
 	// Verify that this is actually a refresh token
-	if claims.ID == "" || claims.ID[:7] != "refresh" {
+	if claims.ID == "" || len(claims.ID) < 7 || claims.ID[:7] != "refresh" {
 		return nil, ErrInvalidToken
 	}
 
@@ -303,6 +388,230 @@ func (a *AuthService) RefreshTokens(refreshToken string, user *models.User) (*To
 
 	// Generate new token pair
 	return a.GenerateTokens(user)
+}
+
+// RotateRefreshToken validates a refresh token, marks it as used, and issues new tokens
+// This implements secure token rotation - each refresh token can only be used once
+func (a *AuthService) RotateRefreshToken(refreshToken string, metadata *RefreshTokenMetadata) (*TokenPair, error) {
+	if a.db == nil {
+		return nil, errors.New("database not configured for refresh token rotation")
+	}
+
+	tokenHash := hashToken(refreshToken)
+
+	// Find the refresh token in database
+	var storedToken models.RefreshToken
+	err := a.db.Where("token_hash = ?", tokenHash).First(&storedToken).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrRefreshTokenNotFound
+		}
+		return nil, fmt.Errorf("failed to lookup refresh token: %w", err)
+	}
+
+	// Check if token has been revoked
+	if storedToken.Revoked {
+		return nil, ErrRefreshTokenRevoked
+	}
+
+	// Check if token has expired
+	if time.Now().After(storedToken.ExpiresAt) {
+		return nil, ErrRefreshTokenExpired
+	}
+
+	// CRITICAL: Check if token has already been used (token reuse attack detection)
+	if storedToken.Used {
+		// Token reuse detected! This could indicate a token theft
+		// Revoke the entire token family to protect the user
+		if err := a.RevokeTokenFamily(storedToken.FamilyID); err != nil {
+			// Log the error but continue with the security response
+			fmt.Printf("Failed to revoke token family %s: %v\n", storedToken.FamilyID, err)
+		}
+		return nil, ErrTokenFamilyCompromised
+	}
+
+	// Get the user
+	var user models.User
+	if err := a.db.First(&user, storedToken.UserID).Error; err != nil {
+		return nil, ErrUserNotFound
+	}
+
+	// Check if user is still active
+	if !user.IsActive {
+		return nil, errors.New("user account is disabled")
+	}
+
+	// Mark the current token as used (atomically to prevent race conditions)
+	now := time.Now()
+	result := a.db.Model(&models.RefreshToken{}).
+		Where("id = ? AND used = ?", storedToken.ID, false).
+		Updates(map[string]interface{}{
+			"used":    true,
+			"used_at": now,
+		})
+
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to mark token as used: %w", result.Error)
+	}
+
+	// If no rows were updated, another request beat us to it
+	if result.RowsAffected == 0 {
+		return nil, ErrRefreshTokenUsed
+	}
+
+	// Generate new tokens with the same family ID (for tracking)
+	newMetadata := &RefreshTokenMetadata{
+		FamilyID: storedToken.FamilyID,
+	}
+	if metadata != nil {
+		newMetadata.IPAddress = metadata.IPAddress
+		newMetadata.UserAgent = metadata.UserAgent
+		newMetadata.DeviceID = metadata.DeviceID
+	} else {
+		// Preserve original metadata
+		newMetadata.IPAddress = storedToken.IPAddress
+		newMetadata.UserAgent = storedToken.UserAgent
+		newMetadata.DeviceID = storedToken.DeviceID
+	}
+
+	return a.GenerateTokensWithMetadata(&user, newMetadata)
+}
+
+// RevokeRefreshToken revokes a specific refresh token
+func (a *AuthService) RevokeRefreshToken(refreshToken string) error {
+	if a.db == nil {
+		return errors.New("database not configured for refresh token management")
+	}
+
+	tokenHash := hashToken(refreshToken)
+	now := time.Now()
+
+	result := a.db.Model(&models.RefreshToken{}).
+		Where("token_hash = ?", tokenHash).
+		Updates(map[string]interface{}{
+			"revoked":    true,
+			"revoked_at": now,
+		})
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to revoke refresh token: %w", result.Error)
+	}
+
+	return nil
+}
+
+// RevokeUserRefreshTokens revokes all refresh tokens for a user (logout from all devices)
+func (a *AuthService) RevokeUserRefreshTokens(userID uint) error {
+	if a.db == nil {
+		return errors.New("database not configured for refresh token management")
+	}
+
+	now := time.Now()
+	result := a.db.Model(&models.RefreshToken{}).
+		Where("user_id = ? AND revoked = ?", userID, false).
+		Updates(map[string]interface{}{
+			"revoked":    true,
+			"revoked_at": now,
+		})
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to revoke user refresh tokens: %w", result.Error)
+	}
+
+	return nil
+}
+
+// RevokeTokenFamily revokes all refresh tokens in a token family
+// Used when token reuse is detected (potential security breach)
+func (a *AuthService) RevokeTokenFamily(familyID string) error {
+	if a.db == nil {
+		return errors.New("database not configured for refresh token management")
+	}
+
+	now := time.Now()
+	result := a.db.Model(&models.RefreshToken{}).
+		Where("family_id = ? AND revoked = ?", familyID, false).
+		Updates(map[string]interface{}{
+			"revoked":    true,
+			"revoked_at": now,
+		})
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to revoke token family: %w", result.Error)
+	}
+
+	return nil
+}
+
+// ValidateRefreshToken validates a refresh token without rotating it
+func (a *AuthService) ValidateRefreshToken(refreshToken string) (*models.RefreshToken, error) {
+	if a.db == nil {
+		return nil, errors.New("database not configured for refresh token management")
+	}
+
+	tokenHash := hashToken(refreshToken)
+
+	var storedToken models.RefreshToken
+	err := a.db.Where("token_hash = ?", tokenHash).First(&storedToken).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrRefreshTokenNotFound
+		}
+		return nil, fmt.Errorf("failed to lookup refresh token: %w", err)
+	}
+
+	if storedToken.Revoked {
+		return nil, ErrRefreshTokenRevoked
+	}
+
+	if storedToken.Used {
+		return nil, ErrRefreshTokenUsed
+	}
+
+	if time.Now().After(storedToken.ExpiresAt) {
+		return nil, ErrRefreshTokenExpired
+	}
+
+	return &storedToken, nil
+}
+
+// CleanupExpiredRefreshTokens removes expired refresh tokens from the database
+func (a *AuthService) CleanupExpiredRefreshTokens() (int64, error) {
+	if a.db == nil {
+		return 0, errors.New("database not configured for refresh token management")
+	}
+
+	result := a.db.Where("expires_at < ?", time.Now()).Delete(&models.RefreshToken{})
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to cleanup expired refresh tokens: %w", result.Error)
+	}
+
+	return result.RowsAffected, nil
+}
+
+// GetUserRefreshTokens gets all active refresh tokens for a user (for session management UI)
+func (a *AuthService) GetUserRefreshTokens(userID uint) ([]models.RefreshToken, error) {
+	if a.db == nil {
+		return nil, errors.New("database not configured for refresh token management")
+	}
+
+	var tokens []models.RefreshToken
+	err := a.db.Where("user_id = ? AND revoked = ? AND used = ? AND expires_at > ?",
+		userID, false, false, time.Now()).
+		Order("created_at DESC").
+		Find(&tokens).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user refresh tokens: %w", err)
+	}
+
+	// Clear sensitive data before returning
+	for i := range tokens {
+		tokens[i].Token = ""
+		tokens[i].TokenHash = ""
+	}
+
+	return tokens, nil
 }
 
 // getUserRole determines the user's role based on subscription type
