@@ -849,17 +849,24 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
   // WebSocket URL builder
   const buildWebSocketUrl = useCallback((buildId: string): string => {
+    const token = localStorage.getItem('apex_access_token')
+    const appendToken = (url: string) => {
+      if (!token) return url
+      const separator = url.includes('?') ? '&' : '?'
+      return `${url}${separator}token=${encodeURIComponent(token)}`
+    }
+
     if (import.meta.env.VITE_WS_URL) {
       const baseWsUrl = import.meta.env.VITE_WS_URL.replace(/\/ws\/?$/, '').replace(/\/$/, '')
-      return `${baseWsUrl}/ws/build/${buildId}`
+      return appendToken(`${baseWsUrl}/ws/build/${buildId}`)
     } else if (import.meta.env.VITE_API_URL) {
       const apiUrl = import.meta.env.VITE_API_URL.replace('/api/v1', '').replace(/\/$/, '')
       const wsProtocol = apiUrl.startsWith('https') ? 'wss' : 'ws'
       const wsHost = apiUrl.replace(/^https?:\/\//, '')
-      return `${wsProtocol}://${wsHost}/ws/build/${buildId}`
+      return appendToken(`${wsProtocol}://${wsHost}/ws/build/${buildId}`)
     } else {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      return `${protocol}//${window.location.host}/ws/build/${buildId}`
+      return appendToken(`${protocol}//${window.location.host}/ws/build/${buildId}`)
     }
   }, [])
 

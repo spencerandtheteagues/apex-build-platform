@@ -79,7 +79,9 @@ export class AgentApiService {
 
     return new Promise((resolve, reject) => {
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsUrl = `${wsProtocol}//${window.location.host}/api/v1/build/${buildId}/ws`
+      const token = localStorage.getItem('apex_access_token')
+      const baseUrl = `${wsProtocol}//${window.location.host}/ws/build/${buildId}`
+      const wsUrl = token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl
 
       try {
         this.ws = new WebSocket(wsUrl)

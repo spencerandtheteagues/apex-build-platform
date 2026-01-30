@@ -184,16 +184,7 @@ func (h *WSHub) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	// Upgrade to WebSocket
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		log.Printf("WebSocket upgrade failed for build %s: %v", buildID, err)
-		return
-	}
-
-	log.Printf("WebSocket connection established for build %s", buildID)
-
-	// Get user ID from context (set by auth middleware)
+	// Get user ID from context (set by auth middleware) or from token query param
 	var uid uint
 	if userID, exists := c.Get("user_id"); exists {
 		uid, _ = userID.(uint)
@@ -222,6 +213,15 @@ func (h *WSHub) HandleWebSocket(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized for this build"})
 		return
 	}
+
+	// Upgrade to WebSocket (after auth check)
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		log.Printf("WebSocket upgrade failed for build %s: %v", buildID, err)
+		return
+	}
+
+	log.Printf("WebSocket connection established for build %s", buildID)
 
 	wsConn := &WSConnection{
 		hub:     h,

@@ -91,7 +91,11 @@ const InlineAppBuilder: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   // Connect to WebSocket for real-time updates
   const connectWebSocket = useCallback((buildId: string) => {
-    const ws = new WebSocket(`${WS_BASE}/ws/build/${buildId}`);
+    const token = localStorage.getItem('apex_access_token');
+    const wsUrl = token
+      ? `${WS_BASE}/ws/build/${buildId}?token=${encodeURIComponent(token)}`
+      : `${WS_BASE}/ws/build/${buildId}`;
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
