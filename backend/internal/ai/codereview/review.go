@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"apex-build/internal/ai/router"
+	"apex-build/internal/ai"
 )
 
 // ReviewFinding represents a single code review finding
@@ -62,11 +62,11 @@ type ReviewMetrics struct {
 
 // CodeReviewService provides AI-powered code review
 type CodeReviewService struct {
-	aiRouter *router.AIRouter
+	aiRouter *ai.AIRouter
 }
 
 // NewCodeReviewService creates a new code review service
-func NewCodeReviewService(aiRouter *router.AIRouter) *CodeReviewService {
+func NewCodeReviewService(aiRouter *ai.AIRouter) *CodeReviewService {
 	return &CodeReviewService{
 		aiRouter: aiRouter,
 	}
@@ -89,8 +89,8 @@ func (s *CodeReviewService) Review(ctx context.Context, req ReviewRequest) (*Rev
 	prompt := s.buildReviewPrompt(req, focusAreas)
 
 	// Get AI review
-	aiResponse, err := s.aiRouter.Route(ctx, &router.Request{
-		Capability: "code_review",
+	aiResponse, err := s.aiRouter.Generate(ctx, &ai.AIRequest{
+		Capability: ai.CapabilityCodeReview,
 		Prompt:     prompt,
 		Code:       req.Code,
 		Language:   req.Language,
