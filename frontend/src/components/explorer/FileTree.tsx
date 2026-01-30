@@ -69,7 +69,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
     type: 'file' | 'directory'
   } | null>(null)
 
-  const { files, isLoading, refreshFiles, currentProject } = useStore()
+  const { files, isLoading, fetchFiles: refreshFiles, currentProject } = useStore()
 
   // Convert flat files array to tree structure
   const fileTree = useMemo(() => {
@@ -403,7 +403,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             <Button
               size="xs"
               variant="ghost"
-              onClick={refreshFiles}
+              onClick={() => currentProject && refreshFiles(currentProject.id)}
               icon={<RefreshCw size={12} />}
               title="Refresh"
             />

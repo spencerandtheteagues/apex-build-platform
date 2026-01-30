@@ -1,0 +1,14 @@
+{
+  "mode": "supreme",
+  "agents": {
+    "master_architect": {
+      "enabled": true,
+      "complexity_threshold": 0.8,
+      "capabilities": ["system_design", "orchestration", "complexity_analysis"]
+    }
+  },
+  "logging": {
+    "level": "DEBUG",
+    "path": ".supremepower/logs"
+  }
+}

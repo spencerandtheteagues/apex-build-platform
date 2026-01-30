@@ -9,7 +9,7 @@ export { TerminalManager } from './TerminalManager';
 export { TerminalService } from './TerminalService';
 export type { TerminalServiceCallbacks } from './TerminalService';
 
-export {
+export type {
   TerminalSession,
   TerminalTab,
   TerminalPane,
@@ -21,8 +21,6 @@ export {
   TerminalHistoryEntry,
   CompletionItem,
   CompletionResult,
-  DEFAULT_TERMINAL_SETTINGS,
-  TERMINAL_SHORTCUTS,
-} from './types';
+} from './types'
 
 export { terminalThemes, getTerminalTheme, getXtermTheme } from './themes';

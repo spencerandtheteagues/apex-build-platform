@@ -17,7 +17,7 @@ import {
 } from '@/hooks/useMobile'
 import apiService from '@/services/api'
 import websocketService from '@/services/websocket'
-import { File, AICapability } from '@/types'
+import { File, AICapability, FileVersion } from '@/types'
 import {
   Button,
   Badge,
@@ -32,10 +32,15 @@ import { ProjectDashboard } from '@/components/project/ProjectDashboard'
 import { ProjectList } from '@/components/project/ProjectList'
 import { MobileNavigation, MobilePanelSwitcher } from '@/components/mobile'
 import { CodeComments } from '@/components/ide/CodeComments'
+import { VersionHistoryPanel } from '@/components/ide/panels/VersionHistoryPanel'
+import { DatabasePanel } from '@/components/ide/panels/DatabasePanel'
+import { SplitPaneEditor, SplitPaneEditorRef } from '@/components/ide/SplitPaneEditor'
+import { usePaneManager } from '@/hooks/usePaneManager'
 
 // Lazy load heavy components for better initial load performance
 // Monaco Editor is ~800KB-1.2MB, XTerminal is ~200KB
 const MonacoEditor = lazy(() => import('@/components/editor/MonacoEditor').then(m => ({ default: m.MonacoEditor })))
+const DiffViewer = lazy(() => import('@/components/ide/DiffViewer').then(m => ({ default: m.DiffViewer })))
 const XTerminal = lazy(() => import('@/components/terminal/XTerminal').then(m => ({ default: m.default })))
 import {
   Menu,
@@ -74,7 +79,7 @@ import {
 const EditorLoadingFallback = () => (
   <div className="flex items-center justify-center h-full bg-gray-900/50">
     <div className="text-center">
-      <Loading size="lg" variant="primary" />
+      <Loading size="lg" variant="spinner" />
       <p className="mt-3 text-sm text-gray-400">Loading editor...</p>
     </div>
   </div>
@@ -83,7 +88,7 @@ const EditorLoadingFallback = () => (
 const TerminalLoadingFallback = () => (
   <div className="flex items-center justify-center h-full bg-black">
     <div className="text-center">
-      <Loading size="md" variant="primary" />
+      <Loading size="md" variant="spinner" />
       <p className="mt-2 text-xs text-gray-500">Loading terminal...</p>
     </div>
   </div>
@@ -113,7 +118,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   const [leftPanelState, setLeftPanelState] = useState<PanelState>(isMobile ? 'collapsed' : 'normal')
   const [rightPanelState, setRightPanelState] = useState<PanelState>(isMobile ? 'collapsed' : 'normal')
   const [bottomPanelState, setBottomPanelState] = useState<PanelState>('collapsed')
-  const [activeLeftTab, setActiveLeftTab] = useState<'explorer' | 'search' | 'git'>('explorer')
+  const [activeLeftTab, setActiveLeftTab] = useState<'explorer' | 'search' | 'git' | 'history'>('explorer')
   const [activeRightTab, setActiveRightTab] = useState<'ai' | 'comments' | 'collab' | 'database' | 'settings'>('ai')
   const [activeBottomTab, setActiveBottomTab] = useState<'terminal' | 'output' | 'problems'>('terminal')
 
@@ -122,11 +127,31 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [mobileOverlayPanel, setMobileOverlayPanel] = useState<'left' | 'right' | null>(null)
 
-  // Editor state
-  const [openFiles, setOpenFiles] = useState<File[]>([])
-  const [activeFile, setActiveFile] = useState<File | null>(null)
-  const [fileContents, setFileContents] = useState<Map<number, string>>(new Map())
-  const [unsavedChanges, setUnsavedChanges] = useState<Set<number>>(new Set())
+  // Editor state with pane management
+  const {
+    layout,
+    activePane,
+    activePaneId,
+    openFile: paneOpenFile,
+    closeFile: paneCloseFile,
+    setActiveFile: paneSetActiveFile,
+    updateFileContent: paneUpdateFileContent,
+    markFileSaved: paneMarkFileSaved,
+    splitHorizontal,
+    splitVertical,
+    closePane,
+    focusPane,
+    canSplit,
+    getPaneActiveFile
+  } = usePaneManager()
+
+  // Derived state from active pane for compatibility with existing components
+  const activeFile = activePane ? activePane.files.find(f => f.file.id === activePane.activeFileId)?.file || null : null
+  const openFiles = activePane ? activePane.files.map(f => f.file) : []
+
+  // Diff state
+  const [showDiff, setShowDiff] = useState(false)
+  const [diffVersion, setDiffVersion] = useState<FileVersion | null>(null)
 
   // Terminal state
   const [terminalOutput, setTerminalOutput] = useState<string[]>([
@@ -137,7 +162,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   const [terminalInput, setTerminalInput] = useState('')
 
   // Component refs
-  const editorRef = useRef<any>(null)
+  const splitPaneRef = useRef<SplitPaneEditorRef>(null)
   const terminalRef = useRef<HTMLDivElement>(null)
   const mainContentRef = useRef<HTMLDivElement>(null)
 
@@ -199,10 +224,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
 
   // Handle file selection
   const handleFileSelect = useCallback((file: File) => {
-    if (!openFiles.find(f => f.id === file.id)) {
-      setOpenFiles(prev => [...prev, file])
-    }
-    setActiveFile(file)
+    paneOpenFile(file)
 
     if (viewMode !== 'editor') {
       setViewMode('editor')
@@ -213,45 +235,32 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
       setMobilePanel('editor')
       setMobileOverlayPanel(null)
     }
-  }, [openFiles, viewMode, isMobile])
+  }, [paneOpenFile, viewMode, isMobile])
 
   // Handle file content change
-  const handleFileChange = useCallback((content: string) => {
-    if (!activeFile) return
-
-    setFileContents(prev => new Map(prev.set(activeFile.id, content)))
-    setUnsavedChanges(prev => new Set(prev.add(activeFile.id)))
+  const handleFileChange = useCallback((fileId: number, content: string, paneId: string) => {
+    paneUpdateFileContent(fileId, content, paneId)
 
     // Send real-time collaboration updates
     if (websocketService.isConnected() && currentProject) {
-      const editor = editorRef.current
-      if (editor) {
-        const position = editor.getPosition()
-        websocketService.sendFileChange(
-          activeFile.id,
-          content,
-          position?.lineNumber || 1,
-          position?.column || 1
-        )
-      }
+      websocketService.sendFileChange(
+        fileId,
+        content,
+        1, // Default position
+        1
+      )
     }
-  }, [activeFile, currentProject])
+  }, [paneUpdateFileContent, currentProject])
 
   // Handle file save
-  const handleFileSave = useCallback(async (content: string) => {
-    if (!activeFile) return
-
+  const handleFileSave = useCallback(async (fileId: number, content: string, paneId: string) => {
     try {
-      await apiService.updateFile(activeFile.id, { content })
-      setUnsavedChanges(prev => {
-        const newSet = new Set(prev)
-        newSet.delete(activeFile.id)
-        return newSet
-      })
+      await apiService.updateFile(fileId, { content })
+      paneMarkFileSaved(fileId, paneId)
     } catch (error) {
       console.error('Failed to save file:', error)
     }
-  }, [activeFile])
+  }, [paneMarkFileSaved])
 
   // Handle AI request
   const handleAIRequest = useCallback(async (capability: AICapability, prompt: string, code: string) => {
@@ -274,13 +283,9 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   }, [activeFile, currentProject])
 
   // Close file tab
-  const closeFile = useCallback((file: File) => {
-    setOpenFiles(prev => prev.filter(f => f.id !== file.id))
-    if (activeFile?.id === file.id) {
-      const remainingFiles = openFiles.filter(f => f.id !== file.id)
-      setActiveFile(remainingFiles[remainingFiles.length - 1] || null)
-    }
-  }, [openFiles, activeFile])
+  const closeFile = useCallback((fileId: number, paneId?: string) => {
+    paneCloseFile(fileId, paneId)
+  }, [paneCloseFile])
 
   // Handle project creation
   const handleProjectCreate = useCallback((project: any) => {
@@ -321,18 +326,14 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     try {
       await apiService.deleteFile(file.id)
 
-      setOpenFiles(prev => prev.filter(f => f.id !== file.id))
-      if (activeFile?.id === file.id) {
-        const remainingFiles = openFiles.filter(f => f.id !== file.id)
-        setActiveFile(remainingFiles[remainingFiles.length - 1] || null)
-      }
+      paneCloseFile(file.id)
 
       setTerminalOutput(prev => [...prev, `Deleted: ${file.path}`])
     } catch (error) {
       console.error('Failed to delete file:', error)
       setTerminalOutput(prev => [...prev, `Failed to delete: ${error}`])
     }
-  }, [activeFile, openFiles])
+  }, [paneCloseFile])
 
   // Handle file rename
   const handleFileRename = useCallback(async (file: File, newName: string) => {
@@ -346,20 +347,51 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
         path: newPath
       })
 
-      setOpenFiles(prev => prev.map(f =>
-        f.id === file.id ? { ...f, name: newName, path: newPath } : f
-      ))
-
-      if (activeFile?.id === file.id) {
-        setActiveFile({ ...activeFile, name: newName, path: newPath })
-      }
+      // Update in all panes
+      layout.panes.forEach(pane => {
+        if (pane.files.find(f => f.file.id === file.id)) {
+          // This is a bit complex as paneManager doesn't have rename, 
+          // but we can just reopen the file with new data
+          paneOpenFile({ ...file, name: newName, path: newPath }, pane.id)
+        }
+      })
 
       setTerminalOutput(prev => [...prev, `Renamed: ${file.name} -> ${newName}`])
     } catch (error) {
       console.error('Failed to rename file:', error)
       setTerminalOutput(prev => [...prev, `Failed to rename: ${error}`])
     }
-  }, [activeFile])
+  }, [layout.panes, paneOpenFile])
+
+  // Handle version preview (diff)
+  const handlePreviewVersion = useCallback((version: FileVersion) => {
+    setDiffVersion(version)
+    setShowDiff(true)
+  }, [])
+
+  // Handle version restore
+  const handleRestoreVersion = useCallback(async (version: FileVersion) => {
+    if (!activeFile) return
+    
+    try {
+      const restoredFile = await apiService.restoreFileVersion(version.id)
+      
+      // Update file content in all panes that have this file open
+      layout.panes.forEach(pane => {
+        if (pane.files.find(f => f.file.id === restoredFile.id)) {
+          paneUpdateFileContent(restoredFile.id, restoredFile.content, pane.id)
+          paneMarkFileSaved(restoredFile.id, pane.id)
+        }
+      })
+      
+      setTerminalOutput(prev => [...prev, `Restored version ${version.version}`])
+      setShowDiff(false)
+      setDiffVersion(null)
+    } catch (error) {
+      console.error('Failed to restore version:', error)
+      setTerminalOutput(prev => [...prev, `Failed to restore version: ${error}`])
+    }
+  }, [activeFile, layout.panes, paneUpdateFileContent, paneMarkFileSaved])
 
   // Terminal command execution
   const executeTerminalCommand = useCallback(async (command: string) => {
@@ -428,6 +460,16 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
             </div>
           </Card>
         )
+      case 'history':
+        return currentProject ? (
+          <VersionHistoryPanel
+            file={activeFile}
+            projectId={currentProject.id}
+            onPreviewVersion={handlePreviewVersion}
+            onRestoreVersion={handleRestoreVersion}
+            className="h-full border-0"
+          />
+        ) : null
       default:
         return null
     }
@@ -442,19 +484,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
             projectId={currentProject?.id}
             fileId={activeFile?.id}
             onCodeInsert={(code) => {
-              const editor = editorRef.current
-              if (editor) {
-                const position = editor.getPosition()
-                editor.executeEdits('ai-insert', [{
-                  range: {
-                    startLineNumber: position.lineNumber,
-                    startColumn: position.column,
-                    endLineNumber: position.lineNumber,
-                    endColumn: position.column
-                  },
-                  text: code
-                }])
-              }
+              splitPaneRef.current?.insertCode(code)
             }}
             className="h-full border-0"
           />
@@ -467,11 +497,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
             currentUserId={user.id}
             currentUsername={user.username}
             onCommentClick={(line) => {
-              const editor = editorRef.current
-              if (editor) {
-                editor.revealLineInCenter(line)
-                editor.setPosition({ lineNumber: line, column: 1 })
-              }
+              splitPaneRef.current?.revealLine(line)
             }}
             className="h-full border-0"
           />
@@ -514,33 +540,12 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
           </Card>
         )
       case 'database':
-        return (
-          <Card variant="cyberpunk" padding="md" className="h-full border-0">
-            <h3 className="text-lg font-semibold text-white mb-4">Managed Database</h3>
-            <div className="space-y-4">
-              <div className="p-3 bg-gray-800/50 rounded-lg border border-gray-700">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-white">PostgreSQL</span>
-                  <Badge variant="success" size="sm">Running</Badge>
-                </div>
-                <p className="text-xs text-gray-400 mb-3">Host: apex-db-primary.internal</p>
-                <Button size="xs" variant="outline" className="w-full">Open SQL Shell</Button>
-              </div>
-              <div className="p-3 bg-gray-800/50 rounded-lg border border-gray-700">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-white">Redis Cache</span>
-                  <Badge variant="success" size="sm">Healthy</Badge>
-                </div>
-                <p className="text-xs text-gray-400 mb-3">Memory: 12.4MB / 256MB</p>
-                <Button size="xs" variant="outline" className="w-full">Flush Cache</Button>
-              </div>
-              <Button size="sm" variant="primary" className="w-full bg-red-600 hover:bg-red-500">
-                <Zap className="w-4 h-4 mr-2" />
-                Add New Database
-              </Button>
-            </div>
-          </Card>
-        )
+        return currentProject ? (
+          <DatabasePanel
+            projectId={currentProject.id}
+            className="h-full border-0"
+          />
+        ) : null
       case 'settings':
         return (
           <Card variant="cyberpunk" padding="md" className="h-full border-0">
@@ -627,72 +632,38 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
       case 'editor':
         return (
           <div className="h-full flex flex-col">
-            {/* File tabs - scrollable on mobile */}
-            {openFiles.length > 0 && (
-              <div className="flex items-center bg-gray-900/80 border-b border-gray-700/50 px-1 py-1 overflow-x-auto scrollbar-hide">
-                {openFiles.map(file => {
-                  const hasUnsavedChanges = unsavedChanges.has(file.id)
-                  const isActive = activeFile?.id === file.id
-
-                  return (
-                    <div
-                      key={file.id}
-                      className={cn(
-                        'flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors group min-w-0 shrink-0',
-                        'touch-target',
-                        isActive
-                          ? 'bg-gray-800 border-b-2 border-red-500'
-                          : 'hover:bg-gray-800/50'
-                      )}
-                      onClick={() => setActiveFile(file)}
-                    >
-                      <span className="text-xs">{file.name.split('.').pop()?.toUpperCase()}</span>
-                      <span className={cn(
-                        'text-sm truncate max-w-[100px] md:max-w-none',
-                        isActive ? 'text-white' : 'text-gray-400'
-                      )}>
-                        {file.name}
-                      </span>
-                      {hasUnsavedChanges && (
-                        <div className="w-1.5 h-1.5 bg-red-500 rounded-full" />
-                      )}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          closeFile(file)
-                        }}
-                        className="ml-1 opacity-0 group-hover:opacity-100 md:hover:bg-gray-700 rounded transition-all p-1 touch-target"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-            {/* Editor */}
+            {/* Editor Area */}
             <div className="flex-1 min-h-0">
-              {activeFile ? (
+              {showDiff && diffVersion && activeFile ? (
                 <Suspense fallback={<EditorLoadingFallback />}>
-                  <MonacoEditor
-                    ref={editorRef}
-                    file={activeFile}
-                    value={fileContents.get(activeFile.id) || activeFile.content}
-                    onChange={handleFileChange}
-                    onSave={handleFileSave}
-                    onAIRequest={handleAIRequest}
-                    height="100%"
+                  <DiffViewer
+                    originalContent={diffVersion.content}
+                    modifiedContent={activePane?.files.find(f => f.file.id === activeFile.id)?.content || activeFile.content}
+                    originalLabel={`v${diffVersion.version}`}
+                    modifiedLabel="Working Copy"
+                    language={activeFile.name.split('.').pop() || 'plaintext'}
+                    onClose={() => {
+                      setShowDiff(false)
+                      setDiffVersion(null)
+                    }}
                   />
                 </Suspense>
               ) : (
-                <div className="h-full flex items-center justify-center text-center p-4">
-                  <div>
-                    <Code className="w-12 h-12 md:w-16 md:h-16 text-gray-600 mx-auto mb-4" />
-                    <h3 className="text-base md:text-lg font-semibold text-gray-300 mb-2">No file open</h3>
-                    <p className="text-sm text-gray-400">Select a file from the explorer to start editing</p>
-                  </div>
-                </div>
+                <SplitPaneEditor
+                  ref={splitPaneRef}
+                  layout={layout}
+                  activePaneId={activePaneId}
+                  canSplit={canSplit}
+                  onFocusPane={focusPane}
+                  onClosePane={closePane}
+                  onFileSelect={paneSetActiveFile}
+                  onFileClose={closeFile}
+                  onFileChange={handleFileChange}
+                  onFileSave={handleFileSave}
+                  onAIRequest={handleAIRequest}
+                  onSplitHorizontal={splitHorizontal}
+                  onSplitVertical={splitVertical}
+                />
               )}
             </div>
           </div>
@@ -892,6 +863,15 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
                   className="rounded-none border-0 touch-target"
                 >
                   {leftPanelState !== 'collapsed' && 'Git'}
+                </Button>
+                <Button
+                  size="xs"
+                  variant={activeLeftTab === 'history' ? 'primary' : 'ghost'}
+                  onClick={() => setActiveLeftTab('history')}
+                  icon={<RotateCcw size={14} />}
+                  className="rounded-none border-0 touch-target"
+                >
+                  {leftPanelState !== 'collapsed' && 'History'}
                 </Button>
               </div>
               <Button

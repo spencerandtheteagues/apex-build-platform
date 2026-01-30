@@ -1,8 +1,8 @@
 // Split Pane Editor - APEX.BUILD
 // Multi-pane code editor with resizable splits
 
-import React, { lazy, Suspense, useCallback, useRef } from 'react'
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
+import React, { lazy, Suspense, useCallback, useRef, useImperativeHandle, forwardRef } from 'react'
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
 import { cn } from '@/lib/utils'
 import { EditorPane, PaneFile, PaneLayout } from '@/hooks/usePaneManager'
 import { AICapability, File } from '@/types'
@@ -41,6 +41,7 @@ interface EditorPaneContentProps {
   onAIRequest: (capability: AICapability, prompt: string, code: string) => Promise<any>
   onClosePane?: () => void
   canClosePane: boolean
+  editorRef?: (el: any) => void
 }
 
 const EditorPaneContent: React.FC<EditorPaneContentProps> = ({
@@ -53,9 +54,9 @@ const EditorPaneContent: React.FC<EditorPaneContentProps> = ({
   onFileSave,
   onAIRequest,
   onClosePane,
-  canClosePane
+  canClosePane,
+  editorRef
 }) => {
-  const editorRef = useRef<any>(null)
   const activeFile = pane.files.find(f => f.file.id === pane.activeFileId)
 
   return (
@@ -190,7 +191,12 @@ export interface SplitPaneEditorProps {
   onSplitVertical: () => void
 }
 
-export const SplitPaneEditor: React.FC<SplitPaneEditorProps> = ({
+export interface SplitPaneEditorRef {
+  insertCode: (code: string) => void
+  revealLine: (line: number) => void
+}
+
+export const SplitPaneEditor = forwardRef<SplitPaneEditorRef, SplitPaneEditorProps>(({
   layout,
   activePaneId,
   canSplit,
@@ -203,7 +209,37 @@ export const SplitPaneEditor: React.FC<SplitPaneEditorProps> = ({
   onAIRequest,
   onSplitHorizontal,
   onSplitVertical
-}) => {
+}, ref) => {
+  const editorRefs = useRef<Map<string, any>>(new Map())
+
+  useImperativeHandle(ref, () => ({
+    insertCode: (code: string) => {
+      if (!activePaneId) return
+      const editor = editorRefs.current.get(activePaneId)
+      if (editor) {
+        const position = editor.getPosition()
+        editor.executeEdits('ai-insert', [{
+          range: {
+            startLineNumber: position.lineNumber,
+            startColumn: position.column,
+            endLineNumber: position.lineNumber,
+            endColumn: position.column
+          },
+          text: code
+        }])
+      }
+    },
+    revealLine: (line: number) => {
+      if (!activePaneId) return
+      const editor = editorRefs.current.get(activePaneId)
+      if (editor) {
+        editor.revealLineInCenter(line)
+        editor.setPosition({ lineNumber: line, column: 1 })
+        editor.focus()
+      }
+    }
+  }))
+
   const renderPane = useCallback((pane: EditorPane) => (
     <EditorPaneContent
       key={pane.id}
@@ -227,6 +263,10 @@ export const SplitPaneEditor: React.FC<SplitPaneEditorProps> = ({
       onAIRequest={onAIRequest}
       onClosePane={layout.panes.length > 1 ? () => onClosePane(pane.id) : undefined}
       canClosePane={layout.panes.length > 1}
+      editorRef={(el: any) => {
+        if (el) editorRefs.current.set(pane.id, el)
+        else editorRefs.current.delete(pane.id)
+      }}
     />
   ), [activePaneId, layout.panes.length, onFocusPane, onFileSelect, onFileClose, onFileChange, onFileSave, onAIRequest, onClosePane])
 
@@ -238,7 +278,7 @@ export const SplitPaneEditor: React.FC<SplitPaneEditorProps> = ({
 
       case 'horizontal':
         return (
-          <PanelGroup direction="horizontal" className="h-full">
+          <PanelGroup orientation="horizontal" className="h-full">
             <Panel defaultSize={50} minSize={20}>
               {renderPane(layout.panes[0])}
             </Panel>
@@ -268,7 +308,7 @@ export const SplitPaneEditor: React.FC<SplitPaneEditorProps> = ({
         return (
           <PanelGroup direction="vertical" className="h-full">
             <Panel defaultSize={50} minSize={15}>
-              <PanelGroup direction="horizontal" className="h-full">
+              <PanelGroup orientation="horizontal" className="h-full">
                 <Panel defaultSize={50} minSize={20}>
                   {renderPane(p1)}
                 </Panel>
@@ -280,7 +320,7 @@ export const SplitPaneEditor: React.FC<SplitPaneEditorProps> = ({
             </Panel>
             <ResizeHandle direction="vertical" />
             <Panel defaultSize={50} minSize={15}>
-              <PanelGroup direction="horizontal" className="h-full">
+              <PanelGroup orientation="horizontal" className="h-full">
                 <Panel defaultSize={50} minSize={20}>
                   {p3 ? renderPane(p3) : <EmptyPaneSlot />}
                 </Panel>
@@ -339,7 +379,9 @@ export const SplitPaneEditor: React.FC<SplitPaneEditorProps> = ({
       </div>
     </div>
   )
-}
+})
+
+SplitPaneEditor.displayName = 'SplitPaneEditor'
 
 // Empty slot for grid layout
 const EmptyPaneSlot = () => (

@@ -61,7 +61,10 @@ export class AgentApiService {
     })
 
     this.buildId = response.build_id
-    return response
+    return {
+      ...response,
+      status: response.status as AgentStatus
+    }
   }
 
   // Connect to WebSocket for real-time updates

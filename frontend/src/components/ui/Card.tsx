@@ -30,6 +30,12 @@ const cardVariants = cva(
 
         // Interactive card (clickable)
         interactive: 'bg-gray-900/80 backdrop-blur-md border border-gray-700/50 hover:border-cyan-400/70 hover:bg-gray-800/90 cursor-pointer transform hover:scale-[1.02] shadow-lg hover:shadow-cyan-500/20',
+
+        // Error card
+        error: 'bg-red-950/30 backdrop-blur-md border border-red-500/30 shadow-lg shadow-red-500/10',
+
+        // Neutral card
+        neutral: 'bg-gray-900/50 backdrop-blur-md border border-gray-800',
       },
       padding: {
         none: 'p-0',

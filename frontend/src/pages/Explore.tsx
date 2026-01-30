@@ -87,9 +87,9 @@ export const ExplorePage = () => {
             name: p.owner_username, 
             avatar: p.owner_avatar_url || '' 
           },
-          stars: p.stats?.stars || 0,
-          forks: p.stats?.forks || 0,
-          views: p.stats?.views || 0,
+          stars: p.stats?.star_count || 0,
+          forks: p.stats?.fork_count || 0,
+          views: p.stats?.view_count || 0,
           tags: p.topics || [p.language],
           updatedAt: new Date(p.updated_at).toLocaleDateString(),
           verified: p.is_verified

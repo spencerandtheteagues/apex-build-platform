@@ -27,6 +27,13 @@ import {
   CodeCommentThread,
   CreateCommentRequest,
   UpdateCommentRequest,
+  FileVersion,
+  VersionDiff,
+  ManagedDatabase,
+  CreateDatabaseRequest,
+  DatabaseMetrics,
+  TableInfo,
+  ColumnInfo,
 } from '@/types'
 
 // Get API URL from environment or use default
@@ -47,7 +54,7 @@ const getApiUrl = (): string => {
 }
 
 export class ApiService {
-  private client: AxiosInstance
+  public client: AxiosInstance
   private baseURL: string
 
   constructor(baseURL: string = getApiUrl()) {
@@ -124,6 +131,23 @@ export class ApiService {
     localStorage.removeItem('apex_refresh_token')
     localStorage.removeItem('apex_token_expires')
     localStorage.removeItem('apex_user')
+  }
+
+  // Generic HTTP methods for components that need direct access
+  public async get<T = any>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    return this.client.get<T>(url, config)
+  }
+
+  public async post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    return this.client.post<T>(url, data, config)
+  }
+
+  public async put<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    return this.client.put<T>(url, data, config)
+  }
+
+  public async delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    return this.client.delete<T>(url, config)
   }
 
   // Health check
@@ -692,6 +716,133 @@ export class ApiService {
     await this.client.put(`/projects/${projectId}/categories`, { categories })
   }
 
+  // ========== VERSION HISTORY ENDPOINTS (Replit parity) ==========
+
+  async getFileVersions(fileId: number): Promise<FileVersion[]> {
+    const response = await this.client.get<ApiResponse<{ versions: FileVersion[] }>>(
+      `/versions/file/${fileId}`
+    )
+    return response.data.data!.versions
+  }
+
+  async getFileVersion(versionId: number): Promise<FileVersion> {
+    const response = await this.client.get<ApiResponse<{ version: FileVersion }>>(
+      `/versions/${versionId}`
+    )
+    return response.data.data!.version
+  }
+
+  async getFileVersionContent(versionId: number): Promise<string> {
+    const response = await this.client.get<ApiResponse<{ content: string }>>(
+      `/versions/${versionId}/content`
+    )
+    return response.data.data!.content
+  }
+
+  async restoreFileVersion(versionId: number): Promise<File> {
+    const response = await this.client.post<ApiResponse<{ file: File }>>(
+      `/versions/${versionId}/restore`
+    )
+    return response.data.data!.file
+  }
+
+  async pinFileVersion(versionId: number, pinned: boolean): Promise<FileVersion> {
+    const response = await this.client.post<ApiResponse<{ version: FileVersion }>>(
+      `/versions/${versionId}/pin`,
+      { pinned }
+    )
+    return response.data.data!.version
+  }
+
+  async deleteFileVersion(versionId: number): Promise<void> {
+    await this.client.delete(`/versions/${versionId}`)
+  }
+
+  async getVersionDiff(oldVersionId: number, newVersionId: number): Promise<VersionDiff> {
+    const response = await this.client.get<ApiResponse<{ diff: VersionDiff }>>(
+      `/versions/diff/${oldVersionId}/${newVersionId}`
+    )
+    return response.data.data!.diff
+  }
+
+  // ========== MANAGED DATABASE ENDPOINTS ==========
+
+  async createDatabase(projectId: number, data: CreateDatabaseRequest): Promise<ManagedDatabase> {
+    const response = await this.client.post<ApiResponse<{ database: ManagedDatabase }>>(
+      `/projects/${projectId}/databases`,
+      data
+    )
+    return response.data.data!.database
+  }
+
+  async getDatabases(projectId: number): Promise<ManagedDatabase[]> {
+    const response = await this.client.get<ApiResponse<{ databases: ManagedDatabase[] }>>(
+      `/projects/${projectId}/databases`
+    )
+    return response.data.data!.databases
+  }
+
+  async getDatabase(projectId: number, dbId: number, includeCredentials = false): Promise<ManagedDatabase> {
+    const response = await this.client.get<ApiResponse<{ database: ManagedDatabase }>>(
+      `/projects/${projectId}/databases/${dbId}?include_credentials=${includeCredentials}`
+    )
+    return response.data.data!.database
+  }
+
+  async deleteDatabase(projectId: number, dbId: number): Promise<void> {
+    await this.client.delete(`/projects/${projectId}/databases/${dbId}`)
+  }
+
+  async resetDatabaseCredentials(projectId: number, dbId: number): Promise<{
+    username: string
+    password: string
+    connection_string: string
+  }> {
+    const response = await this.client.post<ApiResponse<{ credentials: any }>>(
+      `/projects/${projectId}/databases/${dbId}/reset`
+    )
+    return response.data.data!.credentials
+  }
+
+  async executeSQLQuery(projectId: number, dbId: number, query: string): Promise<{
+    result: {
+      columns: string[]
+      rows: any[][]
+      affected_rows: number
+      duration_ms: number
+    }
+  }> {
+    const response = await this.client.post<ApiResponse<{ result: any }>>(
+      `/projects/${projectId}/databases/${dbId}/query`,
+      { query }
+    )
+    return response.data.data!
+  }
+
+  async getDatabaseTables(projectId: number, dbId: number): Promise<TableInfo[]> {
+    const response = await this.client.get<ApiResponse<{ tables: TableInfo[] }>>(
+      `/projects/${projectId}/databases/${dbId}/tables`
+    )
+    return response.data.data!.tables
+  }
+
+  async getTableSchema(projectId: number, dbId: number, tableName: string): Promise<ColumnInfo[]> {
+    const response = await this.client.get<ApiResponse<{ columns: ColumnInfo[] }>>(
+      `/projects/${projectId}/databases/${dbId}/tables/${tableName}/schema`
+    )
+    return response.data.data!.columns
+  }
+
+  async getDatabaseMetrics(projectId: number, dbId: number): Promise<{
+    metrics: DatabaseMetrics
+    limits: { max_storage_mb: number; max_connections: number }
+  }> {
+    const response = await this.client.get<ApiResponse<{ metrics: DatabaseMetrics; limits: any }>>(
+      `/projects/${projectId}/databases/${dbId}/metrics`
+    )
+    return response.data.data!
+  }
+
   // ========== GITHUB IMPORT WIZARD ENDPOINTS ==========
 
   // Validate GitHub URL and get repo info
@@ -845,6 +996,58 @@ export class ApiService {
     )
     return response.data.data!
   }
+
+  // ========== AI CODE REVIEW ENDPOINTS ==========
+
+  async reviewCode(data: {
+    code: string
+    language: string
+    file_name?: string
+    context?: string
+    focus?: string[]
+    max_results?: number
+  }): Promise<CodeReviewResponse> {
+    const response = await this.client.post<CodeReviewResponse>('/ai/code-review', data)
+    return response.data
+  }
+}
+
+// ---------------------------------------------------------------------------
+// AI Code Review types (matching backend codereview.ReviewResponse)
+// ---------------------------------------------------------------------------
+
+export interface CodeReviewFinding {
+  type: string       // bug, security, performance, style, best_practice
+  severity: string   // error, warning, info, hint
+  line: number
+  end_line: number
+  column: number
+  end_column: number
+  message: string
+  suggestion: string
+  code: string
+  rule_id: string
+}
+
+export interface CodeReviewMetrics {
+  total_lines: number
+  code_lines: number
+  comment_lines: number
+  blank_lines: number
+  complexity: number
+  security_issues: number
+  bug_risks: number
+  style_issues: number
+}
+
+export interface CodeReviewResponse {
+  findings: CodeReviewFinding[]
+  summary: string
+  score: number
+  metrics: CodeReviewMetrics
+  suggestions: string[]
+  reviewed_at: string
+  duration_ms: number
 }
 
 // Create singleton instance

@@ -14,6 +14,9 @@ const buttonVariants = cva(
         // Primary - Demon red with scary glow
         primary: 'bg-gradient-to-r from-red-600 to-red-900 text-white hover:from-red-500 hover:to-red-800 shadow-lg shadow-red-600/30 hover:shadow-red-500/50 border border-red-500/30',
 
+        // Default (alias for primary)
+        default: 'bg-gradient-to-r from-red-600 to-red-900 text-white hover:from-red-500 hover:to-red-800 shadow-lg shadow-red-600/30 hover:shadow-red-500/50 border border-red-500/30',
+
         // Secondary - Dark crimson accent
         secondary: 'bg-gradient-to-r from-red-700 to-rose-900 text-white hover:from-red-600 hover:to-rose-800 shadow-lg shadow-red-700/25 hover:shadow-red-600/40 border border-red-600/30',
 

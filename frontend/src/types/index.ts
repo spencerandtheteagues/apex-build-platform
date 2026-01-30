@@ -9,6 +9,8 @@ export interface User {
   avatar_url?: string
   is_active: boolean
   is_verified: boolean
+  is_admin?: boolean
+  is_super_admin?: boolean
   subscription_type: 'free' | 'pro' | 'team'
   subscription_end?: string
   monthly_ai_requests: number
@@ -541,6 +543,14 @@ export interface ProjectWithStats extends Project {
   is_fork?: boolean
   original_id?: number
   categories?: string[]
+  // Flattened fields for UI convenience
+  owner_username?: string
+  owner_avatar_url?: string
+  stars?: number
+  forks?: number
+  views?: number
+  topics?: string[]
+  is_verified?: boolean
 }
 
 export interface UserPublicProfile {
@@ -577,6 +587,39 @@ export interface UserFollowInfo {
 
 // AI Autonomous Agent Types
 export * from './agent'
+
+// Version History Types (Replit parity feature)
+
+export interface FileVersion {
+  id: number
+  file_id: number
+  project_id: number
+  version: number
+  version_hash: string
+  content: string
+  size: number
+  line_count: number
+  change_type: 'create' | 'edit' | 'rename' | 'restore'
+  change_summary?: string
+  lines_added: number
+  lines_removed: number
+  author_id: number
+  author_name: string
+  file_path: string
+  file_name: string
+  is_pinned: boolean
+  is_auto_save: boolean
+  created_at: string
+}
+
+export interface VersionDiff {
+  old_version_id: number
+  new_version_id: number
+  diff_content: string // Unified diff format
+  insertions: number
+  deletions: number
+  files_changed: number
+}
 
 // GitHub Import Wizard Types
 
@@ -624,6 +667,64 @@ export interface GitHubImportResponse {
   import_duration_ms: number
   repository_url: string
   default_branch: string
+}
+
+// Managed Database Types
+
+export type DatabaseType = 'postgresql' | 'redis' | 'sqlite'
+export type DatabaseStatus = 'provisioning' | 'active' | 'suspended' | 'deleting' | 'failed'
+
+export interface ManagedDatabase {
+  id: number
+  project_id: number
+  type: DatabaseType
+  name: string
+  host: string
+  port: number
+  database_name: string
+  status: DatabaseStatus
+  storage_used_mb: number
+  connection_count: number
+  query_count: number
+  last_queried?: string
+  backup_enabled: boolean
+  backup_schedule?: string
+  last_backup?: string
+  next_backup?: string
+  max_storage_mb: number
+  max_connections: number
+  created_at: string
+  updated_at: string
+  credentials?: Record<string, string> // Only if requested with reveal=true
+}
+
+export interface CreateDatabaseRequest {
+  name: string
+  type: DatabaseType
+}
+
+export interface DatabaseMetrics {
+  cpu_usage_percent: number
+  memory_usage_mb: number
+  storage_usage_mb: number
+  active_connections: number
+  queries_per_second: number
+  cache_hit_rate?: number // Redis only
+}
+
+export interface TableInfo {
+  name: string
+  schema: string
+  row_count: number
+  size_bytes: number
+}
+
+export interface ColumnInfo {
+  name: string
+  type: string
+  is_nullable: boolean
+  default_value?: string
+  is_primary_key: boolean
 }
 
 // Code Comments Types (Replit parity feature)

@@ -28,6 +28,9 @@ const badgeVariants = cva(
         // Info blue
         info: 'bg-blue-500/20 text-blue-300 border border-blue-400/50 shadow-lg shadow-blue-500/10',
 
+        // Default (alias for neutral)
+        default: 'bg-gray-500/20 text-gray-300 border border-gray-400/50 shadow-lg shadow-gray-500/10',
+
         // Neutral gray
         neutral: 'bg-gray-500/20 text-gray-300 border border-gray-400/50 shadow-lg shadow-gray-500/10',
 

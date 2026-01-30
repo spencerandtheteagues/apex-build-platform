@@ -108,7 +108,6 @@ export class WebSocketService {
         reconnectionAttempts: this.maxReconnectAttempts,
         reconnectionDelay: this.reconnectDelay,
         reconnectionDelayMax: 5000,
-        maxHttpBufferSize: 1e6, // 1MB
         pingTimeout: 60000,
         pingInterval: 25000,
       })

@@ -189,7 +189,9 @@ interface StoreState
     EditorSliceState,
     CollaborationState,
     AIState,
-    UIState {}
+    UIState {
+      apiService: typeof apiService
+    }
 
 interface StoreActions
   extends AuthActions,
@@ -206,6 +208,8 @@ export const useStore = create<StoreState & StoreActions>()(
     subscribeWithSelector(
       immer((set, get) => ({
         // Initial state
+        apiService, // Expose apiService
+        
         // Auth
         user: apiService.getCurrentUser(),
         isAuthenticated: apiService.isAuthenticated(),
@@ -228,6 +232,7 @@ export const useStore = create<StoreState & StoreActions>()(
         selection: undefined,
         isAIAssistantOpen: false,
         aiProvider: 'auto' as const,
+        theme: 'cyberpunk', // Initial editor theme
         isAIGenerating: false,
         aiConversations: [],
 

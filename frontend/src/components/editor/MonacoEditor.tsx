@@ -182,7 +182,7 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
       const editorInstance = monaco.editor.create(editorRef.current, {
         value: value || (file?.content || ''),
         language: getLanguageFromFile(file?.name || ''),
-        theme: `apex-${theme.id}`,
+        theme: `apex-${(theme as any).id}`,
         automaticLayout: true,
         readOnly,
         fontSize: 14,
@@ -250,9 +250,9 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
     // Update theme when it changes
     useEffect(() => {
       if (editor) {
-        monaco.editor.setTheme(`apex-${theme.id}`)
+        monaco.editor.setTheme(`apex-${(theme as any).id}`)
       }
-    }, [theme.id, editor])
+    }, [(theme as any).id, editor])
 
     // Update content when file changes
     useEffect(() => {
