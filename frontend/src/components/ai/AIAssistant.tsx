@@ -46,7 +46,7 @@ export interface AIAssistantProps {
   className?: string
   projectId?: number
   fileId?: number
-  defaultProvider?: AIProvider
+  defaultProvider?: AIProvider | 'auto'
   onCodeInsert?: (code: string) => void
 }
 

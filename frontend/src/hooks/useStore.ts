@@ -11,6 +11,7 @@ import {
   File,
   AIRequest,
   AIUsage,
+  AICapability,
   Execution,
   CollabRoom,
   CursorPosition,
@@ -144,7 +145,7 @@ interface AIState {
 
 interface AIActions {
   generateAI: (data: {
-    capability: string
+    capability: AICapability
     prompt: string
     code?: string
     language?: string

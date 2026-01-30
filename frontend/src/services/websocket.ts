@@ -108,8 +108,6 @@ export class WebSocketService {
         reconnectionAttempts: this.maxReconnectAttempts,
         reconnectionDelay: this.reconnectDelay,
         reconnectionDelayMax: 5000,
-        pingTimeout: 60000,
-        pingInterval: 25000,
       })
 
       this.setupSocketEvents()

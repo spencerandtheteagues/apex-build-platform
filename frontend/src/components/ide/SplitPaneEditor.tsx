@@ -291,7 +291,7 @@ export const SplitPaneEditor = forwardRef<SplitPaneEditorRef, SplitPaneEditorPro
 
       case 'vertical':
         return (
-          <PanelGroup direction="vertical" className="h-full">
+          <PanelGroup orientation="vertical" className="h-full">
             <Panel defaultSize={50} minSize={15}>
               {renderPane(layout.panes[0])}
             </Panel>
@@ -306,7 +306,7 @@ export const SplitPaneEditor = forwardRef<SplitPaneEditorRef, SplitPaneEditorPro
         // 2x2 grid for 3-4 panes
         const [p1, p2, p3, p4] = layout.panes
         return (
-          <PanelGroup direction="vertical" className="h-full">
+          <PanelGroup orientation="vertical" className="h-full">
             <Panel defaultSize={50} minSize={15}>
               <PanelGroup orientation="horizontal" className="h-full">
                 <Panel defaultSize={50} minSize={20}>

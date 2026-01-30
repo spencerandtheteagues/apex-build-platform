@@ -39,14 +39,12 @@ export type { RemoteCursor, UseCollaborationOptions } from './useCollaboration'
 // Mobile detection hooks
 export {
   useBreakpoint,
-  useMobile,
   useIsMobile,
-  useTouch,
+  useIsTouchDevice,
   usePinchZoom,
-  useKeyboardHeight,
-  useSafeArea,
-  useOrientationChange,
-  useVirtualKeyboard,
+  useKeyboardVisibility,
+  useSafeAreaInsets,
+  useOrientation,
   BREAKPOINTS,
 } from './useMobile'
 export type { Breakpoint } from './useMobile'

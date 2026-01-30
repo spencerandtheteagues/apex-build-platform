@@ -32,7 +32,8 @@ import {
   Box,
   Puzzle,
   Globe,
-  Heart
+  Heart,
+  Brain
 } from 'lucide-react'
 
 // Types
@@ -83,16 +84,16 @@ export const ExplorePage = () => {
           id: String(p.id),
           title: p.name,
           description: p.description || 'No description provided',
-          author: { 
-            name: p.owner_username, 
-            avatar: p.owner_avatar_url || '' 
+          author: {
+            name: p.owner_username || 'Unknown',
+            avatar: p.owner_avatar_url || ''
           },
           stars: p.stats?.star_count || 0,
           forks: p.stats?.fork_count || 0,
           views: p.stats?.view_count || 0,
-          tags: p.topics || [p.language],
+          tags: p.topics || [p.language].filter(Boolean) as string[],
           updatedAt: new Date(p.updated_at).toLocaleDateString(),
-          verified: p.is_verified
+          verified: p.is_verified || false
         })))
       } catch (error) {
         console.error('Failed to fetch projects:', error)
@@ -148,7 +149,7 @@ export const ExplorePage = () => {
 
           <div className="flex gap-2">
             <Button variant="outline" className="border-gray-700 hover:bg-gray-800">
-              <img src="/logo.png" alt="APEX" className="w-4 h-4 mr-2 object-contain" />
+              <img src="/logo.png" alt="APEX" className="w-5 h-5 mr-2 object-contain" />
               Publish Project
             </Button>
           </div>

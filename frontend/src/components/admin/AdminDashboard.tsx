@@ -326,7 +326,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
                         <Badge variant="warning" size="sm">Admin</Badge>
                       )}
                       {u.bypass_billing && (
-                        <CreditCard className="w-4 h-4 text-green-500" title="Bypass Billing" />
+                        <CreditCard className="w-4 h-4 text-green-500" aria-label="Bypass Billing" />
                       )}
                     </div>
                   </td>

@@ -236,9 +236,9 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
               <div className="mt-4">
                 <h4 className="text-sm font-medium text-gray-300 mb-2">Languages</h4>
                 <div className="flex flex-wrap gap-1">
-                  {projectStats.languages.map(lang => (
-                    <Badge key={lang} variant="outline" size="xs">
-                      {lang.toUpperCase()}
+                  {projectStats.languages.map((lang, idx) => (
+                    <Badge key={lang || idx} variant="outline" size="xs">
+                      {(lang || 'unknown').toUpperCase()}
                     </Badge>
                   ))}
                 </div>

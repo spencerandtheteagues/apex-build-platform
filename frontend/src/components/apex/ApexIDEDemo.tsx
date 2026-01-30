@@ -388,7 +388,7 @@ const CodeEditor: React.FC<{
 
 // ===== MAIN IDE COMPONENT =====
 export const APEXIDEDemo: React.FC = () => {
-  const [selectedFile, setSelectedFile] = useState(MOCK_FILES[0].children[3]); // main.tsx
+  const [selectedFile, setSelectedFile] = useState(MOCK_FILES[0].children?.[3] || MOCK_FILES[0]); // main.tsx
   const [code, setCode] = useState(SAMPLE_CODE);
   const [isRunning, setIsRunning] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(300);
