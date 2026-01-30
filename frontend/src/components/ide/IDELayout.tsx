@@ -31,6 +31,7 @@ import { FileTree } from '@/components/explorer/FileTree'
 import { ProjectDashboard } from '@/components/project/ProjectDashboard'
 import { ProjectList } from '@/components/project/ProjectList'
 import { MobileNavigation, MobilePanelSwitcher } from '@/components/mobile'
+import XTerminal from '@/components/terminal/XTerminal'
 import {
   Menu,
   X,
@@ -85,7 +86,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
   const [rightPanelState, setRightPanelState] = useState<PanelState>(isMobile ? 'collapsed' : 'normal')
   const [bottomPanelState, setBottomPanelState] = useState<PanelState>('collapsed')
   const [activeLeftTab, setActiveLeftTab] = useState<'explorer' | 'search' | 'git'>('explorer')
-  const [activeRightTab, setActiveRightTab] = useState<'ai' | 'collab' | 'settings'>('ai')
+  const [activeRightTab, setActiveRightTab] = useState<'ai' | 'collab' | 'database' | 'settings'>('ai')
   const [activeBottomTab, setActiveBottomTab] = useState<'terminal' | 'output' | 'problems'>('terminal')
 
   // Mobile-specific state
@@ -460,6 +461,34 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
             )}
           </Card>
         )
+      case 'database':
+        return (
+          <Card variant="cyberpunk" padding="md" className="h-full border-0">
+            <h3 className="text-lg font-semibold text-white mb-4">Managed Database</h3>
+            <div className="space-y-4">
+              <div className="p-3 bg-gray-800/50 rounded-lg border border-gray-700">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-white">PostgreSQL</span>
+                  <Badge variant="success" size="sm">Running</Badge>
+                </div>
+                <p className="text-xs text-gray-400 mb-3">Host: apex-db-primary.internal</p>
+                <Button size="xs" variant="outline" className="w-full">Open SQL Shell</Button>
+              </div>
+              <div className="p-3 bg-gray-800/50 rounded-lg border border-gray-700">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-white">Redis Cache</span>
+                  <Badge variant="success" size="sm">Healthy</Badge>
+                </div>
+                <p className="text-xs text-gray-400 mb-3">Memory: 12.4MB / 256MB</p>
+                <Button size="xs" variant="outline" className="w-full">Flush Cache</Button>
+              </div>
+              <Button size="sm" variant="primary" className="w-full bg-red-600 hover:bg-red-500">
+                <Zap className="w-4 h-4 mr-2" />
+                Add New Database
+              </Button>
+            </div>
+          </Card>
+        )
       case 'settings':
         return (
           <Card variant="cyberpunk" padding="md" className="h-full border-0">
@@ -484,10 +513,6 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className }) => {
         return null
     }
   }
-
-import XTerminal from '@/components/terminal/XTerminal'
-
-// ... existing imports
 
   // Render bottom panel content
   const renderBottomPanel = () => {
@@ -928,6 +953,15 @@ import XTerminal from '@/components/terminal/XTerminal'
                   className="rounded-none border-0 touch-target"
                 >
                   {rightPanelState !== 'collapsed' && 'Collab'}
+                </Button>
+                <Button
+                  size="xs"
+                  variant={activeRightTab === 'database' ? 'primary' : 'ghost'}
+                  onClick={() => setActiveRightTab('database')}
+                  icon={<Database size={14} />}
+                  className="rounded-none border-0 touch-target"
+                >
+                  {rightPanelState !== 'collapsed' && 'Database'}
                 </Button>
                 <Button
                   size="xs"

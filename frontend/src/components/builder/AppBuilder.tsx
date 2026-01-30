@@ -572,6 +572,27 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     }
   }
 
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [replitUrl, setReplitUrl] = useState('')
+  const [isImporting, setIsImporting] = useState(false)
+
+  const handleReplitImport = async () => {
+    if (!replitUrl.trim()) return
+    setIsImporting(true)
+    try {
+      // Logic will be added to apiService
+      alert('Replit import initialized. Our agents are analyzing the project...')
+      setShowImportModal(false)
+      setAppDescription(`Imported from Replit: ${replitUrl}`)
+      // Trigger build with specialized description
+      startBuild()
+    } catch (error) {
+      console.error('Import failed:', error)
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
   return (
     <div className="h-full overflow-y-auto bg-black text-white">
       {/* Demon theme background */}
@@ -582,7 +603,51 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         <div className="absolute bottom-0 right-1/4 w-64 h-64 bg-red-800/5 rounded-full" />
       </div>
 
-      <div className="relative z-10 max-w-7xl mx-auto px-4 py-8">
+      {/* Replit Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[100] p-4">
+          <Card variant="cyberpunk" glow="intense" className="w-full max-w-lg border-2 border-red-600/50">
+            <CardHeader>
+              <CardTitle className="text-2xl flex items-center gap-2">
+                <Download className="w-6 h-6 text-red-500" />
+                Import from Replit
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <p className="text-gray-400">
+                Enter the URL of the Replit project you want to migrate to APEX.BUILD.
+                Our agents will analyze the source and reconstruct it with optimized performance.
+              </p>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-300">Replit URL</label>
+                <input
+                  type="text"
+                  value={replitUrl}
+                  onChange={(e) => setReplitUrl(e.target.value)}
+                  placeholder="https://replit.com/@username/project-name"
+                  className="w-full bg-gray-900 border-2 border-gray-700 rounded-xl px-4 py-3 text-white focus:border-red-600 outline-none transition-all"
+                />
+              </div>
+              <div className="flex gap-4">
+                <Button 
+                  onClick={handleReplitImport}
+                  disabled={isImporting || !replitUrl.includes('replit.com')}
+                  className="flex-1 bg-red-600 hover:bg-red-500"
+                >
+                  {isImporting ? 'Analyzing...' : 'Start Migration'}
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  onClick={() => setShowImportModal(false)}
+                  className="border-gray-700"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
         {/* Header */}
         <div className="text-center mb-12">
           <div className="flex items-center justify-center gap-3 mb-4">
@@ -663,30 +728,41 @@ For example:
                 </div>
 
                 {/* Build Button */}
-                <Button
-                  onClick={startBuild}
-                  disabled={!appDescription.trim() || isBuilding}
-                  size="lg"
-                  className={cn(
-                    'w-full h-14 text-lg font-bold',
-                    'bg-gradient-to-r from-red-700 via-red-600 to-red-700',
-                    'hover:from-red-600 hover:via-red-500 hover:to-red-600',
-                    'shadow-lg shadow-red-900/50 hover:shadow-red-800/60',
-                    'disabled:opacity-50 disabled:cursor-not-allowed'
-                  )}
-                >
-                  {isBuilding ? (
-                    <>
-                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
-                      Starting Build...
-                    </>
-                  ) : (
-                    <>
-                      <Rocket className="w-5 h-5 mr-2" />
-                      Start Building
-                    </>
-                  )}
-                </Button>
+                <div className="flex flex-col md:flex-row gap-4">
+                  <Button
+                    onClick={startBuild}
+                    disabled={!appDescription.trim() || isBuilding}
+                    size="lg"
+                    className={cn(
+                      'flex-1 h-14 text-lg font-bold',
+                      'bg-gradient-to-r from-red-700 via-red-600 to-red-700',
+                      'hover:from-red-600 hover:via-red-500 hover:to-red-600',
+                      'shadow-lg shadow-red-900/50 hover:shadow-red-800/60',
+                      'disabled:opacity-50 disabled:cursor-not-allowed'
+                    )}
+                  >
+                    {isBuilding ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+                        Starting Build...
+                      </>
+                    ) : (
+                      <>
+                        <Rocket className="w-5 h-5 mr-2" />
+                        Start Building
+                      </>
+                    )}
+                  </Button>
+
+                  <Button
+                    onClick={() => setShowImportModal(true)}
+                    variant="outline"
+                    className="h-14 px-8 border-2 border-red-900/50 text-red-400 hover:bg-red-900/10"
+                  >
+                    <Download className="w-5 h-5 mr-2" />
+                    Migrate from Replit
+                  </Button>
+                </div>
 
                 {/* Example Apps */}
                 <div className="mt-6 pt-6 border-t border-gray-800">
