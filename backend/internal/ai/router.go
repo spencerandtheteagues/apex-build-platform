@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -142,7 +143,19 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 	// Attempt to generate with primary provider
 	response, err := client.Generate(ctx, req)
 	if err != nil {
+		errStr := err.Error()
 		log.Printf("Error from provider %s: %v", provider, err)
+
+		// Mark provider as temporarily unhealthy for quota/rate limit errors
+		if strings.Contains(errStr, "RATE_LIMIT") || strings.Contains(errStr, "QUOTA_EXCEEDED") {
+			r.mu.Lock()
+			r.healthCheck[provider] = false
+			r.mu.Unlock()
+			log.Printf("Marked provider %s as temporarily unhealthy due to quota/rate limit", provider)
+		}
+
+		// Collect all errors for better reporting
+		failedProviders := []string{fmt.Sprintf("%s: %s", provider, errStr)}
 
 		// Try fallback providers
 		fallbacks := r.config.FallbackOrder[provider]
@@ -154,12 +167,23 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 					if fallbackErr == nil {
 						return fallbackResponse, nil
 					}
+					fallbackErrStr := fallbackErr.Error()
 					log.Printf("Fallback provider %s also failed: %v", fallbackProvider, fallbackErr)
+					failedProviders = append(failedProviders, fmt.Sprintf("%s: %s", fallbackProvider, fallbackErrStr))
+
+					// Mark fallback as unhealthy too if quota/rate limited
+					if strings.Contains(fallbackErrStr, "RATE_LIMIT") || strings.Contains(fallbackErrStr, "QUOTA_EXCEEDED") {
+						r.mu.Lock()
+						r.healthCheck[fallbackProvider] = false
+						r.mu.Unlock()
+					}
+				} else {
+					failedProviders = append(failedProviders, fmt.Sprintf("%s: unavailable or rate-limited", fallbackProvider))
 				}
 			}
 		}
 
-		return nil, fmt.Errorf("all providers failed, last error: %w", err)
+		return nil, fmt.Errorf("ALL_PROVIDERS_FAILED: %s", strings.Join(failedProviders, "; "))
 	}
 
 	return response, nil

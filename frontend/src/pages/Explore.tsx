@@ -148,7 +148,7 @@ export const ExplorePage = () => {
 
           <div className="flex gap-2">
             <Button variant="outline" className="border-gray-700 hover:bg-gray-800">
-              <Rocket className="w-4 h-4 mr-2 text-purple-400" />
+              <img src="/logo.png" alt="APEX" className="w-4 h-4 mr-2 object-contain" />
               Publish Project
             </Button>
           </div>

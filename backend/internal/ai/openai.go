@@ -234,7 +234,21 @@ func (o *OpenAIClient) makeRequest(ctx context.Context, req *openAIRequest) (*op
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		// Parse specific error types for better error messages
+		switch resp.StatusCode {
+		case 429:
+			return nil, fmt.Errorf("RATE_LIMIT: OpenAI API rate limit exceeded. Please wait before retrying")
+		case 403:
+			return nil, fmt.Errorf("FORBIDDEN: OpenAI API access denied - check API key permissions")
+		case 401:
+			return nil, fmt.Errorf("UNAUTHORIZED: Invalid OpenAI API key")
+		case 402:
+			return nil, fmt.Errorf("QUOTA_EXCEEDED: OpenAI API quota exhausted. Add credits or use another provider")
+		case 500, 502, 503, 504:
+			return nil, fmt.Errorf("SERVICE_ERROR: OpenAI service temporarily unavailable (status %d)", resp.StatusCode)
+		default:
+			return nil, fmt.Errorf("API_ERROR: OpenAI request failed with status %d: %s", resp.StatusCode, string(body))
+		}
 	}
 
 	var openAIResp openAIResponse

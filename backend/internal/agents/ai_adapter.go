@@ -453,3 +453,28 @@ type Issue struct {
 	Severity string `json:"severity"`
 	Message  string `json:"message"`
 }
+
+// GetAvailableProviders returns a list of healthy, available AI providers
+func (a *AIRouterAdapter) GetAvailableProviders() []AIProvider {
+	healthStatus := a.router.GetHealthStatus()
+	available := make([]AIProvider, 0)
+
+	// Map AI router providers to agent providers and check health
+	providerMappings := map[ai.AIProvider]AIProvider{
+		ai.ProviderClaude: ProviderClaude,
+		ai.ProviderGPT4:   ProviderGPT,
+		ai.ProviderGemini: ProviderGemini,
+	}
+
+	for aiProvider, agentProvider := range providerMappings {
+		if healthy, exists := healthStatus[aiProvider]; exists && healthy {
+			available = append(available, agentProvider)
+			log.Printf("Provider %s is available and healthy", agentProvider)
+		} else {
+			log.Printf("Provider %s is not available or unhealthy", agentProvider)
+		}
+	}
+
+	log.Printf("Available providers: %v", available)
+	return available
+}

@@ -248,7 +248,23 @@ func (g *GeminiClient) makeRequest(ctx context.Context, url string, req *geminiR
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		// Parse specific error types for better error messages
+		switch resp.StatusCode {
+		case 429:
+			return nil, fmt.Errorf("RATE_LIMIT: Gemini API rate limit exceeded. Please wait before retrying")
+		case 403:
+			// Check if it's a quota issue
+			if bytes.Contains(body, []byte("quota")) || bytes.Contains(body, []byte("QUOTA")) {
+				return nil, fmt.Errorf("QUOTA_EXCEEDED: Gemini API quota exhausted. Consider adding billing or using another provider")
+			}
+			return nil, fmt.Errorf("FORBIDDEN: Gemini API access denied - check API key permissions")
+		case 401:
+			return nil, fmt.Errorf("UNAUTHORIZED: Invalid Gemini API key")
+		case 500, 502, 503, 504:
+			return nil, fmt.Errorf("SERVICE_ERROR: Gemini service temporarily unavailable (status %d)", resp.StatusCode)
+		default:
+			return nil, fmt.Errorf("API_ERROR: Gemini request failed with status %d: %s", resp.StatusCode, string(body))
+		}
 	}
 
 	var geminiResp geminiResponse

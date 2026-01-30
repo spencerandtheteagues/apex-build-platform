@@ -102,6 +102,7 @@ interface BuildState {
   tasks: Task[]
   checkpoints: Checkpoint[]
   description: string
+  availableProviders?: string[]
 }
 
 type BuildMode = 'fast' | 'full'
@@ -241,7 +242,23 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         break
 
       case 'build:progress':
-        setBuildState(prev => prev ? { ...prev, progress: data.progress } : null)
+        setBuildState(prev => {
+          if (!prev) return null
+          const updates: Partial<BuildState> = { progress: data.progress }
+
+          // Handle provider check phase - update available providers
+          if (data.phase === 'provider_check' && data.available_providers) {
+            updates.availableProviders = data.available_providers
+            addSystemMessage(`AI Providers available: ${data.available_providers.join(', ')} (${data.provider_count} total)`)
+          }
+
+          // Handle inactivity warnings
+          if (data.inactivity_warning) {
+            addSystemMessage(`${data.message}`)
+          }
+
+          return { ...prev, ...updates }
+        })
         break
 
       case 'agent:spawned':
@@ -345,6 +362,73 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
       case 'agent:output':
         addAiThought(message.agent_id, data.agent_role, data.provider, 'output', data.content)
+        break
+
+      // Critical error handlers - these prevent the build from getting stuck
+      case 'build:error':
+        addSystemMessage(`Build Error: ${data.error || 'Unknown error'}${data.details ? ` - ${data.details}` : ''}`)
+        setIsBuilding(false)
+        setBuildState(prev => prev ? { ...prev, status: 'failed' } : null)
+        break
+
+      case 'build:started':
+        addSystemMessage('Build initialized, spawning agents...')
+        setBuildState(prev => prev ? { ...prev, status: data.status || 'planning' } : null)
+        break
+
+      case 'agent:generation_failed':
+        addSystemMessage(`AI generation failed for ${data.agent_role || 'agent'} (${data.provider || 'unknown'}): ${data.error || 'Unknown error'}`)
+        // Show retry info if available
+        if (data.retry_count !== undefined && data.max_retries !== undefined) {
+          if (data.retry_count < data.max_retries) {
+            addSystemMessage(`Retrying... (attempt ${data.retry_count + 1}/${data.max_retries})`)
+          } else {
+            addSystemMessage(`Max retries reached. The AI provider may be unavailable.`)
+          }
+        }
+        break
+
+      case 'agent:generating':
+        addAiThought(message.agent_id, data.agent_role, data.provider, 'action', data.content || `Generating code with ${data.provider}...`)
+        break
+
+      case 'agent:retrying':
+        addSystemMessage(`${data.agent_role || 'Agent'} retrying task (attempt ${data.retry_count}/${data.max_retries})...`)
+        break
+
+      case 'code:generated':
+        addSystemMessage(`${data.agent_role || 'Agent'} generated ${data.files_count || 0} file(s)`)
+        // Add generated files if provided
+        if (data.files && Array.isArray(data.files)) {
+          data.files.forEach((file: any) => {
+            if (file.path) {
+              setGeneratedFiles(prev => [...prev, {
+                path: file.path,
+                content: file.content || '',
+                language: file.language || 'text'
+              }])
+            }
+          })
+        }
+        break
+
+      case 'agent:progress':
+        setBuildState(prev => {
+          if (!prev) return null
+          return {
+            ...prev,
+            agents: prev.agents.map(a =>
+              a.id === message.agent_id ? { ...a, progress: data.progress || 0 } : a
+            )
+          }
+        })
+        break
+
+      case 'preview:ready':
+        if (data.url) {
+          setPreviewUrl(data.url)
+          addSystemMessage(`Preview ready: ${data.url}`)
+        }
         break
     }
   }
@@ -652,8 +736,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         <div className="text-center mb-12">
           <div className="flex items-center justify-center gap-3 mb-4">
             <div className="relative">
-              <div className="w-16 h-16 bg-gradient-to-br from-red-600 to-red-900 rounded-2xl flex items-center justify-center shadow-lg shadow-red-900/50">
-                <Rocket className="w-8 h-8 text-white" />
+              <div className="w-16 h-16 bg-gradient-to-br from-red-600 to-red-900 rounded-2xl flex items-center justify-center shadow-lg shadow-red-900/50 p-2">
+                <img src="/logo.png" alt="APEX" className="w-full h-full object-contain" />
               </div>
               {/* Demon glow effect */}
               <div className="absolute -inset-1 bg-gradient-to-br from-red-600 to-red-900 rounded-2xl opacity-30" style={{ filter: 'blur(8px)' }} />
@@ -748,7 +832,7 @@ For example:
                       </>
                     ) : (
                       <>
-                        <Rocket className="w-5 h-5 mr-2" />
+                        <img src="/logo.png" alt="APEX" className="w-5 h-5 mr-2 object-contain" />
                         Start Building
                       </>
                     )}
@@ -819,7 +903,7 @@ For example:
                   {/* Status Badge */}
                   <div className="flex items-center gap-2">
                     <Badge
-                      variant={buildState.status === 'completed' ? 'success' : 'primary'}
+                      variant={buildState.status === 'completed' ? 'success' : buildState.status === 'failed' ? 'destructive' : 'primary'}
                       className="capitalize"
                     >
                       {buildState.status.replace('_', ' ')}
@@ -830,6 +914,29 @@ For example:
                       </span>
                     )}
                   </div>
+
+                  {/* Available AI Providers */}
+                  {buildState.availableProviders && buildState.availableProviders.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-gray-800">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-gray-500">AI Providers:</span>
+                        {buildState.availableProviders.map((provider) => (
+                          <Badge
+                            key={provider}
+                            variant="outline"
+                            className={cn(
+                              'text-xs',
+                              provider === 'claude' && 'border-orange-500/50 text-orange-400',
+                              provider === 'gpt' && 'border-green-500/50 text-green-400',
+                              provider === 'gemini' && 'border-blue-500/50 text-blue-400'
+                            )}
+                          >
+                            {provider === 'claude' ? 'Claude' : provider === 'gpt' ? 'GPT-4' : provider === 'gemini' ? 'Gemini' : provider}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 

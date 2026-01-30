@@ -45,7 +45,7 @@ const stepIcons: Record<AgentStepType, React.ReactNode> = {
   test: <TestTube className="w-4 h-4" />,
   review: <Shield className="w-4 h-4" />,
   fix: <Wrench className="w-4 h-4" />,
-  deploy: <Rocket className="w-4 h-4" />,
+  deploy: <img src="/logo.png" alt="Deploy" className="w-4 h-4 object-contain" />,
   checkpoint: <History className="w-4 h-4" />,
 }
 

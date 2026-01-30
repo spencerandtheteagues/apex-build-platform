@@ -305,7 +305,7 @@ function App() {
                 : 'text-gray-400 hover:text-white hover:bg-gray-800'
             }`}
           >
-            <Rocket className="w-4 h-4" />
+            <img src="/logo.png" alt="APEX" className="w-4 h-4 object-contain" />
             <span className="text-sm font-medium">Build App</span>
           </button>
           <button

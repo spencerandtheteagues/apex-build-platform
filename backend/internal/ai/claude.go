@@ -209,7 +209,21 @@ func (c *ClaudeClient) makeRequest(ctx context.Context, req *claudeRequest) (*cl
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		// Parse specific error types for better error messages
+		switch resp.StatusCode {
+		case 429:
+			return nil, fmt.Errorf("RATE_LIMIT: Claude API rate limit exceeded. Please wait before retrying")
+		case 403:
+			return nil, fmt.Errorf("FORBIDDEN: Claude API access denied - check API key permissions")
+		case 401:
+			return nil, fmt.Errorf("UNAUTHORIZED: Invalid Claude API key")
+		case 402:
+			return nil, fmt.Errorf("QUOTA_EXCEEDED: Claude API quota exhausted. Add credits or use another provider")
+		case 500, 502, 503, 504, 529:
+			return nil, fmt.Errorf("SERVICE_ERROR: Claude service temporarily unavailable (status %d)", resp.StatusCode)
+		default:
+			return nil, fmt.Errorf("API_ERROR: Claude request failed with status %d: %s", resp.StatusCode, string(body))
+		}
 	}
 
 	var claudeResp claudeResponse

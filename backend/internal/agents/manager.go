@@ -30,6 +30,7 @@ type AgentManager struct {
 // AIRouter interface for communicating with AI providers
 type AIRouter interface {
 	Generate(ctx context.Context, provider AIProvider, prompt string, opts GenerateOptions) (string, error)
+	GetAvailableProviders() []AIProvider
 }
 
 // GenerateOptions for AI generation requests
@@ -146,15 +147,54 @@ func (am *AgentManager) StartBuild(buildID string) error {
 		},
 	})
 
-	// Spawn the lead agent first
-	leadAgent, err := am.spawnAgent(buildID, RoleLead, ProviderClaude)
+	// Get available providers and spawn lead agent with the best available
+	availableProviders := am.aiRouter.GetAvailableProviders()
+	if len(availableProviders) == 0 {
+		am.broadcast(buildID, &WSMessage{
+			Type:      WSBuildError,
+			BuildID:   buildID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"error":   "No AI providers available",
+				"details": "Please check your API key configuration. Ensure at least one of Claude, GPT, or Gemini API keys is configured and valid.",
+			},
+		})
+		return fmt.Errorf("no AI providers available")
+	}
+
+	// Select best provider for lead agent (prefer Claude, then GPT, then Gemini)
+	leadProvider := availableProviders[0]
+	for _, p := range availableProviders {
+		if p == ProviderClaude {
+			leadProvider = ProviderClaude
+			break
+		}
+		if p == ProviderGPT && leadProvider != ProviderClaude {
+			leadProvider = ProviderGPT
+		}
+	}
+
+	log.Printf("Spawning lead agent with provider: %s (available: %v)", leadProvider, availableProviders)
+
+	// Spawn the lead agent with selected provider
+	var leadAgent *Agent
+	var err error
+	for _, provider := range availableProviders {
+		leadAgent, err = am.spawnAgent(buildID, RoleLead, provider)
+		if err == nil {
+			log.Printf("Successfully spawned lead agent with %s", provider)
+			break
+		}
+		log.Printf("Failed to spawn lead agent with %s: %v, trying next provider", provider, err)
+	}
+
 	if err != nil {
 		am.broadcast(buildID, &WSMessage{
 			Type:      WSBuildError,
 			BuildID:   buildID,
 			Timestamp: time.Now(),
 			Data: map[string]any{
-				"error":   "Failed to spawn lead agent",
+				"error":   "Failed to spawn lead agent with any available provider",
 				"details": err.Error(),
 			},
 		})
@@ -217,6 +257,9 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	// Start build timeout goroutine - force complete after timeout
 	go am.buildTimeoutHandler(buildID, build.Mode)
 
+	// Start inactivity monitor - fail build if no AI activity for 45 seconds
+	go am.inactivityMonitor(buildID)
+
 	log.Printf("Build %s started with lead agent %s, planning task %s queued", buildID, leadAgent.ID, planTask.ID)
 	return nil
 }
@@ -247,6 +290,79 @@ func (am *AgentManager) buildTimeoutHandler(buildID string, mode BuildMode) {
 	if status == BuildPlanning || status == BuildInProgress {
 		log.Printf("Build %s timed out after %v, forcing completion", buildID, timeout)
 		am.forceCompleteBuild(buildID)
+	}
+}
+
+// inactivityMonitor checks for build inactivity and broadcasts errors if AI isn't responding
+func (am *AgentManager) inactivityMonitor(buildID string) {
+	// Check every 15 seconds
+	checkInterval := 15 * time.Second
+	inactivityThreshold := 45 * time.Second
+	maxInactivityWarnings := 3
+	warningCount := 0
+
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		am.mu.RLock()
+		build, exists := am.builds[buildID]
+		am.mu.RUnlock()
+
+		if !exists {
+			return
+		}
+
+		build.mu.RLock()
+		status := build.Status
+		lastUpdate := build.UpdatedAt
+		build.mu.RUnlock()
+
+		// Stop monitoring if build is complete or failed
+		if status == BuildCompleted || status == BuildFailed || status == BuildCancelled {
+			return
+		}
+
+		// Check if there's been any activity
+		timeSinceUpdate := time.Since(lastUpdate)
+		if timeSinceUpdate > inactivityThreshold {
+			warningCount++
+			log.Printf("Build %s: No activity for %v (warning %d/%d)", buildID, timeSinceUpdate.Round(time.Second), warningCount, maxInactivityWarnings)
+
+			// Broadcast inactivity warning to frontend
+			am.broadcast(buildID, &WSMessage{
+				Type:      WSBuildProgress,
+				BuildID:   buildID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"phase":              "waiting",
+					"message":            fmt.Sprintf("Waiting for AI response... (no activity for %v)", timeSinceUpdate.Round(time.Second)),
+					"inactivity_warning": true,
+					"warning_count":      warningCount,
+				},
+			})
+
+			// If too many warnings, broadcast an error
+			if warningCount >= maxInactivityWarnings {
+				log.Printf("Build %s: Inactivity threshold exceeded, broadcasting AI availability warning", buildID)
+				am.broadcast(buildID, &WSMessage{
+					Type:      WSBuildError,
+					BuildID:   buildID,
+					Timestamp: time.Now(),
+					Data: map[string]any{
+						"error":           "AI providers may be unavailable or rate-limited",
+						"details":         "No AI activity detected. The build will continue trying but may take longer than expected. Check your API key configuration.",
+						"recoverable":     true,
+						"inactivity_time": timeSinceUpdate.Round(time.Second).String(),
+					},
+				})
+				// Reset warning count but keep monitoring
+				warningCount = 0
+			}
+		} else {
+			// Activity detected, reset warning count
+			warningCount = 0
+		}
 	}
 }
 
@@ -345,28 +461,204 @@ func (am *AgentManager) spawnAgent(buildID string, role AgentRole, provider AIPr
 
 // SpawnAgentTeam creates the full team of agents for a build
 func (am *AgentManager) SpawnAgentTeam(buildID string) error {
-	// Spawn agents with appropriate providers based on their roles
-	agentConfigs := []struct {
-		Role     AgentRole
-		Provider AIProvider
-	}{
-		{RolePlanner, ProviderClaude},    // Claude excels at planning
-		{RoleArchitect, ProviderClaude},  // Claude for architecture
-		{RoleFrontend, ProviderGPT},      // GPT for code generation
-		{RoleBackend, ProviderGPT},       // GPT for code generation
-		{RoleDatabase, ProviderClaude},   // Claude for schemas
-		{RoleTesting, ProviderGemini},    // Gemini for testing
-		{RoleReviewer, ProviderClaude},   // Claude for code review
+	// Get available providers dynamically
+	availableProviders := am.aiRouter.GetAvailableProviders()
+
+	if len(availableProviders) == 0 {
+		return fmt.Errorf("no AI providers available - please check API key configuration")
 	}
 
-	for _, config := range agentConfigs {
-		_, err := am.spawnAgent(buildID, config.Role, config.Provider)
+	// Define all agent roles needed for a complete build
+	allRoles := []AgentRole{
+		RolePlanner,
+		RoleArchitect,
+		RoleFrontend,
+		RoleBackend,
+		RoleDatabase,
+		RoleTesting,
+		RoleReviewer,
+	}
+
+	// Determine provider assignments based on availability
+	providerAssignments := am.assignProvidersToRoles(availableProviders, allRoles)
+
+	// Broadcast provider availability status
+	am.mu.RLock()
+	build, exists := am.builds[buildID]
+	am.mu.RUnlock()
+	if exists {
+		providerNames := make([]string, len(availableProviders))
+		for i, p := range availableProviders {
+			providerNames[i] = string(p)
+		}
+		am.broadcast(buildID, &WSMessage{
+			Type:      WSBuildProgress,
+			BuildID:   buildID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"phase":               "provider_check",
+				"available_providers": providerNames,
+				"provider_count":      len(availableProviders),
+				"message":             fmt.Sprintf("Using %d available AI provider(s): %v", len(availableProviders), providerNames),
+			},
+		})
+		_ = build // silence unused variable warning
+	}
+
+	// Spawn agents with dynamically assigned providers
+	for role, provider := range providerAssignments {
+		_, err := am.spawnAgent(buildID, role, provider)
 		if err != nil {
-			return fmt.Errorf("failed to spawn %s agent: %w", config.Role, err)
+			log.Printf("Warning: failed to spawn %s agent with %s: %v", role, provider, err)
+			// Try with a fallback provider if available
+			for _, fallback := range availableProviders {
+				if fallback != provider {
+					log.Printf("Trying fallback provider %s for %s agent", fallback, role)
+					_, err = am.spawnAgent(buildID, role, fallback)
+					if err == nil {
+						break
+					}
+				}
+			}
+			if err != nil {
+				return fmt.Errorf("failed to spawn %s agent with any provider: %w", role, err)
+			}
 		}
 	}
 
+	log.Printf("Successfully spawned agent team for build %s with %d providers", buildID, len(availableProviders))
 	return nil
+}
+
+// assignProvidersToRoles distributes providers to agent roles based on availability
+func (am *AgentManager) assignProvidersToRoles(providers []AIProvider, roles []AgentRole) map[AgentRole]AIProvider {
+	assignments := make(map[AgentRole]AIProvider)
+
+	// Check which specific providers are available
+	hasClaude := false
+	hasGPT := false
+	hasGemini := false
+	for _, p := range providers {
+		switch p {
+		case ProviderClaude:
+			hasClaude = true
+		case ProviderGPT:
+			hasGPT = true
+		case ProviderGemini:
+			hasGemini = true
+		}
+	}
+
+	numProviders := len(providers)
+	log.Printf("Assigning providers to roles: %d providers available (Claude=%v, GPT=%v, Gemini=%v)",
+		numProviders, hasClaude, hasGPT, hasGemini)
+
+	switch numProviders {
+	case 1:
+		// Single provider handles ALL agents
+		singleProvider := providers[0]
+		log.Printf("Single provider mode: %s handles all agents", singleProvider)
+		for _, role := range roles {
+			assignments[role] = singleProvider
+		}
+
+	case 2:
+		// Two providers split the work
+		// Strategy: one handles planning/architecture/review, other handles code generation
+		provider1, provider2 := providers[0], providers[1]
+
+		// Prefer Claude for planning if available, otherwise use first provider
+		planningProvider := provider1
+		codingProvider := provider2
+		if hasClaude {
+			planningProvider = ProviderClaude
+			if provider1 == ProviderClaude {
+				codingProvider = provider2
+			} else {
+				codingProvider = provider1
+			}
+		}
+
+		log.Printf("Two provider mode: %s for planning/review, %s for coding", planningProvider, codingProvider)
+
+		// Planning-oriented roles
+		assignments[RolePlanner] = planningProvider
+		assignments[RoleArchitect] = planningProvider
+		assignments[RoleReviewer] = planningProvider
+
+		// Code generation roles
+		assignments[RoleFrontend] = codingProvider
+		assignments[RoleBackend] = codingProvider
+		assignments[RoleDatabase] = codingProvider
+		assignments[RoleTesting] = codingProvider
+
+	default: // 3 or more providers - optimal distribution
+		log.Printf("Full provider mode: optimal distribution across all providers")
+
+		// Optimal provider assignments based on each model's strengths
+		// Claude: Best for planning, architecture, review (reasoning-heavy)
+		// GPT: Best for code generation (frontend, backend)
+		// Gemini: Good for testing, database, general tasks
+
+		for _, role := range roles {
+			var assignedProvider AIProvider
+
+			switch role {
+			case RolePlanner, RoleArchitect, RoleReviewer:
+				// Prefer Claude for reasoning-heavy tasks
+				if hasClaude {
+					assignedProvider = ProviderClaude
+				} else if hasGPT {
+					assignedProvider = ProviderGPT
+				} else {
+					assignedProvider = ProviderGemini
+				}
+
+			case RoleFrontend, RoleBackend:
+				// Prefer GPT for code generation
+				if hasGPT {
+					assignedProvider = ProviderGPT
+				} else if hasClaude {
+					assignedProvider = ProviderClaude
+				} else {
+					assignedProvider = ProviderGemini
+				}
+
+			case RoleDatabase:
+				// Claude or Gemini for schemas
+				if hasClaude {
+					assignedProvider = ProviderClaude
+				} else if hasGemini {
+					assignedProvider = ProviderGemini
+				} else {
+					assignedProvider = ProviderGPT
+				}
+
+			case RoleTesting:
+				// Gemini for testing
+				if hasGemini {
+					assignedProvider = ProviderGemini
+				} else if hasGPT {
+					assignedProvider = ProviderGPT
+				} else {
+					assignedProvider = ProviderClaude
+				}
+
+			default:
+				// Default: use first available
+				assignedProvider = providers[0]
+			}
+
+			assignments[role] = assignedProvider
+		}
+	}
+
+	// Log final assignments
+	for role, provider := range assignments {
+		log.Printf("Agent %s -> Provider %s", role, provider)
+	}
+
+	return assignments
 }
 
 // AssignTask assigns a task to a specific agent
