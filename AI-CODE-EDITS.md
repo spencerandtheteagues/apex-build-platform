@@ -247,4 +247,110 @@ REDIS_URL=redis://localhost:6379    # Optional - falls back to in-memory
 
 ---
 
-**Session completed:** 2026-01-30 06:55 UTC
+## Session Continuation: 2026-01-30 - SQL Injection, Token Blacklisting, Code Splitting
+
+**Commit:** `ad5997a`
+
+### SQL Injection Protection (LIKE Clause Escaping)
+
+Added `escapeLikePattern()` function across all files using LIKE queries:
+
+```go
+// Sanitizes LIKE pattern special characters to prevent injection
+func escapeLikePattern(pattern string) string {
+    pattern = strings.ReplaceAll(pattern, "\\", "\\\\")
+    pattern = strings.ReplaceAll(pattern, "%", "\\%")
+    pattern = strings.ReplaceAll(pattern, "_", "\\_")
+    return pattern
+}
+```
+
+**Files Fixed:**
+- `backend/internal/api/admin.go` - User and project search
+- `backend/internal/community/handlers.go` - Template search
+- `backend/internal/extensions/service.go` - Extension search
+- `backend/internal/search/search.go` - Global search
+
+### Token Blacklisting on Logout
+
+Implemented in-memory token blacklist with automatic cleanup:
+
+```go
+// TokenBlacklist manages revoked tokens with automatic TTL-based cleanup
+type TokenBlacklist struct {
+    tokens  map[string]time.Time  // token -> expiration time
+    mu      sync.RWMutex
+    stopCh  chan struct{}
+}
+
+// Cleanup runs every 5 minutes to remove naturally expired tokens
+func (tb *TokenBlacklist) cleanupRoutine() {
+    ticker := time.NewTicker(5 * time.Minute)
+    // ...
+}
+```
+
+**Files Modified:**
+- `backend/internal/auth/auth.go` - TokenBlacklist struct, Add(), IsBlacklisted(), BlacklistToken()
+- `backend/internal/middleware/auth.go` - GetRawToken() helper for logout
+
+### Frontend Code Splitting
+
+Added React.lazy() with Suspense for IDE components:
+
+```tsx
+// Lazy load heavy IDE components
+const LazyMonacoEditor = lazy(() => import('@monaco-editor/react'));
+const LazyXTerminal = lazy(() => import('./XTerminal'));
+const LazyFileExplorer = lazy(() => import('./FileExplorer'));
+
+// Loading fallback component
+const EditorSkeleton = () => (
+  <div className="flex items-center justify-center h-full bg-background">
+    <div className="animate-pulse">Loading editor...</div>
+  </div>
+);
+```
+
+**Files Modified:**
+- `frontend/src/components/ide/IDELayout.tsx` - Lazy loading with Suspense
+
+### Build Fix
+
+Fixed type mismatch in main.go where BatchedHub was passed to NewHandler expecting Hub:
+
+```go
+// BEFORE (caused build failure)
+baseHandler := handlers.NewHandler(database.GetDB(), aiRouter, authService, wsHubRT)
+
+// AFTER (fixed - access embedded Hub)
+baseHandler := handlers.NewHandler(database.GetDB(), aiRouter, authService, wsHubRT.Hub)
+```
+
+---
+
+## Updated Checklist
+
+### Security (Completed ✅)
+- [x] Token blacklisting on logout
+- [x] Rate limiting on auth endpoints
+- [x] SQL injection fix in LIKE clauses
+- [ ] Refresh token rotation
+
+### Performance (Completed ✅)
+- [x] Wire OptimizedHandler into routes
+- [x] Connect Redis cache (with in-memory fallback)
+- [x] Add React.lazy() code splitting
+- [ ] Lazy load Monaco Editor (separate chunk created)
+
+### Features (Replit Parity)
+- [ ] Full terminal integration (xterm.js + pty)
+- [ ] Version history system
+- [ ] GitHub import wizard
+- [ ] Autonomous AI Agent
+- [ ] Built-in PostgreSQL hosting
+- [ ] Mobile app
+
+---
+
+**Session continued:** 2026-01-30 07:15 UTC
