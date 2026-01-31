@@ -1041,7 +1041,11 @@ export class ApiService {
 
   // ========== BYOK (BRING YOUR OWN KEY) ENDPOINTS ==========
 
-  async saveAPIKey(provider: string, apiKey: string, modelPreference?: string): Promise<{
+  async saveAPIKey(
+    provider: string,
+    apiKey: string,
+    options?: { model_preference?: string }
+  ): Promise<{
     success: boolean
     message: string
     provider: string
@@ -1049,7 +1053,7 @@ export class ApiService {
     const response = await this.client.post('/byok/keys', {
       provider,
       api_key: apiKey,
-      model_preference: modelPreference || '',
+      model_preference: options?.model_preference || '',
     })
     return response.data
   }
@@ -1082,6 +1086,14 @@ export class ApiService {
     error_detail?: string
   }> {
     const response = await this.client.post(`/byok/keys/${provider}/validate`)
+    return response.data
+  }
+
+  async updateAPIKeySettings(
+    provider: string,
+    settings: { is_active?: boolean; model_preference?: string }
+  ): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.patch(`/byok/keys/${provider}`, settings)
     return response.data
   }
 
