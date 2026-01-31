@@ -326,37 +326,37 @@ func (m *BYOKManager) decryptUserKey(key models.UserAPIKey) (string, error) {
 	return m.secretsManager.Decrypt(key.UserID, key.EncryptedKey, key.KeySalt)
 }
 
-// GetAvailableModels returns available models per provider
+// GetAvailableModels returns available models per provider (January 2026)
 func GetAvailableModels() map[string][]ModelInfo {
 	return map[string][]ModelInfo{
 		"claude": {
 			{ID: "claude-opus-4-5-20251101", Name: "Claude Opus 4.5", Speed: "slow", CostTier: "high", Description: "Flagship reasoning model"},
-			{ID: "claude-sonnet-4-20250514", Name: "Claude Sonnet 4", Speed: "medium", CostTier: "medium", Description: "Balanced performance and cost"},
+			{ID: "claude-sonnet-4-20250514", Name: "Claude Sonnet 4", Speed: "medium", CostTier: "medium", Description: "Balanced performance"},
 			{ID: "claude-haiku-3-5-20241022", Name: "Claude Haiku 3.5", Speed: "fast", CostTier: "low", Description: "Fast and affordable"},
 		},
 		"gpt4": {
-			{ID: "gpt-4o", Name: "GPT-4o", Speed: "medium", CostTier: "medium", Description: "Flagship multimodal model"},
-			{ID: "gpt-4o-mini", Name: "GPT-4o Mini", Speed: "fast", CostTier: "low", Description: "Fast and affordable"},
-			{ID: "o1", Name: "o1", Speed: "slow", CostTier: "high", Description: "Advanced reasoning"},
-			{ID: "o1-mini", Name: "o1 Mini", Speed: "medium", CostTier: "medium", Description: "Efficient reasoning"},
+			{ID: "gpt-5.2-pro", Name: "GPT-5.2 Pro", Speed: "slow", CostTier: "high", Description: "Most intelligent, 100% AIME"},
+			{ID: "gpt-5.2-thinking", Name: "GPT-5.2 Thinking", Speed: "medium", CostTier: "medium", Description: "Deep reasoning"},
+			{ID: "gpt-5.2-instant", Name: "GPT-5.2 Instant", Speed: "fast", CostTier: "low", Description: "Fast everyday tasks"},
+			{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Speed: "medium", CostTier: "high", Description: "Agentic coding specialist"},
 		},
 		"gemini": {
-			{ID: "gemini-2.0-flash", Name: "Gemini 2.0 Flash", Speed: "fast", CostTier: "low", Description: "Fast multimodal model"},
-			{ID: "gemini-1.5-pro", Name: "Gemini 1.5 Pro", Speed: "medium", CostTier: "medium", Description: "Advanced capabilities"},
-			{ID: "gemini-1.5-flash", Name: "Gemini 1.5 Flash", Speed: "fast", CostTier: "low", Description: "Fast and efficient"},
+			{ID: "gemini-3-pro", Name: "Gemini 3 Pro", Speed: "medium", CostTier: "medium", Description: "Advanced reasoning"},
+			{ID: "gemini-3-deep-think", Name: "Gemini 3 Deep Think", Speed: "slow", CostTier: "high", Description: "Extended thinking mode"},
+			{ID: "gemini-3-flash", Name: "Gemini 3 Flash", Speed: "fast", CostTier: "low", Description: "Pro-grade at Flash speed"},
 		},
 		"grok": {
-			{ID: "grok-4", Name: "Grok 4", Speed: "medium", CostTier: "medium", Description: "Frontier intelligence model"},
-			{ID: "grok-4-fast", Name: "Grok 4 Fast", Speed: "fast", CostTier: "low", Description: "Fast and very affordable"},
-			{ID: "grok-3-mini", Name: "Grok 3 Mini", Speed: "fast", CostTier: "low", Description: "Budget-friendly option"},
+			{ID: "grok-4-heavy", Name: "Grok 4 Heavy", Speed: "slow", CostTier: "high", Description: "50% HLE, parallel compute"},
+			{ID: "grok-4.1-thinking", Name: "Grok 4.1 Thinking", Speed: "medium", CostTier: "medium", Description: "#1 LMArena overall"},
+			{ID: "grok-4.1", Name: "Grok 4.1", Speed: "fast", CostTier: "medium", Description: "#2 non-reasoning"},
+			{ID: "grok-4-fast", Name: "Grok 4 Fast", Speed: "fast", CostTier: "low", Description: "Budget-friendly option"},
 		},
 		"ollama": {
-			{ID: "llama3.1", Name: "Llama 3.1", Speed: "variable", CostTier: "free", Description: "Meta's open-source model (local)"},
-			{ID: "codellama", Name: "Code Llama", Speed: "variable", CostTier: "free", Description: "Code-specialized Llama (local)"},
-			{ID: "deepseek-coder-v2", Name: "DeepSeek Coder V2", Speed: "variable", CostTier: "free", Description: "Top-tier code model (local)"},
-			{ID: "qwen2.5-coder", Name: "Qwen 2.5 Coder", Speed: "variable", CostTier: "free", Description: "Alibaba's code model (local)"},
-			{ID: "mistral", Name: "Mistral", Speed: "variable", CostTier: "free", Description: "Fast general-purpose model (local)"},
-			{ID: "phi-3", Name: "Phi-3", Speed: "variable", CostTier: "free", Description: "Microsoft's efficient model (local)"},
+			{ID: "deepseek-r1", Name: "DeepSeek-R1", Speed: "variable", CostTier: "free", Description: "O3-tier reasoning (local)"},
+			{ID: "deepseek-v3.2", Name: "DeepSeek-V3.2", Speed: "variable", CostTier: "free", Description: "Efficient long-context (local)"},
+			{ID: "llama3.3-70b", Name: "Llama 3.3 70B", Speed: "variable", CostTier: "free", Description: "405B performance (local)"},
+			{ID: "codellama", Name: "Code Llama", Speed: "variable", CostTier: "free", Description: "Code-specialized (local)"},
+			{ID: "qwen2.5-coder", Name: "Qwen 2.5 Coder", Speed: "variable", CostTier: "free", Description: "Alibaba code model (local)"},
 		},
 	}
 }
