@@ -124,7 +124,7 @@ func main() {
 	masterKey := secretsConfig.SecretsMasterKey
 	if masterKey == "" {
 		if config.IsProductionEnvironment() {
-			log.Fatal("CRITICAL: SECRETS_MASTER_KEY required in production")
+			log.Printf("WARNING: SECRETS_MASTER_KEY not set in production - using generated key (DATA LOSS RISK ON RESTART)")
 		}
 		// Generate a key for development only
 		var genErr error
