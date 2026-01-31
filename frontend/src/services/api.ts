@@ -123,7 +123,7 @@ export class ApiService {
   private setTokens(tokens: TokenResponse): void {
     localStorage.setItem('apex_access_token', tokens.access_token)
     localStorage.setItem('apex_refresh_token', tokens.refresh_token)
-    localStorage.setItem('apex_token_expires', tokens.expires_at)
+    localStorage.setItem('apex_token_expires', tokens.access_token_expires_at)
   }
 
   private clearAuth(): void {

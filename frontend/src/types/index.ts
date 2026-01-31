@@ -204,7 +204,8 @@ export interface RegisterRequest {
 export interface TokenResponse {
   access_token: string
   refresh_token: string
-  expires_at: string
+  access_token_expires_at: string
+  refresh_token_expires_at?: string
   token_type: string
 }
 
