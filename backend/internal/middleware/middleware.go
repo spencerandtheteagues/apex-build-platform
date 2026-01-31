@@ -203,6 +203,9 @@ func CORS() gin.HandlerFunc {
 			"http://localhost:5173",
 			"http://127.0.0.1:3000",
 			"https://apex.build",
+			"https://apex-build.web.app",
+			"https://apex-build.firebaseapp.com",
+			"https://apex-frontend-gigq.onrender.com",
 		}
 
 		// Check if origin is allowed
