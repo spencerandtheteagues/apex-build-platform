@@ -45,7 +45,7 @@ func (h *BYOKHandlers) SaveKey(c *gin.Context) {
 	}
 
 	if err := h.byokManager.SaveKey(userID, req.Provider, req.APIKey, req.ModelPreference); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save API key"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save API key: " + err.Error()})
 		return
 	}
 
