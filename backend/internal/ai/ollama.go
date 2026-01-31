@@ -243,6 +243,8 @@ func (o *OllamaClient) makeRequest(ctx context.Context, req *ollamaRequest) (*ol
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
+	// Bypass ngrok browser warning for free tunnels
+	httpReq.Header.Set("ngrok-skip-browser-warning", "true")
 	// No Authorization header — Ollama runs locally without auth
 
 	resp, err := o.httpClient.Do(httpReq)
@@ -307,6 +309,9 @@ func (o *OllamaClient) Health(ctx context.Context) error {
 		return fmt.Errorf("failed to create health check request: %w", err)
 	}
 
+	// Bypass ngrok browser warning for free tunnels
+	req.Header.Set("ngrok-skip-browser-warning", "true")
+
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("Ollama server not reachable at %s: %w", o.baseURL, err)
@@ -328,6 +333,9 @@ func (o *OllamaClient) GetAvailableModels(ctx context.Context) ([]string, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
+
+	// Bypass ngrok browser warning for free tunnels
+	req.Header.Set("ngrok-skip-browser-warning", "true")
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
