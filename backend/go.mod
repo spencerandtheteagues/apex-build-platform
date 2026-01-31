@@ -1,6 +1,6 @@
 module apex-build
 
-go 1.24.0
+go 1.23.0
 
 require (
 	github.com/creack/pty v1.1.24
@@ -15,7 +15,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
 	github.com/stripe/stripe-go/v76 v76.25.0
-	golang.org/x/crypto v0.44.0
+	golang.org/x/crypto v0.33.0
 	golang.org/x/oauth2 v0.30.0
 	golang.org/x/time v0.12.0
 	gorm.io/driver/postgres v1.5.6
@@ -67,9 +67,9 @@ require (
 	go.uber.org/atomic v1.7.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/arch v0.18.0 // indirect
-	golang.org/x/net v0.46.0 // indirect
+	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/sync v0.18.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/sys v0.28.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
