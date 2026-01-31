@@ -31,6 +31,28 @@ func sanitizeIdentifier(name string) (string, error) {
 	return name, nil
 }
 
+// quoteIdentifier quotes a PostgreSQL identifier (table, database, user name)
+// using double quotes to prevent SQL injection
+func quoteIdentifier(name string) (string, error) {
+	// First validate the identifier contains only safe characters
+	if !validIdentifier.MatchString(name) {
+		return "", fmt.Errorf("invalid identifier: %q", name)
+	}
+	// Double any existing double quotes (PostgreSQL escaping)
+	escaped := strings.ReplaceAll(name, `"`, `""`)
+	return `"` + escaped + `"`, nil
+}
+
+// escapeLiteral escapes a string for use in PostgreSQL SQL as a literal value
+// This is used for values like passwords that can contain any characters
+func escapeLiteral(value string) string {
+	// PostgreSQL uses '' to escape single quotes in string literals
+	escaped := strings.ReplaceAll(value, `'`, `''`)
+	// Also escape backslashes for standard_conforming_strings = on (default)
+	escaped = strings.ReplaceAll(escaped, `\`, `\\`)
+	return escaped
+}
+
 // DatabaseType represents the type of managed database
 type DatabaseType string
 
@@ -287,20 +309,31 @@ func (dm *DatabaseManager) createPostgreSQLDatabase(db *ManagedDatabase) error {
 	}
 	defer adminDB.Close()
 
+	// Validate and quote identifiers to prevent SQL injection
+	quotedDBName, err := quoteIdentifier(db.DatabaseName)
+	if err != nil {
+		return fmt.Errorf("invalid database name: %w", err)
+	}
+	quotedUsername, err := quoteIdentifier(db.Username)
+	if err != nil {
+		return fmt.Errorf("invalid username: %w", err)
+	}
+	escapedPassword := escapeLiteral(db.Password)
+
 	// Create the database
-	_, err = adminDB.Exec(fmt.Sprintf("CREATE DATABASE %s", db.DatabaseName))
+	_, err = adminDB.Exec(fmt.Sprintf("CREATE DATABASE %s", quotedDBName))
 	if err != nil && !strings.Contains(err.Error(), "already exists") {
 		return fmt.Errorf("failed to create PostgreSQL database: %w", err)
 	}
 
 	// Create user with password
-	_, err = adminDB.Exec(fmt.Sprintf("CREATE USER %s WITH PASSWORD '%s'", db.Username, db.Password))
+	_, err = adminDB.Exec(fmt.Sprintf("CREATE USER %s WITH PASSWORD '%s'", quotedUsername, escapedPassword))
 	if err != nil && !strings.Contains(err.Error(), "already exists") {
 		return fmt.Errorf("failed to create PostgreSQL user: %w", err)
 	}
 
 	// Grant privileges
-	_, err = adminDB.Exec(fmt.Sprintf("GRANT ALL PRIVILEGES ON DATABASE %s TO %s", db.DatabaseName, db.Username))
+	_, err = adminDB.Exec(fmt.Sprintf("GRANT ALL PRIVILEGES ON DATABASE %s TO %s", quotedDBName, quotedUsername))
 	if err != nil {
 		return fmt.Errorf("failed to grant privileges: %w", err)
 	}
@@ -385,7 +418,12 @@ func (dm *DatabaseManager) ResetCredentials(db *ManagedDatabase) (string, error)
 		}
 		defer adminDB.Close()
 
-		_, err = adminDB.Exec(fmt.Sprintf("ALTER USER %s WITH PASSWORD '%s'", db.Username, newPassword))
+		quotedUsername, qErr := quoteIdentifier(db.Username)
+		if qErr != nil {
+			return "", fmt.Errorf("invalid username: %w", qErr)
+		}
+		escapedPassword := escapeLiteral(newPassword)
+		_, err = adminDB.Exec(fmt.Sprintf("ALTER USER %s WITH PASSWORD '%s'", quotedUsername, escapedPassword))
 		if err != nil {
 			return "", fmt.Errorf("failed to reset password: %w", err)
 		}
@@ -427,8 +465,13 @@ func (dm *DatabaseManager) DeleteDatabase(db *ManagedDatabase) error {
 			db.Host, db.Port)
 		adminDB, err := sql.Open("postgres", adminDSN)
 		if err == nil {
-			adminDB.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s", db.DatabaseName))
-			adminDB.Exec(fmt.Sprintf("DROP USER IF EXISTS %s", db.Username))
+			// Quote identifiers safely to prevent SQL injection
+			if quotedDBName, qErr := quoteIdentifier(db.DatabaseName); qErr == nil {
+				adminDB.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s", quotedDBName))
+			}
+			if quotedUsername, qErr := quoteIdentifier(db.Username); qErr == nil {
+				adminDB.Exec(fmt.Sprintf("DROP USER IF EXISTS %s", quotedUsername))
+			}
 			adminDB.Close()
 		}
 
@@ -451,9 +494,6 @@ func (dm *DatabaseManager) DeleteDatabase(db *ManagedDatabase) error {
 
 // ExecuteQuery runs a SQL query on a managed database
 func (dm *DatabaseManager) ExecuteQuery(db *ManagedDatabase, query string, password string) (*QueryResult, error) {
-	start := time.Now()
-	result := &QueryResult{}
-
 	switch db.Type {
 	case DatabaseTypeSQLite:
 		return dm.executeSQLiteQuery(db, query)
@@ -464,9 +504,6 @@ func (dm *DatabaseManager) ExecuteQuery(db *ManagedDatabase, query string, passw
 	default:
 		return nil, fmt.Errorf("unsupported database type")
 	}
-
-	result.Duration = time.Since(start)
-	return result, nil
 }
 
 func (dm *DatabaseManager) executeSQLiteQuery(db *ManagedDatabase, query string) (*QueryResult, error) {

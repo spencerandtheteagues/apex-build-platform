@@ -5,6 +5,8 @@ package middleware
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -219,9 +221,9 @@ func CORS() gin.HandlerFunc {
 
 		if allowed {
 			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Access-Control-Allow-Credentials", "true")
 		}
 
-		c.Header("Access-Control-Allow-Credentials", "true")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, X-Requested-With, X-Request-ID")
 		c.Header("Access-Control-Expose-Headers", "X-Request-ID")
@@ -302,9 +304,12 @@ func Logger() gin.HandlerFunc {
 	})
 }
 
-// generateRequestID generates a unique request ID
+// generateRequestID generates a unique request ID using timestamp + random bytes
 func generateRequestID() string {
-	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), time.Now().Unix())
+	// Add 4 random bytes to ensure uniqueness even in tight loops
+	randomBytes := make([]byte, 4)
+	rand.Read(randomBytes)
+	return fmt.Sprintf("%d-%s", time.Now().UnixNano(), hex.EncodeToString(randomBytes))
 }
 
 // APIKeyAuth middleware for API key authentication (for webhook endpoints)

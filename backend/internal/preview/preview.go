@@ -7,13 +7,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"apex-build/internal/bundler"
 	"apex-build/pkg/models"
 
 	"github.com/gorilla/websocket"
@@ -29,19 +33,43 @@ type PreviewServer struct {
 	basePort  int
 	portMap   map[uint]int // projectID -> assigned port
 	portMu    sync.Mutex
+	bundler   *bundler.Service // Bundler service for React/Vue/TypeScript projects
 }
 
 // PreviewSession represents an active preview session
 type PreviewSession struct {
-	ProjectID    uint
-	Port         int
-	Clients      map[*websocket.Conn]bool
-	FileCache    map[string]*CachedFile
-	StartedAt    time.Time
-	LastAccess   time.Time
-	mu           sync.RWMutex
-	server       *http.Server
-	stopChan     chan struct{}
+	ProjectID     uint
+	Port          int
+	Clients       map[*SafeClient]bool
+	FileCache     map[string]*CachedFile
+	StartedAt     time.Time
+	LastAccess    time.Time
+	mu            sync.RWMutex
+	server        *http.Server
+	stopChan      chan struct{}
+	BackendServer *ServerProcess // Backend server process (if running)
+	// Bundler-related fields
+	IsBundled    bool                   // Whether the project uses bundling
+	BundleResult *bundler.BundleResult  // Cached bundle result
+	BundleConfig *bundler.BundleConfig  // Bundle configuration used
+}
+
+// SafeClient wraps a WebSocket connection with a write mutex for thread-safe writes
+type SafeClient struct {
+	conn    *websocket.Conn
+	writeMu sync.Mutex
+}
+
+// WriteMessage safely writes a message to the WebSocket connection
+func (sc *SafeClient) WriteMessage(messageType int, data []byte) error {
+	sc.writeMu.Lock()
+	defer sc.writeMu.Unlock()
+	return sc.conn.WriteMessage(messageType, data)
+}
+
+// Close safely closes the WebSocket connection
+func (sc *SafeClient) Close() error {
+	return sc.conn.Close()
 }
 
 // CachedFile stores processed file content for preview
@@ -74,6 +102,14 @@ type PreviewStatus struct {
 
 // NewPreviewServer creates a new preview server manager
 func NewPreviewServer(db *gorm.DB) *PreviewServer {
+	// Initialize the bundler service for React/Vue/TypeScript support
+	bundlerService := bundler.NewService(db)
+	if bundlerService.IsAvailable() {
+		log.Printf("[preview] Bundler available (esbuild %s)", bundlerService.GetVersion())
+	} else {
+		log.Printf("[preview] Bundler not available - esbuild not found. Install with: npm install -g esbuild")
+	}
+
 	return &PreviewServer{
 		db:       db,
 		sessions: make(map[uint]*PreviewSession),
@@ -86,6 +122,7 @@ func NewPreviewServer(db *gorm.DB) *PreviewServer {
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 		},
+		bundler: bundlerService,
 	}
 }
 
@@ -109,7 +146,7 @@ func (ps *PreviewServer) StartPreview(ctx context.Context, config *PreviewConfig
 	session := &PreviewSession{
 		ProjectID:  config.ProjectID,
 		Port:       port,
-		Clients:    make(map[*websocket.Conn]bool),
+		Clients:    make(map[*SafeClient]bool),
 		FileCache:  make(map[string]*CachedFile),
 		StartedAt:  time.Now(),
 		LastAccess: time.Now(),
@@ -205,8 +242,56 @@ func (ps *PreviewServer) RefreshPreview(projectID uint, changedFiles []string) e
 
 	// Update file cache
 	ctx := context.Background()
+	needsRebundle := false
+
 	for _, path := range changedFiles {
 		ps.updateFileCache(ctx, session, path)
+
+		// Check if any changed file requires rebundling
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == ".ts" || ext == ".tsx" || ext == ".js" || ext == ".jsx" ||
+			ext == ".css" || ext == ".scss" || ext == ".json" {
+			needsRebundle = true
+		}
+	}
+
+	// Rebundle if needed and bundler is available
+	if needsRebundle && ps.bundler != nil && ps.bundler.IsAvailable() {
+		session.mu.RLock()
+		wasBundled := session.IsBundled
+		bundleConfig := session.BundleConfig
+		session.mu.RUnlock()
+
+		if wasBundled && bundleConfig != nil {
+			log.Printf("[preview] Rebundling project %d due to source file changes", projectID)
+
+			result, err := ps.bundler.BundleProject(ctx, projectID, *bundleConfig)
+			if err != nil {
+				log.Printf("[preview] Rebundle failed: %v", err)
+			} else if result.Success {
+				session.mu.Lock()
+				session.BundleResult = result
+				session.IsBundled = true
+				session.FileCache["__apex_bundle.js"] = &CachedFile{
+					Content:     string(result.OutputJS),
+					ContentType: "application/javascript; charset=utf-8",
+					ProcessedAt: time.Now(),
+					Size:        int64(len(result.OutputJS)),
+				}
+				if len(result.OutputCSS) > 0 {
+					session.FileCache["__apex_bundle.css"] = &CachedFile{
+						Content:     string(result.OutputCSS),
+						ContentType: "text/css; charset=utf-8",
+						ProcessedAt: time.Now(),
+						Size:        int64(len(result.OutputCSS)),
+					}
+				}
+				session.mu.Unlock()
+				log.Printf("[preview] Rebundle successful (JS: %d bytes, duration: %v)", len(result.OutputJS), result.Duration)
+			} else {
+				log.Printf("[preview] Rebundle failed with %d errors", len(result.Errors))
+			}
+		}
 	}
 
 	// Notify all connected clients
@@ -330,6 +415,7 @@ func (ps *PreviewServer) loadProjectFiles(ctx context.Context, session *PreviewS
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
+	// First, load all raw files into cache
 	for _, file := range files {
 		processed := ps.processFile(&file, config)
 		session.FileCache[file.Path] = &CachedFile{
@@ -337,6 +423,84 @@ func (ps *PreviewServer) loadProjectFiles(ctx context.Context, session *PreviewS
 			ContentType: ps.getContentType(file.Path),
 			ProcessedAt: time.Now(),
 			Size:        int64(len(processed)),
+		}
+	}
+
+	// Check if bundling is needed and available
+	if ps.bundler != nil && ps.bundler.IsAvailable() {
+		needsBundling, framework := ps.bundler.NeedsBundling(ctx, config.ProjectID)
+		if needsBundling {
+			log.Printf("[preview] Project %d requires bundling (reason: %s)", config.ProjectID, framework)
+
+			// Detect or use configured framework
+			bundleFramework := config.Framework
+			if bundleFramework == "" {
+				bundleFramework = framework
+			}
+
+			// Create bundle config
+			bundleConfig := bundler.BundleConfig{
+				EntryPoint: config.EntryPoint,
+				Format:     "iife", // Use IIFE for browser compatibility
+				Minify:     false,  // No minification for dev preview
+				SourceMap:  true,
+				Target:     []string{"es2020"},
+				Framework:  bundleFramework,
+			}
+
+			// Bundle the project
+			result, err := ps.bundler.BundleProject(ctx, config.ProjectID, bundleConfig)
+			if err != nil {
+				log.Printf("[preview] Bundling failed for project %d: %v", config.ProjectID, err)
+				// Continue without bundling - serve raw files
+			} else if result.Success {
+				log.Printf("[preview] Bundle successful for project %d (JS: %d bytes, CSS: %d bytes, duration: %v)",
+					config.ProjectID, len(result.OutputJS), len(result.OutputCSS), result.Duration)
+
+				// Store bundle result
+				session.IsBundled = true
+				session.BundleResult = result
+				session.BundleConfig = &bundleConfig
+
+				// Add bundled files to cache
+				session.FileCache["__apex_bundle.js"] = &CachedFile{
+					Content:     string(result.OutputJS),
+					ContentType: "application/javascript; charset=utf-8",
+					ProcessedAt: time.Now(),
+					Size:        int64(len(result.OutputJS)),
+				}
+
+				if len(result.OutputCSS) > 0 {
+					session.FileCache["__apex_bundle.css"] = &CachedFile{
+						Content:     string(result.OutputCSS),
+						ContentType: "text/css; charset=utf-8",
+						ProcessedAt: time.Now(),
+						Size:        int64(len(result.OutputCSS)),
+					}
+				}
+
+				// Generate or update index.html to load the bundle
+				if err := ps.generateBundledHTML(session, config); err != nil {
+					log.Printf("[preview] Failed to generate bundled HTML: %v", err)
+				}
+			} else {
+				// Bundle failed with errors
+				log.Printf("[preview] Bundle failed with errors for project %d:", config.ProjectID)
+				for _, err := range result.Errors {
+					log.Printf("  - %s", err.Message)
+					if err.File != "" {
+						log.Printf("    at %s:%d:%d", err.File, err.Line, err.Column)
+					}
+				}
+
+				// Generate error HTML page
+				session.FileCache["index.html"] = &CachedFile{
+					Content:     ps.bundler.GeneratePreviewHTML(result, bundleConfig, ""),
+					ContentType: "text/html; charset=utf-8",
+					ProcessedAt: time.Now(),
+					Size:        int64(len(session.FileCache["index.html"].Content)),
+				}
+			}
 		}
 	}
 
@@ -358,9 +522,150 @@ func (ps *PreviewServer) updateFileCache(ctx context.Context, session *PreviewSe
 		ProcessedAt: time.Now(),
 		Size:        file.Size,
 	}
+
+	// If this is a bundled project and a source file changed, invalidate the bundle
+	if session.IsBundled {
+		ext := strings.ToLower(filepath.Ext(path))
+		needsRebundle := ext == ".ts" || ext == ".tsx" || ext == ".js" || ext == ".jsx" ||
+			ext == ".css" || ext == ".scss" || ext == ".json"
+
+		if needsRebundle {
+			log.Printf("[preview] Source file %s changed, invalidating bundle for project %d", path, session.ProjectID)
+			// Invalidate the bundle cache
+			if ps.bundler != nil {
+				ps.bundler.InvalidateCache(session.ProjectID)
+			}
+			session.IsBundled = false
+			session.BundleResult = nil
+		}
+	}
 	session.mu.Unlock()
 
 	return nil
+}
+
+// generateBundledHTML creates an HTML file that loads the bundled JS/CSS
+func (ps *PreviewServer) generateBundledHTML(session *PreviewSession, config *PreviewConfig) error {
+	// Look for existing index.html
+	var existingHTML string
+	if cached, exists := session.FileCache["index.html"]; exists {
+		existingHTML = cached.Content
+	} else if cached, exists := session.FileCache["public/index.html"]; exists {
+		existingHTML = cached.Content
+	}
+
+	var html string
+
+	if existingHTML != "" {
+		// Inject bundle references into existing HTML
+		html = ps.injectBundleReferences(existingHTML, session)
+	} else {
+		// Generate new HTML that loads the bundle
+		html = ps.generateBundleHTML(session, config)
+	}
+
+	// Inject hot reload script
+	html = ps.injectHotReloadScript(html, config)
+
+	session.FileCache["index.html"] = &CachedFile{
+		Content:     html,
+		ContentType: "text/html; charset=utf-8",
+		ProcessedAt: time.Now(),
+		Size:        int64(len(html)),
+	}
+
+	return nil
+}
+
+// injectBundleReferences injects bundle script/style tags into existing HTML
+func (ps *PreviewServer) injectBundleReferences(html string, session *PreviewSession) string {
+	// Add CSS link before </head>
+	if session.BundleResult != nil && len(session.BundleResult.OutputCSS) > 0 {
+		cssTag := `<link rel="stylesheet" href="/__apex_bundle.css">`
+		if strings.Contains(html, "</head>") {
+			html = strings.Replace(html, "</head>", cssTag+"\n</head>", 1)
+		}
+	}
+
+	// Remove existing script tags that reference source files (we'll use the bundle instead)
+	// This is a simple approach - a more sophisticated parser could be used
+	html = removeSourceScriptTags(html)
+
+	// Add bundle script before </body>
+	if session.BundleResult != nil && len(session.BundleResult.OutputJS) > 0 {
+		scriptTag := `<script src="/__apex_bundle.js"></script>`
+		if strings.Contains(html, "</body>") {
+			html = strings.Replace(html, "</body>", scriptTag+"\n</body>", 1)
+		} else {
+			html = html + scriptTag
+		}
+	}
+
+	return html
+}
+
+// removeSourceScriptTags removes script tags pointing to source files
+func removeSourceScriptTags(html string) string {
+	// Remove script tags that point to .tsx, .ts, .jsx files
+	// This is a simple regex-free approach
+	lines := strings.Split(html, "\n")
+	var result []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Skip lines that are script tags pointing to TypeScript/JSX
+		if strings.Contains(trimmed, "<script") &&
+			(strings.Contains(trimmed, ".tsx") || strings.Contains(trimmed, ".ts") ||
+				strings.Contains(trimmed, ".jsx") || strings.Contains(trimmed, "src/")) {
+			continue
+		}
+		result = append(result, line)
+	}
+	return strings.Join(result, "\n")
+}
+
+// generateBundleHTML generates a complete HTML file for a bundled project
+func (ps *PreviewServer) generateBundleHTML(session *PreviewSession, config *PreviewConfig) string {
+	framework := "app"
+	if session.BundleConfig != nil {
+		framework = session.BundleConfig.Framework
+	}
+
+	var frameworkHead string
+	switch strings.ToLower(framework) {
+	case "react":
+		// React 18+ uses createRoot, which is in the bundle
+		frameworkHead = ""
+	case "vue":
+		// Vue is bundled
+		frameworkHead = ""
+	case "preact":
+		frameworkHead = ""
+	}
+
+	var cssLink string
+	if session.BundleResult != nil && len(session.BundleResult.OutputCSS) > 0 {
+		cssLink = `<link rel="stylesheet" href="/__apex_bundle.css">`
+	}
+
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>APEX Preview</title>
+  %s
+  %s
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <div id="app"></div>
+  <script src="/__apex_bundle.js"></script>
+</body>
+</html>`, frameworkHead, cssLink)
 }
 
 func (ps *PreviewServer) processFile(file *models.File, config *PreviewConfig) string {
@@ -386,6 +691,134 @@ func (ps *PreviewServer) injectHotReloadScript(html string, config *PreviewConfi
 	script := `
 <script>
 (function() {
+  // ============================================
+  // APEX Console Interception
+  // ============================================
+  const consoleMethods = ['log', 'warn', 'error', 'info', 'debug'];
+  consoleMethods.forEach(method => {
+    const original = console[method];
+    console[method] = function(...args) {
+      original.apply(console, args);
+      try {
+        const message = args.map(arg => {
+          if (arg === null) return 'null';
+          if (arg === undefined) return 'undefined';
+          if (typeof arg === 'object') {
+            try { return JSON.stringify(arg, null, 2); }
+            catch { return String(arg); }
+          }
+          return String(arg);
+        }).join(' ');
+        window.parent.postMessage({
+          type: 'apex-console',
+          level: method,
+          message: message,
+          timestamp: new Date().toISOString()
+        }, '*');
+      } catch (e) {}
+    };
+  });
+
+  // Capture uncaught errors
+  window.onerror = function(msg, url, line, col, error) {
+    window.parent.postMessage({
+      type: 'apex-console',
+      level: 'error',
+      message: msg + ' at ' + url + ':' + line + ':' + col,
+      stack: error?.stack || '',
+      timestamp: new Date().toISOString()
+    }, '*');
+    return false;
+  };
+
+  // Capture unhandled promise rejections
+  window.onunhandledrejection = function(event) {
+    window.parent.postMessage({
+      type: 'apex-console',
+      level: 'error',
+      message: 'Unhandled Promise Rejection: ' + (event.reason?.message || event.reason),
+      stack: event.reason?.stack || '',
+      timestamp: new Date().toISOString()
+    }, '*');
+  };
+
+  // ============================================
+  // APEX Network Request Interception
+  // ============================================
+  let requestIdCounter = 0;
+
+  // Intercept fetch
+  const originalFetch = window.fetch;
+  window.fetch = function(...args) {
+    const requestId = ++requestIdCounter;
+    const startTime = performance.now();
+    const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+    const method = args[1]?.method || 'GET';
+
+    return originalFetch.apply(window, args)
+      .then(response => {
+        window.parent.postMessage({
+          type: 'apex-network',
+          id: requestId,
+          method: method,
+          url: url,
+          status: response.status,
+          statusText: response.statusText,
+          duration: Math.round(performance.now() - startTime),
+          timestamp: new Date().toISOString()
+        }, '*');
+        return response;
+      })
+      .catch(error => {
+        window.parent.postMessage({
+          type: 'apex-network',
+          id: requestId,
+          method: method,
+          url: url,
+          status: 0,
+          statusText: 'Network Error',
+          error: error.message,
+          duration: Math.round(performance.now() - startTime),
+          timestamp: new Date().toISOString()
+        }, '*');
+        throw error;
+      });
+  };
+
+  // Intercept XMLHttpRequest
+  const originalXHROpen = XMLHttpRequest.prototype.open;
+  const originalXHRSend = XMLHttpRequest.prototype.send;
+
+  XMLHttpRequest.prototype.open = function(method, url) {
+    this._apexMethod = method;
+    this._apexUrl = url;
+    this._apexId = ++requestIdCounter;
+    return originalXHROpen.apply(this, arguments);
+  };
+
+  XMLHttpRequest.prototype.send = function() {
+    const xhr = this;
+    const startTime = performance.now();
+
+    xhr.addEventListener('loadend', function() {
+      window.parent.postMessage({
+        type: 'apex-network',
+        id: xhr._apexId,
+        method: xhr._apexMethod || 'GET',
+        url: xhr._apexUrl || '',
+        status: xhr.status,
+        statusText: xhr.statusText,
+        duration: Math.round(performance.now() - startTime),
+        timestamp: new Date().toISOString()
+      }, '*');
+    });
+
+    return originalXHRSend.apply(this, arguments);
+  };
+
+  // ============================================
+  // APEX Hot Reload WebSocket
+  // ============================================
   const ws = new WebSocket('ws://' + window.location.host + '/__apex_ws');
 
   ws.onmessage = function(event) {
@@ -421,7 +854,7 @@ func (ps *PreviewServer) injectHotReloadScript(html string, config *PreviewConfi
     console.error('[APEX] WebSocket error:', error);
   };
 
-  console.log('[APEX] Hot reload connected');
+  console.log('[APEX] Preview connected with DevTools');
 })();
 </script>
 `
@@ -436,7 +869,26 @@ func (ps *PreviewServer) createFileHandler(session *PreviewSession, config *Prev
 	return func(w http.ResponseWriter, r *http.Request) {
 		session.mu.Lock()
 		session.LastAccess = time.Now()
+		backendServer := session.BackendServer
 		session.mu.Unlock()
+
+		// If backend server is running and path starts with /api, proxy to backend
+		if backendServer != nil && backendServer.Ready && strings.HasPrefix(r.URL.Path, "/api") {
+			targetURL, err := url.Parse(backendServer.URL)
+			if err == nil {
+				proxy := httputil.NewSingleHostReverseProxy(targetURL)
+				proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusBadGateway)
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"error":   "Backend server unavailable",
+						"message": err.Error(),
+					})
+				}
+				proxy.ServeHTTP(w, r)
+				return
+			}
+		}
 
 		path := r.URL.Path
 		if path == "/" {
@@ -510,15 +962,18 @@ func (ps *PreviewServer) createWebSocketHandler(session *PreviewSession) http.Ha
 			return
 		}
 
+		// Wrap connection in SafeClient for thread-safe writes
+		safeClient := &SafeClient{conn: conn}
+
 		session.mu.Lock()
-		session.Clients[conn] = true
+		session.Clients[safeClient] = true
 		session.mu.Unlock()
 
 		defer func() {
 			session.mu.Lock()
-			delete(session.Clients, conn)
+			delete(session.Clients, safeClient)
 			session.mu.Unlock()
-			conn.Close()
+			safeClient.Close()
 		}()
 
 		// Keep connection alive
@@ -678,6 +1133,53 @@ func (ps *PreviewServer) GetAllPreviews() []*PreviewStatus {
 		previews = append(previews, ps.getStatus(session))
 	}
 	return previews
+}
+
+// SetBackendServer sets the backend server for a preview session
+func (ps *PreviewServer) SetBackendServer(projectID uint, proc *ServerProcess) {
+	ps.mu.RLock()
+	session, exists := ps.sessions[projectID]
+	ps.mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	session.mu.Lock()
+	session.BackendServer = proc
+	session.mu.Unlock()
+}
+
+// ClearBackendServer clears the backend server from a preview session
+func (ps *PreviewServer) ClearBackendServer(projectID uint) {
+	ps.mu.RLock()
+	session, exists := ps.sessions[projectID]
+	ps.mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	session.mu.Lock()
+	session.BackendServer = nil
+	session.mu.Unlock()
+}
+
+// GetSession returns a preview session by project ID
+func (ps *PreviewServer) GetSession(projectID uint) *PreviewSession {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	return ps.sessions[projectID]
+}
+
+// GetBundler returns the bundler service
+func (ps *PreviewServer) GetBundler() *bundler.Service {
+	return ps.bundler
+}
+
+// IsBundlerAvailable returns true if the bundler is available
+func (ps *PreviewServer) IsBundlerAvailable() bool {
+	return ps.bundler != nil && ps.bundler.IsAvailable()
 }
 
 // PreviewHandler HTTP handler for preview management

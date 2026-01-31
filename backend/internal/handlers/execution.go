@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -20,6 +21,36 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// validEntryPoint matches only safe characters for entry point file paths
+// Allows: alphanumeric, dots, underscores, hyphens, and forward slashes
+var validEntryPoint = regexp.MustCompile(`^[a-zA-Z0-9_./-]+$`)
+
+// sanitizeEntryPoint validates that an entry point path contains only safe characters
+// and does not include shell metacharacters that could enable command injection
+func sanitizeEntryPoint(entryPoint string) string {
+	if entryPoint == "" {
+		return ""
+	}
+	// Reject paths with shell metacharacters, spaces, or control characters
+	if !validEntryPoint.MatchString(entryPoint) {
+		return ""
+	}
+	// Prevent directory traversal
+	if filepath.Clean(entryPoint) != entryPoint || filepath.IsAbs(entryPoint) {
+		return ""
+	}
+	// Additional check for .. sequences
+	if len(entryPoint) >= 2 && (entryPoint[:2] == ".." || entryPoint[len(entryPoint)-2:] == "..") {
+		return ""
+	}
+	for i := 0; i < len(entryPoint)-2; i++ {
+		if entryPoint[i:i+3] == "/.." || entryPoint[i:i+3] == "../" {
+			return ""
+		}
+	}
+	return entryPoint
+}
 
 // ExecutionHandler handles code execution requests
 type ExecutionHandler struct {
@@ -789,6 +820,9 @@ func (h *ExecutionHandler) GetExecutionStats(c *gin.Context) {
 // Helper functions
 
 func getDefaultRunCommand(language, framework, entryPoint string) string {
+	// Sanitize entryPoint to prevent command injection
+	safeEntryPoint := sanitizeEntryPoint(entryPoint)
+
 	switch language {
 	case "javascript", "typescript":
 		if framework == "next" || framework == "nextjs" {
@@ -797,11 +831,11 @@ func getDefaultRunCommand(language, framework, entryPoint string) string {
 		if framework == "react" {
 			return "npm start"
 		}
-		if entryPoint != "" {
+		if safeEntryPoint != "" {
 			if language == "typescript" {
-				return "npx ts-node " + entryPoint
+				return "npx ts-node " + safeEntryPoint
 			}
-			return "node " + entryPoint
+			return "node " + safeEntryPoint
 		}
 		return "npm start"
 
@@ -812,14 +846,14 @@ func getDefaultRunCommand(language, framework, entryPoint string) string {
 		if framework == "flask" {
 			return "flask run"
 		}
-		if entryPoint != "" {
-			return "python3 " + entryPoint
+		if safeEntryPoint != "" {
+			return "python3 " + safeEntryPoint
 		}
 		return "python3 main.py"
 
 	case "go":
-		if entryPoint != "" {
-			return "go run " + entryPoint
+		if safeEntryPoint != "" {
+			return "go run " + safeEntryPoint
 		}
 		return "go run ."
 
@@ -827,8 +861,8 @@ func getDefaultRunCommand(language, framework, entryPoint string) string {
 		return "cargo run"
 
 	case "java":
-		if entryPoint != "" {
-			return "javac " + entryPoint + " && java " + entryPoint[:len(entryPoint)-5]
+		if safeEntryPoint != "" && len(safeEntryPoint) > 5 {
+			return "javac " + safeEntryPoint + " && java " + safeEntryPoint[:len(safeEntryPoint)-5]
 		}
 		return "mvn exec:java"
 
@@ -836,8 +870,8 @@ func getDefaultRunCommand(language, framework, entryPoint string) string {
 		if framework == "rails" {
 			return "rails server"
 		}
-		if entryPoint != "" {
-			return "ruby " + entryPoint
+		if safeEntryPoint != "" {
+			return "ruby " + safeEntryPoint
 		}
 		return "ruby main.rb"
 
@@ -845,8 +879,8 @@ func getDefaultRunCommand(language, framework, entryPoint string) string {
 		if framework == "laravel" {
 			return "php artisan serve"
 		}
-		if entryPoint != "" {
-			return "php " + entryPoint
+		if safeEntryPoint != "" {
+			return "php " + safeEntryPoint
 		}
 		return "php -S localhost:8000"
 

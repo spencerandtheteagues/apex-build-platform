@@ -37,6 +37,9 @@ export interface CollaborationEventData {
   'ai-response': { request_id: string; content: string; provider: string }
 }
 
+// Debug mode - only log in development
+const DEBUG = import.meta.env.DEV
+
 export class WebSocketService {
   private socket: Socket | null = null
   private reconnectAttempts = 0
@@ -46,6 +49,12 @@ export class WebSocketService {
   private isConnecting = false
   private currentRoom: string | null = null
   private listeners: Map<CollaborationEvent, Set<Function>> = new Map()
+
+  private log(...args: any[]): void {
+    if (DEBUG) {
+      console.log('[WS]', ...args)
+    }
+  }
 
   constructor() {
     this.initializeListeners()
@@ -80,7 +89,11 @@ export class WebSocketService {
 
     // Production detection - if running on Render, Firebase, or production domain
     const hostname = typeof window !== 'undefined' ? window.location.hostname : ''
-    if (hostname.includes('onrender.com') || hostname.includes('apex.build') || hostname.includes('web.app') || hostname.includes('firebaseapp.com') || hostname === 'apex-frontend-gigq.onrender.com') {
+    const productionHosts = ['onrender.com', 'apex.build', 'web.app', 'firebaseapp.com']
+    const isProduction = productionHosts.some(host => hostname.includes(host))
+      || hostname === 'apex-frontend-gigq.onrender.com'
+
+    if (isProduction) {
       return 'wss://apex-backend-5ypy.onrender.com'
     }
 
@@ -122,7 +135,7 @@ export class WebSocketService {
           this.isConnecting = false
           this.reconnectAttempts = 0
           this.startHeartbeat()
-          console.log('✅ APEX.BUILD WebSocket connected')
+          this.log('✅ APEX.BUILD WebSocket connected')
           resolve()
         })
 
@@ -144,12 +157,12 @@ export class WebSocketService {
 
     // Connection events
     this.socket.on('connect', () => {
-      console.log('🔌 WebSocket connected')
+      this.log('🔌 WebSocket connected')
       this.reconnectAttempts = 0
     })
 
     this.socket.on('disconnect', (reason) => {
-      console.log('🔌 WebSocket disconnected:', reason)
+      this.log('🔌 WebSocket disconnected:', reason)
       this.stopHeartbeat()
 
       if (reason === 'io server disconnect') {
@@ -162,7 +175,7 @@ export class WebSocketService {
     })
 
     this.socket.on('reconnect', (attemptNumber) => {
-      console.log(`🔄 WebSocket reconnected after ${attemptNumber} attempts`)
+      this.log(`🔄 WebSocket reconnected after ${attemptNumber} attempts`)
       if (this.currentRoom) {
         this.joinRoom(this.currentRoom)
       }
@@ -258,7 +271,7 @@ export class WebSocketService {
 
     setTimeout(() => {
       if (!this.socket?.connected && !this.isConnecting) {
-        console.log(`🔄 Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
+        this.log(`🔄 Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
         this.socket?.connect()
       }
     }, delay)
@@ -319,7 +332,7 @@ export class WebSocketService {
         clearTimeout(timeout)
         if (response.success) {
           this.currentRoom = roomId
-          console.log(`🏠 Joined collaboration room: ${roomId}`)
+          this.log(`🏠 Joined collaboration room: ${roomId}`)
           resolve()
         } else {
           reject(new Error(response.error || 'Failed to join room'))
@@ -341,7 +354,7 @@ export class WebSocketService {
       this.socket!.emit('leave-room', { room_id: this.currentRoom }, (response: any) => {
         clearTimeout(timeout)
         if (response.success) {
-          console.log(`🚪 Left collaboration room: ${this.currentRoom}`)
+          this.log(`🚪 Left collaboration room: ${this.currentRoom}`)
           this.currentRoom = null
           resolve()
         } else {
@@ -491,7 +504,7 @@ export class WebSocketService {
       this.currentRoom = null
       this.reconnectAttempts = 0
       this.isConnecting = false
-      console.log('🔌 WebSocket manually disconnected')
+      this.log('🔌 WebSocket manually disconnected')
     }
   }
 
