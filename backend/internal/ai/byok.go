@@ -82,6 +82,27 @@ func (m *BYOKManager) DeleteKey(userID uint, provider string) error {
 	return m.db.Where("user_id = ? AND provider = ?", userID, provider).Delete(&models.UserAPIKey{}).Error
 }
 
+// UpdateKeySettings updates is_active and/or model_preference for a provider
+func (m *BYOKManager) UpdateKeySettings(userID uint, provider string, isActive *bool, modelPref *string) error {
+	updates := make(map[string]interface{})
+	if isActive != nil {
+		updates["is_active"] = *isActive
+	}
+	if modelPref != nil {
+		updates["model_preference"] = *modelPref
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	result := m.db.Model(&models.UserAPIKey{}).
+		Where("user_id = ? AND provider = ? AND deleted_at IS NULL", userID, provider).
+		Updates(updates)
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("no key found for provider %s", provider)
+	}
+	return result.Error
+}
+
 // ValidateKey tests if a stored key is valid by making a minimal API call
 func (m *BYOKManager) ValidateKey(ctx context.Context, userID uint, provider string) (bool, error) {
 	apiKey, err := m.decryptKey(userID, provider)

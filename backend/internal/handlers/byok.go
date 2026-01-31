@@ -154,6 +154,41 @@ func (h *BYOKHandlers) ValidateKey(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// UpdateKeySettings updates is_active and/or model_preference for a provider
+func (h *BYOKHandlers) UpdateKeySettings(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	provider := c.Param("provider")
+	if provider == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Provider parameter required"})
+		return
+	}
+
+	var req struct {
+		IsActive        *bool   `json:"is_active"`
+		ModelPreference *string `json:"model_preference"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	if err := h.byokManager.UpdateKeySettings(userID, provider, req.IsActive, req.ModelPreference); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"message":  "Settings updated",
+		"provider": provider,
+	})
+}
+
 // GetUsage returns usage summary for the current user
 func (h *BYOKHandlers) GetUsage(c *gin.Context) {
 	userID := c.GetUint("user_id")

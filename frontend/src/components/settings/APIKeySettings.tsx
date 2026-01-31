@@ -192,16 +192,23 @@ export default function APIKeySettings() {
 
     try {
       await apiService.updateAPIKeySettings(provider, { is_active: newActive })
-    } catch {
+      setSuccesses(prev => ({ ...prev, [provider]: newActive ? 'Activated' : 'Deactivated' }))
+      setTimeout(() => setSuccesses(prev => ({ ...prev, [provider]: '' })), 2000)
+    } catch (err: any) {
       // Revert on error
       setKeys(prev => ({
         ...prev,
         [provider]: { ...prev[provider], isActive: !newActive }
       }))
+      setErrors(prev => ({
+        ...prev,
+        [provider]: err.response?.data?.error || 'Failed to update settings'
+      }))
     }
   }
 
   const handleModelChange = async (provider: string, modelId: string) => {
+    const prevModel = keys[provider]?.selectedModel
     setKeys(prev => ({
       ...prev,
       [provider]: { ...prev[provider], selectedModel: modelId }
@@ -211,8 +218,18 @@ export default function APIKeySettings() {
     if (keys[provider]?.isConfigured) {
       try {
         await apiService.updateAPIKeySettings(provider, { model_preference: modelId })
-      } catch {
-        // Silently fail
+      } catch (err: any) {
+        // Revert on error
+        if (prevModel) {
+          setKeys(prev => ({
+            ...prev,
+            [provider]: { ...prev[provider], selectedModel: prevModel }
+          }))
+        }
+        setErrors(prev => ({
+          ...prev,
+          [provider]: err.response?.data?.error || 'Failed to update model'
+        }))
       }
     }
   }

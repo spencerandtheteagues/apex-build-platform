@@ -874,6 +874,7 @@ func setupRoutes(
 				byok.POST("/keys", byokHandler.SaveKey)
 				byok.GET("/keys", byokHandler.GetKeys)
 				byok.DELETE("/keys/:provider", byokHandler.DeleteKey)
+				byok.PATCH("/keys/:provider", byokHandler.UpdateKeySettings)
 				byok.POST("/keys/:provider/validate", byokHandler.ValidateKey)
 				byok.GET("/usage", byokHandler.GetUsage)
 				byok.GET("/models", byokHandler.GetModels)
