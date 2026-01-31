@@ -864,6 +864,256 @@ func (g *GitService) createGitHubPullRequest(ctx context.Context, repo *Reposito
 	}, nil
 }
 
+// ExportResult contains the result of exporting a project to GitHub
+type ExportResult struct {
+	RepoURL   string `json:"repo_url"`
+	RepoOwner string `json:"repo_owner"`
+	RepoName  string `json:"repo_name"`
+	CommitSHA string `json:"commit_sha"`
+	Branch    string `json:"branch"`
+	FileCount int    `json:"file_count"`
+}
+
+// ExportToGitHub creates a new GitHub repository and pushes all project files to it
+func (g *GitService) ExportToGitHub(ctx context.Context, projectID uint, repoName, description, token string, isPrivate bool) (*ExportResult, error) {
+	// Step 1: Get all project files from the database
+	var files []models.File
+	if err := g.db.WithContext(ctx).Where("project_id = ?", projectID).Find(&files).Error; err != nil {
+		return nil, fmt.Errorf("failed to get project files: %w", err)
+	}
+
+	if len(files) == 0 {
+		return nil, fmt.Errorf("project has no files to export")
+	}
+
+	// Step 2: Get the authenticated user's GitHub username
+	owner, err := g.getGitHubUser(ctx, token)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get GitHub user: %w", err)
+	}
+
+	// Step 3: Create the GitHub repository
+	if err := g.createGitHubRepo(ctx, repoName, description, isPrivate, token); err != nil {
+		return nil, fmt.Errorf("failed to create repository: %w", err)
+	}
+
+	// Step 4: Create an initial commit with all files using the Git Data API
+	// We need to build: blobs → tree → commit → update ref (creating the default branch)
+	var treeEntries []map[string]interface{}
+	fileCount := 0
+
+	for _, file := range files {
+		if file.Type == "directory" || file.Content == "" {
+			continue
+		}
+
+		path := file.Path
+		if len(path) > 0 && path[0] == '/' {
+			path = path[1:]
+		}
+
+		// Create blob
+		blobURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/blobs", owner, repoName)
+		blobData := map[string]string{
+			"content":  base64.StdEncoding.EncodeToString([]byte(file.Content)),
+			"encoding": "base64",
+		}
+		blobJSON, _ := json.Marshal(blobData)
+
+		req, _ := http.NewRequestWithContext(ctx, "POST", blobURL, strings.NewReader(string(blobJSON)))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/vnd.github.v3+json")
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			continue
+		}
+
+		var blob struct {
+			SHA string `json:"sha"`
+		}
+		json.NewDecoder(resp.Body).Decode(&blob)
+		resp.Body.Close()
+
+		if blob.SHA == "" {
+			continue
+		}
+
+		treeEntries = append(treeEntries, map[string]interface{}{
+			"path": path,
+			"mode": "100644",
+			"type": "blob",
+			"sha":  blob.SHA,
+		})
+		fileCount++
+	}
+
+	if fileCount == 0 {
+		return nil, fmt.Errorf("no valid files to export")
+	}
+
+	// Create tree (no base_tree since this is the initial commit)
+	treeURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees", owner, repoName)
+	treeData := map[string]interface{}{
+		"tree": treeEntries,
+	}
+	treeJSON, _ := json.Marshal(treeData)
+
+	treeReq, _ := http.NewRequestWithContext(ctx, "POST", treeURL, strings.NewReader(string(treeJSON)))
+	treeReq.Header.Set("Authorization", "Bearer "+token)
+	treeReq.Header.Set("Accept", "application/vnd.github.v3+json")
+	treeReq.Header.Set("Content-Type", "application/json")
+
+	treeResp, err := http.DefaultClient.Do(treeReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create tree: %w", err)
+	}
+	defer treeResp.Body.Close()
+
+	if treeResp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(treeResp.Body)
+		return nil, fmt.Errorf("GitHub tree creation failed (%d): %s", treeResp.StatusCode, string(body))
+	}
+
+	var tree struct {
+		SHA string `json:"sha"`
+	}
+	if err := json.NewDecoder(treeResp.Body).Decode(&tree); err != nil {
+		return nil, fmt.Errorf("failed to decode tree response: %w", err)
+	}
+
+	// Create initial commit (no parents)
+	commitURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/commits", owner, repoName)
+	commitData := map[string]interface{}{
+		"message": "Initial commit — exported from APEX.BUILD",
+		"tree":    tree.SHA,
+		"parents": []string{},
+	}
+	commitJSON, _ := json.Marshal(commitData)
+
+	commitReq, _ := http.NewRequestWithContext(ctx, "POST", commitURL, strings.NewReader(string(commitJSON)))
+	commitReq.Header.Set("Authorization", "Bearer "+token)
+	commitReq.Header.Set("Accept", "application/vnd.github.v3+json")
+	commitReq.Header.Set("Content-Type", "application/json")
+
+	commitResp, err := http.DefaultClient.Do(commitReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create commit: %w", err)
+	}
+	defer commitResp.Body.Close()
+
+	if commitResp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(commitResp.Body)
+		return nil, fmt.Errorf("GitHub commit creation failed (%d): %s", commitResp.StatusCode, string(body))
+	}
+
+	var newCommit struct {
+		SHA string `json:"sha"`
+	}
+	if err := json.NewDecoder(commitResp.Body).Decode(&newCommit); err != nil {
+		return nil, fmt.Errorf("failed to decode commit response: %w", err)
+	}
+
+	// Create the main ref pointing to our commit
+	refURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/refs", owner, repoName)
+	refData := map[string]string{
+		"ref": "refs/heads/main",
+		"sha": newCommit.SHA,
+	}
+	refJSON, _ := json.Marshal(refData)
+
+	refReq, _ := http.NewRequestWithContext(ctx, "POST", refURL, strings.NewReader(string(refJSON)))
+	refReq.Header.Set("Authorization", "Bearer "+token)
+	refReq.Header.Set("Accept", "application/vnd.github.v3+json")
+	refReq.Header.Set("Content-Type", "application/json")
+
+	refResp, err := http.DefaultClient.Do(refReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ref: %w", err)
+	}
+	refResp.Body.Close()
+
+	// Step 5: Optionally connect the repository to the project
+	repoRecord := &Repository{
+		ProjectID:   projectID,
+		RemoteURL:   fmt.Sprintf("https://github.com/%s/%s", owner, repoName),
+		Provider:    "github",
+		RepoOwner:   owner,
+		RepoName:    repoName,
+		Branch:      "main",
+		LastSync:    time.Now(),
+		IsConnected: true,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	g.db.WithContext(ctx).Save(repoRecord)
+
+	return &ExportResult{
+		RepoURL:   fmt.Sprintf("https://github.com/%s/%s", owner, repoName),
+		RepoOwner: owner,
+		RepoName:  repoName,
+		CommitSHA: newCommit.SHA,
+		Branch:    "main",
+		FileCount: fileCount,
+	}, nil
+}
+
+// getGitHubUser returns the authenticated user's login name
+func (g *GitService) getGitHubUser(ctx context.Context, token string) (string, error) {
+	req, _ := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("GitHub user API failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	var user struct {
+		Login string `json:"login"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return "", err
+	}
+	return user.Login, nil
+}
+
+// createGitHubRepo creates a new GitHub repository (auto_init=false so we control the initial commit)
+func (g *GitService) createGitHubRepo(ctx context.Context, name, description string, isPrivate bool, token string) error {
+	repoData := map[string]interface{}{
+		"name":        name,
+		"description": description,
+		"private":     isPrivate,
+		"auto_init":   false,
+	}
+	repoJSON, _ := json.Marshal(repoData)
+
+	req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.github.com/user/repos", strings.NewReader(string(repoJSON)))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("GitHub repo creation failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
 // Helper methods
 
 func (g *GitService) parseRemoteURL(url string) (provider, owner, name string) {
