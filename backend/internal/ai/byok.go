@@ -42,19 +42,20 @@ func (m *BYOKManager) SaveKey(userID uint, provider, apiKey, modelPref string) e
 		return fmt.Errorf("failed to encrypt API key: %w", err)
 	}
 
-	// Upsert: update existing or create new
+	// Upsert: update existing or create new (including soft-deleted records)
 	var existing models.UserAPIKey
-	result := m.db.Where("user_id = ? AND provider = ?", userID, provider).First(&existing)
+	result := m.db.Unscoped().Where("user_id = ? AND provider = ?", userID, provider).First(&existing)
 
 	if result.Error == nil {
-		// Update existing
-		return m.db.Model(&existing).Updates(models.UserAPIKey{
-			EncryptedKey:    encrypted,
-			KeySalt:         salt,
-			KeyFingerprint:  fingerprint,
-			ModelPreference: modelPref,
-			IsActive:        true,
-			IsValid:         false, // Re-validate after update
+		// Update existing and ensure it's not deleted
+		return m.db.Unscoped().Model(&existing).Updates(map[string]interface{}{
+			"encrypted_key":    encrypted,
+			"key_salt":         salt,
+			"key_fingerprint":  fingerprint,
+			"model_preference": modelPref,
+			"is_active":        true,
+			"is_valid":         false,
+			"deleted_at":       nil,
 		}).Error
 	}
 
