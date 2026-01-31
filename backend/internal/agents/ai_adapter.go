@@ -13,17 +13,35 @@ import (
 
 // AIRouterAdapter adapts the existing AI router to the agent system interface
 type AIRouterAdapter struct {
-	router *ai.AIRouter
+	router      *ai.AIRouter
+	byokManager *ai.BYOKManager
 }
 
 // NewAIRouterAdapter creates a new adapter wrapping the existing AI router
-func NewAIRouterAdapter(router *ai.AIRouter) *AIRouterAdapter {
-	return &AIRouterAdapter{router: router}
+func NewAIRouterAdapter(router *ai.AIRouter, byokManager *ai.BYOKManager) *AIRouterAdapter {
+	return &AIRouterAdapter{
+		router:      router,
+		byokManager: byokManager,
+	}
 }
 
 // Generate executes an AI generation request using the specified provider
 func (a *AIRouterAdapter) Generate(ctx context.Context, provider AIProvider, prompt string, opts GenerateOptions) (string, error) {
 	log.Printf("AIRouterAdapter.Generate called with provider: %s", provider)
+
+	// Determine which router to use
+	targetRouter := a.router
+	if opts.UserID > 0 && a.byokManager != nil {
+		userRouter, _, err := a.byokManager.GetRouterForUser(opts.UserID)
+		if err == nil && userRouter != nil {
+			targetRouter = userRouter
+			log.Printf("Using user-specific router for user %d", opts.UserID)
+		} else {
+			log.Printf("Failed to get user router, falling back to platform router: %v", err)
+		}
+	} else {
+		log.Printf("Using platform router (UserID=%d, BYOKManager=%v)", opts.UserID, a.byokManager != nil)
+	}
 
 	// Map agent provider to AI router capability
 	capability := a.mapProviderToCapability(provider, opts)
@@ -107,8 +125,8 @@ For code files, use this exact format:
 	log.Printf("Calling AI router.Generate with capability=%s, provider=%s, prompt_length=%d, max_tokens=%d",
 		capability, aiProvider, len(fullPrompt), maxTokens)
 
-	// Execute the request using Generate method
-	response, err := a.router.Generate(ctx, request)
+	// Execute the request using Generate method on the selected router
+	response, err := targetRouter.Generate(ctx, request)
 	if err != nil {
 		log.Printf("AI generation failed: %v", err)
 		return "", fmt.Errorf("AI generation failed: %w", err)
@@ -456,7 +474,41 @@ type Issue struct {
 	Message  string `json:"message"`
 }
 
-// GetAvailableProviders returns a list of healthy, available AI providers
+// GetAvailableProvidersForUser returns available providers for a specific user (BYOK aware)
+func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []AIProvider {
+	if a.byokManager == nil {
+		return a.GetAvailableProviders()
+	}
+
+	userRouter, _, err := a.byokManager.GetRouterForUser(userID)
+	if err != nil || userRouter == nil {
+		log.Printf("Failed to get router for user %d: %v", userID, err)
+		return a.GetAvailableProviders()
+	}
+
+	healthStatus := userRouter.GetHealthStatus()
+	available := make([]AIProvider, 0)
+
+	// Map AI router providers to agent providers and check health
+	providerMappings := map[ai.AIProvider]AIProvider{
+		ai.ProviderClaude: ProviderClaude,
+		ai.ProviderGPT4:   ProviderGPT,
+		ai.ProviderGemini: ProviderGemini,
+		ai.ProviderOllama: ProviderOllama,
+	}
+
+	for aiProvider, agentProvider := range providerMappings {
+		// For BYOK, we care if it exists in the router map (configured) AND is healthy
+		if healthy, exists := healthStatus[aiProvider]; exists && healthy {
+			available = append(available, agentProvider)
+		}
+	}
+
+	log.Printf("Available providers for user %d: %v", userID, available)
+	return available
+}
+
+// GetAvailableProviders returns a list of healthy, available AI providers (Platform default)
 func (a *AIRouterAdapter) GetAvailableProviders() []AIProvider {
 	healthStatus := a.router.GetHealthStatus()
 	available := make([]AIProvider, 0)

@@ -34,10 +34,12 @@ type AgentManager struct {
 type AIRouter interface {
 	Generate(ctx context.Context, provider AIProvider, prompt string, opts GenerateOptions) (string, error)
 	GetAvailableProviders() []AIProvider
+	GetAvailableProvidersForUser(userID uint) []AIProvider
 }
 
 // GenerateOptions for AI generation requests
 type GenerateOptions struct {
+	UserID      uint
 	MaxTokens   int
 	Temperature float64
 	SystemPrompt string
@@ -158,7 +160,8 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	})
 
 	// Get available providers and spawn lead agent with the best available
-	availableProviders := am.aiRouter.GetAvailableProviders()
+	// Use user-specific providers to respect BYOK/Ollama settings
+	availableProviders := am.aiRouter.GetAvailableProvidersForUser(build.UserID)
 	if len(availableProviders) == 0 {
 		build.mu.Lock()
 		build.Status = BuildFailed
@@ -499,8 +502,8 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 		return fmt.Errorf("build %s not found", buildID)
 	}
 
-	// Get available providers dynamically
-	availableProviders := am.aiRouter.GetAvailableProviders()
+	// Get available providers dynamically based on user BYOK settings
+	availableProviders := am.aiRouter.GetAvailableProvidersForUser(build.UserID)
 
 	if len(availableProviders) == 0 {
 		return fmt.Errorf("no AI providers available - please check API key configuration")
@@ -903,6 +906,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		maxTokens = build.MaxTokensPerRequest
 	}
 	response, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
+		UserID:       build.UserID,
 		MaxTokens:    maxTokens,
 		Temperature:  0.7,
 		SystemPrompt: systemPrompt,
@@ -1627,9 +1631,19 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 	ctx, cancel := context.WithTimeout(am.ctx, 2*time.Minute)
 	defer cancel()
 
+	am.mu.RLock()
+	build, exists := am.builds[agent.BuildID]
+	am.mu.RUnlock()
+
+	if !exists {
+		log.Printf("Build %s not found for agent %s during message processing", agent.BuildID, agent.ID)
+		return
+	}
+
 	prompt := fmt.Sprintf("User message: %s\n\nRespond helpfully and briefly.", message)
 
 	response, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
+		UserID:       build.UserID,
 		MaxTokens:    1000,
 		Temperature:  0.7,
 		SystemPrompt: am.getSystemPrompt(RoleLead),

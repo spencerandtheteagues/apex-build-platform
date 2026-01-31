@@ -103,22 +103,6 @@ func main() {
 	log.Printf("   - Grok API:   %s", getStatusIcon(appConfig.GrokAPIKey != ""))
 	log.Printf("   - Ollama:     ❌ Disabled globally (User must configure in BYOK settings)")
 
-	// Initialize Agent Orchestration System
-	aiAdapter := agents.NewAIRouterAdapter(aiRouter)
-	agentManager := agents.NewAgentManager(aiAdapter)
-	wsHub := agents.NewWSHub(agentManager)
-	buildHandler := agents.NewBuildHandler(agentManager, wsHub)
-
-	log.Println("Agent Orchestration System initialized")
-
-	// Initialize Autonomous Agent System (Replit parity feature)
-	autonomousWorkDir := getEnv("AUTONOMOUS_WORK_DIR", "/tmp/apex-autonomous")
-	autonomousAIAdapter := autonomous.NewAIAdapter(aiRouter)
-	autonomousAgent := autonomous.NewAutonomousAgent(autonomousAIAdapter, autonomousWorkDir)
-	autonomousHandler := autonomous.NewHandler(autonomousAgent)
-
-	log.Println("Autonomous Agent System initialized (AI-driven build, test, deploy)")
-
 	// Initialize Secrets Manager with validated master key
 	// SECURITY: Use validated key from secretsConfig, with fallback for development
 	masterKey := secretsConfig.SecretsMasterKey
@@ -149,6 +133,14 @@ func main() {
 	byokManager := ai.NewBYOKManager(database.GetDB(), secretsManager, aiRouter)
 	byokHandler := handlers.NewBYOKHandlers(byokManager)
 	log.Println("BYOK Manager initialized (user-provided API keys, per-provider cost tracking)")
+
+	// Initialize Agent Orchestration System
+	aiAdapter := agents.NewAIRouterAdapter(aiRouter, byokManager)
+	agentManager := agents.NewAgentManager(aiAdapter)
+	wsHub := agents.NewWSHub(agentManager)
+	buildHandler := agents.NewBuildHandler(agentManager, wsHub)
+
+	log.Println("Agent Orchestration System initialized")
 
 	// Initialize MCP Server (APEX.BUILD as MCP provider)
 	mcpServer := mcp.NewMCPServer("APEX.BUILD", "1.0.0")
