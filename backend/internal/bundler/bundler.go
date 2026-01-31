@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -214,9 +215,14 @@ func VueBundleConfig() BundleConfig {
 func ComputeFileHash(files map[string]string) string {
 	hasher := sha256.New()
 	// Sort keys for deterministic ordering
-	for path, content := range files {
+	keys := make([]string, 0, len(files))
+	for path := range files {
+		keys = append(keys, path)
+	}
+	sort.Strings(keys)
+	for _, path := range keys {
 		hasher.Write([]byte(path))
-		hasher.Write([]byte(content))
+		hasher.Write([]byte(files[path]))
 	}
 	return hex.EncodeToString(hasher.Sum(nil))
 }

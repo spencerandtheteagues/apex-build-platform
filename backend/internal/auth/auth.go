@@ -40,17 +40,17 @@ type TokenBlacklist struct {
 
 // Global token blacklist instance
 var tokenBlacklist *TokenBlacklist
+var tokenBlacklistOnce sync.Once
 
 // initTokenBlacklist initializes the global token blacklist with cleanup
 func initTokenBlacklist() {
-	if tokenBlacklist != nil {
-		return
-	}
-	tokenBlacklist = &TokenBlacklist{
-		tokens: make(map[string]time.Time),
-		stopCh: make(chan struct{}),
-	}
-	go tokenBlacklist.cleanupRoutine()
+	tokenBlacklistOnce.Do(func() {
+		tokenBlacklist = &TokenBlacklist{
+			tokens: make(map[string]time.Time),
+			stopCh: make(chan struct{}),
+		}
+		go tokenBlacklist.cleanupRoutine()
+	})
 }
 
 // Add adds a token to the blacklist with its expiration time

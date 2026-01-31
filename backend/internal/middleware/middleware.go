@@ -83,6 +83,7 @@ type IPRateLimiter struct {
 	rate     rate.Limit
 	burst    int
 	cleanup  time.Duration
+	stopCh   chan struct{} // Channel to signal cleanup goroutine to stop
 }
 
 // NewIPRateLimiter creates a new IP-based rate limiter
@@ -92,12 +93,18 @@ func NewIPRateLimiter(rateLimit rate.Limit, burst int) *IPRateLimiter {
 		rate:     rateLimit,
 		burst:    burst,
 		cleanup:  time.Minute * 10, // Clean up old limiters every 10 minutes
+		stopCh:   make(chan struct{}),
 	}
 
 	// Start cleanup goroutine
 	go limiter.cleanupRoutine()
 
 	return limiter
+}
+
+// Stop stops the cleanup goroutine
+func (irl *IPRateLimiter) Stop() {
+	close(irl.stopCh)
 }
 
 // GetLimiter returns the rate limiter for a given IP
@@ -124,16 +131,21 @@ func (irl *IPRateLimiter) cleanupRoutine() {
 	ticker := time.NewTicker(irl.cleanup)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		irl.mu.Lock()
-		cutoff := time.Now().Add(-time.Hour) // Remove limiters not seen for 1 hour
+	for {
+		select {
+		case <-ticker.C:
+			irl.mu.Lock()
+			cutoff := time.Now().Add(-time.Hour) // Remove limiters not seen for 1 hour
 
-		for ip, limiter := range irl.limiters {
-			if limiter.lastSeen.Before(cutoff) {
-				delete(irl.limiters, ip)
+			for ip, limiter := range irl.limiters {
+				if limiter.lastSeen.Before(cutoff) {
+					delete(irl.limiters, ip)
+				}
 			}
+			irl.mu.Unlock()
+		case <-irl.stopCh:
+			return
 		}
-		irl.mu.Unlock()
 	}
 }
 

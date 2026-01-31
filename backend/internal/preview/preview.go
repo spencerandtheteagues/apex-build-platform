@@ -47,6 +47,7 @@ type PreviewSession struct {
 	mu            sync.RWMutex
 	server        *http.Server
 	stopChan      chan struct{}
+	stopOnce      sync.Once // Prevents double close of stopChan
 	BackendServer *ServerProcess // Backend server process (if running)
 	// Bundler-related fields
 	IsBundled    bool                   // Whether the project uses bundling
@@ -117,7 +118,29 @@ func NewPreviewServer(db *gorm.DB) *PreviewServer {
 		basePort: 9000, // Preview ports start at 9000
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
-				return true // Allow all origins for preview
+				origin := r.Header.Get("Origin")
+				// Allow requests with no origin (same-origin requests)
+				if origin == "" {
+					return true
+				}
+				// Allow known development and production origins
+				allowedOrigins := []string{
+					"http://localhost:3000",
+					"http://localhost:5173",
+					"http://localhost:8080",
+					"https://apex.build",
+					"https://www.apex.build",
+				}
+				for _, allowed := range allowedOrigins {
+					if origin == allowed {
+						return true
+					}
+				}
+				// Also allow preview server origins (localhost:9000+)
+				if strings.HasPrefix(origin, "http://localhost:") {
+					return true
+				}
+				return false
 			},
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -199,8 +222,10 @@ func (ps *PreviewServer) StopPreview(ctx context.Context, projectID uint) error 
 	}
 	session.mu.Unlock()
 
-	// Stop HTTP server
-	close(session.stopChan)
+	// Stop HTTP server - use sync.Once to prevent double close
+	session.stopOnce.Do(func() {
+		close(session.stopChan)
+	})
 	if session.server != nil {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
@@ -494,11 +519,12 @@ func (ps *PreviewServer) loadProjectFiles(ctx context.Context, session *PreviewS
 				}
 
 				// Generate error HTML page
+				errorHTML := ps.bundler.GeneratePreviewHTML(result, bundleConfig, "")
 				session.FileCache["index.html"] = &CachedFile{
-					Content:     ps.bundler.GeneratePreviewHTML(result, bundleConfig, ""),
+					Content:     errorHTML,
 					ContentType: "text/html; charset=utf-8",
 					ProcessedAt: time.Now(),
-					Size:        int64(len(session.FileCache["index.html"].Content)),
+					Size:        int64(len(errorHTML)),
 				}
 			}
 		}
@@ -680,7 +706,13 @@ func (ps *PreviewServer) processFile(file *models.File, config *PreviewConfig) s
 	if config.EnvVars != nil {
 		for key, value := range config.EnvVars {
 			content = strings.ReplaceAll(content, fmt.Sprintf("${%s}", key), value)
-			content = strings.ReplaceAll(content, fmt.Sprintf("process.env.%s", key), fmt.Sprintf("'%s'", value))
+			// JSON-encode values for JavaScript context to prevent injection attacks
+			jsonValue, err := json.Marshal(value)
+			if err != nil {
+				// Fallback to simple quoting if JSON encoding fails
+				jsonValue = []byte(fmt.Sprintf("%q", value))
+			}
+			content = strings.ReplaceAll(content, fmt.Sprintf("process.env.%s", key), string(jsonValue))
 		}
 	}
 
@@ -1110,8 +1142,18 @@ func (ps *PreviewServer) CleanupIdleSessions(maxIdleTime time.Duration) {
 		session.mu.RUnlock()
 
 		if idle {
-			// Stop session
-			close(session.stopChan)
+			// Close all WebSocket connections before shutdown
+			session.mu.Lock()
+			for client := range session.Clients {
+				client.Close()
+			}
+			session.Clients = make(map[*SafeClient]bool)
+			session.mu.Unlock()
+
+			// Stop session - use sync.Once to prevent double close
+			session.stopOnce.Do(func() {
+				close(session.stopChan)
+			})
 			if session.server != nil {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				session.server.Shutdown(ctx)

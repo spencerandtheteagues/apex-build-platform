@@ -165,6 +165,7 @@ class AIService {
 
     const decoder = new TextDecoder()
     let fullContent = ''
+    let buffer = '' // Buffer to handle incomplete lines between chunks
 
     try {
       while (true) {
@@ -172,7 +173,9 @@ class AIService {
         if (done) break
 
         const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n')
+        buffer += chunk
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || '' // Keep incomplete line for next chunk
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
@@ -238,7 +241,8 @@ class AIService {
 
   // Get inline code completions (for ghost text)
   async getInlineCompletion(
-    request: AICompletionRequest
+    request: AICompletionRequest,
+    abortSignal?: AbortSignal
   ): Promise<AICompletionSuggestion | null> {
     const token = this.getAuthToken()
 
@@ -263,6 +267,7 @@ class AIService {
           max_tokens: request.maxTokens || 150,
           temperature: 0.2, // Lower temperature for completions
         }),
+        signal: abortSignal,
       })
 
       if (!response.ok) {
@@ -286,8 +291,11 @@ class AIService {
         },
         confidence: data.confidence || 0.8,
       }
-    } catch (error) {
-      console.error('Inline completion error:', error)
+    } catch (error: unknown) {
+      // Don't log abort errors as they are expected
+      if (error instanceof Error && error.name !== 'AbortError') {
+        console.error('Inline completion error:', error)
+      }
       return null
     }
   }

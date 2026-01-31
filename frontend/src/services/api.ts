@@ -34,6 +34,10 @@ import {
   DatabaseMetrics,
   TableInfo,
   ColumnInfo,
+  CompletionRequest,
+  CompletionResponse,
+  CompletionItem,
+  CompletionStats,
 } from '@/types'
 
 // Get API URL from environment or use default
@@ -56,6 +60,7 @@ const getApiUrl = (): string => {
 export class ApiService {
   public client: AxiosInstance
   private baseURL: string
+  private refreshPromise: Promise<TokenResponse> | null = null
 
   constructor(baseURL: string = getApiUrl()) {
     this.baseURL = baseURL
@@ -180,6 +185,19 @@ export class ApiService {
   }
 
   async refreshToken(): Promise<TokenResponse> {
+    // Prevent multiple concurrent refresh attempts (mutex pattern)
+    if (this.refreshPromise) {
+      return this.refreshPromise
+    }
+
+    this.refreshPromise = this.doRefreshToken().finally(() => {
+      this.refreshPromise = null
+    })
+
+    return this.refreshPromise
+  }
+
+  private async doRefreshToken(): Promise<TokenResponse> {
     const refreshToken = this.getRefreshToken()
     if (!refreshToken) {
       throw new Error('No refresh token available')
@@ -1132,6 +1150,131 @@ export class ApiService {
     return response.data
   }
 
+  // ========== TERMINAL SESSION ENDPOINTS ==========
+
+  /**
+   * Create a new terminal session
+   */
+  async createTerminalSession(
+    projectId?: number,
+    options?: {
+      shell?: string
+      workDir?: string
+      name?: string
+      rows?: number
+      cols?: number
+      environment?: Record<string, string>
+    }
+  ): Promise<TerminalSessionResponse> {
+    const response = await this.client.post<TerminalSessionCreateResponse>(
+      '/terminal/sessions',
+      {
+        project_id: projectId || 0,
+        work_dir: options?.workDir || '',
+        shell: options?.shell || '',
+        name: options?.name || '',
+        rows: options?.rows || 24,
+        cols: options?.cols || 80,
+        environment: options?.environment || {},
+      }
+    )
+    return response.data.data
+  }
+
+  /**
+   * List all terminal sessions for the current user
+   */
+  async listTerminalSessions(projectId?: number): Promise<TerminalSessionInfo[]> {
+    const params = projectId ? `?project_id=${projectId}` : ''
+    const response = await this.client.get<{ success: boolean; data: TerminalSessionInfo[] }>(
+      `/terminal/sessions${params}`
+    )
+    return response.data.data || []
+  }
+
+  /**
+   * Get a specific terminal session by ID
+   */
+  async getTerminalSession(sessionId: string): Promise<TerminalSessionInfo | null> {
+    try {
+      const response = await this.client.get<{ success: boolean; data: TerminalSessionInfo }>(
+        `/terminal/sessions/${sessionId}`
+      )
+      return response.data.data
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Close/delete a terminal session
+   */
+  async closeTerminalSession(sessionId: string): Promise<void> {
+    await this.client.delete(`/terminal/sessions/${sessionId}`)
+  }
+
+  /**
+   * Resize a terminal session
+   */
+  async resizeTerminal(sessionId: string, cols: number, rows: number): Promise<void> {
+    await this.client.post(`/terminal/sessions/${sessionId}/resize`, {
+      rows,
+      cols,
+    })
+  }
+
+  /**
+   * Get command history for a terminal session
+   */
+  async getCommandHistory(sessionId: string): Promise<string[]> {
+    try {
+      const response = await this.client.get<{ success: boolean; data: { history: string[] } }>(
+        `/terminal/sessions/${sessionId}/history`
+      )
+      return response.data.data?.history || []
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * List available shells on the system
+   */
+  async listAvailableShells(): Promise<AvailableShell[]> {
+    try {
+      const response = await this.client.get<{ success: boolean; data: { shells: AvailableShell[] } }>(
+        '/terminal/shells'
+      )
+      return response.data.data?.shells || []
+    } catch {
+      // Default shells if API fails
+      return [
+        { name: 'bash', path: '/bin/bash' },
+        { name: 'sh', path: '/bin/sh' },
+      ]
+    }
+  }
+
+  /**
+   * Get WebSocket URL for terminal connection
+   */
+  getTerminalWebSocketUrl(sessionId: string): string {
+    const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+
+    // Use API URL if available
+    if (this.baseURL) {
+      try {
+        const url = new URL(this.baseURL)
+        return `${protocol}//${url.host}/ws/terminal/${sessionId}`
+      } catch {
+        // Fall through to default
+      }
+    }
+
+    const host = typeof window !== 'undefined' ? window.location.host : 'localhost:8080'
+    return `${protocol}//${host}/ws/terminal/${sessionId}`
+  }
+
   // ========== AI CODE REVIEW ENDPOINTS ==========
 
   async reviewCode(data: {
@@ -1144,6 +1287,135 @@ export class ApiService {
   }): Promise<CodeReviewResponse> {
     const response = await this.client.post<CodeReviewResponse>('/ai/code-review', data)
     return response.data
+  }
+
+  // ========== PACKAGE MANAGEMENT ENDPOINTS ==========
+
+  /**
+   * Search for packages across registries (npm, pypi, go)
+   */
+  async searchPackages(
+    query: string,
+    registry: PackageRegistry,
+    limit: number = 20
+  ): Promise<PackageSearchResult[]> {
+    const response = await this.client.get<{
+      success: boolean
+      data: { packages: PackageSearchResult[]; query: string; type: string; count: number }
+    }>(`/packages/search?q=${encodeURIComponent(query)}&type=${registry}&limit=${limit}`)
+    return response.data.data?.packages || []
+  }
+
+  /**
+   * Get detailed information about a specific package
+   */
+  async getPackageInfo(name: string, registry: PackageRegistry): Promise<PackageInfo> {
+    const encodedName = encodeURIComponent(name)
+    const response = await this.client.get<{ success: boolean; data: PackageInfo }>(
+      `/packages/info/${encodedName}?type=${registry}`
+    )
+    return response.data.data
+  }
+
+  /**
+   * Install a package to a project
+   */
+  async installPackage(
+    projectId: number,
+    packageName: string,
+    version: string,
+    registry: PackageRegistry,
+    isDev: boolean = false
+  ): Promise<{ package: string; version: string; is_dev: boolean; info?: PackageInfo }> {
+    const response = await this.client.post<{
+      success: boolean
+      message: string
+      data: { package: string; version: string; is_dev: boolean; info?: PackageInfo }
+    }>('/packages/install', {
+      project_id: projectId,
+      package_name: packageName,
+      version,
+      type: registry,
+      is_dev: isDev,
+    })
+    return response.data.data
+  }
+
+  /**
+   * Uninstall a package from a project
+   */
+  async uninstallPackage(
+    projectId: number,
+    packageName: string,
+    registry: PackageRegistry = 'npm'
+  ): Promise<void> {
+    const encodedName = encodeURIComponent(packageName)
+    await this.client.delete(`/packages/${projectId}/${encodedName}?type=${registry}`)
+  }
+
+  /**
+   * List all installed packages for a project
+   */
+  async listProjectPackages(
+    projectId: number,
+    registry: PackageRegistry | 'all' = 'all'
+  ): Promise<{
+    npm?: InstalledPackage[]
+    pip?: InstalledPackage[]
+    go?: InstalledPackage[]
+  }> {
+    const response = await this.client.get<{
+      success: boolean
+      data: {
+        project_id: number
+        packages: {
+          npm?: InstalledPackage[]
+          pip?: InstalledPackage[]
+          go?: InstalledPackage[]
+        }
+      }
+    }>(`/packages/project/${projectId}?type=${registry}`)
+    return response.data.data?.packages || {}
+  }
+
+  /**
+   * Update all packages for a project to their latest versions
+   */
+  async updateAllPackages(
+    projectId: number,
+    registry?: PackageRegistry
+  ): Promise<{ packages: InstalledPackage[] }> {
+    const typeParam = registry ? `?type=${registry}` : ''
+    const response = await this.client.post<{
+      success: boolean
+      message: string
+      data: { project_id: number; type: string; packages: InstalledPackage[] }
+    }>(`/packages/project/${projectId}/update${typeParam}`)
+    return { packages: response.data.data?.packages || [] }
+  }
+
+  /**
+   * Get package suggestions based on project language and framework
+   */
+  async getPackageSuggestions(projectId: number): Promise<{
+    language: string
+    framework: string
+    suggestions: PackageSuggestion[]
+  }> {
+    const response = await this.client.get<{
+      success: boolean
+      data: {
+        project_id: number
+        language: string
+        framework: string
+        suggestions: PackageSuggestion[]
+      }
+    }>(`/packages/suggestions/${projectId}`)
+    return {
+      language: response.data.data?.language || '',
+      framework: response.data.data?.framework || '',
+      suggestions: response.data.data?.suggestions || [],
+    }
   }
 
   // ========== ALWAYS-ON DEPLOYMENT ENDPOINTS (Replit parity) ==========
@@ -1229,6 +1501,360 @@ export class ApiService {
     )
     return response.data.data!.metrics
   }
+
+  // ========== CODE COMPLETIONS ENDPOINTS (Ghostwriter-equivalent) ==========
+
+  /**
+   * Get inline ghost-text completions for the Monaco editor
+   * Returns a single completion item for displaying as ghost text
+   */
+  async getInlineCompletions(
+    code: string,
+    cursorPosition: { line: number; column: number },
+    language: string,
+    context?: {
+      projectId?: number
+      fileId?: number
+      filePath?: string
+      suffix?: string
+      triggerKind?: 'invoked' | 'trigger_char' | 'automatic' | 'incomplete'
+      fileImports?: string[]
+      fileSymbols?: string[]
+      framework?: string
+    }
+  ): Promise<CompletionItem | null> {
+    const request: CompletionRequest = {
+      project_id: context?.projectId,
+      file_id: context?.fileId,
+      file_path: context?.filePath || '',
+      language,
+      prefix: code,
+      suffix: context?.suffix || '',
+      line: cursorPosition.line,
+      column: cursorPosition.column,
+      trigger_kind: context?.triggerKind || 'automatic',
+      context: {
+        file_imports: context?.fileImports,
+        file_symbols: context?.fileSymbols,
+        framework: context?.framework,
+      },
+    }
+
+    const response = await this.client.post<{
+      success: boolean
+      completion: CompletionItem | null
+    }>('/completions/inline', request)
+
+    return response.data.completion
+  }
+
+  /**
+   * Get multiple completion suggestions
+   * Returns a list of completion items for a completion menu
+   */
+  async getCompletions(
+    code: string,
+    cursorPosition: { line: number; column: number },
+    language: string,
+    context?: {
+      projectId?: number
+      fileId?: number
+      filePath?: string
+      suffix?: string
+      triggerKind?: 'invoked' | 'trigger_char' | 'automatic' | 'incomplete'
+      fileImports?: string[]
+      fileSymbols?: string[]
+      framework?: string
+      maxTokens?: number
+      temperature?: number
+    }
+  ): Promise<CompletionResponse> {
+    const request: CompletionRequest = {
+      project_id: context?.projectId,
+      file_id: context?.fileId,
+      file_path: context?.filePath || '',
+      language,
+      prefix: code,
+      suffix: context?.suffix || '',
+      line: cursorPosition.line,
+      column: cursorPosition.column,
+      trigger_kind: context?.triggerKind || 'invoked',
+      context: {
+        file_imports: context?.fileImports,
+        file_symbols: context?.fileSymbols,
+        framework: context?.framework,
+      },
+      max_tokens: context?.maxTokens,
+      temperature: context?.temperature,
+    }
+
+    const response = await this.client.post<{
+      success: boolean
+      data: CompletionResponse
+    }>('/completions', request)
+
+    return response.data.data
+  }
+
+  /**
+   * Record when a user accepts a completion (for analytics and improving suggestions)
+   */
+  async acceptCompletion(completionId: string, accepted: boolean = true): Promise<void> {
+    await this.client.post('/completions/accept', {
+      completion_id: completionId,
+      accepted,
+    })
+  }
+
+  /**
+   * Get completion statistics (admin only)
+   */
+  async getCompletionStats(): Promise<CompletionStats> {
+    const response = await this.client.get<{
+      success: boolean
+      data: CompletionStats
+    }>('/completions/stats')
+    return response.data.data
+  }
+
+  // ========== DEBUGGING SYSTEM ENDPOINTS ==========
+
+  // Start a new debug session
+  async startDebugSession(data: {
+    project_id: number
+    file_id?: number
+    entry_point: string
+    language: string
+  }): Promise<{
+    message: string
+    session: DebugSession
+    websocket_url: string
+  }> {
+    const response = await this.client.post('/debug/sessions', data)
+    return response.data
+  }
+
+  // Get debug session info
+  async getDebugSession(sessionId: string): Promise<{
+    session: DebugSession
+    breakpoints: DebugBreakpoint[]
+  }> {
+    const response = await this.client.get(`/debug/sessions/${sessionId}`)
+    return response.data
+  }
+
+  // Stop debug session
+  async stopDebugSession(sessionId: string): Promise<{ message: string }> {
+    const response = await this.client.post(`/debug/sessions/${sessionId}/stop`)
+    return response.data
+  }
+
+  // Set a breakpoint
+  async setDebugBreakpoint(
+    sessionId: string,
+    data: {
+      file_id: number
+      file_path: string
+      line: number
+      column?: number
+      type?: DebugBreakpointType
+      condition?: string
+    }
+  ): Promise<{ message: string; breakpoint: DebugBreakpoint }> {
+    const response = await this.client.post(
+      `/debug/sessions/${sessionId}/breakpoints`,
+      data
+    )
+    return response.data
+  }
+
+  // Remove a breakpoint
+  async removeDebugBreakpoint(
+    sessionId: string,
+    breakpointId: string
+  ): Promise<{ message: string }> {
+    const response = await this.client.delete(
+      `/debug/sessions/${sessionId}/breakpoints/${breakpointId}`
+    )
+    return response.data
+  }
+
+  // Toggle breakpoint enabled state
+  async toggleDebugBreakpoint(
+    sessionId: string,
+    breakpointId: string,
+    enabled: boolean
+  ): Promise<{ message: string; enabled: boolean }> {
+    const response = await this.client.patch(
+      `/debug/sessions/${sessionId}/breakpoints/${breakpointId}`,
+      { enabled }
+    )
+    return response.data
+  }
+
+  // Continue execution
+  async debugContinue(sessionId: string): Promise<{ message: string }> {
+    const response = await this.client.post(
+      `/debug/sessions/${sessionId}/continue`
+    )
+    return response.data
+  }
+
+  // Pause execution
+  async debugPause(sessionId: string): Promise<{ message: string }> {
+    const response = await this.client.post(`/debug/sessions/${sessionId}/pause`)
+    return response.data
+  }
+
+  // Step over
+  async debugStepOver(sessionId: string): Promise<{ message: string }> {
+    const response = await this.client.post(
+      `/debug/sessions/${sessionId}/step-over`
+    )
+    return response.data
+  }
+
+  // Step into
+  async debugStepInto(sessionId: string): Promise<{ message: string }> {
+    const response = await this.client.post(
+      `/debug/sessions/${sessionId}/step-into`
+    )
+    return response.data
+  }
+
+  // Step out
+  async debugStepOut(sessionId: string): Promise<{ message: string }> {
+    const response = await this.client.post(
+      `/debug/sessions/${sessionId}/step-out`
+    )
+    return response.data
+  }
+
+  // Get call stack
+  async getDebugCallStack(sessionId: string): Promise<{
+    call_stack: DebugStackFrame[]
+  }> {
+    const response = await this.client.get(`/debug/sessions/${sessionId}/stack`)
+    return response.data
+  }
+
+  // Get variables for a scope/object
+  async getDebugVariables(
+    sessionId: string,
+    objectId: string
+  ): Promise<{ variables: DebugVariable[] }> {
+    const response = await this.client.get(
+      `/debug/sessions/${sessionId}/variables/${objectId}`
+    )
+    return response.data
+  }
+
+  // Evaluate expression
+  async evaluateDebugExpression(
+    sessionId: string,
+    expression: string
+  ): Promise<{ result: DebugEvaluateResult }> {
+    const response = await this.client.post(
+      `/debug/sessions/${sessionId}/evaluate`,
+      { expression }
+    )
+    return response.data
+  }
+
+  // Get watch expressions
+  async getDebugWatches(sessionId: string): Promise<{
+    watches: DebugWatchExpression[]
+  }> {
+    const response = await this.client.get(
+      `/debug/sessions/${sessionId}/watches`
+    )
+    return response.data
+  }
+
+  // Add watch expression
+  async addDebugWatch(
+    sessionId: string,
+    expression: string
+  ): Promise<{ watch: DebugWatchExpression }> {
+    const response = await this.client.post(
+      `/debug/sessions/${sessionId}/watches`,
+      { expression }
+    )
+    return response.data
+  }
+
+  // Remove watch expression
+  async removeDebugWatch(
+    sessionId: string,
+    watchId: string
+  ): Promise<{ message: string }> {
+    const response = await this.client.delete(
+      `/debug/sessions/${sessionId}/watches/${watchId}`
+    )
+    return response.data
+  }
+
+  // Get WebSocket URL for debug events
+  getDebugWebSocketUrl(sessionId: string): string {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    // Use appropriate host based on environment
+    let host: string
+    if (this.baseURL.includes('onrender.com')) {
+      host = 'apex-backend-5ypy.onrender.com'
+    } else if (this.baseURL.startsWith('/')) {
+      host = window.location.host
+    } else {
+      try {
+        const url = new URL(this.baseURL)
+        host = url.host
+      } catch {
+        host = window.location.host
+      }
+    }
+    return `${protocol}//${host}/ws/debug/${sessionId}`
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Terminal Session types
+// ---------------------------------------------------------------------------
+
+export interface TerminalSessionResponse {
+  session_id: string
+  project_id: number
+  work_dir: string
+  shell: string
+  name: string
+  rows: number
+  cols: number
+  created_at: string
+  ws_endpoint: string
+}
+
+export interface TerminalSessionCreateResponse {
+  success: boolean
+  data: TerminalSessionResponse
+}
+
+export interface TerminalSessionInfo {
+  id: string
+  project_id: number
+  user_id: number
+  work_dir: string
+  shell: string
+  shell_name?: string
+  name: string
+  created_at: string
+  last_active: string
+  is_active: boolean
+  rows: number
+  cols: number
+  ws_endpoint: string
+}
+
+export interface AvailableShell {
+  name: string
+  path: string
 }
 
 // ---------------------------------------------------------------------------
@@ -1362,6 +1988,161 @@ export interface CodeReviewResponse {
   reviewed_at: string
   duration_ms: number
 }
+
+// ---------------------------------------------------------------------------
+// Package Management types (matching backend packages.go)
+// ---------------------------------------------------------------------------
+
+export type PackageRegistry = 'npm' | 'pip' | 'go'
+
+export interface PackageSearchResult {
+  name: string
+  version: string
+  description: string
+  homepage?: string
+  repository?: string
+  license?: string
+  downloads?: number
+  keywords?: string[]
+}
+
+export interface PackageInfo {
+  name: string
+  version: string
+  description: string
+  homepage?: string
+  repository?: string
+  license?: string
+  author?: string
+  dependencies?: Record<string, string>
+  dev_dependencies?: Record<string, string>
+  versions?: string[]
+  readme?: string
+}
+
+export interface InstalledPackage {
+  name: string
+  version: string
+  is_dev: boolean
+  type: PackageRegistry
+}
+
+export interface PackageSuggestion {
+  name: string
+  description: string
+  category: string
+  is_dev: boolean
+}
+
+// ---------------------------------------------------------------------------
+// Debug System types (matching backend debugging handlers)
+// ---------------------------------------------------------------------------
+
+export type DebugSessionStatus = 'pending' | 'running' | 'paused' | 'completed' | 'error'
+export type DebugBreakpointType = 'line' | 'conditional' | 'logpoint' | 'exception' | 'function'
+
+export interface DebugSession {
+  id: string
+  project_id: number
+  user_id: number
+  file_id: number
+  status: DebugSessionStatus
+  language: string
+  entry_point: string
+  working_directory: string
+  debug_port: number
+  devtools_url?: string
+  process_id?: number
+  error_message?: string
+  started_at?: string
+  ended_at?: string
+  current_line?: number
+  current_file?: string
+}
+
+export interface DebugBreakpoint {
+  id: string
+  session_id: string
+  file_id: number
+  file_path: string
+  line: number
+  column: number
+  type: DebugBreakpointType
+  condition?: string
+  log_message?: string
+  hit_count: number
+  enabled: boolean
+  verified: boolean
+  breakpoint_id?: string
+}
+
+export interface DebugStackFrame {
+  id: string
+  index: number
+  function_name: string
+  file_path: string
+  line: number
+  column: number
+  script_id?: string
+  is_async: boolean
+  scopes?: DebugScope[]
+  local_vars?: Record<string, string>
+}
+
+export interface DebugScope {
+  type: 'local' | 'closure' | 'global' | 'with' | 'catch' | 'block' | 'script'
+  name?: string
+  start_line?: number
+  end_line?: number
+  variables?: DebugVariable[]
+}
+
+export interface DebugVariable {
+  name: string
+  value: string
+  type: string
+  object_id?: string
+  has_children: boolean
+  children?: DebugVariable[]
+  preview?: string
+}
+
+export interface DebugWatchExpression {
+  id: string
+  expression: string
+  value?: string
+  type?: string
+  error?: string
+}
+
+export interface DebugEvaluateResult {
+  value: string
+  type: string
+  object_id?: string
+  has_children: boolean
+  preview?: string
+  error?: string
+}
+
+export interface DebugEvent {
+  type: DebugEventType
+  timestamp: string
+  data: any
+}
+
+export type DebugEventType =
+  | 'session_started'
+  | 'session_stopped'
+  | 'paused'
+  | 'resumed'
+  | 'stepping'
+  | 'breakpoint_hit'
+  | 'breakpoint_verified'
+  | 'breakpoint_added'
+  | 'breakpoint_removed'
+  | 'exception'
+  | 'output'
+  | 'error'
 
 // Create singleton instance
 export const apiService = new ApiService()

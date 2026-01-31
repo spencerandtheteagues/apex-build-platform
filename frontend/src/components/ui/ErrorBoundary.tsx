@@ -88,7 +88,7 @@ export class ErrorBoundary extends Component<Props, State> {
     window.location.href = '/'
   }
 
-  copyErrorDetails = () => {
+  copyErrorDetails = async () => {
     const errorDetails = `
 APEX.BUILD Error Report
 =======================
@@ -101,18 +101,33 @@ URL: ${window.location.href}
 User Agent: ${navigator.userAgent}
     `.trim()
 
-    navigator.clipboard.writeText(errorDetails).then(() => {
-      alert('Error details copied to clipboard!')
-    }).catch(() => {
-      // Fallback for older browsers
+    // Use modern Clipboard API as primary, with fallback for older browsers
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try {
+        await navigator.clipboard.writeText(errorDetails)
+        alert('Error details copied to clipboard!')
+        return
+      } catch {
+        // Fall through to legacy method
+      }
+    }
+
+    // Legacy fallback for older browsers (execCommand is deprecated but still works)
+    try {
       const textArea = document.createElement('textarea')
       textArea.value = errorDetails
+      textArea.style.position = 'fixed'
+      textArea.style.left = '-9999px'
+      textArea.style.top = '-9999px'
       document.body.appendChild(textArea)
+      textArea.focus()
       textArea.select()
       document.execCommand('copy')
       document.body.removeChild(textArea)
       alert('Error details copied to clipboard!')
-    })
+    } catch {
+      alert('Failed to copy error details. Please manually copy the error information.')
+    }
   }
 
   render() {

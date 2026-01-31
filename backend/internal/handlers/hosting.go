@@ -4,7 +4,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -283,7 +282,25 @@ func (h *HostingHandler) StreamDeploymentLogs(c *gin.Context) {
 
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
-			return true
+			origin := r.Header.Get("Origin")
+			// Allow requests with no origin (same-origin requests)
+			if origin == "" {
+				return true
+			}
+			// Allow known development and production origins
+			allowedOrigins := []string{
+				"http://localhost:3000",
+				"http://localhost:5173",
+				"http://localhost:8080",
+				"https://apex.build",
+				"https://www.apex.build",
+			}
+			for _, allowed := range allowedOrigins {
+				if origin == allowed {
+					return true
+				}
+			}
+			return false
 		},
 	}
 
@@ -718,7 +735,25 @@ func (h *HostingHandler) HandleDeploymentWebSocket(c *gin.Context) {
 
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
-			return true
+			origin := r.Header.Get("Origin")
+			// Allow requests with no origin (same-origin requests)
+			if origin == "" {
+				return true
+			}
+			// Allow known development and production origins
+			allowedOrigins := []string{
+				"http://localhost:3000",
+				"http://localhost:5173",
+				"http://localhost:8080",
+				"https://apex.build",
+				"https://www.apex.build",
+			}
+			for _, allowed := range allowedOrigins {
+				if origin == allowed {
+					return true
+				}
+			}
+			return false
 		},
 	}
 
@@ -1008,11 +1043,13 @@ func detectFramework(language, framework string, files []models.File) string {
 }
 
 func containsString(content, search string) bool {
-	return len(content) > 0 && len(search) > 0 &&
-		(len(content) >= len(search)) &&
-		(content == search ||
-			len(content) > len(search) &&
-			(content[:len(search)] == search ||
-				content[len(content)-len(search):] == search ||
-				io.NopCloser != nil)) // Just check if contains
+	if len(content) == 0 || len(search) == 0 || len(content) < len(search) {
+		return false
+	}
+	for i := 0; i <= len(content)-len(search); i++ {
+		if content[i:i+len(search)] == search {
+			return true
+		}
+	}
+	return false
 }

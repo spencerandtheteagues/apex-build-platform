@@ -804,6 +804,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   const wsReconnectAttempts = useRef(0)
   const maxWsReconnectAttempts = 5
 
+  // Ref to track current isBuilding state (prevents stale closure in WebSocket onclose)
+  const isBuildingRef = useRef(isBuilding)
+  useEffect(() => {
+    isBuildingRef.current = isBuilding
+  }, [isBuilding])
+
   const { user, createProject, setCurrentProject } = useStore()
 
   // Tech stack options
@@ -903,13 +909,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     ws.onclose = (event) => {
       console.log('WebSocket disconnected, code:', event.code)
 
-      if (isBuilding && wsReconnectAttempts.current < maxWsReconnectAttempts) {
+      // Use ref to access current isBuilding state (prevents stale closure)
+      if (isBuildingRef.current && wsReconnectAttempts.current < maxWsReconnectAttempts) {
         wsReconnectAttempts.current++
         const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts.current - 1), 10000)
         addSystemMessage(`Connection lost. Reconnecting in ${delay / 1000}s...`)
 
         setTimeout(() => {
-          if (isBuilding) {
+          if (isBuildingRef.current) {
             connectWebSocket(buildId)
           }
         }, delay)
@@ -919,7 +926,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     }
 
     wsRef.current = ws
-  }, [buildWebSocketUrl, isBuilding])
+  }, [buildWebSocketUrl])
 
   // Handle WebSocket messages
   const handleWebSocketMessage = (message: any) => {
@@ -1188,30 +1195,40 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       connectWebSocket(buildId)
       addSystemMessage(`Build started! Build ID: ${buildId}`)
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Build start failed:', error)
 
       let errorMsg = 'Unknown error occurred'
-      if (error.response?.data?.error) {
-        errorMsg = error.response.data.error
-      } else if (error.response?.data?.details) {
-        errorMsg = error.response.data.details
-      } else if (error.response?.data?.message) {
-        errorMsg = error.response.data.message
-      } else if (error.message) {
-        errorMsg = error.message
+
+      // Type-safe error handling with proper narrowing
+      const isAxiosError = (err: unknown): err is { response?: { data?: { error?: string; details?: string; message?: string }; status?: number }; message?: string } => {
+        return typeof err === 'object' && err !== null
       }
 
-      if (error.response?.status === 401) {
-        errorMsg = 'Authentication required. Please log in to start a build.'
-      } else if (error.response?.status === 403) {
-        errorMsg = 'You do not have permission to start builds.'
-      } else if (error.response?.status === 429) {
-        errorMsg = 'Too many requests. Please wait a moment before trying again.'
-      } else if (error.response?.status >= 500) {
-        errorMsg = 'Server error. Please try again later.'
-      } else if (!error.response && error.message?.includes('Network')) {
-        errorMsg = 'Network error. Please check your connection and try again.'
+      if (isAxiosError(error)) {
+        if (error.response?.data?.error) {
+          errorMsg = error.response.data.error
+        } else if (error.response?.data?.details) {
+          errorMsg = error.response.data.details
+        } else if (error.response?.data?.message) {
+          errorMsg = error.response.data.message
+        } else if (error.message) {
+          errorMsg = error.message
+        }
+
+        if (error.response?.status === 401) {
+          errorMsg = 'Authentication required. Please log in to start a build.'
+        } else if (error.response?.status === 403) {
+          errorMsg = 'You do not have permission to start builds.'
+        } else if (error.response?.status === 429) {
+          errorMsg = 'Too many requests. Please wait a moment before trying again.'
+        } else if (error.response?.status && error.response.status >= 500) {
+          errorMsg = 'Server error. Please try again later.'
+        } else if (!error.response && error.message?.includes('Network')) {
+          errorMsg = 'Network error. Please check your connection and try again.'
+        }
+      } else if (error instanceof Error) {
+        errorMsg = error.message
       }
 
       addSystemMessage(`Error: ${errorMsg}`)
@@ -1288,9 +1305,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           onNavigateToIDE()
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to create project:', error)
-      addSystemMessage(`Failed to create project: ${error.message || 'Unknown error'}`)
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      addSystemMessage(`Failed to create project: ${message}`)
     } finally {
       setIsCreatingProject(false)
     }

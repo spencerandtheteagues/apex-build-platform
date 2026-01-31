@@ -26,11 +26,32 @@ import { themes, getTheme } from '@/styles/themes'
 import apiService from '@/services/api'
 import websocketService from '@/services/websocket'
 
+// Helper function to extract error message from unknown error type
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message
+  }
+  if (typeof error === 'object' && error !== null) {
+    const errObj = error as Record<string, unknown>
+    if (errObj.response && typeof errObj.response === 'object') {
+      const response = errObj.response as Record<string, unknown>
+      if (response.data && typeof response.data === 'object') {
+        const data = response.data as Record<string, unknown>
+        if (typeof data.error === 'string') return data.error
+        if (typeof data.message === 'string') return data.message
+      }
+    }
+    if (typeof errObj.message === 'string') return errObj.message
+  }
+  return 'An unknown error occurred'
+}
+
 // Auth slice
 interface AuthState {
   user: User | null
   isAuthenticated: boolean
-  isLoading: boolean
+  isLoading: boolean  // Legacy - kept for backwards compatibility
+  isAuthLoading: boolean  // Domain-specific loading state for auth operations
   error: string | null
 }
 
@@ -52,7 +73,7 @@ interface AuthActions {
 interface ProjectsState {
   projects: Project[]
   currentProject: Project | null
-  isLoading: boolean
+  isProjectsLoading: boolean  // Domain-specific loading state for project operations
   error: string | null
 }
 
@@ -79,7 +100,7 @@ interface FilesState {
   fileTree: any[]
   openFiles: File[]
   activeFileId: number | null
-  isLoading: boolean
+  isFilesLoading: boolean  // Domain-specific loading state for file operations
   error: string | null
 }
 
@@ -140,7 +161,7 @@ interface CollaborationActions {
 interface AIState {
   usage: AIUsage | null
   history: AIRequest[]
-  isLoading: boolean
+  isAILoading: boolean  // Domain-specific loading state for AI operations
 }
 
 interface AIActions {
@@ -155,6 +176,9 @@ interface AIActions {
   fetchHistory: () => Promise<void>
   rateResponse: (requestId: string, rating: number, feedback?: string) => Promise<void>
 }
+
+// Notification timeout tracking (stored outside Zustand to avoid serialization issues)
+const notificationTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
 
 // UI slice
 interface UIState {
@@ -210,22 +234,25 @@ export const useStore = create<StoreState & StoreActions>()(
       immer((set, get) => ({
         // Initial state
         apiService, // Expose apiService
-        
+
         // Auth
         user: apiService.getCurrentUser(),
         isAuthenticated: apiService.isAuthenticated(),
-        isLoading: false,
+        isLoading: false,  // Legacy - kept for backwards compatibility
+        isAuthLoading: false,  // Domain-specific loading state
         error: null,
 
         // Projects
         projects: [],
         currentProject: null,
+        isProjectsLoading: false,  // Domain-specific loading state
 
         // Files
         files: [],
         fileTree: [],
         openFiles: [],
         activeFileId: null,
+        isFilesLoading: false,  // Domain-specific loading state
 
         // Editor
         activeFile: undefined,
@@ -249,6 +276,7 @@ export const useStore = create<StoreState & StoreActions>()(
         // AI
         usage: null,
         history: [],
+        isAILoading: false,  // Domain-specific loading state
 
         // UI
         currentTheme: getTheme('cyberpunk'),
@@ -263,7 +291,8 @@ export const useStore = create<StoreState & StoreActions>()(
         // Auth actions
         login: async (username: string, password: string) => {
           set((state) => {
-            state.isLoading = true
+            state.isLoading = true  // Legacy
+            state.isAuthLoading = true
             state.error = null
           })
 
@@ -274,7 +303,8 @@ export const useStore = create<StoreState & StoreActions>()(
             set((state) => {
               state.user = user
               state.isAuthenticated = true
-              state.isLoading = false
+              state.isLoading = false  // Legacy
+              state.isAuthLoading = false
             })
 
             // Connect WebSocket
@@ -286,16 +316,17 @@ export const useStore = create<StoreState & StoreActions>()(
               title: 'Login Successful',
               message: `Welcome back, ${user.username}!`,
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             set((state) => {
-              state.error = error.response?.data?.error || error.message
-              state.isLoading = false
+              state.error = getErrorMessage(error)
+              state.isLoading = false  // Legacy
+              state.isAuthLoading = false
             })
 
             get().addNotification({
               type: 'error',
               title: 'Login Failed',
-              message: error.response?.data?.error || error.message,
+              message: getErrorMessage(error),
             })
             throw error
           }
@@ -303,7 +334,8 @@ export const useStore = create<StoreState & StoreActions>()(
 
         register: async (data) => {
           set((state) => {
-            state.isLoading = true
+            state.isLoading = true  // Legacy
+            state.isAuthLoading = true
             state.error = null
           })
 
@@ -314,7 +346,8 @@ export const useStore = create<StoreState & StoreActions>()(
             set((state) => {
               state.user = user
               state.isAuthenticated = true
-              state.isLoading = false
+              state.isLoading = false  // Legacy
+              state.isAuthLoading = false
             })
 
             // Connect WebSocket
@@ -326,16 +359,17 @@ export const useStore = create<StoreState & StoreActions>()(
               title: 'Registration Successful',
               message: `Welcome to APEX.BUILD, ${user.username}!`,
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             set((state) => {
-              state.error = error.response?.data?.error || error.message
-              state.isLoading = false
+              state.error = getErrorMessage(error)
+              state.isLoading = false  // Legacy
+              state.isAuthLoading = false
             })
 
             get().addNotification({
               type: 'error',
               title: 'Registration Failed',
-              message: error.response?.data?.error || error.message,
+              message: getErrorMessage(error),
             })
             throw error
           }
@@ -363,7 +397,7 @@ export const useStore = create<StoreState & StoreActions>()(
               title: 'Logged Out',
               message: 'You have been logged out successfully.',
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             console.error('Logout error:', error)
           }
         },
@@ -374,7 +408,7 @@ export const useStore = create<StoreState & StoreActions>()(
             set((state) => {
               state.user = user
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             console.error('Failed to refresh user:', error)
           }
         },
@@ -391,11 +425,11 @@ export const useStore = create<StoreState & StoreActions>()(
               title: 'Profile Updated',
               message: 'Your profile has been updated successfully.',
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             get().addNotification({
               type: 'error',
               title: 'Update Failed',
-              message: error.response?.data?.error || error.message,
+              message: getErrorMessage(error),
             })
             throw error
           }
@@ -410,19 +444,22 @@ export const useStore = create<StoreState & StoreActions>()(
         // Projects actions
         fetchProjects: async () => {
           set((state) => {
-            state.isLoading = true
+            state.isLoading = true  // Legacy
+            state.isProjectsLoading = true
           })
 
           try {
             const projects = await apiService.getProjects()
             set((state) => {
               state.projects = projects
-              state.isLoading = false
+              state.isLoading = false  // Legacy
+              state.isProjectsLoading = false
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             set((state) => {
-              state.error = error.message
-              state.isLoading = false
+              state.error = getErrorMessage(error)
+              state.isLoading = false  // Legacy
+              state.isProjectsLoading = false
             })
           }
         },
@@ -441,11 +478,11 @@ export const useStore = create<StoreState & StoreActions>()(
             })
 
             return project
-          } catch (error: any) {
+          } catch (error: unknown) {
             get().addNotification({
               type: 'error',
               title: 'Creation Failed',
-              message: error.response?.data?.error || error.message,
+              message: getErrorMessage(error),
             })
             throw error
           }
@@ -453,14 +490,16 @@ export const useStore = create<StoreState & StoreActions>()(
 
         selectProject: async (id: number) => {
           set((state) => {
-            state.isLoading = true
+            state.isLoading = true  // Legacy
+            state.isProjectsLoading = true
           })
 
           try {
             const project = await apiService.getProject(id)
             set((state) => {
               state.currentProject = project
-              state.isLoading = false
+              state.isLoading = false  // Legacy
+              state.isProjectsLoading = false
             })
 
             // Fetch files for the project
@@ -471,16 +510,17 @@ export const useStore = create<StoreState & StoreActions>()(
               title: 'Project Loaded',
               message: `${project.name} is now active.`,
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             set((state) => {
-              state.error = error.message
-              state.isLoading = false
+              state.error = getErrorMessage(error)
+              state.isLoading = false  // Legacy
+              state.isProjectsLoading = false
             })
 
             get().addNotification({
               type: 'error',
               title: 'Failed to Load Project',
-              message: error.response?.data?.error || error.message,
+              message: getErrorMessage(error),
             })
           }
         },
@@ -512,11 +552,11 @@ export const useStore = create<StoreState & StoreActions>()(
               title: 'Project Updated',
               message: `${project.name} has been updated.`,
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             get().addNotification({
               type: 'error',
               title: 'Update Failed',
-              message: error.response?.data?.error || error.message,
+              message: getErrorMessage(error),
             })
             throw error
           }
@@ -539,11 +579,11 @@ export const useStore = create<StoreState & StoreActions>()(
               title: 'Project Deleted',
               message: 'Project has been deleted successfully.',
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             get().addNotification({
               type: 'error',
               title: 'Deletion Failed',
-              message: error.response?.data?.error || error.message,
+              message: getErrorMessage(error),
             })
             throw error
           }
@@ -561,20 +601,23 @@ export const useStore = create<StoreState & StoreActions>()(
         // Files actions
         fetchFiles: async (projectId: number) => {
           set((state) => {
-            state.isLoading = true
+            state.isLoading = true  // Legacy
+            state.isFilesLoading = true
           })
 
           try {
             const files = await apiService.getFiles(projectId)
             set((state) => {
               state.files = files
-              state.isLoading = false
+              state.isLoading = false  // Legacy
+              state.isFilesLoading = false
             })
             get().buildFileTree()
-          } catch (error: any) {
+          } catch (error: unknown) {
             set((state) => {
-              state.error = error.message
-              state.isLoading = false
+              state.error = getErrorMessage(error)
+              state.isLoading = false  // Legacy
+              state.isFilesLoading = false
             })
           }
         },
@@ -594,11 +637,11 @@ export const useStore = create<StoreState & StoreActions>()(
             })
 
             return file
-          } catch (error: any) {
+          } catch (error: unknown) {
             get().addNotification({
               type: 'error',
               title: 'Creation Failed',
-              message: error.response?.data?.error || error.message,
+              message: getErrorMessage(error),
             })
             throw error
           }
@@ -622,11 +665,11 @@ export const useStore = create<StoreState & StoreActions>()(
             if (websocketService.isConnected()) {
               websocketService.sendFileChange(id, content, 1, 1)
             }
-          } catch (error: any) {
+          } catch (error: unknown) {
             get().addNotification({
               type: 'error',
               title: 'Save Failed',
-              message: error.response?.data?.error || error.message,
+              message: getErrorMessage(error),
             })
             throw error
           }
@@ -649,11 +692,11 @@ export const useStore = create<StoreState & StoreActions>()(
               title: 'File Deleted',
               message: 'File has been deleted successfully.',
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             get().addNotification({
               type: 'error',
               title: 'Deletion Failed',
-              message: error.response?.data?.error || error.message,
+              message: getErrorMessage(error),
             })
             throw error
           }
@@ -781,7 +824,7 @@ export const useStore = create<StoreState & StoreActions>()(
               title: 'Collaboration Started',
               message: 'You are now collaborating in real-time!',
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             set((state) => {
               state.isConnecting = false
             })
@@ -789,7 +832,7 @@ export const useStore = create<StoreState & StoreActions>()(
             get().addNotification({
               type: 'error',
               title: 'Collaboration Failed',
-              message: error.message,
+              message: getErrorMessage(error),
             })
           }
         },
@@ -804,7 +847,7 @@ export const useStore = create<StoreState & StoreActions>()(
               state.cursors = []
               state.isConnected = false
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             console.error('Failed to leave room:', error)
           }
         },
@@ -833,7 +876,8 @@ export const useStore = create<StoreState & StoreActions>()(
         // AI actions
         generateAI: async (data) => {
           set((state) => {
-            state.isLoading = true
+            state.isLoading = true  // Legacy
+            state.isAILoading = true
             state.isAIGenerating = true
           })
 
@@ -841,7 +885,8 @@ export const useStore = create<StoreState & StoreActions>()(
             const response = await apiService.generateAI(data)
 
             set((state) => {
-              state.isLoading = false
+              state.isLoading = false  // Legacy
+              state.isAILoading = false
               state.isAIGenerating = false
             })
 
@@ -851,16 +896,17 @@ export const useStore = create<StoreState & StoreActions>()(
             }
 
             return response
-          } catch (error: any) {
+          } catch (error: unknown) {
             set((state) => {
-              state.isLoading = false
+              state.isLoading = false  // Legacy
+              state.isAILoading = false
               state.isAIGenerating = false
             })
 
             get().addNotification({
               type: 'error',
               title: 'AI Request Failed',
-              message: error.response?.data?.error || error.message,
+              message: getErrorMessage(error),
             })
             throw error
           }
@@ -872,7 +918,7 @@ export const useStore = create<StoreState & StoreActions>()(
             set((state) => {
               state.usage = usage
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             console.error('Failed to fetch AI usage:', error)
           }
         },
@@ -883,7 +929,7 @@ export const useStore = create<StoreState & StoreActions>()(
             set((state) => {
               state.history = history
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             console.error('Failed to fetch AI history:', error)
           }
         },
@@ -897,11 +943,11 @@ export const useStore = create<StoreState & StoreActions>()(
               title: 'Rating Submitted',
               message: 'Thank you for your feedback!',
             })
-          } catch (error: any) {
+          } catch (error: unknown) {
             get().addNotification({
               type: 'error',
               title: 'Rating Failed',
-              message: error.response?.data?.error || error.message,
+              message: getErrorMessage(error),
             })
           }
         },
@@ -943,20 +989,36 @@ export const useStore = create<StoreState & StoreActions>()(
             })
           })
 
-          // Auto-remove after duration
+          // Auto-remove after duration with proper timeout tracking for cleanup
           const duration = notification.duration || 5000
-          setTimeout(() => {
+          const timeoutId = setTimeout(() => {
             get().removeNotification(id)
           }, duration)
+
+          // Store timeout ID for potential cleanup
+          notificationTimeouts.set(id, timeoutId)
         },
 
         removeNotification: (id: string) => {
+          // Clear the timeout to prevent memory leaks
+          const timeoutId = notificationTimeouts.get(id)
+          if (timeoutId) {
+            clearTimeout(timeoutId)
+            notificationTimeouts.delete(id)
+          }
+
           set((state) => {
             state.notifications = state.notifications.filter((n) => n.id !== id)
           })
         },
 
         clearNotifications: () => {
+          // Clear all timeouts before clearing notifications
+          notificationTimeouts.forEach((timeoutId) => {
+            clearTimeout(timeoutId)
+          })
+          notificationTimeouts.clear()
+
           set((state) => {
             state.notifications = []
           })
@@ -1025,7 +1087,11 @@ export const useStore = create<StoreState & StoreActions>()(
 // Individual atomic selectors for fine-grained subscriptions
 export const useUser = () => useStore((state) => state.user)
 export const useIsAuthenticated = () => useStore((state) => state.isAuthenticated)
-export const useIsLoading = () => useStore((state) => state.isLoading)
+export const useIsLoading = () => useStore((state) => state.isLoading)  // Legacy - use domain-specific selectors
+export const useIsAuthLoading = () => useStore((state) => state.isAuthLoading)
+export const useIsProjectsLoading = () => useStore((state) => state.isProjectsLoading)
+export const useIsFilesLoading = () => useStore((state) => state.isFilesLoading)
+export const useIsAILoading = () => useStore((state) => state.isAILoading)
 export const useError = () => useStore((state) => state.error)
 export const useCurrentProject = () => useStore((state) => state.currentProject)
 export const useProjects = () => useStore((state) => state.projects)
@@ -1086,7 +1152,8 @@ export const useAuth = () => useStore(
   useShallow((state) => ({
     user: state.user,
     isAuthenticated: state.isAuthenticated,
-    isLoading: state.isLoading,
+    isLoading: state.isAuthLoading,  // Use domain-specific loading state
+    isAuthLoading: state.isAuthLoading,
     error: state.error,
     login: state.login,
     register: state.register,
@@ -1101,7 +1168,8 @@ export const useProjectsState = () => useStore(
   useShallow((state) => ({
     projects: state.projects,
     currentProject: state.currentProject,
-    isLoading: state.isLoading,
+    isLoading: state.isProjectsLoading,  // Use domain-specific loading state
+    isProjectsLoading: state.isProjectsLoading,
     fetchProjects: state.fetchProjects,
     createProject: state.createProject,
     selectProject: state.selectProject,
@@ -1117,7 +1185,8 @@ export const useFilesState = () => useStore(
     openFiles: state.openFiles,
     activeFileId: state.activeFileId,
     activeFile: state.activeFile,
-    isLoading: state.isLoading,
+    isLoading: state.isFilesLoading,  // Use domain-specific loading state
+    isFilesLoading: state.isFilesLoading,
     fetchFiles: state.fetchFiles,
     createFile: state.createFile,
     updateFile: state.updateFile,
@@ -1167,7 +1236,8 @@ export const useAI = () => useStore(
   useShallow((state) => ({
     usage: state.usage,
     history: state.history,
-    isLoading: state.isLoading,
+    isLoading: state.isAILoading,  // Use domain-specific loading state
+    isAILoading: state.isAILoading,
     generateAI: state.generateAI,
     fetchUsage: state.fetchUsage,
     fetchHistory: state.fetchHistory,

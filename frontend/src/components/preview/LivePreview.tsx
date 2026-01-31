@@ -107,6 +107,10 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
   // Bundler state
   const [bundlerAvailable, setBundlerAvailable] = useState(false)
 
+  // Settings state (controlled checkboxes)
+  const [autoRefreshOnSave, setAutoRefreshOnSave] = useState(true)
+  const [showDevTools, setShowDevTools] = useState(true)
+
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -241,7 +245,7 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
     } finally {
       setLoading(false)
     }
-  }, [projectId, clearDevTools])
+  }, [projectId, clearDevTools, useSandbox])
 
   // Auto-start preview when autoStart prop is true
   const autoStartRef = useRef(false)
@@ -646,11 +650,21 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
                   <div className="space-y-3">
                     <label className="flex items-center justify-between">
                       <span className="text-sm text-gray-400">Auto-refresh on save</span>
-                      <input type="checkbox" defaultChecked className="rounded bg-gray-700 border-gray-600 text-cyan-500" />
+                      <input
+                        type="checkbox"
+                        checked={autoRefreshOnSave}
+                        onChange={(e) => setAutoRefreshOnSave(e.target.checked)}
+                        className="rounded bg-gray-700 border-gray-600 text-cyan-500"
+                      />
                     </label>
                     <label className="flex items-center justify-between">
                       <span className="text-sm text-gray-400">Show dev tools</span>
-                      <input type="checkbox" defaultChecked className="rounded bg-gray-700 border-gray-600 text-cyan-500" />
+                      <input
+                        type="checkbox"
+                        checked={showDevTools}
+                        onChange={(e) => setShowDevTools(e.target.checked)}
+                        className="rounded bg-gray-700 border-gray-600 text-cyan-500"
+                      />
                     </label>
 
                     {/* Docker Sandbox Toggle */}
