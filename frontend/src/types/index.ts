@@ -875,3 +875,120 @@ export interface BYOKUsageSummary {
     byok_requests: number
   }>
 }
+
+// Code Completions Types (Ghostwriter-equivalent)
+
+export type CompletionTriggerKind = 'invoked' | 'trigger_char' | 'automatic' | 'incomplete'
+
+export type CompletionKind =
+  | 'text'
+  | 'method'
+  | 'function'
+  | 'constructor'
+  | 'field'
+  | 'variable'
+  | 'class'
+  | 'interface'
+  | 'module'
+  | 'property'
+  | 'unit'
+  | 'value'
+  | 'enum'
+  | 'keyword'
+  | 'snippet'
+  | 'color'
+  | 'file'
+  | 'reference'
+  | 'customcolor'
+  | 'folder'
+  | 'type_parameter'
+
+export interface CompletionRange {
+  start_line: number
+  start_column: number
+  end_line: number
+  end_column: number
+}
+
+export interface CompletionTextEdit {
+  range: CompletionRange
+  new_text: string
+}
+
+export interface CompletionItem {
+  id: string
+  text: string
+  display_text: string
+  insert_text: string
+  kind: CompletionKind
+  detail?: string
+  documentation?: string
+  sort_text?: string
+  filter_text?: string
+  confidence: number
+  range?: CompletionRange
+  additional_edits?: CompletionTextEdit[]
+}
+
+export interface CompletionUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  estimated_cost: number
+}
+
+export interface CompletionResponse {
+  id: string
+  completions: CompletionItem[]
+  provider: string
+  model: string
+  processing_time_ms: number
+  cached_hit: boolean
+  usage?: CompletionUsage
+}
+
+export interface RecentEdit {
+  line: number
+  old_text: string
+  new_text: string
+  timestamp: number
+}
+
+export interface RelatedFile {
+  path: string
+  language: string
+  snippet: string
+}
+
+export interface CompletionContext {
+  file_imports?: string[]
+  file_symbols?: string[]
+  project_symbols?: string[]
+  recent_edits?: RecentEdit[]
+  related_files?: RelatedFile[]
+  framework?: string
+  dependencies?: Record<string, string>
+}
+
+export interface CompletionRequest {
+  project_id?: number
+  file_id?: number
+  file_path?: string
+  language: string
+  prefix: string
+  suffix: string
+  line: number
+  column: number
+  trigger_kind: CompletionTriggerKind
+  context?: CompletionContext
+  max_tokens?: number
+  temperature?: number
+  stop_tokens?: string[]
+}
+
+export interface CompletionStats {
+  total_requests: number
+  avg_latency_ms: number
+  cache_hit_rate: number
+  provider_requests: Record<string, number>
+}

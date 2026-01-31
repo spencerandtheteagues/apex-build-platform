@@ -1,14 +1,15 @@
 // APEX.BUILD Monaco Code Editor
 // Advanced code editor with multi-AI integration and multiplayer collaboration
 
-import React, { useEffect, useRef, useState, forwardRef, useCallback } from 'react'
+import React, { useEffect, useRef, useState, forwardRef, useCallback, useMemo } from 'react'
 import * as monaco from 'monaco-editor'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
 import { useCollaboration, RemoteCursor } from '@/hooks/useCollaboration'
 import { MultiplayerCursors, UserPresenceIndicator } from './MultiplayerCursors'
-import { File, AICapability, AIProvider } from '@/types'
+import { File, AICapability, AIProvider, CompletionItem } from '@/types'
 import { Button, Badge, Loading } from '@/components/ui'
+import { apiService } from '@/services/api'
 import {
   Play,
   Save,
@@ -19,8 +20,25 @@ import {
   RefreshCw,
   FileText,
   Sparkles,
-  Users
+  Users,
+  X
 } from 'lucide-react'
+
+// Debounce utility for completions
+function debounce<T extends (...args: any[]) => any>(
+  func: T,
+  wait: number
+): (...args: Parameters<T>) => void {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  return (...args: Parameters<T>) => {
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+    }
+    timeoutId = setTimeout(() => {
+      func(...args)
+    }, wait)
+  }
+}
 
 // Editor theme configurations
 const EDITOR_THEMES = {
@@ -153,6 +171,10 @@ export interface MonacoEditorProps {
   enableCollaboration?: boolean
   roomId?: string
   projectId?: number
+  // AI Inline Completions props
+  enableInlineCompletions?: boolean
+  completionDebounceMs?: number
+  framework?: string
 }
 
 const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, MonacoEditorProps>(
@@ -169,6 +191,9 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
     enableCollaboration = true,
     roomId,
     projectId,
+    enableInlineCompletions = true,
+    completionDebounceMs = 300,
+    framework,
   }, ref) => {
     const editorRef = useRef<HTMLDivElement>(null)
     const [editor, setEditor] = useState<monaco.editor.IStandaloneCodeEditor | null>(null)
@@ -179,7 +204,18 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
     const [showCollaborators, setShowCollaborators] = useState(false)
     const [followingUserId, setFollowingUserId] = useState<number | undefined>()
 
+    // Inline completions state
+    const [isCompletionLoading, setIsCompletionLoading] = useState(false)
+    const [completionsEnabled, setCompletionsEnabled] = useState(enableInlineCompletions)
+    const lastCompletionRef = useRef<CompletionItem | null>(null)
+    const completionProviderRef = useRef<monaco.IDisposable | null>(null)
+
     const { theme, currentProject, room } = useStore()
+
+    // Safely extract theme id
+    const themeId = typeof theme === 'object' && theme !== null && 'id' in theme
+      ? String((theme as { id: string }).id)
+      : 'cyberpunk'
 
     // Get file info for collaboration
     const fileId = file?.id
@@ -230,7 +266,7 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
       const editorInstance = monaco.editor.create(editorRef.current, {
         value: value || (file?.content || ''),
         language: getLanguageFromFile(file?.name || ''),
-        theme: `apex-${(theme as any).id}`,
+        theme: `apex-${themeId}`,
         automaticLayout: true,
         readOnly,
         fontSize: 14,
@@ -322,14 +358,15 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
       return () => {
         editorInstance.dispose()
       }
-    }, [editorRef.current])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
 
     // Update theme when it changes
     useEffect(() => {
       if (editor) {
-        monaco.editor.setTheme(`apex-${(theme as any).id}`)
+        monaco.editor.setTheme(`apex-${themeId}`)
       }
-    }, [(theme as any).id, editor])
+    }, [themeId, editor])
 
     // Update content when file changes
     useEffect(() => {
@@ -342,6 +379,192 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
         }
       }
     }, [file, editor])
+
+    // Register inline completion provider for AI ghost-text suggestions
+    useEffect(() => {
+      if (!editor || !completionsEnabled) {
+        // Dispose existing provider if completions are disabled
+        if (completionProviderRef.current) {
+          completionProviderRef.current.dispose()
+          completionProviderRef.current = null
+        }
+        return
+      }
+
+      const language = getLanguageFromFile(file?.name || '')
+
+      // Track pending requests for debouncing
+      let pendingRequestId = 0
+      let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+      // Register the inline completion provider
+      const provider = monaco.languages.registerInlineCompletionsProvider(language, {
+        provideInlineCompletions: async (model, position, context, token) => {
+          // Only trigger on automatic or explicit invocation
+          if (
+            context.triggerKind !== monaco.languages.InlineCompletionTriggerKind.Automatic &&
+            context.triggerKind !== monaco.languages.InlineCompletionTriggerKind.Explicit
+          ) {
+            return null
+          }
+
+          // Increment request ID for debouncing
+          const requestId = ++pendingRequestId
+
+          // Debounce: wait before making the request
+          return new Promise((resolve) => {
+            if (debounceTimer) {
+              clearTimeout(debounceTimer)
+            }
+
+            debounceTimer = setTimeout(async () => {
+              // Check if this request is still the latest
+              if (requestId !== pendingRequestId || token.isCancellationRequested) {
+                resolve(null)
+                return
+              }
+
+              try {
+                setIsCompletionLoading(true)
+
+                // Get text before and after cursor
+                const textUntilPosition = model.getValueInRange({
+                  startLineNumber: 1,
+                  startColumn: 1,
+                  endLineNumber: position.lineNumber,
+                  endColumn: position.column,
+                })
+
+                const textAfterPosition = model.getValueInRange({
+                  startLineNumber: position.lineNumber,
+                  startColumn: position.column,
+                  endLineNumber: model.getLineCount(),
+                  endColumn: model.getLineMaxColumn(model.getLineCount()),
+                })
+
+                // Don't fetch if cursor is at the start or text is too short
+                if (textUntilPosition.trim().length < 3) {
+                  resolve(null)
+                  return
+                }
+
+                // Skip if we're likely in a comment
+                const currentLine = model.getLineContent(position.lineNumber)
+                const lineUntilCursor = currentLine.substring(0, position.column - 1)
+                if (lineUntilCursor.trim().startsWith('//') || lineUntilCursor.trim().startsWith('#')) {
+                  resolve(null)
+                  return
+                }
+
+                // Check cancellation again before API call
+                if (token.isCancellationRequested) {
+                  resolve(null)
+                  return
+                }
+
+                // Fetch inline completion from API
+                const completion = await apiService.getInlineCompletions(
+                  textUntilPosition,
+                  { line: position.lineNumber, column: position.column },
+                  language,
+                  {
+                    projectId: projectId || currentProject?.id,
+                    fileId: file?.id,
+                    filePath: file?.path,
+                    suffix: textAfterPosition,
+                    triggerKind: 'automatic',
+                    framework: framework || currentProject?.framework,
+                  }
+                )
+
+                // Check if request is still valid
+                if (requestId !== pendingRequestId || token.isCancellationRequested || !completion) {
+                  resolve(null)
+                  return
+                }
+
+                // Store the completion for tracking acceptance
+                lastCompletionRef.current = completion
+
+                // Return Monaco inline completion format
+                resolve({
+                  items: [
+                    {
+                      insertText: completion.insert_text || completion.text,
+                      range: {
+                        startLineNumber: position.lineNumber,
+                        startColumn: position.column,
+                        endLineNumber: position.lineNumber,
+                        endColumn: position.column,
+                      },
+                      // Command to track acceptance when user accepts the completion
+                      command: {
+                        id: 'apex.acceptCompletion',
+                        title: 'Accept Completion',
+                        arguments: [completion.id],
+                      },
+                    },
+                  ],
+                  // Enable partial acceptance (accepting word by word with Ctrl+Right)
+                  enableForwardStability: true,
+                })
+              } catch (error) {
+                console.error('[APEX] Inline completion error:', error)
+                resolve(null)
+              } finally {
+                setIsCompletionLoading(false)
+              }
+            }, completionDebounceMs)
+          })
+        },
+        freeInlineCompletions: () => {
+          // Cleanup when completions are dismissed
+          lastCompletionRef.current = null
+        },
+      })
+
+      // Register command to track accepted completions
+      editor.addAction({
+        id: 'apex.acceptCompletion',
+        label: 'Accept AI Completion',
+        run: (_, completionId?: string) => {
+          const idToTrack = completionId || lastCompletionRef.current?.id
+          if (idToTrack) {
+            apiService.acceptCompletion(idToTrack, true).catch((err) => {
+              console.error('[APEX] Failed to track completion acceptance:', err)
+            })
+          }
+        },
+      })
+
+      // Track when inline completion is accepted via Tab key
+      const tabDisposable = editor.onDidChangeModelContent((e) => {
+        // If we have a pending completion and content changed, check if it was accepted
+        if (lastCompletionRef.current && e.changes.length > 0) {
+          const change = e.changes[0]
+          const completionText = lastCompletionRef.current.insert_text || lastCompletionRef.current.text
+
+          // If the inserted text matches or contains the completion text, track acceptance
+          if (change.text && completionText && change.text.includes(completionText.substring(0, Math.min(10, completionText.length)))) {
+            apiService.acceptCompletion(lastCompletionRef.current.id, true).catch((err) => {
+              console.error('[APEX] Failed to track completion acceptance:', err)
+            })
+            lastCompletionRef.current = null
+          }
+        }
+      })
+
+      completionProviderRef.current = provider
+
+      return () => {
+        if (debounceTimer) {
+          clearTimeout(debounceTimer)
+        }
+        provider.dispose()
+        tabDisposable.dispose()
+        completionProviderRef.current = null
+      }
+    }, [editor, completionsEnabled, file, projectId, currentProject, framework, completionDebounceMs])
 
     // Get language from file extension
     const getLanguageFromFile = (filename: string): string => {
@@ -374,7 +597,8 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
     const handleAIRequest = async () => {
       if (!editor || !onAIRequest) return
 
-      const selectedText = editor.getModel()?.getValueInRange(editor.getSelection()!)
+      const selection = editor.getSelection()
+      const selectedText = selection ? editor.getModel()?.getValueInRange(selection) : null
       const fullCode = editor.getValue()
       const codeToAnalyze = selectedText || fullCode
 
@@ -455,6 +679,26 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
               <Badge variant="success" size="xs">
                 Live
               </Badge>
+            )}
+
+            {/* AI Inline Completions Toggle */}
+            {enableInlineCompletions && (
+              <button
+                onClick={() => setCompletionsEnabled(!completionsEnabled)}
+                className={cn(
+                  'flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors',
+                  completionsEnabled
+                    ? 'text-cyan-400 bg-cyan-500/20 hover:bg-cyan-500/30'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                )}
+                title={completionsEnabled ? 'Disable AI ghost-text completions' : 'Enable AI ghost-text completions'}
+              >
+                <Zap size={14} className={isCompletionLoading ? 'animate-pulse' : ''} />
+                <span>AI</span>
+                {isCompletionLoading && (
+                  <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse" />
+                )}
+              </button>
             )}
 
             {showAIPanel && (
@@ -554,7 +798,7 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
                   onClick={() => setShowCollaborators(false)}
                   className="text-gray-400 hover:text-white"
                 >
-                  x
+                  <X size={16} />
                 </button>
               </div>
               <div className="p-2 max-h-64 overflow-y-auto">

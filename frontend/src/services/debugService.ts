@@ -2,53 +2,58 @@
 // Frontend service for interacting with the backend debugging API
 // Supports JavaScript, TypeScript, Python, and Go debugging
 
-import apiService from './api'
+import apiService, {
+  DebugSession,
+  DebugSessionStatus,
+  DebugBreakpoint,
+  DebugBreakpointType,
+  DebugStackFrame,
+  DebugVariable,
+  DebugWatchExpression,
+  DebugEvaluateResult,
+  DebugEvent,
+  DebugEventType,
+} from './api'
 
-// Debug session status matching backend
-export type DebugSessionStatus = 'pending' | 'running' | 'paused' | 'completed' | 'error'
-
-// Breakpoint types matching backend
-export type BreakpointType = 'line' | 'conditional' | 'logpoint' | 'exception' | 'function'
-
-// Debug session interface
-export interface DebugSession {
-  id: string
-  project_id: number
-  user_id: number
-  file_id: number
-  status: DebugSessionStatus
-  language: string
-  entry_point: string
-  working_directory: string
-  debug_port: number
-  devtools_url?: string
-  process_id?: number
-  error_message?: string
-  started_at?: string
-  ended_at?: string
-  current_line?: number
-  current_file?: string
+// Re-export types for consumers
+export type {
+  DebugSession,
+  DebugSessionStatus,
+  DebugBreakpoint,
+  DebugBreakpointType,
+  DebugStackFrame,
+  DebugVariable,
+  DebugWatchExpression,
+  DebugEvaluateResult,
+  DebugEvent,
+  DebugEventType,
 }
 
-// Breakpoint interface
-export interface Breakpoint {
-  id: string
-  session_id: string
-  file_id: number
-  file_path: string
-  line: number
-  column: number
-  type: BreakpointType
-  condition?: string
-  log_message?: string
-  hit_count: number
-  enabled: boolean
-  verified: boolean
-  breakpoint_id?: string // CDP breakpoint ID
+// Also export local types for backward compatibility
+export type { Scope, Variable, StackFrame, Breakpoint, WatchExpression, EvaluateResult, BreakpointType }
+
+// Scope interface
+interface Scope {
+  type: 'local' | 'closure' | 'global' | 'with' | 'catch' | 'block' | 'script'
+  name?: string
+  start_line?: number
+  end_line?: number
+  variables?: Variable[]
 }
 
-// Stack frame interface
-export interface StackFrame {
+// Variable interface
+interface Variable {
+  name: string
+  value: string
+  type: string
+  object_id?: string
+  has_children: boolean
+  children?: Variable[]
+  preview?: string
+}
+
+// Stack frame interface (local alias)
+interface StackFrame {
   id: string
   index: number
   function_name: string
@@ -61,28 +66,27 @@ export interface StackFrame {
   local_vars?: Record<string, string>
 }
 
-// Scope interface
-export interface Scope {
-  type: 'local' | 'closure' | 'global' | 'with' | 'catch' | 'block' | 'script'
-  name?: string
-  start_line?: number
-  end_line?: number
-  variables?: Variable[]
+// Breakpoint interface (local alias)
+interface Breakpoint {
+  id: string
+  session_id: string
+  file_id: number
+  file_path: string
+  line: number
+  column: number
+  type: BreakpointType
+  condition?: string
+  log_message?: string
+  hit_count: number
+  enabled: boolean
+  verified: boolean
+  breakpoint_id?: string
 }
 
-// Variable interface
-export interface Variable {
-  name: string
-  value: string
-  type: string
-  object_id?: string
-  has_children: boolean
-  children?: Variable[]
-  preview?: string
-}
+type BreakpointType = DebugBreakpointType
 
-// Watch expression interface
-export interface WatchExpression {
+// Watch expression interface (local alias)
+interface WatchExpression {
   id: string
   expression: string
   value?: string
@@ -90,26 +94,15 @@ export interface WatchExpression {
   error?: string
 }
 
-// Debug event interface
-export interface DebugEvent {
-  type: DebugEventType
-  timestamp: string
-  data: any
+// Evaluate result (local alias)
+interface EvaluateResult {
+  value: string
+  type: string
+  object_id?: string
+  has_children: boolean
+  preview?: string
+  error?: string
 }
-
-export type DebugEventType =
-  | 'session_started'
-  | 'session_stopped'
-  | 'paused'
-  | 'resumed'
-  | 'stepping'
-  | 'breakpoint_hit'
-  | 'breakpoint_verified'
-  | 'breakpoint_added'
-  | 'breakpoint_removed'
-  | 'exception'
-  | 'output'
-  | 'error'
 
 // Paused event data
 export interface PausedEventData {
@@ -118,16 +111,6 @@ export interface PausedEventData {
   call_stack: StackFrame[]
   exception?: Variable
   hit_breakpoint_ids?: string[]
-}
-
-// Evaluate result
-export interface EvaluateResult {
-  value: string
-  type: string
-  object_id?: string
-  has_children: boolean
-  preview?: string
-  error?: string
 }
 
 // Debug service event callbacks
@@ -139,8 +122,9 @@ class DebugService {
   private websocket: WebSocket | null = null
   private breakpoints: Map<string, Breakpoint> = new Map()
   private watchExpressions: Map<string, WatchExpression> = new Map()
-  private pendingCallbacks: Map<number, (data: any) => void> = new Map()
-  private messageId = 0
+  private reconnectAttempts = 0
+  private maxReconnectAttempts = 5
+  private reconnectDelay = 1000
 
   constructor() {
     // Initialize event listener maps
@@ -162,28 +146,19 @@ class DebugService {
     language: string
   ): Promise<DebugSession> {
     try {
-      const response = await fetch(`/api/v1/debug/sessions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('apex_access_token')}`
-        },
-        body: JSON.stringify({
-          project_id: projectId,
-          entry_point: entryFile,
-          language: language
-        })
+      const response = await apiService.startDebugSession({
+        project_id: projectId,
+        entry_point: entryFile,
+        language: language
       })
 
-      if (!response.ok) {
-        throw new Error(`Failed to start debug session: ${response.statusText}`)
-      }
+      this.activeSession = response.session
 
-      const data = await response.json()
-      this.activeSession = data.session
+      // Sync any pending breakpoints
+      await this.syncPendingBreakpoints()
 
       // Connect to debug WebSocket
-      await this.connectWebSocket(data.session.id)
+      await this.connectWebSocket(response.session.id)
 
       this.emit('session_started', { session: this.activeSession })
       return this.activeSession!
@@ -199,16 +174,16 @@ class DebugService {
     if (!sid) return
 
     try {
-      await fetch(`/api/v1/debug/sessions/${sid}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('apex_access_token')}`
-        }
-      })
+      await apiService.stopDebugSession(sid)
 
       this.disconnectWebSocket()
       this.activeSession = null
-      this.breakpoints.clear()
+      // Only clear server-synced breakpoints, keep temp ones
+      this.breakpoints.forEach((bp, id) => {
+        if (!id.startsWith('temp-')) {
+          this.breakpoints.delete(id)
+        }
+      })
       this.watchExpressions.clear()
 
       this.emit('session_stopped', { session_id: sid })
@@ -221,6 +196,36 @@ class DebugService {
   // Get current session
   getSession(): DebugSession | null {
     return this.activeSession
+  }
+
+  // Sync pending (temp) breakpoints to the server
+  private async syncPendingBreakpoints(): Promise<void> {
+    if (!this.activeSession) return
+
+    const pendingBps = Array.from(this.breakpoints.values()).filter(bp =>
+      bp.id.startsWith('temp-')
+    )
+
+    for (const tempBp of pendingBps) {
+      try {
+        const response = await apiService.setDebugBreakpoint(
+          this.activeSession.id,
+          {
+            file_id: tempBp.file_id,
+            file_path: tempBp.file_path,
+            line: tempBp.line,
+            type: tempBp.type,
+            condition: tempBp.condition
+          }
+        )
+
+        // Replace temp breakpoint with server breakpoint
+        this.breakpoints.delete(tempBp.id)
+        this.breakpoints.set(response.breakpoint.id, response.breakpoint as Breakpoint)
+      } catch (error) {
+        console.error('Failed to sync breakpoint:', error)
+      }
+    }
   }
 
   // Set a breakpoint
@@ -252,27 +257,18 @@ class DebugService {
     }
 
     try {
-      const response = await fetch(`/api/v1/debug/sessions/${this.activeSession.id}/breakpoints`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('apex_access_token')}`
-        },
-        body: JSON.stringify({
+      const response = await apiService.setDebugBreakpoint(
+        this.activeSession.id,
+        {
           file_id: fileId,
           file_path: filePath,
           line,
           type,
           condition
-        })
-      })
+        }
+      )
 
-      if (!response.ok) {
-        throw new Error(`Failed to set breakpoint: ${response.statusText}`)
-      }
-
-      const data = await response.json()
-      const breakpoint = data.breakpoint as Breakpoint
+      const breakpoint = response.breakpoint as Breakpoint
       this.breakpoints.set(breakpoint.id, breakpoint)
 
       this.emit('breakpoint_added', { breakpoint })
@@ -290,12 +286,7 @@ class DebugService {
 
     if (this.activeSession && !breakpointId.startsWith('temp-')) {
       try {
-        await fetch(`/api/v1/debug/sessions/${this.activeSession.id}/breakpoints/${breakpointId}`, {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('apex_access_token')}`
-          }
-        })
+        await apiService.removeDebugBreakpoint(this.activeSession.id, breakpointId)
       } catch (error) {
         this.emit('error', { error: (error as Error).message })
         throw error
@@ -316,14 +307,11 @@ class DebugService {
 
     if (this.activeSession && !breakpointId.startsWith('temp-')) {
       try {
-        await fetch(`/api/v1/debug/sessions/${this.activeSession.id}/breakpoints/${breakpointId}/toggle`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('apex_access_token')}`
-          },
-          body: JSON.stringify({ enabled })
-        })
+        await apiService.toggleDebugBreakpoint(
+          this.activeSession.id,
+          breakpointId,
+          enabled
+        )
       } catch (error) {
         this.emit('error', { error: (error as Error).message })
       }
@@ -345,7 +333,7 @@ class DebugService {
     if (!this.activeSession) return
 
     try {
-      await this.sendDebugCommand('continue')
+      await apiService.debugContinue(this.activeSession.id)
       if (this.activeSession) {
         this.activeSession.status = 'running'
       }
@@ -360,7 +348,7 @@ class DebugService {
     if (!this.activeSession) return
 
     try {
-      await this.sendDebugCommand('stepOver')
+      await apiService.debugStepOver(this.activeSession.id)
       this.emit('stepping', { step_type: 'over' })
     } catch (error) {
       this.emit('error', { error: (error as Error).message })
@@ -372,7 +360,7 @@ class DebugService {
     if (!this.activeSession) return
 
     try {
-      await this.sendDebugCommand('stepInto')
+      await apiService.debugStepInto(this.activeSession.id)
       this.emit('stepping', { step_type: 'into' })
     } catch (error) {
       this.emit('error', { error: (error as Error).message })
@@ -384,7 +372,7 @@ class DebugService {
     if (!this.activeSession) return
 
     try {
-      await this.sendDebugCommand('stepOut')
+      await apiService.debugStepOut(this.activeSession.id)
       this.emit('stepping', { step_type: 'out' })
     } catch (error) {
       this.emit('error', { error: (error as Error).message })
@@ -396,14 +384,14 @@ class DebugService {
     if (!this.activeSession) return
 
     try {
-      await this.sendDebugCommand('pause')
+      await apiService.debugPause(this.activeSession.id)
     } catch (error) {
       this.emit('error', { error: (error as Error).message })
     }
   }
 
   // Evaluate an expression
-  async evaluate(expression: string, frameId?: string): Promise<EvaluateResult> {
+  async evaluate(expression: string, _frameId?: string): Promise<EvaluateResult> {
     if (!this.activeSession) {
       return {
         value: '<no active session>',
@@ -414,24 +402,11 @@ class DebugService {
     }
 
     try {
-      const response = await fetch(`/api/v1/debug/sessions/${this.activeSession.id}/evaluate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('apex_access_token')}`
-        },
-        body: JSON.stringify({
-          expression,
-          frame_id: frameId
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to evaluate: ${response.statusText}`)
-      }
-
-      const data = await response.json()
-      return data.result as EvaluateResult
+      const response = await apiService.evaluateDebugExpression(
+        this.activeSession.id,
+        expression
+      )
+      return response.result as EvaluateResult
     } catch (error) {
       return {
         value: '',
@@ -447,22 +422,13 @@ class DebugService {
     if (!this.activeSession) return []
 
     try {
-      const url = scopeType
-        ? `/api/v1/debug/sessions/${this.activeSession.id}/variables?scope=${scopeType}`
-        : `/api/v1/debug/sessions/${this.activeSession.id}/variables`
-
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('apex_access_token')}`
-        }
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to get variables: ${response.statusText}`)
-      }
-
-      const data = await response.json()
-      return data.variables as Variable[]
+      // Use scope type as object ID for root-level variable fetch
+      const objectId = scopeType || 'local'
+      const response = await apiService.getDebugVariables(
+        this.activeSession.id,
+        objectId
+      )
+      return response.variables as Variable[]
     } catch (error) {
       this.emit('error', { error: (error as Error).message })
       return []
@@ -474,21 +440,11 @@ class DebugService {
     if (!this.activeSession) return []
 
     try {
-      const response = await fetch(
-        `/api/v1/debug/sessions/${this.activeSession.id}/variables/${objectId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('apex_access_token')}`
-          }
-        }
+      const response = await apiService.getDebugVariables(
+        this.activeSession.id,
+        objectId
       )
-
-      if (!response.ok) {
-        throw new Error(`Failed to expand variable: ${response.statusText}`)
-      }
-
-      const data = await response.json()
-      return data.children as Variable[]
+      return response.variables as Variable[]
     } catch (error) {
       this.emit('error', { error: (error as Error).message })
       return []
@@ -500,18 +456,8 @@ class DebugService {
     if (!this.activeSession) return []
 
     try {
-      const response = await fetch(`/api/v1/debug/sessions/${this.activeSession.id}/callstack`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('apex_access_token')}`
-        }
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to get call stack: ${response.statusText}`)
-      }
-
-      const data = await response.json()
-      return data.frames as StackFrame[]
+      const response = await apiService.getDebugCallStack(this.activeSession.id)
+      return response.call_stack as StackFrame[]
     } catch (error) {
       this.emit('error', { error: (error as Error).message })
       return []
@@ -528,16 +474,48 @@ class DebugService {
     }
     this.watchExpressions.set(watch.id, watch)
 
-    // Evaluate immediately if session is paused
+    // If we have an active session and it's paused, sync to server
     if (this.activeSession?.status === 'paused') {
-      this.evaluateWatch(watch.id)
+      this.syncWatchToServer(watch)
     }
 
     return watch
   }
 
+  // Sync watch expression to server
+  private async syncWatchToServer(watch: WatchExpression): Promise<void> {
+    if (!this.activeSession) return
+
+    try {
+      const response = await apiService.addDebugWatch(
+        this.activeSession.id,
+        watch.expression
+      )
+      // Update the local watch with server data
+      const serverWatch = response.watch
+      watch.id = serverWatch.id
+      watch.value = serverWatch.value
+      watch.type = serverWatch.type
+      watch.error = serverWatch.error
+      this.watchExpressions.set(watch.id, watch)
+    } catch (error) {
+      // Just evaluate locally
+      this.evaluateWatch(watch.id)
+    }
+  }
+
   // Remove watch expression
   removeWatch(watchId: string): void {
+    const watch = this.watchExpressions.get(watchId)
+    if (!watch) return
+
+    // Try to remove from server if we have an active session
+    if (this.activeSession && !watchId.startsWith('watch-')) {
+      apiService.removeDebugWatch(this.activeSession.id, watchId).catch(() => {
+        // Ignore errors for local watches
+      })
+    }
+
     this.watchExpressions.delete(watchId)
   }
 
@@ -610,13 +588,13 @@ class DebugService {
   // WebSocket connection for real-time debug events
   private async connectWebSocket(sessionId: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsUrl = `${protocol}//${window.location.host}/api/v1/debug/sessions/${sessionId}/ws`
+      const wsUrl = apiService.getDebugWebSocketUrl(sessionId)
 
       this.websocket = new WebSocket(wsUrl)
 
       this.websocket.onopen = () => {
         console.log('Debug WebSocket connected')
+        this.reconnectAttempts = 0
         resolve()
       }
 
@@ -625,9 +603,23 @@ class DebugService {
         reject(error)
       }
 
-      this.websocket.onclose = () => {
-        console.log('Debug WebSocket closed')
+      this.websocket.onclose = (event) => {
+        console.log('Debug WebSocket closed:', event.code, event.reason)
         this.websocket = null
+
+        // Attempt reconnection if session is still active
+        if (this.activeSession && this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.reconnectAttempts++
+          const delay = this.reconnectDelay * this.reconnectAttempts
+          console.log(`Attempting to reconnect in ${delay}ms...`)
+          setTimeout(() => {
+            if (this.activeSession) {
+              this.connectWebSocket(this.activeSession.id).catch(() => {
+                // Reconnection failed
+              })
+            }
+          }, delay)
+        }
       }
 
       this.websocket.onmessage = (event) => {
@@ -641,6 +633,7 @@ class DebugService {
       this.websocket.close()
       this.websocket = null
     }
+    this.reconnectAttempts = 0
   }
 
   private handleWebSocketMessage(data: string): void {
@@ -675,6 +668,10 @@ class DebugService {
           this.emit('breakpoint_verified', message.data)
           break
 
+        case 'breakpoint_hit':
+          this.emit('breakpoint_hit', message.data)
+          break
+
         case 'output':
           this.emit('output', message.data)
           break
@@ -687,36 +684,18 @@ class DebugService {
           this.emit('error', message.data)
           break
 
+        case 'session_stopped':
+          this.activeSession = null
+          this.disconnectWebSocket()
+          this.emit('session_stopped', message.data)
+          break
+
         default:
           console.log('Unknown debug message type:', message.type)
       }
     } catch (error) {
       console.error('Error parsing debug message:', error)
     }
-  }
-
-  private async sendDebugCommand(command: string, params?: any): Promise<any> {
-    if (!this.activeSession) {
-      throw new Error('No active debug session')
-    }
-
-    const response = await fetch(`/api/v1/debug/sessions/${this.activeSession.id}/command`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('apex_access_token')}`
-      },
-      body: JSON.stringify({
-        command,
-        params
-      })
-    })
-
-    if (!response.ok) {
-      throw new Error(`Debug command failed: ${response.statusText}`)
-    }
-
-    return response.json()
   }
 
   // Check if debugger is active

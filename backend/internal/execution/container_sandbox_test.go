@@ -5,6 +5,7 @@ package execution
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
@@ -356,7 +357,7 @@ func TestContainerSandboxConcurrentExecutions(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		go func(idx int) {
-			code := `print(f"Execution {}")`.replace("{}", string(rune('A'+idx)))
+			code := fmt.Sprintf(`print("Execution %c")`, rune('A'+idx))
 			r, e := sandbox.Execute(ctx, "python", code, "")
 			results <- result{idx: idx, result: r, err: e}
 		}(i)

@@ -1,0 +1,122 @@
+# APEX.BUILD Alertmanager Configuration
+# Route and deliver alerts to various receivers
+
+global:
+  # Resolve timeout for alerts
+  resolve_timeout: 5m
+
+  # SMTP settings (configure for email alerts)
+  # smtp_smarthost: 'smtp.gmail.com:587'
+  # smtp_from: 'alerts@apex.build'
+  # smtp_auth_username: 'alerts@apex.build'
+  # smtp_auth_password: '${SMTP_PASSWORD}'
+
+  # Slack webhook (configure for Slack alerts)
+  # slack_api_url: '${SLACK_WEBHOOK_URL}'
+
+# Templates for alert messages
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Alert routing tree
+route:
+  # Default receiver
+  receiver: 'default-receiver'
+
+  # Group alerts by these labels
+  group_by: ['alertname', 'severity', 'service']
+
+  # Wait before sending the first notification for a group
+  group_wait: 30s
+
+  # Wait before sending subsequent notifications for a group
+  group_interval: 5m
+
+  # Wait before resending a notification
+  repeat_interval: 4h
+
+  # Child routes
+  routes:
+    # Critical alerts go to PagerDuty/urgent channel
+    - match:
+        severity: critical
+      receiver: 'critical-receiver'
+      group_wait: 10s
+      repeat_interval: 1h
+      continue: true
+
+    # Warning alerts
+    - match:
+        severity: warning
+      receiver: 'warning-receiver'
+      repeat_interval: 4h
+
+    # Business alerts go to a separate channel
+    - match:
+        service: apex-business
+      receiver: 'business-receiver'
+      group_wait: 1h
+      repeat_interval: 24h
+
+# Inhibition rules - suppress lower severity alerts when higher severity fires
+inhibit_rules:
+  # Inhibit warning alerts when a critical alert is firing for the same service
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'service']
+
+  # Inhibit all alerts when API is down
+  - source_match:
+      alertname: 'APIServiceDown'
+    target_match_re:
+      alertname: '.+'
+    equal: ['service']
+
+# Alert receivers
+receivers:
+  # Default receiver - logs to stdout
+  - name: 'default-receiver'
+    webhook_configs:
+      - url: 'http://api:8080/api/v1/alerts/webhook'
+        send_resolved: true
+
+  # Critical alerts - high priority
+  - name: 'critical-receiver'
+    webhook_configs:
+      - url: 'http://api:8080/api/v1/alerts/webhook'
+        send_resolved: true
+    # Uncomment for PagerDuty
+    # pagerduty_configs:
+    #   - service_key: '${PAGERDUTY_SERVICE_KEY}'
+    #     severity: critical
+    # Uncomment for Slack
+    # slack_configs:
+    #   - channel: '#apex-alerts-critical'
+    #     send_resolved: true
+    #     title: '{{ .CommonAnnotations.summary }}'
+    #     text: '{{ .CommonAnnotations.description }}'
+
+  # Warning alerts
+  - name: 'warning-receiver'
+    webhook_configs:
+      - url: 'http://api:8080/api/v1/alerts/webhook'
+        send_resolved: true
+    # Uncomment for Slack
+    # slack_configs:
+    #   - channel: '#apex-alerts'
+    #     send_resolved: true
+    #     title: '{{ .CommonAnnotations.summary }}'
+    #     text: '{{ .CommonAnnotations.description }}'
+
+  # Business alerts - daily digest
+  - name: 'business-receiver'
+    webhook_configs:
+      - url: 'http://api:8080/api/v1/alerts/webhook'
+        send_resolved: true
+    # Uncomment for email
+    # email_configs:
+    #   - to: 'business@apex.build'
+    #     send_resolved: true
+    #     html: '{{ template "email.default.html" . }}'

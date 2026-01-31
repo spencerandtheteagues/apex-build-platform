@@ -1,6 +1,7 @@
 // APEX.BUILD Terminal WebSocket Service
 // Handles real-time communication with backend PTY
 
+import { apiService, TerminalSessionInfo, AvailableShell } from '@/services/api';
 import { TerminalMessage, TerminalSession } from './types';
 
 export interface TerminalServiceCallbacks {
@@ -37,96 +38,39 @@ export class TerminalService {
     this.callbacks = callbacks;
   }
 
-  // Get WebSocket URL based on environment
+  // Get WebSocket URL using the API service
   private getWebSocketUrl(sessionId: string): string {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = import.meta.env.VITE_WS_HOST || window.location.host;
-
-    // Check if we have a specific API URL
-    const apiUrl = import.meta.env.VITE_API_URL;
-    if (apiUrl) {
-      const url = new URL(apiUrl);
-      return `${protocol}//${url.host}/ws/terminal/${sessionId}`;
-    }
-
-    return `${protocol}//${host}/ws/terminal/${sessionId}`;
+    return apiService.getTerminalWebSocketUrl(sessionId);
   }
 
   // Create a new terminal session via REST API
   async createSession(projectId?: number, workDir?: string, options?: Partial<CreateSessionOptions>): Promise<TerminalSession> {
-    const token = localStorage.getItem('apex_access_token');
-    const apiUrl = import.meta.env.VITE_API_URL || '/api/v1';
-
-    const requestBody: CreateSessionOptions = {
-      projectId: projectId || 0,
-      workDir: workDir || '',
-      ...options,
-    };
-
-    const response = await fetch(`${apiUrl}/terminal/sessions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        project_id: requestBody.projectId,
-        work_dir: requestBody.workDir,
-        shell: requestBody.shell || '',
-        name: requestBody.name || '',
-        rows: requestBody.rows || 24,
-        cols: requestBody.cols || 80,
-        environment: requestBody.environment || {},
-      }),
+    const response = await apiService.createTerminalSession(projectId, {
+      workDir: workDir || options?.workDir,
+      shell: options?.shell,
+      name: options?.name,
+      rows: options?.rows || 24,
+      cols: options?.cols || 80,
+      environment: options?.environment,
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to create terminal session');
-    }
-
-    const result = await response.json();
     return {
-      id: result.data.session_id,
-      name: result.data.name || 'Terminal',
-      projectId: result.data.project_id,
-      workDir: result.data.work_dir,
-      shell: result.data.shell || 'bash',
+      id: response.session_id,
+      name: response.name || 'Terminal',
+      projectId: response.project_id,
+      workDir: response.work_dir,
+      shell: response.shell || 'bash',
       status: 'connected',
-      createdAt: result.data.created_at,
+      createdAt: response.created_at,
       lastActive: new Date().toISOString(),
-      rows: result.data.rows || 24,
-      cols: result.data.cols || 80,
+      rows: response.rows || 24,
+      cols: response.cols || 80,
     };
   }
 
-  // Get available shells
-  async getAvailableShells(): Promise<Array<{ name: string; path: string }>> {
-    const token = localStorage.getItem('apex_access_token');
-    const apiUrl = import.meta.env.VITE_API_URL || '/api/v1';
-
-    try {
-      const response = await fetch(`${apiUrl}/terminal/shells`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        return [
-          { name: 'bash', path: '/bin/bash' },
-          { name: 'sh', path: '/bin/sh' },
-        ];
-      }
-
-      const result = await response.json();
-      return result.data?.shells || [];
-    } catch {
-      return [
-        { name: 'bash', path: '/bin/bash' },
-        { name: 'sh', path: '/bin/sh' },
-      ];
-    }
+  // Get available shells using the API service
+  async getAvailableShells(): Promise<AvailableShell[]> {
+    return apiService.listAvailableShells();
   }
 
   // Connect to terminal WebSocket
@@ -233,6 +177,13 @@ export class TerminalService {
   // Send resize event
   resize(rows: number, cols: number): void {
     this.send({ type: 'resize', rows, cols });
+
+    // Also notify backend via REST API for persistent state
+    if (this.sessionId) {
+      apiService.resizeTerminal(this.sessionId, cols, rows).catch((err) => {
+        console.warn('Failed to update terminal size via REST:', err);
+      });
+    }
   }
 
   // Send signal (SIGINT, SIGTERM, etc.)
@@ -299,86 +250,50 @@ export class TerminalService {
     }, delay);
   }
 
-  // Get session info
+  // Get session info using the API service
   async getSession(sessionId: string): Promise<TerminalSession | null> {
-    const token = localStorage.getItem('apex_access_token');
-    const apiUrl = import.meta.env.VITE_API_URL || '/api/v1';
+    const info = await apiService.getTerminalSession(sessionId);
+    if (!info) return null;
 
-    try {
-      const response = await fetch(`${apiUrl}/terminal/sessions/${sessionId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        return null;
-      }
-
-      const result = await response.json();
-      return result.data;
-    } catch {
-      return null;
-    }
+    return {
+      id: info.id,
+      name: info.name || 'Terminal',
+      projectId: info.project_id,
+      workDir: info.work_dir,
+      shell: info.shell,
+      status: info.is_active ? 'connected' : 'disconnected',
+      createdAt: info.created_at,
+      lastActive: info.last_active,
+      rows: info.rows,
+      cols: info.cols,
+    };
   }
 
-  // List all sessions
-  async listSessions(): Promise<TerminalSession[]> {
-    const token = localStorage.getItem('apex_access_token');
-    const apiUrl = import.meta.env.VITE_API_URL || '/api/v1';
-
-    try {
-      const response = await fetch(`${apiUrl}/terminal/sessions`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        return [];
-      }
-
-      const result = await response.json();
-      return result.data || [];
-    } catch {
-      return [];
-    }
+  // List all sessions using the API service
+  async listSessions(projectId?: number): Promise<TerminalSession[]> {
+    const sessions = await apiService.listTerminalSessions(projectId);
+    return sessions.map((info: TerminalSessionInfo) => ({
+      id: info.id,
+      name: info.name || 'Terminal',
+      projectId: info.project_id,
+      workDir: info.work_dir,
+      shell: info.shell,
+      status: info.is_active ? 'connected' as const : 'disconnected' as const,
+      createdAt: info.created_at,
+      lastActive: info.last_active,
+      rows: info.rows || 24,
+      cols: info.cols || 80,
+    }));
   }
 
-  // Delete session
+  // Delete session using the API service
   async deleteSession(sessionId: string): Promise<void> {
-    const token = localStorage.getItem('apex_access_token');
-    const apiUrl = import.meta.env.VITE_API_URL || '/api/v1';
-
-    await fetch(`${apiUrl}/terminal/sessions/${sessionId}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
+    await apiService.closeTerminalSession(sessionId);
   }
 
-  // Get command history
+  // Get command history using the API service
   async getHistory(sessionId: string): Promise<string[]> {
-    const token = localStorage.getItem('apex_access_token');
-    const apiUrl = import.meta.env.VITE_API_URL || '/api/v1';
-
-    try {
-      const response = await fetch(`${apiUrl}/terminal/sessions/${sessionId}/history`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        return [];
-      }
-
-      const result = await response.json();
-      return result.data?.history || [];
-    } catch {
-      return [];
-    }
+    return apiService.getCommandHistory(sessionId);
   }
 
   // Disconnect

@@ -18,12 +18,11 @@ import {
 import { XTerminal, XTerminalRef } from './XTerminal';
 import { TerminalService } from './TerminalService';
 import { TerminalSession, TerminalTab, DEFAULT_TERMINAL_SETTINGS } from './types';
+import { apiService, AvailableShell } from '@/services/api';
 import { cn } from '@/lib/utils';
 
-interface Shell {
-  name: string;
-  path: string;
-}
+// Using AvailableShell type from API service
+type Shell = AvailableShell;
 
 interface TerminalManagerProps {
   projectId?: number;
@@ -51,24 +50,20 @@ export const TerminalManager: React.FC<TerminalManagerProps> = ({
   const terminalRefs = useRef<Map<string, XTerminalRef>>(new Map());
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Fetch available shells on mount
+  // Fetch available shells on mount using API service
   useEffect(() => {
     const fetchShells = async () => {
       try {
-        const token = localStorage.getItem('apex_access_token');
-        const apiUrl = import.meta.env.VITE_API_URL || '/api/v1';
-
-        const response = await fetch(`${apiUrl}/terminal/shells`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        });
-
-        if (response.ok) {
-          const result = await response.json();
-          if (result.data?.shells) {
-            setShells(result.data.shells);
-          }
+        const availableShells = await apiService.listAvailableShells();
+        if (availableShells.length > 0) {
+          setShells(availableShells);
+        } else {
+          // Default shells if none returned
+          setShells([
+            { name: 'bash', path: '/bin/bash' },
+            { name: 'zsh', path: '/bin/zsh' },
+            { name: 'sh', path: '/bin/sh' },
+          ]);
         }
       } catch (err) {
         // Default shells if API fails
@@ -133,17 +128,10 @@ export const TerminalManager: React.FC<TerminalManagerProps> = ({
     // Clean up terminal ref
     const termRef = terminalRefs.current.get(tabId);
     if (termRef) {
-      // Disconnect the session
+      // Disconnect the session using the API service
       const session = termRef.getSession();
       if (session?.id) {
-        const service = new TerminalService({
-          onData: () => {},
-          onConnect: () => {},
-          onDisconnect: () => {},
-          onError: () => {},
-          onExit: () => {},
-        });
-        service.deleteSession(session.id).catch(() => {});
+        apiService.closeTerminalSession(session.id).catch(() => {});
       }
       terminalRefs.current.delete(tabId);
     }

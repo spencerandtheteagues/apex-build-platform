@@ -111,8 +111,8 @@ func (r *NodeRunner) Extensions() []string {
 
 func (r *NodeRunner) WriteCode(tempDir, code string) (string, error) {
 	filename := "main.js"
-	filepath := filepath.Join(tempDir, filename)
-	if err := os.WriteFile(filepath, []byte(code), 0644); err != nil {
+	filePath := filepath.Join(tempDir, filename)
+	if err := os.WriteFile(filePath, []byte(code), 0644); err != nil {
 		return "", fmt.Errorf("failed to write JavaScript file: %w", err)
 	}
 	return filename, nil
@@ -164,8 +164,8 @@ func (r *TypeScriptRunner) Extensions() []string {
 
 func (r *TypeScriptRunner) WriteCode(tempDir, code string) (string, error) {
 	filename := "main.ts"
-	filepath := filepath.Join(tempDir, filename)
-	if err := os.WriteFile(filepath, []byte(code), 0644); err != nil {
+	filePath := filepath.Join(tempDir, filename)
+	if err := os.WriteFile(filePath, []byte(code), 0644); err != nil {
 		return "", fmt.Errorf("failed to write TypeScript file: %w", err)
 	}
 	return filename, nil
@@ -229,8 +229,8 @@ func (r *PythonRunner) Extensions() []string {
 
 func (r *PythonRunner) WriteCode(tempDir, code string) (string, error) {
 	filename := "main.py"
-	filepath := filepath.Join(tempDir, filename)
-	if err := os.WriteFile(filepath, []byte(code), 0644); err != nil {
+	filePath := filepath.Join(tempDir, filename)
+	if err := os.WriteFile(filePath, []byte(code), 0644); err != nil {
 		return "", fmt.Errorf("failed to write Python file: %w", err)
 	}
 	return filename, nil
@@ -288,14 +288,14 @@ func (r *GoRunner) Extensions() []string {
 
 func (r *GoRunner) WriteCode(tempDir, code string) (string, error) {
 	filename := "main.go"
-	filepath := filepath.Join(tempDir, filename)
+	filePath := filepath.Join(tempDir, filename)
 
 	// Ensure code has package main if not present
 	if !strings.Contains(code, "package ") {
 		code = "package main\n\n" + code
 	}
 
-	if err := os.WriteFile(filepath, []byte(code), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(code), 0644); err != nil {
 		return "", fmt.Errorf("failed to write Go file: %w", err)
 	}
 	return filename, nil
@@ -363,14 +363,14 @@ func (r *RustRunner) Extensions() []string {
 
 func (r *RustRunner) WriteCode(tempDir, code string) (string, error) {
 	filename := "main.rs"
-	filepath := filepath.Join(tempDir, filename)
+	filePath := filepath.Join(tempDir, filename)
 
 	// Ensure code has main function wrapper if it doesn't
 	if !strings.Contains(code, "fn main") {
 		code = "fn main() {\n" + code + "\n}"
 	}
 
-	if err := os.WriteFile(filepath, []byte(code), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(code), 0644); err != nil {
 		return "", fmt.Errorf("failed to write Rust file: %w", err)
 	}
 	return filename, nil
@@ -446,14 +446,14 @@ func (r *CRunner) Extensions() []string {
 
 func (r *CRunner) WriteCode(tempDir, code string) (string, error) {
 	filename := "main.c"
-	filepath := filepath.Join(tempDir, filename)
+	filePath := filepath.Join(tempDir, filename)
 
 	// Add common includes if not present
 	if !strings.Contains(code, "#include") {
 		code = "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n" + code
 	}
 
-	if err := os.WriteFile(filepath, []byte(code), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(code), 0644); err != nil {
 		return "", fmt.Errorf("failed to write C file: %w", err)
 	}
 	return filename, nil
@@ -535,14 +535,14 @@ func (r *CppRunner) Extensions() []string {
 
 func (r *CppRunner) WriteCode(tempDir, code string) (string, error) {
 	filename := "main.cpp"
-	filepath := filepath.Join(tempDir, filename)
+	filePath := filepath.Join(tempDir, filename)
 
 	// Add common includes if not present
 	if !strings.Contains(code, "#include") {
 		code = "#include <iostream>\n#include <vector>\n#include <string>\n#include <algorithm>\nusing namespace std;\n\n" + code
 	}
 
-	if err := os.WriteFile(filepath, []byte(code), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(code), 0644); err != nil {
 		return "", fmt.Errorf("failed to write C++ file: %w", err)
 	}
 	return filename, nil
@@ -631,9 +631,9 @@ func (r *JavaRunner) WriteCode(tempDir, code string) (string, error) {
 	}
 
 	filename := className + ".java"
-	filepath := filepath.Join(tempDir, filename)
+	filePath := filepath.Join(tempDir, filename)
 
-	if err := os.WriteFile(filepath, []byte(code), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(code), 0644); err != nil {
 		return "", fmt.Errorf("failed to write Java file: %w", err)
 	}
 	return filename, nil
@@ -739,9 +739,9 @@ func (r *RubyRunner) Extensions() []string {
 
 func (r *RubyRunner) WriteCode(tempDir, code string) (string, error) {
 	filename := "main.rb"
-	filepath := filepath.Join(tempDir, filename)
+	filePath := filepath.Join(tempDir, filename)
 
-	if err := os.WriteFile(filepath, []byte(code), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(code), 0644); err != nil {
 		return "", fmt.Errorf("failed to write Ruby file: %w", err)
 	}
 	return filename, nil
@@ -792,14 +792,14 @@ func (r *PHPRunner) Extensions() []string {
 
 func (r *PHPRunner) WriteCode(tempDir, code string) (string, error) {
 	filename := "main.php"
-	filepath := filepath.Join(tempDir, filename)
+	filePath := filepath.Join(tempDir, filename)
 
 	// Add PHP tags if not present
 	if !strings.HasPrefix(strings.TrimSpace(code), "<?") {
 		code = "<?php\n" + code
 	}
 
-	if err := os.WriteFile(filepath, []byte(code), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(code), 0644); err != nil {
 		return "", fmt.Errorf("failed to write PHP file: %w", err)
 	}
 	return filename, nil

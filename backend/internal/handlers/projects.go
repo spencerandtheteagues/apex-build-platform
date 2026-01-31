@@ -49,9 +49,8 @@ func (h *Handler) GetProjects(c *gin.Context) {
 	// Get total count
 	h.DB.Model(&models.Project{}).Where("owner_id = ?", userID).Count(&total)
 
-	// Get paginated projects
+	// Get paginated projects (without files - use GetProject for full details)
 	result := h.DB.Where("owner_id = ?", userID).
-		Preload("Files").
 		Order("updated_at DESC").
 		Scopes(paginate(page, limit)).
 		Find(&projects)

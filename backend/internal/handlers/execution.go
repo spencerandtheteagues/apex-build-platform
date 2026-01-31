@@ -1,11 +1,17 @@
 // APEX.BUILD Code Execution Handlers
 // HTTP handlers for code execution API
+//
+// SECURITY: All code execution goes through Docker containers by default.
+// Container sandboxing provides: seccomp profiles, network isolation,
+// resource limits (memory, CPU, PIDs), read-only root filesystem,
+// and dropped capabilities.
 
 package handlers
 
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -55,36 +61,139 @@ func sanitizeEntryPoint(entryPoint string) string {
 // ExecutionHandler handles code execution requests
 type ExecutionHandler struct {
 	DB              *gorm.DB
-	Sandbox         *execution.Sandbox
+	SandboxFactory  *execution.SandboxFactory
 	TerminalManager *execution.TerminalManager
 	ProjectsDir     string
+	// ContainerRequired indicates whether container sandbox is required
+	// When true, execution will fail if Docker is unavailable
+	ContainerRequired bool
 }
 
-// NewExecutionHandler creates a new execution handler
-func NewExecutionHandler(db *gorm.DB, projectsDir string) (*ExecutionHandler, error) {
-	// Create sandbox with default config
-	sandbox, err := execution.NewSandbox(execution.DefaultSandboxConfig())
-	if err != nil {
-		return nil, fmt.Errorf("failed to create sandbox: %w", err)
+// ExecutionHandlerConfig configures the execution handler
+type ExecutionHandlerConfig struct {
+	// ProjectsDir is the directory for project files
+	ProjectsDir string
+	// ForceContainer requires Docker for all code execution (recommended for production)
+	ForceContainer bool
+	// DisableExecution disables all code execution (useful if Docker is required but unavailable)
+	DisableExecution bool
+}
+
+// DefaultExecutionHandlerConfig returns secure defaults for production
+func DefaultExecutionHandlerConfig() *ExecutionHandlerConfig {
+	// Check environment for configuration
+	forceContainer := os.Getenv("EXECUTION_FORCE_CONTAINER") == "true" ||
+		os.Getenv("ENVIRONMENT") == "production"
+
+	return &ExecutionHandlerConfig{
+		ProjectsDir:    os.Getenv("PROJECTS_DIR"),
+		ForceContainer: forceContainer,
 	}
+}
+
+// NewExecutionHandler creates a new execution handler with secure container sandboxing
+func NewExecutionHandler(db *gorm.DB, projectsDir string) (*ExecutionHandler, error) {
+	config := DefaultExecutionHandlerConfig()
+	if projectsDir != "" {
+		config.ProjectsDir = projectsDir
+	}
+	return NewExecutionHandlerWithConfig(db, config)
+}
+
+// NewExecutionHandlerWithConfig creates a new execution handler with custom configuration
+func NewExecutionHandlerWithConfig(db *gorm.DB, config *ExecutionHandlerConfig) (*ExecutionHandler, error) {
+	if config == nil {
+		config = DefaultExecutionHandlerConfig()
+	}
+
+	// Check Docker availability first
+	dockerStatus := execution.CheckDockerStatus()
+	if dockerStatus.Available {
+		log.Printf("SECURITY: Docker sandbox available (version: %s)", dockerStatus.Version)
+		log.Println("SECURITY: Code execution will use container isolation with:")
+		log.Println("          - Seccomp syscall filtering")
+		log.Println("          - Network isolation (disabled by default)")
+		log.Println("          - Memory limits (256MB default)")
+		log.Println("          - CPU limits (0.5 cores default)")
+		log.Println("          - Read-only root filesystem")
+		log.Println("          - All capabilities dropped")
+	} else {
+		log.Printf("WARNING: Docker not available: %s", dockerStatus.Error)
+		if config.ForceContainer {
+			log.Println("SECURITY: Container execution is required but Docker is unavailable")
+			log.Println("SECURITY: Code execution features will be DISABLED")
+			config.DisableExecution = true
+		} else {
+			log.Println("WARNING: Falling back to process-based sandbox (less secure)")
+			log.Println("WARNING: Set EXECUTION_FORCE_CONTAINER=true to require Docker")
+		}
+	}
+
+	// Configure sandbox factory
+	factoryConfig := &execution.SandboxFactoryConfig{
+		PreferContainer: true, // Always prefer container when available
+		ForceContainer:  config.ForceContainer,
+		ContainerConfig: execution.DefaultContainerSandboxConfig(),
+		ProcessConfig:   execution.DefaultSandboxConfig(),
+	}
+
+	// Create sandbox factory
+	sandboxFactory, err := execution.NewSandboxFactory(factoryConfig)
+	if err != nil {
+		if config.ForceContainer {
+			// If container is required and unavailable, create handler with disabled execution
+			log.Printf("SECURITY: Sandbox factory failed: %v", err)
+			log.Println("SECURITY: Code execution is DISABLED due to security requirements")
+
+			// Still create the handler but with execution disabled
+			termManager := execution.NewTerminalManager()
+			termManager.StartCleanupRoutine()
+
+			projectsPath := config.ProjectsDir
+			if projectsPath == "" {
+				projectsPath = filepath.Join(os.TempDir(), "apex-build-projects")
+			}
+			os.MkdirAll(projectsPath, 0755)
+
+			return &ExecutionHandler{
+				DB:                db,
+				SandboxFactory:    nil, // No sandbox available
+				TerminalManager:   termManager,
+				ProjectsDir:       projectsPath,
+				ContainerRequired: true,
+			}, nil
+		}
+		return nil, fmt.Errorf("failed to create sandbox factory: %w", err)
+	}
+
+	// Log sandbox capabilities
+	caps := sandboxFactory.GetCapabilities()
+	log.Printf("SECURITY: Sandbox capabilities:")
+	log.Printf("          - Container isolation: %v", caps.ContainerIsolation)
+	log.Printf("          - Network isolation: %v", caps.NetworkIsolation)
+	log.Printf("          - Seccomp enabled: %v", caps.SeccompEnabled)
+	log.Printf("          - Read-only root: %v", caps.ReadOnlyRoot)
+	log.Printf("          - Resource limits: %v", caps.ResourceLimits)
 
 	// Create terminal manager
 	termManager := execution.NewTerminalManager()
 	termManager.StartCleanupRoutine()
 
 	// Ensure projects directory exists
-	if projectsDir == "" {
-		projectsDir = filepath.Join(os.TempDir(), "apex-build-projects")
+	projectsPath := config.ProjectsDir
+	if projectsPath == "" {
+		projectsPath = filepath.Join(os.TempDir(), "apex-build-projects")
 	}
-	if err := os.MkdirAll(projectsDir, 0755); err != nil {
+	if err := os.MkdirAll(projectsPath, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create projects directory: %w", err)
 	}
 
 	return &ExecutionHandler{
-		DB:              db,
-		Sandbox:         sandbox,
-		TerminalManager: termManager,
-		ProjectsDir:     projectsDir,
+		DB:                db,
+		SandboxFactory:    sandboxFactory,
+		TerminalManager:   termManager,
+		ProjectsDir:       projectsPath,
+		ContainerRequired: config.ForceContainer,
 	}, nil
 }
 
@@ -99,6 +208,7 @@ type ExecuteCodeRequest struct {
 }
 
 // ExecuteCode handles POST /api/v1/execute
+// SECURITY: All code execution uses Docker container sandboxing by default
 func (h *ExecutionHandler) ExecuteCode(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
@@ -106,6 +216,16 @@ func (h *ExecutionHandler) ExecuteCode(c *gin.Context) {
 			Success: false,
 			Error:   "User not authenticated",
 			Code:    "NOT_AUTHENTICATED",
+		})
+		return
+	}
+
+	// SECURITY: Check if execution is available
+	if h.SandboxFactory == nil {
+		c.JSON(http.StatusServiceUnavailable, StandardResponse{
+			Success: false,
+			Error:   "Code execution is currently disabled for security reasons. Docker container sandbox is required but unavailable.",
+			Code:    "EXECUTION_DISABLED",
 		})
 		return
 	}
@@ -153,29 +273,45 @@ func (h *ExecutionHandler) ExecuteCode(c *gin.Context) {
 		return
 	}
 
-	// Configure sandbox
-	config := execution.DefaultSandboxConfig()
+	// Get the appropriate executor from factory (prefers container sandbox)
+	// SECURITY: Container sandbox is always preferred when available
+	var executor execution.CodeExecutor
+	var err error
+
+	if h.ContainerRequired {
+		// SECURITY: In production, require container sandbox
+		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeContainer)
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, StandardResponse{
+				Success: false,
+				Error:   "Secure container execution is required but unavailable",
+				Code:    "CONTAINER_REQUIRED",
+			})
+			return
+		}
+	} else {
+		// Use auto mode which prefers container but falls back to process
+		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeAuto)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, StandardResponse{
+				Success: false,
+				Error:   "Failed to get execution sandbox: " + err.Error(),
+				Code:    "SANDBOX_ERROR",
+			})
+			return
+		}
+	}
+
+	// Create execution context with timeout
+	timeout := 30 * time.Second
 	if req.Timeout > 0 && req.Timeout <= 120 {
-		config.Timeout = time.Duration(req.Timeout) * time.Second
+		timeout = time.Duration(req.Timeout) * time.Second
 	}
-	if req.Env != nil {
-		config.Environment = req.Env
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-	// Create sandbox with custom config
-	sandbox, err := execution.NewSandbox(config)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, StandardResponse{
-			Success: false,
-			Error:   "Failed to create execution sandbox",
-			Code:    "SANDBOX_ERROR",
-		})
-		return
-	}
-
-	// Execute code
-	ctx := context.Background()
-	result, err := sandbox.Execute(ctx, req.Language, req.Code, req.Stdin)
+	// Execute code using the secure sandbox
+	result, err := executor.Execute(ctx, req.Language, req.Code, req.Stdin)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, StandardResponse{
 			Success: false,
@@ -199,7 +335,13 @@ func (h *ExecutionHandler) ExecuteCode(c *gin.Context) {
 
 	if err := h.DB.Save(execRecord).Error; err != nil {
 		// Log error but don't fail the request
-		fmt.Printf("Failed to update execution record: %v\n", err)
+		log.Printf("Failed to update execution record: %v", err)
+	}
+
+	// Include sandbox info in response for transparency
+	sandboxInfo := "container"
+	if !h.SandboxFactory.IsContainerAvailable() {
+		sandboxInfo = "process"
 	}
 
 	c.JSON(http.StatusOK, StandardResponse{
@@ -219,6 +361,7 @@ func (h *ExecutionHandler) ExecuteCode(c *gin.Context) {
 			"language":       result.Language,
 			"started_at":     result.StartedAt,
 			"completed_at":   result.CompletedAt,
+			"sandbox_type":   sandboxInfo,
 		},
 	})
 }
@@ -232,6 +375,7 @@ type ExecuteFileRequest struct {
 }
 
 // ExecuteFile handles POST /api/v1/execute/file
+// SECURITY: File execution uses Docker container sandboxing by default
 func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
@@ -239,6 +383,16 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 			Success: false,
 			Error:   "User not authenticated",
 			Code:    "NOT_AUTHENTICATED",
+		})
+		return
+	}
+
+	// SECURITY: Check if execution is available
+	if h.SandboxFactory == nil {
+		c.JSON(http.StatusServiceUnavailable, StandardResponse{
+			Success: false,
+			Error:   "Code execution is currently disabled for security reasons. Docker container sandbox is required but unavailable.",
+			Code:    "EXECUTION_DISABLED",
 		})
 		return
 	}
@@ -317,34 +471,68 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 
 	if err := h.DB.Create(execRecord).Error; err != nil {
 		// Continue even if record creation fails
-		fmt.Printf("Failed to create execution record: %v\n", err)
+		log.Printf("Failed to create execution record: %v", err)
 	}
 
-	// Configure and execute
-	config := execution.DefaultSandboxConfig()
+	// Get executor from factory
+	// SECURITY: For file execution, we need to read file content and use container sandbox
+	var executor execution.CodeExecutor
+	var err error
+
+	if h.ContainerRequired {
+		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeContainer)
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, StandardResponse{
+				Success: false,
+				Error:   "Secure container execution is required but unavailable",
+				Code:    "CONTAINER_REQUIRED",
+			})
+			return
+		}
+	} else {
+		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeAuto)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, StandardResponse{
+				Success: false,
+				Error:   "Failed to get execution sandbox",
+				Code:    "SANDBOX_ERROR",
+			})
+			return
+		}
+	}
+
+	// Create execution context with timeout
+	timeout := 30 * time.Second
 	if req.Timeout > 0 && req.Timeout <= 120 {
-		config.Timeout = time.Duration(req.Timeout) * time.Second
+		timeout = time.Duration(req.Timeout) * time.Second
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-	sandbox, err := execution.NewSandbox(config)
+	// Execute file - for container sandbox, we read the file content and execute as code
+	// since container sandbox doesn't support direct file execution
+	result, err := executor.ExecuteFile(ctx, filePath, req.Args, req.Stdin)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, StandardResponse{
-			Success: false,
-			Error:   "Failed to create sandbox",
-			Code:    "SANDBOX_ERROR",
-		})
-		return
-	}
-
-	ctx := context.Background()
-	result, err := sandbox.ExecuteFile(ctx, filePath, req.Args, req.Stdin)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, StandardResponse{
-			Success: false,
-			Error:   "Execution failed: " + err.Error(),
-			Code:    "EXECUTION_ERROR",
-		})
-		return
+		// If file execution not supported (container sandbox), fall back to Execute with code
+		if err.Error() == "file execution not supported in container sandbox - use Execute with code content" {
+			// Read file content and execute as code
+			result, err = executor.Execute(ctx, file.Project.Language, file.Content, req.Stdin)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, StandardResponse{
+					Success: false,
+					Error:   "Execution failed: " + err.Error(),
+					Code:    "EXECUTION_ERROR",
+				})
+				return
+			}
+		} else {
+			c.JSON(http.StatusInternalServerError, StandardResponse{
+				Success: false,
+				Error:   "Execution failed: " + err.Error(),
+				Code:    "EXECUTION_ERROR",
+			})
+			return
+		}
 	}
 
 	// Update record
@@ -356,6 +544,12 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 		execRecord.Duration = result.DurationMs
 		execRecord.MemoryUsed = result.MemoryUsed
 		h.DB.Save(execRecord)
+	}
+
+	// Include sandbox info
+	sandboxInfo := "container"
+	if !h.SandboxFactory.IsContainerAvailable() {
+		sandboxInfo = "process"
 	}
 
 	c.JSON(http.StatusOK, StandardResponse{
@@ -370,6 +564,7 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 			"memory_used":   result.MemoryUsed,
 			"timed_out":     result.TimedOut,
 			"compile_error": result.CompileError,
+			"sandbox_type":  sandboxInfo,
 		},
 	})
 }
@@ -383,6 +578,7 @@ type ExecuteProjectRequest struct {
 }
 
 // ExecuteProject handles POST /api/v1/execute/project
+// SECURITY: Project execution uses Docker container sandboxing by default
 func (h *ExecutionHandler) ExecuteProject(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
@@ -390,6 +586,16 @@ func (h *ExecutionHandler) ExecuteProject(c *gin.Context) {
 			Success: false,
 			Error:   "User not authenticated",
 			Code:    "NOT_AUTHENTICATED",
+		})
+		return
+	}
+
+	// SECURITY: Check if execution is available
+	if h.SandboxFactory == nil {
+		c.JSON(http.StatusServiceUnavailable, StandardResponse{
+			Success: false,
+			Error:   "Code execution is currently disabled for security reasons. Docker container sandbox is required but unavailable.",
+			Code:    "EXECUTION_DISABLED",
 		})
 		return
 	}
@@ -484,52 +690,67 @@ func (h *ExecutionHandler) ExecuteProject(c *gin.Context) {
 	}
 	h.DB.Create(execRecord)
 
-	// Configure sandbox
-	config := execution.DefaultSandboxConfig()
-	config.WorkDir = projectDir
-	if req.Timeout > 0 && req.Timeout <= 300 {
-		config.Timeout = time.Duration(req.Timeout) * time.Second
+	// Get executor from factory
+	var executor execution.CodeExecutor
+	var err error
+
+	if h.ContainerRequired {
+		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeContainer)
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, StandardResponse{
+				Success: false,
+				Error:   "Secure container execution is required but unavailable",
+				Code:    "CONTAINER_REQUIRED",
+			})
+			return
+		}
 	} else {
-		config.Timeout = 60 * time.Second // Default 60s for projects
-	}
-	if req.Env != nil {
-		config.Environment = req.Env
-	}
-
-	sandbox, err := execution.NewSandbox(config)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, StandardResponse{
-			Success: false,
-			Error:   "Failed to create sandbox",
-			Code:    "SANDBOX_ERROR",
-		})
-		return
+		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeAuto)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, StandardResponse{
+				Success: false,
+				Error:   "Failed to get execution sandbox",
+				Code:    "SANDBOX_ERROR",
+			})
+			return
+		}
 	}
 
-	// Execute the run command as shell script
-	ctx := context.Background()
-	result, err := sandbox.Execute(ctx, "javascript", fmt.Sprintf(`
-const { execSync } = require('child_process');
-try {
-  const output = execSync(%q, { encoding: 'utf8', cwd: %q, timeout: %d });
-  console.log(output);
-} catch (e) {
-  console.error(e.message);
-  process.exit(e.status || 1);
-}
-`, runCmd, projectDir, int(config.Timeout.Milliseconds())), "")
+	// Create execution context with timeout
+	timeout := 60 * time.Second // Default 60s for projects
+	if req.Timeout > 0 && req.Timeout <= 300 {
+		timeout = time.Duration(req.Timeout) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-	if err != nil {
-		// Fallback: try to run the entry point directly
-		entryPoint := project.EntryPoint
-		if entryPoint == "" {
-			entryPoint = findEntryPoint(project.Language, project.Files)
+	// Find entry point
+	entryPoint := project.EntryPoint
+	if entryPoint == "" {
+		entryPoint = findEntryPoint(project.Language, project.Files)
+	}
+
+	// Execute the entry point file
+	var result *execution.ExecutionResult
+	if entryPoint != "" {
+		// Find the entry point file content
+		var entryContent string
+		for _, file := range project.Files {
+			if file.Path == entryPoint || file.Name == entryPoint {
+				entryContent = file.Content
+				break
+			}
 		}
 
-		if entryPoint != "" {
-			entryPath := filepath.Join(projectDir, entryPoint)
-			result, err = sandbox.ExecuteFile(ctx, entryPath, nil, "")
+		if entryContent != "" {
+			// Execute the entry point content in the container
+			result, err = executor.Execute(ctx, project.Language, entryContent, "")
+		} else {
+			err = fmt.Errorf("entry point file not found: %s", entryPoint)
 		}
+	} else {
+		// No entry point found, try to find main file
+		err = fmt.Errorf("no entry point found for project")
 	}
 
 	if err != nil {
@@ -550,6 +771,12 @@ try {
 	execRecord.MemoryUsed = result.MemoryUsed
 	h.DB.Save(execRecord)
 
+	// Include sandbox info
+	sandboxInfo := "container"
+	if !h.SandboxFactory.IsContainerAvailable() {
+		sandboxInfo = "process"
+	}
+
 	c.JSON(http.StatusOK, StandardResponse{
 		Success: true,
 		Data: map[string]interface{}{
@@ -562,6 +789,7 @@ try {
 			"memory_used":  result.MemoryUsed,
 			"timed_out":    result.TimedOut,
 			"command":      runCmd,
+			"sandbox_type": sandboxInfo,
 		},
 	})
 }
@@ -695,8 +923,28 @@ func (h *ExecutionHandler) StopExecution(c *gin.Context) {
 		return
 	}
 
-	// Try to kill the execution
-	if err := h.Sandbox.Kill(execID); err != nil {
+	// SECURITY: Check if execution is available
+	if h.SandboxFactory == nil {
+		c.JSON(http.StatusServiceUnavailable, StandardResponse{
+			Success: false,
+			Error:   "Code execution is currently disabled",
+			Code:    "EXECUTION_DISABLED",
+		})
+		return
+	}
+
+	// Try to kill the execution using the factory
+	executor, err := h.SandboxFactory.GetExecutor(execution.SandboxTypeAuto)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, StandardResponse{
+			Success: false,
+			Error:   "Failed to get executor",
+			Code:    "SANDBOX_ERROR",
+		})
+		return
+	}
+
+	if err := executor.Kill(execID); err != nil {
 		// Execution might already be completed
 		c.JSON(http.StatusOK, StandardResponse{
 			Success: true,
@@ -803,17 +1051,59 @@ func (h *ExecutionHandler) GetExecutionStats(c *gin.Context) {
 	// Get terminal stats
 	termStats := h.TerminalManager.GetStats()
 
-	// Get active executions
-	activeExecs := h.Sandbox.GetActiveExecutions()
+	// Get sandbox stats and capabilities
+	var sandboxStats map[string]interface{}
+	var capabilities execution.SandboxCapabilities
+	var activeExecs int
+
+	if h.SandboxFactory != nil {
+		sandboxStats = h.SandboxFactory.GetStats()
+		capabilities = h.SandboxFactory.GetCapabilities()
+
+		// Get active executions from the appropriate executor
+		if executor, err := h.SandboxFactory.GetExecutor(execution.SandboxTypeAuto); err == nil {
+			activeExecs = executor.GetActiveExecutions()
+		}
+	}
 
 	c.JSON(http.StatusOK, StandardResponse{
 		Success: true,
 		Data: map[string]interface{}{
-			"user_stats":        stats,
-			"terminal_stats":    termStats,
-			"active_executions": activeExecs,
+			"user_stats":          stats,
+			"terminal_stats":      termStats,
+			"active_executions":   activeExecs,
 			"supported_languages": len(execution.GetSupportedLanguages()),
+			"sandbox_stats":       sandboxStats,
+			"sandbox_capabilities": map[string]interface{}{
+				"container_isolation": capabilities.ContainerIsolation,
+				"network_isolation":   capabilities.NetworkIsolation,
+				"seccomp_enabled":     capabilities.SeccompEnabled,
+				"read_only_root":      capabilities.ReadOnlyRoot,
+				"resource_limits":     capabilities.ResourceLimits,
+			},
+			"execution_enabled": h.SandboxFactory != nil,
 		},
+	})
+}
+
+// GetSandboxStatusHandler handles GET /api/v1/execute/sandbox/status
+// Returns detailed information about sandbox security status
+func (h *ExecutionHandler) GetSandboxStatusHandler(c *gin.Context) {
+	status := h.GetSandboxStatus()
+
+	// Add security recommendations if container is not available
+	if h.SandboxFactory == nil || !h.SandboxFactory.IsContainerAvailable() {
+		status["security_warning"] = "Container sandbox is not available. Code execution is using process-based isolation which provides less security."
+		status["recommendations"] = []string{
+			"Install Docker to enable container sandboxing",
+			"Set EXECUTION_FORCE_CONTAINER=true to require Docker",
+			"In production, always use container isolation",
+		}
+	}
+
+	c.JSON(http.StatusOK, StandardResponse{
+		Success: true,
+		Data:    status,
 	})
 }
 
@@ -922,8 +1212,36 @@ func findEntryPoint(language string, files []models.File) string {
 
 // Cleanup cleans up handler resources
 func (h *ExecutionHandler) Cleanup() error {
-	if h.Sandbox != nil {
-		return h.Sandbox.Cleanup()
+	if h.SandboxFactory != nil {
+		return h.SandboxFactory.Cleanup()
 	}
 	return nil
+}
+
+// GetSandboxStatus returns the current sandbox status for health checks
+func (h *ExecutionHandler) GetSandboxStatus() map[string]interface{} {
+	status := map[string]interface{}{
+		"execution_enabled": h.SandboxFactory != nil,
+		"container_required": h.ContainerRequired,
+	}
+
+	if h.SandboxFactory != nil {
+		caps := h.SandboxFactory.GetCapabilities()
+		status["container_available"] = h.SandboxFactory.IsContainerAvailable()
+		status["container_isolation"] = caps.ContainerIsolation
+		status["network_isolation"] = caps.NetworkIsolation
+		status["seccomp_enabled"] = caps.SeccompEnabled
+		status["supported_languages"] = caps.SupportedLanguages
+	}
+
+	// Check Docker status directly
+	dockerStatus := execution.CheckDockerStatus()
+	status["docker"] = map[string]interface{}{
+		"available":   dockerStatus.Available,
+		"version":     dockerStatus.Version,
+		"api_version": dockerStatus.APIVersion,
+		"error":       dockerStatus.Error,
+	}
+
+	return status
 }

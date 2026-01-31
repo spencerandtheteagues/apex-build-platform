@@ -1813,6 +1813,215 @@ export class ApiService {
     }
     return `${protocol}//${host}/ws/debug/${sessionId}`
   }
+
+  // ========== HOSTING SYSTEM ENDPOINTS (*.apex.app) ==========
+
+  /**
+   * Get hosting status for a project
+   * Returns current deployment state, URL, and metrics
+   */
+  async getHostingStatus(projectId: number): Promise<HostingStatus> {
+    const response = await this.client.get<{ success: boolean; data: HostingStatus }>(
+      `/hosting/${projectId}/status`
+    )
+    return response.data.data
+  }
+
+  /**
+   * Quick deploy a project to *.apex.app
+   * Auto-detects build configuration if not provided
+   */
+  async quickDeploy(
+    projectId: number,
+    config?: QuickDeployConfig
+  ): Promise<{
+    success: boolean
+    message: string
+    deployment: NativeDeployment
+    websocket_url: string
+  }> {
+    const response = await this.client.post(`/hosting/${projectId}/deploy`, config || {})
+    return response.data
+  }
+
+  /**
+   * Undeploy/stop a project's hosting
+   */
+  async undeploy(projectId: number): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.delete(`/hosting/${projectId}/undeploy`)
+    return response.data
+  }
+
+  /**
+   * Get deployment logs for a project
+   */
+  async getHostingLogs(
+    projectId: number,
+    options?: { limit?: number; level?: string; since?: string }
+  ): Promise<DeploymentLog[]> {
+    const params = new URLSearchParams()
+    if (options?.limit) params.append('limit', options.limit.toString())
+    if (options?.level) params.append('level', options.level)
+    if (options?.since) params.append('since', options.since)
+    const query = params.toString() ? `?${params.toString()}` : ''
+
+    const response = await this.client.get<{ success: boolean; data: { logs: DeploymentLog[] } }>(
+      `/hosting/${projectId}/logs${query}`
+    )
+    return response.data.data?.logs || []
+  }
+
+  /**
+   * Get the deployment URL for a project
+   */
+  async getDeploymentUrl(projectId: number): Promise<{
+    url: string
+    subdomain: string
+    status: string
+    ssl_enabled: boolean
+  }> {
+    const response = await this.client.get<{
+      success: boolean
+      data: { url: string; subdomain: string; status: string; ssl_enabled: boolean }
+    }>(`/hosting/${projectId}/url`)
+    return response.data.data
+  }
+
+  /**
+   * Check if a subdomain is available
+   */
+  async checkSubdomainAvailability(subdomain: string): Promise<{
+    available: boolean
+    subdomain: string
+    suggestion?: string
+  }> {
+    const response = await this.client.get<{
+      success: boolean
+      data: { available: boolean; subdomain: string; suggestion?: string }
+    }>(`/hosting/check-subdomain?subdomain=${encodeURIComponent(subdomain)}`)
+    return response.data.data
+  }
+
+  // ========== CUSTOM DOMAIN MANAGEMENT ==========
+
+  /**
+   * Get all custom domains for a project
+   */
+  async getCustomDomains(projectId: number): Promise<CustomDomain[]> {
+    const response = await this.client.get<{
+      success: boolean
+      data: { domains: CustomDomain[] }
+    }>(`/hosting/${projectId}/domains`)
+    return response.data.data?.domains || []
+  }
+
+  /**
+   * Add a custom domain to a project
+   */
+  async addCustomDomain(
+    projectId: number,
+    domain: string
+  ): Promise<{
+    domain: CustomDomain
+    verification_instructions: string
+  }> {
+    const response = await this.client.post<{
+      success: boolean
+      message: string
+      data: { domain: CustomDomain; verification_instructions: string }
+    }>(`/hosting/${projectId}/domains`, { domain })
+    return response.data.data
+  }
+
+  /**
+   * Verify a custom domain's DNS configuration
+   */
+  async verifyCustomDomain(
+    projectId: number,
+    domainId: number
+  ): Promise<{
+    verified: boolean
+    domain: CustomDomain
+    error?: string
+  }> {
+    const response = await this.client.post<{
+      success: boolean
+      data: { verified: boolean; domain: CustomDomain; error?: string }
+    }>(`/hosting/${projectId}/domains/${domainId}/verify`)
+    return response.data.data
+  }
+
+  /**
+   * Delete a custom domain from a project
+   */
+  async deleteCustomDomain(projectId: number, domainId: number): Promise<void> {
+    await this.client.delete(`/hosting/${projectId}/domains/${domainId}`)
+  }
+
+  /**
+   * Get WebSocket URL for deployment logs streaming
+   */
+  getDeploymentLogsWebSocketUrl(projectId: number): string {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    let host: string
+    if (this.baseURL.includes('onrender.com')) {
+      host = 'apex-backend-5ypy.onrender.com'
+    } else if (this.baseURL.startsWith('/')) {
+      host = window.location.host
+    } else {
+      try {
+        const url = new URL(this.baseURL)
+        host = url.host
+      } catch {
+        host = window.location.host
+      }
+    }
+    return `${protocol}//${host}/ws/deployment/${projectId}/logs`
+  }
+
+  // ========== PLAN USAGE QUOTA ENDPOINTS ==========
+
+  /**
+   * Get current usage and limits for the authenticated user
+   * Returns usage across all tracked dimensions: projects, storage, AI requests, execution time
+   */
+  async getCurrentUsage(): Promise<CurrentUsageData> {
+    const response = await this.client.get<{ success: boolean; data: CurrentUsageData }>(
+      '/usage/current'
+    )
+    return response.data.data
+  }
+
+  /**
+   * Get historical usage data for charts and trend analysis
+   */
+  async getUsageHistory(days: number = 30): Promise<UsageHistoryData> {
+    const response = await this.client.get<{ success: boolean; data: UsageHistoryData }>(
+      `/usage/history?days=${days}`
+    )
+    return response.data.data
+  }
+
+  /**
+   * Get plan limits for the current user and all available plans
+   * Useful for showing upgrade comparison
+   */
+  async getUsageLimits(): Promise<UsageLimitsData> {
+    const response = await this.client.get<{ success: boolean; data: UsageLimitsData }>(
+      '/usage/limits'
+    )
+    return response.data.data
+  }
+
+  /**
+   * Force refresh the usage cache (useful after major operations)
+   */
+  async refreshUsageCache(): Promise<{ message: string }> {
+    const response = await this.client.post<{ success: boolean; message: string }>(
+      '/usage/refresh'
+    )
+    return { message: response.data.message }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2143,6 +2352,184 @@ export type DebugEventType =
   | 'exception'
   | 'output'
   | 'error'
+
+// ---------------------------------------------------------------------------
+// Hosting System types (*.apex.app native hosting)
+// ---------------------------------------------------------------------------
+
+export type DeploymentStatus =
+  | 'pending'
+  | 'building'
+  | 'deploying'
+  | 'live'
+  | 'stopped'
+  | 'failed'
+  | 'maintenance'
+
+export type DomainVerificationStatus =
+  | 'pending'
+  | 'verifying'
+  | 'verified'
+  | 'failed'
+
+export type SSLStatus =
+  | 'pending'
+  | 'provisioning'
+  | 'active'
+  | 'expired'
+  | 'failed'
+
+export interface HostingStatus {
+  project_id: number
+  deployment_id?: string
+  status: DeploymentStatus
+  url?: string
+  subdomain?: string
+  ssl_enabled: boolean
+  container_status?: 'healthy' | 'unhealthy' | 'starting' | 'stopped'
+  last_deployed_at?: string
+  build_duration_ms?: number
+  deploy_duration_ms?: number
+  error_message?: string
+  metrics?: {
+    total_requests: number
+    avg_response_time_ms: number
+    uptime_seconds: number
+    bandwidth_bytes: number
+  }
+  custom_domains?: CustomDomain[]
+}
+
+export interface QuickDeployConfig {
+  subdomain?: string
+  build_command?: string
+  start_command?: string
+  install_command?: string
+  port?: number
+  env_vars?: Record<string, string>
+  framework?: string
+  node_version?: string
+  python_version?: string
+  go_version?: string
+  always_on?: boolean
+  health_check_path?: string
+  memory_limit?: number
+  cpu_limit?: number
+}
+
+export interface CustomDomain {
+  id: number
+  project_id: number
+  domain: string
+  verification_status: DomainVerificationStatus
+  verification_token: string
+  ssl_status: SSLStatus
+  ssl_expires_at?: string
+  is_primary: boolean
+  created_at: string
+  verified_at?: string
+  last_checked_at?: string
+  error_message?: string
+}
+
+export interface DeploymentEvent {
+  id: number
+  deployment_id: string
+  event_type: 'build_started' | 'build_completed' | 'build_failed' | 'deploy_started' | 'deploy_completed' | 'deploy_failed' | 'health_check' | 'restart' | 'scale' | 'stop'
+  timestamp: string
+  message: string
+  metadata?: Record<string, any>
+}
+
+// ---------------------------------------------------------------------------
+// Plan Usage Quota types (matching backend usage/tracker.go)
+// ---------------------------------------------------------------------------
+
+export type PlanType = 'free' | 'pro' | 'team' | 'enterprise' | 'owner'
+export type UsageType = 'projects' | 'storage_bytes' | 'ai_requests' | 'execution_minutes'
+
+export interface PlanLimits {
+  projects: number
+  storage_bytes: number
+  ai_requests: number
+  execution_minutes: number
+}
+
+export interface UsageWarning {
+  type: UsageType
+  severity: 'warning' | 'high' | 'critical'
+  message: string
+  percentage: number
+}
+
+export interface CurrentUsageData {
+  user_id: number
+  plan: PlanType
+  unlimited: boolean
+  usage: {
+    projects: {
+      current: number
+      limit: number
+      percentage: number
+      unlimited: boolean
+    }
+    storage: {
+      current: number
+      limit: number
+      percentage: number
+      unlimited: boolean
+      current_formatted: string
+      limit_formatted: string
+    }
+    ai_requests: {
+      current: number
+      limit: number
+      percentage: number
+      unlimited: boolean
+      period: string
+      period_start: string
+      period_end: string
+    }
+    execution_minutes: {
+      current: number
+      limit: number
+      percentage: number
+      unlimited: boolean
+      period: string
+    }
+  }
+  warnings: UsageWarning[]
+  cached_at: string
+}
+
+export interface UsageHistoryData {
+  user_id: number
+  days: number
+  daily: Array<{
+    date: string
+    projects: number
+    storage_bytes: number
+    ai_requests: number
+    execution_minutes: number
+  }>
+  monthly: Array<{
+    month: string
+    projects: number
+    storage_bytes: number
+    ai_requests: number
+    execution_minutes: number
+  }>
+}
+
+export interface UsageLimitsData {
+  current_plan: PlanType
+  current_limits: PlanLimits
+  all_plans: Record<PlanType, PlanLimits>
+  pricing: Record<PlanType, {
+    price_monthly: number
+    price_yearly: number
+  }>
+}
 
 // Create singleton instance
 export const apiService = new ApiService()

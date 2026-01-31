@@ -4,10 +4,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
-	"apex-build/internal/database"
+	manageddb "apex-build/internal/database"
 	"apex-build/internal/git"
+	"apex-build/internal/hosting"
 	"apex-build/internal/mcp"
 	"apex-build/internal/secrets"
 	"apex-build/pkg/models"
@@ -73,20 +77,128 @@ func NewDatabase(config *Config) (*Database, error) {
 	sqlDB.SetConnMaxLifetime(time.Hour)
 	sqlDB.SetConnMaxIdleTime(10 * time.Minute) // Close idle connections after 10min
 
-	database := &Database{DB: db}
+	dbWrapper := &Database{DB: db}
 
-	// Run migrations
-	if err := database.Migrate(); err != nil {
-		return nil, fmt.Errorf("failed to run migrations: %w", err)
+	// Check if we should use the new migration system or fall back to GORM AutoMigrate
+	// Set DISABLE_AUTO_MIGRATE=true to skip GORM AutoMigrate and use golang-migrate only
+	disableAutoMigrate := strings.ToLower(os.Getenv("DISABLE_AUTO_MIGRATE")) == "true"
+	useFileMigrations := strings.ToLower(os.Getenv("USE_FILE_MIGRATIONS")) == "true"
+
+	if useFileMigrations {
+		// Use golang-migrate with SQL files (production-ready)
+		if err := dbWrapper.RunFileMigrations(config); err != nil {
+			return nil, fmt.Errorf("failed to run file migrations: %w", err)
+		}
+	} else if !disableAutoMigrate {
+		// Fall back to GORM AutoMigrate (development mode)
+		if err := dbWrapper.Migrate(); err != nil {
+			return nil, fmt.Errorf("failed to run GORM migrations: %w", err)
+		}
+	} else {
+		log.Println("WARNING: DISABLE_AUTO_MIGRATE=true - skipping all automatic migrations")
+		log.Println("   Run migrations manually: go run cmd/migrate/main.go up")
 	}
 
-	log.Println("✅ Database connected successfully")
-	return database, nil
+	log.Println("Database connected successfully")
+	return dbWrapper, nil
 }
 
-// Migrate runs database migrations
+// RunFileMigrations runs migrations using golang-migrate with SQL files
+// This is the production-ready approach that provides full control and rollback capability
+func (d *Database) RunFileMigrations(config *Config) error {
+	log.Println("🔄 Running SQL file migrations (golang-migrate)...")
+
+	// Build database URL for golang-migrate
+	databaseURL := fmt.Sprintf(
+		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		config.User, config.Password, config.Host, config.Port, config.DBName, config.SSLMode,
+	)
+
+	// Find migrations directory
+	migrationsPath := findMigrationsPath()
+	if migrationsPath == "" {
+		log.Println("⚠️ Migrations directory not found, falling back to GORM AutoMigrate")
+		return d.Migrate()
+	}
+
+	log.Printf("📁 Using migrations from: %s", migrationsPath)
+
+	// Run migrations using the migration runner
+	migrationConfig := &manageddb.MigrationConfig{
+		DatabaseURL:    databaseURL,
+		DatabaseType:   "postgres",
+		MigrationsPath: migrationsPath,
+	}
+
+	runner, err := manageddb.NewMigrationRunner(migrationConfig)
+	if err != nil {
+		log.Printf("⚠️ Failed to create migration runner: %v", err)
+		log.Println("⚠️ Falling back to GORM AutoMigrate")
+		return d.Migrate()
+	}
+	defer runner.Close()
+
+	if err := runner.RunMigrations(); err != nil {
+		return fmt.Errorf("file migrations failed: %w", err)
+	}
+
+	// Get and log current version
+	status, err := runner.GetVersion()
+	if err == nil {
+		log.Printf("✅ File migrations completed. Version: %d", status.Version)
+	}
+
+	// Seed admin user after migrations
+	if err := d.seedAdminUser(); err != nil {
+		log.Printf("⚠️ Admin user seeding: %v", err)
+	}
+
+	return nil
+}
+
+// findMigrationsPath locates the migrations directory
+func findMigrationsPath() string {
+	// Check for explicit path first
+	if path := os.Getenv("MIGRATIONS_PATH"); path != "" {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	// Get the directory of this source file
+	_, filename, _, ok := runtime.Caller(0)
+	if ok {
+		baseDir := filepath.Dir(filepath.Dir(filepath.Dir(filename)))
+		migrationsPath := filepath.Join(baseDir, "migrations")
+		if _, err := os.Stat(migrationsPath); err == nil {
+			return migrationsPath
+		}
+	}
+
+	// Try relative to working directory
+	cwd, err := os.Getwd()
+	if err == nil {
+		candidates := []string{
+			filepath.Join(cwd, "migrations"),
+			filepath.Join(cwd, "backend", "migrations"),
+			filepath.Join(cwd, "..", "migrations"),
+		}
+		for _, candidate := range candidates {
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+		}
+	}
+
+	return ""
+}
+
+// Migrate runs database migrations using GORM AutoMigrate
+// WARNING: AutoMigrate is convenient for development but can be unsafe for production
+// as it may make destructive schema changes. Use RunFileMigrations for production.
 func (d *Database) Migrate() error {
-	log.Println("🔄 Running database migrations...")
+	log.Println("🔄 Running GORM AutoMigrate (development mode)...")
+	log.Println("⚠️ WARNING: Set USE_FILE_MIGRATIONS=true for production deployments")
 
 	// Auto-migrate all models
 	err := d.DB.AutoMigrate(
@@ -111,7 +223,21 @@ func (d *Database) Migrate() error {
 		// Git integration
 		&git.Repository{},
 		// Managed Database Service (auto-provisioned PostgreSQL per project)
-		&database.ManagedDatabase{},
+		&manageddb.ManagedDatabase{},
+		// BYOK (Bring Your Own Key) management
+		&models.UserAPIKey{},
+		&models.AIUsageLog{},
+		// Refresh token storage for secure rotation
+		&models.RefreshToken{},
+		// Native Hosting (.apex.app) - Replit parity feature
+		&hosting.NativeDeployment{},
+		&hosting.DeploymentLog{},
+		&hosting.DeploymentEnvVar{},
+		&hosting.DeploymentHistory{},
+		&hosting.Subdomain{},
+		&hosting.CustomDomain{},
+		&hosting.DeploymentEvent{},
+		&hosting.SSLCertificate{},
 	)
 
 	if err != nil {
@@ -235,6 +361,15 @@ func (d *Database) createIndexes() error {
 	// MCP server indexes
 	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_external_mcp_servers_user ON external_mcp_servers(user_id)")
 	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_external_mcp_servers_project ON external_mcp_servers(project_id) WHERE project_id IS NOT NULL")
+
+	// Native Hosting indexes (.apex.app)
+	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_native_deployments_project ON native_deployments(project_id) WHERE deleted_at IS NULL")
+	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_native_deployments_user_status ON native_deployments(user_id, status) WHERE deleted_at IS NULL")
+	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_native_deployments_subdomain ON native_deployments(subdomain) WHERE deleted_at IS NULL")
+	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_native_deployments_always_on ON native_deployments(always_on) WHERE always_on = true AND deleted_at IS NULL")
+	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_deployment_logs_deployment_time ON deployment_logs(deployment_id, timestamp DESC)")
+	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_deployment_env_vars_deployment ON deployment_env_vars(deployment_id) WHERE deleted_at IS NULL")
+	d.DB.Exec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_subdomains_name_status ON subdomains(name) WHERE status = 'active'")
 
 	return nil
 }

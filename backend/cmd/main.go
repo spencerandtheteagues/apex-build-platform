@@ -18,6 +18,7 @@ import (
 	"apex-build/internal/collaboration"
 	"apex-build/internal/community"
 	"apex-build/internal/completions"
+	"apex-build/internal/config"
 	manageddb "apex-build/internal/database"
 	"apex-build/internal/db"
 	"apex-build/internal/debugging"
@@ -29,11 +30,13 @@ import (
 	"apex-build/internal/handlers"
 	"apex-build/internal/hosting"
 	"apex-build/internal/mcp"
+	"apex-build/internal/metrics"
 	"apex-build/internal/middleware"
 	"apex-build/internal/payments"
 	"apex-build/internal/preview"
 	"apex-build/internal/search"
 	"apex-build/internal/secrets"
+	"apex-build/internal/usage"
 	"apex-build/internal/websocket"
 
 	"github.com/gin-gonic/gin"
@@ -41,50 +44,62 @@ import (
 )
 
 func main() {
-	log.Println("🚀 Starting APEX.BUILD - Multi-AI Cloud Development Platform")
+	log.Println("Starting APEX.BUILD - Multi-AI Cloud Development Platform")
 
 	// Load .env file
 	if err := godotenv.Load(); err != nil {
 		// Try parent directory for .env
 		if err := godotenv.Load("../.env"); err != nil {
-			log.Println("⚠️ No .env file found, using environment variables")
+			log.Println("WARNING: No .env file found, using environment variables")
 		}
 	}
-	log.Println("✅ Environment configuration loaded")
+	log.Println("Environment configuration loaded")
 
-	// Load configuration
-	config := loadConfig()
+	// SECURITY: Validate all required secrets before starting
+	// This will fail fast in production if secrets are missing or invalid
+	secretsConfig, err := config.ValidateAndLogSecrets()
+	if err != nil {
+		log.Fatalf("CRITICAL: Secrets validation failed - cannot start server: %v", err)
+	}
+
+	// Load application configuration
+	appConfig := loadConfig()
 
 	// Initialize database
-	database, err := db.NewDatabase(config.Database)
+	database, err := db.NewDatabase(appConfig.Database)
 	if err != nil {
-		log.Fatalf("❌ Failed to connect to database: %v", err)
+		log.Fatalf("CRITICAL: Failed to connect to database: %v", err)
 	}
 	defer database.Close()
 
 	// Run database seeds (create admin accounts)
 	if err := database.RunSeeds(); err != nil {
-		log.Printf("⚠️ Database seeding had issues: %v", err)
+		log.Printf("WARNING: Database seeding had issues: %v", err)
 	}
 
-	// Initialize authentication service
-	authService := auth.NewAuthService(config.JWTSecret)
+	// Initialize authentication service with validated JWT secret
+	// Use the validated secret from secretsConfig for consistency
+	jwtSecret := secretsConfig.JWTSecret
+	if jwtSecret == "" {
+		jwtSecret = appConfig.JWTSecret // Fallback for dev
+	}
+	authService := auth.NewAuthService(jwtSecret)
 
 	// Initialize AI router with all providers (Claude, OpenAI, Gemini, Grok, Ollama)
 	aiRouter := ai.NewAIRouter(
-		config.ClaudeAPIKey,
-		config.OpenAIAPIKey,
-		config.GeminiAPIKey,
-		config.GrokAPIKey,
-		config.OllamaBaseURL, // Ollama local server (optional)
+		appConfig.ClaudeAPIKey,
+		appConfig.OpenAIAPIKey,
+		appConfig.GeminiAPIKey,
+		appConfig.GrokAPIKey,
+		appConfig.OllamaBaseURL, // Ollama local server (optional)
 	)
 
-	log.Println("✅ Multi-AI integration initialized:")
-	log.Printf("   - Claude API: %s", getStatusIcon(config.ClaudeAPIKey != ""))
-	log.Printf("   - OpenAI API: %s", getStatusIcon(config.OpenAIAPIKey != ""))
-	log.Printf("   - Gemini API: %s", getStatusIcon(config.GeminiAPIKey != ""))
-	log.Printf("   - Grok API:   %s", getStatusIcon(config.GrokAPIKey != ""))
-	log.Printf("   - Ollama:     %s", getOllamaStatus(config.OllamaBaseURL))
+	log.Println("Multi-AI integration initialized:")
+	log.Printf("   - Claude API: %s", getStatusIcon(appConfig.ClaudeAPIKey != ""))
+	log.Printf("   - OpenAI API: %s", getStatusIcon(appConfig.OpenAIAPIKey != ""))
+	log.Printf("   - Gemini API: %s", getStatusIcon(appConfig.GeminiAPIKey != ""))
+	log.Printf("   - Grok API:   %s", getStatusIcon(appConfig.GrokAPIKey != ""))
+	log.Printf("   - Ollama:     %s", getOllamaStatus(appConfig.OllamaBaseURL))
 
 	// Initialize Agent Orchestration System
 	aiAdapter := agents.NewAIRouterAdapter(aiRouter)
@@ -92,7 +107,7 @@ func main() {
 	wsHub := agents.NewWSHub(agentManager)
 	buildHandler := agents.NewBuildHandler(agentManager, wsHub)
 
-	log.Println("✅ Agent Orchestration System initialized")
+	log.Println("Agent Orchestration System initialized")
 
 	// Initialize Autonomous Agent System (Replit parity feature)
 	autonomousWorkDir := getEnv("AUTONOMOUS_WORK_DIR", "/tmp/apex-autonomous")
@@ -100,31 +115,38 @@ func main() {
 	autonomousAgent := autonomous.NewAutonomousAgent(autonomousAIAdapter, autonomousWorkDir)
 	autonomousHandler := autonomous.NewHandler(autonomousAgent)
 
-	log.Println("✅ Autonomous Agent System initialized (AI-driven build, test, deploy)")
+	log.Println("Autonomous Agent System initialized (AI-driven build, test, deploy)")
 
-	// Initialize Secrets Manager
-	masterKey := os.Getenv("SECRETS_MASTER_KEY")
+	// Initialize Secrets Manager with validated master key
+	// SECURITY: Use validated key from secretsConfig, with fallback for development
+	masterKey := secretsConfig.SecretsMasterKey
 	if masterKey == "" {
-		// Generate a key if not set (for development)
-		var err error
-		masterKey, err = secrets.GenerateMasterKey()
-		if err != nil {
-			log.Printf("⚠️ Failed to generate master key: %v", err)
+		if config.IsProductionEnvironment() {
+			log.Fatal("CRITICAL: SECRETS_MASTER_KEY required in production")
 		}
-		log.Println("⚠️ SECRETS_MASTER_KEY not set - using generated key (set in production!)")
+		// Generate a key for development only
+		var genErr error
+		masterKey, genErr = secrets.GenerateMasterKey()
+		if genErr != nil {
+			log.Printf("WARNING: Failed to generate master key: %v", genErr)
+		}
+		log.Println("WARNING: SECRETS_MASTER_KEY not set - using generated key (NOT FOR PRODUCTION)")
 	}
 
 	secretsManager, err := secrets.NewSecretsManager(masterKey)
 	if err != nil {
-		log.Printf("⚠️ Failed to initialize secrets manager: %v", err)
+		if config.IsProductionEnvironment() {
+			log.Fatalf("CRITICAL: Failed to initialize secrets manager: %v", err)
+		}
+		log.Printf("WARNING: Failed to initialize secrets manager: %v", err)
 	} else {
-		log.Println("✅ Secrets Manager initialized with AES-256 encryption")
+		log.Println("Secrets Manager initialized with AES-256 encryption")
 	}
 
 	// Initialize BYOK (Bring Your Own Key) Manager
 	byokManager := ai.NewBYOKManager(database.GetDB(), secretsManager, aiRouter)
 	byokHandler := handlers.NewBYOKHandlers(byokManager)
-	log.Println("✅ BYOK Manager initialized (user-provided API keys, per-provider cost tracking)")
+	log.Println("BYOK Manager initialized (user-provided API keys, per-provider cost tracking)")
 
 	// Initialize MCP Server (APEX.BUILD as MCP provider)
 	mcpServer := mcp.NewMCPServer("APEX.BUILD", "1.0.0")
@@ -163,74 +185,75 @@ func main() {
 		}, nil
 	})
 
-	log.Println("✅ MCP Server initialized with built-in tools")
+	log.Println("MCP Server initialized with built-in tools")
 
 	// Initialize MCP Connection Manager (for connecting to external MCP servers)
 	mcpConnManager := mcp.NewMCPConnectionManager()
-	log.Println("✅ MCP Connection Manager ready for external integrations")
+	log.Println("MCP Connection Manager ready for external integrations")
 
 	// Initialize Secrets and MCP handlers
 	secretsHandler := handlers.NewSecretsHandler(database.GetDB(), secretsManager)
 	mcpHandler := handlers.NewMCPHandler(database.GetDB(), mcpServer, mcpConnManager, secretsManager)
 	templatesHandler := handlers.NewTemplatesHandler(database.GetDB())
 
-	log.Println("✅ Project Templates System initialized (15+ starter templates)")
+	log.Println("Project Templates System initialized (15+ starter templates)")
 
 	// Initialize Code Search Engine
 	searchEngine := search.NewSearchEngine(database.GetDB())
 	searchHandler := handlers.NewSearchHandler(searchEngine)
 
-	log.Println("✅ Code Search Engine initialized (full-text, regex, symbol search)")
+	log.Println("Code Search Engine initialized (full-text, regex, symbol search)")
 
 	// Initialize Live Preview Server
 	previewServer := preview.NewPreviewServer(database.GetDB())
 	previewHandler := handlers.NewPreviewHandler(database.GetDB(), previewServer)
 
-	log.Println("✅ Live Preview Server initialized (hot reload support)")
+	log.Println("Live Preview Server initialized (hot reload support)")
 
 	// Initialize Git Integration Service
 	gitService := git.NewGitService(database.GetDB())
 	gitHandler := handlers.NewGitHandler(database.GetDB(), gitService, secretsManager)
 
-	log.Println("✅ Git Integration initialized (GitHub support)")
+	log.Println("Git Integration initialized (GitHub support)")
 
 	// Initialize GitHub Import Handler (one-click repo import like replit.new)
 	importHandler := handlers.NewImportHandler(database.GetDB(), gitService, secretsManager)
-	log.Println("✅ GitHub Import Wizard initialized (one-click repo import)")
+	log.Println("GitHub Import Wizard initialized (one-click repo import)")
 
 	// Initialize GitHub Export Handler (export projects to GitHub repos)
 	exportHandler := handlers.NewExportHandler(database.GetDB(), gitService, secretsManager)
-	log.Println("✅ GitHub Export initialized (one-click export to GitHub)")
+	log.Println("GitHub Export initialized (one-click export to GitHub)")
 
 	// Initialize Version History Handler (Replit parity feature)
 	versionHandler := handlers.NewVersionHandler(database.GetDB())
-	log.Println("✅ Version History System initialized (diff viewing, restore, pinning)")
+	log.Println("Version History System initialized (diff viewing, restore, pinning)")
 
 	// Initialize Code Comments Handler (Replit parity feature)
 	commentsHandler := handlers.NewCommentsHandler(database.GetDB())
-	log.Println("✅ Code Comments System initialized (inline threads, reactions, resolve)")
+	log.Println("Code Comments System initialized (inline threads, reactions, resolve)")
 
-	// Initialize Stripe Payment Service
-	stripeSecretKey := os.Getenv("STRIPE_SECRET_KEY")
+	// Initialize Stripe Payment Service with validated key
+	// SECURITY: Use validated key from secretsConfig
+	stripeSecretKey := secretsConfig.StripeSecretKey
 	paymentHandler := handlers.NewPaymentHandlers(database.GetDB(), stripeSecretKey)
 
 	if stripeSecretKey != "" && stripeSecretKey != "sk_test_xxx" {
-		log.Println("✅ Stripe Payment Integration initialized")
+		log.Println("Stripe Payment Integration initialized")
 		log.Printf("   - Plans: Free, Pro ($12/mo), Team ($29/mo), Enterprise ($99/mo)")
 	} else {
-		log.Println("⚠️  Stripe not configured - payment features disabled")
+		log.Println("WARNING: Stripe not configured - payment features disabled")
 		log.Println("   Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET to enable")
 	}
 
 	// Log available plans
 	plans := payments.GetAllPlans()
-	log.Printf("✅ Subscription Plans configured: %d plans available", len(plans))
+	log.Printf("Subscription Plans configured: %d plans available", len(plans))
 
 	// Initialize WebSocket Hub for real-time updates
 	// PERFORMANCE: Using BatchedHub for 70% message reduction via 50ms batching
 	wsHubRT := websocket.NewBatchedHub()
 	go wsHubRT.Run()
-	log.Println("✅ WebSocket BatchedHub initialized (50ms batching, 16ms write coalescing)")
+	log.Println("WebSocket BatchedHub initialized (50ms batching, 16ms write coalescing)")
 
 	// Initialize cache for performance optimization
 	// PERFORMANCE: 30s TTL cache with in-memory fallback when Redis unavailable
@@ -238,11 +261,11 @@ func main() {
 	redisURL := os.Getenv("REDIS_URL")
 	var redisCache *cache.RedisCache
 	if redisURL != "" {
-		log.Printf("✅ Redis cache connecting to: %s", redisURL)
+		log.Printf("Redis cache connecting to: %s", redisURL)
 		// TODO: Initialize with Redis client when available
 		redisCache = cache.NewRedisCache(cacheConfig)
 	} else {
-		log.Println("⚠️  REDIS_URL not set - using in-memory cache (set for production)")
+		log.Println("WARNING: REDIS_URL not set - using in-memory cache (set for production)")
 		redisCache = cache.NewRedisCache(cacheConfig)
 	}
 
@@ -253,19 +276,44 @@ func main() {
 	// Initialize OptimizedHandler with caching for better performance
 	// PERFORMANCE: Fixes N+1 queries with proper JOINs, adds cursor-based pagination
 	optimizedHandler := handlers.NewOptimizedHandler(baseHandler, redisCache)
-	log.Println("✅ OptimizedHandler initialized (N+1 fix, 30s cache, cursor pagination)")
+	log.Println("OptimizedHandler initialized (N+1 fix, 30s cache, cursor pagination)")
 
-	// Initialize Code Execution Engine
+	// Initialize Code Execution Engine with Docker container sandboxing
+	// SECURITY: Container sandboxing is the default and recommended mode
 	projectsDir := os.Getenv("PROJECTS_DIR")
 	if projectsDir == "" {
 		projectsDir = "/tmp/apex-build-projects"
 	}
-	executionHandler, err := handlers.NewExecutionHandler(database.GetDB(), projectsDir)
+
+	// Create execution handler with security configuration
+	executionConfig := handlers.DefaultExecutionHandlerConfig()
+	executionConfig.ProjectsDir = projectsDir
+
+	executionHandler, err := handlers.NewExecutionHandlerWithConfig(database.GetDB(), executionConfig)
 	if err != nil {
-		log.Printf("⚠️ Failed to initialize execution handler: %v", err)
+		log.Printf("CRITICAL: Failed to initialize execution handler: %v", err)
+		log.Println("SECURITY: Code execution features are DISABLED")
 	} else {
-		log.Println("✅ Code Execution Engine initialized (10+ languages supported)")
+		log.Println("Code Execution Engine initialized (10+ languages supported)")
 		log.Println("   - Languages: JavaScript, TypeScript, Python, Go, Rust, Java, C, C++, Ruby, PHP")
+
+		// Log sandbox status
+		sandboxStatus := executionHandler.GetSandboxStatus()
+		if containerAvail, ok := sandboxStatus["container_available"].(bool); ok && containerAvail {
+			log.Println("SECURITY: Docker container sandboxing ENABLED")
+			log.Println("   - Seccomp syscall filtering: enabled")
+			log.Println("   - Network isolation: disabled by default")
+			log.Println("   - Memory limit: 256MB default")
+			log.Println("   - CPU limit: 0.5 cores default")
+			log.Println("   - Read-only root filesystem: enabled")
+		} else {
+			if executionConfig.ForceContainer {
+				log.Println("WARNING: Docker required but not available - execution DISABLED")
+			} else {
+				log.Println("WARNING: Docker not available - using process-based sandbox (less secure)")
+				log.Println("WARNING: Set EXECUTION_FORCE_CONTAINER=true to require Docker in production")
+			}
+		}
 	}
 
 	// Initialize One-Click Deployment Service
@@ -286,35 +334,35 @@ func main() {
 	}
 
 	deployHandler := handlers.NewDeployHandler(database.GetDB(), deployService)
-	log.Println("✅ One-Click Deployment initialized (Vercel, Netlify, Render)")
+	log.Println("One-Click Deployment initialized (Vercel, Netlify, Render)")
 
 	// Initialize Package Manager
 	packageHandler := handlers.NewPackageHandler(baseHandler)
-	log.Println("✅ Package Manager initialized (NPM, PyPI, Go Modules)")
+	log.Println("Package Manager initialized (NPM, PyPI, Go Modules)")
 
 	// Initialize Environment Handler (Nix-like reproducible environments - Replit parity)
 	environmentHandler := handlers.NewEnvironmentHandler(baseHandler)
-	log.Println("✅ Environment Configuration initialized (Nix-like reproducible environments)")
+	log.Println("Environment Configuration initialized (Nix-like reproducible environments)")
 
 	// Initialize Community/Sharing Marketplace
 	communityHandler := community.NewCommunityHandler(database.GetDB())
 
 	// Run community migrations
 	if err := community.AutoMigrate(database.GetDB()); err != nil {
-		log.Printf("⚠️ Community migration had issues: %v", err)
+		log.Printf("WARNING: Community migration had issues: %v", err)
 	}
 
 	// Seed default categories
 	if err := community.SeedCategories(database.GetDB()); err != nil {
-		log.Printf("⚠️ Category seeding had issues: %v", err)
+		log.Printf("WARNING: Category seeding had issues: %v", err)
 	}
 
-	log.Println("✅ Community Marketplace initialized (discover, share, fork projects)")
+	log.Println("Community Marketplace initialized (discover, share, fork projects)")
 
 	// Initialize Native Hosting Service
 	hostingService := hosting.NewHostingService(database.GetDB())
 	hostingHandler := handlers.NewHostingHandler(database.GetDB(), hostingService)
-	log.Println("✅ Native Hosting (.apex.app) initialized")
+	log.Println("Native Hosting (.apex.app) initialized")
 
 	// Initialize Managed Database Service
 	dbManagerConfig := &manageddb.ManagerConfig{
@@ -328,24 +376,24 @@ func main() {
 	dbManager, err := manageddb.NewDatabaseManager(dbManagerConfig)
 	var databaseHandler *handlers.DatabaseHandler
 	if err != nil {
-		log.Printf("⚠️ Managed Database service not available: %v", err)
+		log.Printf("WARNING: Managed Database service not available: %v", err)
 	} else {
 		databaseHandler = handlers.NewDatabaseHandler(database.GetDB(), dbManager, secretsManager)
 		// Initialize auto-provisioning dependencies for project creation
 		handlers.InitAutoProvisioningDeps(dbManager, secretsManager)
-		log.Println("✅ Managed Database Service initialized (PostgreSQL, Redis, SQLite)")
-		log.Println("✅ Auto-Provision PostgreSQL enabled for new projects")
+		log.Println("Managed Database Service initialized (PostgreSQL, Redis, SQLite)")
+		log.Println("Auto-Provision PostgreSQL enabled for new projects")
 	}
 
 	// Initialize Debugging Service
 	debugService := debugging.NewDebugService(database.GetDB())
 	debuggingHandler := handlers.NewDebuggingHandler(database.GetDB(), debugService)
-	log.Println("✅ Debugging Service initialized (breakpoints, stepping, watch expressions)")
+	log.Println("Debugging Service initialized (breakpoints, stepping, watch expressions)")
 
 	// Initialize AI Completions Service
 	completionService := completions.NewCompletionService(database.GetDB(), aiRouter)
 	completionsHandler := handlers.NewCompletionsHandler(completionService)
-	log.Println("✅ AI Completions Service initialized (inline ghost-text, multi-provider)")
+	log.Println("AI Completions Service initialized (inline ghost-text, multi-provider)")
 
 	// Initialize Extensions Marketplace
 	extensionService := extensions.NewService(database.GetDB())
@@ -357,7 +405,7 @@ func main() {
 		&extensions.ExtensionReview{},
 		&extensions.UserExtension{},
 	)
-	log.Println("✅ Extensions Marketplace initialized (discover, install, publish)")
+	log.Println("Extensions Marketplace initialized (discover, install, publish)")
 
 	// Initialize Enterprise Services (SAML SSO, SCIM, RBAC, Audit)
 	auditService := enterprise.NewAuditService(database.GetDB())
@@ -383,12 +431,43 @@ func main() {
 		&enterprise.RateLimit{},
 		&enterprise.Invitation{},
 	)
-	log.Println("✅ Enterprise Features initialized (SSO/SAML, SCIM, RBAC, Audit Logs)")
+	log.Println("Enterprise Features initialized (SSO/SAML, SCIM, RBAC, Audit Logs)")
 
 	// Initialize Real-Time Collaboration Hub
 	collabHub := collaboration.NewCollabHub()
 	go collabHub.Run()
-	log.Println("✅ Real-Time Collaboration initialized (OT, presence, cursor tracking)")
+	log.Println("Real-Time Collaboration initialized (OT, presence, cursor tracking)")
+
+	// Initialize Usage Tracker for quota enforcement (REVENUE PROTECTION)
+	usageTracker := usage.NewTracker(database.GetDB(), redisCache)
+	if err := usageTracker.Migrate(); err != nil {
+		log.Printf("WARNING: Usage tracker migration had issues: %v", err)
+	}
+	usageHandler := handlers.NewUsageHandlers(database.GetDB(), usageTracker)
+	quotaChecker := middleware.NewQuotaChecker(usageTracker)
+	log.Println("Usage Tracking & Quota Enforcement initialized (projects, storage, AI, execution)")
+	log.Println("   - Free: 3 projects, 100MB storage, 1000 AI/month, 10 exec min/day")
+	log.Println("   - Pro ($12): 25 projects, 5GB storage, 10000 AI/month, 120 exec min/day")
+	log.Println("   - Team ($29): 100 projects, 25GB storage, 50000 AI/month, 480 exec min/day")
+	log.Println("   - Enterprise ($79): Unlimited")
+
+	// Initialize Prometheus Metrics and Business Metrics Collector
+	metricsEnabled := getEnv("ENABLE_METRICS", "true") == "true"
+	if metricsEnabled {
+		// Set build info
+		m := metrics.Get()
+		m.SetBuildInfo(getEnv("VERSION", "dev"), getEnv("GIT_COMMIT", "unknown"), getEnv("BUILD_DATE", "unknown"))
+
+		// Start business metrics collector (collects user/project/subscription counts)
+		businessCollector := metrics.NewBusinessMetricsCollector(database.GetDB(), 30*time.Second)
+		businessCollector.Start(context.Background())
+		log.Println("Prometheus Metrics initialized")
+		log.Println("   - HTTP metrics: requests_total, request_duration, response_size")
+		log.Println("   - AI metrics: requests_total, tokens_total, cost_dollars, latency")
+		log.Println("   - Execution metrics: total, duration, queue_length, container_usage")
+		log.Println("   - Business metrics: active_users, total_projects, subscriptions")
+		log.Println("   - Metrics endpoint: GET /metrics")
+	}
 
 	// Initialize API server
 	server := api.NewServer(database, authService, aiRouter)
@@ -407,29 +486,35 @@ func main() {
 		optimizedHandler,
 		byokHandler,         // BYOK API key management and model selection
 		exportHandler,       // GitHub export (push projects to GitHub)
+		usageHandler,        // Usage tracking and quota API endpoints
+		quotaChecker,        // Quota enforcement middleware
 	)
 
 	// Start server
-	port := config.Port
+	port := appConfig.Port
 	if port == "" {
 		port = "8080"
 	}
 
-	log.Printf("🌐 Server starting on port %s", port)
-	log.Printf("📍 Health check: http://localhost:%s/health", port)
-	log.Printf("📍 API documentation: http://localhost:%s/docs", port)
+	log.Printf("Server starting on port %s", port)
+	log.Printf("Health check: http://localhost:%s/health", port)
+	log.Printf("API documentation: http://localhost:%s/docs", port)
 	log.Println("")
-	log.Println("🎯 APEX.BUILD is ready to dominate the market!")
-	log.Println("🎯 Beats Replit by 1000x in performance!")
-	log.Println("🎯 Multi-AI integration with Claude, GPT-4, and Gemini!")
+	log.Println("APEX.BUILD is ready!")
+	if secretsConfig.IsProduction {
+		log.Println("Running in PRODUCTION mode with validated secrets")
+	} else {
+		log.Println("Running in DEVELOPMENT mode - some security checks relaxed")
+	}
 
 	if err := router.Run(":" + port); err != nil {
-		log.Fatalf("❌ Failed to start server: %v", err)
+		log.Fatalf("CRITICAL: Failed to start server: %v", err)
 	}
 }
 
-// Config holds all application configuration
-type Config struct {
+// AppConfig holds all application configuration (non-secret)
+// SECURITY: Secret values should come from config.SecretsConfig
+type AppConfig struct {
 	// Database configuration
 	Database *db.Config
 
@@ -440,7 +525,7 @@ type Config struct {
 	GrokAPIKey    string
 	OllamaBaseURL string // Ollama local server URL (e.g., http://localhost:11434)
 
-	// Authentication
+	// Authentication (fallback for development)
 	JWTSecret string
 
 	// Server configuration
@@ -448,8 +533,9 @@ type Config struct {
 	Environment string
 }
 
-// loadConfig loads configuration from environment variables
-func loadConfig() *Config {
+// loadConfig loads application configuration from environment variables
+// NOTE: Security-critical secrets are validated separately via config.ValidateAndLogSecrets()
+func loadConfig() *AppConfig {
 	// Check for DATABASE_URL first (Fly.io, Heroku, Railway, etc.)
 	dbConfig := parseDatabaseURL(os.Getenv("DATABASE_URL"))
 	if dbConfig == nil {
@@ -465,19 +551,12 @@ func loadConfig() *Config {
 		}
 	}
 
-	// SECURITY: JWT_SECRET is required - fail if not set in production
+	// JWT_SECRET handling is now done in config.ValidateAndLogSecrets()
+	// This is just a fallback for development
 	jwtSecret := os.Getenv("JWT_SECRET")
-	environment := getEnv("ENVIRONMENT", "development")
-	if jwtSecret == "" {
-		if environment == "production" {
-			log.Fatal("❌ CRITICAL: JWT_SECRET environment variable is required in production")
-		}
-		// Development only - generate a random secret and warn
-		jwtSecret = "dev-only-jwt-secret-" + strconv.FormatInt(time.Now().UnixNano(), 36)
-		log.Println("⚠️  WARNING: JWT_SECRET not set - using generated dev secret (NOT FOR PRODUCTION)")
-	}
+	environment := config.GetEnvironment()
 
-	return &Config{
+	return &AppConfig{
 		Database:      dbConfig,
 		ClaudeAPIKey:  getEnv("ANTHROPIC_API_KEY", ""),
 		OpenAIAPIKey:  getEnv("OPENAI_API_KEY", ""),
@@ -497,11 +576,11 @@ func parseDatabaseURL(databaseURL string) *db.Config {
 		return nil
 	}
 
-	log.Printf("📡 Parsing DATABASE_URL for database connection")
+	log.Printf("Parsing DATABASE_URL for database connection")
 
 	u, err := url.Parse(databaseURL)
 	if err != nil {
-		log.Printf("⚠️ Failed to parse DATABASE_URL: %v, falling back to individual vars", err)
+		log.Printf("WARNING: Failed to parse DATABASE_URL: %v, falling back to individual vars", err)
 		return nil
 	}
 
@@ -559,9 +638,11 @@ func setupRoutes(
 	debuggingHandler *handlers.DebuggingHandler, completionsHandler *handlers.CompletionsHandler,
 	extensionsHandler *handlers.ExtensionsHandler, enterpriseHandler *handlers.EnterpriseHandler,
 	collabHub *collaboration.CollabHub,
-	optimizedHandler *handlers.OptimizedHandler, // PERFORMANCE: Optimized handlers with caching
-	byokHandler *handlers.BYOKHandlers,          // BYOK API key management
-	exportHandler *handlers.ExportHandler,       // GitHub export
+	optimizedHandler *handlers.OptimizedHandler,     // PERFORMANCE: Optimized handlers with caching
+	byokHandler *handlers.BYOKHandlers,              // BYOK API key management
+	exportHandler *handlers.ExportHandler,           // GitHub export
+	usageHandler *handlers.UsageHandlers,            // Usage tracking and quota API
+	quotaChecker *middleware.QuotaChecker,           // Quota enforcement middleware
 ) *gin.Engine {
 	// Set gin mode based on environment
 	if os.Getenv("ENVIRONMENT") == "production" {
@@ -574,6 +655,13 @@ func setupRoutes(
 	router.Use(server.CORSMiddleware())
 	router.Use(gin.Recovery())
 	router.Use(middleware.SecurityHeaders())
+
+	// Add Prometheus metrics middleware (if enabled)
+	if getEnv("ENABLE_METRICS", "true") == "true" {
+		router.Use(metrics.PrometheusMiddleware())
+		// Metrics endpoint (Prometheus format)
+		router.GET("/metrics", metrics.PrometheusHandler())
+	}
 
 	// Health check endpoint
 	router.GET("/health", server.Health)
@@ -643,8 +731,12 @@ func setupRoutes(
 		protected := v1.Group("/")
 		protected.Use(server.AuthMiddleware())
 		{
-			// AI endpoints
+			// Usage tracking and quota API endpoints (REVENUE PROTECTION)
+			usageHandler.RegisterUsageRoutes(protected)
+
+			// AI endpoints - with quota enforcement
 			ai := protected.Group("/ai")
+			ai.Use(quotaChecker.CheckAIQuota()) // Enforce AI request quota
 			{
 				ai.POST("/generate", server.AIGenerate)
 				ai.GET("/usage", server.GetAIUsage)
@@ -654,7 +746,8 @@ func setupRoutes(
 			// PERFORMANCE: 60-80% faster with proper JOINs, no N+1 queries, 30s cache
 			projects := protected.Group("/projects")
 			{
-				projects.POST("", optimizedHandler.CreateProjectOptimized)
+				// Project creation has quota check
+				projects.POST("", quotaChecker.CheckProjectQuota(), optimizedHandler.CreateProjectOptimized)
 				projects.GET("", optimizedHandler.GetProjectsOptimized)        // Optimized: cursor pagination, caching
 				projects.GET("/:id", optimizedHandler.GetProjectOptimized)     // Optimized: JOINed file count
 				projects.PUT("/:id", optimizedHandler.UpdateProjectOptimized)  // Optimized: cache invalidation
@@ -662,7 +755,8 @@ func setupRoutes(
 				projects.GET("/:id/download", server.DownloadProject)
 
 				// File endpoints under projects - using optimized handler
-				projects.POST("/:id/files", server.CreateFile)
+				// Storage quota checked on file creation
+				projects.POST("/:id/files", quotaChecker.CheckStorageQuota(1024*1024), server.CreateFile) // Estimate 1MB
 				projects.GET("/:id/files", optimizedHandler.GetProjectFilesOptimized) // Optimized: no content loading for list
 			}
 
@@ -749,6 +843,21 @@ func setupRoutes(
 				previewRoutes.POST("/hot-reload", previewHandler.HotReload)     // Hot reload file
 				previewRoutes.GET("/list", previewHandler.ListPreviews)         // List active previews
 				previewRoutes.GET("/url/:projectId", previewHandler.GetPreviewURL) // Get preview URL
+
+				// Bundler endpoints
+				previewRoutes.POST("/build", previewHandler.BuildProject)                // Bundle project
+				previewRoutes.GET("/bundler/status", previewHandler.GetBundlerStatus)    // Bundler availability
+				previewRoutes.POST("/bundler/invalidate", previewHandler.InvalidateBundleCache) // Invalidate cache
+
+				// Backend server endpoints
+				previewRoutes.POST("/server/start", previewHandler.StartServer)             // Start backend server
+				previewRoutes.POST("/server/stop", previewHandler.StopServer)               // Stop backend server
+				previewRoutes.GET("/server/status/:projectId", previewHandler.GetServerStatus) // Server status
+				previewRoutes.GET("/server/logs/:projectId", previewHandler.GetServerLogs)  // Server logs
+				previewRoutes.GET("/server/detect/:projectId", previewHandler.DetectServer)  // Detect backend
+
+				// Docker sandbox endpoint
+				previewRoutes.GET("/docker/status", previewHandler.GetDockerStatus) // Docker availability
 			}
 
 			// Git Integration endpoints
@@ -798,9 +907,10 @@ func setupRoutes(
 				billing.GET("/config-status", paymentHandler.StripeConfigStatus)     // Check Stripe config
 			}
 
-			// Code Execution endpoints (the core of cloud IDE)
+			// Code Execution endpoints (the core of cloud IDE) - with quota enforcement
 			if executionHandler != nil {
 				execute := protected.Group("/execute")
+				execute.Use(quotaChecker.CheckExecutionQuota(1)) // Check execution minutes quota
 				{
 					execute.POST("", executionHandler.ExecuteCode)                  // Execute code snippet
 					execute.POST("/file", executionHandler.ExecuteFile)             // Execute a file
@@ -810,6 +920,7 @@ func setupRoutes(
 					execute.GET("/history", executionHandler.GetExecutionHistory)   // Get execution history
 					execute.POST("/:id/stop", executionHandler.StopExecution)       // Stop running execution
 					execute.GET("/stats", executionHandler.GetExecutionStats)       // Get execution statistics
+					execute.GET("/sandbox/status", executionHandler.GetSandboxStatusHandler) // Get sandbox security status
 				}
 
 				// Terminal endpoints (interactive shell with full PTY support)

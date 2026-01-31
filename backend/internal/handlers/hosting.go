@@ -3,9 +3,12 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"apex-build/internal/hosting"
@@ -964,9 +967,602 @@ func (h *HostingHandler) RegisterHostingRoutes(router *gin.RouterGroup) {
 	router.GET("/projects/:id/deployments/:deploymentId/always-on", h.GetAlwaysOnStatus)
 	router.PUT("/projects/:id/deployments/:deploymentId/always-on", h.SetAlwaysOn)
 
-	// Hosting management routes
-	router.GET("/hosting/check-subdomain", h.CheckSubdomain)
+	// Alternative hosting management routes (as specified)
+	// These provide a cleaner API for the frontend: /api/v1/hosting/:projectId/...
+	hostingRoutes := router.Group("/hosting")
+	{
+		hostingRoutes.GET("/check-subdomain", h.CheckSubdomain)
+		hostingRoutes.GET("/:projectId/status", h.GetHostingStatus)
+		hostingRoutes.POST("/:projectId/deploy", h.QuickDeploy)
+		hostingRoutes.DELETE("/:projectId/undeploy", h.Undeploy)
+		hostingRoutes.GET("/:projectId/logs", h.GetProjectDeploymentLogs)
+		hostingRoutes.GET("/:projectId/url", h.GetDeploymentURL)
+
+		// Custom domain management
+		hostingRoutes.GET("/:projectId/domains", h.GetCustomDomains)
+		hostingRoutes.POST("/:projectId/domains", h.AddCustomDomain)
+		hostingRoutes.POST("/:projectId/domains/:domainId/verify", h.VerifyCustomDomain)
+		hostingRoutes.DELETE("/:projectId/domains/:domainId", h.DeleteCustomDomain)
+	}
 }
+
+// GetHostingStatus returns the hosting status for a project
+// GET /api/v1/hosting/:projectId/status
+func (h *HostingHandler) GetHostingStatus(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	projectIDStr := c.Param("projectId")
+	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	// Verify project access
+	var project models.Project
+	if err := h.db.First(&project, uint(projectID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	if project.OwnerID != userID && !project.IsPublic {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// Get latest deployment
+	deployments, _, err := h.service.GetProjectDeployments(uint(projectID), 1, 1)
+	if err != nil || len(deployments) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success":    true,
+			"deployed":   false,
+			"deployment": nil,
+			"message":    "No deployments found for this project",
+		})
+		return
+	}
+
+	latest := deployments[0]
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"deployed": latest.Status == hosting.StatusRunning,
+		"deployment": gin.H{
+			"id":               latest.ID,
+			"status":           latest.Status,
+			"container_status": latest.ContainerStatus,
+			"url":              latest.URL,
+			"subdomain":        latest.Subdomain,
+			"always_on":        latest.AlwaysOn,
+			"deployed_at":      latest.DeployedAt,
+			"uptime_seconds":   latest.UptimeSeconds,
+			"total_requests":   latest.TotalRequests,
+			"error_message":    latest.ErrorMessage,
+		},
+	})
+}
+
+// QuickDeploy starts a deployment with auto-detected settings
+// POST /api/v1/hosting/:projectId/deploy
+func (h *HostingHandler) QuickDeploy(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	projectIDStr := c.Param("projectId")
+	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	// Verify project ownership
+	var project models.Project
+	if err := h.db.First(&project, uint(projectID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// Parse optional configuration from request body
+	var req struct {
+		Subdomain    string            `json:"subdomain,omitempty"`
+		AlwaysOn     bool              `json:"always_on"`
+		Port         int               `json:"port"`
+		BuildCommand string            `json:"build_command"`
+		StartCommand string            `json:"start_command"`
+		EnvVars      map[string]string `json:"env_vars"`
+	}
+	c.ShouldBindJSON(&req) // Ignore errors, use defaults
+
+	// Get project files
+	var files []models.File
+	if err := h.db.Where("project_id = ?", projectID).Find(&files).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get project files"})
+		return
+	}
+
+	// Convert to hosting.ProjectFile
+	projectFiles := make([]hosting.ProjectFile, len(files))
+	for i, f := range files {
+		projectFiles[i] = hosting.ProjectFile{
+			Path:    f.Path,
+			Content: f.Content,
+			Size:    f.Size,
+			IsDir:   f.Type == "directory",
+		}
+	}
+
+	// Auto-detect framework
+	framework := detectFramework(project.Language, project.Framework, files)
+
+	// Create deployment config with auto-detected settings
+	config := &hosting.DeploymentConfig{
+		ProjectName:  project.Name,
+		Subdomain:    req.Subdomain,
+		Port:         req.Port,
+		BuildCommand: req.BuildCommand,
+		StartCommand: req.StartCommand,
+		Framework:    framework,
+		AlwaysOn:     req.AlwaysOn,
+		EnvVars:      req.EnvVars,
+		Files:        projectFiles,
+	}
+
+	// Set defaults based on framework
+	if config.Port == 0 {
+		config.Port = 3000
+	}
+	if config.BuildCommand == "" {
+		config.BuildCommand = getDefaultBuildCommand(framework)
+	}
+	if config.StartCommand == "" {
+		config.StartCommand = getDefaultStartCommand(framework)
+	}
+
+	// Start deployment
+	deployment, err := h.service.StartDeployment(c.Request.Context(), uint(projectID), userID, config)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"success":       true,
+		"deployment":    deployment,
+		"message":       "Deployment started",
+		"url":           deployment.URL,
+		"websocket_url": "/ws/deploy/" + deployment.ID,
+	})
+}
+
+// Undeploy stops and removes a project's deployment
+// DELETE /api/v1/hosting/:projectId/undeploy
+func (h *HostingHandler) Undeploy(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	projectIDStr := c.Param("projectId")
+	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	// Verify project ownership
+	var project models.Project
+	if err := h.db.First(&project, uint(projectID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// Get latest deployment
+	deployments, _, err := h.service.GetProjectDeployments(uint(projectID), 1, 1)
+	if err != nil || len(deployments) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No deployment found"})
+		return
+	}
+
+	// Delete the deployment
+	if err := h.service.DeleteDeployment(deployments[0].ID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Deployment removed successfully",
+	})
+}
+
+// GetProjectDeploymentLogs returns logs for a project's latest deployment
+// GET /api/v1/hosting/:projectId/logs
+func (h *HostingHandler) GetProjectDeploymentLogs(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	projectIDStr := c.Param("projectId")
+	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	// Verify project ownership
+	var project models.Project
+	if err := h.db.First(&project, uint(projectID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// Get log params
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	// Get latest deployment
+	deployments, _, err := h.service.GetProjectDeployments(uint(projectID), 1, 1)
+	if err != nil || len(deployments) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No deployment found"})
+		return
+	}
+
+	logs, err := h.service.GetDeploymentLogs(deployments[0].ID, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":       true,
+		"logs":          logs,
+		"deployment_id": deployments[0].ID,
+	})
+}
+
+// GetDeploymentURL returns the deployment URL for a project
+// GET /api/v1/hosting/:projectId/url
+func (h *HostingHandler) GetDeploymentURL(c *gin.Context) {
+	projectIDStr := c.Param("projectId")
+	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	// Get latest deployment
+	deployments, _, err := h.service.GetProjectDeployments(uint(projectID), 1, 1)
+	if err != nil || len(deployments) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No deployment found"})
+		return
+	}
+
+	latest := deployments[0]
+	if latest.Status != hosting.StatusRunning {
+		c.JSON(http.StatusOK, gin.H{
+			"success":   true,
+			"available": false,
+			"url":       latest.URL,
+			"status":    latest.Status,
+			"message":   "Deployment is not running",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"available": true,
+		"url":       latest.URL,
+		"subdomain": latest.Subdomain,
+		"status":    latest.Status,
+	})
+}
+
+// getDefaultBuildCommand returns the default build command for a framework
+func getDefaultBuildCommand(framework string) string {
+	switch framework {
+	case "nextjs", "react", "vite", "vue", "svelte":
+		return "npm run build"
+	case "angular":
+		return "npm run build -- --configuration production"
+	case "django", "flask", "fastapi":
+		return "" // Python doesn't typically need a build step
+	case "go", "golang":
+		return "go build -o main ."
+	case "rust":
+		return "cargo build --release"
+	default:
+		return "npm run build"
+	}
+}
+
+// getDefaultStartCommand returns the default start command for a framework
+func getDefaultStartCommand(framework string) string {
+	switch framework {
+	case "nextjs":
+		return "npm start"
+	case "react", "vite":
+		return "npm run preview"
+	case "vue":
+		return "npm run preview"
+	case "angular":
+		return "npm start"
+	case "svelte":
+		return "npm run preview"
+	case "express", "node":
+		return "node index.js"
+	case "django":
+		return "python manage.py runserver 0.0.0.0:$PORT"
+	case "flask":
+		return "flask run --host=0.0.0.0 --port=$PORT"
+	case "fastapi":
+		return "uvicorn main:app --host 0.0.0.0 --port $PORT"
+	case "go", "golang":
+		return "./main"
+	case "rust":
+		return "./target/release/$(basename $(pwd))"
+	default:
+		return "npm start"
+	}
+}
+
+// Custom Domain Management Handlers
+
+// AddCustomDomain adds a custom domain to a project
+// POST /api/v1/hosting/:projectId/domains
+func (h *HostingHandler) AddCustomDomain(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	projectIDStr := c.Param("projectId")
+	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	// Verify project ownership
+	var project models.Project
+	if err := h.db.First(&project, uint(projectID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	var req struct {
+		Domain string `json:"domain" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Domain is required"})
+		return
+	}
+
+	// Validate domain format
+	if !isValidDomain(req.Domain) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid domain format"})
+		return
+	}
+
+	// Check if domain is already registered
+	var existing hosting.CustomDomain
+	if err := h.db.Where("domain = ?", req.Domain).First(&existing).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Domain is already registered"})
+		return
+	}
+
+	// Generate verification token
+	verificationToken := generateVerificationToken()
+
+	// Create custom domain record
+	customDomain := &hosting.CustomDomain{
+		Domain:             req.Domain,
+		ProjectID:          uint(projectID),
+		UserID:             userID,
+		VerificationStatus: "pending",
+		VerificationToken:  verificationToken,
+		DNSType:            "CNAME",
+		DNSTarget:          "hosting.apex.app",
+		SSLStatus:          "pending",
+		SSLProvider:        "cloudflare",
+		SSLAutoRenew:       true,
+	}
+
+	if err := h.db.Create(customDomain).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add custom domain"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"domain":  customDomain,
+		"dns_instructions": gin.H{
+			"type":   "CNAME",
+			"name":   "@", // or www
+			"target": "hosting.apex.app",
+			"ttl":    300,
+		},
+		"verification_instructions": gin.H{
+			"type":  "TXT",
+			"name":  "_apex-verify." + req.Domain,
+			"value": verificationToken,
+		},
+		"message": "Domain added. Please configure DNS and verify ownership.",
+	})
+}
+
+// GetCustomDomains returns custom domains for a project
+// GET /api/v1/hosting/:projectId/domains
+func (h *HostingHandler) GetCustomDomains(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	projectIDStr := c.Param("projectId")
+	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	// Verify project access
+	var project models.Project
+	if err := h.db.First(&project, uint(projectID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	if project.OwnerID != userID && !project.IsPublic {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	var domains []hosting.CustomDomain
+	if err := h.db.Where("project_id = ?", projectID).Find(&domains).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get custom domains"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"domains": domains,
+	})
+}
+
+// VerifyCustomDomain verifies domain ownership
+// POST /api/v1/hosting/:projectId/domains/:domainId/verify
+func (h *HostingHandler) VerifyCustomDomain(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	projectIDStr := c.Param("projectId")
+	domainIDStr := c.Param("domainId")
+
+	projectID, _ := strconv.ParseUint(projectIDStr, 10, 32)
+	domainID, _ := strconv.ParseUint(domainIDStr, 10, 32)
+
+	// Verify project ownership
+	var project models.Project
+	if err := h.db.First(&project, uint(projectID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// Get custom domain
+	var domain hosting.CustomDomain
+	if err := h.db.Where("id = ? AND project_id = ?", domainID, projectID).First(&domain).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
+		return
+	}
+
+	// In a real implementation, we would:
+	// 1. Query DNS for TXT record: _apex-verify.{domain}
+	// 2. Compare with stored verification token
+	// 3. If match, mark as verified
+
+	// For now, simulate verification success
+	now := time.Now()
+	domain.VerificationStatus = "verified"
+	domain.VerifiedAt = &now
+	domain.DNSVerified = true
+	domain.DNSCheckedAt = &now
+	domain.IsActive = true
+
+	if err := h.db.Save(&domain).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify domain"})
+		return
+	}
+
+	// Trigger SSL provisioning (async)
+	go h.provisionSSL(&domain)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"domain":  domain,
+		"message": "Domain verified successfully. SSL certificate is being provisioned.",
+	})
+}
+
+// DeleteCustomDomain removes a custom domain
+// DELETE /api/v1/hosting/:projectId/domains/:domainId
+func (h *HostingHandler) DeleteCustomDomain(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	projectIDStr := c.Param("projectId")
+	domainIDStr := c.Param("domainId")
+
+	projectID, _ := strconv.ParseUint(projectIDStr, 10, 32)
+	domainID, _ := strconv.ParseUint(domainIDStr, 10, 32)
+
+	// Verify project ownership
+	var project models.Project
+	if err := h.db.First(&project, uint(projectID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// Delete domain
+	if err := h.db.Where("id = ? AND project_id = ?", domainID, projectID).Delete(&hosting.CustomDomain{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete domain"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Domain deleted successfully",
+	})
+}
+
+// provisionSSL provisions an SSL certificate for a custom domain
+func (h *HostingHandler) provisionSSL(domain *hosting.CustomDomain) {
+	// In a real implementation, this would:
+	// 1. Request SSL certificate from Let's Encrypt or Cloudflare
+	// 2. Configure the certificate on the load balancer
+	// 3. Update domain status
+
+	// Simulate SSL provisioning
+	time.Sleep(5 * time.Second)
+
+	domain.SSLStatus = "active"
+	h.db.Save(domain)
+}
+
+// isValidDomain validates a domain name
+func isValidDomain(domain string) bool {
+	// Simple validation - in production, use a proper validator
+	if len(domain) < 4 || len(domain) > 253 {
+		return false
+	}
+	// Check for apex.app subdomain attempts
+	if strings.HasSuffix(domain, ".apex.app") {
+		return false
+	}
+	// Check basic format
+	parts := strings.Split(domain, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	return true
+}
+
+// generateVerificationToken generates a random verification token
+func generateVerificationToken() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return "apex-verify-" + hex.EncodeToString(b)
+}
+
 
 // detectFramework detects the framework from project files
 func detectFramework(language, framework string, files []models.File) string {

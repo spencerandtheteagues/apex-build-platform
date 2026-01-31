@@ -7,7 +7,7 @@ export type { XTerminalRef, XTerminalProps } from './XTerminal';
 export { TerminalManager } from './TerminalManager';
 
 export { TerminalService } from './TerminalService';
-export type { TerminalServiceCallbacks } from './TerminalService';
+export type { TerminalServiceCallbacks, CreateSessionOptions } from './TerminalService';
 
 export type {
   TerminalSession,
@@ -24,3 +24,10 @@ export type {
 } from './types'
 
 export { terminalThemes, getTerminalTheme, getXtermTheme } from './themes';
+
+// Re-export API types for terminal
+export type {
+  TerminalSessionResponse,
+  TerminalSessionInfo,
+  AvailableShell,
+} from '@/services/api';

@@ -1,0 +1,14 @@
+# Grafana Dashboard Provisioning Configuration
+apiVersion: 1
+
+providers:
+  - name: 'APEX.BUILD Dashboards'
+    orgId: 1
+    folder: 'APEX.BUILD'
+    folderUid: apex-build
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json

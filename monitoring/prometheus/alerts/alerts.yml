@@ -1,0 +1,315 @@
+# APEX.BUILD Prometheus Alerting Rules
+# High-value alerts for production monitoring
+
+groups:
+  - name: apex.http
+    interval: 30s
+    rules:
+      # High Error Rate Alert
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(apex_http_requests_total{status=~"5xx"}[5m]))
+            /
+            sum(rate(apex_http_requests_total[5m]))
+          ) * 100 > 5
+        for: 2m
+        labels:
+          severity: critical
+          service: apex-api
+        annotations:
+          summary: "High HTTP error rate detected"
+          description: "Error rate is {{ $value | printf \"%.2f\" }}% (threshold: 5%)"
+          runbook_url: "https://apex.build/runbooks/high-error-rate"
+
+      # High Latency Alert (P95)
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(apex_http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: apex-api
+        annotations:
+          summary: "High P95 latency detected"
+          description: "P95 latency is {{ $value | printf \"%.2f\" }}s (threshold: 2s)"
+          runbook_url: "https://apex.build/runbooks/high-latency"
+
+      # High Latency Alert (P99)
+      - alert: HighLatencyP99
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(apex_http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 5
+        for: 5m
+        labels:
+          severity: critical
+          service: apex-api
+        annotations:
+          summary: "Critical P99 latency detected"
+          description: "P99 latency is {{ $value | printf \"%.2f\" }}s (threshold: 5s)"
+          runbook_url: "https://apex.build/runbooks/high-latency"
+
+      # Too Many Requests In-Flight
+      - alert: TooManyRequestsInFlight
+        expr: apex_http_requests_in_flight > 100
+        for: 1m
+        labels:
+          severity: warning
+          service: apex-api
+        annotations:
+          summary: "High number of concurrent requests"
+          description: "{{ $value }} requests currently in-flight (threshold: 100)"
+
+  - name: apex.ai
+    interval: 30s
+    rules:
+      # AI Provider Down
+      - alert: AIProviderUnhealthy
+        expr: apex_ai_provider_health == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: apex-ai
+        annotations:
+          summary: "AI provider {{ $labels.provider }} is unhealthy"
+          description: "Provider has been unhealthy for more than 2 minutes"
+          runbook_url: "https://apex.build/runbooks/ai-provider-down"
+
+      # High AI Latency
+      - alert: HighAILatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(apex_ai_request_duration_seconds_bucket[5m])) by (le, provider)
+          ) > 30
+        for: 5m
+        labels:
+          severity: warning
+          service: apex-ai
+        annotations:
+          summary: "High AI request latency for {{ $labels.provider }}"
+          description: "P95 latency is {{ $value | printf \"%.2f\" }}s (threshold: 30s)"
+
+      # High AI Error Rate
+      - alert: HighAIErrorRate
+        expr: |
+          (
+            sum(rate(apex_ai_requests_total{status="error"}[5m])) by (provider)
+            /
+            sum(rate(apex_ai_requests_total[5m])) by (provider)
+          ) * 100 > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: apex-ai
+        annotations:
+          summary: "High AI error rate for {{ $labels.provider }}"
+          description: "Error rate is {{ $value | printf \"%.2f\" }}% (threshold: 10%)"
+
+      # High AI Cost
+      - alert: HighAICostHourly
+        expr: sum(rate(apex_ai_cost_dollars[1h])) * 3600 > 100
+        for: 30m
+        labels:
+          severity: warning
+          service: apex-ai
+        annotations:
+          summary: "High AI spending detected"
+          description: "Hourly AI cost is ${{ $value | printf \"%.2f\" }} (threshold: $100/hr)"
+
+      # Excessive AI Fallbacks
+      - alert: ExcessiveAIFallbacks
+        expr: sum(rate(apex_ai_fallbacks_total[5m])) * 300 > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: apex-ai
+        annotations:
+          summary: "Excessive AI provider fallbacks"
+          description: "{{ $value | printf \"%.0f\" }} fallbacks in the last 5 minutes"
+
+  - name: apex.execution
+    interval: 30s
+    rules:
+      # High Execution Failure Rate
+      - alert: HighExecutionFailureRate
+        expr: |
+          (
+            sum(rate(apex_execution_total{status="error"}[5m]))
+            /
+            sum(rate(apex_execution_total[5m]))
+          ) * 100 > 20
+        for: 5m
+        labels:
+          severity: warning
+          service: apex-execution
+        annotations:
+          summary: "High code execution failure rate"
+          description: "Failure rate is {{ $value | printf \"%.2f\" }}% (threshold: 20%)"
+
+      # Execution Queue Buildup
+      - alert: ExecutionQueueBacklog
+        expr: apex_execution_queue_length > 50
+        for: 5m
+        labels:
+          severity: warning
+          service: apex-execution
+        annotations:
+          summary: "Execution queue backlog detected"
+          description: "{{ $value }} executions waiting in queue (threshold: 50)"
+
+      # Long Running Executions
+      - alert: LongRunningExecutions
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(apex_execution_duration_seconds_bucket[5m])) by (le)
+          ) > 120
+        for: 10m
+        labels:
+          severity: warning
+          service: apex-execution
+        annotations:
+          summary: "Executions taking too long"
+          description: "P95 execution time is {{ $value | printf \"%.0f\" }}s (threshold: 120s)"
+
+  - name: apex.database
+    interval: 30s
+    rules:
+      # Database Connection Pool Exhaustion
+      - alert: DatabaseConnectionPoolLow
+        expr: |
+          apex_database_connections_idle /
+          (apex_database_connections_active + apex_database_connections_idle) < 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: apex-database
+        annotations:
+          summary: "Database connection pool running low"
+          description: "Only {{ $value | printf \"%.1f\" }}% idle connections remaining"
+
+      # High Database Query Latency
+      - alert: HighDatabaseLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(apex_database_query_duration_seconds_bucket[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: apex-database
+        annotations:
+          summary: "High database query latency"
+          description: "P95 query latency is {{ $value | printf \"%.2f\" }}s (threshold: 1s)"
+
+      # Database Errors
+      - alert: DatabaseErrors
+        expr: sum(rate(apex_database_errors_total[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: apex-database
+        annotations:
+          summary: "Database errors detected"
+          description: "{{ $value | printf \"%.2f\" }} errors per second"
+
+  - name: apex.websocket
+    interval: 30s
+    rules:
+      # WebSocket Connection Drop
+      - alert: WebSocketConnectionDrop
+        expr: |
+          (
+            sum(apex_websocket_connections) - sum(apex_websocket_connections offset 5m)
+          ) / sum(apex_websocket_connections offset 5m) * 100 < -20
+        for: 2m
+        labels:
+          severity: warning
+          service: apex-websocket
+        annotations:
+          summary: "Significant WebSocket connection drop"
+          description: "Connections dropped by {{ $value | printf \"%.0f\" }}% in 5 minutes"
+
+      # High WebSocket Latency
+      - alert: HighWebSocketLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(apex_websocket_latency_seconds_bucket[5m])) by (le)
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: apex-websocket
+        annotations:
+          summary: "High WebSocket message latency"
+          description: "P95 latency is {{ $value | printf \"%.3f\" }}s (threshold: 0.5s)"
+
+  - name: apex.infrastructure
+    interval: 1m
+    rules:
+      # API Service Down
+      - alert: APIServiceDown
+        expr: up{job="apex-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: apex-api
+        annotations:
+          summary: "APEX API service is down"
+          description: "The API service has been unreachable for more than 1 minute"
+          runbook_url: "https://apex.build/runbooks/api-down"
+
+      # High Goroutine Count
+      - alert: HighGoroutineCount
+        expr: apex_server_goroutines > 10000
+        for: 5m
+        labels:
+          severity: warning
+          service: apex-api
+        annotations:
+          summary: "High goroutine count detected"
+          description: "{{ $value }} goroutines running (threshold: 10000)"
+
+      # Cache Hit Rate Low
+      - alert: LowCacheHitRate
+        expr: |
+          sum(rate(apex_cache_hits_total[5m])) /
+          (sum(rate(apex_cache_hits_total[5m])) + sum(rate(apex_cache_misses_total[5m]))) < 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: apex-cache
+        annotations:
+          summary: "Low cache hit rate"
+          description: "Cache hit rate is {{ $value | printf \"%.1f\" }}% (threshold: 50%)"
+
+  - name: apex.business
+    interval: 5m
+    rules:
+      # Daily Signup Drop
+      - alert: SignupDrop
+        expr: |
+          increase(apex_billing_signups_total[24h]) <
+          increase(apex_billing_signups_total[24h] offset 7d) * 0.5
+        for: 1h
+        labels:
+          severity: warning
+          service: apex-business
+        annotations:
+          summary: "Significant drop in daily signups"
+          description: "Signups are less than 50% of last week's average"
+
+      # High Churn Rate
+      - alert: HighChurnRate
+        expr: |
+          increase(apex_billing_churn_total[7d]) /
+          (apex_business_total_users > 0) * 100 > 5
+        for: 1h
+        labels:
+          severity: warning
+          service: apex-business
+        annotations:
+          summary: "High weekly churn rate detected"
+          description: "Weekly churn rate is {{ $value | printf \"%.1f\" }}% (threshold: 5%)"

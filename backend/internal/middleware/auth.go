@@ -4,6 +4,7 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -85,7 +86,17 @@ func RequireRole(role string) gin.HandlerFunc {
 			return
 		}
 
-		if userRole.(string) != role {
+		userRoleStr, ok := userRole.(string)
+		if !ok {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Invalid role type in context",
+				"code":  "INTERNAL_ERROR",
+			})
+			c.Abort()
+			return
+		}
+
+		if userRoleStr != role {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error": "Insufficient permissions",
 				"code":  "INSUFFICIENT_PERMISSIONS",
@@ -113,7 +124,16 @@ func RequireAnyRole(roles ...string) gin.HandlerFunc {
 			return
 		}
 
-		userRoleStr := userRole.(string)
+		userRoleStr, ok := userRole.(string)
+		if !ok {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Invalid role type in context",
+				"code":  "INTERNAL_ERROR",
+			})
+			c.Abort()
+			return
+		}
+
 		for _, role := range roles {
 			if userRoleStr == role {
 				c.Next()
@@ -122,10 +142,10 @@ func RequireAnyRole(roles ...string) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusForbidden, gin.H{
-			"error": "Insufficient permissions",
-			"code":  "INSUFFICIENT_PERMISSIONS",
+			"error":          "Insufficient permissions",
+			"code":           "INSUFFICIENT_PERMISSIONS",
 			"required_roles": roles,
-			"user_role": userRoleStr,
+			"user_role":      userRoleStr,
 		})
 		c.Abort()
 	}
@@ -171,20 +191,12 @@ func OptionalAuth(authService *auth.AuthService) gin.HandlerFunc {
 func extractBearerToken(authHeader string) (string, error) {
 	const bearerPrefix = "Bearer "
 	if !strings.HasPrefix(authHeader, bearerPrefix) {
-		return "", gin.Error{
-			Err:  nil,
-			Type: gin.ErrorTypePublic,
-			Meta: "Invalid authorization header format. Expected 'Bearer <token>'",
-		}
+		return "", errors.New("invalid authorization header format: expected 'Bearer <token>'")
 	}
 
 	token := strings.TrimPrefix(authHeader, bearerPrefix)
 	if token == "" {
-		return "", gin.Error{
-			Err:  nil,
-			Type: gin.ErrorTypePublic,
-			Meta: "Token cannot be empty",
-		}
+		return "", errors.New("token cannot be empty")
 	}
 
 	return token, nil
@@ -196,7 +208,11 @@ func GetUserID(c *gin.Context) (uint, bool) {
 	if !exists {
 		return 0, false
 	}
-	return userID.(uint), true
+	id, ok := userID.(uint)
+	if !ok {
+		return 0, false
+	}
+	return id, true
 }
 
 // GetUsername helper function to extract username from context
@@ -205,7 +221,11 @@ func GetUsername(c *gin.Context) (string, bool) {
 	if !exists {
 		return "", false
 	}
-	return username.(string), true
+	name, ok := username.(string)
+	if !ok {
+		return "", false
+	}
+	return name, true
 }
 
 // GetUserEmail helper function to extract email from context
@@ -214,7 +234,11 @@ func GetUserEmail(c *gin.Context) (string, bool) {
 	if !exists {
 		return "", false
 	}
-	return email.(string), true
+	addr, ok := email.(string)
+	if !ok {
+		return "", false
+	}
+	return addr, true
 }
 
 // GetUserRole helper function to extract role from context
@@ -223,7 +247,11 @@ func GetUserRole(c *gin.Context) (string, bool) {
 	if !exists {
 		return "", false
 	}
-	return role.(string), true
+	r, ok := role.(string)
+	if !ok {
+		return "", false
+	}
+	return r, true
 }
 
 // IsAuthenticated checks if request is authenticated
@@ -234,7 +262,11 @@ func IsAuthenticated(c *gin.Context) bool {
 		_, exists = c.Get("user_id")
 		return exists
 	}
-	return authenticated.(bool)
+	auth, ok := authenticated.(bool)
+	if !ok {
+		return false
+	}
+	return auth
 }
 
 // GetRawToken retrieves the raw JWT token from context for logout blacklisting
@@ -243,5 +275,9 @@ func GetRawToken(c *gin.Context) (string, bool) {
 	if !exists {
 		return "", false
 	}
-	return token.(string), true
+	t, ok := token.(string)
+	if !ok {
+		return "", false
+	}
+	return t, true
 }

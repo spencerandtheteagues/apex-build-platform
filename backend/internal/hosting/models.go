@@ -283,3 +283,116 @@ func (d *NativeDeployment) GetFullURL() string {
 	}
 	return "https://" + d.Subdomain + ".apex.app"
 }
+
+// CustomDomain represents a custom domain mapping for a deployment
+type CustomDomain struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	// Domain info
+	Domain     string `json:"domain" gorm:"uniqueIndex;not null;type:varchar(255)"` // e.g., "myapp.com"
+	ProjectID  uint   `json:"project_id" gorm:"not null;index"`
+	UserID     uint   `json:"user_id" gorm:"not null;index"`
+
+	// Verification
+	VerificationStatus string `json:"verification_status" gorm:"default:'pending'"` // pending, verified, failed
+	VerificationToken  string `json:"verification_token,omitempty"`                 // TXT record token for verification
+	VerifiedAt         *time.Time `json:"verified_at,omitempty"`
+
+	// DNS configuration
+	DNSType        string `json:"dns_type" gorm:"default:'CNAME'"` // CNAME or A record
+	DNSTarget      string `json:"dns_target"`                      // Target for the DNS record
+	DNSVerified    bool   `json:"dns_verified" gorm:"default:false"`
+	DNSCheckedAt   *time.Time `json:"dns_checked_at,omitempty"`
+
+	// SSL configuration
+	SSLStatus       string     `json:"ssl_status" gorm:"default:'pending'"` // pending, provisioning, active, failed
+	SSLProvider     string     `json:"ssl_provider" gorm:"default:'cloudflare'"` // cloudflare, letsencrypt
+	SSLCertificateID string    `json:"ssl_certificate_id,omitempty"`
+	SSLExpiresAt    *time.Time `json:"ssl_expires_at,omitempty"`
+	SSLAutoRenew    bool       `json:"ssl_auto_renew" gorm:"default:true"`
+
+	// Link to active deployment
+	DeploymentID string `json:"deployment_id,omitempty" gorm:"type:varchar(36);index"`
+
+	// Status flags
+	IsActive  bool `json:"is_active" gorm:"default:false"` // Only active when verified and SSL is ready
+	IsPrimary bool `json:"is_primary" gorm:"default:false"` // Primary custom domain for the project
+}
+
+// TableName specifies the table name for CustomDomain
+func (CustomDomain) TableName() string {
+	return "custom_domains"
+}
+
+// IsReady returns true if the custom domain is verified and has valid SSL
+func (d *CustomDomain) IsReady() bool {
+	return d.VerificationStatus == "verified" && d.SSLStatus == "active" && d.IsActive
+}
+
+// DeploymentEvent represents an event in the deployment lifecycle
+type DeploymentEvent struct {
+	ID        uint      `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// Event info
+	DeploymentID string `json:"deployment_id" gorm:"not null;index;type:varchar(36)"`
+	EventType    string `json:"event_type" gorm:"not null;type:varchar(50)"` // build_started, build_completed, deploy_started, etc.
+	EventStatus  string `json:"event_status" gorm:"type:varchar(20)"`        // success, error, warning
+	Message      string `json:"message" gorm:"type:text"`
+	Metadata     string `json:"metadata,omitempty" gorm:"type:text"` // JSON metadata
+
+	// Timing
+	Duration int64 `json:"duration,omitempty"` // Event duration in ms
+}
+
+// TableName specifies the table name for DeploymentEvent
+func (DeploymentEvent) TableName() string {
+	return "deployment_events"
+}
+
+// SSLCertificate represents an SSL certificate for a domain
+type SSLCertificate struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	// Certificate info
+	CertificateID string `json:"certificate_id" gorm:"uniqueIndex;not null;type:varchar(100)"`
+	Domain        string `json:"domain" gorm:"not null;type:varchar(255)"`
+	Issuer        string `json:"issuer" gorm:"type:varchar(100)"` // Let's Encrypt, Cloudflare, etc.
+
+	// Certificate data (encrypted)
+	CertificatePEM    string `json:"-" gorm:"type:text"` // Encrypted certificate
+	PrivateKeyPEM     string `json:"-" gorm:"type:text"` // Encrypted private key
+	CertificateChain  string `json:"-" gorm:"type:text"` // Encrypted certificate chain
+
+	// Validity
+	IssuedAt  time.Time `json:"issued_at"`
+	ExpiresAt time.Time `json:"expires_at" gorm:"index"`
+	IsValid   bool      `json:"is_valid" gorm:"default:true"`
+
+	// Renewal
+	AutoRenew      bool       `json:"auto_renew" gorm:"default:true"`
+	RenewalAttempts int       `json:"renewal_attempts" gorm:"default:0"`
+	LastRenewalAt  *time.Time `json:"last_renewal_at,omitempty"`
+	NextRenewalAt  *time.Time `json:"next_renewal_at,omitempty"`
+
+	// Linking
+	CustomDomainID *uint `json:"custom_domain_id,omitempty" gorm:"index"`
+	SubdomainID    *uint `json:"subdomain_id,omitempty" gorm:"index"`
+}
+
+// TableName specifies the table name for SSLCertificate
+func (SSLCertificate) TableName() string {
+	return "ssl_certificates"
+}
+
+// NeedsRenewal returns true if the certificate needs to be renewed
+func (c *SSLCertificate) NeedsRenewal() bool {
+	// Renew 30 days before expiry
+	return time.Now().Add(30 * 24 * time.Hour).After(c.ExpiresAt)
+}
