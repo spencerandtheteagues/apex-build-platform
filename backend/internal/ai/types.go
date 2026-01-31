@@ -140,13 +140,13 @@ func DefaultRouterConfig() *RouterConfig {
 		DefaultProviders: map[AICapability]AIProvider{
 			CapabilityCodeGeneration:       ProviderOllama,  // Default to Local/DeepSeek
 			CapabilityNaturalLanguageToCode: ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityCodeReview:           ProviderClaude,  // Claude excellent at analysis
+			CapabilityCodeReview:           ProviderOllama,  // Default to Local/DeepSeek
 			CapabilityCodeCompletion:       ProviderOllama,  // Default to Local/DeepSeek
 			CapabilityDebugging:            ProviderOllama,  // Default to Local/DeepSeek
 			CapabilityExplanation:          ProviderOllama,  // Default to Local/DeepSeek
 			CapabilityRefactoring:          ProviderOllama,  // Default to Local/DeepSeek
 			CapabilityTesting:              ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityDocumentation:        ProviderClaude,  // Claude excels at documentation
+			CapabilityDocumentation:        ProviderOllama,  // Default to Local/DeepSeek
 			CapabilityArchitecture:         ProviderOllama,  // Default to Local/DeepSeek
 		},
 		FallbackOrder: map[AIProvider][]AIProvider{

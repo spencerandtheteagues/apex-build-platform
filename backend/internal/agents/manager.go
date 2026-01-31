@@ -177,15 +177,31 @@ func (am *AgentManager) StartBuild(buildID string) error {
 		return fmt.Errorf("no AI providers available")
 	}
 
-	// Select best provider for lead agent (prefer Claude, then GPT, then Gemini)
+	// Select best provider for lead agent
+	// PRIORITY: Ollama (BYOK/Local) > Claude > GPT > Gemini
+	// If the user has brought their own local model, we MUST use it to avoid platform costs.
 	leadProvider := availableProviders[0]
+	useOllama := false
+
+	// Check for Ollama first
 	for _, p := range availableProviders {
-		if p == ProviderClaude {
-			leadProvider = ProviderClaude
+		if p == ProviderOllama {
+			leadProvider = ProviderOllama
+			useOllama = true
 			break
 		}
-		if p == ProviderGPT && leadProvider != ProviderClaude {
-			leadProvider = ProviderGPT
+	}
+
+	// If not using Ollama, fall back to standard platform hierarchy
+	if !useOllama {
+		for _, p := range availableProviders {
+			if p == ProviderClaude {
+				leadProvider = ProviderClaude
+				break
+			}
+			if p == ProviderGPT && leadProvider != ProviderClaude {
+				leadProvider = ProviderGPT
+			}
 		}
 	}
 
@@ -570,6 +586,7 @@ func (am *AgentManager) assignProvidersToRoles(providers []AIProvider, roles []A
 	hasClaude := false
 	hasGPT := false
 	hasGemini := false
+	hasOllama := false
 	for _, p := range providers {
 		switch p {
 		case ProviderClaude:
@@ -578,12 +595,24 @@ func (am *AgentManager) assignProvidersToRoles(providers []AIProvider, roles []A
 			hasGPT = true
 		case ProviderGemini:
 			hasGemini = true
+		case ProviderOllama:
+			hasOllama = true
 		}
 	}
 
 	numProviders := len(providers)
-	log.Printf("Assigning providers to roles: %d providers available (Claude=%v, GPT=%v, Gemini=%v)",
-		numProviders, hasClaude, hasGPT, hasGemini)
+	log.Printf("Assigning providers to roles: %d providers available (Ollama=%v, Claude=%v, GPT=%v, Gemini=%v)",
+		numProviders, hasOllama, hasClaude, hasGPT, hasGemini)
+
+	// BYOK PRIORITY: If user provided a local model (Ollama), use it for EVERYTHING.
+	// This avoids platform costs and respects user choice for local inference.
+	if hasOllama {
+		log.Printf("Ollama (BYOK) available: using local model for all agents")
+		for _, role := range roles {
+			assignments[role] = ProviderOllama
+		}
+		return assignments
+	}
 
 	switch numProviders {
 	case 1:
