@@ -62,13 +62,24 @@ type ReviewMetrics struct {
 
 // CodeReviewService provides AI-powered code review
 type CodeReviewService struct {
-	aiRouter *ai.AIRouter
+	aiRouter      *ai.AIRouter
+	buildVerifier *BuildVerifier
+	projectDir    string
 }
 
 // NewCodeReviewService creates a new code review service
 func NewCodeReviewService(aiRouter *ai.AIRouter) *CodeReviewService {
 	return &CodeReviewService{
 		aiRouter: aiRouter,
+	}
+}
+
+// NewCodeReviewServiceWithBuild creates a service with build verification enabled
+func NewCodeReviewServiceWithBuild(aiRouter *ai.AIRouter, projectDir string) *CodeReviewService {
+	return &CodeReviewService{
+		aiRouter:      aiRouter,
+		buildVerifier: NewBuildVerifier(projectDir),
+		projectDir:    projectDir,
 	}
 }
 
@@ -405,4 +416,291 @@ func (s *CodeReviewService) SecurityReview(ctx context.Context, code, language s
 		Focus:    []string{"security"},
 		Severity: "warning",
 	})
+}
+
+// MultiPassReview performs a two-pass review for deeper analysis
+// Pass 1: Fast model — syntax, security, obvious bugs
+// Pass 2: Deep model — architecture, logic, performance, fix suggestions
+func (s *CodeReviewService) MultiPassReview(ctx context.Context, req ReviewRequest) (*ReviewResponse, error) {
+	startTime := time.Now()
+
+	// Pass 1: Quick scan (syntax + security)
+	pass1Req := ReviewRequest{
+		Code:       req.Code,
+		Language:   req.Language,
+		FileName:   req.FileName,
+		Context:    req.Context,
+		Focus:      []string{"bugs", "security", "syntax"},
+		MaxResults: 20,
+	}
+	pass1, err := s.Review(ctx, pass1Req)
+	if err != nil {
+		return nil, fmt.Errorf("pass 1 failed: %w", err)
+	}
+
+	// Pass 2: Deep analysis (architecture + performance + fix suggestions)
+	pass2Req := ReviewRequest{
+		Code:     req.Code,
+		Language: req.Language,
+		FileName: req.FileName,
+		Context:  req.Context,
+		Focus:    []string{"performance", "best_practices", "architecture", "readability"},
+	}
+	pass2, err := s.Review(ctx, pass2Req)
+	if err != nil {
+		// Pass 2 failure is non-fatal, return pass 1 results
+		return pass1, nil
+	}
+
+	// Merge results
+	merged := &ReviewResponse{
+		Findings:    append(pass1.Findings, pass2.Findings...),
+		Summary:     pass1.Summary + " " + pass2.Summary,
+		Score:       (pass1.Score + pass2.Score) / 2,
+		Metrics:     pass1.Metrics,
+		Suggestions: append(pass1.Suggestions, pass2.Suggestions...),
+		ReviewedAt:  time.Now(),
+		Duration:    time.Since(startTime).Milliseconds(),
+	}
+
+	// Add Apex-specific static analysis for Apex files
+	if IsApexFile(req.FileName) || strings.EqualFold(req.Language, "apex") {
+		engine := NewApexRuleEngine()
+		apexFindings := engine.Analyze(req.Code, req.FileName)
+		merged.Findings = append(merged.Findings, apexFindings...)
+	}
+
+	// Deduplicate findings by line + message
+	merged.Findings = s.deduplicateFindings(merged.Findings)
+
+	// Apply filters
+	if req.Severity != "" {
+		merged.Findings = s.filterBySeverity(merged.Findings, req.Severity)
+	}
+	if req.MaxResults > 0 && len(merged.Findings) > req.MaxResults {
+		merged.Findings = merged.Findings[:req.MaxResults]
+	}
+
+	// Recalculate metrics
+	merged.Metrics.SecurityIssues = s.countBySeverityType(merged.Findings, "security")
+	merged.Metrics.BugRisks = s.countBySeverityType(merged.Findings, "bug")
+	merged.Metrics.StyleIssues = s.countBySeverityType(merged.Findings, "style")
+
+	return merged, nil
+}
+
+// ReviewWithFixes performs a review and generates concrete fix diffs
+func (s *CodeReviewService) ReviewWithFixes(ctx context.Context, req ReviewRequest) (*ReviewResponse, []FixSuggestion, error) {
+	// First do the multi-pass review
+	review, err := s.MultiPassReview(ctx, req)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Only generate fixes for error/warning findings
+	var criticalFindings []ReviewFinding
+	for _, f := range review.Findings {
+		if f.Severity == "error" || f.Severity == "warning" {
+			criticalFindings = append(criticalFindings, f)
+		}
+	}
+
+	if len(criticalFindings) == 0 {
+		return review, nil, nil
+	}
+
+	// Ask AI for concrete fixes
+	fixes, err := s.generateFixes(ctx, req.Code, req.Language, criticalFindings)
+	if err != nil {
+		// Non-fatal — return review without fixes
+		return review, nil, nil
+	}
+
+	return review, fixes, nil
+}
+
+// FixSuggestion represents a concrete code fix with search/replace
+type FixSuggestion struct {
+	FindingIndex int    `json:"finding_index"`
+	File         string `json:"file"`
+	Search       string `json:"search"`
+	Replace      string `json:"replace"`
+	Description  string `json:"description"`
+}
+
+func (s *CodeReviewService) generateFixes(ctx context.Context, code, language string, findings []ReviewFinding) ([]FixSuggestion, error) {
+	// Build findings summary for AI
+	var findingsList strings.Builder
+	for i, f := range findings {
+		findingsList.WriteString(fmt.Sprintf("%d. [Line %d] %s: %s\n", i+1, f.Line, f.Severity, f.Message))
+	}
+
+	prompt := fmt.Sprintf(`Given this %s code and the following issues, generate concrete fixes.
+
+Issues:
+%s
+
+For each fix, respond with JSON array:
+[
+  {
+    "finding_index": <1-based index>,
+    "search": "<exact text to find in the code>",
+    "replace": "<replacement text>",
+    "description": "<what this fix does>"
+  }
+]
+
+The search text must match the code exactly. Only output valid JSON.
+
+Code:
+%s`, language, findingsList.String(), code)
+
+	aiResponse, err := s.aiRouter.Generate(ctx, &ai.AIRequest{
+		Capability: ai.CapabilityCodeReview,
+		Prompt:     prompt,
+		Language:   language,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse fixes
+	clean := aiResponse.Content
+	if strings.HasPrefix(clean, "```json") {
+		clean = strings.TrimPrefix(clean, "```json")
+		clean = strings.TrimSuffix(strings.TrimSpace(clean), "```")
+	}
+	if strings.HasPrefix(clean, "```") {
+		clean = strings.TrimPrefix(clean, "```")
+		clean = strings.TrimSuffix(strings.TrimSpace(clean), "```")
+	}
+	clean = strings.TrimSpace(clean)
+
+	var fixes []FixSuggestion
+	if err := json.Unmarshal([]byte(clean), &fixes); err != nil {
+		return nil, fmt.Errorf("failed to parse fix suggestions: %w", err)
+	}
+
+	return fixes, nil
+}
+
+// deduplicateFindings removes duplicate findings by line + message
+func (s *CodeReviewService) deduplicateFindings(findings []ReviewFinding) []ReviewFinding {
+	seen := make(map[string]bool)
+	var unique []ReviewFinding
+
+	for _, f := range findings {
+		key := fmt.Sprintf("%d:%s", f.Line, f.Message)
+		if !seen[key] {
+			seen[key] = true
+			unique = append(unique, f)
+		}
+	}
+
+	return unique
+}
+
+// ComprehensiveReview performs BOTH AI review AND build verification
+// This catches issues that pure AI review misses (undefined symbols, type errors)
+func (s *CodeReviewService) ComprehensiveReview(ctx context.Context, req ReviewRequest) (*ReviewResponse, error) {
+	startTime := time.Now()
+
+	// PHASE 1: Build verification (catches real compilation errors)
+	var buildFindings []ReviewFinding
+	var buildSuccess bool = true
+
+	if s.buildVerifier != nil {
+		buildResult, err := s.buildVerifier.VerifyBuild(ctx, req.Language)
+		if err == nil {
+			buildFindings = buildResult.Findings
+			buildSuccess = buildResult.Success
+
+			// If build fails, prioritize build errors
+			if !buildSuccess && len(buildFindings) > 0 {
+				// Still do AI review but mark it as secondary
+				for i := range buildFindings {
+					buildFindings[i].Type = "build_" + buildFindings[i].Type
+				}
+			}
+		}
+	}
+
+	// PHASE 2: AI-powered semantic review (catches logic, security, style issues)
+	aiReview, err := s.MultiPassReview(ctx, req)
+	if err != nil {
+		// If AI review fails but build verification worked, return build results
+		if len(buildFindings) > 0 {
+			return &ReviewResponse{
+				Findings:   buildFindings,
+				Summary:    "Build verification completed. AI review unavailable.",
+				Score:      buildSuccess ? 70 : 30,
+				Metrics:    s.calculateMetrics(req.Code),
+				ReviewedAt: time.Now(),
+				Duration:   time.Since(startTime).Milliseconds(),
+			}, nil
+		}
+		return nil, err
+	}
+
+	// PHASE 3: Merge findings (build errors first, then AI findings)
+	allFindings := append(buildFindings, aiReview.Findings...)
+
+	// Deduplicate
+	allFindings = s.deduplicateFindings(allFindings)
+
+	// Sort by severity (errors first)
+	allFindings = s.sortBySeverity(allFindings)
+
+	// Adjust score based on build success
+	score := aiReview.Score
+	if !buildSuccess {
+		// Heavily penalize failed builds
+		score = min(score, 40)
+	}
+
+	// Update summary
+	summary := aiReview.Summary
+	if !buildSuccess {
+		summary = fmt.Sprintf("BUILD FAILED: %d compilation error(s). %s", len(buildFindings), summary)
+	}
+
+	return &ReviewResponse{
+		Findings:    allFindings,
+		Summary:     summary,
+		Score:       score,
+		Metrics:     aiReview.Metrics,
+		Suggestions: append([]string{"Fix all build errors before deployment"}, aiReview.Suggestions...),
+		ReviewedAt:  time.Now(),
+		Duration:    time.Since(startTime).Milliseconds(),
+	}, nil
+}
+
+// sortBySeverity sorts findings with errors first, then warnings, then info
+func (s *CodeReviewService) sortBySeverity(findings []ReviewFinding) []ReviewFinding {
+	severityOrder := map[string]int{
+		"error":   0,
+		"warning": 1,
+		"info":    2,
+		"hint":    3,
+	}
+
+	// Simple bubble sort (findings lists are typically small)
+	for i := 0; i < len(findings); i++ {
+		for j := i + 1; j < len(findings); j++ {
+			iOrder := severityOrder[findings[i].Severity]
+			jOrder := severityOrder[findings[j].Severity]
+			if jOrder < iOrder {
+				findings[i], findings[j] = findings[j], findings[i]
+			}
+		}
+	}
+
+	return findings
+}
+
+// PreCommitReview runs a fast review suitable for pre-commit hooks
+// Focuses on build verification and critical issues only
+func (s *CodeReviewService) PreCommitReview(ctx context.Context, language, projectDir string) (*BuildResult, error) {
+	verifier := NewBuildVerifier(projectDir)
+	return verifier.VerifyBuild(ctx, language)
 }
