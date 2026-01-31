@@ -1,0 +1,3092 @@
+openapi: 3.0.3
+info:
+  title: APEX.BUILD API
+  description: |
+    Next-generation cloud development platform with multi-AI integration.
+
+    APEX.BUILD provides:
+    - Multi-AI integration (Claude, GPT-4, Gemini, Grok, Ollama)
+    - Real-time code collaboration
+    - Cloud code execution with Docker container sandboxing
+    - One-click deployment (Vercel, Netlify, Render, native hosting)
+    - Live preview with hot reload
+    - BYOK (Bring Your Own Key) for AI providers
+
+    ## Authentication
+
+    All protected endpoints require a Bearer JWT token in the Authorization header:
+    ```
+    Authorization: Bearer <your_jwt_token>
+    ```
+
+    Obtain tokens via the `/api/v1/auth/login` or `/api/v1/auth/register` endpoints.
+
+    ## Rate Limiting
+
+    - Authentication endpoints: 10 requests/minute
+    - AI endpoints: Based on subscription tier
+    - General API: 1000 requests/hour
+
+    ## WebSocket Endpoints
+
+    Real-time features use WebSocket connections:
+    - `/ws/build/:buildId` - Build progress updates
+    - `/ws/terminal/:sessionId` - Interactive terminal
+    - `/ws/collab` - Real-time collaboration
+    - `/ws/debug/:sessionId` - Debug session
+    - `/ws/deploy/:deploymentId` - Deployment logs
+    - `/mcp/ws` - MCP protocol
+
+  version: 1.0.0
+  contact:
+    name: APEX.BUILD Support
+    email: support@apex.build
+    url: https://apex.build
+  license:
+    name: Proprietary
+    url: https://apex.build/terms
+
+servers:
+  - url: https://api.apex.build/api/v1
+    description: Production server
+  - url: http://localhost:8080/api/v1
+    description: Development server
+
+tags:
+  - name: Authentication
+    description: User authentication and session management
+  - name: User
+    description: User profile management
+  - name: Projects
+    description: Project CRUD operations
+  - name: Files
+    description: File management within projects
+  - name: AI
+    description: AI code generation and assistance
+  - name: Execution
+    description: Code execution and terminal management
+  - name: Preview
+    description: Live preview server management
+  - name: Deploy
+    description: One-click deployment to cloud providers
+  - name: Hosting
+    description: Native .apex.app hosting
+  - name: Billing
+    description: Subscription and payment management
+  - name: Usage
+    description: Usage tracking and quota management
+  - name: BYOK
+    description: Bring Your Own Key API management
+  - name: Secrets
+    description: Encrypted secrets management
+  - name: Admin
+    description: Administrative operations (requires admin privileges)
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ==================== AUTHENTICATION ====================
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register a new user
+      description: Create a new user account and receive authentication tokens
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              username: johndoe
+              email: john@example.com
+              password: SecureP@ssw0rd!
+              full_name: John Doe
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: User already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: User login
+      description: Authenticate user and receive JWT tokens
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              username: johndoe
+              password: SecureP@ssw0rd!
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh access token
+      description: Exchange a refresh token for new access and refresh tokens
+      operationId: refreshToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        '200':
+          description: Tokens refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: User logout
+      description: Invalidate current session and blacklist token
+      operationId: logout
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ==================== USER ====================
+  /user/profile:
+    get:
+      tags: [User]
+      summary: Get current user profile
+      operationId: getProfile
+      responses:
+        '200':
+          description: User profile retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      tags: [User]
+      summary: Update user profile
+      operationId: updateProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ==================== PROJECTS ====================
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List user projects
+      operationId: getProjects
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Projects retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Project'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+    post:
+      tags: [Projects]
+      summary: Create a new project
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+            example:
+              name: My React App
+              description: A sample React application
+              language: typescript
+              framework: react
+              is_public: false
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  project:
+                    $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /projects/{id}:
+    get:
+      tags: [Projects]
+      summary: Get project details
+      operationId: getProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project:
+                    $ref: '#/components/schemas/Project'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Projects]
+      summary: Update project
+      operationId: updateProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectRequest'
+      responses:
+        '200':
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Projects]
+      summary: Delete project
+      operationId: deleteProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{id}/files:
+    get:
+      tags: [Files]
+      summary: List project files
+      operationId: getProjectFiles
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Files retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/File'
+    post:
+      tags: [Files]
+      summary: Create file in project
+      operationId: createFile
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFileRequest'
+      responses:
+        '201':
+          description: File created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/File'
+                  message:
+                    type: string
+
+  /projects/{id}/download:
+    get:
+      tags: [Projects]
+      summary: Download project as ZIP
+      operationId: downloadProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: ZIP archive
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+
+  /files/{id}:
+    put:
+      tags: [Files]
+      summary: Update file content
+      operationId: updateFile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateFileRequest'
+      responses:
+        '200':
+          description: File updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ==================== AI ====================
+  /ai/generate:
+    post:
+      tags: [AI]
+      summary: Generate AI response
+      description: |
+        Send a prompt to the AI system. The request is routed to the best available
+        AI provider based on capability and user preferences.
+
+        Capabilities:
+        - code_generation: Generate new code
+        - code_review: Review and analyze code
+        - code_completion: Complete partial code
+        - debugging: Help debug issues
+        - explanation: Explain code
+        - refactoring: Suggest refactoring
+        - testing: Generate tests
+        - documentation: Generate docs
+      operationId: aiGenerate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIGenerateRequest'
+            example:
+              prompt: "Create a React component for a user profile card"
+              capability: code_generation
+              language: typescript
+              context:
+                framework: react
+      responses:
+        '200':
+          description: AI response generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIGenerateResponse'
+        '429':
+          description: Usage limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /ai/usage:
+    get:
+      tags: [AI]
+      summary: Get AI usage statistics
+      operationId: getAIUsage
+      responses:
+        '200':
+          description: Usage statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIUsageResponse'
+
+  # ==================== EXECUTION ====================
+  /execute:
+    post:
+      tags: [Execution]
+      summary: Execute code snippet
+      description: |
+        Execute code in a secure Docker container sandbox.
+        Supports 10+ languages including JavaScript, TypeScript, Python, Go, Rust, Java, and more.
+      operationId: executeCode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteCodeRequest'
+            example:
+              code: "print('Hello, APEX.BUILD!')"
+              language: python
+              timeout: 30
+      responses:
+        '200':
+          description: Execution result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResult'
+        '503':
+          description: Execution disabled (Docker unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /execute/file:
+    post:
+      tags: [Execution]
+      summary: Execute a file
+      operationId: executeFile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteFileRequest'
+      responses:
+        '200':
+          description: Execution result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResult'
+
+  /execute/project:
+    post:
+      tags: [Execution]
+      summary: Execute entire project
+      operationId: executeProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteProjectRequest'
+      responses:
+        '200':
+          description: Execution result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResult'
+
+  /execute/languages:
+    get:
+      tags: [Execution]
+      summary: Get supported languages
+      operationId: getLanguages
+      responses:
+        '200':
+          description: Languages list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      languages:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Language'
+                      total:
+                        type: integer
+
+  /execute/{id}:
+    get:
+      tags: [Execution]
+      summary: Get execution details
+      operationId: getExecution
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Execution details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResult'
+
+  /execute/{id}/stop:
+    post:
+      tags: [Execution]
+      summary: Stop running execution
+      operationId: stopExecution
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Execution stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /execute/history:
+    get:
+      tags: [Execution]
+      summary: Get execution history
+      operationId: getExecutionHistory
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: project_id
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Execution history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Execution'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /execute/stats:
+    get:
+      tags: [Execution]
+      summary: Get execution statistics
+      operationId: getExecutionStats
+      responses:
+        '200':
+          description: Execution statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionStats'
+
+  /execute/sandbox/status:
+    get:
+      tags: [Execution]
+      summary: Get sandbox security status
+      operationId: getSandboxStatus
+      responses:
+        '200':
+          description: Sandbox status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxStatus'
+
+  # ==================== TERMINAL ====================
+  /terminal/sessions:
+    get:
+      tags: [Execution]
+      summary: List terminal sessions
+      operationId: listTerminalSessions
+      responses:
+        '200':
+          description: Terminal sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TerminalSession'
+    post:
+      tags: [Execution]
+      summary: Create terminal session
+      operationId: createTerminalSession
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                project_id:
+                  type: integer
+                shell:
+                  type: string
+                  default: bash
+      responses:
+        '201':
+          description: Terminal session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TerminalSession'
+
+  /terminal/sessions/{id}:
+    get:
+      tags: [Execution]
+      summary: Get terminal session
+      operationId: getTerminalSession
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Terminal session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TerminalSession'
+    delete:
+      tags: [Execution]
+      summary: Close terminal session
+      operationId: deleteTerminalSession
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /terminal/sessions/{id}/resize:
+    post:
+      tags: [Execution]
+      summary: Resize terminal
+      operationId: resizeTerminalSession
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rows, cols]
+              properties:
+                rows:
+                  type: integer
+                cols:
+                  type: integer
+      responses:
+        '200':
+          description: Terminal resized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /terminal/shells:
+    get:
+      tags: [Execution]
+      summary: Get available shells
+      operationId: getAvailableShells
+      responses:
+        '200':
+          description: Available shells
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shells:
+                    type: array
+                    items:
+                      type: string
+
+  # ==================== PREVIEW ====================
+  /preview/start:
+    post:
+      tags: [Preview]
+      summary: Start live preview
+      operationId: startPreview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartPreviewRequest'
+      responses:
+        '200':
+          description: Preview started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewStatus'
+
+  /preview/stop:
+    post:
+      tags: [Preview]
+      summary: Stop live preview
+      operationId: stopPreview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_id]
+              properties:
+                project_id:
+                  type: integer
+      responses:
+        '200':
+          description: Preview stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /preview/status/{projectId}:
+    get:
+      tags: [Preview]
+      summary: Get preview status
+      operationId: getPreviewStatus
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Preview status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewStatus'
+
+  /preview/refresh:
+    post:
+      tags: [Preview]
+      summary: Refresh preview
+      operationId: refreshPreview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_id]
+              properties:
+                project_id:
+                  type: integer
+                changed_files:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Preview refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /preview/hot-reload:
+    post:
+      tags: [Preview]
+      summary: Hot reload file
+      operationId: hotReload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_id, file_path, content]
+              properties:
+                project_id:
+                  type: integer
+                file_path:
+                  type: string
+                content:
+                  type: string
+      responses:
+        '200':
+          description: Hot reload sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /preview/list:
+    get:
+      tags: [Preview]
+      summary: List active previews
+      operationId: listPreviews
+      responses:
+        '200':
+          description: Active previews
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  previews:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PreviewStatus'
+                  count:
+                    type: integer
+
+  # ==================== DEPLOY ====================
+  /deploy:
+    post:
+      tags: [Deploy]
+      summary: Start deployment
+      description: Deploy project to cloud provider (Vercel, Netlify, Render)
+      operationId: startDeployment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartDeploymentRequest'
+      responses:
+        '202':
+          description: Deployment started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentResponse'
+
+  /deploy/{id}:
+    get:
+      tags: [Deploy]
+      summary: Get deployment details
+      operationId: getDeployment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deployment details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+    delete:
+      tags: [Deploy]
+      summary: Cancel deployment
+      operationId: cancelDeployment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deployment cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /deploy/{id}/status:
+    get:
+      tags: [Deploy]
+      summary: Get deployment status
+      operationId: getDeploymentStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deployment status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  status:
+                    type: string
+                  url:
+                    type: string
+
+  /deploy/{id}/logs:
+    get:
+      tags: [Deploy]
+      summary: Get deployment logs
+      operationId: getDeploymentLogs
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Deployment logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  logs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LogEntry'
+
+  /deploy/{id}/redeploy:
+    post:
+      tags: [Deploy]
+      summary: Redeploy
+      operationId: redeploy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Redeployment started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentResponse'
+
+  /deploy/providers:
+    get:
+      tags: [Deploy]
+      summary: Get available providers
+      operationId: getProviders
+      responses:
+        '200':
+          description: Available providers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  providers:
+                    type: array
+                    items:
+                      type: string
+                      enum: [vercel, netlify, render]
+
+  /deploy/projects/{projectId}/history:
+    get:
+      tags: [Deploy]
+      summary: Get deployment history
+      operationId: getProjectDeployments
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Deployment history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  deployments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Deployment'
+                  total:
+                    type: integer
+
+  # ==================== HOSTING ====================
+  /hosting/check-subdomain:
+    get:
+      tags: [Hosting]
+      summary: Check subdomain availability
+      operationId: checkSubdomain
+      parameters:
+        - name: subdomain
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Availability status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subdomain:
+                    type: string
+                  available:
+                    type: boolean
+                  message:
+                    type: string
+                  url:
+                    type: string
+
+  /hosting/{projectId}/status:
+    get:
+      tags: [Hosting]
+      summary: Get hosting status
+      operationId: getHostingStatus
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Hosting status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HostingStatus'
+
+  /hosting/{projectId}/deploy:
+    post:
+      tags: [Hosting]
+      summary: Quick deploy to native hosting
+      operationId: quickDeploy
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuickDeployRequest'
+      responses:
+        '202':
+          description: Deployment started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentResponse'
+
+  /hosting/{projectId}/undeploy:
+    delete:
+      tags: [Hosting]
+      summary: Remove deployment
+      operationId: undeploy
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Deployment removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /hosting/{projectId}/domains:
+    get:
+      tags: [Hosting]
+      summary: Get custom domains
+      operationId: getCustomDomains
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Custom domains
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  domains:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CustomDomain'
+    post:
+      tags: [Hosting]
+      summary: Add custom domain
+      operationId: addCustomDomain
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [domain]
+              properties:
+                domain:
+                  type: string
+      responses:
+        '201':
+          description: Domain added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDomainResponse'
+
+  # ==================== BILLING ====================
+  /billing/plans:
+    get:
+      tags: [Billing]
+      summary: Get available plans
+      operationId: getPlans
+      responses:
+        '200':
+          description: Available plans
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Plan'
+
+  /billing/subscription:
+    get:
+      tags: [Billing]
+      summary: Get current subscription
+      operationId: getSubscription
+      responses:
+        '200':
+          description: Subscription details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+
+  /billing/checkout:
+    post:
+      tags: [Billing]
+      summary: Create checkout session
+      operationId: createCheckoutSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [price_id, success_url, cancel_url]
+              properties:
+                price_id:
+                  type: string
+                success_url:
+                  type: string
+                cancel_url:
+                  type: string
+      responses:
+        '200':
+          description: Checkout session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  checkout_url:
+                    type: string
+
+  /billing/portal:
+    post:
+      tags: [Billing]
+      summary: Create billing portal session
+      operationId: createBillingPortalSession
+      responses:
+        '200':
+          description: Portal session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  portal_url:
+                    type: string
+
+  /billing/usage:
+    get:
+      tags: [Billing]
+      summary: Get usage statistics
+      operationId: getBillingUsage
+      responses:
+        '200':
+          description: Usage statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingUsage'
+
+  /billing/invoices:
+    get:
+      tags: [Billing]
+      summary: Get invoice history
+      operationId: getInvoices
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Invoices
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      invoices:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Invoice'
+
+  # ==================== USAGE ====================
+  /usage/current:
+    get:
+      tags: [Usage]
+      summary: Get current usage
+      operationId: getCurrentUsage
+      responses:
+        '200':
+          description: Current usage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUsage'
+
+  /usage/history:
+    get:
+      tags: [Usage]
+      summary: Get usage history
+      operationId: getUsageHistory
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 30
+            maximum: 365
+      responses:
+        '200':
+          description: Usage history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageHistory'
+
+  /usage/limits:
+    get:
+      tags: [Usage]
+      summary: Get plan limits
+      operationId: getUsageLimits
+      responses:
+        '200':
+          description: Plan limits
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanLimits'
+
+  /usage/refresh:
+    post:
+      tags: [Usage]
+      summary: Refresh usage cache
+      operationId: refreshUsage
+      responses:
+        '200':
+          description: Cache refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ==================== BYOK ====================
+  /byok/keys:
+    get:
+      tags: [BYOK]
+      summary: List configured API keys
+      description: Returns metadata about configured API keys (values are never exposed)
+      operationId: getBYOKKeys
+      responses:
+        '200':
+          description: Configured keys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BYOKKey'
+    post:
+      tags: [BYOK]
+      summary: Save API key
+      operationId: saveBYOKKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveBYOKKeyRequest'
+      responses:
+        '200':
+          description: Key saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /byok/keys/{provider}:
+    delete:
+      tags: [BYOK]
+      summary: Delete API key
+      operationId: deleteBYOKKey
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [claude, gpt4, gemini, grok, ollama]
+      responses:
+        '200':
+          description: Key deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+    patch:
+      tags: [BYOK]
+      summary: Update key settings
+      operationId: updateBYOKKeySettings
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                is_active:
+                  type: boolean
+                model_preference:
+                  type: string
+      responses:
+        '200':
+          description: Settings updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /byok/keys/{provider}/validate:
+    post:
+      tags: [BYOK]
+      summary: Validate API key
+      operationId: validateBYOKKey
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  provider:
+                    type: string
+                  valid:
+                    type: boolean
+                  error_detail:
+                    type: string
+
+  /byok/usage:
+    get:
+      tags: [BYOK]
+      summary: Get BYOK usage
+      operationId: getBYOKUsage
+      parameters:
+        - name: month
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+            example: '2026-01'
+      responses:
+        '200':
+          description: BYOK usage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BYOKUsage'
+
+  /byok/models:
+    get:
+      tags: [BYOK]
+      summary: Get available models
+      operationId: getBYOKModels
+      responses:
+        '200':
+          description: Available models by provider
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: string
+
+  # ==================== SECRETS ====================
+  /secrets:
+    get:
+      tags: [Secrets]
+      summary: List secrets
+      operationId: listSecrets
+      parameters:
+        - name: project_id
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Secrets list (metadata only)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secrets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SecretMetadata'
+                  count:
+                    type: integer
+    post:
+      tags: [Secrets]
+      summary: Create secret
+      operationId: createSecret
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSecretRequest'
+      responses:
+        '201':
+          description: Secret created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  secret:
+                    $ref: '#/components/schemas/SecretMetadata'
+
+  /secrets/{id}:
+    get:
+      tags: [Secrets]
+      summary: Get secret value
+      operationId: getSecret
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Secret with decrypted value
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret:
+                    $ref: '#/components/schemas/SecretMetadata'
+                  value:
+                    type: string
+    put:
+      tags: [Secrets]
+      summary: Update secret
+      operationId: updateSecret
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSecretRequest'
+      responses:
+        '200':
+          description: Secret updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+    delete:
+      tags: [Secrets]
+      summary: Delete secret
+      operationId: deleteSecret
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Secret deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /secrets/{id}/rotate:
+    post:
+      tags: [Secrets]
+      summary: Rotate secret encryption
+      operationId: rotateSecret
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Secret rotated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /secrets/{id}/audit:
+    get:
+      tags: [Secrets]
+      summary: Get secret audit log
+      operationId: getSecretAuditLog
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Audit log
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  audit_log:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SecretAuditLog'
+                  count:
+                    type: integer
+
+  /projects/{id}/secrets:
+    get:
+      tags: [Secrets]
+      summary: Get project environment variables
+      operationId: getProjectSecrets
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Environment variables
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  environment_variables:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  count:
+                    type: integer
+
+  # ==================== ADMIN ====================
+  /admin/dashboard:
+    get:
+      tags: [Admin]
+      summary: Get admin dashboard
+      operationId: getAdminDashboard
+      responses:
+        '200':
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDashboard'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: List all users
+      operationId: adminGetUsers
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        '200':
+          description: Users list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+                  total:
+                    type: integer
+
+  /admin/users/{id}:
+    get:
+      tags: [Admin]
+      summary: Get user details
+      operationId: adminGetUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+    put:
+      tags: [Admin]
+      summary: Update user
+      operationId: adminUpdateUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                is_active:
+                  type: boolean
+                is_admin:
+                  type: boolean
+                subscription_type:
+                  type: string
+      responses:
+        '200':
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+    delete:
+      tags: [Admin]
+      summary: Delete user
+      operationId: adminDeleteUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /admin/stats:
+    get:
+      tags: [Admin]
+      summary: Get system statistics
+      operationId: adminGetSystemStats
+      responses:
+        '200':
+          description: System statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemStats'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token obtained from /auth/login or /auth/register
+
+  parameters:
+    ProjectId:
+      name: id
+      in: path
+      required: true
+      description: Project ID
+      schema:
+        type: integer
+    PageParam:
+      name: page
+      in: query
+      description: Page number
+      schema:
+        type: integer
+        default: 1
+        minimum: 1
+    LimitParam:
+      name: limit
+      in: query
+      description: Items per page
+      schema:
+        type: integer
+        default: 10
+        minimum: 1
+        maximum: 100
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    # ==================== Common ====================
+    Error:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
+        total_pages:
+          type: integer
+        has_next:
+          type: boolean
+        has_prev:
+          type: boolean
+
+    # ==================== Auth ====================
+    RegisterRequest:
+      type: object
+      required: [username, email, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 50
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        full_name:
+          type: string
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          description: Username or email
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        user:
+          $ref: '#/components/schemas/UserSummary'
+        tokens:
+          $ref: '#/components/schemas/TokenResponse'
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        token_type:
+          type: string
+          default: Bearer
+
+    # ==================== User ====================
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        email:
+          type: string
+        full_name:
+          type: string
+        avatar_url:
+          type: string
+        is_active:
+          type: boolean
+        is_verified:
+          type: boolean
+        is_admin:
+          type: boolean
+        subscription_type:
+          type: string
+          enum: [free, pro, team, enterprise]
+        subscription_end:
+          type: string
+          format: date-time
+        preferred_theme:
+          type: string
+          enum: [cyberpunk, matrix, synthwave, neonCity]
+        preferred_ai:
+          type: string
+          enum: [auto, claude, gpt4, gemini]
+        created_at:
+          type: string
+          format: date-time
+
+    UserSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        email:
+          type: string
+        full_name:
+          type: string
+        subscription_type:
+          type: string
+        is_admin:
+          type: boolean
+        preferred_theme:
+          type: string
+        preferred_ai:
+          type: string
+
+    UserProfile:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/User'
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        full_name:
+          type: string
+        avatar_url:
+          type: string
+        preferred_theme:
+          type: string
+          enum: [cyberpunk, matrix, synthwave, neonCity]
+        preferred_ai:
+          type: string
+          enum: [auto, claude, gpt4, gemini]
+
+    # ==================== Project ====================
+    Project:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        language:
+          type: string
+        framework:
+          type: string
+        owner_id:
+          type: integer
+        is_public:
+          type: boolean
+        is_archived:
+          type: boolean
+        entry_point:
+          type: string
+        environment:
+          type: object
+        dependencies:
+          type: object
+        build_config:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/File'
+
+    CreateProjectRequest:
+      type: object
+      required: [name, language]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+        language:
+          type: string
+          enum: [javascript, typescript, python, go, rust, java, cpp, html, css]
+        framework:
+          type: string
+        is_public:
+          type: boolean
+        environment:
+          type: object
+
+    UpdateProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+        framework:
+          type: string
+        is_public:
+          type: boolean
+        is_archived:
+          type: boolean
+        environment:
+          type: object
+        build_config:
+          type: object
+        dependencies:
+          type: object
+
+    # ==================== File ====================
+    File:
+      type: object
+      properties:
+        id:
+          type: integer
+        project_id:
+          type: integer
+        name:
+          type: string
+        path:
+          type: string
+        type:
+          type: string
+          enum: [file, directory]
+        mime_type:
+          type: string
+        content:
+          type: string
+        size:
+          type: integer
+          format: int64
+        version:
+          type: integer
+        last_edit_by:
+          type: integer
+        is_locked:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateFileRequest:
+      type: object
+      required: [name, path, type]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        path:
+          type: string
+          maxLength: 1000
+        type:
+          type: string
+          enum: [file, directory]
+        content:
+          type: string
+        mime_type:
+          type: string
+
+    UpdateFileRequest:
+      type: object
+      properties:
+        content:
+          type: string
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        path:
+          type: string
+          maxLength: 1000
+        create_version:
+          type: boolean
+        version_note:
+          type: string
+
+    # ==================== AI ====================
+    AIGenerateRequest:
+      type: object
+      required: [prompt, capability]
+      properties:
+        prompt:
+          type: string
+          maxLength: 100000
+        provider:
+          type: string
+          enum: [claude, gpt4, gemini, grok, ollama]
+        capability:
+          type: string
+          enum: [code_generation, code_review, code_completion, debugging, explanation, refactoring, testing, documentation]
+        language:
+          type: string
+        code:
+          type: string
+          maxLength: 50000
+        project_id:
+          type: integer
+        context:
+          type: object
+        temperature:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 2
+        max_tokens:
+          type: integer
+
+    AIGenerateResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+            provider:
+              type: string
+            content:
+              type: string
+            usage:
+              $ref: '#/components/schemas/AIUsage'
+            duration:
+              type: string
+        message:
+          type: string
+
+    AIUsage:
+      type: object
+      properties:
+        prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+        cost:
+          type: number
+          format: double
+
+    AIUsageResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            monthly_usage:
+              type: object
+              properties:
+                requests:
+                  type: integer
+                cost:
+                  type: number
+                tokens:
+                  type: integer
+                limit:
+                  type: integer
+                remaining:
+                  type: integer
+                reset_date:
+                  type: string
+                  format: date-time
+            provider_usage:
+              type: object
+            subscription:
+              type: object
+
+    # ==================== Execution ====================
+    ExecuteCodeRequest:
+      type: object
+      required: [code, language]
+      properties:
+        code:
+          type: string
+        language:
+          type: string
+        stdin:
+          type: string
+        timeout:
+          type: integer
+          description: Timeout in seconds (max 120)
+        env:
+          type: object
+          additionalProperties:
+            type: string
+        project_id:
+          type: integer
+
+    ExecuteFileRequest:
+      type: object
+      required: [file_id]
+      properties:
+        file_id:
+          type: integer
+        args:
+          type: array
+          items:
+            type: string
+        stdin:
+          type: string
+        timeout:
+          type: integer
+
+    ExecuteProjectRequest:
+      type: object
+      required: [project_id]
+      properties:
+        project_id:
+          type: integer
+        command:
+          type: string
+        env:
+          type: object
+          additionalProperties:
+            type: string
+        timeout:
+          type: integer
+
+    ExecutionResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+            status:
+              type: string
+              enum: [running, completed, failed, timeout, killed]
+            output:
+              type: string
+            error_output:
+              type: string
+            exit_code:
+              type: integer
+            duration_ms:
+              type: integer
+            memory_used:
+              type: integer
+              format: int64
+            cpu_time_ms:
+              type: integer
+            timed_out:
+              type: boolean
+            killed:
+              type: boolean
+            compile_error:
+              type: string
+            language:
+              type: string
+            started_at:
+              type: string
+              format: date-time
+            completed_at:
+              type: string
+              format: date-time
+            sandbox_type:
+              type: string
+              enum: [container, process]
+
+    Execution:
+      type: object
+      properties:
+        id:
+          type: integer
+        execution_id:
+          type: string
+        project_id:
+          type: integer
+        user_id:
+          type: integer
+        command:
+          type: string
+        language:
+          type: string
+        status:
+          type: string
+        output:
+          type: string
+        error_out:
+          type: string
+        exit_code:
+          type: integer
+        duration:
+          type: integer
+        memory_used:
+          type: integer
+        cpu_time:
+          type: integer
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+
+    ExecutionStats:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            user_stats:
+              type: object
+            terminal_stats:
+              type: object
+            active_executions:
+              type: integer
+            supported_languages:
+              type: integer
+            sandbox_stats:
+              type: object
+            sandbox_capabilities:
+              type: object
+            execution_enabled:
+              type: boolean
+
+    SandboxStatus:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            execution_enabled:
+              type: boolean
+            container_required:
+              type: boolean
+            container_available:
+              type: boolean
+            container_isolation:
+              type: boolean
+            network_isolation:
+              type: boolean
+            seccomp_enabled:
+              type: boolean
+            docker:
+              type: object
+
+    Language:
+      type: object
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        extensions:
+          type: array
+          items:
+            type: string
+        compiler:
+          type: string
+        runner:
+          type: string
+
+    TerminalSession:
+      type: object
+      properties:
+        id:
+          type: string
+        project_id:
+          type: integer
+        user_id:
+          type: integer
+        shell:
+          type: string
+        rows:
+          type: integer
+        cols:
+          type: integer
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    # ==================== Preview ====================
+    StartPreviewRequest:
+      type: object
+      required: [project_id]
+      properties:
+        project_id:
+          type: integer
+        entry_point:
+          type: string
+        framework:
+          type: string
+        env_vars:
+          type: object
+          additionalProperties:
+            type: string
+        sandbox:
+          type: boolean
+
+    PreviewStatus:
+      type: object
+      properties:
+        success:
+          type: boolean
+        preview:
+          type: object
+          properties:
+            project_id:
+              type: integer
+            active:
+              type: boolean
+            url:
+              type: string
+            port:
+              type: integer
+            framework:
+              type: string
+            started_at:
+              type: string
+              format: date-time
+
+    # ==================== Deploy ====================
+    StartDeploymentRequest:
+      type: object
+      required: [project_id, provider]
+      properties:
+        project_id:
+          type: integer
+        provider:
+          type: string
+          enum: [vercel, netlify, render]
+        environment:
+          type: string
+          default: production
+        branch:
+          type: string
+          default: main
+        env_vars:
+          type: object
+          additionalProperties:
+            type: string
+        build_command:
+          type: string
+        output_dir:
+          type: string
+        install_cmd:
+          type: string
+        framework:
+          type: string
+
+    Deployment:
+      type: object
+      properties:
+        id:
+          type: string
+        project_id:
+          type: integer
+        user_id:
+          type: integer
+        provider:
+          type: string
+        status:
+          type: string
+          enum: [pending, building, deploying, running, failed, stopped]
+        url:
+          type: string
+        error_message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        deployed_at:
+          type: string
+          format: date-time
+
+    DeploymentResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        deployment:
+          $ref: '#/components/schemas/Deployment'
+        message:
+          type: string
+        websocket_url:
+          type: string
+
+    LogEntry:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        level:
+          type: string
+        source:
+          type: string
+        message:
+          type: string
+
+    # ==================== Hosting ====================
+    HostingStatus:
+      type: object
+      properties:
+        success:
+          type: boolean
+        deployed:
+          type: boolean
+        deployment:
+          type: object
+          properties:
+            id:
+              type: string
+            status:
+              type: string
+            url:
+              type: string
+            subdomain:
+              type: string
+            always_on:
+              type: boolean
+            deployed_at:
+              type: string
+              format: date-time
+            uptime_seconds:
+              type: integer
+            total_requests:
+              type: integer
+
+    QuickDeployRequest:
+      type: object
+      properties:
+        subdomain:
+          type: string
+        always_on:
+          type: boolean
+        port:
+          type: integer
+        build_command:
+          type: string
+        start_command:
+          type: string
+        env_vars:
+          type: object
+          additionalProperties:
+            type: string
+
+    CustomDomain:
+      type: object
+      properties:
+        id:
+          type: integer
+        domain:
+          type: string
+        project_id:
+          type: integer
+        verification_status:
+          type: string
+          enum: [pending, verified, failed]
+        ssl_status:
+          type: string
+          enum: [pending, active, expired]
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    CustomDomainResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        domain:
+          $ref: '#/components/schemas/CustomDomain'
+        dns_instructions:
+          type: object
+        verification_instructions:
+          type: object
+        message:
+          type: string
+
+    # ==================== Billing ====================
+    Plan:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [free, pro, team, enterprise]
+        price_monthly:
+          type: integer
+        price_yearly:
+          type: integer
+        features:
+          type: array
+          items:
+            type: string
+        limits:
+          type: object
+
+    Subscription:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            plan:
+              type: string
+            status:
+              type: string
+              enum: [active, canceled, past_due, trialing, inactive]
+            current_period_end:
+              type: string
+              format: date-time
+            cancel_at_period_end:
+              type: boolean
+
+    BillingUsage:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            usage:
+              type: object
+            limits:
+              type: object
+            plan:
+              type: string
+
+    Invoice:
+      type: object
+      properties:
+        id:
+          type: string
+        date:
+          type: string
+          format: date-time
+        amount:
+          type: integer
+        status:
+          type: string
+        description:
+          type: string
+        pdf_url:
+          type: string
+
+    # ==================== Usage ====================
+    CurrentUsage:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            user_id:
+              type: integer
+            plan:
+              type: string
+            unlimited:
+              type: boolean
+            usage:
+              type: object
+              properties:
+                projects:
+                  type: object
+                storage:
+                  type: object
+                ai_requests:
+                  type: object
+                execution_minutes:
+                  type: object
+            warnings:
+              type: array
+              items:
+                type: object
+            cached_at:
+              type: string
+              format: date-time
+
+    UsageHistory:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            user_id:
+              type: integer
+            days:
+              type: integer
+            daily:
+              type: array
+              items:
+                type: object
+            monthly:
+              type: array
+              items:
+                type: object
+
+    PlanLimits:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            current_plan:
+              type: string
+            current_limits:
+              type: object
+            all_plans:
+              type: object
+            pricing:
+              type: object
+
+    # ==================== BYOK ====================
+    BYOKKey:
+      type: object
+      properties:
+        provider:
+          type: string
+        model_preference:
+          type: string
+        is_active:
+          type: boolean
+        is_valid:
+          type: boolean
+        last_used:
+          type: string
+          format: date-time
+        usage_count:
+          type: integer
+        total_cost:
+          type: number
+
+    SaveBYOKKeyRequest:
+      type: object
+      required: [provider, api_key]
+      properties:
+        provider:
+          type: string
+          enum: [claude, gpt4, gemini, grok, ollama]
+        api_key:
+          type: string
+        model_preference:
+          type: string
+
+    BYOKUsage:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+        month:
+          type: string
+
+    # ==================== Secrets ====================
+    SecretMetadata:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+          enum: [api_key, database, environment, oauth, certificate, other]
+        project_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        last_accessed:
+          type: string
+          format: date-time
+
+    CreateSecretRequest:
+      type: object
+      required: [name, value, type]
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+          enum: [api_key, database, environment, oauth, certificate, other]
+        project_id:
+          type: integer
+
+    UpdateSecretRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+        description:
+          type: string
+
+    SecretAuditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        secret_id:
+          type: integer
+        user_id:
+          type: integer
+        action:
+          type: string
+        ip_address:
+          type: string
+        user_agent:
+          type: string
+        success:
+          type: boolean
+        error_msg:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # ==================== Admin ====================
+    AdminDashboard:
+      type: object
+      properties:
+        total_users:
+          type: integer
+        active_users:
+          type: integer
+        total_projects:
+          type: integer
+        total_executions:
+          type: integer
+        ai_requests_today:
+          type: integer
+        revenue_mtd:
+          type: number
+        active_subscriptions:
+          type: object
+
+    SystemStats:
+      type: object
+      properties:
+        cpu_usage:
+          type: number
+        memory_usage:
+          type: number
+        disk_usage:
+          type: number
+        active_connections:
+          type: integer
+        requests_per_minute:
+          type: integer
+        error_rate:
+          type: number

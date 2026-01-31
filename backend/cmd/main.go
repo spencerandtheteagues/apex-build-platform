@@ -85,13 +85,15 @@ func main() {
 	}
 	authService := auth.NewAuthService(jwtSecret)
 
-	// Initialize AI router with all providers (Claude, OpenAI, Gemini, Grok, Ollama)
+	// Initialize AI router with all providers (Claude, OpenAI, Gemini, Grok)
+	// NOTE: Ollama is explicitly excluded from the global router to enforce BYOK policy.
+	// Users must configure their own local Ollama URL in settings.
 	aiRouter := ai.NewAIRouter(
 		appConfig.ClaudeAPIKey,
 		appConfig.OpenAIAPIKey,
 		appConfig.GeminiAPIKey,
 		appConfig.GrokAPIKey,
-		appConfig.OllamaBaseURL, // Ollama local server (optional)
+		"", // Ollama disabled globally - strictly BYOK
 	)
 
 	log.Println("Multi-AI integration initialized:")
@@ -99,7 +101,7 @@ func main() {
 	log.Printf("   - OpenAI API: %s", getStatusIcon(appConfig.OpenAIAPIKey != ""))
 	log.Printf("   - Gemini API: %s", getStatusIcon(appConfig.GeminiAPIKey != ""))
 	log.Printf("   - Grok API:   %s", getStatusIcon(appConfig.GrokAPIKey != ""))
-	log.Printf("   - Ollama:     %s", getOllamaStatus(appConfig.OllamaBaseURL))
+	log.Printf("   - Ollama:     ❌ Disabled globally (User must configure in BYOK settings)")
 
 	// Initialize Agent Orchestration System
 	aiAdapter := agents.NewAIRouterAdapter(aiRouter)

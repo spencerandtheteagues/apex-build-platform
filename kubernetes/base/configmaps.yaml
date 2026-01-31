@@ -1,0 +1,234 @@
+# APEX.BUILD ConfigMaps
+# Non-sensitive configuration for all services
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apex-backend-config
+  namespace: apex-build
+  labels:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: backend
+data:
+  # Server configuration
+  PORT: "8080"
+  GIN_MODE: "release"
+  ENVIRONMENT: "production"
+  GRACEFUL_SHUTDOWN_TIMEOUT: "30s"
+
+  # Database connection settings
+  DB_PORT: "5432"
+  DB_SSL_MODE: "require"
+  DB_TIMEZONE: "UTC"
+  DB_MAX_IDLE_CONNS: "10"
+  DB_MAX_OPEN_CONNS: "100"
+  DB_CONN_MAX_LIFETIME: "1h"
+
+  # Redis settings
+  REDIS_POOL_SIZE: "10"
+  REDIS_MIN_IDLE_CONNS: "5"
+
+  # JWT settings
+  JWT_EXPIRY: "24h"
+  JWT_REFRESH_EXPIRY: "168h"
+
+  # Session settings
+  SESSION_TIMEOUT: "24h"
+  BCRYPT_COST: "12"
+
+  # AI defaults
+  DEFAULT_AI_MODEL: "claude-3-5-sonnet-20241022"
+  MAX_TOKENS: "4000"
+  TEMPERATURE: "0.7"
+  TOP_P: "0.95"
+
+  # File storage
+  UPLOAD_PATH: "/app/uploads"
+  PROJECTS_DIR: "/tmp/apex-build-projects"
+  MAX_FILE_SIZE: "50MB"
+  ALLOWED_EXTENSIONS: ".js,.ts,.tsx,.jsx,.py,.go,.rs,.java,.cpp,.c,.html,.css,.json,.md,.txt,.yml,.yaml,.toml,.sh,.sql"
+
+  # WebSocket settings
+  WS_MAX_CONNECTIONS: "1000"
+  WS_HEARTBEAT_INTERVAL: "30s"
+  WS_MESSAGE_BUFFER_SIZE: "1024"
+  WS_READ_BUFFER_SIZE: "4096"
+  WS_WRITE_BUFFER_SIZE: "4096"
+
+  # Code execution
+  EXECUTION_TIMEOUT: "30s"
+  EXECUTION_MEMORY_LIMIT: "512MB"
+  EXECUTION_CPU_LIMIT: "1000m"
+
+  # Rate limiting
+  RATE_LIMIT_REQUESTS: "1000"
+  RATE_LIMIT_DURATION: "1h"
+  RATE_LIMIT_BURST: "50"
+
+  # Logging
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+
+  # Metrics
+  ENABLE_METRICS: "true"
+  ENABLE_TRACING: "true"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apex-frontend-config
+  namespace: apex-build
+  labels:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: frontend
+data:
+  NODE_ENV: "production"
+  # These are build-time variables, set via build args
+  # Runtime config is handled via nginx substitution
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apex-postgres-config
+  namespace: apex-build
+  labels:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: postgres
+data:
+  POSTGRES_DB: "apex_build"
+  PGDATA: "/var/lib/postgresql/data/pgdata"
+  # PostgreSQL tuning for production
+  POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apex-redis-config
+  namespace: apex-build
+  labels:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: redis
+data:
+  redis.conf: |
+    # Redis production configuration
+    maxmemory 512mb
+    maxmemory-policy allkeys-lru
+    appendonly yes
+    appendfsync everysec
+
+    # Security
+    protected-mode yes
+
+    # Performance
+    tcp-backlog 511
+    timeout 0
+    tcp-keepalive 300
+
+    # Persistence
+    save 900 1
+    save 300 10
+    save 60 10000
+
+    # Logging
+    loglevel notice
+
+    # Slow log
+    slowlog-log-slower-than 10000
+    slowlog-max-len 128
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apex-nginx-config
+  namespace: apex-build
+  labels:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: frontend
+data:
+  nginx.conf: |
+    worker_processes auto;
+    error_log /var/log/nginx/error.log warn;
+    pid /tmp/nginx.pid;
+
+    events {
+        worker_connections 1024;
+        use epoll;
+        multi_accept on;
+    }
+
+    http {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+
+        log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent" "$http_x_forwarded_for"';
+
+        access_log /var/log/nginx/access.log main;
+
+        sendfile on;
+        tcp_nopush on;
+        tcp_nodelay on;
+        keepalive_timeout 65;
+        types_hash_max_size 2048;
+
+        # Gzip compression
+        gzip on;
+        gzip_vary on;
+        gzip_proxied any;
+        gzip_comp_level 6;
+        gzip_types text/plain text/css text/xml application/json application/javascript application/xml;
+
+        # Security headers
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+        server {
+            listen 3000;
+            server_name _;
+            root /usr/share/nginx/html;
+            index index.html;
+
+            # Health check endpoint
+            location /health {
+                access_log off;
+                return 200 "healthy\n";
+                add_header Content-Type text/plain;
+            }
+
+            # Static assets with caching
+            location /assets {
+                expires 1y;
+                add_header Cache-Control "public, immutable";
+            }
+
+            # SPA routing
+            location / {
+                try_files $uri $uri/ /index.html;
+            }
+
+            # Proxy API requests (if needed)
+            location /api {
+                proxy_pass http://apex-backend:8080;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "upgrade";
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }
+
+            # WebSocket proxy
+            location /ws {
+                proxy_pass http://apex-backend:8080;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "upgrade";
+                proxy_set_header Host $host;
+                proxy_read_timeout 86400;
+            }
+        }
+    }

@@ -1,0 +1,141 @@
+# APEX.BUILD Kubernetes Services
+# Service definitions for all components
+---
+# Backend API Service (ClusterIP for internal access)
+apiVersion: v1
+kind: Service
+metadata:
+  name: apex-backend
+  namespace: apex-build
+  labels:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: backend
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  sessionAffinity: None
+---
+# Frontend Service (ClusterIP for internal access)
+apiVersion: v1
+kind: Service
+metadata:
+  name: apex-frontend
+  namespace: apex-build
+  labels:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: frontend
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: frontend
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      protocol: TCP
+  sessionAffinity: None
+---
+# PostgreSQL Service (Headless for StatefulSet)
+apiVersion: v1
+kind: Service
+metadata:
+  name: apex-postgres
+  namespace: apex-build
+  labels:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: postgres
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for StatefulSet
+  selector:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+---
+# PostgreSQL Read Service (for read replicas if needed)
+apiVersion: v1
+kind: Service
+metadata:
+  name: apex-postgres-read
+  namespace: apex-build
+  labels:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+---
+# Redis Service (ClusterIP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: apex-redis
+  namespace: apex-build
+  labels:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: redis
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+  sessionAffinity: None
+---
+# External LoadBalancer Service (optional, use Ingress instead in production)
+# Uncomment if you need direct LoadBalancer access
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: apex-frontend-lb
+#   namespace: apex-build
+#   labels:
+#     app.kubernetes.io/name: apex-build
+#     app.kubernetes.io/component: frontend
+#   annotations:
+#     # AWS NLB annotations
+#     service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+#     service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+#     # GCP annotations
+#     # cloud.google.com/load-balancer-type: "External"
+# spec:
+#   type: LoadBalancer
+#   selector:
+#     app.kubernetes.io/name: apex-build
+#     app.kubernetes.io/component: frontend
+#   ports:
+#     - name: http
+#       port: 80
+#       targetPort: http
+#       protocol: TCP
+#     - name: https
+#       port: 443
+#       targetPort: http
+#       protocol: TCP

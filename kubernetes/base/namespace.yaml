@@ -1,0 +1,59 @@
+# APEX.BUILD Kubernetes Namespace
+# Provides resource isolation and RBAC boundary
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apex-build
+  labels:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/managed-by: kustomize
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+  annotations:
+    scheduler.alpha.kubernetes.io/defaultTolerations: "[]"
+---
+# Resource Quota for namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: apex-build-quota
+  namespace: apex-build
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    persistentvolumeclaims: "10"
+    pods: "50"
+    services: "20"
+    secrets: "50"
+    configmaps: "50"
+---
+# Limit Range for default resource constraints
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: apex-build-limits
+  namespace: apex-build
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      max:
+        cpu: "4"
+        memory: 8Gi
+      min:
+        cpu: 50m
+        memory: 64Mi
+    - type: PersistentVolumeClaim
+      max:
+        storage: 100Gi
+      min:
+        storage: 1Gi

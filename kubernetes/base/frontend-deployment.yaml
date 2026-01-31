@@ -1,0 +1,188 @@
+# APEX.BUILD Frontend Deployment
+# React/Vite application served via Nginx
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apex-frontend
+  namespace: apex-build
+  labels:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: apex-build
+      app.kubernetes.io/component: frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: apex-build
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        checksum/nginx-config: "{{ include (print $.Template.BasePath \"/configmaps.yaml\") . | sha256sum }}"
+    spec:
+      serviceAccountName: apex-frontend
+      automountServiceAccountToken: false
+
+      # Pod anti-affinity for HA
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: apex-build
+                    app.kubernetes.io/component: frontend
+                topologyKey: kubernetes.io/hostname
+            - weight: 50
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: apex-build
+                    app.kubernetes.io/component: frontend
+                topologyKey: topology.kubernetes.io/zone
+
+      # Security context for pod
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101  # nginx user
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+
+      # Topology spread constraints
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: frontend
+
+      containers:
+        - name: frontend
+          image: apex-build/frontend:latest
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+
+          # Environment variables
+          envFrom:
+            - configMapRef:
+                name: apex-frontend-config
+
+          # Resource limits
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          # Liveness probe
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+
+          # Readiness probe
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+
+          # Security context for container
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          # Volume mounts
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: nginx-logs
+              mountPath: /var/log/nginx
+            - name: tmp
+              mountPath: /tmp
+
+          # Lifecycle hooks
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - nginx -s quit && sleep 5
+
+      # Volumes
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: apex-nginx-config
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: nginx-logs
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+
+      # Termination grace period
+      terminationGracePeriodSeconds: 30
+
+      # DNS policy
+      dnsPolicy: ClusterFirst
+
+      # Restart policy
+      restartPolicy: Always
+---
+# Service Account for frontend
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: apex-frontend
+  namespace: apex-build
+  labels:
+    app.kubernetes.io/name: apex-build
+    app.kubernetes.io/component: frontend
+automountServiceAccountToken: false

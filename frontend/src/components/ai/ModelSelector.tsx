@@ -83,11 +83,10 @@ export default function ModelSelector({ value, onChange, compact = false, classN
             { id: 'grok-4-fast', name: 'Grok 4 Fast', speed: 'fast', cost_tier: 'low', description: 'Budget-friendly option' },
           ],
           ollama: [
-            { id: 'deepseek-r1', name: 'DeepSeek-R1', speed: 'variable', cost_tier: 'free', description: 'Reasoning model, O3-tier (local)' },
+            { id: 'deepseek-r1:8b', name: 'DeepSeek-R1 (8b)', speed: 'variable', cost_tier: 'free', description: 'Reasoning model (local)' },
+            { id: 'qwen3-coder:30b', name: 'Qwen 3 Coder (30b)', speed: 'variable', cost_tier: 'free', description: 'Advanced code model (local)' },
             { id: 'deepseek-v3.2', name: 'DeepSeek-V3.2', speed: 'variable', cost_tier: 'free', description: 'Efficient long-context (local)' },
             { id: 'llama3.3-70b', name: 'Llama 3.3 70B', speed: 'variable', cost_tier: 'free', description: '405B performance (local)' },
-            { id: 'codellama', name: 'Code Llama', speed: 'variable', cost_tier: 'free', description: 'Code-specialized (local)' },
-            { id: 'qwen2.5-coder', name: 'Qwen 2.5 Coder', speed: 'variable', cost_tier: 'free', description: 'Alibaba code model (local)' },
           ],
         })
       }

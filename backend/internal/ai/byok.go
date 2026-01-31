@@ -193,6 +193,22 @@ func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
 	m.mu.RLock()
 	for provider, client := range m.platformRouter.clients {
 		if _, exists := clients[provider]; !exists {
+			// STRICT POLICY:
+			// 1. If user has ANY BYOK key enabled, disable all paid platform models.
+			// 2. NEVER allow a global/shared Ollama instance to leak to users.
+			//    Ollama must ALWAYS be provided by the user (BYOK).
+
+			if provider == ProviderOllama {
+				continue // Explicitly block global Ollama
+			}
+
+			if hasBYOK {
+				// If user is bringing keys, we disable platform's paid models to save costs.
+				if provider == ProviderClaude || provider == ProviderGPT4 ||
+					provider == ProviderGemini || provider == ProviderGrok {
+					continue
+				}
+			}
 			clients[provider] = client
 		}
 	}
@@ -352,11 +368,10 @@ func GetAvailableModels() map[string][]ModelInfo {
 			{ID: "grok-4-fast", Name: "Grok 4 Fast", Speed: "fast", CostTier: "low", Description: "Budget-friendly option"},
 		},
 		"ollama": {
-			{ID: "deepseek-r1", Name: "DeepSeek-R1", Speed: "variable", CostTier: "free", Description: "O3-tier reasoning (local)"},
+			{ID: "deepseek-r1:8b", Name: "DeepSeek-R1 (8b)", Speed: "variable", CostTier: "free", Description: "Reasoning model (local)"},
+			{ID: "qwen3-coder:30b", Name: "Qwen 3 Coder (30b)", Speed: "variable", CostTier: "free", Description: "Advanced code model (local)"},
 			{ID: "deepseek-v3.2", Name: "DeepSeek-V3.2", Speed: "variable", CostTier: "free", Description: "Efficient long-context (local)"},
 			{ID: "llama3.3-70b", Name: "Llama 3.3 70B", Speed: "variable", CostTier: "free", Description: "405B performance (local)"},
-			{ID: "codellama", Name: "Code Llama", Speed: "variable", CostTier: "free", Description: "Code-specialized (local)"},
-			{ID: "qwen2.5-coder", Name: "Qwen 2.5 Coder", Speed: "variable", CostTier: "free", Description: "Alibaba code model (local)"},
 		},
 	}
 }

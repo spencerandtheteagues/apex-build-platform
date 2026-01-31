@@ -106,10 +106,10 @@ const PROVIDERS: ProviderConfig[] = [
     activeBorder: 'border-cyan-500',
     placeholder: 'http://localhost:11434',
     models: [
-      { id: 'deepseek-r1', name: 'DeepSeek-R1', speed: 'medium', cost: 'free', description: 'O3-tier reasoning' },
+      { id: 'deepseek-r1:8b', name: 'DeepSeek-R1 (8b)', speed: 'medium', cost: 'free', description: 'Reasoning model' },
+      { id: 'qwen3-coder:30b', name: 'Qwen 3 Coder (30b)', speed: 'fast', cost: 'free', description: 'Advanced coding' },
       { id: 'deepseek-v3.2', name: 'DeepSeek-V3.2', speed: 'fast', cost: 'free', description: 'Efficient' },
       { id: 'llama3.3-70b', name: 'Llama 3.3 70B', speed: 'medium', cost: 'free', description: '405B performance' },
-      { id: 'codellama', name: 'Code Llama', speed: 'fast', cost: 'free', description: 'Code specialist' },
     ],
   },
 ]

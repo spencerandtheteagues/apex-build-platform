@@ -138,23 +138,23 @@ type RouterConfig struct {
 func DefaultRouterConfig() *RouterConfig {
 	return &RouterConfig{
 		DefaultProviders: map[AICapability]AIProvider{
-			CapabilityCodeGeneration:       ProviderGPT4,    // GPT-4 excels at code generation
-			CapabilityNaturalLanguageToCode: ProviderClaude,  // Claude Opus 4.5 best for natural language to code
+			CapabilityCodeGeneration:       ProviderOllama,  // Default to Local/DeepSeek
+			CapabilityNaturalLanguageToCode: ProviderOllama,  // Default to Local/DeepSeek
 			CapabilityCodeReview:           ProviderClaude,  // Claude excellent at analysis
-			CapabilityCodeCompletion:       ProviderGemini,  // Gemini fast for completions
-			CapabilityDebugging:            ProviderClaude,  // Claude great at debugging
-			CapabilityExplanation:          ProviderGemini,  // Gemini good at explanations
-			CapabilityRefactoring:          ProviderGPT4,    // GPT-4 handles complex refactoring
-			CapabilityTesting:              ProviderGPT4,    // GPT-4 writes comprehensive tests
+			CapabilityCodeCompletion:       ProviderOllama,  // Default to Local/DeepSeek
+			CapabilityDebugging:            ProviderOllama,  // Default to Local/DeepSeek
+			CapabilityExplanation:          ProviderOllama,  // Default to Local/DeepSeek
+			CapabilityRefactoring:          ProviderOllama,  // Default to Local/DeepSeek
+			CapabilityTesting:              ProviderOllama,  // Default to Local/DeepSeek
 			CapabilityDocumentation:        ProviderClaude,  // Claude excels at documentation
-			CapabilityArchitecture:         ProviderClaude,  // Claude best for architecture design
+			CapabilityArchitecture:         ProviderOllama,  // Default to Local/DeepSeek
 		},
 		FallbackOrder: map[AIProvider][]AIProvider{
 			ProviderClaude: {ProviderGPT4, ProviderGrok, ProviderOllama, ProviderGemini},
 			ProviderGPT4:   {ProviderClaude, ProviderGrok, ProviderOllama, ProviderGemini},
 			ProviderGemini: {ProviderGrok, ProviderOllama, ProviderGPT4, ProviderClaude},
 			ProviderGrok:   {ProviderOllama, ProviderGPT4, ProviderClaude, ProviderGemini},
-			ProviderOllama: {ProviderGrok, ProviderGPT4, ProviderClaude, ProviderGemini},
+			ProviderOllama: {}, // No fallbacks for local/free model to prevent accidental costs
 		},
 		LoadBalancing: map[AIProvider]float64{
 			ProviderClaude: 0.25,
