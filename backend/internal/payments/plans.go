@@ -47,11 +47,14 @@ type Plan struct {
 
 // PlanLimits defines the resource limits for each plan
 type PlanLimits struct {
-	AIRequestsPerMonth     int   `json:"ai_requests_per_month"`
-	ProjectsLimit          int   `json:"projects_limit"`          // -1 for unlimited
+	AIRequestsPerMonth     int   `json:"ai_requests_per_month"`     // Platform-key requests; -1 for unlimited
+	BYOKEnabled            bool  `json:"byok_enabled"`              // Can use Bring Your Own Key
+	BYOKUnlimited          bool  `json:"byok_unlimited"`            // Unlimited requests via BYOK
+	ProjectsLimit          int   `json:"projects_limit"`            // -1 for unlimited
 	StorageGB              int   `json:"storage_gb"`
 	CollaboratorsPerProject int  `json:"collaborators_per_project"` // -1 for unlimited
 	CodeExecutionsPerDay   int   `json:"code_executions_per_day"`
+	GitHubExport           bool  `json:"github_export"`
 	PriorityAI             bool  `json:"priority_ai"`
 	TeamFeatures           bool  `json:"team_features"`
 	DedicatedSupport       bool  `json:"dedicated_support"`
@@ -94,20 +97,24 @@ func GetAllPlans() []Plan {
 
 	return []Plan{
 		// Free Plan - $0/month
+		// BYOK on all tiers — unique in market (Replit/Cursor/Lovable don't offer this)
 		{
 			Type:              PlanFree,
 			Name:              "Free",
-			Description:       "Perfect for getting started with cloud development",
+			Description:       "Get started with cloud development — BYOK included",
 			MonthlyPriceCents: 0,
 			MonthlyPriceID:    "", // No Stripe price for free plan
 			AnnualPriceCents:  0,
 			AnnualPriceID:     "",
 			Limits: PlanLimits{
-				AIRequestsPerMonth:     1000,
+				AIRequestsPerMonth:     500,
+				BYOKEnabled:            true,
+				BYOKUnlimited:          true,
 				ProjectsLimit:          3,
 				StorageGB:              1,
 				CollaboratorsPerProject: 1,
 				CodeExecutionsPerDay:   50,
+				GitHubExport:           false,
 				PriorityAI:             false,
 				TeamFeatures:           false,
 				DedicatedSupport:       false,
@@ -115,33 +122,38 @@ func GetAllPlans() []Plan {
 				CustomIntegrations:     false,
 			},
 			Features: []string{
-				"1,000 AI requests/month",
+				"500 AI requests/month (platform keys)",
+				"Unlimited AI requests with BYOK",
+				"Bring Your Own API Keys",
 				"3 projects",
 				"1GB storage",
-				"Basic code editor",
+				"All AI models (Claude, GPT-4, Gemini, Grok)",
+				"Code editor with AI assist",
 				"Community support",
-				"Public projects only",
 			},
 			IsPopular:    false,
 			IsEnterprise: false,
 			TrialDays:    0,
 		},
 
-		// Pro Plan - $12/month
+		// Pro Plan - $12/month (undercuts Replit $25, Cursor $20, Lovable $25)
 		{
 			Type:              PlanPro,
 			Name:              "Pro",
-			Description:       "For individual developers who need more power",
+			Description:       "For developers who ship fast — all models, GitHub export, zero markup BYOK",
 			MonthlyPriceCents: 1200, // $12.00
 			MonthlyPriceID:    config.StripePriceIDProMonthly,
 			AnnualPriceCents:  11520, // $115.20/year ($9.60/month - 20% off)
 			AnnualPriceID:     config.StripePriceIDProAnnual,
 			Limits: PlanLimits{
-				AIRequestsPerMonth:     10000,
+				AIRequestsPerMonth:     5000,
+				BYOKEnabled:            true,
+				BYOKUnlimited:          true,
 				ProjectsLimit:          -1, // Unlimited
 				StorageGB:              10,
 				CollaboratorsPerProject: 3,
 				CodeExecutionsPerDay:   500,
+				GitHubExport:           true,
 				PriorityAI:             true,
 				TeamFeatures:           false,
 				DedicatedSupport:       false,
@@ -149,37 +161,42 @@ func GetAllPlans() []Plan {
 				CustomIntegrations:     false,
 			},
 			Features: []string{
-				"10,000 AI requests/month",
+				"5,000 AI requests/month (platform keys)",
+				"Unlimited AI requests with BYOK",
+				"Bring Your Own API Keys (zero markup)",
 				"Unlimited projects",
 				"10GB storage",
+				"All AI models (Claude, GPT-4, Gemini, Grok)",
+				"GitHub export & ZIP download",
 				"Priority AI responses",
 				"Private projects",
-				"Advanced code editor",
-				"All AI models (Claude, GPT-4, Gemini)",
+				"Transparent cost tracking",
+				"Model selection per request",
 				"Email support",
-				"Custom themes",
-				"Git integration",
 			},
 			IsPopular:    true,
 			IsEnterprise: false,
 			TrialDays:    14,
 		},
 
-		// Team Plan - $29/month
+		// Team Plan - $29/seat/month
 		{
 			Type:              PlanTeam,
 			Name:              "Team",
-			Description:       "For teams that build together",
-			MonthlyPriceCents: 2900, // $29.00
+			Description:       "Real-time collaboration with team management and SSO",
+			MonthlyPriceCents: 2900, // $29.00/seat
 			MonthlyPriceID:    config.StripePriceIDTeamMonthly,
 			AnnualPriceCents:  27840, // $278.40/year ($23.20/month - 20% off)
 			AnnualPriceID:     config.StripePriceIDTeamAnnual,
 			Limits: PlanLimits{
-				AIRequestsPerMonth:     50000,
+				AIRequestsPerMonth:     25000,
+				BYOKEnabled:            true,
+				BYOKUnlimited:          true,
 				ProjectsLimit:          -1, // Unlimited
 				StorageGB:              50,
 				CollaboratorsPerProject: -1, // Unlimited
 				CodeExecutionsPerDay:   2000,
+				GitHubExport:           true,
 				PriorityAI:             true,
 				TeamFeatures:           true,
 				DedicatedSupport:       false,
@@ -187,39 +204,43 @@ func GetAllPlans() []Plan {
 				CustomIntegrations:     true,
 			},
 			Features: []string{
-				"50,000 AI requests/month",
+				"25,000 AI requests/seat/month (platform keys)",
+				"Unlimited AI requests with BYOK",
+				"Bring Your Own API Keys (zero markup)",
 				"Unlimited projects",
 				"50GB storage",
 				"Real-time collaboration",
-				"Team management",
-				"Priority AI responses",
-				"All AI models",
+				"Team management & roles",
+				"All AI models (Claude, GPT-4, Gemini, Grok)",
+				"GitHub export & ZIP download",
+				"SSO integration",
+				"API access",
 				"Priority support",
 				"Advanced analytics",
-				"SSO integration",
-				"Custom integrations",
-				"API access",
 			},
 			IsPopular:    false,
 			IsEnterprise: false,
 			TrialDays:    14,
 		},
 
-		// Enterprise Plan - $99/month
+		// Enterprise Plan - $79/seat/month (undercuts Replit enterprise)
 		{
 			Type:              PlanEnterprise,
 			Name:              "Enterprise",
-			Description:       "For organizations that need everything",
-			MonthlyPriceCents: 9900, // $99.00
+			Description:       "Full platform with SAML/SCIM, audit logs, SLA, and dedicated support",
+			MonthlyPriceCents: 7900, // $79.00/seat
 			MonthlyPriceID:    config.StripePriceIDEnterpriseMonthly,
-			AnnualPriceCents:  95040, // $950.40/year ($79.20/month - 20% off)
+			AnnualPriceCents:  75840, // $758.40/year ($63.20/month - 20% off)
 			AnnualPriceID:     config.StripePriceIDEnterpriseAnnual,
 			Limits: PlanLimits{
 				AIRequestsPerMonth:     -1, // Unlimited
+				BYOKEnabled:            true,
+				BYOKUnlimited:          true,
 				ProjectsLimit:          -1, // Unlimited
 				StorageGB:              -1, // Unlimited
 				CollaboratorsPerProject: -1, // Unlimited
 				CodeExecutionsPerDay:   -1, // Unlimited
+				GitHubExport:           true,
 				PriorityAI:             true,
 				TeamFeatures:           true,
 				DedicatedSupport:       true,
@@ -228,22 +249,19 @@ func GetAllPlans() []Plan {
 			},
 			Features: []string{
 				"Unlimited AI requests",
-				"Unlimited projects",
-				"Unlimited storage",
+				"Unlimited BYOK (zero markup)",
+				"Unlimited projects & storage",
 				"Unlimited collaborators",
 				"Real-time collaboration",
-				"Team management",
-				"Priority AI responses",
-				"All AI models",
-				"24/7 dedicated support",
-				"99.9% SLA guarantee",
-				"Advanced security",
-				"On-premise deployment option",
-				"Custom integrations",
-				"Dedicated account manager",
-				"Custom contracts",
+				"All AI models (Claude, GPT-4, Gemini, Grok)",
+				"GitHub export & ZIP download",
 				"SAML/SCIM SSO",
 				"Audit logs",
+				"99.9% SLA guarantee",
+				"24/7 dedicated support",
+				"Dedicated account manager",
+				"On-premise deployment option",
+				"Custom contracts",
 				"SOC 2 compliance",
 			},
 			IsPopular:    false,

@@ -122,8 +122,11 @@ func (g *GeminiClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		},
 	}
 
-	// Select appropriate model
+	// Select appropriate model - respect explicit override
 	model := g.getModelForCapability(req.Capability)
+	if req.Model != "" {
+		model = req.Model
+	}
 	url := fmt.Sprintf("%s/%s:generateContent?key=%s", g.baseURL, model, g.apiKey)
 
 	// Make API request

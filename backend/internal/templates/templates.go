@@ -19,6 +19,7 @@ const (
 	CategoryGame       TemplateCategory = "game"
 	CategoryData       TemplateCategory = "data"
 	CategoryAutomation TemplateCategory = "automation"
+	CategorySalesforce TemplateCategory = "salesforce"
 )
 
 // Template represents a project template
@@ -336,6 +337,197 @@ func GetAllTemplates() []Template {
 			DevDependencies: map[string]string{
 				"typescript": "^5.0.0",
 				"vite":       "^5.0.0",
+			},
+		},
+
+		// ============ SALESFORCE / APEX ============
+		{
+			ID:          "salesforce-apex",
+			Name:        "Salesforce Apex Project",
+			Description: "Apex classes with trigger handler framework, test factory, and service layer",
+			Category:    CategorySalesforce,
+			Language:    "apex",
+			Icon:        "☁️",
+			Tags:        []string{"salesforce", "apex", "soql", "crm", "enterprise"},
+			Difficulty:  "intermediate",
+			Files: []TemplateFile{
+				{Path: "sfdx-project.json", Content: `{
+  "packageDirectories": [{ "path": "force-app/main/default", "default": true }],
+  "name": "apex-project",
+  "namespace": "",
+  "sfdcLoginUrl": "https://login.salesforce.com",
+  "sourceApiVersion": "60.0"
+}
+`},
+				{Path: "force-app/main/default/classes/TriggerHandler.cls", Content: `/**
+ * Base Trigger Handler Framework
+ * Extend this class for all trigger handlers.
+ * Ensures one trigger per object, bulkified, with governor limit awareness.
+ */
+public virtual class TriggerHandler {
+    @TestVisible private static Boolean isBypassed = false;
+
+    public void run() {
+        if (isBypassed) return;
+
+        if (Trigger.isBefore) {
+            if (Trigger.isInsert) beforeInsert(Trigger.new);
+            if (Trigger.isUpdate) beforeUpdate(Trigger.new, Trigger.oldMap);
+            if (Trigger.isDelete) beforeDelete(Trigger.old, Trigger.oldMap);
+        }
+        if (Trigger.isAfter) {
+            if (Trigger.isInsert) afterInsert(Trigger.new, Trigger.newMap);
+            if (Trigger.isUpdate) afterUpdate(Trigger.new, Trigger.oldMap);
+            if (Trigger.isDelete) afterDelete(Trigger.old, Trigger.oldMap);
+            if (Trigger.isUndelete) afterUndelete(Trigger.new);
+        }
+    }
+
+    // Override these in your handler subclass
+    protected virtual void beforeInsert(List<SObject> newRecords) {}
+    protected virtual void beforeUpdate(List<SObject> newRecords, Map<Id, SObject> oldMap) {}
+    protected virtual void beforeDelete(List<SObject> oldRecords, Map<Id, SObject> oldMap) {}
+    protected virtual void afterInsert(List<SObject> newRecords, Map<Id, SObject> newMap) {}
+    protected virtual void afterUpdate(List<SObject> newRecords, Map<Id, SObject> oldMap) {}
+    protected virtual void afterDelete(List<SObject> oldRecords, Map<Id, SObject> oldMap) {}
+    protected virtual void afterUndelete(List<SObject> newRecords) {}
+
+    public static void bypass() { isBypassed = true; }
+    public static void clearBypass() { isBypassed = false; }
+}
+`},
+				{Path: "force-app/main/default/classes/TriggerHandler.cls-meta.xml", Content: `<?xml version="1.0" encoding="UTF-8"?>
+<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>60.0</apiVersion>
+    <status>Active</status>
+</ApexClass>
+`},
+				{Path: "force-app/main/default/classes/TestDataFactory.cls", Content: `/**
+ * Test Data Factory
+ * Centralized test data creation. Never use SeeAllData=true.
+ */
+@IsTest
+public class TestDataFactory {
+
+    public static Account createAccount(String name) {
+        Account acc = new Account(
+            Name = name,
+            Industry = 'Technology',
+            BillingCity = 'San Francisco'
+        );
+        insert acc;
+        return acc;
+    }
+
+    public static Contact createContact(Id accountId, String lastName) {
+        Contact con = new Contact(
+            AccountId = accountId,
+            FirstName = 'Test',
+            LastName = lastName,
+            Email = lastName.toLowerCase() + '@test.com'
+        );
+        insert con;
+        return con;
+    }
+
+    public static Opportunity createOpportunity(Id accountId, String name) {
+        Opportunity opp = new Opportunity(
+            AccountId = accountId,
+            Name = name,
+            StageName = 'Prospecting',
+            CloseDate = Date.today().addDays(30),
+            Amount = 10000
+        );
+        insert opp;
+        return opp;
+    }
+
+    public static List<Account> createAccounts(Integer count) {
+        List<Account> accounts = new List<Account>();
+        for (Integer i = 0; i < count; i++) {
+            accounts.add(new Account(Name = 'Test Account ' + i));
+        }
+        insert accounts;
+        return accounts;
+    }
+}
+`},
+				{Path: "force-app/main/default/classes/TestDataFactory.cls-meta.xml", Content: `<?xml version="1.0" encoding="UTF-8"?>
+<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>60.0</apiVersion>
+    <status>Active</status>
+</ApexClass>
+`},
+				{Path: "force-app/main/default/classes/AccountService.cls", Content: `/**
+ * Account Service Layer
+ * Business logic for Account operations. Called from triggers and controllers.
+ * Follows bulkification best practices — no SOQL/DML inside loops.
+ */
+public with sharing class AccountService {
+
+    /**
+     * Update Account rating based on total opportunity amount.
+     * Called from OpportunityTriggerHandler after insert/update.
+     */
+    public static void updateAccountRatings(Set<Id> accountIds) {
+        if (accountIds == null || accountIds.isEmpty()) return;
+
+        // Single SOQL outside loop — governor limit safe
+        Map<Id, AggregateResult> oppTotals = new Map<Id, AggregateResult>();
+        for (AggregateResult ar : [
+            SELECT AccountId, SUM(Amount) totalAmount
+            FROM Opportunity
+            WHERE AccountId IN :accountIds AND IsClosed = false
+            GROUP BY AccountId
+        ]) {
+            oppTotals.put((Id) ar.get('AccountId'), ar);
+        }
+
+        // Build update list outside loop
+        List<Account> toUpdate = new List<Account>();
+        for (Id accId : accountIds) {
+            Decimal total = 0;
+            if (oppTotals.containsKey(accId)) {
+                total = (Decimal) oppTotals.get(accId).get('totalAmount');
+            }
+
+            String rating = 'Cold';
+            if (total > 100000) rating = 'Hot';
+            else if (total > 50000) rating = 'Warm';
+
+            toUpdate.add(new Account(Id = accId, Rating = rating));
+        }
+
+        // Single DML outside loop — governor limit safe
+        if (!toUpdate.isEmpty()) {
+            update toUpdate;
+        }
+    }
+}
+`},
+				{Path: "force-app/main/default/classes/AccountService.cls-meta.xml", Content: `<?xml version="1.0" encoding="UTF-8"?>
+<ApexClass xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>60.0</apiVersion>
+    <status>Active</status>
+</ApexClass>
+`},
+				{Path: "README.md", Content: `# Salesforce Apex Project
+
+Built with APEX.BUILD — AI-powered Salesforce development.
+
+## Structure
+
+- **TriggerHandler.cls** — Base trigger handler framework (one trigger per object)
+- **TestDataFactory.cls** — Centralized test data creation (no SeeAllData)
+- **AccountService.cls** — Service layer with bulkified operations
+
+## Best Practices
+
+- All SOQL/DML happens outside loops (governor limit safe)
+- Classes use ` + "`with sharing`" + ` by default
+- Test classes use factory methods, not SeeAllData=true
+- Trigger logic is delegated to handler classes
+`},
 			},
 		},
 

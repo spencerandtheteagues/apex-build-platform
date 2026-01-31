@@ -78,9 +78,9 @@ export class WebSocketService {
       return import.meta.env.VITE_WS_URL
     }
 
-    // Production detection - if running on Render or production domain
+    // Production detection - if running on Render, Firebase, or production domain
     const hostname = typeof window !== 'undefined' ? window.location.hostname : ''
-    if (hostname.includes('onrender.com') || hostname.includes('apex.build') || hostname === 'apex-frontend-gigq.onrender.com') {
+    if (hostname.includes('onrender.com') || hostname.includes('apex.build') || hostname.includes('web.app') || hostname.includes('firebaseapp.com') || hostname === 'apex-frontend-gigq.onrender.com') {
       return 'wss://apex-backend-5ypy.onrender.com'
     }
 

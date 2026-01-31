@@ -83,7 +83,7 @@ func (o *OpenAIClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 
 	// Create OpenAI API request
 	openAIReq := &openAIRequest{
-		Model:       o.getModelForCapability(req.Capability),
+		Model:       o.getModelForRequest(req),
 		Messages:    messages,
 		MaxTokens:   o.getMaxTokens(req),
 		Temperature: req.Temperature,
@@ -261,6 +261,14 @@ func (o *OpenAIClient) makeRequest(ctx context.Context, req *openAIRequest) (*op
 	}
 
 	return &openAIResp, nil
+}
+
+// getModelForRequest selects model respecting explicit override
+func (o *OpenAIClient) getModelForRequest(req *AIRequest) string {
+	if req.Model != "" {
+		return req.Model
+	}
+	return o.getModelForCapability(req.Capability)
 }
 
 // getModelForCapability selects the best OpenAI model for the capability

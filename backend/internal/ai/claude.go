@@ -75,9 +75,15 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	// Build user prompt
 	userPrompt := c.buildUserPrompt(req)
 
+	// Select model - respect explicit override or use flagship
+	model := "claude-opus-4-5-20251101"
+	if req.Model != "" {
+		model = req.Model
+	}
+
 	// Create Claude API request
 	claudeReq := &claudeRequest{
-		Model:     "claude-opus-4-5-20251101",  // Claude Opus 4.5 - flagship model
+		Model:     model,
 		MaxTokens: c.getMaxTokens(req),
 		Messages: []claudeMessage{
 			{
