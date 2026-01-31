@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -948,7 +949,7 @@ func (am *AgentManager) resultProcessor() {
 	}
 }
 
-// processResult handles a task result with retry logic
+// processResult handles a task result with retry logic and build verification
 func (am *AgentManager) processResult(result *TaskResult) {
 	am.mu.RLock()
 	agent, agentExists := am.agents[result.AgentID]
@@ -963,33 +964,100 @@ func (am *AgentManager) processResult(result *TaskResult) {
 	task := agent.CurrentTask
 
 	if result.Success {
-		agent.Status = StatusCompleted
-		if task != nil {
-			task.Status = TaskCompleted
-			now := time.Now()
-			task.CompletedAt = &now
-			task.Output = result.Output
+		// NEW: Verify generated code before marking complete (for code generation tasks)
+		if task != nil && am.isCodeGenerationTask(task.Type) && result.Output != nil {
+			agent.mu.Unlock() // Release lock during verification
+
+			// Run quick build verification on generated code
+			verificationPassed, verifyErrors := am.verifyGeneratedCode(agent.BuildID, result.Output)
+
+			agent.mu.Lock()
+			if !verificationPassed {
+				log.Printf("Build verification failed for task %s: %v", task.ID, verifyErrors)
+
+				// Track verification failure for learning
+				task.ErrorHistory = append(task.ErrorHistory, ErrorAttempt{
+					AttemptNumber: task.RetryCount + 1,
+					Error:         fmt.Sprintf("Build verification failed: %v", verifyErrors),
+					Timestamp:     time.Now(),
+					Context:       "build_verification",
+				})
+
+				// If we can retry, add verification errors to context and retry
+				if task.RetryCount < task.MaxRetries {
+					task.RetryCount++
+					task.Status = TaskPending
+					task.Input["verification_errors"] = verifyErrors
+					task.Input["retry_guidance"] = "Previous code failed build verification. Fix the following errors:"
+
+					agent.Status = StatusWorking
+					agent.mu.Unlock()
+
+					// Broadcast retry with verification context
+					am.broadcast(agent.BuildID, &WSMessage{
+						Type:      "agent:verification_failed",
+						BuildID:   agent.BuildID,
+						AgentID:   agent.ID,
+						Timestamp: time.Now(),
+						Data: map[string]any{
+							"task_id":       result.TaskID,
+							"errors":        verifyErrors,
+							"retry_count":   task.RetryCount,
+							"max_retries":   task.MaxRetries,
+							"message":       "Build verification failed, retrying with error context...",
+						},
+					})
+
+					am.taskQueue <- task
+					return
+				}
+
+				// Max retries exceeded with verification failures
+				result.Success = false
+				result.Error = fmt.Errorf("build verification failed after %d attempts: %v", task.RetryCount, verifyErrors)
+			}
 		}
-		agent.UpdatedAt = time.Now()
+
+		// If still successful after verification
+		if result.Success {
+			agent.Status = StatusCompleted
+			if task != nil {
+				task.Status = TaskCompleted
+				now := time.Now()
+				task.CompletedAt = &now
+				task.Output = result.Output
+			}
+			agent.UpdatedAt = time.Now()
+			agent.mu.Unlock()
+
+			// Broadcast success
+			am.broadcast(agent.BuildID, &WSMessage{
+				Type:      WSAgentCompleted,
+				BuildID:   agent.BuildID,
+				AgentID:   agent.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"task_id":            result.TaskID,
+					"success":            true,
+					"output":             result.Output,
+					"verified":           true,
+				},
+			})
+
+			// Handle task completion - may trigger next tasks
+			if task != nil {
+				am.handleTaskCompletion(agent.BuildID, task, result.Output)
+			}
+			return
+		}
+	}
+
+	// Handle failure case (continued from original)
+	if result.Success {
+		// This block handles the case where verification changed success to failure
 		agent.mu.Unlock()
-
-		// Broadcast success
-		am.broadcast(agent.BuildID, &WSMessage{
-			Type:      WSAgentCompleted,
-			BuildID:   agent.BuildID,
-			AgentID:   agent.ID,
-			Timestamp: time.Now(),
-			Data: map[string]any{
-				"task_id": result.TaskID,
-				"success": true,
-				"output":  result.Output,
-			},
-		})
-
-		// Handle task completion - may trigger next tasks
-		if task != nil {
-			am.handleTaskCompletion(agent.BuildID, task, result.Output)
-		}
+		am.handleTaskFailure(agent, task, result)
+		return
 	} else {
 		// FAILURE HANDLING - Learn from error and retry
 		if task == nil {
@@ -2136,4 +2204,255 @@ func getErrorString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// isCodeGenerationTask checks if a task type produces code that should be verified
+func (am *AgentManager) isCodeGenerationTask(taskType TaskType) bool {
+	switch taskType {
+	case TaskGenerateFile, TaskGenerateAPI, TaskGenerateUI, TaskGenerateSchema:
+		return true
+	}
+	return false
+}
+
+// verifyGeneratedCode performs quick build verification on generated code
+func (am *AgentManager) verifyGeneratedCode(buildID string, output *TaskOutput) (bool, []string) {
+	if output == nil || len(output.Files) == 0 {
+		return true, nil // Nothing to verify
+	}
+
+	errors := make([]string, 0)
+
+	// Quick syntax checks on generated files
+	for _, file := range output.Files {
+		// Check for obvious problems
+		fileErrors := am.quickSyntaxCheck(file)
+		errors = append(errors, fileErrors...)
+	}
+
+	// Check for common generation failures
+	for _, file := range output.Files {
+		content := file.Content
+
+		// Check for placeholder code
+		placeholders := []string{
+			"// TODO:",
+			"// FIXME:",
+			"throw new Error('Not implemented')",
+			"raise NotImplementedError",
+			"panic(\"not implemented\")",
+			"// ... rest of implementation",
+			"/* placeholder */",
+		}
+		for _, p := range placeholders {
+			if strings.Contains(content, p) {
+				errors = append(errors, fmt.Sprintf("%s: Contains placeholder code '%s'", file.Path, p))
+			}
+		}
+
+		// Check for empty functions/methods
+		if am.hasEmptyFunctions(content, file.Language) {
+			errors = append(errors, fmt.Sprintf("%s: Contains empty function bodies", file.Path))
+		}
+	}
+
+	return len(errors) == 0, errors
+}
+
+// quickSyntaxCheck performs language-specific syntax validation
+func (am *AgentManager) quickSyntaxCheck(file GeneratedFile) []string {
+	errors := make([]string, 0)
+	content := file.Content
+
+	switch file.Language {
+	case "typescript", "javascript":
+		// Check bracket balance
+		if strings.Count(content, "{") != strings.Count(content, "}") {
+			errors = append(errors, fmt.Sprintf("%s: Unbalanced curly braces", file.Path))
+		}
+		if strings.Count(content, "(") != strings.Count(content, ")") {
+			errors = append(errors, fmt.Sprintf("%s: Unbalanced parentheses", file.Path))
+		}
+		// Check for common TS/JS errors
+		if strings.Contains(content, "import ") && !strings.Contains(content, "from ") && !strings.Contains(content, "require(") {
+			errors = append(errors, fmt.Sprintf("%s: Malformed import statement", file.Path))
+		}
+
+	case "go":
+		// Check bracket balance
+		if strings.Count(content, "{") != strings.Count(content, "}") {
+			errors = append(errors, fmt.Sprintf("%s: Unbalanced curly braces", file.Path))
+		}
+		// Check for package declaration
+		if !strings.Contains(content, "package ") {
+			errors = append(errors, fmt.Sprintf("%s: Missing package declaration", file.Path))
+		}
+
+	case "python":
+		// Check for syntax issues - basic indentation check
+		lines := strings.Split(content, "\n")
+		for i, line := range lines {
+			if strings.HasPrefix(line, "\t") && i > 0 {
+				prevLine := lines[i-1]
+				if strings.HasPrefix(prevLine, "    ") {
+					errors = append(errors, fmt.Sprintf("%s:%d: Mixed tabs and spaces", file.Path, i+1))
+					break
+				}
+			}
+		}
+
+	case "rust":
+		// Check bracket balance
+		if strings.Count(content, "{") != strings.Count(content, "}") {
+			errors = append(errors, fmt.Sprintf("%s: Unbalanced curly braces", file.Path))
+		}
+	}
+
+	return errors
+}
+
+// hasEmptyFunctions checks if content has empty function bodies
+func (am *AgentManager) hasEmptyFunctions(content string, language string) bool {
+	patterns := []string{}
+
+	switch language {
+	case "typescript", "javascript":
+		patterns = []string{
+			`function\s+\w+\s*\([^)]*\)\s*\{\s*\}`,
+			`=>\s*\{\s*\}`,
+			`async\s+function\s+\w+\s*\([^)]*\)\s*\{\s*\}`,
+		}
+	case "go":
+		patterns = []string{
+			`func\s+\w+\s*\([^)]*\)\s*\{[\s]*\}`,
+			`func\s+\([^)]+\)\s+\w+\s*\([^)]*\)\s*\{[\s]*\}`,
+		}
+	case "python":
+		patterns = []string{
+			`def\s+\w+\s*\([^)]*\)\s*:\s*pass\s*$`,
+			`def\s+\w+\s*\([^)]*\)\s*:\s*\.\.\.\s*$`,
+		}
+	}
+
+	for _, pattern := range patterns {
+		if matched, _ := regexp.MatchString(pattern, content); matched {
+			return true
+		}
+	}
+
+	return false
+}
+
+// handleTaskFailure processes a failed task with intelligent retry logic
+func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *TaskResult) {
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
+
+	if task == nil {
+		agent.Status = StatusError
+		agent.Error = result.Error.Error()
+		return
+	}
+
+	// Analyze error for smart retry strategy
+	errorMsg := result.Error.Error()
+	retryStrategy := am.determineRetryStrategy(errorMsg, task)
+
+	// Track error for learning
+	task.ErrorHistory = append(task.ErrorHistory, ErrorAttempt{
+		AttemptNumber: task.RetryCount + 1,
+		Error:         errorMsg,
+		Timestamp:     time.Now(),
+		Context:       retryStrategy,
+	})
+	task.RetryCount++
+
+	// Check if we should retry
+	if task.RetryCount < task.MaxRetries {
+		log.Printf("Task %s failed (attempt %d/%d, strategy: %s): %v. Retrying...",
+			task.ID, task.RetryCount, task.MaxRetries, retryStrategy, result.Error)
+
+		task.Status = TaskPending
+		task.Error = ""
+		task.RetryStrategy = RetryStrategy(retryStrategy)
+		task.Input["previous_errors"] = task.ErrorHistory
+		task.Input["retry_strategy"] = retryStrategy
+
+		agent.Status = StatusWorking
+		agent.Error = ""
+		agent.UpdatedAt = time.Now()
+
+		// Broadcast retry attempt
+		am.broadcast(agent.BuildID, &WSMessage{
+			Type:      "agent:retrying",
+			BuildID:   agent.BuildID,
+			AgentID:   agent.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"task_id":       result.TaskID,
+				"attempt":       task.RetryCount,
+				"max_retries":   task.MaxRetries,
+				"strategy":      retryStrategy,
+				"error":         errorMsg,
+				"message":       fmt.Sprintf("Retrying with %s strategy (%d/%d)...", retryStrategy, task.RetryCount, task.MaxRetries),
+			},
+		})
+
+		agent.mu.Unlock()
+		am.taskQueue <- task
+		agent.mu.Lock()
+	} else {
+		// Max retries exceeded
+		agent.Status = StatusError
+		agent.Error = fmt.Sprintf("Failed after %d attempts: %s", task.RetryCount, errorMsg)
+		task.Status = TaskFailed
+		task.Error = agent.Error
+		agent.UpdatedAt = time.Now()
+
+		// Broadcast final failure
+		am.broadcast(agent.BuildID, &WSMessage{
+			Type:      WSAgentError,
+			BuildID:   agent.BuildID,
+			AgentID:   agent.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"task_id":       result.TaskID,
+				"success":       false,
+				"error":         agent.Error,
+				"error_history": task.ErrorHistory,
+				"attempts":      task.RetryCount,
+			},
+		})
+	}
+}
+
+// determineRetryStrategy analyzes an error to pick the best retry approach
+func (am *AgentManager) determineRetryStrategy(errorMsg string, task *Task) string {
+	errorLower := strings.ToLower(errorMsg)
+
+	// Rate limiting - back off
+	if strings.Contains(errorLower, "rate limit") || strings.Contains(errorLower, "too many requests") || strings.Contains(errorLower, "429") {
+		return "backoff"
+	}
+
+	// Provider issues - try different provider
+	if strings.Contains(errorLower, "service unavailable") || strings.Contains(errorLower, "503") ||
+		strings.Contains(errorLower, "timeout") || strings.Contains(errorLower, "connection") {
+		return "switch_provider"
+	}
+
+	// Context/token issues - simplify request
+	if strings.Contains(errorLower, "context length") || strings.Contains(errorLower, "too long") ||
+		strings.Contains(errorLower, "max tokens") {
+		return "reduce_context"
+	}
+
+	// Build verification failures - fix and retry
+	if strings.Contains(errorLower, "verification failed") || strings.Contains(errorLower, "build failed") ||
+		strings.Contains(errorLower, "syntax error") || strings.Contains(errorLower, "compilation") {
+		return "fix_and_retry"
+	}
+
+	// Default strategy
+	return "standard_retry"
 }

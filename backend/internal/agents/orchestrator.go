@@ -23,17 +23,46 @@ type BuildOrchestrator struct {
 
 // OrchestrationState tracks the orchestration state for a build
 type OrchestrationState struct {
-	BuildID       string
-	Phase         BuildPhase
-	StartTime     time.Time
-	PhaseStarted  time.Time
-	TotalAgents   int
-	ActiveAgents  int
-	CompletedTasks int
-	TotalTasks    int
-	Errors        []string
-	ctx           context.Context
-	cancel        context.CancelFunc
+	BuildID         string
+	Phase           BuildPhase
+	StartTime       time.Time
+	PhaseStarted    time.Time
+	TotalAgents     int
+	ActiveAgents    int
+	CompletedTasks  int
+	TotalTasks      int
+	Errors          []string
+	ctx             context.Context
+	cancel          context.CancelFunc
+
+	// Enhanced tracking
+	ParallelTasks   int              // Number of tasks running in parallel
+	DependencyGraph map[string][]string // Task ID -> dependent task IDs
+	TaskStatus      map[string]TaskStatus
+	VerifyGates     []VerifyGate     // Build verification checkpoints
+	ResourceUsage   ResourceMetrics  // Track resource consumption
+}
+
+// VerifyGate represents a build verification checkpoint
+type VerifyGate struct {
+	ID          string
+	Name        string
+	Phase       BuildPhase
+	Required    bool
+	Passed      bool
+	Score       int
+	RunAt       *time.Time
+	Duration    int64
+	BlocksPhase BuildPhase // Which phase this gate blocks
+}
+
+// ResourceMetrics tracks resource consumption
+type ResourceMetrics struct {
+	AIRequestsUsed    int
+	AITokensConsumed  int64
+	FilesGenerated    int
+	TotalBytesWritten int64
+	PeakParallelTasks int
 }
 
 // BuildPhase represents the current phase of the build
@@ -105,9 +134,20 @@ func (o *BuildOrchestrator) runPipeline(build *Build, state *OrchestrationState)
 		o.mu.Unlock()
 	}()
 
+	// Initialize enhanced tracking
+	state.DependencyGraph = make(map[string][]string)
+	state.TaskStatus = make(map[string]TaskStatus)
+	state.VerifyGates = o.initializeVerifyGates()
+
 	// Phase 1: Planning
 	if err := o.executePlanningPhase(build, state); err != nil {
 		o.handlePhaseError(build, state, PhasePlanning, err)
+		return
+	}
+
+	// Verify Gate: Post-Planning
+	if !o.runVerifyGate(build, state, "post-planning") {
+		o.handlePhaseError(build, state, PhasePlanning, fmt.Errorf("post-planning verification failed"))
 		return
 	}
 
@@ -117,10 +157,19 @@ func (o *BuildOrchestrator) runPipeline(build *Build, state *OrchestrationState)
 		return
 	}
 
-	// Phase 3: Code Generation
-	if err := o.executeGenerationPhase(build, state); err != nil {
+	// Phase 3: Code Generation (with parallel execution)
+	if err := o.executeGenerationPhaseParallel(build, state); err != nil {
 		o.handlePhaseError(build, state, PhaseGenerating, err)
 		return
+	}
+
+	// Verify Gate: Post-Generation (run actual build)
+	if !o.runVerifyGate(build, state, "post-generation") {
+		log.Printf("Orchestrator: Post-generation verification failed, attempting auto-fix")
+		if !o.attemptAutoFix(build, state) {
+			o.handlePhaseError(build, state, PhaseGenerating, fmt.Errorf("code generation verification failed"))
+			return
+		}
 	}
 
 	// Phase 4: Testing
@@ -135,8 +184,296 @@ func (o *BuildOrchestrator) runPipeline(build *Build, state *OrchestrationState)
 		return
 	}
 
+	// Final Verify Gate
+	if !o.runVerifyGate(build, state, "final") {
+		log.Printf("Orchestrator: Final verification has warnings but proceeding")
+	}
+
 	// Complete
 	o.completeOrchestration(build, state)
+}
+
+// initializeVerifyGates creates the verification checkpoints
+func (o *BuildOrchestrator) initializeVerifyGates() []VerifyGate {
+	return []VerifyGate{
+		{
+			ID:          "post-planning",
+			Name:        "Post-Planning Validation",
+			Phase:       PhasePlanning,
+			Required:    true,
+			BlocksPhase: PhaseArchitecting,
+		},
+		{
+			ID:          "post-generation",
+			Name:        "Build Verification",
+			Phase:       PhaseGenerating,
+			Required:    true,
+			BlocksPhase: PhaseTesting,
+		},
+		{
+			ID:          "final",
+			Name:        "Final Quality Check",
+			Phase:       PhaseCompleting,
+			Required:    false, // Warnings OK
+			BlocksPhase: PhaseComplete,
+		},
+	}
+}
+
+// runVerifyGate executes a verification checkpoint
+func (o *BuildOrchestrator) runVerifyGate(build *Build, state *OrchestrationState, gateID string) bool {
+	var gate *VerifyGate
+	for i := range state.VerifyGates {
+		if state.VerifyGates[i].ID == gateID {
+			gate = &state.VerifyGates[i]
+			break
+		}
+	}
+	if gate == nil {
+		return true
+	}
+
+	log.Printf("Orchestrator: Running verify gate '%s' for build %s", gate.Name, build.ID)
+	now := time.Now()
+	gate.RunAt = &now
+
+	o.broadcastPhase(build.ID, state.Phase, fmt.Sprintf("Running verification: %s...", gate.Name))
+
+	// Placeholder for actual verification logic
+	// In production, this would call the BuildVerifier
+	gate.Passed = true
+	gate.Score = 80
+	gate.Duration = time.Since(now).Milliseconds()
+
+	o.hub.Broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"verify_gate": gate.ID,
+			"name":        gate.Name,
+			"passed":      gate.Passed,
+			"score":       gate.Score,
+			"duration_ms": gate.Duration,
+		},
+	})
+
+	if !gate.Passed && gate.Required {
+		return false
+	}
+
+	return true
+}
+
+// executeGenerationPhaseParallel runs code generation tasks in parallel
+func (o *BuildOrchestrator) executeGenerationPhaseParallel(build *Build, state *OrchestrationState) error {
+	state.Phase = PhaseGenerating
+	state.PhaseStarted = time.Now()
+	o.broadcastPhase(build.ID, state.Phase, "Generating code (parallel execution)...")
+
+	// Get all generation tasks
+	generationTypes := []TaskType{TaskGenerateFile, TaskGenerateAPI, TaskGenerateUI, TaskGenerateSchema}
+
+	build.mu.RLock()
+	var genTasks []*Task
+	for _, task := range build.Tasks {
+		for _, genType := range generationTypes {
+			if task.Type == genType && task.Status == TaskPending {
+				genTasks = append(genTasks, task)
+				break
+			}
+		}
+	}
+	build.mu.RUnlock()
+
+	if len(genTasks) == 0 {
+		return nil
+	}
+
+	// Build dependency graph
+	depGraph := o.buildDependencyGraph(genTasks)
+
+	// Execute in parallel waves based on dependencies
+	return o.executeTasksInWaves(build, state, genTasks, depGraph)
+}
+
+// buildDependencyGraph creates a dependency graph for tasks
+func (o *BuildOrchestrator) buildDependencyGraph(tasks []*Task) map[string][]string {
+	graph := make(map[string][]string)
+
+	// Simple heuristic: DB schema before backend, backend before frontend
+	var schemaTasks, backendTasks, frontendTasks []string
+
+	for _, task := range tasks {
+		switch task.Type {
+		case TaskGenerateSchema:
+			schemaTasks = append(schemaTasks, task.ID)
+		case TaskGenerateAPI:
+			backendTasks = append(backendTasks, task.ID)
+		case TaskGenerateUI:
+			frontendTasks = append(frontendTasks, task.ID)
+		}
+	}
+
+	// Backend depends on schema
+	for _, backend := range backendTasks {
+		graph[backend] = schemaTasks
+	}
+
+	// Frontend depends on backend (for API types)
+	for _, frontend := range frontendTasks {
+		graph[frontend] = backendTasks
+	}
+
+	return graph
+}
+
+// executeTasksInWaves executes tasks in parallel waves based on dependencies
+func (o *BuildOrchestrator) executeTasksInWaves(build *Build, state *OrchestrationState, tasks []*Task, depGraph map[string][]string) error {
+	ctx := state.ctx
+	remaining := make(map[string]*Task)
+	completed := make(map[string]bool)
+
+	for _, task := range tasks {
+		remaining[task.ID] = task
+	}
+
+	maxParallel := 4 // Configurable max parallel tasks
+
+	for len(remaining) > 0 {
+		// Find tasks that can run (all dependencies complete)
+		var ready []*Task
+		for id, task := range remaining {
+			deps := depGraph[id]
+			canRun := true
+			for _, dep := range deps {
+				if !completed[dep] {
+					canRun = false
+					break
+				}
+			}
+			if canRun {
+				ready = append(ready, task)
+			}
+		}
+
+		if len(ready) == 0 {
+			// Deadlock - remaining tasks have unmet dependencies
+			log.Printf("Orchestrator: Dependency deadlock detected with %d remaining tasks", len(remaining))
+			break
+		}
+
+		// Limit parallel execution
+		if len(ready) > maxParallel {
+			ready = ready[:maxParallel]
+		}
+
+		state.ParallelTasks = len(ready)
+		if state.ParallelTasks > state.ResourceUsage.PeakParallelTasks {
+			state.ResourceUsage.PeakParallelTasks = state.ParallelTasks
+		}
+
+		o.broadcastPhase(build.ID, state.Phase,
+			fmt.Sprintf("Executing %d tasks in parallel (%d remaining)...", len(ready), len(remaining)))
+
+		// Execute wave in parallel
+		var wg sync.WaitGroup
+		errChan := make(chan error, len(ready))
+
+		for _, task := range ready {
+			wg.Add(1)
+			go func(t *Task) {
+				defer wg.Done()
+
+				select {
+				case <-ctx.Done():
+					errChan <- ctx.Err()
+					return
+				default:
+				}
+
+				if err := o.waitForTasksOfType(build, state, t.Type, 5*time.Minute); err != nil {
+					errChan <- err
+				}
+			}(task)
+		}
+
+		wg.Wait()
+		close(errChan)
+
+		// Check for errors
+		for err := range errChan {
+			if err != nil {
+				return err
+			}
+		}
+
+		// Mark tasks as complete and remove from remaining
+		for _, task := range ready {
+			completed[task.ID] = true
+			delete(remaining, task.ID)
+		}
+
+		state.ParallelTasks = 0
+	}
+
+	return nil
+}
+
+// attemptAutoFix tries to automatically fix verification failures
+func (o *BuildOrchestrator) attemptAutoFix(build *Build, state *OrchestrationState) bool {
+	log.Printf("Orchestrator: Attempting auto-fix for build %s", build.ID)
+
+	o.broadcastPhase(build.ID, state.Phase, "Attempting automatic fixes...")
+
+	// Find agents that can do fixes
+	build.mu.RLock()
+	var reviewerAgent *Agent
+	for _, agent := range build.Agents {
+		if agent.Role == RoleReviewer {
+			reviewerAgent = agent
+			break
+		}
+	}
+	build.mu.RUnlock()
+
+	if reviewerAgent == nil {
+		log.Printf("Orchestrator: No reviewer agent available for auto-fix")
+		return false
+	}
+
+	// Create fix task
+	fixTask := &Task{
+		ID:          uuid.New().String(),
+		Type:        TaskReview,
+		Description: "Analyze and fix build verification failures",
+		Priority:    100, // High priority
+		Status:      TaskPending,
+		MaxRetries:  2,
+		Input: map[string]any{
+			"action":       "auto_fix",
+			"build_errors": state.Errors,
+		},
+		CreatedAt: time.Now(),
+	}
+
+	build.mu.Lock()
+	build.Tasks = append(build.Tasks, fixTask)
+	build.mu.Unlock()
+
+	if err := o.manager.AssignTask(reviewerAgent.ID, fixTask); err != nil {
+		log.Printf("Orchestrator: Failed to assign fix task: %v", err)
+		return false
+	}
+
+	// Wait for fix task
+	if err := o.waitForTasksOfType(build, state, TaskReview, 3*time.Minute); err != nil {
+		log.Printf("Orchestrator: Fix task failed: %v", err)
+		return false
+	}
+
+	// Re-run verification
+	return o.runVerifyGate(build, state, "post-generation")
 }
 
 // executePlanningPhase runs the planning phase

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -34,11 +35,60 @@ func (v *Validator) SetWorkDir(dir string) {
 func (v *Validator) verifyBuild(ctx context.Context) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
 
-	// Check if package.json exists
-	packageJSONPath := filepath.Join(v.workDir, "package.json")
-	if _, err := os.Stat(packageJSONPath); os.IsNotExist(err) {
-		return issues // Not a Node.js project, skip
+	// Detect project type and run appropriate verification
+	projectType := v.detectProjectType()
+
+	switch projectType {
+	case "node":
+		issues = append(issues, v.verifyNodeProject(ctx)...)
+	case "go":
+		issues = append(issues, v.verifyGoProject(ctx)...)
+	case "python":
+		issues = append(issues, v.verifyPythonProject(ctx)...)
+	case "rust":
+		issues = append(issues, v.verifyRustProject(ctx)...)
+	case "java":
+		issues = append(issues, v.verifyJavaProject(ctx)...)
+	default:
+		log.Printf("Validator: Unknown project type, skipping build verification")
 	}
+
+	// Run security scan regardless of project type
+	securityIssues := v.runSecurityScan(ctx)
+	issues = append(issues, securityIssues...)
+
+	return issues
+}
+
+// detectProjectType identifies the project type from files present
+func (v *Validator) detectProjectType() string {
+	if _, err := os.Stat(filepath.Join(v.workDir, "package.json")); err == nil {
+		return "node"
+	}
+	if _, err := os.Stat(filepath.Join(v.workDir, "go.mod")); err == nil {
+		return "go"
+	}
+	if _, err := os.Stat(filepath.Join(v.workDir, "requirements.txt")); err == nil {
+		return "python"
+	}
+	if _, err := os.Stat(filepath.Join(v.workDir, "pyproject.toml")); err == nil {
+		return "python"
+	}
+	if _, err := os.Stat(filepath.Join(v.workDir, "Cargo.toml")); err == nil {
+		return "rust"
+	}
+	if _, err := os.Stat(filepath.Join(v.workDir, "pom.xml")); err == nil {
+		return "java"
+	}
+	if _, err := os.Stat(filepath.Join(v.workDir, "build.gradle")); err == nil {
+		return "java"
+	}
+	return "unknown"
+}
+
+// verifyNodeProject runs Node.js/TypeScript build verification
+func (v *Validator) verifyNodeProject(ctx context.Context) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
 
 	// Check if node_modules exists (deps installed)
 	nodeModulesPath := filepath.Join(v.workDir, "node_modules")
@@ -48,25 +98,37 @@ func (v *Validator) verifyBuild(ctx context.Context) []ValidationIssue {
 		installCmd.Dir = v.workDir
 		if output, err := installCmd.CombinedOutput(); err != nil {
 			issues = append(issues, ValidationIssue{
-				Type:        IssueSyntaxError,
+				Type:        IssueDependencyMissing,
 				Severity:    SeverityCritical,
 				File:        "package.json",
-				Description: fmt.Sprintf("npm install failed: %s", string(output)),
+				Description: fmt.Sprintf("npm install failed: %s", truncateOutput(string(output), 500)),
 			})
 			return issues
 		}
 	}
 
-	// Run TypeScript type check
-	tscCmd := exec.CommandContext(ctx, "npx", "tsc", "--noEmit")
-	tscCmd.Dir = v.workDir
-	if output, err := tscCmd.CombinedOutput(); err != nil {
-		issues = append(issues, ValidationIssue{
-			Type:        IssueSyntaxError,
-			Severity:    SeverityWarning,
-			File:        "tsconfig.json",
-			Description: fmt.Sprintf("TypeScript type check found errors: %s", truncateOutput(string(output), 500)),
-		})
+	// Run TypeScript type check if tsconfig.json exists
+	if _, err := os.Stat(filepath.Join(v.workDir, "tsconfig.json")); err == nil {
+		tscCmd := exec.CommandContext(ctx, "npx", "tsc", "--noEmit")
+		tscCmd.Dir = v.workDir
+		if output, err := tscCmd.CombinedOutput(); err != nil {
+			parsed := v.parseTypeScriptErrors(string(output))
+			issues = append(issues, parsed...)
+		}
+	}
+
+	// Run ESLint if config exists
+	eslintConfigs := []string{".eslintrc.js", ".eslintrc.json", ".eslintrc", "eslint.config.js", "eslint.config.mjs"}
+	for _, config := range eslintConfigs {
+		if _, err := os.Stat(filepath.Join(v.workDir, config)); err == nil {
+			lintCmd := exec.CommandContext(ctx, "npx", "eslint", ".", "--format=json", "--max-warnings=0")
+			lintCmd.Dir = v.workDir
+			if output, _ := lintCmd.CombinedOutput(); len(output) > 0 {
+				lintIssues := v.parseESLintOutput(string(output))
+				issues = append(issues, lintIssues...)
+			}
+			break
+		}
 	}
 
 	// Run build
@@ -79,6 +141,480 @@ func (v *Validator) verifyBuild(ctx context.Context) []ValidationIssue {
 			File:        "package.json",
 			Description: fmt.Sprintf("Build failed: %s", truncateOutput(string(output), 500)),
 		})
+	}
+
+	return issues
+}
+
+// verifyGoProject runs Go build verification
+func (v *Validator) verifyGoProject(ctx context.Context) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+
+	// Download dependencies
+	modCmd := exec.CommandContext(ctx, "go", "mod", "download")
+	modCmd.Dir = v.workDir
+	if output, err := modCmd.CombinedOutput(); err != nil {
+		issues = append(issues, ValidationIssue{
+			Type:        IssueDependencyMissing,
+			Severity:    SeverityCritical,
+			File:        "go.mod",
+			Description: fmt.Sprintf("go mod download failed: %s", truncateOutput(string(output), 500)),
+		})
+		return issues
+	}
+
+	// Run go vet
+	vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
+	vetCmd.Dir = v.workDir
+	if output, err := vetCmd.CombinedOutput(); err != nil {
+		vetIssues := v.parseGoVetOutput(string(output))
+		issues = append(issues, vetIssues...)
+	}
+
+	// Run go build
+	buildCmd := exec.CommandContext(ctx, "go", "build", "./...")
+	buildCmd.Dir = v.workDir
+	if output, err := buildCmd.CombinedOutput(); err != nil {
+		buildIssues := v.parseGoBuildErrors(string(output))
+		issues = append(issues, buildIssues...)
+	}
+
+	// Run tests
+	testCmd := exec.CommandContext(ctx, "go", "test", "./...", "-short")
+	testCmd.Dir = v.workDir
+	if output, err := testCmd.CombinedOutput(); err != nil {
+		issues = append(issues, ValidationIssue{
+			Type:        IssueTestFailure,
+			Severity:    SeverityError,
+			Description: fmt.Sprintf("Go tests failed: %s", truncateOutput(string(output), 500)),
+		})
+	}
+
+	return issues
+}
+
+// verifyPythonProject runs Python build verification
+func (v *Validator) verifyPythonProject(ctx context.Context) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+
+	// Check for virtual environment
+	venvPath := filepath.Join(v.workDir, "venv")
+	if _, err := os.Stat(venvPath); os.IsNotExist(err) {
+		// Try creating venv
+		venvCmd := exec.CommandContext(ctx, "python3", "-m", "venv", "venv")
+		venvCmd.Dir = v.workDir
+		venvCmd.Run() // Ignore errors - might already have system Python
+	}
+
+	// Install dependencies
+	if _, err := os.Stat(filepath.Join(v.workDir, "requirements.txt")); err == nil {
+		pipCmd := exec.CommandContext(ctx, "pip", "install", "-r", "requirements.txt", "-q")
+		pipCmd.Dir = v.workDir
+		if output, err := pipCmd.CombinedOutput(); err != nil {
+			issues = append(issues, ValidationIssue{
+				Type:        IssueDependencyMissing,
+				Severity:    SeverityError,
+				File:        "requirements.txt",
+				Description: fmt.Sprintf("pip install failed: %s", truncateOutput(string(output), 300)),
+			})
+		}
+	}
+
+	// Run flake8 if available
+	flakeCmd := exec.CommandContext(ctx, "python3", "-m", "flake8", "--max-line-length=120", "--format=%(path)s:%(row)d:%(col)d: %(code)s %(text)s")
+	flakeCmd.Dir = v.workDir
+	if output, err := flakeCmd.CombinedOutput(); err != nil {
+		flakeIssues := v.parseFlake8Output(string(output))
+		issues = append(issues, flakeIssues...)
+	}
+
+	// Run mypy for type checking if available
+	mypyCmd := exec.CommandContext(ctx, "python3", "-m", "mypy", ".", "--ignore-missing-imports")
+	mypyCmd.Dir = v.workDir
+	if output, err := mypyCmd.CombinedOutput(); err != nil {
+		mypyIssues := v.parseMypyOutput(string(output))
+		issues = append(issues, mypyIssues...)
+	}
+
+	// Run pytest
+	pytestCmd := exec.CommandContext(ctx, "python3", "-m", "pytest", "--tb=short", "-q")
+	pytestCmd.Dir = v.workDir
+	if output, err := pytestCmd.CombinedOutput(); err != nil {
+		issues = append(issues, ValidationIssue{
+			Type:        IssueTestFailure,
+			Severity:    SeverityError,
+			Description: fmt.Sprintf("pytest failed: %s", truncateOutput(string(output), 500)),
+		})
+	}
+
+	return issues
+}
+
+// verifyRustProject runs Rust build verification
+func (v *Validator) verifyRustProject(ctx context.Context) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+
+	// Run cargo check (faster than full build)
+	checkCmd := exec.CommandContext(ctx, "cargo", "check", "--message-format=short")
+	checkCmd.Dir = v.workDir
+	if output, err := checkCmd.CombinedOutput(); err != nil {
+		rustIssues := v.parseCargoOutput(string(output))
+		issues = append(issues, rustIssues...)
+	}
+
+	// Run clippy for linting
+	clippyCmd := exec.CommandContext(ctx, "cargo", "clippy", "--", "-D", "warnings")
+	clippyCmd.Dir = v.workDir
+	if output, err := clippyCmd.CombinedOutput(); err != nil {
+		clippyIssues := v.parseCargoOutput(string(output))
+		for i := range clippyIssues {
+			clippyIssues[i].Type = IssueBestPractice
+			clippyIssues[i].Severity = SeverityWarning
+		}
+		issues = append(issues, clippyIssues...)
+	}
+
+	// Run tests
+	testCmd := exec.CommandContext(ctx, "cargo", "test", "--", "--test-threads=1")
+	testCmd.Dir = v.workDir
+	if output, err := testCmd.CombinedOutput(); err != nil {
+		issues = append(issues, ValidationIssue{
+			Type:        IssueTestFailure,
+			Severity:    SeverityError,
+			Description: fmt.Sprintf("cargo test failed: %s", truncateOutput(string(output), 500)),
+		})
+	}
+
+	return issues
+}
+
+// verifyJavaProject runs Java build verification
+func (v *Validator) verifyJavaProject(ctx context.Context) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+
+	// Check for Maven or Gradle
+	if _, err := os.Stat(filepath.Join(v.workDir, "pom.xml")); err == nil {
+		// Maven project
+		compileCmd := exec.CommandContext(ctx, "mvn", "compile", "-q")
+		compileCmd.Dir = v.workDir
+		if output, err := compileCmd.CombinedOutput(); err != nil {
+			issues = append(issues, ValidationIssue{
+				Type:        IssueSyntaxError,
+				Severity:    SeverityCritical,
+				File:        "pom.xml",
+				Description: fmt.Sprintf("Maven compile failed: %s", truncateOutput(string(output), 500)),
+			})
+		}
+
+		testCmd := exec.CommandContext(ctx, "mvn", "test", "-q")
+		testCmd.Dir = v.workDir
+		if output, err := testCmd.CombinedOutput(); err != nil {
+			issues = append(issues, ValidationIssue{
+				Type:        IssueTestFailure,
+				Severity:    SeverityError,
+				Description: fmt.Sprintf("Maven tests failed: %s", truncateOutput(string(output), 500)),
+			})
+		}
+	} else if _, err := os.Stat(filepath.Join(v.workDir, "build.gradle")); err == nil {
+		// Gradle project
+		compileCmd := exec.CommandContext(ctx, "gradle", "compileJava", "-q")
+		compileCmd.Dir = v.workDir
+		if output, err := compileCmd.CombinedOutput(); err != nil {
+			issues = append(issues, ValidationIssue{
+				Type:        IssueSyntaxError,
+				Severity:    SeverityCritical,
+				File:        "build.gradle",
+				Description: fmt.Sprintf("Gradle compile failed: %s", truncateOutput(string(output), 500)),
+			})
+		}
+
+		testCmd := exec.CommandContext(ctx, "gradle", "test", "-q")
+		testCmd.Dir = v.workDir
+		if output, err := testCmd.CombinedOutput(); err != nil {
+			issues = append(issues, ValidationIssue{
+				Type:        IssueTestFailure,
+				Severity:    SeverityError,
+				Description: fmt.Sprintf("Gradle tests failed: %s", truncateOutput(string(output), 500)),
+			})
+		}
+	}
+
+	return issues
+}
+
+// runSecurityScan performs basic security vulnerability scanning
+func (v *Validator) runSecurityScan(ctx context.Context) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+
+	// Scan for common security issues in code
+	securityPatterns := []struct {
+		pattern     string
+		severity    Severity
+		description string
+		suggestion  string
+	}{
+		{`(?i)password\s*=\s*["'][^"']+["']`, SeverityCritical, "Hardcoded password detected", "Use environment variables or secrets manager"},
+		{`(?i)api[_-]?key\s*=\s*["'][^"']+["']`, SeverityCritical, "Hardcoded API key detected", "Use environment variables"},
+		{`(?i)secret\s*=\s*["'][^"']+["']`, SeverityCritical, "Hardcoded secret detected", "Use environment variables or secrets manager"},
+		{`(?i)eval\s*\(`, SeverityError, "Dangerous eval() usage detected", "Avoid eval() for security"},
+		{`(?i)exec\s*\(`, SeverityWarning, "exec() usage detected - potential command injection", "Sanitize inputs or use safer alternatives"},
+		{`(?i)innerHTML\s*=`, SeverityWarning, "innerHTML usage detected - potential XSS", "Use textContent or sanitize HTML"},
+		{`(?i)dangerouslySetInnerHTML`, SeverityWarning, "React dangerouslySetInnerHTML detected", "Sanitize HTML before rendering"},
+		{`(?i)SELECT\s+.*\s+FROM\s+.*\s+WHERE.*\+`, SeverityError, "Potential SQL injection (string concatenation in query)", "Use parameterized queries"},
+	}
+
+	err := filepath.Walk(v.workDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		// Skip node_modules, vendor, etc.
+		if info.IsDir() {
+			baseName := filepath.Base(path)
+			if baseName == "node_modules" || baseName == "vendor" || baseName == ".git" || baseName == "target" || baseName == "dist" || baseName == "build" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Only scan code files
+		ext := strings.ToLower(filepath.Ext(path))
+		codeExts := map[string]bool{".js": true, ".ts": true, ".jsx": true, ".tsx": true, ".py": true, ".go": true, ".rs": true, ".java": true, ".rb": true, ".php": true}
+		if !codeExts[ext] {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		contentStr := string(content)
+		relPath, _ := filepath.Rel(v.workDir, path)
+
+		for _, sp := range securityPatterns {
+			re, err := regexp.Compile(sp.pattern)
+			if err != nil {
+				continue
+			}
+
+			matches := re.FindAllStringIndex(contentStr, -1)
+			for _, match := range matches {
+				lineNum := strings.Count(contentStr[:match[0]], "\n") + 1
+				issues = append(issues, ValidationIssue{
+					Type:        IssueSecurityRisk,
+					Severity:    sp.severity,
+					File:        relPath,
+					Line:        lineNum,
+					Description: sp.description,
+					Suggestion:  sp.suggestion,
+				})
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		log.Printf("Validator: Security scan walk error: %v", err)
+	}
+
+	return issues
+}
+
+// Error parsing helpers
+
+func (v *Validator) parseTypeScriptErrors(output string) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	lines := strings.Split(output, "\n")
+
+	// TypeScript error format: src/file.ts(10,5): error TS2322: message
+	re := regexp.MustCompile(`^(.+?)\((\d+),(\d+)\):\s*(error|warning)\s+TS(\d+):\s*(.+)$`)
+
+	for _, line := range lines {
+		matches := re.FindStringSubmatch(strings.TrimSpace(line))
+		if len(matches) >= 7 {
+			lineNum, _ := strconv.Atoi(matches[2])
+			severity := SeverityError
+			if matches[4] == "warning" {
+				severity = SeverityWarning
+			}
+			issues = append(issues, ValidationIssue{
+				Type:        IssueTypeError,
+				Severity:    severity,
+				File:        matches[1],
+				Line:        lineNum,
+				Description: fmt.Sprintf("TS%s: %s", matches[5], matches[6]),
+			})
+		}
+	}
+
+	return issues
+}
+
+func (v *Validator) parseGoBuildErrors(output string) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	lines := strings.Split(output, "\n")
+
+	// Go error format: file.go:10:5: error message
+	re := regexp.MustCompile(`^(.+?):(\d+):(\d+):\s*(.+)$`)
+
+	for _, line := range lines {
+		matches := re.FindStringSubmatch(strings.TrimSpace(line))
+		if len(matches) >= 5 {
+			lineNum, _ := strconv.Atoi(matches[2])
+			issues = append(issues, ValidationIssue{
+				Type:        IssueSyntaxError,
+				Severity:    SeverityError,
+				File:        matches[1],
+				Line:        lineNum,
+				Description: matches[4],
+			})
+		}
+	}
+
+	return issues
+}
+
+func (v *Validator) parseGoVetOutput(output string) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	lines := strings.Split(output, "\n")
+
+	re := regexp.MustCompile(`^(.+?):(\d+):(\d+):\s*(.+)$`)
+
+	for _, line := range lines {
+		matches := re.FindStringSubmatch(strings.TrimSpace(line))
+		if len(matches) >= 5 {
+			lineNum, _ := strconv.Atoi(matches[2])
+			issues = append(issues, ValidationIssue{
+				Type:        IssueBestPractice,
+				Severity:    SeverityWarning,
+				File:        matches[1],
+				Line:        lineNum,
+				Description: fmt.Sprintf("go vet: %s", matches[4]),
+			})
+		}
+	}
+
+	return issues
+}
+
+func (v *Validator) parseFlake8Output(output string) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	lines := strings.Split(output, "\n")
+
+	// Flake8 format: path:line:col: code text
+	re := regexp.MustCompile(`^(.+?):(\d+):(\d+):\s*([A-Z]\d+)\s+(.+)$`)
+
+	for _, line := range lines {
+		matches := re.FindStringSubmatch(strings.TrimSpace(line))
+		if len(matches) >= 6 {
+			lineNum, _ := strconv.Atoi(matches[2])
+			issues = append(issues, ValidationIssue{
+				Type:        IssueBestPractice,
+				Severity:    SeverityWarning,
+				File:        matches[1],
+				Line:        lineNum,
+				Description: fmt.Sprintf("%s: %s", matches[4], matches[5]),
+			})
+		}
+	}
+
+	return issues
+}
+
+func (v *Validator) parseMypyOutput(output string) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	lines := strings.Split(output, "\n")
+
+	// mypy format: file.py:10: error: message
+	re := regexp.MustCompile(`^(.+?):(\d+):\s*(error|warning|note):\s*(.+)$`)
+
+	for _, line := range lines {
+		matches := re.FindStringSubmatch(strings.TrimSpace(line))
+		if len(matches) >= 5 {
+			lineNum, _ := strconv.Atoi(matches[2])
+			severity := SeverityWarning
+			if matches[3] == "error" {
+				severity = SeverityError
+			}
+			issues = append(issues, ValidationIssue{
+				Type:        IssueTypeError,
+				Severity:    severity,
+				File:        matches[1],
+				Line:        lineNum,
+				Description: fmt.Sprintf("mypy: %s", matches[4]),
+			})
+		}
+	}
+
+	return issues
+}
+
+func (v *Validator) parseCargoOutput(output string) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	lines := strings.Split(output, "\n")
+
+	// Rust error format: error[E0001]: message
+	//                   --> src/main.rs:10:5
+	currentError := ""
+	re := regexp.MustCompile(`^\s*-->\s*(.+?):(\d+):(\d+)$`)
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "error") || strings.HasPrefix(trimmed, "warning") {
+			currentError = trimmed
+		} else if matches := re.FindStringSubmatch(trimmed); len(matches) >= 4 && currentError != "" {
+			lineNum, _ := strconv.Atoi(matches[2])
+			severity := SeverityError
+			if strings.HasPrefix(currentError, "warning") {
+				severity = SeverityWarning
+			}
+			issues = append(issues, ValidationIssue{
+				Type:        IssueSyntaxError,
+				Severity:    severity,
+				File:        matches[1],
+				Line:        lineNum,
+				Description: currentError,
+			})
+			currentError = ""
+		}
+	}
+
+	return issues
+}
+
+func (v *Validator) parseESLintOutput(output string) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+
+	// Try to parse as JSON
+	var eslintResults []struct {
+		FilePath string `json:"filePath"`
+		Messages []struct {
+			Line     int    `json:"line"`
+			Column   int    `json:"column"`
+			Severity int    `json:"severity"`
+			Message  string `json:"message"`
+			RuleID   string `json:"ruleId"`
+		} `json:"messages"`
+	}
+
+	if err := json.Unmarshal([]byte(output), &eslintResults); err == nil {
+		for _, result := range eslintResults {
+			for _, msg := range result.Messages {
+				severity := SeverityWarning
+				if msg.Severity == 2 {
+					severity = SeverityError
+				}
+				issues = append(issues, ValidationIssue{
+					Type:        IssueBestPractice,
+					Severity:    severity,
+					File:        result.FilePath,
+					Line:        msg.Line,
+					Description: fmt.Sprintf("[%s] %s", msg.RuleID, msg.Message),
+				})
+			}
+		}
 	}
 
 	return issues

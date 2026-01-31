@@ -33,29 +33,249 @@ func (p *Planner) CreatePlan(ctx context.Context, description string) (*Executio
 		return nil, fmt.Errorf("requirement analysis failed: %w", err)
 	}
 
-	// Generate the structured plan
+	// Perform risk assessment
+	analysis = p.assessRisks(analysis)
+	if analysis.RiskScore > 80 {
+		log.Printf("Planner: WARNING - High risk score (%d) detected for build", analysis.RiskScore)
+	}
+
+	// Generate the structured plan with build verification gates
 	plan, err := p.generatePlan(ctx, description, analysis)
 	if err != nil {
 		return nil, fmt.Errorf("plan generation failed: %w", err)
 	}
+
+	// Add mandatory build verification steps
+	plan = p.addBuildVerificationGates(plan, analysis)
+
+	// Optimize step ordering based on dependencies
+	plan = p.optimizeStepOrder(plan)
 
 	// Validate and optimize the plan
 	if err := p.validatePlan(plan); err != nil {
 		return nil, fmt.Errorf("plan validation failed: %w", err)
 	}
 
-	log.Printf("Planner: Created plan with %d steps", len(plan.Steps))
+	log.Printf("Planner: Created plan with %d steps (risk score: %d)", len(plan.Steps), analysis.RiskScore)
 	return plan, nil
+}
+
+// assessRisks evaluates potential risks in the build
+func (p *Planner) assessRisks(analysis *RequirementAnalysis) *RequirementAnalysis {
+	risks := make([]RiskAssessment, 0)
+	score := 0
+
+	// Complexity risk
+	switch analysis.Complexity {
+	case "complex":
+		score += 25
+		risks = append(risks, RiskAssessment{
+			Type:        "complexity",
+			Severity:    "high",
+			Description: "High complexity project may require more iterations",
+			Mitigation:  "Break down into smaller, verifiable components",
+		})
+	case "medium":
+		score += 10
+	}
+
+	// Feature count risk
+	if len(analysis.Features) > 5 {
+		score += 15
+		risks = append(risks, RiskAssessment{
+			Type:        "scope",
+			Severity:    "medium",
+			Description: fmt.Sprintf("Large feature count (%d) increases failure risk", len(analysis.Features)),
+			Mitigation:  "Prioritize core features and implement incrementally",
+		})
+	}
+
+	// External dependency risk
+	if analysis.TechStack != nil {
+		if len(analysis.TechStack.Extras) > 5 {
+			score += 10
+			risks = append(risks, RiskAssessment{
+				Type:        "dependency",
+				Severity:    "medium",
+				Description: "Many external dependencies increase integration complexity",
+				Mitigation:  "Verify dependency compatibility before code generation",
+			})
+		}
+	}
+
+	// Security risk for certain features
+	for _, feature := range analysis.Features {
+		featureLower := strings.ToLower(feature.Name + " " + feature.Description)
+		if strings.Contains(featureLower, "auth") || strings.Contains(featureLower, "payment") ||
+			strings.Contains(featureLower, "user data") || strings.Contains(featureLower, "credential") {
+			score += 15
+			risks = append(risks, RiskAssessment{
+				Type:        "security",
+				Severity:    "high",
+				Description: fmt.Sprintf("Feature '%s' requires careful security implementation", feature.Name),
+				Mitigation:  "Include security review step and follow OWASP guidelines",
+			})
+			break
+		}
+	}
+
+	// Data model risk
+	if len(analysis.DataModels) > 10 {
+		score += 10
+		risks = append(risks, RiskAssessment{
+			Type:        "data",
+			Severity:    "medium",
+			Description: "Complex data model may have relationship issues",
+			Mitigation:  "Validate schema before proceeding to code generation",
+		})
+	}
+
+	// Cap at 100
+	if score > 100 {
+		score = 100
+	}
+
+	analysis.RiskScore = score
+	analysis.Risks = risks
+	return analysis
+}
+
+// addBuildVerificationGates inserts mandatory verification steps
+func (p *Planner) addBuildVerificationGates(plan *ExecutionPlan, analysis *RequirementAnalysis) *ExecutionPlan {
+	newSteps := make([]*PlanStep, 0)
+	verifyStepCount := 0
+
+	for _, step := range plan.Steps {
+		newSteps = append(newSteps, step)
+
+		// After code generation steps, add verification
+		if step.ActionType == ActionAIGenerate {
+			verifyStepCount++
+			verifyStep := &PlanStep{
+				ID:          uuid.New().String(),
+				Order:       step.Order + 1,
+				Name:        fmt.Sprintf("Verify: %s", step.Name),
+				Description: "Run build verification to catch compilation errors",
+				ActionType:  ActionVerifyBuild,
+				Input: map[string]interface{}{
+					"generated_by": step.ID,
+					"tech_stack":   analysis.TechStack,
+				},
+				Dependencies: []string{step.ID},
+				Status:       StepPending,
+			}
+			newSteps = append(newSteps, verifyStep)
+		}
+	}
+
+	// Always add final comprehensive verification
+	finalVerify := &PlanStep{
+		ID:          uuid.New().String(),
+		Order:       len(newSteps),
+		Name:        "Final Build Verification",
+		Description: "Comprehensive build, lint, type-check, and test verification",
+		ActionType:  ActionVerifyBuild,
+		Input: map[string]interface{}{
+			"comprehensive": true,
+			"tech_stack":    analysis.TechStack,
+			"run_tests":     true,
+			"run_lint":      true,
+		},
+		Status: StepPending,
+	}
+	if len(newSteps) > 0 {
+		finalVerify.Dependencies = []string{newSteps[len(newSteps)-1].ID}
+	}
+	newSteps = append(newSteps, finalVerify)
+
+	plan.Steps = newSteps
+	return plan
+}
+
+// optimizeStepOrder reorders steps based on dependency graph for parallel execution
+func (p *Planner) optimizeStepOrder(plan *ExecutionPlan) *ExecutionPlan {
+	// Build dependency map
+	dependencyCount := make(map[string]int)
+	dependents := make(map[string][]string)
+
+	for _, step := range plan.Steps {
+		dependencyCount[step.ID] = len(step.Dependencies)
+		for _, depID := range step.Dependencies {
+			dependents[depID] = append(dependents[depID], step.ID)
+		}
+	}
+
+	// Topological sort with level assignment
+	ordered := make([]*PlanStep, 0)
+	ready := make([]*PlanStep, 0)
+	stepMap := make(map[string]*PlanStep)
+
+	for _, step := range plan.Steps {
+		stepMap[step.ID] = step
+		if dependencyCount[step.ID] == 0 {
+			ready = append(ready, step)
+		}
+	}
+
+	level := 0
+	for len(ready) > 0 {
+		nextReady := make([]*PlanStep, 0)
+		for _, step := range ready {
+			step.Order = level
+			ordered = append(ordered, step)
+
+			for _, depID := range dependents[step.ID] {
+				dependencyCount[depID]--
+				if dependencyCount[depID] == 0 {
+					nextReady = append(nextReady, stepMap[depID])
+				}
+			}
+		}
+		ready = nextReady
+		level++
+	}
+
+	plan.Steps = ordered
+	return plan
 }
 
 // RequirementAnalysis holds the parsed requirements
 type RequirementAnalysis struct {
-	AppType      string      `json:"app_type"`      // web, api, cli, fullstack
-	Features     []Feature   `json:"features"`      // Key features to implement
-	DataModels   []DataModel `json:"data_models"`   // Data structures needed
-	TechStack    *TechStack  `json:"tech_stack"`    // Recommended technologies
-	Complexity   string      `json:"complexity"`    // simple, medium, complex
-	EstimatedTime string     `json:"estimated_time"` // Rough time estimate
+	AppType       string           `json:"app_type"`        // web, api, cli, fullstack
+	Features      []Feature        `json:"features"`        // Key features to implement
+	DataModels    []DataModel      `json:"data_models"`     // Data structures needed
+	TechStack     *TechStack       `json:"tech_stack"`      // Recommended technologies
+	Complexity    string           `json:"complexity"`      // simple, medium, complex
+	EstimatedTime string           `json:"estimated_time"`  // Rough time estimate
+	RiskScore     int              `json:"risk_score"`      // 0-100 risk assessment
+	Risks         []RiskAssessment `json:"risks"`           // Identified risks
+	Dependencies  []DependencyInfo `json:"dependencies"`    // External dependencies
+	PreflightChecks []PreflightCheck `json:"preflight_checks"` // Pre-build requirements
+}
+
+// RiskAssessment identifies potential risks in the build
+type RiskAssessment struct {
+	Type        string `json:"type"`        // security, complexity, integration, dependency
+	Severity    string `json:"severity"`    // low, medium, high, critical
+	Description string `json:"description"`
+	Mitigation  string `json:"mitigation"`
+}
+
+// DependencyInfo tracks external dependencies
+type DependencyInfo struct {
+	Name         string   `json:"name"`
+	Version      string   `json:"version,omitempty"`
+	Type         string   `json:"type"` // npm, pip, go, cargo
+	Required     bool     `json:"required"`
+	Alternatives []string `json:"alternatives,omitempty"`
+}
+
+// PreflightCheck defines pre-build requirements
+type PreflightCheck struct {
+	Name        string `json:"name"`
+	Command     string `json:"command,omitempty"`
+	Required    bool   `json:"required"`
+	Description string `json:"description"`
 }
 
 // Feature represents a feature to implement

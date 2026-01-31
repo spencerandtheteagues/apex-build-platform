@@ -42,6 +42,10 @@ const (
 	ActionValidate     ActionType = "validate"      // Validate output
 	ActionDeploy       ActionType = "deploy"        // Deploy application
 	ActionRollback     ActionType = "rollback"      // Rollback changes
+	ActionVerifyBuild  ActionType = "verify_build"  // Run actual compiler/build verification
+	ActionSecurityScan ActionType = "security_scan" // Run security vulnerability scan
+	ActionLint         ActionType = "lint"          // Run linter checks
+	ActionTypeCheck    ActionType = "type_check"    // Run type checker
 )
 
 // AutonomousTask represents a task for the autonomous agent

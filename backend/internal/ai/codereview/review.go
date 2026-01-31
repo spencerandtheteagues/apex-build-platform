@@ -630,10 +630,14 @@ func (s *CodeReviewService) ComprehensiveReview(ctx context.Context, req ReviewR
 	if err != nil {
 		// If AI review fails but build verification worked, return build results
 		if len(buildFindings) > 0 {
+			score := 30
+			if buildSuccess {
+				score = 70
+			}
 			return &ReviewResponse{
 				Findings:   buildFindings,
 				Summary:    "Build verification completed. AI review unavailable.",
-				Score:      buildSuccess ? 70 : 30,
+				Score:      score,
 				Metrics:    s.calculateMetrics(req.Code),
 				ReviewedAt: time.Now(),
 				Duration:   time.Since(startTime).Milliseconds(),
