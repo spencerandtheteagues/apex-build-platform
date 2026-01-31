@@ -8,10 +8,12 @@ import { AppBuilder } from './components/builder/AppBuilder'
 import { AdminDashboard } from './components/admin/AdminDashboard'
 import { ExplorePage } from './pages/Explore'
 import { GitHubImportWizard } from './components/import/GitHubImportWizard'
+import APIKeySettings from './components/settings/APIKeySettings'
+import ModelSelector from './components/ai/ModelSelector'
 // Import ErrorBoundary directly to be safe
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input, AnimatedBackground } from './components/ui'
-import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown, Key } from 'lucide-react'
 import './styles/globals.css'
 
 // Premium Auth Screen Styles
@@ -313,7 +315,7 @@ const AuthParticle: React.FC<{ delay: number; startX: number; startY: number }> 
   />
 );
 
-type AppView = 'builder' | 'ide' | 'admin' | 'explore'
+type AppView = 'builder' | 'ide' | 'admin' | 'explore' | 'settings'
 
 function App() {
   const [currentView, setCurrentView] = useState<AppView>('builder')
@@ -742,6 +744,17 @@ function App() {
         {/* User Info */}
         {user && (
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setCurrentView('settings')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all duration-200 ${
+                currentView === 'settings'
+                  ? 'bg-red-900/20 text-red-400 border border-red-900/50'
+                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+              }`}
+              title="Settings & API Keys"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
             <span className="text-sm text-gray-400">{user.username}</span>
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-red-900/30">
               {user.username?.charAt(0).toUpperCase()}
@@ -786,6 +799,48 @@ function App() {
         <div className={`absolute inset-0 overflow-y-auto ${currentView === 'explore' ? 'block' : 'hidden'}`}>
           <ErrorBoundary>
             <ExplorePage />
+          </ErrorBoundary>
+        </div>
+
+        <div className={`absolute inset-0 overflow-y-auto ${currentView === 'settings' ? 'block' : 'hidden'}`}>
+          <ErrorBoundary>
+            <div className="min-h-full bg-black p-6">
+              <div className="max-w-4xl mx-auto space-y-8">
+                <div>
+                  <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-500 mb-2">
+                    Settings
+                  </h1>
+                  <p className="text-gray-400">Configure your AI providers and API keys</p>
+                </div>
+
+                {/* Model Selector Section */}
+                <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                  <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-red-400" />
+                    Default AI Model
+                  </h2>
+                  <p className="text-gray-400 text-sm mb-4">
+                    Select the default AI model for your builds. You can override this per-project.
+                  </p>
+                  <ModelSelector
+                    onChange={(provider, model) => console.log('Selected:', provider, model)}
+                    className="w-full max-w-md"
+                  />
+                </div>
+
+                {/* API Keys Section */}
+                <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                  <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                    <Key className="w-5 h-5 text-red-400" />
+                    API Keys (BYOK)
+                  </h2>
+                  <p className="text-gray-400 text-sm mb-6">
+                    Bring Your Own Keys - Add your own API keys to use your personal quotas and get better rates.
+                  </p>
+                  <APIKeySettings />
+                </div>
+              </div>
+            </div>
           </ErrorBoundary>
         </div>
       </div>
