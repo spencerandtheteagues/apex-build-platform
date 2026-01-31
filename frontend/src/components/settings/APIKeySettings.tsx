@@ -21,7 +21,7 @@ const PROVIDERS: ProviderConfig[] = [
   {
     id: 'claude',
     name: 'Claude (Anthropic)',
-    description: 'Flagship reasoning model with strong coding abilities',
+    description: 'Opus 4.5, Sonnet 4, Haiku 3.5 — flagship reasoning',
     color: 'text-orange-400',
     bgGlow: 'shadow-orange-500/20',
     borderColor: 'border-orange-500/30 hover:border-orange-400/60',
@@ -29,8 +29,8 @@ const PROVIDERS: ProviderConfig[] = [
   },
   {
     id: 'gpt4',
-    name: 'GPT-4 (OpenAI)',
-    description: 'Multimodal model excelling at code generation and testing',
+    name: 'GPT-5.2 (OpenAI)',
+    description: 'Pro, Thinking, Instant, Codex — 100% AIME, 400K context',
     color: 'text-green-400',
     bgGlow: 'shadow-green-500/20',
     borderColor: 'border-green-500/30 hover:border-green-400/60',
@@ -38,8 +38,8 @@ const PROVIDERS: ProviderConfig[] = [
   },
   {
     id: 'gemini',
-    name: 'Gemini (Google)',
-    description: 'Fast multimodal model with large context window',
+    name: 'Gemini 3 (Google)',
+    description: 'Pro, Deep Think, Flash — 90.4% GPQA Diamond',
     color: 'text-blue-400',
     bgGlow: 'shadow-blue-500/20',
     borderColor: 'border-blue-500/30 hover:border-blue-400/60',
@@ -47,8 +47,8 @@ const PROVIDERS: ProviderConfig[] = [
   },
   {
     id: 'grok',
-    name: 'Grok (xAI)',
-    description: 'Frontier intelligence model, fast and affordable',
+    name: 'Grok 4 (xAI)',
+    description: 'Heavy, 4.1 Thinking, 4.1 — 50% HLE, #1 LMArena',
     color: 'text-purple-400',
     bgGlow: 'shadow-purple-500/20',
     borderColor: 'border-purple-500/30 hover:border-purple-400/60',
@@ -57,7 +57,7 @@ const PROVIDERS: ProviderConfig[] = [
   {
     id: 'ollama',
     name: 'Ollama (Local)',
-    description: 'Run AI models locally — free, private, no API key needed',
+    description: 'DeepSeek-R1, Llama 3.3, Qwen — free, private, local',
     color: 'text-cyan-400',
     bgGlow: 'shadow-cyan-500/20',
     borderColor: 'border-cyan-500/30 hover:border-cyan-400/60',

@@ -58,31 +58,36 @@ export default function ModelSelector({ value, onChange, compact = false, classN
           setModels(response.data)
         }
       } catch {
-        // Fallback models if API is unavailable
+        // Fallback models if API is unavailable - Updated January 2026
         setModels({
           claude: [
-            { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', speed: 'slow', cost_tier: 'high', description: 'Flagship reasoning' },
-            { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', speed: 'medium', cost_tier: 'medium', description: 'Balanced' },
+            { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', speed: 'slow', cost_tier: 'high', description: 'Flagship reasoning model' },
+            { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', speed: 'medium', cost_tier: 'medium', description: 'Balanced performance' },
             { id: 'claude-haiku-3-5-20241022', name: 'Claude Haiku 3.5', speed: 'fast', cost_tier: 'low', description: 'Fast and affordable' },
           ],
           gpt4: [
-            { id: 'gpt-4o', name: 'GPT-4o', speed: 'medium', cost_tier: 'medium', description: 'Flagship multimodal' },
-            { id: 'gpt-4o-mini', name: 'GPT-4o Mini', speed: 'fast', cost_tier: 'low', description: 'Fast and affordable' },
+            { id: 'gpt-5.2-pro', name: 'GPT-5.2 Pro', speed: 'slow', cost_tier: 'high', description: 'Most intelligent, 100% AIME' },
+            { id: 'gpt-5.2-thinking', name: 'GPT-5.2 Thinking', speed: 'medium', cost_tier: 'medium', description: 'Deep work & coding' },
+            { id: 'gpt-5.2-instant', name: 'GPT-5.2 Instant', speed: 'fast', cost_tier: 'low', description: 'Fast everyday tasks' },
+            { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', speed: 'medium', cost_tier: 'high', description: 'Agentic coding specialist' },
           ],
           gemini: [
-            { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', speed: 'fast', cost_tier: 'low', description: 'Fast multimodal' },
-            { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', speed: 'medium', cost_tier: 'medium', description: 'Advanced' },
+            { id: 'gemini-3-pro', name: 'Gemini 3 Pro', speed: 'medium', cost_tier: 'medium', description: 'Advanced reasoning' },
+            { id: 'gemini-3-deep-think', name: 'Gemini 3 Deep Think', speed: 'slow', cost_tier: 'high', description: 'Extended thinking mode' },
+            { id: 'gemini-3-flash', name: 'Gemini 3 Flash', speed: 'fast', cost_tier: 'low', description: 'Pro-grade at Flash speed' },
           ],
           grok: [
-            { id: 'grok-4', name: 'Grok 4', speed: 'medium', cost_tier: 'medium', description: 'Frontier intelligence' },
-            { id: 'grok-4-fast', name: 'Grok 4 Fast', speed: 'fast', cost_tier: 'low', description: 'Fast and affordable' },
+            { id: 'grok-4-heavy', name: 'Grok 4 Heavy', speed: 'slow', cost_tier: 'high', description: '50% HLE, parallel compute' },
+            { id: 'grok-4.1-thinking', name: 'Grok 4.1 Thinking', speed: 'medium', cost_tier: 'medium', description: '#1 LMArena overall' },
+            { id: 'grok-4.1', name: 'Grok 4.1', speed: 'fast', cost_tier: 'medium', description: '#2 LMArena, non-reasoning' },
+            { id: 'grok-4-fast', name: 'Grok 4 Fast', speed: 'fast', cost_tier: 'low', description: 'Budget-friendly option' },
           ],
           ollama: [
-            { id: 'llama3.1', name: 'Llama 3.1', speed: 'variable', cost_tier: 'free', description: 'Meta open-source (local)' },
+            { id: 'deepseek-r1', name: 'DeepSeek-R1', speed: 'variable', cost_tier: 'free', description: 'Reasoning model, O3-tier (local)' },
+            { id: 'deepseek-v3.2', name: 'DeepSeek-V3.2', speed: 'variable', cost_tier: 'free', description: 'Efficient long-context (local)' },
+            { id: 'llama3.3-70b', name: 'Llama 3.3 70B', speed: 'variable', cost_tier: 'free', description: '405B performance (local)' },
             { id: 'codellama', name: 'Code Llama', speed: 'variable', cost_tier: 'free', description: 'Code-specialized (local)' },
-            { id: 'deepseek-coder-v2', name: 'DeepSeek Coder V2', speed: 'variable', cost_tier: 'free', description: 'Top-tier code model (local)' },
             { id: 'qwen2.5-coder', name: 'Qwen 2.5 Coder', speed: 'variable', cost_tier: 'free', description: 'Alibaba code model (local)' },
-            { id: 'mistral', name: 'Mistral', speed: 'variable', cost_tier: 'free', description: 'Fast general-purpose (local)' },
           ],
         })
       }
