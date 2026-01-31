@@ -17,8 +17,8 @@ export const FixedApp = forwardRef<FixedAppHandle>((props, ref) => {
   // Dashboard View
   const DashboardView = () => (
     <div className="main-content" style={{
-      background: 'linear-gradient(135deg, #0a0a0f 0%, #001133 100%)',
-      color: '#00f5ff',
+      background: 'linear-gradient(135deg, #0a0a0f 0%, #1a0000 100%)',
+      color: '#ff0033',
       minHeight: '100vh',
       padding: '20px',
       fontFamily: 'monospace'
@@ -28,7 +28,7 @@ export const FixedApp = forwardRef<FixedAppHandle>((props, ref) => {
         <div style={{ textAlign: 'center', marginBottom: '40px' }}>
           <h1 style={{
             fontSize: 'clamp(2rem, 5vw, 3rem)',
-            textShadow: '0 0 20px #00f5ff',
+            textShadow: '0 0 20px #ff0033',
             marginBottom: '20px',
             fontWeight: 'bold'
           }}>
@@ -53,22 +53,22 @@ export const FixedApp = forwardRef<FixedAppHandle>((props, ref) => {
           {/* IDE Launch Card */}
           <div style={{
             background: 'rgba(21, 21, 32, 0.8)',
-            border: '1px solid #00f5ff',
+            border: '1px solid #ff0033',
             borderRadius: '12px',
             padding: '24px',
             textAlign: 'center',
-            boxShadow: '0 0 20px rgba(0, 245, 255, 0.3)',
+            boxShadow: '0 0 20px rgba(255, 0, 51, 0.3)',
             transition: 'transform 0.3s ease, box-shadow 0.3s ease'
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.transform = 'translateY(-5px)';
-            e.currentTarget.style.boxShadow = '0 10px 30px rgba(0, 245, 255, 0.5)';
+            e.currentTarget.style.boxShadow = '0 10px 30px rgba(255, 0, 51, 0.5)';
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 245, 255, 0.3)';
+            e.currentTarget.style.boxShadow = '0 0 20px rgba(255, 0, 51, 0.3)';
           }}>
-            <h3 style={{ color: '#39ff14', marginBottom: '15px', fontSize: '1.5rem' }}>
+            <h3 style={{ color: '#ff3333', marginBottom: '15px', fontSize: '1.5rem' }}>
               💻 Professional IDE
             </h3>
             <p style={{ marginBottom: '20px', color: '#ffffff', lineHeight: '1.6' }}>
@@ -105,12 +105,12 @@ export const FixedApp = forwardRef<FixedAppHandle>((props, ref) => {
           {/* Backend Status Card */}
           <div style={{
             background: 'rgba(21, 21, 32, 0.8)',
-            border: '1px solid #00f5ff',
+            border: '1px solid #ff0033',
             borderRadius: '12px',
             padding: '24px',
-            boxShadow: '0 0 20px rgba(0, 245, 255, 0.3)'
+            boxShadow: '0 0 20px rgba(255, 0, 51, 0.3)'
           }}>
-            <h3 style={{ color: '#39ff14', marginBottom: '15px', fontSize: '1.5rem' }}>
+            <h3 style={{ color: '#ff3333', marginBottom: '15px', fontSize: '1.5rem' }}>
               ✅ Backend Status
             </h3>
             <div style={{ textAlign: 'left', lineHeight: '1.8' }}>
@@ -122,7 +122,7 @@ export const FixedApp = forwardRef<FixedAppHandle>((props, ref) => {
             <button
               onClick={() => testBackendConnection()}
               style={{
-                background: 'linear-gradient(135deg, #00f5ff, #0080ff)',
+                background: 'linear-gradient(135deg, #ff0033, #0080ff)',
                 border: 'none',
                 color: '#000',
                 padding: '12px 24px',
@@ -141,19 +141,19 @@ export const FixedApp = forwardRef<FixedAppHandle>((props, ref) => {
           {/* Quick Actions Card */}
           <div style={{
             background: 'rgba(21, 21, 32, 0.8)',
-            border: '1px solid #00f5ff',
+            border: '1px solid #ff0033',
             borderRadius: '12px',
             padding: '24px',
-            boxShadow: '0 0 20px rgba(0, 245, 255, 0.3)'
+            boxShadow: '0 0 20px rgba(255, 0, 51, 0.3)'
           }}>
-            <h3 style={{ color: '#39ff14', marginBottom: '15px', fontSize: '1.5rem' }}>
+            <h3 style={{ color: '#ff3333', marginBottom: '15px', fontSize: '1.5rem' }}>
               ⚡ Quick Actions
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <button
                 onClick={() => createProject()}
                 style={{
-                  background: 'linear-gradient(135deg, #39ff14, #00aa00)',
+                  background: 'linear-gradient(135deg, #ff3333, #cc0022)',
                   border: 'none',
                   color: '#000',
                   padding: '12px 20px',
@@ -188,12 +188,12 @@ export const FixedApp = forwardRef<FixedAppHandle>((props, ref) => {
           {/* Features Card */}
           <div style={{
             background: 'rgba(21, 21, 32, 0.8)',
-            border: '1px solid #00f5ff',
+            border: '1px solid #ff0033',
             borderRadius: '12px',
             padding: '24px',
-            boxShadow: '0 0 20px rgba(0, 245, 255, 0.3)'
+            boxShadow: '0 0 20px rgba(255, 0, 51, 0.3)'
           }}>
-            <h3 style={{ color: '#39ff14', marginBottom: '15px', fontSize: '1.5rem' }}>
+            <h3 style={{ color: '#ff3333', marginBottom: '15px', fontSize: '1.5rem' }}>
               🎯 Platform Features
             </h3>
             <div style={{ textAlign: 'left', fontSize: '14px', lineHeight: '1.6' }}>
@@ -212,14 +212,14 @@ export const FixedApp = forwardRef<FixedAppHandle>((props, ref) => {
         {/* Output Console */}
         <div id="output" style={{
           background: '#000',
-          border: '1px solid #00f5ff',
+          border: '1px solid #ff0033',
           borderRadius: '8px',
           padding: '20px',
           margin: '20px 0',
           fontFamily: 'monospace',
           textAlign: 'left',
           minHeight: '120px',
-          color: '#39ff14',
+          color: '#ff3333',
           fontSize: '14px',
           lineHeight: '1.6',
           overflow: 'auto'
@@ -235,13 +235,13 @@ export const FixedApp = forwardRef<FixedAppHandle>((props, ref) => {
         <div style={{
           textAlign: 'center',
           padding: '40px 20px',
-          borderTop: '1px solid rgba(0, 245, 255, 0.3)',
+          borderTop: '1px solid rgba(255, 0, 51, 0.3)',
           marginTop: '40px'
         }}>
           <p style={{ color: '#888', fontSize: '14px', marginBottom: '10px' }}>
             APEX.BUILD v2.0.0 - Production Ready Cloud Development Platform
           </p>
-          <p style={{ color: '#00f5ff', fontSize: '12px' }}>
+          <p style={{ color: '#ff0033', fontSize: '12px' }}>
             Powered by Claude Opus 4.5 • GPT-5 • Gemini 3 • Monaco Editor
           </p>
         </div>

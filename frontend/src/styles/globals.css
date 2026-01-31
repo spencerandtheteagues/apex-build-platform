@@ -13,48 +13,48 @@
 /* Fonts - Extended Futuristic Typography */
 @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=Exo+2:wght@100;200;300;400;500;600;700;800;900&family=Share+Tech+Mono&display=swap');
 
-/* CSS Custom Properties - Futuristic Cyberpunk Theme */
+/* CSS Custom Properties - BLACK & RED Theme */
 :root {
-  /* === PRIMARY THEME COLORS === */
-  --color-primary: #00f0ff;
-  --color-primary-light: #40f8ff;
-  --color-primary-dark: #00b8c4;
-  --color-secondary: #b400ff;
-  --color-secondary-light: #d24fff;
-  --color-secondary-dark: #8800c4;
-  --color-accent: #ff0040;
-  --color-accent-light: #ff4d7a;
-  --color-accent-dark: #c4002f;
+  /* === PRIMARY THEME COLORS - RED === */
+  --color-primary: #ff0033;
+  --color-primary-light: #ff3355;
+  --color-primary-dark: #cc0028;
+  --color-secondary: #990022;
+  --color-secondary-light: #bb0033;
+  --color-secondary-dark: #660018;
+  --color-accent: #ff4444;
+  --color-accent-light: #ff6666;
+  --color-accent-dark: #cc2222;
 
-  /* === BACKGROUND SYSTEM === */
-  --color-background: #030308;
-  --color-background-elevated: #0a0a12;
-  --color-surface: #0f0f18;
-  --color-surface-elevated: #16162a;
-  --color-surface-hover: #1a1a35;
+  /* === BACKGROUND SYSTEM - PURE BLACK === */
+  --color-background: #000000;
+  --color-background-elevated: #0a0a0a;
+  --color-surface: #111111;
+  --color-surface-elevated: #1a1a1a;
+  --color-surface-hover: #222222;
 
   /* === TEXT COLORS === */
-  --color-text: #e8e8f0;
-  --color-text-secondary: #8888a0;
-  --color-text-muted: #5555668;
+  --color-text: #f0f0f0;
+  --color-text-secondary: #999999;
+  --color-text-muted: #666666;
 
-  /* === BORDER COLORS === */
-  --color-border: rgba(0, 240, 255, 0.15);
-  --color-border-bright: rgba(0, 240, 255, 0.3);
+  /* === BORDER COLORS - RED TINTED === */
+  --color-border: rgba(255, 0, 51, 0.2);
+  --color-border-bright: rgba(255, 0, 51, 0.4);
   --color-border-subtle: rgba(255, 255, 255, 0.05);
 
-  /* === GLOW EFFECTS === */
-  --color-glow: rgba(0, 240, 255, 0.3);
-  --color-glow-secondary: rgba(180, 0, 255, 0.3);
-  --color-glow-accent: rgba(255, 0, 64, 0.3);
+  /* === GLOW EFFECTS - RED === */
+  --color-glow: rgba(255, 0, 51, 0.3);
+  --color-glow-secondary: rgba(153, 0, 34, 0.3);
+  --color-glow-accent: rgba(255, 68, 68, 0.3);
 
-  /* === EFFECT PRESETS === */
-  --effect-glow: 0 0 20px rgba(0, 240, 255, 0.5);
-  --effect-glow-strong: 0 0 40px rgba(0, 240, 255, 0.7);
-  --effect-glow-purple: 0 0 20px rgba(180, 0, 255, 0.5);
+  /* === EFFECT PRESETS - RED GLOWS === */
+  --effect-glow: 0 0 20px rgba(255, 0, 51, 0.5);
+  --effect-glow-strong: 0 0 40px rgba(255, 0, 51, 0.7);
+  --effect-glow-purple: 0 0 20px rgba(153, 0, 34, 0.5);
   --effect-blur: blur(0.5px);
-  --effect-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  --effect-shadow-glow: 0 8px 32px rgba(0, 240, 255, 0.15);
+  --effect-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  --effect-shadow-glow: 0 8px 32px rgba(255, 0, 51, 0.15);
 
   /* === ANIMATIONS === */
   --transition-fast: 150ms cubic-bezier(0.23, 1, 0.32, 1);
@@ -87,10 +87,10 @@ body {
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
 
-  /* Futuristic background with subtle gradient */
+  /* Black background with subtle red gradient */
   background-image:
-    radial-gradient(ellipse at top, rgba(0, 240, 255, 0.03) 0%, transparent 50%),
-    radial-gradient(ellipse at bottom right, rgba(180, 0, 255, 0.02) 0%, transparent 50%);
+    radial-gradient(ellipse at top, rgba(255, 0, 51, 0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at bottom right, rgba(153, 0, 34, 0.02) 0%, transparent 50%);
   background-attachment: fixed;
   min-height: 100vh;
 }
@@ -152,10 +152,10 @@ html {
   scrollbar-color: var(--color-primary) rgba(0, 0, 0, 0.3);
 }
 
-/* Focus Styles - Glowing Cyberpunk */
+/* Focus Styles - Red Glow */
 *:focus {
   outline: none;
-  box-shadow: 0 0 0 2px var(--color-primary), 0 0 15px rgba(0, 240, 255, 0.3);
+  box-shadow: 0 0 0 2px var(--color-primary), 0 0 15px rgba(255, 0, 51, 0.3);
 }
 
 *:focus:not(:focus-visible) {
@@ -164,7 +164,7 @@ html {
 
 *:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--color-primary), 0 0 15px rgba(0, 240, 255, 0.3);
+  box-shadow: 0 0 0 2px var(--color-primary), 0 0 15px rgba(255, 0, 51, 0.3);
 }
 
 /* Utility Classes - Cyberpunk Effects */
@@ -339,7 +339,7 @@ html {
   background: rgba(5, 5, 15, 0.6);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(0, 240, 255, 0.1);
+  border: 1px solid rgba(255, 0, 51, 0.1);
   box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.3),
     inset 0 0 0 1px rgba(255, 255, 255, 0.03);
@@ -359,11 +359,11 @@ html {
   background: rgba(5, 5, 15, 0.7);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(0, 240, 255, 0.2);
+  border: 1px solid rgba(255, 0, 51, 0.2);
   box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.3),
-    0 0 20px rgba(0, 240, 255, 0.1),
-    inset 0 0 0 1px rgba(0, 240, 255, 0.05);
+    0 0 20px rgba(255, 0, 51, 0.1),
+    inset 0 0 0 1px rgba(255, 0, 51, 0.05);
 }
 
 /* Holographic Effects */
@@ -386,13 +386,13 @@ html {
     0 0 40px currentColor;
 }
 
-.neon-text-cyan {
+.neon-text-red {
   color: var(--color-primary);
   text-shadow:
     0 0 5px var(--color-primary),
     0 0 10px var(--color-primary),
     0 0 20px var(--color-primary),
-    0 0 40px rgba(0, 240, 255, 0.5);
+    0 0 40px rgba(255, 0, 51, 0.5);
 }
 
 .neon-text-purple {
@@ -401,7 +401,7 @@ html {
     0 0 5px var(--color-secondary),
     0 0 10px var(--color-secondary),
     0 0 20px var(--color-secondary),
-    0 0 40px rgba(180, 0, 255, 0.5);
+    0 0 40px rgba(153, 0, 34, 0.5);
 }
 
 .neon-text-red {
@@ -463,15 +463,15 @@ html {
 /* Grid Background - Cyberpunk */
 .grid-background {
   background-image:
-    linear-gradient(rgba(0, 240, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 240, 255, 0.05) 1px, transparent 1px);
+    linear-gradient(rgba(255, 0, 51, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 0, 51, 0.05) 1px, transparent 1px);
   background-size: 40px 40px;
 }
 
 .grid-background-dense {
   background-image:
-    linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(255, 0, 51, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 0, 51, 0.03) 1px, transparent 1px);
   background-size: 20px 20px;
 }
 
@@ -489,20 +489,20 @@ html {
   right: -50%;
   height: 60%;
   background:
-    linear-gradient(180deg, transparent 0%, rgba(0, 240, 255, 0.05) 100%),
+    linear-gradient(180deg, transparent 0%, rgba(255, 0, 51, 0.05) 100%),
     repeating-linear-gradient(
       90deg,
       transparent,
       transparent 79px,
-      rgba(0, 240, 255, 0.1) 79px,
-      rgba(0, 240, 255, 0.1) 80px
+      rgba(255, 0, 51, 0.1) 79px,
+      rgba(255, 0, 51, 0.1) 80px
     ),
     repeating-linear-gradient(
       0deg,
       transparent,
       transparent 79px,
-      rgba(0, 240, 255, 0.1) 79px,
-      rgba(0, 240, 255, 0.1) 80px
+      rgba(255, 0, 51, 0.1) 79px,
+      rgba(255, 0, 51, 0.1) 80px
     );
   transform: perspective(500px) rotateX(60deg);
   transform-origin: center top;
@@ -520,32 +520,32 @@ html {
 }
 
 .monaco-editor .selected-text {
-  background: rgba(0, 240, 255, 0.15) !important;
+  background: rgba(255, 0, 51, 0.15) !important;
 }
 
 .monaco-editor .current-line {
-  background: rgba(0, 240, 255, 0.03) !important;
-  border-left: 2px solid rgba(0, 240, 255, 0.3) !important;
+  background: rgba(255, 0, 51, 0.03) !important;
+  border-left: 2px solid rgba(255, 0, 51, 0.3) !important;
 }
 
 .monaco-editor .line-numbers {
-  color: rgba(0, 240, 255, 0.4) !important;
+  color: rgba(255, 0, 51, 0.4) !important;
 }
 
 /* React Resizable Panels - Cyberpunk */
 [data-panel-resize-handle-enabled] {
-  background: rgba(0, 240, 255, 0.1);
+  background: rgba(255, 0, 51, 0.1);
   transition: all var(--transition-normal);
 }
 
 [data-panel-resize-handle-enabled]:hover {
-  background: rgba(0, 240, 255, 0.3);
-  box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+  background: rgba(255, 0, 51, 0.3);
+  box-shadow: 0 0 10px rgba(255, 0, 51, 0.3);
 }
 
 [data-panel-resize-handle-enabled]:active {
-  background: rgba(0, 240, 255, 0.5);
-  box-shadow: 0 0 15px rgba(0, 240, 255, 0.5);
+  background: rgba(255, 0, 51, 0.5);
+  box-shadow: 0 0 15px rgba(255, 0, 51, 0.5);
 }
 
 /* Prose Styles for AI Content - Cyberpunk Enhanced */
@@ -555,20 +555,20 @@ html {
 
 .prose pre {
   background: rgba(0, 5, 15, 0.8);
-  border: 1px solid rgba(0, 240, 255, 0.2);
+  border: 1px solid rgba(255, 0, 51, 0.2);
   border-radius: 8px;
   box-shadow:
     0 0 20px rgba(0, 0, 0, 0.3),
-    inset 0 0 30px rgba(0, 240, 255, 0.02);
+    inset 0 0 30px rgba(255, 0, 51, 0.02);
 }
 
 .prose code {
-  background: rgba(0, 240, 255, 0.1);
+  background: rgba(255, 0, 51, 0.1);
   color: var(--color-primary);
   padding: 0.125rem 0.375rem;
   border-radius: 4px;
   font-size: 0.875em;
-  border: 1px solid rgba(0, 240, 255, 0.15);
+  border: 1px solid rgba(255, 0, 51, 0.15);
 }
 
 .prose pre code {
@@ -581,14 +581,14 @@ html {
 .prose a {
   color: var(--color-primary);
   text-decoration: none;
-  border-bottom: 1px solid rgba(0, 240, 255, 0.3);
+  border-bottom: 1px solid rgba(255, 0, 51, 0.3);
   transition: all var(--transition-normal);
 }
 
 .prose a:hover {
   color: var(--color-primary-light);
   border-bottom-color: var(--color-primary);
-  text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+  text-shadow: 0 0 10px rgba(255, 0, 51, 0.5);
 }
 
 .prose h1, .prose h2, .prose h3, .prose h4 {
@@ -599,7 +599,7 @@ html {
 
 .prose blockquote {
   border-left: 3px solid var(--color-primary);
-  background: rgba(0, 240, 255, 0.03);
+  background: rgba(255, 0, 51, 0.03);
   padding: 1rem;
   margin-left: 0;
   font-style: italic;
@@ -926,9 +926,9 @@ h1, h2, h3 {
   background: conic-gradient(
     from 0deg,
     transparent 0deg,
-    rgba(0, 240, 255, 0.1) 60deg,
+    rgba(255, 0, 51, 0.1) 60deg,
     transparent 120deg,
-    rgba(180, 0, 255, 0.1) 180deg,
+    rgba(153, 0, 34, 0.1) 180deg,
     transparent 240deg,
     rgba(255, 0, 160, 0.1) 300deg,
     transparent 360deg
@@ -980,8 +980,8 @@ h1, h2, h3 {
 .btn-futuristic {
   position: relative;
   padding: 12px 28px;
-  background: linear-gradient(135deg, rgba(0, 240, 255, 0.1), rgba(180, 0, 255, 0.1));
-  border: 1px solid rgba(0, 240, 255, 0.3);
+  background: linear-gradient(135deg, rgba(255, 0, 51, 0.1), rgba(153, 0, 34, 0.1));
+  border: 1px solid rgba(255, 0, 51, 0.3);
   color: var(--color-primary);
   font-family: var(--font-display);
   font-weight: 600;
@@ -1006,8 +1006,8 @@ h1, h2, h3 {
   color: #000;
   border-color: var(--color-primary);
   box-shadow:
-    0 0 20px rgba(0, 240, 255, 0.4),
-    inset 0 0 20px rgba(0, 240, 255, 0.1);
+    0 0 20px rgba(255, 0, 51, 0.4),
+    inset 0 0 20px rgba(255, 0, 51, 0.1);
   transform: translateY(-2px);
 }
 

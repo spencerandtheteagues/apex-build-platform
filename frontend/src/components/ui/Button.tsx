@@ -87,14 +87,14 @@ const buttonVariants = cva(
         // Link - Red link style
         link: 'text-red-400 underline-offset-4 hover:underline hover:text-red-300',
 
-        // NEON - Bright glowing outline button
-        neon: 'bg-transparent border-2 border-cyan-400 text-cyan-400 hover:text-cyan-300 hover:border-cyan-300 hover:scale-[1.02] active:scale-[0.98]',
+        // NEON - Bright glowing red outline button
+        neon: 'bg-transparent border-2 border-red-500 text-red-400 hover:text-red-300 hover:border-red-400 hover:scale-[1.02] active:scale-[0.98]',
 
-        // HOLOGRAPHIC - Iridescent shifting gradient
-        holographic: 'text-white border border-white/20 hover:border-white/40 hover:scale-[1.02] active:scale-[0.98]',
+        // HOLOGRAPHIC - Red/black shifting gradient
+        holographic: 'text-white border border-red-500/20 hover:border-red-400/40 hover:scale-[1.02] active:scale-[0.98]',
 
         // CYBER - Sharp angular with circuit pattern
-        cyber: 'bg-gray-900 text-cyan-400 border border-cyan-500/50 hover:border-cyan-400 hover:text-cyan-300 hover:scale-[1.02] active:scale-[0.98] clip-path-cyber',
+        cyber: 'bg-gray-900 text-red-400 border border-red-500/50 hover:border-red-400 hover:text-red-300 hover:scale-[1.02] active:scale-[0.98] clip-path-cyber',
       },
       size: {
         xs: 'h-7 px-2 text-xs',
@@ -172,19 +172,19 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       switch (variant) {
         case 'neon':
           return {
-            boxShadow: '0 0 10px rgba(34, 211, 238, 0.5), 0 0 20px rgba(34, 211, 238, 0.3), inset 0 0 10px rgba(34, 211, 238, 0.1)',
+            boxShadow: '0 0 10px rgba(255, 0, 51, 0.5), 0 0 20px rgba(255, 0, 51, 0.3), inset 0 0 10px rgba(255, 0, 51, 0.1)',
             animation: 'neonPulse 2s ease-in-out infinite',
           }
         case 'holographic':
           return {
-            background: 'linear-gradient(135deg, #ff0080, #7928ca, #00d4ff, #00ff87, #ff0080)',
+            background: 'linear-gradient(135deg, #ff0033, #990022, #ff0044, #cc0022, #ff0033)',
             backgroundSize: '400% 400%',
             animation: 'holographicShift 3s ease infinite',
           }
         case 'cyber':
           return {
             clipPath: 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))',
-            backgroundImage: 'repeating-linear-gradient(90deg, transparent, transparent 10px, rgba(34, 211, 238, 0.03) 10px, rgba(34, 211, 238, 0.03) 20px)',
+            backgroundImage: 'repeating-linear-gradient(90deg, transparent, transparent 10px, rgba(255, 0, 51, 0.03) 10px, rgba(255, 0, 51, 0.03) 20px)',
           }
         default:
           return {}
@@ -232,9 +232,9 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
             className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"
             style={{
               boxShadow: variant === 'neon'
-                ? '0 0 15px rgba(34, 211, 238, 0.8), 0 0 30px rgba(34, 211, 238, 0.4)'
+                ? '0 0 15px rgba(255, 0, 51, 0.8), 0 0 30px rgba(255, 0, 51, 0.4)'
                 : variant === 'holographic'
-                ? '0 0 20px rgba(255, 0, 128, 0.4), 0 0 40px rgba(121, 40, 202, 0.3)'
+                ? '0 0 20px rgba(255, 0, 51, 0.4), 0 0 40px rgba(153, 0, 34, 0.3)'
                 : '0 0 15px currentColor',
               animation: 'borderGlow 2s ease-in-out infinite',
             }}
@@ -313,8 +313,8 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
               className="absolute inset-0 pointer-events-none opacity-20"
               style={{
                 backgroundImage: `
-                  linear-gradient(90deg, rgba(34, 211, 238, 0.1) 1px, transparent 1px),
-                  linear-gradient(rgba(34, 211, 238, 0.1) 1px, transparent 1px)
+                  linear-gradient(90deg, rgba(255, 0, 51, 0.1) 1px, transparent 1px),
+                  linear-gradient(rgba(255, 0, 51, 0.1) 1px, transparent 1px)
                 `,
                 backgroundSize: '8px 8px',
                 animation: 'circuitFlow 10s linear infinite',

@@ -8,29 +8,29 @@
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  /* === NEON GLOW SYSTEM === */
-  --glow-red: #ff0040;
-  --glow-red-intense: #ff2d6a;
-  --glow-cyan: #00f0ff;
-  --glow-cyan-intense: #40f8ff;
-  --glow-purple: #b400ff;
-  --glow-purple-intense: #d24fff;
-  --glow-yellow: #ffe600;
-  --glow-yellow-intense: #fff066;
-  --glow-green: #00ff88;
-  --glow-green-intense: #4fffaa;
-  --glow-orange: #ff6b00;
-  --glow-orange-intense: #ff9040;
-  --glow-blue: #0066ff;
-  --glow-blue-intense: #4d94ff;
-  --glow-pink: #ff00a0;
-  --glow-pink-intense: #ff4dc0;
+  /* === NEON GLOW SYSTEM - RED DOMINANT === */
+  --glow-red: #ff0033;
+  --glow-red-intense: #ff3355;
+  --glow-cyan: #ff0033;
+  --glow-cyan-intense: #ff3355;
+  --glow-purple: #990022;
+  --glow-purple-intense: #bb0033;
+  --glow-yellow: #ff4444;
+  --glow-yellow-intense: #ff6666;
+  --glow-green: #cc0022;
+  --glow-green-intense: #dd0033;
+  --glow-orange: #ff2200;
+  --glow-orange-intense: #ff4422;
+  --glow-blue: #aa0022;
+  --glow-blue-intense: #cc0033;
+  --glow-pink: #ff0044;
+  --glow-pink-intense: #ff2266;
 
-  /* === HOLOGRAPHIC PALETTE === */
-  --holo-start: #00f0ff;
-  --holo-mid-1: #b400ff;
-  --holo-mid-2: #ff00a0;
-  --holo-end: #ffe600;
+  /* === HOLOGRAPHIC PALETTE - RED/BLACK === */
+  --holo-start: #ff0033;
+  --holo-mid-1: #990022;
+  --holo-mid-2: #ff0044;
+  --holo-end: #cc0022;
 
   /* === GLASS MORPHISM SETTINGS === */
   --glass-bg: rgba(0, 0, 0, 0.4);
@@ -115,7 +115,7 @@
     0 0 5px var(--glow-cyan),
     0 0 10px var(--glow-cyan),
     0 0 20px var(--glow-cyan),
-    0 0 40px rgba(0, 240, 255, 0.5);
+    0 0 40px rgba(255, 0, 51, 0.5);
 }
 
 .text-glow-purple {
@@ -214,7 +214,7 @@
 .glass-gradient {
   background: linear-gradient(
     135deg,
-    rgba(0, 240, 255, 0.1) 0%,
+    rgba(255, 0, 51, 0.1) 0%,
     rgba(180, 0, 255, 0.1) 50%,
     rgba(255, 0, 160, 0.1) 100%
   );
@@ -232,7 +232,7 @@
   box-shadow:
     0 0 10px var(--glow-cyan),
     0 0 20px var(--glow-cyan),
-    0 0 30px rgba(0, 240, 255, 0.5);
+    0 0 30px rgba(255, 0, 51, 0.5);
 }
 
 .glow-purple {
@@ -268,7 +268,7 @@
   border: 1px solid var(--glow-cyan);
   box-shadow:
     0 0 5px var(--glow-cyan),
-    inset 0 0 5px rgba(0, 240, 255, 0.2);
+    inset 0 0 5px rgba(255, 0, 51, 0.2);
 }
 
 .border-glow-purple {
@@ -329,7 +329,7 @@
   background: linear-gradient(
     to bottom,
     transparent,
-    rgba(0, 240, 255, 0.2),
+    rgba(255, 0, 51, 0.2),
     transparent
   );
   animation: scanline-sweep 4s linear infinite;
@@ -344,11 +344,11 @@
 .holographic {
   background: linear-gradient(
     135deg,
-    rgba(0, 240, 255, 0.3) 0%,
+    rgba(255, 0, 51, 0.3) 0%,
     rgba(180, 0, 255, 0.3) 25%,
     rgba(255, 0, 160, 0.3) 50%,
     rgba(255, 230, 0, 0.3) 75%,
-    rgba(0, 240, 255, 0.3) 100%
+    rgba(255, 0, 51, 0.3) 100%
   );
   background-size: 400% 400%;
   animation: holographic-shift 8s ease infinite;
@@ -429,8 +429,8 @@
 .bg-circuit {
   background-color: #0a0a0f;
   background-image:
-    linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(rgba(255, 0, 51, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 0, 51, 0.03) 1px, transparent 1px),
     url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M10 10h80v80H10z' fill='none' stroke='%2300f0ff' stroke-opacity='0.05' stroke-width='0.5'/%3E%3Ccircle cx='10' cy='10' r='2' fill='%2300f0ff' fill-opacity='0.1'/%3E%3Ccircle cx='90' cy='10' r='2' fill='%2300f0ff' fill-opacity='0.1'/%3E%3Ccircle cx='10' cy='90' r='2' fill='%2300f0ff' fill-opacity='0.1'/%3E%3Ccircle cx='90' cy='90' r='2' fill='%2300f0ff' fill-opacity='0.1'/%3E%3Cpath d='M10 50h30M60 50h30M50 10v30M50 60v30' stroke='%2300f0ff' stroke-opacity='0.08' stroke-width='0.5'/%3E%3C/svg%3E");
   background-size: 20px 20px, 20px 20px, 100px 100px;
 }
@@ -438,20 +438,20 @@
 /* Grid perspective */
 .bg-grid-perspective {
   background:
-    linear-gradient(180deg, transparent 0%, rgba(0, 240, 255, 0.1) 100%),
+    linear-gradient(180deg, transparent 0%, rgba(255, 0, 51, 0.1) 100%),
     repeating-linear-gradient(
       90deg,
       transparent,
       transparent 49px,
-      rgba(0, 240, 255, 0.1) 49px,
-      rgba(0, 240, 255, 0.1) 50px
+      rgba(255, 0, 51, 0.1) 49px,
+      rgba(255, 0, 51, 0.1) 50px
     ),
     repeating-linear-gradient(
       0deg,
       transparent,
       transparent 49px,
-      rgba(0, 240, 255, 0.1) 49px,
-      rgba(0, 240, 255, 0.1) 50px
+      rgba(255, 0, 51, 0.1) 49px,
+      rgba(255, 0, 51, 0.1) 50px
     );
   transform: perspective(500px) rotateX(60deg);
   transform-origin: center top;
@@ -463,15 +463,15 @@
     -45deg,
     transparent,
     transparent 10px,
-    rgba(0, 240, 255, 0.03) 10px,
-    rgba(0, 240, 255, 0.03) 11px
+    rgba(255, 0, 51, 0.03) 10px,
+    rgba(255, 0, 51, 0.03) 11px
   );
 }
 
 /* Dotted grid */
 .bg-dots {
   background-image: radial-gradient(
-    rgba(0, 240, 255, 0.15) 1px,
+    rgba(255, 0, 51, 0.15) 1px,
     transparent 1px
   );
   background-size: 20px 20px;
@@ -523,7 +523,7 @@
   inset: 0;
   background: linear-gradient(
     135deg,
-    rgba(0, 240, 255, 0.2) 0%,
+    rgba(255, 0, 51, 0.2) 0%,
     transparent 50%
   );
   clip-path: inherit;
@@ -944,7 +944,7 @@ html {
   box-shadow:
     0 0 10px var(--glow-cyan),
     0 0 20px var(--glow-cyan),
-    0 0 30px rgba(0, 240, 255, 0.4);
+    0 0 30px rgba(255, 0, 51, 0.4);
 }
 
 .hover-glow-purple:hover {
@@ -1044,7 +1044,7 @@ html {
   color: #000;
   box-shadow:
     0 0 20px var(--glow-cyan),
-    inset 0 0 20px rgba(0, 240, 255, 0.2);
+    inset 0 0 20px rgba(255, 0, 51, 0.2);
 }
 
 .btn-cyber:hover::before {
@@ -1054,7 +1054,7 @@ html {
 /* Cyber input */
 .input-cyber {
   background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(0, 240, 255, 0.3);
+  border: 1px solid rgba(255, 0, 51, 0.3);
   color: #fff;
   padding: 12px 16px;
   font-family: 'Share Tech Mono', monospace;
@@ -1066,11 +1066,11 @@ html {
   border-color: var(--glow-cyan);
   box-shadow:
     0 0 10px var(--glow-cyan),
-    inset 0 0 10px rgba(0, 240, 255, 0.1);
+    inset 0 0 10px rgba(255, 0, 51, 0.1);
 }
 
 .input-cyber::placeholder {
-  color: rgba(0, 240, 255, 0.4);
+  color: rgba(255, 0, 51, 0.4);
 }
 
 /* Status indicator */
@@ -1106,7 +1106,7 @@ html {
 .progress-cyber {
   position: relative;
   height: 4px;
-  background: rgba(0, 240, 255, 0.1);
+  background: rgba(255, 0, 51, 0.1);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -1159,7 +1159,7 @@ html {
 .loading-bar-cyber {
   position: relative;
   height: 2px;
-  background: rgba(0, 240, 255, 0.1);
+  background: rgba(255, 0, 51, 0.1);
   overflow: hidden;
 }
 
@@ -1187,9 +1187,9 @@ html {
 .skeleton-cyber {
   background: linear-gradient(
     90deg,
-    rgba(0, 240, 255, 0.05) 0%,
-    rgba(0, 240, 255, 0.1) 50%,
-    rgba(0, 240, 255, 0.05) 100%
+    rgba(255, 0, 51, 0.05) 0%,
+    rgba(255, 0, 51, 0.1) 50%,
+    rgba(255, 0, 51, 0.05) 100%
   );
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.5s infinite;
