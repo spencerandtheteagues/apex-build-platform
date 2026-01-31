@@ -42,6 +42,7 @@ const (
 	ProviderClaude  AIProvider = "claude"  // Anthropic Claude (code review, debugging)
 	ProviderGPT     AIProvider = "gpt"     // OpenAI GPT-4 (code generation)
 	ProviderGemini  AIProvider = "gemini"  // Google Gemini (completion, explanation)
+	ProviderOllama  AIProvider = "ollama"  // Ollama (local models)
 )
 
 // Agent represents a single AI agent working on part of a build

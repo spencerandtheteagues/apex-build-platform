@@ -71,6 +71,8 @@ For code files, use this exact format:
 		aiProvider = ai.ProviderGPT4
 	case ProviderGemini:
 		aiProvider = ai.ProviderGemini
+	case ProviderOllama:
+		aiProvider = ai.ProviderOllama
 	default:
 		aiProvider = ai.ProviderClaude
 	}
@@ -464,6 +466,7 @@ func (a *AIRouterAdapter) GetAvailableProviders() []AIProvider {
 		ai.ProviderClaude: ProviderClaude,
 		ai.ProviderGPT4:   ProviderGPT,
 		ai.ProviderGemini: ProviderGemini,
+		ai.ProviderOllama: ProviderOllama,
 	}
 
 	for aiProvider, agentProvider := range providerMappings {
