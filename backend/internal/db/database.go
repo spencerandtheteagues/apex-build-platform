@@ -227,6 +227,8 @@ func (d *Database) Migrate() error {
 		// BYOK (Bring Your Own Key) management
 		&models.UserAPIKey{},
 		&models.AIUsageLog{},
+		// Search history for quick access to recent searches
+		&models.SearchHistory{},
 		// Refresh token storage for secure rotation
 		&models.RefreshToken{},
 		// Native Hosting (.apex.app) - Replit parity feature

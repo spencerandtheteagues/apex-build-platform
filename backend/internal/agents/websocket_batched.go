@@ -10,6 +10,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 const (
@@ -83,9 +85,9 @@ type BatchedWSMessage struct {
 }
 
 // NewBatchedWSHub creates a new batched WebSocket hub for agents
-func NewBatchedWSHub(manager *AgentManager) *BatchedWSHub {
+func NewBatchedWSHub(manager *AgentManager, db *gorm.DB) *BatchedWSHub {
 	bh := &BatchedWSHub{
-		WSHub:        NewWSHub(manager),
+		WSHub:        NewWSHub(manager, db),
 		batchQueues:  make(map[string]*agentBatchQueue),
 		writeBuffers: make(map[*WSConnection]*agentWriteBuffer),
 		stats: &batchingStats{},

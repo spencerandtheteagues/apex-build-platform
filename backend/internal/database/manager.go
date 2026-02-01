@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 	_ "github.com/lib/pq"
 	_ "modernc.org/sqlite"
 )
