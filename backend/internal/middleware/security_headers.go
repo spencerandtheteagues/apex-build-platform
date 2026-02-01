@@ -6,13 +6,162 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+// FixedWindowRateLimiter provides thread-safe rate limiting using a fixed window algorithm
+// This is separate from the token bucket RateLimiter in middleware.go and provides
+// accurate request counts for rate limit headers
+type FixedWindowRateLimiter struct {
+	requests    sync.Map      // map[string]*fixedWindowEntry
+	limit       int64         // max requests per window
+	windowSecs  int64         // window duration in seconds
+	cleanupStop chan struct{} // channel to stop cleanup goroutine
+}
+
+// fixedWindowEntry tracks request count for a single client
+type fixedWindowEntry struct {
+	count       int64 // atomic counter for requests in current window
+	windowStart int64 // atomic unix timestamp of window start
+}
+
+// Global fixed window rate limiter instance (initialized lazily)
+var (
+	headerRateLimiter     *FixedWindowRateLimiter
+	headerRateLimiterOnce sync.Once
+)
+
+// NewFixedWindowRateLimiter creates a new fixed window rate limiter with the specified limit and window
+func NewFixedWindowRateLimiter(limit int64, windowSecs int64) *FixedWindowRateLimiter {
+	rl := &FixedWindowRateLimiter{
+		limit:       limit,
+		windowSecs:  windowSecs,
+		cleanupStop: make(chan struct{}),
+	}
+	// Start background cleanup goroutine
+	go rl.cleanupExpiredEntries()
+	return rl
+}
+
+// getHeaderRateLimiter returns the singleton rate limiter for headers (1000 req/hour)
+func getHeaderRateLimiter() *FixedWindowRateLimiter {
+	headerRateLimiterOnce.Do(func() {
+		headerRateLimiter = NewFixedWindowRateLimiter(1000, 3600) // 1000 requests per hour
+	})
+	return headerRateLimiter
+}
+
+// Allow checks if a request from the given key should be allowed
+// Returns: allowed (bool), remaining count, seconds until reset
+func (rl *FixedWindowRateLimiter) Allow(key string) (bool, int64, int64) {
+	now := time.Now().Unix()
+
+	// Get or create entry for this key
+	entryI, loaded := rl.requests.LoadOrStore(key, &fixedWindowEntry{
+		count:       1,
+		windowStart: now,
+	})
+	entry := entryI.(*fixedWindowEntry)
+
+	if !loaded {
+		// New entry was created with count=1
+		resetIn := rl.windowSecs
+		return true, rl.limit - 1, resetIn
+	}
+
+	// Check if we need to reset the window
+	windowStart := atomic.LoadInt64(&entry.windowStart)
+	if now-windowStart >= rl.windowSecs {
+		// Window has expired, reset the counter
+		atomic.StoreInt64(&entry.windowStart, now)
+		atomic.StoreInt64(&entry.count, 1)
+		return true, rl.limit - 1, rl.windowSecs
+	}
+
+	// Increment counter and check limit
+	newCount := atomic.AddInt64(&entry.count, 1)
+	remaining := rl.limit - newCount
+	resetIn := rl.windowSecs - (now - windowStart)
+
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	if newCount > rl.limit {
+		// Rate limit exceeded - decrement the counter we just added
+		// so we don't count rejected requests
+		atomic.AddInt64(&entry.count, -1)
+		return false, 0, resetIn
+	}
+
+	return true, remaining, resetIn
+}
+
+// cleanupExpiredEntries removes entries that haven't been used in 2x the window duration
+func (rl *FixedWindowRateLimiter) cleanupExpiredEntries() {
+	ticker := time.NewTicker(time.Duration(rl.windowSecs) * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			now := time.Now().Unix()
+			expireThreshold := now - (rl.windowSecs * 2) // Keep entries for 2 windows
+
+			rl.requests.Range(func(key, value interface{}) bool {
+				entry := value.(*fixedWindowEntry)
+				windowStart := atomic.LoadInt64(&entry.windowStart)
+				if windowStart < expireThreshold {
+					rl.requests.Delete(key)
+				}
+				return true
+			})
+		case <-rl.cleanupStop:
+			return
+		}
+	}
+}
+
+// StopCleanup stops the cleanup goroutine (call when shutting down)
+func (rl *FixedWindowRateLimiter) StopCleanup() {
+	close(rl.cleanupStop)
+}
+
+// getClientIPForRateLimit extracts the client IP address, handling proxies
+func getClientIPForRateLimit(c *gin.Context) string {
+	// Check X-Forwarded-For header first (for reverse proxies)
+	if xff := c.GetHeader("X-Forwarded-For"); xff != "" {
+		// Take the first IP in the chain (original client)
+		if idx := strings.Index(xff, ","); idx != -1 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
+	}
+
+	// Check X-Real-IP header
+	if xri := c.GetHeader("X-Real-IP"); xri != "" {
+		return strings.TrimSpace(xri)
+	}
+
+	// Fall back to RemoteAddr
+	ip := c.ClientIP()
+	if ip == "" {
+		ip = c.Request.RemoteAddr
+		// Strip port if present
+		if idx := strings.LastIndex(ip, ":"); idx != -1 {
+			ip = ip[:idx]
+		}
+	}
+	return ip
+}
 
 // SecurityHeaders adds comprehensive security headers to all responses
 func SecurityHeaders() gin.HandlerFunc {
@@ -162,13 +311,70 @@ func getCSRFSecret() string {
 	return secret
 }
 
-// RateLimitHeaders adds rate limiting headers
+// RateLimitHeaders adds rate limiting headers and enforces rate limits
+// Uses a fixed window algorithm with 1000 requests per hour per IP
 func RateLimitHeaders() gin.HandlerFunc {
+	limiter := getHeaderRateLimiter()
+
 	return func(c *gin.Context) {
-		// Add rate limiting headers
-		c.Header("X-RateLimit-Limit", "1000")
-		c.Header("X-RateLimit-Remaining", "999") // TODO: Implement actual counting
-		c.Header("X-RateLimit-Reset", "3600")
+		// Get client identifier (IP address)
+		clientKey := getClientIPForRateLimit(c)
+
+		// Check rate limit
+		allowed, remaining, resetIn := limiter.Allow(clientKey)
+
+		// Always set rate limit headers
+		c.Header("X-RateLimit-Limit", strconv.FormatInt(limiter.limit, 10))
+		c.Header("X-RateLimit-Remaining", strconv.FormatInt(remaining, 10))
+		c.Header("X-RateLimit-Reset", strconv.FormatInt(resetIn, 10))
+
+		if !allowed {
+			// Rate limit exceeded - return 429 Too Many Requests
+			c.Header("Retry-After", strconv.FormatInt(resetIn, 10))
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"error":       "Rate limit exceeded",
+				"code":        "RATE_LIMIT_EXCEEDED",
+				"limit":       limiter.limit,
+				"reset_in":    resetIn,
+				"retry_after": resetIn,
+			})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// RateLimitHeadersWithConfig creates a rate limiter with custom configuration
+func RateLimitHeadersWithConfig(limit int64, windowSecs int64) gin.HandlerFunc {
+	limiter := NewFixedWindowRateLimiter(limit, windowSecs)
+
+	return func(c *gin.Context) {
+		// Get client identifier (IP address)
+		clientKey := getClientIPForRateLimit(c)
+
+		// Check rate limit
+		allowed, remaining, resetIn := limiter.Allow(clientKey)
+
+		// Always set rate limit headers
+		c.Header("X-RateLimit-Limit", strconv.FormatInt(limiter.limit, 10))
+		c.Header("X-RateLimit-Remaining", strconv.FormatInt(remaining, 10))
+		c.Header("X-RateLimit-Reset", strconv.FormatInt(resetIn, 10))
+
+		if !allowed {
+			// Rate limit exceeded - return 429 Too Many Requests
+			c.Header("Retry-After", strconv.FormatInt(resetIn, 10))
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"error":       "Rate limit exceeded",
+				"code":        "RATE_LIMIT_EXCEEDED",
+				"limit":       limiter.limit,
+				"reset_in":    resetIn,
+				"retry_after": resetIn,
+			})
+			c.Abort()
+			return
+		}
 
 		c.Next()
 	}

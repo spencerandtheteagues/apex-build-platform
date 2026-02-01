@@ -4,8 +4,10 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"apex-build/internal/search"
+	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,9 +31,10 @@ func (h *SearchHandler) Search(c *gin.Context) {
 		return
 	}
 
+	userID := c.GetUint("user_id")
+
 	// Validate project access (user must own the project)
 	if query.ProjectID > 0 {
-		userID := c.GetUint("user_id")
 		if !h.userOwnsProject(userID, query.ProjectID) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to this project"})
 			return
@@ -43,6 +46,9 @@ func (h *SearchHandler) Search(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Save search to history (non-blocking, don't fail on error)
+	go h.saveSearchHistory(userID, query.ProjectID, query.Query, query.SearchType, results.TotalMatches)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -59,6 +65,7 @@ func (h *SearchHandler) QuickSearch(c *gin.Context) {
 		return
 	}
 
+	userID := c.GetUint("user_id")
 	projectID, _ := strconv.ParseUint(c.Query("project_id"), 10, 32)
 
 	query := &search.SearchQuery{
@@ -72,7 +79,6 @@ func (h *SearchHandler) QuickSearch(c *gin.Context) {
 
 	// Validate project access
 	if query.ProjectID > 0 {
-		userID := c.GetUint("user_id")
 		if !h.userOwnsProject(userID, query.ProjectID) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 			return
@@ -84,6 +90,9 @@ func (h *SearchHandler) QuickSearch(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Save search to history (non-blocking, don't fail on error)
+	go h.saveSearchHistory(userID, query.ProjectID, q, "all", results.TotalMatches)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -100,6 +109,7 @@ func (h *SearchHandler) SearchSymbols(c *gin.Context) {
 		return
 	}
 
+	userID := c.GetUint("user_id")
 	projectID, _ := strconv.ParseUint(c.Query("project_id"), 10, 32)
 	maxResults, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 
@@ -112,7 +122,6 @@ func (h *SearchHandler) SearchSymbols(c *gin.Context) {
 
 	// Validate project access
 	if query.ProjectID > 0 {
-		userID := c.GetUint("user_id")
 		if !h.userOwnsProject(userID, query.ProjectID) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 			return
@@ -124,6 +133,9 @@ func (h *SearchHandler) SearchSymbols(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Save search to history (non-blocking, don't fail on error)
+	go h.saveSearchHistory(userID, query.ProjectID, q, "symbol", len(symbols))
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -141,6 +153,7 @@ func (h *SearchHandler) SearchFiles(c *gin.Context) {
 		return
 	}
 
+	userID := c.GetUint("user_id")
 	projectID, _ := strconv.ParseUint(c.Query("project_id"), 10, 32)
 	maxResults, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 
@@ -153,7 +166,6 @@ func (h *SearchHandler) SearchFiles(c *gin.Context) {
 
 	// Validate project access
 	if query.ProjectID > 0 {
-		userID := c.GetUint("user_id")
 		if !h.userOwnsProject(userID, query.ProjectID) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 			return
@@ -177,6 +189,9 @@ func (h *SearchHandler) SearchFiles(c *gin.Context) {
 			"score":    f.Score,
 		})
 	}
+
+	// Save search to history (non-blocking, don't fail on error)
+	go h.saveSearchHistory(userID, query.ProjectID, q, "filename", len(files))
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -239,30 +254,158 @@ func (h *SearchHandler) SearchAndReplace(c *gin.Context) {
 }
 
 // GetSearchHistory handles GET /api/v1/search/history
-// Returns user's recent search queries
+// Returns user's recent search queries (limited to 50 entries)
 func (h *SearchHandler) GetSearchHistory(c *gin.Context) {
-	// userID := c.GetUint("user_id")
+	userID := c.GetUint("user_id")
 	projectID, _ := strconv.ParseUint(c.Query("project_id"), 10, 32)
 
-	// TODO: Implement search history storage
-	// For now, return empty history
+	db := h.engine.GetDB()
+	if db == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database not available"})
+		return
+	}
+
+	var history []models.SearchHistory
+
+	// Build query - filter by user and optionally by project
+	query := db.Where("user_id = ?", userID)
+	if projectID > 0 {
+		query = query.Where("project_id = ?", uint(projectID))
+	}
+
+	// Get last 50 entries, ordered by timestamp descending
+	if err := query.Order("timestamp DESC").Limit(50).Find(&history).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch search history"})
+		return
+	}
+
+	// Convert to response format
+	historyResponse := make([]gin.H, 0, len(history))
+	for _, h := range history {
+		entry := gin.H{
+			"id":           h.ID,
+			"query":        h.Query,
+			"search_type":  h.SearchType,
+			"timestamp":    h.Timestamp,
+			"result_count": h.ResultCount,
+		}
+		if h.ProjectID != nil {
+			entry["project_id"] = *h.ProjectID
+		}
+		historyResponse = append(historyResponse, entry)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"history": []gin.H{},
-		"project_id": projectID,
+		"history": historyResponse,
+		"count":   len(historyResponse),
 	})
 }
 
 // ClearSearchHistory handles DELETE /api/v1/search/history
-// Clears user's search history
+// Clears user's search history (optionally filtered by project)
 func (h *SearchHandler) ClearSearchHistory(c *gin.Context) {
-	// userID := c.GetUint("user_id")
+	userID := c.GetUint("user_id")
+	projectID, _ := strconv.ParseUint(c.Query("project_id"), 10, 32)
 
-	// TODO: Implement search history storage
+	db := h.engine.GetDB()
+	if db == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database not available"})
+		return
+	}
+
+	// Build delete query - filter by user and optionally by project
+	query := db.Where("user_id = ?", userID)
+	if projectID > 0 {
+		query = query.Where("project_id = ?", uint(projectID))
+	}
+
+	result := query.Delete(&models.SearchHistory{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear search history"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Search history cleared",
+		"success":       true,
+		"message":       "Search history cleared",
+		"deleted_count": result.RowsAffected,
 	})
+}
+
+// saveSearchHistory saves a search query to the user's history
+// This is called asynchronously to avoid blocking search responses
+func (h *SearchHandler) saveSearchHistory(userID uint, projectID uint, query string, searchType string, resultCount int) {
+	// Skip empty queries
+	if query == "" {
+		return
+	}
+
+	db := h.engine.GetDB()
+	if db == nil {
+		return
+	}
+
+	// Create the history entry
+	var projectIDPtr *uint
+	if projectID > 0 {
+		projectIDPtr = &projectID
+	}
+
+	// Set default search type if not provided
+	if searchType == "" {
+		searchType = "all"
+	}
+
+	history := models.SearchHistory{
+		UserID:      userID,
+		ProjectID:   projectIDPtr,
+		Query:       query,
+		SearchType:  searchType,
+		Timestamp:   time.Now(),
+		ResultCount: resultCount,
+	}
+
+	// Save to database
+	if err := db.Create(&history).Error; err != nil {
+		// Log error but don't fail - history is not critical
+		return
+	}
+
+	// Enforce limit of 50 entries per user - delete oldest entries if over limit
+	h.pruneSearchHistory(userID)
+}
+
+// pruneSearchHistory removes old search history entries to maintain the 50 entry limit
+func (h *SearchHandler) pruneSearchHistory(userID uint) {
+	db := h.engine.GetDB()
+	if db == nil {
+		return
+	}
+
+	const maxHistoryEntries = 50
+
+	// Count entries for user
+	var count int64
+	db.Model(&models.SearchHistory{}).Where("user_id = ?", userID).Count(&count)
+
+	if count <= maxHistoryEntries {
+		return
+	}
+
+	// Find the ID threshold - get the 50th newest entry's ID
+	var threshold models.SearchHistory
+	if err := db.Where("user_id = ?", userID).
+		Order("timestamp DESC").
+		Offset(maxHistoryEntries - 1).
+		Limit(1).
+		First(&threshold).Error; err != nil {
+		return
+	}
+
+	// Delete entries older than the threshold
+	db.Where("user_id = ? AND timestamp < ?", userID, threshold.Timestamp).
+		Delete(&models.SearchHistory{})
 }
 
 // Helper to check project ownership

@@ -48,6 +48,14 @@ type User struct {
 	PreferredTheme string `json:"preferred_theme" gorm:"default:'cyberpunk'"` // cyberpunk, matrix, synthwave, neonCity
 	PreferredAI    string `json:"preferred_ai" gorm:"default:'auto'"`         // auto, claude, gpt4, gemini
 
+	// MFA (Multi-Factor Authentication) Settings
+	MFAEnabled     bool       `json:"mfa_enabled" gorm:"default:false"`          // Whether MFA is enabled for this user
+	MFAMethod      string     `json:"mfa_method" gorm:"default:'totp'"`          // totp, sms, email
+	MFASecret      string     `json:"-" gorm:""`                                 // Encrypted TOTP secret (never exposed in JSON)
+	MFABackupCodes string     `json:"-" gorm:"type:text"`                        // Encrypted backup codes (JSON array)
+	MFAVerifiedAt  *time.Time `json:"mfa_verified_at,omitempty"`                 // When MFA was last successfully verified
+	MFAEnforcedAt  *time.Time `json:"mfa_enforced_at,omitempty"`                 // When MFA was enabled/enforced
+
 	// Relationships
 	Projects    []Project    `json:"projects" gorm:"foreignKey:OwnerID"`
 	Sessions    []Session    `json:"sessions" gorm:"foreignKey:UserID"`
@@ -486,4 +494,22 @@ type AIUsageLog struct {
 
 	// For budget alerting
 	MonthKey string `json:"month_key" gorm:"size:7;index"` // "2026-01" for monthly aggregation
+}
+
+// SearchHistory stores user search queries for quick access to recent searches
+type SearchHistory struct {
+	ID        uint      `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time `json:"created_at" gorm:"index"`
+
+	// User and project context
+	UserID    uint  `json:"user_id" gorm:"not null;index:idx_search_history_user_time"`
+	ProjectID *uint `json:"project_id,omitempty" gorm:"index"`
+
+	// Search details
+	Query      string    `json:"query" gorm:"not null;size:500"`                                            // The search query string
+	SearchType string    `json:"search_type" gorm:"not null;size:20;default:'all'"`                         // all, content, filename, symbol
+	Timestamp  time.Time `json:"timestamp" gorm:"not null;index:idx_search_history_user_time,sort:desc"`    // When the search was performed
+
+	// Optional metadata
+	ResultCount int `json:"result_count" gorm:"default:0"` // Number of results found
 }

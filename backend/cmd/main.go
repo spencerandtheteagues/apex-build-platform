@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"apex-build/internal/agents"
-	"apex-build/internal/agents/autonomous"
+	"apex-build/internal/autonomous"
 	"apex-build/internal/ai"
 	"apex-build/internal/api"
 	"apex-build/internal/auth"
@@ -85,15 +85,16 @@ func main() {
 	}
 	authService := auth.NewAuthService(jwtSecret)
 
-	// Initialize AI router with all providers (Claude, OpenAI, Gemini, Grok)
-	// NOTE: Ollama is explicitly excluded from the global router to enforce BYOK policy.
-	// Users must configure their own local Ollama URL in settings.
+	// Initialize AI router with all providers (Claude, OpenAI, Gemini, Grok, Ollama)
+	// Ollama is enabled globally if OLLAMA_BASE_URL is set (for local development/self-hosted)
+	// Otherwise, users can configure their own local Ollama URL in BYOK settings
+	ollamaBaseURL := os.Getenv("OLLAMA_BASE_URL")
 	aiRouter := ai.NewAIRouter(
 		appConfig.ClaudeAPIKey,
 		appConfig.OpenAIAPIKey,
 		appConfig.GeminiAPIKey,
 		appConfig.GrokAPIKey,
-		"", // Ollama disabled globally - strictly BYOK
+		ollamaBaseURL, // Enable Ollama if OLLAMA_BASE_URL is set
 	)
 
 	log.Println("Multi-AI integration initialized:")
@@ -101,7 +102,7 @@ func main() {
 	log.Printf("   - OpenAI API: %s", getStatusIcon(appConfig.OpenAIAPIKey != ""))
 	log.Printf("   - Gemini API: %s", getStatusIcon(appConfig.GeminiAPIKey != ""))
 	log.Printf("   - Grok API:   %s", getStatusIcon(appConfig.GrokAPIKey != ""))
-	log.Printf("   - Ollama:     ❌ Disabled globally (User must configure in BYOK settings)")
+	log.Printf("   - Ollama:     %s", getOllamaStatus(ollamaBaseURL))
 
 	// Initialize Secrets Manager with validated master key
 	// SECURITY: Use validated key from secretsConfig, with fallback for development
@@ -137,7 +138,7 @@ func main() {
 	// Initialize Agent Orchestration System
 	aiAdapter := agents.NewAIRouterAdapter(aiRouter, byokManager)
 	agentManager := agents.NewAgentManager(aiAdapter)
-	wsHub := agents.NewWSHub(agentManager)
+	wsHub := agents.NewWSHub(agentManager, database.GetDB())
 	buildHandler := agents.NewBuildHandler(agentManager, wsHub)
 
 	log.Println("Agent Orchestration System initialized")
@@ -226,6 +227,10 @@ func main() {
 	commentsHandler := handlers.NewCommentsHandler(database.GetDB())
 	log.Println("Code Comments System initialized (inline threads, reactions, resolve)")
 
+	// Initialize Autonomous Agent Handler (Replit parity feature)
+	autonomousHandler := autonomous.NewHandler(database.GetDB())
+	log.Println("Autonomous Agent System initialized (background task execution)")
+
 	// Initialize Stripe Payment Service with validated key
 	// SECURITY: Use validated key from secretsConfig
 	stripeSecretKey := secretsConfig.StripeSecretKey
@@ -255,9 +260,15 @@ func main() {
 	redisURL := os.Getenv("REDIS_URL")
 	var redisCache *cache.RedisCache
 	if redisURL != "" {
-		log.Printf("Redis cache connecting to: %s", redisURL)
-		// TODO: Initialize with Redis client when available
-		redisCache = cache.NewRedisCache(cacheConfig)
+		log.Printf("Redis cache connecting to: %s", maskRedisURL(redisURL))
+		var err error
+		redisCache, err = cache.NewRedisCacheFromURL(redisURL, cacheConfig)
+		if err != nil {
+			log.Printf("WARNING: Failed to connect to Redis: %v - falling back to in-memory cache", err)
+			redisCache = cache.NewRedisCache(cacheConfig)
+		} else {
+			log.Println("Redis cache connected successfully")
+		}
 	} else {
 		log.Println("WARNING: REDIS_URL not set - using in-memory cache (set for production)")
 		redisCache = cache.NewRedisCache(cacheConfig)
@@ -1056,4 +1067,22 @@ func getOllamaStatus(baseURL string) string {
 		return "✅ Enabled (" + baseURL + ")"
 	}
 	return "❌ Disabled (set OLLAMA_BASE_URL)"
+}
+
+// maskRedisURL masks the password in a Redis URL for safe logging
+func maskRedisURL(redisURL string) string {
+	parsed, err := url.Parse(redisURL)
+	if err != nil {
+		// If parsing fails, just show a masked version
+		return "redis://****@<host>"
+	}
+
+	// Mask the password if present
+	if parsed.User != nil {
+		if _, hasPassword := parsed.User.Password(); hasPassword {
+			parsed.User = url.UserPassword(parsed.User.Username(), "****")
+		}
+	}
+
+	return parsed.String()
 }

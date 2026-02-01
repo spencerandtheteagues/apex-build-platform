@@ -126,6 +126,11 @@ func NewSearchEngine(db *gorm.DB) *SearchEngine {
 	}
 }
 
+// GetDB returns the underlying GORM database instance for search history operations
+func (e *SearchEngine) GetDB() *gorm.DB {
+	return e.db
+}
+
 // Search performs a comprehensive code search
 func (e *SearchEngine) Search(ctx context.Context, query *SearchQuery) (*SearchResults, error) {
 	start := time.Now()

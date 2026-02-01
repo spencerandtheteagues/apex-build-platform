@@ -15,10 +15,13 @@ import (
 // Ollama uses an OpenAI-compatible chat completions endpoint
 // https://ollama.com/blog/openai-compatibility
 type OllamaClient struct {
-	baseURL    string
-	httpClient *http.Client
-	usage      *ProviderUsage
-	usageMu    sync.RWMutex
+	baseURL         string
+	httpClient      *http.Client
+	usage           *ProviderUsage
+	usageMu         sync.RWMutex
+	availableModels []string      // Cached list of available models
+	modelsMu        sync.RWMutex
+	modelsChecked   bool
 }
 
 // Ollama uses OpenAI-compatible request/response format
@@ -206,25 +209,172 @@ func (o *OllamaClient) buildUserPrompt(req *AIRequest) string {
 	return prompt
 }
 
-// getModel selects the appropriate Ollama model
+// getModel selects the appropriate Ollama model with smart fallback
 func (o *OllamaClient) getModel(req *AIRequest) string {
 	// Respect explicit model override
 	if req.Model != "" {
 		return req.Model
 	}
 
-	// Default models based on capability
-	// Users should have these installed via `ollama pull <model>`
-	switch req.Capability {
-	case CapabilityCodeGeneration, CapabilityRefactoring, CapabilityArchitecture:
-		return "deepseek-r1:8b" // Best for complex code tasks
-	case CapabilityCodeCompletion:
-		return "qwen3-coder:30b" // Fast for completions
-	case CapabilityCodeReview, CapabilityDebugging:
-		return "deepseek-r1:8b" // Good at analysis
-	default:
-		return "deepseek-r1:8b" // General purpose fallback
+	// Refresh available models if not checked yet
+	o.refreshModelsIfNeeded()
+
+	// Preferred models for each capability (in order of preference)
+	preferredModels := o.getPreferredModels(req.Capability)
+
+	// Find first available preferred model
+	o.modelsMu.RLock()
+	available := o.availableModels
+	o.modelsMu.RUnlock()
+
+	for _, preferred := range preferredModels {
+		if o.isModelAvailable(preferred, available) {
+			return preferred
+		}
 	}
+
+	// If no preferred model is available, try to find any coding-capable model
+	codingModelPatterns := []string{
+		"deepseek", "qwen", "codellama", "starcoder", "wizardcoder",
+		"codegemma", "granite-code", "llama", "mistral", "phi",
+	}
+
+	for _, model := range available {
+		for _, pattern := range codingModelPatterns {
+			if containsIgnoreCase(model, pattern) {
+				return model
+			}
+		}
+	}
+
+	// Last resort: use the first available model
+	if len(available) > 0 {
+		return available[0]
+	}
+
+	// Fallback to deepseek-coder (will error with helpful message if not installed)
+	return "deepseek-coder:latest"
+}
+
+// getPreferredModels returns the list of preferred models for a capability
+func (o *OllamaClient) getPreferredModels(capability AICapability) []string {
+	// Model preferences by capability, ordered by quality/suitability
+	switch capability {
+	case CapabilityCodeGeneration, CapabilityRefactoring, CapabilityArchitecture:
+		return []string{
+			"deepseek-coder-v2:latest", "deepseek-coder:33b", "deepseek-coder:6.7b",
+			"qwen2.5-coder:32b", "qwen2.5-coder:14b", "qwen2.5-coder:7b",
+			"codellama:70b", "codellama:34b", "codellama:13b", "codellama:7b",
+			"deepseek-r1:8b", "deepseek-coder:latest",
+		}
+	case CapabilityCodeCompletion:
+		return []string{
+			"qwen2.5-coder:7b", "qwen2.5-coder:1.5b",
+			"deepseek-coder:1.3b", "deepseek-coder:6.7b",
+			"starcoder2:7b", "starcoder2:3b",
+			"codellama:7b", "deepseek-coder:latest",
+		}
+	case CapabilityCodeReview, CapabilityDebugging:
+		return []string{
+			"deepseek-coder-v2:latest", "deepseek-coder:33b",
+			"qwen2.5-coder:32b", "qwen2.5-coder:14b",
+			"codellama:34b", "deepseek-r1:8b", "deepseek-coder:latest",
+		}
+	case CapabilityTesting:
+		return []string{
+			"deepseek-coder:33b", "deepseek-coder:6.7b",
+			"qwen2.5-coder:14b", "qwen2.5-coder:7b",
+			"codellama:13b", "deepseek-coder:latest",
+		}
+	default:
+		return []string{
+			"deepseek-coder:latest", "qwen2.5-coder:7b",
+			"codellama:7b", "llama3.2:latest", "mistral:latest",
+		}
+	}
+}
+
+// isModelAvailable checks if a model is in the available list
+func (o *OllamaClient) isModelAvailable(model string, available []string) bool {
+	modelLower := normalizeModelName(model)
+	for _, m := range available {
+		if normalizeModelName(m) == modelLower {
+			return true
+		}
+		// Also check without version tag
+		if containsIgnoreCase(m, modelLower) || containsIgnoreCase(modelLower, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeModelName strips version tags for comparison
+func normalizeModelName(model string) string {
+	// Remove :latest, :7b, etc. for flexible matching
+	for _, suffix := range []string{":latest", ":instruct"} {
+		if containsSuffix(model, suffix) {
+			model = model[:len(model)-len(suffix)]
+		}
+	}
+	return model
+}
+
+// containsSuffix checks if string ends with suffix (case-insensitive)
+func containsSuffix(s, suffix string) bool {
+	if len(s) < len(suffix) {
+		return false
+	}
+	return containsIgnoreCase(s[len(s)-len(suffix):], suffix)
+}
+
+// containsIgnoreCase checks if s contains substr (case-insensitive)
+func containsIgnoreCase(s, substr string) bool {
+	sLower := make([]byte, len(s))
+	substrLower := make([]byte, len(substr))
+	for i := range s {
+		if s[i] >= 'A' && s[i] <= 'Z' {
+			sLower[i] = s[i] + 32
+		} else {
+			sLower[i] = s[i]
+		}
+	}
+	for i := range substr {
+		if substr[i] >= 'A' && substr[i] <= 'Z' {
+			substrLower[i] = substr[i] + 32
+		} else {
+			substrLower[i] = substr[i]
+		}
+	}
+	return bytes.Contains(sLower, substrLower)
+}
+
+// refreshModelsIfNeeded fetches available models if not already cached
+func (o *OllamaClient) refreshModelsIfNeeded() {
+	o.modelsMu.RLock()
+	checked := o.modelsChecked
+	o.modelsMu.RUnlock()
+
+	if checked {
+		return
+	}
+
+	o.modelsMu.Lock()
+	defer o.modelsMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if o.modelsChecked {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	models, err := o.GetAvailableModels(ctx)
+	if err == nil {
+		o.availableModels = models
+	}
+	o.modelsChecked = true
 }
 
 // makeRequest sends HTTP request to Ollama API

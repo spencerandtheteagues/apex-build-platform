@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 )
 
 // RedisConfig holds Redis connection configuration
@@ -26,9 +26,9 @@ type RedisConfig struct {
 	// Connection pool settings
 	PoolSize        int
 	MinIdleConns    int
-	MaxConnAge      time.Duration
+	ConnMaxLifetime      time.Duration
 	PoolTimeout     time.Duration
-	IdleTimeout     time.Duration
+	ConnMaxIdleTime     time.Duration
 	IdleCheckFreq   time.Duration
 
 	// Timeouts
@@ -53,9 +53,9 @@ func DefaultRedisConfig() *RedisConfig {
 		DB:             0,
 		PoolSize:       100,
 		MinIdleConns:   10,
-		MaxConnAge:     0, // No max age
+		ConnMaxLifetime:     0, // No max age
 		PoolTimeout:    4 * time.Second,
-		IdleTimeout:    5 * time.Minute,
+		ConnMaxIdleTime:    5 * time.Minute,
 		IdleCheckFreq:  1 * time.Minute,
 		DialTimeout:    5 * time.Second,
 		ReadTimeout:    3 * time.Second,
@@ -181,9 +181,9 @@ func (rc *RedisClient) createStandardClient(config *RedisConfig) (redis.Universa
 		DB:           config.DB,
 		PoolSize:     config.PoolSize,
 		MinIdleConns: config.MinIdleConns,
-		MaxConnAge:   config.MaxConnAge,
+		ConnMaxLifetime:   config.ConnMaxLifetime,
 		PoolTimeout:  config.PoolTimeout,
-		IdleTimeout:  config.IdleTimeout,
+		ConnMaxIdleTime:  config.ConnMaxIdleTime,
 		DialTimeout:  config.DialTimeout,
 		ReadTimeout:  config.ReadTimeout,
 		WriteTimeout: config.WriteTimeout,
@@ -198,9 +198,9 @@ func (rc *RedisClient) createStandardClient(config *RedisConfig) (redis.Universa
 		// Merge pool settings
 		parsedOpts.PoolSize = config.PoolSize
 		parsedOpts.MinIdleConns = config.MinIdleConns
-		parsedOpts.MaxConnAge = config.MaxConnAge
+		parsedOpts.ConnMaxLifetime = config.ConnMaxLifetime
 		parsedOpts.PoolTimeout = config.PoolTimeout
-		parsedOpts.IdleTimeout = config.IdleTimeout
+		parsedOpts.ConnMaxIdleTime = config.ConnMaxIdleTime
 		parsedOpts.DialTimeout = config.DialTimeout
 		parsedOpts.ReadTimeout = config.ReadTimeout
 		parsedOpts.WriteTimeout = config.WriteTimeout
@@ -220,9 +220,9 @@ func (rc *RedisClient) createSentinelClient(config *RedisConfig) (redis.Universa
 		DB:               config.DB,
 		PoolSize:         config.PoolSize,
 		MinIdleConns:     config.MinIdleConns,
-		MaxConnAge:       config.MaxConnAge,
+		ConnMaxLifetime:       config.ConnMaxLifetime,
 		PoolTimeout:      config.PoolTimeout,
-		IdleTimeout:      config.IdleTimeout,
+		ConnMaxIdleTime:      config.ConnMaxIdleTime,
 		DialTimeout:      config.DialTimeout,
 		ReadTimeout:      config.ReadTimeout,
 		WriteTimeout:     config.WriteTimeout,
@@ -236,9 +236,9 @@ func (rc *RedisClient) createClusterClient(config *RedisConfig) (redis.Universal
 		Password:     config.Password,
 		PoolSize:     config.PoolSize,
 		MinIdleConns: config.MinIdleConns,
-		MaxConnAge:   config.MaxConnAge,
+		ConnMaxLifetime:   config.ConnMaxLifetime,
 		PoolTimeout:  config.PoolTimeout,
-		IdleTimeout:  config.IdleTimeout,
+		ConnMaxIdleTime:  config.ConnMaxIdleTime,
 		DialTimeout:  config.DialTimeout,
 		ReadTimeout:  config.ReadTimeout,
 		WriteTimeout: config.WriteTimeout,
@@ -413,7 +413,7 @@ func (rc *RedisClient) HGetAll(ctx context.Context, key string) (map[string]stri
 }
 
 // ZAdd adds members to a sorted set
-func (rc *RedisClient) ZAdd(ctx context.Context, key string, members ...*redis.Z) error {
+func (rc *RedisClient) ZAdd(ctx context.Context, key string, members ...redis.Z) error {
 	return rc.client.ZAdd(ctx, key, members...).Err()
 }
 

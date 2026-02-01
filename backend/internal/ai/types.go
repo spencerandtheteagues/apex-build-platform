@@ -135,19 +135,14 @@ type RouterConfig struct {
 }
 
 // DefaultRouterConfig returns the optimal routing configuration
+// NOTE: Default providers are intentionally empty - the router will use the first
+// available provider dynamically. This prevents failures when Ollama isn't configured.
+// If Ollama IS configured (via OLLAMA_BASE_URL or BYOK), it will be prioritized.
 func DefaultRouterConfig() *RouterConfig {
 	return &RouterConfig{
 		DefaultProviders: map[AICapability]AIProvider{
-			CapabilityCodeGeneration:       ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityNaturalLanguageToCode: ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityCodeReview:           ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityCodeCompletion:       ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityDebugging:            ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityExplanation:          ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityRefactoring:          ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityTesting:              ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityDocumentation:        ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityArchitecture:         ProviderOllama,  // Default to Local/DeepSeek
+			// Empty map = router uses first available provider with fallback chain
+			// Priority order: Ollama (if configured) > Claude > GPT4 > Gemini > Grok
 		},
 		FallbackOrder: map[AIProvider][]AIProvider{
 			ProviderClaude: {ProviderGPT4, ProviderGrok, ProviderOllama, ProviderGemini},

@@ -1768,6 +1768,61 @@ func (am *AgentManager) broadcast(buildID string, msg *WSMessage) {
 	}
 }
 
+// CancelBuild cancels a running build
+func (am *AgentManager) CancelBuild(buildID string) error {
+	am.mu.RLock()
+	build, exists := am.builds[buildID]
+	am.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("build %s not found", buildID)
+	}
+
+	build.mu.Lock()
+	// Only cancel if build is still in progress
+	if build.Status == BuildCompleted || build.Status == BuildFailed || build.Status == BuildCancelled {
+		build.mu.Unlock()
+		return fmt.Errorf("build %s is already %s", buildID, build.Status)
+	}
+
+	now := time.Now()
+	build.Status = BuildCancelled
+	build.CompletedAt = &now
+	build.UpdatedAt = now
+	build.Error = "Cancelled by user"
+
+	// Cancel all pending tasks
+	for _, task := range build.Tasks {
+		if task.Status == TaskPending || task.Status == TaskInProgress {
+			task.Status = TaskCancelled
+		}
+	}
+
+	// Mark all agents as stopped
+	for _, agent := range build.Agents {
+		agent.mu.Lock()
+		if agent.Status == StatusWorking || agent.Status == StatusIdle {
+			agent.Status = StatusTerminated
+		}
+		agent.mu.Unlock()
+	}
+	build.mu.Unlock()
+
+	// Broadcast cancellation
+	am.broadcast(buildID, &WSMessage{
+		Type:      WSBuildCancelled,
+		BuildID:   buildID,
+		Timestamp: now,
+		Data: map[string]any{
+			"status":  string(BuildCancelled),
+			"message": "Build cancelled by user",
+		},
+	})
+
+	log.Printf("Build %s cancelled by user", buildID)
+	return nil
+}
+
 // RollbackToCheckpoint restores the build to a previous checkpoint
 func (am *AgentManager) RollbackToCheckpoint(buildID, checkpointID string) error {
 	am.mu.RLock()

@@ -11,9 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"apex-build/pkg/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
+	"gorm.io/gorm"
 )
 
 // WebSocketClaims represents JWT claims for WebSocket authentication
@@ -48,12 +51,24 @@ func validateWebSocketToken(tokenString string) (*WebSocketClaims, error) {
 	return nil, errors.New("invalid token claims")
 }
 
-// isUserAdmin checks if a user has admin privileges
-// In production, this should query the database
-func isUserAdmin(userID uint) bool {
-	// TODO: Implement proper admin check via database query
-	// For now, return false to enforce strict ownership
-	return false
+// isUserAdmin checks if a user has admin privileges by querying the database
+// Returns true if the user has IsAdmin or IsSuperAdmin set to true
+func (h *WSHub) isUserAdmin(userID uint) bool {
+	if h.db == nil {
+		log.Printf("Warning: database not configured for admin check, denying access for user %d", userID)
+		return false
+	}
+
+	var user models.User
+	result := h.db.Select("is_admin", "is_super_admin").First(&user, userID)
+	if result.Error != nil {
+		if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			log.Printf("Error checking admin status for user %d: %v", userID, result.Error)
+		}
+		return false
+	}
+
+	return user.IsAdmin || user.IsSuperAdmin
 }
 
 var upgrader = websocket.Upgrader{
@@ -71,6 +86,7 @@ type WSHub struct {
 	register    chan *registerRequest
 	unregister  chan *WSConnection
 	manager     *AgentManager
+	db          *gorm.DB
 	mu          sync.RWMutex
 }
 
@@ -94,13 +110,14 @@ type registerRequest struct {
 }
 
 // NewWSHub creates a new WebSocket hub
-func NewWSHub(manager *AgentManager) *WSHub {
+func NewWSHub(manager *AgentManager, db *gorm.DB) *WSHub {
 	hub := &WSHub{
 		connections: make(map[string]map[*WSConnection]bool),
 		broadcast:   make(chan *broadcastMessage, 256),
 		register:    make(chan *registerRequest),
 		unregister:  make(chan *WSConnection),
 		manager:     manager,
+		db:          db,
 	}
 	go hub.run()
 	return hub
@@ -208,7 +225,7 @@ func (h *WSHub) HandleWebSocket(c *gin.Context) {
 	}
 
 	// Verify user has access to this build
-	if uid != build.UserID && !isUserAdmin(uid) {
+	if uid != build.UserID && !h.isUserAdmin(uid) {
 		log.Printf("WebSocket connection rejected: user %d not authorized for build %s (owner: %d)", uid, buildID, build.UserID)
 		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized for this build"})
 		return
@@ -364,7 +381,9 @@ func (c *WSConnection) handleMessage(message []byte) {
 
 	case "build:cancel":
 		// User wants to cancel the build
-		// TODO: Implement build cancellation
+		if err := c.hub.manager.CancelBuild(c.buildID); err != nil {
+			log.Printf("Failed to cancel build: %v", err)
+		}
 
 	case "build:rollback":
 		// User wants to rollback to a checkpoint

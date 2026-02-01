@@ -1,6 +1,7 @@
 package security
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -384,7 +385,16 @@ func (eas *EnterpriseAuthService) requiresMFA(user *models.User, riskScore float
 	}
 
 	// Check user's MFA preferences
-	// TODO: Add MFA preference to user model
+	// If the user has explicitly enabled MFA, require it
+	if user.MFAEnabled {
+		return true
+	}
+
+	// If MFA was enforced (e.g., by admin policy), require it
+	if user.MFAEnforcedAt != nil {
+		return true
+	}
+
 	return false
 }
 
@@ -430,21 +440,109 @@ type Session struct {
 	Metadata         map[string]interface{} `json:"metadata"`
 }
 
-// TODO: Implement these interfaces and types
+// SessionStore defines the interface for session persistence operations
+type SessionStore interface {
+	// Save persists a session to the store
+	Save(ctx context.Context, session *Session) error
+	// Get retrieves a session by ID
+	Get(ctx context.Context, sessionID string) (*Session, error)
+	// GetByUserID retrieves all sessions for a user
+	GetByUserID(ctx context.Context, userID uint) ([]*Session, error)
+	// Delete removes a session from the store
+	Delete(ctx context.Context, sessionID string) error
+	// DeleteByUserID removes all sessions for a user (e.g., logout all devices)
+	DeleteByUserID(ctx context.Context, userID uint) error
+	// UpdateLastActivity updates the last activity timestamp for a session
+	UpdateLastActivity(ctx context.Context, sessionID string, timestamp time.Time) error
+	// ListActive returns all active sessions, optionally filtered by user
+	ListActive(ctx context.Context, userID *uint, limit, offset int) ([]*Session, error)
+	// CleanupExpired removes all expired sessions from the store
+	CleanupExpired(ctx context.Context) (int64, error)
+}
+
+// AuditStore defines the interface for security audit log persistence
+type AuditStore interface {
+	// Save persists a security event to the audit log
+	Save(ctx context.Context, event *SecurityEvent) error
+	// Get retrieves a security event by ID
+	Get(ctx context.Context, eventID string) (*SecurityEvent, error)
+	// GetByUserID retrieves security events for a specific user
+	GetByUserID(ctx context.Context, userID uint, limit, offset int) ([]*SecurityEvent, error)
+	// GetByType retrieves security events by event type
+	GetByType(ctx context.Context, eventType string, limit, offset int) ([]*SecurityEvent, error)
+	// GetByTimeRange retrieves security events within a time range
+	GetByTimeRange(ctx context.Context, start, end time.Time, limit, offset int) ([]*SecurityEvent, error)
+	// GetBySeverity retrieves security events by severity level
+	GetBySeverity(ctx context.Context, severity string, limit, offset int) ([]*SecurityEvent, error)
+	// List retrieves security events with optional filters
+	List(ctx context.Context, filters AuditFilters, limit, offset int) ([]*SecurityEvent, error)
+	// Count returns the total number of events matching the filters
+	Count(ctx context.Context, filters AuditFilters) (int64, error)
+	// Delete removes a security event (for GDPR compliance, etc.)
+	Delete(ctx context.Context, eventID string) error
+	// DeleteByUserID removes all security events for a user
+	DeleteByUserID(ctx context.Context, userID uint) error
+}
+
+// AuditFilters defines filter criteria for audit log queries
+type AuditFilters struct {
+	UserID    *uint      `json:"user_id,omitempty"`
+	EventType string     `json:"event_type,omitempty"`
+	Severity  string     `json:"severity,omitempty"`
+	IPAddress string     `json:"ip_address,omitempty"`
+	StartTime *time.Time `json:"start_time,omitempty"`
+	EndTime   *time.Time `json:"end_time,omitempty"`
+	Mitigated *bool      `json:"mitigated,omitempty"`
+}
+
+// DeviceStore defines the interface for device fingerprint persistence
+type DeviceStore interface {
+	// Save persists a device fingerprint to the store
+	Save(ctx context.Context, device *DeviceFingerprint) error
+	// Get retrieves a device fingerprint by ID
+	Get(ctx context.Context, deviceID string) (*DeviceFingerprint, error)
+	// GetByUserID retrieves all devices associated with a user
+	GetByUserID(ctx context.Context, userID uint) ([]*DeviceFingerprint, error)
+	// Delete removes a device fingerprint from the store
+	Delete(ctx context.Context, deviceID string) error
+	// MarkTrusted marks a device as trusted for a user
+	MarkTrusted(ctx context.Context, deviceID string, userID uint) error
+	// IsTrusted checks if a device is trusted for a user
+	IsTrusted(ctx context.Context, deviceID string, userID uint) (bool, error)
+	// List retrieves devices with optional filters
+	List(ctx context.Context, userID *uint, limit, offset int) ([]*DeviceFingerprint, error)
+}
+
+// SMSProvider defines the interface for SMS-based MFA delivery
+type SMSProvider interface {
+	// SendVerificationCode sends an MFA code via SMS
+	SendVerificationCode(ctx context.Context, phoneNumber string, code string) error
+	// ValidatePhoneNumber checks if a phone number is valid for SMS delivery
+	ValidatePhoneNumber(ctx context.Context, phoneNumber string) (bool, error)
+	// GetDeliveryStatus checks the delivery status of a sent message
+	GetDeliveryStatus(ctx context.Context, messageID string) (string, error)
+}
+
+// EmailProvider defines the interface for email-based MFA delivery
+type EmailProvider interface {
+	// SendVerificationCode sends an MFA code via email
+	SendVerificationCode(ctx context.Context, email string, code string) error
+	// SendSecurityAlert sends a security alert notification
+	SendSecurityAlert(ctx context.Context, email string, alert *SecurityEvent) error
+	// SendLoginNotification sends a login notification to the user
+	SendLoginNotification(ctx context.Context, email string, session *Session) error
+}
+
+// Supporting types for the security system
 type (
-	SessionStore interface{}
-	AuditStore   interface{}
-	DeviceStore  interface{}
-	SMSProvider  interface{}
-	EmailProvider interface{}
-	AlertSystem  struct{}
-	RiskScorer   struct{}
-	MLModel      struct{}
+	AlertSystem        struct{}
+	RiskScorer         struct{}
+	MLModel            struct{}
 	GeoLocationService struct{}
-	ThreatIntel struct{}
-	TOTPConfig    struct{}
-	BatteryInfo   struct{}
-	NetworkInfo   struct{}
+	ThreatIntel        struct{}
+	TOTPConfig         struct{}
+	BatteryInfo        struct{}
+	NetworkInfo        struct{}
 )
 
 // Stub implementations for now
