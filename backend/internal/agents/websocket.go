@@ -88,6 +88,8 @@ type WSHub struct {
 	manager     *AgentManager
 	db          *gorm.DB
 	mu          sync.RWMutex
+	stopChan    chan struct{} // Channel to signal shutdown
+	stopped     bool          // Flag to prevent double operations
 }
 
 // WSConnection represents a single WebSocket connection
@@ -118,6 +120,7 @@ func NewWSHub(manager *AgentManager, db *gorm.DB) *WSHub {
 		unregister:  make(chan *WSConnection),
 		manager:     manager,
 		db:          db,
+		stopChan:    make(chan struct{}),
 	}
 	go hub.run()
 	return hub
@@ -127,6 +130,20 @@ func NewWSHub(manager *AgentManager, db *gorm.DB) *WSHub {
 func (h *WSHub) run() {
 	for {
 		select {
+		case <-h.stopChan:
+			log.Printf("WSHub shutting down")
+			// Close all connections on shutdown
+			h.mu.Lock()
+			for buildID, conns := range h.connections {
+				for conn := range conns {
+					// Use a helper to safely close
+					h.safeCloseSend(conn)
+				}
+				delete(h.connections, buildID)
+			}
+			h.mu.Unlock()
+			return
+
 		case req := <-h.register:
 			h.mu.Lock()
 			if h.connections[req.buildID] == nil {
@@ -142,7 +159,7 @@ func (h *WSHub) run() {
 			if conns, ok := h.connections[conn.buildID]; ok {
 				if _, ok := conns[conn]; ok {
 					delete(conns, conn)
-					close(conn.send)
+					h.safeCloseSend(conn)
 				}
 			}
 			h.mu.Unlock()
@@ -159,13 +176,38 @@ func (h *WSHub) run() {
 				case conn.send <- msg.message:
 				default:
 					h.mu.Lock()
-					close(conn.send)
+					h.safeCloseSend(conn)
 					delete(h.connections[msg.buildID], conn)
 					h.mu.Unlock()
 				}
 			}
 		}
 	}
+}
+
+// safeCloseSend safely closes a connection's send channel, preventing double-close panics
+func (h *WSHub) safeCloseSend(conn *WSConnection) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Channel was already closed, ignore
+			log.Printf("Recovered from close on closed channel for build %s", conn.buildID)
+		}
+	}()
+	close(conn.send)
+}
+
+// Shutdown gracefully stops the WSHub
+func (h *WSHub) Shutdown() {
+	h.mu.Lock()
+	if h.stopped {
+		h.mu.Unlock()
+		return
+	}
+	h.stopped = true
+	h.mu.Unlock()
+
+	close(h.stopChan)
+	log.Printf("WSHub shutdown initiated")
 }
 
 // Broadcast sends a message to all connections for a build
@@ -394,6 +436,34 @@ func (c *WSConnection) handleMessage(message []byte) {
 			if err := c.hub.manager.RollbackToCheckpoint(c.buildID, rollbackMsg.CheckpointID); err != nil {
 				log.Printf("Failed to rollback: %v", err)
 			}
+		}
+
+	case "build:reset":
+		// User wants to completely reset/clear the build and start over
+		if err := c.hub.manager.ResetBuild(c.buildID); err != nil {
+			log.Printf("Failed to reset build: %v", err)
+			// Send error back to client
+			errorMsg := &WSMessage{
+				Type:      "build:error",
+				BuildID:   c.buildID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"error":   "Failed to reset build",
+					"details": err.Error(),
+				},
+			}
+			if data, err := json.Marshal(errorMsg); err == nil {
+				select {
+				case c.send <- data:
+				default:
+				}
+			}
+		}
+
+	case "build:clear":
+		// Alias for reset - clears the prompt and build state
+		if err := c.hub.manager.ResetBuild(c.buildID); err != nil {
+			log.Printf("Failed to clear build: %v", err)
 		}
 
 	default:

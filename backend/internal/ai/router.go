@@ -27,7 +27,9 @@ type AIRouter struct {
 	rateLimits     map[AIProvider]*rateLimiter
 	mu             sync.RWMutex
 	healthCheck    map[AIProvider]bool
-	strictBYOKMode bool // When true, NEVER fall back to unconfigured providers
+	strictBYOKMode bool          // When true, NEVER fall back to unconfigured providers
+	stopChan       chan struct{} // Channel to signal shutdown
+	stopped        bool          // Flag to prevent double-close
 }
 
 // rateLimiter tracks rate limiting for each provider
@@ -87,6 +89,7 @@ func NewAIRouter(claudeKey, openAIKey, geminiKey string, extraKeys ...string) *A
 		config:      config,
 		rateLimits:  rateLimits,
 		healthCheck: make(map[AIProvider]bool),
+		stopChan:    make(chan struct{}),
 	}
 
 	// Start health monitoring
@@ -124,6 +127,7 @@ func NewBYOKRouter(clients map[AIProvider]AIClient) *AIRouter {
 		rateLimits:     rateLimits,
 		healthCheck:    make(map[AIProvider]bool),
 		strictBYOKMode: true, // CRITICAL: Enable strict BYOK mode
+		stopChan:       make(chan struct{}),
 	}
 
 	// Start health monitoring for configured providers only
@@ -451,9 +455,31 @@ func (r *AIRouter) monitorHealth() {
 	// Initial health check
 	r.performHealthChecks()
 
-	for range ticker.C {
-		r.performHealthChecks()
+	for {
+		select {
+		case <-ticker.C:
+			r.performHealthChecks()
+		case <-r.stopChan:
+			log.Printf("AIRouter health monitor shutting down")
+			return
+		}
 	}
+}
+
+// Shutdown gracefully stops the AIRouter and its health monitoring goroutine
+func (r *AIRouter) Shutdown() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.stopped {
+		return // Already stopped
+	}
+	r.stopped = true
+
+	if r.stopChan != nil {
+		close(r.stopChan)
+	}
+	log.Printf("AIRouter shutdown complete")
 }
 
 // performHealthChecks checks health of all providers

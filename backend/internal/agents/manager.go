@@ -1823,6 +1823,89 @@ func (am *AgentManager) CancelBuild(buildID string) error {
 	return nil
 }
 
+// ResetBuild stops and clears a build, allowing the user to start fresh
+// This is different from CancelBuild - Reset clears all data and removes the build
+func (am *AgentManager) ResetBuild(buildID string) error {
+	am.mu.Lock()
+	build, exists := am.builds[buildID]
+	if !exists {
+		am.mu.Unlock()
+		return fmt.Errorf("build %s not found", buildID)
+	}
+
+	// Cancel any running work
+	build.mu.Lock()
+	now := time.Now()
+	build.Status = BuildCancelled
+	build.CompletedAt = &now
+	build.UpdatedAt = now
+
+	// Cancel all tasks
+	for _, task := range build.Tasks {
+		task.Status = TaskCancelled
+	}
+
+	// Stop all agents
+	for _, agent := range build.Agents {
+		agent.mu.Lock()
+		agent.Status = StatusTerminated
+		agent.mu.Unlock()
+	}
+	build.mu.Unlock()
+
+	// Remove the build from tracking
+	delete(am.builds, buildID)
+
+	// Clean up agents
+	for agentID, agent := range am.agents {
+		if agent.BuildID == buildID {
+			delete(am.agents, agentID)
+		}
+	}
+
+	// Clean up subscribers
+	if subs, ok := am.subscribers[buildID]; ok {
+		for _, ch := range subs {
+			// Notify subscribers that build is being reset
+			select {
+			case ch <- &WSMessage{
+				Type:      "build:reset",
+				BuildID:   buildID,
+				Timestamp: now,
+				Data: map[string]any{
+					"message": "Build reset by user",
+				},
+			}:
+			default:
+			}
+		}
+		delete(am.subscribers, buildID)
+	}
+	am.mu.Unlock()
+
+	log.Printf("Build %s reset and cleared", buildID)
+	return nil
+}
+
+// DeleteBuild completely removes a build and all associated data
+func (am *AgentManager) DeleteBuild(buildID string) error {
+	return am.ResetBuild(buildID)
+}
+
+// GetUserBuilds returns all builds for a specific user
+func (am *AgentManager) GetUserBuilds(userID uint) []*Build {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	builds := make([]*Build, 0)
+	for _, build := range am.builds {
+		if build.UserID == userID {
+			builds = append(builds, build)
+		}
+	}
+	return builds
+}
+
 // RollbackToCheckpoint restores the build to a previous checkpoint
 func (am *AgentManager) RollbackToCheckpoint(buildID, checkpointID string) error {
 	am.mu.RLock()

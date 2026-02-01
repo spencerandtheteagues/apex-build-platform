@@ -309,6 +309,8 @@ const (
 	WSBuildCheckpoint WSMessageType = "build:checkpoint"
 	WSBuildCompleted  WSMessageType = "build:completed"
 	WSBuildCancelled  WSMessageType = "build:cancelled"
+	WSBuildReset      WSMessageType = "build:reset"
+	WSBuildCleared    WSMessageType = "build:cleared"
 	WSBuildError      WSMessageType = "build:error"
 	WSFileCreated     WSMessageType = "file:created"
 	WSFileUpdated     WSMessageType = "file:updated"

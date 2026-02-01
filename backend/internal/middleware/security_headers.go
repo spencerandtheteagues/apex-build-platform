@@ -77,22 +77,35 @@ func (rl *FixedWindowRateLimiter) Allow(key string) (bool, int64, int64) {
 		return true, rl.limit - 1, resetIn
 	}
 
-	// Check if we need to reset the window
-	windowStart := atomic.LoadInt64(&entry.windowStart)
-	if now-windowStart >= rl.windowSecs {
-		// Window has expired, reset the counter
-		atomic.StoreInt64(&entry.windowStart, now)
-		atomic.StoreInt64(&entry.count, 1)
-		return true, rl.limit - 1, rl.windowSecs
+	// Check if we need to reset the window using compare-and-swap for thread safety
+	for {
+		windowStart := atomic.LoadInt64(&entry.windowStart)
+		if now-windowStart >= rl.windowSecs {
+			// Window has expired, try to reset using CAS
+			// Only one goroutine will succeed in resetting
+			if atomic.CompareAndSwapInt64(&entry.windowStart, windowStart, now) {
+				// We won the race, reset the counter
+				atomic.StoreInt64(&entry.count, 1)
+				return true, rl.limit - 1, rl.windowSecs
+			}
+			// Another goroutine reset the window, retry the check
+			continue
+		}
+		// Window is still valid, break out of the loop
+		break
 	}
 
 	// Increment counter and check limit
+	windowStart := atomic.LoadInt64(&entry.windowStart)
 	newCount := atomic.AddInt64(&entry.count, 1)
 	remaining := rl.limit - newCount
 	resetIn := rl.windowSecs - (now - windowStart)
 
 	if remaining < 0 {
 		remaining = 0
+	}
+	if resetIn < 0 {
+		resetIn = 0
 	}
 
 	if newCount > rl.limit {

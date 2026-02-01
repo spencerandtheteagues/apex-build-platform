@@ -408,9 +408,43 @@ func (h *SearchHandler) pruneSearchHistory(userID uint) {
 		Delete(&models.SearchHistory{})
 }
 
-// Helper to check project ownership
+// userOwnsProject checks if a user owns a project or has access to it
+// Returns true if:
+// - User is the owner of the project
+// - Project is public
+// - User is an admin (checked via is_admin or is_super_admin flags)
 func (h *SearchHandler) userOwnsProject(userID, projectID uint) bool {
-	// This would normally query the database
-	// For now, allow all authenticated users
-	return true
+	db := h.engine.GetDB()
+	if db == nil {
+		// If no database, deny access for security
+		return false
+	}
+
+	// First check the project
+	var project models.Project
+	result := db.Select("owner_id", "is_public").First(&project, projectID)
+	if result.Error != nil {
+		// Project not found or error - deny access
+		return false
+	}
+
+	// Allow access if project is public
+	if project.IsPublic {
+		return true
+	}
+
+	// Allow access if user is the owner
+	if project.OwnerID == userID {
+		return true
+	}
+
+	// Check if user is an admin
+	var user models.User
+	result = db.Select("is_admin", "is_super_admin").First(&user, userID)
+	if result.Error != nil {
+		return false
+	}
+
+	// Allow access if user is admin or super admin
+	return user.IsAdmin || user.IsSuperAdmin
 }
