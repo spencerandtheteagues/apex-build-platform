@@ -31,17 +31,26 @@ func (a *AIRouterAdapter) Generate(ctx context.Context, provider AIProvider, pro
 
 	// Determine which router to use
 	targetRouter := a.router
+	isBYOKMode := false
 	if opts.UserID > 0 && a.byokManager != nil {
-		userRouter, _, err := a.byokManager.GetRouterForUser(opts.UserID)
+		userRouter, hasBYOK, err := a.byokManager.GetRouterForUser(opts.UserID)
 		if err == nil && userRouter != nil {
 			targetRouter = userRouter
-			log.Printf("Using user-specific router for user %d", opts.UserID)
+			isBYOKMode = hasBYOK
+			if hasBYOK {
+				log.Printf("BYOK: Using strict BYOK router for user %d (no platform fallbacks)", opts.UserID)
+			} else {
+				log.Printf("Using platform router for user %d (no BYOK keys configured)", opts.UserID)
+			}
 		} else {
 			log.Printf("Failed to get user router, falling back to platform router: %v", err)
 		}
 	} else {
 		log.Printf("Using platform router (UserID=%d, BYOKManager=%v)", opts.UserID, a.byokManager != nil)
 	}
+
+	// Log BYOK mode status for debugging
+	_ = isBYOKMode // Used for logging above, may be used for additional enforcement
 
 	// Map agent provider to AI router capability
 	capability := a.mapProviderToCapability(provider, opts)

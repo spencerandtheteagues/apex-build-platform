@@ -22,11 +22,12 @@ const (
 
 // AIRouter intelligently routes AI requests to the optimal provider
 type AIRouter struct {
-	clients     map[AIProvider]AIClient
-	config      *RouterConfig
-	rateLimits  map[AIProvider]*rateLimiter
-	mu          sync.RWMutex
-	healthCheck map[AIProvider]bool
+	clients        map[AIProvider]AIClient
+	config         *RouterConfig
+	rateLimits     map[AIProvider]*rateLimiter
+	mu             sync.RWMutex
+	healthCheck    map[AIProvider]bool
+	strictBYOKMode bool // When true, NEVER fall back to unconfigured providers
 }
 
 // rateLimiter tracks rate limiting for each provider
@@ -92,6 +93,50 @@ func NewAIRouter(claudeKey, openAIKey, geminiKey string, extraKeys ...string) *A
 	go router.monitorHealth()
 
 	return router
+}
+
+// NewBYOKRouter creates a strict BYOK router that ONLY uses the provided clients.
+// It will NEVER fall back to platform providers - if a requested provider isn't
+// in the clients map, the request will fail with an error.
+func NewBYOKRouter(clients map[AIProvider]AIClient) *AIRouter {
+	// Get the list of configured providers
+	configuredProviders := make([]AIProvider, 0, len(clients))
+	for provider := range clients {
+		configuredProviders = append(configuredProviders, provider)
+	}
+
+	// Use BYOK-specific config with no fallbacks
+	config := BYOKRouterConfig(configuredProviders)
+
+	// Initialize rate limiters for configured providers only
+	rateLimits := make(map[AIProvider]*rateLimiter)
+	for provider, limit := range config.RateLimits {
+		rateLimits[provider] = &rateLimiter{
+			tokens:     limit,
+			maxTokens:  limit,
+			lastRefill: time.Now(),
+		}
+	}
+
+	router := &AIRouter{
+		clients:        clients,
+		config:         config,
+		rateLimits:     rateLimits,
+		healthCheck:    make(map[AIProvider]bool),
+		strictBYOKMode: true, // CRITICAL: Enable strict BYOK mode
+	}
+
+	// Start health monitoring for configured providers only
+	go router.monitorHealth()
+
+	log.Printf("BYOK Router created with strict mode - providers: %v", configuredProviders)
+
+	return router
+}
+
+// IsStrictBYOKMode returns whether this router is in strict BYOK mode
+func (r *AIRouter) IsStrictBYOKMode() bool {
+	return r.strictBYOKMode
 }
 
 // Generate routes an AI request to the optimal provider
@@ -211,6 +256,13 @@ func (r *AIRouter) selectProvider(req *AIRequest) (AIProvider, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	// STRICT BYOK MODE: If a specific provider is requested, it MUST be available
+	// or we return an error. No fallbacks allowed.
+	if r.strictBYOKMode {
+		return r.selectProviderStrictBYOK(req)
+	}
+
+	// Non-BYOK mode: allow fallbacks to platform providers
 	// Respect explicit provider requests when possible (with fallbacks)
 	if req.Provider != "" {
 		requested := req.Provider
@@ -252,6 +304,40 @@ func (r *AIRouter) selectProvider(req *AIRequest) (AIProvider, error) {
 
 	// If no fallbacks work, use load balancing among healthy providers
 	return r.selectByLoadBalancing()
+}
+
+// selectProviderStrictBYOK selects a provider in strict BYOK mode.
+// NO fallbacks to platform providers are allowed.
+// If the requested provider isn't available, returns an error.
+func (r *AIRouter) selectProviderStrictBYOK(req *AIRequest) (AIProvider, error) {
+	// List configured BYOK providers for error messages
+	configuredProviders := make([]string, 0, len(r.clients))
+	for provider := range r.clients {
+		configuredProviders = append(configuredProviders, string(provider))
+	}
+
+	// If a specific provider is requested, it MUST be available
+	if req.Provider != "" {
+		requested := req.Provider
+		if r.isAvailable(requested) {
+			if r.isHealthyOrUnknown(requested) {
+				return requested, nil
+			}
+			return "", fmt.Errorf("BYOK_PROVIDER_UNHEALTHY: Provider '%s' is configured but not healthy. Check your connection settings", requested)
+		}
+		return "", fmt.Errorf("BYOK_PROVIDER_NOT_CONFIGURED: Provider '%s' is not in your BYOK configuration. Configured providers: %v", requested, configuredProviders)
+	}
+
+	// No specific provider requested - use load balancing among BYOK providers only
+	for provider := range r.clients {
+		if r.isHealthyOrUnknown(provider) {
+			log.Printf("BYOK: Auto-selected provider %s from configured providers", provider)
+			return provider, nil
+		}
+	}
+
+	// No healthy BYOK providers available
+	return "", fmt.Errorf("BYOK_NO_HEALTHY_PROVIDERS: None of your configured BYOK providers are healthy. Configured: %v", configuredProviders)
 }
 
 // selectByLoadBalancing selects provider based on load balancing weights

@@ -174,3 +174,32 @@ func DefaultRouterConfig() *RouterConfig {
 		},
 	}
 }
+
+// BYOKRouterConfig returns a strict BYOK configuration with NO fallbacks.
+// When BYOK is active, users should ONLY use their configured providers.
+// If a requested provider isn't available, the request fails instead of falling back.
+func BYOKRouterConfig(configuredProviders []AIProvider) *RouterConfig {
+	// Create empty fallback chains - NO fallbacks in BYOK mode
+	fallbackOrder := make(map[AIProvider][]AIProvider)
+	loadBalancing := make(map[AIProvider]float64)
+	rateLimits := make(map[AIProvider]int)
+	costThresholds := make(map[AIProvider]float64)
+
+	// Only configure the providers the user has set up
+	for _, provider := range configuredProviders {
+		fallbackOrder[provider] = []AIProvider{} // NO fallbacks
+		loadBalancing[provider] = 1.0 / float64(len(configuredProviders)) // Equal weight
+		rateLimits[provider] = 1000 // High limit for user's own keys
+		costThresholds[provider] = 1.0 // User pays their own costs
+	}
+
+	return &RouterConfig{
+		DefaultProviders: map[AICapability]AIProvider{
+			// Empty - let the router pick from configured providers
+		},
+		FallbackOrder:   fallbackOrder,
+		LoadBalancing:   loadBalancing,
+		RateLimits:      rateLimits,
+		CostThresholds:  costThresholds,
+	}
+}

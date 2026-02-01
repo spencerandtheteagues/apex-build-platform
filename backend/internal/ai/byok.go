@@ -190,47 +190,20 @@ func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
 		return m.platformRouter, false, nil
 	}
 
-	// Fill in missing providers from platform router
-	m.mu.RLock()
-	for provider, client := range m.platformRouter.clients {
-		if _, exists := clients[provider]; !exists {
-			// STRICT POLICY:
-			// 1. If user has ANY BYOK key enabled, disable all paid platform models.
-			// 2. NEVER allow a global/shared Ollama instance to leak to users.
-			//    Ollama must ALWAYS be provided by the user (BYOK).
+	// STRICT BYOK POLICY:
+	// When user has ANY BYOK key configured, they ONLY use their own keys.
+	// NO platform providers are added. NO fallbacks to platform APIs.
+	// This ensures users with BYOK never accidentally use platform credits.
 
-			if provider == ProviderOllama {
-				continue // Explicitly block global Ollama
-			}
-
-			if hasBYOK {
-				// If user is bringing keys, we disable platform's paid models to save costs.
-				if provider == ProviderClaude || provider == ProviderGPT4 ||
-					provider == ProviderGemini || provider == ProviderGrok {
-					continue
-				}
-			}
-			clients[provider] = client
-		}
+	// Log what BYOK providers are configured
+	configuredProviders := make([]string, 0, len(clients))
+	for provider := range clients {
+		configuredProviders = append(configuredProviders, string(provider))
 	}
-	m.mu.RUnlock()
+	log.Printf("BYOK: User %d has strict BYOK mode with providers: %v", userID, configuredProviders)
 
-	config := DefaultRouterConfig()
-	rateLimits := make(map[AIProvider]*rateLimiter)
-	for provider, limit := range config.RateLimits {
-		rateLimits[provider] = &rateLimiter{
-			tokens:     limit,
-			maxTokens:  limit,
-			lastRefill: time.Now(),
-		}
-	}
-
-	router := &AIRouter{
-		clients:     clients,
-		config:      config,
-		rateLimits:  rateLimits,
-		healthCheck: make(map[AIProvider]bool),
-	}
+	// Create a strict BYOK router - NO platform fallbacks
+	router := NewBYOKRouter(clients)
 
 	return router, true, nil
 }
