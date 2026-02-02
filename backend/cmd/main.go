@@ -427,6 +427,17 @@ func main() {
 	)
 	log.Println("Enterprise Features initialized (SSO/SAML, SCIM, RBAC, Audit Logs)")
 
+	// Initialize Autonomous Agent System (CRITICAL Replit parity feature)
+	// This enables AI-powered autonomous building, testing, and deployment
+	autonomousAIAdapter := autonomous.NewAIAdapter(aiRouter)
+	autonomousAgent := autonomous.NewAutonomousAgent(autonomousAIAdapter, projectsDir)
+	autonomousHandler := autonomous.NewHandler(autonomousAgent)
+	log.Println("Autonomous Agent System initialized (Replit Agent 3.0 parity)")
+	log.Println("   - Planning: Natural language → execution plan")
+	log.Println("   - Building: Create files, install deps, run builds")
+	log.Println("   - Validation: Auto-test, lint, security scan")
+	log.Println("   - Recovery: Self-healing with retries and rollback")
+
 	// Initialize Real-Time Collaboration Hub
 	collabHub := collaboration.NewCollabHub()
 	go collabHub.Run()
