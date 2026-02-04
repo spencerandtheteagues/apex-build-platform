@@ -132,6 +132,13 @@ type RouterConfig struct {
 
 	// Cost thresholds for switching providers
 	CostThresholds map[AIProvider]float64 `json:"cost_thresholds"`
+
+	// BYOK emergency fallback settings
+	// Controls when BYOK providers can fallback to platform providers
+	EnableBYOKEmergencyFallback bool `json:"enable_byok_emergency_fallback"`
+
+	// Retry attempts before using emergency fallback
+	MaxRetryAttempts map[AIProvider]int `json:"max_retry_attempts"`
 }
 
 // DefaultRouterConfig returns the optimal routing configuration
@@ -154,7 +161,9 @@ func DefaultRouterConfig() *RouterConfig {
 			ProviderGPT4:   {ProviderClaude, ProviderGrok, ProviderOllama, ProviderGemini},
 			ProviderGemini: {ProviderGrok, ProviderOllama, ProviderGPT4, ProviderClaude},
 			ProviderGrok:   {ProviderOllama, ProviderGPT4, ProviderClaude, ProviderGemini},
-			ProviderOllama: {}, // No fallbacks for local/free model to prevent accidental costs
+			// ADAPTIVE FALLBACK: Ollama now has emergency cloud fallbacks for BYOK scenarios
+			// First retry Ollama (network/startup issues), then gracefully degrade to cloud
+			ProviderOllama: {ProviderGPT4, ProviderClaude, ProviderGemini, ProviderGrok},
 		},
 		LoadBalancing: map[AIProvider]float64{
 			ProviderClaude: 0.25,
@@ -176,6 +185,16 @@ func DefaultRouterConfig() *RouterConfig {
 			ProviderGemini: 0.08,  // max cost per request
 			ProviderGrok:   0.05,  // max cost per request
 			ProviderOllama: 0.00,  // Free — runs locally
+		},
+		// Enable emergency fallback for BYOK scenarios to prevent build failures
+		EnableBYOKEmergencyFallback: true,
+		// Retry local models multiple times before falling back to cloud
+		MaxRetryAttempts: map[AIProvider]int{
+			ProviderClaude: 2,     // Cloud providers get fewer retries
+			ProviderGPT4:   2,     // Cloud providers get fewer retries
+			ProviderGemini: 2,     // Cloud providers get fewer retries
+			ProviderGrok:   2,     // Cloud providers get fewer retries
+			ProviderOllama: 5,     // Local model gets more retries (network/startup issues)
 		},
 	}
 }

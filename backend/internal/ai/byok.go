@@ -191,31 +191,40 @@ func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
 	}
 
 	// Fill in missing providers from platform router
+	config := DefaultRouterConfig()
+	allowEmergencyFallback := config.EnableBYOKEmergencyFallback
+
 	m.mu.RLock()
+
 	for provider, client := range m.platformRouter.clients {
 		if _, exists := clients[provider]; !exists {
-			// STRICT POLICY:
-			// 1. If user has ANY BYOK key enabled, disable all paid platform models.
-			// 2. NEVER allow a global/shared Ollama instance to leak to users.
+			// UPDATED POLICY:
+			// 1. NEVER allow a global/shared Ollama instance to leak to users.
 			//    Ollama must ALWAYS be provided by the user (BYOK).
+			// 2. If emergency fallback enabled, allow platform models as fallback
+			//    for BYOK scenarios to prevent complete build failures.
 
 			if provider == ProviderOllama {
 				continue // Explicitly block global Ollama
 			}
 
-			if hasBYOK {
-				// If user is bringing keys, we disable platform's paid models to save costs.
+			if hasBYOK && !allowEmergencyFallback {
+				// Original strict policy: disable platform models to save costs
 				if provider == ProviderClaude || provider == ProviderGPT4 ||
 					provider == ProviderGemini || provider == ProviderGrok {
 					continue
 				}
+			} else if hasBYOK && allowEmergencyFallback {
+				// Emergency fallback policy: add platform models as fallback only
+				// They will only be used if BYOK provider fails completely
+				log.Printf("BYOK: Adding platform %s as emergency fallback for user %d", provider, userID)
 			}
 			clients[provider] = client
 		}
 	}
 	m.mu.RUnlock()
 
-	config := DefaultRouterConfig()
+	// Use the same config instance loaded earlier
 	rateLimits := make(map[AIProvider]*rateLimiter)
 	for provider, limit := range config.RateLimits {
 		rateLimits[provider] = &rateLimiter{

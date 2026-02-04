@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"apex-build/internal/ai"
 )
@@ -15,6 +16,7 @@ import (
 type AIRouterAdapter struct {
 	router      *ai.AIRouter
 	byokManager *ai.BYOKManager
+	startupTime time.Time // Track when adapter was created for grace period
 }
 
 // NewAIRouterAdapter creates a new adapter wrapping the existing AI router
@@ -22,11 +24,12 @@ func NewAIRouterAdapter(router *ai.AIRouter, byokManager *ai.BYOKManager) *AIRou
 	return &AIRouterAdapter{
 		router:      router,
 		byokManager: byokManager,
+		startupTime: time.Now(), // Track startup for grace period
 	}
 }
 
 // Generate executes an AI generation request using the specified provider
-func (a *AIRouterAdapter) Generate(ctx context.Context, provider AIProvider, prompt string, opts GenerateOptions) (string, error) {
+func (a *AIRouterAdapter) Generate(ctx context.Context, provider ai.AIProvider, prompt string, opts GenerateOptions) (string, error) {
 	log.Printf("AIRouterAdapter.Generate called with provider: %s", provider)
 
 	// Determine which router to use
@@ -83,13 +86,13 @@ For code files, use this exact format:
 	// Map agent provider to AI package provider
 	var aiProvider ai.AIProvider
 	switch provider {
-	case ProviderClaude:
+	case ai.ProviderClaude:
 		aiProvider = ai.ProviderClaude
-	case ProviderGPT:
+	case ai.ProviderGPT4:
 		aiProvider = ai.ProviderGPT4
-	case ProviderGemini:
+	case ai.ProviderGemini:
 		aiProvider = ai.ProviderGemini
-	case ProviderOllama:
+	case ai.ProviderOllama:
 		aiProvider = ai.ProviderOllama
 	default:
 		aiProvider = ai.ProviderClaude
@@ -142,7 +145,7 @@ For code files, use this exact format:
 }
 
 // mapProviderToCapability determines the best capability based on provider and context
-func (a *AIRouterAdapter) mapProviderToCapability(provider AIProvider, opts GenerateOptions) ai.AICapability {
+func (a *AIRouterAdapter) mapProviderToCapability(provider ai.AIProvider, opts GenerateOptions) ai.AICapability {
 	// Check system prompt for hints about the task type
 	sysPrompt := strings.ToLower(opts.SystemPrompt)
 
@@ -178,7 +181,7 @@ func (a *AIRouterAdapter) mapProviderToCapability(provider AIProvider, opts Gene
 // GenerateWithStreaming generates content and streams it back via callback
 func (a *AIRouterAdapter) GenerateWithStreaming(
 	ctx context.Context,
-	provider AIProvider,
+	provider ai.AIProvider,
 	prompt string,
 	opts GenerateOptions,
 	callback func(chunk string) error,
@@ -214,7 +217,7 @@ func (a *AIRouterAdapter) GenerateWithStreaming(
 // GenerateCode specifically generates code with proper formatting
 func (a *AIRouterAdapter) GenerateCode(
 	ctx context.Context,
-	provider AIProvider,
+	provider ai.AIProvider,
 	description string,
 	language string,
 	opts GenerateOptions,
@@ -293,7 +296,7 @@ Output a JSON structure with:
 		techStack.Styling,
 	)
 
-	archResponse, err := a.Generate(ctx, ProviderClaude, archPrompt, GenerateOptions{
+	archResponse, err := a.Generate(ctx, ai.ProviderClaude, archPrompt, GenerateOptions{
 		MaxTokens: 4000,
 		SystemPrompt: `You are a senior software architect. Create detailed, comprehensive architecture plans.
 Output valid JSON that can be parsed programmatically.`,
@@ -315,7 +318,7 @@ Output valid JSON that can be parsed programmatically.`,
 	// Generate main files based on tech stack
 	files := a.getFilesToGenerate(techStack)
 	for _, fileSpec := range files {
-		content, err := a.GenerateCode(ctx, ProviderGPT, fileSpec.Description, fileSpec.Language, GenerateOptions{
+		content, err := a.GenerateCode(ctx, ai.ProviderGPT4, fileSpec.Description, fileSpec.Language, GenerateOptions{
 			MaxTokens: 4000,
 		})
 		if err != nil {
@@ -442,7 +445,7 @@ Output JSON:
   "suggestions": ["..."]
 }`, language, code)
 
-	response, err := a.Generate(ctx, ProviderClaude, prompt, GenerateOptions{
+	response, err := a.Generate(ctx, ai.ProviderClaude, prompt, GenerateOptions{
 		MaxTokens: 2000,
 		SystemPrompt: "You are a code analyzer. Output valid JSON only.",
 	})
@@ -475,7 +478,7 @@ type Issue struct {
 }
 
 // GetAvailableProvidersForUser returns available providers for a specific user (BYOK aware)
-func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []AIProvider {
+func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []ai.AIProvider {
 	if a.byokManager == nil {
 		return a.GetAvailableProviders()
 	}
@@ -487,20 +490,40 @@ func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []AIProvider
 	}
 
 	healthStatus := userRouter.GetHealthStatus()
-	available := make([]AIProvider, 0)
+	available := make([]ai.AIProvider, 0)
 
 	// Map AI router providers to agent providers and check health
-	providerMappings := map[ai.AIProvider]AIProvider{
-		ai.ProviderClaude: ProviderClaude,
-		ai.ProviderGPT4:   ProviderGPT,
-		ai.ProviderGemini: ProviderGemini,
-		ai.ProviderOllama: ProviderOllama,
+	providerMappings := map[ai.AIProvider]ai.AIProvider{
+		ai.ProviderClaude: ai.ProviderClaude,
+		ai.ProviderGPT4:   ai.ProviderGPT4,
+		ai.ProviderGemini: ai.ProviderGemini,
+		ai.ProviderOllama: ai.ProviderOllama,
 	}
 
+	// Startup grace period: 30 seconds after adapter creation
+	const startupGracePeriod = 30 * time.Second
+	isInGracePeriod := time.Since(a.startupTime) < startupGracePeriod
+
 	for aiProvider, agentProvider := range providerMappings {
-		// For BYOK, we care if it exists in the router map (configured) AND is healthy
-		if healthy, exists := healthStatus[aiProvider]; exists && healthy {
-			available = append(available, agentProvider)
+		if healthy, exists := healthStatus[aiProvider]; exists {
+			// Health status is known
+			if healthy {
+				available = append(available, agentProvider)
+			} else if isInGracePeriod {
+				// During grace period, give unhealthy providers a chance (might be startup delay)
+				log.Printf("Provider %s unhealthy but in grace period, including anyway", aiProvider)
+				available = append(available, agentProvider)
+			} else {
+				log.Printf("Provider %s marked as unhealthy, skipping", aiProvider)
+			}
+		} else {
+			// Health status unknown - provider may be configured but health check hasn't run
+			log.Printf("Provider %s health status unknown", aiProvider)
+			if isInGracePeriod {
+				// During grace period, assume configured providers are available
+				log.Printf("Provider %s health unknown but in grace period, assuming healthy", aiProvider)
+				available = append(available, agentProvider)
+			}
 		}
 	}
 
@@ -509,16 +532,16 @@ func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []AIProvider
 }
 
 // GetAvailableProviders returns a list of healthy, available AI providers (Platform default)
-func (a *AIRouterAdapter) GetAvailableProviders() []AIProvider {
+func (a *AIRouterAdapter) GetAvailableProviders() []ai.AIProvider {
 	healthStatus := a.router.GetHealthStatus()
-	available := make([]AIProvider, 0)
+	available := make([]ai.AIProvider, 0)
 
 	// Map AI router providers to agent providers and check health
-	providerMappings := map[ai.AIProvider]AIProvider{
-		ai.ProviderClaude: ProviderClaude,
-		ai.ProviderGPT4:   ProviderGPT,
-		ai.ProviderGemini: ProviderGemini,
-		ai.ProviderOllama: ProviderOllama,
+	providerMappings := map[ai.AIProvider]ai.AIProvider{
+		ai.ProviderClaude: ai.ProviderClaude,
+		ai.ProviderGPT4:   ai.ProviderGPT4,
+		ai.ProviderGemini: ai.ProviderGemini,
+		ai.ProviderOllama: ai.ProviderOllama,
 	}
 
 	for aiProvider, agentProvider := range providerMappings {

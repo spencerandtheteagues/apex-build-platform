@@ -6,6 +6,8 @@ package agents
 import (
 	"sync"
 	"time"
+
+	"apex-build/internal/ai"
 )
 
 // AgentRole defines the specialized role of an AI agent
@@ -35,22 +37,14 @@ const (
 	StatusTerminated AgentStatus = "terminated"  // Agent was stopped
 )
 
-// AIProvider identifies which AI model powers an agent
-type AIProvider string
-
-const (
-	ProviderClaude  AIProvider = "claude"  // Anthropic Claude (code review, debugging)
-	ProviderGPT     AIProvider = "gpt"     // OpenAI GPT-4 (code generation)
-	ProviderGemini  AIProvider = "gemini"  // Google Gemini (completion, explanation)
-	ProviderOllama  AIProvider = "ollama"  // Ollama (local models)
-)
+// Note: AIProvider type is now imported from the ai package
 
 // Agent represents a single AI agent working on part of a build
 type Agent struct {
-	ID          string      `json:"id"`
-	Role        AgentRole   `json:"role"`
-	Provider    AIProvider  `json:"provider"`
-	Status      AgentStatus `json:"status"`
+	ID          string        `json:"id"`
+	Role        AgentRole     `json:"role"`
+	Provider    ai.AIProvider `json:"provider"`
+	Status      AgentStatus   `json:"status"`
 	BuildID     string      `json:"build_id"`
 	CurrentTask *Task       `json:"current_task,omitempty"`
 	Progress    int         `json:"progress"` // 0-100

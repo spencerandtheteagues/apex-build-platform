@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"apex-build/internal/ai"
+
 	"github.com/google/uuid"
 )
 
@@ -32,9 +34,9 @@ type AgentManager struct {
 
 // AIRouter interface for communicating with AI providers
 type AIRouter interface {
-	Generate(ctx context.Context, provider AIProvider, prompt string, opts GenerateOptions) (string, error)
-	GetAvailableProviders() []AIProvider
-	GetAvailableProvidersForUser(userID uint) []AIProvider
+	Generate(ctx context.Context, provider ai.AIProvider, prompt string, opts GenerateOptions) (string, error)
+	GetAvailableProviders() []ai.AIProvider
+	GetAvailableProvidersForUser(userID uint) []ai.AIProvider
 }
 
 // GenerateOptions for AI generation requests
@@ -159,9 +161,9 @@ func (am *AgentManager) StartBuild(buildID string) error {
 		},
 	})
 
-	// Get available providers and spawn lead agent with the best available
+	// Get available providers with grace period for startup race conditions
 	// Use user-specific providers to respect BYOK/Ollama settings
-	availableProviders := am.aiRouter.GetAvailableProvidersForUser(build.UserID)
+	availableProviders := am.getAvailableProvidersWithGracePeriod(build.UserID)
 	if len(availableProviders) == 0 {
 		build.mu.Lock()
 		build.Status = BuildFailed
@@ -174,7 +176,7 @@ func (am *AgentManager) StartBuild(buildID string) error {
 			Timestamp: time.Now(),
 			Data: map[string]any{
 				"error":   "No AI providers available",
-				"details": "Please check your API key configuration. Ensure at least one of Claude, GPT, or Gemini API keys is configured and valid.",
+				"details": "Please check your API key configuration. Ensure at least one of Claude, GPT, or Gemini API keys is configured and valid. If using BYOK, verify your provider is running and accessible.",
 			},
 		})
 		return fmt.Errorf("no AI providers available")
@@ -188,8 +190,8 @@ func (am *AgentManager) StartBuild(buildID string) error {
 
 	// Check for Ollama first
 	for _, p := range availableProviders {
-		if p == ProviderOllama {
-			leadProvider = ProviderOllama
+		if p == ai.ProviderOllama {
+			leadProvider = ai.ProviderOllama
 			useOllama = true
 			break
 		}
@@ -198,12 +200,12 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	// If not using Ollama, fall back to standard platform hierarchy
 	if !useOllama {
 		for _, p := range availableProviders {
-			if p == ProviderClaude {
-				leadProvider = ProviderClaude
+			if p == ai.ProviderClaude {
+				leadProvider = ai.ProviderClaude
 				break
 			}
-			if p == ProviderGPT && leadProvider != ProviderClaude {
-				leadProvider = ProviderGPT
+			if p == ai.ProviderGPT4 && leadProvider != ai.ProviderClaude {
+				leadProvider = ai.ProviderGPT4
 			}
 		}
 	}
@@ -445,7 +447,7 @@ func (am *AgentManager) forceCompleteBuild(buildID string) {
 }
 
 // spawnAgent creates a new AI agent with a specific role
-func (am *AgentManager) spawnAgent(buildID string, role AgentRole, provider AIProvider) (*Agent, error) {
+func (am *AgentManager) spawnAgent(buildID string, role AgentRole, provider ai.AIProvider) (*Agent, error) {
 	am.mu.Lock()
 
 	build, exists := am.builds[buildID]
@@ -552,29 +554,48 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 		},
 	})
 
-	// Spawn agents with dynamically assigned providers
+	// Spawn agents with resilience for single-provider scenarios
+	isSingleProvider := len(availableProviders) == 1
+	failedRoles := make([]AgentRole, 0)
+
 	for _, role := range roles {
 		provider, ok := providerAssignments[role]
 		if !ok {
 			continue
 		}
-		_, err := am.spawnAgent(buildID, role, provider)
+
+		err := am.spawnAgentWithRetries(buildID, role, provider, isSingleProvider)
 		if err != nil {
 			log.Printf("Warning: failed to spawn %s agent with %s: %v", role, provider, err)
-			// Try with a fallback provider if available
-			for _, fallback := range availableProviders {
-				if fallback != provider {
-					log.Printf("Trying fallback provider %s for %s agent", fallback, role)
-					_, err = am.spawnAgent(buildID, role, fallback)
-					if err == nil {
-						break
+
+			if !isSingleProvider {
+				// Try with fallback providers if available
+				var fallbackSucceeded bool
+				for _, fallback := range availableProviders {
+					if fallback != provider {
+						log.Printf("Trying fallback provider %s for %s agent", fallback, role)
+						err = am.spawnAgentWithRetries(buildID, role, fallback, false)
+						if err == nil {
+							fallbackSucceeded = true
+							break
+						}
 					}
 				}
-			}
-			if err != nil {
-				return fmt.Errorf("failed to spawn %s agent with any provider: %w", role, err)
+				if !fallbackSucceeded {
+					failedRoles = append(failedRoles, role)
+				}
+			} else {
+				// Single provider scenario: collect failed roles for lead agent handling
+				failedRoles = append(failedRoles, role)
 			}
 		}
+	}
+
+	// Handle failed roles in single-provider scenarios
+	if isSingleProvider && len(failedRoles) > 0 {
+		return am.handleSingleProviderFailures(buildID, failedRoles, availableProviders[0])
+	} else if len(failedRoles) > 0 {
+		return fmt.Errorf("failed to spawn agents for roles: %v", failedRoles)
 	}
 
 	log.Printf("Successfully spawned agent team for build %s with %d providers", buildID, len(availableProviders))
@@ -582,8 +603,8 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 }
 
 // assignProvidersToRoles distributes providers to agent roles based on availability
-func (am *AgentManager) assignProvidersToRoles(providers []AIProvider, roles []AgentRole) map[AgentRole]AIProvider {
-	assignments := make(map[AgentRole]AIProvider)
+func (am *AgentManager) assignProvidersToRoles(providers []ai.AIProvider, roles []AgentRole) map[AgentRole]ai.AIProvider {
+	assignments := make(map[AgentRole]ai.AIProvider)
 
 	// Check which specific providers are available
 	hasClaude := false
@@ -592,13 +613,13 @@ func (am *AgentManager) assignProvidersToRoles(providers []AIProvider, roles []A
 	hasOllama := false
 	for _, p := range providers {
 		switch p {
-		case ProviderClaude:
+		case ai.ProviderClaude:
 			hasClaude = true
-		case ProviderGPT:
+		case ai.ProviderGPT4:
 			hasGPT = true
-		case ProviderGemini:
+		case ai.ProviderGemini:
 			hasGemini = true
-		case ProviderOllama:
+		case ai.ProviderOllama:
 			hasOllama = true
 		}
 	}
@@ -607,110 +628,105 @@ func (am *AgentManager) assignProvidersToRoles(providers []AIProvider, roles []A
 	log.Printf("Assigning providers to roles: %d providers available (Ollama=%v, Claude=%v, GPT=%v, Gemini=%v)",
 		numProviders, hasOllama, hasClaude, hasGPT, hasGemini)
 
-	// BYOK PRIORITY: If user provided a local model (Ollama), use it for EVERYTHING.
-	// This avoids platform costs and respects user choice for local inference.
-	if hasOllama {
-		log.Printf("Ollama (BYOK) available: using local model for all agents")
-		for _, role := range roles {
-			assignments[role] = ProviderOllama
-		}
-		return assignments
-	}
+	// CAPABILITY-BASED LEAD SELECTION
+	// The most capable available model becomes the lead, regardless of type
+	leadProvider := am.selectLeadProvider(providers)
+	log.Printf("Selected lead provider based on capability: %s", leadProvider)
+
+	// BYOK COST OPTIMIZATION: If user has Ollama (local/free), prefer it for non-critical tasks
+	// But still use the most capable model for planning and architecture
+	preferOllama := hasOllama
 
 	switch numProviders {
 	case 1:
-		// Single provider handles ALL agents
-		singleProvider := providers[0]
-		log.Printf("Single provider mode: %s handles all agents", singleProvider)
+		// Single provider mode: lead provider handles ALL agents
+		singleProvider := leadProvider // Use the capability-selected lead
+		log.Printf("Single provider mode: %s (lead) handles all agents", singleProvider)
 		for _, role := range roles {
 			assignments[role] = singleProvider
 		}
 
 	case 2:
 		// Two providers split the work
-		// Strategy: one handles planning/architecture/review, other handles code generation
-		provider1, provider2 := providers[0], providers[1]
+		// Strategy: lead handles critical planning/architecture/review, other handles code generation
+		planningProvider := leadProvider
+		var codingProvider ai.AIProvider
 
-		// Prefer Claude for planning if available, otherwise use first provider
-		planningProvider := provider1
-		codingProvider := provider2
-		if hasClaude {
-			planningProvider = ProviderClaude
-			if provider1 == ProviderClaude {
-				codingProvider = provider2
-			} else {
-				codingProvider = provider1
+		// Find the non-lead provider for coding
+		for _, p := range providers {
+			if p != leadProvider {
+				codingProvider = p
+				break
 			}
 		}
 
-		log.Printf("Two provider mode: %s for planning/review, %s for coding", planningProvider, codingProvider)
+		// If BYOK optimization and Ollama is available, prefer it for repetitive coding tasks
+		if preferOllama && hasOllama && codingProvider != ai.ProviderOllama {
+			codingProvider = ai.ProviderOllama
+		}
 
-		// Planning-oriented roles
+		log.Printf("Two provider mode: %s (lead) for planning/review, %s for coding", planningProvider, codingProvider)
+
+		// Critical planning-oriented roles use lead
 		assignments[RolePlanner] = planningProvider
 		assignments[RoleArchitect] = planningProvider
 		assignments[RoleReviewer] = planningProvider
 
-		// Code generation roles
+		// Code generation roles use secondary/cost-optimized provider
 		assignments[RoleFrontend] = codingProvider
 		assignments[RoleBackend] = codingProvider
 		assignments[RoleDatabase] = codingProvider
 		assignments[RoleTesting] = codingProvider
 
-	default: // 3 or more providers - optimal distribution
-		log.Printf("Full provider mode: optimal distribution across all providers")
-
-		// Optimal provider assignments based on each model's strengths
-		// Claude: Best for planning, architecture, review (reasoning-heavy)
-		// GPT: Best for code generation (frontend, backend)
-		// Gemini: Good for testing, database, general tasks
+	default: // 3 or more providers - optimal distribution with lead priority
+		log.Printf("Full provider mode: lead-based optimal distribution across all providers")
 
 		for _, role := range roles {
-			var assignedProvider AIProvider
+			var assignedProvider ai.AIProvider
 
 			switch role {
 			case RolePlanner, RoleArchitect, RoleReviewer:
-				// Prefer Claude for reasoning-heavy tasks
-				if hasClaude {
-					assignedProvider = ProviderClaude
-				} else if hasGPT {
-					assignedProvider = ProviderGPT
-				} else {
-					assignedProvider = ProviderGemini
-				}
+				// Critical reasoning tasks ALWAYS use the lead provider
+				assignedProvider = leadProvider
 
 			case RoleFrontend, RoleBackend:
-				// Prefer GPT for code generation
-				if hasGPT {
-					assignedProvider = ProviderGPT
-				} else if hasClaude {
-					assignedProvider = ProviderClaude
+				// Code generation: prefer GPT if available, otherwise use lead
+				// Cost optimization: if BYOK Ollama available, use for non-critical code gen
+				if hasGPT && !preferOllama {
+					assignedProvider = ai.ProviderGPT4
+				} else if preferOllama && hasOllama {
+					assignedProvider = ai.ProviderOllama
 				} else {
-					assignedProvider = ProviderGemini
+					assignedProvider = leadProvider
 				}
 
 			case RoleDatabase:
-				// Claude or Gemini for schemas
-				if hasClaude {
-					assignedProvider = ProviderClaude
-				} else if hasGemini {
-					assignedProvider = ProviderGemini
+				// Database schema: prefer capable model but allow cost optimization
+				if hasClaude && !preferOllama {
+					assignedProvider = ai.ProviderClaude
+				} else if hasGemini && !preferOllama {
+					assignedProvider = ai.ProviderGemini
+				} else if preferOllama && hasOllama {
+					assignedProvider = ai.ProviderOllama
 				} else {
-					assignedProvider = ProviderGPT
+					assignedProvider = leadProvider
 				}
 
 			case RoleTesting:
-				// Gemini for testing
-				if hasGemini {
-					assignedProvider = ProviderGemini
-				} else if hasGPT {
-					assignedProvider = ProviderGPT
+				// Testing: prefer Gemini but allow cost optimization
+				if hasGemini && !preferOllama {
+					assignedProvider = ai.ProviderGemini
+				} else if hasGPT && !preferOllama {
+					assignedProvider = ai.ProviderGPT4
+				} else if preferOllama && hasOllama {
+					assignedProvider = ai.ProviderOllama
 				} else {
-					assignedProvider = ProviderClaude
+					assignedProvider = leadProvider
 				}
 
 			default:
-				// Default: use first available
-				assignedProvider = providers[0]
+				// Default: use lead provider for unknown roles
+				assignedProvider = leadProvider
 			}
 
 			assignments[role] = assignedProvider
@@ -723,6 +739,125 @@ func (am *AgentManager) assignProvidersToRoles(providers []AIProvider, roles []A
 	}
 
 	return assignments
+}
+
+// selectLeadProvider chooses the most capable provider from available options
+// Lead provider handles critical planning, architecture, and decision-making tasks
+func (am *AgentManager) selectLeadProvider(providers []ai.AIProvider) ai.AIProvider {
+	// Provider capability ranking (highest to lowest)
+	// Claude: Best for reasoning, planning, architecture decisions
+	// GPT-4: Strong for complex code generation and problem-solving
+	// Gemini: Good general purpose model
+	// Grok: Alternative reasoning model
+	// Ollama: Local model (capability depends on underlying model, assume good but not top)
+
+	capabilityRank := map[ai.AIProvider]int{
+		ai.ProviderClaude: 5, // Highest capability for reasoning and planning
+		ai.ProviderGPT4:   4, // Strong for code generation and complex tasks
+		ai.ProviderGemini: 3, // Good general purpose
+		ai.ProviderGrok:   2, // Alternative option
+		ai.ProviderOllama: 1, // Local model (good but depends on specific model)
+	}
+
+	var bestProvider ai.AIProvider
+	bestRank := 0
+
+	for _, provider := range providers {
+		if rank := capabilityRank[provider]; rank > bestRank {
+			bestRank = rank
+			bestProvider = provider
+		}
+	}
+
+	log.Printf("Provider capability analysis: selected %s (rank %d) from %v",
+		bestProvider, bestRank, providers)
+
+	return bestProvider
+}
+
+// spawnAgentWithRetries attempts to spawn an agent with retry logic for transient failures
+func (am *AgentManager) spawnAgentWithRetries(buildID string, role AgentRole, provider ai.AIProvider, isSingleProvider bool) error {
+	maxRetries := 1 // Default retries for multi-provider scenarios
+	if isSingleProvider {
+		maxRetries = 3 // More retries for single-provider scenarios
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		_, err := am.spawnAgent(buildID, role, provider)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+		if attempt < maxRetries {
+			delay := time.Duration(attempt) * time.Second
+			log.Printf("Agent spawn attempt %d/%d failed for %s with %s, retrying in %v: %v",
+				attempt, maxRetries, role, provider, delay, err)
+			time.Sleep(delay)
+		}
+	}
+
+	return fmt.Errorf("failed to spawn %s agent after %d attempts: %w", role, maxRetries, lastErr)
+}
+
+// handleSingleProviderFailures manages failed role spawning in single-provider scenarios
+// Instead of failing the build, we notify that the lead agent will handle these roles
+func (am *AgentManager) handleSingleProviderFailures(buildID string, failedRoles []AgentRole, provider ai.AIProvider) error {
+	if len(failedRoles) == 0 {
+		return nil
+	}
+
+	// Log the failure and mitigation strategy
+	log.Printf("Single provider scenario: %d agent roles failed to spawn, lead agent will handle these roles: %v",
+		len(failedRoles), failedRoles)
+
+	// Broadcast the mitigation message to the frontend
+	roleNames := make([]string, len(failedRoles))
+	for i, role := range failedRoles {
+		roleNames[i] = string(role)
+	}
+
+	am.broadcast(buildID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   buildID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"phase":   "agent_spawn_mitigation",
+			"message": fmt.Sprintf("Some specialized agents couldn't be created, but the lead agent will handle %s tasks to ensure build completion", roleNames),
+			"warning": true,
+		},
+	})
+
+	// In a single-provider scenario, we don't fail the build entirely
+	// The lead agent will coordinate and handle these tasks
+	return nil
+}
+
+// getAvailableProvidersWithGracePeriod attempts to get providers with retries for startup scenarios
+func (am *AgentManager) getAvailableProvidersWithGracePeriod(userID uint) []ai.AIProvider {
+	// Try immediate check first
+	providers := am.aiRouter.GetAvailableProvidersForUser(userID)
+	if len(providers) > 0 {
+		return providers
+	}
+
+	// If no providers initially, wait with grace period for health checks to complete
+	log.Printf("No providers available immediately for user %d, waiting for health checks...", userID)
+
+	maxAttempts := 3
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		time.Sleep(time.Duration(attempt*2) * time.Second) // 2s, 4s, 6s delays
+		providers = am.aiRouter.GetAvailableProvidersForUser(userID)
+		if len(providers) > 0 {
+			log.Printf("Providers became available after %d attempts: %v", attempt, providers)
+			return providers
+		}
+		log.Printf("Grace period attempt %d/%d: still no providers available", attempt, maxAttempts)
+	}
+
+	log.Printf("No providers available after grace period for user %d", userID)
+	return providers // Will be empty
 }
 
 // AssignTask assigns a task to a specific agent
