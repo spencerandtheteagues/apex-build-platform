@@ -30,10 +30,18 @@ func (d *Database) SeedAdminUser() error {
 	var existingAdmin models.User
 	result := d.DB.Where("username = ?", "admin").First(&existingAdmin)
 
+	// SECURITY: Get password from environment variable
+	password := getSeedPassword("ADMIN_SEED_PASSWORD", "admin-dev-password")
+	if password == "" {
+		log.Println("⚠️  Skipping admin user creation - ADMIN_SEED_PASSWORD not set")
+		return nil
+	}
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+
 	if result.Error == nil {
-		log.Println("✅ Admin user already exists")
-		// Update admin privileges in case they were changed
+		log.Println("✅ Admin user already exists - updating privileges and password")
 		d.DB.Model(&existingAdmin).Updates(map[string]interface{}{
+			"password_hash":        string(hashedPassword),
 			"is_admin":             true,
 			"is_super_admin":       true,
 			"has_unlimited_credits": true,
@@ -45,14 +53,6 @@ func (d *Database) SeedAdminUser() error {
 		})
 		return nil
 	}
-
-	// SECURITY: Get password from environment variable
-	password := getSeedPassword("ADMIN_SEED_PASSWORD", "admin-dev-password")
-	if password == "" {
-		log.Println("⚠️  Skipping admin user creation - ADMIN_SEED_PASSWORD not set")
-		return nil
-	}
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
@@ -94,10 +94,18 @@ func (d *Database) SeedSpencerUser() error {
 	var existingUser models.User
 	result := d.DB.Where("username = ?", "spencer").First(&existingUser)
 
+	// SECURITY: Get password from environment variable
+	password := getSeedPassword("SPENCER_SEED_PASSWORD", "spencer-dev-password")
+	if password == "" {
+		log.Println("⚠️  Skipping spencer user creation - SPENCER_SEED_PASSWORD not set")
+		return nil
+	}
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+
 	if result.Error == nil {
-		log.Println("✅ Spencer user already exists")
-		// Update to owner privileges
+		log.Println("✅ Spencer user already exists - updating privileges and password")
 		d.DB.Model(&existingUser).Updates(map[string]interface{}{
+			"password_hash":        string(hashedPassword),
 			"is_admin":             true,
 			"is_super_admin":       true,
 			"has_unlimited_credits": true,
@@ -109,14 +117,6 @@ func (d *Database) SeedSpencerUser() error {
 		})
 		return nil
 	}
-
-	// SECURITY: Get password from environment variable
-	password := getSeedPassword("SPENCER_SEED_PASSWORD", "spencer-dev-password")
-	if password == "" {
-		log.Println("⚠️  Skipping spencer user creation - SPENCER_SEED_PASSWORD not set")
-		return nil
-	}
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
