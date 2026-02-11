@@ -303,11 +303,11 @@ func (o *OpenAIClient) GetProvider() AIProvider {
 // Health checks if OpenAI API is accessible
 func (o *OpenAIClient) Health(ctx context.Context) error {
 	testReq := &openAIRequest{
-		Model: "gpt-4o",
+		Model: "gpt-4o-mini",
 		Messages: []openAIMessage{
-			{Role: "user", Content: "Hello"},
+			{Role: "user", Content: "Hi"},
 		},
-		MaxTokens: 5,
+		MaxTokens: 3,
 	}
 
 	_, err := o.makeRequest(ctx, testReq)

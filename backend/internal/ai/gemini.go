@@ -325,7 +325,7 @@ func (g *GeminiClient) Health(ctx context.Context) error {
 		},
 	}
 
-	url := fmt.Sprintf("%s/gemini-2.0-flash-exp:generateContent?key=%s", g.baseURL, g.apiKey)
+	url := fmt.Sprintf("%s/gemini-2.0-flash:generateContent?key=%s", g.baseURL, g.apiKey)
 	_, err := g.makeRequest(ctx, url, testReq)
 	return err
 }

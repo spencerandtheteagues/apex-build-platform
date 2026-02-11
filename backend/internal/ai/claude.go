@@ -264,8 +264,8 @@ func (c *ClaudeClient) GetProvider() AIProvider {
 // Health checks if Claude API is accessible
 func (c *ClaudeClient) Health(ctx context.Context) error {
 	testReq := &claudeRequest{
-		Model:     "claude-opus-4-5-20251101",
-		MaxTokens: 10,
+		Model:     "claude-haiku-4-5-20251001",
+		MaxTokens: 5,
 		Messages: []claudeMessage{
 			{
 				Role:    "user",
