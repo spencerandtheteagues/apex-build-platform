@@ -352,6 +352,13 @@ export class ApiService {
   async startBuild(data: {
     description: string
     mode: 'fast' | 'full'
+    tech_stack?: {
+      frontend?: string
+      backend?: string
+      database?: string
+      styling?: string
+      extras?: string[]
+    }
   }): Promise<{
     build_id: string
     websocket_url: string
@@ -372,7 +379,7 @@ export class ApiService {
   }
 
   async sendBuildMessage(buildId: string, message: string): Promise<void> {
-    await this.client.post(`/build/${buildId}/message`, { message })
+    await this.client.post(`/build/${buildId}/message`, { content: message })
   }
 
   async getBuildCheckpoints(buildId: string): Promise<any[]> {

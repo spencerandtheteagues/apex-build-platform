@@ -120,8 +120,16 @@ interface TechStack {
   id: string
   name: string
   icon: React.ReactNode
-  category: 'frontend' | 'backend' | 'database' | 'deploy'
+  category: 'frontend' | 'backend' | 'database' | 'deploy' | 'auto'
   description: string
+}
+
+interface BuildTechStack {
+  frontend?: string
+  backend?: string
+  database?: string
+  styling?: string
+  extras?: string[]
 }
 
 interface AppBuilderProps {
@@ -627,7 +635,7 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index, getAgentEmoji, getS
           className={cn(
             "shrink-0 uppercase text-xs font-bold tracking-wider px-3 py-1",
             agent.provider === 'claude' && "border-orange-500/60 text-orange-400 bg-orange-500/10",
-            agent.provider === 'gpt' && "border-green-500/60 text-green-400 bg-green-500/10",
+            (agent.provider === 'gpt' || agent.provider === 'gpt4') && "border-green-500/60 text-green-400 bg-green-500/10",
             agent.provider === 'gemini' && "border-blue-500/60 text-blue-400 bg-blue-500/10"
           )}
         >
@@ -787,7 +795,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   const [generatedFiles, setGeneratedFiles] = useState<Array<{ path: string; content: string; language: string }>>([])
   const [createdProjectId, setCreatedProjectId] = useState<number | null>(null)
   const [isCreatingProject, setIsCreatingProject] = useState(false)
-  const [selectedStack, setSelectedStack] = useState<Set<string>>(new Set(['nextjs', 'postgresql', 'vercel']))
+  const AUTO_STACK_ID = 'auto'
+  const [selectedStack, setSelectedStack] = useState<Set<string>>(new Set([AUTO_STACK_ID]))
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
@@ -814,6 +823,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
   // Tech stack options
   const techStacks: TechStack[] = [
+    { id: AUTO_STACK_ID, name: 'Auto (Best Fit)', icon: <Sparkles className="w-5 h-5" />, category: 'auto', description: 'Let AI choose' },
     { id: 'nextjs', name: 'Next.js', icon: <Globe className="w-5 h-5" />, category: 'frontend', description: 'React Framework' },
     { id: 'react', name: 'React', icon: <Layout className="w-5 h-5" />, category: 'frontend', description: 'UI Library' },
     { id: 'vue', name: 'Vue.js', icon: <Layers className="w-5 h-5" />, category: 'frontend', description: 'Progressive Framework' },
@@ -829,13 +839,76 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   const toggleStack = (id: string) => {
     setSelectedStack(prev => {
       const next = new Set(prev)
+
+      if (id === AUTO_STACK_ID) {
+        return new Set([AUTO_STACK_ID])
+      }
+
+      next.delete(AUTO_STACK_ID)
       if (next.has(id)) {
         next.delete(id)
       } else {
         next.add(id)
       }
+
+      if (next.size === 0) {
+        next.add(AUTO_STACK_ID)
+      }
+
       return next
     })
+  }
+
+  const getSelectedStacks = () => {
+    if (selectedStack.has(AUTO_STACK_ID)) return []
+    return techStacks.filter((stack) => stack.id !== AUTO_STACK_ID && selectedStack.has(stack.id))
+  }
+
+  const buildTechStackOverride = (): BuildTechStack | null => {
+    if (selectedStack.has(AUTO_STACK_ID)) return null
+
+    const selected = getSelectedStacks()
+    if (selected.length === 0) return null
+
+    const primary: Record<string, string> = {}
+    const extras: string[] = []
+
+    for (const stack of selected) {
+      if (stack.category === 'frontend' || stack.category === 'backend' || stack.category === 'database') {
+        if (!primary[stack.category]) {
+          primary[stack.category] = stack.name
+        } else {
+          extras.push(stack.name)
+        }
+      } else {
+        extras.push(stack.name)
+      }
+    }
+
+    const override: BuildTechStack = {
+      frontend: primary.frontend || undefined,
+      backend: primary.backend || undefined,
+      database: primary.database || undefined,
+      styling: undefined,
+      extras: extras.length > 0 ? extras : undefined,
+    }
+
+    return override
+  }
+
+  const buildTechStackSummary = () => {
+    if (selectedStack.has(AUTO_STACK_ID)) return 'Auto (AI chooses best)'
+    const override = buildTechStackOverride()
+    if (!override) return 'Auto (AI chooses best)'
+
+    const parts: string[] = []
+    if (override.frontend) parts.push(`Frontend: ${override.frontend}`)
+    if (override.backend) parts.push(`Backend: ${override.backend}`)
+    if (override.database) parts.push(`Database: ${override.database}`)
+    if (override.styling) parts.push(`Styling: ${override.styling}`)
+    if (override.extras && override.extras.length > 0) parts.push(`Extras: ${override.extras.join(', ')}`)
+
+    return parts.length > 0 ? parts.join(' | ') : 'Auto (AI chooses best)'
   }
 
   // Scroll chat to bottom
@@ -1193,11 +1266,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     wsReconnectAttempts.current = 0
 
     addSystemMessage(`Starting ${buildMode} build for: "${appDescription}"`)
+    addSystemMessage(`Tech stack: ${buildTechStackSummary()}`)
 
     try {
+      const techStackOverride = buildTechStackOverride()
       const response = await apiService.startBuild({
         description: appDescription,
         mode: buildMode,
+        tech_stack: techStackOverride || undefined,
       })
 
       if (!response || !response.build_id) {
@@ -1593,6 +1669,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                       />
                     ))}
                   </div>
+                  <p className="mt-3 text-xs text-gray-500">
+                    Selection: <span className="text-gray-300">{buildTechStackSummary()}</span>
+                  </p>
                 </div>
 
                 {/* Epic Build Button */}
@@ -1721,11 +1800,17 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                             className={cn(
                               'text-xs',
                               provider === 'claude' && 'border-orange-500/60 text-orange-400 bg-orange-500/10',
-                              provider === 'gpt' && 'border-green-500/60 text-green-400 bg-green-500/10',
+                              (provider === 'gpt' || provider === 'gpt4') && 'border-green-500/60 text-green-400 bg-green-500/10',
                               provider === 'gemini' && 'border-blue-500/60 text-blue-400 bg-blue-500/10'
                             )}
                           >
-                            {provider === 'claude' ? 'Claude' : provider === 'gpt' ? 'GPT-4' : provider === 'gemini' ? 'Gemini' : provider}
+                            {provider === 'claude'
+                              ? 'Claude'
+                              : (provider === 'gpt' || provider === 'gpt4')
+                                ? 'GPT-4'
+                                : provider === 'gemini'
+                                  ? 'Gemini'
+                                  : provider}
                           </Badge>
                         ))}
                       </div>

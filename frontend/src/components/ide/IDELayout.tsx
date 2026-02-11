@@ -317,6 +317,38 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     setViewMode('dashboard')
   }, [])
 
+  const handleDashboardShare = useCallback(() => {
+    if (!currentProject) return
+    const url = `${window.location.origin}/project/${currentProject.id}`
+    navigator.clipboard.writeText(url).then(() => {
+      setTerminalOutput(prev => [...prev, `Project URL copied to clipboard: ${url}`])
+    }).catch(() => {
+      setTerminalOutput(prev => [...prev, `Project URL: ${url}`])
+    })
+  }, [currentProject])
+
+  const handleDashboardDownload = useCallback(async () => {
+    if (!currentProject) return
+    try {
+      await apiService.exportProject(currentProject.id, currentProject.name)
+      setTerminalOutput(prev => [...prev, `Download started: ${currentProject.name}.zip`])
+    } catch (error) {
+      console.error('Export failed:', error)
+      setTerminalOutput(prev => [...prev, 'Download failed. Please try again.'])
+    }
+  }, [currentProject])
+
+  const handleDashboardRun = useCallback(() => {
+    if (!currentProject) return
+    setViewMode('editor')
+    setShowPreview(true)
+  }, [currentProject])
+
+  const handleDashboardSettings = useCallback(() => {
+    setRightPanelState('normal')
+    setActiveRightTab('settings')
+  }, [])
+
   // Handle file creation
   const handleFileCreate = useCallback(async (parentPath: string, name: string, type: 'file' | 'directory') => {
     if (!currentProject) return
@@ -648,6 +680,10 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
           <ProjectDashboard
             projectId={currentProject?.id}
             className="h-full"
+            onShare={handleDashboardShare}
+            onSettings={handleDashboardSettings}
+            onRunProject={handleDashboardRun}
+            onDownload={handleDashboardDownload}
           />
         )
       case 'editor':

@@ -43,11 +43,19 @@ import {
 export interface ProjectDashboardProps {
   className?: string
   projectId?: number
+  onShare?: () => void
+  onSettings?: () => void
+  onRunProject?: () => void
+  onDownload?: () => void
 }
 
 export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   className,
   projectId,
+  onShare,
+  onSettings,
+  onRunProject,
+  onDownload,
 }) => {
   const [recentFiles, setRecentFiles] = useState<File[]>([])
   const [recentExecutions, setRecentExecutions] = useState<Execution[]>([])
@@ -60,8 +68,101 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
     user,
     apiService,
     collaborationUsers,
-    setCurrentProject
+    setCurrentProject,
+    addNotification
   } = useStore()
+
+  const handleShare = async () => {
+    if (onShare) {
+      onShare()
+      return
+    }
+    if (!currentProject) return
+    const url = `${window.location.origin}/project/${currentProject.id}`
+    try {
+      await navigator.clipboard.writeText(url)
+      addNotification({
+        type: 'success',
+        title: 'Link Copied',
+        message: 'Project URL copied to clipboard.',
+      })
+    } catch {
+      addNotification({
+        type: 'info',
+        title: 'Project URL',
+        message: url,
+      })
+    }
+  }
+
+  const handleDownload = async () => {
+    if (onDownload) {
+      onDownload()
+      return
+    }
+    if (!currentProject) return
+    try {
+      await apiService.exportProject(currentProject.id, currentProject.name)
+      addNotification({
+        type: 'success',
+        title: 'Download Started',
+        message: 'Your ZIP export is downloading.',
+      })
+    } catch (error) {
+      addNotification({
+        type: 'error',
+        title: 'Download Failed',
+        message: 'Unable to export ZIP. Please try again.',
+      })
+    }
+  }
+
+  const handleRunProject = async () => {
+    if (onRunProject) {
+      onRunProject()
+      return
+    }
+    if (!currentProject) return
+    const language = currentProject.language?.toLowerCase() || ''
+    if (language !== 'javascript' && language !== 'typescript') {
+      addNotification({
+        type: 'info',
+        title: 'Run Project',
+        message: 'Use the IDE terminal to run this project.',
+      })
+      return
+    }
+    try {
+      await apiService.executeCode({
+        project_id: currentProject.id,
+        command: 'npm start',
+        language: currentProject.language,
+      })
+      addNotification({
+        type: 'success',
+        title: 'Run Started',
+        message: 'Project execution started.',
+      })
+    } catch {
+      addNotification({
+        type: 'error',
+        title: 'Run Failed',
+        message: 'Failed to start the project. Check terminal output.',
+      })
+    }
+  }
+
+  const handleSettings = () => {
+    if (onSettings) {
+      onSettings()
+      return
+    }
+    addNotification({
+      type: 'info',
+      title: 'Project Settings',
+      message: 'Open the Settings tab in the right panel.',
+    })
+  }
 
   // Load project data
   useEffect(() => {
@@ -184,13 +285,16 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="ghost" icon={<Share2 size={14} />}>
+              <Button size="sm" variant="ghost" icon={<Share2 size={14} />} onClick={handleShare}>
                 Share
               </Button>
-              <Button size="sm" variant="ghost" icon={<Settings size={14} />}>
+              <Button size="sm" variant="ghost" icon={<Settings size={14} />} onClick={handleSettings}>
                 Settings
               </Button>
-              <Button size="sm" variant="primary" icon={<Play size={14} />}>
+              <Button size="sm" variant="ghost" icon={<Download size={14} />} onClick={handleDownload}>
+                Download ZIP
+              </Button>
+              <Button size="sm" variant="primary" icon={<Play size={14} />} onClick={handleRunProject}>
                 Run Project
               </Button>
             </div>

@@ -477,7 +477,7 @@ function App() {
       </div>
 
       {/* Main Content - Wrapped in ErrorBoundary and safely rendered */}
-      <div className="flex-1 overflow-hidden relative">
+      <div className="flex-1 overflow-hidden relative min-h-0">
         <div className={`absolute inset-0 overflow-y-auto ${currentView === 'builder' ? 'block' : 'hidden'}`}>
           <ErrorBoundary>
             <AppBuilder onNavigateToIDE={() => setCurrentView('ide')} />
