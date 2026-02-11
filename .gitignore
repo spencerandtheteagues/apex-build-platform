@@ -3,6 +3,8 @@
 .env.local
 .env.development
 .env.production
+apex-backend.env
+*.env
 
 # Dependencies
 node_modules/
