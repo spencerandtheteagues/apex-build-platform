@@ -387,6 +387,31 @@ func (oh *OptimizedHandler) GetProjectFilesOptimized(c *gin.Context) {
 		return
 	}
 
+	includeContent := c.Query("include_content")
+	if includeContent == "true" || includeContent == "1" {
+		var files []models.File
+		err = oh.DB.WithContext(ctx).
+			Where("project_id = ? AND deleted_at IS NULL", projectID).
+			Order("path ASC").
+			Find(&files).Error
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, StandardResponse{
+				Success: false,
+				Error:   "Failed to fetch files",
+				Code:    "DATABASE_ERROR",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"files":           files,
+			"total":           len(files),
+			"include_content": true,
+			"cached":          false,
+		})
+		return
+	}
+
 	// Try cache
 	cachedFiles, err := oh.fileCache.GetFileList(ctx, uint(projectID))
 	if err == nil {

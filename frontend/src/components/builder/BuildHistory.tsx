@@ -48,18 +48,11 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ onOpenBuild }) => {
   const handleDownload = async (build: CompletedBuildSummary) => {
     try {
       setDownloading(build.build_id)
-      const data = await apiService.getCompletedBuild(build.build_id)
-      if (!data.files || data.files.length === 0) return
-
-      // Create a simple zip-like download of all files as a single text
-      const blob = new Blob(
-        data.files.map(f => `// === ${f.path} ===\n${f.content}\n\n`),
-        { type: 'text/plain' }
-      )
+      const blob = await apiService.downloadBuildAsZip(build.build_id)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${build.project_name || 'apex-build'}-${build.build_id.slice(0, 8)}.txt`
+      a.download = `${build.project_name || 'apex-build'}-${build.build_id.slice(0, 8)}.zip`
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {

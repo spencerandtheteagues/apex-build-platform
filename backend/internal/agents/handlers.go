@@ -3,10 +3,13 @@
 package agents
 
 import (
+	"archive/zip"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"apex-build/pkg/models"
 
@@ -599,6 +602,69 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 	})
 }
 
+// DownloadCompletedBuild streams a completed build as a ZIP archive
+// GET /api/v1/builds/:buildId/download
+func (h *BuildHandler) DownloadCompletedBuild(c *gin.Context) {
+	if h.db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "build history not available"})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+	buildID := c.Param("buildId")
+
+	var build models.CompletedBuild
+	if err := h.db.Where("build_id = ? AND user_id = ?", buildID, uid).First(&build).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		return
+	}
+
+	// Parse stored files JSON
+	var files []GeneratedFile
+	if build.FilesJSON != "" {
+		json.Unmarshal([]byte(build.FilesJSON), &files)
+	}
+
+	if len(files) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no files available for this build"})
+		return
+	}
+
+	projectName := strings.TrimSpace(build.ProjectName)
+	if projectName == "" {
+		projectName = "apex-build"
+	}
+
+	c.Header("Content-Type", "application/zip")
+	suffix := build.BuildID
+	if len(suffix) > 8 {
+		suffix = suffix[:8]
+	}
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s-%s.zip\"", projectName, suffix))
+
+	zipWriter := zip.NewWriter(c.Writer)
+	defer zipWriter.Close()
+
+	for _, file := range files {
+		if file.Path == "" || file.Content == "" {
+			continue
+		}
+		path := strings.TrimPrefix(file.Path, "/")
+		w, err := zipWriter.Create(path)
+		if err != nil {
+			continue
+		}
+		if _, err := w.Write([]byte(file.Content)); err != nil {
+			continue
+		}
+	}
+}
+
 // RegisterRoutes registers all build routes on the router
 func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	build := rg.Group("/build")
@@ -618,4 +684,5 @@ func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	// Build history endpoints
 	rg.GET("/builds", h.ListBuilds)
 	rg.GET("/builds/:buildId", h.GetCompletedBuild)
+	rg.GET("/builds/:buildId/download", h.DownloadCompletedBuild)
 }

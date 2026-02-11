@@ -71,47 +71,21 @@ export interface UseGitIntegrationReturn extends GitState {
   refresh: () => Promise<void>
 }
 
-// Simulated Git data for when no real backend Git API exists yet.
-// This provides a working UI that demonstrates the panel's capabilities.
-function generateSimulatedData(projectId: number | undefined) {
-  const branches: GitBranch[] = [
-    { name: 'main', isCurrent: true, isRemote: false, lastCommit: 'abc1234' },
-    { name: 'develop', isCurrent: false, isRemote: false, lastCommit: 'def5678' },
-    { name: 'feature/search-panel', isCurrent: false, isRemote: false, lastCommit: 'ghi9012' },
-    { name: 'origin/main', isCurrent: false, isRemote: true, lastCommit: 'abc1234' },
-    { name: 'origin/develop', isCurrent: false, isRemote: true, lastCommit: 'xyz7890' },
-  ]
+const formatRelativeDate = (isoDate: string) => {
+  const date = new Date(isoDate)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  if (diffMs < 60000) return 'just now'
+  if (diffMs < 3600000) return `${Math.round(diffMs / 60000)}m ago`
+  if (diffMs < 86400000) return `${Math.round(diffMs / 3600000)}h ago`
+  if (diffMs < 604800000) return `${Math.round(diffMs / 86400000)}d ago`
+  return date.toLocaleDateString()
+}
 
-  const changes: GitChangedFile[] = [
-    { path: 'src/components/ide/SearchPanel.tsx', name: 'SearchPanel.tsx', status: 'added', stage: 'staged', additions: 340, deletions: 0 },
-    { path: 'src/components/ide/GitPanel.tsx', name: 'GitPanel.tsx', status: 'added', stage: 'staged', additions: 520, deletions: 0 },
-    { path: 'src/hooks/useProjectSearch.ts', name: 'useProjectSearch.ts', status: 'added', stage: 'unstaged', additions: 220, deletions: 0 },
-    { path: 'src/hooks/useGitIntegration.ts', name: 'useGitIntegration.ts', status: 'added', stage: 'unstaged', additions: 280, deletions: 0 },
-    { path: 'src/components/ide/IDELayout.tsx', name: 'IDELayout.tsx', status: 'modified', stage: 'unstaged', additions: 8, deletions: 12 },
-    { path: 'src/services/api.ts', name: 'api.ts', status: 'modified', stage: 'unstaged', additions: 45, deletions: 2 },
-  ]
-
-  const commits: GitCommit[] = [
-    { hash: 'd3dcffa1b2c3d4e5', shortHash: 'd3dcffa', message: 'Fix database connection by removing SQLite dependency', author: 'Spencer', authorEmail: 'spencer@apex.build', date: '2026-01-30T10:00:00Z', relativeDate: '2 hours ago' },
-    { hash: 'a72cff71a2b3c4d5', shortHash: 'a72cff7', message: 'Add Gemini session handoff log', author: 'Spencer', authorEmail: 'spencer@apex.build', date: '2026-01-29T18:00:00Z', relativeDate: '18 hours ago' },
-    { hash: '78eeb4b1a2b3c4d5', shortHash: '78eeb4b', message: 'Fix duplicate exports in ApexComponents.tsx', author: 'Spencer', authorEmail: 'spencer@apex.build', date: '2026-01-29T14:00:00Z', relativeDate: '22 hours ago' },
-    { hash: '5f540741a2b3c4d5', shortHash: '5f54074', message: 'Final Upgrade: Replit Parity achieved. Added 3D visuals, Replit Migration, Enterprise Workspace, and Database management.', author: 'Spencer', authorEmail: 'spencer@apex.build', date: '2026-01-28T20:00:00Z', relativeDate: '2 days ago' },
-    { hash: '493b0221a2b3c4d5', shortHash: '493b022', message: 'Integrate real API data for Explore page and implement fork functionality', author: 'Spencer', authorEmail: 'spencer@apex.build', date: '2026-01-28T15:00:00Z', relativeDate: '2 days ago' },
-    { hash: 'e1f2a3b4c5d6e7f8', shortHash: 'e1f2a3b', message: 'Add code comments panel with reactions and threading', author: 'Spencer', authorEmail: 'spencer@apex.build', date: '2026-01-27T22:00:00Z', relativeDate: '3 days ago' },
-    { hash: 'f8e7d6c5b4a39281', shortHash: 'f8e7d6c', message: 'Implement GitHub import wizard with stack detection', author: 'Spencer', authorEmail: 'spencer@apex.build', date: '2026-01-27T16:00:00Z', relativeDate: '3 days ago' },
-    { hash: '0a1b2c3d4e5f6789', shortHash: '0a1b2c3', message: 'Add real-time collaboration with WebSocket cursors', author: 'Spencer', authorEmail: 'spencer@apex.build', date: '2026-01-26T12:00:00Z', relativeDate: '4 days ago' },
-    { hash: '9876543210abcdef', shortHash: '9876543', message: 'Implement AI assistant with multi-provider support', author: 'Spencer', authorEmail: 'spencer@apex.build', date: '2026-01-25T09:00:00Z', relativeDate: '5 days ago' },
-    { hash: 'fedcba9876543210', shortHash: 'fedcba9', message: 'Initial project scaffold with dark cyberpunk theme', author: 'Spencer', authorEmail: 'spencer@apex.build', date: '2026-01-24T08:00:00Z', relativeDate: '6 days ago' },
-  ]
-
-  const remoteStatus: GitRemoteStatus = {
-    ahead: 2,
-    behind: 0,
-    remote: 'origin',
-    branch: 'main',
-  }
-
-  return { branches, changes, commits, remoteStatus }
+const mapStatusToStage = (staged: boolean, status: string): FileStage => {
+  if (staged) return 'staged'
+  if (status === 'added') return 'untracked'
+  return 'unstaged'
 }
 
 export function useGitIntegration(projectId: number | undefined): UseGitIntegrationReturn {
@@ -129,76 +103,163 @@ export function useGitIntegration(projectId: number | undefined): UseGitIntegrat
   const [commitMessage, setCommitMessage] = useState('')
 
   const changesRef = useRef(changes)
+  const stageOverridesRef = useRef<Record<string, FileStage>>({})
   changesRef.current = changes
 
-  // Fetch git status on mount and when projectId changes
-  useEffect(() => {
-    if (projectId) {
-      fetchStatus()
-    }
-  }, [projectId])
+  const applyStageOverrides = useCallback((items: GitChangedFile[]) => {
+    const overrides = stageOverridesRef.current
+    if (!overrides || Object.keys(overrides).length === 0) return items
+    return items.map((item) => {
+      const override = overrides[item.path]
+      return override ? { ...item, stage: override } : item
+    })
+  }, [])
+
+  const buildChangesFromStatus = useCallback((status: {
+    staged?: Array<{ path: string; status: string; staged?: boolean; additions?: number; deletions?: number }>
+    unstaged?: Array<{ path: string; status: string; staged?: boolean; additions?: number; deletions?: number }>
+  }) => {
+    const staged = (status.staged || []).map((item) => ({
+      path: item.path,
+      name: item.path.split('/').pop() || item.path,
+      status: (item.status as FileStatus) || 'modified',
+      stage: mapStatusToStage(true, item.status),
+      additions: item.additions || undefined,
+      deletions: item.deletions || undefined,
+    }))
+
+    const unstaged = (status.unstaged || []).map((item) => ({
+      path: item.path,
+      name: item.path.split('/').pop() || item.path,
+      status: (item.status as FileStatus) || 'modified',
+      stage: mapStatusToStage(false, item.status),
+      additions: item.additions || undefined,
+      deletions: item.deletions || undefined,
+    }))
+
+    return applyStageOverrides([...staged, ...unstaged])
+  }, [applyStageOverrides])
 
   const fetchStatus = useCallback(async () => {
     if (!projectId) return
 
+    setIsFetching(true)
+    setError(null)
+
+    try {
+      const statusRes = await apiService.getGitStatus(projectId)
+      const mapped = buildChangesFromStatus(statusRes)
+      setChanges(mapped)
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || 'Failed to fetch git status')
+      setChanges([])
+    } finally {
+      setIsFetching(false)
+      setIsLoading(false)
+    }
+  }, [projectId, buildChangesFromStatus])
+
+  const refresh = useCallback(async () => {
+    if (!projectId) return
     setIsLoading(true)
     setError(null)
 
     try {
-      // Use simulated data - in a real implementation this would call
-      // apiService.getGitStatus(projectId) or similar endpoint
-      const data = generateSimulatedData(projectId)
+      const repoPromise = apiService.getGitRepo(projectId)
+      const branchesPromise = apiService.getGitBranches(projectId)
+      const statusPromise = apiService.getGitStatus(projectId)
 
-      const currentBr = data.branches.find(b => b.isCurrent)
-      if (currentBr) {
-        setCurrentBranch(currentBr.name)
+      const repo = await repoPromise
+      const branchName = repo?.repository?.branch || 'main'
+      setCurrentBranch(branchName)
+
+      const [branchesRes, statusRes, commitsRes] = await Promise.all([
+        branchesPromise,
+        statusPromise,
+        apiService.getGitCommits(projectId, branchName, 20),
+      ])
+
+      const normalizedBranches: GitBranch[] = (branchesRes.branches || []).map((b) => ({
+        name: b.name,
+        isCurrent: b.name === branchName,
+        isRemote: b.name.startsWith('origin/'),
+        lastCommit: b.sha,
+      }))
+      setBranches(normalizedBranches)
+
+      const normalizedCommits: GitCommit[] = (commitsRes.commits || []).map((c) => ({
+        hash: c.sha,
+        shortHash: c.sha.slice(0, 7),
+        message: c.message,
+        author: c.author,
+        authorEmail: c.email,
+        date: c.timestamp,
+        relativeDate: formatRelativeDate(c.timestamp),
+      }))
+      setRecentCommits(normalizedCommits)
+
+      const mappedChanges = buildChangesFromStatus(statusRes)
+      setChanges(mappedChanges)
+
+      if (repo?.repository?.branch) {
+        setRemoteStatus({
+          ahead: 0,
+          behind: 0,
+          remote: 'origin',
+          branch: repo.repository.branch,
+        })
+      } else {
+        setRemoteStatus(null)
       }
-
-      setBranches(data.branches)
-      setChanges(data.changes)
-      setRecentCommits(data.commits)
-      setRemoteStatus(data.remoteStatus)
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch git status')
+      setError(err.response?.data?.error || err.message || 'Failed to refresh git data')
     } finally {
       setIsLoading(false)
+      setIsFetching(false)
     }
-  }, [projectId])
+  }, [projectId, buildChangesFromStatus])
+
+  useEffect(() => {
+    if (projectId) {
+      refresh()
+    } else {
+      setChanges([])
+      setBranches([])
+      setRecentCommits([])
+      setRemoteStatus(null)
+      setError(null)
+      setIsLoading(false)
+    }
+  }, [projectId, refresh])
 
   const stageFile = useCallback(async (path: string) => {
-    setChanges(prev =>
-      prev.map(f =>
-        f.path === path ? { ...f, stage: 'staged' as FileStage } : f
-      )
-    )
+    stageOverridesRef.current = { ...stageOverridesRef.current, [path]: 'staged' }
+    setChanges(prev => prev.map(f => f.path === path ? { ...f, stage: 'staged' } : f))
   }, [])
 
   const unstageFile = useCallback(async (path: string) => {
-    setChanges(prev =>
-      prev.map(f =>
-        f.path === path
-          ? { ...f, stage: (f.status === 'untracked' ? 'untracked' : 'unstaged') as FileStage }
-          : f
-      )
-    )
+    stageOverridesRef.current = { ...stageOverridesRef.current, [path]: 'unstaged' }
+    setChanges(prev => prev.map(f => f.path === path ? { ...f, stage: f.status === 'added' ? 'untracked' : 'unstaged' } : f))
   }, [])
 
   const stageAll = useCallback(async () => {
-    setChanges(prev =>
-      prev.map(f => ({ ...f, stage: 'staged' as FileStage }))
-    )
+    const overrides: Record<string, FileStage> = {}
+    changesRef.current.forEach(file => { overrides[file.path] = 'staged' })
+    stageOverridesRef.current = { ...stageOverridesRef.current, ...overrides }
+    setChanges(prev => prev.map(f => ({ ...f, stage: 'staged' })))
   }, [])
 
   const unstageAll = useCallback(async () => {
-    setChanges(prev =>
-      prev.map(f => ({
-        ...f,
-        stage: (f.status === 'untracked' ? 'untracked' : 'unstaged') as FileStage,
-      }))
-    )
+    const overrides: Record<string, FileStage> = {}
+    changesRef.current.forEach(file => {
+      overrides[file.path] = file.status === 'added' ? 'untracked' : 'unstaged'
+    })
+    stageOverridesRef.current = { ...stageOverridesRef.current, ...overrides }
+    setChanges(prev => prev.map(f => ({ ...f, stage: f.status === 'added' ? 'untracked' : 'unstaged' })))
   }, [])
 
   const commit = useCallback(async (message?: string) => {
+    if (!projectId) return
     const msg = message || commitMessage
     if (!msg.trim()) {
       setError('Commit message is required')
@@ -215,138 +276,111 @@ export function useGitIntegration(projectId: number | undefined): UseGitIntegrat
     setError(null)
 
     try {
-      // Simulate commit - real implementation: apiService.gitCommit(projectId, msg)
-      await new Promise(resolve => setTimeout(resolve, 800))
-
-      const newCommit: GitCommit = {
-        hash: Math.random().toString(16).substring(2, 18),
-        shortHash: Math.random().toString(16).substring(2, 9),
-        message: msg,
-        author: 'You',
-        authorEmail: 'you@apex.build',
-        date: new Date().toISOString(),
-        relativeDate: 'just now',
-      }
-
-      setRecentCommits(prev => [newCommit, ...prev.slice(0, 9)])
-      setChanges(prev => prev.filter(f => f.stage !== 'staged'))
+      await apiService.gitCommit(projectId, msg, stagedFiles.map(f => f.path))
       setCommitMessage('')
 
-      if (remoteStatus) {
-        setRemoteStatus({
-          ...remoteStatus,
-          ahead: remoteStatus.ahead + 1,
-        })
-      }
+      // Clear stage overrides for committed files
+      const overrides = { ...stageOverridesRef.current }
+      stagedFiles.forEach(file => { delete overrides[file.path] })
+      stageOverridesRef.current = overrides
+
+      await refresh()
     } catch (err: any) {
-      setError(err.message || 'Commit failed')
+      setError(err.response?.data?.error || err.message || 'Commit failed')
     } finally {
       setIsCommitting(false)
     }
-  }, [commitMessage, remoteStatus])
+  }, [projectId, commitMessage, refresh])
 
   const push = useCallback(async () => {
+    if (!projectId) return
     setIsPushing(true)
     setError(null)
 
     try {
-      // Simulate push - real implementation: apiService.gitPush(projectId)
-      await new Promise(resolve => setTimeout(resolve, 1200))
-
-      if (remoteStatus) {
-        setRemoteStatus({ ...remoteStatus, ahead: 0 })
-      }
+      await apiService.gitPush(projectId)
+      await refresh()
     } catch (err: any) {
-      setError(err.message || 'Push failed')
+      setError(err.response?.data?.error || err.message || 'Push failed')
     } finally {
       setIsPushing(false)
     }
-  }, [remoteStatus])
+  }, [projectId, refresh])
 
   const pull = useCallback(async () => {
+    if (!projectId) return
     setIsPulling(true)
     setError(null)
 
     try {
-      // Simulate pull - real implementation: apiService.gitPull(projectId)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-
-      if (remoteStatus) {
-        setRemoteStatus({ ...remoteStatus, behind: 0 })
-      }
+      await apiService.gitPull(projectId)
+      await refresh()
     } catch (err: any) {
-      setError(err.message || 'Pull failed')
+      setError(err.response?.data?.error || err.message || 'Pull failed')
     } finally {
       setIsPulling(false)
     }
-  }, [remoteStatus])
+  }, [projectId, refresh])
 
   const switchBranch = useCallback(async (branchName: string) => {
-    setIsLoading(true)
+    if (!projectId) return
+    setIsFetching(true)
     setError(null)
 
     try {
-      // Simulate branch switch
-      await new Promise(resolve => setTimeout(resolve, 500))
-
-      setBranches(prev =>
-        prev.map(b => ({
-          ...b,
-          isCurrent: b.name === branchName,
-        }))
-      )
-      setCurrentBranch(branchName)
+      await apiService.gitSwitchBranch(projectId, branchName)
+      await refresh()
     } catch (err: any) {
-      setError(err.message || 'Failed to switch branch')
+      setError(err.response?.data?.error || err.message || 'Failed to switch branch')
     } finally {
-      setIsLoading(false)
+      setIsFetching(false)
     }
-  }, [])
+  }, [projectId, refresh])
 
   const createBranch = useCallback(async (branchName: string) => {
-    if (!branchName.trim()) {
-      setError('Branch name is required')
-      return
-    }
-
-    setIsLoading(true)
+    if (!projectId) return
+    setIsFetching(true)
     setError(null)
 
     try {
-      // Simulate branch creation
-      await new Promise(resolve => setTimeout(resolve, 400))
-
-      const newBranch: GitBranch = {
-        name: branchName,
-        isCurrent: true,
-        isRemote: false,
-        lastCommit: recentCommits[0]?.shortHash,
-      }
-
-      setBranches(prev => [
-        newBranch,
-        ...prev.map(b => ({ ...b, isCurrent: false })),
-      ])
-      setCurrentBranch(branchName)
+      await apiService.gitCreateBranch(projectId, branchName, currentBranch)
+      await refresh()
     } catch (err: any) {
-      setError(err.message || 'Failed to create branch')
+      setError(err.response?.data?.error || err.message || 'Failed to create branch')
     } finally {
-      setIsLoading(false)
+      setIsFetching(false)
     }
-  }, [recentCommits])
+  }, [projectId, currentBranch, refresh])
 
   const discardFileChanges = useCallback(async (path: string) => {
-    try {
-      // Simulate discarding changes
-      setChanges(prev => prev.filter(f => f.path !== path))
-    } catch (err: any) {
-      setError(err.message || 'Failed to discard changes')
-    }
-  }, [])
+    if (!projectId) return
+    setIsFetching(true)
+    setError(null)
 
-  const refresh = useCallback(async () => {
-    await fetchStatus()
-  }, [fetchStatus])
+    try {
+      const files = await apiService.getFiles(projectId)
+      const target = files.find(f => f.path === path)
+      if (!target) {
+        throw new Error('File not found for discard')
+      }
+
+      const versions = await apiService.getFileVersions(target.id)
+      const sorted = [...versions].sort((a, b) => b.version - a.version)
+      const currentVersion = target.version ?? sorted[0]?.version
+      const previous = sorted.find(v => v.version < (currentVersion || 0))
+
+      if (!previous) {
+        throw new Error('No previous version to restore')
+      }
+
+      await apiService.restoreFileVersion(previous.id)
+      await refresh()
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || 'Discard failed')
+    } finally {
+      setIsFetching(false)
+    }
+  }, [projectId, refresh])
 
   return {
     currentBranch,
@@ -376,5 +410,3 @@ export function useGitIntegration(projectId: number | undefined): UseGitIntegrat
     refresh,
   }
 }
-
-export default useGitIntegration

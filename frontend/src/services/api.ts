@@ -261,8 +261,8 @@ export class ApiService {
   }
 
   async updateProject(id: number, data: Partial<Project>): Promise<Project> {
-    const response = await this.client.put<ApiResponse<{ project: Project }>>(`/projects/${id}`, data)
-    return response.data.data!.project
+    const response = await this.client.put<{ project?: Project; data?: { project?: Project } }>(`/projects/${id}`, data)
+    return response.data.project || response.data.data?.project || (response.data as unknown as Project)
   }
 
   async deleteProject(id: number): Promise<void> {
@@ -277,28 +277,28 @@ export class ApiService {
     content?: string
     mime_type?: string
   }): Promise<File> {
-    const response = await this.client.post<ApiResponse<{ file: File }>>(
+    const response = await this.client.post<{ file?: File; data?: { file?: File } }>(
       `/projects/${projectId}/files`,
       data
     )
-    return response.data.data!.file
+    return response.data.file || response.data.data?.file || (response.data as unknown as File)
   }
 
   async getFiles(projectId: number): Promise<File[]> {
-    const response = await this.client.get<ApiResponse<{ files: File[] }>>(
-      `/projects/${projectId}/files`
+    const response = await this.client.get<{ files?: File[] }>(
+      `/projects/${projectId}/files?include_content=true`
     )
-    return response.data.data!.files
+    return response.data.files || []
   }
 
   async getFile(id: number): Promise<File> {
-    const response = await this.client.get<ApiResponse<{ file: File }>>(`/files/${id}`)
-    return response.data.data!.file
+    const response = await this.client.get<{ file?: File }>(`/files/${id}`)
+    return response.data.file || (response.data as unknown as File)
   }
 
   async updateFile(id: number, data: { content?: string; name?: string; path?: string }): Promise<File> {
-    const response = await this.client.put<ApiResponse<{ file: File }>>(`/files/${id}`, data)
-    return response.data.data!.file
+    const response = await this.client.put<{ file?: File; data?: { file?: File } }>(`/files/${id}`, data)
+    return response.data.file || response.data.data?.file || (response.data as unknown as File)
   }
 
   async deleteFile(id: number): Promise<void> {
@@ -500,6 +500,14 @@ export class ApiService {
     return response.data
   }
 
+  // Build export/download functionality
+  async downloadBuildAsZip(buildId: string): Promise<Blob> {
+    const response = await this.client.get(`/builds/${buildId}/download`, {
+      responseType: 'blob'
+    })
+    return response.data
+  }
+
   // Download and save project as zip file
   async exportProject(projectId: number, projectName: string): Promise<void> {
     try {
@@ -557,6 +565,98 @@ export class ApiService {
     } | null
   }> {
     const response = await this.client.get(`/git/export/status/${projectId}`)
+    return response.data
+  }
+
+  // ========== GIT INTEGRATION ENDPOINTS ==========
+
+  async getGitRepo(projectId: number): Promise<{
+    success: boolean
+    repository: {
+      id: number
+      project_id: number
+      remote_url: string
+      provider: string
+      repo_owner: string
+      repo_name: string
+      branch: string
+      last_sync: string
+      is_connected: boolean
+    }
+  }> {
+    const response = await this.client.get(`/git/repo/${projectId}`)
+    return response.data
+  }
+
+  async getGitBranches(projectId: number): Promise<{
+    success: boolean
+    branches: Array<{ name: string; sha: string; is_default: boolean; protected: boolean }>
+  }> {
+    const response = await this.client.get(`/git/branches/${projectId}`)
+    return response.data
+  }
+
+  async getGitCommits(projectId: number, branch?: string, limit: number = 20): Promise<{
+    success: boolean
+    commits: Array<{ sha: string; message: string; author: string; email: string; timestamp: string }>
+  }> {
+    const params: Record<string, any> = { limit }
+    if (branch) params.branch = branch
+    const response = await this.client.get(`/git/commits/${projectId}`, { params })
+    return response.data
+  }
+
+  async getGitStatus(projectId: number): Promise<{
+    success: boolean
+    staged: Array<{ path: string; status: string; staged: boolean }>
+    unstaged: Array<{ path: string; status: string; staged: boolean }>
+  }> {
+    const response = await this.client.get(`/git/status/${projectId}`)
+    return response.data
+  }
+
+  async gitCommit(projectId: number, message: string, files: string[]): Promise<{
+    success: boolean
+    commit: any
+  }> {
+    const response = await this.client.post('/git/commit', {
+      project_id: projectId,
+      message,
+      files,
+    })
+    return response.data
+  }
+
+  async gitPush(projectId: number): Promise<{ success: boolean; message?: string }> {
+    const response = await this.client.post('/git/push', { project_id: projectId })
+    return response.data
+  }
+
+  async gitPull(projectId: number): Promise<{ success: boolean; message?: string }> {
+    const response = await this.client.post('/git/pull', { project_id: projectId })
+    return response.data
+  }
+
+  async gitCreateBranch(projectId: number, branchName: string, baseBranch?: string): Promise<{
+    success: boolean
+    branch: any
+  }> {
+    const response = await this.client.post('/git/branch', {
+      project_id: projectId,
+      branch_name: branchName,
+      base_branch: baseBranch,
+    })
+    return response.data
+  }
+
+  async gitSwitchBranch(projectId: number, branchName: string): Promise<{
+    success: boolean
+    branch: string
+  }> {
+    const response = await this.client.post('/git/checkout', {
+      project_id: projectId,
+      branch_name: branchName,
+    })
     return response.data
   }
 
@@ -643,11 +743,54 @@ export class ApiService {
     file: File
     matches: Array<{ line: number; content: string; start: number; end: number }>
   }>> {
-    const response = await this.client.post(`/search/files/${projectId}`, {
+    const response = await this.client.post<{
+      success: boolean
+      results?: {
+        files?: Array<{
+          file_id: number
+          file_name: string
+          file_path: string
+          language: string
+          matches: Array<{
+            line_number: number
+            column_start: number
+            column_end: number
+            content: string
+          }>
+        }>
+      }
+    }>('/search', {
       query,
-      ...options,
+      project_id: projectId,
+      case_sensitive: options?.case_sensitive,
+      use_regex: options?.regex,
+      include_content: true,
+      context_lines: 0,
+      search_type: 'content',
     })
-    return response.data.results
+
+    const files = response.data.results?.files || []
+    return files.map((result) => ({
+      file: {
+        id: result.file_id,
+        project_id: projectId,
+        path: result.file_path,
+        name: result.file_name || result.file_path.split('/').pop() || result.file_path,
+        type: 'file',
+        content: '' as string,
+        size: 0,
+        version: 1,
+        is_locked: false,
+        created_at: '',
+        updated_at: '',
+      },
+      matches: result.matches.map(match => ({
+        line: match.line_number,
+        content: match.content,
+        start: match.column_start,
+        end: match.column_end,
+      }))
+    }))
   }
 
   // ========== COMMUNITY/SHARING MARKETPLACE ENDPOINTS ==========

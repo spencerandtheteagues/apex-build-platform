@@ -2,7 +2,7 @@
 // Dark Demon Theme - Fully responsive development environment interface
 // Optimized with React.lazy for Monaco Editor and XTerminal
 
-import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
 import {
@@ -34,6 +34,8 @@ import { MobileNavigation, MobilePanelSwitcher } from '@/components/mobile'
 import { CodeComments } from '@/components/ide/CodeComments'
 import { VersionHistoryPanel } from '@/components/ide/panels/VersionHistoryPanel'
 import { DatabasePanel } from '@/components/ide/panels/DatabasePanel'
+import { SearchPanel } from '@/components/ide/SearchPanel'
+import { GitPanel } from '@/components/ide/GitPanel'
 import { SplitPaneEditor, SplitPaneEditorRef } from '@/components/ide/SplitPaneEditor'
 import { usePaneManager } from '@/hooks/usePaneManager'
 
@@ -163,6 +165,10 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     ''
   ])
   const [terminalInput, setTerminalInput] = useState('')
+  const problemLines = useMemo(
+    () => terminalOutput.filter(line => /error|failed|exception|warn/i.test(line)),
+    [terminalOutput]
+  )
 
   // Component refs
   const splitPaneRef = useRef<SplitPaneEditorRef>(null)
@@ -176,6 +182,10 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     isLoading,
     currentTheme: theme,
     setTheme,
+    createFile: createFileAction,
+    deleteFile: deleteFileAction,
+    fetchFiles,
+    hydrateFile,
     collaborationUsers,
     connect,
     disconnect,
@@ -227,8 +237,20 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   })
 
   // Handle file selection
-  const handleFileSelect = useCallback((file: File) => {
-    paneOpenFile(file)
+  const handleFileSelect = useCallback(async (file: File) => {
+    let selectedFile = file
+    const hasContent = typeof (file as any).content === 'string'
+    if (!hasContent) {
+      try {
+        const fullFile = await apiService.getFile(file.id)
+        hydrateFile(fullFile)
+        selectedFile = fullFile
+      } catch (error) {
+        console.error('Failed to load file content:', error)
+      }
+    }
+
+    paneOpenFile(selectedFile)
 
     if (viewMode !== 'editor') {
       setViewMode('editor')
@@ -239,7 +261,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
       setMobilePanel('editor')
       setMobileOverlayPanel(null)
     }
-  }, [paneOpenFile, viewMode, isMobile])
+  }, [paneOpenFile, viewMode, isMobile, hydrateFile])
 
   // Handle file content change
   const handleFileChange = useCallback((fileId: number, content: string, paneId: string) => {
@@ -355,7 +377,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
 
     try {
       const fullPath = parentPath === '/' ? `/${name}` : `${parentPath}/${name}`
-      const newFile = await apiService.createFile(currentProject.id, {
+      const newFile = await createFileAction(currentProject.id, {
         name: name,
         path: fullPath,
         type: type,
@@ -365,18 +387,18 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
       setTerminalOutput(prev => [...prev, `Created ${type}: ${fullPath}`])
 
       if (type === 'file') {
-        handleFileSelect(newFile)
+        await handleFileSelect(newFile)
       }
     } catch (error) {
       console.error('Failed to create file:', error)
       setTerminalOutput(prev => [...prev, `Failed to create ${type}: ${error}`])
     }
-  }, [currentProject, handleFileSelect])
+  }, [currentProject, handleFileSelect, createFileAction])
 
   // Handle file deletion
   const handleFileDelete = useCallback(async (file: File) => {
     try {
-      await apiService.deleteFile(file.id)
+      await deleteFileAction(file.id)
 
       paneCloseFile(file.id)
 
@@ -385,7 +407,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
       console.error('Failed to delete file:', error)
       setTerminalOutput(prev => [...prev, `Failed to delete: ${error}`])
     }
-  }, [paneCloseFile])
+  }, [paneCloseFile, deleteFileAction])
 
   // Handle file rename
   const handleFileRename = useCallback(async (file: File, newName: string) => {
@@ -394,26 +416,32 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
       pathParts[pathParts.length - 1] = newName
       const newPath = pathParts.join('/')
 
-      await apiService.updateFile(file.id, {
+      const updated = await apiService.updateFile(file.id, {
         name: newName,
         path: newPath
       })
+
+      hydrateFile(updated)
 
       // Update in all panes
       layout.panes.forEach(pane => {
         if (pane.files.find(f => f.file.id === file.id)) {
           // This is a bit complex as paneManager doesn't have rename, 
           // but we can just reopen the file with new data
-          paneOpenFile({ ...file, name: newName, path: newPath }, pane.id)
+          paneOpenFile({ ...updated }, pane.id)
         }
       })
+
+      if (currentProject) {
+        await fetchFiles(currentProject.id)
+      }
 
       setTerminalOutput(prev => [...prev, `Renamed: ${file.name} -> ${newName}`])
     } catch (error) {
       console.error('Failed to rename file:', error)
       setTerminalOutput(prev => [...prev, `Failed to rename: ${error}`])
     }
-  }, [layout.panes, paneOpenFile])
+  }, [layout.panes, paneOpenFile, currentProject, fetchFiles, hydrateFile])
 
   // Handle version preview (diff)
   const handlePreviewVersion = useCallback((version: FileVersion) => {
@@ -496,21 +524,23 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
         )
       case 'search':
         return (
-          <Card variant="cyberpunk" padding="md" className="h-full border-0">
-            <div className="text-center text-gray-400">
-              <Search className="w-8 h-8 mx-auto mb-2" />
-              <p className="text-sm">Global search coming soon</p>
-            </div>
-          </Card>
+          <SearchPanel
+            projectId={currentProject?.id}
+            onFileOpen={(file, line) => {
+              handleFileSelect(file)
+              if (line) {
+                splitPaneRef.current?.revealLine(line)
+              }
+            }}
+            className="h-full border-0"
+          />
         )
       case 'git':
         return (
-          <Card variant="cyberpunk" padding="md" className="h-full border-0">
-            <div className="text-center text-gray-400">
-              <GitBranch className="w-8 h-8 mx-auto mb-2" />
-              <p className="text-sm">Git integration coming soon</p>
-            </div>
-          </Card>
+          <GitPanel
+            projectId={currentProject?.id}
+            className="h-full border-0"
+          />
         )
       case 'history':
         return currentProject ? (
@@ -643,19 +673,54 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
         )
       case 'output':
         return (
-          <Card variant="cyberpunk" padding="md" className="h-full border-0">
-            <div className="text-center text-gray-400">
-              <FileText className="w-8 h-8 mx-auto mb-2" />
-              <p className="text-sm">Output panel</p>
+          <Card variant="cyberpunk" padding="md" className="h-full border-0 flex flex-col">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-cyan-400" />
+                <h3 className="text-sm font-semibold text-white">Output Log</h3>
+              </div>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => setTerminalOutput([])}
+                className="text-gray-400 hover:text-white"
+              >
+                Clear
+              </Button>
+            </div>
+            <div className="flex-1 overflow-auto rounded bg-black/40 border border-gray-800 p-2 font-mono text-xs text-gray-300 space-y-1">
+              {terminalOutput.length > 0 ? (
+                terminalOutput.map((line, idx) => (
+                  <div key={`${idx}-${line}`} className="whitespace-pre-wrap">
+                    {line}
+                  </div>
+                ))
+              ) : (
+                <div className="text-gray-500 text-center py-4">No output yet</div>
+              )}
             </div>
           </Card>
         )
       case 'problems':
         return (
-          <Card variant="cyberpunk" padding="md" className="h-full border-0">
-            <div className="text-center text-gray-400">
-              <Zap className="w-8 h-8 mx-auto mb-2" />
-              <p className="text-sm">Problems panel</p>
+          <Card variant="cyberpunk" padding="md" className="h-full border-0 flex flex-col">
+            <div className="flex items-center gap-2 mb-2">
+              <Zap className="w-4 h-4 text-yellow-400" />
+              <h3 className="text-sm font-semibold text-white">Problems</h3>
+            </div>
+            <div className="flex-1 overflow-auto rounded bg-black/40 border border-gray-800 p-2 text-xs">
+              {problemLines.length === 0 ? (
+                <div className="text-gray-500 text-center py-4">No problems detected</div>
+              ) : (
+                <div className="space-y-2">
+                  {problemLines.map((line, idx) => (
+                    <div key={`${idx}-${line}`} className="flex items-start gap-2 text-red-300">
+                      <AlertCircle className="w-3.5 h-3.5 mt-0.5 text-red-400" />
+                      <span className="whitespace-pre-wrap">{line}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </Card>
         )
@@ -669,22 +734,26 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     switch (viewMode) {
       case 'projects':
         return (
-          <ProjectList
-            onProjectSelect={handleProjectSelect}
-            onProjectCreate={handleProjectCreate}
-            className="p-4 md:p-6"
-          />
+          <div className="h-full overflow-auto">
+            <ProjectList
+              onProjectSelect={handleProjectSelect}
+              onProjectCreate={handleProjectCreate}
+              className="p-4 md:p-6"
+            />
+          </div>
         )
       case 'dashboard':
         return (
-          <ProjectDashboard
-            projectId={currentProject?.id}
-            className="h-full"
-            onShare={handleDashboardShare}
-            onSettings={handleDashboardSettings}
-            onRunProject={handleDashboardRun}
-            onDownload={handleDashboardDownload}
-          />
+          <div className="h-full overflow-auto">
+            <ProjectDashboard
+              projectId={currentProject?.id}
+              className="min-h-full"
+              onShare={handleDashboardShare}
+              onSettings={handleDashboardSettings}
+              onRunProject={handleDashboardRun}
+              onDownload={handleDashboardDownload}
+            />
+          </div>
         )
       case 'editor':
         return (
@@ -1022,7 +1091,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
             </div>
 
             {/* Sidebar content */}
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-hidden">
               {leftPanelState !== 'collapsed' && renderLeftPanel()}
             </div>
           </div>
@@ -1084,7 +1153,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
               </div>
 
               {/* Bottom content */}
-              <div className="flex-1 overflow-hidden">
+              <div className="flex-1 min-h-0 overflow-hidden">
                 {renderBottomPanel()}
               </div>
             </div>
@@ -1159,7 +1228,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
             </div>
 
             {/* Sidebar content */}
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-hidden">
               {rightPanelState !== 'collapsed' && renderRightPanel()}
             </div>
           </div>

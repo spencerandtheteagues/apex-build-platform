@@ -64,6 +64,7 @@ export function useProjectSearch(projectId: number | undefined): UseProjectSearc
   })
 
   const abortControllerRef = useRef<AbortController | null>(null)
+  const contentCacheRef = useRef<Map<number, string>>(new Map())
 
   const setOptions = useCallback((newOptions: Partial<SearchOptions>) => {
     setOptionsState(prev => ({ ...prev, ...newOptions }))
@@ -96,6 +97,7 @@ export function useProjectSearch(projectId: number | undefined): UseProjectSearc
 
     setIsSearching(true)
     setError(null)
+    contentCacheRef.current.clear()
 
     try {
       const apiResults = await apiService.searchInFiles(projectId, q, {
@@ -168,6 +170,26 @@ export function useProjectSearch(projectId: number | undefined): UseProjectSearc
     return flat[currentMatchIndex]
   }, [currentMatchIndex, results, flattenMatches])
 
+  const ensureFileContent = useCallback(async (file: File): Promise<string> => {
+    const cached = contentCacheRef.current.get(file.id)
+    if (cached !== undefined) {
+      return cached
+    }
+
+    try {
+      const fullFile = await apiService.getFile(file.id)
+      const content = fullFile.content || ''
+      contentCacheRef.current.set(file.id, content)
+      setResults(prev => prev.map(r => (
+        r.file.id === file.id ? { ...r, file: { ...r.file, content } } : r
+      )))
+      return content
+    } catch (err: any) {
+      setError(err.message || 'Failed to load file content')
+      return file.content || ''
+    }
+  }, [])
+
   const nextMatch = useCallback((): { file: File; line: number } | null => {
     if (totalMatchCount === 0) return null
     const nextIndex = (currentMatchIndex + 1) % totalMatchCount
@@ -193,7 +215,7 @@ export function useProjectSearch(projectId: number | undefined): UseProjectSearc
     if (!current || !replaceText && replaceText !== '') return
 
     try {
-      const fileContent = current.file.content || ''
+      const fileContent = await ensureFileContent(current.file)
       const lines = fileContent.split('\n')
       const lineIndex = current.match.line - 1
 
@@ -213,7 +235,7 @@ export function useProjectSearch(projectId: number | undefined): UseProjectSearc
     } catch (err: any) {
       setError(err.message || 'Replace failed')
     }
-  }, [getCurrentMatch, replaceText, search])
+  }, [getCurrentMatch, replaceText, search, ensureFileContent])
 
   const replaceAllMatches = useCallback(async () => {
     if (results.length === 0 || !query.trim()) return
@@ -222,7 +244,7 @@ export function useProjectSearch(projectId: number | undefined): UseProjectSearc
       const updates: Array<{ id: number; content: string }> = []
 
       for (const result of results) {
-        let content = result.file.content || ''
+        let content = await ensureFileContent(result.file)
         let searchPattern: RegExp
 
         if (options.regex) {
@@ -245,18 +267,18 @@ export function useProjectSearch(projectId: number | undefined): UseProjectSearc
         }
       }
 
-      if (updates.length > 0) {
-        await apiService.batchUpdateFiles(updates)
+      for (const update of updates) {
+        await apiService.updateFile(update.id, {
+          content: update.content
+        })
       }
 
-      // Clear results after replace all
-      setResults([])
-      setTotalMatchCount(0)
-      setCurrentMatchIndex(-1)
+      // Re-run search to refresh matches
+      await search()
     } catch (err: any) {
       setError(err.message || 'Replace all failed')
     }
-  }, [results, query, replaceText, options])
+  }, [results, query, replaceText, options, search, ensureFileContent])
 
   return {
     query,

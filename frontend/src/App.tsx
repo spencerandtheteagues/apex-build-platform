@@ -46,6 +46,10 @@ function App() {
   const [authErrors, setAuthErrors] = useState<Record<string, string>>({})
   const [showPassword, setShowPassword] = useState(false)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
+  const [defaultModel, setDefaultModel] = useState(() => {
+    if (typeof window === 'undefined') return 'auto'
+    return localStorage.getItem('apex_default_model') || 'auto'
+  })
 
   const {
     user,
@@ -54,6 +58,7 @@ function App() {
     currentProject, // We need this to check if we can safely render the IDE
     login,
     register,
+    updateProfile,
   } = useStore()
 
   // Handle authentication
@@ -118,6 +123,27 @@ function App() {
       })
     } finally {
       setIsAuthenticating(false)
+    }
+  }
+
+  const handleDefaultModelChange = async (provider: string, model: string) => {
+    const selectedModel = model || 'auto'
+    setDefaultModel(selectedModel)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('apex_default_model', selectedModel)
+    }
+
+    if (!isAuthenticated) return
+
+    const preferredAI = provider && provider.length > 0 ? provider : 'auto'
+    const allowedProviders = new Set(['auto', 'claude', 'gpt4', 'gemini'])
+    if (!allowedProviders.has(preferredAI)) {
+      return
+    }
+    try {
+      await updateProfile({ preferred_ai: preferredAI as any })
+    } catch (error) {
+      console.error('Failed to update preferred AI:', error)
     }
   }
 
@@ -536,7 +562,8 @@ function App() {
                     Select the default AI model for your builds. You can override this per-project.
                   </p>
                   <ModelSelector
-                    onChange={(provider, model) => console.log('Selected:', provider, model)}
+                    value={defaultModel}
+                    onChange={handleDefaultModelChange}
                     className="w-full max-w-md"
                   />
                 </div>

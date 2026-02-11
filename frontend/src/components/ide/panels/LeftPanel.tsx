@@ -3,8 +3,10 @@
 
 import React, { memo } from 'react'
 import { cn } from '@/lib/utils'
-import { Button, Card } from '@/components/ui'
+import { Button } from '@/components/ui'
 import { FileTree } from '@/components/explorer/FileTree'
+import { SearchPanel } from '@/components/ide/SearchPanel'
+import { GitPanel } from '@/components/ide/GitPanel'
 import { Folder, Search, GitBranch } from 'lucide-react'
 import type { File as FileType } from '@/types'
 
@@ -21,28 +23,6 @@ interface LeftPanelProps {
   onFileDelete: (file: FileType) => Promise<void>
   onFileRename: (file: FileType, newName: string) => Promise<void>
 }
-
-// Search Panel Component
-const SearchPanel = memo(() => (
-  <Card variant="cyberpunk" padding="md" className="h-full border-0">
-    <div className="text-center text-gray-400">
-      <Search className="w-8 h-8 mx-auto mb-2" />
-      <p className="text-sm">Global search coming soon</p>
-    </div>
-  </Card>
-))
-SearchPanel.displayName = 'SearchPanel'
-
-// Git Panel Component
-const GitPanel = memo(() => (
-  <Card variant="cyberpunk" padding="md" className="h-full border-0">
-    <div className="text-center text-gray-400">
-      <GitBranch className="w-8 h-8 mx-auto mb-2" />
-      <p className="text-sm">Git integration coming soon</p>
-    </div>
-  </Card>
-))
-GitPanel.displayName = 'GitPanel'
 
 // Panel Tab Button
 interface TabButtonProps {
@@ -92,9 +72,22 @@ export const LeftPanel = memo<LeftPanelProps>(({
           />
         )
       case 'search':
-        return <SearchPanel />
+        return (
+          <SearchPanel
+            projectId={projectId}
+            onFileOpen={(file, line) => {
+              onFileSelect(file)
+            }}
+            className="h-full border-0"
+          />
+        )
       case 'git':
-        return <GitPanel />
+        return (
+          <GitPanel
+            projectId={projectId}
+            className="h-full border-0"
+          />
+        )
       default:
         return null
     }

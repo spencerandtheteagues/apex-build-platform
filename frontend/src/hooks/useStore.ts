@@ -114,6 +114,7 @@ interface FilesActions {
     mime_type?: string
   }) => Promise<File>
   updateFile: (id: number, content: string) => Promise<void>
+  hydrateFile: (file: File) => void
   deleteFile: (id: number) => Promise<void>
   openFile: (file: File) => void
   closeFile: (id: number) => void
@@ -673,6 +674,21 @@ export const useStore = create<StoreState & StoreActions>()(
             })
             throw error
           }
+        },
+
+        hydrateFile: (file: File) => {
+          set((state) => {
+            const index = state.files.findIndex((f) => f.id === file.id)
+            if (index !== -1) {
+              state.files[index] = { ...state.files[index], ...file }
+            } else {
+              state.files.push(file)
+            }
+            const openIndex = state.openFiles.findIndex((f) => f.id === file.id)
+            if (openIndex !== -1) {
+              state.openFiles[openIndex] = { ...state.openFiles[openIndex], ...file }
+            }
+          })
         },
 
         deleteFile: async (id: number) => {

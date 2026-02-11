@@ -50,6 +50,7 @@ import {
 import { GitHubImportWizard } from '@/components/import/GitHubImportWizard'
 import { OnboardingTour } from './OnboardingTour'
 import { BuildHistory } from './BuildHistory'
+import LivePreview from '@/components/preview/LivePreview'
 
 // ============================================================================
 // TYPES
@@ -652,11 +653,21 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index, getAgentEmoji, getS
 // BUILD COMPLETE CELEBRATION
 // ============================================================================
 
-const BuildCompleteCard: React.FC<{ filesCount: number; onPreview: () => void; onOpenIDE: () => void; isCreating: boolean; showPreview: boolean }> = ({
+const BuildCompleteCard: React.FC<{
+  filesCount: number
+  onPreview: () => void
+  onOpenIDE: () => void
+  onDownload: () => void
+  isCreating: boolean
+  isPreparingPreview: boolean
+  showPreview: boolean
+}> = ({
   filesCount,
   onPreview,
   onOpenIDE,
+  onDownload,
   isCreating,
+  isPreparingPreview,
   showPreview
 }) => {
   return (
@@ -700,9 +711,20 @@ const BuildCompleteCard: React.FC<{ filesCount: number; onPreview: () => void; o
                 showPreview && "bg-red-950/50 shadow-lg shadow-red-900/30"
               )}
               onClick={onPreview}
+              disabled={isPreparingPreview}
             >
               <Eye className="w-5 h-5 mr-2" />
-              {showPreview ? 'Hide Preview' : 'Preview'}
+              {isPreparingPreview ? 'Preparing...' : showPreview ? 'Hide Preview' : 'Preview'}
+            </Button>
+            <Button
+              variant="outline"
+              size="lg"
+              className="border-2 border-gray-700 text-gray-300 hover:bg-gray-800/60 transition-all font-semibold"
+              onClick={onDownload}
+              disabled={filesCount === 0}
+            >
+              <Download className="w-5 h-5 mr-2" />
+              Download ZIP
             </Button>
             <Button
               size="lg"
@@ -793,7 +815,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   const [isBuilding, setIsBuilding] = useState(false)
   const [showChat, setShowChat] = useState(true)
   const [showPreview, setShowPreview] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [isPreparingPreview, setIsPreparingPreview] = useState(false)
   const [generatedFiles, setGeneratedFiles] = useState<Array<{ path: string; content: string; language: string }>>([])
   const [createdProjectId, setCreatedProjectId] = useState<number | null>(null)
   const [isCreatingProject, setIsCreatingProject] = useState(false)
@@ -822,7 +844,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     isBuildingRef.current = isBuilding
   }, [isBuilding])
 
-  const { user, createProject, setCurrentProject } = useStore()
+  const generatedFilesRef = useRef(generatedFiles)
+  useEffect(() => {
+    generatedFilesRef.current = generatedFiles
+  }, [generatedFiles])
+
+  const { user, currentProject, createProject, setCurrentProject } = useStore()
 
   // Tech stack options
   const techStacks: TechStack[] = [
@@ -972,7 +999,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data)
-        handleWebSocketMessage(message)
+        void handleWebSocketMessage(message)
       } catch (e) {
         console.error('Failed to parse WebSocket message:', e)
       }
@@ -1005,7 +1032,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   }, [buildWebSocketUrl])
 
   // Handle WebSocket messages
-  const handleWebSocketMessage = (message: any) => {
+  const handleWebSocketMessage = async (message: any) => {
     const { type, data } = message
 
     switch (type) {
@@ -1114,22 +1141,17 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         setIsBuilding(false)
         addSystemMessage(`Build completed successfully! ${data.files_count || 0} files generated.`)
         setBuildState(prev => prev ? { ...prev, status: 'completed', progress: 100 } : null)
-        if (data.preview_url) {
-          setPreviewUrl(data.preview_url)
-        }
         // Reconcile file manifest — merge any files not already in state
         if (data.files && Array.isArray(data.files)) {
-          setGeneratedFiles(prev => {
-            const existingPaths = new Set(prev.map(f => f.path))
-            const missing = data.files
-              .filter((file: any) => file.path && file.content && !existingPaths.has(file.path))
-              .map((file: any) => ({
-                path: file.path,
-                content: file.content,
-                language: file.language || 'text'
-              }))
-            return missing.length > 0 ? [...prev, ...missing] : prev
-          })
+          const normalized = normalizeGeneratedFiles(data.files)
+          mergeGeneratedFiles(normalized)
+        }
+
+        if (generatedFilesRef.current.length === 0 && (!data.files || data.files.length === 0)) {
+          const buildId = message.build_id || buildState?.id
+          if (buildId) {
+            await resolveGeneratedFiles(buildId)
+          }
         }
         break
 
@@ -1221,8 +1243,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
       case 'preview:ready':
         if (data.url) {
-          setPreviewUrl(data.url)
-          addSystemMessage(`Preview ready: ${data.url}`)
+          addSystemMessage('Preview ready')
         }
         break
     }
@@ -1258,6 +1279,208 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     }])
   }
 
+  const normalizeGeneratedFiles = useCallback((files: Array<any>) => {
+    if (!Array.isArray(files)) return []
+    return files
+      .filter((file) => file && file.path && typeof file.content === 'string')
+      .map((file) => ({
+        path: file.path,
+        content: file.content,
+        language: file.language || 'text',
+      }))
+  }, [])
+
+  const mergeGeneratedFiles = useCallback((incoming: Array<{ path: string; content: string; language: string }>) => {
+    if (!incoming || incoming.length === 0) return
+    setGeneratedFiles(prev => {
+      const map = new Map(prev.map(f => [f.path, f]))
+      for (const file of incoming) {
+        map.set(file.path, file)
+      }
+      return Array.from(map.values())
+    })
+  }, [])
+
+  const resolveGeneratedFiles = useCallback(async (buildIdOverride?: string) => {
+    if (generatedFilesRef.current.length > 0) {
+      return generatedFilesRef.current
+    }
+
+    const buildId = buildIdOverride || buildState?.id
+    if (!buildId) return []
+
+    try {
+      const buildFiles = await apiService.getBuildFiles(buildId)
+      const normalized = normalizeGeneratedFiles(buildFiles)
+      if (normalized.length > 0) {
+        mergeGeneratedFiles(normalized)
+        return normalized
+      }
+    } catch (error) {
+      // Ignore and fall back to completed build fetch
+    }
+
+    try {
+      const completed = await apiService.getCompletedBuild(buildId)
+      const normalized = normalizeGeneratedFiles(completed.files || [])
+      if (normalized.length > 0) {
+        mergeGeneratedFiles(normalized)
+        return normalized
+      }
+    } catch (error) {
+      // Ignore and return empty
+    }
+
+    return []
+  }, [buildState?.id, mergeGeneratedFiles, normalizeGeneratedFiles])
+
+  const deriveProjectName = (source: string) => {
+    const base = source || 'Generated App'
+    return base
+      .slice(0, 60)
+      .replace(/[^a-zA-Z0-9\s-]/g, '')
+      .trim() || 'Generated App'
+  }
+
+  const ensureProjectCreated = useCallback(async (options?: {
+    files?: Array<{ path: string; content: string; language: string }>
+    projectName?: string
+    description?: string
+    forceNew?: boolean
+  }) => {
+    if (!options?.forceNew && createdProjectId && currentProject?.id === createdProjectId) {
+      return currentProject
+    }
+
+    const files = options?.files && options.files.length > 0
+      ? options.files
+      : await resolveGeneratedFiles()
+
+    if (files.length === 0) {
+      throw new Error('No files available to create project from')
+    }
+
+    setIsCreatingProject(true)
+    try {
+      const projectNameSource = options?.projectName || appDescription || buildState?.description || 'Generated App'
+      const projectName = deriveProjectName(projectNameSource)
+      const projectDescription = options?.description || appDescription || buildState?.description || ''
+
+      const extensions = files.map(f => f.path.split('.').pop()?.toLowerCase() || '')
+      let language = 'javascript'
+      if (extensions.some(e => ['tsx', 'ts'].includes(e))) language = 'typescript'
+      else if (extensions.some(e => ['py'].includes(e))) language = 'python'
+      else if (extensions.some(e => ['go'].includes(e))) language = 'go'
+      else if (extensions.some(e => ['rs'].includes(e))) language = 'rust'
+
+      const project = await createProject({
+        name: projectName,
+        description: projectDescription,
+        language,
+        is_public: false,
+      })
+
+      const filesToSave = files.filter(f => f.path && f.content)
+      let savedCount = 0
+
+      for (const file of filesToSave) {
+        try {
+          await apiService.createFile(project.id, {
+            path: file.path,
+            name: file.path.split('/').pop() || file.path,
+            type: 'file',
+            content: file.content,
+          })
+          savedCount++
+        } catch (err) {
+          console.error(`Failed to save file ${file.path}:`, err)
+        }
+      }
+
+      setCreatedProjectId(project.id)
+      setCurrentProject(project)
+      addSystemMessage(`Project "${projectName}" created with ${savedCount}/${filesToSave.length} files!`)
+      return project
+    } finally {
+      setIsCreatingProject(false)
+    }
+  }, [
+    appDescription,
+    buildState?.description,
+    createProject,
+    currentProject,
+    createdProjectId,
+    resolveGeneratedFiles,
+    setCurrentProject,
+  ])
+
+  const handlePreviewToggle = async () => {
+    if (showPreview) {
+      setShowPreview(false)
+      return
+    }
+
+    setIsPreparingPreview(true)
+    try {
+      await ensureProjectCreated()
+      setShowPreview(true)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to prepare preview'
+      addSystemMessage(`Preview error: ${message}`)
+    } finally {
+      setIsPreparingPreview(false)
+    }
+  }
+
+  const handleDownloadBuild = async () => {
+    try {
+      if (createdProjectId && currentProject?.id === createdProjectId) {
+        await apiService.exportProject(createdProjectId, currentProject.name)
+        return
+      }
+      if (buildState?.id) {
+        const buildId = buildState.id
+        const buildDescription = buildState.description
+        const blob = await apiService.downloadBuildAsZip(buildId)
+        const url = window.URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `${deriveProjectName(appDescription || buildDescription || 'apex-build')}-${buildId.slice(0, 8)}.zip`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        window.URL.revokeObjectURL(url)
+        return
+      }
+      addSystemMessage('No build available to download')
+    } catch (error) {
+      addSystemMessage('Download failed. Please try again.')
+    }
+  }
+
+  const openCompletedBuild = async (buildId: string) => {
+    try {
+      const completed = await apiService.getCompletedBuild(buildId)
+      const normalized = normalizeGeneratedFiles(completed.files || [])
+      if (normalized.length === 0) {
+        addSystemMessage('No files found for that build')
+        return
+      }
+      setGeneratedFiles(normalized)
+      await ensureProjectCreated({
+        files: normalized,
+        projectName: completed.project_name || deriveProjectName(completed.description || 'Completed Build'),
+        description: completed.description || '',
+        forceNew: true,
+      })
+      if (onNavigateToIDE) {
+        onNavigateToIDE()
+      }
+    } catch (error) {
+      addSystemMessage('Failed to open build. Please try again.')
+    }
+  }
+
   // Start build
   const startBuild = async () => {
     if (!appDescription.trim()) return
@@ -1266,6 +1489,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     setGeneratedFiles([])
     setAiThoughts([])
     setChatMessages([])
+    setShowPreview(false)
+    setIsPreparingPreview(false)
+    setCreatedProjectId(null)
     wsReconnectAttempts.current = 0
 
     addSystemMessage(`Starting ${buildMode} build for: "${appDescription}"`)
@@ -1365,61 +1591,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
   // Create project and open in IDE
   const openInIDE = async () => {
-    if (generatedFiles.length === 0) {
-      addSystemMessage('No files to create project from')
-      return
-    }
-
-    setIsCreatingProject(true)
     try {
-      const projectName = appDescription.slice(0, 50).replace(/[^a-zA-Z0-9\s-]/g, '').trim() || 'Generated App'
-
-      const extensions = generatedFiles.map(f => f.path.split('.').pop()?.toLowerCase() || '')
-      let language = 'javascript'
-      if (extensions.some(e => ['tsx', 'ts'].includes(e))) language = 'typescript'
-      else if (extensions.some(e => ['py'].includes(e))) language = 'python'
-      else if (extensions.some(e => ['go'].includes(e))) language = 'go'
-      else if (extensions.some(e => ['rs'].includes(e))) language = 'rust'
-
-      const project = await createProject({
-        name: projectName,
-        description: appDescription,
-        language,
-        is_public: false,
-      })
-
-      if (project) {
-        const filesToSave = generatedFiles.filter(f => f.path && f.content)
-        let savedCount = 0
-
-        for (const file of filesToSave) {
-          try {
-            await apiService.createFile(project.id, {
-              path: file.path,
-              name: file.path.split('/').pop() || file.path,
-              type: 'file',
-              content: file.content,
-            })
-            savedCount++
-          } catch (err) {
-            console.error(`Failed to save file ${file.path}:`, err)
-          }
-        }
-
-        setCreatedProjectId(project.id)
-        setCurrentProject(project)
-        addSystemMessage(`Project "${projectName}" created with ${savedCount}/${filesToSave.length} files!`)
-
-        if (onNavigateToIDE) {
-          onNavigateToIDE()
-        }
+      await ensureProjectCreated()
+      if (onNavigateToIDE) {
+        onNavigateToIDE()
       }
     } catch (error: unknown) {
       console.error('Failed to create project:', error)
       const message = error instanceof Error ? error.message : 'Unknown error'
       addSystemMessage(`Failed to create project: ${message}`)
-    } finally {
-      setIsCreatingProject(false)
     }
   }
 
@@ -1672,7 +1852,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                       <TechStackCard
                         key={stack.id}
                         stack={stack}
-                        isSelected={selectedStack.has(stack.id)}
+                        isSelected={selectedStack.has(stack.id) || (stack.id === AUTO_STACK_ID && selectedStack.size === 0)}
                         onClick={() => toggleStack(stack.id)}
                       />
                     ))}
@@ -1802,10 +1982,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
             </Card>
 
             {/* Build History */}
-            <BuildHistory onOpenBuild={(buildId) => {
-              // Navigate to IDE with the build's files
-              onNavigateToIDE?.()
-            }} />
+            <BuildHistory onOpenBuild={openCompletedBuild} />
           </div>
         ) : (
           // Build Progress View
@@ -2103,9 +2280,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                 <>
                   <BuildCompleteCard
                     filesCount={generatedFiles.length}
-                    onPreview={() => setShowPreview(!showPreview)}
+                    onPreview={handlePreviewToggle}
                     onOpenIDE={openInIDE}
+                    onDownload={handleDownloadBuild}
                     isCreating={isCreatingProject}
+                    isPreparingPreview={isPreparingPreview}
                     showPreview={showPreview}
                   />
 
@@ -2118,54 +2297,24 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                             <Eye className="w-7 h-7 text-red-400" />
                             Live Preview
                           </CardTitle>
-                          {previewUrl && (
-                            <a
-                              href={previewUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-sm text-red-400 hover:text-orange-400 flex items-center gap-2 transition-colors font-medium"
-                            >
-                              <ExternalLink className="w-4 h-4" />
-                              Open in new tab
-                            </a>
-                          )}
                         </div>
                       </CardHeader>
                       <CardContent className="p-0">
-                        {previewUrl ? (
-                          <iframe
-                            src={previewUrl}
-                            className="w-full h-[500px] bg-white rounded-b-lg"
-                            title="App Preview"
-                            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                        {createdProjectId ? (
+                          <LivePreview
+                            projectId={createdProjectId}
+                            autoStart={true}
+                            className="h-[520px]"
                           />
                         ) : (
-                          <div className="h-[500px] flex flex-col items-center justify-center bg-gray-900/60 rounded-b-lg">
+                          <div className="h-[520px] flex flex-col items-center justify-center bg-gray-900/60 rounded-b-lg">
                             <FileCode className="w-20 h-20 text-gray-600 mb-6 animate-pulse" />
                             <p className="text-gray-400 text-center mb-3 text-xl font-semibold">
-                              Preview not available yet
+                              Preview not ready yet
                             </p>
                             <p className="text-gray-500 text-sm text-center max-w-md leading-relaxed">
-                              The generated app needs to be deployed to view.
-                              Click "Open in IDE" to view the code and run it locally.
+                              Click Preview to create a project and launch the live preview.
                             </p>
-                            {generatedFiles.length > 0 && (
-                              <div className="mt-6 p-5 bg-gray-800/60 rounded-xl max-w-md w-full border border-gray-700">
-                                <p className="text-xs text-gray-400 mb-3 font-semibold">Generated files:</p>
-                                <div className="space-y-2 max-h-36 overflow-y-auto">
-                                  {generatedFiles.map((file, idx) => (
-                                    <div
-                                      key={idx}
-                                      className="flex items-center gap-3 text-xs"
-                                      style={{ animation: 'fade-in 0.2s ease-out', animationDelay: `${idx * 50}ms` }}
-                                    >
-                                      <FileCode className="w-4 h-4 text-red-400 shrink-0" />
-                                      <span className="text-gray-300 truncate font-mono">{file.path}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
                           </div>
                         )}
                       </CardContent>

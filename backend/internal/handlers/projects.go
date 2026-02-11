@@ -387,9 +387,19 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, StandardResponse{
-		Success: true,
-		Message: "Project updated successfully",
+	// Reload updated project for response
+	if err := h.DB.Where("id = ?", project.ID).First(&project).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, StandardResponse{
+			Success: false,
+			Error:   "Failed to load updated project",
+			Code:    "DATABASE_ERROR",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Project updated successfully",
+		"project": project,
 	})
 }
 

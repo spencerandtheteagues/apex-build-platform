@@ -851,7 +851,11 @@ func (ps *PreviewServer) injectHotReloadScript(html string, config *PreviewConfi
   // ============================================
   // APEX Hot Reload WebSocket
   // ============================================
-  const ws = new WebSocket('ws://' + window.location.host + '/__apex_ws');
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+  const proxyMatch = window.location.pathname.match(/^\/api\/v1\/preview\/proxy\/\d+/);
+  const proxyBase = proxyMatch ? proxyMatch[0] : '';
+  const wsPath = (proxyBase ? proxyBase : '') + '/__apex_ws' + (window.location.search || '');
+  const ws = new WebSocket(wsProtocol + window.location.host + wsPath);
 
   ws.onmessage = function(event) {
     const data = JSON.parse(event.data);

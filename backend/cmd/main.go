@@ -200,7 +200,7 @@ func main() {
 
 	// Initialize Live Preview Server
 	previewServer := preview.NewPreviewServer(database.GetDB())
-	previewHandler := handlers.NewPreviewHandler(database.GetDB(), previewServer)
+	previewHandler := handlers.NewPreviewHandler(database.GetDB(), previewServer, authService)
 
 	log.Println("Live Preview Server initialized (hot reload support)")
 
@@ -732,6 +732,13 @@ func setupRoutes(
 		// Community/Sharing Marketplace public endpoints (no auth required for viewing)
 		communityHandler.RegisterRoutes(v1)
 
+		// Preview proxy endpoints (token-auth via query param for iframe embedding)
+		previewProxy := v1.Group("/preview")
+		{
+			previewProxy.Any("/proxy/:projectId", previewHandler.ProxyPreview)
+			previewProxy.Any("/proxy/:projectId/*path", previewHandler.ProxyPreview)
+		}
+
 		// Protected routes (authentication required)
 		protected := v1.Group("/")
 		protected.Use(server.AuthMiddleware())
@@ -768,7 +775,9 @@ func setupRoutes(
 			// File endpoints
 			files := protected.Group("/files")
 			{
+				files.GET("/:id", server.GetFile)
 				files.PUT("/:id", server.UpdateFile)
+				files.DELETE("/:id", server.DeleteFile)
 			}
 
 			// User profile endpoints

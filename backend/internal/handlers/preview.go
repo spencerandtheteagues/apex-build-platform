@@ -2,9 +2,14 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"strconv"
+	"strings"
 
+	"apex-build/internal/auth"
 	"apex-build/internal/bundler"
 	"apex-build/internal/preview"
 	"apex-build/pkg/models"
@@ -20,26 +25,29 @@ type PreviewHandler struct {
 	factory        *preview.PreviewServerFactory
 	serverRunner   *preview.ServerRunner
 	bundlerService *bundler.Service
+	authService    *auth.AuthService
 }
 
 // NewPreviewHandler creates a new preview handler
-func NewPreviewHandler(db *gorm.DB, server *preview.PreviewServer) *PreviewHandler {
+func NewPreviewHandler(db *gorm.DB, server *preview.PreviewServer, authService *auth.AuthService) *PreviewHandler {
 	return &PreviewHandler{
 		db:             db,
 		server:         server,
 		serverRunner:   preview.NewServerRunner(db),
 		bundlerService: bundler.NewService(db),
+		authService:    authService,
 	}
 }
 
 // NewPreviewHandlerWithFactory creates a preview handler with Docker sandbox support
-func NewPreviewHandlerWithFactory(db *gorm.DB, factory *preview.PreviewServerFactory) *PreviewHandler {
+func NewPreviewHandlerWithFactory(db *gorm.DB, factory *preview.PreviewServerFactory, authService *auth.AuthService) *PreviewHandler {
 	return &PreviewHandler{
 		db:             db,
 		server:         factory.GetProcessServer(),
 		factory:        factory,
 		serverRunner:   preview.NewServerRunner(db),
 		bundlerService: bundler.NewService(db),
+		authService:    authService,
 	}
 }
 
@@ -104,6 +112,9 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Override URL to use proxy so it's accessible from the browser
+	status.URL = h.buildProxyURL(c, req.ProjectID)
 
 	response := gin.H{
 		"success": true,
@@ -189,6 +200,15 @@ func (h *PreviewHandler) GetPreviewStatus(c *gin.Context) {
 	}
 
 	status := h.server.GetPreviewStatus(uint(projectID))
+	if h.factory != nil {
+		useSandbox := c.Query("sandbox") == "true" || c.Query("sandbox") == "1"
+		status = h.getPreviewStatus(uint(projectID), useSandbox)
+	}
+
+	// Override URL to proxy
+	if status != nil && status.Active {
+		status.URL = h.buildProxyURL(c, uint(projectID))
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -204,6 +224,7 @@ func (h *PreviewHandler) RefreshPreview(c *gin.Context) {
 	var req struct {
 		ProjectID    uint     `json:"project_id" binding:"required"`
 		ChangedFiles []string `json:"changed_files"`
+		Sandbox      bool     `json:"sandbox"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -223,7 +244,13 @@ func (h *PreviewHandler) RefreshPreview(c *gin.Context) {
 		return
 	}
 
-	if err := h.server.RefreshPreview(req.ProjectID, req.ChangedFiles); err != nil {
+	useSandbox := req.Sandbox
+	if h.factory != nil {
+		if err := h.factory.RefreshPreview(req.ProjectID, req.ChangedFiles, useSandbox); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else if err := h.server.RefreshPreview(req.ProjectID, req.ChangedFiles); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -330,6 +357,10 @@ func (h *PreviewHandler) GetPreviewURL(c *gin.Context) {
 	}
 
 	status := h.server.GetPreviewStatus(uint(projectID))
+	if h.factory != nil {
+		useSandbox := c.Query("sandbox") == "true" || c.Query("sandbox") == "1"
+		status = h.getPreviewStatus(uint(projectID), useSandbox)
+	}
 
 	if !status.Active {
 		c.JSON(http.StatusNotFound, gin.H{
@@ -341,10 +372,147 @@ func (h *PreviewHandler) GetPreviewURL(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":    true,
-		"url":        status.URL,
+		"url":        h.buildProxyURL(c, uint(projectID)),
 		"port":       status.Port,
 		"started_at": status.StartedAt,
 	})
+}
+
+// ProxyPreview proxies preview traffic through the API host so it can be embedded securely
+// GET/POST/etc /api/v1/preview/proxy/:projectId/*path
+func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
+	projectIDStr := c.Param("projectId")
+	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	userID, err := h.resolveUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Verify project ownership
+	var project models.Project
+	if err := h.db.First(&project, uint(projectID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	useSandbox := c.Query("sandbox") == "true" || c.Query("sandbox") == "1"
+	status := h.getPreviewStatus(uint(projectID), useSandbox)
+	if status == nil || !status.Active {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Preview not running"})
+		return
+	}
+
+	targetURL, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", status.Port))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build preview proxy"})
+		return
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy.FlushInterval = -1
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, proxyErr error) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":"Preview proxy unavailable"}`))
+	}
+
+	proxy.Director = func(req *http.Request) {
+		req.URL.Scheme = targetURL.Scheme
+		req.URL.Host = targetURL.Host
+		req.Host = targetURL.Host
+
+		path := c.Param("path")
+		if path == "" {
+			path = "/"
+		}
+		req.URL.Path = path
+		req.URL.RawPath = path
+
+		// Strip auth token from proxied request
+		query := req.URL.Query()
+		query.Del("token")
+		req.URL.RawQuery = query.Encode()
+	}
+
+	proxy.ServeHTTP(c.Writer, c.Request)
+}
+
+func (h *PreviewHandler) getPreviewStatus(projectID uint, useSandbox bool) *preview.PreviewStatus {
+	if h.factory != nil {
+		status := h.factory.GetPreviewStatus(projectID, useSandbox)
+		if status.Active {
+			return status
+		}
+		if useSandbox {
+			return h.factory.GetPreviewStatus(projectID, false)
+		}
+		return status
+	}
+	return h.server.GetPreviewStatus(projectID)
+}
+
+func (h *PreviewHandler) resolveUserID(c *gin.Context) (uint, error) {
+	if userID := c.GetUint("user_id"); userID != 0 {
+		return userID, nil
+	}
+	token := h.extractToken(c)
+	if token == "" {
+		return 0, fmt.Errorf("authentication required")
+	}
+	if h.authService == nil {
+		return 0, fmt.Errorf("auth service unavailable")
+	}
+	claims, err := h.authService.ValidateToken(token)
+	if err != nil {
+		return 0, err
+	}
+	c.Set("user_id", claims.UserID)
+	c.Set("username", claims.Username)
+	c.Set("email", claims.Email)
+	c.Set("role", claims.Role)
+	return claims.UserID, nil
+}
+
+func (h *PreviewHandler) extractToken(c *gin.Context) string {
+	authHeader := c.GetHeader("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		return strings.TrimPrefix(authHeader, "Bearer ")
+	}
+	if token := c.Query("token"); token != "" {
+		return token
+	}
+	return ""
+}
+
+func (h *PreviewHandler) buildProxyURL(c *gin.Context, projectID uint) string {
+	host := c.Request.Host
+	if forwardedHost := c.GetHeader("X-Forwarded-Host"); forwardedHost != "" {
+		host = strings.Split(forwardedHost, ",")[0]
+	}
+
+	scheme := "http"
+	if forwardedProto := c.GetHeader("X-Forwarded-Proto"); forwardedProto != "" {
+		scheme = strings.Split(forwardedProto, ",")[0]
+	} else if c.Request.TLS != nil {
+		scheme = "https"
+	}
+
+	base := fmt.Sprintf("%s://%s/api/v1/preview/proxy/%d", scheme, host, projectID)
+	token := h.extractToken(c)
+	if token == "" {
+		return base
+	}
+	return base + "?token=" + url.QueryEscape(token)
 }
 
 // GetDockerStatus returns Docker availability and container statistics

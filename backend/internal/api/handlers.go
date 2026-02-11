@@ -574,6 +574,32 @@ func (s *Server) GetFiles(c *gin.Context) {
 	})
 }
 
+// GetFile returns a specific file by ID
+func (s *Server) GetFile(c *gin.Context) {
+	fileID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	var file models.File
+	if err := s.db.DB.Preload("Project").Where("id = ?", fileID).First(&file).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	// Check access permissions
+	if file.Project.OwnerID != userID.(uint) && !file.Project.IsPublic {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"file": file,
+	})
+}
+
 // DownloadProject exports all project files as a zip archive
 func (s *Server) DownloadProject(c *gin.Context) {
 	projectID := c.Param("id")
@@ -642,11 +668,18 @@ func (s *Server) UpdateFile(c *gin.Context) {
 	}
 
 	var req struct {
-		Content string `json:"content" binding:"required"`
+		Content *string `json:"content"`
+		Name    *string `json:"name"`
+		Path    *string `json:"path"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.Content == nil && req.Name == nil && req.Path == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No updates provided"})
 		return
 	}
 
@@ -662,20 +695,113 @@ func (s *Server) UpdateFile(c *gin.Context) {
 		return
 	}
 
-	// Update file
-	file.Content = req.Content
-	file.Size = int64(len(req.Content))
+	// Update file (content and/or metadata)
+	tx := s.db.DB.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start update transaction"})
+		return
+	}
+
+	// Handle rename/path update
+	if req.Name != nil || req.Path != nil {
+		newPath := file.Path
+		if req.Path != nil {
+			newPath = *req.Path
+		}
+		if req.Name != nil && req.Path == nil {
+			pathParts := strings.Split(file.Path, "/")
+			if len(pathParts) > 0 {
+				pathParts[len(pathParts)-1] = *req.Name
+				newPath = strings.Join(pathParts, "/")
+			}
+		}
+
+		if req.Name != nil {
+			file.Name = *req.Name
+		} else if newPath != "" {
+			parts := strings.Split(newPath, "/")
+			file.Name = parts[len(parts)-1]
+		}
+
+		if newPath != "" && newPath != file.Path {
+			oldPath := file.Path
+			file.Path = newPath
+
+			// If renaming a directory, update all child paths
+			if file.Type == "directory" {
+				var children []models.File
+				if err := tx.Where("project_id = ? AND path LIKE ?", file.ProjectID, oldPath+"/%").Find(&children).Error; err != nil {
+					tx.Rollback()
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load directory contents"})
+					return
+				}
+
+				for _, child := range children {
+					child.Path = newPath + strings.TrimPrefix(child.Path, oldPath)
+					pathParts := strings.Split(child.Path, "/")
+					child.Name = pathParts[len(pathParts)-1]
+					if err := tx.Save(&child).Error; err != nil {
+						tx.Rollback()
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update child paths"})
+						return
+					}
+				}
+			}
+		}
+	}
+
+	if req.Content != nil {
+		file.Content = *req.Content
+		file.Size = int64(len(*req.Content))
+	}
+
 	file.LastEditBy = userID.(uint)
 	file.Version++
 
-	if err := s.db.DB.Save(&file).Error; err != nil {
+	if err := tx.Save(&file).Error; err != nil {
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update file"})
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit file update"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "File updated successfully",
 		"file":    file,
+	})
+}
+
+// DeleteFile deletes a file by ID
+func (s *Server) DeleteFile(c *gin.Context) {
+	fileID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	var file models.File
+	if err := s.db.DB.Preload("Project").Where("id = ?", fileID).First(&file).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	if file.Project.OwnerID != userID.(uint) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	if err := s.db.DB.Delete(&file).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete file"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "File deleted successfully",
 	})
 }
 

@@ -24,7 +24,7 @@ import {
   Shield,
   ShieldOff
 } from 'lucide-react'
-import api from '../../services/api'
+import apiService from '@/services/api'
 import ConsolePanel, { ConsoleEntry } from './ConsolePanel'
 import NetworkPanel, { NetworkRequest } from './NetworkPanel'
 
@@ -102,6 +102,7 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
 
   // Docker sandbox state
   const [useSandbox, setUseSandbox] = useState(false)
+  const [activeSandbox, setActiveSandbox] = useState(false)
   const [dockerAvailable, setDockerAvailable] = useState(false)
 
   // Bundler state
@@ -114,17 +115,28 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
+  const displayUrl = React.useMemo(() => {
+    if (!previewUrl) return ''
+    try {
+      const url = new URL(previewUrl)
+      url.searchParams.delete('token')
+      return url.toString()
+    } catch {
+      return previewUrl.replace(/([?&]token=)[^&]+/, '$1•••')
+    }
+  }, [previewUrl])
+
   // Check Docker and bundler availability on mount
   useEffect(() => {
     const checkCapabilities = async () => {
       try {
-        const response = await api.get('/preview/docker/status')
+        const response = await apiService.client.get('/preview/docker/status')
         setDockerAvailable(response.data.available === true)
       } catch {
         setDockerAvailable(false)
       }
       try {
-        const response = await api.get('/preview/bundler/status')
+        const response = await apiService.client.get('/preview/bundler/status')
         setBundlerAvailable(response.data.available === true)
       } catch {
         setBundlerAvailable(false)
@@ -204,7 +216,9 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
   // Fetch preview status
   const fetchStatus = useCallback(async () => {
     try {
-      const response = await api.get(`/preview/status/${projectId}`)
+      const response = await apiService.client.get(`/preview/status/${projectId}`, {
+        params: { sandbox: activeSandbox || useSandbox ? '1' : '0' }
+      })
       setStatus(response.data.preview)
       if (response.data.preview?.active) {
         setPreviewUrl(response.data.preview.url)
@@ -217,7 +231,7 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
       setStatus(null)
       setConnected(false)
     }
-  }, [projectId])
+  }, [projectId, activeSandbox, useSandbox])
 
   useEffect(() => {
     fetchStatus()
@@ -232,13 +246,14 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
     setError(null)
     clearDevTools() // Clear old console/network data
     try {
-      const response = await api.post('/preview/start', {
+      const response = await apiService.client.post('/preview/start', {
         project_id: projectId,
         sandbox: useSandbox
       })
       setStatus(response.data.preview)
-      setPreviewUrl(response.data.preview.url)
+      setPreviewUrl(response.data.preview?.url || response.data.url || '')
       setConnected(true)
+      setActiveSandbox(response.data.sandbox ?? useSandbox)
       setRefreshKey(prev => prev + 1)
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to start preview')
@@ -260,12 +275,14 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
   const stopPreview = async () => {
     setLoading(true)
     try {
-      await api.post('/preview/stop', {
-        project_id: projectId
+      await apiService.client.post('/preview/stop', {
+        project_id: projectId,
+        sandbox: activeSandbox
       })
       setStatus(null)
       setPreviewUrl('')
       setConnected(false)
+      setActiveSandbox(false)
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to stop preview')
     } finally {
@@ -276,8 +293,9 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
   // Refresh preview
   const refreshPreview = async () => {
     try {
-      await api.post('/preview/refresh', {
-        project_id: projectId
+      await apiService.client.post('/preview/refresh', {
+        project_id: projectId,
+        sandbox: activeSandbox
       })
       setRefreshKey(prev => prev + 1)
     } catch (err) {
@@ -292,7 +310,7 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
   useEffect(() => {
     const detectBackend = async () => {
       try {
-        const response = await api.get(`/preview/server/detect/${projectId}`)
+        const response = await apiService.client.get(`/preview/server/detect/${projectId}`)
         setServerDetection(response.data)
       } catch (err) {
         // No backend detected or error - that's fine
@@ -305,7 +323,7 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
   // Fetch server status
   const fetchServerStatus = useCallback(async () => {
     try {
-      const response = await api.get(`/preview/server/status/${projectId}`)
+      const response = await apiService.client.get(`/preview/server/status/${projectId}`)
       setServerStatus(response.data.server)
     } catch (err) {
       setServerStatus(null)
@@ -325,7 +343,7 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
   const startServer = async () => {
     setServerLoading(true)
     try {
-      const response = await api.post('/preview/server/start', {
+      const response = await apiService.client.post('/preview/server/start', {
         project_id: projectId,
         entry_file: serverDetection?.entry_file,
         command: serverDetection?.command
@@ -350,7 +368,7 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
   const stopServer = async () => {
     setServerLoading(true)
     try {
-      await api.post('/preview/server/stop', {
+      await apiService.client.post('/preview/server/stop', {
         project_id: projectId
       })
       setServerStatus(null)
@@ -364,7 +382,7 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
   // Fetch server logs
   const fetchServerLogs = async () => {
     try {
-      const response = await api.get(`/preview/server/logs/${projectId}`)
+      const response = await apiService.client.get(`/preview/server/logs/${projectId}`)
       setServerLogs({
         stdout: response.data.stdout || '',
         stderr: response.data.stderr || ''
@@ -718,7 +736,7 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
             </span>
             <input
               type="text"
-              value={previewUrl}
+              value={displayUrl}
               readOnly
               className="flex-1 bg-transparent text-sm text-gray-300 outline-none"
             />
