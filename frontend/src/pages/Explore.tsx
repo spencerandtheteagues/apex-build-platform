@@ -71,7 +71,7 @@ export const ExplorePage = () => {
   const [publishSearch, setPublishSearch] = useState('')
   const [userProjects, setUserProjects] = useState<Project[]>([])
 
-  const { setCurrentProject } = useStore()
+  const { setCurrentProject, addNotification } = useStore()
 
   const handleLike = async (projectId: string) => {
     const numericId = Number(projectId)
@@ -194,11 +194,19 @@ export const ExplorePage = () => {
       const forked = await apiService.forkProject(Number(projectId))
       if (forked) {
         setCurrentProject(forked.project)
-        alert('Project forked successfully! You can now find it in your projects.')
+        addNotification({
+          type: 'success',
+          title: 'Project Forked',
+          message: 'Project forked successfully. You can find it in your projects.',
+        })
       }
     } catch (error) {
       console.error('Failed to fork project:', error)
-      alert('Failed to fork project. Please try again.')
+      addNotification({
+        type: 'error',
+        title: 'Fork Failed',
+        message: 'Failed to fork project. Please try again.',
+      })
     }
   }
 
