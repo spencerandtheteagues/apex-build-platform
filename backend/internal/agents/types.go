@@ -202,6 +202,18 @@ const (
 	PowerFast     PowerMode = "fast"     // Cheapest, fastest models (Haiku 4.5, GPT-4o-mini, Gemini 2.5 Flash Lite)
 )
 
+// CreditMultiplier returns the credit usage multiplier for a power mode
+func (pm PowerMode) CreditMultiplier() float64 {
+	switch pm {
+	case PowerMax:
+		return 10.0 // 10x credits — premium models
+	case PowerBalanced:
+		return 5.0 // 5x credits — mid-tier models
+	default:
+		return 1.0 // 1x credits — budget models
+	}
+}
+
 // BuildPlan contains the structured plan for building an app
 type BuildPlan struct {
 	ID           string           `json:"id"`

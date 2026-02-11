@@ -611,6 +611,9 @@ func (o *BuildOrchestrator) completeOrchestration(build *Build, state *Orchestra
 	})
 
 	log.Printf("Orchestrator: Build %s completed in %v (%d files)", build.ID, time.Since(state.StartTime), len(allFiles))
+
+	// Persist to database
+	o.manager.persistCompletedBuild(build, allFiles)
 }
 
 // handlePhaseError handles errors during a phase

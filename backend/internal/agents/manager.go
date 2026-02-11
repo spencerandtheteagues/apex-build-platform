@@ -15,8 +15,11 @@ import (
 	"time"
 
 	"apex-build/internal/ai"
+	"apex-build/pkg/models"
+	"encoding/json"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // AgentManager handles the lifecycle and coordination of AI agents
@@ -27,6 +30,7 @@ type AgentManager struct {
 	resultQueue chan *TaskResult
 	subscribers map[string][]chan *WSMessage
 	aiRouter    AIRouter
+	db          *gorm.DB // Database connection for persisting completed builds
 	mu          sync.RWMutex
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -65,7 +69,7 @@ type TaskResult struct {
 }
 
 // NewAgentManager creates a new agent manager instance
-func NewAgentManager(aiRouter AIRouter) *AgentManager {
+func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	am := &AgentManager{
@@ -77,6 +81,9 @@ func NewAgentManager(aiRouter AIRouter) *AgentManager {
 		aiRouter:    aiRouter,
 		ctx:         ctx,
 		cancel:      cancel,
+	}
+	if len(db) > 0 && db[0] != nil {
+		am.db = db[0]
 	}
 
 	// Start background workers
@@ -456,6 +463,9 @@ func (am *AgentManager) forceCompleteBuild(buildID string) {
 	})
 
 	log.Printf("Build %s force completed with %d files", buildID, len(allFiles))
+
+	// Persist to database
+	am.persistCompletedBuild(build, allFiles)
 }
 
 // spawnAgent creates a new AI agent with a specific role
@@ -1494,6 +1504,67 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 	})
 
 	log.Printf("Build %s completed with status: %s (%d files)", build.ID, build.Status, len(allFiles))
+
+	// Persist to database
+	am.persistCompletedBuild(build, allFiles)
+}
+
+// persistCompletedBuild saves a completed build to the database for history/retrieval
+func (am *AgentManager) persistCompletedBuild(build *Build, files []GeneratedFile) {
+	if am.db == nil {
+		return
+	}
+
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+
+	techStackJSON := ""
+	if build.TechStack != nil {
+		if b, err := json.Marshal(build.TechStack); err == nil {
+			techStackJSON = string(b)
+		}
+	}
+
+	filesJSON := "[]"
+	if len(files) > 0 {
+		if b, err := json.Marshal(files); err == nil {
+			filesJSON = string(b)
+		}
+	}
+
+	var durationMs int64
+	if build.CompletedAt != nil {
+		durationMs = build.CompletedAt.Sub(build.CreatedAt).Milliseconds()
+	}
+
+	projectName := ""
+	if build.Plan != nil {
+		projectName = build.Plan.AppType
+	}
+
+	cb := &models.CompletedBuild{
+		BuildID:     build.ID,
+		UserID:      build.UserID,
+		ProjectID:   build.ProjectID,
+		ProjectName: projectName,
+		Description: build.Description,
+		Status:      string(build.Status),
+		Mode:        string(build.Mode),
+		PowerMode:   string(build.PowerMode),
+		TechStack:   techStackJSON,
+		FilesJSON:   filesJSON,
+		FilesCount:  len(files),
+		Progress:    build.Progress,
+		DurationMs:  durationMs,
+		Error:       build.Error,
+		CompletedAt: build.CompletedAt,
+	}
+
+	if err := am.db.Create(cb).Error; err != nil {
+		log.Printf("Failed to persist build %s: %v", build.ID, err)
+	} else {
+		log.Printf("Persisted build %s to database (user=%d, files=%d)", build.ID, build.UserID, len(files))
+	}
 }
 
 // createCheckpoint saves a checkpoint of the current build state

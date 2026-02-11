@@ -487,3 +487,28 @@ type AIUsageLog struct {
 	// For budget alerting
 	MonthKey string `json:"month_key" gorm:"size:7;index"` // "2026-01" for monthly aggregation
 }
+
+// CompletedBuild stores a completed build for history and retrieval
+type CompletedBuild struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at" gorm:"index"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	BuildID     string  `json:"build_id" gorm:"uniqueIndex;not null;size:64"` // UUID from agent system
+	UserID      uint    `json:"user_id" gorm:"not null;index"`
+	ProjectID   *uint   `json:"project_id,omitempty" gorm:"index"`
+	ProjectName string  `json:"project_name" gorm:"size:255"`
+	Description string  `json:"description" gorm:"type:text"`
+	Status      string  `json:"status" gorm:"size:20;index"` // completed, failed, cancelled
+	Mode        string  `json:"mode" gorm:"size:10"`         // fast, full
+	PowerMode   string  `json:"power_mode" gorm:"size:10"`   // fast, balanced, max
+	TechStack   string  `json:"tech_stack" gorm:"type:text"`  // JSON blob of tech stack
+	FilesJSON   string  `json:"-" gorm:"column:files_json;type:text"` // JSON array of generated files
+	FilesCount  int     `json:"files_count" gorm:"default:0"`
+	TotalCost   float64 `json:"total_cost" gorm:"default:0.0"` // Total AI cost in USD
+	Progress    int     `json:"progress" gorm:"default:100"`
+	DurationMs  int64   `json:"duration_ms" gorm:"default:0"` // Build duration in milliseconds
+	Error       string  `json:"error,omitempty" gorm:"type:text"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}

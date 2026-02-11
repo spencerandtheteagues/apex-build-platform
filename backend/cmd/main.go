@@ -136,7 +136,7 @@ func main() {
 
 	// Initialize Agent Orchestration System
 	aiAdapter := agents.NewAIRouterAdapter(aiRouter, byokManager)
-	agentManager := agents.NewAgentManager(aiAdapter)
+	agentManager := agents.NewAgentManager(aiAdapter, database.GetDB())
 	wsHub := agents.NewWSHub(agentManager)
 	buildHandler := agents.NewBuildHandler(agentManager, wsHub)
 

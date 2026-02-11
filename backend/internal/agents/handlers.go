@@ -3,16 +3,22 @@
 package agents
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
+
+	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // BuildHandler handles build-related HTTP requests
 type BuildHandler struct {
 	manager *AgentManager
 	hub     *WSHub
+	db      *gorm.DB
 }
 
 // NewBuildHandler creates a new build handler
@@ -20,6 +26,7 @@ func NewBuildHandler(manager *AgentManager, hub *WSHub) *BuildHandler {
 	return &BuildHandler{
 		manager: manager,
 		hub:     hub,
+		db:      manager.db,
 	}
 }
 
@@ -454,6 +461,144 @@ func (h *BuildHandler) CancelBuild(c *gin.Context) {
 	})
 }
 
+// ListBuilds returns all completed builds for the authenticated user
+// GET /api/v1/builds
+func (h *BuildHandler) ListBuilds(c *gin.Context) {
+	if h.db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "build history not available"})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	var builds []models.CompletedBuild
+	var total int64
+
+	h.db.Model(&models.CompletedBuild{}).Where("user_id = ?", uid).Count(&total)
+	h.db.Where("user_id = ?", uid).Order("created_at DESC").Offset(offset).Limit(limit).Find(&builds)
+
+	// Convert to response format (exclude raw files JSON, include file count)
+	type BuildSummary struct {
+		ID          uint    `json:"id"`
+		BuildID     string  `json:"build_id"`
+		ProjectName string  `json:"project_name"`
+		Description string  `json:"description"`
+		Status      string  `json:"status"`
+		Mode        string  `json:"mode"`
+		PowerMode   string  `json:"power_mode"`
+		TechStack   any     `json:"tech_stack"`
+		FilesCount  int     `json:"files_count"`
+		TotalCost   float64 `json:"total_cost"`
+		Progress    int     `json:"progress"`
+		DurationMs  int64   `json:"duration_ms"`
+		CreatedAt   string  `json:"created_at"`
+		CompletedAt *string `json:"completed_at,omitempty"`
+	}
+
+	summaries := make([]BuildSummary, 0, len(builds))
+	for _, b := range builds {
+		var techStack any
+		if b.TechStack != "" {
+			json.Unmarshal([]byte(b.TechStack), &techStack)
+		}
+		s := BuildSummary{
+			ID:          b.ID,
+			BuildID:     b.BuildID,
+			ProjectName: b.ProjectName,
+			Description: b.Description,
+			Status:      b.Status,
+			Mode:        b.Mode,
+			PowerMode:   b.PowerMode,
+			TechStack:   techStack,
+			FilesCount:  b.FilesCount,
+			TotalCost:   b.TotalCost,
+			Progress:    b.Progress,
+			DurationMs:  b.DurationMs,
+			CreatedAt:   b.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		}
+		if b.CompletedAt != nil {
+			t := b.CompletedAt.Format("2006-01-02T15:04:05Z")
+			s.CompletedAt = &t
+		}
+		summaries = append(summaries, s)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"builds": summaries,
+		"total":  total,
+		"page":   page,
+		"limit":  limit,
+	})
+}
+
+// GetCompletedBuild returns a specific completed build with all file data
+// GET /api/v1/builds/:buildId
+func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
+	if h.db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "build history not available"})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+	buildID := c.Param("buildId")
+
+	var build models.CompletedBuild
+	if err := h.db.Where("build_id = ? AND user_id = ?", buildID, uid).First(&build).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		return
+	}
+
+	// Parse stored files JSON
+	var files []GeneratedFile
+	if build.FilesJSON != "" {
+		json.Unmarshal([]byte(build.FilesJSON), &files)
+	}
+
+	var techStack any
+	if build.TechStack != "" {
+		json.Unmarshal([]byte(build.TechStack), &techStack)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":           build.ID,
+		"build_id":     build.BuildID,
+		"project_name": build.ProjectName,
+		"description":  build.Description,
+		"status":       build.Status,
+		"mode":         build.Mode,
+		"power_mode":   build.PowerMode,
+		"tech_stack":   techStack,
+		"files":        files,
+		"files_count":  build.FilesCount,
+		"total_cost":   build.TotalCost,
+		"progress":     build.Progress,
+		"duration_ms":  build.DurationMs,
+		"error":        build.Error,
+		"created_at":   build.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		"completed_at": build.CompletedAt,
+	})
+}
+
 // RegisterRoutes registers all build routes on the router
 func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	build := rg.Group("/build")
@@ -469,4 +614,8 @@ func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		build.GET("/:id/files", h.GetGeneratedFiles)
 		build.POST("/:id/cancel", h.CancelBuild)
 	}
+
+	// Build history endpoints
+	rg.GET("/builds", h.ListBuilds)
+	rg.GET("/builds/:buildId", h.GetCompletedBuild)
 }

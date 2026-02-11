@@ -411,6 +411,22 @@ export class ApiService {
     await this.client.post(`/build/${buildId}/cancel`)
   }
 
+  // Build history endpoints
+  async listBuilds(page = 1, limit = 20): Promise<{
+    builds: CompletedBuildSummary[]
+    total: number
+    page: number
+    limit: number
+  }> {
+    const response = await this.client.get('/builds', { params: { page, limit } })
+    return response.data
+  }
+
+  async getCompletedBuild(buildId: string): Promise<CompletedBuildDetail> {
+    const response = await this.client.get(`/builds/${buildId}`)
+    return response.data
+  }
+
   // Code execution endpoints
   async executeCode(data: {
     project_id: number
@@ -2537,6 +2553,29 @@ export interface UsageLimitsData {
     price_monthly: number
     price_yearly: number
   }>
+}
+
+// Build history types
+export interface CompletedBuildSummary {
+  id: number
+  build_id: string
+  project_name: string
+  description: string
+  status: string
+  mode: string
+  power_mode: string
+  tech_stack: { frontend?: string; backend?: string; database?: string } | null
+  files_count: number
+  total_cost: number
+  progress: number
+  duration_ms: number
+  created_at: string
+  completed_at?: string
+}
+
+export interface CompletedBuildDetail extends CompletedBuildSummary {
+  files: { path: string; content: string; language: string; size: number; is_new: boolean }[]
+  error?: string
 }
 
 // Create singleton instance

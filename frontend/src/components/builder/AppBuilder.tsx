@@ -48,6 +48,8 @@ import {
   Github
 } from 'lucide-react'
 import { GitHubImportWizard } from '@/components/import/GitHubImportWizard'
+import { OnboardingTour } from './OnboardingTour'
+import { BuildHistory } from './BuildHistory'
 
 // ============================================================================
 // TYPES
@@ -1475,6 +1477,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
   return (
     <div className="min-h-screen overflow-y-auto bg-black text-white relative">
+      {/* Onboarding Tour - shows on first visit */}
+      <OnboardingTour />
+
       {/* CSS Keyframe Animations */}
       <style>{`
         @keyframes gradient-shift {
@@ -1685,9 +1690,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                   </h3>
                   <div className="grid grid-cols-3 gap-3">
                     {([
-                      { id: 'fast' as const, label: 'Fast & Cheap', icon: <Zap className="w-5 h-5" />, desc: 'Haiku 4.5 / GPT-4o Mini / Gemini Flash Lite', color: 'green' },
-                      { id: 'balanced' as const, label: 'Balanced', icon: <Sparkles className="w-5 h-5" />, desc: 'Sonnet 4.5 / GPT-5 / Gemini 3 Flash', color: 'yellow' },
-                      { id: 'max' as const, label: 'Max Power', icon: <Rocket className="w-5 h-5" />, desc: 'Opus 4.6 / GPT-5.2 Codex / Gemini 3 Pro', color: 'red' },
+                      { id: 'fast' as const, label: 'Fast & Cheap', icon: <Zap className="w-5 h-5" />, desc: 'Haiku 4.5 / GPT-4o Mini / Gemini Flash Lite', color: 'green', cost: '~$1', multiplier: '1x', perBuild: 'Included with all plans' },
+                      { id: 'balanced' as const, label: 'Balanced', icon: <Sparkles className="w-5 h-5" />, desc: 'Sonnet 4.5 / GPT-5 / Gemini 3 Flash', color: 'yellow', cost: '~$5', multiplier: '5x', perBuild: '5x credit usage' },
+                      { id: 'max' as const, label: 'Max Power', icon: <Rocket className="w-5 h-5" />, desc: 'Opus 4.6 / GPT-5.2 Codex / Gemini 3 Pro', color: 'red', cost: '~$10', multiplier: '10x', perBuild: '10x credit usage' },
                     ]).map((mode) => (
                       <button
                         key={mode.id}
@@ -1717,10 +1722,29 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                           )}>
                             {mode.label}
                           </span>
+                          <span className={cn(
+                            'ml-auto text-xs font-mono font-bold',
+                            mode.color === 'green' ? 'text-green-400' : mode.color === 'yellow' ? 'text-yellow-400' : 'text-red-400'
+                          )}>
+                            {mode.cost}/build
+                          </span>
                         </div>
                         <p className="text-xs text-gray-500 leading-tight">{mode.desc}</p>
+                        <div className="mt-2 flex items-center justify-between">
+                          <span className="text-[10px] text-gray-600 font-mono">{mode.multiplier} credits</span>
+                          <span className="text-[10px] text-gray-600">{mode.perBuild}</span>
+                        </div>
                       </button>
                     ))}
+                  </div>
+                  <div className="mt-3 p-3 rounded-lg bg-gray-900/50 border border-gray-800/50">
+                    <p className="text-[11px] text-gray-500 leading-relaxed">
+                      <strong className="text-gray-400">Pricing:</strong> Fast mode uses budget-friendly models at baseline credit rates.
+                      Balanced and Max Power use premium models from Claude, OpenAI, and Google that cost more per token.
+                      {powerMode === 'max' && <span className="text-red-400/80"> Max Power uses the most capable models available — Opus 4.6 ($5/$25 per MTok), GPT-5.2 Codex ($1.25/$10), and Gemini 3 Pro ($2/$12).</span>}
+                      {powerMode === 'balanced' && <span className="text-yellow-400/80"> Balanced uses mid-tier models — Sonnet 4.5 ($3/$15 per MTok), GPT-5 ($1.25/$10), and Gemini 3 Flash ($0.50/$3).</span>}
+                      {powerMode === 'fast' && <span className="text-green-400/80"> Fast uses the cheapest models — Haiku 4.5 ($1/$5 per MTok), GPT-4o Mini ($0.15/$0.60), and Gemini Flash Lite ($0.10/$0.40).</span>}
+                    </p>
                   </div>
                 </div>
 
@@ -1776,6 +1800,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Build History */}
+            <BuildHistory onOpenBuild={(buildId) => {
+              // Navigate to IDE with the build's files
+              onNavigateToIDE?.()
+            }} />
           </div>
         ) : (
           // Build Progress View

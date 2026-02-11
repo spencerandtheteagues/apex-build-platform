@@ -238,6 +238,8 @@ func (d *Database) Migrate() error {
 		&hosting.CustomDomain{},
 		&hosting.DeploymentEvent{},
 		&hosting.SSLCertificate{},
+		// Completed build history (persist builds across restarts)
+		&models.CompletedBuild{},
 	)
 
 	if err != nil {
