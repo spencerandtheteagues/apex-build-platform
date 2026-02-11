@@ -1308,7 +1308,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       })
 
       if (project) {
-        for (const file of generatedFiles) {
+        const filesToSave = generatedFiles.filter(f => f.path && f.content)
+        let savedCount = 0
+
+        for (const file of filesToSave) {
           try {
             await apiService.createFile(project.id, {
               path: file.path,
@@ -1316,6 +1319,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
               type: 'file',
               content: file.content,
             })
+            savedCount++
           } catch (err) {
             console.error(`Failed to save file ${file.path}:`, err)
           }
@@ -1323,7 +1327,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
         setCreatedProjectId(project.id)
         setCurrentProject(project)
-        addSystemMessage(`Project "${projectName}" created with ${generatedFiles.length} files!`)
+        addSystemMessage(`Project "${projectName}" created with ${savedCount}/${filesToSave.length} files!`)
 
         if (onNavigateToIDE) {
           onNavigateToIDE()

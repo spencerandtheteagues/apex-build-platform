@@ -610,130 +610,39 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 func (am *AgentManager) assignProvidersToRoles(providers []ai.AIProvider, roles []AgentRole) map[AgentRole]ai.AIProvider {
 	assignments := make(map[AgentRole]ai.AIProvider)
 
-	// Check which specific providers are available
-	hasClaude := false
-	hasGPT := false
-	hasGemini := false
-	hasOllama := false
+	// Build a quick lookup for availability
+	available := make(map[ai.AIProvider]bool)
 	for _, p := range providers {
-		switch p {
-		case ai.ProviderClaude:
-			hasClaude = true
-		case ai.ProviderGPT4:
-			hasGPT = true
-		case ai.ProviderGemini:
-			hasGemini = true
-		case ai.ProviderOllama:
-			hasOllama = true
-		}
+		available[p] = true
 	}
-
-	numProviders := len(providers)
-	log.Printf("Assigning providers to roles: %d providers available (Ollama=%v, Claude=%v, GPT=%v, Gemini=%v)",
-		numProviders, hasOllama, hasClaude, hasGPT, hasGemini)
 
 	// CAPABILITY-BASED LEAD SELECTION
 	// The most capable available model becomes the lead, regardless of type
 	leadProvider := am.selectLeadProvider(providers)
-	log.Printf("Selected lead provider based on capability: %s", leadProvider)
+	log.Printf("Assigning providers to roles: %d providers available (lead=%s)", len(providers), leadProvider)
 
-	// BYOK COST OPTIMIZATION: If user has Ollama (local/free), prefer it for non-critical tasks
-	// But still use the most capable model for planning and architecture
-	preferOllama := hasOllama
-
-	switch numProviders {
-	case 1:
-		// Single provider mode: lead provider handles ALL agents
-		singleProvider := leadProvider // Use the capability-selected lead
-		log.Printf("Single provider mode: %s (lead) handles all agents", singleProvider)
-		for _, role := range roles {
-			assignments[role] = singleProvider
-		}
-
-	case 2:
-		// Two providers split the work
-		// Strategy: lead handles critical planning/architecture/review, other handles code generation
-		planningProvider := leadProvider
-		var codingProvider ai.AIProvider
-
-		// Find the non-lead provider for coding
-		for _, p := range providers {
-			if p != leadProvider {
-				codingProvider = p
-				break
+	// Helper to pick the first available provider in preference order
+	pick := func(preferences ...ai.AIProvider) ai.AIProvider {
+		for _, p := range preferences {
+			if available[p] {
+				return p
 			}
 		}
+		return leadProvider
+	}
 
-		// If BYOK optimization and Ollama is available, prefer it for repetitive coding tasks
-		if preferOllama && hasOllama && codingProvider != ai.ProviderOllama {
-			codingProvider = ai.ProviderOllama
-		}
-
-		log.Printf("Two provider mode: %s (lead) for planning/review, %s for coding", planningProvider, codingProvider)
-
-		// Critical planning-oriented roles use lead
-		assignments[RolePlanner] = planningProvider
-		assignments[RoleArchitect] = planningProvider
-		assignments[RoleReviewer] = planningProvider
-
-		// Code generation roles use secondary/cost-optimized provider
-		assignments[RoleFrontend] = codingProvider
-		assignments[RoleBackend] = codingProvider
-		assignments[RoleDatabase] = codingProvider
-		assignments[RoleTesting] = codingProvider
-
-	default: // 3 or more providers - optimal distribution with lead priority
-		log.Printf("Full provider mode: lead-based optimal distribution across all providers")
-
-		for _, role := range roles {
-			var assignedProvider ai.AIProvider
-
-			switch role {
-			case RolePlanner, RoleArchitect, RoleReviewer:
-				// Critical reasoning tasks ALWAYS use the lead provider
-				assignedProvider = leadProvider
-
-			case RoleFrontend, RoleBackend:
-				// Code generation: prefer GPT if available, otherwise use lead
-				// Cost optimization: if BYOK Ollama available, use for non-critical code gen
-				if hasGPT && !preferOllama {
-					assignedProvider = ai.ProviderGPT4
-				} else if preferOllama && hasOllama {
-					assignedProvider = ai.ProviderOllama
-				} else {
-					assignedProvider = leadProvider
-				}
-
-			case RoleDatabase:
-				// Database schema: prefer capable model but allow cost optimization
-				if hasClaude && !preferOllama {
-					assignedProvider = ai.ProviderClaude
-				} else if hasGemini && !preferOllama {
-					assignedProvider = ai.ProviderGemini
-				} else if preferOllama && hasOllama {
-					assignedProvider = ai.ProviderOllama
-				} else {
-					assignedProvider = leadProvider
-				}
-
-			case RoleTesting:
-				// Testing: prefer Gemini but allow cost optimization
-				if hasGemini && !preferOllama {
-					assignedProvider = ai.ProviderGemini
-				} else if hasGPT && !preferOllama {
-					assignedProvider = ai.ProviderGPT4
-				} else if preferOllama && hasOllama {
-					assignedProvider = ai.ProviderOllama
-				} else {
-					assignedProvider = leadProvider
-				}
-
-			default:
-				// Default: use lead provider for unknown roles
-				assignedProvider = leadProvider
-			}
-
-			assignments[role] = assignedProvider
+	// Role-to-provider preferences
+	// Desired mapping: Claude = architect/planner/reviewer, OpenAI = builder/coder, Gemini = tester
+	for _, role := range roles {
+		switch role {
+		case RolePlanner, RoleArchitect, RoleReviewer:
+			assignments[role] = pick(ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama)
+		case RoleFrontend, RoleBackend, RoleDatabase:
+			assignments[role] = pick(ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama)
+		case RoleTesting:
+			assignments[role] = pick(ai.ProviderGemini, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGrok, ai.ProviderOllama)
+		default:
+			assignments[role] = leadProvider
 		}
 	}
 

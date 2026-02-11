@@ -714,9 +714,9 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   if (isMobile) {
     return (
       <div
-        className={cn('h-screen flex flex-col bg-gray-950', className)}
+        className={cn('h-full flex flex-col bg-gray-950 min-h-0', className)}
         style={{
-          height: `calc(var(--vh, 1vh) * 100)`,
+          height: '100%',
           paddingTop: safeArea.top,
         }}
       >
@@ -778,7 +778,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
 
   // Desktop/Tablet layout
   return (
-    <div className={cn('h-screen flex flex-col bg-gray-950', className)}>
+    <div className={cn('h-full flex flex-col bg-gray-950 min-h-0', className)}>
       {/* Loading overlay */}
       <LoadingOverlay isVisible={isLoading} text="Loading APEX.BUILD..." />
 
@@ -871,25 +871,18 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
               </Button>
               <Button
                 size="sm"
-                variant="ghost"
+                variant={showPreview ? 'primary' : 'ghost'}
                 icon={<Play size={14} />}
                 className="touch-target"
-                title="Run Project"
-                onClick={async () => {
-                  try {
-                    setBottomPanelState('normal')
-                    setActiveBottomTab('terminal')
-                    await apiService.executeCode({
-                      project_id: currentProject.id,
-                      command: 'npm start',
-                      language: currentProject.language,
-                    })
-                  } catch (err) {
-                    console.error('Run failed:', err)
+                title={showPreview ? 'Stop Preview' : 'Run Project'}
+                onClick={() => {
+                  if (!showPreview) {
+                    setViewMode('editor')
                   }
+                  setShowPreview(!showPreview)
                 }}
               >
-                <span className="hidden lg:inline">Run</span>
+                <span className="hidden lg:inline">{showPreview ? 'Stop' : 'Run'}</span>
               </Button>
               <Button
                 size="sm"
