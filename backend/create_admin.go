@@ -48,10 +48,19 @@ func main() {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
 
-	// Admin account details
-	adminEmail := "spencerandtheteagues@gmail.com"
-	adminPassword := "THE$T@R$H1PKEY!"
-	adminUsername := "apex_admin"
+	// Admin account details - read from environment variables
+	adminEmail := os.Getenv("ADMIN_EMAIL")
+	if adminEmail == "" {
+		log.Fatal("ADMIN_EMAIL environment variable is required")
+	}
+	adminPassword := os.Getenv("ADMIN_PASSWORD")
+	if adminPassword == "" {
+		log.Fatal("ADMIN_PASSWORD environment variable is required")
+	}
+	adminUsername := os.Getenv("ADMIN_USERNAME")
+	if adminUsername == "" {
+		adminUsername = "apex_admin"
+	}
 	adminFullName := "APEX.BUILD System Administrator"
 
 	// Check if admin already exists
@@ -138,7 +147,7 @@ func main() {
 	fmt.Println("\n🔑 LOGIN CREDENTIALS:")
 	fmt.Println("=====================")
 	fmt.Printf("Email: %s\n", adminEmail)
-	fmt.Printf("Password: %s\n", adminPassword)
+	fmt.Println("Password: [set via ADMIN_PASSWORD env var]")
 
 	fmt.Println("\n🎯 ADMIN CAPABILITIES:")
 	fmt.Println("======================")
