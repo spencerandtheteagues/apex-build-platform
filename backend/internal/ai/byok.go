@@ -419,36 +419,22 @@ func (m *BYOKManager) decryptUserKey(key models.UserAPIKey) (string, error) {
 	return m.secretsManager.Decrypt(key.UserID, key.EncryptedKey, key.KeySalt)
 }
 
-// GetAvailableModels returns available models per provider (January 2026)
+// GetAvailableModels returns available models per provider
 func GetAvailableModels() map[string][]ModelInfo {
 	return map[string][]ModelInfo{
 		"claude": {
-			{ID: "claude-opus-4-5-20251101", Name: "Claude Opus 4.5", Speed: "slow", CostTier: "high", Description: "Flagship reasoning model"},
-			{ID: "claude-sonnet-4-20250514", Name: "Claude Sonnet 4", Speed: "medium", CostTier: "medium", Description: "Balanced performance"},
-			{ID: "claude-haiku-3-5-20241022", Name: "Claude Haiku 3.5", Speed: "fast", CostTier: "low", Description: "Fast and affordable"},
+			{ID: "claude-sonnet-4-5-20250929", Name: "Claude Sonnet 4.5", Speed: "medium", CostTier: "medium", Description: "Latest balanced model"},
+			{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", Speed: "fast", CostTier: "low", Description: "Fast and affordable"},
 		},
 		"gpt4": {
-			{ID: "gpt-5.2-pro", Name: "GPT-5.2 Pro", Speed: "slow", CostTier: "high", Description: "Most intelligent, 100% AIME"},
-			{ID: "gpt-5.2-thinking", Name: "GPT-5.2 Thinking", Speed: "medium", CostTier: "medium", Description: "Deep reasoning"},
-			{ID: "gpt-5.2-instant", Name: "GPT-5.2 Instant", Speed: "fast", CostTier: "low", Description: "Fast everyday tasks"},
-			{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Speed: "medium", CostTier: "high", Description: "Agentic coding specialist"},
+			{ID: "gpt-5", Name: "GPT-5", Speed: "medium", CostTier: "medium", Description: "Latest OpenAI flagship"},
 		},
 		"gemini": {
-			{ID: "gemini-3-pro", Name: "Gemini 3 Pro", Speed: "medium", CostTier: "medium", Description: "Advanced reasoning"},
-			{ID: "gemini-3-deep-think", Name: "Gemini 3 Deep Think", Speed: "slow", CostTier: "high", Description: "Extended thinking mode"},
-			{ID: "gemini-3-flash", Name: "Gemini 3 Flash", Speed: "fast", CostTier: "low", Description: "Pro-grade at Flash speed"},
-		},
-		"grok": {
-			{ID: "grok-4-heavy", Name: "Grok 4 Heavy", Speed: "slow", CostTier: "high", Description: "50% HLE, parallel compute"},
-			{ID: "grok-4.1-thinking", Name: "Grok 4.1 Thinking", Speed: "medium", CostTier: "medium", Description: "#1 LMArena overall"},
-			{ID: "grok-4.1", Name: "Grok 4.1", Speed: "fast", CostTier: "medium", Description: "#2 non-reasoning"},
-			{ID: "grok-4-fast", Name: "Grok 4 Fast", Speed: "fast", CostTier: "low", Description: "Budget-friendly option"},
+			{ID: "gemini-2.0-flash", Name: "Gemini 2.0 Flash", Speed: "fast", CostTier: "low", Description: "Fast and capable"},
 		},
 		"ollama": {
 			{ID: "deepseek-r1:18b", Name: "DeepSeek-R1 (18b)", Speed: "variable", CostTier: "free", Description: "Reasoning model (local)"},
 			{ID: "deepseek-r1:8b", Name: "DeepSeek-R1 (8b)", Speed: "variable", CostTier: "free", Description: "Reasoning model (local)"},
-			{ID: "qwen3-coder:30b", Name: "Qwen 3 Coder (30b)", Speed: "variable", CostTier: "free", Description: "Advanced code model (local)"},
-			{ID: "deepseek-v3.2", Name: "DeepSeek-V3.2", Speed: "variable", CostTier: "free", Description: "Efficient long-context (local)"},
 			{ID: "llama3.3-70b", Name: "Llama 3.3 70B", Speed: "variable", CostTier: "free", Description: "405B performance (local)"},
 		},
 	}

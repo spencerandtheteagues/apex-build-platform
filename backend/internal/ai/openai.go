@@ -275,11 +275,11 @@ func (o *OpenAIClient) getModelForRequest(req *AIRequest) string {
 func (o *OpenAIClient) getModelForCapability(capability AICapability) string {
 	switch capability {
 	case CapabilityCodeGeneration, CapabilityRefactoring, CapabilityTesting:
-		return "gpt-4o"  // GPT-4o flagship for complex code tasks
+		return "gpt-5"  // GPT-5 for complex code tasks
 	case CapabilityCodeCompletion:
-		return "gpt-4o-mini"  // Fast for completions
+		return "gpt-5"  // GPT-5 for completions
 	default:
-		return "gpt-4o"  // Default to GPT-4o flagship
+		return "gpt-5"  // Default to GPT-5
 	}
 }
 
@@ -303,7 +303,7 @@ func (o *OpenAIClient) GetProvider() AIProvider {
 // Health checks if OpenAI API is accessible
 func (o *OpenAIClient) Health(ctx context.Context) error {
 	testReq := &openAIRequest{
-		Model: "gpt-4o-mini",
+		Model: "gpt-5",
 		Messages: []openAIMessage{
 			{Role: "user", Content: "Hi"},
 		},
@@ -357,21 +357,18 @@ func (o *OpenAIClient) calculateCost(inputTokens, outputTokens int, model string
 	var inputCostPer1K, outputCostPer1K float64
 
 	switch model {
+	case "gpt-5":
+		inputCostPer1K = 0.005   // GPT-5 pricing estimate
+		outputCostPer1K = 0.015
 	case "gpt-4o":
 		inputCostPer1K = 0.0025  // $0.0025 per 1K input tokens
 		outputCostPer1K = 0.01   // $0.01 per 1K output tokens
 	case "gpt-4o-mini":
 		inputCostPer1K = 0.00015 // $0.00015 per 1K input tokens
 		outputCostPer1K = 0.0006 // $0.0006 per 1K output tokens
-	case "gpt-4-turbo":
-		inputCostPer1K = 0.01    // $0.01 per 1K input tokens
-		outputCostPer1K = 0.03   // $0.03 per 1K output tokens
-	case "gpt-4":
-		inputCostPer1K = 0.03    // $0.03 per 1K input tokens
-		outputCostPer1K = 0.06   // $0.06 per 1K output tokens
 	default:
-		inputCostPer1K = 0.0025  // Default to GPT-4o pricing
-		outputCostPer1K = 0.01
+		inputCostPer1K = 0.005   // Default to GPT-5 pricing
+		outputCostPer1K = 0.015
 	}
 
 	inputCost := float64(inputTokens) / 1000.0 * inputCostPer1K

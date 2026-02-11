@@ -75,8 +75,8 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	// Build user prompt
 	userPrompt := c.buildUserPrompt(req)
 
-	// Select model - respect explicit override or use flagship
-	model := "claude-opus-4-5-20251101"
+	// Select model - respect explicit override or use Sonnet 4.5
+	model := "claude-sonnet-4-5-20250929"
 	if req.Model != "" {
 		model = req.Model
 	}

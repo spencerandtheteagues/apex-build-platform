@@ -286,11 +286,11 @@ func (g *GeminiClient) makeRequest(ctx context.Context, url string, req *geminiR
 func (g *GeminiClient) getModelForCapability(capability AICapability) string {
 	switch capability {
 	case CapabilityCodeCompletion:
-		return "gemini-2.0-flash-exp"  // Fast for real-time completions
+		return "gemini-2.0-flash"  // Fast for real-time completions
 	case CapabilityExplanation:
-		return "gemini-1.5-pro"        // Better for detailed explanations
+		return "gemini-2.0-flash"  // Stable flash model
 	default:
-		return "gemini-2.0-flash-exp"  // Default to flash model
+		return "gemini-2.0-flash"  // Default to flash model
 	}
 }
 
