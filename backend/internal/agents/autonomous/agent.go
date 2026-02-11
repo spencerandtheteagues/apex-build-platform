@@ -344,6 +344,8 @@ func (a *AutonomousAgent) planningPhase(task *AutonomousTask) error {
 
 	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Minute)
 	defer cancel()
+	ctx = withUserID(ctx, task.UserID)
+	ctx = withProjectID(ctx, task.ProjectID)
 
 	plan, err := a.planner.CreatePlan(ctx, task.Description)
 	if err != nil {
@@ -445,6 +447,8 @@ func (a *AutonomousAgent) executeStepWithRetry(task *AutonomousTask, step *PlanS
 		step.StartedAt = &now
 
 		ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
+		ctx = withUserID(ctx, task.UserID)
+		ctx = withProjectID(ctx, task.ProjectID)
 		result, err := a.executor.ExecuteStep(ctx, step, task)
 		cancel()
 
@@ -472,6 +476,8 @@ func (a *AutonomousAgent) executeStepWithRetry(task *AutonomousTask, step *PlanS
 
 		// Let the validator analyze the error and suggest fixes
 		ctx2, cancel2 := context.WithTimeout(a.ctx, 30*time.Second)
+		ctx2 = withUserID(ctx2, task.UserID)
+		ctx2 = withProjectID(ctx2, task.ProjectID)
 		analysis := a.validator.AnalyzeError(ctx2, err.Error(), step)
 		cancel2()
 
@@ -492,6 +498,8 @@ func (a *AutonomousAgent) validatingPhase(task *AutonomousTask) error {
 
 	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Minute)
 	defer cancel()
+	ctx = withUserID(ctx, task.UserID)
+	ctx = withProjectID(ctx, task.ProjectID)
 
 	// Get all artifacts/files created
 	task.mu.RLock()

@@ -34,10 +34,12 @@ func (a *AIRouterAdapter) Generate(ctx context.Context, provider ai.AIProvider, 
 
 	// Determine which router to use
 	targetRouter := a.router
+	isBYOK := false
 	if opts.UserID > 0 && a.byokManager != nil {
-		userRouter, _, err := a.byokManager.GetRouterForUser(opts.UserID)
+		userRouter, hasBYOK, err := a.byokManager.GetRouterForUser(opts.UserID)
 		if err == nil && userRouter != nil {
 			targetRouter = userRouter
+			isBYOK = hasBYOK
 			log.Printf("Using user-specific router for user %d", opts.UserID)
 		} else {
 			log.Printf("Failed to get user router, falling back to platform router: %v", err)
@@ -124,6 +126,9 @@ For code files, use this exact format:
 		Temperature: float32(temperature),
 		Provider:    aiProvider,
 	}
+	if opts.UserID > 0 {
+		request.UserID = fmt.Sprintf("%d", opts.UserID)
+	}
 
 	log.Printf("Calling AI router.Generate with capability=%s, provider=%s, prompt_length=%d, max_tokens=%d",
 		capability, aiProvider, len(fullPrompt), maxTokens)
@@ -138,6 +143,21 @@ For code files, use this exact format:
 	if response == nil || response.Content == "" {
 		log.Printf("AI generation returned empty response")
 		return "", fmt.Errorf("AI generation returned empty response")
+	}
+
+	// Record BYOK usage if applicable
+	if a.byokManager != nil && opts.UserID > 0 && response != nil {
+		inputTokens := 0
+		outputTokens := 0
+		cost := 0.0
+		if response.Usage != nil {
+			inputTokens = response.Usage.PromptTokens
+			outputTokens = response.Usage.CompletionTokens
+			cost = response.Usage.Cost
+		}
+		modelUsed := ai.GetModelUsed(response, request)
+		a.byokManager.RecordUsage(opts.UserID, nil, string(response.Provider), modelUsed, isBYOK,
+			inputTokens, outputTokens, cost, string(request.Capability), response.Duration, "success")
 	}
 
 	log.Printf("AI generation succeeded, response length: %d", len(response.Content))

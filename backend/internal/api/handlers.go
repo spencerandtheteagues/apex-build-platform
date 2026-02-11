@@ -23,14 +23,16 @@ type Server struct {
 	db       *db.Database
 	auth     *auth.AuthService
 	aiRouter *ai.AIRouter
+	byok     *ai.BYOKManager
 }
 
 // NewServer creates a new API server
-func NewServer(database *db.Database, authService *auth.AuthService, aiRouter *ai.AIRouter) *Server {
+func NewServer(database *db.Database, authService *auth.AuthService, aiRouter *ai.AIRouter, byokManager *ai.BYOKManager) *Server {
 	return &Server{
 		db:       database,
 		auth:     authService,
 		aiRouter: aiRouter,
+		byok:     byokManager,
 	}
 }
 
@@ -231,6 +233,8 @@ func (s *Server) AIGenerate(c *gin.Context) {
 		MaxTokens   int                    `json:"max_tokens,omitempty"`
 		Temperature float32                `json:"temperature,omitempty"`
 		ProjectID   string                 `json:"project_id,omitempty"`
+		Provider    string                 `json:"provider,omitempty"`
+		Model       string                 `json:"model,omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -239,6 +243,10 @@ func (s *Server) AIGenerate(c *gin.Context) {
 	}
 
 	// Create AI request
+	provider := strings.ToLower(request.Provider)
+	if provider == "auto" {
+		provider = ""
+	}
 	aiReq := &ai.AIRequest{
 		ID:          uuid.New().String(),
 		Capability:  ai.AICapability(request.Capability),
@@ -248,6 +256,8 @@ func (s *Server) AIGenerate(c *gin.Context) {
 		Context:     request.Context,
 		MaxTokens:   request.MaxTokens,
 		Temperature: request.Temperature,
+		Provider:    ai.AIProvider(provider),
+		Model:       request.Model,
 		UserID:      fmt.Sprintf("%v", userID),
 		ProjectID:   request.ProjectID,
 	}
@@ -256,8 +266,20 @@ func (s *Server) AIGenerate(c *gin.Context) {
 		aiReq.Temperature = 0.7
 	}
 
+	// Select router with BYOK awareness
+	targetRouter := s.aiRouter
+	isBYOK := false
+	if s.byok != nil {
+		if uid, ok := userID.(uint); ok && uid > 0 {
+			if userRouter, hasBYOK, err := s.byok.GetRouterForUser(uid); err == nil && userRouter != nil {
+				targetRouter = userRouter
+				isBYOK = hasBYOK
+			}
+		}
+	}
+
 	// Generate AI response
-	response, err := s.aiRouter.Generate(c.Request.Context(), aiReq)
+	response, err := targetRouter.Generate(c.Request.Context(), aiReq)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -295,6 +317,30 @@ func (s *Server) AIGenerate(c *gin.Context) {
 	}
 
 	s.db.DB.Create(dbRequest)
+
+	// Record BYOK usage if applicable
+	if s.byok != nil {
+		if uid, ok := userID.(uint); ok && uid > 0 && response != nil {
+			var projectID *uint
+			if request.ProjectID != "" {
+				if projectIDUint, err := strconv.ParseUint(request.ProjectID, 10, 32); err == nil {
+					pid := uint(projectIDUint)
+					projectID = &pid
+				}
+			}
+			inputTokens := 0
+			outputTokens := 0
+			cost := 0.0
+			if response.Usage != nil {
+				inputTokens = response.Usage.PromptTokens
+				outputTokens = response.Usage.CompletionTokens
+				cost = response.Usage.Cost
+			}
+			modelUsed := ai.GetModelUsed(response, aiReq)
+			s.byok.RecordUsage(uid, projectID, string(response.Provider), modelUsed, isBYOK,
+				inputTokens, outputTokens, cost, string(aiReq.Capability), response.Duration, "success")
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"request_id": response.ID,

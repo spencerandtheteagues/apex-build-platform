@@ -217,13 +217,13 @@ func (o *OllamaClient) getModel(req *AIRequest) string {
 	// Users should have these installed via `ollama pull <model>`
 	switch req.Capability {
 	case CapabilityCodeGeneration, CapabilityRefactoring, CapabilityArchitecture:
-		return "deepseek-r1:8b" // Best for complex code tasks
+		return "deepseek-r1:18b" // Best for complex code tasks (local)
 	case CapabilityCodeCompletion:
 		return "qwen3-coder:30b" // Fast for completions
 	case CapabilityCodeReview, CapabilityDebugging:
-		return "deepseek-r1:8b" // Good at analysis
+		return "deepseek-r1:18b" // Good at analysis (local)
 	default:
-		return "deepseek-r1:8b" // General purpose fallback
+		return "deepseek-r1:18b" // General purpose fallback
 	}
 }
 

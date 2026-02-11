@@ -22,6 +22,47 @@ type BYOKManager struct {
 	mu             sync.RWMutex
 }
 
+// modelOverrideClient applies a default model when the request doesn't specify one.
+// This is used for BYOK model preferences.
+type modelOverrideClient struct {
+	base         AIClient
+	defaultModel string
+}
+
+func (m *modelOverrideClient) Generate(ctx context.Context, req *AIRequest) (*AIResponse, error) {
+	if req == nil || m.defaultModel == "" || req.Model != "" {
+		resp, err := m.base.Generate(ctx, req)
+		if resp != nil && req != nil && req.Model != "" {
+			if resp.Metadata == nil {
+				resp.Metadata = map[string]interface{}{}
+			}
+			if _, exists := resp.Metadata["model"]; !exists {
+				resp.Metadata["model"] = req.Model
+			}
+		}
+		return resp, err
+	}
+
+	// Copy request to avoid mutating caller state
+	reqCopy := *req
+	reqCopy.Model = m.defaultModel
+	resp, err := m.base.Generate(ctx, &reqCopy)
+	if resp != nil {
+		if resp.Metadata == nil {
+			resp.Metadata = map[string]interface{}{}
+		}
+		if _, exists := resp.Metadata["model"]; !exists {
+			resp.Metadata["model"] = reqCopy.Model
+		}
+	}
+	return resp, err
+}
+
+func (m *modelOverrideClient) GetCapabilities() []AICapability { return m.base.GetCapabilities() }
+func (m *modelOverrideClient) GetProvider() AIProvider          { return m.base.GetProvider() }
+func (m *modelOverrideClient) Health(ctx context.Context) error { return m.base.Health(ctx) }
+func (m *modelOverrideClient) GetUsage() *ProviderUsage         { return m.base.GetUsage() }
+
 // NewBYOKManager creates a new BYOK manager
 func NewBYOKManager(db *gorm.DB, sm *secrets.SecretsManager, platformRouter *AIRouter) *BYOKManager {
 	// Auto-migrate BYOK tables
@@ -157,7 +198,8 @@ func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
 
 	// Build a custom router with user's keys
 	clients := make(map[AIProvider]AIClient)
-	hasBYOK := false
+	hasActiveKey := true
+	hasValidClient := false
 
 	for _, key := range keys {
 		apiKey, err := m.decryptUserKey(key)
@@ -168,26 +210,46 @@ func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
 
 		switch AIProvider(key.Provider) {
 		case ProviderClaude:
-			clients[ProviderClaude] = NewClaudeClient(apiKey)
-			hasBYOK = true
+			client := AIClient(NewClaudeClient(apiKey))
+			if key.ModelPreference != "" {
+				client = &modelOverrideClient{base: client, defaultModel: key.ModelPreference}
+			}
+			clients[ProviderClaude] = client
+			hasValidClient = true
 		case ProviderGPT4:
-			clients[ProviderGPT4] = NewOpenAIClient(apiKey)
-			hasBYOK = true
+			client := AIClient(NewOpenAIClient(apiKey))
+			if key.ModelPreference != "" {
+				client = &modelOverrideClient{base: client, defaultModel: key.ModelPreference}
+			}
+			clients[ProviderGPT4] = client
+			hasValidClient = true
 		case ProviderGemini:
-			clients[ProviderGemini] = NewGeminiClient(apiKey)
-			hasBYOK = true
+			client := AIClient(NewGeminiClient(apiKey))
+			if key.ModelPreference != "" {
+				client = &modelOverrideClient{base: client, defaultModel: key.ModelPreference}
+			}
+			clients[ProviderGemini] = client
+			hasValidClient = true
 		case ProviderGrok:
-			clients[ProviderGrok] = NewGrokClient(apiKey)
-			hasBYOK = true
+			client := AIClient(NewGrokClient(apiKey))
+			if key.ModelPreference != "" {
+				client = &modelOverrideClient{base: client, defaultModel: key.ModelPreference}
+			}
+			clients[ProviderGrok] = client
+			hasValidClient = true
 		case ProviderOllama:
 			// For Ollama, the "apiKey" is actually the base URL
-			clients[ProviderOllama] = NewOllamaClient(apiKey)
-			hasBYOK = true
+			client := AIClient(NewOllamaClient(apiKey))
+			if key.ModelPreference != "" {
+				client = &modelOverrideClient{base: client, defaultModel: key.ModelPreference}
+			}
+			clients[ProviderOllama] = client
+			hasValidClient = true
 		}
 	}
 
-	if !hasBYOK {
-		return m.platformRouter, false, nil
+	if !hasValidClient {
+		log.Printf("BYOK: No valid clients could be created for user %d (keys present but unusable)", userID)
 	}
 
 	// Fill in missing providers from platform router
@@ -208,13 +270,13 @@ func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
 				continue // Explicitly block global Ollama
 			}
 
-			if hasBYOK && !allowEmergencyFallback {
-				// Original strict policy: disable platform models to save costs
+			if hasActiveKey && !allowEmergencyFallback {
+				// Strict policy: disable platform models to save costs
 				if provider == ProviderClaude || provider == ProviderGPT4 ||
 					provider == ProviderGemini || provider == ProviderGrok {
 					continue
 				}
-			} else if hasBYOK && allowEmergencyFallback {
+			} else if hasActiveKey && allowEmergencyFallback {
 				// Emergency fallback policy: add platform models as fallback only
 				// They will only be used if BYOK provider fails completely
 				log.Printf("BYOK: Adding platform %s as emergency fallback for user %d", provider, userID)
@@ -241,7 +303,12 @@ func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
 		healthCheck: make(map[AIProvider]bool),
 	}
 
-	return router, true, nil
+	// Mark configured providers as healthy by default for BYOK routers.
+	for provider := range clients {
+		router.healthCheck[provider] = true
+	}
+
+	return router, hasActiveKey, nil
 }
 
 // RecordUsage logs an AI API call for cost tracking
@@ -378,6 +445,7 @@ func GetAvailableModels() map[string][]ModelInfo {
 			{ID: "grok-4-fast", Name: "Grok 4 Fast", Speed: "fast", CostTier: "low", Description: "Budget-friendly option"},
 		},
 		"ollama": {
+			{ID: "deepseek-r1:18b", Name: "DeepSeek-R1 (18b)", Speed: "variable", CostTier: "free", Description: "Reasoning model (local)"},
 			{ID: "deepseek-r1:8b", Name: "DeepSeek-R1 (8b)", Speed: "variable", CostTier: "free", Description: "Reasoning model (local)"},
 			{ID: "qwen3-coder:30b", Name: "Qwen 3 Coder (30b)", Speed: "variable", CostTier: "free", Description: "Advanced code model (local)"},
 			{ID: "deepseek-v3.2", Name: "DeepSeek-V3.2", Speed: "variable", CostTier: "free", Description: "Efficient long-context (local)"},

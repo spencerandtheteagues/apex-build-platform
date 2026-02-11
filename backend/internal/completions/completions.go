@@ -161,6 +161,7 @@ type CompletionCache struct {
 type CompletionService struct {
 	db           *gorm.DB
 	aiRouter     *ai.AIRouter
+	byokManager  *ai.BYOKManager
 	cache        *sync.Map
 	cacheEnabled bool
 	cacheTTL     time.Duration
@@ -197,10 +198,11 @@ type CompletionMetrics struct {
 }
 
 // NewCompletionService creates a new completion service
-func NewCompletionService(db *gorm.DB, aiRouter *ai.AIRouter) *CompletionService {
+func NewCompletionService(db *gorm.DB, aiRouter *ai.AIRouter, byokManager *ai.BYOKManager) *CompletionService {
 	svc := &CompletionService{
 		db:           db,
 		aiRouter:     aiRouter,
+		byokManager:  byokManager,
 		cache:        &sync.Map{},
 		cacheEnabled: true,
 		cacheTTL:     5 * time.Minute,
@@ -269,9 +271,19 @@ func (s *CompletionService) GetCompletions(ctx context.Context, userID uint, req
 		Language:    req.Language,
 		MaxTokens:   maxTokens,
 		Temperature: float32(temperature),
+		UserID:      fmt.Sprintf("%d", userID),
 	}
 
-	aiResp, err := s.aiRouter.Generate(ctx, aiReq)
+	targetRouter := s.aiRouter
+	isBYOK := false
+	if s.byokManager != nil && userID > 0 {
+		if userRouter, hasBYOK, err := s.byokManager.GetRouterForUser(userID); err == nil && userRouter != nil {
+			targetRouter = userRouter
+			isBYOK = hasBYOK
+		}
+	}
+
+	aiResp, err := targetRouter.Generate(ctx, aiReq)
 	if err != nil {
 		return nil, fmt.Errorf("AI completion failed: %w", err)
 	}
@@ -307,6 +319,25 @@ func (s *CompletionService) GetCompletions(ctx context.Context, userID uint, req
 
 	// Record metrics
 	s.metrics.RecordRequest(string(aiResp.Provider), time.Since(startTime).Milliseconds())
+
+	// Record BYOK usage if applicable
+	if s.byokManager != nil && userID > 0 {
+		var projectID *uint
+		if req.ProjectID != 0 {
+			projectID = &req.ProjectID
+		}
+		inputTokens := 0
+		outputTokens := 0
+		cost := 0.0
+		if aiResp.Usage != nil {
+			inputTokens = aiResp.Usage.PromptTokens
+			outputTokens = aiResp.Usage.CompletionTokens
+			cost = aiResp.Usage.Cost
+		}
+		modelUsed := ai.GetModelUsed(aiResp, aiReq)
+		s.byokManager.RecordUsage(userID, projectID, string(aiResp.Provider), modelUsed, isBYOK,
+			inputTokens, outputTokens, cost, string(aiReq.Capability), time.Since(startTime), "success")
+	}
 
 	return response, nil
 }

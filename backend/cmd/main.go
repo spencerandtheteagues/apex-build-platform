@@ -385,7 +385,7 @@ func main() {
 	log.Println("Debugging Service initialized (breakpoints, stepping, watch expressions)")
 
 	// Initialize AI Completions Service
-	completionService := completions.NewCompletionService(database.GetDB(), aiRouter)
+	completionService := completions.NewCompletionService(database.GetDB(), aiRouter, byokManager)
 	completionsHandler := handlers.NewCompletionsHandler(completionService)
 	log.Println("AI Completions Service initialized (inline ghost-text, multi-provider)")
 
@@ -429,7 +429,7 @@ func main() {
 
 	// Initialize Autonomous Agent System (CRITICAL Replit parity feature)
 	// This enables AI-powered autonomous building, testing, and deployment
-	autonomousAIAdapter := autonomous.NewAIAdapter(aiRouter)
+	autonomousAIAdapter := autonomous.NewAIAdapter(aiRouter, byokManager)
 	autonomousAgent := autonomous.NewAutonomousAgent(autonomousAIAdapter, projectsDir)
 	autonomousHandler := autonomous.NewHandler(autonomousAgent)
 	log.Println("Autonomous Agent System initialized (Replit Agent 3.0 parity)")
@@ -475,7 +475,7 @@ func main() {
 	}
 
 	// Initialize API server
-	server := api.NewServer(database, authService, aiRouter)
+	server := api.NewServer(database, authService, aiRouter, byokManager)
 
 	// Setup routes
 	router := setupRoutes(

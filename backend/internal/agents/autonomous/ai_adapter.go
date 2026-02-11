@@ -13,12 +13,16 @@ import (
 
 // AIAdapter implements the AIProvider interface using the existing AI router
 type AIAdapter struct {
-	router *ai.AIRouter
+	router      *ai.AIRouter
+	byokManager *ai.BYOKManager
 }
 
 // NewAIAdapter creates a new AI adapter
-func NewAIAdapter(router *ai.AIRouter) *AIAdapter {
-	return &AIAdapter{router: router}
+func NewAIAdapter(router *ai.AIRouter, byokManager *ai.BYOKManager) *AIAdapter {
+	return &AIAdapter{
+		router:      router,
+		byokManager: byokManager,
+	}
 }
 
 // Generate implements AIProvider.Generate
@@ -69,6 +73,19 @@ For code files, use this exact format:
 		temperature = 1.5
 	}
 
+	// Resolve user-specific router (BYOK-aware)
+	targetRouter := a.router
+	isBYOK := false
+	userID := userIDFromContext(ctx)
+	projectID := projectIDFromContext(ctx)
+	if userID > 0 && a.byokManager != nil {
+		userRouter, hasBYOK, err := a.byokManager.GetRouterForUser(userID)
+		if err == nil && userRouter != nil {
+			targetRouter = userRouter
+			isBYOK = hasBYOK
+		}
+	}
+
 	// Create AI request
 	request := &ai.AIRequest{
 		Capability:  capability,
@@ -76,11 +93,14 @@ For code files, use this exact format:
 		MaxTokens:   maxTokens,
 		Temperature: float32(temperature),
 	}
+	if userID > 0 {
+		request.UserID = fmt.Sprintf("%d", userID)
+	}
 
 	log.Printf("AIAdapter: Calling router with capability=%s, max_tokens=%d", capability, maxTokens)
 
 	// Execute request
-	response, err := a.router.Generate(ctx, request)
+	response, err := targetRouter.Generate(ctx, request)
 	if err != nil {
 		log.Printf("AIAdapter: Generation failed: %v", err)
 		return "", fmt.Errorf("AI generation failed: %w", err)
@@ -88,6 +108,21 @@ For code files, use this exact format:
 
 	if response == nil || response.Content == "" {
 		return "", fmt.Errorf("AI returned empty response")
+	}
+
+	// Record BYOK usage if applicable
+	if a.byokManager != nil && userID > 0 {
+		inputTokens := 0
+		outputTokens := 0
+		cost := 0.0
+		if response.Usage != nil {
+			inputTokens = response.Usage.PromptTokens
+			outputTokens = response.Usage.CompletionTokens
+			cost = response.Usage.Cost
+		}
+		modelUsed := ai.GetModelUsed(response, request)
+		a.byokManager.RecordUsage(userID, projectID, string(response.Provider), modelUsed, isBYOK,
+			inputTokens, outputTokens, cost, string(request.Capability), response.Duration, "success")
 	}
 
 	log.Printf("AIAdapter: Generation succeeded, response length %d", len(response.Content))
@@ -104,12 +139,28 @@ func (a *AIAdapter) Analyze(ctx context.Context, content string, instruction str
 Content to analyze:
 %s`, instruction, content)
 
+	// Resolve user-specific router (BYOK-aware)
+	targetRouter := a.router
+	isBYOK := false
+	userID := userIDFromContext(ctx)
+	projectID := projectIDFromContext(ctx)
+	if userID > 0 && a.byokManager != nil {
+		userRouter, hasBYOK, err := a.byokManager.GetRouterForUser(userID)
+		if err == nil && userRouter != nil {
+			targetRouter = userRouter
+			isBYOK = hasBYOK
+		}
+	}
+
 	// Use code review capability for analysis
 	request := &ai.AIRequest{
 		Capability:  ai.CapabilityCodeReview,
 		Prompt:      prompt,
 		MaxTokens:   opts.MaxTokens,
 		Temperature: float32(opts.Temperature),
+	}
+	if userID > 0 {
+		request.UserID = fmt.Sprintf("%d", userID)
 	}
 
 	if request.MaxTokens <= 0 {
@@ -119,13 +170,28 @@ Content to analyze:
 		request.Temperature = 0.3
 	}
 
-	response, err := a.router.Generate(ctx, request)
+	response, err := targetRouter.Generate(ctx, request)
 	if err != nil {
 		return "", fmt.Errorf("AI analysis failed: %w", err)
 	}
 
 	if response == nil {
 		return "", fmt.Errorf("AI returned nil response")
+	}
+
+	// Record BYOK usage if applicable
+	if a.byokManager != nil && userID > 0 {
+		inputTokens := 0
+		outputTokens := 0
+		cost := 0.0
+		if response.Usage != nil {
+			inputTokens = response.Usage.PromptTokens
+			outputTokens = response.Usage.CompletionTokens
+			cost = response.Usage.Cost
+		}
+		modelUsed := ai.GetModelUsed(response, request)
+		a.byokManager.RecordUsage(userID, projectID, string(response.Provider), modelUsed, isBYOK,
+			inputTokens, outputTokens, cost, string(request.Capability), response.Duration, "success")
 	}
 
 	return response.Content, nil
