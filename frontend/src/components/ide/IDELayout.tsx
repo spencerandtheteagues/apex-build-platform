@@ -850,6 +850,67 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
             </div>
           )}
 
+          {/* Project action buttons */}
+          {currentProject && (
+            <div className="flex items-center gap-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<Download size={14} />}
+                className="touch-target"
+                title="Download ZIP"
+                onClick={async () => {
+                  try {
+                    await apiService.exportProject(currentProject.id, currentProject.name)
+                  } catch (err) {
+                    console.error('Export failed:', err)
+                  }
+                }}
+              >
+                <span className="hidden lg:inline">ZIP</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<Play size={14} />}
+                className="touch-target"
+                title="Run Project"
+                onClick={async () => {
+                  try {
+                    setBottomPanelState('normal')
+                    setActiveBottomTab('terminal')
+                    await apiService.executeCode({
+                      project_id: currentProject.id,
+                      command: 'npm start',
+                      language: currentProject.language,
+                    })
+                  } catch (err) {
+                    console.error('Run failed:', err)
+                  }
+                }}
+              >
+                <span className="hidden lg:inline">Run</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<Share2 size={14} />}
+                className="touch-target"
+                title="Copy project URL"
+                onClick={() => {
+                  const url = `${window.location.origin}/project/${currentProject.id}`
+                  navigator.clipboard.writeText(url).then(() => {
+                    setTerminalOutput(prev => [...prev, `Project URL copied to clipboard: ${url}`])
+                  }).catch(() => {
+                    setTerminalOutput(prev => [...prev, `Project URL: ${url}`])
+                  })
+                }}
+              >
+                <span className="hidden lg:inline">Share</span>
+              </Button>
+            </div>
+          )}
+
           {/* User menu */}
           {user && (
             <div className="flex items-center gap-2">

@@ -1006,11 +1006,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
       case 'file:created':
         addSystemMessage(`Created: ${data.path}`)
-        setGeneratedFiles(prev => [...prev, {
-          path: data.path,
-          content: data.content || '',
-          language: data.language || 'text'
-        }])
+        if (data.content) {
+          setGeneratedFiles(prev => {
+            const filtered = prev.filter(f => f.path !== data.path)
+            return [...filtered, {
+              path: data.path,
+              content: data.content,
+              language: data.language || 'text'
+            }]
+          })
+        }
         break
 
       case 'build:checkpoint':
@@ -1031,10 +1036,24 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
       case 'build:completed':
         setIsBuilding(false)
-        addSystemMessage('Build completed successfully!')
+        addSystemMessage(`Build completed successfully! ${data.files_count || 0} files generated.`)
         setBuildState(prev => prev ? { ...prev, status: 'completed', progress: 100 } : null)
         if (data.preview_url) {
           setPreviewUrl(data.preview_url)
+        }
+        // Reconcile file manifest — merge any files not already in state
+        if (data.files && Array.isArray(data.files)) {
+          setGeneratedFiles(prev => {
+            const existingPaths = new Set(prev.map(f => f.path))
+            const missing = data.files
+              .filter((file: any) => file.path && file.content && !existingPaths.has(file.path))
+              .map((file: any) => ({
+                path: file.path,
+                content: file.content,
+                language: file.language || 'text'
+              }))
+            return missing.length > 0 ? [...prev, ...missing] : prev
+          })
         }
         break
 
@@ -1095,15 +1114,20 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       case 'code:generated':
         addSystemMessage(`${data.agent_role || 'Agent'} generated ${data.files_count || 0} file(s)`)
         if (data.files && Array.isArray(data.files)) {
-          data.files.forEach((file: any) => {
-            if (file.path) {
-              setGeneratedFiles(prev => [...prev, {
-                path: file.path,
-                content: file.content || '',
-                language: file.language || 'text'
-              }])
-            }
-          })
+          const newFiles = data.files
+            .filter((file: any) => file.path && file.content)
+            .map((file: any) => ({
+              path: file.path,
+              content: file.content,
+              language: file.language || 'text'
+            }))
+          if (newFiles.length > 0) {
+            setGeneratedFiles(prev => {
+              const existingPaths = new Set(newFiles.map((f: any) => f.path))
+              const filtered = prev.filter(f => !existingPaths.has(f.path))
+              return [...filtered, ...newFiles]
+            })
+          }
         }
         break
 

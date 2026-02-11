@@ -430,20 +430,24 @@ func (am *AgentManager) forceCompleteBuild(buildID string) {
 	// Create final checkpoint with all generated files
 	am.createCheckpoint(build, "Build Complete (Timeout)", "Build completed with available results")
 
-	// Broadcast completion
+	// Collect all generated files as safety net for the frontend
+	allFiles := am.collectGeneratedFiles(build)
+
+	// Broadcast completion with full file manifest
 	am.broadcast(buildID, &WSMessage{
 		Type:      WSBuildCompleted,
 		BuildID:   buildID,
 		Timestamp: now,
 		Data: map[string]any{
-			"status":       string(BuildCompleted),
-			"progress":     100,
-			"timed_out":    true,
-			"files_count":  len(am.collectGeneratedFiles(build)),
+			"status":      string(BuildCompleted),
+			"progress":    100,
+			"timed_out":   true,
+			"files_count": len(allFiles),
+			"files":       allFiles,
 		},
 	})
 
-	log.Printf("Build %s force completed with %d files", buildID, len(am.collectGeneratedFiles(build)))
+	log.Printf("Build %s force completed with %d files", buildID, len(allFiles))
 }
 
 // spawnAgent creates a new AI agent with a specific role
@@ -1451,6 +1455,7 @@ func (am *AgentManager) handleFileGeneration(build *Build, output *TaskOutput) {
 			Timestamp: time.Now(),
 			Data: map[string]any{
 				"path":     file.Path,
+				"content":  file.Content,
 				"language": file.Language,
 				"size":     file.Size,
 			},
@@ -1554,18 +1559,23 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 	// Create final checkpoint
 	am.createCheckpoint(build, "Build Complete", "All tasks completed successfully")
 
-	// Broadcast completion
+	// Collect all generated files as safety net for the frontend
+	allFiles := am.collectGeneratedFiles(build)
+
+	// Broadcast completion with full file manifest
 	am.broadcast(build.ID, &WSMessage{
 		Type:      WSBuildCompleted,
 		BuildID:   build.ID,
 		Timestamp: now,
 		Data: map[string]any{
-			"status":   string(build.Status),
-			"progress": build.Progress,
+			"status":      string(build.Status),
+			"progress":    build.Progress,
+			"files_count": len(allFiles),
+			"files":       allFiles,
 		},
 	})
 
-	log.Printf("Build %s completed with status: %s", build.ID, build.Status)
+	log.Printf("Build %s completed with status: %s (%d files)", build.ID, build.Status, len(allFiles))
 }
 
 // createCheckpoint saves a checkpoint of the current build state

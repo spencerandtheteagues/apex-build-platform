@@ -592,7 +592,10 @@ func (o *BuildOrchestrator) completeOrchestration(build *Build, state *Orchestra
 	build.UpdatedAt = now
 	build.mu.Unlock()
 
-	// Broadcast completion
+	// Collect all generated files as safety net for the frontend
+	allFiles := o.manager.collectGeneratedFiles(build)
+
+	// Broadcast completion with full file manifest
 	o.hub.Broadcast(build.ID, &WSMessage{
 		Type:      WSBuildCompleted,
 		BuildID:   build.ID,
@@ -602,10 +605,12 @@ func (o *BuildOrchestrator) completeOrchestration(build *Build, state *Orchestra
 			"progress":    100,
 			"duration_ms": time.Since(state.StartTime).Milliseconds(),
 			"message":     "Build completed successfully!",
+			"files_count": len(allFiles),
+			"files":       allFiles,
 		},
 	})
 
-	log.Printf("Orchestrator: Build %s completed in %v", build.ID, time.Since(state.StartTime))
+	log.Printf("Orchestrator: Build %s completed in %v (%d files)", build.ID, time.Since(state.StartTime), len(allFiles))
 }
 
 // handlePhaseError handles errors during a phase
