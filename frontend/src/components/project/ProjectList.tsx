@@ -63,6 +63,7 @@ export interface ProjectListProps {
   className?: string
   onProjectSelect?: (project: Project) => void
   onProjectCreate?: (project: Project) => void
+  onProjectRun?: (project: Project) => void
   showCreateButton?: boolean
 }
 
@@ -70,6 +71,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
   className,
   onProjectSelect,
   onProjectCreate,
+  onProjectRun,
   showCreateButton = true,
 }) => {
   const [projects, setProjects] = useState<Project[]>([])
@@ -79,6 +81,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
   const [filterLanguage, setFilterLanguage] = useState('')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
   const [newProject, setNewProject] = useState({
     name: '',
     description: '',
@@ -87,8 +90,17 @@ export const ProjectList: React.FC<ProjectListProps> = ({
     is_public: false
   })
   const [isCreating, setIsCreating] = useState(false)
+  const [editProject, setEditProject] = useState<{
+    id: number
+    name: string
+    description: string
+    language: string
+    framework: string
+    is_public: boolean
+  } | null>(null)
+  const [isUpdating, setIsUpdating] = useState(false)
 
-  const { user, apiService, setCurrentProject } = useStore()
+  const { user, apiService, setCurrentProject, currentProject } = useStore()
 
   // Load projects
   useEffect(() => {
@@ -170,6 +182,58 @@ export const ProjectList: React.FC<ProjectListProps> = ({
     onProjectSelect?.(project)
   }
 
+  const handleRunProject = (project: Project) => {
+    setCurrentProject(project)
+    if (onProjectRun) {
+      onProjectRun(project)
+      return
+    }
+    onProjectSelect?.(project)
+  }
+
+  const handleEditProject = (project: Project) => {
+    setEditProject({
+      id: project.id,
+      name: project.name || '',
+      description: project.description || '',
+      language: project.language || '',
+      framework: project.framework || '',
+      is_public: project.is_public || false
+    })
+    setShowEditModal(true)
+  }
+
+  const handleUpdateProject = async () => {
+    if (!editProject) return
+    if (!editProject.name.trim() || !editProject.language) return
+
+    setIsUpdating(true)
+    try {
+      const updated = await apiService.updateProject(editProject.id, {
+        name: editProject.name.trim(),
+        description: editProject.description.trim() || undefined,
+        language: editProject.language,
+        framework: editProject.framework || undefined,
+        is_public: editProject.is_public,
+        environment: {
+          language: editProject.language,
+          framework: editProject.framework
+        }
+      })
+
+      setProjects(prev => prev.map(p => (p.id === updated.id ? updated : p)))
+      if (currentProject?.id === updated.id) {
+        setCurrentProject(updated)
+      }
+      setShowEditModal(false)
+      setEditProject(null)
+    } catch (error) {
+      console.error('Failed to update project:', error)
+    } finally {
+      setIsUpdating(false)
+    }
+  }
+
   // Delete project
   const handleDeleteProject = async (project: Project) => {
     if (!confirm(`Are you sure you want to delete "${project.name}"?`)) return
@@ -221,7 +285,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
                 variant="ghost"
                 onClick={(e) => {
                   e.stopPropagation()
-                  // Edit project
+                  handleEditProject(project)
                 }}
                 icon={<Edit3 size={12} />}
               />
@@ -294,7 +358,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
                 variant="ghost"
                 onClick={(e) => {
                   e.stopPropagation()
-                  // Run project
+                  handleRunProject(project)
                 }}
                 icon={<Play size={12} />}
               />
@@ -592,6 +656,116 @@ export const ProjectList: React.FC<ProjectListProps> = ({
                   icon={<Plus size={16} />}
                 >
                   Create Project
+                </Button>
+              </div>
+            </CardFooter>
+          </Card>
+        </div>
+      )}
+
+      {/* Edit Project Modal */}
+      {showEditModal && editProject && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <Card variant="cyberpunk" className="w-full max-w-lg">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-cyan-400" />
+                Edit Project
+              </CardTitle>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <Input
+                label="Project Name"
+                placeholder="My Awesome Project"
+                value={editProject.name}
+                onChange={(e) => setEditProject(prev => prev ? ({ ...prev, name: e.target.value }) : prev)}
+                variant="cyberpunk"
+              />
+
+              <Input
+                label="Description (optional)"
+                placeholder="A brief description of your project"
+                value={editProject.description}
+                onChange={(e) => setEditProject(prev => prev ? ({ ...prev, description: e.target.value }) : prev)}
+                variant="cyberpunk"
+              />
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-300 block mb-2">
+                    Language
+                  </label>
+                  <select
+                    value={editProject.language}
+                    onChange={(e) => setEditProject(prev => prev ? ({
+                      ...prev,
+                      language: e.target.value,
+                      framework: ''
+                    }) : prev)}
+                    className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:border-cyan-400 focus:outline-none"
+                    required
+                  >
+                    <option value="">Select Language</option>
+                    {LANGUAGE_CONFIGS.map(lang => (
+                      <option key={lang.id} value={lang.id}>
+                        {lang.icon} {lang.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-gray-300 block mb-2">
+                    Framework (optional)
+                  </label>
+                  <select
+                    value={editProject.framework}
+                    onChange={(e) => setEditProject(prev => prev ? ({ ...prev, framework: e.target.value }) : prev)}
+                    className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:border-cyan-400 focus:outline-none"
+                    disabled={!editProject.language}
+                  >
+                    <option value="">Select Framework</option>
+                    {editProject.language && FRAMEWORKS[editProject.language as keyof typeof FRAMEWORKS]?.map(framework => (
+                      <option key={framework} value={framework}>
+                        {framework}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editProject.is_public}
+                  onChange={(e) => setEditProject(prev => prev ? ({ ...prev, is_public: e.target.checked }) : prev)}
+                  className="w-4 h-4 bg-gray-800 border border-gray-600 rounded focus:ring-cyan-400"
+                />
+                <span className="text-sm text-gray-300">Make project public</span>
+              </label>
+            </CardContent>
+
+            <CardFooter>
+              <div className="flex justify-end gap-2 w-full">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setShowEditModal(false)
+                    setEditProject(null)
+                  }}
+                  disabled={isUpdating}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleUpdateProject}
+                  loading={isUpdating}
+                  disabled={!editProject.name.trim() || !editProject.language}
+                  icon={<Edit3 size={16} />}
+                >
+                  Save Changes
                 </Button>
               </div>
             </CardFooter>

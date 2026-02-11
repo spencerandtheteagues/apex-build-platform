@@ -178,6 +178,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   const {
     user,
     currentProject,
+    setCurrentProject,
     files,
     isLoading,
     currentTheme: theme,
@@ -338,6 +339,12 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   const handleProjectSelect = useCallback((project: any) => {
     setViewMode('dashboard')
   }, [])
+
+  const handleProjectRun = useCallback((project: any) => {
+    setCurrentProject(project)
+    setViewMode('editor')
+    setShowPreview(true)
+  }, [setCurrentProject, setShowPreview])
 
   const handleDashboardShare = useCallback(() => {
     if (!currentProject) return
@@ -738,6 +745,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
             <ProjectList
               onProjectSelect={handleProjectSelect}
               onProjectCreate={handleProjectCreate}
+              onProjectRun={handleProjectRun}
               className="p-4 md:p-6"
             />
           </div>

@@ -61,6 +61,7 @@ interface SearchResults {
 interface SymbolResult {
   name: string
   kind: string
+  file_id?: number
   file_path: string
   line_number: number
   signature?: string
@@ -222,6 +223,15 @@ export default function CodeSearch({ projectId, onFileSelect, isOpen = true, onC
       setLoading(false)
     }
   }, [projectId, searchType, caseSensitive, wholeWord, useRegex, fileTypes, excludePaths])
+
+  const handleSymbolClick = useCallback((symbol: SymbolResult) => {
+    if (!onFileSelect) return
+    if (!symbol.file_id) {
+      setError('Unable to open symbol: missing file reference. Please retry the search.')
+      return
+    }
+    onFileSelect(symbol.file_id, symbol.line_number)
+  }, [onFileSelect])
 
   // Debounced search
   const handleSearchChange = (value: string) => {
@@ -486,7 +496,7 @@ export default function CodeSearch({ projectId, onFileSelect, isOpen = true, onC
             {symbols.map((symbol, idx) => (
               <button
                 key={idx}
-                onClick={() => onFileSelect?.(0, symbol.line_number)} // Would need file ID
+                onClick={() => handleSymbolClick(symbol)}
                 className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-800 rounded-lg text-left group"
               >
                 {symbolIcons[symbol.kind] || symbolIcons.default}

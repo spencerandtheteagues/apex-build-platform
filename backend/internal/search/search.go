@@ -109,6 +109,7 @@ type SearchStats struct {
 type SymbolResult struct {
 	Name       string `json:"name"`
 	Kind       string `json:"kind"` // function, class, variable, interface, etc.
+	FileID     uint   `json:"file_id"`
 	FilePath   string `json:"file_path"`
 	LineNumber int    `json:"line_number"`
 	Signature  string `json:"signature,omitempty"`
@@ -319,6 +320,7 @@ func (e *SearchEngine) SearchSymbols(ctx context.Context, query *SearchQuery) ([
 						symbols = append(symbols, &SymbolResult{
 							Name:       name,
 							Kind:       e.determineSymbolKind(pattern.String()),
+							FileID:     file.ID,
 							FilePath:   file.Path,
 							LineNumber: lineNum,
 						})

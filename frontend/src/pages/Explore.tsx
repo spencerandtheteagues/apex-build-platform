@@ -4,6 +4,7 @@
 import React, { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
+import { Project } from '@/types'
 import apiService from '@/services/api'
 import {
   Card,
@@ -33,7 +34,8 @@ import {
   Puzzle,
   Globe,
   Heart,
-  Brain
+  Brain,
+  X
 } from 'lucide-react'
 
 // Types
@@ -52,6 +54,7 @@ interface ProjectCard {
   updatedAt: string
   thumbnail?: string
   verified?: boolean
+  isStarred?: boolean
 }
 
 export const ExplorePage = () => {
@@ -61,26 +64,77 @@ export const ExplorePage = () => {
   const [projects, setProjects] = useState<ProjectCard[]>([])
   const [showFilters, setShowFilters] = useState(false)
   const [likedProjects, setLikedProjects] = useState<Set<string>>(new Set())
+  const [showPublishModal, setShowPublishModal] = useState(false)
+  const [publishLoading, setPublishLoading] = useState(false)
+  const [publishError, setPublishError] = useState<string | null>(null)
+  const [publishSuccess, setPublishSuccess] = useState<string | null>(null)
+  const [publishSearch, setPublishSearch] = useState('')
+  const [userProjects, setUserProjects] = useState<Project[]>([])
 
-  const { createProject, setCurrentProject } = useStore()
+  const { setCurrentProject } = useStore()
 
-  const handleLike = (projectId: string) => {
+  const handleLike = async (projectId: string) => {
+    const numericId = Number(projectId)
+    if (!Number.isFinite(numericId)) return
+
+    const isLiked = likedProjects.has(projectId)
+
     setLikedProjects(prev => {
       const next = new Set(prev)
-      if (next.has(projectId)) {
+      if (isLiked) {
         next.delete(projectId)
       } else {
         next.add(projectId)
       }
       return next
     })
+
     setProjects(prev => prev.map(p =>
-      p.id === projectId ? { ...p, stars: p.stars + (likedProjects.has(projectId) ? -1 : 1) } : p
+      p.id === projectId
+        ? { ...p, stars: Math.max(0, p.stars + (isLiked ? -1 : 1)), isStarred: !isLiked }
+        : p
     ))
+
+    try {
+      if (isLiked) {
+        await apiService.unstarProject(numericId)
+      } else {
+        await apiService.starProject(numericId)
+      }
+    } catch (error) {
+      console.error('Failed to update star:', error)
+      setLikedProjects(prev => {
+        const next = new Set(prev)
+        if (isLiked) {
+          next.add(projectId)
+        } else {
+          next.delete(projectId)
+        }
+        return next
+      })
+      setProjects(prev => prev.map(p =>
+        p.id === projectId
+          ? { ...p, stars: Math.max(0, p.stars + (isLiked ? 1 : -1)), isStarred: isLiked }
+          : p
+      ))
+    }
   }
 
-  const handlePublish = () => {
-    alert('To publish a project, open it in the IDE and use the Deploy menu.')
+  const handlePublish = async () => {
+    setPublishError(null)
+    setPublishSuccess(null)
+    setPublishSearch('')
+    setShowPublishModal(true)
+    setPublishLoading(true)
+    try {
+      const projectsData = await apiService.getProjects()
+      setUserProjects(projectsData)
+    } catch (error) {
+      console.error('Failed to load projects:', error)
+      setPublishError('Failed to load your projects.')
+    } finally {
+      setPublishLoading(false)
+    }
   }
 
   // Fetch projects from API
@@ -101,7 +155,7 @@ export const ExplorePage = () => {
         
         // Transform API response to UI model if necessary, or use directly if compatible
         // Assuming API returns compatible ProjectWithStats objects
-        setProjects(response.projects.map(p => ({
+        const mapped = response.projects.map(p => ({
           id: String(p.id),
           title: p.name,
           description: p.description || 'No description provided',
@@ -114,8 +168,12 @@ export const ExplorePage = () => {
           views: p.stats?.view_count || 0,
           tags: p.topics || [p.language].filter(Boolean) as string[],
           updatedAt: new Date(p.updated_at).toLocaleDateString(),
-          verified: p.is_verified || false
-        })))
+          verified: p.is_verified || false,
+          isStarred: p.is_starred || false
+        }))
+
+        setProjects(mapped)
+        setLikedProjects(new Set(mapped.filter(p => p.isStarred).map(p => p.id)))
       } catch (error) {
         console.error('Failed to fetch projects:', error)
       } finally {
@@ -143,6 +201,29 @@ export const ExplorePage = () => {
       alert('Failed to fork project. Please try again.')
     }
   }
+
+  const handleTogglePublish = async (project: Project) => {
+    setPublishError(null)
+    setPublishSuccess(null)
+    setPublishLoading(true)
+    try {
+      const updated = await apiService.updateProject(project.id, {
+        is_public: !project.is_public
+      })
+      setUserProjects(prev => prev.map(p => (p.id === updated.id ? updated : p)))
+      setPublishSuccess(updated.is_public ? 'Project published successfully.' : 'Project unpublished successfully.')
+    } catch (error) {
+      console.error('Failed to update project visibility:', error)
+      setPublishError('Failed to update project visibility.')
+    } finally {
+      setPublishLoading(false)
+    }
+  }
+
+  const filteredUserProjects = userProjects.filter(project =>
+    project.name.toLowerCase().includes(publishSearch.toLowerCase()) ||
+    project.description?.toLowerCase().includes(publishSearch.toLowerCase())
+  )
 
   return (
     <div className="h-full overflow-y-auto bg-black text-white p-6 pb-20">
@@ -321,6 +402,97 @@ export const ExplorePage = () => {
           </div>
         )}
       </div>
+
+      {showPublishModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <Card variant="cyberpunk" padding="lg" className="w-full max-w-2xl">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+              <CardTitle className="text-white">Publish a Project</CardTitle>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => {
+                  setShowPublishModal(false)
+                  setPublishSearch('')
+                  setPublishError(null)
+                  setPublishSuccess(null)
+                }}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Search className="w-4 h-4 text-gray-500" />
+                <input
+                  type="text"
+                  placeholder="Search your projects..."
+                  value={publishSearch}
+                  onChange={(e) => setPublishSearch(e.target.value)}
+                  className="flex-1 bg-gray-900/50 border border-gray-800 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors"
+                />
+              </div>
+
+              {publishError && (
+                <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+                  {publishError}
+                </div>
+              )}
+              {publishSuccess && (
+                <div className="text-sm text-green-400 bg-green-500/10 border border-green-500/30 rounded-lg px-3 py-2">
+                  {publishSuccess}
+                </div>
+              )}
+
+              {publishLoading && userProjects.length === 0 ? (
+                <div className="flex items-center justify-center py-8 text-gray-400">
+                  Loading projects...
+                </div>
+              ) : filteredUserProjects.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  No projects found.
+                </div>
+              ) : (
+                <div className="max-h-[50vh] overflow-y-auto space-y-3 pr-1">
+                  {filteredUserProjects.map(project => (
+                    <div
+                      key={project.id}
+                      className="flex items-center justify-between gap-4 bg-gray-900/60 border border-gray-800 rounded-lg p-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-white font-medium truncate">{project.name}</span>
+                          {project.is_public ? (
+                            <Badge variant="success" size="xs">
+                              Public
+                            </Badge>
+                          ) : (
+                            <Badge variant="neutral" size="xs">
+                              Private
+                            </Badge>
+                          )}
+                        </div>
+                        {project.description && (
+                          <p className="text-xs text-gray-500 truncate">{project.description}</p>
+                        )}
+                      </div>
+                      <Button
+                        size="xs"
+                        variant={project.is_public ? 'ghost' : 'primary'}
+                        onClick={() => handleTogglePublish(project)}
+                        disabled={publishLoading}
+                      >
+                        {project.is_public ? 'Unpublish' : 'Publish'}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

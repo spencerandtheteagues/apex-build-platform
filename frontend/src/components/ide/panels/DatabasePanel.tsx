@@ -110,6 +110,25 @@ export const DatabasePanel: React.FC<DatabasePanelProps> = ({
     }
   }
 
+  const handleResetCredentials = async (dbId: number) => {
+    const confirmed = window.confirm('Reset database credentials? Existing connections will stop working.')
+    if (!confirmed) return
+
+    setLoading(true)
+    setError(null)
+    try {
+      const newCredentials = await apiService.resetDatabaseCredentials(projectId, dbId)
+      setCredentials(newCredentials)
+      setShowCredentials(true)
+      fetchDatabases(true)
+    } catch (err) {
+      console.error('Failed to reset credentials:', err)
+      setError('Failed to reset credentials')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // Handle delete
   const handleDelete = async (dbId: number) => {
     if (!window.confirm('Are you sure you want to delete this database? All data will be permanently lost.')) return
@@ -144,6 +163,12 @@ export const DatabasePanel: React.FC<DatabasePanelProps> = ({
           New Database
         </Button>
       </div>
+
+      {error && (
+        <div className="mx-4 mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+          {error}
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
         {loading && databases.length === 0 ? (
@@ -336,6 +361,12 @@ export const DatabasePanel: React.FC<DatabasePanelProps> = ({
           </div>
         </div>
 
+        {error && (
+          <div className="mx-4 mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+            {error}
+          </div>
+        )}
+
         <div className="flex-1 overflow-auto p-4 space-y-6">
           {/* Metrics Summary */}
           <div className="grid grid-cols-2 gap-4">
@@ -416,9 +447,9 @@ export const DatabasePanel: React.FC<DatabasePanelProps> = ({
               variant="outline"
               icon={<RefreshCw size={14} />}
               disabled={selectedDb.status !== 'active'}
-              onClick={() => {}}
+              onClick={() => handleResetCredentials(selectedDb.id)}
             >
-              Restart Instance
+              Reset Credentials
             </Button>
           </div>
         </div>
