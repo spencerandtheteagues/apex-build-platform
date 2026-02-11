@@ -105,6 +105,7 @@ func (am *AgentManager) CreateBuild(userID uint, req *BuildRequest) (*Build, err
 		Status:      BuildPending,
 		Mode:        mode,
 		Description: req.Description,
+		TechStack:   req.TechStack,
 		Agents:      make(map[string]*Agent),
 		Tasks:       make([]*Task, 0),
 		Checkpoints: make([]*Checkpoint, 0),
@@ -1882,11 +1883,19 @@ Analyze what went wrong and use a different approach this time.
 `, prevErrors)
 	}
 
+	techStackContext := ""
+	if build != nil && build.TechStack != nil {
+		if summary := formatTechStackSummary(build.TechStack); summary != "" {
+			techStackContext = fmt.Sprintf("\nTech Stack Preference: %s\n", summary)
+		}
+	}
+
 	return fmt.Sprintf(`Task: %s
 
 Description: %s
 
 App being built: %s
+%s
 %s
 OUTPUT FORMAT - CRITICAL:
 For EVERY file you create, use this EXACT format:
@@ -1931,7 +1940,32 @@ FORBIDDEN OUTPUTS:
 - Incomplete implementations
 
 Build the REAL, COMPLETE implementation now.`,
-		task.Type, task.Description, build.Description, errorContext)
+		task.Type, task.Description, build.Description, techStackContext, errorContext)
+}
+
+func formatTechStackSummary(stack *TechStack) string {
+	if stack == nil {
+		return ""
+	}
+
+	parts := make([]string, 0, 5)
+	if stack.Frontend != "" {
+		parts = append(parts, fmt.Sprintf("Frontend: %s", stack.Frontend))
+	}
+	if stack.Backend != "" {
+		parts = append(parts, fmt.Sprintf("Backend: %s", stack.Backend))
+	}
+	if stack.Database != "" {
+		parts = append(parts, fmt.Sprintf("Database: %s", stack.Database))
+	}
+	if stack.Styling != "" {
+		parts = append(parts, fmt.Sprintf("Styling: %s", stack.Styling))
+	}
+	if len(stack.Extras) > 0 {
+		parts = append(parts, fmt.Sprintf("Extras: %s", strings.Join(stack.Extras, ", ")))
+	}
+
+	return strings.Join(parts, " | ")
 }
 
 func (am *AgentManager) getSystemPrompt(role AgentRole) string {

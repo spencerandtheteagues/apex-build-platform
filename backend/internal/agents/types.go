@@ -150,6 +150,7 @@ type Build struct {
 	Status      BuildStatus       `json:"status"`
 	Mode        BuildMode         `json:"mode"`
 	Description string            `json:"description"` // User's app description
+	TechStack   *TechStack        `json:"tech_stack,omitempty"`
 	Plan        *BuildPlan        `json:"plan,omitempty"`
 	Agents      map[string]*Agent `json:"agents"`
 	Tasks       []*Task           `json:"tasks"`
