@@ -100,7 +100,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
   } | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
 
-  const { user, apiService, setCurrentProject, currentProject } = useStore()
+  const { apiService, setCurrentProject, currentProject } = useStore()
 
   // Load projects
   useEffect(() => {
