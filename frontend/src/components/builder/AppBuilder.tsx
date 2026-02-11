@@ -797,6 +797,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   const [isCreatingProject, setIsCreatingProject] = useState(false)
   const AUTO_STACK_ID = 'auto'
   const [selectedStack, setSelectedStack] = useState<Set<string>>(new Set([AUTO_STACK_ID]))
+  const [powerMode, setPowerMode] = useState<'fast' | 'balanced' | 'max'>('fast')
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
@@ -1267,12 +1268,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
     addSystemMessage(`Starting ${buildMode} build for: "${appDescription}"`)
     addSystemMessage(`Tech stack: ${buildTechStackSummary()}`)
+    addSystemMessage(`AI Power: ${powerMode === 'max' ? 'MAX POWER (Opus 4.6 / GPT-5.2 Codex / Gemini 3 Pro)' : powerMode === 'balanced' ? 'Balanced (Sonnet 4.5 / GPT-5 / Gemini 3 Flash)' : 'Fast & Cheap (Haiku 4.5 / GPT-4o Mini / Flash Lite)'}`)
 
     try {
       const techStackOverride = buildTechStackOverride()
       const response = await apiService.startBuild({
         description: appDescription,
         mode: buildMode,
+        power_mode: powerMode,
         tech_stack: techStackOverride || undefined,
       })
 
@@ -1672,6 +1675,53 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                   <p className="mt-3 text-xs text-gray-500">
                     Selection: <span className="text-gray-300">{buildTechStackSummary()}</span>
                   </p>
+                </div>
+
+                {/* AI Power Mode */}
+                <div className="mb-10">
+                  <h3 className="text-xl font-bold text-gray-200 mb-5 flex items-center gap-3">
+                    <Sparkles className="w-6 h-6 text-red-400" />
+                    AI Power Mode
+                  </h3>
+                  <div className="grid grid-cols-3 gap-3">
+                    {([
+                      { id: 'fast' as const, label: 'Fast & Cheap', icon: <Zap className="w-5 h-5" />, desc: 'Haiku 4.5 / GPT-4o Mini / Gemini Flash Lite', color: 'green' },
+                      { id: 'balanced' as const, label: 'Balanced', icon: <Sparkles className="w-5 h-5" />, desc: 'Sonnet 4.5 / GPT-5 / Gemini 3 Flash', color: 'yellow' },
+                      { id: 'max' as const, label: 'Max Power', icon: <Rocket className="w-5 h-5" />, desc: 'Opus 4.6 / GPT-5.2 Codex / Gemini 3 Pro', color: 'red' },
+                    ]).map((mode) => (
+                      <button
+                        key={mode.id}
+                        onClick={() => setPowerMode(mode.id)}
+                        className={cn(
+                          'relative group p-4 rounded-xl border-2 transition-all duration-200 text-left',
+                          powerMode === mode.id
+                            ? mode.color === 'green' ? 'border-green-500/60 bg-green-500/10 shadow-lg shadow-green-500/10'
+                              : mode.color === 'yellow' ? 'border-yellow-500/60 bg-yellow-500/10 shadow-lg shadow-yellow-500/10'
+                              : 'border-red-500/60 bg-red-500/10 shadow-lg shadow-red-500/10'
+                            : 'border-gray-700/50 bg-gray-900/30 hover:border-gray-600/60'
+                        )}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={cn(
+                            powerMode === mode.id
+                              ? mode.color === 'green' ? 'text-green-400'
+                                : mode.color === 'yellow' ? 'text-yellow-400'
+                                : 'text-red-400'
+                              : 'text-gray-500'
+                          )}>
+                            {mode.icon}
+                          </span>
+                          <span className={cn(
+                            'font-bold text-sm',
+                            powerMode === mode.id ? 'text-white' : 'text-gray-400'
+                          )}>
+                            {mode.label}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 leading-tight">{mode.desc}</p>
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Epic Build Button */}

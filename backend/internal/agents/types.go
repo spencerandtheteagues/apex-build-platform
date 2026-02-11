@@ -149,6 +149,7 @@ type Build struct {
 	ProjectID   *uint             `json:"project_id,omitempty"`
 	Status      BuildStatus       `json:"status"`
 	Mode        BuildMode         `json:"mode"`
+	PowerMode   PowerMode         `json:"power_mode"`
 	Description string            `json:"description"` // User's app description
 	TechStack   *TechStack        `json:"tech_stack,omitempty"`
 	Plan        *BuildPlan        `json:"plan,omitempty"`
@@ -190,6 +191,15 @@ type BuildMode string
 const (
 	ModeFast BuildMode = "fast" // Quick build, ~3-5 minutes
 	ModeFull BuildMode = "full" // Comprehensive build, 10+ minutes
+)
+
+// PowerMode controls which AI models are used during the build
+type PowerMode string
+
+const (
+	PowerMax      PowerMode = "max"      // Latest, most powerful models (Claude Opus, GPT-5.2-Codex, Gemini 3 Pro)
+	PowerBalanced PowerMode = "balanced" // Best balance of quality and speed (Sonnet 4.5, GPT-5, Gemini 3 Flash)
+	PowerFast     PowerMode = "fast"     // Cheapest, fastest models (Haiku 4.5, GPT-4o-mini, Gemini 2.5 Flash Lite)
 )
 
 // BuildPlan contains the structured plan for building an app
@@ -324,9 +334,10 @@ type WSMessage struct {
 
 // BuildRequest is the input for starting a new build
 type BuildRequest struct {
-	Description string    `json:"description" binding:"required"`
-	Mode        BuildMode `json:"mode"`
-	ProjectName string    `json:"project_name,omitempty"`
+	Description string     `json:"description" binding:"required"`
+	Mode        BuildMode  `json:"mode"`
+	PowerMode   PowerMode  `json:"power_mode,omitempty"` // max, balanced, fast — controls model quality
+	ProjectName string     `json:"project_name,omitempty"`
 	TechStack   *TechStack `json:"tech_stack,omitempty"` // Optional override
 }
 

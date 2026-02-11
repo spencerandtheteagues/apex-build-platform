@@ -354,6 +354,7 @@ func (am *OptimizedAgentManager) executeTaskCore(ctx context.Context, task *Task
 		MaxTokens:    8000,
 		Temperature:  0.7,
 		SystemPrompt: systemPrompt,
+		PowerMode:    build.PowerMode,
 	})
 
 	if err != nil {

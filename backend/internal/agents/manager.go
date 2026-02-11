@@ -41,11 +41,12 @@ type AIRouter interface {
 
 // GenerateOptions for AI generation requests
 type GenerateOptions struct {
-	UserID      uint
-	MaxTokens   int
-	Temperature float64
+	UserID       uint
+	MaxTokens    int
+	Temperature  float64
 	SystemPrompt string
-	Context     []Message
+	Context      []Message
+	PowerMode    PowerMode // Controls which model tier is used (max/balanced/fast)
 }
 
 // Message for AI context
@@ -99,11 +100,17 @@ func (am *AgentManager) CreateBuild(userID uint, req *BuildRequest) (*Build, err
 		mode = ModeFull
 	}
 
+	powerMode := req.PowerMode
+	if powerMode == "" {
+		powerMode = PowerFast // Default to cheapest models when not explicitly set
+	}
+
 	build := &Build{
 		ID:          buildID,
 		UserID:      userID,
 		Status:      BuildPending,
 		Mode:        mode,
+		PowerMode:   powerMode,
 		Description: req.Description,
 		TechStack:   req.TechStack,
 		Agents:      make(map[string]*Agent),
@@ -959,6 +966,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		MaxTokens:    maxTokens,
 		Temperature:  0.7,
 		SystemPrompt: systemPrompt,
+		PowerMode:    build.PowerMode,
 	})
 
 	if err != nil {
@@ -1702,6 +1710,7 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 		MaxTokens:    1000,
 		Temperature:  0.7,
 		SystemPrompt: am.getSystemPrompt(RoleLead),
+		PowerMode:    build.PowerMode,
 	})
 
 	if err != nil {

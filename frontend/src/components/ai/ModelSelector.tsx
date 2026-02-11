@@ -61,14 +61,19 @@ export default function ModelSelector({ value, onChange, compact = false, classN
         // Fallback models if API is unavailable - Updated January 2026
         setModels({
           claude: [
-            { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', speed: 'medium', cost_tier: 'medium', description: 'Latest balanced model' },
+            { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', speed: 'slow', cost_tier: 'high', description: 'Most powerful — reasoning & coding' },
+            { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', speed: 'medium', cost_tier: 'medium', description: 'Balanced quality and speed' },
             { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', speed: 'fast', cost_tier: 'low', description: 'Fast and affordable' },
           ],
           gpt4: [
-            { id: 'gpt-5', name: 'GPT-5', speed: 'medium', cost_tier: 'medium', description: 'Latest OpenAI flagship' },
+            { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', speed: 'medium', cost_tier: 'high', description: 'Most powerful — agentic coding' },
+            { id: 'gpt-5', name: 'GPT-5', speed: 'medium', cost_tier: 'medium', description: 'Strong general purpose' },
+            { id: 'gpt-4o-mini', name: 'GPT-4o Mini', speed: 'fast', cost_tier: 'low', description: 'Fast and cheap' },
           ],
           gemini: [
-            { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', speed: 'fast', cost_tier: 'low', description: 'Fast and capable' },
+            { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', speed: 'slow', cost_tier: 'high', description: 'State-of-the-art reasoning' },
+            { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', speed: 'medium', cost_tier: 'medium', description: 'Fast frontier performance' },
+            { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', speed: 'fast', cost_tier: 'low', description: 'Cheapest and fastest' },
           ],
           ollama: [
             { id: 'deepseek-r1:18b', name: 'DeepSeek-R1 (18b)', speed: 'variable', cost_tier: 'free', description: 'Reasoning model (local)' },

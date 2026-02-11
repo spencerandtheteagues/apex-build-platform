@@ -419,18 +419,23 @@ func (m *BYOKManager) decryptUserKey(key models.UserAPIKey) (string, error) {
 	return m.secretsManager.Decrypt(key.UserID, key.EncryptedKey, key.KeySalt)
 }
 
-// GetAvailableModels returns available models per provider
+// GetAvailableModels returns available models per provider (updated Feb 2026)
 func GetAvailableModels() map[string][]ModelInfo {
 	return map[string][]ModelInfo{
 		"claude": {
-			{ID: "claude-sonnet-4-5-20250929", Name: "Claude Sonnet 4.5", Speed: "medium", CostTier: "medium", Description: "Latest balanced model"},
+			{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", Speed: "slow", CostTier: "high", Description: "Most powerful — reasoning, coding, architecture"},
+			{ID: "claude-sonnet-4-5-20250929", Name: "Claude Sonnet 4.5", Speed: "medium", CostTier: "medium", Description: "Balanced quality and speed"},
 			{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", Speed: "fast", CostTier: "low", Description: "Fast and affordable"},
 		},
 		"gpt4": {
-			{ID: "gpt-5", Name: "GPT-5", Speed: "medium", CostTier: "medium", Description: "Latest OpenAI flagship"},
+			{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Speed: "medium", CostTier: "high", Description: "Most powerful — agentic coding"},
+			{ID: "gpt-5", Name: "GPT-5", Speed: "medium", CostTier: "medium", Description: "Strong general purpose"},
+			{ID: "gpt-4o-mini", Name: "GPT-4o Mini", Speed: "fast", CostTier: "low", Description: "Fast and cheap"},
 		},
 		"gemini": {
-			{ID: "gemini-2.0-flash", Name: "Gemini 2.0 Flash", Speed: "fast", CostTier: "low", Description: "Fast and capable"},
+			{ID: "gemini-3-pro-preview", Name: "Gemini 3 Pro", Speed: "slow", CostTier: "high", Description: "State-of-the-art reasoning"},
+			{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash", Speed: "medium", CostTier: "medium", Description: "Fast frontier performance"},
+			{ID: "gemini-2.5-flash-lite", Name: "Gemini 2.5 Flash Lite", Speed: "fast", CostTier: "low", Description: "Cheapest and fastest"},
 		},
 		"ollama": {
 			{ID: "deepseek-r1:18b", Name: "DeepSeek-R1 (18b)", Speed: "variable", CostTier: "free", Description: "Reasoning model (local)"},

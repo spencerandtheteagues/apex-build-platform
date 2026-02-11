@@ -352,6 +352,7 @@ export class ApiService {
   async startBuild(data: {
     description: string
     mode: 'fast' | 'full'
+    power_mode?: 'fast' | 'balanced' | 'max'
     tech_stack?: {
       frontend?: string
       backend?: string

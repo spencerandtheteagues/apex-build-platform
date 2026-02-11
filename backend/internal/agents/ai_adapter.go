@@ -12,6 +12,44 @@ import (
 	"apex-build/internal/ai"
 )
 
+// modelsByPowerMode maps each provider + power mode to the correct model ID
+// Updated February 2026 with latest verified models
+var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
+	ai.ProviderClaude: {
+		PowerMax:      "claude-opus-4-6",
+		PowerBalanced: "claude-sonnet-4-5-20250929",
+		PowerFast:     "claude-haiku-4-5-20251001",
+	},
+	ai.ProviderGPT4: {
+		PowerMax:      "gpt-5.2-codex",
+		PowerBalanced: "gpt-5",
+		PowerFast:     "gpt-4o-mini",
+	},
+	ai.ProviderGemini: {
+		PowerMax:      "gemini-3-pro-preview",
+		PowerBalanced: "gemini-3-flash-preview",
+		PowerFast:     "gemini-2.5-flash-lite",
+	},
+	ai.ProviderOllama: {
+		PowerMax:      "deepseek-r1:18b",
+		PowerBalanced: "deepseek-r1:8b",
+		PowerFast:     "deepseek-r1:8b",
+	},
+}
+
+// selectModelForPowerMode returns the best model ID for a given provider and power mode
+func selectModelForPowerMode(provider ai.AIProvider, mode PowerMode) string {
+	if mode == "" {
+		mode = PowerFast // Default to cheapest
+	}
+	if providerModels, ok := modelsByPowerMode[provider]; ok {
+		if model, ok := providerModels[mode]; ok {
+			return model
+		}
+	}
+	return "" // Empty string = let the AI client pick its own default
+}
+
 // AIRouterAdapter adapts the existing AI router to the agent system interface
 type AIRouterAdapter struct {
 	router      *ai.AIRouter
@@ -118,8 +156,12 @@ For code files, use this exact format:
 		temperature = 1.5
 	}
 
+	// Select model based on power mode
+	model := selectModelForPowerMode(aiProvider, opts.PowerMode)
+
 	// Create AI request
 	request := &ai.AIRequest{
+		Model:       model,
 		Capability:  capability,
 		Prompt:      fullPrompt,
 		MaxTokens:   maxTokens,
@@ -130,8 +172,8 @@ For code files, use this exact format:
 		request.UserID = fmt.Sprintf("%d", opts.UserID)
 	}
 
-	log.Printf("Calling AI router.Generate with capability=%s, provider=%s, prompt_length=%d, max_tokens=%d",
-		capability, aiProvider, len(fullPrompt), maxTokens)
+	log.Printf("Calling AI router.Generate with capability=%s, provider=%s, model=%s, prompt_length=%d, max_tokens=%d",
+		capability, aiProvider, model, len(fullPrompt), maxTokens)
 
 	// Execute the request using Generate method on the selected router
 	response, err := targetRouter.Generate(ctx, request)

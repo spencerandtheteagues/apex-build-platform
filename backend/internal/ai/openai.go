@@ -272,14 +272,15 @@ func (o *OpenAIClient) getModelForRequest(req *AIRequest) string {
 }
 
 // getModelForCapability selects the best OpenAI model for the capability
+// This is the fallback when no explicit model is set via power mode
 func (o *OpenAIClient) getModelForCapability(capability AICapability) string {
 	switch capability {
 	case CapabilityCodeGeneration, CapabilityRefactoring, CapabilityTesting:
-		return "gpt-5"  // GPT-5 for complex code tasks
+		return "gpt-4o-mini" // Default to fast/cheap model; power mode overrides for premium
 	case CapabilityCodeCompletion:
-		return "gpt-5"  // GPT-5 for completions
+		return "gpt-4o-mini" // Fast completions
 	default:
-		return "gpt-5"  // Default to GPT-5
+		return "gpt-4o-mini" // Default to cheapest
 	}
 }
 
@@ -303,7 +304,7 @@ func (o *OpenAIClient) GetProvider() AIProvider {
 // Health checks if OpenAI API is accessible
 func (o *OpenAIClient) Health(ctx context.Context) error {
 	testReq := &openAIRequest{
-		Model: "gpt-5",
+		Model: "gpt-4o-mini", // Use cheapest model for health checks
 		Messages: []openAIMessage{
 			{Role: "user", Content: "Hi"},
 		},
@@ -357,18 +358,21 @@ func (o *OpenAIClient) calculateCost(inputTokens, outputTokens int, model string
 	var inputCostPer1K, outputCostPer1K float64
 
 	switch model {
+	case "gpt-5.2-codex":
+		inputCostPer1K = 0.008
+		outputCostPer1K = 0.024
 	case "gpt-5":
-		inputCostPer1K = 0.005   // GPT-5 pricing estimate
+		inputCostPer1K = 0.005
 		outputCostPer1K = 0.015
 	case "gpt-4o":
-		inputCostPer1K = 0.0025  // $0.0025 per 1K input tokens
-		outputCostPer1K = 0.01   // $0.01 per 1K output tokens
+		inputCostPer1K = 0.0025
+		outputCostPer1K = 0.01
 	case "gpt-4o-mini":
-		inputCostPer1K = 0.00015 // $0.00015 per 1K input tokens
-		outputCostPer1K = 0.0006 // $0.0006 per 1K output tokens
+		inputCostPer1K = 0.00015
+		outputCostPer1K = 0.0006
 	default:
-		inputCostPer1K = 0.005   // Default to GPT-5 pricing
-		outputCostPer1K = 0.015
+		inputCostPer1K = 0.00015 // Default to cheapest pricing
+		outputCostPer1K = 0.0006
 	}
 
 	inputCost := float64(inputTokens) / 1000.0 * inputCostPer1K

@@ -122,13 +122,13 @@ func (ear *EnhancedAIRouter) initializeProviders() {
 		},
 	}
 
-	// GPT-5 - Best for code generation and documentation
+	// GPT-5.2 Codex - Best for code generation and documentation
 	ear.providers["gpt5"] = &GPTProvider{
-		Name:    "GPT-5",
-		Version: "gpt-5-turbo-20250101",
+		Name:    "GPT-5.2 Codex",
+		Version: "gpt-5.2-codex",
 		Capabilities: &ProviderCapabilities{
-			Name:                "GPT-5",
-			Version:             "5.0",
+			Name:                "GPT-5.2 Codex",
+			Version:             "5.2",
 			MaxTokens:           128000,
 			SupportedLanguages:  []string{"go", "typescript", "javascript", "python", "rust", "java", "cpp", "html", "css"},
 			Strengths:           []string{"code_generation", "documentation", "unit_testing", "api_design"},
@@ -146,12 +146,12 @@ func (ear *EnhancedAIRouter) initializeProviders() {
 		},
 	}
 
-	// Gemini 3 - Best for optimization and performance analysis
+	// Gemini 3 Pro - Best for optimization and performance analysis
 	ear.providers["gemini"] = &GeminiProvider{
-		Name:    "Gemini 3 Ultra",
-		Version: "gemini-3-ultra-20250101",
+		Name:    "Gemini 3 Pro",
+		Version: "gemini-3-pro-preview",
 		Capabilities: &ProviderCapabilities{
-			Name:                "Gemini 3 Ultra",
+			Name:                "Gemini 3 Pro",
 			Version:             "3.0",
 			MaxTokens:           1000000,
 			SupportedLanguages:  []string{"go", "typescript", "javascript", "python", "rust", "java", "cpp"},
