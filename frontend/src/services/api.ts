@@ -355,6 +355,7 @@ export class ApiService {
     description: string
     mode: 'fast' | 'full'
     power_mode?: 'fast' | 'balanced' | 'max'
+    provider_mode?: 'platform' | 'byok'
     tech_stack?: {
       frontend?: string
       backend?: string

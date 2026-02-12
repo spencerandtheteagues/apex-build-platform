@@ -73,7 +73,9 @@ func (a *AIRouterAdapter) Generate(ctx context.Context, provider ai.AIProvider, 
 	// Determine which router to use
 	targetRouter := a.router
 	isBYOK := false
-	if opts.UserID > 0 && a.byokManager != nil {
+	if opts.UsePlatformKeys {
+		log.Printf("Using platform router (forced platform mode) for user %d", opts.UserID)
+	} else if opts.UserID > 0 && a.byokManager != nil {
 		userRouter, hasBYOK, err := a.byokManager.GetRouterForUser(opts.UserID)
 		if err == nil && userRouter != nil {
 			targetRouter = userRouter

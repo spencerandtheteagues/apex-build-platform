@@ -51,6 +51,8 @@ type GenerateOptions struct {
 	SystemPrompt string
 	Context      []Message
 	PowerMode    PowerMode // Controls which model tier is used (max/balanced/fast)
+	// Platform-key app builds should not route through user BYOK state.
+	UsePlatformKeys bool
 }
 
 // Message for AI context
@@ -184,9 +186,8 @@ func (am *AgentManager) StartBuild(buildID string) error {
 		},
 	})
 
-	// Get available providers with grace period for startup race conditions
-	// Use user-specific providers to respect BYOK/Ollama settings
-	availableProviders := am.getAvailableProvidersWithGracePeriod(build.UserID)
+	// Platform builds always use backend-configured providers (Claude/OpenAI/Gemini).
+	availableProviders := am.getAvailableProvidersWithGracePeriod()
 	if len(availableProviders) == 0 {
 		build.mu.Lock()
 		build.Status = BuildFailed
@@ -549,8 +550,8 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 		return fmt.Errorf("build %s not found", buildID)
 	}
 
-	// Get available providers dynamically based on user BYOK settings
-	availableProviders := am.aiRouter.GetAvailableProvidersForUser(build.UserID)
+	// Platform builds always use backend-configured providers.
+	availableProviders := am.aiRouter.GetAvailableProviders()
 
 	if len(availableProviders) == 0 {
 		return fmt.Errorf("no AI providers available - please check API key configuration")
@@ -820,20 +821,20 @@ func (am *AgentManager) handleSingleProviderFailures(buildID string, failedRoles
 }
 
 // getAvailableProvidersWithGracePeriod attempts to get providers with retries for startup scenarios
-func (am *AgentManager) getAvailableProvidersWithGracePeriod(userID uint) []ai.AIProvider {
+func (am *AgentManager) getAvailableProvidersWithGracePeriod() []ai.AIProvider {
 	// Try immediate check first
-	providers := am.aiRouter.GetAvailableProvidersForUser(userID)
+	providers := am.aiRouter.GetAvailableProviders()
 	if len(providers) > 0 {
 		return providers
 	}
 
 	// If no providers initially, wait with grace period for health checks to complete
-	log.Printf("No providers available immediately for user %d, waiting for health checks...", userID)
+	log.Printf("No platform providers available immediately, waiting for health checks...")
 
 	maxAttempts := 3
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		time.Sleep(time.Duration(attempt*2) * time.Second) // 2s, 4s, 6s delays
-		providers = am.aiRouter.GetAvailableProvidersForUser(userID)
+		providers = am.aiRouter.GetAvailableProviders()
 		if len(providers) > 0 {
 			log.Printf("Providers became available after %d attempts: %v", attempt, providers)
 			return providers
@@ -841,7 +842,7 @@ func (am *AgentManager) getAvailableProvidersWithGracePeriod(userID uint) []ai.A
 		log.Printf("Grace period attempt %d/%d: still no providers available", attempt, maxAttempts)
 	}
 
-	log.Printf("No providers available after grace period for user %d", userID)
+	log.Printf("No platform providers available after grace period")
 	return providers // Will be empty
 }
 
@@ -1084,11 +1085,12 @@ func (am *AgentManager) executeTask(task *Task) {
 	temperature := am.getTemperatureForRole(agent.Role)
 
 	response, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
-		UserID:       build.UserID,
-		MaxTokens:    maxTokens,
-		Temperature:  temperature,
-		SystemPrompt: systemPrompt,
-		PowerMode:    build.PowerMode,
+		UserID:          build.UserID,
+		MaxTokens:       maxTokens,
+		Temperature:     temperature,
+		SystemPrompt:    systemPrompt,
+		PowerMode:       build.PowerMode,
+		UsePlatformKeys: true,
 	})
 
 	if err != nil {
@@ -1500,7 +1502,7 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 
 	build.mu.Lock()
 	build.Status = BuildInProgress
-	build.Progress = 15
+	build.Progress = 20
 	build.UpdatedAt = time.Now()
 	build.mu.Unlock()
 
@@ -1764,6 +1766,30 @@ func (am *AgentManager) updateBuildProgress(build *Build) {
 	// Scale task progress into the 20-100 range (20% is the planning baseline)
 	taskProgress := (completed * 80) / len(build.Tasks)
 	progress := 20 + taskProgress
+
+	// Also track progress by worker-agent completion so long-running tasks don't look stuck.
+	workerTotal := 0
+	workerDone := 0
+	for _, agent := range build.Agents {
+		if agent.Role == RoleLead {
+			continue
+		}
+		workerTotal++
+		if agent.Status == StatusCompleted || agent.Status == StatusError {
+			workerDone++
+		}
+	}
+	if workerTotal > 0 {
+		agentProgress := 20 + (workerDone*70)/workerTotal
+		if agentProgress > progress {
+			progress = agentProgress
+		}
+	}
+
+	if build.Status != BuildCompleted && progress > 99 {
+		progress = 99
+	}
+
 	build.Progress = progress
 	build.UpdatedAt = time.Now()
 
@@ -1921,6 +1947,7 @@ func (am *AgentManager) createCheckpoint(build *Build, name, description string)
 			"number":        checkpoint.Number,
 			"name":          name,
 			"description":   description,
+			"progress":      checkpoint.Progress,
 		},
 	})
 
@@ -2149,11 +2176,12 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 	prompt := fmt.Sprintf("User message: %s\n\nRespond helpfully and briefly.", message)
 
 	response, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
-		UserID:       build.UserID,
-		MaxTokens:    2000,
-		Temperature:  am.getTemperatureForRole(RoleLead),
-		SystemPrompt: am.getSystemPrompt(RoleLead, build),
-		PowerMode:    build.PowerMode,
+		UserID:          build.UserID,
+		MaxTokens:       2000,
+		Temperature:     am.getTemperatureForRole(RoleLead),
+		SystemPrompt:    am.getSystemPrompt(RoleLead, build),
+		PowerMode:       build.PowerMode,
+		UsePlatformKeys: true,
 	})
 
 	if err != nil {

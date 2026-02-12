@@ -868,7 +868,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           thoughts: [],
         })
       }
-      groups.get(thought.agentId)?.thoughts.push(thought)
+      const group = groups.get(thought.agentId)
+      if (!group) continue
+      // Keep header metadata synced with latest provider/model updates.
+      if (thought.provider) {
+        group.agent.provider = thought.provider
+      }
+      if (thought.model) {
+        group.agent.model = thought.model
+      }
+      group.thoughts.push(thought)
     }
     return Array.from(groups.values())
   }, [aiThoughts, buildState?.agents])
@@ -998,6 +1007,18 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     }
   }, [])
 
+  const clampPercent = (value: number) => {
+    if (!Number.isFinite(value)) return 0
+    return Math.max(0, Math.min(100, Math.round(value)))
+  }
+
+  const computeAgentProgressFloor = (agents: Agent[]) => {
+    const workers = agents.filter(a => a.role !== 'lead')
+    if (workers.length === 0) return 20
+    const done = workers.filter(a => a.status === 'completed' || a.status === 'error').length
+    return clampPercent(20 + Math.round((done / workers.length) * 70))
+  }
+
   // WebSocket URL builder
   const buildWebSocketUrl = useCallback((buildId: string): string => {
     const token = localStorage.getItem('apex_access_token')
@@ -1090,7 +1111,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       case 'build:progress':
         setBuildState(prev => {
           if (!prev) return null
-          const updates: Partial<BuildState> = { progress: data.progress }
+          const updates: Partial<BuildState> = {}
+
+          if (typeof data.progress === 'number') {
+            updates.progress = clampPercent(data.progress)
+          }
 
           // Apply status transition (e.g. planning → in_progress)
           if (data.status) {
@@ -1122,6 +1147,17 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
             status: 'idle',
             progress: 0,
           }
+          const existing = prev.agents.find(a => a.id === message.agent_id)
+          if (existing) {
+            return {
+              ...prev,
+              agents: prev.agents.map(a =>
+                a.id === message.agent_id
+                  ? { ...a, role: data.role ?? a.role, provider: data.provider ?? a.provider, model: data.model ?? a.model }
+                  : a
+              ),
+            }
+          }
           return { ...prev, agents: [...prev.agents, newAgent] }
         })
         break
@@ -1129,19 +1165,21 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       case 'agent:working':
         setBuildState(prev => {
           if (!prev) return null
+          const nextAgents: Agent[] = prev.agents.map((a): Agent =>
+            a.id === message.agent_id
+              ? {
+                ...a,
+                status: 'working' as Agent['status'],
+                provider: data.provider ?? a.provider,
+                model: data.model ?? a.model,
+                currentTask: { type: data.task_type, description: data.description }
+              }
+              : a
+          )
           return {
             ...prev,
-            agents: prev.agents.map(a =>
-              a.id === message.agent_id
-                ? {
-                  ...a,
-                  status: 'working',
-                  provider: data.provider ?? a.provider,
-                  model: data.model ?? a.model,
-                  currentTask: { type: data.task_type, description: data.description }
-                }
-                : a
-            )
+            agents: nextAgents,
+            progress: Math.max(prev.progress, computeAgentProgressFloor(nextAgents)),
           }
         })
         break
@@ -1149,17 +1187,45 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       case 'agent:completed':
         setBuildState(prev => {
           if (!prev) return null
+          const nextAgents: Agent[] = prev.agents.map((a): Agent =>
+            a.id === message.agent_id
+              ? {
+                ...a,
+                status: 'completed' as Agent['status'],
+                progress: 100,
+                provider: data.provider ?? a.provider,
+                model: data.model ?? a.model,
+              }
+              : a
+          )
           return {
             ...prev,
-            agents: prev.agents.map(a =>
-              a.id === message.agent_id ? { ...a, status: 'completed' } : a
-            )
+            agents: nextAgents,
+            progress: Math.max(prev.progress, computeAgentProgressFloor(nextAgents)),
           }
         })
         break
 
       case 'agent:error':
         addSystemMessage(`Agent encountered an error: ${data.error}`)
+        setBuildState(prev => {
+          if (!prev) return null
+          const nextAgents: Agent[] = prev.agents.map((a): Agent =>
+            a.id === message.agent_id
+              ? {
+                ...a,
+                status: 'error' as Agent['status'],
+                provider: data.provider ?? a.provider,
+                model: data.model ?? a.model,
+              }
+              : a
+          )
+          return {
+            ...prev,
+            agents: nextAgents,
+            progress: Math.max(prev.progress, computeAgentProgressFloor(nextAgents)),
+          }
+        })
         break
 
       case 'file:created':
@@ -1185,7 +1251,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
             number: data.number,
             name: data.name,
             description: data.description,
-            progress: prev.progress,
+            progress: typeof data.progress === 'number' ? clampPercent(data.progress) : prev.progress,
             createdAt: new Date().toISOString(),
           }
           return { ...prev, checkpoints: [...prev.checkpoints, checkpoint] }
@@ -1224,14 +1290,47 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         break
 
       case 'agent:thinking':
+        setBuildState(prev => {
+          if (!prev) return null
+          return {
+            ...prev,
+            agents: prev.agents.map(a =>
+              a.id === message.agent_id
+                ? { ...a, provider: data.provider ?? a.provider, model: data.model ?? a.model }
+                : a
+            ),
+          }
+        })
         addAiThought(message.agent_id, data.agent_role, data.provider, data.model, 'thinking', data.content)
         break
 
       case 'agent:action':
+        setBuildState(prev => {
+          if (!prev) return null
+          return {
+            ...prev,
+            agents: prev.agents.map(a =>
+              a.id === message.agent_id
+                ? { ...a, provider: data.provider ?? a.provider, model: data.model ?? a.model }
+                : a
+            ),
+          }
+        })
         addAiThought(message.agent_id, data.agent_role, data.provider, data.model, 'action', data.content)
         break
 
       case 'agent:output':
+        setBuildState(prev => {
+          if (!prev) return null
+          return {
+            ...prev,
+            agents: prev.agents.map(a =>
+              a.id === message.agent_id
+                ? { ...a, provider: data.provider ?? a.provider, model: data.model ?? a.model }
+                : a
+            ),
+          }
+        })
         addAiThought(message.agent_id, data.agent_role, data.provider, data.model, 'output', data.content)
         break
 
@@ -1254,10 +1353,23 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         break
 
       case 'agent:generation_failed':
+        setBuildState(prev => {
+          if (!prev) return null
+          return {
+            ...prev,
+            agents: prev.agents.map(a =>
+              a.id === message.agent_id
+                ? { ...a, provider: data.provider ?? a.provider, model: data.model ?? a.model }
+                : a
+            ),
+          }
+        })
         addSystemMessage(`AI generation failed for ${data.agent_role || 'agent'} (${data.provider || 'unknown'}): ${data.error || 'Unknown error'}`)
         {
-          const retryCount = data.retry_count ?? data.attempt
-          const maxRetries = data.max_retries
+          const retryCountRaw = data.retry_count ?? data.attempt
+          const maxRetriesRaw = data.max_retries
+          const retryCount = Number.isFinite(Number(retryCountRaw)) ? Number(retryCountRaw) : undefined
+          const maxRetries = Number.isFinite(Number(maxRetriesRaw)) ? Number(maxRetriesRaw) : undefined
           const willRetry = data.will_retry
 
           if (retryCount !== undefined && maxRetries !== undefined) {
@@ -1273,6 +1385,17 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         break
 
       case 'agent:generating':
+        setBuildState(prev => {
+          if (!prev) return null
+          return {
+            ...prev,
+            agents: prev.agents.map(a =>
+              a.id === message.agent_id
+                ? { ...a, provider: data.provider ?? a.provider, model: data.model ?? a.model }
+                : a
+            ),
+          }
+        })
         addAiThought(
           message.agent_id,
           data.agent_role,
@@ -1284,9 +1407,22 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         break
 
       case 'agent:retrying':
+        setBuildState(prev => {
+          if (!prev) return null
+          return {
+            ...prev,
+            agents: prev.agents.map(a =>
+              a.id === message.agent_id
+                ? { ...a, provider: data.provider ?? a.provider, model: data.model ?? a.model }
+                : a
+            ),
+          }
+        })
         {
-          const retryCount = data.retry_count ?? data.attempt
-          const maxRetries = data.max_retries
+          const retryCountRaw = data.retry_count ?? data.attempt
+          const maxRetriesRaw = data.max_retries
+          const retryCount = Number.isFinite(Number(retryCountRaw)) ? Number(retryCountRaw) : undefined
+          const maxRetries = Number.isFinite(Number(maxRetriesRaw)) ? Number(maxRetriesRaw) : undefined
           if (retryCount !== undefined && maxRetries !== undefined) {
             addSystemMessage(`${data.agent_role || 'Agent'} retrying task (attempt ${retryCount}/${maxRetries})...`)
           } else {
@@ -1296,6 +1432,19 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         break
 
       case 'code:generated':
+        setBuildState(prev => {
+          if (!prev) return null
+          const nextAgents = prev.agents.map(a =>
+            a.id === message.agent_id
+              ? { ...a, provider: data.provider ?? a.provider, model: data.model ?? a.model, progress: Math.max(a.progress, 95) }
+              : a
+          )
+          return {
+            ...prev,
+            agents: nextAgents,
+            progress: Math.max(prev.progress, computeAgentProgressFloor(nextAgents)),
+          }
+        })
         addSystemMessage(`${data.agent_role || 'Agent'} generated ${data.files_count || 0} file(s)`)
         // Add output thought to thinking box for visibility
         {
@@ -1336,7 +1485,29 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           return {
             ...prev,
             agents: prev.agents.map(a =>
-              a.id === message.agent_id ? { ...a, progress: data.progress || 0 } : a
+              a.id === message.agent_id
+                ? {
+                  ...a,
+                  progress: typeof data.progress === 'number' ? clampPercent(data.progress) : a.progress,
+                  provider: data.provider ?? a.provider,
+                  model: data.model ?? a.model,
+                }
+                : a
+            )
+          }
+        })
+        break
+
+      case 'agent:provider_switched':
+        addSystemMessage(`${data.agent_role || 'Agent'} switched provider: ${data.old_provider || 'unknown'} → ${data.new_provider || 'unknown'}`)
+        setBuildState(prev => {
+          if (!prev) return null
+          return {
+            ...prev,
+            agents: prev.agents.map(a =>
+              a.id === message.agent_id
+                ? { ...a, provider: data.new_provider ?? a.provider, model: data.model ?? a.model }
+                : a
             )
           }
         })
@@ -1359,14 +1530,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     type: AIThought['type'],
     content: string
   ) => {
+    const knownAgent = buildState?.agents.find(a => a.id === agentId)
     const thought: AIThought = {
       id: Date.now().toString() + Math.random(),
       agentId,
-      agentRole,
-      provider,
-      model,
+      agentRole: agentRole || knownAgent?.role || 'agent',
+      provider: provider || knownAgent?.provider || 'unknown',
+      model: model || knownAgent?.model,
       type,
-      content,
+      content: content || `${agentRole || knownAgent?.role || 'Agent'} update`,
       timestamp: new Date(),
     }
     setAiThoughts(prev => {
@@ -1623,6 +1795,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         description: appDescription,
         mode: buildMode,
         power_mode: powerMode,
+        provider_mode: 'platform',
         tech_stack: techStackOverride || undefined,
       })
 
