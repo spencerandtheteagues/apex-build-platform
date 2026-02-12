@@ -67,51 +67,84 @@
   --font-display: 'Orbitron', 'Rajdhani', 'Exo 2', var(--font-sans);
 }
 
-/* Blue/White UI mode overrides */
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * BLUE & WHITE UI MODE — Premium Light Interface
+ * A clean, professional, modern design with depth and polish
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* --- Core Variable Overrides --- */
 html[data-ui-theme="blue"] {
+  /* === PRIMARY THEME COLORS - BLUE === */
   --color-primary: #2563eb;
   --color-primary-light: #3b82f6;
   --color-primary-dark: #1d4ed8;
   --color-secondary: #0ea5e9;
   --color-secondary-light: #38bdf8;
   --color-secondary-dark: #0284c7;
-  --color-accent: #60a5fa;
-  --color-accent-light: #93c5fd;
-  --color-accent-dark: #1e40af;
+  --color-accent: #6366f1;
+  --color-accent-light: #818cf8;
+  --color-accent-dark: #4f46e5;
 
-  --color-background: #f8fbff;
-  --color-background-elevated: #f1f6ff;
+  /* === BACKGROUND SYSTEM - SOFT WHITE === */
+  --color-background: #f8fafc;
+  --color-background-elevated: #f1f5f9;
   --color-surface: #ffffff;
   --color-surface-elevated: #f8fafc;
-  --color-surface-hover: #eef4ff;
+  --color-surface-hover: #eff6ff;
 
+  /* === TEXT COLORS - SLATE === */
   --color-text: #0f172a;
   --color-text-secondary: #475569;
-  --color-text-muted: #64748b;
+  --color-text-muted: #94a3b8;
 
-  --color-border: rgba(37, 99, 235, 0.18);
-  --color-border-bright: rgba(37, 99, 235, 0.35);
-  --color-border-subtle: rgba(15, 23, 42, 0.08);
+  /* === BORDER COLORS - BLUE TINTED === */
+  --color-border: rgba(37, 99, 235, 0.15);
+  --color-border-bright: rgba(37, 99, 235, 0.3);
+  --color-border-subtle: rgba(15, 23, 42, 0.06);
 
-  --color-glow: rgba(37, 99, 235, 0.25);
-  --color-glow-secondary: rgba(14, 165, 233, 0.22);
-  --color-glow-accent: rgba(96, 165, 250, 0.22);
+  /* === GLOW EFFECTS - BLUE === */
+  --color-glow: rgba(37, 99, 235, 0.2);
+  --color-glow-secondary: rgba(14, 165, 233, 0.18);
+  --color-glow-accent: rgba(99, 102, 241, 0.18);
 
-  --effect-glow: 0 0 18px rgba(37, 99, 235, 0.35);
-  --effect-glow-strong: 0 0 32px rgba(37, 99, 235, 0.5);
-  --effect-glow-purple: 0 0 18px rgba(14, 165, 233, 0.28);
-  --effect-shadow: 0 8px 32px rgba(15, 23, 42, 0.08);
-  --effect-shadow-glow: 0 8px 32px rgba(37, 99, 235, 0.12);
+  /* === EFFECT PRESETS - BLUE SHADOWS === */
+  --effect-glow: 0 1px 3px rgba(37, 99, 235, 0.12), 0 4px 12px rgba(37, 99, 235, 0.08);
+  --effect-glow-strong: 0 4px 16px rgba(37, 99, 235, 0.2), 0 8px 32px rgba(37, 99, 235, 0.12);
+  --effect-glow-purple: 0 1px 3px rgba(99, 102, 241, 0.12), 0 4px 12px rgba(99, 102, 241, 0.08);
+  --effect-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.04);
+  --effect-shadow-glow: 0 4px 16px rgba(37, 99, 235, 0.08), 0 1px 3px rgba(15, 23, 42, 0.06);
+
+  /* === ADDITIONAL BLUE THEME TOKENS === */
+  --blue-card-bg: #ffffff;
+  --blue-card-border: rgba(226, 232, 240, 0.8);
+  --blue-card-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 4px 16px rgba(15, 23, 42, 0.03);
+  --blue-card-shadow-hover: 0 4px 12px rgba(37, 99, 235, 0.08), 0 8px 24px rgba(15, 23, 42, 0.06);
+  --blue-input-bg: #ffffff;
+  --blue-input-border: #cbd5e1;
+  --blue-input-focus: #2563eb;
+  --blue-badge-bg: rgba(37, 99, 235, 0.08);
+  --blue-badge-text: #1d4ed8;
+  --blue-success: #059669;
+  --blue-warning: #d97706;
+  --blue-error: #dc2626;
+  --blue-info: #2563eb;
+  --blue-nav-bg: rgba(255, 255, 255, 0.85);
+  --blue-sidebar-bg: #f8fafc;
+  --blue-code-bg: #f1f5f9;
 }
 
+/* --- Body & Root Styles --- */
 html[data-ui-theme="blue"] body {
-  background: #f8fbff;
+  background: #f8fafc;
   color: #0f172a;
   background-image:
-    radial-gradient(ellipse at top, rgba(59, 130, 246, 0.08) 0%, transparent 55%),
-    radial-gradient(ellipse at bottom right, rgba(14, 165, 233, 0.06) 0%, transparent 50%);
+    radial-gradient(ellipse at 0% 0%, rgba(37, 99, 235, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 100% 0%, rgba(99, 102, 241, 0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 100%, rgba(14, 165, 233, 0.03) 0%, transparent 50%);
+  background-attachment: fixed;
 }
 
+/* --- Selection --- */
 html[data-ui-theme="blue"] ::selection {
   background: #2563eb;
   color: #ffffff;
@@ -124,68 +157,610 @@ html[data-ui-theme="blue"] ::-moz-selection {
   text-shadow: none;
 }
 
+/* --- Focus States --- */
 html[data-ui-theme="blue"] *:focus {
   outline: none;
-  box-shadow: 0 0 0 2px #3b82f6, 0 0 12px rgba(59, 130, 246, 0.25);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25), 0 0 0 4px rgba(37, 99, 235, 0.1);
+}
+
+html[data-ui-theme="blue"] *:focus:not(:focus-visible) {
+  box-shadow: none;
 }
 
 html[data-ui-theme="blue"] *:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px #3b82f6, 0 0 12px rgba(59, 130, 246, 0.25);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25), 0 0 0 4px rgba(37, 99, 235, 0.1);
 }
 
-/* Tailwind utility remapping for blue/white mode */
+/* --- Scrollbars --- */
+html[data-ui-theme="blue"] ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html[data-ui-theme="blue"] ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+html[data-ui-theme="blue"] ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+  border: 2px solid #f1f5f9;
+  box-shadow: none;
+}
+
+html[data-ui-theme="blue"] ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+  box-shadow: none;
+}
+
+html[data-ui-theme="blue"] {
+  scrollbar-color: #cbd5e1 #f1f5f9;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * TAILWIND CLASS REMAPPING — Comprehensive color overrides
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* --- Text Colors --- */
 html[data-ui-theme="blue"] [class*="text-red-"] {
   color: #2563eb !important;
 }
 
-html[data-ui-theme="blue"] [class*="text-gray-300"],
-html[data-ui-theme="blue"] [class*="text-gray-400"],
+html[data-ui-theme="blue"] [class*="text-gray-100"],
+html[data-ui-theme="blue"] [class*="text-gray-200"] {
+  color: #1e293b !important;
+}
+
+html[data-ui-theme="blue"] [class*="text-gray-300"] {
+  color: #334155 !important;
+}
+
+html[data-ui-theme="blue"] [class*="text-gray-400"] {
+  color: #475569 !important;
+}
+
 html[data-ui-theme="blue"] [class*="text-gray-500"],
 html[data-ui-theme="blue"] [class*="text-gray-600"] {
-  color: #475569 !important;
+  color: #64748b !important;
 }
 
 html[data-ui-theme="blue"] [class*="text-white"] {
   color: #0f172a !important;
 }
 
-html[data-ui-theme="blue"] [class*="bg-black"],
-html[data-ui-theme="blue"] [class*="bg-gray-800"],
+/* --- Background Colors --- */
+html[data-ui-theme="blue"] [class*="bg-black"] {
+  background-color: #ffffff !important;
+}
+
+html[data-ui-theme="blue"] [class*="bg-gray-950"] {
+  background-color: #f8fafc !important;
+}
+
 html[data-ui-theme="blue"] [class*="bg-gray-900"] {
-  background-color: rgba(255, 255, 255, 0.92) !important;
+  background-color: #ffffff !important;
+}
+
+html[data-ui-theme="blue"] [class*="bg-gray-800"] {
+  background-color: #f8fafc !important;
+}
+
+html[data-ui-theme="blue"] [class*="bg-gray-700"] {
+  background-color: #f1f5f9 !important;
 }
 
 html[data-ui-theme="blue"] [class*="bg-red-"] {
-  background-color: rgba(59, 130, 246, 0.12) !important;
+  background-color: rgba(37, 99, 235, 0.08) !important;
 }
 
-html[data-ui-theme="blue"] [class*="border-red-"],
-html[data-ui-theme="blue"] [class*="border-gray-700"],
+/* --- Border Colors --- */
+html[data-ui-theme="blue"] [class*="border-red-"] {
+  border-color: rgba(37, 99, 235, 0.25) !important;
+}
+
+html[data-ui-theme="blue"] [class*="border-gray-600"],
+html[data-ui-theme="blue"] [class*="border-gray-700"] {
+  border-color: #e2e8f0 !important;
+}
+
 html[data-ui-theme="blue"] [class*="border-gray-800"],
 html[data-ui-theme="blue"] [class*="border-gray-900"] {
-  border-color: rgba(59, 130, 246, 0.28) !important;
+  border-color: #e2e8f0 !important;
 }
 
+/* --- Ring Colors --- */
+html[data-ui-theme="blue"] [class*="ring-red-"] {
+  --tw-ring-color: rgba(37, 99, 235, 0.5) !important;
+}
+
+/* --- Gradient Remapping --- */
 html[data-ui-theme="blue"] [class*="from-red-"],
 html[data-ui-theme="blue"] [class*="from-orange-"] {
-  --tw-gradient-from: #60a5fa var(--tw-gradient-from-position) !important;
-  --tw-gradient-to: rgb(96 165 250 / 0) var(--tw-gradient-to-position) !important;
+  --tw-gradient-from: #3b82f6 var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgb(59 130 246 / 0) var(--tw-gradient-to-position) !important;
 }
 
 html[data-ui-theme="blue"] [class*="via-red-"],
 html[data-ui-theme="blue"] [class*="via-orange-"] {
-  --tw-gradient-via: #3b82f6 var(--tw-gradient-via-position) !important;
-  --tw-gradient-to: rgb(59 130 246 / 0) var(--tw-gradient-to-position) !important;
+  --tw-gradient-via: #2563eb var(--tw-gradient-via-position) !important;
+  --tw-gradient-to: rgb(37 99 235 / 0) var(--tw-gradient-to-position) !important;
 }
 
 html[data-ui-theme="blue"] [class*="to-red-"],
 html[data-ui-theme="blue"] [class*="to-orange-"] {
-  --tw-gradient-to: #2563eb var(--tw-gradient-to-position) !important;
+  --tw-gradient-to: #1d4ed8 var(--tw-gradient-to-position) !important;
 }
 
+html[data-ui-theme="blue"] [class*="from-gray-900"],
+html[data-ui-theme="blue"] [class*="from-gray-800"] {
+  --tw-gradient-from: #f8fafc var(--tw-gradient-from-position) !important;
+}
+
+html[data-ui-theme="blue"] [class*="to-gray-900"],
+html[data-ui-theme="blue"] [class*="to-gray-800"] {
+  --tw-gradient-to: #f1f5f9 var(--tw-gradient-to-position) !important;
+}
+
+/* --- Shadow Remapping --- */
 html[data-ui-theme="blue"] [class*="shadow-red-"] {
-  --tw-shadow-color: rgba(59, 130, 246, 0.32) !important;
+  --tw-shadow-color: rgba(37, 99, 235, 0.15) !important;
+}
+
+html[data-ui-theme="blue"] [class*="shadow-lg"],
+html[data-ui-theme="blue"] [class*="shadow-xl"],
+html[data-ui-theme="blue"] [class*="shadow-2xl"] {
+  --tw-shadow: 0 4px 16px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+}
+
+/* --- Placeholder Text --- */
+html[data-ui-theme="blue"] ::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* --- Divide Colors --- */
+html[data-ui-theme="blue"] [class*="divide-gray-700"] > * + *,
+html[data-ui-theme="blue"] [class*="divide-gray-800"] > * + * {
+  border-color: #e2e8f0 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * COMPONENT OVERRIDES — Cards, Buttons, Inputs, Panels
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* --- Glass Morphism (light version) --- */
+html[data-ui-theme="blue"] .glass-morphism,
+html[data-ui-theme="blue"] .glass-morphism-dark,
+html[data-ui-theme="blue"] .glass-morphism-glow {
+  background: rgba(255, 255, 255, 0.7) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  border: 1px solid rgba(226, 232, 240, 0.8) !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 4px 16px rgba(15, 23, 42, 0.03) !important;
+}
+
+/* --- Cyber Panel (clean card) --- */
+html[data-ui-theme="blue"] .cyber-panel {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 4px 16px rgba(15, 23, 42, 0.03) !important;
+}
+
+html[data-ui-theme="blue"] .cyber-panel:hover {
+  border-color: #bfdbfe !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.06), 0 8px 24px rgba(15, 23, 42, 0.05) !important;
+}
+
+/* --- Cyberpunk Effects → Refined Blue Effects --- */
+html[data-ui-theme="blue"] .cyberpunk-glow {
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.1), 0 4px 12px rgba(37, 99, 235, 0.06) !important;
+}
+
+html[data-ui-theme="blue"] .cyberpunk-glow-strong {
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.15), 0 8px 32px rgba(37, 99, 235, 0.08) !important;
+}
+
+html[data-ui-theme="blue"] .cyberpunk-gradient,
+html[data-ui-theme="blue"] .cyberpunk-gradient-accent {
+  background: linear-gradient(135deg, #2563eb, #0ea5e9) !important;
+}
+
+html[data-ui-theme="blue"] .cyberpunk-text-gradient {
+  background: linear-gradient(135deg, #2563eb, #6366f1) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+html[data-ui-theme="blue"] .cyberpunk-text-gradient-fire {
+  background: linear-gradient(135deg, #2563eb, #0ea5e9, #6366f1) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+/* --- Neon Text → Clean Subtle Text --- */
+html[data-ui-theme="blue"] .neon-text,
+html[data-ui-theme="blue"] .neon-text-red,
+html[data-ui-theme="blue"] .neon-text-purple,
+html[data-ui-theme="blue"] .neon-text-pink {
+  color: #2563eb !important;
+  text-shadow: none !important;
+}
+
+html[data-ui-theme="blue"] .neon-text-green {
+  color: #059669 !important;
+  text-shadow: none !important;
+}
+
+html[data-ui-theme="blue"] .neon-text-yellow {
+  color: #d97706 !important;
+  text-shadow: none !important;
+}
+
+/* --- Grid Backgrounds → Subtle Dot Pattern --- */
+html[data-ui-theme="blue"] .grid-background,
+html[data-ui-theme="blue"] .grid-background-dense {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(37, 99, 235, 0.06) 1px, transparent 1px) !important;
+  background-size: 24px 24px !important;
+}
+
+/* --- Buttons (futuristic → polished) --- */
+html[data-ui-theme="blue"] .btn-futuristic {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.06), rgba(99, 102, 241, 0.04)) !important;
+  border: 1px solid rgba(37, 99, 235, 0.2) !important;
+  color: #2563eb !important;
+  clip-path: none !important;
+  border-radius: 8px !important;
+}
+
+html[data-ui-theme="blue"] .btn-futuristic:hover {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+  color: #ffffff !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25), 0 1px 3px rgba(37, 99, 235, 0.1) !important;
+  transform: translateY(-1px) !important;
+}
+
+html[data-ui-theme="blue"] .btn-futuristic:hover::before {
+  opacity: 0 !important;
+}
+
+/* --- Prose (content blocks) --- */
+html[data-ui-theme="blue"] .prose pre {
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+
+html[data-ui-theme="blue"] .prose code {
+  background: rgba(37, 99, 235, 0.06) !important;
+  color: #1d4ed8 !important;
+  border: 1px solid rgba(37, 99, 235, 0.12) !important;
+}
+
+html[data-ui-theme="blue"] .prose a {
+  color: #2563eb !important;
+  border-bottom: 1px solid rgba(37, 99, 235, 0.3) !important;
+}
+
+html[data-ui-theme="blue"] .prose a:hover {
+  color: #1d4ed8 !important;
+  border-bottom-color: #2563eb !important;
+  text-shadow: none !important;
+}
+
+html[data-ui-theme="blue"] .prose blockquote {
+  border-left: 3px solid #2563eb !important;
+  background: rgba(37, 99, 235, 0.04) !important;
+}
+
+html[data-ui-theme="blue"] .prose h1,
+html[data-ui-theme="blue"] .prose h2,
+html[data-ui-theme="blue"] .prose h3,
+html[data-ui-theme="blue"] .prose h4 {
+  color: #0f172a !important;
+}
+
+/* --- Monaco Editor --- */
+html[data-ui-theme="blue"] .monaco-editor .cursor {
+  color: #2563eb !important;
+  box-shadow: none !important;
+}
+
+html[data-ui-theme="blue"] .monaco-editor .selected-text {
+  background: rgba(37, 99, 235, 0.12) !important;
+}
+
+html[data-ui-theme="blue"] .monaco-editor .current-line {
+  background: rgba(37, 99, 235, 0.04) !important;
+  border-left: 2px solid rgba(37, 99, 235, 0.3) !important;
+}
+
+html[data-ui-theme="blue"] .monaco-editor .line-numbers {
+  color: #94a3b8 !important;
+}
+
+/* --- Resize Handles --- */
+html[data-ui-theme="blue"] [data-panel-resize-handle-enabled] {
+  background: rgba(37, 99, 235, 0.08) !important;
+}
+
+html[data-ui-theme="blue"] [data-panel-resize-handle-enabled]:hover {
+  background: rgba(37, 99, 235, 0.15) !important;
+  box-shadow: none !important;
+}
+
+html[data-ui-theme="blue"] [data-panel-resize-handle-enabled]:active {
+  background: rgba(37, 99, 235, 0.25) !important;
+  box-shadow: none !important;
+}
+
+/* --- Disable Cyberpunk Animations in Blue Mode --- */
+html[data-ui-theme="blue"] .animate-cyberpunk-flicker {
+  animation: none !important;
+}
+
+html[data-ui-theme="blue"] .animate-cyberpunk-pulse {
+  animation: blue-gentle-pulse 3s ease-in-out infinite !important;
+}
+
+html[data-ui-theme="blue"] .animate-cyberpunk-glow {
+  animation: blue-gentle-glow 4s ease-in-out infinite !important;
+}
+
+@keyframes blue-gentle-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes blue-gentle-glow {
+  0%, 100% { box-shadow: 0 1px 3px rgba(37, 99, 235, 0.08); }
+  50% { box-shadow: 0 4px 16px rgba(37, 99, 235, 0.12); }
+}
+
+/* --- Holographic → Subtle Gradient Shimmer --- */
+html[data-ui-theme="blue"] .holographic,
+html[data-ui-theme="blue"] .bg-holographic {
+  background: linear-gradient(
+    135deg,
+    rgba(37, 99, 235, 0.03) 0%,
+    rgba(99, 102, 241, 0.03) 50%,
+    rgba(14, 165, 233, 0.03) 100%
+  ) !important;
+  animation: none !important;
+}
+
+html[data-ui-theme="blue"] .holo-card::before {
+  background: none !important;
+  animation: none !important;
+}
+
+/* --- Scanlines & Data Streams → Clean --- */
+html[data-ui-theme="blue"] .scanline-container::after {
+  display: none !important;
+}
+
+html[data-ui-theme="blue"] .data-stream-bg::before,
+html[data-ui-theme="blue"] .data-stream-bg::after {
+  display: none !important;
+}
+
+/* --- Ambient Particles → Off in light mode --- */
+html[data-ui-theme="blue"] .ambient-particles::before,
+html[data-ui-theme="blue"] .ambient-particles::after {
+  display: none !important;
+}
+
+/* --- Status Pulse → Clean Dot --- */
+html[data-ui-theme="blue"] .status-pulse {
+  background: #2563eb !important;
+}
+
+html[data-ui-theme="blue"] .status-pulse::after {
+  border-color: rgba(37, 99, 235, 0.4) !important;
+}
+
+/* --- Glitch Text → Off --- */
+html[data-ui-theme="blue"] .glitch-text::before,
+html[data-ui-theme="blue"] .glitch-text::after {
+  display: none !important;
+}
+
+/* --- Cyber Corners → Rounded blue accent --- */
+html[data-ui-theme="blue"] .cyber-corners::before,
+html[data-ui-theme="blue"] .cyber-corners::after {
+  border-color: rgba(37, 99, 235, 0.2) !important;
+}
+
+/* --- Breathing Border → Subtle --- */
+html[data-ui-theme="blue"] .breathing-border::before {
+  border-color: rgba(37, 99, 235, 0.15) !important;
+  animation: blue-border-breathe 4s ease-in-out infinite !important;
+}
+
+@keyframes blue-border-breathe {
+  0%, 100% { opacity: 0.3; box-shadow: none; }
+  50% { opacity: 0.6; box-shadow: 0 0 8px rgba(37, 99, 235, 0.08); }
+}
+
+/* --- Tech Border → Clean gradient --- */
+html[data-ui-theme="blue"] .tech-border::before {
+  background: linear-gradient(90deg, #2563eb, #0ea5e9, #2563eb) !important;
+  background-size: 200% 100% !important;
+}
+
+/* --- Electric Arc → Off --- */
+html[data-ui-theme="blue"] .electric-arc::after {
+  display: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * AUTH SCREEN OVERRIDES
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+html[data-ui-theme="blue"] .auth-gradient-bg {
+  background: linear-gradient(-45deg, #f8fafc, #eff6ff, #f0f9ff, #eef2ff, #f8fafc) !important;
+  background-size: 400% 400% !important;
+}
+
+html[data-ui-theme="blue"] .auth-grid-bg {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(37, 99, 235, 0.05) 1px, transparent 1px) !important;
+  background-size: 32px 32px !important;
+}
+
+html[data-ui-theme="blue"] .auth-card {
+  background: rgba(255, 255, 255, 0.85) !important;
+  border: 1px solid rgba(226, 232, 240, 0.8) !important;
+  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+}
+
+html[data-ui-theme="blue"] .auth-card::before {
+  background: conic-gradient(from 0deg, transparent, rgba(37, 99, 235, 0.3), transparent, rgba(99, 102, 241, 0.2), transparent) !important;
+}
+
+html[data-ui-theme="blue"] .auth-card:hover {
+  border-color: rgba(37, 99, 235, 0.2) !important;
+}
+
+html[data-ui-theme="blue"] .auth-logo {
+  animation: blue-logo-pulse 3s ease-in-out infinite !important;
+}
+
+@keyframes blue-logo-pulse {
+  0%, 100% { box-shadow: 0 4px 16px rgba(37, 99, 235, 0.15), 0 1px 3px rgba(15, 23, 42, 0.06); }
+  50% { box-shadow: 0 8px 24px rgba(37, 99, 235, 0.2), 0 4px 8px rgba(15, 23, 42, 0.04); }
+}
+
+html[data-ui-theme="blue"] .auth-title {
+  background: linear-gradient(90deg, #2563eb, #1d4ed8, #3b82f6, #1d4ed8, #2563eb) !important;
+  background-size: 200% auto !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+}
+
+html[data-ui-theme="blue"] .auth-input-wrapper input:focus {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1) !important;
+  animation: none !important;
+}
+
+html[data-ui-theme="blue"] .auth-input-wrapper.focused .auth-input-icon {
+  color: #2563eb !important;
+}
+
+html[data-ui-theme="blue"] .auth-input-wrapper.focused .auth-input-label,
+html[data-ui-theme="blue"] .auth-input-wrapper.has-value .auth-input-label {
+  color: #2563eb !important;
+}
+
+html[data-ui-theme="blue"] .auth-button {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #2563eb 100%) !important;
+  background-size: 200% 200% !important;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3) !important;
+}
+
+html[data-ui-theme="blue"] .auth-button:hover:not(:disabled) {
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4), 0 2px 4px rgba(37, 99, 235, 0.2) !important;
+  animation: blue-button-glow 2s ease-in-out infinite !important;
+}
+
+@keyframes blue-button-glow {
+  0%, 100% { box-shadow: 0 4px 16px rgba(37, 99, 235, 0.3); }
+  50% { box-shadow: 0 6px 24px rgba(37, 99, 235, 0.45), 0 2px 8px rgba(37, 99, 235, 0.2); }
+}
+
+html[data-ui-theme="blue"] .auth-link::after {
+  background: linear-gradient(90deg, #2563eb, #1d4ed8) !important;
+}
+
+html[data-ui-theme="blue"] .auth-link:hover {
+  color: #1d4ed8 !important;
+}
+
+html[data-ui-theme="blue"] .auth-particle {
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.4) 0%, transparent 70%) !important;
+}
+
+html[data-ui-theme="blue"] .hud-corner {
+  border-color: rgba(37, 99, 235, 0.2) !important;
+}
+
+html[data-ui-theme="blue"] .auth-error {
+  background: rgba(239, 68, 68, 0.06) !important;
+  border-color: rgba(239, 68, 68, 0.2) !important;
+  color: #dc2626 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * NAVIGATION & LAYOUT OVERRIDES
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* Nav bar */
+html[data-ui-theme="blue"] nav,
+html[data-ui-theme="blue"] header {
+  background: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(12px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+/* Sidebar areas */
+html[data-ui-theme="blue"] aside {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * FORM INPUT OVERRIDES
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+html[data-ui-theme="blue"] input[type="text"],
+html[data-ui-theme="blue"] input[type="email"],
+html[data-ui-theme="blue"] input[type="password"],
+html[data-ui-theme="blue"] input[type="search"],
+html[data-ui-theme="blue"] input[type="url"],
+html[data-ui-theme="blue"] input[type="number"],
+html[data-ui-theme="blue"] textarea,
+html[data-ui-theme="blue"] select {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+html[data-ui-theme="blue"] input:focus,
+html[data-ui-theme="blue"] textarea:focus,
+html[data-ui-theme="blue"] select:focus {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * BADGE & CHIP OVERRIDES
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+html[data-ui-theme="blue"] [class*="bg-green-"] {
+  background-color: rgba(5, 150, 105, 0.08) !important;
+  color: #059669 !important;
+}
+
+html[data-ui-theme="blue"] [class*="bg-yellow-"] {
+  background-color: rgba(217, 119, 6, 0.08) !important;
+  color: #d97706 !important;
+}
+
+html[data-ui-theme="blue"] [class*="bg-blue-"] {
+  background-color: rgba(37, 99, 235, 0.08) !important;
+}
+
+html[data-ui-theme="blue"] [class*="bg-purple-"],
+html[data-ui-theme="blue"] [class*="bg-indigo-"] {
+  background-color: rgba(99, 102, 241, 0.08) !important;
 }
 
 /* Base Styles */
