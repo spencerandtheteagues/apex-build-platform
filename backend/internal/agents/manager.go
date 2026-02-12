@@ -130,6 +130,13 @@ func (am *AgentManager) CreateBuild(userID uint, req *BuildRequest) (*Build, err
 
 	// Apply guardrails for cost control
 	maxAgents, maxRetries, maxRequests, maxTokens := am.defaultBuildLimits(mode)
+	// Ensure power mode token scaling isn't capped by conservative defaults
+	if !am.hasTokenLimitOverride(mode) {
+		minTokens := am.getPowerModeTokenCap(powerMode)
+		if maxTokens < minTokens {
+			maxTokens = minTokens
+		}
+	}
 	build.MaxAgents = maxAgents
 	build.MaxRetries = maxRetries
 	build.MaxRequests = maxRequests
@@ -2096,6 +2103,29 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func (am *AgentManager) hasTokenLimitOverride(mode BuildMode) bool {
+	if strings.TrimSpace(os.Getenv("BUILD_MAX_TOKENS")) != "" {
+		return true
+	}
+	if mode == ModeFast {
+		return strings.TrimSpace(os.Getenv("BUILD_MAX_TOKENS_FAST")) != ""
+	}
+	return strings.TrimSpace(os.Getenv("BUILD_MAX_TOKENS_FULL")) != ""
+}
+
+func (am *AgentManager) getPowerModeTokenCap(mode PowerMode) int {
+	switch mode {
+	case PowerMax:
+		return 24000
+	case PowerBalanced:
+		return 18000
+	case PowerFast:
+		return 12000
+	default:
+		return 12000
+	}
 }
 
 // Subscribe adds a channel to receive build updates
