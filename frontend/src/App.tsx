@@ -9,6 +9,7 @@ import { AdminDashboard } from './components/admin/AdminDashboard'
 import { ExplorePage } from './pages/Explore'
 import { GitHubImportWizard } from './components/import/GitHubImportWizard'
 import APIKeySettings from './components/settings/APIKeySettings'
+import { HelpButton } from './components/help/HelpCenter'
 import ModelSelector from './components/ai/ModelSelector'
 // Import ErrorBoundary directly to be safe
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
@@ -593,6 +594,9 @@ function App() {
           </ErrorBoundary>
         </div>
       )}
+
+      {/* Floating Help Button */}
+      <HelpButton />
     </div>
   )
 }
