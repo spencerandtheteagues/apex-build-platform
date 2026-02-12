@@ -141,25 +141,25 @@ type Config struct {
 
 // BackupMetadata contains information about a backup
 type BackupMetadata struct {
-	ID              string         `json:"id"`
-	Type            BackupType     `json:"type"`
-	Status          BackupStatus   `json:"status"`
-	StartTime       time.Time      `json:"start_time"`
-	EndTime         time.Time      `json:"end_time,omitempty"`
-	Duration        time.Duration  `json:"duration,omitempty"`
-	SizeBytes       int64          `json:"size_bytes,omitempty"`
-	CompressedSize  int64          `json:"compressed_size,omitempty"`
+	ID              string          `json:"id"`
+	Type            BackupType      `json:"type"`
+	Status          BackupStatus    `json:"status"`
+	StartTime       time.Time       `json:"start_time"`
+	EndTime         time.Time       `json:"end_time,omitempty"`
+	Duration        time.Duration   `json:"duration,omitempty"`
+	SizeBytes       int64           `json:"size_bytes,omitempty"`
+	CompressedSize  int64           `json:"compressed_size,omitempty"`
 	Compression     CompressionType `json:"compression"`
-	Encrypted       bool           `json:"encrypted"`
-	Checksum        string         `json:"checksum,omitempty"`
-	StorageLocation string         `json:"storage_location"`
-	DatabaseName    string         `json:"database_name"`
-	DatabaseVersion string         `json:"database_version,omitempty"`
-	WALPosition     string         `json:"wal_position,omitempty"`
-	ParentBackupID  string         `json:"parent_backup_id,omitempty"`
-	Error           string         `json:"error,omitempty"`
-	Tables          []string       `json:"tables,omitempty"`
-	RowCount        int64          `json:"row_count,omitempty"`
+	Encrypted       bool            `json:"encrypted"`
+	Checksum        string          `json:"checksum,omitempty"`
+	StorageLocation string          `json:"storage_location"`
+	DatabaseName    string          `json:"database_name"`
+	DatabaseVersion string          `json:"database_version,omitempty"`
+	WALPosition     string          `json:"wal_position,omitempty"`
+	ParentBackupID  string          `json:"parent_backup_id,omitempty"`
+	Error           string          `json:"error,omitempty"`
+	Tables          []string        `json:"tables,omitempty"`
+	RowCount        int64           `json:"row_count,omitempty"`
 }
 
 // RestoreOptions configures restore behavior
@@ -191,9 +191,15 @@ type Logger interface {
 // DefaultLogger implements basic logging
 type DefaultLogger struct{}
 
-func (l *DefaultLogger) Info(msg string, args ...interface{})  { fmt.Printf("[INFO] "+msg+"\n", args...) }
-func (l *DefaultLogger) Error(msg string, args ...interface{}) { fmt.Printf("[ERROR] "+msg+"\n", args...) }
-func (l *DefaultLogger) Debug(msg string, args ...interface{}) { fmt.Printf("[DEBUG] "+msg+"\n", args...) }
+func (l *DefaultLogger) Info(msg string, args ...interface{}) {
+	fmt.Printf("[INFO] "+msg+"\n", args...)
+}
+func (l *DefaultLogger) Error(msg string, args ...interface{}) {
+	fmt.Printf("[ERROR] "+msg+"\n", args...)
+}
+func (l *DefaultLogger) Debug(msg string, args ...interface{}) {
+	fmt.Printf("[DEBUG] "+msg+"\n", args...)
+}
 
 // StorageProvider interface for backup storage
 type StorageProvider interface {
@@ -202,6 +208,160 @@ type StorageProvider interface {
 	Delete(ctx context.Context, key string) error
 	List(ctx context.Context, prefix string) ([]string, error)
 	Exists(ctx context.Context, key string) (bool, error)
+}
+
+// localStorage stores backups on the local filesystem under a base directory.
+type localStorage struct {
+	basePath string
+}
+
+func NewLocalStorage(basePath string) (StorageProvider, error) {
+	if strings.TrimSpace(basePath) == "" {
+		basePath = "./backups"
+	}
+
+	if err := os.MkdirAll(basePath, 0o755); err != nil {
+		return nil, fmt.Errorf("create local storage directory: %w", err)
+	}
+
+	return &localStorage{basePath: basePath}, nil
+}
+
+func NewS3Storage(_ *Config) (StorageProvider, error) {
+	return nil, fmt.Errorf("s3 storage backend is not implemented")
+}
+
+func NewGCSStorage(_ *Config) (StorageProvider, error) {
+	return nil, fmt.Errorf("gcs storage backend is not implemented")
+}
+
+func (l *localStorage) Upload(_ context.Context, key string, data io.Reader, _ int64) error {
+	path, err := l.resolvePath(key)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create local storage path: %w", err)
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create backup file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(f, data); err != nil {
+		return fmt.Errorf("write backup file: %w", err)
+	}
+
+	return nil
+}
+
+func (l *localStorage) Download(_ context.Context, key string, writer io.Writer) error {
+	path, err := l.resolvePath(key)
+	if err != nil {
+		return err
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open backup file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(writer, f); err != nil {
+		return fmt.Errorf("read backup file: %w", err)
+	}
+
+	return nil
+}
+
+func (l *localStorage) Delete(_ context.Context, key string) error {
+	path, err := l.resolvePath(key)
+	if err != nil {
+		return err
+	}
+
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete backup file: %w", err)
+	}
+
+	return nil
+}
+
+func (l *localStorage) List(_ context.Context, prefix string) ([]string, error) {
+	var root string
+	if strings.TrimSpace(prefix) == "" {
+		root = l.basePath
+	} else {
+		var err error
+		root, err = l.resolvePath(prefix)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if _, err := os.Stat(root); err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("stat storage path: %w", err)
+	}
+
+	keys := make([]string, 0)
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		rel, err := filepath.Rel(l.basePath, path)
+		if err != nil {
+			return err
+		}
+		keys = append(keys, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk storage path: %w", err)
+	}
+
+	sort.Strings(keys)
+	return keys, nil
+}
+
+func (l *localStorage) Exists(_ context.Context, key string) (bool, error) {
+	path, err := l.resolvePath(key)
+	if err != nil {
+		return false, err
+	}
+
+	_, err = os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, fmt.Errorf("stat backup file: %w", err)
+}
+
+func (l *localStorage) resolvePath(key string) (string, error) {
+	cleanKey := filepath.Clean(strings.TrimSpace(key))
+	cleanKey = strings.TrimPrefix(cleanKey, string(filepath.Separator))
+	cleanKey = strings.TrimPrefix(cleanKey, "/")
+
+	if cleanKey == "" || cleanKey == "." || cleanKey == ".." || strings.HasPrefix(cleanKey, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid storage key: %q", key)
+	}
+	if filepath.IsAbs(cleanKey) {
+		return "", fmt.Errorf("invalid absolute storage key: %q", key)
+	}
+
+	return filepath.Join(l.basePath, cleanKey), nil
 }
 
 // NewService creates a new backup service

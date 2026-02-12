@@ -225,8 +225,11 @@ export const AgentPanel: React.FC<AgentPanelProps> = memo(({
   }, [agentMessages])
 
   // Update elapsed time
+  const taskStatus = task?.status
+  const taskStartedAt = task?.startedAt
+
   useEffect(() => {
-    if (!task || task.status !== 'executing') return
+    if (taskStatus !== 'executing' || !taskStartedAt) return
 
     const interval = setInterval(() => {
       setTask((prev) => {
@@ -239,7 +242,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = memo(({
     }, 100)
 
     return () => clearInterval(interval)
-  }, [task?.status, task?.startedAt])
+  }, [taskStatus, taskStartedAt])
 
   // Handle start build
   const handleStartBuild = useCallback(async () => {

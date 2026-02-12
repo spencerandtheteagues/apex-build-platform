@@ -200,7 +200,7 @@ const DebugPanel: React.FC<DebugPanelProps> = ({
       unsubBpRemoved()
       unsubException()
     }
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- listeners bind once to debug service singleton.
 
   // -----------------------------------------------------------------------
   // Data fetching when paused

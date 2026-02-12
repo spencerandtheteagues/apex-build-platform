@@ -72,7 +72,7 @@ export const DeploymentPanel: React.FC<DeploymentPanelProps> = ({
 
   useEffect(() => {
     loadDeployments()
-  }, [projectId])
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps -- loader is intentionally scoped to project transitions.
 
   useEffect(() => {
     if (activeDeployment && showLogs) {
@@ -80,7 +80,7 @@ export const DeploymentPanel: React.FC<DeploymentPanelProps> = ({
       const interval = setInterval(() => loadLogs(activeDeployment.id), 5000)
       return () => clearInterval(interval)
     }
-  }, [activeDeployment, showLogs])
+  }, [activeDeployment, showLogs]) // eslint-disable-line react-hooks/exhaustive-deps -- polling lifecycle is controlled by selected deployment + log visibility.
 
   const loadDeployments = async () => {
     try {

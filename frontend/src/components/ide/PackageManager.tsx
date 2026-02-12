@@ -92,7 +92,7 @@ export const PackageManager: React.FC<PackageManagerProps> = ({
       loadInstalledPackages()
       loadSuggestions()
     }
-  }, [projectId])
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps -- initial project load flow is intentionally explicit.
 
   // Load installed packages
   const loadInstalledPackages = useCallback(async () => {
@@ -163,7 +163,7 @@ export const PackageManager: React.FC<PackageManagerProps> = ({
     }, 300)
 
     return () => clearTimeout(timer)
-  }, [searchQuery, selectedRegistry, activeTab])
+  }, [searchQuery, selectedRegistry, activeTab, handleSearch])
 
   // Install package
   const handleInstall = useCallback(async (

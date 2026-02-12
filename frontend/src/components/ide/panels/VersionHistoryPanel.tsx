@@ -38,10 +38,11 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { user } = useStore()
+  const fileId = file?.id
 
   // Fetch versions when file changes
   useEffect(() => {
-    if (!file) {
+    if (!fileId) {
       setVersions([])
       return
     }
@@ -50,7 +51,7 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
       setLoading(true)
       setError(null)
       try {
-        const data = await apiService.getFileVersions(file.id)
+        const data = await apiService.getFileVersions(fileId)
         setVersions(data)
       } catch (err) {
         console.error('Failed to fetch versions:', err)
@@ -61,7 +62,7 @@ export const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
     }
 
     fetchVersions()
-  }, [file?.id])
+  }, [fileId])
 
   // Handle pin toggle
   const handleTogglePin = async (e: React.MouseEvent, version: FileVersion) => {

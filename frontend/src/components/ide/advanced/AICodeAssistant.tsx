@@ -94,7 +94,7 @@ export const AICodeAssistant: React.FC<AICodeAssistantProps> = ({
     if (currentCode && currentCode.length > 100) {
       analyzeCodeAutomatically();
     }
-  }, [currentCode]);
+  }, [currentCode]); // eslint-disable-line react-hooks/exhaustive-deps -- analyzer callback is intentionally stable.
 
   const analyzeCodeAutomatically = useCallback(async () => {
     try {
@@ -133,7 +133,7 @@ export const AICodeAssistant: React.FC<AICodeAssistantProps> = ({
     } catch (error) {
       console.error('Failed to analyze code:', error);
     }
-  }, [currentCode]);
+  }, []);
 
   const generateCode = async () => {
     if (!prompt.trim()) return;

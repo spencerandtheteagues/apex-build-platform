@@ -1,16 +1,9 @@
 // APEX.BUILD Main Application
 // Dark Demon Theme - Cloud Development Platform
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { useStore } from './hooks/useStore'
-import { IDELayout } from './components/ide/IDELayout'
-import { AppBuilder } from './components/builder/AppBuilder'
-import { AdminDashboard } from './components/admin/AdminDashboard'
-import { ExplorePage } from './pages/Explore'
-import { GitHubImportWizard } from './components/import/GitHubImportWizard'
-import APIKeySettings from './components/settings/APIKeySettings'
 import { HelpButton } from './components/help/HelpCenter'
-import ModelSelector from './components/ai/ModelSelector'
 import CostTicker from './components/ide/CostTicker'
 // Import ErrorBoundary directly to be safe
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
@@ -34,8 +27,33 @@ const AuthParticle: React.FC<{ delay: number; startX: number; startY: number }> 
 
 type AppView = 'builder' | 'ide' | 'admin' | 'explore' | 'settings'
 
+const AppBuilder = lazy(() =>
+  import('./components/builder/AppBuilder').then((m) => ({ default: m.AppBuilder }))
+)
+const IDELayout = lazy(() =>
+  import('./components/ide/IDELayout').then((m) => ({ default: m.IDELayout }))
+)
+const AdminDashboard = lazy(() =>
+  import('./components/admin/AdminDashboard').then((m) => ({ default: m.AdminDashboard }))
+)
+const ExplorePage = lazy(() =>
+  import('./pages/Explore').then((m) => ({ default: m.ExplorePage }))
+)
+const GitHubImportWizard = lazy(() =>
+  import('./components/import/GitHubImportWizard').then((m) => ({ default: m.GitHubImportWizard }))
+)
+const APIKeySettings = lazy(() => import('./components/settings/APIKeySettings'))
+const ModelSelector = lazy(() => import('./components/ai/ModelSelector'))
+
+const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
+  <div className="h-full flex items-center justify-center bg-black/40">
+    <div className="text-sm text-gray-400 animate-pulse">{label}</div>
+  </div>
+)
+
 function App() {
   const [currentView, setCurrentView] = useState<AppView>('builder')
+  const [visitedViews, setVisitedViews] = useState<Set<AppView>>(() => new Set(['builder']))
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false)
   const [showGitHubImport, setShowGitHubImport] = useState(false)
   const [isAuthMode, setIsAuthMode] = useState<'login' | 'register'>('login')
@@ -160,6 +178,16 @@ function App() {
       confirmPassword: '',
     })
   }
+
+  // Lazy-load heavy views on first visit while preserving view state after they mount.
+  useEffect(() => {
+    setVisitedViews((prev) => {
+      if (prev.has(currentView)) return prev
+      const next = new Set(prev)
+      next.add(currentView)
+      return next
+    })
+  }, [currentView])
 
   // Loading screen
   if (isLoading) {
@@ -507,18 +535,25 @@ function App() {
 
       {/* Main Content - Wrapped in ErrorBoundary and safely rendered */}
       <div className="flex-1 overflow-hidden relative min-h-0">
-        <div className={`absolute inset-0 overflow-y-auto ${currentView === 'builder' ? 'block' : 'hidden'}`}>
-          <ErrorBoundary>
-            <AppBuilder onNavigateToIDE={() => setCurrentView('ide')} />
-          </ErrorBoundary>
-        </div>
-        
-        <div className={`absolute inset-0 ${currentView === 'ide' ? 'block' : 'hidden'}`}>
-          <ErrorBoundary>
-            {currentProject ? (
-               <IDELayout />
-            ) : (
-               <div className="h-full flex flex-col items-center justify-center bg-black text-gray-400">
+        {visitedViews.has('builder') && (
+          <div className={`absolute inset-0 overflow-y-auto ${currentView === 'builder' ? 'block' : 'hidden'}`}>
+            <ErrorBoundary>
+              <Suspense fallback={<ViewLoadingFallback label="Loading Builder..." />}>
+                <AppBuilder onNavigateToIDE={() => setCurrentView('ide')} />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {visitedViews.has('ide') && (
+          <div className={`absolute inset-0 ${currentView === 'ide' ? 'block' : 'hidden'}`}>
+            <ErrorBoundary>
+              {currentProject ? (
+                <Suspense fallback={<ViewLoadingFallback label="Loading IDE..." />}>
+                  <IDELayout />
+                </Suspense>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center bg-black text-gray-400">
                   <AlertTriangle className="w-16 h-16 text-yellow-500 mb-4" />
                   <h2 className="text-xl font-bold text-white mb-2">No Project Selected</h2>
                   <p className="max-w-md text-center mb-6">
@@ -527,72 +562,87 @@ function App() {
                   <Button onClick={() => setCurrentView('builder')} variant="primary">
                     Go to Builder
                   </Button>
-               </div>
-            )}
-          </ErrorBoundary>
-        </div>
-
-        <div className={`absolute inset-0 ${currentView === 'admin' ? 'block' : 'hidden'}`}>
-          <ErrorBoundary>
-            <AdminDashboard />
-          </ErrorBoundary>
-        </div>
-
-        <div className={`absolute inset-0 overflow-y-auto ${currentView === 'explore' ? 'block' : 'hidden'}`}>
-          <ErrorBoundary>
-            <ExplorePage />
-          </ErrorBoundary>
-        </div>
-
-        <div className={`absolute inset-0 overflow-y-auto ${currentView === 'settings' ? 'block' : 'hidden'}`}>
-          <ErrorBoundary>
-            <div className="min-h-full bg-black p-6">
-              <div className="max-w-4xl mx-auto space-y-8">
-                <div>
-                  <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-500 mb-2">
-                    Settings
-                  </h1>
-                  <p className="text-gray-400">Configure your AI providers and API keys</p>
                 </div>
+              )}
+            </ErrorBoundary>
+          </div>
+        )}
 
-                {/* Model Selector Section */}
-                <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
-                  <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                    <Sparkles className="w-5 h-5 text-red-400" />
-                    Default AI Model
-                  </h2>
-                  <p className="text-gray-400 text-sm mb-4">
-                    Select the default AI model for your builds. You can override this per-project.
-                  </p>
-                  <ModelSelector
-                    value={defaultModel}
-                    onChange={handleDefaultModelChange}
-                    className="w-full max-w-md"
-                  />
-                </div>
+        {visitedViews.has('admin') && (
+          <div className={`absolute inset-0 ${currentView === 'admin' ? 'block' : 'hidden'}`}>
+            <ErrorBoundary>
+              <Suspense fallback={<ViewLoadingFallback label="Loading Admin..." />}>
+                <AdminDashboard />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
 
-                {/* API Keys Section */}
-                <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
-                  <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                    <Key className="w-5 h-5 text-red-400" />
-                    API Keys (BYOK)
-                  </h2>
-                  <p className="text-gray-400 text-sm mb-6">
-                    Bring Your Own Keys - Add your own API keys to use your personal quotas and get better rates.
-                  </p>
-                  <APIKeySettings />
+        {visitedViews.has('explore') && (
+          <div className={`absolute inset-0 overflow-y-auto ${currentView === 'explore' ? 'block' : 'hidden'}`}>
+            <ErrorBoundary>
+              <Suspense fallback={<ViewLoadingFallback label="Loading Explore..." />}>
+                <ExplorePage />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
+
+        {visitedViews.has('settings') && (
+          <div className={`absolute inset-0 overflow-y-auto ${currentView === 'settings' ? 'block' : 'hidden'}`}>
+            <ErrorBoundary>
+              <Suspense fallback={<ViewLoadingFallback label="Loading Settings..." />}>
+                <div className="min-h-full bg-black p-6">
+                  <div className="max-w-4xl mx-auto space-y-8">
+                    <div>
+                      <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-500 mb-2">
+                        Settings
+                      </h1>
+                      <p className="text-gray-400">Configure your AI providers and API keys</p>
+                    </div>
+
+                    {/* Model Selector Section */}
+                    <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                      <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                        <Sparkles className="w-5 h-5 text-red-400" />
+                        Default AI Model
+                      </h2>
+                      <p className="text-gray-400 text-sm mb-4">
+                        Select the default AI model for your builds. You can override this per-project.
+                      </p>
+                      <ModelSelector
+                        value={defaultModel}
+                        onChange={handleDefaultModelChange}
+                        className="w-full max-w-md"
+                      />
+                    </div>
+
+                    {/* API Keys Section */}
+                    <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                      <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                        <Key className="w-5 h-5 text-red-400" />
+                        API Keys (BYOK)
+                      </h2>
+                      <p className="text-gray-400 text-sm mb-6">
+                        Bring Your Own Keys - Add your own API keys to use your personal quotas and get better rates.
+                      </p>
+                      <APIKeySettings />
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          </ErrorBoundary>
-        </div>
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
       </div>
 
       {/* GitHub Import Modal */}
       {showGitHubImport && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <ErrorBoundary>
-            <GitHubImportWizard onClose={() => setShowGitHubImport(false)} />
+            <Suspense fallback={<ViewLoadingFallback label="Loading Import Wizard..." />}>
+              <GitHubImportWizard onClose={() => setShowGitHubImport(false)} />
+            </Suspense>
           </ErrorBoundary>
         </div>
       )}

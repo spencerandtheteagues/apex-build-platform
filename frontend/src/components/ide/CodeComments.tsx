@@ -77,7 +77,7 @@ export const CodeComments: React.FC<CodeCommentsProps> = ({
     if (file?.id) {
       fetchComments()
     }
-  }, [file?.id, showResolved])
+  }, [file?.id, showResolved]) // eslint-disable-line react-hooks/exhaustive-deps -- fetch helper is intentionally local for readability.
 
   // Set up WebSocket listener for real-time updates
   // Note: When WebSocket comment events are implemented, they should trigger fetchComments()

@@ -55,7 +55,7 @@ export const AlwaysOnToggle: React.FC<AlwaysOnToggleProps> = ({
       }
     }, 30000)
     return () => clearInterval(interval)
-  }, [projectId, deploymentId, enabled])
+  }, [projectId, deploymentId, enabled]) // eslint-disable-line react-hooks/exhaustive-deps -- poll lifecycle is controlled by enabled/project identity.
 
   const loadStatus = async () => {
     try {

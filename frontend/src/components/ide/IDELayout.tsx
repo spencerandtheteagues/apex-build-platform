@@ -77,6 +77,7 @@ import {
   Database,
   Bot,
   MessageSquare,
+  AlertCircle,
 } from 'lucide-react'
 
 // Loading fallback for lazy-loaded components
@@ -356,7 +357,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     }).catch(() => {
       setTerminalOutput(prev => [...prev, `Project URL: ${url}`])
     })
-  }, [currentProject, setShowPreview, setViewMode])
+  }, [currentProject])
 
   const handleDashboardDownload = useCallback(async () => {
     if (!currentProject) return

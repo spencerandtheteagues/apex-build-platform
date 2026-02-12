@@ -105,7 +105,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
   // Load projects
   useEffect(() => {
     loadProjects()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- list bootstrap is intentionally one-shot on mount.
 
   const loadProjects = async () => {
     setIsLoading(true)

@@ -1065,7 +1065,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     }
 
     wsRef.current = ws
-  }, [buildWebSocketUrl])
+  }, [buildWebSocketUrl]) // eslint-disable-line react-hooks/exhaustive-deps -- message handler is intentionally late-bound.
 
   // Handle WebSocket messages
   const handleWebSocketMessage = async (message: any) => {

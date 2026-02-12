@@ -357,7 +357,6 @@ export const FileTree: React.FC<FileTreeProps> = ({
     editingFile,
     newFileName,
     isCreating,
-    expandedNodes,
     handleFileSelect,
     handleContextMenu,
     toggleNode,

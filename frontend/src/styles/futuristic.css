@@ -73,9 +73,6 @@
   font-display: swap;
 }
 
-/* Futuristic display font import */
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=Exo+2:wght@100;200;300;400;500;600;700;800;900&family=Share+Tech+Mono&display=swap');
-
 /* Typography utility classes */
 .font-cyber {
   font-family: 'Orbitron', 'Rajdhani', 'Exo 2', sans-serif;

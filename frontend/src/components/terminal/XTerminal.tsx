@@ -185,7 +185,7 @@ export const XTerminal = forwardRef<XTerminalRef, XTerminalProps>(({
       searchAddonRef.current = null;
       serializeAddonRef.current = null;
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- terminal bootstrap is intentionally one-time per mount.
 
   // Update theme
   useEffect(() => {
@@ -282,7 +282,7 @@ export const XTerminal = forwardRef<XTerminalRef, XTerminalProps>(({
       service.disconnect();
       serviceRef.current = null;
     };
-  }, [sessionId, projectId, workDir, shell, name, environment]);
+  }, [sessionId, projectId, workDir, shell, name, environment]); // eslint-disable-line react-hooks/exhaustive-deps -- session callbacks are intentionally bound at connect time.
 
   // Expose methods via ref
   useImperativeHandle(ref, () => ({

@@ -423,7 +423,7 @@ export default function LivePreview({
   }
 
   // Fetch server logs
-  const fetchServerLogs = async () => {
+  const fetchServerLogs = useCallback(async () => {
     try {
       const response = await apiService.client.get(`/preview/server/logs/${projectId}`)
       setServerLogs({
@@ -433,7 +433,7 @@ export default function LivePreview({
     } catch (err) {
       // Ignore errors
     }
-  }
+  }, [projectId])
 
   // Fetch logs when showing server logs panel
   useEffect(() => {
@@ -442,7 +442,7 @@ export default function LivePreview({
       const interval = setInterval(fetchServerLogs, 2000)
       return () => clearInterval(interval)
     }
-  }, [showServerLogs, serverStatus?.running])
+  }, [showServerLogs, serverStatus?.running, fetchServerLogs])
 
   // Toggle fullscreen
   const toggleFullscreen = () => {

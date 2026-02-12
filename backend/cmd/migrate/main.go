@@ -2,13 +2,14 @@
 // Provides command-line tools for managing database migrations
 //
 // Usage:
-//   go run cmd/migrate/main.go up           # Apply all pending migrations
-//   go run cmd/migrate/main.go down         # Rollback last migration
-//   go run cmd/migrate/main.go down-all     # Rollback all migrations
-//   go run cmd/migrate/main.go version      # Show current migration version
-//   go run cmd/migrate/main.go to N         # Migrate to specific version N
-//   go run cmd/migrate/main.go force N      # Force version to N (fix dirty state)
-//   go run cmd/migrate/main.go create NAME  # Create new migration files
+//
+//	go run cmd/migrate/main.go up           # Apply all pending migrations
+//	go run cmd/migrate/main.go down         # Rollback last migration
+//	go run cmd/migrate/main.go down-all     # Rollback all migrations
+//	go run cmd/migrate/main.go version      # Show current migration version
+//	go run cmd/migrate/main.go to N         # Migrate to specific version N
+//	go run cmd/migrate/main.go force N      # Force version to N (fix dirty state)
+//	go run cmd/migrate/main.go create NAME  # Create new migration files
 package main
 
 import (
@@ -98,7 +99,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println(`
+	fmt.Print(`
 APEX.BUILD Database Migration Tool
 
 Usage:

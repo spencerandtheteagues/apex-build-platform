@@ -968,11 +968,6 @@ export class ApiService {
     return response.data
   }
 
-  // Set project categories (owner only)
-  async setProjectCategories(projectId: number, categories: string[]): Promise<void> {
-    await this.client.put(`/projects/${projectId}/categories`, { categories })
-  }
-
   // ========== VERSION HISTORY ENDPOINTS (Replit parity) ==========
 
   async getFileVersions(fileId: number): Promise<FileVersion[]> {

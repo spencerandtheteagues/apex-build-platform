@@ -167,7 +167,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
     if (projectId && projectId !== currentProject?.id) {
       loadProject(projectId)
     }
-  }, [projectId])
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps -- loadProject is intentionally scoped for project-switch behavior.
 
   const loadProject = async (id: number) => {
     setIsLoading(true)

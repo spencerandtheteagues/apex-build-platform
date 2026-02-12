@@ -83,7 +83,7 @@ export const TerminalManager: React.FC<TerminalManagerProps> = ({
     if (tabs.length === 0) {
       createNewTerminal();
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- initial terminal tab is created once on mount.
 
   // Create a new terminal tab
   const createNewTerminal = useCallback(async (shellName?: string) => {

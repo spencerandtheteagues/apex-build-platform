@@ -382,6 +382,7 @@ export const CodeReviewPanel: React.FC<CodeReviewPanelProps> = ({
   className,
 }) => {
   const review = useCodeReview()
+  const { focusFilter, reviewCode, reviewSelection } = review
   const [showSuggestions, setShowSuggestions] = useState(false)
 
   const handleReviewCode = useCallback(async () => {
@@ -394,12 +395,12 @@ export const CodeReviewPanel: React.FC<CodeReviewPanelProps> = ({
         style: ['style', 'best_practices', 'readability'],
         best_practice: ['best_practices'],
       }
-      const focus = focusMap[review.focusFilter] || []
-      await review.reviewCode(code, language, fileName, focus.length > 0 ? focus : undefined)
+      const focus = focusMap[focusFilter] || []
+      await reviewCode(code, language, fileName, focus.length > 0 ? focus : undefined)
     } catch {
       // Error is captured in hook state
     }
-  }, [code, language, fileName, review.focusFilter, review.reviewCode])
+  }, [code, language, fileName, focusFilter, reviewCode])
 
   const handleReviewSelection = useCallback(async () => {
     if (!selectedCode || !selectionStartLine || !selectionEndLine) return
@@ -412,8 +413,8 @@ export const CodeReviewPanel: React.FC<CodeReviewPanelProps> = ({
         style: ['style', 'best_practices', 'readability'],
         best_practice: ['best_practices'],
       }
-      const focus = focusMap[review.focusFilter] || []
-      await review.reviewSelection(
+      const focus = focusMap[focusFilter] || []
+      await reviewSelection(
         selectedCode,
         language,
         selectionStartLine,
@@ -424,7 +425,7 @@ export const CodeReviewPanel: React.FC<CodeReviewPanelProps> = ({
     } catch {
       // Error is captured in hook state
     }
-  }, [selectedCode, language, selectionStartLine, selectionEndLine, fileName, review.focusFilter, review.reviewSelection])
+  }, [selectedCode, language, selectionStartLine, selectionEndLine, fileName, focusFilter, reviewSelection])
 
   // Group filtered findings by severity for ordered display
   const groupedFindings: { severity: string; items: CodeReviewFinding[] }[] = React.useMemo(() => {
