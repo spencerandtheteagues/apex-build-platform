@@ -1039,7 +1039,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
       </div>
 
       {/* Main content area */}
-      <div ref={mainContentRef} className="flex-1 flex overflow-hidden">
+      <div ref={mainContentRef} className="flex-1 flex overflow-hidden min-h-0 min-w-0">
         {/* Left sidebar */}
         {(viewMode === 'dashboard' || viewMode === 'editor') && currentProject && (
           <div className={cn(

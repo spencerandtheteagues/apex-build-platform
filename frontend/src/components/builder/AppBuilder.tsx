@@ -839,6 +839,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   const [aiThoughts, setAiThoughts] = useState<AIThought[]>([])
   const [showAiActivity, setShowAiActivity] = useState(true)
   const aiActivityRef = useRef<HTMLDivElement>(null)
+  const previewPreparedRef = useRef(false)
 
   const thoughtGroups = useMemo(() => {
     const groups = new Map<string, { agent: Agent; thoughts: AIThought[] }>()
@@ -1196,6 +1197,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
             await resolveGeneratedFiles(buildId)
           }
         }
+        if (!previewPreparedRef.current) {
+          previewPreparedRef.current = true
+          void preparePreview(true)
+        }
         break
 
       case 'lead:response':
@@ -1476,22 +1481,31 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     setCurrentProject,
   ])
 
+  const preparePreview = useCallback(async (auto: boolean) => {
+    setIsPreparingPreview(true)
+    try {
+      await ensureProjectCreated()
+      setShowPreview(true)
+      if (auto) {
+        addSystemMessage('Preview ready — launching live preview.')
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to prepare preview'
+      addSystemMessage(`Preview error: ${message}`)
+      if (auto) {
+        setShowPreview(false)
+      }
+    } finally {
+      setIsPreparingPreview(false)
+    }
+  }, [ensureProjectCreated])
+
   const handlePreviewToggle = async () => {
     if (showPreview) {
       setShowPreview(false)
       return
     }
-
-    setIsPreparingPreview(true)
-    try {
-      await ensureProjectCreated()
-      setShowPreview(true)
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Failed to prepare preview'
-      addSystemMessage(`Preview error: ${message}`)
-    } finally {
-      setIsPreparingPreview(false)
-    }
+    await preparePreview(false)
   }
 
   const handleDownloadBuild = async () => {
@@ -1555,6 +1569,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     setIsPreparingPreview(false)
     setCreatedProjectId(null)
     wsReconnectAttempts.current = 0
+    previewPreparedRef.current = false
 
     addSystemMessage(`Starting ${buildMode} build for: "${appDescription}"`)
     addSystemMessage(`Tech stack: ${buildTechStackSummary()}`)
@@ -1698,6 +1713,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   const [showGitHubImport, setShowGitHubImport] = useState(false)
   const [replitUrl, setReplitUrl] = useState('')
   const [isImporting, setIsImporting] = useState(false)
+  const [rollbackCheckpointId, setRollbackCheckpointId] = useState<string | null>(null)
 
   const handleReplitImport = async () => {
     if (!replitUrl.trim()) return
@@ -1711,6 +1727,20 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       console.error('Import failed:', error)
     } finally {
       setIsImporting(false)
+    }
+  }
+
+  const handleRollbackCheckpoint = async (checkpointId: string) => {
+    if (!buildState?.id) return
+    setRollbackCheckpointId(checkpointId)
+    try {
+      await apiService.rollbackBuild(buildState.id, checkpointId)
+      addSystemMessage(`Rolled back to checkpoint ${checkpointId}`)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Rollback failed'
+      addSystemMessage(`Rollback error: ${message}`)
+    } finally {
+      setRollbackCheckpointId(null)
     }
   }
 
@@ -2232,8 +2262,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                             <p className="text-sm font-semibold text-white">{cp.name}</p>
                             <p className="text-xs text-gray-500">{cp.progress}% complete</p>
                           </div>
-                          <Button size="xs" variant="ghost" className="shrink-0 hover:bg-gray-800">
-                            <RotateCcw className="w-4 h-4" />
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            className="shrink-0 hover:bg-gray-800"
+                            onClick={() => handleRollbackCheckpoint(cp.id)}
+                            disabled={rollbackCheckpointId === cp.id}
+                            title="Rollback to this checkpoint"
+                          >
+                            <RotateCcw className={cn("w-4 h-4", rollbackCheckpointId === cp.id && "animate-spin")} />
                           </Button>
                         </div>
                       ))}
