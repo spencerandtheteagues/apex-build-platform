@@ -464,14 +464,14 @@ function App() {
       <div className="h-12 bg-black/90 border-b border-red-900/30 flex items-center justify-between px-4 z-50 relative">
         {/* Logo */}
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 flex items-center justify-center">
+          <div className="w-14 h-14 flex items-center justify-center">
             <img
               src={logoSrc}
               alt="APEX Logo"
-              className="w-full h-full object-contain drop-shadow-[0_0_12px_rgba(239,68,68,0.5)]"
+              className="desktop-header-logo w-full h-full object-contain drop-shadow-[0_0_12px_rgba(239,68,68,0.5)]"
             />
           </div>
-          <span className="text-xl font-bold bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
+          <span className="desktop-header-wordmark text-xl font-bold bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
             APEX.BUILD
           </span>
         </div>
@@ -486,7 +486,7 @@ function App() {
                 : 'text-gray-400 hover:text-white hover:bg-gray-800'
             }`}
           >
-            <img src={logoSrc} alt="APEX" className="w-5 h-5 object-contain" />
+            <img src={logoSrc} alt="APEX" className="desktop-tab-logo w-6 h-6 object-contain" />
             <span className="text-sm font-medium">Build App</span>
           </button>
           <button

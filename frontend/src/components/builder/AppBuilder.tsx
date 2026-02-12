@@ -149,21 +149,21 @@ interface AppBuilderProps {
 
 const HexGrid: React.FC = () => {
   return (
-    <div className="absolute inset-0 overflow-hidden opacity-30 pointer-events-none">
+    <div className="app-builder-hex-grid absolute inset-0 overflow-hidden opacity-30 pointer-events-none">
       <svg className="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <pattern id="hexagons" width="50" height="43.4" patternUnits="userSpaceOnUse" patternTransform="scale(2)">
             <polygon
               fill="none"
-              stroke="rgba(204, 0, 0, 0.3)"
               strokeWidth="0.5"
+              style={{ stroke: 'var(--builder-hex-stroke, rgba(204, 0, 0, 0.3))' }}
               points="24.8,22 37.3,29.2 37.3,43.7 24.8,50.9 12.3,43.7 12.3,29.2"
               transform="translate(0, -21.7)"
             />
             <polygon
               fill="none"
-              stroke="rgba(204, 0, 0, 0.3)"
               strokeWidth="0.5"
+              style={{ stroke: 'var(--builder-hex-stroke, rgba(204, 0, 0, 0.3))' }}
               points="24.8,22 37.3,29.2 37.3,43.7 24.8,50.9 12.3,43.7 12.3,29.2"
               transform="translate(25, 0)"
             />
@@ -188,11 +188,11 @@ const FloatingParticles: React.FC = () => {
   )
 
   return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+    <div className="app-builder-particles absolute inset-0 overflow-hidden pointer-events-none">
       {particles.map((particle) => (
         <div
           key={particle.id}
-          className="absolute rounded-full bg-red-500/40"
+          className="app-builder-particle absolute rounded-full"
           style={{
             width: particle.size,
             height: particle.size,
@@ -200,7 +200,8 @@ const FloatingParticles: React.FC = () => {
             top: `${particle.y}%`,
             animation: `float ${particle.duration}s ease-in-out infinite`,
             animationDelay: `${particle.delay}s`,
-            boxShadow: '0 0 8px rgba(204, 0, 0, 0.6)',
+            background: 'var(--builder-particle-bg, rgba(239, 68, 68, 0.4))',
+            boxShadow: 'var(--builder-particle-shadow, 0 0 8px rgba(204, 0, 0, 0.6))',
           }}
         />
       ))}
@@ -215,21 +216,21 @@ const FloatingParticles: React.FC = () => {
 const AnimatedLogo: React.FC = () => {
   const logoSrc = useThemeLogo()
   return (
-    <div className="relative group">
+    <div className="app-builder-logo relative group">
       {/* Main logo - large and clean, no background box */}
       <div className="relative w-[20rem] h-[20rem] md:w-[26rem] md:h-[26rem] flex items-center justify-center group-hover:scale-105 transition-transform duration-500">
         <img
           src={logoSrc}
           alt="APEX"
-          className="w-full h-full object-contain relative z-10 drop-shadow-[0_0_30px_rgba(220,38,38,0.5)]"
+          className="app-builder-logo-image w-full h-full object-contain relative z-10 drop-shadow-[0_0_30px_rgba(220,38,38,0.5)]"
         />
       </div>
 
       {/* Corner accents - HUD style brackets */}
-      <div className="absolute -top-4 -left-4 w-6 h-6 border-t-2 border-l-2 border-red-500/70 rounded-tl" />
-      <div className="absolute -top-4 -right-4 w-6 h-6 border-t-2 border-r-2 border-red-500/70 rounded-tr" />
-      <div className="absolute -bottom-4 -left-4 w-6 h-6 border-b-2 border-l-2 border-red-500/70 rounded-bl" />
-      <div className="absolute -bottom-4 -right-4 w-6 h-6 border-b-2 border-r-2 border-red-500/70 rounded-br" />
+      <div className="app-builder-logo-corner absolute -top-4 -left-4 w-6 h-6 border-t-2 border-l-2 border-red-500/70 rounded-tl" />
+      <div className="app-builder-logo-corner absolute -top-4 -right-4 w-6 h-6 border-t-2 border-r-2 border-red-500/70 rounded-tr" />
+      <div className="app-builder-logo-corner absolute -bottom-4 -left-4 w-6 h-6 border-b-2 border-l-2 border-red-500/70 rounded-bl" />
+      <div className="app-builder-logo-corner absolute -bottom-4 -right-4 w-6 h-6 border-b-2 border-r-2 border-red-500/70 rounded-br" />
     </div>
   )
 }
@@ -240,7 +241,7 @@ const AnimatedLogo: React.FC = () => {
 
 const AnimatedTitle: React.FC = () => {
   return (
-    <h1 className="text-5xl md:text-6xl font-black relative tracking-tight">
+    <h1 className="app-builder-title text-5xl md:text-6xl font-black relative tracking-tight">
       <span
         className="bg-gradient-to-r from-red-400 via-orange-400 to-red-500 bg-clip-text text-transparent"
         style={{
@@ -295,7 +296,7 @@ const TypewriterSubtitle: React.FC<{ text: string }> = ({ text }) => {
   }, [])
 
   return (
-    <p className="text-gray-400 text-lg md:text-xl font-light tracking-wide">
+    <p className="app-builder-subtitle text-gray-400 text-lg md:text-xl font-light tracking-wide">
       {displayedText}
       <span className={cn("inline-block w-0.5 h-5 bg-red-500 ml-1 align-middle transition-opacity duration-100", showCursor ? "opacity-100" : "opacity-0")} />
     </p>
@@ -318,10 +319,10 @@ const PremiumTextarea: React.FC<PremiumTextareaProps> = ({ value, onChange, maxL
   const progressPercent = (value.length / maxLength) * 100
 
   return (
-    <div className="relative group">
+    <div className="premium-textarea relative group">
       {/* Animated border container */}
       <div className={cn(
-        "absolute -inset-[2px] rounded-2xl transition-all duration-500",
+        "premium-textarea-border absolute -inset-[2px] rounded-2xl transition-all duration-500",
         isEmpty && !isFocused && "animate-pulse",
         isFocused
           ? "bg-gradient-to-r from-red-500 via-orange-500 to-red-500 shadow-lg shadow-red-900/50"
@@ -329,7 +330,7 @@ const PremiumTextarea: React.FC<PremiumTextareaProps> = ({ value, onChange, maxL
       )} style={isFocused ? { backgroundSize: '200% auto', animation: 'gradient-shift 2s linear infinite' } : {}} />
 
       {/* Glass effect background */}
-      <div className="absolute inset-0 rounded-xl bg-black/90 backdrop-blur-xl" />
+      <div className="premium-textarea-shell absolute inset-0 rounded-xl bg-black/90 backdrop-blur-xl" />
 
       {/* Inner glow on focus */}
       {isFocused && (
@@ -400,10 +401,10 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
     <button
       onClick={onClick}
       className={cn(
-        "relative group p-4 rounded-xl transition-all duration-300 text-left overflow-hidden",
+        "tech-stack-card relative group p-4 rounded-xl transition-all duration-300 text-left overflow-hidden",
         "border-2 backdrop-blur-sm",
         isSelected
-          ? "border-red-500 bg-red-950/40 shadow-lg shadow-red-900/40 scale-[1.02]"
+          ? "is-selected border-red-500 bg-red-950/40 shadow-lg shadow-red-900/40 scale-[1.02]"
           : "border-gray-800 bg-gray-900/50 hover:border-gray-600 hover:bg-gray-900/70 hover:scale-[1.01]"
       )}
     >
@@ -424,7 +425,7 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
       {/* Content */}
       <div className="relative z-10 flex items-center gap-3">
         <div className={cn(
-          "w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-300 flex-shrink-0",
+          "tech-stack-icon w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-300 flex-shrink-0",
           isSelected
             ? "bg-red-600 text-white shadow-lg shadow-red-900/50"
             : "bg-gray-800 text-gray-400 group-hover:text-white group-hover:bg-gray-700"
@@ -433,13 +434,13 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
         </div>
         <div className="flex-1 min-w-0">
           <h4 className={cn(
-            "font-bold text-sm transition-colors",
+            "tech-stack-title font-bold text-sm transition-colors",
             isSelected ? "text-white" : "text-gray-200"
           )}>
             {stack.name}
           </h4>
           <p className={cn(
-            "text-xs transition-colors",
+            "tech-stack-description text-xs transition-colors",
             isSelected ? "text-red-300" : "text-gray-500"
           )}>{stack.description}</p>
         </div>
@@ -486,6 +487,7 @@ const EpicBuildButton: React.FC<EpicBuildButtonProps> = ({ onClick, disabled, is
       onClick={handleClick}
       disabled={disabled}
       className={cn(
+        "launch-build-btn",
         "relative w-full h-18 py-5 rounded-2xl font-black text-xl overflow-hidden",
         "transition-all duration-300 transform",
         disabled
@@ -495,17 +497,17 @@ const EpicBuildButton: React.FC<EpicBuildButtonProps> = ({ onClick, disabled, is
     >
       {/* Animated gradient background */}
       <div className={cn(
-        "absolute inset-0 bg-gradient-to-r from-red-700 via-orange-600 to-red-700",
+        "launch-build-bg absolute inset-0 bg-gradient-to-r from-red-700 via-orange-600 to-red-700",
         !disabled && !isLoading && "animate-gradient-shift"
       )} style={{ backgroundSize: '200% auto' }} />
 
       {/* Pulsing glow effect */}
       {!disabled && !isLoading && (
-        <div className="absolute -inset-1 bg-gradient-to-r from-red-500 via-orange-500 to-red-500 rounded-2xl opacity-60 blur-lg animate-pulse" />
+        <div className="launch-build-glow absolute -inset-1 bg-gradient-to-r from-red-500 via-orange-500 to-red-500 rounded-2xl opacity-60 blur-lg animate-pulse" />
       )}
 
       {/* Inner shine */}
-      <div className="absolute inset-0 bg-gradient-to-b from-white/25 via-transparent to-black/30" />
+      <div className="launch-build-shine absolute inset-0 bg-gradient-to-b from-white/25 via-transparent to-black/30" />
 
       {/* Animated border for loading */}
       {isLoading && (
@@ -1764,7 +1766,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   // ============================================================================
 
   return (
-    <div className="min-h-screen overflow-y-auto bg-black text-white relative">
+    <div className="app-builder-root min-h-screen overflow-y-auto bg-black text-white relative">
       {/* Onboarding Tour - shows on first visit */}
       <OnboardingTour />
 
@@ -1816,12 +1818,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       `}</style>
 
       {/* Animated background layers */}
-      <div className="fixed inset-0 pointer-events-none">
+      <div className="app-builder-background fixed inset-0 pointer-events-none">
         {/* Base gradient */}
-        <div className="absolute inset-0 bg-gradient-to-b from-red-950/30 via-black to-black" />
+        <div className="app-builder-bg-base absolute inset-0 bg-gradient-to-b from-red-950/30 via-black to-black" />
 
         {/* Animated background component */}
-        <AnimatedBackground variant="full" intensity="low" interactive={false} className="opacity-40" />
+        <AnimatedBackground variant="full" intensity="low" interactive={false} className="app-builder-animated-bg opacity-40" />
 
         {/* Hex grid pattern */}
         <HexGrid />
@@ -1830,9 +1832,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         <FloatingParticles />
 
         {/* Radial gradient accents */}
-        <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-red-900/15 rounded-full blur-3xl" />
-        <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-orange-900/10 rounded-full blur-3xl" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] bg-red-950/10 rounded-full blur-3xl" />
+        <div className="app-builder-accent app-builder-accent-a absolute top-0 left-1/4 w-[500px] h-[500px] bg-red-900/15 rounded-full blur-3xl" />
+        <div className="app-builder-accent app-builder-accent-b absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-orange-900/10 rounded-full blur-3xl" />
+        <div className="app-builder-accent app-builder-accent-c absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] bg-red-950/10 rounded-full blur-3xl" />
       </div>
 
       {/* Main content */}
@@ -1898,21 +1900,22 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         {!buildState ? (
           // App Description Input
           <div className="max-w-4xl mx-auto">
-            <Card variant="cyberpunk" glow="intense" className="border-2 border-red-900/40 bg-black/60 backdrop-blur-xl">
+            <Card variant="cyberpunk" glow="intense" className="builder-main-card border-2 border-red-900/40 bg-black/60 backdrop-blur-xl">
               <CardContent className="p-8 md:p-10">
                 {/* Build Mode Toggle */}
                 <div className="flex items-center justify-center gap-6 mb-10">
                   <button
                     onClick={() => setBuildMode('fast')}
                     className={cn(
-                      'relative flex items-center gap-4 px-8 py-4 rounded-xl transition-all duration-300 overflow-hidden group',
+                      'build-mode-btn relative flex items-center gap-4 px-8 py-4 rounded-xl transition-all duration-300 overflow-hidden group',
+                      buildMode === 'fast' && 'is-active',
                       buildMode === 'fast'
                         ? 'bg-gradient-to-r from-red-900/50 to-orange-900/40 border-2 border-red-500 text-red-400 shadow-xl shadow-red-900/40'
                         : 'bg-gray-900/60 border-2 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300'
                     )}
                   >
                     {buildMode === 'fast' && (
-                      <div className="absolute inset-0 bg-gradient-to-r from-red-600/10 via-orange-600/10 to-red-600/10 animate-pulse" />
+                      <div className="build-mode-active-overlay absolute inset-0 bg-gradient-to-r from-red-600/10 via-orange-600/10 to-red-600/10 animate-pulse" />
                     )}
                     <Zap className={cn("w-6 h-6 relative z-10", buildMode === 'fast' && "animate-pulse")} />
                     <div className="relative z-10 text-left">
@@ -1923,14 +1926,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                   <button
                     onClick={() => setBuildMode('full')}
                     className={cn(
-                      'relative flex items-center gap-4 px-8 py-4 rounded-xl transition-all duration-300 overflow-hidden group',
+                      'build-mode-btn relative flex items-center gap-4 px-8 py-4 rounded-xl transition-all duration-300 overflow-hidden group',
+                      buildMode === 'full' && 'is-active',
                       buildMode === 'full'
                         ? 'bg-gradient-to-r from-red-900/50 to-orange-900/40 border-2 border-red-500 text-red-400 shadow-xl shadow-red-900/40'
                         : 'bg-gray-900/60 border-2 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300'
                     )}
                   >
                     {buildMode === 'full' && (
-                      <div className="absolute inset-0 bg-gradient-to-r from-red-600/10 via-orange-600/10 to-red-600/10 animate-pulse" />
+                      <div className="build-mode-active-overlay absolute inset-0 bg-gradient-to-r from-red-600/10 via-orange-600/10 to-red-600/10 animate-pulse" />
                     )}
                     <Sparkles className={cn("w-6 h-6 relative z-10", buildMode === 'full' && "animate-pulse")} />
                     <div className="relative z-10 text-left">
@@ -1951,7 +1955,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
                 {/* Tech Stack Selection */}
                 <div className="mb-10">
-                  <h3 className="text-xl font-bold text-gray-200 mb-5 flex items-center gap-3">
+                  <h3 className="builder-section-heading text-xl font-bold text-gray-200 mb-5 flex items-center gap-3">
                     <Cpu className="w-6 h-6 text-red-400" />
                     Technology Stack
                   </h3>
@@ -1972,7 +1976,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
                 {/* AI Power Mode */}
                 <div className="mb-10">
-                  <h3 className="text-xl font-bold text-gray-200 mb-5 flex items-center gap-3">
+                  <h3 className="builder-section-heading text-xl font-bold text-gray-200 mb-5 flex items-center gap-3">
                     <Sparkles className="w-6 h-6 text-red-400" />
                     AI Power Mode
                   </h3>
@@ -1986,7 +1990,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                         key={mode.id}
                         onClick={() => setPowerMode(mode.id)}
                         className={cn(
-                          'relative group p-4 rounded-xl border-2 transition-all duration-200 text-left',
+                          'power-mode-card relative group p-4 rounded-xl border-2 transition-all duration-200 text-left',
+                          powerMode === mode.id && 'is-active',
                           powerMode === mode.id
                             ? mode.color === 'green' ? 'border-green-500/60 bg-green-500/10 shadow-lg shadow-green-500/10'
                               : mode.color === 'yellow' ? 'border-yellow-500/60 bg-yellow-500/10 shadow-lg shadow-yellow-500/10'
@@ -2049,7 +2054,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                     onClick={() => setShowImportModal(true)}
                     variant="outline"
                     size="lg"
-                    className="w-full h-14 border-2 border-red-900/60 text-red-400 hover:bg-red-950/40 hover:border-red-700 transition-all duration-300 font-semibold"
+                    className="builder-secondary-btn w-full h-14 border-2 border-red-900/60 text-red-400 hover:bg-red-950/40 hover:border-red-700 transition-all duration-300 font-semibold"
                   >
                     <Download className="w-5 h-5 mr-3" />
                     Migrate from Replit
@@ -2059,7 +2064,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                     onClick={() => setShowGitHubImport(true)}
                     variant="outline"
                     size="lg"
-                    className="w-full h-14 border-2 border-gray-700 text-gray-300 hover:bg-gray-800 hover:border-gray-600 transition-all duration-300 font-semibold"
+                    className="builder-tertiary-btn w-full h-14 border-2 border-gray-700 text-gray-300 hover:bg-gray-800 hover:border-gray-600 transition-all duration-300 font-semibold"
                   >
                     <Github className="w-5 h-5 mr-3" />
                     Import from GitHub
@@ -2068,7 +2073,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
                 {/* Example Apps */}
                 <div className="mt-10 pt-8 border-t border-gray-800">
-                  <p className="text-sm text-gray-500 mb-4 font-medium">Quick examples:</p>
+                  <p className="builder-quick-examples-label text-sm text-gray-500 mb-4 font-medium">Quick examples:</p>
                   <div className="flex flex-wrap gap-3">
                     {[
                       'Todo app with auth',
@@ -2080,7 +2085,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                       <button
                         key={example}
                         onClick={() => setAppDescription(example)}
-                        className="px-5 py-2.5 text-sm bg-gray-900/80 hover:bg-gray-800 text-gray-300 rounded-lg transition-all duration-200 border border-gray-800 hover:border-red-900/60 hover:text-white hover:shadow-lg hover:shadow-red-900/20"
+                        className="quick-example-btn px-5 py-2.5 text-sm bg-gray-900/80 hover:bg-gray-800 text-gray-300 rounded-lg transition-all duration-200 border border-gray-800 hover:border-red-900/60 hover:text-white hover:shadow-lg hover:shadow-red-900/20"
                       >
                         {example}
                       </button>
