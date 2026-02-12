@@ -144,8 +144,8 @@ For code files, use this exact format:
 	if maxTokens <= 0 {
 		maxTokens = 4000
 	}
-	if maxTokens > 16000 {
-		maxTokens = 16000
+	if maxTokens > 24000 {
+		maxTokens = 24000
 	}
 
 	temperature := opts.Temperature

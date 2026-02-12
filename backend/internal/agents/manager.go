@@ -1021,8 +1021,8 @@ func (am *AgentManager) executeTask(task *Task) {
 
 	log.Printf("Calling AI router for task %s with provider %s", task.ID, agent.Provider)
 
-	// Role-aware token limits
-	maxTokens := am.getMaxTokensForRole(agent.Role)
+	// Role-aware token limits scaled by power mode
+	maxTokens := am.getMaxTokensForRole(agent.Role, build.PowerMode)
 	if build.MaxTokensPerRequest > 0 && build.MaxTokensPerRequest < maxTokens {
 		maxTokens = build.MaxTokensPerRequest
 	}
@@ -3258,27 +3258,43 @@ func (am *AgentManager) getTemperatureForRole(role AgentRole) float64 {
 }
 
 // getMaxTokensForRole returns the optimal max token limit for each agent role
-func (am *AgentManager) getMaxTokensForRole(role AgentRole) int {
+func (am *AgentManager) getMaxTokensForRole(role AgentRole, powerMode ...PowerMode) int {
+	// Base token limits per role
+	var base int
 	switch role {
 	case RolePlanner:
-		return 4000 // Structured plan output
+		base = 4000 // Structured plan output
 	case RoleArchitect:
-		return 6000 // Architecture documents
+		base = 6000 // Architecture documents
 	case RoleFrontend:
-		return 12000 // Full React components with styling
+		base = 12000 // Full React components with styling
 	case RoleBackend:
-		return 12000 // Full API endpoints with middleware
+		base = 12000 // Full API endpoints with middleware
 	case RoleDatabase:
-		return 8000 // Schemas, migrations, seeds
+		base = 8000 // Schemas, migrations, seeds
 	case RoleTesting:
-		return 8000 // Comprehensive test suites
+		base = 8000 // Comprehensive test suites
 	case RoleReviewer:
-		return 4000 // Concise review findings
+		base = 4000 // Concise review findings
 	case RoleLead:
-		return 2000 // Conversation responses
+		base = 2000 // Conversation responses
 	default:
-		return 8000
+		base = 8000
 	}
+
+	// Scale by power mode — users paying for Max get premium token budgets
+	if len(powerMode) > 0 {
+		switch powerMode[0] {
+		case PowerMax:
+			base = base * 2 // 2x tokens: Frontend/Backend get 24K, Architect 12K, etc.
+		case PowerBalanced:
+			base = base * 3 / 2 // 1.5x tokens: Frontend/Backend get 18K, etc.
+		case PowerFast:
+			// Keep base limits — fast mode optimizes for speed/cost
+		}
+	}
+
+	return base
 }
 
 // getNextFallbackProvider returns the next provider in the fallback chain
