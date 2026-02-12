@@ -5,7 +5,7 @@
 # ==================================================
 # Stage 1: Dependencies
 # ==================================================
-FROM node:18-alpine AS deps
+FROM node:20-alpine AS deps
 
 WORKDIR /app
 
@@ -18,7 +18,7 @@ RUN npm ci --only=production=false
 # ==================================================
 # Stage 2: Build
 # ==================================================
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 # Build arguments
 ARG VITE_API_URL=http://localhost:8080/api/v1
