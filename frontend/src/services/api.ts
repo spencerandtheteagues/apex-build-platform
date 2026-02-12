@@ -838,6 +838,17 @@ export class ApiService {
     return response.data.categories
   }
 
+  async getProjectCategories(projectId: number): Promise<string[]> {
+    const response = await this.client.get<ApiResponse<{ categories: string[] }>>(
+      `/projects/${projectId}/categories`
+    )
+    return response.data.data?.categories || (response.data as any).categories || []
+  }
+
+  async setProjectCategories(projectId: number, categories: string[]): Promise<void> {
+    await this.client.put(`/projects/${projectId}/categories`, { categories })
+  }
+
   // Get public project page
   async getPublicProject(username: string, projectName: string): Promise<{
     project: Project

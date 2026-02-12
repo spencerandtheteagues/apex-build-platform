@@ -4,7 +4,7 @@
 import React, { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
-import { Project } from '@/types'
+import { Project, ProjectCategory } from '@/types'
 import apiService from '@/services/api'
 import {
   Card,
@@ -70,6 +70,10 @@ export const ExplorePage = () => {
   const [publishSuccess, setPublishSuccess] = useState<string | null>(null)
   const [publishSearch, setPublishSearch] = useState('')
   const [userProjects, setUserProjects] = useState<Project[]>([])
+  const [categories, setCategories] = useState<ProjectCategory[]>([])
+  const [categorySelections, setCategorySelections] = useState<Record<number, string[]>>({})
+  const [categoryLoading, setCategoryLoading] = useState<Record<number, boolean>>({})
+  const [expandedCategoryProjects, setExpandedCategoryProjects] = useState<Set<number>>(new Set())
 
   const { setCurrentProject, addNotification } = useStore()
 
@@ -127,8 +131,12 @@ export const ExplorePage = () => {
     setShowPublishModal(true)
     setPublishLoading(true)
     try {
-      const projectsData = await apiService.getProjects()
+      const [projectsData, categoriesData] = await Promise.all([
+        apiService.getProjects(),
+        apiService.getCategories()
+      ])
       setUserProjects(projectsData)
+      setCategories(categoriesData)
     } catch (error) {
       console.error('Failed to load projects:', error)
       setPublishError('Failed to load your projects.')
@@ -225,6 +233,74 @@ export const ExplorePage = () => {
       setPublishError('Failed to update project visibility.')
     } finally {
       setPublishLoading(false)
+    }
+  }
+
+  const ensureProjectCategoriesLoaded = async (projectId: number) => {
+    if (categorySelections[projectId]) return
+
+    setCategoryLoading(prev => ({ ...prev, [projectId]: true }))
+    try {
+      const selected = await apiService.getProjectCategories(projectId)
+      setCategorySelections(prev => ({ ...prev, [projectId]: selected }))
+    } catch (error) {
+      console.error('Failed to load project categories:', error)
+      setCategorySelections(prev => ({ ...prev, [projectId]: [] }))
+    } finally {
+      setCategoryLoading(prev => ({ ...prev, [projectId]: false }))
+    }
+  }
+
+  const toggleCategoryPanel = async (projectId: number) => {
+    setExpandedCategoryProjects(prev => {
+      const next = new Set(prev)
+      if (next.has(projectId)) {
+        next.delete(projectId)
+      } else {
+        next.add(projectId)
+      }
+      return next
+    })
+    await ensureProjectCategoriesLoaded(projectId)
+  }
+
+  const toggleCategorySelection = (projectId: number, slug: string) => {
+    setCategorySelections(prev => {
+      const current = prev[projectId] || []
+      if (current.includes(slug)) {
+        return { ...prev, [projectId]: current.filter(c => c !== slug) }
+      }
+      if (current.length >= 3) {
+        addNotification({
+          type: 'warning',
+          title: 'Category Limit',
+          message: 'You can select up to 3 categories.',
+        })
+        return prev
+      }
+      return { ...prev, [projectId]: [...current, slug] }
+    })
+  }
+
+  const saveProjectCategories = async (projectId: number) => {
+    const selected = categorySelections[projectId] || []
+    setCategoryLoading(prev => ({ ...prev, [projectId]: true }))
+    try {
+      await apiService.setProjectCategories(projectId, selected)
+      addNotification({
+        type: 'success',
+        title: 'Categories Updated',
+        message: 'Project categories saved successfully.',
+      })
+    } catch (error) {
+      console.error('Failed to save project categories:', error)
+      addNotification({
+        type: 'error',
+        title: 'Save Failed',
+        message: 'Unable to save categories. Please try again.',
+      })
+    } finally {
+      setCategoryLoading(prev => ({ ...prev, [projectId]: false }))
     }
   }
 
@@ -466,33 +542,86 @@ export const ExplorePage = () => {
                   {filteredUserProjects.map(project => (
                     <div
                       key={project.id}
-                      className="flex items-center justify-between gap-4 bg-gray-900/60 border border-gray-800 rounded-lg p-3"
+                      className="bg-gray-900/60 border border-gray-800 rounded-lg"
                     >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-white font-medium truncate">{project.name}</span>
-                          {project.is_public ? (
-                            <Badge variant="success" size="xs">
-                              Public
-                            </Badge>
-                          ) : (
-                            <Badge variant="neutral" size="xs">
-                              Private
-                            </Badge>
+                      <div className="flex items-center justify-between gap-4 p-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-white font-medium truncate">{project.name}</span>
+                            {project.is_public ? (
+                              <Badge variant="success" size="xs">
+                                Public
+                              </Badge>
+                            ) : (
+                              <Badge variant="neutral" size="xs">
+                                Private
+                              </Badge>
+                            )}
+                          </div>
+                          {project.description && (
+                            <p className="text-xs text-gray-500 truncate">{project.description}</p>
                           )}
                         </div>
-                        {project.description && (
-                          <p className="text-xs text-gray-500 truncate">{project.description}</p>
-                        )}
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="xs"
+                            variant={project.is_public ? 'ghost' : 'primary'}
+                            onClick={() => handleTogglePublish(project)}
+                            disabled={publishLoading}
+                          >
+                            {project.is_public ? 'Unpublish' : 'Publish'}
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            onClick={() => toggleCategoryPanel(project.id)}
+                          >
+                            <Tag className="w-3.5 h-3.5 mr-1.5" />
+                            Categories
+                          </Button>
+                        </div>
                       </div>
-                      <Button
-                        size="xs"
-                        variant={project.is_public ? 'ghost' : 'primary'}
-                        onClick={() => handleTogglePublish(project)}
-                        disabled={publishLoading}
-                      >
-                        {project.is_public ? 'Unpublish' : 'Publish'}
-                      </Button>
+
+                      {expandedCategoryProjects.has(project.id) && (
+                        <div className="border-t border-gray-800 px-3 py-3 space-y-3">
+                          {categoryLoading[project.id] && categories.length === 0 ? (
+                            <div className="text-xs text-gray-500">Loading categories...</div>
+                          ) : (
+                            <>
+                              <div className="flex flex-wrap gap-2">
+                                {categories.map(category => {
+                                  const selected = (categorySelections[project.id] || []).includes(category.slug)
+                                  return (
+                                    <button
+                                      key={category.slug}
+                                      onClick={() => toggleCategorySelection(project.id, category.slug)}
+                                      className={cn(
+                                        'px-2 py-1 rounded-full text-xs border transition-colors',
+                                        selected
+                                          ? 'bg-purple-600/20 border-purple-500 text-purple-200'
+                                          : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'
+                                      )}
+                                    >
+                                      {category.name}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                              <div className="flex items-center justify-between text-xs text-gray-500">
+                                <span>Up to 3 categories</span>
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  onClick={() => saveProjectCategories(project.id)}
+                                  disabled={categoryLoading[project.id]}
+                                >
+                                  Save Categories
+                                </Button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

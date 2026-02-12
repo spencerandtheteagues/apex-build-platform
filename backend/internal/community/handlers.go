@@ -1255,6 +1255,53 @@ func (h *CommunityHandler) SetProjectCategories(c *gin.Context) {
 	})
 }
 
+// GetProjectCategories returns categories for a project (owner only)
+func (h *CommunityHandler) GetProjectCategories(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, StandardResponse{
+			Success: false,
+			Error:   "Authentication required",
+			Code:    "NOT_AUTHENTICATED",
+		})
+		return
+	}
+
+	projectID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, StandardResponse{
+			Success: false,
+			Error:   "Invalid project ID",
+			Code:    "INVALID_PROJECT_ID",
+		})
+		return
+	}
+
+	var project models.Project
+	if err := h.DB.Where("id = ? AND owner_id = ?", projectID, userID).First(&project).Error; err != nil {
+		c.JSON(http.StatusNotFound, StandardResponse{
+			Success: false,
+			Error:   "Project not found or access denied",
+			Code:    "PROJECT_NOT_FOUND",
+		})
+		return
+	}
+
+	var assignments []ProjectCategoryAssignment
+	h.DB.Preload("Category").Where("project_id = ?", projectID).Find(&assignments)
+	categories := make([]string, len(assignments))
+	for i, a := range assignments {
+		categories[i] = a.Category.Slug
+	}
+
+	c.JSON(http.StatusOK, StandardResponse{
+		Success: true,
+		Data: gin.H{
+			"categories": categories,
+		},
+	})
+}
+
 // ========== HELPER FUNCTIONS ==========
 
 func (h *CommunityHandler) enrichProjects(projects []models.Project, userID uint) []ProjectWithStats {
@@ -1469,4 +1516,5 @@ func (h *CommunityHandler) RegisterProtectedRoutes(router *gin.RouterGroup) {
 
 	// Project categories (owner only)
 	router.PUT("/projects/:id/categories", h.SetProjectCategories)
+	router.GET("/projects/:id/categories", h.GetProjectCategories)
 }
