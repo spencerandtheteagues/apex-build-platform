@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"apex-build/internal/ai"
+
 	"github.com/google/uuid"
 )
 
@@ -58,7 +60,7 @@ type ManagedBuild struct {
 	evictedAt  *time.Time
 
 	// Resource tracking
-	goroutineCount int
+	goroutineCount  int
 	subscriberCount int
 }
 
@@ -378,8 +380,25 @@ func (am *OptimizedAgentManager) executeTaskCore(ctx context.Context, task *Task
 		return
 	}
 
+	if response == nil || response.Content == "" {
+		am.resultQueue <- &TaskResult{
+			TaskID:  task.ID,
+			AgentID: agent.ID,
+			Success: false,
+			Error:   fmt.Errorf("AI generation returned empty response"),
+		}
+		return
+	}
+
+	modelUsed := ai.GetModelUsed(response, nil)
+	if modelUsed != "" && modelUsed != "unknown" {
+		agent.mu.Lock()
+		agent.Model = modelUsed
+		agent.mu.Unlock()
+	}
+
 	// Parse output
-	output := am.parseTaskOutputFromResponse(task.Type, response)
+	output := am.parseTaskOutputFromResponse(task.Type, response.Content)
 
 	am.resultQueue <- &TaskResult{
 		TaskID:  task.ID,
@@ -703,14 +722,14 @@ func (am *OptimizedAgentManager) buildTaskPromptFromBuild(task *Task, build *Bui
 
 func (am *OptimizedAgentManager) getSystemPromptForRole(role AgentRole) string {
 	prompts := map[AgentRole]string{
-		RoleLead:     "You are the Lead Agent coordinating the build.",
-		RolePlanner:  "You are the Planning Agent creating detailed plans.",
+		RoleLead:      "You are the Lead Agent coordinating the build.",
+		RolePlanner:   "You are the Planning Agent creating detailed plans.",
 		RoleArchitect: "You are the Architect Agent designing systems.",
-		RoleFrontend: "You are the Frontend Agent building UIs.",
-		RoleBackend:  "You are the Backend Agent creating APIs.",
-		RoleDatabase: "You are the Database Agent designing schemas.",
-		RoleTesting:  "You are the Testing Agent writing tests.",
-		RoleReviewer: "You are the Reviewer Agent reviewing code.",
+		RoleFrontend:  "You are the Frontend Agent building UIs.",
+		RoleBackend:   "You are the Backend Agent creating APIs.",
+		RoleDatabase:  "You are the Database Agent designing schemas.",
+		RoleTesting:   "You are the Testing Agent writing tests.",
+		RoleReviewer:  "You are the Reviewer Agent reviewing code.",
 	}
 	return prompts[role]
 }
