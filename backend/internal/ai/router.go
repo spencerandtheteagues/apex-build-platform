@@ -155,6 +155,7 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 	if !exists {
 		return nil, fmt.Errorf("client not available for provider: %s", provider)
 	}
+	primaryReq := r.requestForProvider(req, provider)
 
 	// Check rate limiting
 	if !r.checkRateLimit(provider) {
@@ -164,7 +165,8 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 			if r.checkRateLimit(fallbackProvider) {
 				if fallbackClient, exists := r.clients[fallbackProvider]; exists {
 					log.Printf("Rate limited for %s, using fallback %s", provider, fallbackProvider)
-					return fallbackClient.Generate(ctx, req)
+					fallbackReq := r.requestForProvider(primaryReq, fallbackProvider)
+					return fallbackClient.Generate(ctx, fallbackReq)
 				}
 			}
 		}
@@ -172,7 +174,7 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 	}
 
 	// Attempt to generate with primary provider
-	response, err := client.Generate(ctx, req)
+	response, err := client.Generate(ctx, primaryReq)
 	if err != nil {
 		errStr := err.Error()
 		log.Printf("Error from provider %s: %v", provider, err)
@@ -194,7 +196,8 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 			if fallbackClient, exists := r.clients[fallbackProvider]; exists {
 				if r.checkRateLimit(fallbackProvider) && r.isHealthyOrUnknown(fallbackProvider) {
 					log.Printf("Falling back to provider %s", fallbackProvider)
-					fallbackResponse, fallbackErr := fallbackClient.Generate(ctx, req)
+					fallbackReq := r.requestForProvider(primaryReq, fallbackProvider)
+					fallbackResponse, fallbackErr := fallbackClient.Generate(ctx, fallbackReq)
 					if fallbackErr == nil {
 						return fallbackResponse, nil
 					}
@@ -218,6 +221,21 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 	}
 
 	return response, nil
+}
+
+// requestForProvider prepares a provider-specific request copy.
+// If provider changes, model override is cleared to avoid cross-provider model mismatches.
+func (r *AIRouter) requestForProvider(req *AIRequest, provider AIProvider) *AIRequest {
+	if req == nil {
+		return nil
+	}
+
+	reqCopy := *req
+	if req.Provider != "" && req.Provider != provider {
+		reqCopy.Model = ""
+	}
+	reqCopy.Provider = provider
+	return &reqCopy
 }
 
 // selectProvider chooses the optimal provider for a request

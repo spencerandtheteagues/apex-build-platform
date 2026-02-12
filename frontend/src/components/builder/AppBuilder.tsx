@@ -1241,11 +1241,19 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
       case 'agent:generation_failed':
         addSystemMessage(`AI generation failed for ${data.agent_role || 'agent'} (${data.provider || 'unknown'}): ${data.error || 'Unknown error'}`)
-        if (data.retry_count !== undefined && data.max_retries !== undefined) {
-          if (data.retry_count < data.max_retries) {
-            addSystemMessage(`Retrying... (attempt ${data.retry_count + 1}/${data.max_retries})`)
+        {
+          const retryCount = data.retry_count ?? data.attempt
+          const maxRetries = data.max_retries
+          const willRetry = data.will_retry
+
+          if (retryCount !== undefined && maxRetries !== undefined) {
+            if (willRetry === true || (willRetry === undefined && retryCount < maxRetries)) {
+              addSystemMessage(`Retrying... (attempt ${retryCount + 1}/${maxRetries})`)
+            } else {
+              addSystemMessage('Max retries reached. The AI provider may be unavailable.')
+            }
           } else {
-            addSystemMessage(`Max retries reached. The AI provider may be unavailable.`)
+            addSystemMessage('The AI provider reported an unrecoverable error.')
           }
         }
         break
@@ -1262,7 +1270,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         break
 
       case 'agent:retrying':
-        addSystemMessage(`${data.agent_role || 'Agent'} retrying task (attempt ${data.retry_count}/${data.max_retries})...`)
+        {
+          const retryCount = data.retry_count ?? data.attempt
+          const maxRetries = data.max_retries
+          if (retryCount !== undefined && maxRetries !== undefined) {
+            addSystemMessage(`${data.agent_role || 'Agent'} retrying task (attempt ${retryCount}/${maxRetries})...`)
+          } else {
+            addSystemMessage(`${data.agent_role || 'Agent'} retrying task...`)
+          }
+        }
         break
 
       case 'code:generated':

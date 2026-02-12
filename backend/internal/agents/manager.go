@@ -238,7 +238,14 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	// Spawn the lead agent with selected provider
 	var leadAgent *Agent
 	var err error
+	providerOrder := make([]ai.AIProvider, 0, len(availableProviders))
+	providerOrder = append(providerOrder, leadProvider)
 	for _, provider := range availableProviders {
+		if provider != leadProvider {
+			providerOrder = append(providerOrder, provider)
+		}
+	}
+	for _, provider := range providerOrder {
 		leadAgent, err = am.spawnAgent(buildID, RoleLead, provider)
 		if err == nil {
 			log.Printf("Successfully spawned lead agent with %s", provider)
@@ -1051,6 +1058,8 @@ func (am *AgentManager) executeTask(task *Task) {
 
 	if err != nil {
 		log.Printf("AI generation failed for task %s: %v", task.ID, err)
+		nextRetryCount := task.RetryCount + 1
+		willRetry := nextRetryCount < task.MaxRetries && !am.isNonRetriableAIError(err)
 
 		// Broadcast the error
 		am.broadcast(agent.BuildID, &WSMessage{
@@ -1066,6 +1075,7 @@ func (am *AgentManager) executeTask(task *Task) {
 				"error":       err.Error(),
 				"retry_count": task.RetryCount,
 				"max_retries": task.MaxRetries,
+				"will_retry":  willRetry,
 			},
 		})
 
@@ -1271,9 +1281,10 @@ func (am *AgentManager) processResult(result *TaskResult) {
 		}
 		task.ErrorHistory = append(task.ErrorHistory, errorAttempt)
 		task.RetryCount++
+		nonRetriable := am.isNonRetriableAIError(result.Error)
 
 		// Check if we should retry
-		if task.RetryCount < task.MaxRetries {
+		if task.RetryCount < task.MaxRetries && !nonRetriable {
 			// Analyze error and prepare for retry
 			log.Printf("Task %s failed (attempt %d/%d): %v. Retrying...",
 				task.ID, task.RetryCount, task.MaxRetries, result.Error)
@@ -1297,7 +1308,9 @@ func (am *AgentManager) processResult(result *TaskResult) {
 				Data: map[string]any{
 					"task_id":       result.TaskID,
 					"attempt":       task.RetryCount,
+					"retry_count":   task.RetryCount,
 					"max_retries":   task.MaxRetries,
+					"agent_role":    agent.Role,
 					"error":         result.Error.Error(),
 					"error_history": task.ErrorHistory,
 					"message":       fmt.Sprintf("Learning from error, retrying (%d/%d)...", task.RetryCount, task.MaxRetries),
@@ -1329,6 +1342,10 @@ func (am *AgentManager) processResult(result *TaskResult) {
 		} else {
 			// Max retries exceeded - mark as failed
 			log.Printf("Task %s failed after %d attempts. Giving up.", task.ID, task.RetryCount)
+			finalMessage := "Task failed after multiple retry attempts. Consider breaking down the task or providing more guidance."
+			if nonRetriable {
+				finalMessage = "Task failed due to a non-retriable provider/model configuration error."
+			}
 
 			agent.Status = StatusError
 			agent.Error = fmt.Sprintf("Failed after %d attempts: %s", task.RetryCount, result.Error.Error())
@@ -1350,7 +1367,7 @@ func (am *AgentManager) processResult(result *TaskResult) {
 					"error_history": task.ErrorHistory,
 					"attempts":      task.RetryCount,
 					"max_retries":   task.MaxRetries,
-					"message":       "Task failed after multiple retry attempts. Consider breaking down the task or providing more guidance.",
+					"message":       finalMessage,
 				},
 			})
 		}
@@ -2082,6 +2099,9 @@ func (am *AgentManager) defaultBuildLimits(mode BuildMode) (int, int, int, int) 
 	}
 	if maxRetries < 0 {
 		maxRetries = 0
+	}
+	if maxRetries > 3 {
+		maxRetries = 3
 	}
 	if maxRequests < 0 {
 		maxRequests = 0
@@ -3161,6 +3181,10 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 	// Analyze error for smart retry strategy
 	errorMsg := result.Error.Error()
 	retryStrategy := am.determineRetryStrategy(errorMsg, task)
+	nonRetriable := am.isNonRetriableAIError(result.Error)
+	if nonRetriable {
+		retryStrategy = "non_retriable"
+	}
 
 	// Track error for learning
 	task.ErrorHistory = append(task.ErrorHistory, ErrorAttempt{
@@ -3172,7 +3196,7 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 	task.RetryCount++
 
 	// Check if we should retry
-	if task.RetryCount < task.MaxRetries {
+	if task.RetryCount < task.MaxRetries && !nonRetriable {
 		log.Printf("Task %s failed (attempt %d/%d, strategy: %s): %v. Retrying...",
 			task.ID, task.RetryCount, task.MaxRetries, retryStrategy, result.Error)
 
@@ -3195,7 +3219,9 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 			Data: map[string]any{
 				"task_id":     result.TaskID,
 				"attempt":     task.RetryCount,
+				"retry_count": task.RetryCount,
 				"max_retries": task.MaxRetries,
+				"agent_role":  agent.Role,
 				"strategy":    retryStrategy,
 				"error":       errorMsg,
 				"message":     fmt.Sprintf("Retrying with %s strategy (%d/%d)...", retryStrategy, task.RetryCount, task.MaxRetries),
@@ -3209,6 +3235,11 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 		agent.mu.Lock()
 	} else {
 		// Max retries exceeded
+		finalMessage := "Task failed after multiple retry attempts. Consider breaking down the task or providing more guidance."
+		if nonRetriable {
+			finalMessage = "Task failed due to a non-retriable provider/model configuration error."
+		}
+
 		agent.Status = StatusError
 		agent.Error = fmt.Sprintf("Failed after %d attempts: %s", task.RetryCount, errorMsg)
 		task.Status = TaskFailed
@@ -3227,14 +3258,55 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 				"error":         agent.Error,
 				"error_history": task.ErrorHistory,
 				"attempts":      task.RetryCount,
+				"max_retries":   task.MaxRetries,
+				"message":       finalMessage,
 			},
 		})
 	}
 }
 
+func (am *AgentManager) isNonRetriableAIError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return am.isNonRetriableAIErrorMessage(err.Error())
+}
+
+func (am *AgentManager) isNonRetriableAIErrorMessage(errorMsg string) bool {
+	errorLower := strings.ToLower(errorMsg)
+
+	if strings.Contains(errorLower, "no ai providers available") ||
+		strings.Contains(errorLower, "client not available for provider") ||
+		strings.Contains(errorLower, "failed to select provider") {
+		return true
+	}
+
+	modelNotFound := strings.Contains(errorLower, "model") &&
+		(strings.Contains(errorLower, "not found") ||
+			strings.Contains(errorLower, "not_found_error") ||
+			strings.Contains(errorLower, "unsupported") ||
+			strings.Contains(errorLower, "invalid") ||
+			strings.Contains(errorLower, "unknown"))
+
+	if modelNotFound || strings.Contains(errorLower, "unsupported for generatecontent") {
+		return true
+	}
+
+	if strings.Contains(errorLower, "all_providers_failed") &&
+		(modelNotFound || strings.Contains(errorLower, "unsupported for generatecontent")) {
+		return true
+	}
+
+	return false
+}
+
 // determineRetryStrategy analyzes an error to pick the best retry approach
 func (am *AgentManager) determineRetryStrategy(errorMsg string, task *Task) string {
 	errorLower := strings.ToLower(errorMsg)
+
+	if am.isNonRetriableAIErrorMessage(errorMsg) {
+		return "non_retriable"
+	}
 
 	// Rate limiting - back off
 	if strings.Contains(errorLower, "rate limit") || strings.Contains(errorLower, "too many requests") || strings.Contains(errorLower, "429") {
