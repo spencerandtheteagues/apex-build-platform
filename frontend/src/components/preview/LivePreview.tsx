@@ -62,6 +62,8 @@ interface LivePreviewProps {
   onFileChange?: (filePath: string, content: string) => void
   className?: string
   autoStart?: boolean
+  autoRefreshOnSave?: boolean
+  onAutoRefreshChange?: (enabled: boolean) => void
 }
 
 type ViewportSize = 'mobile' | 'tablet' | 'desktop' | 'full'
@@ -77,7 +79,14 @@ const viewportSizes: Record<ViewportSize, { width: number; height: number; label
 const MAX_CONSOLE_ENTRIES = 1000
 const MAX_NETWORK_REQUESTS = 500
 
-export default function LivePreview({ projectId, onFileChange, className = '', autoStart = false }: LivePreviewProps) {
+export default function LivePreview({
+  projectId,
+  onFileChange,
+  className = '',
+  autoStart = false,
+  autoRefreshOnSave,
+  onAutoRefreshChange
+}: LivePreviewProps) {
   const [status, setStatus] = useState<PreviewStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -108,23 +117,57 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
   // Bundler state
   const [bundlerAvailable, setBundlerAvailable] = useState(false)
 
-  // Settings state (controlled checkboxes)
-  const [autoRefreshOnSave, setAutoRefreshOnSave] = useState(true)
+  // Settings state
+  const [internalAutoRefresh, setInternalAutoRefresh] = useState(true)
   const [showDevTools, setShowDevTools] = useState(true)
+  const [customPath, setCustomPath] = useState('')
+
+  const autoRefreshEnabled = typeof autoRefreshOnSave === 'boolean' ? autoRefreshOnSave : internalAutoRefresh
+  const setAutoRefreshEnabled = (value: boolean) => {
+    if (typeof autoRefreshOnSave === 'boolean') {
+      onAutoRefreshChange?.(value)
+      return
+    }
+    setInternalAutoRefresh(value)
+    onAutoRefreshChange?.(value)
+  }
 
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const displayUrl = React.useMemo(() => {
+  useEffect(() => {
+    if (!showDevTools && activeTab !== 'preview') {
+      setActiveTab('preview')
+    }
+  }, [showDevTools, activeTab])
+
+  const previewSrc = React.useMemo(() => {
     if (!previewUrl) return ''
+    const trimmed = customPath.trim()
+    if (!trimmed) return previewUrl
+    if (/^https?:\/\//i.test(trimmed)) {
+      return trimmed
+    }
+    const normalized = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
     try {
       const url = new URL(previewUrl)
+      url.pathname = url.pathname.replace(/\/$/, '') + normalized
+      return url.toString()
+    } catch {
+      return previewUrl
+    }
+  }, [previewUrl, customPath])
+
+  const displayUrl = React.useMemo(() => {
+    if (!previewSrc) return ''
+    try {
+      const url = new URL(previewSrc)
       url.searchParams.delete('token')
       return url.toString()
     } catch {
-      return previewUrl.replace(/([?&]token=)[^&]+/, '$1•••')
+      return previewSrc.replace(/([?&]token=)[^&]+/, '$1•••')
     }
-  }, [previewUrl])
+  }, [previewSrc])
 
   // Check Docker and bundler availability on mount
   useEffect(() => {
@@ -423,8 +466,8 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
 
   // Open in new tab
   const openInNewTab = () => {
-    if (previewUrl) {
-      window.open(previewUrl, '_blank')
+    if (previewSrc) {
+      window.open(previewSrc, '_blank')
     }
   }
 
@@ -566,36 +609,40 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
             >
               Preview
             </button>
-            <button
-              onClick={() => setActiveTab('console')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors ${
-                activeTab === 'console' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <Terminal className="w-3 h-3" />
-              Console
-              {(errorCount > 0 || warnCount > 0) && (
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
-                  errorCount > 0 ? 'bg-red-500 text-white' : 'bg-yellow-500 text-black'
-                }`}>
-                  {errorCount > 0 ? errorCount : warnCount}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('network')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors ${
-                activeTab === 'network' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <Globe className="w-3 h-3" />
-              Network
-              {networkErrorCount > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white">
-                  {networkErrorCount}
-                </span>
-              )}
-            </button>
+            {showDevTools && (
+              <>
+                <button
+                  onClick={() => setActiveTab('console')}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors ${
+                    activeTab === 'console' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <Terminal className="w-3 h-3" />
+                  Console
+                  {(errorCount > 0 || warnCount > 0) && (
+                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
+                      errorCount > 0 ? 'bg-red-500 text-white' : 'bg-yellow-500 text-black'
+                    }`}>
+                      {errorCount > 0 ? errorCount : warnCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setActiveTab('network')}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors ${
+                    activeTab === 'network' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <Globe className="w-3 h-3" />
+                  Network
+                  {networkErrorCount > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white">
+                      {networkErrorCount}
+                    </span>
+                  )}
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -670,8 +717,8 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
                       <span className="text-sm text-gray-400">Auto-refresh on save</span>
                       <input
                         type="checkbox"
-                        checked={autoRefreshOnSave}
-                        onChange={(e) => setAutoRefreshOnSave(e.target.checked)}
+                        checked={autoRefreshEnabled}
+                        onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
                         className="rounded bg-gray-700 border-gray-600 text-cyan-500"
                       />
                     </label>
@@ -716,6 +763,8 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
                       <input
                         type="text"
                         placeholder="/custom-path"
+                        value={customPath}
+                        onChange={(e) => setCustomPath(e.target.value)}
                         className="w-full mt-1 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm text-white"
                       />
                     </div>
@@ -778,15 +827,15 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
               </div>
             )}
 
-            {status?.active && previewUrl && (
+            {status?.active && previewSrc && (
               <div
                 className="bg-white rounded-lg shadow-2xl overflow-hidden transition-all duration-300"
                 style={getViewportStyle()}
               >
                 <iframe
                   ref={iframeRef}
-                  key={refreshKey}
-                  src={previewUrl}
+                  key={`${refreshKey}-${previewSrc}`}
+                  src={previewSrc}
                   className="w-full h-full border-0"
                   title="Live Preview"
                   sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
@@ -797,7 +846,7 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
         )}
 
         {/* Console Tab */}
-        {activeTab === 'console' && (
+        {showDevTools && activeTab === 'console' && (
           <ConsolePanel
             entries={consoleEntries}
             onClear={() => setConsoleEntries([])}
@@ -806,7 +855,7 @@ export default function LivePreview({ projectId, onFileChange, className = '', a
         )}
 
         {/* Network Tab */}
-        {activeTab === 'network' && (
+        {showDevTools && activeTab === 'network' && (
           <NetworkPanel
             requests={networkRequests}
             onClear={() => setNetworkRequests([])}

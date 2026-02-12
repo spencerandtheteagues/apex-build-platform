@@ -126,6 +126,8 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   const [activeRightTab, setActiveRightTab] = useState<'ai' | 'comments' | 'collab' | 'database' | 'settings'>('ai')
   const [activeBottomTab, setActiveBottomTab] = useState<'terminal' | 'output' | 'problems'>('terminal')
   const [showPreview, setShowPreview] = useState(false)
+  const [previewAutoRefresh, setPreviewAutoRefresh] = useState(true)
+  const [showNotifications, setShowNotifications] = useState(false)
 
   // Mobile-specific state
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('editor')
@@ -286,7 +288,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
       paneMarkFileSaved(fileId, paneId)
 
       // Trigger preview hot reload when preview is active
-      if (showPreview && currentProject) {
+      if (previewAutoRefresh && showPreview && currentProject) {
         const file = files.find(f => f.id === fileId)
         if (file) {
           try {
@@ -303,7 +305,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     } catch (error) {
       console.error('Failed to save file:', error)
     }
-  }, [paneMarkFileSaved, showPreview, currentProject, files])
+  }, [paneMarkFileSaved, previewAutoRefresh, showPreview, currentProject, files])
 
   // Handle AI request
   const handleAIRequest = useCallback(async (capability: AICapability, prompt: string, code: string) => {
@@ -811,6 +813,8 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
                   <LivePreview
                     projectId={currentProject.id}
                     autoStart={true}
+                    autoRefreshOnSave={previewAutoRefresh}
+                    onAutoRefreshChange={setPreviewAutoRefresh}
                     className="h-full"
                   />
                 </Suspense>
@@ -1020,12 +1024,26 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
           {/* User menu */}
           {user && (
             <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={<Bell size={14} />}
-                className="touch-target"
-              />
+              <div className="relative">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<Bell size={14} />}
+                  className="touch-target"
+                  onClick={() => setShowNotifications(!showNotifications)}
+                  title="Notifications"
+                />
+                {showNotifications && (
+                  <div className="absolute right-0 mt-2 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50">
+                    <div className="p-3 border-b border-gray-800 text-sm font-medium text-white">
+                      Notifications
+                    </div>
+                    <div className="p-4 text-xs text-gray-400">
+                      No notifications yet.
+                    </div>
+                  </div>
+                )}
+              </div>
               <Avatar
                 src={user.avatar_url}
                 fallback={user.username}
