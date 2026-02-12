@@ -61,6 +61,7 @@ type openAIResponse struct {
 
 // NewOpenAIClient creates a new OpenAI API client
 func NewOpenAIClient(apiKey string) *OpenAIClient {
+	apiKey = normalizeAPIKey(apiKey)
 	return &OpenAIClient{
 		apiKey:  apiKey,
 		baseURL: "https://api.openai.com/v1/chat/completions",

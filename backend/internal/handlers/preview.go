@@ -2,7 +2,9 @@
 package handlers
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -57,11 +59,11 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 	userID := c.GetUint("user_id")
 
 	var req struct {
-		ProjectID    uint              `json:"project_id" binding:"required"`
-		EntryPoint   string            `json:"entry_point"`
-		Framework    string            `json:"framework"`
-		EnvVars      map[string]string `json:"env_vars"`
-		Sandbox      bool              `json:"sandbox"` // Enable Docker container sandbox
+		ProjectID  uint              `json:"project_id" binding:"required"`
+		EntryPoint string            `json:"entry_point"`
+		Framework  string            `json:"framework"`
+		EnvVars    map[string]string `json:"env_vars"`
+		Sandbox    bool              `json:"sandbox"` // Enable Docker container sandbox
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -393,6 +395,22 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
+	token := h.extractToken(c)
+	if token != "" {
+		secure := c.Request.TLS != nil
+		if forwardedProto := strings.TrimSpace(strings.Split(c.GetHeader("X-Forwarded-Proto"), ",")[0]); forwardedProto != "" {
+			secure = strings.EqualFold(forwardedProto, "https")
+		}
+		http.SetCookie(c.Writer, &http.Cookie{
+			Name:     "apex_preview_token",
+			Value:    token,
+			Path:     fmt.Sprintf("/api/v1/preview/proxy/%d", uint(projectID)),
+			MaxAge:   3600,
+			HttpOnly: true,
+			Secure:   secure,
+			SameSite: http.SameSiteLaxMode,
+		})
+	}
 
 	// Verify project ownership
 	var project models.Project
@@ -420,6 +438,24 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.FlushInterval = -1
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+		if !strings.Contains(contentType, "text/html") {
+			return nil
+		}
+
+		originalBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return readErr
+		}
+		_ = resp.Body.Close()
+
+		rewritten := h.rewritePreviewHTMLForProxy(string(originalBody), uint(projectID))
+		resp.Body = io.NopCloser(bytes.NewBufferString(rewritten))
+		resp.ContentLength = int64(len(rewritten))
+		resp.Header.Set("Content-Length", strconv.Itoa(len(rewritten)))
+		return nil
+	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, proxyErr error) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
@@ -491,6 +527,9 @@ func (h *PreviewHandler) extractToken(c *gin.Context) string {
 	if token := c.Query("token"); token != "" {
 		return token
 	}
+	if token, err := c.Cookie("apex_preview_token"); err == nil && token != "" {
+		return token
+	}
 	return ""
 }
 
@@ -513,6 +552,34 @@ func (h *PreviewHandler) buildProxyURL(c *gin.Context, projectID uint) string {
 		return base
 	}
 	return base + "?token=" + url.QueryEscape(token)
+}
+
+func (h *PreviewHandler) rewritePreviewHTMLForProxy(html string, projectID uint) string {
+	prefix := fmt.Sprintf("/api/v1/preview/proxy/%d", projectID)
+	replaced := strings.NewReplacer(
+		`src="/`, `src="`+prefix+`/`,
+		`src='/`, `src='`+prefix+`/`,
+		`href="/`, `href="`+prefix+`/`,
+		`href='/`, `href='`+prefix+`/`,
+		`action="/`, `action="`+prefix+`/`,
+		`action='/`, `action='`+prefix+`/`,
+		`url("/`, `url("`+prefix+`/`,
+		`url('/`, `url('`+prefix+`/`,
+		`url(/`, `url(`+prefix+`/`,
+	).Replace(html)
+
+	// Preserve protocol-relative external URLs (e.g. //cdn.example.com).
+	replaced = strings.ReplaceAll(replaced, `src="`+prefix+`//`, `src="//`)
+	replaced = strings.ReplaceAll(replaced, `src='`+prefix+`//`, `src='//`)
+	replaced = strings.ReplaceAll(replaced, `href="`+prefix+`//`, `href="//`)
+	replaced = strings.ReplaceAll(replaced, `href='`+prefix+`//`, `href='//`)
+	replaced = strings.ReplaceAll(replaced, `action="`+prefix+`//`, `action="//`)
+	replaced = strings.ReplaceAll(replaced, `action='`+prefix+`//`, `action='//`)
+	replaced = strings.ReplaceAll(replaced, `url("`+prefix+`//`, `url("//`)
+	replaced = strings.ReplaceAll(replaced, `url('`+prefix+`//`, `url('//`)
+	replaced = strings.ReplaceAll(replaced, `url(`+prefix+`//`, `url(//`)
+
+	return replaced
 }
 
 // GetDockerStatus returns Docker availability and container statistics
@@ -574,11 +641,11 @@ func (h *PreviewHandler) detectFramework(projectID uint) string {
 
 		// Check for common frameworks
 		frameworks := map[string][]string{
-			"react":  {"react", "react-dom"},
-			"vue":    {"vue"},
-			"svelte": {"svelte"},
-			"next":   {"next"},
-			"nuxt":   {"nuxt"},
+			"react":   {"react", "react-dom"},
+			"vue":     {"vue"},
+			"svelte":  {"svelte"},
+			"next":    {"next"},
+			"nuxt":    {"nuxt"},
 			"angular": {"@angular/core"},
 		}
 

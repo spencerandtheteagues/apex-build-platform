@@ -52,6 +52,7 @@ type claudeResponse struct {
 
 // NewClaudeClient creates a new Claude API client
 func NewClaudeClient(apiKey string) *ClaudeClient {
+	apiKey = normalizeAPIKey(apiKey)
 	return &ClaudeClient{
 		apiKey:  apiKey,
 		baseURL: "https://api.anthropic.com/v1/messages",

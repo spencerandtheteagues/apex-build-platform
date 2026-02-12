@@ -322,7 +322,7 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	// Queue the planning task
 	am.taskQueue <- planTask
 
-	// Start build timeout goroutine - force complete after timeout
+	// Start build timeout goroutine - fail cleanly if build exceeds SLA.
 	go am.buildTimeoutHandler(buildID, build.Mode)
 
 	// Start inactivity monitor - fail build if no AI activity for 45 seconds
@@ -332,15 +332,17 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	return nil
 }
 
-// buildTimeoutHandler forces build completion after a timeout to ensure users get results
+// buildTimeoutHandler fails builds that run past timeout instead of marking them as completed.
 func (am *AgentManager) buildTimeoutHandler(buildID string, mode BuildMode) {
-	// Fast build: 2 minutes, Full build: 5 minutes
-	timeout := 2 * time.Minute
-	if mode == ModeFull {
-		timeout = 5 * time.Minute
-	}
+	timeout := am.buildTimeoutForMode(mode)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 
-	time.Sleep(timeout)
+	select {
+	case <-timer.C:
+	case <-am.ctx.Done():
+		return
+	}
 
 	am.mu.RLock()
 	build, exists := am.builds[buildID]
@@ -354,11 +356,27 @@ func (am *AgentManager) buildTimeoutHandler(buildID string, mode BuildMode) {
 	status := build.Status
 	build.mu.RUnlock()
 
-	// If build is still in progress, force complete it
-	if status == BuildPlanning || status == BuildInProgress {
-		log.Printf("Build %s timed out after %v, forcing completion", buildID, timeout)
-		am.forceCompleteBuild(buildID)
+	// If build is still in progress, fail it as timeout.
+	if status == BuildPlanning || status == BuildInProgress || status == BuildTesting || status == BuildReviewing {
+		log.Printf("Build %s timed out after %v, marking as failed", buildID, timeout)
+		am.failBuildOnTimeout(buildID, timeout)
 	}
+}
+
+func (am *AgentManager) buildTimeoutForMode(mode BuildMode) time.Duration {
+	defaultSeconds := 240 // fast: 4 minutes
+	envKey := "BUILD_TIMEOUT_FAST_SECONDS"
+	if mode == ModeFull {
+		defaultSeconds = 600 // full: 10 minutes
+		envKey = "BUILD_TIMEOUT_FULL_SECONDS"
+	}
+
+	seconds := envInt(envKey, defaultSeconds)
+	if seconds < 30 {
+		seconds = 30
+	}
+
+	return time.Duration(seconds) * time.Second
 }
 
 // inactivityMonitor checks for build inactivity and broadcasts errors if AI isn't responding
@@ -434,8 +452,8 @@ func (am *AgentManager) inactivityMonitor(buildID string) {
 	}
 }
 
-// forceCompleteBuild marks a build as complete even if some tasks are still pending
-func (am *AgentManager) forceCompleteBuild(buildID string) {
+// failBuildOnTimeout marks a timed-out build as failed and preserves partial artifacts.
+func (am *AgentManager) failBuildOnTimeout(buildID string, timeout time.Duration) {
 	am.mu.RLock()
 	build, exists := am.builds[buildID]
 	am.mu.RUnlock()
@@ -445,41 +463,52 @@ func (am *AgentManager) forceCompleteBuild(buildID string) {
 	}
 
 	build.mu.Lock()
+	if build.Status == BuildCompleted || build.Status == BuildFailed || build.Status == BuildCancelled {
+		build.mu.Unlock()
+		return
+	}
+
 	now := time.Now()
 	build.CompletedAt = &now
 	build.UpdatedAt = now
-	build.Status = BuildCompleted
-	build.Progress = 100
+	build.Status = BuildFailed
+	if strings.TrimSpace(build.Error) == "" {
+		build.Error = fmt.Sprintf("Build timed out after %v before all tasks completed", timeout.Round(time.Second))
+	}
 
-	// Cancel any pending tasks
+	cancelledTasks := 0
+	// Cancel any pending/in-progress tasks to stop the pipeline.
 	for _, task := range build.Tasks {
 		if task.Status == TaskPending || task.Status == TaskInProgress {
 			task.Status = TaskCancelled
+			cancelledTasks++
 		}
 	}
+	progress := build.Progress
 	build.mu.Unlock()
 
-	// Create final checkpoint with all generated files
-	am.createCheckpoint(build, "Build Complete (Timeout)", "Build completed with available results")
+	am.createCheckpoint(build, "Build Timed Out", "Build exceeded allowed execution time and was stopped")
 
-	// Collect all generated files as safety net for the frontend
 	allFiles := am.collectGeneratedFiles(build)
 
-	// Broadcast completion with full file manifest
 	am.broadcast(buildID, &WSMessage{
-		Type:      WSBuildCompleted,
+		Type:      WSBuildError,
 		BuildID:   buildID,
 		Timestamp: now,
 		Data: map[string]any{
-			"status":      string(BuildCompleted),
-			"progress":    100,
-			"timed_out":   true,
-			"files_count": len(allFiles),
-			"files":       allFiles,
+			"status":          string(BuildFailed),
+			"error":           "Build timed out",
+			"details":         fmt.Sprintf("Build exceeded timeout of %v and was stopped before completion.", timeout.Round(time.Second)),
+			"progress":        progress,
+			"timed_out":       true,
+			"files_count":     len(allFiles),
+			"files":           allFiles,
+			"cancelled_tasks": cancelledTasks,
+			"recoverable":     false,
 		},
 	})
 
-	log.Printf("Build %s force completed with %d files", buildID, len(allFiles))
+	log.Printf("Build %s timed out: marked failed with %d files and %d cancelled tasks", buildID, len(allFiles), cancelledTasks)
 
 	// Persist to database
 	am.persistCompletedBuild(build, allFiles)
@@ -557,27 +586,44 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 		return fmt.Errorf("no AI providers available - please check API key configuration")
 	}
 
-	// Define all agent roles needed for a complete build
-	allRoles := []AgentRole{
+	// Define mandatory and optional roles.
+	// Reviewer is mandatory so every build gets an explicit quality gate.
+	mandatoryRoles := []AgentRole{
 		RoleArchitect,
 		RoleDatabase,
 		RoleBackend,
 		RoleFrontend,
 		RoleTesting,
 		RoleReviewer,
+	}
+	optionalRoles := []AgentRole{
 		RolePlanner,
 	}
 
+	roles := append([]AgentRole{}, mandatoryRoles...)
+
 	// Enforce max agents (excluding lead)
-	roles := allRoles
 	if build.MaxAgents > 0 {
 		allowed := build.MaxAgents - 1
 		if allowed < 0 {
 			allowed = 0
 		}
-		if allowed < len(allRoles) {
-			roles = allRoles[:allowed]
+
+		if allowed < len(mandatoryRoles) {
+			log.Printf("Build %s max_agents=%d is below mandatory orchestration floor (%d); enforcing mandatory roles",
+				buildID, build.MaxAgents, len(mandatoryRoles)+1)
+			allowed = len(mandatoryRoles)
 		}
+
+		remaining := allowed - len(mandatoryRoles)
+		if remaining > 0 {
+			if remaining > len(optionalRoles) {
+				remaining = len(optionalRoles)
+			}
+			roles = append(roles, optionalRoles[:remaining]...)
+		}
+	} else {
+		roles = append(roles, optionalRoles...)
 	}
 
 	// Determine provider assignments based on availability
@@ -678,7 +724,7 @@ func (am *AgentManager) assignProvidersToRoles(providers []ai.AIProvider, roles 
 		switch role {
 		case RolePlanner, RoleArchitect, RoleReviewer:
 			assignments[role] = pick(ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama)
-		case RoleFrontend, RoleBackend, RoleDatabase:
+		case RoleFrontend, RoleBackend, RoleDatabase, RoleSolver:
 			assignments[role] = pick(ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama)
 		case RoleTesting:
 			assignments[role] = pick(ai.ProviderGemini, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGrok, ai.ProviderOllama)
@@ -698,7 +744,7 @@ func (am *AgentManager) assignProvidersToRoles(providers []ai.AIProvider, roles 
 			if available[ai.ProviderClaude] {
 				assignments[role] = ai.ProviderClaude
 			}
-		case RoleFrontend, RoleBackend, RoleDatabase:
+		case RoleFrontend, RoleBackend, RoleDatabase, RoleSolver:
 			if available[ai.ProviderGPT4] {
 				assignments[role] = ai.ProviderGPT4
 			}
@@ -1437,6 +1483,12 @@ func (am *AgentManager) processResult(result *TaskResult) {
 					"message":       finalMessage,
 				},
 			})
+
+			am.enqueueRecoveryTask(agent.BuildID, task, result.Error)
+			if build, err := am.GetBuild(agent.BuildID); err == nil {
+				am.updateBuildProgress(build)
+				am.checkBuildCompletion(build)
+			}
 		}
 	}
 }
@@ -1464,6 +1516,9 @@ func (am *AgentManager) handleTaskCompletion(buildID string, task *Task, output 
 	case TaskReview:
 		// Review completed - apply fixes if needed
 		am.handleReviewCompletion(build, output)
+	case TaskFix:
+		// Any fix task is followed by fresh tests and review before completion.
+		am.schedulePostFixValidation(build, task)
 	}
 
 	// Update build progress
@@ -1579,16 +1634,226 @@ func (am *AgentManager) selectFixAgent(build *Build, preferred []AgentRole) *Age
 
 	for _, role := range preferred {
 		for _, agent := range build.Agents {
-			if agent.Role == role {
+			if agent.Role == role && agent.Status != StatusError && agent.Status != StatusTerminated {
 				return agent
 			}
 		}
 	}
 	// Fallback to any available agent
 	for _, agent := range build.Agents {
-		return agent
+		if agent.Status != StatusError && agent.Status != StatusTerminated {
+			return agent
+		}
 	}
 	return nil
+}
+
+func (am *AgentManager) ensureProblemSolverAgent(buildID string) *Agent {
+	am.mu.RLock()
+	build, exists := am.builds[buildID]
+	am.mu.RUnlock()
+	if !exists {
+		return nil
+	}
+
+	build.mu.RLock()
+	for _, agent := range build.Agents {
+		if agent.Role == RoleSolver {
+			build.mu.RUnlock()
+			return agent
+		}
+	}
+	build.mu.RUnlock()
+
+	availableProviders := am.aiRouter.GetAvailableProviders()
+	if len(availableProviders) == 0 {
+		log.Printf("Build %s: unable to spawn solver agent (no providers available)", buildID)
+		return nil
+	}
+
+	provider := am.assignProvidersToRoles(availableProviders, []AgentRole{RoleSolver})[RoleSolver]
+	solver, err := am.spawnAgent(buildID, RoleSolver, provider)
+	if err != nil {
+		log.Printf("Build %s: failed to spawn solver agent: %v", buildID, err)
+		return nil
+	}
+	return solver
+}
+
+func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, err error) {
+	if failedTask == nil || err == nil {
+		return
+	}
+	if failedTask.Type == TaskFix {
+		if action, ok := failedTask.Input["action"].(string); ok && action == "solve_build_failure" {
+			// Avoid recursive recovery loops if the solver task itself fails.
+			return
+		}
+	}
+
+	build, getErr := am.GetBuild(buildID)
+	if getErr != nil {
+		return
+	}
+
+	failedTaskID := failedTask.ID
+	failedTaskType := string(failedTask.Type)
+	failedTaskDescription := failedTask.Description
+	failureMessage := err.Error()
+
+	build.mu.Lock()
+	if flag, ok := failedTask.Input["recovery_queued"].(bool); ok && flag {
+		build.mu.Unlock()
+		return
+	}
+	if failedTask.Input == nil {
+		failedTask.Input = map[string]any{}
+	}
+	failedTask.Input["recovery_queued"] = true
+
+	recoveryTask := &Task{
+		ID:          uuid.New().String(),
+		Type:        TaskFix,
+		Description: fmt.Sprintf("Investigate and resolve failure in task %s (%s)", failedTaskID, failedTaskType),
+		Priority:    99,
+		Status:      TaskPending,
+		MaxRetries:  build.MaxRetries,
+		Input: map[string]any{
+			"action":                   "solve_build_failure",
+			"failed_task_id":           failedTaskID,
+			"failed_task_type":         failedTaskType,
+			"failed_task_description":  failedTaskDescription,
+			"failure_error":            failureMessage,
+			"app_description":          build.Description,
+			"retry_strategy":           "fix_and_retry",
+			"requires_regression_test": true,
+		},
+		CreatedAt: time.Now(),
+	}
+	// Supersede the failed task with an explicit recovery flow so the build can
+	// still converge to success if solver + validation tasks pass.
+	failedTask.Status = TaskCancelled
+	failedTask.Input["superseded_by_recovery"] = recoveryTask.ID
+
+	build.Tasks = append(build.Tasks, recoveryTask)
+	build.UpdatedAt = time.Now()
+	build.mu.Unlock()
+
+	solver := am.ensureProblemSolverAgent(buildID)
+	if solver == nil {
+		// Fallback: use existing specialists if solver could not be spawned.
+		solver = am.selectFixAgent(build, []AgentRole{RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
+	}
+	if solver == nil {
+		log.Printf("Build %s: no solver or fallback agent available for recovery task %s", buildID, recoveryTask.ID)
+		return
+	}
+
+	am.broadcast(buildID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   buildID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"phase":         "auto_recovery",
+			"message":       "Task failure detected. Launching problem-solving recovery agent...",
+			"recovery_task": recoveryTask.ID,
+		},
+	})
+
+	if assignErr := am.AssignTask(solver.ID, recoveryTask); assignErr != nil {
+		log.Printf("Build %s: failed to assign recovery task %s to %s: %v", buildID, recoveryTask.ID, solver.ID, assignErr)
+	}
+}
+
+func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task) {
+	if build == nil || sourceTask == nil {
+		return
+	}
+
+	var testAgent, reviewAgent *Agent
+	build.mu.RLock()
+	for _, agent := range build.Agents {
+		switch agent.Role {
+		case RoleTesting:
+			testAgent = agent
+		case RoleReviewer:
+			reviewAgent = agent
+		}
+	}
+	build.mu.RUnlock()
+
+	newTasks := make([]*Task, 0, 2)
+	now := time.Now()
+
+	if testAgent != nil {
+		newTasks = append(newTasks, &Task{
+			ID:          uuid.New().String(),
+			Type:        TaskTest,
+			Description: "Regression test after automated fixes",
+			Priority:    88,
+			Status:      TaskPending,
+			MaxRetries:  build.MaxRetries,
+			Input: map[string]any{
+				"action":             "regression_test",
+				"trigger_task":       sourceTask.ID,
+				"app_description":    build.Description,
+				"fix_context_action": sourceTask.Input["action"],
+			},
+			CreatedAt: now,
+		})
+	}
+
+	if reviewAgent != nil {
+		newTasks = append(newTasks, &Task{
+			ID:          uuid.New().String(),
+			Type:        TaskReview,
+			Description: "Final review after automated fixes",
+			Priority:    87,
+			Status:      TaskPending,
+			MaxRetries:  build.MaxRetries,
+			Input: map[string]any{
+				"action":             "post_fix_review",
+				"trigger_task":       sourceTask.ID,
+				"app_description":    build.Description,
+				"fix_context_action": sourceTask.Input["action"],
+			},
+			CreatedAt: now,
+		})
+	}
+
+	if len(newTasks) == 0 {
+		return
+	}
+
+	build.mu.Lock()
+	build.Tasks = append(build.Tasks, newTasks...)
+	build.UpdatedAt = time.Now()
+	build.mu.Unlock()
+
+	for _, task := range newTasks {
+		var assignee *Agent
+		if task.Type == TaskTest {
+			assignee = testAgent
+		} else if task.Type == TaskReview {
+			assignee = reviewAgent
+		}
+		if assignee == nil {
+			continue
+		}
+		if err := am.AssignTask(assignee.ID, task); err != nil {
+			log.Printf("Build %s: failed to assign post-fix validation task %s: %v", build.ID, task.ID, err)
+		}
+	}
+
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"phase":   "validation",
+			"message": "Automated fixes applied. Running regression testing and review.",
+		},
+	})
 }
 
 // handleTestCompletion processes test results and creates fix tasks for failures
@@ -1650,7 +1915,7 @@ func (am *AgentManager) handleTestCompletion(build *Build, output *TaskOutput) {
 			},
 		})
 
-		agent := am.selectFixAgent(build, []AgentRole{RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
+		agent := am.selectFixAgent(build, []AgentRole{RoleSolver, RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
 		if agent != nil {
 			if err := am.AssignTask(agent.ID, fixTask); err != nil {
 				log.Printf("Failed to assign test fix task %s to agent %s: %v", fixTask.ID, agent.ID, err)
@@ -1720,7 +1985,7 @@ func (am *AgentManager) handleReviewCompletion(build *Build, output *TaskOutput)
 			},
 		})
 
-		agent := am.selectFixAgent(build, []AgentRole{RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
+		agent := am.selectFixAgent(build, []AgentRole{RoleSolver, RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
 		if agent != nil {
 			if err := am.AssignTask(agent.ID, fixTask); err != nil {
 				log.Printf("Failed to assign review fix task %s to agent %s: %v", fixTask.ID, agent.ID, err)
@@ -1829,34 +2094,71 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 	build.CompletedAt = &now
 	build.UpdatedAt = now
 
-	if anyFailed {
-		build.Status = BuildFailed
-	} else {
-		build.Status = BuildCompleted
-		build.Progress = 100
+	status := build.Status
+	if status != BuildFailed && status != BuildCancelled {
+		if anyFailed {
+			status = BuildFailed
+		} else {
+			status = BuildCompleted
+			build.Progress = 100
+		}
+		build.Status = status
 	}
+	progress := build.Progress
+	buildError := strings.TrimSpace(build.Error)
 	build.mu.Unlock()
 
-	// Create final checkpoint
-	am.createCheckpoint(build, "Build Complete", "All tasks completed successfully")
-
-	// Collect all generated files as safety net for the frontend
 	allFiles := am.collectGeneratedFiles(build)
 
-	// Broadcast completion with full file manifest
-	am.broadcast(build.ID, &WSMessage{
-		Type:      WSBuildCompleted,
-		BuildID:   build.ID,
-		Timestamp: now,
-		Data: map[string]any{
-			"status":      string(build.Status),
-			"progress":    build.Progress,
-			"files_count": len(allFiles),
-			"files":       allFiles,
-		},
-	})
+	if status == BuildCompleted {
+		am.createCheckpoint(build, "Build Complete", "All tasks completed successfully")
+		am.broadcast(build.ID, &WSMessage{
+			Type:      WSBuildCompleted,
+			BuildID:   build.ID,
+			Timestamp: now,
+			Data: map[string]any{
+				"status":      string(status),
+				"progress":    progress,
+				"files_count": len(allFiles),
+				"files":       allFiles,
+			},
+		})
+		log.Printf("Build %s completed successfully (%d files)", build.ID, len(allFiles))
+	} else {
+		checkpointName := "Build Failed"
+		checkpointDescription := "Build finished with errors"
+		errorTitle := "Build failed"
 
-	log.Printf("Build %s completed with status: %s (%d files)", build.ID, build.Status, len(allFiles))
+		if status == BuildCancelled {
+			checkpointName = "Build Cancelled"
+			checkpointDescription = "Build was cancelled"
+			errorTitle = "Build cancelled"
+		}
+		if buildError == "" {
+			if status == BuildCancelled {
+				buildError = "Build was cancelled before completion."
+			} else {
+				buildError = "One or more tasks failed before build completion."
+			}
+		}
+
+		am.createCheckpoint(build, checkpointName, checkpointDescription)
+		am.broadcast(build.ID, &WSMessage{
+			Type:      WSBuildError,
+			BuildID:   build.ID,
+			Timestamp: now,
+			Data: map[string]any{
+				"status":      string(status),
+				"error":       errorTitle,
+				"details":     buildError,
+				"recoverable": false,
+				"progress":    progress,
+				"files_count": len(allFiles),
+				"files":       allFiles,
+			},
+		})
+		log.Printf("Build %s finished with status %s (%d files)", build.ID, status, len(allFiles))
+	}
 
 	// Persist to database
 	am.persistCompletedBuild(build, allFiles)
@@ -2046,7 +2348,8 @@ func (am *AgentManager) queuePlanTasks(build *Build) {
 	//   Phase 2: Database  (produces schema for backend)
 	//   Phase 3: Backend + Frontend (parallel, both get architecture context; backend also gets schema)
 	//   Phase 4: Testing   (needs all generated files)
-	var archAgents, dbAgents, codeAgents, testAgents []agentPriority
+	//   Phase 5: Review    (runs after tests for final quality gate)
+	var archAgents, dbAgents, codeAgents, testAgents, reviewAgents []agentPriority
 	for _, ap := range allAgents {
 		switch ap.agent.Role {
 		case RoleArchitect:
@@ -2055,13 +2358,15 @@ func (am *AgentManager) queuePlanTasks(build *Build) {
 			dbAgents = append(dbAgents, ap)
 		case RoleTesting:
 			testAgents = append(testAgents, ap)
+		case RoleReviewer:
+			reviewAgents = append(reviewAgents, ap)
 		default:
 			codeAgents = append(codeAgents, ap)
 		}
 	}
 
 	// Execute phases in order in a goroutine (non-blocking)
-	go am.executePhasedTasks(build, description, archAgents, dbAgents, codeAgents, testAgents)
+	go am.executePhasedTasks(build, description, archAgents, dbAgents, codeAgents, testAgents, reviewAgents)
 
 	log.Printf("Started phased task execution for build %s (%d agents)", build.ID, len(allAgents))
 }
@@ -2069,7 +2374,7 @@ func (am *AgentManager) queuePlanTasks(build *Build) {
 // executePhasedTasks runs agent tasks in sequential phases, waiting for each
 // phase to complete before starting the next. This ensures context flows properly.
 func (am *AgentManager) executePhasedTasks(build *Build, description string,
-	archAgents, dbAgents, codeAgents, testAgents []agentPriority) {
+	archAgents, dbAgents, codeAgents, testAgents, reviewAgents []agentPriority) {
 
 	phases := []struct {
 		name   string
@@ -2079,12 +2384,31 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string,
 		{"Database Schema", dbAgents},
 		{"Code Generation", codeAgents},
 		{"Testing", testAgents},
+		{"Review", reviewAgents},
 	}
 
 	for _, phase := range phases {
 		if len(phase.agents) == 0 {
 			continue
 		}
+
+		phaseStatus := BuildInProgress
+		build.mu.Lock()
+		switch phase.name {
+		case "Testing":
+			build.Status = BuildTesting
+			phaseStatus = BuildTesting
+		case "Review":
+			build.Status = BuildReviewing
+			phaseStatus = BuildReviewing
+		default:
+			if build.Status != BuildFailed && build.Status != BuildCancelled {
+				build.Status = BuildInProgress
+			}
+			phaseStatus = build.Status
+		}
+		build.UpdatedAt = time.Now()
+		build.mu.Unlock()
 
 		log.Printf("Build %s: Starting phase — %s (%d agents)", build.ID, phase.name, len(phase.agents))
 
@@ -2095,6 +2419,7 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string,
 			Data: map[string]any{
 				"phase":   phase.name,
 				"agents":  len(phase.agents),
+				"status":  string(phaseStatus),
 				"message": fmt.Sprintf("Starting %s phase", phase.name),
 			},
 		})
@@ -2312,6 +2637,14 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 		return
 	}
 
+	content := strings.TrimSpace(response.Content)
+	if content == "" && strings.TrimSpace(response.Error) != "" {
+		content = strings.TrimSpace(response.Error)
+	}
+	if content == "" {
+		content = "No response returned."
+	}
+
 	// Broadcast lead response
 	am.broadcast(agent.BuildID, &WSMessage{
 		Type:      WSLeadResponse,
@@ -2319,7 +2652,9 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 		AgentID:   agent.ID,
 		Timestamp: time.Now(),
 		Data: map[string]any{
-			"content": response,
+			"content":  content,
+			"provider": agent.Provider,
+			"model":    agent.Model,
 		},
 	})
 }
@@ -2327,12 +2662,12 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 // defaultBuildLimits returns guardrails based on build mode and environment overrides.
 func (am *AgentManager) defaultBuildLimits(mode BuildMode) (int, int, int, int) {
 	// Mode-based defaults
-	maxAgents := 6
+	maxAgents := 8
 	maxRetries := 3
 	maxRequests := 48
 	maxTokens := 4000
 	if mode == ModeFast {
-		maxAgents = 4
+		maxAgents = 7
 		maxRetries = 2
 		maxRequests = 24
 		maxTokens = 2000
@@ -2562,8 +2897,8 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 				agentContext += fmt.Sprintf("\n<generated_files>\n%s</generated_files>\n", fileList.String())
 			}
 		}
-		if agent.Role == RoleReviewer {
-			// Include all generated files for reviewer
+		if agent.Role == RoleReviewer || agent.Role == RoleSolver {
+			// Include all generated files for reviewer/solver.
 			files := am.collectGeneratedFiles(build)
 			if len(files) > 0 {
 				var fileList strings.Builder
@@ -2572,9 +2907,23 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 				}
 				content := fileList.String()
 				if len(content) > 15000 {
-					content = content[:15000] + "\n... (truncated, review the above files)"
+					content = content[:15000] + "\n... (truncated)"
 				}
-				agentContext += fmt.Sprintf("\n<code_to_review>\n%s</code_to_review>\n", content)
+				block := "code_to_review"
+				if agent.Role == RoleSolver {
+					block = "code_to_fix"
+				}
+				agentContext += fmt.Sprintf("\n<%s>\n%s</%s>\n", block, content, block)
+			}
+		}
+		if agent.Role == RoleSolver && task != nil && task.Input != nil {
+			failedTaskID, _ := task.Input["failed_task_id"].(string)
+			failedTaskType, _ := task.Input["failed_task_type"].(string)
+			failedTaskDesc, _ := task.Input["failed_task_description"].(string)
+			failureErr, _ := task.Input["failure_error"].(string)
+			if failedTaskID != "" || failedTaskType != "" || failedTaskDesc != "" || failureErr != "" {
+				agentContext += fmt.Sprintf("\n<failure_context>\nfailed_task_id: %s\nfailed_task_type: %s\nfailed_task_description: %s\nerror: %s\n</failure_context>\n",
+					failedTaskID, failedTaskType, failedTaskDesc, failureErr)
 			}
 		}
 	}
@@ -2970,6 +3319,18 @@ try {
 ` + "```" + `
 
 Output COMPLETE fixes with before/after code. Not just descriptions.` + techHint + baseRules,
+
+		RoleSolver: `You are the Solver Agent — a senior incident response engineer for failed builds.
+Your job is to diagnose why a task failed, apply concrete fixes, and restore build health.
+
+WORKFLOW:
+1. Identify root cause from task errors and generated files
+2. Produce exact file edits needed to resolve the failure
+3. Prioritize build-blocking fixes first (syntax/runtime/config/dependency)
+4. Keep patches minimal, deterministic, and production-ready
+5. If a fix needs follow-up validation, explicitly note test/review targets
+
+NEVER return vague advice only. Return concrete, corrected code/files.` + techHint + baseRules,
 	}
 	return prompts[role]
 }
@@ -2990,6 +3351,8 @@ func (am *AgentManager) getTaskTypeForRole(role AgentRole) TaskType {
 		return TaskTest
 	case RoleReviewer:
 		return TaskReview
+	case RoleSolver:
+		return TaskFix
 	default:
 		return TaskGenerateFile
 	}
@@ -3009,6 +3372,8 @@ func (am *AgentManager) getTaskDescriptionForRole(role AgentRole, appDescription
 		return fmt.Sprintf("Write tests for: %s", appDescription)
 	case RoleReviewer:
 		return fmt.Sprintf("Review code quality for: %s", appDescription)
+	case RoleSolver:
+		return fmt.Sprintf("Investigate and fix build failures for: %s", appDescription)
 	default:
 		return appDescription
 	}
@@ -3028,6 +3393,8 @@ func (am *AgentManager) getPriorityForRole(role AgentRole) int {
 		return 50
 	case RoleReviewer:
 		return 40
+	case RoleSolver:
+		return 95
 	default:
 		return 50
 	}
@@ -3371,25 +3738,16 @@ func (am *AgentManager) quickSyntaxCheck(file GeneratedFile) []string {
 
 	switch file.Language {
 	case "typescript", "javascript":
-		// Check bracket balance
-		if strings.Count(content, "{") != strings.Count(content, "}") {
-			errors = append(errors, fmt.Sprintf("%s: Unbalanced curly braces", file.Path))
-		}
-		if strings.Count(content, "(") != strings.Count(content, ")") {
-			errors = append(errors, fmt.Sprintf("%s: Unbalanced parentheses", file.Path))
-		}
-		// Check for common TS/JS errors
-		if strings.Contains(content, "import ") && !strings.Contains(content, "from ") && !strings.Contains(content, "require(") {
-			errors = append(errors, fmt.Sprintf("%s: Malformed import statement", file.Path))
+		// Avoid naive brace/import validation for JS/TS.
+		// Template strings, JSX and side-effect imports trigger false positives and
+		// cause unnecessary retry loops.
+		if strings.Count(content, "```")%2 != 0 {
+			errors = append(errors, fmt.Sprintf("%s: Contains unmatched markdown code fence", file.Path))
 		}
 
 	case "go":
-		// Check bracket balance
-		if strings.Count(content, "{") != strings.Count(content, "}") {
-			errors = append(errors, fmt.Sprintf("%s: Unbalanced curly braces", file.Path))
-		}
-		// Check for package declaration
-		if !strings.Contains(content, "package ") {
+		// Only enforce package declaration for actual Go source files.
+		if strings.HasSuffix(strings.ToLower(file.Path), ".go") && !strings.Contains(content, "package ") {
 			errors = append(errors, fmt.Sprintf("%s: Missing package declaration", file.Path))
 		}
 
@@ -3404,12 +3762,6 @@ func (am *AgentManager) quickSyntaxCheck(file GeneratedFile) []string {
 					break
 				}
 			}
-		}
-
-	case "rust":
-		// Check bracket balance
-		if strings.Count(content, "{") != strings.Count(content, "}") {
-			errors = append(errors, fmt.Sprintf("%s: Unbalanced curly braces", file.Path))
 		}
 
 	case "html":
@@ -3557,6 +3909,12 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 				"message":       finalMessage,
 			},
 		})
+
+		am.enqueueRecoveryTask(agent.BuildID, task, result.Error)
+		if build, err := am.GetBuild(agent.BuildID); err == nil {
+			am.updateBuildProgress(build)
+			am.checkBuildCompletion(build)
+		}
 	}
 }
 
@@ -3647,6 +4005,8 @@ func (am *AgentManager) getTemperatureForRole(role AgentRole) float64 {
 		return 0.3 // Precise test assertions
 	case RoleReviewer:
 		return 0.4 // Analytical, precise review
+	case RoleSolver:
+		return 0.35 // Deterministic root-cause analysis and fixing
 	case RoleLead:
 		return 0.6 // Balanced communication
 	default:
@@ -3673,6 +4033,8 @@ func (am *AgentManager) getMaxTokensForRole(role AgentRole, powerMode ...PowerMo
 		base = 8000 // Comprehensive test suites
 	case RoleReviewer:
 		base = 4000 // Concise review findings
+	case RoleSolver:
+		base = 10000 // Root-cause analysis plus corrected replacement files
 	case RoleLead:
 		base = 2000 // Conversation responses
 	default:

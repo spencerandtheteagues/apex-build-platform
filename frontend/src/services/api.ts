@@ -2739,6 +2739,7 @@ export interface UsageLimitsData {
 export interface CompletedBuildSummary {
   id: number
   build_id: string
+  project_id?: number | null
   project_name: string
   description: string
   status: string

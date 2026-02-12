@@ -1258,11 +1258,24 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         })
         break
 
-      case 'build:completed':
+      case 'build:completed': {
         setIsBuilding(false)
-        addSystemMessage(`Build completed successfully! ${data.files_count || 0} files generated.`)
-        setBuildState(prev => prev ? { ...prev, status: 'completed', progress: 100 } : null)
-        // Reconcile file manifest — merge any files not already in state
+        const finalStatus = data.status === 'completed' ? 'completed' : 'failed'
+        if (finalStatus === 'completed') {
+          addSystemMessage(`Build completed successfully! ${data.files_count || 0} files generated.`)
+        } else {
+          addSystemMessage(`Build finished with errors. ${data.files_count || 0} files generated.`)
+        }
+        setBuildState(prev => prev
+          ? {
+            ...prev,
+            status: finalStatus,
+            progress: finalStatus === 'completed' ? 100 : (typeof data.progress === 'number' ? clampPercent(data.progress) : prev.progress),
+          }
+          : null
+        )
+
+        // Reconcile file manifest — merge any files not already in state.
         if (data.files && Array.isArray(data.files)) {
           const normalized = normalizeGeneratedFiles(data.files)
           mergeGeneratedFiles(normalized)
@@ -1274,20 +1287,25 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
             await resolveGeneratedFiles(buildId)
           }
         }
-        if (!previewPreparedRef.current) {
+        if (finalStatus === 'completed' && !previewPreparedRef.current) {
           previewPreparedRef.current = true
           void preparePreview(true)
         }
         break
+      }
 
-      case 'lead:response':
+      case 'lead:response': {
+        const content = typeof data.content === 'string'
+          ? data.content
+          : JSON.stringify(data.content ?? '')
         setChatMessages(prev => [...prev, {
           id: Date.now().toString(),
           role: 'lead',
-          content: data.content,
+          content,
           timestamp: new Date(),
         }])
         break
+      }
 
       case 'agent:thinking':
         setBuildState(prev => {
@@ -1340,15 +1358,28 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
       case 'build:error':
         addSystemMessage(`Build Error: ${data.error || 'Unknown error'}${data.details ? ` - ${data.details}` : ''}`)
+        if (data.files && Array.isArray(data.files)) {
+          mergeGeneratedFiles(normalizeGeneratedFiles(data.files))
+        }
         if (data.recoverable) {
           break
         }
         setIsBuilding(false)
-        setBuildState(prev => prev ? { ...prev, status: 'failed' } : null)
+        setBuildState(prev => prev
+          ? {
+            ...prev,
+            status: 'failed',
+            progress: typeof data.progress === 'number' ? clampPercent(data.progress) : prev.progress,
+          }
+          : null
+        )
         break
 
       case 'build:phase':
         addSystemMessage(`Phase: ${data.phase || data.message || 'Next phase starting'}`)
+        if (data.status) {
+          setBuildState(prev => prev ? { ...prev, status: data.status } : null)
+        }
         break
 
       case 'build:started':
@@ -1759,6 +1790,21 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   const openCompletedBuild = async (buildId: string) => {
     try {
       const completed = await apiService.getCompletedBuild(buildId)
+      if (completed.project_id) {
+        try {
+          const existingProject = await apiService.getProject(completed.project_id)
+          setCreatedProjectId(existingProject.id)
+          setCurrentProject(existingProject)
+          addSystemMessage(`Opened project "${existingProject.name}" from recent build`)
+          if (onNavigateToIDE) {
+            onNavigateToIDE()
+          }
+          return
+        } catch {
+          addSystemMessage('Stored project not found, restoring from build artifacts...')
+        }
+      }
+
       const normalized = normalizeGeneratedFiles(completed.files || [])
       if (normalized.length === 0) {
         addSystemMessage('No files found for that build')
@@ -1915,6 +1961,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       database: '🗄️',
       testing: '🧪',
       reviewer: '🔍',
+      solver: '🛠️',
     }
     return emojis[role] || '🤖'
   }

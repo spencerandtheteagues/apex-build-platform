@@ -22,6 +22,7 @@ const (
 	RoleTesting   AgentRole = "testing"   // Writes and runs tests
 	RoleDevOps    AgentRole = "devops"    // Handles deployment configuration
 	RoleReviewer  AgentRole = "reviewer"  // Code review and quality assurance
+	RoleSolver    AgentRole = "solver"    // Investigates and fixes failed tasks
 	RoleLead      AgentRole = "lead"      // Coordinates all agents (main contact point)
 )
 

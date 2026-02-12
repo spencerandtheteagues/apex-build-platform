@@ -77,6 +77,7 @@ type geminiResponse struct {
 
 // NewGeminiClient creates a new Gemini API client
 func NewGeminiClient(apiKey string) *GeminiClient {
+	apiKey = normalizeAPIKey(apiKey)
 	return &GeminiClient{
 		apiKey:  apiKey,
 		baseURL: "https://generativelanguage.googleapis.com/v1beta/models",

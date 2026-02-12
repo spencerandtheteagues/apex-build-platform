@@ -63,6 +63,7 @@ type grokResponse struct {
 
 // NewGrokClient creates a new xAI Grok API client
 func NewGrokClient(apiKey string) *GrokClient {
+	apiKey = normalizeAPIKey(apiKey)
 	return &GrokClient{
 		apiKey:  apiKey,
 		baseURL: "https://api.x.ai/v1/chat/completions",

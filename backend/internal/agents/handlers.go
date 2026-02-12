@@ -171,21 +171,21 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":          build.ID,
-		"user_id":     build.UserID,
-		"project_id":  build.ProjectID,
-		"status":      string(build.Status),
-		"mode":        string(build.Mode),
-		"description": build.Description,
-		"plan":        build.Plan,
-		"agents":      agents,
-		"tasks":       build.Tasks,
-		"checkpoints": build.Checkpoints,
-		"progress":    build.Progress,
-		"created_at":  build.CreatedAt,
-		"updated_at":  build.UpdatedAt,
+		"id":           build.ID,
+		"user_id":      build.UserID,
+		"project_id":   build.ProjectID,
+		"status":       string(build.Status),
+		"mode":         string(build.Mode),
+		"description":  build.Description,
+		"plan":         build.Plan,
+		"agents":       agents,
+		"tasks":        build.Tasks,
+		"checkpoints":  build.Checkpoints,
+		"progress":     build.Progress,
+		"created_at":   build.CreatedAt,
+		"updated_at":   build.UpdatedAt,
 		"completed_at": build.CompletedAt,
-		"error":       build.Error,
+		"error":        build.Error,
 	})
 }
 
@@ -446,7 +446,7 @@ func (h *BuildHandler) CancelBuild(c *gin.Context) {
 	if build.Status == BuildCompleted || build.Status == BuildFailed || build.Status == BuildCancelled {
 		build.mu.Unlock()
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "build cannot be cancelled",
+			"error":   "build cannot be cancelled",
 			"details": "Build is already " + string(build.Status),
 		})
 		return
@@ -499,6 +499,7 @@ func (h *BuildHandler) ListBuilds(c *gin.Context) {
 	type BuildSummary struct {
 		ID          uint    `json:"id"`
 		BuildID     string  `json:"build_id"`
+		ProjectID   *uint   `json:"project_id,omitempty"`
 		ProjectName string  `json:"project_name"`
 		Description string  `json:"description"`
 		Status      string  `json:"status"`
@@ -522,6 +523,7 @@ func (h *BuildHandler) ListBuilds(c *gin.Context) {
 		s := BuildSummary{
 			ID:          b.ID,
 			BuildID:     b.BuildID,
+			ProjectID:   b.ProjectID,
 			ProjectName: b.ProjectName,
 			Description: b.Description,
 			Status:      b.Status,
@@ -585,6 +587,7 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"id":           build.ID,
 		"build_id":     build.BuildID,
+		"project_id":   build.ProjectID,
 		"project_name": build.ProjectName,
 		"description":  build.Description,
 		"status":       build.Status,
