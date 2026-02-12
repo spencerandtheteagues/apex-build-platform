@@ -1023,7 +1023,11 @@ func (am *AgentManager) executeTask(task *Task) {
 	build.UpdatedAt = time.Now()
 	build.mu.Unlock()
 
-	// Broadcast that the agent is thinking
+	// Broadcast that the agent is thinking with task-specific detail
+	thinkingContent := fmt.Sprintf("%s agent is working on %s", agent.Role, string(task.Type))
+	if task.Description != "" {
+		thinkingContent = fmt.Sprintf("%s agent is analyzing: %s", agent.Role, task.Description)
+	}
 	am.broadcast(agent.BuildID, &WSMessage{
 		Type:      "agent:thinking",
 		BuildID:   agent.BuildID,
@@ -1035,7 +1039,7 @@ func (am *AgentManager) executeTask(task *Task) {
 			"model":      agent.Model,
 			"task_id":    task.ID,
 			"task_type":  string(task.Type),
-			"content":    fmt.Sprintf("%s agent is analyzing the task...", agent.Role),
+			"content":    thinkingContent,
 		},
 	})
 
@@ -1141,6 +1145,36 @@ func (am *AgentManager) executeTask(task *Task) {
 
 	// Parse the response into task output
 	output := am.parseTaskOutput(task.Type, response.Content)
+
+	// Broadcast completion thought with actual model and file details
+	fileNames := make([]string, 0, len(output.Files))
+	for _, f := range output.Files {
+		fileNames = append(fileNames, f.Path)
+	}
+	completionContent := fmt.Sprintf("Completed %s — generated %d file(s)", string(task.Type), len(output.Files))
+	if len(fileNames) > 0 && len(fileNames) <= 5 {
+		completionContent += ": " + strings.Join(fileNames, ", ")
+	} else if len(fileNames) > 5 {
+		completionContent += ": " + strings.Join(fileNames[:5], ", ") + fmt.Sprintf(" (+%d more)", len(fileNames)-5)
+	}
+	displayModel := modelUsed
+	if displayModel == "" || displayModel == "unknown" {
+		displayModel = agent.Model
+	}
+	am.broadcast(agent.BuildID, &WSMessage{
+		Type:      "agent:thinking",
+		BuildID:   agent.BuildID,
+		AgentID:   agent.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"agent_role": agent.Role,
+			"provider":   agent.Provider,
+			"model":      displayModel,
+			"task_id":    task.ID,
+			"task_type":  string(task.Type),
+			"content":    completionContent,
+		},
+	})
 
 	// Broadcast code generated with file count
 	am.broadcast(agent.BuildID, &WSMessage{
@@ -1490,7 +1524,7 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 		return
 	}
 
-	// Broadcast agent team spawned
+	// Broadcast agent team spawned with status transition
 	am.broadcast(build.ID, &WSMessage{
 		Type:      WSBuildProgress,
 		BuildID:   build.ID,
@@ -1499,6 +1533,7 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 			"phase":    "agents_spawned",
 			"message":  "Agent team assembled and ready",
 			"progress": 20,
+			"status":   "in_progress",
 		},
 	})
 
@@ -1726,7 +1761,9 @@ func (am *AgentManager) updateBuildProgress(build *Build) {
 		}
 	}
 
-	progress := (completed * 100) / len(build.Tasks)
+	// Scale task progress into the 20-100 range (20% is the planning baseline)
+	taskProgress := (completed * 80) / len(build.Tasks)
+	progress := 20 + taskProgress
 	build.Progress = progress
 	build.UpdatedAt = time.Now()
 

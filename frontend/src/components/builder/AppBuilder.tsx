@@ -1092,6 +1092,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           if (!prev) return null
           const updates: Partial<BuildState> = { progress: data.progress }
 
+          // Apply status transition (e.g. planning → in_progress)
+          if (data.status) {
+            updates.status = data.status
+          }
+
           if (data.phase === 'provider_check' && data.available_providers) {
             updates.availableProviders = data.available_providers
             addSystemMessage(`AI Providers available: ${data.available_providers.join(', ')} (${data.provider_count} total)`)
@@ -1292,6 +1297,21 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
       case 'code:generated':
         addSystemMessage(`${data.agent_role || 'Agent'} generated ${data.files_count || 0} file(s)`)
+        // Add output thought to thinking box for visibility
+        {
+          const fileList = Array.isArray(data.files) ? data.files.map((f: any) => f.path).filter(Boolean) : []
+          const outputSummary = fileList.length > 0
+            ? `Generated ${fileList.length} file(s): ${fileList.slice(0, 5).join(', ')}${fileList.length > 5 ? ` (+${fileList.length - 5} more)` : ''}`
+            : `Generated ${data.files_count || 0} file(s)`
+          addAiThought(
+            message.agent_id,
+            data.agent_role || 'agent',
+            data.provider || '',
+            data.model,
+            'output',
+            outputSummary
+          )
+        }
         if (data.files && Array.isArray(data.files)) {
           const newFiles = data.files
             .filter((file: any) => file.path && file.content)

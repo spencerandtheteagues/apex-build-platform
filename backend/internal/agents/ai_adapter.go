@@ -586,9 +586,15 @@ func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []ai.AIProvi
 		return a.GetAvailableProviders()
 	}
 
-	userRouter, _, err := a.byokManager.GetRouterForUser(userID)
+	userRouter, hasBYOK, err := a.byokManager.GetRouterForUser(userID)
 	if err != nil || userRouter == nil {
 		log.Printf("Failed to get router for user %d: %v", userID, err)
+		return a.GetAvailableProviders()
+	}
+
+	// Platform-key users should not be filtered aggressively by BYOK health gating.
+	// Return platform provider availability (healthy first, degraded fallback included).
+	if !hasBYOK {
 		return a.GetAvailableProviders()
 	}
 
@@ -637,7 +643,8 @@ func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []ai.AIProvi
 // GetAvailableProviders returns a list of healthy, available AI providers (Platform default)
 func (a *AIRouterAdapter) GetAvailableProviders() []ai.AIProvider {
 	healthStatus := a.router.GetHealthStatus()
-	available := make([]ai.AIProvider, 0)
+	healthyAvailable := make([]ai.AIProvider, 0)
+	degradedAvailable := make([]ai.AIProvider, 0)
 
 	// Map AI router providers to agent providers and check health
 	providerMappings := map[ai.AIProvider]ai.AIProvider{
@@ -648,21 +655,25 @@ func (a *AIRouterAdapter) GetAvailableProviders() []ai.AIProvider {
 	}
 
 	for aiProvider, agentProvider := range providerMappings {
-		if healthy, exists := healthStatus[aiProvider]; exists && healthy {
-			available = append(available, agentProvider)
-			log.Printf("Provider %s is available and healthy", agentProvider)
+		if healthy, exists := healthStatus[aiProvider]; exists {
+			if healthy {
+				healthyAvailable = append(healthyAvailable, agentProvider)
+				log.Printf("Provider %s is available and healthy", agentProvider)
+			} else {
+				// Keep configured-but-unhealthy providers as degraded fallbacks.
+				// This prevents one flaky health check from completely removing a provider.
+				degradedAvailable = append(degradedAvailable, agentProvider)
+				log.Printf("Provider %s is configured but unhealthy (kept as degraded fallback)", agentProvider)
+			}
 		}
 	}
 
-	// If no healthy providers are reported yet, fall back to any configured providers.
-	// This avoids failing builds during startup or transient health-check gaps.
-	if len(available) == 0 {
-		for aiProvider, agentProvider := range providerMappings {
-			if _, exists := healthStatus[aiProvider]; exists {
-				available = append(available, agentProvider)
-				log.Printf("Provider %s is available (health unknown/unhealthy)", agentProvider)
-			}
-		}
+	available := make([]ai.AIProvider, 0, len(healthyAvailable)+len(degradedAvailable))
+	available = append(available, healthyAvailable...)
+	available = append(available, degradedAvailable...)
+
+	if len(healthyAvailable) == 0 && len(degradedAvailable) > 0 {
+		log.Printf("No healthy providers reported; using %d degraded configured provider(s)", len(degradedAvailable))
 	}
 
 	log.Printf("Available providers: %v", available)

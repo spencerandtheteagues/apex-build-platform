@@ -409,7 +409,7 @@ func main() {
 	samlConfig := &enterprise.ServiceProviderConfig{
 		EntityID:                    baseURL,
 		AssertionConsumerServiceURL: baseURL + "/api/v1/enterprise/sso/callback",
-		SingleLogoutServiceURL:     baseURL + "/api/v1/enterprise/sso/logout",
+		SingleLogoutServiceURL:      baseURL + "/api/v1/enterprise/sso/logout",
 	}
 	samlService := enterprise.NewSAMLService(database.GetDB(), samlConfig, auditService)
 	scimService := enterprise.NewSCIMService(database.GetDB(), auditService, rbacService)
@@ -481,18 +481,18 @@ func main() {
 	router := setupRoutes(
 		server, buildHandler, wsHub, secretsHandler, mcpHandler,
 		templatesHandler, searchHandler, previewHandler, gitHandler, importHandler,
-		versionHandler,      // Version history system (Replit parity)
-		commentsHandler,     // Code comments system (Replit parity)
-		autonomousHandler,   // Autonomous agent system (Replit parity)
+		versionHandler,    // Version history system (Replit parity)
+		commentsHandler,   // Code comments system (Replit parity)
+		autonomousHandler, // Autonomous agent system (Replit parity)
 		paymentHandler, executionHandler, deployHandler, packageHandler,
-		environmentHandler,  // Environment configuration (Nix-like - Replit parity)
+		environmentHandler, // Environment configuration (Nix-like - Replit parity)
 		communityHandler, hostingHandler, databaseHandler, debuggingHandler,
 		completionsHandler, extensionsHandler, enterpriseHandler, collabHub,
 		optimizedHandler,
-		byokHandler,         // BYOK API key management and model selection
-		exportHandler,       // GitHub export (push projects to GitHub)
-		usageHandler,        // Usage tracking and quota API endpoints
-		quotaChecker,        // Quota enforcement middleware
+		byokHandler,   // BYOK API key management and model selection
+		exportHandler, // GitHub export (push projects to GitHub)
+		usageHandler,  // Usage tracking and quota API endpoints
+		quotaChecker,  // Quota enforcement middleware
 	)
 
 	// Start server
@@ -563,9 +563,9 @@ func loadConfig() *AppConfig {
 
 	return &AppConfig{
 		Database:      dbConfig,
-		ClaudeAPIKey:  getEnv("ANTHROPIC_API_KEY", ""),
-		OpenAIAPIKey:  getEnv("OPENAI_API_KEY", ""),
-		GeminiAPIKey:  getEnv("GEMINI_API_KEY", ""),
+		ClaudeAPIKey:  getEnvAny([]string{"ANTHROPIC_API_KEY", "CLAUDE_API_KEY"}, ""),
+		OpenAIAPIKey:  getEnvAny([]string{"OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN", "OPENAI_SECRET_KEY"}, ""),
+		GeminiAPIKey:  getEnvAny([]string{"GEMINI_API_KEY", "GOOGLE_AI_API_KEY", "GOOGLE_GEMINI_API_KEY"}, ""),
 		GrokAPIKey:    getEnv("XAI_API_KEY", ""),
 		OllamaBaseURL: getEnv("OLLAMA_BASE_URL", ""), // Empty = disabled, or "http://localhost:11434"
 		JWTSecret:     jwtSecret,
@@ -631,10 +631,10 @@ func setupRoutes(
 	secretsHandler *handlers.SecretsHandler, mcpHandler *handlers.MCPHandler,
 	templatesHandler *handlers.TemplatesHandler, searchHandler *handlers.SearchHandler,
 	previewHandler *handlers.PreviewHandler, gitHandler *handlers.GitHandler,
-	importHandler *handlers.ImportHandler,           // GitHub repository import wizard
-	versionHandler *handlers.VersionHandler,         // Version history system (Replit parity)
-	commentsHandler *handlers.CommentsHandler,       // Code comments system (Replit parity)
-	autonomousHandler *autonomous.Handler,           // Autonomous agent system (Replit parity)
+	importHandler *handlers.ImportHandler, // GitHub repository import wizard
+	versionHandler *handlers.VersionHandler, // Version history system (Replit parity)
+	commentsHandler *handlers.CommentsHandler, // Code comments system (Replit parity)
+	autonomousHandler *autonomous.Handler, // Autonomous agent system (Replit parity)
 	paymentHandler *handlers.PaymentHandlers, executionHandler *handlers.ExecutionHandler,
 	deployHandler *handlers.DeployHandler, packageHandler *handlers.PackageHandler,
 	environmentHandler *handlers.EnvironmentHandler, // Environment configuration (Nix-like - Replit parity)
@@ -643,11 +643,11 @@ func setupRoutes(
 	debuggingHandler *handlers.DebuggingHandler, completionsHandler *handlers.CompletionsHandler,
 	extensionsHandler *handlers.ExtensionsHandler, enterpriseHandler *handlers.EnterpriseHandler,
 	collabHub *collaboration.CollabHub,
-	optimizedHandler *handlers.OptimizedHandler,     // PERFORMANCE: Optimized handlers with caching
-	byokHandler *handlers.BYOKHandlers,              // BYOK API key management
-	exportHandler *handlers.ExportHandler,           // GitHub export
-	usageHandler *handlers.UsageHandlers,            // Usage tracking and quota API
-	quotaChecker *middleware.QuotaChecker,           // Quota enforcement middleware
+	optimizedHandler *handlers.OptimizedHandler, // PERFORMANCE: Optimized handlers with caching
+	byokHandler *handlers.BYOKHandlers, // BYOK API key management
+	exportHandler *handlers.ExportHandler, // GitHub export
+	usageHandler *handlers.UsageHandlers, // Usage tracking and quota API
+	quotaChecker *middleware.QuotaChecker, // Quota enforcement middleware
 ) *gin.Engine {
 	// Set gin mode based on environment
 	if os.Getenv("ENVIRONMENT") == "production" {
@@ -685,11 +685,11 @@ func setupRoutes(
 				"High-performance code execution",
 			},
 			"competitive_advantages": map[string]string{
-				"AI_response_time":      "1.5s (1440x faster than Replit's 36+ minutes)",
-				"environment_startup":   "85ms (120x faster than Replit's 3-10 seconds)",
-				"cost_savings":         "50% cheaper with transparent pricing",
-				"reliability":          "Multi-cloud architecture with 99.99% uptime",
-				"interface":            "Beautiful cyberpunk UI vs bland corporate design",
+				"AI_response_time":    "1.5s (1440x faster than Replit's 36+ minutes)",
+				"environment_startup": "85ms (120x faster than Replit's 3-10 seconds)",
+				"cost_savings":        "50% cheaper with transparent pricing",
+				"reliability":         "Multi-cloud architecture with 99.99% uptime",
+				"interface":           "Beautiful cyberpunk UI vs bland corporate design",
 			},
 			"endpoints": gin.H{
 				"authentication": []string{
@@ -760,16 +760,16 @@ func setupRoutes(
 			{
 				// Project creation has quota check
 				projects.POST("", quotaChecker.CheckProjectQuota(), optimizedHandler.CreateProjectOptimized)
-				projects.GET("", optimizedHandler.GetProjectsOptimized)        // Optimized: cursor pagination, caching
-				projects.GET("/:id", optimizedHandler.GetProjectOptimized)     // Optimized: JOINed file count
-				projects.PUT("/:id", optimizedHandler.UpdateProjectOptimized)  // Optimized: cache invalidation
+				projects.GET("", optimizedHandler.GetProjectsOptimized)          // Optimized: cursor pagination, caching
+				projects.GET("/:id", optimizedHandler.GetProjectOptimized)       // Optimized: JOINed file count
+				projects.PUT("/:id", optimizedHandler.UpdateProjectOptimized)    // Optimized: cache invalidation
 				projects.DELETE("/:id", optimizedHandler.DeleteProjectOptimized) // Optimized: cache invalidation
 				projects.GET("/:id/download", server.DownloadProject)
 
 				// File endpoints under projects - using optimized handler
 				// Storage quota checked on file creation
 				projects.POST("/:id/files", quotaChecker.CheckStorageQuota(1024*1024), server.CreateFile) // Estimate 1MB
-				projects.GET("/:id/files", optimizedHandler.GetProjectFilesOptimized) // Optimized: no content loading for list
+				projects.GET("/:id/files", optimizedHandler.GetProjectFilesOptimized)                     // Optimized: no content loading for list
 			}
 
 			// File endpoints
@@ -838,37 +838,37 @@ func setupRoutes(
 			// Code Search endpoints
 			searchRoutes := protected.Group("/search")
 			{
-				searchRoutes.POST("", searchHandler.Search)              // Full search with all options
-				searchRoutes.GET("/quick", searchHandler.QuickSearch)   // Quick search for autocomplete
-				searchRoutes.GET("/symbols", searchHandler.SearchSymbols) // Symbol search (functions, classes)
-				searchRoutes.GET("/files", searchHandler.SearchFiles)    // File name search
-				searchRoutes.POST("/replace", searchHandler.SearchAndReplace) // Search & replace
-				searchRoutes.GET("/history", searchHandler.GetSearchHistory)  // Search history
+				searchRoutes.POST("", searchHandler.Search)                       // Full search with all options
+				searchRoutes.GET("/quick", searchHandler.QuickSearch)             // Quick search for autocomplete
+				searchRoutes.GET("/symbols", searchHandler.SearchSymbols)         // Symbol search (functions, classes)
+				searchRoutes.GET("/files", searchHandler.SearchFiles)             // File name search
+				searchRoutes.POST("/replace", searchHandler.SearchAndReplace)     // Search & replace
+				searchRoutes.GET("/history", searchHandler.GetSearchHistory)      // Search history
 				searchRoutes.DELETE("/history", searchHandler.ClearSearchHistory) // Clear history
 			}
 
 			// Live Preview endpoints
 			previewRoutes := protected.Group("/preview")
 			{
-				previewRoutes.POST("/start", previewHandler.StartPreview)       // Start preview server
-				previewRoutes.POST("/stop", previewHandler.StopPreview)         // Stop preview server
+				previewRoutes.POST("/start", previewHandler.StartPreview)                // Start preview server
+				previewRoutes.POST("/stop", previewHandler.StopPreview)                  // Stop preview server
 				previewRoutes.GET("/status/:projectId", previewHandler.GetPreviewStatus) // Get status
-				previewRoutes.POST("/refresh", previewHandler.RefreshPreview)   // Trigger reload
-				previewRoutes.POST("/hot-reload", previewHandler.HotReload)     // Hot reload file
-				previewRoutes.GET("/list", previewHandler.ListPreviews)         // List active previews
-				previewRoutes.GET("/url/:projectId", previewHandler.GetPreviewURL) // Get preview URL
+				previewRoutes.POST("/refresh", previewHandler.RefreshPreview)            // Trigger reload
+				previewRoutes.POST("/hot-reload", previewHandler.HotReload)              // Hot reload file
+				previewRoutes.GET("/list", previewHandler.ListPreviews)                  // List active previews
+				previewRoutes.GET("/url/:projectId", previewHandler.GetPreviewURL)       // Get preview URL
 
 				// Bundler endpoints
-				previewRoutes.POST("/build", previewHandler.BuildProject)                // Bundle project
-				previewRoutes.GET("/bundler/status", previewHandler.GetBundlerStatus)    // Bundler availability
+				previewRoutes.POST("/build", previewHandler.BuildProject)                       // Bundle project
+				previewRoutes.GET("/bundler/status", previewHandler.GetBundlerStatus)           // Bundler availability
 				previewRoutes.POST("/bundler/invalidate", previewHandler.InvalidateBundleCache) // Invalidate cache
 
 				// Backend server endpoints
-				previewRoutes.POST("/server/start", previewHandler.StartServer)             // Start backend server
-				previewRoutes.POST("/server/stop", previewHandler.StopServer)               // Stop backend server
+				previewRoutes.POST("/server/start", previewHandler.StartServer)                // Start backend server
+				previewRoutes.POST("/server/stop", previewHandler.StopServer)                  // Stop backend server
 				previewRoutes.GET("/server/status/:projectId", previewHandler.GetServerStatus) // Server status
-				previewRoutes.GET("/server/logs/:projectId", previewHandler.GetServerLogs)  // Server logs
-				previewRoutes.GET("/server/detect/:projectId", previewHandler.DetectServer)  // Detect backend
+				previewRoutes.GET("/server/logs/:projectId", previewHandler.GetServerLogs)     // Server logs
+				previewRoutes.GET("/server/detect/:projectId", previewHandler.DetectServer)    // Detect backend
 
 				// Docker sandbox endpoint
 				previewRoutes.GET("/docker/status", previewHandler.GetDockerStatus) // Docker availability
@@ -877,20 +877,20 @@ func setupRoutes(
 			// Git Integration endpoints
 			gitRoutes := protected.Group("/git")
 			{
-				gitRoutes.POST("/connect", gitHandler.ConnectRepository)         // Connect to repo
-				gitRoutes.GET("/repo/:projectId", gitHandler.GetRepository)      // Get repo info
-				gitRoutes.DELETE("/repo/:projectId", gitHandler.DisconnectRepository) // Disconnect
-				gitRoutes.GET("/branches/:projectId", gitHandler.GetBranches)    // List branches
-				gitRoutes.GET("/commits/:projectId", gitHandler.GetCommits)      // Get commits
-				gitRoutes.GET("/status/:projectId", gitHandler.GetStatus)        // Working tree status
-				gitRoutes.POST("/commit", gitHandler.Commit)                     // Create commit
-				gitRoutes.POST("/push", gitHandler.Push)                         // Push to remote
-				gitRoutes.POST("/pull", gitHandler.Pull)                         // Pull from remote
-				gitRoutes.POST("/branch", gitHandler.CreateBranch)               // Create branch
-				gitRoutes.POST("/checkout", gitHandler.SwitchBranch)             // Switch branch
-				gitRoutes.GET("/pulls/:projectId", gitHandler.GetPullRequests)   // List PRs
-				gitRoutes.POST("/pulls", gitHandler.CreatePullRequest)           // Create PR
-				gitRoutes.POST("/export", exportHandler.ExportToGitHub)          // Export project to GitHub
+				gitRoutes.POST("/connect", gitHandler.ConnectRepository)                  // Connect to repo
+				gitRoutes.GET("/repo/:projectId", gitHandler.GetRepository)               // Get repo info
+				gitRoutes.DELETE("/repo/:projectId", gitHandler.DisconnectRepository)     // Disconnect
+				gitRoutes.GET("/branches/:projectId", gitHandler.GetBranches)             // List branches
+				gitRoutes.GET("/commits/:projectId", gitHandler.GetCommits)               // Get commits
+				gitRoutes.GET("/status/:projectId", gitHandler.GetStatus)                 // Working tree status
+				gitRoutes.POST("/commit", gitHandler.Commit)                              // Create commit
+				gitRoutes.POST("/push", gitHandler.Push)                                  // Push to remote
+				gitRoutes.POST("/pull", gitHandler.Pull)                                  // Pull from remote
+				gitRoutes.POST("/branch", gitHandler.CreateBranch)                        // Create branch
+				gitRoutes.POST("/checkout", gitHandler.SwitchBranch)                      // Switch branch
+				gitRoutes.GET("/pulls/:projectId", gitHandler.GetPullRequests)            // List PRs
+				gitRoutes.POST("/pulls", gitHandler.CreatePullRequest)                    // Create PR
+				gitRoutes.POST("/export", exportHandler.ExportToGitHub)                   // Export project to GitHub
 				gitRoutes.GET("/export/status/:projectId", exportHandler.GetExportStatus) // Check export status
 			}
 
@@ -908,17 +908,17 @@ func setupRoutes(
 			// Billing & Subscription endpoints (Stripe integration)
 			billing := protected.Group("/billing")
 			{
-				billing.POST("/checkout", paymentHandler.CreateCheckoutSession)      // Create Stripe checkout
-				billing.GET("/subscription", paymentHandler.GetSubscription)         // Get current subscription
-				billing.POST("/portal", paymentHandler.CreateBillingPortalSession)   // Stripe billing portal
-				billing.GET("/plans", paymentHandler.GetPlans)                       // List available plans
-				billing.GET("/usage", paymentHandler.GetUsage)                       // Get usage stats
-				billing.POST("/cancel", paymentHandler.CancelSubscription)           // Cancel subscription
-				billing.POST("/reactivate", paymentHandler.ReactivateSubscription)   // Reactivate subscription
-				billing.GET("/invoices", paymentHandler.GetInvoices)                 // Get invoice history
-				billing.GET("/payment-methods", paymentHandler.GetPaymentMethods)    // Get payment methods
-				billing.GET("/check-limit/:type", paymentHandler.CheckUsageLimit)    // Check usage limit
-				billing.GET("/config-status", paymentHandler.StripeConfigStatus)     // Check Stripe config
+				billing.POST("/checkout", paymentHandler.CreateCheckoutSession)    // Create Stripe checkout
+				billing.GET("/subscription", paymentHandler.GetSubscription)       // Get current subscription
+				billing.POST("/portal", paymentHandler.CreateBillingPortalSession) // Stripe billing portal
+				billing.GET("/plans", paymentHandler.GetPlans)                     // List available plans
+				billing.GET("/usage", paymentHandler.GetUsage)                     // Get usage stats
+				billing.POST("/cancel", paymentHandler.CancelSubscription)         // Cancel subscription
+				billing.POST("/reactivate", paymentHandler.ReactivateSubscription) // Reactivate subscription
+				billing.GET("/invoices", paymentHandler.GetInvoices)               // Get invoice history
+				billing.GET("/payment-methods", paymentHandler.GetPaymentMethods)  // Get payment methods
+				billing.GET("/check-limit/:type", paymentHandler.CheckUsageLimit)  // Check usage limit
+				billing.GET("/config-status", paymentHandler.StripeConfigStatus)   // Check Stripe config
 			}
 
 			// Code Execution endpoints (the core of cloud IDE) - with quota enforcement
@@ -926,40 +926,40 @@ func setupRoutes(
 				execute := protected.Group("/execute")
 				execute.Use(quotaChecker.CheckExecutionQuota(1)) // Check execution minutes quota
 				{
-					execute.POST("", executionHandler.ExecuteCode)                  // Execute code snippet
-					execute.POST("/file", executionHandler.ExecuteFile)             // Execute a file
-					execute.POST("/project", executionHandler.ExecuteProject)       // Execute entire project
-					execute.GET("/languages", executionHandler.GetLanguages)        // Get supported languages
-					execute.GET("/:id", executionHandler.GetExecution)              // Get execution details
-					execute.GET("/history", executionHandler.GetExecutionHistory)   // Get execution history
-					execute.POST("/:id/stop", executionHandler.StopExecution)       // Stop running execution
-					execute.GET("/stats", executionHandler.GetExecutionStats)       // Get execution statistics
+					execute.POST("", executionHandler.ExecuteCode)                           // Execute code snippet
+					execute.POST("/file", executionHandler.ExecuteFile)                      // Execute a file
+					execute.POST("/project", executionHandler.ExecuteProject)                // Execute entire project
+					execute.GET("/languages", executionHandler.GetLanguages)                 // Get supported languages
+					execute.GET("/:id", executionHandler.GetExecution)                       // Get execution details
+					execute.GET("/history", executionHandler.GetExecutionHistory)            // Get execution history
+					execute.POST("/:id/stop", executionHandler.StopExecution)                // Stop running execution
+					execute.GET("/stats", executionHandler.GetExecutionStats)                // Get execution statistics
 					execute.GET("/sandbox/status", executionHandler.GetSandboxStatusHandler) // Get sandbox security status
 				}
 
 				// Terminal endpoints (interactive shell with full PTY support)
 				terminal := protected.Group("/terminal")
 				{
-					terminal.POST("/sessions", executionHandler.CreateTerminalSession)           // Create new terminal
-					terminal.GET("/sessions", executionHandler.ListTerminalSessions)             // List all terminals
-					terminal.GET("/sessions/:id", executionHandler.GetTerminalSession)           // Get terminal info
-					terminal.DELETE("/sessions/:id", executionHandler.DeleteTerminalSession)     // Close terminal
+					terminal.POST("/sessions", executionHandler.CreateTerminalSession)            // Create new terminal
+					terminal.GET("/sessions", executionHandler.ListTerminalSessions)              // List all terminals
+					terminal.GET("/sessions/:id", executionHandler.GetTerminalSession)            // Get terminal info
+					terminal.DELETE("/sessions/:id", executionHandler.DeleteTerminalSession)      // Close terminal
 					terminal.POST("/sessions/:id/resize", executionHandler.ResizeTerminalSession) // Resize terminal
-					terminal.GET("/sessions/:id/history", executionHandler.GetTerminalHistory)   // Get command history
-					terminal.GET("/shells", executionHandler.GetAvailableShells)                 // List available shells
+					terminal.GET("/sessions/:id/history", executionHandler.GetTerminalHistory)    // Get command history
+					terminal.GET("/shells", executionHandler.GetAvailableShells)                  // List available shells
 				}
 			}
 
 			// One-Click Deployment endpoints (Vercel, Netlify, Render)
 			deployRoutes := protected.Group("/deploy")
 			{
-				deployRoutes.POST("", deployHandler.StartDeployment)                           // Start deployment
-				deployRoutes.GET("/:id", deployHandler.GetDeployment)                          // Get deployment details
-				deployRoutes.GET("/:id/status", deployHandler.GetDeploymentStatus)             // Get status only
-				deployRoutes.GET("/:id/logs", deployHandler.GetDeploymentLogs)                 // Get deployment logs
-				deployRoutes.DELETE("/:id", deployHandler.CancelDeployment)                    // Cancel deployment
-				deployRoutes.POST("/:id/redeploy", deployHandler.Redeploy)                     // Redeploy
-				deployRoutes.GET("/providers", deployHandler.GetProviders)                     // List providers
+				deployRoutes.POST("", deployHandler.StartDeployment)                                  // Start deployment
+				deployRoutes.GET("/:id", deployHandler.GetDeployment)                                 // Get deployment details
+				deployRoutes.GET("/:id/status", deployHandler.GetDeploymentStatus)                    // Get status only
+				deployRoutes.GET("/:id/logs", deployHandler.GetDeploymentLogs)                        // Get deployment logs
+				deployRoutes.DELETE("/:id", deployHandler.CancelDeployment)                           // Cancel deployment
+				deployRoutes.POST("/:id/redeploy", deployHandler.Redeploy)                            // Redeploy
+				deployRoutes.GET("/providers", deployHandler.GetProviders)                            // List providers
 				deployRoutes.GET("/projects/:projectId/history", deployHandler.GetProjectDeployments) // Deployment history
 				deployRoutes.GET("/projects/:projectId/latest", deployHandler.GetLatestDeployment)    // Latest deployment
 			}
@@ -1051,6 +1051,15 @@ func setupRoutes(
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+func getEnvAny(keys []string, defaultValue string) string {
+	for _, key := range keys {
+		if value := os.Getenv(key); value != "" {
+			return value
+		}
 	}
 	return defaultValue
 }
