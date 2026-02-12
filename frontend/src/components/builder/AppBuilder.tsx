@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
+import { useThemeLogo } from '@/hooks/useThemeLogo'
 import apiService from '@/services/api'
 import {
   Button,
@@ -212,12 +213,13 @@ const FloatingParticles: React.FC = () => {
 // ============================================================================
 
 const AnimatedLogo: React.FC = () => {
+  const logoSrc = useThemeLogo()
   return (
     <div className="relative group">
       {/* Main logo - large and clean, no background box */}
       <div className="relative w-[20rem] h-[20rem] md:w-[26rem] md:h-[26rem] flex items-center justify-center group-hover:scale-105 transition-transform duration-500">
         <img
-          src="/logo.png"
+          src={logoSrc}
           alt="APEX"
           className="w-full h-full object-contain relative z-10 drop-shadow-[0_0_30px_rgba(220,38,38,0.5)]"
         />

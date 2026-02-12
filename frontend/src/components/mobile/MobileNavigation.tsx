@@ -4,6 +4,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { useSwipeGesture, useIsMobile, useSafeAreaInsets } from '@/hooks/useMobile'
+import { useThemeLogo } from '@/hooks/useThemeLogo'
 import {
   Menu,
   X,
@@ -48,6 +49,7 @@ export const MobileNavigation: React.FC<MobileNavigationProps> = ({
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const safeArea = useSafeAreaInsets()
+  const logoSrc = useThemeLogo()
 
   // Handle menu open/close
   const toggleMenu = () => {
@@ -116,7 +118,7 @@ export const MobileNavigation: React.FC<MobileNavigationProps> = ({
         <div className="h-14 flex items-center justify-between px-4 border-b border-gray-800">
           <div className="flex items-center gap-2">
             <div className="w-10 h-10 flex items-center justify-center">
-              <img src="/logo.png" alt="APEX" className="w-full h-full object-contain drop-shadow-[0_0_10px_rgba(239,68,68,0.45)]" />
+              <img src={logoSrc} alt="APEX" className="w-full h-full object-contain drop-shadow-[0_0_10px_rgba(239,68,68,0.45)]" />
             </div>
             <span className="text-lg font-bold text-white">APEX.BUILD</span>
           </div>
@@ -159,7 +161,7 @@ export const MobileNavigation: React.FC<MobileNavigationProps> = ({
                   : 'hover:bg-gray-800 text-gray-300'
               )}
             >
-              <img src="/logo.png" alt="APEX" className="w-6 h-6 object-contain" />
+              <img src={logoSrc} alt="APEX" className="w-6 h-6 object-contain" />
               <span className="flex-1 text-left">Build App</span>
               <ChevronRight className="w-4 h-4 opacity-50" />
             </button>
@@ -296,7 +298,7 @@ export const MobileNavigation: React.FC<MobileNavigationProps> = ({
           {/* Logo */}
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 flex items-center justify-center">
-              <img src="/logo.png" alt="APEX" className="w-full h-full object-contain drop-shadow-[0_0_8px_rgba(239,68,68,0.4)]" />
+              <img src={logoSrc} alt="APEX" className="w-full h-full object-contain drop-shadow-[0_0_8px_rgba(239,68,68,0.4)]" />
             </div>
             <span className="text-sm font-bold text-white">APEX.BUILD</span>
           </div>

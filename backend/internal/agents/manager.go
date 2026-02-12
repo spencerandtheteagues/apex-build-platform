@@ -1861,13 +1861,58 @@ func (am *AgentManager) createCheckpoint(build *Build, name, description string)
 
 // collectGeneratedFiles gathers all generated files from completed tasks
 func (am *AgentManager) collectGeneratedFiles(build *Build) []GeneratedFile {
-	files := make([]GeneratedFile, 0)
+	filesByPath := make(map[string]GeneratedFile)
+	orderedPaths := make([]string, 0)
+
 	for _, task := range build.Tasks {
-		if task.Output != nil {
-			files = append(files, task.Output.Files...)
+		if task.Output == nil || !am.isCodeGenerationTask(task.Type) {
+			continue
+		}
+		for _, file := range task.Output.Files {
+			if strings.TrimSpace(file.Path) == "" || strings.TrimSpace(file.Content) == "" {
+				continue
+			}
+			sanitized := sanitizeFilePath(file.Path)
+			if sanitized == "" {
+				continue
+			}
+			file.Path = sanitized
+
+			existing, exists := filesByPath[sanitized]
+			if !exists {
+				filesByPath[sanitized] = file
+				orderedPaths = append(orderedPaths, sanitized)
+				continue
+			}
+
+			// Prefer fuller file content when the same path appears multiple times.
+			if len(strings.TrimSpace(file.Content)) > len(strings.TrimSpace(existing.Content)) {
+				filesByPath[sanitized] = file
+			}
 		}
 	}
-	return files
+
+	if len(orderedPaths) == 0 {
+		return []GeneratedFile{}
+	}
+
+	hasRealFiles := false
+	for _, path := range orderedPaths {
+		if !isGeneratedArtifactPath(path) {
+			hasRealFiles = true
+			break
+		}
+	}
+
+	result := make([]GeneratedFile, 0, len(orderedPaths))
+	for _, path := range orderedPaths {
+		// Drop parser fallback artifacts when real project files exist.
+		if hasRealFiles && isGeneratedArtifactPath(path) {
+			continue
+		}
+		result = append(result, filesByPath[path])
+	}
+	return result
 }
 
 // queuePlanTasks creates and queues tasks based on the build plan
@@ -2775,9 +2820,21 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 		Files:    make([]GeneratedFile, 0),
 	}
 
+	if !am.isCodeGenerationTask(taskType) {
+		trimmed := strings.TrimSpace(response)
+		if trimmed != "" {
+			output.Messages = append(output.Messages, trimmed)
+		}
+		return output
+	}
+
 	// Parse the AI response to extract code blocks and files
 	// Look for patterns like ```language\n...code...\n``` or file markers
 	lines := strings.Split(response, "\n")
+	hasExplicitFileMarkers := strings.Contains(response, "// File:") ||
+		strings.Contains(response, "# File:") ||
+		strings.Contains(response, "/* File:") ||
+		strings.Contains(response, "<!-- File:")
 	var currentFile *GeneratedFile
 	var codeBuffer strings.Builder
 	inCodeBlock := false
@@ -2837,7 +2894,7 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 				currentLanguage = strings.TrimSpace(currentLanguage)
 
 				// If we don't have a current file, create one from the code block
-				if currentFile == nil && currentLanguage != "" {
+				if currentFile == nil && currentLanguage != "" && !hasExplicitFileMarkers {
 					ext := am.languageToExtension(currentLanguage)
 					currentFile = &GeneratedFile{
 						Path:     fmt.Sprintf("generated_%d.%s", len(output.Files)+1, ext),
@@ -2854,14 +2911,14 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 					currentFile.Size = int64(len(currentFile.Content))
 					output.Files = append(output.Files, *currentFile)
 					currentFile = nil
-					codeBuffer.Reset()
 				}
+				codeBuffer.Reset()
 				continue
 			}
 		}
 
-		// Add line to buffer if in code block or if we have a current file
-		if inCodeBlock || currentFile != nil {
+		// Add line to buffer only for an active file context.
+		if currentFile != nil {
 			if codeBuffer.Len() > 0 {
 				codeBuffer.WriteString("\n")
 			}
@@ -2934,6 +2991,11 @@ func (am *AgentManager) detectLanguage(path string) string {
 	default:
 		return "text"
 	}
+}
+
+func isGeneratedArtifactPath(path string) bool {
+	base := filepath.Base(strings.TrimSpace(path))
+	return strings.HasPrefix(base, "generated_")
 }
 
 // languageToExtension converts a language name to file extension
@@ -3033,7 +3095,7 @@ func getErrorString(err error) string {
 // isCodeGenerationTask checks if a task type produces code that should be verified
 func (am *AgentManager) isCodeGenerationTask(taskType TaskType) bool {
 	switch taskType {
-	case TaskGenerateFile, TaskGenerateAPI, TaskGenerateUI, TaskGenerateSchema:
+	case TaskGenerateFile, TaskGenerateAPI, TaskGenerateUI, TaskGenerateSchema, TaskFix:
 		return true
 	}
 	return false
@@ -3129,6 +3191,20 @@ func (am *AgentManager) quickSyntaxCheck(file GeneratedFile) []string {
 		// Check bracket balance
 		if strings.Count(content, "{") != strings.Count(content, "}") {
 			errors = append(errors, fmt.Sprintf("%s: Unbalanced curly braces", file.Path))
+		}
+
+	case "html":
+		contentLower := strings.ToLower(content)
+		if strings.Contains(contentLower, "<html") && !strings.Contains(contentLower, "</html>") {
+			errors = append(errors, fmt.Sprintf("%s: Incomplete HTML document (missing </html>)", file.Path))
+		}
+		if strings.Contains(contentLower, "<body") && !strings.Contains(contentLower, "</body>") {
+			errors = append(errors, fmt.Sprintf("%s: Incomplete HTML document (missing </body>)", file.Path))
+		}
+
+	case "json":
+		if !json.Valid([]byte(content)) {
+			errors = append(errors, fmt.Sprintf("%s: Invalid JSON syntax", file.Path))
 		}
 	}
 

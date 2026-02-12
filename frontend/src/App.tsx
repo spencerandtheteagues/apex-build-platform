@@ -202,6 +202,9 @@ function App() {
     document.documentElement.setAttribute('data-ui-theme', uiColorScheme === 'blue-light' ? 'blue' : 'red')
   }, [uiColorScheme])
 
+  // Theme-aware logo path
+  const logoSrc = uiColorScheme === 'blue-light' ? '/logo-blue.png' : '/logo.png'
+
   // Loading screen
   if (isLoading) {
     return (
@@ -211,7 +214,7 @@ function App() {
 
         <div className="flex flex-col items-center space-y-6 relative z-10">
           <div className="w-48 h-48 flex items-center justify-center animate-pulse">
-            <img src="/logo.png" alt="APEX Logo" className="w-full h-full object-contain drop-shadow-[0_0_30px_rgba(239,68,68,0.5)]" />
+            <img src={logoSrc} alt="APEX Logo" className="w-full h-full object-contain drop-shadow-[0_0_30px_rgba(239,68,68,0.5)]" />
           </div>
           <div className="flex flex-col items-center gap-2">
             <p className="text-red-400 text-sm animate-pulse">Initializing System...</p>
@@ -242,7 +245,7 @@ function App() {
               <div className="flex flex-col items-center gap-4">
                 {/* Animated Logo */}
                 <div className="auth-logo w-[8.4rem] h-[8.4rem] flex items-center justify-center relative bg-transparent">
-                  <img src="/logo.png" alt="APEX Logo" className="w-full h-full object-contain relative z-10 bg-transparent drop-shadow-[0_0_22px_rgba(239,68,68,0.45)]" />
+                  <img src={logoSrc} alt="APEX Logo" className="w-full h-full object-contain relative z-10 bg-transparent drop-shadow-[0_0_22px_rgba(239,68,68,0.45)]" />
                 </div>
 
                 {/* Animated title */}
@@ -463,7 +466,7 @@ function App() {
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 flex items-center justify-center">
             <img
-              src="/logo.png"
+              src={logoSrc}
               alt="APEX Logo"
               className="w-full h-full object-contain drop-shadow-[0_0_12px_rgba(239,68,68,0.5)]"
             />
@@ -483,7 +486,7 @@ function App() {
                 : 'text-gray-400 hover:text-white hover:bg-gray-800'
             }`}
           >
-            <img src="/logo.png" alt="APEX" className="w-5 h-5 object-contain" />
+            <img src={logoSrc} alt="APEX" className="w-5 h-5 object-contain" />
             <span className="text-sm font-medium">Build App</span>
           </button>
           <button

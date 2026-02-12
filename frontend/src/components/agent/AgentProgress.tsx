@@ -3,6 +3,7 @@
 
 import React, { memo, useMemo } from 'react'
 import { cn } from '@/lib/utils'
+import { useThemeLogo } from '@/hooks/useThemeLogo'
 import {
   AgentTask,
   AgentStep,
@@ -36,6 +37,11 @@ export interface AgentProgressProps {
   compact?: boolean
 }
 
+const DeployIcon = () => {
+  const logoSrc = useThemeLogo()
+  return <img src={logoSrc} alt="Deploy" className="w-4 h-4 object-contain" />
+}
+
 // Step type icons
 const stepIcons: Record<AgentStepType, React.ReactNode> = {
   analyze: <Brain className="w-4 h-4" />,
@@ -45,7 +51,7 @@ const stepIcons: Record<AgentStepType, React.ReactNode> = {
   test: <TestTube className="w-4 h-4" />,
   review: <Shield className="w-4 h-4" />,
   fix: <Wrench className="w-4 h-4" />,
-  deploy: <img src="/logo.png" alt="Deploy" className="w-4 h-4 object-contain" />,
+  deploy: <DeployIcon />,
   checkpoint: <History className="w-4 h-4" />,
 }
 
