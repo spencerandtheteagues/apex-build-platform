@@ -124,24 +124,22 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
     }
     if (!currentProject) return
     const language = currentProject.language?.toLowerCase() || ''
-    if (language !== 'javascript' && language !== 'typescript') {
+    if (language === 'javascript' || language === 'typescript') {
       addNotification({
         type: 'info',
         title: 'Run Project',
-        message: 'Use the IDE terminal to run this project.',
+        message: 'Open the IDE and use Preview to run this project.',
       })
       return
     }
     try {
-      await apiService.executeCode({
+      const result = await apiService.executeProject({
         project_id: currentProject.id,
-        command: 'npm start',
-        language: currentProject.language,
       })
       addNotification({
         type: 'success',
-        title: 'Run Started',
-        message: 'Project execution started.',
+        title: 'Run Completed',
+        message: result.output ? result.output.slice(0, 200) : 'Project execution completed.',
       })
     } catch {
       addNotification({

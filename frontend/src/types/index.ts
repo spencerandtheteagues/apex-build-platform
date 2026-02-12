@@ -142,6 +142,20 @@ export interface Execution {
   updated_at: string
 }
 
+// ExecutionResult represents immediate execution responses (not persisted model)
+export interface ExecutionResult {
+  id: string
+  status: string
+  output: string
+  error_output?: string
+  exit_code?: number
+  duration_ms?: number
+  memory_used?: number
+  timed_out?: boolean
+  command?: string
+  sandbox_type?: string
+}
+
 export interface CollabRoom {
   id: number
   room_id: string

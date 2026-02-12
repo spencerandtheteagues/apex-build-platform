@@ -356,7 +356,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     }).catch(() => {
       setTerminalOutput(prev => [...prev, `Project URL: ${url}`])
     })
-  }, [currentProject])
+  }, [currentProject, setShowPreview, setViewMode])
 
   const handleDashboardDownload = useCallback(async () => {
     if (!currentProject) return
@@ -490,13 +490,22 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     try {
       if (command.startsWith('run') || command === 'start') {
         if (currentProject) {
+          const language = (currentProject.language || '').toLowerCase()
+          if (language === 'javascript' || language === 'typescript') {
+            setViewMode('editor')
+            setShowPreview(true)
+            setTerminalOutput(prev => [...prev, 'Preview started in the right pane.'])
+            return
+          }
           setTerminalOutput(prev => [...prev, 'Executing project...'])
-          const execution = await apiService.executeCode({
+          const execution = await apiService.executeProject({
             project_id: currentProject.id,
-            command: 'npm start',
-            language: currentProject.language,
           })
-          setTerminalOutput(prev => [...prev, execution.output])
+          if (execution.output) {
+            setTerminalOutput(prev => [...prev, execution.output])
+          } else {
+            setTerminalOutput(prev => [...prev, `Execution finished with status: ${execution.status}`])
+          }
         }
       } else if (command === 'clear') {
         setTerminalOutput(['APEX.BUILD Terminal v1.0.0', 'Welcome to the future of development', ''])

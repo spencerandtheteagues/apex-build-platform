@@ -9,6 +9,7 @@ import {
   AIRequest,
   AIUsage,
   Execution,
+  ExecutionResult,
   LoginRequest,
   RegisterRequest,
   AuthResponse,
@@ -277,28 +278,29 @@ export class ApiService {
     content?: string
     mime_type?: string
   }): Promise<File> {
-    const response = await this.client.post<{ file?: File; data?: { file?: File } }>(
+    const response = await this.client.post<{ file?: File; data?: File | { file?: File } }>(
       `/projects/${projectId}/files`,
       data
     )
-    return response.data.file || response.data.data?.file || (response.data as unknown as File)
+    const dataValue = response.data.data as any
+    return response.data.file || dataValue?.file || dataValue || (response.data as unknown as File)
   }
 
   async getFiles(projectId: number): Promise<File[]> {
-    const response = await this.client.get<{ files?: File[] }>(
+    const response = await this.client.get<{ files?: File[]; data?: File[] }>(
       `/projects/${projectId}/files?include_content=true`
     )
-    return response.data.files || []
+    return response.data.files || response.data.data || []
   }
 
   async getFile(id: number): Promise<File> {
-    const response = await this.client.get<{ file?: File }>(`/files/${id}`)
-    return response.data.file || (response.data as unknown as File)
+    const response = await this.client.get<{ file?: File; data?: File }>(`/files/${id}`)
+    return response.data.file || response.data.data || (response.data as unknown as File)
   }
 
   async updateFile(id: number, data: { content?: string; name?: string; path?: string }): Promise<File> {
-    const response = await this.client.put<{ file?: File; data?: { file?: File } }>(`/files/${id}`, data)
-    return response.data.file || response.data.data?.file || (response.data as unknown as File)
+    await this.client.put(`/files/${id}`, data)
+    return this.getFile(id)
   }
 
   async deleteFile(id: number): Promise<void> {
@@ -429,19 +431,33 @@ export class ApiService {
 
   // Code execution endpoints
   async executeCode(data: {
-    project_id: number
-    command: string
+    code: string
     language: string
-    input?: string
-    environment?: Record<string, any>
-  }): Promise<Execution> {
-    const response = await this.client.post<ApiResponse<{ execution: Execution }>>('/execute', data)
-    return response.data.data!.execution
+    stdin?: string
+    timeout?: number
+    env?: Record<string, string>
+    project_id?: number
+  }): Promise<ExecutionResult> {
+    const response = await this.client.post<{ data?: ExecutionResult }>('/execute', data)
+    return response.data.data || (response.data as unknown as ExecutionResult)
   }
 
-  async getExecution(id: number): Promise<Execution> {
-    const response = await this.client.get<ApiResponse<{ execution: Execution }>>(`/execute/${id}`)
-    return response.data.data!.execution
+  async executeProject(data: {
+    project_id: number
+    command?: string
+    env?: Record<string, string>
+    timeout?: number
+  }): Promise<ExecutionResult> {
+    const response = await this.client.post<{ data?: ExecutionResult }>(
+      '/execute/project',
+      data
+    )
+    return response.data.data || (response.data as unknown as ExecutionResult)
+  }
+
+  async getExecution(executionId: string): Promise<Execution> {
+    const response = await this.client.get<{ data?: Execution }>(`/execute/${executionId}`)
+    return response.data.data || (response.data as unknown as Execution)
   }
 
   async getExecutionHistory(
@@ -449,23 +465,26 @@ export class ApiService {
     limit: number = 50,
     offset: number = 0
   ): Promise<Execution[]> {
-    const response = await this.client.get<ApiResponse<{ executions: Execution[] }>>(
-      `/execute/history?project_id=${projectId}&limit=${limit}&offset=${offset}`
+    const page = Math.max(1, Math.floor(offset / limit) + 1)
+    const response = await this.client.get<{ data?: Execution[] }>(
+      `/execute/history?project_id=${projectId}&limit=${limit}&page=${page}`
     )
-    return response.data.data!.executions
+    return response.data.data || (response.data as unknown as Execution[]) || []
   }
 
-  async stopExecution(id: number): Promise<void> {
-    await this.client.post(`/execute/${id}/stop`)
+  async stopExecution(executionId: string): Promise<void> {
+    await this.client.post(`/execute/${executionId}/stop`)
   }
 
   // Collaboration endpoints
   async joinCollabRoom(projectId: number): Promise<{
     room_id: string
-    websocket_url: string
+    project_id?: string
+    users?: User[]
+    user_count?: number
   }> {
-    const response = await this.client.post(`/collab/join/${projectId}`)
-    return response.data
+    const response = await this.client.post<{ data?: any }>(`/collab/join/${projectId}`)
+    return response.data.data || response.data
   }
 
   async leaveCollabRoom(roomId: string): Promise<void> {
@@ -473,8 +492,8 @@ export class ApiService {
   }
 
   async getCollabUsers(roomId: string): Promise<User[]> {
-    const response = await this.client.get<ApiResponse<{ users: User[] }>>(`/collab/users/${roomId}`)
-    return response.data.data!.users
+    const response = await this.client.get<{ data?: { users?: User[] } }>(`/collab/users/${roomId}`)
+    return response.data.data?.users || []
   }
 
   // System information
