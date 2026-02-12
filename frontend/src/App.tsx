@@ -8,7 +8,7 @@ import CostTicker from './components/ide/CostTicker'
 // Import ErrorBoundary directly to be safe
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input, AnimatedBackground } from './components/ui'
-import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown, Key } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown, Key, Palette } from 'lucide-react'
 import './styles/globals.css'
 import './styles/auth-animations.css'
 
@@ -26,6 +26,7 @@ const AuthParticle: React.FC<{ delay: number; startX: number; startY: number }> 
 );
 
 type AppView = 'builder' | 'ide' | 'admin' | 'explore' | 'settings'
+type UIColorScheme = 'red-dark' | 'blue-light'
 
 const AppBuilder = lazy(() =>
   import('./components/builder/AppBuilder').then((m) => ({ default: m.AppBuilder }))
@@ -66,6 +67,11 @@ function App() {
   const [authErrors, setAuthErrors] = useState<Record<string, string>>({})
   const [showPassword, setShowPassword] = useState(false)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
+  const [uiColorScheme, setUIColorScheme] = useState<UIColorScheme>(() => {
+    if (typeof window === 'undefined') return 'red-dark'
+    const saved = localStorage.getItem('apex_ui_color_scheme')
+    return saved === 'blue-light' ? 'blue-light' : 'red-dark'
+  })
   const [defaultModel, setDefaultModel] = useState(() => {
     if (typeof window === 'undefined') return 'auto'
     return localStorage.getItem('apex_default_model') || 'auto'
@@ -188,6 +194,13 @@ function App() {
       return next
     })
   }, [currentView])
+
+  // Persist UI color scheme and apply to the whole app.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    localStorage.setItem('apex_ui_color_scheme', uiColorScheme)
+    document.documentElement.setAttribute('data-ui-theme', uiColorScheme === 'blue-light' ? 'blue' : 'red')
+  }, [uiColorScheme])
 
   // Loading screen
   if (isLoading) {
@@ -600,6 +613,51 @@ function App() {
                         Settings
                       </h1>
                       <p className="text-gray-400">Configure your AI providers and API keys</p>
+                    </div>
+
+                    {/* UI Color Scheme Section */}
+                    <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                      <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                        <Palette className="w-5 h-5 text-red-400" />
+                        UI Color Scheme
+                      </h2>
+                      <p className="text-gray-400 text-sm mb-4">
+                        Choose between the default red/black cyberpunk mode and a friendlier blue/white mode.
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setUIColorScheme('red-dark')}
+                          aria-pressed={uiColorScheme === 'red-dark'}
+                          className={`rounded-lg border p-4 text-left transition-all duration-200 ${
+                            uiColorScheme === 'red-dark'
+                              ? 'bg-red-900/20 border-red-700 text-red-300 shadow-sm shadow-red-900/30'
+                              : 'bg-black/40 border-gray-700 text-gray-300 hover:border-red-600/60'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold">Red & Black</span>
+                            {uiColorScheme === 'red-dark' && <Check className="w-4 h-4" />}
+                          </div>
+                          <p className="text-xs mt-2 opacity-80">Default cyberpunk look</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setUIColorScheme('blue-light')}
+                          aria-pressed={uiColorScheme === 'blue-light'}
+                          className={`rounded-lg border p-4 text-left transition-all duration-200 ${
+                            uiColorScheme === 'blue-light'
+                              ? 'bg-blue-100 border-blue-400 text-blue-800 shadow-sm shadow-blue-200'
+                              : 'bg-black/40 border-gray-700 text-gray-300 hover:border-blue-500/70'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold">Blue & White</span>
+                            {uiColorScheme === 'blue-light' && <Check className="w-4 h-4" />}
+                          </div>
+                          <p className="text-xs mt-2 opacity-80">Friendly light interface</p>
+                        </button>
+                      </div>
                     </div>
 
                     {/* Model Selector Section */}
