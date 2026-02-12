@@ -400,8 +400,10 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
   return (
     <button
       onClick={onClick}
+      type="button"
+      aria-pressed={isSelected}
       className={cn(
-        "tech-stack-card relative group p-4 rounded-xl transition-all duration-300 text-left overflow-hidden",
+        "tech-stack-card relative group min-h-[8.6rem] p-4 rounded-xl transition-all duration-300 text-left overflow-hidden",
         "border-2 backdrop-blur-sm",
         isSelected
           ? "is-selected border-red-500 bg-red-950/40 shadow-lg shadow-red-900/40 scale-[1.02]"
@@ -419,11 +421,14 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
         <>
           <div className="absolute inset-0 bg-gradient-to-br from-red-600/20 via-transparent to-orange-600/20 pointer-events-none" />
           <div className="absolute -inset-[1px] bg-gradient-to-r from-red-500 via-orange-500 to-red-500 rounded-xl opacity-40 blur-sm -z-10" />
+          <div className="tech-stack-selected-indicator absolute top-2 right-2 z-20 rounded-full border border-red-400/70 bg-red-950/60 p-1 text-red-100 shadow-lg shadow-red-900/40">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+          </div>
         </>
       )}
 
       {/* Content */}
-      <div className="relative z-10 flex items-center gap-3">
+      <div className="relative z-10 flex items-start gap-3">
         <div className={cn(
           "tech-stack-icon w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-300 flex-shrink-0",
           isSelected
@@ -432,15 +437,15 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
         )}>
           {stack.icon}
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 pt-0.5">
           <h4 className={cn(
-            "tech-stack-title font-bold text-sm transition-colors",
+            "tech-stack-title [overflow-wrap:anywhere] break-words font-bold text-[0.92rem] leading-tight transition-colors",
             isSelected ? "text-white" : "text-gray-200"
           )}>
             {stack.name}
           </h4>
           <p className={cn(
-            "tech-stack-description text-xs transition-colors",
+            "tech-stack-description mt-1 [overflow-wrap:anywhere] break-words text-xs leading-snug transition-colors",
             isSelected ? "text-red-300" : "text-gray-500"
           )}>{stack.description}</p>
         </div>
@@ -1959,7 +1964,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                     <Cpu className="w-6 h-6 text-red-400" />
                     Technology Stack
                   </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
                     {techStacks.map((stack) => (
                       <TechStackCard
                         key={stack.id}
