@@ -1477,11 +1477,30 @@ func (am *AgentManager) handleFileGeneration(build *Build, output *TaskOutput) {
 	}
 }
 
+// selectFixAgent chooses an agent for fix tasks based on preferred roles
+func (am *AgentManager) selectFixAgent(build *Build, preferred []AgentRole) *Agent {
+	if build == nil {
+		return nil
+	}
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+
+	for _, role := range preferred {
+		for _, agent := range build.Agents {
+			if agent.Role == role {
+				return agent
+			}
+		}
+	}
+	// Fallback to any available agent
+	for _, agent := range build.Agents {
+		return agent
+	}
+	return nil
+}
+
 // handleTestCompletion processes test results and creates fix tasks for failures
 func (am *AgentManager) handleTestCompletion(build *Build, output *TaskOutput) {
-	build.mu.Lock()
-	defer build.mu.Unlock()
-
 	// Parse test output for failures
 	hasFailures := false
 	if output != nil {
@@ -1506,7 +1525,6 @@ func (am *AgentManager) handleTestCompletion(build *Build, output *TaskOutput) {
 	if hasFailures {
 		log.Printf("Test failures detected in build %s, creating fix task", build.ID)
 
-		// Find a backend or frontend agent to assign the fix
 		fixTask := &Task{
 			ID:          uuid.New().String(),
 			Type:        TaskFix,
@@ -1518,10 +1536,16 @@ func (am *AgentManager) handleTestCompletion(build *Build, output *TaskOutput) {
 				"action":          "fix_tests",
 				"test_output":     output.Messages,
 				"app_description": build.Description,
+				"previous_errors": output.Messages,
+				"retry_strategy":  "fix_and_retry",
 			},
 			CreatedAt: time.Now(),
 		}
+
+		build.mu.Lock()
 		build.Tasks = append(build.Tasks, fixTask)
+		build.UpdatedAt = time.Now()
+		build.mu.Unlock()
 
 		am.broadcast(build.ID, &WSMessage{
 			Type:      WSBuildProgress,
@@ -1533,17 +1557,25 @@ func (am *AgentManager) handleTestCompletion(build *Build, output *TaskOutput) {
 				"fix_task": fixTask.ID,
 			},
 		})
+
+		agent := am.selectFixAgent(build, []AgentRole{RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
+		if agent != nil {
+			if err := am.AssignTask(agent.ID, fixTask); err != nil {
+				log.Printf("Failed to assign test fix task %s to agent %s: %v", fixTask.ID, agent.ID, err)
+			}
+		} else {
+			log.Printf("No available agent to handle test fix task %s", fixTask.ID)
+		}
 	}
 
+	build.mu.Lock()
 	build.Status = BuildReviewing
 	build.UpdatedAt = time.Now()
+	build.mu.Unlock()
 }
 
 // handleReviewCompletion processes code review results and creates fix tasks for critical issues
 func (am *AgentManager) handleReviewCompletion(build *Build, output *TaskOutput) {
-	build.mu.Lock()
-	defer build.mu.Unlock()
-
 	if output == nil {
 		return
 	}
@@ -1574,10 +1606,16 @@ func (am *AgentManager) handleReviewCompletion(build *Build, output *TaskOutput)
 				"action":          "fix_review_issues",
 				"review_findings": output.Messages,
 				"app_description": build.Description,
+				"previous_errors": output.Messages,
+				"retry_strategy":  "fix_and_retry",
 			},
 			CreatedAt: time.Now(),
 		}
+
+		build.mu.Lock()
 		build.Tasks = append(build.Tasks, fixTask)
+		build.UpdatedAt = time.Now()
+		build.mu.Unlock()
 
 		am.broadcast(build.ID, &WSMessage{
 			Type:      WSBuildProgress,
@@ -1589,9 +1627,20 @@ func (am *AgentManager) handleReviewCompletion(build *Build, output *TaskOutput)
 				"fix_task": fixTask.ID,
 			},
 		})
+
+		agent := am.selectFixAgent(build, []AgentRole{RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
+		if agent != nil {
+			if err := am.AssignTask(agent.ID, fixTask); err != nil {
+				log.Printf("Failed to assign review fix task %s to agent %s: %v", fixTask.ID, agent.ID, err)
+			}
+		} else {
+			log.Printf("No available agent to handle review fix task %s", fixTask.ID)
+		}
 	}
 
+	build.mu.Lock()
 	build.UpdatedAt = time.Now()
+	build.mu.Unlock()
 }
 
 // cancelPendingTasks marks all pending tasks as cancelled to stop further work
@@ -2715,6 +2764,8 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 				sanitized := sanitizeFilePath(filePath)
 				if sanitized == "" {
 					log.Printf("Skipping file with unsafe path: %s", filePath)
+					currentFile = nil
+					codeBuffer.Reset()
 					continue
 				}
 				currentFile = &GeneratedFile{
@@ -3274,15 +3325,18 @@ func (am *AgentManager) getCompletedTaskOutput(build *Build, taskType TaskType) 
 // sanitizeFilePath prevents directory traversal attacks in generated file paths
 func sanitizeFilePath(path string) string {
 	cleaned := strings.TrimSpace(path)
-	cleaned = filepath.Clean(cleaned)
-	// Remove leading slashes and dot-prefixed traversal
-	cleaned = strings.TrimLeft(cleaned, "/\\.")
-	// Reject if still contains path traversal
-	if strings.Contains(cleaned, "..") {
+	if cleaned == "" {
 		return ""
 	}
-	// Reject absolute paths
-	if filepath.IsAbs(cleaned) {
+	// Normalize separators to avoid backslash traversal on Windows-style paths
+	cleaned = strings.ReplaceAll(cleaned, "\\", "/")
+	// Reject absolute paths or drive letters
+	if strings.HasPrefix(cleaned, "/") || (len(cleaned) > 1 && cleaned[1] == ':') {
+		return ""
+	}
+	cleaned = filepath.Clean(cleaned)
+	// Reject traversal after cleaning
+	if cleaned == "." || strings.HasPrefix(cleaned, "..") {
 		return ""
 	}
 	return cleaned
