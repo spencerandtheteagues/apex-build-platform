@@ -1455,8 +1455,8 @@ func (am *AgentManager) handleTaskCompletion(buildID string, task *Task, output 
 	case TaskPlan:
 		// Planning completed - parse plan and spawn agents
 		am.handlePlanCompletion(build, output)
-	case TaskGenerateFile:
-		// File generated - broadcast and update progress
+	case TaskGenerateFile, TaskGenerateUI, TaskGenerateAPI, TaskGenerateSchema, TaskArchitecture:
+		// Code/architecture generated - broadcast files and update progress
 		am.handleFileGeneration(build, output)
 	case TaskTest:
 		// Tests completed - check results
@@ -2010,7 +2010,14 @@ func (am *AgentManager) collectGeneratedFiles(build *Build) []GeneratedFile {
 	return result
 }
 
-// queuePlanTasks creates and queues tasks based on the build plan
+// agentPriority pairs an agent with its execution priority
+type agentPriority struct {
+	agent    *Agent
+	priority int
+}
+
+// queuePlanTasks creates and queues tasks in phased order so upstream outputs
+// (architecture, schema) are available as context for downstream agents.
 func (am *AgentManager) queuePlanTasks(build *Build) {
 	log.Printf("queuePlanTasks called for build %s", build.ID)
 
@@ -2022,33 +2029,90 @@ func (am *AgentManager) queuePlanTasks(build *Build) {
 	description := build.Description
 	build.mu.RUnlock()
 
-	// Sort agents by priority to ensure proper ordering
-	type agentPriority struct {
-		agent    *Agent
-		priority int
-	}
-	sortedAgents := make([]agentPriority, 0)
+	// Collect non-lead agents
+	allAgents := make([]agentPriority, 0)
 	for _, agent := range agents {
 		if agent.Role == RoleLead {
-			continue // Lead already has a task
+			continue
 		}
-		sortedAgents = append(sortedAgents, agentPriority{
+		allAgents = append(allAgents, agentPriority{
 			agent:    agent,
 			priority: am.getPriorityForRole(agent.Role),
 		})
 	}
 
-	// Sort by priority (higher first)
-	for i := 0; i < len(sortedAgents)-1; i++ {
-		for j := i + 1; j < len(sortedAgents); j++ {
-			if sortedAgents[j].priority > sortedAgents[i].priority {
-				sortedAgents[i], sortedAgents[j] = sortedAgents[j], sortedAgents[i]
-			}
+	// Group agents by execution phase:
+	//   Phase 1: Architect (produces architecture plan for all downstream agents)
+	//   Phase 2: Database  (produces schema for backend)
+	//   Phase 3: Backend + Frontend (parallel, both get architecture context; backend also gets schema)
+	//   Phase 4: Testing   (needs all generated files)
+	var archAgents, dbAgents, codeAgents, testAgents []agentPriority
+	for _, ap := range allAgents {
+		switch ap.agent.Role {
+		case RoleArchitect:
+			archAgents = append(archAgents, ap)
+		case RoleDatabase:
+			dbAgents = append(dbAgents, ap)
+		case RoleTesting:
+			testAgents = append(testAgents, ap)
+		default:
+			codeAgents = append(codeAgents, ap)
 		}
 	}
 
-	// Create and assign tasks to agents
-	for _, ap := range sortedAgents {
+	// Execute phases in order in a goroutine (non-blocking)
+	go am.executePhasedTasks(build, description, archAgents, dbAgents, codeAgents, testAgents)
+
+	log.Printf("Started phased task execution for build %s (%d agents)", build.ID, len(allAgents))
+}
+
+// executePhasedTasks runs agent tasks in sequential phases, waiting for each
+// phase to complete before starting the next. This ensures context flows properly.
+func (am *AgentManager) executePhasedTasks(build *Build, description string,
+	archAgents, dbAgents, codeAgents, testAgents []agentPriority) {
+
+	phases := []struct {
+		name   string
+		agents []agentPriority
+	}{
+		{"Architecture", archAgents},
+		{"Database Schema", dbAgents},
+		{"Code Generation", codeAgents},
+		{"Testing", testAgents},
+	}
+
+	for _, phase := range phases {
+		if len(phase.agents) == 0 {
+			continue
+		}
+
+		log.Printf("Build %s: Starting phase — %s (%d agents)", build.ID, phase.name, len(phase.agents))
+
+		am.broadcast(build.ID, &WSMessage{
+			Type:      "build:phase",
+			BuildID:   build.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"phase":   phase.name,
+				"agents":  len(phase.agents),
+				"message": fmt.Sprintf("Starting %s phase", phase.name),
+			},
+		})
+
+		taskIDs := am.assignPhaseAgents(build, phase.agents, description)
+		if !am.waitForPhaseCompletion(build, taskIDs) {
+			log.Printf("Build %s: Phase %s aborted (build cancelled or timed out)", build.ID, phase.name)
+			return
+		}
+
+		log.Printf("Build %s: Phase %s complete", build.ID, phase.name)
+	}
+}
+
+// assignPhaseAgents creates tasks for a group of agents and assigns them.
+func (am *AgentManager) assignPhaseAgents(build *Build, agents []agentPriority, description string) []string {
+	taskIDs := make([]string, 0, len(agents))
+	for _, ap := range agents {
 		agent := ap.agent
 
 		task := &Task{
@@ -2089,9 +2153,58 @@ func (am *AgentManager) queuePlanTasks(build *Build) {
 		} else {
 			log.Printf("Assigned task %s (%s) to agent %s (%s)", task.ID, task.Type, agent.ID, agent.Role)
 		}
+		taskIDs = append(taskIDs, task.ID)
+	}
+	return taskIDs
+}
+
+// waitForPhaseCompletion polls task statuses until all tasks in the phase are
+// done (completed or failed). Returns false if the build is cancelled or times out.
+func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) bool {
+	if len(taskIDs) == 0 {
+		return true
 	}
 
-	log.Printf("Queued %d tasks for build %s", len(sortedAgents), build.ID)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	timeout := time.After(5 * time.Minute)
+
+	for {
+		select {
+		case <-am.ctx.Done():
+			return false
+		case <-timeout:
+			log.Printf("Build %s: Phase timed out waiting for tasks", build.ID)
+			return false
+		case <-ticker.C:
+			allDone := true
+
+			build.mu.RLock()
+			buildFailed := build.Status == BuildFailed
+			for _, id := range taskIDs {
+				for _, t := range build.Tasks {
+					if t.ID == id {
+						if t.Status != TaskCompleted && t.Status != TaskFailed {
+							allDone = false
+						}
+						break
+					}
+				}
+				if !allDone {
+					break
+				}
+			}
+			build.mu.RUnlock()
+
+			if buildFailed {
+				return false
+			}
+			if allDone {
+				return true
+			}
+		}
+	}
 }
 
 // GetBuild retrieves a build by ID
@@ -2186,6 +2299,16 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 
 	if err != nil {
 		log.Printf("Failed to process user message: %v", err)
+		am.broadcast(agent.BuildID, &WSMessage{
+			Type:      "message:error",
+			BuildID:   agent.BuildID,
+			AgentID:   agent.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"error":   err.Error(),
+				"message": "Failed to process your message. The AI provider may be temporarily unavailable.",
+			},
+		})
 		return
 	}
 

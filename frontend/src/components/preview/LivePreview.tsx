@@ -283,26 +283,38 @@ export default function LivePreview({
     return () => clearInterval(interval)
   }, [fetchStatus])
 
-  // Start preview (wrapped in useCallback for dependency safety)
+  // Start preview with retry logic for rate limiting (429)
   const startPreview = useCallback(async () => {
     setLoading(true)
     setError(null)
     clearDevTools() // Clear old console/network data
-    try {
-      const response = await apiService.client.post('/preview/start', {
-        project_id: projectId,
-        sandbox: useSandbox
-      })
-      setStatus(response.data.preview)
-      setPreviewUrl(response.data.preview?.url || response.data.url || '')
-      setConnected(true)
-      setActiveSandbox(response.data.sandbox ?? useSandbox)
-      setRefreshKey(prev => prev + 1)
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to start preview')
-    } finally {
-      setLoading(false)
+
+    const maxRetries = 3
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await apiService.client.post('/preview/start', {
+          project_id: projectId,
+          sandbox: useSandbox
+        })
+        setStatus(response.data.preview)
+        setPreviewUrl(response.data.preview?.url || response.data.url || '')
+        setConnected(true)
+        setActiveSandbox(response.data.sandbox ?? useSandbox)
+        setRefreshKey(prev => prev + 1)
+        setLoading(false)
+        return
+      } catch (err: any) {
+        const status = err.response?.status
+        if (status === 429 && attempt < maxRetries) {
+          // Rate limited — wait with exponential backoff before retry
+          await new Promise(r => setTimeout(r, (attempt + 1) * 2000))
+          continue
+        }
+        setError(err.response?.data?.error || 'Failed to start preview')
+        break
+      }
     }
+    setLoading(false)
   }, [projectId, clearDevTools, useSandbox])
 
   // Auto-start preview when autoStart prop is true

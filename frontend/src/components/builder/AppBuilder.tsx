@@ -1334,6 +1334,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         addAiThought(message.agent_id, data.agent_role, data.provider, data.model, 'output', data.content)
         break
 
+      case 'message:error':
+        addSystemMessage(`Message failed: ${data.message || data.error || 'AI provider unavailable'}`)
+        break
+
       case 'build:error':
         addSystemMessage(`Build Error: ${data.error || 'Unknown error'}${data.details ? ` - ${data.details}` : ''}`)
         if (data.recoverable) {
@@ -1341,6 +1345,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         }
         setIsBuilding(false)
         setBuildState(prev => prev ? { ...prev, status: 'failed' } : null)
+        break
+
+      case 'build:phase':
+        addSystemMessage(`Phase: ${data.phase || data.message || 'Next phase starting'}`)
         break
 
       case 'build:started':
