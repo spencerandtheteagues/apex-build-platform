@@ -254,6 +254,8 @@ func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
 
 	// Fill in missing providers from platform router
 	config := DefaultRouterConfig()
+	// Enforce strict BYOK: never mix platform providers when BYOK is active
+	config.EnableBYOKEmergencyFallback = false
 	allowEmergencyFallback := config.EnableBYOKEmergencyFallback
 
 	m.mu.RLock()
@@ -315,8 +317,17 @@ func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
 func (m *BYOKManager) RecordUsage(userID uint, projectID *uint, provider, model string, isBYOK bool,
 	inputTokens, outputTokens int, cost float64, capability string, duration time.Duration, status string) {
 
+	// BYOK routing fee (platform fee) in USD per 1M tokens
+	const byokRoutingFeePer1MTokens = 0.25
+
 	now := time.Now()
 	monthKey := now.Format("2006-01")
+
+	// For BYOK, override cost with routing fee only (no provider costs)
+	if isBYOK {
+		totalTokens := inputTokens + outputTokens
+		cost = (float64(totalTokens) / 1_000_000.0) * byokRoutingFeePer1MTokens
+	}
 
 	log := models.AIUsageLog{
 		CreatedAt:    now,
