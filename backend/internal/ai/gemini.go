@@ -22,14 +22,14 @@ type GeminiClient struct {
 
 // Gemini API request/response structures
 type geminiRequest struct {
-	Contents         []geminiContent    `json:"contents"`
-	SafetySettings   []geminySafety     `json:"safetySettings,omitempty"`
-	GenerationConfig *geminiGenConfig   `json:"generationConfig,omitempty"`
+	Contents         []geminiContent  `json:"contents"`
+	SafetySettings   []geminySafety   `json:"safetySettings,omitempty"`
+	GenerationConfig *geminiGenConfig `json:"generationConfig,omitempty"`
 }
 
 type geminiContent struct {
-	Role  string         `json:"role,omitempty"`
-	Parts []geminiPart   `json:"parts"`
+	Role  string       `json:"role,omitempty"`
+	Parts []geminiPart `json:"parts"`
 }
 
 type geminiPart struct {
@@ -56,9 +56,9 @@ type geminiResponse struct {
 			} `json:"parts"`
 			Role string `json:"role"`
 		} `json:"content"`
-		FinishReason   string `json:"finishReason"`
-		Index          int    `json:"index"`
-		SafetyRatings  []struct {
+		FinishReason  string `json:"finishReason"`
+		Index         int    `json:"index"`
+		SafetyRatings []struct {
 			Category    string `json:"category"`
 			Probability string `json:"probability"`
 		} `json:"safetyRatings"`
@@ -117,8 +117,8 @@ func (g *GeminiClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		GenerationConfig: &geminiGenConfig{
 			Temperature:     req.Temperature,
 			MaxOutputTokens: g.getMaxTokens(req),
-			TopP:           0.8,
-			TopK:           40,
+			TopP:            0.8,
+			TopK:            40,
 		},
 	}
 
@@ -158,6 +158,9 @@ func (g *GeminiClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		ID:       req.ID,
 		Provider: ProviderGemini,
 		Content:  content,
+		Metadata: map[string]interface{}{
+			"model": model,
+		},
 		Usage: &Usage{
 			PromptTokens:     resp.UsageMetadata.PromptTokenCount,
 			CompletionTokens: resp.UsageMetadata.CandidatesTokenCount,

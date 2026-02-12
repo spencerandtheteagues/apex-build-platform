@@ -14,27 +14,27 @@ import (
 type AgentRole string
 
 const (
-	RolePlanner    AgentRole = "planner"    // Analyzes requirements, creates build plans
-	RoleArchitect  AgentRole = "architect"  // Designs system architecture
-	RoleFrontend   AgentRole = "frontend"   // Builds UI components
-	RoleBackend    AgentRole = "backend"    // Creates API and business logic
-	RoleDatabase   AgentRole = "database"   // Designs schemas and queries
-	RoleTesting    AgentRole = "testing"    // Writes and runs tests
-	RoleDevOps     AgentRole = "devops"     // Handles deployment configuration
-	RoleReviewer   AgentRole = "reviewer"   // Code review and quality assurance
-	RoleLead       AgentRole = "lead"       // Coordinates all agents (main contact point)
+	RolePlanner   AgentRole = "planner"   // Analyzes requirements, creates build plans
+	RoleArchitect AgentRole = "architect" // Designs system architecture
+	RoleFrontend  AgentRole = "frontend"  // Builds UI components
+	RoleBackend   AgentRole = "backend"   // Creates API and business logic
+	RoleDatabase  AgentRole = "database"  // Designs schemas and queries
+	RoleTesting   AgentRole = "testing"   // Writes and runs tests
+	RoleDevOps    AgentRole = "devops"    // Handles deployment configuration
+	RoleReviewer  AgentRole = "reviewer"  // Code review and quality assurance
+	RoleLead      AgentRole = "lead"      // Coordinates all agents (main contact point)
 )
 
 // AgentStatus represents the current state of an agent
 type AgentStatus string
 
 const (
-	StatusIdle       AgentStatus = "idle"        // Agent is available for work
-	StatusWorking    AgentStatus = "working"     // Agent is actively working on a task
-	StatusWaiting    AgentStatus = "waiting"     // Agent is waiting for dependencies
-	StatusCompleted  AgentStatus = "completed"   // Agent finished its task successfully
-	StatusError      AgentStatus = "error"       // Agent encountered an error
-	StatusTerminated AgentStatus = "terminated"  // Agent was stopped
+	StatusIdle       AgentStatus = "idle"       // Agent is available for work
+	StatusWorking    AgentStatus = "working"    // Agent is actively working on a task
+	StatusWaiting    AgentStatus = "waiting"    // Agent is waiting for dependencies
+	StatusCompleted  AgentStatus = "completed"  // Agent finished its task successfully
+	StatusError      AgentStatus = "error"      // Agent encountered an error
+	StatusTerminated AgentStatus = "terminated" // Agent was stopped
 )
 
 // Note: AIProvider type is now imported from the ai package
@@ -44,39 +44,40 @@ type Agent struct {
 	ID          string        `json:"id"`
 	Role        AgentRole     `json:"role"`
 	Provider    ai.AIProvider `json:"provider"`
+	Model       string        `json:"model,omitempty"`
 	Status      AgentStatus   `json:"status"`
-	BuildID     string      `json:"build_id"`
-	CurrentTask *Task       `json:"current_task,omitempty"`
-	Progress    int         `json:"progress"` // 0-100
-	CreatedAt   time.Time   `json:"created_at"`
-	UpdatedAt   time.Time   `json:"updated_at"`
-	Output      []string    `json:"output,omitempty"` // Agent's messages/output
-	Error       string      `json:"error,omitempty"`
+	BuildID     string        `json:"build_id"`
+	CurrentTask *Task         `json:"current_task,omitempty"`
+	Progress    int           `json:"progress"` // 0-100
+	CreatedAt   time.Time     `json:"created_at"`
+	UpdatedAt   time.Time     `json:"updated_at"`
+	Output      []string      `json:"output,omitempty"` // Agent's messages/output
+	Error       string        `json:"error,omitempty"`
 
 	mu sync.RWMutex
 }
 
 // Task represents a unit of work assigned to an agent
 type Task struct {
-	ID           string            `json:"id"`
-	Type         TaskType          `json:"type"`
-	Description  string            `json:"description"`
-	Priority     int               `json:"priority"` // Higher = more important
-	Dependencies []string          `json:"dependencies,omitempty"` // Task IDs that must complete first
-	AssignedTo   string            `json:"assigned_to,omitempty"` // Agent ID
-	Status       TaskStatus        `json:"status"`
-	Input        map[string]any    `json:"input,omitempty"`
-	Output       *TaskOutput       `json:"output,omitempty"`
-	CreatedAt    time.Time         `json:"created_at"`
-	StartedAt    *time.Time        `json:"started_at,omitempty"`
-	CompletedAt  *time.Time        `json:"completed_at,omitempty"`
-	Error        string            `json:"error,omitempty"`
+	ID           string         `json:"id"`
+	Type         TaskType       `json:"type"`
+	Description  string         `json:"description"`
+	Priority     int            `json:"priority"`               // Higher = more important
+	Dependencies []string       `json:"dependencies,omitempty"` // Task IDs that must complete first
+	AssignedTo   string         `json:"assigned_to,omitempty"`  // Agent ID
+	Status       TaskStatus     `json:"status"`
+	Input        map[string]any `json:"input,omitempty"`
+	Output       *TaskOutput    `json:"output,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
+	StartedAt    *time.Time     `json:"started_at,omitempty"`
+	CompletedAt  *time.Time     `json:"completed_at,omitempty"`
+	Error        string         `json:"error,omitempty"`
 
 	// Retry mechanism - persist until success
-	RetryCount    int            `json:"retry_count"`     // Number of attempts made
-	MaxRetries    int            `json:"max_retries"`     // Maximum retry attempts (default: 5)
+	RetryCount    int            `json:"retry_count"`             // Number of attempts made
+	MaxRetries    int            `json:"max_retries"`             // Maximum retry attempts (default: 5)
 	ErrorHistory  []ErrorAttempt `json:"error_history,omitempty"` // History of errors for learning
-	RetryStrategy RetryStrategy  `json:"retry_strategy"`  // How to retry on failure
+	RetryStrategy RetryStrategy  `json:"retry_strategy"`          // How to retry on failure
 }
 
 // ErrorAttempt tracks a failed attempt for learning
@@ -84,7 +85,7 @@ type ErrorAttempt struct {
 	AttemptNumber int       `json:"attempt_number"`
 	Error         string    `json:"error"`
 	Timestamp     time.Time `json:"timestamp"`
-	Context       string    `json:"context,omitempty"` // What was tried
+	Context       string    `json:"context,omitempty"`  // What was tried
 	Analysis      string    `json:"analysis,omitempty"` // AI analysis of what went wrong
 }
 
@@ -92,10 +93,10 @@ type ErrorAttempt struct {
 type RetryStrategy string
 
 const (
-	RetryImmediate  RetryStrategy = "immediate"   // Retry immediately with same approach
-	RetryWithFix    RetryStrategy = "with_fix"    // Analyze error and adjust approach
-	RetryDifferent  RetryStrategy = "different"   // Try a completely different approach
-	RetryEscalate   RetryStrategy = "escalate"    // Ask for human help
+	RetryImmediate RetryStrategy = "immediate" // Retry immediately with same approach
+	RetryWithFix   RetryStrategy = "with_fix"  // Analyze error and adjust approach
+	RetryDifferent RetryStrategy = "different" // Try a completely different approach
+	RetryEscalate  RetryStrategy = "escalate"  // Ask for human help
 )
 
 // TaskType categorizes the kind of work a task involves
@@ -127,10 +128,10 @@ const (
 
 // TaskOutput contains the results of a completed task
 type TaskOutput struct {
-	Files       []GeneratedFile  `json:"files,omitempty"`
-	Messages    []string         `json:"messages,omitempty"`
-	Suggestions []string         `json:"suggestions,omitempty"`
-	Metrics     map[string]any   `json:"metrics,omitempty"`
+	Files       []GeneratedFile `json:"files,omitempty"`
+	Messages    []string        `json:"messages,omitempty"`
+	Suggestions []string        `json:"suggestions,omitempty"`
+	Metrics     map[string]any  `json:"metrics,omitempty"`
 }
 
 // GeneratedFile represents a file created by an agent
@@ -158,15 +159,15 @@ type Build struct {
 	Checkpoints []*Checkpoint     `json:"checkpoints"`
 	Progress    int               `json:"progress"` // 0-100
 	// Guardrails
-	MaxAgents          int `json:"max_agents,omitempty"`
-	MaxRetries         int `json:"max_retries,omitempty"`
-	MaxRequests        int `json:"max_requests,omitempty"`
-	MaxTokensPerRequest int `json:"max_tokens_per_request,omitempty"`
-	RequestsUsed       int `json:"requests_used,omitempty"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
-	CompletedAt *time.Time        `json:"completed_at,omitempty"`
-	Error       string            `json:"error,omitempty"`
+	MaxAgents           int        `json:"max_agents,omitempty"`
+	MaxRetries          int        `json:"max_retries,omitempty"`
+	MaxRequests         int        `json:"max_requests,omitempty"`
+	MaxTokensPerRequest int        `json:"max_tokens_per_request,omitempty"`
+	RequestsUsed        int        `json:"requests_used,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+	CompletedAt         *time.Time `json:"completed_at,omitempty"`
+	Error               string     `json:"error,omitempty"`
 
 	mu sync.RWMutex
 }
@@ -206,44 +207,44 @@ const (
 func (pm PowerMode) CreditMultiplier() float64 {
 	switch pm {
 	case PowerMax:
-		return 10.0 // 10x credits — premium models
+		return 2.0 // 2.0x credits — premium models
 	case PowerBalanced:
-		return 5.0 // 5x credits — mid-tier models
+		return 1.8 // 1.8x credits — mid-tier models
 	default:
-		return 1.0 // 1x credits — budget models
+		return 1.6 // 1.6x credits — budget models
 	}
 }
 
 // BuildPlan contains the structured plan for building an app
 type BuildPlan struct {
-	ID           string           `json:"id"`
-	BuildID      string           `json:"build_id"`
-	AppType      string           `json:"app_type"` // web, api, fullstack, etc.
-	TechStack    TechStack        `json:"tech_stack"`
-	Features     []Feature        `json:"features"`
-	DataModels   []DataModel      `json:"data_models"`
-	APIEndpoints []APIEndpoint    `json:"api_endpoints"`
-	Components   []UIComponent    `json:"components"`
-	Files        []PlannedFile    `json:"files"`
-	EstimatedTime time.Duration   `json:"estimated_time"`
-	CreatedAt    time.Time        `json:"created_at"`
+	ID            string        `json:"id"`
+	BuildID       string        `json:"build_id"`
+	AppType       string        `json:"app_type"` // web, api, fullstack, etc.
+	TechStack     TechStack     `json:"tech_stack"`
+	Features      []Feature     `json:"features"`
+	DataModels    []DataModel   `json:"data_models"`
+	APIEndpoints  []APIEndpoint `json:"api_endpoints"`
+	Components    []UIComponent `json:"components"`
+	Files         []PlannedFile `json:"files"`
+	EstimatedTime time.Duration `json:"estimated_time"`
+	CreatedAt     time.Time     `json:"created_at"`
 }
 
 // TechStack defines the technologies to use
 type TechStack struct {
-	Frontend  string   `json:"frontend"`  // React, Vue, Next.js, etc.
-	Backend   string   `json:"backend"`   // Node.js, Go, Python, etc.
-	Database  string   `json:"database"`  // PostgreSQL, MongoDB, etc.
-	Styling   string   `json:"styling"`   // Tailwind, CSS Modules, etc.
-	Extras    []string `json:"extras"`    // Additional libraries
+	Frontend string   `json:"frontend"` // React, Vue, Next.js, etc.
+	Backend  string   `json:"backend"`  // Node.js, Go, Python, etc.
+	Database string   `json:"database"` // PostgreSQL, MongoDB, etc.
+	Styling  string   `json:"styling"`  // Tailwind, CSS Modules, etc.
+	Extras   []string `json:"extras"`   // Additional libraries
 }
 
 // Feature represents a feature to implement
 type Feature struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Priority    int      `json:"priority"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Priority     int      `json:"priority"`
 	Dependencies []string `json:"dependencies,omitempty"`
 }
 
@@ -293,22 +294,22 @@ type UIComponent struct {
 
 // PlannedFile represents a file to be generated
 type PlannedFile struct {
-	Path        string   `json:"path"`
-	Type        string   `json:"type"` // frontend, backend, config, etc.
-	Description string   `json:"description"`
+	Path         string   `json:"path"`
+	Type         string   `json:"type"` // frontend, backend, config, etc.
+	Description  string   `json:"description"`
 	Dependencies []string `json:"dependencies,omitempty"`
 }
 
 // Checkpoint represents a saved state during the build
 type Checkpoint struct {
-	ID          string           `json:"id"`
-	BuildID     string           `json:"build_id"`
-	Number      int              `json:"number"`
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	Files       []GeneratedFile  `json:"files"`
-	Progress    int              `json:"progress"`
-	CreatedAt   time.Time        `json:"created_at"`
+	ID          string          `json:"id"`
+	BuildID     string          `json:"build_id"`
+	Number      int             `json:"number"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Files       []GeneratedFile `json:"files"`
+	Progress    int             `json:"progress"`
+	CreatedAt   time.Time       `json:"created_at"`
 }
 
 // Message types for WebSocket communication
@@ -355,9 +356,9 @@ type BuildRequest struct {
 
 // BuildResponse is returned when a build is created
 type BuildResponse struct {
-	BuildID     string `json:"build_id"`
+	BuildID      string `json:"build_id"`
 	WebSocketURL string `json:"websocket_url"`
-	Status      string `json:"status"`
+	Status       string `json:"status"`
 }
 
 // ChatMessage represents a message in the build chat

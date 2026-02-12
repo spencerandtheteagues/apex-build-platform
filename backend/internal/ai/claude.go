@@ -23,10 +23,10 @@ type ClaudeClient struct {
 // Claude API request/response structures
 type claudeRequest struct {
 	Model       string          `json:"model"`
-	MaxTokens   int            `json:"max_tokens"`
+	MaxTokens   int             `json:"max_tokens"`
 	Messages    []claudeMessage `json:"messages"`
-	Temperature float32        `json:"temperature,omitempty"`
-	System      string         `json:"system,omitempty"`
+	Temperature float32         `json:"temperature,omitempty"`
+	System      string          `json:"system,omitempty"`
 }
 
 type claudeMessage struct {
@@ -59,8 +59,8 @@ func NewClaudeClient(apiKey string) *ClaudeClient {
 			Timeout: 120 * time.Second,
 		},
 		usage: &ProviderUsage{
-			Provider:  ProviderClaude,
-			LastUsed:  time.Now(),
+			Provider: ProviderClaude,
+			LastUsed: time.Now(),
 		},
 	}
 }
@@ -124,6 +124,9 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		ID:       req.ID,
 		Provider: ProviderClaude,
 		Content:  content,
+		Metadata: map[string]interface{}{
+			"model": model,
+		},
 		Usage: &Usage{
 			PromptTokens:     resp.Usage.InputTokens,
 			CompletionTokens: resp.Usage.OutputTokens,
@@ -301,8 +304,8 @@ func (c *ClaudeClient) getMaxTokens(req *AIRequest) int {
 // calculateCost estimates cost based on Claude pricing
 func (c *ClaudeClient) calculateCost(inputTokens, outputTokens int) float64 {
 	// Claude 3.5 Sonnet pricing (as of 2024)
-	inputCostPer1K := 0.003   // $0.003 per 1K input tokens
-	outputCostPer1K := 0.015  // $0.015 per 1K output tokens
+	inputCostPer1K := 0.003  // $0.003 per 1K input tokens
+	outputCostPer1K := 0.015 // $0.015 per 1K output tokens
 
 	inputCost := float64(inputTokens) / 1000.0 * inputCostPer1K
 	outputCost := float64(outputTokens) / 1000.0 * outputCostPer1K

@@ -11,6 +11,7 @@ import (
 	"apex-build/internal/ai"
 	"apex-build/internal/auth"
 	"apex-build/internal/db"
+	"apex-build/internal/pricing"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -235,6 +236,7 @@ func (s *Server) AIGenerate(c *gin.Context) {
 		ProjectID   string                 `json:"project_id,omitempty"`
 		Provider    string                 `json:"provider,omitempty"`
 		Model       string                 `json:"model,omitempty"`
+		PowerMode   string                 `json:"power_mode,omitempty"` // fast, balanced, max
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -278,9 +280,54 @@ func (s *Server) AIGenerate(c *gin.Context) {
 		}
 	}
 
+	// Estimate and reserve credits before making the AI call
+	var reservation *ai.CreditReservation
+	if s.byok != nil {
+		estimateProvider := provider
+		if estimateProvider == "" {
+			estimateProvider = string(s.aiRouter.GetDefaultProvider(aiReq.Capability))
+		}
+		powerMode := request.PowerMode
+		if powerMode == "" {
+			powerMode = pricing.ModeFast
+		}
+		maxTokens := request.MaxTokens
+		if maxTokens <= 0 {
+			maxTokens = 2000
+		}
+		estimatedCost := s.byok.EstimateCost(
+			estimateProvider,
+			request.Model,
+			len(request.Prompt)+len(request.Code),
+			maxTokens,
+			powerMode,
+			isBYOK,
+		)
+		if estimatedCost > 0 {
+			res, err := s.byok.ReserveCredits(userID.(uint), estimatedCost)
+			if err != nil {
+				if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
+					c.JSON(http.StatusPaymentRequired, gin.H{
+						"error":      "Insufficient credits for this request",
+						"code":       "INSUFFICIENT_CREDITS",
+						"required":   estimatedCost,
+						"power_mode": powerMode,
+					})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reserve credits"})
+				return
+			}
+			reservation = res
+		}
+	}
+
 	// Generate AI response
 	response, err := targetRouter.Generate(c.Request.Context(), aiReq)
 	if err != nil {
+		if s.byok != nil && reservation != nil {
+			_ = s.byok.FinalizeCredits(reservation, 0)
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -316,9 +363,7 @@ func (s *Server) AIGenerate(c *gin.Context) {
 		dbRequest.ErrorMsg = response.Error
 	}
 
-	s.db.DB.Create(dbRequest)
-
-	// Record BYOK usage if applicable
+	// Record BYOK usage and finalize credits if applicable
 	if s.byok != nil {
 		if uid, ok := userID.(uint); ok && uid > 0 && response != nil {
 			var projectID *uint
@@ -334,13 +379,27 @@ func (s *Server) AIGenerate(c *gin.Context) {
 			if response.Usage != nil {
 				inputTokens = response.Usage.PromptTokens
 				outputTokens = response.Usage.CompletionTokens
-				cost = response.Usage.Cost
 			}
 			modelUsed := ai.GetModelUsed(response, aiReq)
+			powerMode := request.PowerMode
+			if powerMode == "" {
+				powerMode = pricing.ModeFast
+			}
+			cost = s.byok.BilledCost(string(response.Provider), modelUsed, inputTokens, outputTokens, powerMode, isBYOK)
+			if response.Usage != nil {
+				response.Usage.Cost = cost
+			}
+			dbRequest.Cost = cost
 			s.byok.RecordUsage(uid, projectID, string(response.Provider), modelUsed, isBYOK,
 				inputTokens, outputTokens, cost, string(aiReq.Capability), response.Duration, "success")
+			if reservation != nil {
+				_ = s.byok.FinalizeCredits(reservation, cost)
+			}
 		}
 	}
+
+	// Persist request after cost adjustments
+	s.db.DB.Create(dbRequest)
 
 	c.JSON(http.StatusOK, gin.H{
 		"request_id": response.ID,
@@ -387,10 +446,10 @@ func (s *Server) GetAIUsage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"total_requests": totalRequests,
-		"total_cost":     totalCost,
-		"total_tokens":   totalTokens,
-		"by_provider":    providerStats,
+		"total_requests":  totalRequests,
+		"total_cost":      totalCost,
+		"total_tokens":    totalTokens,
+		"by_provider":     providerStats,
 		"recent_requests": requests,
 	})
 }

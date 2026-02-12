@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"apex-build/internal/ai"
+	"apex-build/internal/pricing"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -20,40 +21,40 @@ import (
 
 // CompletionRequest represents a request for code completion
 type CompletionRequest struct {
-	ProjectID    uint              `json:"project_id"`
-	FileID       uint              `json:"file_id"`
-	FilePath     string            `json:"file_path"`
-	Language     string            `json:"language"`
-	Prefix       string            `json:"prefix"`       // Code before cursor
-	Suffix       string            `json:"suffix"`       // Code after cursor
-	Line         int               `json:"line"`
-	Column       int               `json:"column"`
-	TriggerKind  TriggerKind       `json:"trigger_kind"`
-	Context      CompletionContext `json:"context,omitempty"`
-	MaxTokens    int               `json:"max_tokens,omitempty"`
-	Temperature  float64           `json:"temperature,omitempty"`
-	StopTokens   []string          `json:"stop_tokens,omitempty"`
+	ProjectID   uint              `json:"project_id"`
+	FileID      uint              `json:"file_id"`
+	FilePath    string            `json:"file_path"`
+	Language    string            `json:"language"`
+	Prefix      string            `json:"prefix"` // Code before cursor
+	Suffix      string            `json:"suffix"` // Code after cursor
+	Line        int               `json:"line"`
+	Column      int               `json:"column"`
+	TriggerKind TriggerKind       `json:"trigger_kind"`
+	Context     CompletionContext `json:"context,omitempty"`
+	MaxTokens   int               `json:"max_tokens,omitempty"`
+	Temperature float64           `json:"temperature,omitempty"`
+	StopTokens  []string          `json:"stop_tokens,omitempty"`
 }
 
 // TriggerKind indicates what triggered the completion
 type TriggerKind string
 
 const (
-	TriggerInvoked        TriggerKind = "invoked"         // User explicitly requested
-	TriggerCharacter      TriggerKind = "trigger_char"    // Triggered by character
-	TriggerAutomatic      TriggerKind = "automatic"       // Automatic idle trigger
-	TriggerIncomplete     TriggerKind = "incomplete"      // Re-trigger for incomplete
+	TriggerInvoked    TriggerKind = "invoked"      // User explicitly requested
+	TriggerCharacter  TriggerKind = "trigger_char" // Triggered by character
+	TriggerAutomatic  TriggerKind = "automatic"    // Automatic idle trigger
+	TriggerIncomplete TriggerKind = "incomplete"   // Re-trigger for incomplete
 )
 
 // CompletionContext provides additional context for completions
 type CompletionContext struct {
-	FileImports     []string          `json:"file_imports,omitempty"`
-	FileSymbols     []string          `json:"file_symbols,omitempty"`
-	ProjectSymbols  []string          `json:"project_symbols,omitempty"`
-	RecentEdits     []RecentEdit      `json:"recent_edits,omitempty"`
-	RelatedFiles    []RelatedFile     `json:"related_files,omitempty"`
-	Framework       string            `json:"framework,omitempty"`
-	Dependencies    map[string]string `json:"dependencies,omitempty"`
+	FileImports    []string          `json:"file_imports,omitempty"`
+	FileSymbols    []string          `json:"file_symbols,omitempty"`
+	ProjectSymbols []string          `json:"project_symbols,omitempty"`
+	RecentEdits    []RecentEdit      `json:"recent_edits,omitempty"`
+	RelatedFiles   []RelatedFile     `json:"related_files,omitempty"`
+	Framework      string            `json:"framework,omitempty"`
+	Dependencies   map[string]string `json:"dependencies,omitempty"`
 }
 
 // RecentEdit represents a recent edit in the file
@@ -73,28 +74,28 @@ type RelatedFile struct {
 
 // CompletionResponse contains the completion result
 type CompletionResponse struct {
-	ID             string             `json:"id"`
-	Completions    []CompletionItem   `json:"completions"`
-	Provider       string             `json:"provider"`
-	Model          string             `json:"model"`
-	ProcessingTime int64              `json:"processing_time_ms"`
-	CachedHit      bool               `json:"cached_hit"`
-	Usage          *CompletionUsage   `json:"usage,omitempty"`
+	ID             string           `json:"id"`
+	Completions    []CompletionItem `json:"completions"`
+	Provider       string           `json:"provider"`
+	Model          string           `json:"model"`
+	ProcessingTime int64            `json:"processing_time_ms"`
+	CachedHit      bool             `json:"cached_hit"`
+	Usage          *CompletionUsage `json:"usage,omitempty"`
 }
 
 // CompletionItem represents a single completion suggestion
 type CompletionItem struct {
-	ID             string            `json:"id"`
-	Text           string            `json:"text"`            // The completion text
-	DisplayText    string            `json:"display_text"`    // Text to display in UI
-	InsertText     string            `json:"insert_text"`     // Text to insert (may differ)
-	Kind           CompletionKind    `json:"kind"`
-	Detail         string            `json:"detail,omitempty"`
-	Documentation  string            `json:"documentation,omitempty"`
-	SortText       string            `json:"sort_text,omitempty"`
-	FilterText     string            `json:"filter_text,omitempty"`
-	Confidence     float64           `json:"confidence"`      // 0-1 confidence score
-	Range          *CompletionRange  `json:"range,omitempty"`
+	ID              string           `json:"id"`
+	Text            string           `json:"text"`         // The completion text
+	DisplayText     string           `json:"display_text"` // Text to display in UI
+	InsertText      string           `json:"insert_text"`  // Text to insert (may differ)
+	Kind            CompletionKind   `json:"kind"`
+	Detail          string           `json:"detail,omitempty"`
+	Documentation   string           `json:"documentation,omitempty"`
+	SortText        string           `json:"sort_text,omitempty"`
+	FilterText      string           `json:"filter_text,omitempty"`
+	Confidence      float64          `json:"confidence"` // 0-1 confidence score
+	Range           *CompletionRange `json:"range,omitempty"`
 	AdditionalEdits []TextEdit       `json:"additional_edits,omitempty"`
 }
 
@@ -149,12 +150,12 @@ type CompletionUsage struct {
 
 // CompletionCache stores cached completions
 type CompletionCache struct {
-	Hash       string    `gorm:"primarykey;type:varchar(64)"`
-	Response   string    `gorm:"type:text"`
-	Provider   string    `gorm:"type:varchar(50)"`
-	HitCount   int       `gorm:"default:0"`
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
+	Hash      string `gorm:"primarykey;type:varchar(64)"`
+	Response  string `gorm:"type:text"`
+	Provider  string `gorm:"type:varchar(50)"`
+	HitCount  int    `gorm:"default:0"`
+	CreatedAt time.Time
+	ExpiresAt time.Time
 }
 
 // CompletionService handles AI code completions
@@ -167,17 +168,17 @@ type CompletionService struct {
 	cacheTTL     time.Duration
 
 	// Rate limiting
-	rateLimiter  *CompletionRateLimiter
+	rateLimiter *CompletionRateLimiter
 
 	// Metrics
-	metrics      *CompletionMetrics
+	metrics *CompletionMetrics
 }
 
 // CompletionRateLimiter manages completion rate limits
 type CompletionRateLimiter struct {
 	mu       sync.RWMutex
 	userReqs map[uint]*userRateLimit
-	limit    int           // requests per window
+	limit    int // requests per window
 	window   time.Duration
 }
 
@@ -283,8 +284,36 @@ func (s *CompletionService) GetCompletions(ctx context.Context, userID uint, req
 		}
 	}
 
+	// Reserve credits before making the AI call
+	var reservation *ai.CreditReservation
+	if s.byokManager != nil && userID > 0 {
+		powerMode := pricing.ModeFast
+		estimateProvider := string(targetRouter.GetDefaultProvider(aiReq.Capability))
+		estimatedCost := s.byokManager.EstimateCost(
+			estimateProvider,
+			aiReq.Model,
+			len(prompt)+len(req.Prefix)+len(req.Suffix),
+			maxTokens,
+			powerMode,
+			isBYOK,
+		)
+		if estimatedCost > 0 {
+			res, err := s.byokManager.ReserveCredits(userID, estimatedCost)
+			if err != nil {
+				if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
+					return nil, fmt.Errorf("INSUFFICIENT_CREDITS")
+				}
+				return nil, fmt.Errorf("failed to reserve credits")
+			}
+			reservation = res
+		}
+	}
+
 	aiResp, err := targetRouter.Generate(ctx, aiReq)
 	if err != nil {
+		if s.byokManager != nil && reservation != nil {
+			_ = s.byokManager.FinalizeCredits(reservation, 0)
+		}
 		return nil, fmt.Errorf("AI completion failed: %w", err)
 	}
 
@@ -294,12 +323,23 @@ func (s *CompletionService) GetCompletions(ctx context.Context, userID uint, req
 	// Extract usage info
 	var usage *CompletionUsage
 	if aiResp.Usage != nil {
+		powerMode := pricing.ModeFast
+		modelUsed := ai.GetModelUsed(aiResp, aiReq)
+		billedCost := aiResp.Usage.Cost
+		if s.byokManager != nil {
+			billedCost = s.byokManager.BilledCost(string(aiResp.Provider), modelUsed, aiResp.Usage.PromptTokens, aiResp.Usage.CompletionTokens, powerMode, isBYOK)
+		}
 		usage = &CompletionUsage{
 			PromptTokens:     aiResp.Usage.PromptTokens,
 			CompletionTokens: aiResp.Usage.CompletionTokens,
 			TotalTokens:      aiResp.Usage.TotalTokens,
-			EstimatedCost:    aiResp.Usage.Cost,
+			EstimatedCost:    billedCost,
 		}
+		if reservation != nil {
+			_ = s.byokManager.FinalizeCredits(reservation, billedCost)
+		}
+	} else if reservation != nil && s.byokManager != nil {
+		_ = s.byokManager.FinalizeCredits(reservation, 0)
 	}
 
 	response := &CompletionResponse{
@@ -332,7 +372,8 @@ func (s *CompletionService) GetCompletions(ctx context.Context, userID uint, req
 		if aiResp.Usage != nil {
 			inputTokens = aiResp.Usage.PromptTokens
 			outputTokens = aiResp.Usage.CompletionTokens
-			cost = aiResp.Usage.Cost
+			modelUsed := ai.GetModelUsed(aiResp, aiReq)
+			cost = s.byokManager.BilledCost(string(aiResp.Provider), modelUsed, inputTokens, outputTokens, pricing.ModeFast, isBYOK)
 		}
 		modelUsed := ai.GetModelUsed(aiResp, aiReq)
 		s.byokManager.RecordUsage(userID, projectID, string(aiResp.Provider), modelUsed, isBYOK,
@@ -604,10 +645,10 @@ func (m *CompletionMetrics) GetStats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"total_requests":     m.totalRequests,
-		"avg_latency_ms":     avgLatency,
-		"cache_hit_rate":     cacheHitRate,
-		"provider_requests":  m.providerRequests,
+		"total_requests":    m.totalRequests,
+		"avg_latency_ms":    avgLatency,
+		"cache_hit_rate":    cacheHitRate,
+		"provider_requests": m.providerRequests,
 	}
 }
 

@@ -18,8 +18,8 @@ import (
 
 // WebSocketClaims represents JWT claims for WebSocket authentication
 type WebSocketClaims struct {
-	UserID  uint   `json:"user_id"`
-	IsAdmin bool   `json:"is_admin"`
+	UserID  uint `json:"user_id"`
+	IsAdmin bool `json:"is_admin"`
 	jwt.RegisteredClaims
 }
 
@@ -401,6 +401,7 @@ func (c *WSConnection) sendBuildState() {
 			"id":         agent.ID,
 			"role":       string(agent.Role),
 			"provider":   string(agent.Provider),
+			"model":      agent.Model,
 			"status":     string(agent.Status),
 			"progress":   agent.Progress,
 			"created_at": agent.CreatedAt,
@@ -459,21 +460,22 @@ func (c *WSConnection) sendBuildState() {
 		BuildID:   build.ID,
 		Timestamp: time.Now(),
 		Data: map[string]any{
-			"status":        string(build.Status),
-			"mode":          string(build.Mode),
-			"description":   build.Description,
-			"progress":      build.Progress,
-			"agents":        agentsList,
-			"agents_count":  len(agentsList),
-			"tasks":         tasksList,
-			"tasks_count":   len(tasksList),
-			"files":         allFiles,
-			"files_count":   len(allFiles),
-			"checkpoints":   build.Checkpoints,
-			"created_at":    build.CreatedAt,
-			"updated_at":    build.UpdatedAt,
-			"completed_at":  build.CompletedAt,
-			"error":         build.Error,
+			"status":       string(build.Status),
+			"mode":         string(build.Mode),
+			"power_mode":   string(build.PowerMode),
+			"description":  build.Description,
+			"progress":     build.Progress,
+			"agents":       agentsList,
+			"agents_count": len(agentsList),
+			"tasks":        tasksList,
+			"tasks_count":  len(tasksList),
+			"files":        allFiles,
+			"files_count":  len(allFiles),
+			"checkpoints":  build.Checkpoints,
+			"created_at":   build.CreatedAt,
+			"updated_at":   build.UpdatedAt,
+			"completed_at": build.CompletedAt,
+			"error":        build.Error,
 		},
 	}
 

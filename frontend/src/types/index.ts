@@ -11,6 +11,9 @@ export interface User {
   is_verified: boolean
   is_admin?: boolean
   is_super_admin?: boolean
+  has_unlimited_credits?: boolean
+  bypass_billing?: boolean
+  credit_balance?: number
   subscription_type: 'free' | 'pro' | 'team'
   subscription_end?: string
   monthly_ai_requests: number

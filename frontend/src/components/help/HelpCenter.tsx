@@ -227,30 +227,27 @@ The user avatar in the top-right shows your username. Your session persists acro
         id: 'power-modes',
         title: 'Power Modes: Fast, Balanced, Max',
         tags: ['power', 'models', 'quality', 'cost', 'credits', 'pricing'],
-        content: `Power Mode controls which AI models build your app. Higher power = better code quality but more credits.
+        content: `Power Mode controls which AI models build your app. Higher power = better code quality and higher cost.
 
-**Fast & Cheap (1x credits) — Default**
+**Fast & Cheap (1.6x platform cost) — Default**
 - Models: Claude Haiku 4.5, GPT-4o Mini, Gemini 2.5 Flash Lite
-- Cost: ~$1 per build
 - Speed: Fastest responses
 - Quality: Good for simple apps and prototypes
 - Best for: Testing ideas, learning, budget-conscious builds
 
-**Balanced (5x credits)**
+**Balanced (1.8x platform cost)**
 - Models: Claude Sonnet 4.5, GPT-5, Gemini 3 Flash
-- Cost: ~$5 per build
 - Speed: Moderate
 - Quality: Solid production-quality code
 - Best for: Most real-world applications
 
-**Max Power (10x credits)**
+**Max Power (2.0x platform cost)**
 - Models: Claude Opus 4.6, GPT-5.2 Codex, Gemini 3 Pro
-- Cost: ~$10 per build
 - Speed: Slower (larger models take longer)
-- Quality: Highest possible — these are the most capable AI models available
-- Best for: Complex apps, mission-critical code, apps you're shipping to production
+- Quality: Highest possible — most capable models
+- Best for: Complex apps, mission-critical code, production builds
 
-**Transparent pricing:** The exact cost breakdown is shown below the power mode selector, including real per-million-token rates for each provider.`,
+**Transparent pricing:** The exact cost breakdown is shown in the UI, including per‑million‑token rates and live spend.`,
       },
       {
         id: 'tech-stack',
@@ -762,12 +759,12 @@ This is where you add your own API keys for each AI provider. See the BYOK artic
         content: `BYOK (Bring Your Own Key) lets you use your personal API keys from AI providers instead of APEX.BUILD's shared platform keys. This is one of APEX.BUILD's most powerful features.
 
 **Why use BYOK?**
-- **No markup** — When you use your own key, you pay the AI provider directly at their rates. APEX.BUILD adds zero markup.
+- **Lower costs** — You pay the AI provider directly at their rates plus a small routing fee ($0.25 per 1M tokens).
 - **Unlimited usage** — BYOK requests don't count against your plan's monthly AI request limit
 - **Your preferred models** — Use any model available on the provider's API
 - **Full control** — Enable/disable providers, validate keys, track your own usage
 
-**BYOK is included free on all plans**, including the Free tier. You just need your own API key from the provider.
+**BYOK is available on all plans**, including the Free tier. You just need your own API key from the provider.
 
 **Supported providers for BYOK:**
 - Claude (Anthropic) — Get your key at console.anthropic.com
@@ -1118,7 +1115,7 @@ Both are tracked separately in the history, so you can see every change regardle
 - 1 GB storage
 - 50 min/day code execution
 - 1 collaborator per project
-- BYOK: Unlimited (use your own keys for free)
+- BYOK: Available (use your own keys + routing fee)
 
 **Pro — $12/month**
 - 5,000 AI requests/month
@@ -1150,7 +1147,7 @@ Both are tracked separately in the history, so you can see every change regardle
 - Dedicated support
 - 30-day free trial
 
-**Important:** BYOK (Bring Your Own Key) is free and unlimited on ALL plans. The AI request limits only apply when using APEX.BUILD's platform keys.
+**Important:** BYOK (Bring Your Own Key) is available on ALL plans and does not count toward your monthly AI request limits, but it does include a small routing fee.
 
 Annual billing saves 20%.`,
       },
@@ -1170,14 +1167,14 @@ Your credit balance and usage are visible in your profile and in the admin panel
 - Token count varies by prompt size and response length
 
 **What doesn't count:**
-- BYOK requests (your own API keys)
+- BYOK requests (don't count toward plan limits, but do incur routing fee)
 - File editing, terminal usage, preview
 - Git operations
 - Browsing and navigation
 
 **Running low on credits:**
 - Upgrade your plan for more monthly requests
-- Add your own API keys via BYOK (unlimited, no cost from APEX.BUILD)
+- Add your own API keys via BYOK (lower cost + routing fee)
 - Wait for monthly reset (limits refresh each billing cycle)`,
       },
     ],

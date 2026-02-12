@@ -99,9 +99,36 @@ For code files, use this exact format:
 
 	log.Printf("AIAdapter: Calling router with capability=%s, max_tokens=%d", capability, maxTokens)
 
+	// Reserve credits before making the AI call
+	var reservation *ai.CreditReservation
+	if a.byokManager != nil && userID > 0 {
+		estimateProvider := string(targetRouter.GetDefaultProvider(request.Capability))
+		estimatedCost := a.byokManager.EstimateCost(
+			estimateProvider,
+			request.Model,
+			len(fullPrompt),
+			maxTokens,
+			"",
+			isBYOK,
+		)
+		if estimatedCost > 0 {
+			res, err := a.byokManager.ReserveCredits(userID, estimatedCost)
+			if err != nil {
+				if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
+					return "", fmt.Errorf("INSUFFICIENT_CREDITS")
+				}
+				return "", fmt.Errorf("failed to reserve credits")
+			}
+			reservation = res
+		}
+	}
+
 	// Execute request
 	response, err := targetRouter.Generate(ctx, request)
 	if err != nil {
+		if a.byokManager != nil && reservation != nil {
+			_ = a.byokManager.FinalizeCredits(reservation, 0)
+		}
 		log.Printf("AIAdapter: Generation failed: %v", err)
 		return "", fmt.Errorf("AI generation failed: %w", err)
 	}
@@ -118,11 +145,17 @@ For code files, use this exact format:
 		if response.Usage != nil {
 			inputTokens = response.Usage.PromptTokens
 			outputTokens = response.Usage.CompletionTokens
-			cost = response.Usage.Cost
 		}
 		modelUsed := ai.GetModelUsed(response, request)
+		cost = a.byokManager.BilledCost(string(response.Provider), modelUsed, inputTokens, outputTokens, "", isBYOK)
+		if response.Usage != nil {
+			response.Usage.Cost = cost
+		}
 		a.byokManager.RecordUsage(userID, projectID, string(response.Provider), modelUsed, isBYOK,
 			inputTokens, outputTokens, cost, string(request.Capability), response.Duration, "success")
+		if reservation != nil {
+			_ = a.byokManager.FinalizeCredits(reservation, cost)
+		}
 	}
 
 	log.Printf("AIAdapter: Generation succeeded, response length %d", len(response.Content))
@@ -170,8 +203,35 @@ Content to analyze:
 		request.Temperature = 0.3
 	}
 
+	// Reserve credits before analysis call
+	var reservation *ai.CreditReservation
+	if a.byokManager != nil && userID > 0 {
+		estimateProvider := string(targetRouter.GetDefaultProvider(request.Capability))
+		estimatedCost := a.byokManager.EstimateCost(
+			estimateProvider,
+			request.Model,
+			len(prompt),
+			request.MaxTokens,
+			"",
+			isBYOK,
+		)
+		if estimatedCost > 0 {
+			res, err := a.byokManager.ReserveCredits(userID, estimatedCost)
+			if err != nil {
+				if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
+					return "", fmt.Errorf("INSUFFICIENT_CREDITS")
+				}
+				return "", fmt.Errorf("failed to reserve credits")
+			}
+			reservation = res
+		}
+	}
+
 	response, err := targetRouter.Generate(ctx, request)
 	if err != nil {
+		if a.byokManager != nil && reservation != nil {
+			_ = a.byokManager.FinalizeCredits(reservation, 0)
+		}
 		return "", fmt.Errorf("AI analysis failed: %w", err)
 	}
 
@@ -187,11 +247,17 @@ Content to analyze:
 		if response.Usage != nil {
 			inputTokens = response.Usage.PromptTokens
 			outputTokens = response.Usage.CompletionTokens
-			cost = response.Usage.Cost
 		}
 		modelUsed := ai.GetModelUsed(response, request)
+		cost = a.byokManager.BilledCost(string(response.Provider), modelUsed, inputTokens, outputTokens, "", isBYOK)
+		if response.Usage != nil {
+			response.Usage.Cost = cost
+		}
 		a.byokManager.RecordUsage(userID, projectID, string(response.Provider), modelUsed, isBYOK,
 			inputTokens, outputTokens, cost, string(request.Capability), response.Duration, "success")
+		if reservation != nil {
+			_ = a.byokManager.FinalizeCredits(reservation, cost)
+		}
 	}
 
 	return response.Content, nil

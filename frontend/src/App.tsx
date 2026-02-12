@@ -11,6 +11,7 @@ import { GitHubImportWizard } from './components/import/GitHubImportWizard'
 import APIKeySettings from './components/settings/APIKeySettings'
 import { HelpButton } from './components/help/HelpCenter'
 import ModelSelector from './components/ai/ModelSelector'
+import CostTicker from './components/ide/CostTicker'
 // Import ErrorBoundary directly to be safe
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input, AnimatedBackground } from './components/ui'
@@ -484,6 +485,7 @@ function App() {
         {/* User Info */}
         {user && (
           <div className="flex items-center gap-3">
+            <CostTicker />
             <button
               onClick={() => setCurrentView('settings')}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all duration-200 ${

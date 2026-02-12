@@ -1299,6 +1299,12 @@ export class ApiService {
       total_cost: number
       total_tokens: number
       total_requests: number
+      byok_cost?: number
+      byok_tokens?: number
+      byok_requests?: number
+      platform_cost?: number
+      platform_tokens?: number
+      platform_requests?: number
       by_provider: Record<string, {
         provider: string
         cost: number
@@ -1308,6 +1314,11 @@ export class ApiService {
       }>
     }
     month: string
+    billing?: {
+      credit_balance: number
+      has_unlimited_credits: boolean
+      bypass_billing: boolean
+    }
   }> {
     const params = month ? `?month=${month}` : ''
     const response = await this.client.get(`/byok/usage${params}`)

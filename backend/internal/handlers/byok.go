@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"apex-build/internal/ai"
+	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
 )
@@ -205,10 +206,21 @@ func (h *BYOKHandlers) GetUsage(c *gin.Context) {
 		return
 	}
 
+	var user models.User
+	if err := h.byokManager.DB().Select("credit_balance", "has_unlimited_credits", "bypass_billing").First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get billing data"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    summary,
 		"month":   monthKey,
+		"billing": gin.H{
+			"credit_balance":        user.CreditBalance,
+			"has_unlimited_credits": user.HasUnlimitedCredits,
+			"bypass_billing":        user.BypassBilling,
+		},
 	})
 }
 

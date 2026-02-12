@@ -126,6 +126,9 @@ func (o *OllamaClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		ID:       req.ID,
 		Provider: ProviderOllama,
 		Content:  content,
+		Metadata: map[string]interface{}{
+			"model": resp.Model,
+		},
 		Usage: &Usage{
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,

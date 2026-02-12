@@ -67,7 +67,7 @@ func NewAIRouterAdapter(router *ai.AIRouter, byokManager *ai.BYOKManager) *AIRou
 }
 
 // Generate executes an AI generation request using the specified provider
-func (a *AIRouterAdapter) Generate(ctx context.Context, provider ai.AIProvider, prompt string, opts GenerateOptions) (string, error) {
+func (a *AIRouterAdapter) Generate(ctx context.Context, provider ai.AIProvider, prompt string, opts GenerateOptions) (*ai.AIResponse, error) {
 	log.Printf("AIRouterAdapter.Generate called with provider: %s", provider)
 
 	// Determine which router to use
@@ -175,16 +175,35 @@ For code files, use this exact format:
 	log.Printf("Calling AI router.Generate with capability=%s, provider=%s, model=%s, prompt_length=%d, max_tokens=%d",
 		capability, aiProvider, model, len(fullPrompt), maxTokens)
 
+	// Reserve credits before making the AI call
+	var reservation *ai.CreditReservation
+	if a.byokManager != nil && opts.UserID > 0 {
+		estimatedCost := a.byokManager.EstimateCost(string(aiProvider), model, len(fullPrompt), maxTokens, string(opts.PowerMode), isBYOK)
+		if estimatedCost > 0 {
+			res, err := a.byokManager.ReserveCredits(opts.UserID, estimatedCost)
+			if err != nil {
+				if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
+					return nil, fmt.Errorf("INSUFFICIENT_CREDITS")
+				}
+				return nil, fmt.Errorf("failed to reserve credits")
+			}
+			reservation = res
+		}
+	}
+
 	// Execute the request using Generate method on the selected router
 	response, err := targetRouter.Generate(ctx, request)
 	if err != nil {
+		if a.byokManager != nil && reservation != nil {
+			_ = a.byokManager.FinalizeCredits(reservation, 0)
+		}
 		log.Printf("AI generation failed: %v", err)
-		return "", fmt.Errorf("AI generation failed: %w", err)
+		return nil, fmt.Errorf("AI generation failed: %w", err)
 	}
 
 	if response == nil || response.Content == "" {
 		log.Printf("AI generation returned empty response")
-		return "", fmt.Errorf("AI generation returned empty response")
+		return nil, fmt.Errorf("AI generation returned empty response")
 	}
 
 	// Record BYOK usage if applicable
@@ -195,15 +214,21 @@ For code files, use this exact format:
 		if response.Usage != nil {
 			inputTokens = response.Usage.PromptTokens
 			outputTokens = response.Usage.CompletionTokens
-			cost = response.Usage.Cost
 		}
 		modelUsed := ai.GetModelUsed(response, request)
+		cost = a.byokManager.BilledCost(string(response.Provider), modelUsed, inputTokens, outputTokens, string(opts.PowerMode), isBYOK)
+		if response.Usage != nil {
+			response.Usage.Cost = cost
+		}
 		a.byokManager.RecordUsage(opts.UserID, nil, string(response.Provider), modelUsed, isBYOK,
 			inputTokens, outputTokens, cost, string(request.Capability), response.Duration, "success")
+		if reservation != nil {
+			_ = a.byokManager.FinalizeCredits(reservation, cost)
+		}
 	}
 
 	log.Printf("AI generation succeeded, response length: %d", len(response.Content))
-	return response.Content, nil
+	return response, nil
 }
 
 // mapProviderToCapability determines the best capability based on provider and context
@@ -254,9 +279,12 @@ func (a *AIRouterAdapter) GenerateWithStreaming(
 	if err != nil {
 		return err
 	}
+	if response == nil || response.Content == "" {
+		return fmt.Errorf("empty response")
+	}
 
 	// Simulate streaming by sending chunks
-	words := strings.Fields(response)
+	words := strings.Fields(response.Content)
 	chunk := ""
 	for i, word := range words {
 		chunk += word + " "
@@ -325,7 +353,14 @@ When external resources are needed (API keys, database credentials, third-party 
 - Continue building all other functionality completely`, language)
 	}
 
-	return a.Generate(ctx, provider, prompt, opts)
+	response, err := a.Generate(ctx, provider, prompt, opts)
+	if err != nil {
+		return "", err
+	}
+	if response == nil || response.Content == "" {
+		return "", fmt.Errorf("empty response")
+	}
+	return response.Content, nil
 }
 
 // GenerateFullStackApp generates a complete full-stack application
@@ -366,14 +401,17 @@ Output valid JSON that can be parsed programmatically.`,
 	if err != nil {
 		return nil, fmt.Errorf("architecture generation failed: %w", err)
 	}
+	if archResponse == nil || archResponse.Content == "" {
+		return nil, fmt.Errorf("architecture generation failed: empty response")
+	}
 
 	// Step 2: Generate each file based on the plan
 	// This is a simplified version - full implementation would parse the JSON
 	// and generate each file individually
 
 	result := &AppGeneration{
-		Plan:     archResponse,
-		Files:    make([]GeneratedFile, 0),
+		Plan:      archResponse.Content,
+		Files:     make([]GeneratedFile, 0),
 		TechStack: techStack,
 	}
 
@@ -401,9 +439,9 @@ Output valid JSON that can be parsed programmatically.`,
 
 // AppGeneration holds the results of full app generation
 type AppGeneration struct {
-	Plan      string           `json:"plan"`
-	Files     []GeneratedFile  `json:"files"`
-	TechStack TechStack        `json:"tech_stack"`
+	Plan      string          `json:"plan"`
+	Files     []GeneratedFile `json:"files"`
+	TechStack TechStack       `json:"tech_stack"`
 }
 
 // FileSpec describes a file to generate
@@ -508,17 +546,20 @@ Output JSON:
 }`, language, code)
 
 	response, err := a.Generate(ctx, ai.ProviderClaude, prompt, GenerateOptions{
-		MaxTokens: 2000,
+		MaxTokens:    2000,
 		SystemPrompt: "You are a code analyzer. Output valid JSON only.",
 	})
 	if err != nil {
 		return nil, err
 	}
+	if response == nil || response.Content == "" {
+		return nil, fmt.Errorf("empty response")
+	}
 
 	// Parse the response (simplified)
 	result := &ValidationResult{
-		Valid:       !strings.Contains(strings.ToLower(response), "\"valid\": false"),
-		RawResponse: response,
+		Valid:       !strings.Contains(strings.ToLower(response.Content), "\"valid\": false"),
+		RawResponse: response.Content,
 	}
 
 	return result, nil

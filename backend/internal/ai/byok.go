@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 	"sync"
 	"time"
 
+	"apex-build/internal/pricing"
 	"apex-build/internal/secrets"
 	"apex-build/pkg/models"
 
@@ -20,6 +22,11 @@ type BYOKManager struct {
 	secretsManager *secrets.SecretsManager
 	platformRouter *AIRouter // Fallback to platform keys
 	mu             sync.RWMutex
+}
+
+// DB exposes the underlying database handle for related handlers.
+func (m *BYOKManager) DB() *gorm.DB {
+	return m.db
 }
 
 // modelOverrideClient applies a default model when the request doesn't specify one.
@@ -58,7 +65,7 @@ func (m *modelOverrideClient) Generate(ctx context.Context, req *AIRequest) (*AI
 	return resp, err
 }
 
-func (m *modelOverrideClient) GetCapabilities() []AICapability { return m.base.GetCapabilities() }
+func (m *modelOverrideClient) GetCapabilities() []AICapability  { return m.base.GetCapabilities() }
 func (m *modelOverrideClient) GetProvider() AIProvider          { return m.base.GetProvider() }
 func (m *modelOverrideClient) Health(ctx context.Context) error { return m.base.Health(ctx) }
 func (m *modelOverrideClient) GetUsage() *ProviderUsage         { return m.base.GetUsage() }
@@ -316,18 +323,8 @@ func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
 // RecordUsage logs an AI API call for cost tracking
 func (m *BYOKManager) RecordUsage(userID uint, projectID *uint, provider, model string, isBYOK bool,
 	inputTokens, outputTokens int, cost float64, capability string, duration time.Duration, status string) {
-
-	// BYOK routing fee (platform fee) in USD per 1M tokens
-	const byokRoutingFeePer1MTokens = 0.25
-
 	now := time.Now()
 	monthKey := now.Format("2006-01")
-
-	// For BYOK, override cost with routing fee only (no provider costs)
-	if isBYOK {
-		totalTokens := inputTokens + outputTokens
-		cost = (float64(totalTokens) / 1_000_000.0) * byokRoutingFeePer1MTokens
-	}
 
 	log := models.AIUsageLog{
 		CreatedAt:    now,
@@ -351,6 +348,14 @@ func (m *BYOKManager) RecordUsage(userID uint, projectID *uint, provider, model 
 		fmt.Printf("BYOK: Failed to record usage: %v\n", err)
 	}
 
+	// Update monthly user usage stats (platform + BYOK)
+	m.db.Model(&models.User{}).
+		Where("id = ?", userID).
+		Updates(map[string]interface{}{
+			"monthly_ai_requests": gorm.Expr("monthly_ai_requests + ?", 1),
+			"monthly_ai_cost":     gorm.Expr("monthly_ai_cost + ?", cost),
+		})
+
 	// Update user API key usage stats if BYOK
 	if isBYOK {
 		m.db.Model(&models.UserAPIKey{}).
@@ -361,6 +366,102 @@ func (m *BYOKManager) RecordUsage(userID uint, projectID *uint, provider, model 
 				"last_used":   now,
 			})
 	}
+}
+
+// CreditReservation tracks a pre-authorized credit hold for an AI request.
+type CreditReservation struct {
+	UserID   uint
+	Reserved float64
+	Skipped  bool
+}
+
+// ReserveCredits pre-authorizes credits by deducting an estimated amount up front.
+func (m *BYOKManager) ReserveCredits(userID uint, amount float64) (*CreditReservation, error) {
+	if amount <= 0 {
+		return &CreditReservation{UserID: userID, Reserved: 0, Skipped: true}, nil
+	}
+
+	var user models.User
+	if err := m.db.Select("credit_balance", "has_unlimited_credits", "bypass_billing").First(&user, userID).Error; err != nil {
+		return nil, err
+	}
+
+	if user.BypassBilling || user.HasUnlimitedCredits {
+		return &CreditReservation{UserID: userID, Reserved: 0, Skipped: true}, nil
+	}
+
+	res := m.db.Model(&models.User{}).
+		Where("id = ? AND credit_balance >= ?", userID, amount).
+		Updates(map[string]interface{}{
+			"credit_balance": gorm.Expr("credit_balance - ?", amount),
+		})
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, fmt.Errorf("INSUFFICIENT_CREDITS")
+	}
+
+	return &CreditReservation{UserID: userID, Reserved: amount}, nil
+}
+
+// FinalizeCredits settles the difference between reserved and actual cost.
+func (m *BYOKManager) FinalizeCredits(res *CreditReservation, actualCost float64) error {
+	if res == nil || res.Skipped {
+		return nil
+	}
+
+	delta := res.Reserved - actualCost
+	if math.Abs(delta) < 0.000001 {
+		return nil
+	}
+
+	if delta > 0 {
+		// Refund unused credits
+		return m.db.Model(&models.User{}).
+			Where("id = ?", res.UserID).
+			Updates(map[string]interface{}{
+				"credit_balance": gorm.Expr("credit_balance + ?", delta),
+			}).Error
+	}
+
+	// If actual cost exceeds reserved (should be rare), attempt to deduct extra.
+	extra := -delta
+	resUpdate := m.db.Model(&models.User{}).
+		Where("id = ? AND credit_balance >= ?", res.UserID, extra).
+		Updates(map[string]interface{}{
+			"credit_balance": gorm.Expr("credit_balance - ?", extra),
+		})
+	if resUpdate.Error != nil {
+		return resUpdate.Error
+	}
+	if resUpdate.RowsAffected == 0 {
+		// Clamp to zero if we couldn't collect the remainder
+		return m.db.Model(&models.User{}).
+			Where("id = ?", res.UserID).
+			Updates(map[string]interface{}{
+				"credit_balance": 0.0,
+			}).Error
+	}
+	return nil
+}
+
+// EstimateCost provides a conservative estimate for an AI request.
+func (m *BYOKManager) EstimateCost(provider, model string, promptChars int, maxTokens int, powerMode string, isBYOK bool) float64 {
+	engine := pricing.Get()
+	if model == "" {
+		model = engine.DefaultModel(provider, powerMode)
+	}
+	return engine.EstimateCost(provider, model, promptChars, maxTokens, powerMode, isBYOK)
+}
+
+// BilledCost computes the final billed cost for an AI request.
+func (m *BYOKManager) BilledCost(provider, model string, inputTokens, outputTokens int, powerMode string, isBYOK bool) float64 {
+	engine := pricing.Get()
+	if model == "" {
+		model = engine.DefaultModel(provider, powerMode)
+	}
+	return engine.BilledCost(provider, model, inputTokens, outputTokens, powerMode, isBYOK)
 }
 
 // GetUsageSummary returns usage totals for a user within a date range
@@ -382,6 +483,15 @@ func (m *BYOKManager) GetUsageSummary(userID uint, monthKey string) (*UsageSumma
 		summary.TotalCost += l.Cost
 		summary.TotalTokens += l.TotalTokens
 		summary.TotalRequests++
+		if l.IsBYOK {
+			summary.BYOKCost += l.Cost
+			summary.BYOKTokens += l.TotalTokens
+			summary.BYOKRequests++
+		} else {
+			summary.PlatformCost += l.Cost
+			summary.PlatformTokens += l.TotalTokens
+			summary.PlatformRequests++
+		}
 
 		ps, exists := summary.ByProvider[l.Provider]
 		if !exists {
@@ -401,10 +511,16 @@ func (m *BYOKManager) GetUsageSummary(userID uint, monthKey string) (*UsageSumma
 
 // UsageSummary represents aggregated usage data
 type UsageSummary struct {
-	TotalCost     float64                        `json:"total_cost"`
-	TotalTokens   int                            `json:"total_tokens"`
-	TotalRequests int                            `json:"total_requests"`
-	ByProvider    map[string]*ProviderUsageSummary `json:"by_provider"`
+	TotalCost        float64                          `json:"total_cost"`
+	TotalTokens      int                              `json:"total_tokens"`
+	TotalRequests    int                              `json:"total_requests"`
+	BYOKCost         float64                          `json:"byok_cost"`
+	BYOKTokens       int                              `json:"byok_tokens"`
+	BYOKRequests     int                              `json:"byok_requests"`
+	PlatformCost     float64                          `json:"platform_cost"`
+	PlatformTokens   int                              `json:"platform_tokens"`
+	PlatformRequests int                              `json:"platform_requests"`
+	ByProvider       map[string]*ProviderUsageSummary `json:"by_provider"`
 }
 
 // ProviderUsageSummary represents per-provider usage
@@ -460,7 +576,7 @@ func GetAvailableModels() map[string][]ModelInfo {
 type ModelInfo struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
-	Speed       string `json:"speed"`        // slow, medium, fast
-	CostTier    string `json:"cost_tier"`     // low, medium, high
+	Speed       string `json:"speed"`     // slow, medium, fast
+	CostTier    string `json:"cost_tier"` // low, medium, high
 	Description string `json:"description"`
 }

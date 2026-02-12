@@ -10,6 +10,8 @@ interface UsageData {
   totalCost: number
   totalTokens: number
   totalRequests: number
+  byokCost?: number
+  platformCost?: number
   byProvider: Record<string, {
     provider: string
     cost: number
@@ -19,6 +21,12 @@ interface UsageData {
   }>
 }
 
+interface BillingData {
+  creditBalance: number
+  hasUnlimitedCredits: boolean
+  bypassBilling: boolean
+}
+
 interface CostTickerProps {
   className?: string
 }
@@ -26,10 +34,9 @@ interface CostTickerProps {
 export default function CostTicker({ className }: CostTickerProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [usage, setUsage] = useState<UsageData | null>(null)
-  const [sessionCost, setSessionCost] = useState(0)
+  const [billing, setBilling] = useState<BillingData | null>(null)
   const [loading, setLoading] = useState(true)
   const containerRef = useRef<HTMLDivElement>(null)
-  const sessionStartRef = useRef<number>(Date.now())
 
   const fetchUsage = useCallback(async () => {
     try {
@@ -39,8 +46,17 @@ export default function CostTicker({ className }: CostTickerProps) {
           totalCost: response.data.total_cost,
           totalTokens: response.data.total_tokens,
           totalRequests: response.data.total_requests,
+          byokCost: response.data.byok_cost,
+          platformCost: response.data.platform_cost,
           byProvider: response.data.by_provider,
         })
+        if (response.billing) {
+          setBilling({
+            creditBalance: response.billing.credit_balance,
+            hasUnlimitedCredits: response.billing.has_unlimited_credits,
+            bypassBilling: response.billing.bypass_billing,
+          })
+        }
       }
     } catch {
       // Usage tracking might not be available
@@ -51,8 +67,8 @@ export default function CostTicker({ className }: CostTickerProps) {
 
   useEffect(() => {
     fetchUsage()
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchUsage, 30000)
+    // Refresh every 10 seconds for near real-time billing
+    const interval = setInterval(fetchUsage, 10000)
     return () => clearInterval(interval)
   }, [fetchUsage])
 
@@ -76,6 +92,9 @@ export default function CostTicker({ className }: CostTickerProps) {
 
   const monthCost = usage?.totalCost ?? 0
   const monthColor = getCostColor(monthCost)
+  const creditDisplay = billing?.hasUnlimitedCredits || billing?.bypassBilling
+    ? 'Unlimited'
+    : `$${(billing?.creditBalance ?? 0).toFixed(2)}`
 
   if (loading) {
     return (
@@ -99,6 +118,11 @@ export default function CostTicker({ className }: CostTickerProps) {
         )}
       >
         <DollarSign className={cn('w-3 h-3', monthColor)} />
+        <span className="text-gray-400">Credits:</span>
+        <span className={cn('font-mono font-medium', billing?.hasUnlimitedCredits ? 'text-emerald-400' : 'text-white')}>
+          {creditDisplay}
+        </span>
+        <span className="text-gray-600">|</span>
         <span className="text-gray-400">Month:</span>
         <span className={cn('font-mono font-medium', monthColor)}>
           ${monthCost.toFixed(2)}
@@ -150,24 +174,24 @@ export default function CostTicker({ className }: CostTickerProps) {
               </div>
             </div>
             <div>
+              <div className="text-[10px] text-gray-500 uppercase mb-0.5">Credits</div>
+              <div className={cn('text-lg font-mono font-bold', billing?.hasUnlimitedCredits ? 'text-emerald-400' : 'text-white')}>
+                {creditDisplay}
+              </div>
+            </div>
+            <div>
               <div className="text-[10px] text-gray-500 uppercase mb-0.5">Requests</div>
               <div className="text-lg font-mono font-bold text-white">
                 {usage?.totalRequests ?? 0}
               </div>
             </div>
-            <div>
-              <div className="text-[10px] text-gray-500 uppercase mb-0.5">Tokens</div>
-              <div className="text-lg font-mono font-bold text-white">
-                {usage?.totalTokens
-                  ? usage.totalTokens > 1000000
-                    ? `${(usage.totalTokens / 1000000).toFixed(1)}M`
-                    : usage.totalTokens > 1000
-                    ? `${(usage.totalTokens / 1000).toFixed(1)}K`
-                    : usage.totalTokens.toString()
-                  : '0'}
-              </div>
-            </div>
           </div>
+
+          {(usage?.platformCost !== undefined || usage?.byokCost !== undefined) && (
+            <div className="px-4 py-2 text-[10px] text-gray-500 border-b border-gray-800/50">
+              Platform: ${(usage?.platformCost ?? 0).toFixed(2)} · BYOK: ${(usage?.byokCost ?? 0).toFixed(2)}
+            </div>
+          )}
 
           {/* Per-provider breakdown */}
           {usage?.byProvider && Object.keys(usage.byProvider).length > 0 && (
@@ -221,7 +245,7 @@ export default function CostTicker({ className }: CostTickerProps) {
 
           {/* Footer */}
           <div className="px-4 py-2 border-t border-gray-800/50 text-[10px] text-gray-600 flex items-center justify-between">
-            <span>Updates every 30s</span>
+            <span>Updates every 10s</span>
             <span className="flex items-center gap-1">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
               Live

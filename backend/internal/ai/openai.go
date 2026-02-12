@@ -22,11 +22,11 @@ type OpenAIClient struct {
 
 // OpenAI API request/response structures
 type openAIRequest struct {
-	Model       string            `json:"model"`
-	Messages    []openAIMessage   `json:"messages"`
-	MaxTokens   int               `json:"max_tokens,omitempty"`
-	Temperature float32           `json:"temperature,omitempty"`
-	Stream      bool              `json:"stream"`
+	Model       string          `json:"model"`
+	Messages    []openAIMessage `json:"messages"`
+	MaxTokens   int             `json:"max_tokens,omitempty"`
+	Temperature float32         `json:"temperature,omitempty"`
+	Stream      bool            `json:"stream"`
 }
 
 type openAIMessage struct {
@@ -119,6 +119,9 @@ func (o *OpenAIClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		ID:       req.ID,
 		Provider: ProviderGPT4,
 		Content:  content,
+		Metadata: map[string]interface{}{
+			"model": resp.Model,
+		},
 		Usage: &Usage{
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,

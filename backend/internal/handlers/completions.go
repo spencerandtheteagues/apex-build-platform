@@ -6,6 +6,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"apex-build/internal/completions"
 	"apex-build/internal/middleware"
@@ -40,6 +41,10 @@ func (h *CompletionsHandler) GetInlineCompletion(c *gin.Context) {
 
 	item, err := h.service.GetInlineCompletion(c.Request.Context(), userID, &req)
 	if err != nil {
+		if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
+			c.JSON(http.StatusPaymentRequired, gin.H{"error": "Insufficient credits", "code": "INSUFFICIENT_CREDITS"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -72,6 +77,10 @@ func (h *CompletionsHandler) GetCompletions(c *gin.Context) {
 
 	response, err := h.service.GetCompletions(c.Request.Context(), userID, &req)
 	if err != nil {
+		if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
+			c.JSON(http.StatusPaymentRequired, gin.H{"error": "Insufficient credits", "code": "INSUFFICIENT_CREDITS"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

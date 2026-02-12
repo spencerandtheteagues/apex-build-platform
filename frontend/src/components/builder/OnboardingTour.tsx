@@ -66,12 +66,12 @@ const tourSteps: TourStep[] = [
   },
   {
     title: 'Select AI Power Mode',
-    description: 'Control which AI models build your app. Higher power means better code quality but costs more credits.',
+    description: 'Control which AI models build your app. Higher power means better code quality and higher cost.',
     icon: <Zap className="w-8 h-8" />,
     details: [
-      'Fast & Cheap (1x) — Budget models for quick prototypes and experiments',
-      'Balanced (5x) — Mid-tier models for solid production code',
-      'Max Power (10x) — Flagship models (Claude Opus, GPT-5.2 Codex) for the highest quality',
+      'Fast & Cheap (1.6x) — Budget models for quick prototypes and experiments',
+      'Balanced (1.8x) — Mid-tier models for solid production code',
+      'Max Power (2.0x) — Flagship models (Claude Opus, GPT-5.2 Codex) for the highest quality',
     ],
     tip: 'Start with Fast mode to test your idea, then rebuild with Max Power once you\'re happy with the concept.',
   },

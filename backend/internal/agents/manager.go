@@ -38,7 +38,7 @@ type AgentManager struct {
 
 // AIRouter interface for communicating with AI providers
 type AIRouter interface {
-	Generate(ctx context.Context, provider ai.AIProvider, prompt string, opts GenerateOptions) (string, error)
+	Generate(ctx context.Context, provider ai.AIProvider, prompt string, opts GenerateOptions) (*ai.AIResponse, error)
 	GetAvailableProviders() []ai.AIProvider
 	GetAvailableProvidersForUser(userID uint) []ai.AIProvider
 }
@@ -173,6 +173,7 @@ func (am *AgentManager) StartBuild(buildID string) error {
 			"status":      string(BuildPlanning),
 			"description": build.Description,
 			"mode":        string(build.Mode),
+			"power_mode":  string(build.PowerMode),
 		},
 	})
 
@@ -299,6 +300,7 @@ func (am *AgentManager) StartBuild(buildID string) error {
 			"description": planTask.Description,
 			"agent_role":  string(leadAgent.Role),
 			"provider":    string(leadAgent.Provider),
+			"model":       leadAgent.Model,
 		},
 	})
 
@@ -481,10 +483,16 @@ func (am *AgentManager) spawnAgent(buildID string, role AgentRole, provider ai.A
 	agentID := uuid.New().String()
 	now := time.Now()
 
+	model := selectModelForPowerMode(provider, build.PowerMode)
+	if model == "" {
+		model = "auto"
+	}
+
 	agent := &Agent{
 		ID:        agentID,
 		Role:      role,
 		Provider:  provider,
+		Model:     model,
 		Status:    StatusIdle,
 		BuildID:   buildID,
 		Progress:  0,
@@ -510,6 +518,7 @@ func (am *AgentManager) spawnAgent(buildID string, role AgentRole, provider ai.A
 		Data: map[string]any{
 			"role":     string(role),
 			"provider": string(provider),
+			"model":    model,
 		},
 	})
 
@@ -822,6 +831,9 @@ func (am *AgentManager) AssignTask(agentID string, task *Task) error {
 			"task_id":     task.ID,
 			"task_type":   string(task.Type),
 			"description": task.Description,
+			"agent_role":  string(agent.Role),
+			"provider":    string(agent.Provider),
+			"model":       agent.Model,
 		},
 	})
 
@@ -936,6 +948,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		Data: map[string]any{
 			"agent_role": agent.Role,
 			"provider":   agent.Provider,
+			"model":      agent.Model,
 			"task_id":    task.ID,
 			"task_type":  string(task.Type),
 			"content":    fmt.Sprintf("%s agent is analyzing the task...", agent.Role),
@@ -960,6 +973,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		Data: map[string]any{
 			"agent_role": agent.Role,
 			"provider":   agent.Provider,
+			"model":      agent.Model,
 			"task_id":    task.ID,
 			"task_type":  string(task.Type),
 			"content":    fmt.Sprintf("%s agent is generating code with %s...", agent.Role, agent.Provider),
@@ -989,12 +1003,13 @@ func (am *AgentManager) executeTask(task *Task) {
 			AgentID:   agent.ID,
 			Timestamp: time.Now(),
 			Data: map[string]any{
-				"agent_role":   agent.Role,
-				"provider":     agent.Provider,
-				"task_id":      task.ID,
-				"error":        err.Error(),
-				"retry_count":  task.RetryCount,
-				"max_retries":  task.MaxRetries,
+				"agent_role":  agent.Role,
+				"provider":    agent.Provider,
+				"model":       agent.Model,
+				"task_id":     task.ID,
+				"error":       err.Error(),
+				"retry_count": task.RetryCount,
+				"max_retries": task.MaxRetries,
 			},
 		})
 
@@ -1007,10 +1022,28 @@ func (am *AgentManager) executeTask(task *Task) {
 		return
 	}
 
-	log.Printf("AI generation succeeded for task %s (response_length: %d)", task.ID, len(response))
+	if response == nil || response.Content == "" {
+		log.Printf("AI generation returned empty response for task %s", task.ID)
+		am.resultQueue <- &TaskResult{
+			TaskID:  task.ID,
+			AgentID: agent.ID,
+			Success: false,
+			Error:   fmt.Errorf("AI generation returned empty response"),
+		}
+		return
+	}
+
+	modelUsed := ai.GetModelUsed(response, nil)
+	if modelUsed != "" && modelUsed != "unknown" {
+		agent.mu.Lock()
+		agent.Model = modelUsed
+		agent.mu.Unlock()
+	}
+
+	log.Printf("AI generation succeeded for task %s (response_length: %d)", task.ID, len(response.Content))
 
 	// Parse the response into task output
-	output := am.parseTaskOutput(task.Type, response)
+	output := am.parseTaskOutput(task.Type, response.Content)
 
 	// Broadcast code generated with file count
 	am.broadcast(agent.BuildID, &WSMessage{
@@ -1021,6 +1054,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		Data: map[string]any{
 			"agent_role":  agent.Role,
 			"provider":    agent.Provider,
+			"model":       agent.Model,
 			"task_id":     task.ID,
 			"task_type":   string(task.Type),
 			"files_count": len(output.Files),
@@ -1100,11 +1134,11 @@ func (am *AgentManager) processResult(result *TaskResult) {
 						AgentID:   agent.ID,
 						Timestamp: time.Now(),
 						Data: map[string]any{
-							"task_id":       result.TaskID,
-							"errors":        verifyErrors,
-							"retry_count":   task.RetryCount,
-							"max_retries":   task.MaxRetries,
-							"message":       "Build verification failed, retrying with error context...",
+							"task_id":     result.TaskID,
+							"errors":      verifyErrors,
+							"retry_count": task.RetryCount,
+							"max_retries": task.MaxRetries,
+							"message":     "Build verification failed, retrying with error context...",
 						},
 					})
 
@@ -1137,10 +1171,10 @@ func (am *AgentManager) processResult(result *TaskResult) {
 				AgentID:   agent.ID,
 				Timestamp: time.Now(),
 				Data: map[string]any{
-					"task_id":            result.TaskID,
-					"success":            true,
-					"output":             result.Output,
-					"verified":           true,
+					"task_id":  result.TaskID,
+					"success":  true,
+					"output":   result.Output,
+					"verified": true,
 				},
 			})
 
@@ -1190,7 +1224,7 @@ func (am *AgentManager) processResult(result *TaskResult) {
 
 			// Set status back to pending for retry
 			task.Status = TaskPending
-			task.Error = "" // Clear error for retry
+			task.Error = ""                   // Clear error for retry
 			task.RetryStrategy = RetryWithFix // Use learning-based retry
 
 			agent.Status = StatusWorking
@@ -1211,6 +1245,8 @@ func (am *AgentManager) processResult(result *TaskResult) {
 					"error":         result.Error.Error(),
 					"error_history": task.ErrorHistory,
 					"message":       fmt.Sprintf("Learning from error, retrying (%d/%d)...", task.RetryCount, task.MaxRetries),
+					"model":         agent.Model,
+					"provider":      agent.Provider,
 				},
 			})
 
@@ -1223,6 +1259,7 @@ func (am *AgentManager) processResult(result *TaskResult) {
 				Data: map[string]any{
 					"agent_role": agent.Role,
 					"provider":   agent.Provider,
+					"model":      agent.Model,
 					"content":    fmt.Sprintf("Analyzing error: %s. Adjusting approach for retry attempt %d...", result.Error.Error(), task.RetryCount+1),
 				},
 			})
@@ -2600,12 +2637,14 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 			AgentID:   agent.ID,
 			Timestamp: time.Now(),
 			Data: map[string]any{
-				"task_id":       result.TaskID,
-				"attempt":       task.RetryCount,
-				"max_retries":   task.MaxRetries,
-				"strategy":      retryStrategy,
-				"error":         errorMsg,
-				"message":       fmt.Sprintf("Retrying with %s strategy (%d/%d)...", retryStrategy, task.RetryCount, task.MaxRetries),
+				"task_id":     result.TaskID,
+				"attempt":     task.RetryCount,
+				"max_retries": task.MaxRetries,
+				"strategy":    retryStrategy,
+				"error":       errorMsg,
+				"message":     fmt.Sprintf("Retrying with %s strategy (%d/%d)...", retryStrategy, task.RetryCount, task.MaxRetries),
+				"provider":    agent.Provider,
+				"model":       agent.Model,
 			},
 		})
 

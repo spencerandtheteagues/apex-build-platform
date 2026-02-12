@@ -20,6 +20,12 @@ interface UsageData {
   totalCost: number
   totalTokens: number
   totalRequests: number
+  byokCost?: number
+  byokTokens?: number
+  byokRequests?: number
+  platformCost?: number
+  platformTokens?: number
+  platformRequests?: number
   byProvider: Record<string, {
     provider: string
     cost: number
@@ -27,6 +33,12 @@ interface UsageData {
     requests: number
     byok_requests: number
   }>
+}
+
+interface BillingData {
+  creditBalance: number
+  hasUnlimitedCredits: boolean
+  bypassBilling: boolean
 }
 
 const PROVIDER_COLORS: Record<string, { bg: string; bar: string; text: string; label: string }> = {
@@ -342,6 +354,7 @@ function PlanComparison({
 
 export default function UsageDashboard() {
   const [usage, setUsage] = useState<UsageData | null>(null)
+  const [billing, setBilling] = useState<BillingData | null>(null)
   const [planUsage, setPlanUsage] = useState<CurrentUsageData | null>(null)
   const [limits, setLimits] = useState<UsageLimitsData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -370,8 +383,21 @@ export default function UsageDashboard() {
           totalCost: byokResponse.value.data.total_cost,
           totalTokens: byokResponse.value.data.total_tokens,
           totalRequests: byokResponse.value.data.total_requests,
+          byokCost: byokResponse.value.data.byok_cost,
+          byokTokens: byokResponse.value.data.byok_tokens,
+          byokRequests: byokResponse.value.data.byok_requests,
+          platformCost: byokResponse.value.data.platform_cost,
+          platformTokens: byokResponse.value.data.platform_tokens,
+          platformRequests: byokResponse.value.data.platform_requests,
           byProvider: byokResponse.value.data.by_provider,
         })
+        if (byokResponse.value.billing) {
+          setBilling({
+            creditBalance: byokResponse.value.billing.credit_balance,
+            hasUnlimitedCredits: byokResponse.value.billing.has_unlimited_credits,
+            bypassBilling: byokResponse.value.billing.bypass_billing,
+          })
+        }
       }
 
       // Handle plan usage quotas
@@ -417,6 +443,9 @@ export default function UsageDashboard() {
   const maxProviderCost = providers.length > 0
     ? Math.max(...providers.map(([, d]) => d.cost))
     : 0
+  const creditDisplay = billing?.hasUnlimitedCredits || billing?.bypassBilling
+    ? 'Unlimited'
+    : `$${(billing?.creditBalance ?? 0).toFixed(2)}`
 
   const currentPlan = planUsage?.plan || 'free'
   const planStyle = PLAN_COLORS[currentPlan]
@@ -454,6 +483,14 @@ export default function UsageDashboard() {
           Refresh
         </button>
       </div>
+      {billing && (
+        <div className="flex items-center gap-2 text-sm text-gray-300">
+          <span className="text-gray-500">Credits:</span>
+          <span className={cn('font-mono', billing.hasUnlimitedCredits ? 'text-emerald-400' : 'text-white')}>
+            {creditDisplay}
+          </span>
+        </div>
+      )}
 
       {/* Tab selector */}
       <div className="flex items-center gap-1 p-1 bg-gray-900/50 rounded-lg border border-gray-700/50 w-fit">
@@ -630,6 +667,11 @@ export default function UsageDashboard() {
               <div className="mt-1 text-xs text-gray-500">
                 {isCurrentMonth() ? 'This month so far' : formatMonth(monthKey)}
               </div>
+              {(usage?.platformCost !== undefined || usage?.byokCost !== undefined) && (
+                <div className="mt-2 text-xs text-gray-500">
+                  Platform: ${(usage?.platformCost ?? 0).toFixed(2)} · BYOK: ${(usage?.byokCost ?? 0).toFixed(2)}
+                </div>
+              )}
             </div>
 
             {/* Total Requests */}
@@ -727,9 +769,9 @@ export default function UsageDashboard() {
           <div className="rounded-xl bg-red-500/5 border border-red-500/20 p-4 flex items-start gap-3">
             <DollarSign className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
             <div className="text-sm text-gray-300">
-              <strong className="text-red-400">Cost tip:</strong> Using your own API keys (BYOK) means you
-              pay the provider directly at their standard rates with zero platform markup. Configure your keys
-              in <span className="text-white">Settings &gt; API Keys</span> for unlimited usage.
+              <strong className="text-red-400">Cost tip:</strong> BYOK uses your own provider keys and adds a small
+              routing fee ($0.25 per 1M tokens). Configure your keys in <span className="text-white">Settings &gt; API Keys</span>{' '}
+              to keep costs low while staying fully in control.
             </div>
           </div>
         </>

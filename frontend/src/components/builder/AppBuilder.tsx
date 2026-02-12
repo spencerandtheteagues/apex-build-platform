@@ -60,6 +60,7 @@ interface Agent {
   id: string
   role: string
   provider: string
+  model?: string
   status: 'idle' | 'working' | 'completed' | 'error'
   progress: number
   currentTask?: {
@@ -101,6 +102,7 @@ interface AIThought {
   agentId: string
   agentRole: string
   provider: string
+  model?: string
   type: 'thinking' | 'action' | 'output' | 'error'
   content: string
   timestamp: Date
@@ -115,6 +117,7 @@ interface BuildState {
   checkpoints: Checkpoint[]
   description: string
   availableProviders?: string[]
+  powerMode?: 'fast' | 'balanced' | 'max'
 }
 
 type BuildMode = 'fast' | 'full'
@@ -619,6 +622,11 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index, getAgentEmoji, getS
               {agent.currentTask.description}
             </p>
           )}
+          {agent.model && (
+            <p className="text-xs text-gray-500 mt-1 font-mono truncate">
+              Model: {agent.model}
+            </p>
+          )}
 
           {/* Progress bar for working agents */}
           {agent.status === 'working' && (
@@ -832,6 +840,32 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   const [showAiActivity, setShowAiActivity] = useState(true)
   const aiActivityRef = useRef<HTMLDivElement>(null)
 
+  const thoughtGroups = useMemo(() => {
+    const groups = new Map<string, { agent: Agent; thoughts: AIThought[] }>()
+    const agents = buildState?.agents || []
+    for (const agent of agents) {
+      groups.set(agent.id, { agent, thoughts: [] })
+    }
+    for (const thought of aiThoughts) {
+      if (!thought.agentId) continue
+      if (!groups.has(thought.agentId)) {
+        groups.set(thought.agentId, {
+          agent: {
+            id: thought.agentId,
+            role: thought.agentRole,
+            provider: thought.provider,
+            model: thought.model,
+            status: 'working',
+            progress: 0,
+          },
+          thoughts: [],
+        })
+      }
+      groups.get(thought.agentId)?.thoughts.push(thought)
+    }
+    return Array.from(groups.values())
+  }, [aiThoughts, buildState?.agents])
+
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
@@ -850,6 +884,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   }, [generatedFiles])
 
   const { user, currentProject, createProject, setCurrentProject } = useStore()
+  const activePowerMode = buildState?.powerMode || powerMode
 
   // Tech stack options
   const techStacks: TechStack[] = [
@@ -1041,6 +1076,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           ...prev,
           ...data,
           agents: Object.values(data.agents || {}),
+          powerMode: data.power_mode || data.powerMode || prev?.powerMode,
         }))
         break
 
@@ -1070,6 +1106,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
             id: message.agent_id,
             role: data.role,
             provider: data.provider,
+            model: data.model,
             status: 'idle',
             progress: 0,
           }
@@ -1084,7 +1121,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
             ...prev,
             agents: prev.agents.map(a =>
               a.id === message.agent_id
-                ? { ...a, status: 'working', currentTask: { type: data.task_type, description: data.description } }
+                ? {
+                  ...a,
+                  status: 'working',
+                  provider: data.provider ?? a.provider,
+                  model: data.model ?? a.model,
+                  currentTask: { type: data.task_type, description: data.description }
+                }
                 : a
             )
           }
@@ -1165,15 +1208,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         break
 
       case 'agent:thinking':
-        addAiThought(message.agent_id, data.agent_role, data.provider, 'thinking', data.content)
+        addAiThought(message.agent_id, data.agent_role, data.provider, data.model, 'thinking', data.content)
         break
 
       case 'agent:action':
-        addAiThought(message.agent_id, data.agent_role, data.provider, 'action', data.content)
+        addAiThought(message.agent_id, data.agent_role, data.provider, data.model, 'action', data.content)
         break
 
       case 'agent:output':
-        addAiThought(message.agent_id, data.agent_role, data.provider, 'output', data.content)
+        addAiThought(message.agent_id, data.agent_role, data.provider, data.model, 'output', data.content)
         break
 
       case 'build:error':
@@ -1187,7 +1230,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
       case 'build:started':
         addSystemMessage('Build initialized, spawning agents...')
-        setBuildState(prev => prev ? { ...prev, status: data.status || 'planning' } : null)
+        setBuildState(prev => prev ? {
+          ...prev,
+          status: data.status || 'planning',
+          powerMode: data.power_mode || data.powerMode || prev.powerMode,
+        } : null)
         break
 
       case 'agent:generation_failed':
@@ -1202,7 +1249,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         break
 
       case 'agent:generating':
-        addAiThought(message.agent_id, data.agent_role, data.provider, 'action', data.content || `Generating code with ${data.provider}...`)
+        addAiThought(
+          message.agent_id,
+          data.agent_role,
+          data.provider,
+          data.model,
+          'action',
+          data.content || `Generating code with ${data.provider}...`
+        )
         break
 
       case 'agent:retrying':
@@ -1250,12 +1304,20 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   }
 
   // Add AI thought
-  const addAiThought = (agentId: string, agentRole: string, provider: string, type: AIThought['type'], content: string) => {
+  const addAiThought = (
+    agentId: string,
+    agentRole: string,
+    provider: string,
+    model: string | undefined,
+    type: AIThought['type'],
+    content: string
+  ) => {
     const thought: AIThought = {
       id: Date.now().toString() + Math.random(),
       agentId,
       agentRole,
       provider,
+      model,
       type,
       content,
       timestamp: new Date(),
@@ -1521,6 +1583,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         tasks: [],
         checkpoints: [],
         description: appDescription,
+        powerMode,
       })
 
       connectWebSocket(buildId)
@@ -1870,9 +1933,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                   </h3>
                   <div className="grid grid-cols-3 gap-3">
                     {([
-                      { id: 'fast' as const, label: 'Fast & Cheap', icon: <Zap className="w-5 h-5" />, desc: 'Haiku 4.5 / GPT-4o Mini / Gemini Flash Lite', color: 'green', cost: '~$1', multiplier: '1x', perBuild: 'Included with all plans' },
-                      { id: 'balanced' as const, label: 'Balanced', icon: <Sparkles className="w-5 h-5" />, desc: 'Sonnet 4.5 / GPT-5 / Gemini 3 Flash', color: 'yellow', cost: '~$5', multiplier: '5x', perBuild: '5x credit usage' },
-                      { id: 'max' as const, label: 'Max Power', icon: <Rocket className="w-5 h-5" />, desc: 'Opus 4.6 / GPT-5.2 Codex / Gemini 3 Pro', color: 'red', cost: '~$10', multiplier: '10x', perBuild: '10x credit usage' },
+                      { id: 'fast' as const, label: 'Fast & Cheap', icon: <Zap className="w-5 h-5" />, desc: 'Haiku 4.5 / GPT-4o Mini / Gemini Flash Lite', color: 'green', cost: '1.6x', multiplier: '1.6x', perBuild: 'Lowest cost' },
+                      { id: 'balanced' as const, label: 'Balanced', icon: <Sparkles className="w-5 h-5" />, desc: 'Sonnet 4.5 / GPT-5 / Gemini 3 Flash', color: 'yellow', cost: '1.8x', multiplier: '1.8x', perBuild: 'Best balance' },
+                      { id: 'max' as const, label: 'Max Power', icon: <Rocket className="w-5 h-5" />, desc: 'Opus 4.6 / GPT-5.2 Codex / Gemini 3 Pro', color: 'red', cost: '2.0x', multiplier: '2.0x', perBuild: 'Highest quality' },
                     ]).map((mode) => (
                       <button
                         key={mode.id}
@@ -1906,12 +1969,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                             'ml-auto text-xs font-mono font-bold',
                             mode.color === 'green' ? 'text-green-400' : mode.color === 'yellow' ? 'text-yellow-400' : 'text-red-400'
                           )}>
-                            {mode.cost}/build
+                            {mode.cost} cost
                           </span>
                         </div>
                         <p className="text-xs text-gray-500 leading-tight">{mode.desc}</p>
                         <div className="mt-2 flex items-center justify-between">
-                          <span className="text-[10px] text-gray-600 font-mono">{mode.multiplier} credits</span>
+                          <span className="text-[10px] text-gray-600 font-mono">{mode.multiplier} multiplier</span>
                           <span className="text-[10px] text-gray-600">{mode.perBuild}</span>
                         </div>
                       </button>
@@ -1919,11 +1982,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                   </div>
                   <div className="mt-3 p-3 rounded-lg bg-gray-900/50 border border-gray-800/50">
                     <p className="text-[11px] text-gray-500 leading-relaxed">
-                      <strong className="text-gray-400">Pricing:</strong> Fast mode uses budget-friendly models at baseline credit rates.
-                      Balanced and Max Power use premium models from Claude, OpenAI, and Google that cost more per token.
-                      {powerMode === 'max' && <span className="text-red-400/80"> Max Power uses the most capable models available — Opus 4.6 ($5/$25 per MTok), GPT-5.2 Codex ($1.25/$10), and Gemini 3 Pro ($2/$12).</span>}
-                      {powerMode === 'balanced' && <span className="text-yellow-400/80"> Balanced uses mid-tier models — Sonnet 4.5 ($3/$15 per MTok), GPT-5 ($1.25/$10), and Gemini 3 Flash ($0.50/$3).</span>}
-                      {powerMode === 'fast' && <span className="text-green-400/80"> Fast uses the cheapest models — Haiku 4.5 ($1/$5 per MTok), GPT-4o Mini ($0.15/$0.60), and Gemini Flash Lite ($0.10/$0.40).</span>}
+                      <strong className="text-gray-400">Pricing:</strong> Fast mode uses budget-friendly models with the lowest platform multiplier.
+                      Balanced and Max Power use higher‑tier models with increased multipliers.
+                      {powerMode === 'max' && <span className="text-red-400/80"> Max Power models: Opus 4.6 ($15/$75 per MTok), GPT‑5.2 Codex ($8/$24), Gemini 3 Pro ($2/$6).</span>}
+                      {powerMode === 'balanced' && <span className="text-yellow-400/80"> Balanced models: Sonnet 4.5 ($3/$15 per MTok), GPT‑5 ($5/$15), Gemini 3 Flash ($0.50/$1.50).</span>}
+                      {powerMode === 'fast' && <span className="text-green-400/80"> Fast models: Haiku 4.5 ($0.25/$1.25 per MTok), GPT‑4o Mini ($0.15/$0.60), Gemini Flash Lite ($0.075/$0.30).</span>}
+                      <span className="text-gray-500"> BYOK uses your own keys plus a small routing fee ($0.25 per MTok).</span>
                     </p>
                   </div>
                 </div>
@@ -2045,6 +2109,44 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                     )}
                   </div>
 
+                  {/* Power Mode Highlight */}
+                  <div className="mt-6 pt-6 border-t border-gray-800">
+                    <div className="text-xs text-gray-500 mb-3">Power Mode</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {([
+                        { id: 'fast' as const, label: 'Fast', color: 'green' },
+                        { id: 'balanced' as const, label: 'Balanced', color: 'yellow' },
+                        { id: 'max' as const, label: 'Max Power', color: 'red' },
+                      ]).map((mode) => {
+                        const active = activePowerMode === mode.id
+                        return (
+                          <div
+                            key={mode.id}
+                            className={cn(
+                              'px-3 py-2 rounded-lg border text-center text-xs font-bold uppercase tracking-wide',
+                              active
+                                ? mode.color === 'green'
+                                  ? 'border-green-400/70 bg-green-500/20 text-green-300 shadow-lg shadow-green-500/10'
+                                  : mode.color === 'yellow'
+                                    ? 'border-yellow-400/70 bg-yellow-500/20 text-yellow-300 shadow-lg shadow-yellow-500/10'
+                                    : 'border-red-400/70 bg-red-500/20 text-red-300 shadow-lg shadow-red-500/10'
+                                : 'border-gray-700/60 text-gray-500 bg-gray-900/40'
+                            )}
+                          >
+                            {mode.label}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <div className="mt-2 text-[10px] text-gray-500">
+                      {activePowerMode === 'max'
+                        ? 'Opus 4.6 / GPT-5.2 Codex / Gemini 3 Pro'
+                        : activePowerMode === 'balanced'
+                          ? 'Sonnet 4.5 / GPT-5 / Gemini 3 Flash'
+                          : 'Haiku 4.5 / GPT-4o Mini / Gemini Flash Lite'}
+                    </div>
+                  </div>
+
                   {/* Available AI Providers */}
                   {buildState.availableProviders && buildState.availableProviders.length > 0 && (
                     <div className="mt-5 pt-5 border-t border-gray-800">
@@ -2162,46 +2264,72 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                   <CardContent className="pt-5">
                     <div
                       ref={aiActivityRef}
-                      className="space-y-2 max-h-72 overflow-y-auto scrollbar-thin scrollbar-thumb-purple-900 scrollbar-track-gray-900"
+                      className="space-y-4 max-h-72 overflow-y-auto scrollbar-thin scrollbar-thumb-purple-900 scrollbar-track-gray-900"
                     >
-                      {aiThoughts.length === 0 ? (
+                      {thoughtGroups.length === 0 ? (
                         <div className="text-center text-gray-500 py-10">
                           <Bot className="w-14 h-14 mx-auto mb-4 opacity-50 animate-pulse" />
                           <p className="font-medium">Waiting for AI activity...</p>
                         </div>
                       ) : (
-                        aiThoughts.map((thought) => (
+                        thoughtGroups.map((group) => (
                           <div
-                            key={thought.id}
-                            className={cn(
-                              'p-3 rounded-lg text-sm border-l-4 transition-all',
-                              thought.type === 'thinking' && 'bg-purple-900/30 border-purple-500',
-                              thought.type === 'action' && 'bg-cyan-900/30 border-cyan-500',
-                              thought.type === 'output' && 'bg-green-900/30 border-green-500',
-                              thought.type === 'error' && 'bg-red-900/30 border-red-500'
-                            )}
-                            style={{ animation: 'fade-in 0.2s ease-out' }}
+                            key={group.agent.id}
+                            className="p-3 rounded-xl border border-purple-900/40 bg-black/40"
                           >
-                            <div className="flex items-center gap-2 mb-1.5">
-                              <span className="text-xs font-semibold text-gray-400">
-                                {getAgentEmoji(thought.agentRole)} {thought.agentRole}
+                            <div className="flex items-center gap-2 mb-3">
+                              <span className="text-xs font-semibold text-gray-300">
+                                {getAgentEmoji(group.agent.role)} {group.agent.role}
                               </span>
-                              <Badge variant="outline" size="xs" className="text-[10px]">
-                                {thought.provider}
+                              <Badge variant="outline" size="xs" className="text-[10px] uppercase tracking-wide">
+                                {group.agent.provider}
                               </Badge>
-                              <span className="text-[10px] text-gray-600">
-                                {thought.timestamp.toLocaleTimeString()}
+                              <span className="text-[10px] text-gray-500 font-mono">
+                                {group.agent.model || 'auto'}
+                              </span>
+                              <span className="ml-auto text-[10px] text-gray-600">
+                                {group.thoughts.length} updates
                               </span>
                             </div>
-                            <p className={cn(
-                              'text-xs leading-relaxed',
-                              thought.type === 'thinking' && 'text-purple-300 italic',
-                              thought.type === 'action' && 'text-cyan-300',
-                              thought.type === 'output' && 'text-green-300 font-mono',
-                              thought.type === 'error' && 'text-red-300'
-                            )}>
-                              {thought.content}
-                            </p>
+                            {group.thoughts.length === 0 ? (
+                              <div className="text-xs text-gray-500 italic">No activity yet.</div>
+                            ) : (
+                              <div className="space-y-2">
+                                {group.thoughts.map((thought) => (
+                                  <div
+                                    key={thought.id}
+                                    className={cn(
+                                      'p-3 rounded-lg text-sm border-l-4 transition-all',
+                                      thought.type === 'thinking' && 'bg-purple-900/30 border-purple-500',
+                                      thought.type === 'action' && 'bg-cyan-900/30 border-cyan-500',
+                                      thought.type === 'output' && 'bg-green-900/30 border-green-500',
+                                      thought.type === 'error' && 'bg-red-900/30 border-red-500'
+                                    )}
+                                    style={{ animation: 'fade-in 0.2s ease-out' }}
+                                  >
+                                    <div className="flex items-center gap-2 mb-1.5">
+                                      <span className="text-[10px] text-gray-500 font-mono">
+                                        {thought.timestamp.toLocaleTimeString()}
+                                      </span>
+                                      {thought.model && (
+                                        <span className="text-[10px] text-gray-500 font-mono">
+                                          {thought.model}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className={cn(
+                                      'text-xs leading-relaxed',
+                                      thought.type === 'thinking' && 'text-purple-300 italic',
+                                      thought.type === 'action' && 'text-cyan-300',
+                                      thought.type === 'output' && 'text-green-300 font-mono',
+                                      thought.type === 'error' && 'text-red-300'
+                                    )}>
+                                      {thought.content}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         ))
                       )}

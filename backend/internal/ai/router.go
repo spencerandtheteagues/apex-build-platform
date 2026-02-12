@@ -29,12 +29,26 @@ type AIRouter struct {
 	healthCheck map[AIProvider]bool
 }
 
+// GetDefaultProvider returns the configured default provider for a capability.
+// Falls back to Claude if no explicit mapping exists.
+func (r *AIRouter) GetDefaultProvider(capability AICapability) AIProvider {
+	if r == nil || r.config == nil {
+		return ProviderClaude
+	}
+	if r.config.DefaultProviders != nil {
+		if provider, ok := r.config.DefaultProviders[capability]; ok {
+			return provider
+		}
+	}
+	return ProviderClaude
+}
+
 // rateLimiter tracks rate limiting for each provider
 type rateLimiter struct {
-	tokens    int
-	maxTokens int
+	tokens     int
+	maxTokens  int
 	lastRefill time.Time
-	mu        sync.Mutex
+	mu         sync.Mutex
 }
 
 // NewAIRouter creates a new AI router with multiple providers

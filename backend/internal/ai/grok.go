@@ -116,6 +116,9 @@ func (g *GrokClient) Generate(ctx context.Context, req *AIRequest) (*AIResponse,
 		ID:       req.ID,
 		Provider: ProviderGrok,
 		Content:  content,
+		Metadata: map[string]interface{}{
+			"model": resp.Model,
+		},
 		Usage: &Usage{
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,
@@ -355,7 +358,7 @@ func (g *GrokClient) calculateCost(inputTokens, outputTokens int, model string) 
 		inputCostPer1M = 0.30  // $0.30 per 1M input tokens
 		outputCostPer1M = 0.50 // $0.50 per 1M output tokens
 	default:
-		inputCostPer1M = 0.20  // Default to grok-4-fast pricing
+		inputCostPer1M = 0.20 // Default to grok-4-fast pricing
 		outputCostPer1M = 0.50
 	}
 
