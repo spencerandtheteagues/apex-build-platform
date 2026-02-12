@@ -228,8 +228,8 @@ function App() {
             <div className="text-center mb-8">
               <div className="flex flex-col items-center gap-4">
                 {/* Animated Logo */}
-                <div className="auth-logo w-[8.4rem] h-[8.4rem] flex items-center justify-center relative">
-                  <img src="/Apex-Build-Logo1.png" alt="APEX Logo" className="w-full h-full object-contain relative z-10 drop-shadow-[0_0_20px_rgba(239,68,68,0.4)]" />
+                <div className="auth-logo w-[8.4rem] h-[8.4rem] flex items-center justify-center relative bg-transparent">
+                  <img src="/logo.png" alt="APEX Logo" className="w-full h-full object-contain relative z-10 bg-transparent drop-shadow-[0_0_22px_rgba(239,68,68,0.45)]" />
                 </div>
 
                 {/* Animated title */}

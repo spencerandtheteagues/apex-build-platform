@@ -215,7 +215,7 @@ const AnimatedLogo: React.FC = () => {
   return (
     <div className="relative group">
       {/* Main logo - large and clean, no background box */}
-      <div className="relative w-56 h-56 flex items-center justify-center group-hover:scale-105 transition-transform duration-500">
+      <div className="relative w-[20rem] h-[20rem] md:w-[26rem] md:h-[26rem] flex items-center justify-center group-hover:scale-105 transition-transform duration-500">
         <img
           src="/logo.png"
           alt="APEX"
