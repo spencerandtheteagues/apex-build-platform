@@ -7,11 +7,45 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	"apex-build/internal/agents/autonomous"
+	"apex-build/internal/ai"
+
 	"github.com/google/uuid"
 )
+
+// orchestratorAIAdapter bridges the agents.AIRouter to autonomous.AIProvider interface
+type orchestratorAIAdapter struct {
+	router AIRouter
+	userID uint
+}
+
+func (a *orchestratorAIAdapter) Generate(ctx context.Context, prompt string, opts autonomous.AIOptions) (string, error) {
+	resp, err := a.router.Generate(ctx, ai.ProviderClaude, prompt, GenerateOptions{
+		UserID:       a.userID,
+		MaxTokens:    opts.MaxTokens,
+		Temperature:  opts.Temperature,
+		SystemPrompt: opts.SystemPrompt,
+		PowerMode:    PowerFast, // Use fast model for verification to save cost
+	})
+	if err != nil {
+		return "", err
+	}
+	if resp == nil {
+		return "", fmt.Errorf("empty response from AI")
+	}
+	return resp.Content, nil
+}
+
+func (a *orchestratorAIAdapter) Analyze(ctx context.Context, content string, instruction string, opts autonomous.AIOptions) (string, error) {
+	prompt := fmt.Sprintf("Content to analyze:\n%s\n\nInstruction: %s", content, instruction)
+	return a.Generate(ctx, prompt, opts)
+}
 
 // BuildOrchestrator coordinates the overall build process
 type BuildOrchestrator struct {
@@ -220,7 +254,7 @@ func (o *BuildOrchestrator) initializeVerifyGates() []VerifyGate {
 	}
 }
 
-// runVerifyGate executes a verification checkpoint
+// runVerifyGate executes a verification checkpoint with real validation logic
 func (o *BuildOrchestrator) runVerifyGate(build *Build, state *OrchestrationState, gateID string) bool {
 	var gate *VerifyGate
 	for i := range state.VerifyGates {
@@ -239,10 +273,19 @@ func (o *BuildOrchestrator) runVerifyGate(build *Build, state *OrchestrationStat
 
 	o.broadcastPhase(build.ID, state.Phase, fmt.Sprintf("Running verification: %s...", gate.Name))
 
-	// Placeholder for actual verification logic
-	// In production, this would call the BuildVerifier
-	gate.Passed = true
-	gate.Score = 80
+	// Real verification logic per gate type
+	switch gateID {
+	case "post-planning":
+		gate.Passed, gate.Score = o.verifyPostPlanning(build)
+	case "post-generation":
+		gate.Passed, gate.Score = o.verifyPostGeneration(build, state)
+	case "final":
+		gate.Passed, gate.Score = o.verifyFinal(build)
+	default:
+		gate.Passed = true
+		gate.Score = 80
+	}
+
 	gate.Duration = time.Since(now).Milliseconds()
 
 	o.hub.Broadcast(build.ID, &WSMessage{
@@ -258,11 +301,232 @@ func (o *BuildOrchestrator) runVerifyGate(build *Build, state *OrchestrationStat
 		},
 	})
 
+	log.Printf("Orchestrator: Gate '%s' result: passed=%v score=%d duration=%dms", gate.Name, gate.Passed, gate.Score, gate.Duration)
+
 	if !gate.Passed && gate.Required {
 		return false
 	}
 
 	return true
+}
+
+// verifyPostPlanning validates that the planning output contains required structure
+func (o *BuildOrchestrator) verifyPostPlanning(build *Build) (bool, int) {
+	score := 0
+
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+
+	// Check that we have a plan
+	if build.Plan != nil {
+		score += 30 // Plan exists
+		if len(build.Plan.Files) > 0 {
+			score += 20 // Files planned
+		}
+		if len(build.Plan.Features) > 0 {
+			score += 15 // Features identified
+		}
+		if build.Plan.TechStack.Frontend != "" || build.Plan.TechStack.Backend != "" {
+			score += 15 // Tech stack decided
+		}
+		if len(build.Plan.DataModels) > 0 {
+			score += 10 // Data models defined
+		}
+		if len(build.Plan.APIEndpoints) > 0 {
+			score += 10 // API endpoints defined
+		}
+	} else {
+		// No plan struct — check if planning task produced any output
+		for _, task := range build.Tasks {
+			if task.Type == TaskPlan && task.Status == TaskCompleted {
+				score += 40 // Planning task completed
+				if task.Output != nil && (len(task.Output.Messages) > 0 || len(task.Output.Files) > 0) {
+					score += 30 // Has output content
+				}
+				break
+			}
+		}
+	}
+
+	return score >= 40, score
+}
+
+// verifyPostGeneration runs the real BuildVerifier pipeline on generated code
+func (o *BuildOrchestrator) verifyPostGeneration(build *Build, state *OrchestrationState) (bool, int) {
+	// Collect all generated files
+	allFiles := o.manager.collectGeneratedFiles(build)
+
+	if len(allFiles) == 0 {
+		log.Printf("Orchestrator: No files generated — verification fails")
+		return false, 0
+	}
+
+	// Quick syntax check using manager's built-in verification (no filesystem needed)
+	syntaxScore := 0
+	syntaxErrors := 0
+	placeholderErrors := 0
+
+	for _, file := range allFiles {
+		if file.Content == "" {
+			continue
+		}
+		// Bracket balance check
+		if strings.Count(file.Content, "{") != strings.Count(file.Content, "}") {
+			syntaxErrors++
+		}
+		if strings.Count(file.Content, "(") != strings.Count(file.Content, ")") {
+			syntaxErrors++
+		}
+		// Placeholder detection
+		placeholders := []string{"// TODO:", "// FIXME:", "throw new Error('Not implemented')",
+			"raise NotImplementedError", "panic(\"not implemented\")", "/* placeholder */"}
+		for _, p := range placeholders {
+			if strings.Contains(file.Content, p) {
+				placeholderErrors++
+			}
+		}
+	}
+
+	// Calculate syntax score (0-40)
+	if syntaxErrors == 0 {
+		syntaxScore = 40
+	} else if syntaxErrors <= 2 {
+		syntaxScore = 25
+	} else {
+		syntaxScore = 10
+	}
+
+	// Placeholder penalty
+	if placeholderErrors > 0 {
+		syntaxScore -= placeholderErrors * 5
+		if syntaxScore < 0 {
+			syntaxScore = 0
+		}
+	}
+
+	// File coverage score (0-30): did we generate enough files?
+	fileScore := 0
+	if len(allFiles) >= 5 {
+		fileScore = 30
+	} else if len(allFiles) >= 3 {
+		fileScore = 20
+	} else if len(allFiles) >= 1 {
+		fileScore = 10
+	}
+
+	// Content quality score (0-30): files have substantive content
+	contentScore := 0
+	substantiveFiles := 0
+	for _, file := range allFiles {
+		if len(file.Content) > 100 { // More than 100 chars = substantive
+			substantiveFiles++
+		}
+	}
+	if substantiveFiles == len(allFiles) {
+		contentScore = 30
+	} else if substantiveFiles > len(allFiles)/2 {
+		contentScore = 20
+	} else if substantiveFiles > 0 {
+		contentScore = 10
+	}
+
+	totalScore := syntaxScore + fileScore + contentScore
+
+	// Try filesystem-based verification with BuildVerifier (best-effort, with timeout)
+	verifierScore, verifierRan := o.runBuildVerifier(build, allFiles)
+	if verifierRan {
+		// Blend scores: 40% syntax/structure, 60% real build verification
+		totalScore = (totalScore * 40 / 100) + (verifierScore * 60 / 100)
+	}
+
+	log.Printf("Orchestrator: Post-generation verification: syntax=%d files=%d content=%d verifier=%d(ran=%v) total=%d",
+		syntaxScore, fileScore, contentScore, verifierScore, verifierRan, totalScore)
+
+	return totalScore >= 50, totalScore
+}
+
+// runBuildVerifier writes files to temp dir and runs the autonomous BuildVerifier pipeline
+func (o *BuildOrchestrator) runBuildVerifier(build *Build, files []GeneratedFile) (int, bool) {
+	// Create temp directory for verification
+	tmpDir, err := os.MkdirTemp("", "apex-verify-*")
+	if err != nil {
+		log.Printf("Orchestrator: Failed to create temp dir for verification: %v", err)
+		return 0, false
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Write all generated files to temp dir
+	for _, file := range files {
+		if file.Path == "" || file.Content == "" {
+			continue
+		}
+		fullPath := filepath.Join(tmpDir, file.Path)
+		dir := filepath.Dir(fullPath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("Orchestrator: Failed to create dir %s: %v", dir, err)
+			continue
+		}
+		if err := os.WriteFile(fullPath, []byte(file.Content), 0644); err != nil {
+			log.Printf("Orchestrator: Failed to write file %s: %v", fullPath, err)
+			continue
+		}
+	}
+
+	// Create AI adapter for the verifier
+	aiAdapter := &orchestratorAIAdapter{
+		router: o.manager.aiRouter,
+		userID: build.UserID,
+	}
+
+	// Run verification with a 60-second timeout
+	verifier := autonomous.NewBuildVerifier(aiAdapter, tmpDir)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	result, err := verifier.Verify(ctx, 1) // 1 retry to keep it fast
+	if err != nil {
+		log.Printf("Orchestrator: BuildVerifier failed: %v", err)
+		return 0, false
+	}
+
+	log.Printf("Orchestrator: BuildVerifier result: passed=%v score=%d summary=%s", result.Passed, result.Score, result.Summary)
+	return result.Score, true
+}
+
+// verifyFinal runs a lightweight quality check on all generated files
+func (o *BuildOrchestrator) verifyFinal(build *Build) (bool, int) {
+	allFiles := o.manager.collectGeneratedFiles(build)
+	if len(allFiles) == 0 {
+		return true, 50 // No files is OK for final gate (might be planning-only)
+	}
+
+	score := 100
+	issues := 0
+
+	for _, file := range allFiles {
+		// Check for empty content
+		if file.Content == "" {
+			issues++
+			score -= 10
+		}
+		// Check for placeholder code
+		if strings.Contains(file.Content, "// TODO:") || strings.Contains(file.Content, "// FIXME:") {
+			issues++
+			score -= 5
+		}
+		// Check for very small files (likely incomplete)
+		if len(file.Content) > 0 && len(file.Content) < 50 {
+			issues++
+			score -= 5
+		}
+	}
+
+	if score < 0 {
+		score = 0
+	}
+
+	log.Printf("Orchestrator: Final verification: %d files, %d issues, score=%d", len(allFiles), issues, score)
+	return score >= 50, score
 }
 
 // executeGenerationPhaseParallel runs code generation tasks in parallel

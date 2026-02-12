@@ -889,6 +889,45 @@ func (am *AgentManager) executeTask(task *Task) {
 	}
 	log.Printf("Found build %s for task execution", build.ID)
 
+	// Apply retry strategy if this is a retry attempt
+	if task.RetryCount > 0 {
+		strategy := string(task.RetryStrategy)
+		switch strategy {
+		case "backoff":
+			delay := time.Duration(task.RetryCount) * 2 * time.Second
+			log.Printf("Backoff strategy: waiting %v before retry (attempt %d)", delay, task.RetryCount)
+			time.Sleep(delay)
+		case "switch_provider":
+			newProvider := am.getNextFallbackProvider(agent.Provider)
+			if newProvider != agent.Provider {
+				oldProvider := agent.Provider
+				agent.mu.Lock()
+				agent.Provider = newProvider
+				agent.Model = selectModelForPowerMode(newProvider, build.PowerMode)
+				agent.mu.Unlock()
+				log.Printf("Switch provider strategy: %s → %s (model: %s)", oldProvider, newProvider, agent.Model)
+				am.broadcast(agent.BuildID, &WSMessage{
+					Type:      "agent:provider_switched",
+					BuildID:   agent.BuildID,
+					AgentID:   agent.ID,
+					Timestamp: time.Now(),
+					Data: map[string]any{
+						"old_provider": string(oldProvider),
+						"new_provider": string(newProvider),
+						"model":        agent.Model,
+						"reason":       "retry_strategy",
+					},
+				})
+			}
+		case "reduce_context":
+			log.Printf("Reduce context strategy: will use 75%% tokens (attempt %d)", task.RetryCount)
+		case "fix_and_retry":
+			log.Printf("Fix and retry strategy: injecting fix guidance (attempt %d)", task.RetryCount)
+		default:
+			log.Printf("Standard retry (attempt %d/%d)", task.RetryCount, task.MaxRetries)
+		}
+	}
+
 	// Guardrails: stop if build already failed/cancelled
 	build.mu.Lock()
 	if build.Status == BuildFailed || build.Status == BuildCancelled {
@@ -957,7 +996,7 @@ func (am *AgentManager) executeTask(task *Task) {
 
 	// Build the prompt based on task type
 	prompt := am.buildTaskPrompt(task, build, agent)
-	systemPrompt := am.getSystemPrompt(agent.Role)
+	systemPrompt := am.getSystemPrompt(agent.Role, build)
 	log.Printf("Built prompt for task (prompt_length: %d, system_prompt_length: %d)", len(prompt), len(systemPrompt))
 
 	// Execute using AI router
@@ -981,14 +1020,24 @@ func (am *AgentManager) executeTask(task *Task) {
 	})
 
 	log.Printf("Calling AI router for task %s with provider %s", task.ID, agent.Provider)
-	maxTokens := 8000
+
+	// Role-aware token limits
+	maxTokens := am.getMaxTokensForRole(agent.Role)
 	if build.MaxTokensPerRequest > 0 && build.MaxTokensPerRequest < maxTokens {
 		maxTokens = build.MaxTokensPerRequest
 	}
+	// Apply reduce_context strategy: cut tokens by 25% on retry
+	if task.RetryCount > 0 && string(task.RetryStrategy) == "reduce_context" {
+		maxTokens = maxTokens * 3 / 4
+	}
+
+	// Role-aware temperature
+	temperature := am.getTemperatureForRole(agent.Role)
+
 	response, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
 		UserID:       build.UserID,
 		MaxTokens:    maxTokens,
-		Temperature:  0.7,
+		Temperature:  temperature,
 		SystemPrompt: systemPrompt,
 		PowerMode:    build.PowerMode,
 	})
@@ -1428,21 +1477,121 @@ func (am *AgentManager) handleFileGeneration(build *Build, output *TaskOutput) {
 	}
 }
 
-// handleTestCompletion processes test results
+// handleTestCompletion processes test results and creates fix tasks for failures
 func (am *AgentManager) handleTestCompletion(build *Build, output *TaskOutput) {
-	// Check if tests passed
-	// If not, create fix tasks
-
 	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	// Parse test output for failures
+	hasFailures := false
+	if output != nil {
+		for _, msg := range output.Messages {
+			lower := strings.ToLower(msg)
+			if strings.Contains(lower, "fail") || strings.Contains(lower, "error") ||
+				strings.Contains(lower, "assertion") || strings.Contains(lower, "expected") {
+				hasFailures = true
+				break
+			}
+		}
+		// Also check file content for test failure indicators
+		for _, file := range output.Files {
+			lower := strings.ToLower(file.Content)
+			if strings.Contains(lower, "test failed") || strings.Contains(lower, "tests failing") {
+				hasFailures = true
+				break
+			}
+		}
+	}
+
+	if hasFailures {
+		log.Printf("Test failures detected in build %s, creating fix task", build.ID)
+
+		// Find a backend or frontend agent to assign the fix
+		fixTask := &Task{
+			ID:          uuid.New().String(),
+			Type:        TaskFix,
+			Description: "Fix failing tests identified by testing agent",
+			Priority:    85,
+			Status:      TaskPending,
+			MaxRetries:  build.MaxRetries,
+			Input: map[string]any{
+				"action":          "fix_tests",
+				"test_output":     output.Messages,
+				"app_description": build.Description,
+			},
+			CreatedAt: time.Now(),
+		}
+		build.Tasks = append(build.Tasks, fixTask)
+
+		am.broadcast(build.ID, &WSMessage{
+			Type:      WSBuildProgress,
+			BuildID:   build.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"message":  "Test failures detected, creating fix task...",
+				"phase":    "testing",
+				"fix_task": fixTask.ID,
+			},
+		})
+	}
+
 	build.Status = BuildReviewing
 	build.UpdatedAt = time.Now()
-	build.mu.Unlock()
 }
 
-// handleReviewCompletion processes code review results
+// handleReviewCompletion processes code review results and creates fix tasks for critical issues
 func (am *AgentManager) handleReviewCompletion(build *Build, output *TaskOutput) {
-	// Apply any suggested fixes
-	// Create fix tasks if needed
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	if output == nil {
+		return
+	}
+
+	// Parse review output for critical issues
+	hasCritical := false
+	for _, msg := range output.Messages {
+		lower := strings.ToLower(msg)
+		if strings.Contains(lower, "critical") || strings.Contains(lower, "security vulnerability") ||
+			strings.Contains(lower, "injection") || strings.Contains(lower, "xss") ||
+			strings.Contains(lower, "authentication bypass") {
+			hasCritical = true
+			break
+		}
+	}
+
+	if hasCritical {
+		log.Printf("Critical review issues found in build %s, creating fix task", build.ID)
+
+		fixTask := &Task{
+			ID:          uuid.New().String(),
+			Type:        TaskFix,
+			Description: "Fix critical issues found during code review",
+			Priority:    95,
+			Status:      TaskPending,
+			MaxRetries:  build.MaxRetries,
+			Input: map[string]any{
+				"action":          "fix_review_issues",
+				"review_findings": output.Messages,
+				"app_description": build.Description,
+			},
+			CreatedAt: time.Now(),
+		}
+		build.Tasks = append(build.Tasks, fixTask)
+
+		am.broadcast(build.ID, &WSMessage{
+			Type:      WSBuildProgress,
+			BuildID:   build.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"message":  "Critical issues found in review, creating fix task...",
+				"phase":    "reviewing",
+				"fix_task": fixTask.ID,
+			},
+		})
+	}
+
+	build.UpdatedAt = time.Now()
 }
 
 // cancelPendingTasks marks all pending tasks as cancelled to stop further work
@@ -1815,9 +1964,9 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 
 	response, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
 		UserID:       build.UserID,
-		MaxTokens:    1000,
-		Temperature:  0.7,
-		SystemPrompt: am.getSystemPrompt(RoleLead),
+		MaxTokens:    2000,
+		Temperature:  am.getTemperatureForRole(RoleLead),
+		SystemPrompt: am.getSystemPrompt(RoleLead, build),
 		PowerMode:    build.PowerMode,
 	})
 
@@ -1989,15 +2138,31 @@ func (am *AgentManager) Shutdown() {
 // Helper functions
 
 func (am *AgentManager) buildTaskPrompt(task *Task, build *Build, agent *Agent) string {
-	// Check if there are previous errors to learn from
+	// Check if there are previous errors to learn from (pruned to last 2 attempts)
 	errorContext := ""
 	if prevErrors, ok := task.Input["previous_errors"]; ok {
+		errStr := fmt.Sprintf("%v", prevErrors)
+		// Prune error context: keep only last 3000 chars
+		if len(errStr) > 3000 {
+			errStr = errStr[len(errStr)-3000:]
+		}
+
+		fixGuidance := ""
+		if strategy, ok := task.Input["retry_strategy"]; ok && strategy == "fix_and_retry" {
+			fixGuidance = `
+CRITICAL: This is a FIX AND RETRY attempt. You MUST:
+1. Carefully read the exact error messages below
+2. Identify the root cause of each error
+3. Generate CORRECTED code that directly addresses each error
+4. Do NOT repeat the same mistakes`
+		}
+
 		errorContext = fmt.Sprintf(`
 PREVIOUS ATTEMPTS FAILED - LEARN FROM THESE ERRORS:
-%v
-
-Analyze what went wrong and use a different approach this time.
-`, prevErrors)
+%s
+%s
+Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
+`, errStr, fixGuidance)
 	}
 
 	techStackContext := ""
@@ -2007,11 +2172,64 @@ Analyze what went wrong and use a different approach this time.
 		}
 	}
 
+	// Inter-agent context sharing: inject upstream outputs for downstream agents
+	agentContext := ""
+	if agent != nil && build != nil {
+		switch agent.Role {
+		case RoleFrontend, RoleBackend, RoleDatabase:
+			// Include architecture decisions for implementation agents
+			if archOutput := am.getCompletedTaskOutput(build, TaskArchitecture); archOutput != "" {
+				agentContext += fmt.Sprintf("\n<architecture_context>\n%s\n</architecture_context>\n", archOutput)
+			}
+		}
+		if agent.Role == RoleBackend {
+			// Include schema context for backend agents
+			if schemaOutput := am.getCompletedTaskOutput(build, TaskGenerateSchema); schemaOutput != "" {
+				agentContext += fmt.Sprintf("\n<schema_context>\n%s\n</schema_context>\n", schemaOutput)
+			}
+		}
+		if agent.Role == RoleTesting {
+			// Include file manifest for testing agents
+			files := am.collectGeneratedFiles(build)
+			if len(files) > 0 {
+				var fileList strings.Builder
+				for _, f := range files {
+					fileList.WriteString(fmt.Sprintf("- %s (%s, %d bytes)\n", f.Path, f.Language, f.Size))
+				}
+				agentContext += fmt.Sprintf("\n<generated_files>\n%s</generated_files>\n", fileList.String())
+			}
+		}
+		if agent.Role == RoleReviewer {
+			// Include all generated files for reviewer
+			files := am.collectGeneratedFiles(build)
+			if len(files) > 0 {
+				var fileList strings.Builder
+				for _, f := range files {
+					fileList.WriteString(fmt.Sprintf("// File: %s\n```%s\n%s\n```\n\n", f.Path, f.Language, f.Content))
+				}
+				content := fileList.String()
+				if len(content) > 15000 {
+					content = content[:15000] + "\n... (truncated, review the above files)"
+				}
+				agentContext += fmt.Sprintf("\n<code_to_review>\n%s</code_to_review>\n", content)
+			}
+		}
+	}
+
+	// Prune app description if total prompt would be too long
+	appDescription := build.Description
+	if len(appDescription)+len(errorContext)+len(agentContext) > 30000 {
+		if len(appDescription) > 2000 {
+			appDescription = appDescription[:2000] + "... (description truncated)"
+		}
+	}
+
 	return fmt.Sprintf(`Task: %s
 
 Description: %s
 
 App being built: %s
+%s
 %s
 %s
 OUTPUT FORMAT - CRITICAL:
@@ -2057,7 +2275,7 @@ FORBIDDEN OUTPUTS:
 - Incomplete implementations
 
 Build the REAL, COMPLETE implementation now.`,
-		task.Type, task.Description, build.Description, techStackContext, errorContext)
+		task.Type, task.Description, appDescription, techStackContext, errorContext, agentContext)
 }
 
 func formatTechStackSummary(stack *TechStack) string {
@@ -2085,58 +2303,310 @@ func formatTechStackSummary(stack *TechStack) string {
 	return strings.Join(parts, " | ")
 }
 
-func (am *AgentManager) getSystemPrompt(role AgentRole) string {
+func (am *AgentManager) getSystemPrompt(role AgentRole, build ...*Build) string {
 	baseRules := `
-ABSOLUTE RULES FOR ALL AGENTS:
+
+ABSOLUTE RULES:
 1. NEVER output demo code, mock data, placeholder content, or TODO comments
 2. ALWAYS produce complete, production-ready, fully functional code
-3. If external resources are needed (API keys, credentials), either:
-   a) Ask the user to provide them, OR
-   b) Use environment variable patterns and build everything else completely
-4. Build as much functionality as possible without blocking on user input
-5. Real implementations only - no stubs, no examples, no "this would be" code`
+3. Use environment variable patterns for external credentials (process.env.API_KEY)
+4. Build maximum functionality without blocking on user input
+5. Real implementations only - no stubs, no examples, no "this would be" code
+6. Include ALL imports, error handling, types, and edge cases
+7. Every function must be fully implemented — zero empty bodies`
+
+	// Build tech stack context if available
+	techHint := ""
+	if len(build) > 0 && build[0] != nil && build[0].TechStack != nil {
+		ts := build[0].TechStack
+		if ts.Frontend != "" {
+			techHint += fmt.Sprintf("\nProject uses %s for frontend.", ts.Frontend)
+		}
+		if ts.Backend != "" {
+			techHint += fmt.Sprintf(" %s for backend.", ts.Backend)
+		}
+		if ts.Database != "" {
+			techHint += fmt.Sprintf(" %s for database.", ts.Database)
+		}
+		if ts.Styling != "" {
+			techHint += fmt.Sprintf(" %s for styling.", ts.Styling)
+		}
+	}
 
 	prompts := map[AgentRole]string{
 		RoleLead: `You are the Lead Agent coordinating the APEX.BUILD platform.
-You oversee all other agents and communicate with users.
+You oversee all specialist agents and serve as the primary communicator with users.
 Be helpful, concise, and focused on delivering excellent production-ready results.
 When users need to provide information (API keys, credentials), clearly ask for it.
-When you can proceed without user input, do so and build maximum functionality.` + baseRules,
+When you can proceed without user input, do so and build maximum functionality.
+Summarize progress concisely. Coordinate agent outputs into a cohesive application.` + techHint + baseRules,
 
-		RolePlanner: `You are the Planning Agent. Analyze user requirements and create detailed, actionable build plans.
-Break down the app into specific components, data models, and APIs.
-Identify what external resources the user needs to provide (API keys, etc.).
-Output structured plans with real file paths and implementations.` + baseRules,
+		RolePlanner: `You are the Planning Agent — an expert software architect who creates detailed, actionable build plans.
+Your job: decompose the app into a precise file-by-file implementation plan.
 
-		RoleArchitect: `You are the Architect Agent. Design production-grade system architecture.
-Make concrete technology decisions with specific libraries and versions.
-Consider scalability, maintainability, and security from day one.
-Provide actual architecture code, not just diagrams or descriptions.` + baseRules,
+YOUR OUTPUT MUST INCLUDE:
+- A clear list of every file to create, with its path and purpose
+- Data models with all fields, types, and relationships
+- API endpoints with methods, paths, request/response schemas
+- UI components with their props, state, and user interactions
+- External dependencies and their exact versions
+- A recommended execution order (database → backend → frontend → tests)
 
-		RoleFrontend: `You are the Frontend Agent. Build beautiful, responsive, production-ready user interfaces.
-Use modern React patterns with TypeScript, proper component structure, and clean styling.
-Every component must be complete with all props, state, and handlers implemented.
-No placeholder UI - every button must work, every form must submit.` + baseRules,
+EXAMPLE OUTPUT FORMAT:
+## Tech Stack
+- Frontend: React 18 + TypeScript + Tailwind CSS
+- Backend: Express.js + TypeScript
+- Database: PostgreSQL with Prisma ORM
 
-		RoleBackend: `You are the Backend Agent. Create robust, secure APIs and business logic.
-Implement comprehensive error handling, input validation, and security measures.
-Every endpoint must be complete with authentication, authorization, and data validation.
-No placeholder routes - every endpoint must be fully functional.` + baseRules,
+## Files to Generate
+1. prisma/schema.prisma — Database schema with User, Post, Comment models
+2. src/server/index.ts — Express server setup with middleware
+3. src/server/routes/auth.ts — Authentication endpoints (register, login, refresh)
+4. src/components/App.tsx — Root component with routing
+...
 
-		RoleDatabase: `You are the Database Agent. Design efficient, normalized schemas with proper constraints.
-Create complete migration files with indexes, foreign keys, and seed data.
-Every query must be optimized and handle edge cases.
-No placeholder schemas - include all fields, relationships, and constraints.` + baseRules,
+## Data Models
+### User
+- id: UUID (primary key)
+- email: string (unique, indexed)
+- passwordHash: string
+- createdAt: DateTime` + techHint + baseRules,
 
-		RoleTesting: `You are the Testing Agent. Write comprehensive, executable tests.
-Cover unit tests, integration tests, edge cases, and error scenarios.
-Every test must actually run and verify real functionality.
-No placeholder tests - include real assertions and complete coverage.` + baseRules,
+		RoleArchitect: `You are the Architect Agent — a senior systems architect who designs production-grade software architectures.
+Your job: make concrete technology decisions and output architectural code/configuration.
 
-		RoleReviewer: `You are the Reviewer Agent. Review code for production-readiness.
-Identify security vulnerabilities, performance issues, and incomplete implementations.
-Provide specific, actionable fixes with complete code - not just suggestions.
-Flag any placeholder code, mock data, or TODOs for immediate replacement.` + baseRules,
+YOUR OUTPUT MUST INCLUDE:
+- Exact library versions (e.g., "express@4.18.2", not just "express")
+- Project structure with directory layout
+- Configuration files (tsconfig.json, package.json, docker-compose.yml)
+- Middleware stack and request pipeline
+- Authentication/authorization strategy with implementation details
+- Database connection and ORM configuration
+- Environment variable schema
+
+OUTPUT CONCRETE FILES — not diagrams or descriptions. Every config file must be complete and valid.
+
+EXAMPLE: Output a real package.json with all dependencies, a real tsconfig.json, a real docker-compose.yml.` + techHint + baseRules,
+
+		RoleFrontend: `You are the Frontend Agent — an expert UI engineer who builds beautiful, responsive, production-ready interfaces.
+You specialize in modern React with TypeScript, component composition, and accessible design.
+
+REQUIREMENTS FOR EVERY COMPONENT:
+- Complete TypeScript types for all props, state, and events
+- Full event handlers (onClick, onChange, onSubmit) — no empty handlers
+- Loading states, error states, and empty states
+- Responsive design (mobile-first breakpoints)
+- Proper form validation with user-friendly error messages
+- Keyboard navigation and accessibility attributes (aria-labels, roles)
+
+EXAMPLE COMPONENT PATTERN:
+// File: src/components/LoginForm.tsx
+` + "```" + `typescript
+import React, { useState } from 'react';
+
+interface LoginFormProps {
+  onSuccess: (user: User) => void;
+}
+
+export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      if (!res.ok) throw new Error('Invalid credentials');
+      const user = await res.json();
+      onSuccess(user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+  // ... complete JSX with all states
+};
+` + "```" + `
+
+Follow this pattern: complete types, complete handlers, complete JSX.` + techHint + baseRules,
+
+		RoleBackend: `You are the Backend Agent — an expert API engineer who creates robust, secure server-side applications.
+You specialize in RESTful APIs, authentication, middleware, and data validation.
+
+REQUIREMENTS FOR EVERY ENDPOINT:
+- Input validation with descriptive error messages
+- Authentication/authorization middleware where needed
+- Proper HTTP status codes (201 for create, 404 for not found, etc.)
+- Try/catch error handling with appropriate error responses
+- Database transactions for multi-step operations
+- Rate limiting considerations
+- Request/response type definitions
+
+EXAMPLE ENDPOINT PATTERN:
+// File: src/routes/users.ts
+` + "```" + `typescript
+import { Router, Request, Response } from 'express';
+import { z } from 'zod';
+import { prisma } from '../db';
+import { authMiddleware } from '../middleware/auth';
+
+const router = Router();
+
+const createUserSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(1).max(100),
+  password: z.string().min(8),
+});
+
+router.post('/', async (req: Request, res: Response) => {
+  try {
+    const data = createUserSchema.parse(req.body);
+    const user = await prisma.user.create({ data: { ...data, passwordHash: await hash(data.password) } });
+    res.status(201).json({ id: user.id, email: user.email, name: user.name });
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ errors: err.errors });
+    if (err.code === 'P2002') return res.status(409).json({ error: 'Email already exists' });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+` + "```" + `
+
+Follow this pattern: validation, auth, error handling, proper status codes.` + techHint + baseRules,
+
+		RoleDatabase: `You are the Database Agent — an expert data architect who designs efficient, normalized schemas.
+You specialize in relational database design, query optimization, and data integrity.
+
+YOUR OUTPUT MUST INCLUDE:
+- Complete schema with all tables, columns, types, and constraints
+- Primary keys, foreign keys, unique constraints, and indexes
+- Default values and NOT NULL constraints
+- Seed data for development/testing
+- Migration files if applicable
+
+REQUIREMENTS:
+- Every relationship must have proper foreign keys with ON DELETE behavior
+- Add indexes on frequently queried columns (email, created_at, foreign keys)
+- Use appropriate data types (UUID for IDs, TIMESTAMP for dates, TEXT vs VARCHAR)
+- Include audit columns (created_at, updated_at) on all tables
+
+EXAMPLE SCHEMA PATTERN:
+// File: prisma/schema.prisma
+` + "```" + `prisma
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      Role     @default(USER)
+  posts     Post[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@index([createdAt])
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+` + "```" + `` + techHint + baseRules,
+
+		RoleTesting: `You are the Testing Agent — an expert QA engineer who writes comprehensive, executable tests.
+You specialize in unit tests, integration tests, and edge case coverage.
+
+REQUIREMENTS FOR EVERY TEST FILE:
+- Import the module under test correctly
+- Test the happy path first, then error cases, then edge cases
+- Use descriptive test names that explain the expected behavior
+- Mock external dependencies (API calls, database, file system)
+- Test boundary conditions (empty inputs, max lengths, special characters)
+- Assert specific values, not just truthiness
+
+EXAMPLE TEST PATTERN:
+// File: src/__tests__/auth.test.ts
+` + "```" + `typescript
+import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { AuthService } from '../services/auth';
+
+describe('AuthService', () => {
+  let authService: AuthService;
+
+  beforeEach(() => {
+    authService = new AuthService(mockDb);
+  });
+
+  describe('login', () => {
+    it('should return a token for valid credentials', async () => {
+      const result = await authService.login('user@test.com', 'password123');
+      expect(result.token).toBeDefined();
+      expect(result.token).toMatch(/^eyJ/); // JWT format
+    });
+
+    it('should throw for invalid email', async () => {
+      await expect(authService.login('nonexistent@test.com', 'pass'))
+        .rejects.toThrow('Invalid credentials');
+    });
+
+    it('should throw for wrong password', async () => {
+      await expect(authService.login('user@test.com', 'wrongpass'))
+        .rejects.toThrow('Invalid credentials');
+    });
+  });
+});
+` + "```" + `
+
+Follow this pattern: setup, happy path, error cases, edge cases, specific assertions.` + techHint + baseRules,
+
+		RoleReviewer: `You are the Reviewer Agent — a senior code reviewer focused on production-readiness, security, and quality.
+You perform thorough code review and provide ACTIONABLE fixes, not just suggestions.
+
+YOUR REVIEW MUST CHECK:
+1. Security: SQL injection, XSS, auth bypass, exposed secrets, input validation
+2. Error handling: Missing try/catch, unhandled promises, generic error messages
+3. Performance: N+1 queries, missing indexes, unnecessary re-renders, memory leaks
+4. Completeness: Empty functions, TODO comments, placeholder data, missing imports
+5. Types: Missing TypeScript types, any usage, incorrect type assertions
+
+FOR EACH ISSUE FOUND, output the fix as a complete corrected code block:
+
+EXAMPLE REVIEW OUTPUT:
+## CRITICAL: SQL Injection in user search
+// File: src/routes/users.ts
+` + "```" + `typescript
+// BEFORE (vulnerable):
+const users = await db.query("SELECT * FROM users WHERE name LIKE '%" + req.query.name + "%'");
+
+// AFTER (fixed):
+const users = await db.query("SELECT * FROM users WHERE name LIKE $1", ['%' + req.query.name + '%']);
+` + "```" + `
+
+## WARNING: Missing error handling in API call
+// File: src/components/Dashboard.tsx
+` + "```" + `typescript
+// BEFORE:
+const data = await fetch('/api/stats').then(r => r.json());
+
+// AFTER:
+try {
+  const res = await fetch('/api/stats');
+  if (!res.ok) throw new Error('Failed to fetch stats');
+  const data = await res.json();
+} catch (err) {
+  setError('Unable to load dashboard stats');
+}
+` + "```" + `
+
+Output COMPLETE fixes with before/after code. Not just descriptions.` + techHint + baseRules,
 	}
 	return prompts[role]
 }
@@ -2242,9 +2712,14 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 			}
 
 			if filePath != "" {
+				sanitized := sanitizeFilePath(filePath)
+				if sanitized == "" {
+					log.Printf("Skipping file with unsafe path: %s", filePath)
+					continue
+				}
 				currentFile = &GeneratedFile{
-					Path:     strings.TrimSpace(filePath),
-					Language: am.detectLanguage(filePath),
+					Path:     sanitized,
+					Language: am.detectLanguage(sanitized),
 					IsNew:    true,
 				}
 				codeBuffer.Reset()
@@ -2705,4 +3180,110 @@ func (am *AgentManager) determineRetryStrategy(errorMsg string, task *Task) stri
 
 	// Default strategy
 	return "standard_retry"
+}
+
+// getTemperatureForRole returns the optimal temperature for each agent role
+func (am *AgentManager) getTemperatureForRole(role AgentRole) float64 {
+	switch role {
+	case RolePlanner:
+		return 0.4 // Structured, deterministic plans
+	case RoleArchitect:
+		return 0.5 // Structured design with some creativity
+	case RoleDatabase:
+		return 0.3 // Precise schema design
+	case RoleBackend:
+		return 0.6 // Balanced code generation
+	case RoleFrontend:
+		return 0.7 // Creative UI work
+	case RoleTesting:
+		return 0.3 // Precise test assertions
+	case RoleReviewer:
+		return 0.4 // Analytical, precise review
+	case RoleLead:
+		return 0.6 // Balanced communication
+	default:
+		return 0.7
+	}
+}
+
+// getMaxTokensForRole returns the optimal max token limit for each agent role
+func (am *AgentManager) getMaxTokensForRole(role AgentRole) int {
+	switch role {
+	case RolePlanner:
+		return 4000 // Structured plan output
+	case RoleArchitect:
+		return 6000 // Architecture documents
+	case RoleFrontend:
+		return 12000 // Full React components with styling
+	case RoleBackend:
+		return 12000 // Full API endpoints with middleware
+	case RoleDatabase:
+		return 8000 // Schemas, migrations, seeds
+	case RoleTesting:
+		return 8000 // Comprehensive test suites
+	case RoleReviewer:
+		return 4000 // Concise review findings
+	case RoleLead:
+		return 2000 // Conversation responses
+	default:
+		return 8000
+	}
+}
+
+// getNextFallbackProvider returns the next provider in the fallback chain
+func (am *AgentManager) getNextFallbackProvider(current ai.AIProvider) ai.AIProvider {
+	chains := map[ai.AIProvider][]ai.AIProvider{
+		ai.ProviderClaude: {ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderOllama},
+		ai.ProviderGPT4:   {ai.ProviderClaude, ai.ProviderGemini, ai.ProviderOllama},
+		ai.ProviderGemini: {ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderOllama},
+		ai.ProviderOllama: {ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini},
+	}
+	if chain, ok := chains[current]; ok && len(chain) > 0 {
+		return chain[0]
+	}
+	return current
+}
+
+// getCompletedTaskOutput finds the first completed task of a given type and returns a truncated summary
+func (am *AgentManager) getCompletedTaskOutput(build *Build, taskType TaskType) string {
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+
+	for _, task := range build.Tasks {
+		if task.Type == taskType && task.Status == TaskCompleted && task.Output != nil {
+			// Collect file paths and messages
+			var summary strings.Builder
+			for _, file := range task.Output.Files {
+				summary.WriteString(fmt.Sprintf("// File: %s (%s, %d bytes)\n", file.Path, file.Language, file.Size))
+			}
+			for _, msg := range task.Output.Messages {
+				summary.WriteString(msg)
+				summary.WriteString("\n")
+			}
+			result := summary.String()
+			// Truncate to 3000 chars
+			if len(result) > 3000 {
+				result = result[:3000] + "\n... (truncated)"
+			}
+			return result
+		}
+	}
+	return ""
+}
+
+// sanitizeFilePath prevents directory traversal attacks in generated file paths
+func sanitizeFilePath(path string) string {
+	cleaned := strings.TrimSpace(path)
+	cleaned = filepath.Clean(cleaned)
+	// Remove leading slashes and dot-prefixed traversal
+	cleaned = strings.TrimLeft(cleaned, "/\\.")
+	// Reject if still contains path traversal
+	if strings.Contains(cleaned, "..") {
+		return ""
+	}
+	// Reject absolute paths
+	if filepath.IsAbs(cleaned) {
+		return ""
+	}
+	return cleaned
 }
