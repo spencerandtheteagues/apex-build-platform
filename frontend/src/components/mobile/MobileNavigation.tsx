@@ -115,8 +115,8 @@ export const MobileNavigation: React.FC<MobileNavigationProps> = ({
         {/* Menu Header */}
         <div className="h-14 flex items-center justify-between px-4 border-b border-gray-800">
           <div className="flex items-center gap-2">
-            <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-red-900 rounded-lg flex items-center justify-center p-1">
-              <img src="/logo.png" alt="APEX" className="w-full h-full object-contain" />
+            <div className="w-10 h-10 flex items-center justify-center">
+              <img src="/logo.png" alt="APEX" className="w-full h-full object-contain drop-shadow-[0_0_10px_rgba(239,68,68,0.45)]" />
             </div>
             <span className="text-lg font-bold text-white">APEX.BUILD</span>
           </div>
@@ -295,8 +295,8 @@ export const MobileNavigation: React.FC<MobileNavigationProps> = ({
 
           {/* Logo */}
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-red-600 to-red-900 rounded flex items-center justify-center p-0.5">
-              <img src="/logo.png" alt="APEX" className="w-full h-full object-contain" />
+            <div className="w-8 h-8 flex items-center justify-center">
+              <img src="/logo.png" alt="APEX" className="w-full h-full object-contain drop-shadow-[0_0_8px_rgba(239,68,68,0.4)]" />
             </div>
             <span className="text-sm font-bold text-white">APEX.BUILD</span>
           </div>

@@ -214,9 +214,6 @@ const FloatingParticles: React.FC = () => {
 const AnimatedLogo: React.FC = () => {
   return (
     <div className="relative group">
-      {/* Subtle glow behind logo */}
-      <div className="absolute inset-0 bg-red-600/20 rounded-full blur-3xl scale-150 animate-pulse" style={{ animationDuration: '3s' }} />
-
       {/* Main logo - large and clean, no background box */}
       <div className="relative w-56 h-56 flex items-center justify-center group-hover:scale-105 transition-transform duration-500">
         <img

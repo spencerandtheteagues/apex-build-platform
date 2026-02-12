@@ -448,11 +448,12 @@ function App() {
       <div className="h-12 bg-black/90 border-b border-red-900/30 flex items-center justify-between px-4 z-50 relative">
         {/* Logo */}
         <div className="flex items-center gap-3">
-          <div className="relative">
-            <div className="w-12 h-12 bg-gradient-to-br from-red-600 to-red-900 rounded-lg flex items-center justify-center shadow-lg shadow-red-900/30 p-1">
-              <img src="/logo.png" alt="APEX Logo" className="w-full h-full object-contain" />
-            </div>
-            <div className="absolute -inset-0.5 bg-gradient-to-br from-red-600 to-red-900 rounded-lg opacity-30" style={{ filter: 'blur(4px)' }} />
+          <div className="w-12 h-12 flex items-center justify-center">
+            <img
+              src="/logo.png"
+              alt="APEX Logo"
+              className="w-full h-full object-contain drop-shadow-[0_0_12px_rgba(239,68,68,0.5)]"
+            />
           </div>
           <span className="text-xl font-bold bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
             APEX.BUILD
