@@ -763,6 +763,595 @@ html[data-ui-theme="blue"] [class*="bg-indigo-"] {
   background-color: rgba(99, 102, 241, 0.08) !important;
 }
 
+/* --- Fill colors --- */
+html[data-ui-theme="blue"] [class*="fill-red-"] {
+  fill: #2563eb !important;
+}
+
+/* --- Rose / Orange → Blue --- */
+html[data-ui-theme="blue"] [class*="text-rose-"] {
+  color: #2563eb !important;
+}
+html[data-ui-theme="blue"] [class*="text-orange-"] {
+  color: #2563eb !important;
+}
+html[data-ui-theme="blue"] [class*="bg-rose-"] {
+  background-color: rgba(37, 99, 235, 0.08) !important;
+}
+html[data-ui-theme="blue"] [class*="bg-orange-"] {
+  background-color: rgba(37, 99, 235, 0.08) !important;
+}
+html[data-ui-theme="blue"] [class*="border-rose-"] {
+  border-color: rgba(37, 99, 235, 0.25) !important;
+}
+html[data-ui-theme="blue"] [class*="from-rose-"] {
+  --tw-gradient-from: #3b82f6 var(--tw-gradient-from-position) !important;
+}
+html[data-ui-theme="blue"] [class*="to-rose-"] {
+  --tw-gradient-to: #1d4ed8 var(--tw-gradient-to-position) !important;
+}
+
+/* --- Hover background overrides (dark → light) --- */
+html[data-ui-theme="blue"] [class*="hover:bg-gray-800"]:hover {
+  background-color: #eff6ff !important;
+}
+html[data-ui-theme="blue"] [class*="hover:bg-gray-900"]:hover {
+  background-color: #f1f5f9 !important;
+}
+html[data-ui-theme="blue"] [class*="hover:bg-gray-700"]:hover {
+  background-color: #e2e8f0 !important;
+}
+html[data-ui-theme="blue"] [class*="hover:bg-red-"]:hover {
+  background-color: rgba(37, 99, 235, 0.12) !important;
+}
+
+/* --- Hover text overrides --- */
+html[data-ui-theme="blue"] [class*="hover:text-white"]:hover {
+  color: #1e293b !important;
+}
+html[data-ui-theme="blue"] [class*="hover:text-red-"]:hover {
+  color: #1d4ed8 !important;
+}
+html[data-ui-theme="blue"] [class*="hover:text-gray-"]:hover {
+  color: #334155 !important;
+}
+
+/* --- Hover border overrides --- */
+html[data-ui-theme="blue"] [class*="hover:border-red-"]:hover {
+  border-color: #3b82f6 !important;
+}
+html[data-ui-theme="blue"] [class*="hover:border-gray-"]:hover {
+  border-color: #bfdbfe !important;
+}
+
+/* --- Hover shadow overrides --- */
+html[data-ui-theme="blue"] [class*="hover:shadow-red-"]:hover {
+  --tw-shadow-color: rgba(37, 99, 235, 0.2) !important;
+}
+
+/* --- Drop Shadow overrides (red → blue) --- */
+html[data-ui-theme="blue"] [class*="drop-shadow-"] {
+  filter: drop-shadow(0 0 12px rgba(37, 99, 235, 0.3)) !important;
+}
+
+/* --- Active / Focus state overrides --- */
+html[data-ui-theme="blue"] [class*="focus:ring-red-"]:focus {
+  --tw-ring-color: rgba(37, 99, 235, 0.5) !important;
+}
+html[data-ui-theme="blue"] [class*="focus:border-red-"]:focus {
+  border-color: #2563eb !important;
+}
+
+/* --- More gray background → white/light --- */
+html[data-ui-theme="blue"] [class*="bg-gray-600"] {
+  background-color: #e2e8f0 !important;
+}
+html[data-ui-theme="blue"] [class*="bg-gray-500"] {
+  background-color: #e2e8f0 !important;
+}
+html[data-ui-theme="blue"] [class*="bg-gray-400"] {
+  background-color: #cbd5e1 !important;
+}
+html[data-ui-theme="blue"] [class*="bg-gray-300"] {
+  background-color: #cbd5e1 !important;
+}
+html[data-ui-theme="blue"] [class*="bg-gray-200"] {
+  background-color: #e2e8f0 !important;
+}
+html[data-ui-theme="blue"] [class*="bg-gray-100"] {
+  background-color: #f1f5f9 !important;
+}
+
+/* --- More border overrides --- */
+html[data-ui-theme="blue"] [class*="border-gray-500"] {
+  border-color: #e2e8f0 !important;
+}
+html[data-ui-theme="blue"] [class*="border-gray-400"] {
+  border-color: #cbd5e1 !important;
+}
+html[data-ui-theme="blue"] [class*="border-gray-300"] {
+  border-color: #e2e8f0 !important;
+}
+
+/* --- More gradient overrides (gray) --- */
+html[data-ui-theme="blue"] [class*="from-gray-700"] {
+  --tw-gradient-from: #f1f5f9 var(--tw-gradient-from-position) !important;
+}
+html[data-ui-theme="blue"] [class*="to-gray-700"] {
+  --tw-gradient-to: #e2e8f0 var(--tw-gradient-to-position) !important;
+}
+html[data-ui-theme="blue"] [class*="via-gray-800"],
+html[data-ui-theme="blue"] [class*="via-gray-900"] {
+  --tw-gradient-via: #f8fafc var(--tw-gradient-via-position) !important;
+}
+html[data-ui-theme="blue"] [class*="from-black"] {
+  --tw-gradient-from: #ffffff var(--tw-gradient-from-position) !important;
+}
+html[data-ui-theme="blue"] [class*="to-black"] {
+  --tw-gradient-to: #f1f5f9 var(--tw-gradient-to-position) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * FUTURISTIC.CSS VARIABLE OVERRIDES FOR BLUE THEME
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+html[data-ui-theme="blue"] {
+  /* Override all neon glow system variables */
+  --glow-red: #2563eb;
+  --glow-red-intense: #3b82f6;
+  --glow-cyan: #2563eb;
+  --glow-cyan-intense: #3b82f6;
+  --glow-purple: #6366f1;
+  --glow-purple-intense: #818cf8;
+  --glow-yellow: #d97706;
+  --glow-yellow-intense: #f59e0b;
+  --glow-green: #059669;
+  --glow-green-intense: #10b981;
+  --glow-orange: #2563eb;
+  --glow-orange-intense: #3b82f6;
+  --glow-blue: #2563eb;
+  --glow-blue-intense: #3b82f6;
+  --glow-pink: #6366f1;
+  --glow-pink-intense: #818cf8;
+
+  /* Holographic palette → blue tones */
+  --holo-start: #2563eb;
+  --holo-mid-1: #6366f1;
+  --holo-mid-2: #0ea5e9;
+  --holo-end: #1d4ed8;
+
+  /* Glass morphism → light glass */
+  --glass-bg: rgba(255, 255, 255, 0.6);
+  --glass-bg-light: rgba(255, 255, 255, 0.8);
+  --glass-bg-dark: rgba(248, 250, 252, 0.9);
+  --glass-border: rgba(226, 232, 240, 0.8);
+  --glass-border-bright: rgba(37, 99, 235, 0.2);
+}
+
+/* --- Futuristic glass → light glass in blue mode --- */
+html[data-ui-theme="blue"] .glass,
+html[data-ui-theme="blue"] .glass-light,
+html[data-ui-theme="blue"] .glass-dark,
+html[data-ui-theme="blue"] .glass-frosted,
+html[data-ui-theme="blue"] .glass-gradient {
+  background: rgba(255, 255, 255, 0.7) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  border-color: rgba(226, 232, 240, 0.8) !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 4px 16px rgba(15, 23, 42, 0.03) !important;
+}
+
+/* --- Futuristic text glow → clean in blue mode --- */
+html[data-ui-theme="blue"] .text-glow,
+html[data-ui-theme="blue"] .text-glow-intense,
+html[data-ui-theme="blue"] .text-glow-cyan,
+html[data-ui-theme="blue"] .text-glow-purple,
+html[data-ui-theme="blue"] .text-glow-red,
+html[data-ui-theme="blue"] .text-glow-pink {
+  color: #2563eb !important;
+  text-shadow: none !important;
+}
+
+/* --- Futuristic box glow → subtle blue shadow --- */
+html[data-ui-theme="blue"] .glow-cyan,
+html[data-ui-theme="blue"] .glow-purple,
+html[data-ui-theme="blue"] .glow-red,
+html[data-ui-theme="blue"] .glow-pink,
+html[data-ui-theme="blue"] .glow-green {
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.1), 0 4px 12px rgba(37, 99, 235, 0.06) !important;
+}
+
+/* --- Border glow → clean blue border --- */
+html[data-ui-theme="blue"] .border-glow-cyan,
+html[data-ui-theme="blue"] .border-glow-purple,
+html[data-ui-theme="blue"] .border-glow-red {
+  border: 1px solid rgba(37, 99, 235, 0.25) !important;
+  box-shadow: none !important;
+}
+
+/* --- Scanlines → off --- */
+html[data-ui-theme="blue"] .scanlines::before,
+html[data-ui-theme="blue"] .scanlines-heavy::before,
+html[data-ui-theme="blue"] .scanlines-animated::after {
+  display: none !important;
+}
+
+/* --- Holographic → subtle gradient --- */
+html[data-ui-theme="blue"] .holographic-border::before {
+  background: linear-gradient(135deg, #3b82f6, #6366f1, #0ea5e9, #3b82f6) !important;
+  filter: blur(6px) !important;
+  opacity: 0.15 !important;
+}
+
+html[data-ui-theme="blue"] .iridescent {
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.05), rgba(99, 102, 241, 0.05), rgba(14, 165, 233, 0.05), rgba(37, 99, 235, 0.05)) !important;
+}
+
+/* --- Hexgrid / Circuit → subtle dot pattern --- */
+html[data-ui-theme="blue"] .bg-hexgrid,
+html[data-ui-theme="blue"] .bg-hexgrid-purple,
+html[data-ui-theme="blue"] .bg-circuit {
+  background-color: #f8fafc !important;
+  background-image: radial-gradient(circle at 1px 1px, rgba(37, 99, 235, 0.06) 1px, transparent 1px) !important;
+  background-size: 24px 24px !important;
+}
+
+html[data-ui-theme="blue"] .bg-grid-perspective,
+html[data-ui-theme="blue"] .bg-diagonals {
+  background: none !important;
+}
+
+html[data-ui-theme="blue"] .bg-dots {
+  background-image: radial-gradient(rgba(37, 99, 235, 0.1) 1px, transparent 1px) !important;
+}
+
+/* --- Clip paths → rounded in blue mode --- */
+html[data-ui-theme="blue"] .clip-corner,
+html[data-ui-theme="blue"] .clip-corner-sm,
+html[data-ui-theme="blue"] .clip-corner-lg,
+html[data-ui-theme="blue"] .clip-cyber,
+html[data-ui-theme="blue"] .clip-diagonal,
+html[data-ui-theme="blue"] .clip-notch {
+  clip-path: none !important;
+  border-radius: 12px !important;
+}
+
+html[data-ui-theme="blue"] .cyber-card {
+  clip-path: none !important;
+  border-radius: 12px !important;
+  background: rgba(255, 255, 255, 0.8) !important;
+  backdrop-filter: blur(20px) !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 4px 16px rgba(15, 23, 42, 0.03) !important;
+}
+
+html[data-ui-theme="blue"] .cyber-card::before {
+  background: none !important;
+}
+
+/* --- Cyber scrollbar → clean light --- */
+html[data-ui-theme="blue"] .scrollbar-cyber::-webkit-scrollbar-track {
+  background: #f1f5f9 !important;
+}
+html[data-ui-theme="blue"] .scrollbar-cyber::-webkit-scrollbar-thumb {
+  background: #cbd5e1 !important;
+  box-shadow: none !important;
+}
+html[data-ui-theme="blue"] .scrollbar-cyber::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8 !important;
+  box-shadow: none !important;
+}
+
+/* --- Cyber button → polished blue --- */
+html[data-ui-theme="blue"] .btn-cyber {
+  border-color: rgba(37, 99, 235, 0.3) !important;
+  color: #2563eb !important;
+  clip-path: none !important;
+  border-radius: 8px !important;
+  background: rgba(37, 99, 235, 0.04) !important;
+}
+html[data-ui-theme="blue"] .btn-cyber:hover {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25) !important;
+}
+html[data-ui-theme="blue"] .btn-cyber:hover::before {
+  opacity: 0 !important;
+}
+
+/* --- Cyber input → light --- */
+html[data-ui-theme="blue"] .input-cyber {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+html[data-ui-theme="blue"] .input-cyber:focus {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1) !important;
+}
+html[data-ui-theme="blue"] .input-cyber::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* --- Progress bar → blue gradient --- */
+html[data-ui-theme="blue"] .progress-cyber {
+  background: rgba(37, 99, 235, 0.08) !important;
+}
+html[data-ui-theme="blue"] .progress-cyber::before {
+  background: linear-gradient(90deg, #3b82f6, #2563eb) !important;
+  box-shadow: none !important;
+}
+
+/* --- Divider → subtle blue --- */
+html[data-ui-theme="blue"] .divider-cyber {
+  background: linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.2), transparent) !important;
+  box-shadow: none !important;
+}
+
+/* --- Spinner → blue --- */
+html[data-ui-theme="blue"] .spinner-cyber {
+  border-top-color: #2563eb !important;
+  border-right-color: #6366f1 !important;
+  box-shadow: none !important;
+}
+
+/* --- Loading bar → blue --- */
+html[data-ui-theme="blue"] .loading-bar-cyber {
+  background: rgba(37, 99, 235, 0.06) !important;
+}
+html[data-ui-theme="blue"] .loading-bar-cyber::before {
+  background: linear-gradient(90deg, transparent, #3b82f6, #2563eb, transparent) !important;
+}
+
+/* --- Skeleton → blue shimmer --- */
+html[data-ui-theme="blue"] .skeleton-cyber {
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.04) 0%, rgba(37, 99, 235, 0.08) 50%, rgba(37, 99, 235, 0.04) 100%) !important;
+}
+
+/* --- Noise/vignette → off --- */
+html[data-ui-theme="blue"] .noise-overlay::after {
+  display: none !important;
+}
+html[data-ui-theme="blue"] .vignette::after {
+  display: none !important;
+}
+
+/* --- Futuristic animation classes → toned down --- */
+html[data-ui-theme="blue"] .animate-pulse-glow,
+html[data-ui-theme="blue"] .animate-text-pulse {
+  animation: blue-gentle-pulse 3s ease-in-out infinite !important;
+}
+html[data-ui-theme="blue"] .animate-scanline {
+  animation: none !important;
+}
+html[data-ui-theme="blue"] .animate-flicker,
+html[data-ui-theme="blue"] .animate-glitch,
+html[data-ui-theme="blue"] .animate-glitch-infinite {
+  animation: none !important;
+}
+html[data-ui-theme="blue"] .animate-breathe {
+  animation: blue-gentle-pulse 4s ease-in-out infinite !important;
+}
+
+/* --- Hover glow → subtle blue elevation --- */
+html[data-ui-theme="blue"] .hover-glow-cyan:hover,
+html[data-ui-theme="blue"] .hover-glow-purple:hover,
+html[data-ui-theme="blue"] .hover-glow-red:hover {
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.12), 0 8px 24px rgba(15, 23, 42, 0.06) !important;
+}
+
+/* --- Hover border glow → subtle --- */
+html[data-ui-theme="blue"] .hover-border-glow::before {
+  background: linear-gradient(135deg, #3b82f6, #6366f1) !important;
+  filter: blur(12px) !important;
+}
+html[data-ui-theme="blue"] .hover-border-glow:hover::before {
+  opacity: 0.15 !important;
+}
+
+/* --- Focus ring → blue --- */
+html[data-ui-theme="blue"] .focus-ring-cyber:focus {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25), 0 0 0 4px rgba(37, 99, 235, 0.1) !important;
+}
+
+/* --- Particle system → off in light mode --- */
+html[data-ui-theme="blue"] .particles-container,
+html[data-ui-theme="blue"] .particle {
+  display: none !important;
+}
+html[data-ui-theme="blue"] .data-stream-column {
+  display: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * AUTH ANIMATION OVERRIDES FOR BLUE THEME
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* Auth grid → subtle blue dots */
+html[data-ui-theme="blue"] .auth-grid-bg {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(37, 99, 235, 0.05) 1px, transparent 1px) !important;
+  background-size: 32px 32px !important;
+}
+
+/* Auth gradient bg → light blue */
+html[data-ui-theme="blue"] .auth-gradient-bg {
+  background: linear-gradient(-45deg, #f8fafc, #eff6ff, #f0f9ff, #eef2ff, #f8fafc) !important;
+}
+
+/* Auth card → white glass */
+html[data-ui-theme="blue"] .auth-card {
+  background: rgba(255, 255, 255, 0.85) !important;
+  border-color: rgba(226, 232, 240, 0.8) !important;
+  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+}
+html[data-ui-theme="blue"] .auth-card:hover {
+  border-color: rgba(37, 99, 235, 0.2) !important;
+}
+html[data-ui-theme="blue"] .auth-card::before {
+  background: conic-gradient(from 0deg, transparent, rgba(37, 99, 235, 0.3), transparent, rgba(99, 102, 241, 0.2), transparent) !important;
+}
+
+/* Auth logo → blue glow */
+html[data-ui-theme="blue"] .auth-logo {
+  animation: blue-logo-pulse 3s ease-in-out infinite !important;
+}
+
+/* Auth title → blue gradient */
+html[data-ui-theme="blue"] .auth-title {
+  background: linear-gradient(90deg, #2563eb, #1d4ed8, #3b82f6, #1d4ed8, #2563eb) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+}
+
+/* Auth input focus → blue */
+html[data-ui-theme="blue"] .auth-input-wrapper input:focus {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1) !important;
+  animation: none !important;
+}
+html[data-ui-theme="blue"] .auth-input-wrapper.focused .auth-input-icon {
+  color: #2563eb !important;
+}
+html[data-ui-theme="blue"] .auth-input-wrapper.focused .auth-input-label,
+html[data-ui-theme="blue"] .auth-input-wrapper.has-value .auth-input-label {
+  color: #2563eb !important;
+}
+
+/* Auth button → blue gradient */
+html[data-ui-theme="blue"] .auth-button {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #2563eb 100%) !important;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3) !important;
+}
+html[data-ui-theme="blue"] .auth-button:hover:not(:disabled) {
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4), 0 2px 4px rgba(37, 99, 235, 0.2) !important;
+}
+
+/* Auth link → blue */
+html[data-ui-theme="blue"] .auth-link::after {
+  background: linear-gradient(90deg, #2563eb, #1d4ed8) !important;
+}
+html[data-ui-theme="blue"] .auth-link:hover {
+  color: #1d4ed8 !important;
+}
+
+/* Auth particle → blue */
+html[data-ui-theme="blue"] .auth-particle {
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.4) 0%, transparent 70%) !important;
+}
+
+/* HUD corners → blue */
+html[data-ui-theme="blue"] .hud-corner {
+  border-color: rgba(37, 99, 235, 0.2) !important;
+}
+
+/* Auth error → keep red for errors */
+html[data-ui-theme="blue"] .auth-error {
+  background: rgba(239, 68, 68, 0.06) !important;
+  border-color: rgba(239, 68, 68, 0.2) !important;
+  color: #dc2626 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * BUTTON COMPONENT INLINE STYLE OVERRIDES
+ * Catch the inline red rgba values from Button.tsx
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* Override button corner accents → blue when hovered */
+html[data-ui-theme="blue"] button[class*="from-red-"],
+html[data-ui-theme="blue"] button[class*="bg-gradient-to-r"] {
+  background: linear-gradient(to right, #2563eb, #1d4ed8) !important;
+  border-color: rgba(37, 99, 235, 0.3) !important;
+  --tw-shadow-color: rgba(37, 99, 235, 0.15) !important;
+}
+
+html[data-ui-theme="blue"] button[class*="from-red-"]:hover,
+html[data-ui-theme="blue"] button[class*="bg-gradient-to-r"]:hover {
+  background: linear-gradient(to right, #3b82f6, #2563eb) !important;
+  border-color: rgba(37, 99, 235, 0.5) !important;
+  --tw-shadow-color: rgba(37, 99, 235, 0.25) !important;
+}
+
+/* Ghost / outline button variants → blue */
+html[data-ui-theme="blue"] button[class*="border-red-"] {
+  border-color: rgba(37, 99, 235, 0.3) !important;
+  color: #2563eb !important;
+}
+html[data-ui-theme="blue"] button[class*="border-red-"]:hover {
+  border-color: #3b82f6 !important;
+  background-color: rgba(37, 99, 235, 0.06) !important;
+  color: #1d4ed8 !important;
+}
+
+/* Link-style buttons → blue */
+html[data-ui-theme="blue"] button[class*="text-red-"] {
+  color: #2563eb !important;
+}
+html[data-ui-theme="blue"] button[class*="text-red-"]:hover {
+  color: #1d4ed8 !important;
+}
+
+/* Danger button stays red (semantic) — keep it distinct */
+html[data-ui-theme="blue"] button[class*="from-red-500"][class*="to-red-700"] {
+  background: linear-gradient(to right, #ef4444, #dc2626) !important;
+  border-color: rgba(239, 68, 68, 0.3) !important;
+}
+
+/* Override clip-path on all buttons */
+html[data-ui-theme="blue"] button.clip-path-cyber,
+html[data-ui-theme="blue"] button[class*="clip-path"] {
+  clip-path: none !important;
+  border-radius: 8px !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * ADDITIONAL DARK ELEMENT OVERRIDES
+ * Catch remaining bg-black/gray-9xx patterns in any context
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* Dialog / modal backgrounds */
+html[data-ui-theme="blue"] [class*="bg-black/"] {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+}
+
+/* Dark overlay backgrounds */
+html[data-ui-theme="blue"] [class*="bg-gray-900/"],
+html[data-ui-theme="blue"] [class*="bg-gray-950/"] {
+  background-color: rgba(248, 250, 252, 0.9) !important;
+}
+
+/* Backdrop overlays — keep a subtle overlay effect */
+html[data-ui-theme="blue"] [class*="bg-black"][class*="bg-opacity-"],
+html[data-ui-theme="blue"] [class*="backdrop-blur"] {
+  backdrop-filter: blur(12px) saturate(180%) !important;
+}
+
+/* Ensure code/terminal-like blocks have light bg */
+html[data-ui-theme="blue"] [class*="bg-gray-950"],
+html[data-ui-theme="blue"] [class*="bg-zinc-950"],
+html[data-ui-theme="blue"] [class*="bg-zinc-900"],
+html[data-ui-theme="blue"] [class*="bg-slate-900"],
+html[data-ui-theme="blue"] [class*="bg-slate-950"],
+html[data-ui-theme="blue"] [class*="bg-neutral-900"],
+html[data-ui-theme="blue"] [class*="bg-neutral-950"] {
+  background-color: #f8fafc !important;
+}
+
+/* Text color overrides for dark-on-dark patterns */
+html[data-ui-theme="blue"] [class*="text-zinc-"],
+html[data-ui-theme="blue"] [class*="text-slate-"] {
+  color: #334155 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * ANIMATION STATE OVERRIDES — clean blue pulse for animate-pulse on logos etc.
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+html[data-ui-theme="blue"] .animate-pulse {
+  animation: blue-gentle-pulse 3s ease-in-out infinite !important;
+}
+
 /* Base Styles */
 * {
   box-sizing: border-box;
