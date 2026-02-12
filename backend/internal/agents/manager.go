@@ -672,8 +672,7 @@ func (am *AgentManager) assignProvidersToRoles(providers []ai.AIProvider, roles 
 		return leadProvider
 	}
 
-	// Role-to-provider preferences
-	// Desired mapping: Claude = architect/planner/reviewer, OpenAI = builder/coder, Gemini = tester
+	// Role-to-provider preferences with graceful fallback when a preferred provider is unavailable.
 	for _, role := range roles {
 		switch role {
 		case RolePlanner, RoleArchitect, RoleReviewer:
@@ -685,6 +684,38 @@ func (am *AgentManager) assignProvidersToRoles(providers []ai.AIProvider, roles 
 		default:
 			assignments[role] = leadProvider
 		}
+	}
+
+	// Explicit policy enforcement:
+	// - Claude owns architecture/planning/review
+	// - GPT owns coding/build roles
+	// - Gemini owns testing
+	// This only applies when each preferred provider is actually available.
+	for _, role := range roles {
+		switch role {
+		case RolePlanner, RoleArchitect, RoleReviewer:
+			if available[ai.ProviderClaude] {
+				assignments[role] = ai.ProviderClaude
+			}
+		case RoleFrontend, RoleBackend, RoleDatabase:
+			if available[ai.ProviderGPT4] {
+				assignments[role] = ai.ProviderGPT4
+			}
+		case RoleTesting:
+			if available[ai.ProviderGemini] {
+				assignments[role] = ai.ProviderGemini
+			}
+		}
+	}
+
+	if !available[ai.ProviderClaude] {
+		log.Printf("Provider policy notice: Claude unavailable, architecture roles will use fallback providers")
+	}
+	if !available[ai.ProviderGPT4] {
+		log.Printf("Provider policy notice: OpenAI unavailable, coding roles will use fallback providers")
+	}
+	if !available[ai.ProviderGemini] {
+		log.Printf("Provider policy notice: Gemini unavailable, testing role will use fallback providers")
 	}
 
 	// Log final assignments
