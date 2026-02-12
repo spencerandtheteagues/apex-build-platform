@@ -461,10 +461,10 @@ function App() {
   return (
     <div className="h-screen flex flex-col bg-black">
       {/* Top Navigation */}
-      <div className="h-12 bg-black/90 border-b border-red-900/30 flex items-center justify-between px-4 z-50 relative">
+      <div className="h-14 bg-black/90 border-b border-red-900/30 flex items-center justify-between px-4 z-50 relative">
         {/* Logo */}
         <div className="flex items-center gap-3">
-          <div className="w-14 h-14 flex items-center justify-center">
+          <div className="w-16 h-16 flex items-center justify-center">
             <img
               src={logoSrc}
               alt="APEX Logo"
@@ -486,7 +486,7 @@ function App() {
                 : 'text-gray-400 hover:text-white hover:bg-gray-800'
             }`}
           >
-            <img src={logoSrc} alt="APEX" className="desktop-tab-logo w-6 h-6 object-contain" />
+            <img src={logoSrc} alt="APEX" className="desktop-tab-logo w-7 h-7 object-contain" />
             <span className="text-sm font-medium">Build App</span>
           </button>
           <button

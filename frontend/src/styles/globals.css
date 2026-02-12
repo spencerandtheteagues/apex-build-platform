@@ -1367,17 +1367,23 @@ html[data-ui-theme="blue"] .animate-pulse {
 }
 
 .desktop-header-logo {
-  transform: scale(1.28);
+  transform: scale(1.46);
 }
 
 .desktop-tab-logo {
-  transform: scale(1.2);
+  transform: scale(1.34);
 }
 
-.mobile-header-logo,
-.mobile-menu-logo,
+.mobile-header-logo {
+  transform: scale(1.34);
+}
+
+.mobile-menu-logo {
+  transform: scale(1.42);
+}
+
 .mobile-menu-tab-logo {
-  transform: scale(1.24);
+  transform: scale(1.3);
 }
 
 .desktop-header-wordmark {
