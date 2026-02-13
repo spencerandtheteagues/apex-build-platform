@@ -154,6 +154,24 @@ func initAI() (*ai.AIRouter, error) {
 	// Get API keys from environment
 	claudeKey := os.Getenv("ANTHROPIC_API_KEY")
 	openAIKey := os.Getenv("OPENAI_API_KEY")
+	if openAIKey == "" {
+		openAIKey = os.Getenv("CHATGPT_API_KEY")
+	}
+	if openAIKey == "" {
+		openAIKey = os.Getenv("GPT_API_KEY")
+	}
+	if openAIKey == "" {
+		openAIKey = os.Getenv("OPENAI_PLATFORM_API_KEY")
+	}
+	if openAIKey == "" {
+		openAIKey = os.Getenv("OPENAI_KEY")
+	}
+	if openAIKey == "" {
+		openAIKey = os.Getenv("OPENAI_TOKEN")
+	}
+	if openAIKey == "" {
+		openAIKey = os.Getenv("OPENAI_SECRET_KEY")
+	}
 	geminiKey := os.Getenv("GOOGLE_AI_API_KEY")
 
 	// Check for placeholder values

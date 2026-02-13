@@ -564,7 +564,7 @@ func loadConfig() *AppConfig {
 	return &AppConfig{
 		Database:      dbConfig,
 		ClaudeAPIKey:  getEnvAny([]string{"ANTHROPIC_API_KEY", "CLAUDE_API_KEY"}, ""),
-		OpenAIAPIKey:  getEnvAny([]string{"OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN", "OPENAI_SECRET_KEY"}, ""),
+		OpenAIAPIKey:  getEnvAny([]string{"OPENAI_API_KEY", "CHATGPT_API_KEY", "GPT_API_KEY", "OPENAI_PLATFORM_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN", "OPENAI_SECRET_KEY"}, ""),
 		GeminiAPIKey:  getEnvAny([]string{"GEMINI_API_KEY", "GOOGLE_AI_API_KEY", "GOOGLE_GEMINI_API_KEY"}, ""),
 		GrokAPIKey:    getEnv("XAI_API_KEY", ""),
 		OllamaBaseURL: getEnv("OLLAMA_BASE_URL", ""), // Empty = disabled, or "http://localhost:11434"
