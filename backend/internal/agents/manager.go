@@ -496,15 +496,18 @@ func (am *AgentManager) failBuildOnTimeout(buildID string, timeout time.Duration
 		BuildID:   buildID,
 		Timestamp: now,
 		Data: map[string]any{
-			"status":          string(BuildFailed),
-			"error":           "Build timed out",
-			"details":         fmt.Sprintf("Build exceeded timeout of %v and was stopped before completion.", timeout.Round(time.Second)),
-			"progress":        progress,
-			"timed_out":       true,
-			"files_count":     len(allFiles),
-			"files":           allFiles,
-			"cancelled_tasks": cancelledTasks,
-			"recoverable":     false,
+			"status":                string(BuildFailed),
+			"error":                 "Build timed out",
+			"details":               fmt.Sprintf("Build exceeded timeout of %v and was stopped before completion.", timeout.Round(time.Second)),
+			"progress":              progress,
+			"timed_out":             true,
+			"files_count":           len(allFiles),
+			"files":                 allFiles,
+			"cancelled_tasks":       cancelledTasks,
+			"recoverable":           false,
+			"quality_gate_required": true,
+			"quality_gate_passed":   false,
+			"quality_gate_stage":    "validation",
 		},
 	})
 
@@ -1754,9 +1757,13 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 		BuildID:   buildID,
 		Timestamp: time.Now(),
 		Data: map[string]any{
-			"phase":         "auto_recovery",
-			"message":       "Task failure detected. Launching problem-solving recovery agent...",
-			"recovery_task": recoveryTask.ID,
+			"phase":                 "auto_recovery",
+			"status":                string(BuildReviewing),
+			"message":               "Task failure detected. Launching problem-solving recovery agent...",
+			"recovery_task":         recoveryTask.ID,
+			"quality_gate_required": true,
+			"quality_gate_active":   true,
+			"quality_gate_stage":    "validation",
 		},
 	})
 
@@ -1850,8 +1857,12 @@ func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task
 		BuildID:   build.ID,
 		Timestamp: time.Now(),
 		Data: map[string]any{
-			"phase":   "validation",
-			"message": "Automated fixes applied. Running regression testing and review.",
+			"phase":                 "validation",
+			"status":                string(BuildReviewing),
+			"message":               "Automated fixes applied. Running regression testing and review.",
+			"quality_gate_required": true,
+			"quality_gate_active":   true,
+			"quality_gate_stage":    "validation",
 		},
 	})
 }
@@ -1909,9 +1920,13 @@ func (am *AgentManager) handleTestCompletion(build *Build, output *TaskOutput) {
 			BuildID:   build.ID,
 			Timestamp: time.Now(),
 			Data: map[string]any{
-				"message":  "Test failures detected, creating fix task...",
-				"phase":    "testing",
-				"fix_task": fixTask.ID,
+				"message":               "Test failures detected, creating fix task...",
+				"phase":                 "testing",
+				"status":                string(BuildTesting),
+				"fix_task":              fixTask.ID,
+				"quality_gate_required": true,
+				"quality_gate_active":   true,
+				"quality_gate_stage":    "testing",
 			},
 		})
 
@@ -1926,7 +1941,6 @@ func (am *AgentManager) handleTestCompletion(build *Build, output *TaskOutput) {
 	}
 
 	build.mu.Lock()
-	build.Status = BuildReviewing
 	build.UpdatedAt = time.Now()
 	build.mu.Unlock()
 }
@@ -1979,9 +1993,13 @@ func (am *AgentManager) handleReviewCompletion(build *Build, output *TaskOutput)
 			BuildID:   build.ID,
 			Timestamp: time.Now(),
 			Data: map[string]any{
-				"message":  "Critical issues found in review, creating fix task...",
-				"phase":    "reviewing",
-				"fix_task": fixTask.ID,
+				"message":               "Critical issues found in review, creating fix task...",
+				"phase":                 "reviewing",
+				"status":                string(BuildReviewing),
+				"fix_task":              fixTask.ID,
+				"quality_gate_required": true,
+				"quality_gate_active":   true,
+				"quality_gate_stage":    "review",
 			},
 		})
 
@@ -2057,15 +2075,30 @@ func (am *AgentManager) updateBuildProgress(build *Build) {
 
 	build.Progress = progress
 	build.UpdatedAt = time.Now()
+	status := build.Status
+	qualityStage := ""
+	qualityActive := false
+	switch status {
+	case BuildTesting:
+		qualityStage = "testing"
+		qualityActive = true
+	case BuildReviewing:
+		qualityStage = "review"
+		qualityActive = true
+	}
 
 	am.broadcast(build.ID, &WSMessage{
 		Type:      WSBuildProgress,
 		BuildID:   build.ID,
 		Timestamp: time.Now(),
 		Data: map[string]any{
-			"progress":        progress,
-			"tasks_completed": completed,
-			"tasks_total":     len(build.Tasks),
+			"progress":              progress,
+			"status":                string(status),
+			"tasks_completed":       completed,
+			"tasks_total":           len(build.Tasks),
+			"quality_gate_required": true,
+			"quality_gate_active":   qualityActive,
+			"quality_gate_stage":    qualityStage,
 		},
 	})
 }
@@ -2117,10 +2150,13 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 			BuildID:   build.ID,
 			Timestamp: now,
 			Data: map[string]any{
-				"status":      string(status),
-				"progress":    progress,
-				"files_count": len(allFiles),
-				"files":       allFiles,
+				"status":                string(status),
+				"progress":              progress,
+				"files_count":           len(allFiles),
+				"files":                 allFiles,
+				"quality_gate_required": true,
+				"quality_gate_passed":   true,
+				"quality_gate_stage":    "complete",
 			},
 		})
 		log.Printf("Build %s completed successfully (%d files)", build.ID, len(allFiles))
@@ -2148,13 +2184,16 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 			BuildID:   build.ID,
 			Timestamp: now,
 			Data: map[string]any{
-				"status":      string(status),
-				"error":       errorTitle,
-				"details":     buildError,
-				"recoverable": false,
-				"progress":    progress,
-				"files_count": len(allFiles),
-				"files":       allFiles,
+				"status":                string(status),
+				"error":                 errorTitle,
+				"details":               buildError,
+				"recoverable":           false,
+				"progress":              progress,
+				"files_count":           len(allFiles),
+				"files":                 allFiles,
+				"quality_gate_required": true,
+				"quality_gate_passed":   false,
+				"quality_gate_stage":    "validation",
 			},
 		})
 		log.Printf("Build %s finished with status %s (%d files)", build.ID, status, len(allFiles))
@@ -2377,35 +2416,37 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string,
 	archAgents, dbAgents, codeAgents, testAgents, reviewAgents []agentPriority) {
 
 	phases := []struct {
-		name   string
-		agents []agentPriority
+		name         string
+		key          string
+		status       BuildStatus
+		qualityStage string
+		agents       []agentPriority
 	}{
-		{"Architecture", archAgents},
-		{"Database Schema", dbAgents},
-		{"Code Generation", codeAgents},
-		{"Testing", testAgents},
-		{"Review", reviewAgents},
+		{name: "Architecture", key: "architecture", status: BuildInProgress, qualityStage: "", agents: archAgents},
+		{name: "Database Schema", key: "database", status: BuildInProgress, qualityStage: "", agents: dbAgents},
+		{name: "Code Generation", key: "code_generation", status: BuildInProgress, qualityStage: "", agents: codeAgents},
+		{name: "Testing", key: "testing", status: BuildTesting, qualityStage: "testing", agents: testAgents},
+		{name: "Review", key: "review", status: BuildReviewing, qualityStage: "review", agents: reviewAgents},
 	}
 
+	phaseTotal := 0
+	for _, phase := range phases {
+		if len(phase.agents) > 0 {
+			phaseTotal++
+		}
+	}
+
+	phaseIndex := 0
 	for _, phase := range phases {
 		if len(phase.agents) == 0 {
 			continue
 		}
+		phaseIndex++
 
-		phaseStatus := BuildInProgress
+		phaseStatus := phase.status
 		build.mu.Lock()
-		switch phase.name {
-		case "Testing":
-			build.Status = BuildTesting
-			phaseStatus = BuildTesting
-		case "Review":
-			build.Status = BuildReviewing
-			phaseStatus = BuildReviewing
-		default:
-			if build.Status != BuildFailed && build.Status != BuildCancelled {
-				build.Status = BuildInProgress
-			}
-			phaseStatus = build.Status
+		if build.Status != BuildFailed && build.Status != BuildCancelled {
+			build.Status = phaseStatus
 		}
 		build.UpdatedAt = time.Now()
 		build.mu.Unlock()
@@ -2417,10 +2458,16 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string,
 			BuildID:   build.ID,
 			Timestamp: time.Now(),
 			Data: map[string]any{
-				"phase":   phase.name,
-				"agents":  len(phase.agents),
-				"status":  string(phaseStatus),
-				"message": fmt.Sprintf("Starting %s phase", phase.name),
+				"phase":                 phase.name,
+				"phase_key":             phase.key,
+				"phase_index":           phaseIndex,
+				"phase_total":           phaseTotal,
+				"agents":                len(phase.agents),
+				"status":                string(phaseStatus),
+				"quality_gate_required": true,
+				"quality_gate_active":   phase.qualityStage != "",
+				"quality_gate_stage":    phase.qualityStage,
+				"message":               fmt.Sprintf("Starting %s phase", phase.name),
 			},
 		})
 

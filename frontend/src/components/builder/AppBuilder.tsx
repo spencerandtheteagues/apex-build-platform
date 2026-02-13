@@ -119,6 +119,10 @@ interface BuildState {
   description: string
   availableProviders?: string[]
   powerMode?: 'fast' | 'balanced' | 'max'
+  currentPhase?: string
+  qualityGateRequired?: boolean
+  qualityGateStatus?: 'pending' | 'running' | 'passed' | 'failed'
+  qualityGateStage?: string
 }
 
 type BuildMode = 'fast' | 'full'
@@ -901,6 +905,65 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
   const { user, currentProject, createProject, setCurrentProject } = useStore()
   const activePowerMode = buildState?.powerMode || powerMode
+  const activeBuildStatuses = useMemo(
+    () => new Set<BuildState['status']>(['planning', 'in_progress', 'testing', 'reviewing']),
+    []
+  )
+  const isBuildActive = buildState ? activeBuildStatuses.has(buildState.status) : false
+  const humanizePhase = useCallback((phase: string) => {
+    const normalized = phase.replace(/_/g, ' ').trim()
+    if (!normalized) return 'Planning'
+    return normalized.replace(/\b\w/g, (m) => m.toUpperCase())
+  }, [])
+  const phaseLabel = useMemo(() => {
+    if (!buildState) return 'Planning'
+    if (buildState.currentPhase) return humanizePhase(buildState.currentPhase)
+    switch (buildState.status) {
+      case 'planning':
+        return 'Planning'
+      case 'testing':
+        return 'Testing'
+      case 'reviewing':
+        return 'Review'
+      case 'completed':
+        return 'Completed'
+      case 'failed':
+        return 'Failed'
+      default:
+        return 'Code Generation'
+    }
+  }, [buildState, humanizePhase])
+  const qualityGateLabel = useMemo(() => {
+    if (!buildState) return 'Pending'
+    if (buildState.qualityGateStatus) {
+      switch (buildState.qualityGateStatus) {
+        case 'passed':
+          return 'Passed'
+        case 'failed':
+          return 'Failed'
+        case 'running':
+          return 'Running'
+        default:
+          return 'Pending'
+      }
+    }
+    if (buildState.status === 'completed') return 'Passed'
+    if (buildState.status === 'failed') return 'Failed'
+    if (buildState.status === 'testing' || buildState.status === 'reviewing') return 'Running'
+    return 'Pending'
+  }, [buildState])
+  const qualityGateToneClass = useMemo(() => {
+    switch (qualityGateLabel) {
+      case 'Passed':
+        return 'border-green-500/60 bg-green-500/15 text-green-300'
+      case 'Failed':
+        return 'border-red-500/60 bg-red-500/15 text-red-300'
+      case 'Running':
+        return 'border-blue-500/60 bg-blue-500/15 text-blue-300'
+      default:
+        return 'border-gray-600 bg-gray-500/10 text-gray-300'
+    }
+  }, [qualityGateLabel])
 
   // Tech stack options
   const techStacks: TechStack[] = [
@@ -1105,6 +1168,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           ...data,
           agents: Object.values(data.agents || {}),
           powerMode: data.power_mode || data.powerMode || prev?.powerMode,
+          currentPhase: data.phase || prev?.currentPhase,
+          qualityGateRequired: typeof data.quality_gate_required === 'boolean' ? data.quality_gate_required : prev?.qualityGateRequired,
+          qualityGateStage: data.quality_gate_stage || prev?.qualityGateStage,
+          qualityGateStatus:
+            typeof data.quality_gate_passed === 'boolean'
+              ? (data.quality_gate_passed ? 'passed' : 'failed')
+              : data.quality_gate_active
+                ? 'running'
+                : prev?.qualityGateStatus,
         }))
         break
 
@@ -1125,6 +1197,23 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           if (data.phase === 'provider_check' && data.available_providers) {
             updates.availableProviders = data.available_providers
             addSystemMessage(`AI Providers available: ${data.available_providers.join(', ')} (${data.provider_count} total)`)
+          }
+
+          if (typeof data.phase === 'string' && data.phase.trim()) {
+            updates.currentPhase = data.phase
+          }
+          if (typeof data.quality_gate_required === 'boolean') {
+            updates.qualityGateRequired = data.quality_gate_required
+          }
+          if (typeof data.quality_gate_stage === 'string') {
+            updates.qualityGateStage = data.quality_gate_stage
+          }
+          if (typeof data.quality_gate_passed === 'boolean') {
+            updates.qualityGateStatus = data.quality_gate_passed ? 'passed' : 'failed'
+          } else if (data.quality_gate_active === true) {
+            updates.qualityGateStatus = 'running'
+          } else if (data.quality_gate_required === true && prev.status !== 'completed' && prev.status !== 'failed') {
+            updates.qualityGateStatus = prev.qualityGateStatus || 'pending'
           }
 
           if (data.inactivity_warning) {
@@ -1271,6 +1360,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
             ...prev,
             status: finalStatus,
             progress: finalStatus === 'completed' ? 100 : (typeof data.progress === 'number' ? clampPercent(data.progress) : prev.progress),
+            currentPhase: finalStatus === 'completed' ? 'Completed' : (prev.currentPhase || 'Validation'),
+            qualityGateRequired: typeof data.quality_gate_required === 'boolean' ? data.quality_gate_required : true,
+            qualityGateStage: typeof data.quality_gate_stage === 'string' ? data.quality_gate_stage : prev.qualityGateStage,
+            qualityGateStatus: typeof data.quality_gate_passed === 'boolean'
+              ? (data.quality_gate_passed ? 'passed' : 'failed')
+              : (finalStatus === 'completed' ? 'passed' : 'failed'),
           }
           : null
         )
@@ -1370,6 +1465,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
             ...prev,
             status: 'failed',
             progress: typeof data.progress === 'number' ? clampPercent(data.progress) : prev.progress,
+            currentPhase: prev.currentPhase || 'Validation',
+            qualityGateRequired: typeof data.quality_gate_required === 'boolean' ? data.quality_gate_required : true,
+            qualityGateStage: typeof data.quality_gate_stage === 'string' ? data.quality_gate_stage : prev.qualityGateStage,
+            qualityGateStatus: 'failed',
           }
           : null
         )
@@ -1377,9 +1476,17 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
       case 'build:phase':
         addSystemMessage(`Phase: ${data.phase || data.message || 'Next phase starting'}`)
-        if (data.status) {
-          setBuildState(prev => prev ? { ...prev, status: data.status } : null)
-        }
+        setBuildState(prev => prev
+          ? {
+            ...prev,
+            status: data.status || prev.status,
+            currentPhase: data.phase || prev.currentPhase,
+            qualityGateRequired: typeof data.quality_gate_required === 'boolean' ? data.quality_gate_required : prev.qualityGateRequired,
+            qualityGateStage: typeof data.quality_gate_stage === 'string' ? data.quality_gate_stage : prev.qualityGateStage,
+            qualityGateStatus: data.quality_gate_active ? 'running' : prev.qualityGateStatus,
+          }
+          : null
+        )
         break
 
       case 'build:started':
@@ -1388,6 +1495,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           ...prev,
           status: data.status || 'planning',
           powerMode: data.power_mode || data.powerMode || prev.powerMode,
+          currentPhase: data.phase || prev.currentPhase || 'Planning',
+          qualityGateRequired: true,
+          qualityGateStatus: prev.qualityGateStatus || 'pending',
         } : null)
         break
 
@@ -1868,6 +1978,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         checkpoints: [],
         description: appDescription,
         powerMode,
+        currentPhase: 'Planning',
+        qualityGateRequired: true,
+        qualityGateStatus: 'pending',
+        qualityGateStage: '',
       })
 
       connectWebSocket(buildId)
@@ -2362,7 +2476,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                   <CardTitle className="text-xl flex items-center gap-3">
                     <div className="relative">
                       <Bot className="w-7 h-7 text-red-400" />
-                      {buildState.status === 'in_progress' && (
+                      {isBuildActive && (
                         <div className="absolute inset-0">
                           <Bot className="w-7 h-7 text-red-400 animate-ping opacity-50" />
                         </div>
@@ -2402,14 +2516,37 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                       variant={buildState.status === 'completed' ? 'success' : buildState.status === 'failed' ? 'error' : 'primary'}
                       className="capitalize text-sm px-4 py-1.5 font-semibold"
                     >
-                      {buildState.status === 'in_progress' && <Circle className="w-2 h-2 mr-2 fill-current animate-pulse" />}
+                      {isBuildActive && <Circle className="w-2 h-2 mr-2 fill-current animate-pulse" />}
                       {buildState.status.replace('_', ' ')}
                     </Badge>
-                    {buildState.status === 'in_progress' && (
+                    {isBuildActive && (
                       <span className="text-xs text-gray-400">
                         {buildState.agents.filter(a => a.status === 'working').length} agents working
                       </span>
                     )}
+                  </div>
+
+                  {/* Pipeline telemetry */}
+                  <div className="mt-4 grid grid-cols-1 gap-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-500 uppercase tracking-wide">Pipeline</span>
+                      <Badge variant="outline" className="text-[11px] border-cyan-500/50 bg-cyan-500/10 text-cyan-300">
+                        {phaseLabel}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-500 uppercase tracking-wide">Quality Gate</span>
+                      <div className="flex items-center gap-2">
+                        {buildState.qualityGateStage && (
+                          <Badge variant="outline" className="text-[10px] border-gray-600 text-gray-300 bg-gray-900/60">
+                            {humanizePhase(buildState.qualityGateStage)}
+                          </Badge>
+                        )}
+                        <Badge variant="outline" className={cn('text-[11px]', qualityGateToneClass)}>
+                          {qualityGateLabel}
+                        </Badge>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Power Mode Highlight */}
