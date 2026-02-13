@@ -2752,6 +2752,8 @@ export interface CompletedBuildSummary {
   duration_ms: number
   created_at: string
   completed_at?: string
+  live?: boolean
+  resumable?: boolean
 }
 
 export interface CompletedBuildDetail extends CompletedBuildSummary {

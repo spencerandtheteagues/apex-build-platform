@@ -86,9 +86,10 @@ const frameworkConfig: Record<string, { name: string; color: string }> = {
 
 interface GitHubImportWizardProps {
   onClose?: () => void;
+  onImported?: (projectId: number) => void;
 }
 
-export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose }) => {
+export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose, onImported }) => {
   // State
   const [step, setStep] = useState<ImportStep>('url');
   const [url, setUrl] = useState('');
@@ -123,16 +124,8 @@ export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose 
     setStep('validating');
 
     try {
-      const response = await fetch('/api/v1/projects/import/github/validate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('apex_access_token')}`,
-        },
-        body: JSON.stringify({ url: inputUrl, token }),
-      });
-
-      const data = await response.json();
+      const response = await apiService.post('/projects/import/github/validate', { url: inputUrl, token });
+      const data = response.data;
       setValidation(data);
 
       if (data.valid) {
@@ -181,35 +174,25 @@ export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose 
     }, 500);
 
     try {
-      const response = await fetch('/api/v1/projects/import/github', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('apex_access_token')}`,
-        },
-        body: JSON.stringify({
-          url,
-          project_name: projectName,
-          description,
-          is_public: isPublic,
-          token,
-        }),
+      const response = await apiService.post('/projects/import/github', {
+        url,
+        project_name: projectName,
+        description,
+        is_public: isPublic,
+        token,
       });
-
       clearInterval(progressInterval);
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Import failed');
-      }
-
-      const data: ImportResponse = await response.json();
+      const data: ImportResponse = response.data;
       setImportResult(data);
       setProgress(100);
       setStep('success');
     } catch (err) {
       clearInterval(progressInterval);
-      setError(err instanceof Error ? err.message : 'Import failed');
+      const message =
+        (err as any)?.response?.data?.error ||
+        (err as any)?.response?.data?.details ||
+        (err instanceof Error ? err.message : 'Import failed');
+      setError(message);
       setStep('error');
     }
   };
@@ -230,6 +213,9 @@ export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose 
 
   // Navigate to project (close wizard and let parent handle view switching)
   const handleOpenProject = () => {
+    if (importResult?.project_id) {
+      onImported?.(importResult.project_id);
+    }
     onClose?.();
   };
 

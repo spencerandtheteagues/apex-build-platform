@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // AgentManager handles the lifecycle and coordination of AI agents
@@ -145,6 +146,7 @@ func (am *AgentManager) CreateBuild(userID uint, req *BuildRequest) (*Build, err
 	build.MaxTokensPerRequest = maxTokens
 
 	am.builds[buildID] = build
+	am.persistBuildSnapshot(build, nil)
 
 	log.Printf("Created build %s for user %d: %s", buildID, userID, truncate(req.Description, 50))
 	return build, nil
@@ -170,6 +172,7 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	build.Status = BuildPlanning
 	build.UpdatedAt = time.Now()
 	build.mu.Unlock()
+	am.persistBuildSnapshot(build, nil)
 
 	log.Printf("Build %s status updated, broadcasting", buildID)
 
@@ -194,6 +197,7 @@ func (am *AgentManager) StartBuild(buildID string) error {
 		build.Error = "No AI providers available"
 		build.UpdatedAt = time.Now()
 		build.mu.Unlock()
+		am.persistBuildSnapshot(build, nil)
 		am.broadcast(buildID, &WSMessage{
 			Type:      WSBuildError,
 			BuildID:   buildID,
@@ -256,6 +260,13 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	}
 
 	if err != nil {
+		build.mu.Lock()
+		build.Status = BuildFailed
+		build.Error = fmt.Sprintf("Failed to spawn lead agent: %v", err)
+		build.UpdatedAt = time.Now()
+		build.mu.Unlock()
+		am.persistBuildSnapshot(build, nil)
+
 		am.broadcast(buildID, &WSMessage{
 			Type:      WSBuildError,
 			BuildID:   buildID,
@@ -2033,9 +2044,8 @@ func (am *AgentManager) cancelPendingTasks(build *Build) {
 // updateBuildProgress calculates and updates overall build progress
 func (am *AgentManager) updateBuildProgress(build *Build) {
 	build.mu.Lock()
-	defer build.mu.Unlock()
-
 	if len(build.Tasks) == 0 {
+		build.mu.Unlock()
 		return
 	}
 
@@ -2101,6 +2111,10 @@ func (am *AgentManager) updateBuildProgress(build *Build) {
 			"quality_gate_stage":    qualityStage,
 		},
 	})
+	build.mu.Unlock()
+
+	// Persist rolling progress so recent builds can be resumed after restart/login.
+	am.persistBuildSnapshot(build, nil)
 }
 
 // checkBuildCompletion determines if the build is finished
@@ -2265,20 +2279,26 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 	am.persistCompletedBuild(build, allFiles)
 }
 
-// persistCompletedBuild saves a completed build to the database for history/retrieval
-func (am *AgentManager) persistCompletedBuild(build *Build, files []GeneratedFile) {
+// persistBuildSnapshot upserts the latest build state to the database.
+// This runs for both in-progress and completed builds so users can recover state after restarts.
+func (am *AgentManager) persistBuildSnapshot(build *Build, files []GeneratedFile) {
 	if am.db == nil {
+		return
+	}
+	if build == nil {
 		return
 	}
 
 	build.mu.RLock()
-	defer build.mu.RUnlock()
-
 	techStackJSON := ""
 	if build.TechStack != nil {
 		if b, err := json.Marshal(build.TechStack); err == nil {
 			techStackJSON = string(b)
 		}
+	}
+
+	if files == nil {
+		files = am.collectGeneratedFiles(build)
 	}
 
 	filesJSON := "[]"
@@ -2298,7 +2318,7 @@ func (am *AgentManager) persistCompletedBuild(build *Build, files []GeneratedFil
 		projectName = build.Plan.AppType
 	}
 
-	cb := &models.CompletedBuild{
+	snapshot := &models.CompletedBuild{
 		BuildID:     build.ID,
 		UserID:      build.UserID,
 		ProjectID:   build.ProjectID,
@@ -2315,19 +2335,49 @@ func (am *AgentManager) persistCompletedBuild(build *Build, files []GeneratedFil
 		Error:       build.Error,
 		CompletedAt: build.CompletedAt,
 	}
+	build.mu.RUnlock()
 
-	if err := am.db.Create(cb).Error; err != nil {
-		log.Printf("Failed to persist build %s: %v", build.ID, err)
-	} else {
-		log.Printf("Persisted build %s to database (user=%d, files=%d)", build.ID, build.UserID, len(files))
+	now := time.Now()
+	snapshot.UpdatedAt = now
+	if snapshot.CreatedAt.IsZero() {
+		snapshot.CreatedAt = build.CreatedAt
 	}
+
+	err := am.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "build_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"user_id":      snapshot.UserID,
+			"project_id":   snapshot.ProjectID,
+			"project_name": snapshot.ProjectName,
+			"description":  snapshot.Description,
+			"status":       snapshot.Status,
+			"mode":         snapshot.Mode,
+			"power_mode":   snapshot.PowerMode,
+			"tech_stack":   snapshot.TechStack,
+			"files_json":   snapshot.FilesJSON,
+			"files_count":  snapshot.FilesCount,
+			"total_cost":   snapshot.TotalCost,
+			"progress":     snapshot.Progress,
+			"duration_ms":  snapshot.DurationMs,
+			"error":        snapshot.Error,
+			"completed_at": snapshot.CompletedAt,
+			"updated_at":   now,
+		}),
+	}).Create(snapshot).Error
+
+	if err != nil {
+		log.Printf("Failed to persist build snapshot %s: %v", build.ID, err)
+	}
+}
+
+// persistCompletedBuild remains as a compatibility alias used by orchestrator paths.
+func (am *AgentManager) persistCompletedBuild(build *Build, files []GeneratedFile) {
+	am.persistBuildSnapshot(build, files)
 }
 
 // createCheckpoint saves a checkpoint of the current build state
 func (am *AgentManager) createCheckpoint(build *Build, name, description string) *Checkpoint {
 	build.mu.Lock()
-	defer build.mu.Unlock()
-
 	checkpoint := &Checkpoint{
 		ID:          uuid.New().String(),
 		BuildID:     build.ID,
@@ -2340,6 +2390,7 @@ func (am *AgentManager) createCheckpoint(build *Build, name, description string)
 	}
 
 	build.Checkpoints = append(build.Checkpoints, checkpoint)
+	build.mu.Unlock()
 
 	am.broadcast(build.ID, &WSMessage{
 		Type:      WSBuildCheckpoint,
@@ -2353,6 +2404,7 @@ func (am *AgentManager) createCheckpoint(build *Build, name, description string)
 			"progress":      checkpoint.Progress,
 		},
 	})
+	am.persistBuildSnapshot(build, nil)
 
 	return checkpoint
 }

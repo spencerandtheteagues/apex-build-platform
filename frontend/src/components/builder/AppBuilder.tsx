@@ -5,7 +5,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
 import { useThemeLogo } from '@/hooks/useThemeLogo'
-import apiService from '@/services/api'
+import apiService, { CompletedBuildDetail } from '@/services/api'
 import {
   Button,
   Card,
@@ -111,7 +111,7 @@ interface AIThought {
 
 interface BuildState {
   id: string
-  status: 'idle' | 'planning' | 'in_progress' | 'testing' | 'reviewing' | 'completed' | 'failed'
+  status: 'idle' | 'pending' | 'planning' | 'in_progress' | 'testing' | 'reviewing' | 'completed' | 'failed' | 'cancelled'
   progress: number
   agents: Agent[]
   tasks: Task[]
@@ -146,6 +146,15 @@ interface BuildTechStack {
 interface AppBuilderProps {
   onNavigateToIDE?: () => void
 }
+
+const ACTIVE_BUILD_STORAGE_KEY = 'apex_active_build_id'
+
+const isActiveBuildStatus = (status?: string) =>
+  status === 'pending' ||
+  status === 'planning' ||
+  status === 'in_progress' ||
+  status === 'testing' ||
+  status === 'reviewing'
 
 // ============================================================================
 // ANIMATED BACKGROUND COMPONENTS
@@ -904,6 +913,20 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   }, [generatedFiles])
 
   const { user, currentProject, createProject, setCurrentProject } = useStore()
+  const persistActiveBuildId = useCallback((buildId: string) => {
+    try {
+      localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, buildId)
+    } catch (error) {
+      // Ignore localStorage failures (private mode, quota, etc.)
+    }
+  }, [])
+  const clearActiveBuildId = useCallback(() => {
+    try {
+      localStorage.removeItem(ACTIVE_BUILD_STORAGE_KEY)
+    } catch (error) {
+      // Ignore localStorage failures
+    }
+  }, [])
   const activePowerMode = buildState?.powerMode || powerMode
   const activeBuildStatuses = useMemo(
     () => new Set<BuildState['status']>(['planning', 'in_progress', 'testing', 'reviewing']),
@@ -1349,6 +1372,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
       case 'build:completed': {
         setIsBuilding(false)
+        clearActiveBuildId()
         const finalStatus = data.status === 'completed' ? 'completed' : 'failed'
         if (finalStatus === 'completed') {
           addSystemMessage(`Build completed successfully! ${data.files_count || 0} files generated.`)
@@ -1460,6 +1484,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           break
         }
         setIsBuilding(false)
+        clearActiveBuildId()
         setBuildState(prev => prev
           ? {
             ...prev,
@@ -1764,13 +1789,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     return []
   }, [buildState?.id, mergeGeneratedFiles, normalizeGeneratedFiles])
 
-  const deriveProjectName = (source: string) => {
+  const deriveProjectName = useCallback((source: string) => {
     const base = source || 'Generated App'
     return base
       .slice(0, 60)
       .replace(/[^a-zA-Z0-9\s-]/g, '')
       .trim() || 'Generated App'
-  }
+  }, [])
 
   const ensureProjectCreated = useCallback(async (options?: {
     files?: Array<{ path: string; content: string; language: string }>
@@ -1840,6 +1865,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     createProject,
     currentProject,
     createdProjectId,
+    deriveProjectName,
     resolveGeneratedFiles,
     setCurrentProject,
   ])
@@ -1897,43 +1923,252 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     }
   }
 
-  const openCompletedBuild = async (buildId: string) => {
+  const hydrateBuildContext = useCallback(async (
+    buildId: string,
+    options?: {
+      reconnectLive?: boolean
+      notify?: boolean
+      fallbackDetail?: CompletedBuildDetail
+    }
+  ) => {
+    let payload: any
     try {
-      const completed = await apiService.getCompletedBuild(buildId)
-      if (completed.project_id) {
-        try {
-          const existingProject = await apiService.getProject(completed.project_id)
-          setCreatedProjectId(existingProject.id)
-          setCurrentProject(existingProject)
-          addSystemMessage(`Opened project "${existingProject.name}" from recent build`)
-          if (onNavigateToIDE) {
-            onNavigateToIDE()
+      payload = await apiService.getBuildDetails(buildId)
+    } catch {
+      const fallback = options?.fallbackDetail || await apiService.getCompletedBuild(buildId)
+      payload = {
+        id: fallback.build_id,
+        build_id: fallback.build_id,
+        project_id: fallback.project_id,
+        status: fallback.status,
+        mode: fallback.mode,
+        description: fallback.description,
+        progress: fallback.progress,
+        agents: [],
+        tasks: [],
+        checkpoints: [],
+        files: fallback.files || [],
+        power_mode: fallback.power_mode,
+        live: false,
+      }
+    }
+
+    const statusValue = String(payload.status || 'failed')
+    const validStatuses = new Set(['idle', 'pending', 'planning', 'in_progress', 'testing', 'reviewing', 'completed', 'failed', 'cancelled'])
+    const status = (validStatuses.has(statusValue) ? statusValue : 'failed') as BuildState['status']
+    const files = normalizeGeneratedFiles(payload.files || [])
+
+    const agents: Agent[] = Array.isArray(payload.agents)
+      ? payload.agents.map((agent: any, index: number) => ({
+        id: String(agent.id || `${buildId}-agent-${index}`),
+        role: String(agent.role || 'agent'),
+        provider: String(agent.provider || 'unknown'),
+        model: agent.model ? String(agent.model) : undefined,
+        status: (agent.status === 'working' || agent.status === 'completed' || agent.status === 'error') ? agent.status : 'idle',
+        progress: typeof agent.progress === 'number' ? clampPercent(agent.progress) : 0,
+        currentTask: agent.current_task || agent.currentTask
+          ? {
+            type: String((agent.current_task || agent.currentTask).type || ''),
+            description: String((agent.current_task || agent.currentTask).description || ''),
           }
-          return
-        } catch {
-          addSystemMessage('Stored project not found, restoring from build artifacts...')
+          : undefined,
+      }))
+      : []
+
+    const tasks: Task[] = Array.isArray(payload.tasks)
+      ? payload.tasks.map((task: any, index: number) => ({
+        id: String(task.id || `${buildId}-task-${index}`),
+        type: String(task.type || 'task'),
+        description: String(task.description || ''),
+        status: (task.status === 'pending' || task.status === 'in_progress' || task.status === 'completed' || task.status === 'failed')
+          ? task.status
+          : 'pending',
+        assignedTo: task.assigned_to || task.assignedTo,
+        output: task.output,
+      }))
+      : []
+
+    const checkpoints: Checkpoint[] = Array.isArray(payload.checkpoints)
+      ? payload.checkpoints.map((checkpoint: any, index: number) => ({
+        id: String(checkpoint.id || `${buildId}-checkpoint-${index}`),
+        number: typeof checkpoint.number === 'number' ? checkpoint.number : index + 1,
+        name: String(checkpoint.name || `Checkpoint ${index + 1}`),
+        description: String(checkpoint.description || ''),
+        progress: typeof checkpoint.progress === 'number' ? clampPercent(checkpoint.progress) : 0,
+        createdAt: String(checkpoint.created_at || checkpoint.createdAt || new Date().toISOString()),
+      }))
+      : []
+
+    setAppDescription(String(payload.description || appDescription || ''))
+    setGeneratedFiles(files)
+    setCreatedProjectId(typeof payload.project_id === 'number' ? payload.project_id : null)
+    setShowPreview(false)
+    setIsPreparingPreview(false)
+    previewPreparedRef.current = false
+    wsReconnectAttempts.current = 0
+
+    setBuildState({
+      id: String(payload.id || payload.build_id || buildId),
+      status,
+      progress: typeof payload.progress === 'number' ? clampPercent(payload.progress) : 0,
+      agents,
+      tasks,
+      checkpoints,
+      description: String(payload.description || appDescription || ''),
+      powerMode: payload.power_mode || payload.powerMode || powerMode,
+      currentPhase: payload.phase || payload.current_phase || payload.currentPhase || undefined,
+      qualityGateRequired: typeof payload.quality_gate_required === 'boolean' ? payload.quality_gate_required : true,
+      qualityGateStatus: typeof payload.quality_gate_passed === 'boolean'
+        ? (payload.quality_gate_passed ? 'passed' : 'failed')
+        : status === 'completed'
+          ? 'passed'
+          : status === 'failed' || status === 'cancelled'
+            ? 'failed'
+            : (status === 'testing' || status === 'reviewing')
+              ? 'running'
+              : 'pending',
+      qualityGateStage: payload.quality_gate_stage || undefined,
+      availableProviders: Array.isArray(payload.available_providers) ? payload.available_providers : undefined,
+    })
+
+    const shouldReconnectLive = options?.reconnectLive !== false && payload.live !== false
+    const active = isActiveBuildStatus(status)
+
+    if (active) {
+      persistActiveBuildId(buildId)
+      if (shouldReconnectLive) {
+        setIsBuilding(true)
+        connectWebSocket(buildId)
+        if (options?.notify) {
+          addSystemMessage(`Resumed build ${buildId.slice(0, 8)} from live session`)
+        }
+      } else {
+        setIsBuilding(false)
+        if (options?.notify) {
+          addSystemMessage('Restored latest build snapshot. Live session is no longer active.')
         }
       }
+    } else {
+      setIsBuilding(false)
+      clearActiveBuildId()
+      if (options?.notify) {
+        addSystemMessage(`Opened saved build (${status.replace('_', ' ')})`)
+      }
+    }
 
-      const normalized = normalizeGeneratedFiles(completed.files || [])
-      if (normalized.length === 0) {
-        addSystemMessage('No files found for that build')
+    if (files.length === 0) {
+      void resolveGeneratedFiles(buildId)
+    }
+  }, [
+    appDescription,
+    clearActiveBuildId,
+    connectWebSocket,
+    normalizeGeneratedFiles,
+    persistActiveBuildId,
+    powerMode,
+    resolveGeneratedFiles,
+  ])
+
+  const openBuildFilesInIDE = useCallback(async (buildId: string, detail?: CompletedBuildDetail) => {
+    const completed = detail || await apiService.getCompletedBuild(buildId)
+
+    if (completed.project_id) {
+      try {
+        const existingProject = await apiService.getProject(completed.project_id)
+        setCreatedProjectId(existingProject.id)
+        setCurrentProject(existingProject)
+        addSystemMessage(`Opened project "${existingProject.name}" from recent build`)
+        onNavigateToIDE?.()
+        return
+      } catch {
+        addSystemMessage('Stored project not found, restoring from build artifacts...')
+      }
+    }
+
+    let files = normalizeGeneratedFiles(completed.files || [])
+    if (files.length === 0) {
+      files = await resolveGeneratedFiles(buildId)
+    }
+
+    if (files.length === 0) {
+      addSystemMessage('No files found for that build')
+      return
+    }
+
+    setGeneratedFiles(files)
+    await ensureProjectCreated({
+      files,
+      projectName: completed.project_name || deriveProjectName(completed.description || 'Completed Build'),
+      description: completed.description || '',
+      forceNew: true,
+    })
+    onNavigateToIDE?.()
+  }, [
+    deriveProjectName,
+    ensureProjectCreated,
+    normalizeGeneratedFiles,
+    onNavigateToIDE,
+    resolveGeneratedFiles,
+    setCurrentProject,
+  ])
+
+  const openCompletedBuild = async (buildId: string, action: 'resume' | 'open_files' = 'resume') => {
+    try {
+      const completed = await apiService.getCompletedBuild(buildId)
+      if (action === 'open_files') {
+        await openBuildFilesInIDE(buildId, completed)
         return
       }
-      setGeneratedFiles(normalized)
-      await ensureProjectCreated({
-        files: normalized,
-        projectName: completed.project_name || deriveProjectName(completed.description || 'Completed Build'),
-        description: completed.description || '',
-        forceNew: true,
-      })
-      if (onNavigateToIDE) {
-        onNavigateToIDE()
-      }
+      await hydrateBuildContext(buildId, { reconnectLive: true, notify: true, fallbackDetail: completed })
     } catch (error) {
       addSystemMessage('Failed to open build. Please try again.')
     }
   }
+
+  useEffect(() => {
+    if (!buildState?.id) return
+    if (isActiveBuildStatus(buildState.status)) {
+      persistActiveBuildId(buildState.id)
+    } else {
+      clearActiveBuildId()
+    }
+  }, [buildState?.id, buildState?.status, clearActiveBuildId, persistActiveBuildId])
+
+  useEffect(() => {
+    if (!user?.id || buildState?.id) {
+      return
+    }
+
+    let cancelled = false
+    const restoreActiveBuild = async () => {
+      let activeBuildId: string | null = null
+      try {
+        activeBuildId = localStorage.getItem(ACTIVE_BUILD_STORAGE_KEY)
+      } catch {
+        activeBuildId = null
+      }
+      if (!activeBuildId) return
+
+      try {
+        const status = await apiService.getBuildStatus(activeBuildId)
+        if (cancelled) return
+
+        if (isActiveBuildStatus(String(status?.status || ''))) {
+          await hydrateBuildContext(activeBuildId, { reconnectLive: true, notify: true })
+          return
+        }
+
+        clearActiveBuildId()
+      } catch {
+        clearActiveBuildId()
+      }
+    }
+
+    void restoreActiveBuild()
+    return () => {
+      cancelled = true
+    }
+  }, [buildState?.id, clearActiveBuildId, hydrateBuildContext, user?.id])
 
   // Start build
   const startBuild = async () => {
@@ -1968,6 +2203,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       }
 
       const buildId = response.build_id
+      persistActiveBuildId(buildId)
 
       setBuildState({
         id: buildId,
@@ -2025,6 +2261,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
       addSystemMessage(`Error: ${errorMsg}`)
       setIsBuilding(false)
+      clearActiveBuildId()
       setBuildState(null)
     }
   }
@@ -2113,6 +2350,20 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       setIsImporting(false)
     }
   }
+
+  const handleGitHubImportSuccess = useCallback(async (projectId: number) => {
+    try {
+      const project = await apiService.getProject(projectId)
+      setCurrentProject(project)
+      setCreatedProjectId(project.id)
+      addSystemMessage(`Imported "${project.name}" from GitHub`)
+      onNavigateToIDE?.()
+    } catch (error) {
+      addSystemMessage('Import completed, but opening the project failed. Please open it from Projects.')
+    } finally {
+      setShowGitHubImport(false)
+    }
+  }, [onNavigateToIDE, setCurrentProject])
 
   const handleRollbackCheckpoint = async (checkpointId: string) => {
     if (!buildState?.id) return
@@ -2905,7 +3156,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       {/* GitHub Import Modal */}
       {showGitHubImport && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <GitHubImportWizard onClose={() => setShowGitHubImport(false)} />
+          <GitHubImportWizard
+            onClose={() => setShowGitHubImport(false)}
+            onImported={handleGitHubImportSuccess}
+          />
         </div>
       )}
     </div>

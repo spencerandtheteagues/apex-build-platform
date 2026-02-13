@@ -19,7 +19,7 @@ import {
 } from 'lucide-react'
 
 interface BuildHistoryProps {
-  onOpenBuild?: (buildId: string) => void
+  onOpenBuild?: (buildId: string, action?: 'resume' | 'open_files') => void
 }
 
 export const BuildHistory: React.FC<BuildHistoryProps> = ({ onOpenBuild }) => {
@@ -129,7 +129,7 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ onOpenBuild }) => {
               'hover:bg-gray-900/60 hover:border-gray-700 transition-all duration-200',
               'cursor-pointer'
             )}
-            onClick={() => onOpenBuild?.(build.build_id)}
+            onClick={() => onOpenBuild?.(build.build_id, 'resume')}
           >
             {/* Status icon */}
             <div className="shrink-0">{statusIcon(build.status)}</div>
@@ -184,7 +184,7 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ onOpenBuild }) => {
                 )}
               </button>
               <button
-                onClick={(e) => { e.stopPropagation(); onOpenBuild?.(build.build_id) }}
+                onClick={(e) => { e.stopPropagation(); onOpenBuild?.(build.build_id, 'open_files') }}
                 className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-colors"
                 title="Open build"
               >
