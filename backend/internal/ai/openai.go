@@ -7,17 +7,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
 
 // OpenAIClient implements the OpenAI GPT-4 API client
 type OpenAIClient struct {
-	apiKey     string
-	baseURL    string
-	httpClient *http.Client
-	usage      *ProviderUsage
-	usageMu    sync.RWMutex // Protects usage statistics
+	apiKey       string
+	baseURL      string
+	responsesURL string
+	httpClient   *http.Client
+	usage        *ProviderUsage
+	usageMu      sync.RWMutex // Protects usage statistics
 }
 
 // OpenAI API request/response structures
@@ -59,12 +61,54 @@ type openAIResponse struct {
 	} `json:"error,omitempty"`
 }
 
+type openAIResponsesRequest struct {
+	Model           string                 `json:"model"`
+	Input           []openAIResponsesInput `json:"input"`
+	MaxOutputTokens int                    `json:"max_output_tokens,omitempty"`
+	Temperature     float32                `json:"temperature,omitempty"`
+}
+
+type openAIResponsesInput struct {
+	Role    string                          `json:"role"`
+	Content []openAIResponsesInputTextBlock `json:"content"`
+}
+
+type openAIResponsesInputTextBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type openAIResponsesAPIResponse struct {
+	ID     string `json:"id"`
+	Model  string `json:"model"`
+	Output []struct {
+		Type    string `json:"type"`
+		Role    string `json:"role"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"output"`
+	OutputText string `json:"output_text,omitempty"`
+	Usage      struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+		TotalTokens  int `json:"total_tokens"`
+	} `json:"usage"`
+	Error *struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+		Code    string `json:"code"`
+	} `json:"error,omitempty"`
+}
+
 // NewOpenAIClient creates a new OpenAI API client
 func NewOpenAIClient(apiKey string) *OpenAIClient {
 	apiKey = normalizeAPIKey(apiKey)
 	return &OpenAIClient{
-		apiKey:  apiKey,
-		baseURL: "https://api.openai.com/v1/chat/completions",
+		apiKey:       apiKey,
+		baseURL:      "https://api.openai.com/v1/chat/completions",
+		responsesURL: "https://api.openai.com/v1/responses",
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
 		},
@@ -78,21 +122,67 @@ func NewOpenAIClient(apiKey string) *OpenAIClient {
 // Generate implements the AIClient interface for OpenAI GPT-4
 func (o *OpenAIClient) Generate(ctx context.Context, req *AIRequest) (*AIResponse, error) {
 	startTime := time.Now()
+	model := o.getModelForRequest(req)
 
 	// Build messages with system and user prompts
 	messages := o.buildMessages(req)
 
 	// Create OpenAI API request
 	openAIReq := &openAIRequest{
-		Model:       o.getModelForRequest(req),
+		Model:       model,
 		Messages:    messages,
 		MaxTokens:   o.getMaxTokens(req),
 		Temperature: req.Temperature,
 		Stream:      false,
 	}
 
-	// Make API request
-	resp, err := o.makeRequest(ctx, openAIReq)
+	var (
+		content        string
+		inputTokens    int
+		outputTokens   int
+		totalTokens    int
+		effectiveModel string
+		err            error
+	)
+
+	if o.shouldUseResponsesAPI(model) {
+		var responsesResp *openAIResponsesAPIResponse
+		responsesResp, err = o.makeResponsesRequest(ctx, model, messages, openAIReq.MaxTokens, openAIReq.Temperature)
+		if err == nil {
+			content = o.extractResponsesText(responsesResp)
+			inputTokens = responsesResp.Usage.InputTokens
+			outputTokens = responsesResp.Usage.OutputTokens
+			totalTokens = responsesResp.Usage.TotalTokens
+			effectiveModel = responsesResp.Model
+		} else {
+			// Fallback keeps builds progressing when newer models are temporarily unavailable.
+			openAIReq.Model = "gpt-4o-mini"
+			var chatResp *openAIResponse
+			chatResp, err = o.makeRequest(ctx, openAIReq)
+			if err == nil {
+				if len(chatResp.Choices) > 0 {
+					content = chatResp.Choices[0].Message.Content
+				}
+				inputTokens = chatResp.Usage.PromptTokens
+				outputTokens = chatResp.Usage.CompletionTokens
+				totalTokens = chatResp.Usage.TotalTokens
+				effectiveModel = chatResp.Model
+			}
+		}
+	} else {
+		var chatResp *openAIResponse
+		chatResp, err = o.makeRequest(ctx, openAIReq)
+		if err == nil {
+			if len(chatResp.Choices) > 0 {
+				content = chatResp.Choices[0].Message.Content
+			}
+			inputTokens = chatResp.Usage.PromptTokens
+			outputTokens = chatResp.Usage.CompletionTokens
+			totalTokens = chatResp.Usage.TotalTokens
+			effectiveModel = chatResp.Model
+		}
+	}
+
 	if err != nil {
 		o.incrementErrorCount()
 		return &AIResponse{
@@ -105,33 +195,57 @@ func (o *OpenAIClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	}
 
 	// Calculate cost based on OpenAI pricing
-	cost := o.calculateCost(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, openAIReq.Model)
+	if effectiveModel == "" {
+		effectiveModel = openAIReq.Model
+	}
+	cost := o.calculateCost(inputTokens, outputTokens, effectiveModel)
 
 	// Update usage statistics
-	o.updateUsage(resp.Usage.TotalTokens, cost, time.Since(startTime))
-
-	// Extract response content
-	content := ""
-	if len(resp.Choices) > 0 {
-		content = resp.Choices[0].Message.Content
-	}
+	o.updateUsage(totalTokens, cost, time.Since(startTime))
 
 	return &AIResponse{
 		ID:       req.ID,
 		Provider: ProviderGPT4,
 		Content:  content,
 		Metadata: map[string]interface{}{
-			"model": resp.Model,
+			"model": effectiveModel,
 		},
 		Usage: &Usage{
-			PromptTokens:     resp.Usage.PromptTokens,
-			CompletionTokens: resp.Usage.CompletionTokens,
-			TotalTokens:      resp.Usage.TotalTokens,
+			PromptTokens:     inputTokens,
+			CompletionTokens: outputTokens,
+			TotalTokens:      totalTokens,
 			Cost:             cost,
 		},
 		Duration:  time.Since(startTime),
 		CreatedAt: time.Now(),
 	}, nil
+}
+
+func (o *OpenAIClient) shouldUseResponsesAPI(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(model, "gpt-5")
+}
+
+func (o *OpenAIClient) extractResponsesText(resp *openAIResponsesAPIResponse) string {
+	if resp == nil {
+		return ""
+	}
+	if strings.TrimSpace(resp.OutputText) != "" {
+		return resp.OutputText
+	}
+	var out strings.Builder
+	for _, item := range resp.Output {
+		for _, block := range item.Content {
+			if strings.TrimSpace(block.Text) == "" {
+				continue
+			}
+			if out.Len() > 0 {
+				out.WriteString("\n")
+			}
+			out.WriteString(block.Text)
+		}
+	}
+	return out.String()
 }
 
 // buildMessages creates the message array for OpenAI API
@@ -264,6 +378,84 @@ func (o *OpenAIClient) makeRequest(ctx context.Context, req *openAIRequest) (*op
 		return nil, fmt.Errorf("OpenAI API error: %s", openAIResp.Error.Message)
 	}
 
+	return &openAIResp, nil
+}
+
+func (o *OpenAIClient) makeResponsesRequest(
+	ctx context.Context,
+	model string,
+	messages []openAIMessage,
+	maxOutputTokens int,
+	temperature float32,
+) (*openAIResponsesAPIResponse, error) {
+	input := make([]openAIResponsesInput, 0, len(messages))
+	for _, msg := range messages {
+		input = append(input, openAIResponsesInput{
+			Role: msg.Role,
+			Content: []openAIResponsesInputTextBlock{
+				{
+					Type: "input_text",
+					Text: msg.Content,
+				},
+			},
+		})
+	}
+
+	req := &openAIResponsesRequest{
+		Model:           model,
+		Input:           input,
+		MaxOutputTokens: maxOutputTokens,
+		Temperature:     temperature,
+	}
+
+	jsonData, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal responses request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", o.responsesURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create responses request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", o.apiKey))
+
+	resp, err := o.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to make responses request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read responses response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		switch resp.StatusCode {
+		case 429:
+			return nil, fmt.Errorf("RATE_LIMIT: OpenAI API rate limit exceeded. Please wait before retrying")
+		case 403:
+			return nil, fmt.Errorf("FORBIDDEN: OpenAI API access denied - check API key permissions")
+		case 401:
+			return nil, fmt.Errorf("UNAUTHORIZED: Invalid OpenAI API key")
+		case 402:
+			return nil, fmt.Errorf("QUOTA_EXCEEDED: OpenAI API quota exhausted. Add credits or use another provider")
+		case 500, 502, 503, 504:
+			return nil, fmt.Errorf("SERVICE_ERROR: OpenAI service temporarily unavailable (status %d)", resp.StatusCode)
+		default:
+			return nil, fmt.Errorf("API_ERROR: OpenAI responses request failed with status %d: %s", resp.StatusCode, string(body))
+		}
+	}
+
+	var openAIResp openAIResponsesAPIResponse
+	if err := json.Unmarshal(body, &openAIResp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal responses response: %w", err)
+	}
+	if openAIResp.Error != nil {
+		return nil, fmt.Errorf("OpenAI API error: %s", openAIResp.Error.Message)
+	}
 	return &openAIResp, nil
 }
 

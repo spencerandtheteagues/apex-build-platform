@@ -204,13 +204,37 @@ export class ApiService {
       throw new Error('No refresh token available')
     }
 
-    const response = await this.client.post<ApiResponse<TokenResponse>>('/auth/refresh', {
-      refresh_token: refreshToken,
-    })
+    try {
+      const response = await this.client.post<ApiResponse<TokenResponse> & { tokens?: TokenResponse; access_token?: string }>(
+        '/auth/refresh',
+        { refresh_token: refreshToken }
+      )
 
-    if (response.data.data) {
-      this.setTokens(response.data.data)
-      return response.data.data
+      const direct = response.data as any
+      const tokens: TokenResponse | undefined =
+        response.data.data ||
+        response.data.tokens ||
+        (direct?.access_token ? (direct as TokenResponse) : undefined)
+
+      if (tokens?.access_token && tokens?.refresh_token) {
+        this.setTokens(tokens)
+        return tokens
+      }
+    } catch (error: any) {
+      if (error?.response?.status !== 404) {
+        throw error
+      }
+    }
+
+    // Fallback path for legacy deployments.
+    const fallbackResponse = await this.client.post<ApiResponse<TokenResponse> & { tokens?: TokenResponse }>(
+      '/auth/token/refresh',
+      { refresh_token: refreshToken }
+    )
+    const fallbackTokens = fallbackResponse.data.data || fallbackResponse.data.tokens
+    if (fallbackTokens?.access_token && fallbackTokens?.refresh_token) {
+      this.setTokens(fallbackTokens)
+      return fallbackTokens
     }
 
     throw new Error('Failed to refresh token')

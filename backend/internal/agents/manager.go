@@ -4,6 +4,7 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -22,6 +23,26 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+var (
+	errBuildNotActive      = errors.New("build not active")
+	errBuildBudgetExceeded = errors.New("build request budget exceeded")
+)
+
+type consensusDecision string
+
+const (
+	decisionRetrySame      consensusDecision = "retry_same"
+	decisionSwitchProvider consensusDecision = "switch_provider"
+	decisionSpawnSolver    consensusDecision = "spawn_solver"
+	decisionAbort          consensusDecision = "abort"
+)
+
+type providerVote struct {
+	Provider  ai.AIProvider
+	Decision  consensusDecision
+	Rationale string
+}
 
 // AgentManager handles the lifecycle and coordination of AI agents
 type AgentManager struct {
@@ -916,6 +937,21 @@ func (am *AgentManager) AssignTask(agentID string, task *Task) error {
 		return fmt.Errorf("agent %s not found", agentID)
 	}
 
+	am.mu.RLock()
+	build, buildExists := am.builds[agent.BuildID]
+	am.mu.RUnlock()
+	if !buildExists {
+		return fmt.Errorf("build %s not found", agent.BuildID)
+	}
+
+	build.mu.RLock()
+	buildInactive := build.Status == BuildFailed || build.Status == BuildCancelled || build.Status == BuildCompleted
+	build.mu.RUnlock()
+	if buildInactive {
+		task.Status = TaskCancelled
+		return errBuildNotActive
+	}
+
 	agent.mu.Lock()
 	agent.CurrentTask = task
 	agent.Status = StatusWorking
@@ -1039,11 +1075,12 @@ func (am *AgentManager) executeTask(task *Task) {
 	if build.Status == BuildFailed || build.Status == BuildCancelled {
 		build.mu.Unlock()
 		task.MaxRetries = 0
+		task.Status = TaskCancelled
 		am.resultQueue <- &TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
 			Success: false,
-			Error:   fmt.Errorf("build not active"),
+			Error:   errBuildNotActive,
 		}
 		return
 	}
@@ -1054,8 +1091,11 @@ func (am *AgentManager) executeTask(task *Task) {
 		build.Error = "Build budget exceeded (request limit)"
 		build.UpdatedAt = time.Now()
 		build.mu.Unlock()
+		task.MaxRetries = 0
+		task.Status = TaskCancelled
 
 		am.cancelPendingTasks(build)
+		am.persistBuildSnapshot(build, nil)
 		am.broadcast(build.ID, &WSMessage{
 			Type:      WSBuildError,
 			BuildID:   build.ID,
@@ -1070,12 +1110,11 @@ func (am *AgentManager) executeTask(task *Task) {
 			},
 		})
 
-		task.MaxRetries = 0
 		am.resultQueue <- &TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
 			Success: false,
-			Error:   fmt.Errorf("build request budget exceeded"),
+			Error:   errBuildBudgetExceeded,
 		}
 		return
 	}
@@ -1290,6 +1329,40 @@ func (am *AgentManager) processResult(result *TaskResult) {
 	agent.mu.Lock()
 	task := agent.CurrentTask
 
+	build, buildErr := am.GetBuild(agent.BuildID)
+	buildInactive := false
+	if buildErr == nil {
+		build.mu.RLock()
+		buildInactive = build.Status == BuildFailed || build.Status == BuildCancelled || build.Status == BuildCompleted
+		build.mu.RUnlock()
+	}
+
+	if result.Error != nil && (errors.Is(result.Error, errBuildNotActive) || errors.Is(result.Error, errBuildBudgetExceeded)) {
+		if task != nil && task.Status != TaskCompleted {
+			task.Status = TaskCancelled
+			task.Error = result.Error.Error()
+		}
+		agent.Status = StatusError
+		agent.Error = result.Error.Error()
+		agent.UpdatedAt = time.Now()
+		agent.mu.Unlock()
+
+		if errors.Is(result.Error, errBuildBudgetExceeded) && buildErr == nil {
+			am.checkBuildCompletion(build)
+		}
+		return
+	}
+
+	// Drop stale in-flight results after build termination to prevent retry storms.
+	if buildInactive {
+		if task != nil && task.Status != TaskCompleted && task.Status != TaskFailed {
+			task.Status = TaskCancelled
+		}
+		agent.UpdatedAt = time.Now()
+		agent.mu.Unlock()
+		return
+	}
+
 	if result.Success {
 		// NEW: Verify generated code before marking complete (for code generation tasks)
 		if task != nil && am.isCodeGenerationTask(task.Type) && result.Output != nil {
@@ -1409,6 +1482,37 @@ func (am *AgentManager) processResult(result *TaskResult) {
 		task.ErrorHistory = append(task.ErrorHistory, errorAttempt)
 		task.RetryCount++
 		nonRetriable := am.isNonRetriableAIError(result.Error)
+		retryStrategy := am.determineRetryStrategy(result.Error.Error(), task)
+		if nonRetriable {
+			retryStrategy = "non_retriable"
+		}
+
+		// Collaborative incident mode: providers discuss and vote on recovery strategy.
+		if buildErr == nil && (nonRetriable || task.RetryCount >= 1 || strings.Contains(strings.ToLower(result.Error.Error()), "all_providers_failed")) {
+			decision, votes := am.runFailureConsensus(build, agent, task, result.Error, retryStrategy)
+			if task.Input == nil {
+				task.Input = map[string]any{}
+			}
+			task.Input["consensus_decision"] = string(decision)
+			task.Input["consensus_votes"] = votes
+
+			switch decision {
+			case decisionSwitchProvider:
+				retryStrategy = "switch_provider"
+				nonRetriable = false
+			case decisionRetrySame:
+				if retryStrategy == "non_retriable" {
+					retryStrategy = "standard_retry"
+				}
+				nonRetriable = false
+			case decisionSpawnSolver:
+				nonRetriable = true
+				task.MaxRetries = task.RetryCount
+			case decisionAbort:
+				nonRetriable = true
+				task.MaxRetries = task.RetryCount
+			}
+		}
 
 		// Check if we should retry
 		if task.RetryCount < task.MaxRetries && !nonRetriable {
@@ -1418,8 +1522,8 @@ func (am *AgentManager) processResult(result *TaskResult) {
 
 			// Set status back to pending for retry
 			task.Status = TaskPending
-			task.Error = ""                   // Clear error for retry
-			task.RetryStrategy = RetryWithFix // Use learning-based retry
+			task.Error = "" // Clear error for retry
+			task.RetryStrategy = RetryStrategy(retryStrategy)
 
 			agent.Status = StatusWorking
 			agent.Error = ""
@@ -2487,7 +2591,8 @@ func (am *AgentManager) queuePlanTasks(build *Build) {
 	// Collect non-lead agents
 	allAgents := make([]agentPriority, 0)
 	for _, agent := range agents {
-		if agent.Role == RoleLead {
+		// Planner and solver are on-demand specialists, not part of the default phased pipeline.
+		if agent.Role == RoleLead || agent.Role == RolePlanner || agent.Role == RoleSolver {
 			continue
 		}
 		allAgents = append(allAgents, agentPriority{
@@ -2671,7 +2776,7 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 			for _, id := range taskIDs {
 				for _, t := range build.Tasks {
 					if t.ID == id {
-						if t.Status != TaskCompleted && t.Status != TaskFailed {
+						if t.Status != TaskCompleted && t.Status != TaskFailed && t.Status != TaskCancelled {
 							allDone = false
 						}
 						break
@@ -2825,12 +2930,12 @@ func (am *AgentManager) defaultBuildLimits(mode BuildMode) (int, int, int, int) 
 	// Mode-based defaults
 	maxAgents := 8
 	maxRetries := 3
-	maxRequests := 48
+	maxRequests := 72
 	maxTokens := 4000
 	if mode == ModeFast {
 		maxAgents = 7
 		maxRetries = 2
-		maxRequests = 24
+		maxRequests = 30
 		maxTokens = 2000
 	}
 
@@ -3089,9 +3194,16 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 		}
 	}
 
+	teamCoordinationContext := ""
+	if build != nil {
+		if brief := am.getTeamCoordinationBrief(build, task, agent); brief != "" {
+			teamCoordinationContext = fmt.Sprintf("\n<team_coordination>\n%s\n</team_coordination>\n", brief)
+		}
+	}
+
 	// Prune app description if total prompt would be too long
 	appDescription := build.Description
-	if len(appDescription)+len(errorContext)+len(agentContext) > 30000 {
+	if len(appDescription)+len(errorContext)+len(agentContext)+len(teamCoordinationContext) > 30000 {
 		if len(appDescription) > 2000 {
 			appDescription = appDescription[:2000] + "... (description truncated)"
 		}
@@ -3102,6 +3214,7 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 Description: %s
 
 App being built: %s
+%s
 %s
 %s
 %s
@@ -3148,7 +3261,7 @@ FORBIDDEN OUTPUTS:
 - Incomplete implementations
 
 Build the REAL, COMPLETE implementation now.`,
-		task.Type, task.Description, appDescription, techStackContext, errorContext, agentContext)
+		task.Type, task.Description, appDescription, techStackContext, errorContext, agentContext, teamCoordinationContext)
 }
 
 func formatTechStackSummary(stack *TechStack) string {
@@ -3174,6 +3287,67 @@ func formatTechStackSummary(stack *TechStack) string {
 	}
 
 	return strings.Join(parts, " | ")
+}
+
+func (am *AgentManager) getTeamCoordinationBrief(build *Build, task *Task, agent *Agent) string {
+	if build == nil {
+		return ""
+	}
+
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+
+	lines := make([]string, 0, 6)
+	for i := len(build.Tasks) - 1; i >= 0 && len(lines) < 6; i-- {
+		t := build.Tasks[i]
+		if t == nil || t.Output == nil || t.Status != TaskCompleted {
+			continue
+		}
+		if task != nil && t.ID == task.ID {
+			continue
+		}
+
+		role := "agent"
+		if assigned, ok := build.Agents[t.AssignedTo]; ok && assigned != nil {
+			role = string(assigned.Role)
+		}
+
+		summary := ""
+		if len(t.Output.Messages) > 0 {
+			summary = strings.TrimSpace(t.Output.Messages[0])
+		}
+		if summary == "" {
+			summary = strings.TrimSpace(t.Description)
+		}
+		if summary == "" {
+			continue
+		}
+		if len(summary) > 180 {
+			summary = summary[:180] + "..."
+		}
+
+		lines = append(lines, fmt.Sprintf("- %s (%s): %s", role, t.Type, summary))
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+
+	// Reverse to chronological order for readability.
+	for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+		lines[i], lines[j] = lines[j], lines[i]
+	}
+
+	targetRole := "agent"
+	if agent != nil {
+		targetRole = string(agent.Role)
+	}
+
+	return fmt.Sprintf(
+		"Shared team updates for %s. Coordinate with other agents, challenge weak assumptions, and align on one integrated implementation plan.\n%s",
+		targetRole,
+		strings.Join(lines, "\n"),
+	)
 }
 
 func (am *AgentManager) getSystemPrompt(role AgentRole, build ...*Build) string {
@@ -4119,6 +4293,15 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 		return
 	}
 
+	if result.Error != nil && (errors.Is(result.Error, errBuildNotActive) || errors.Is(result.Error, errBuildBudgetExceeded)) {
+		task.Status = TaskCancelled
+		task.Error = result.Error.Error()
+		agent.Status = StatusError
+		agent.Error = result.Error.Error()
+		agent.UpdatedAt = time.Now()
+		return
+	}
+
 	// Analyze error for smart retry strategy
 	errorMsg := result.Error.Error()
 	retryStrategy := am.determineRetryStrategy(errorMsg, task)
@@ -4222,6 +4405,17 @@ func (am *AgentManager) isNonRetriableAIError(err error) bool {
 func (am *AgentManager) isNonRetriableAIErrorMessage(errorMsg string) bool {
 	errorLower := strings.ToLower(errorMsg)
 
+	if strings.Contains(errorLower, "build not active") ||
+		strings.Contains(errorLower, "build request budget exceeded") {
+		return true
+	}
+
+	// This is recoverable by endpoint/model fallback or provider switch.
+	if strings.Contains(errorLower, "not a chat model") ||
+		strings.Contains(errorLower, "v1/chat/completions endpoint") {
+		return false
+	}
+
 	if strings.Contains(errorLower, "no ai providers available") ||
 		strings.Contains(errorLower, "client not available for provider") ||
 		strings.Contains(errorLower, "failed to select provider") {
@@ -4280,6 +4474,182 @@ func (am *AgentManager) determineRetryStrategy(errorMsg string, task *Task) stri
 
 	// Default strategy
 	return "standard_retry"
+}
+
+func (am *AgentManager) runFailureConsensus(
+	build *Build,
+	agent *Agent,
+	task *Task,
+	taskErr error,
+	defaultStrategy string,
+) (consensusDecision, []providerVote) {
+	if build == nil || task == nil || taskErr == nil {
+		return am.strategyToDecision(defaultStrategy), nil
+	}
+
+	available := am.aiRouter.GetAvailableProviders()
+	majorProviders := []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini}
+	selected := make([]ai.AIProvider, 0, 3)
+	for _, preferred := range majorProviders {
+		for _, p := range available {
+			if p == preferred {
+				selected = append(selected, p)
+				break
+			}
+		}
+	}
+	if len(selected) == 0 {
+		return am.strategyToDecision(defaultStrategy), nil
+	}
+
+	fallbackDecision := am.strategyToDecision(defaultStrategy)
+	build.mu.RLock()
+	description := build.Description
+	build.mu.RUnlock()
+
+	votes := make([]providerVote, 0, len(selected))
+	for _, provider := range selected {
+		ctx, cancel := context.WithTimeout(am.ctx, 45*time.Second)
+		prompt := fmt.Sprintf(`You are participating in a build recovery incident vote.
+
+Build context:
+- App description: %s
+- Failed task type: %s
+- Failed task description: %s
+- Agent role: %s
+- Error: %s
+- Default strategy: %s
+
+Choose exactly ONE recovery action:
+1) retry_same
+2) switch_provider
+3) spawn_solver
+4) abort
+
+Respond in this exact format:
+VOTE: <retry_same|switch_provider|spawn_solver|abort>
+RATIONALE: <single short sentence>`,
+			description,
+			task.Type,
+			task.Description,
+			agent.Role,
+			taskErr.Error(),
+			defaultStrategy,
+		)
+
+		resp, err := am.aiRouter.Generate(ctx, provider, prompt, GenerateOptions{
+			UserID:          build.UserID,
+			MaxTokens:       180,
+			Temperature:     0.2,
+			SystemPrompt:    "You are an incident commander. Vote for the safest path to complete the build.",
+			PowerMode:       PowerFast,
+			UsePlatformKeys: true,
+		})
+		cancel()
+
+		vote := providerVote{
+			Provider: provider,
+			Decision: fallbackDecision,
+		}
+		if err != nil {
+			vote.Rationale = fmt.Sprintf("fallback vote due to provider error: %v", err)
+		} else {
+			decision, rationale := am.parseConsensusVote(resp.Content, fallbackDecision)
+			vote.Decision = decision
+			vote.Rationale = rationale
+		}
+		votes = append(votes, vote)
+	}
+
+	if len(votes) == 0 {
+		return fallbackDecision, votes
+	}
+
+	counts := map[consensusDecision]int{}
+	for _, vote := range votes {
+		counts[vote.Decision]++
+	}
+
+	winning := fallbackDecision
+	best := 0
+	for decision, count := range counts {
+		if count > best {
+			best = count
+			winning = decision
+		}
+	}
+
+	majorityNeeded := 2
+	if len(votes) == 2 {
+		majorityNeeded = 2
+	}
+	if best < majorityNeeded {
+		winning = fallbackDecision
+	}
+
+	summary := make([]string, 0, len(votes))
+	for _, vote := range votes {
+		summary = append(summary, fmt.Sprintf("%s=%s", vote.Provider, vote.Decision))
+	}
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"phase":              "incident_consensus",
+			"message":            fmt.Sprintf("Provider vote: %s → %s", strings.Join(summary, ", "), winning),
+			"consensus_decision": winning,
+			"consensus_votes":    votes,
+		},
+	})
+	am.broadcast(build.ID, &WSMessage{
+		Type:      "build:phase",
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"phase":   "Incident Consensus",
+			"status":  string(BuildReviewing),
+			"message": fmt.Sprintf("Team vote selected %s", winning),
+		},
+	})
+
+	return winning, votes
+}
+
+func (am *AgentManager) strategyToDecision(strategy string) consensusDecision {
+	switch strings.ToLower(strings.TrimSpace(strategy)) {
+	case "switch_provider":
+		return decisionSwitchProvider
+	case "fix_and_retry", "standard_retry", "backoff", "reduce_context":
+		return decisionRetrySame
+	case "non_retriable":
+		return decisionSpawnSolver
+	case "abort":
+		return decisionAbort
+	default:
+		return decisionRetrySame
+	}
+}
+
+func (am *AgentManager) parseConsensusVote(content string, fallback consensusDecision) (consensusDecision, string) {
+	normalized := strings.ToLower(content)
+	vote := fallback
+	switch {
+	case strings.Contains(normalized, "vote: switch_provider"):
+		vote = decisionSwitchProvider
+	case strings.Contains(normalized, "vote: retry_same"):
+		vote = decisionRetrySame
+	case strings.Contains(normalized, "vote: spawn_solver"):
+		vote = decisionSpawnSolver
+	case strings.Contains(normalized, "vote: abort"):
+		vote = decisionAbort
+	}
+
+	rationale := strings.TrimSpace(content)
+	if len(rationale) > 220 {
+		rationale = rationale[:220] + "..."
+	}
+	return vote, rationale
 }
 
 // getTemperatureForRole returns the optimal temperature for each agent role

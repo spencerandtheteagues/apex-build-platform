@@ -215,6 +215,48 @@ func (s *Server) Login(c *gin.Context) {
 	})
 }
 
+// RefreshToken issues a new access/refresh token pair from a valid refresh token.
+func (s *Server) RefreshToken(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "refresh_token is required"})
+		return
+	}
+
+	tokens, err := s.auth.RefreshTokens(req.RefreshToken, nil)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error":   "invalid refresh token",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Return both wrapped and direct token payload shapes for client compatibility.
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Tokens refreshed successfully",
+		"data":    tokens,
+		"tokens":  tokens,
+	})
+}
+
+// Logout invalidates the presented access token when possible.
+func (s *Server) Logout(c *gin.Context) {
+	authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
+	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+		token := strings.TrimSpace(authHeader[7:])
+		if token != "" {
+			_ = s.auth.BlacklistToken(token)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Logged out successfully",
+	})
+}
+
 // AI endpoints
 
 // AIGenerate handles AI generation requests

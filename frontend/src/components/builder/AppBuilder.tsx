@@ -2367,12 +2367,19 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
   const handleRollbackCheckpoint = async (checkpointId: string) => {
     if (!buildState?.id) return
+    if (!isActiveBuildStatus(buildState.status)) {
+      addSystemMessage('Rollback is only available while a live build is still active.')
+      return
+    }
     setRollbackCheckpointId(checkpointId)
     try {
       await apiService.rollbackBuild(buildState.id, checkpointId)
       addSystemMessage(`Rolled back to checkpoint ${checkpointId}`)
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Rollback failed'
+      const message =
+        (error as any)?.response?.data?.details ||
+        (error as any)?.response?.data?.error ||
+        (error instanceof Error ? error.message : 'Rollback failed')
       addSystemMessage(`Rollback error: ${message}`)
     } finally {
       setRollbackCheckpointId(null)

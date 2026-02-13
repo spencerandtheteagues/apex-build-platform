@@ -727,6 +727,8 @@ func setupRoutes(
 		{
 			auth.POST("/register", server.Register)
 			auth.POST("/login", server.Login)
+			auth.POST("/refresh", server.RefreshToken)
+			auth.POST("/logout", server.Logout)
 		}
 
 		// Community/Sharing Marketplace public endpoints (no auth required for viewing)

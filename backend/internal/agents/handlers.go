@@ -336,10 +336,23 @@ func (h *BuildHandler) GetCheckpoints(c *gin.Context) {
 func (h *BuildHandler) RollbackCheckpoint(c *gin.Context) {
 	buildID := c.Param("id")
 	checkpointID := c.Param("checkpointId")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
 
 	// Verify build exists and ownership
 	build, err := h.manager.GetBuild(buildID)
 	if err != nil {
+		if _, snapErr := h.getBuildSnapshot(uid, buildID); snapErr == nil {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":   "rollback unavailable",
+				"details": "Rollback is only supported for active live builds",
+			})
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{
 			"error":   "build not found",
 			"details": err.Error(),
@@ -347,8 +360,7 @@ func (h *BuildHandler) RollbackCheckpoint(c *gin.Context) {
 		return
 	}
 
-	userID, _ := c.Get("user_id")
-	if userID.(uint) != build.UserID {
+	if uid != build.UserID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
 		return
 	}
