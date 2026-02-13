@@ -160,15 +160,16 @@ type Build struct {
 	Checkpoints []*Checkpoint     `json:"checkpoints"`
 	Progress    int               `json:"progress"` // 0-100
 	// Guardrails
-	MaxAgents           int        `json:"max_agents,omitempty"`
-	MaxRetries          int        `json:"max_retries,omitempty"`
-	MaxRequests         int        `json:"max_requests,omitempty"`
-	MaxTokensPerRequest int        `json:"max_tokens_per_request,omitempty"`
-	RequestsUsed        int        `json:"requests_used,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
-	CompletedAt         *time.Time `json:"completed_at,omitempty"`
-	Error               string     `json:"error,omitempty"`
+	MaxAgents                 int        `json:"max_agents,omitempty"`
+	MaxRetries                int        `json:"max_retries,omitempty"`
+	MaxRequests               int        `json:"max_requests,omitempty"`
+	MaxTokensPerRequest       int        `json:"max_tokens_per_request,omitempty"`
+	RequestsUsed              int        `json:"requests_used,omitempty"`
+	ReadinessRecoveryAttempts int        `json:"readiness_recovery_attempts,omitempty"`
+	CreatedAt                 time.Time  `json:"created_at"`
+	UpdatedAt                 time.Time  `json:"updated_at"`
+	CompletedAt               *time.Time `json:"completed_at,omitempty"`
+	Error                     string     `json:"error,omitempty"`
 
 	mu sync.RWMutex
 }
