@@ -89,15 +89,15 @@ func DefaultSecretRequirements() []SecretRequirement {
 			Description: "Secret key for signing JWT tokens",
 			Required:    true,
 			MinLength:   32,
-			Validator:   nil, // Removed strict validator to unblock deployment
+			Validator:   validateJWTSecret,
 		},
 		{
 			Name:        "Secrets Master Key",
 			EnvVar:      "SECRETS_MASTER_KEY",
 			Description: "AES-256 master key for encrypting user secrets (base64 encoded)",
-			Required:    false, // Changed to false to allow main.go fallback generation
-			MinLength:   32, // 32 bytes = 256 bits when decoded
-			Validator:   nil, // Removed strict validator to unblock deployment
+			Required:    true,
+			MinLength:   32,
+			Validator:   validateMasterKey,
 		},
 		{
 			Name:        "Database URL",
@@ -185,6 +185,16 @@ func ValidateSecrets() (*SecretsConfig, error) {
 	config.StripeSecretKey = os.Getenv("STRIPE_SECRET_KEY")
 	config.StripeWebhookSecret = os.Getenv("STRIPE_WEBHOOK_SECRET")
 	config.DatabaseURL = os.Getenv("DATABASE_URL")
+
+	// In production, enforce critical secrets are present
+	if isProduction {
+		if config.SecretsMasterKey == "" {
+			return nil, errors.New("CRITICAL: SECRETS_MASTER_KEY is required in production - encrypted user data will be lost without it")
+		}
+		if config.JWTSecret == "" {
+			return nil, errors.New("CRITICAL: JWT_SECRET is required in production - authentication will not work")
+		}
+	}
 
 	// In production, fail on any validation errors
 	if isProduction && validationErr.HasErrors() {

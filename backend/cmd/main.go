@@ -104,19 +104,21 @@ func main() {
 	log.Printf("   - Ollama:     ❌ Disabled globally (User must configure in BYOK settings)")
 
 	// Initialize Secrets Manager with validated master key
-	// SECURITY: Use validated key from secretsConfig, with fallback for development
+	// SECURITY: Use validated key from secretsConfig, with fallback for development ONLY
 	masterKey := secretsConfig.SecretsMasterKey
 	if masterKey == "" {
 		if config.IsProductionEnvironment() {
-			log.Printf("WARNING: SECRETS_MASTER_KEY not set in production - using generated key (DATA LOSS RISK ON RESTART)")
+			log.Fatalf("CRITICAL: SECRETS_MASTER_KEY not set in production - refusing to start. " +
+				"Generate with: openssl rand -base64 32 and set as env var. " +
+				"Without a persistent key, all encrypted user data (API keys, secrets) will be permanently lost on restart.")
 		}
-		// Generate a key for development only
+		// Generate an ephemeral key for development only
 		var genErr error
 		masterKey, genErr = secrets.GenerateMasterKey()
 		if genErr != nil {
 			log.Printf("WARNING: Failed to generate master key: %v", genErr)
 		}
-		log.Println("WARNING: SECRETS_MASTER_KEY not set - using generated key (NOT FOR PRODUCTION)")
+		log.Println("DEV ONLY: Using ephemeral SECRETS_MASTER_KEY - encrypted data will not survive restart")
 	}
 
 	secretsManager, err := secrets.NewSecretsManager(masterKey)
@@ -443,6 +445,10 @@ func main() {
 	go collabHub.Run()
 	log.Println("Real-Time Collaboration initialized (OT, presence, cursor tracking)")
 
+	// Initialize Key Rotation Handler (admin-only)
+	rotationHandler := handlers.NewRotationHandler(database.GetDB())
+	log.Println("Key Rotation Handler initialized (admin-only)")
+
 	// Initialize Usage Tracker for quota enforcement (REVENUE PROTECTION)
 	usageTracker := usage.NewTracker(database.GetDB(), redisCache)
 	if err := usageTracker.Migrate(); err != nil {
@@ -491,8 +497,9 @@ func main() {
 		optimizedHandler,
 		byokHandler,   // BYOK API key management and model selection
 		exportHandler, // GitHub export (push projects to GitHub)
-		usageHandler,  // Usage tracking and quota API endpoints
-		quotaChecker,  // Quota enforcement middleware
+		usageHandler,     // Usage tracking and quota API endpoints
+		quotaChecker,     // Quota enforcement middleware
+		rotationHandler,  // Key rotation (admin)
 	)
 
 	// Start server
@@ -648,6 +655,7 @@ func setupRoutes(
 	exportHandler *handlers.ExportHandler, // GitHub export
 	usageHandler *handlers.UsageHandlers, // Usage tracking and quota API
 	quotaChecker *middleware.QuotaChecker, // Quota enforcement middleware
+	rotationHandler *handlers.RotationHandler, // Key rotation (admin)
 ) *gin.Engine {
 	// Set gin mode based on environment
 	if os.Getenv("ENVIRONMENT") == "production" {
@@ -1018,6 +1026,8 @@ func setupRoutes(
 				admin.DELETE("/users/:id", server.AdminDeleteUser)
 				admin.POST("/users/:id/credits", server.AdminAddCredits)
 				admin.GET("/stats", server.AdminGetSystemStats)
+				admin.POST("/rotate-secrets", rotationHandler.RotateSecrets)
+				admin.GET("/validate-secrets", rotationHandler.ValidateSecrets)
 			}
 		}
 	}

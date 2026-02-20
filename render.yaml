@@ -31,14 +31,13 @@ services:
           name: apex-db
           property: connectionString
       - key: REDIS_URL
-        fromService:
-          type: redis
-          name: apex-redis
-          property: connectionString
+        sync: false  # Use Upstash Redis (Render free tier has no managed Redis)
       - key: JWT_SECRET
         generateValue: true
       - key: SECRETS_MASTER_KEY
         generateValue: true
+      - key: EXECUTION_FORCE_CONTAINER
+        value: "false"  # Render doesn't support Docker-in-Docker; use process sandbox
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: OPENAI_API_KEY
@@ -71,9 +70,9 @@ services:
     buildCommand: ""
     envVars:
       - key: VITE_API_URL
-        value: https://apex-api.onrender.com/api/v1
+        value: https://apex-backend-5ypy.onrender.com/api/v1
       - key: VITE_WS_URL
-        value: wss://apex-api.onrender.com/ws
+        value: wss://apex-backend-5ypy.onrender.com/ws
       - key: NODE_ENV
         value: production
     autoDeploy: true
@@ -117,10 +116,13 @@ databases:
     # user: apex_user
 
 # ============================================
-# Redis Cache
+# Redis Cache - Use Upstash (free tier)
 # ============================================
-# Note: Render Redis requires Pro plan or higher
-# For starter plans, consider using Upstash Redis
+# Render managed Redis requires Pro plan or higher.
+# Set REDIS_URL manually in each service's env vars using Upstash:
+#   1. Create free Redis at https://upstash.com
+#   2. Copy the Redis URL
+#   3. Set REDIS_URL in Render Dashboard → apex-api → Environment
 
 # Preview Environments (for PRs)
 previewsEnabled: true
