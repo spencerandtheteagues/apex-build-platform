@@ -175,6 +175,7 @@ func (s *Server) AdminUpdateUser(c *gin.Context) {
 		BypassRateLimits    *bool    `json:"bypass_rate_limits"`
 		SubscriptionType    *string  `json:"subscription_type"`
 		CreditBalance       *float64 `json:"credit_balance"`
+		Password            *string  `json:"password"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -226,6 +227,14 @@ func (s *Server) AdminUpdateUser(c *gin.Context) {
 	}
 	if req.CreditBalance != nil {
 		updates["credit_balance"] = *req.CreditBalance
+	}
+	if req.Password != nil && len(*req.Password) >= 8 {
+		hashed, err := s.auth.HashPassword(*req.Password)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+			return
+		}
+		updates["password_hash"] = hashed
 	}
 
 	if err := s.db.DB.Model(&user).Updates(updates).Error; err != nil {
