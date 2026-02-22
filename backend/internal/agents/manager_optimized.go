@@ -353,10 +353,11 @@ func (am *OptimizedAgentManager) executeTaskCore(ctx context.Context, task *Task
 	defer cancel()
 
 	response, err := am.aiRouter.Generate(taskCtx, agent.Provider, prompt, GenerateOptions{
-		MaxTokens:    8000,
-		Temperature:  0.7,
-		SystemPrompt: systemPrompt,
-		PowerMode:    build.PowerMode,
+		MaxTokens:       8000,
+		Temperature:     0.7,
+		SystemPrompt:    systemPrompt,
+		PowerMode:       build.PowerMode,
+		UsePlatformKeys: true,
 	})
 
 	if err != nil {

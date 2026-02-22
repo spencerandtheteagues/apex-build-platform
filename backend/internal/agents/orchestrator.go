@@ -27,11 +27,12 @@ type orchestratorAIAdapter struct {
 
 func (a *orchestratorAIAdapter) Generate(ctx context.Context, prompt string, opts autonomous.AIOptions) (string, error) {
 	resp, err := a.router.Generate(ctx, ai.ProviderClaude, prompt, GenerateOptions{
-		UserID:       a.userID,
-		MaxTokens:    opts.MaxTokens,
-		Temperature:  opts.Temperature,
-		SystemPrompt: opts.SystemPrompt,
-		PowerMode:    PowerFast, // Use fast model for verification to save cost
+		UserID:          a.userID,
+		MaxTokens:       opts.MaxTokens,
+		Temperature:     opts.Temperature,
+		SystemPrompt:    opts.SystemPrompt,
+		PowerMode:       PowerFast, // Use fast model for verification to save cost
+		UsePlatformKeys: true,
 	})
 	if err != nil {
 		return "", err

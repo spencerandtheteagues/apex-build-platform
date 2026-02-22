@@ -59,6 +59,14 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 		})
 		return
 	}
+	// Allow prompt as fallback for description and vice-versa
+	if req.Description == "" && req.Prompt != "" {
+		req.Description = req.Prompt
+	}
+	if req.Prompt == "" && req.Description != "" {
+		req.Prompt = req.Description
+	}
+
 	log.Printf("StartBuild: description=%s, mode=%s", truncate(req.Description, 50), req.Mode)
 
 	// Validate description

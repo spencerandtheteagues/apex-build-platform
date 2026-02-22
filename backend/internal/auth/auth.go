@@ -135,10 +135,11 @@ type RefreshTokenMetadata struct {
 	FamilyID  string // Empty for new family, set to reuse existing family
 }
 
-// LoginRequest represents a login request
+// LoginRequest represents a login request — accepts username or email
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
+	Username string `json:"username"`
 	Password string `json:"password" binding:"required"`
+	Email    string `json:"email"`
 }
 
 // RegisterRequest represents a registration request

@@ -349,11 +349,13 @@ type WSMessage struct {
 
 // BuildRequest is the input for starting a new build
 type BuildRequest struct {
-	Description string     `json:"description" binding:"required"`
-	Mode        BuildMode  `json:"mode"`
-	PowerMode   PowerMode  `json:"power_mode,omitempty"` // max, balanced, fast — controls model quality
-	ProjectName string     `json:"project_name,omitempty"`
-	TechStack   *TechStack `json:"tech_stack,omitempty"` // Optional override
+	Description  string     `json:"description"`
+	Prompt       string     `json:"prompt,omitempty"`        // Detailed build prompt (falls back to Description)
+	Mode         BuildMode  `json:"mode"`
+	PowerMode    PowerMode  `json:"power_mode,omitempty"`    // max, balanced, fast — controls model quality
+	ProviderMode string     `json:"provider_mode,omitempty"` // platform or byok
+	ProjectName  string     `json:"project_name,omitempty"`
+	TechStack    *TechStack `json:"tech_stack,omitempty"`    // Optional override
 }
 
 // BuildResponse is returned when a build is created

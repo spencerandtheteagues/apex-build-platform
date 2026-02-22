@@ -56,7 +56,7 @@ interface AuthState {
 }
 
 interface AuthActions {
-  login: (username: string, password: string) => Promise<void>
+  login: (usernameOrEmail: string, password: string) => Promise<void>
   register: (data: {
     username: string
     email: string
@@ -290,7 +290,7 @@ export const useStore = create<StoreState & StoreActions>()(
         activeTerminalId: null,
 
         // Auth actions
-        login: async (username: string, password: string) => {
+        login: async (usernameOrEmail: string, password: string) => {
           set((state) => {
             state.isLoading = true  // Legacy
             state.isAuthLoading = true
@@ -298,7 +298,13 @@ export const useStore = create<StoreState & StoreActions>()(
           })
 
           try {
-            const response = await apiService.login({ username, password })
+            // Detect email vs username and send the appropriate field
+            const isEmail = usernameOrEmail.includes('@')
+            const response = await apiService.login(
+              isEmail
+                ? { email: usernameOrEmail, password }
+                : { username: usernameOrEmail, password }
+            )
             const user = response.user as User
 
             set((state) => {

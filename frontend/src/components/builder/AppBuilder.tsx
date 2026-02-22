@@ -2192,6 +2192,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       const techStackOverride = buildTechStackOverride()
       const response = await apiService.startBuild({
         description: appDescription,
+        prompt: appDescription,
         mode: buildMode,
         power_mode: powerMode,
         provider_mode: 'platform',

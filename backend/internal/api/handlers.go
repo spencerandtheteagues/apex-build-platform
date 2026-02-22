@@ -161,7 +161,7 @@ func (s *Server) Register(c *gin.Context) {
 	})
 }
 
-// Login handles user login
+// Login handles user login — accepts username or email
 func (s *Server) Login(c *gin.Context) {
 	var req auth.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -169,9 +169,25 @@ func (s *Server) Login(c *gin.Context) {
 		return
 	}
 
-	// Find user
+	// Determine login identifier: accept email or username field
+	identifier := strings.TrimSpace(req.Username)
+	if identifier == "" {
+		identifier = strings.TrimSpace(req.Email)
+	}
+	if identifier == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "username or email is required"})
+		return
+	}
+
+	// Find user — if identifier contains '@', look up by email; otherwise try both
 	var user models.User
-	if err := s.db.DB.Where("username = ? OR email = ?", req.Username, req.Username).First(&user).Error; err != nil {
+	var dbErr error
+	if strings.Contains(identifier, "@") {
+		dbErr = s.db.DB.Where("email = ?", identifier).First(&user).Error
+	} else {
+		dbErr = s.db.DB.Where("username = ?", identifier).First(&user).Error
+	}
+	if dbErr != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
@@ -515,7 +531,7 @@ func (s *Server) CreateProject(c *gin.Context) {
 	var req struct {
 		Name        string                 `json:"name" binding:"required"`
 		Description string                 `json:"description"`
-		Language    string                 `json:"language" binding:"required"`
+		Language    string                 `json:"language"`
 		Framework   string                 `json:"framework"`
 		IsPublic    bool                   `json:"is_public"`
 		Environment map[string]interface{} `json:"environment"`
@@ -524,6 +540,11 @@ func (s *Server) CreateProject(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	// Default language if not provided
+	if req.Language == "" {
+		req.Language = "javascript"
 	}
 
 	project := &models.Project{

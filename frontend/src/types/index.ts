@@ -207,7 +207,8 @@ export interface ChatMessage {
 
 // Authentication types
 export interface LoginRequest {
-  username: string
+  username?: string
+  email?: string
   password: string
 }
 

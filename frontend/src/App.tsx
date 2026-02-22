@@ -293,7 +293,7 @@ function App() {
                     required
                   />
                   <label className="auth-input-label absolute left-11 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none transition-all duration-200">
-                    {authData.username ? '' : 'Username'}
+                    {authData.username ? '' : 'Username or Email'}
                   </label>
                 </div>
                 {authErrors.username && (

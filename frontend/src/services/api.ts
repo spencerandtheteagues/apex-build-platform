@@ -377,6 +377,7 @@ export class ApiService {
   // Build endpoints (Agent Orchestration System)
   async startBuild(data: {
     description: string
+    prompt?: string
     mode: 'fast' | 'full'
     power_mode?: 'fast' | 'balanced' | 'max'
     provider_mode?: 'platform' | 'byok'

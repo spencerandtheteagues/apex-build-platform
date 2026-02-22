@@ -4016,7 +4016,8 @@ func getErrorString(err error) string {
 // isCodeGenerationTask checks if a task type produces code that should be verified
 func (am *AgentManager) isCodeGenerationTask(taskType TaskType) bool {
 	switch taskType {
-	case TaskGenerateFile, TaskGenerateAPI, TaskGenerateUI, TaskGenerateSchema, TaskFix:
+	case TaskGenerateFile, TaskGenerateAPI, TaskGenerateUI, TaskGenerateSchema, TaskFix,
+		TaskArchitecture, TaskTest:
 		return true
 	}
 	return false

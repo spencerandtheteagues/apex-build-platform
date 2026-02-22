@@ -399,6 +399,7 @@ Output a JSON structure with:
 		MaxTokens: 4000,
 		SystemPrompt: `You are a senior software architect. Create detailed, comprehensive architecture plans.
 Output valid JSON that can be parsed programmatically.`,
+		UsePlatformKeys: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("architecture generation failed: %w", err)
@@ -548,8 +549,9 @@ Output JSON:
 }`, language, code)
 
 	response, err := a.Generate(ctx, ai.ProviderClaude, prompt, GenerateOptions{
-		MaxTokens:    2000,
-		SystemPrompt: "You are a code analyzer. Output valid JSON only.",
+		MaxTokens:       2000,
+		SystemPrompt:    "You are a code analyzer. Output valid JSON only.",
+		UsePlatformKeys: true,
 	})
 	if err != nil {
 		return nil, err
