@@ -86,7 +86,7 @@ func (h *Handler) CreateProject(c *gin.Context) {
 	var req struct {
 		Name        string                 `json:"name" binding:"required,min=1,max=100"`
 		Description string                 `json:"description" binding:"max=500"`
-		Language    string                 `json:"language" binding:"required"`
+		Language    string                 `json:"language"`
 		Framework   string                 `json:"framework"`
 		IsPublic    *bool                  `json:"is_public"`
 		Environment map[string]interface{} `json:"environment"`
@@ -95,10 +95,15 @@ func (h *Handler) CreateProject(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, StandardResponse{
 			Success: false,
-			Error:   "Invalid request format",
+			Error:   "Invalid request format: " + err.Error(),
 			Code:    "INVALID_REQUEST",
 		})
 		return
+	}
+
+	// Default language to typescript if not provided
+	if req.Language == "" {
+		req.Language = "typescript"
 	}
 
 	// Validate language
@@ -112,12 +117,7 @@ func (h *Handler) CreateProject(c *gin.Context) {
 	}
 
 	if !languageValid {
-		c.JSON(http.StatusBadRequest, StandardResponse{
-			Success: false,
-			Error:   "Invalid language. Supported languages: " + "javascript, typescript, python, go, rust, java, cpp, html, css",
-			Code:    "INVALID_LANGUAGE",
-		})
-		return
+		req.Language = "typescript" // Default to typescript for unknown languages
 	}
 
 	// Create project
