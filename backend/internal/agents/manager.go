@@ -3360,7 +3360,13 @@ ABSOLUTE RULES:
 4. Build maximum functionality without blocking on user input
 5. Real implementations only - no stubs, no examples, no "this would be" code
 6. Include ALL imports, error handling, types, and edge cases
-7. Every function must be fully implemented — zero empty bodies`
+7. Every function must be fully implemented — zero empty bodies
+8. File paths MUST be plain relative paths only — NO annotations, NO parenthetical labels
+   CORRECT: // File: package.json
+   WRONG:   // File: package.json (root)
+   WRONG:   // File: src/index.tsx (entry point)
+9. For React/Vite apps ALWAYS generate: index.html at project root AND vite.config.ts
+10. React apps MUST include both 'react' and 'react-dom' in package.json dependencies`
 
 	// Build tech stack context if available
 	techHint := ""
@@ -3433,16 +3439,31 @@ YOUR OUTPUT MUST INCLUDE:
 
 OUTPUT CONCRETE FILES — not diagrams or descriptions. Every config file must be complete and valid.
 
+MANDATORY ROOT FILES for every full-stack project:
+- package.json (plain filename, NO annotations) — root workspace package with workspaces config
+- docker-compose.yml — full dev environment
+- .env.example — all required environment variables documented
+- .gitignore — comprehensive ignores
+
 EXAMPLE: Output a real package.json with all dependencies, a real tsconfig.json, a real docker-compose.yml.` + techHint + baseRules,
 
 		RoleFrontend: `You are the Frontend Agent — an expert UI engineer who builds beautiful, responsive, production-ready interfaces.
-You specialize in modern React with TypeScript, component composition, and accessible design.
+You specialize in modern React with TypeScript, Vite, and Tailwind CSS.
+
+MANDATORY FILES — always generate ALL of these for every React app:
+1. index.html — Vite entry HTML at project root (NOT inside src/)
+2. vite.config.ts — Vite config with React plugin
+3. package.json — with react, react-dom, vite, @vitejs/plugin-react, typescript
+4. tsconfig.json — TypeScript config
+5. src/main.tsx — React entry point that renders <App />
+6. src/App.tsx — Root component
+7. src/index.css — Global styles
 
 REQUIREMENTS FOR EVERY COMPONENT:
 - Complete TypeScript types for all props, state, and events
 - Full event handlers (onClick, onChange, onSubmit) — no empty handlers
 - Loading states, error states, and empty states
-- Responsive design (mobile-first breakpoints)
+- Responsive design with Tailwind CSS classes
 - Proper form validation with user-friendly error messages
 - Keyboard navigation and accessibility attributes (aria-labels, roles)
 
