@@ -58,6 +58,11 @@ const getApiUrl = (): string => {
   return '/api/v1'
 }
 
+export const isAuthRefreshRequestUrl = (url?: string | null): boolean => {
+  if (!url) return false
+  return /\/auth\/(?:token\/)?refresh(?:[/?#]|$)/.test(url)
+}
+
 export class ApiService {
   public client: AxiosInstance
   private baseURL: string
@@ -94,8 +99,9 @@ export class ApiService {
       (response) => response,
       async (error) => {
         const originalRequest = error.config
+        const originalUrl = typeof originalRequest?.url === 'string' ? originalRequest.url : ''
 
-        if (error.response?.status === 401 && !originalRequest._retry) {
+        if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !isAuthRefreshRequestUrl(originalUrl)) {
           originalRequest._retry = true
 
           try {
