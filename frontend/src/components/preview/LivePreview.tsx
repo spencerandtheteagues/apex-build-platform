@@ -277,9 +277,10 @@ export default function LivePreview({
   // Fetch preview status
   const fetchStatus = useCallback(async () => {
     const requestProjectId = projectId
+    const statusRequestSandbox = status?.active ? activeSandbox : useSandbox
     try {
       const response = await apiService.client.get(`/preview/status/${projectId}`, {
-        params: { sandbox: activeSandbox || useSandbox ? '1' : '0' }
+        params: { sandbox: statusRequestSandbox ? '1' : '0' }
       })
       if (activeProjectIdRef.current !== requestProjectId) return
       setStatus(response.data.preview)
@@ -292,12 +293,16 @@ export default function LivePreview({
       }
     } catch (err: any) {
       if (activeProjectIdRef.current !== requestProjectId) return
-      // Preview not running - that's OK
-      setStatus(null)
-      setPreviewUrl('')
+      const statusCode = err?.response?.status
+      const previewMissing = statusCode === 404 || statusCode === 410
+      if (previewMissing) {
+        // Preview not running - that's OK
+        setStatus(null)
+        setPreviewUrl('')
+      }
       setConnected(false)
     }
-  }, [projectId, activeSandbox, useSandbox])
+  }, [projectId, activeSandbox, useSandbox, status?.active])
 
   useEffect(() => {
     fetchStatus()
