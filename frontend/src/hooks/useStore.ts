@@ -298,12 +298,9 @@ export const useStore = create<StoreState & StoreActions>()(
           })
 
           try {
-            // Detect email vs username and send the appropriate field
-            const isEmail = usernameOrEmail.includes('@')
+            // Always send as username — backend detects @ and looks up by email
             const response = await apiService.login(
-              isEmail
-                ? { email: usernameOrEmail, password }
-                : { username: usernameOrEmail, password }
+              { username: usernameOrEmail, password }
             )
             const user = response.user as User
 
