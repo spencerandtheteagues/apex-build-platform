@@ -21,7 +21,11 @@ func SecurityHeaders() gin.HandlerFunc {
 		c.Header("X-Content-Type-Options", "nosniff")
 
 		// Prevent page from being displayed in frames (clickjacking protection)
-		c.Header("X-Frame-Options", "DENY")
+		// Exception: preview proxy responses must be embeddable by the frontend app.
+		isPreviewProxy := strings.HasPrefix(c.Request.URL.Path, "/api/v1/preview/proxy/")
+		if !isPreviewProxy {
+			c.Header("X-Frame-Options", "DENY")
+		}
 
 		// Enable XSS filtering (legacy support)
 		c.Header("X-XSS-Protection", "1; mode=block")
@@ -38,6 +42,9 @@ func SecurityHeaders() gin.HandlerFunc {
 			"connect-src 'self' wss: ws:; " +
 			"worker-src 'self' blob:; " +
 			"child-src 'self';"
+		if isPreviewProxy {
+			csp += " frame-ancestors 'self' https://apex-frontend-gigq.onrender.com https://apex.build https://www.apex.build;"
+		}
 		c.Header("Content-Security-Policy", csp)
 
 		// Referrer Policy

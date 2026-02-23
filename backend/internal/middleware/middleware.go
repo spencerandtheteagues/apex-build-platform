@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -256,10 +257,17 @@ func Security() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Security headers
 		c.Header("X-Content-Type-Options", "nosniff")
-		c.Header("X-Frame-Options", "DENY")
+		isPreviewProxy := strings.HasPrefix(c.Request.URL.Path, "/api/v1/preview/proxy/")
+		if !isPreviewProxy {
+			c.Header("X-Frame-Options", "DENY")
+		}
 		c.Header("X-XSS-Protection", "1; mode=block")
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
-		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https:; connect-src 'self' https: wss:")
+		csp := "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https:; connect-src 'self' https: wss:"
+		if isPreviewProxy {
+			csp += "; frame-ancestors 'self' https://apex-frontend-gigq.onrender.com https://apex.build https://www.apex.build"
+		}
+		c.Header("Content-Security-Policy", csp)
 		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
 		c.Next()
