@@ -4,9 +4,11 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"mime"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,7 +19,6 @@ import (
 
 	"apex-build/internal/ai"
 	"apex-build/pkg/models"
-	"encoding/json"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -2335,6 +2336,12 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 	}
 
 	if status == BuildCompleted {
+		// Persist completion first so a completed_build row exists before auto-linking a project.
+		am.persistCompletedBuild(build, allFiles)
+		if err := am.ensureProjectLinkedForCompletedBuild(build, allFiles); err != nil {
+			log.Printf("Failed to auto-link project for build %s: %v", build.ID, err)
+		}
+
 		am.createCheckpoint(build, "Build Complete", "All tasks completed successfully")
 		am.broadcast(build.ID, &WSMessage{
 			Type:      WSBuildCompleted,
@@ -2488,6 +2495,213 @@ func (am *AgentManager) persistBuildSnapshot(build *Build, files []GeneratedFile
 // persistCompletedBuild remains as a compatibility alias used by orchestrator paths.
 func (am *AgentManager) persistCompletedBuild(build *Build, files []GeneratedFile) {
 	am.persistBuildSnapshot(build, files)
+}
+
+// ensureProjectLinkedForCompletedBuild creates (or reuses) a project for a completed build
+// and stores the project_id on both the in-memory build and completed_build snapshot.
+func (am *AgentManager) ensureProjectLinkedForCompletedBuild(build *Build, files []GeneratedFile) error {
+	if am.db == nil || build == nil {
+		return nil
+	}
+	if files == nil {
+		files = am.collectGeneratedFiles(build)
+	}
+	if len(files) == 0 {
+		return nil
+	}
+
+	build.mu.RLock()
+	if build.ProjectID != nil && *build.ProjectID != 0 {
+		build.mu.RUnlock()
+		return nil
+	}
+	buildID := build.ID
+	userID := build.UserID
+	description := strings.TrimSpace(build.Description)
+	projectName := "Generated App"
+	if build.Plan != nil && strings.TrimSpace(build.Plan.AppType) != "" {
+		projectName = strings.TrimSpace(build.Plan.AppType)
+	} else if description != "" {
+		projectName = description
+	}
+	if len(projectName) > 100 {
+		projectName = strings.TrimSpace(projectName[:100])
+	}
+	frameworkHint := ""
+	if build.TechStack != nil {
+		frameworkHint = strings.ToLower(strings.TrimSpace(build.TechStack.Frontend))
+	}
+	buildCreatedAt := build.CreatedAt
+	build.mu.RUnlock()
+
+	if projectName == "" {
+		projectName = "Generated App"
+	}
+
+	language := detectGeneratedProjectLanguage(files)
+	framework := detectGeneratedProjectFramework(frameworkHint)
+
+	return am.db.Transaction(func(tx *gorm.DB) error {
+		// Idempotency: if the completed build already has a linked project, reuse it.
+		var existing models.CompletedBuild
+		if err := tx.Select("project_id").Where("build_id = ?", buildID).First(&existing).Error; err == nil {
+			if existing.ProjectID != nil && *existing.ProjectID != 0 {
+				projectID := *existing.ProjectID
+				build.mu.Lock()
+				build.ProjectID = &projectID
+				build.UpdatedAt = time.Now()
+				build.mu.Unlock()
+				return nil
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		project := models.Project{
+			Name:          projectName,
+			Description:   description,
+			Language:      language,
+			Framework:     framework,
+			OwnerID:       userID,
+			IsPublic:      false,
+			RootDirectory: "/",
+			Environment:   map[string]interface{}{},
+			Dependencies:  map[string]interface{}{},
+			BuildConfig: map[string]interface{}{
+				"source":          "build_completion",
+				"source_build_id": buildID,
+				"auto_linked":     true,
+			},
+		}
+
+		if err := tx.Create(&project).Error; err != nil {
+			return err
+		}
+
+		projectFiles := buildProjectFilesFromGenerated(project.ID, userID, files)
+		if len(projectFiles) > 0 {
+			if err := tx.Create(&projectFiles).Error; err != nil {
+				return err
+			}
+		}
+
+		if err := tx.Model(&models.CompletedBuild{}).
+			Where("build_id = ?", buildID).
+			Update("project_id", project.ID).Error; err != nil {
+			return err
+		}
+
+		projectID := project.ID
+		build.mu.Lock()
+		build.ProjectID = &projectID
+		if build.UpdatedAt.Before(buildCreatedAt) {
+			build.UpdatedAt = time.Now()
+		}
+		build.mu.Unlock()
+
+		return nil
+	})
+}
+
+func detectGeneratedProjectLanguage(files []GeneratedFile) string {
+	hasTS := false
+	hasJS := false
+	hasPy := false
+	hasGo := false
+	hasRust := false
+	hasHTML := false
+	hasCSS := false
+
+	for _, file := range files {
+		ext := strings.ToLower(filepath.Ext(file.Path))
+		switch ext {
+		case ".tsx", ".ts":
+			hasTS = true
+		case ".jsx", ".js", ".mjs", ".cjs":
+			hasJS = true
+		case ".py":
+			hasPy = true
+		case ".go":
+			hasGo = true
+		case ".rs":
+			hasRust = true
+		case ".html":
+			hasHTML = true
+		case ".css":
+			hasCSS = true
+		}
+	}
+
+	switch {
+	case hasTS:
+		return "typescript"
+	case hasJS:
+		return "javascript"
+	case hasPy:
+		return "python"
+	case hasGo:
+		return "go"
+	case hasRust:
+		return "rust"
+	case hasHTML:
+		return "html"
+	case hasCSS:
+		return "css"
+	default:
+		return "javascript"
+	}
+}
+
+func detectGeneratedProjectFramework(frontendHint string) string {
+	switch {
+	case strings.Contains(frontendHint, "next"):
+		return "next"
+	case strings.Contains(frontendHint, "react"):
+		return "react"
+	case strings.Contains(frontendHint, "vue"):
+		return "vue"
+	case strings.Contains(frontendHint, "svelte"):
+		return "svelte"
+	case strings.Contains(frontendHint, "angular"):
+		return "angular"
+	default:
+		return ""
+	}
+}
+
+func buildProjectFilesFromGenerated(projectID, userID uint, files []GeneratedFile) []models.File {
+	projectFiles := make([]models.File, 0, len(files))
+	seen := make(map[string]struct{}, len(files))
+
+	for _, generated := range files {
+		path := sanitizeFilePath(generated.Path)
+		if path == "" {
+			continue
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+
+		name := filepath.Base(path)
+		if name == "." || name == "/" || name == "" {
+			continue
+		}
+
+		mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+		projectFiles = append(projectFiles, models.File{
+			ProjectID:  projectID,
+			Name:       name,
+			Path:       path,
+			Type:       "file",
+			MimeType:   mimeType,
+			Content:    generated.Content,
+			Size:       int64(len(generated.Content)),
+			LastEditBy: userID,
+		})
+	}
+
+	return projectFiles
 }
 
 // createCheckpoint saves a checkpoint of the current build state

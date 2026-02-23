@@ -57,3 +57,18 @@
 2. **INSUFFICIENT_CREDITS retry loop** - Agent manager now treats `INSUFFICIENT_CREDITS` as non-retriable and prevents recovery/retry loops for the same task.
 3. **Build failure UX for credit errors** - Agent task failures now surface a clear user-facing message: `Build paused: Your account has insufficient credits. Please add credits in Settings or contact support.`
 4. **AI adapter error propagation** - Agent AI adapter now preserves and propagates a clear `INSUFFICIENT_CREDITS` message through the build error chain to frontend build status consumers.
+
+## Session 2026-02-23 - Build→Project Auto-Linking + IDE/Preview Post-Completion Flow
+
+### Bugs Fixed
+1. **Completed builds now auto-link to a project (backend)** - Agent manager now creates a project from generated build files on successful build completion, stores file records, and persists `completed_builds.project_id`.
+2. **Duplicate project creation on repeated build opens** - Auto-link helper is idempotent and reuses an existing `completed_builds.project_id` when present instead of creating another project.
+3. **Post-build IDE CTA clarity (frontend)** - Completion card now highlights `Open in IDE` as the primary next step with a stronger visual CTA and auto-open status messaging.
+4. **Auto-open IDE after build completion (frontend)** - On live `build:completed` events, the builder automatically opens the completed build in IDE (when the tab is still visible) to reduce friction.
+5. **Preview auto-start on project switch (frontend)** - `LivePreview` auto-start now checks preview activity for the current project ID so a stale previous-project status does not block preview startup.
+
+### Validation
+- `frontend`: `npm run typecheck` ✅
+- `frontend`: `npm run lint` ✅
+- `frontend`: `npm run build` ✅ (existing Vite warnings only)
+- `backend`: `GOCACHE=/tmp/gocache go build -p 1 ./... 2>&1 | head -20` ✅ (no output)

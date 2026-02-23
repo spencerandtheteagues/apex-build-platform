@@ -695,6 +695,7 @@ const BuildCompleteCard: React.FC<{
   onOpenIDE: () => void
   onDownload: () => void
   isCreating: boolean
+  isAutoOpeningIDE: boolean
   isPreparingPreview: boolean
   showPreview: boolean
 }> = ({
@@ -703,6 +704,7 @@ const BuildCompleteCard: React.FC<{
   onOpenIDE,
   onDownload,
   isCreating,
+  isAutoOpeningIDE,
   isPreparingPreview,
   showPreview
 }) => {
@@ -725,8 +727,21 @@ const BuildCompleteCard: React.FC<{
       </div>
 
       <CardContent className="p-6 relative z-10">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-4">
+        <div className="space-y-5">
+          <div className="rounded-xl border border-green-400/30 bg-green-400/10 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2 text-green-200">
+              <Sparkles className="w-4 h-4 text-green-300" />
+              <span className="text-sm font-semibold">
+                {isAutoOpeningIDE ? 'Opening your build in the IDE now...' : 'Next step: open in IDE to run and edit your app'}
+              </span>
+            </div>
+            {isAutoOpeningIDE && (
+              <span className="text-xs font-mono text-green-300/90">auto-open enabled</span>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-4">
             <div className="relative">
               <CheckCircle2 className="w-14 h-14 text-green-400" style={{ animation: 'bounce-slow 2s ease-in-out infinite' }} />
               <div className="absolute inset-0 bg-green-400/40 rounded-full blur-xl animate-pulse" />
@@ -738,48 +753,53 @@ const BuildCompleteCard: React.FC<{
               </p>
             </div>
           </div>
-          <div className="flex gap-3 flex-wrap">
-            <Button
-              variant="outline"
-              size="lg"
-              className={cn(
-                "border-2 border-red-600 text-red-400 hover:bg-red-950/50 transition-all font-semibold",
-                showPreview && "bg-red-950/50 shadow-lg shadow-red-900/30"
-              )}
-              onClick={onPreview}
-              disabled={isPreparingPreview}
-            >
-              <Eye className="w-5 h-5 mr-2" />
-              {isPreparingPreview ? 'Preparing...' : showPreview ? 'Hide Preview' : 'Preview'}
-            </Button>
-            <Button
-              variant="outline"
-              size="lg"
-              className="border-2 border-gray-700 text-gray-300 hover:bg-gray-800/60 transition-all font-semibold"
-              onClick={onDownload}
-              disabled={filesCount === 0}
-            >
-              <Download className="w-5 h-5 mr-2" />
-              Download ZIP
-            </Button>
-            <Button
-              size="lg"
-              className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 font-bold shadow-lg shadow-green-900/50 text-white"
-              onClick={onOpenIDE}
-              disabled={isCreating}
-            >
-              {isCreating ? (
-                <>
-                  <Clock className="w-5 h-5 mr-2 animate-spin" />
-                  Creating...
-                </>
-              ) : (
-                <>
-                  <ExternalLink className="w-5 h-5 mr-2" />
-                  Open in IDE
-                </>
-              )}
-            </Button>
+            <div className="flex gap-3 flex-wrap items-center">
+              <Button
+                size="lg"
+                className={cn(
+                  "bg-gradient-to-r from-green-500 via-emerald-500 to-lime-500 text-black font-black shadow-xl shadow-green-900/60 border border-green-300/40 px-6",
+                  "hover:from-green-400 hover:via-emerald-400 hover:to-lime-400",
+                  !isCreating && "animate-pulse"
+                )}
+                onClick={onOpenIDE}
+                disabled={isCreating}
+              >
+                {isCreating ? (
+                  <>
+                    <Clock className="w-5 h-5 mr-2 animate-spin" />
+                    {isAutoOpeningIDE ? 'Opening IDE...' : 'Creating Project...'}
+                  </>
+                ) : (
+                  <>
+                    <ExternalLink className="w-5 h-5 mr-2" />
+                    Open in IDE
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                className={cn(
+                  "border-2 border-red-600 text-red-400 hover:bg-red-950/50 transition-all font-semibold",
+                  showPreview && "bg-red-950/50 shadow-lg shadow-red-900/30"
+                )}
+                onClick={onPreview}
+                disabled={isPreparingPreview}
+              >
+                <Eye className="w-5 h-5 mr-2" />
+                {isPreparingPreview ? 'Preparing...' : showPreview ? 'Hide Preview' : 'Preview'}
+              </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                className="border-2 border-gray-700 text-gray-300 hover:bg-gray-800/60 transition-all font-semibold"
+                onClick={onDownload}
+                disabled={filesCount === 0}
+              >
+                <Download className="w-5 h-5 mr-2" />
+                Download ZIP
+              </Button>
+            </div>
           </div>
         </div>
       </CardContent>
@@ -868,6 +888,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   const [showAiActivity, setShowAiActivity] = useState(true)
   const aiActivityRef = useRef<HTMLDivElement>(null)
   const previewPreparedRef = useRef(false)
+  const autoOpenedIDEBuildRef = useRef<string | null>(null)
+  const [isAutoOpeningIDE, setIsAutoOpeningIDE] = useState(false)
 
   const thoughtGroups = useMemo(() => {
     const groups = new Map<string, { agent: Agent; thoughts: AIThought[] }>()
@@ -1433,9 +1455,33 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
             await resolveGeneratedFiles(buildId)
           }
         }
-        if (finalStatus === 'completed' && !previewPreparedRef.current) {
+        const completedBuildId = String(message.build_id || buildState?.id || '')
+        const shouldAutoOpenIDE =
+          finalStatus === 'completed' &&
+          completedBuildId &&
+          autoOpenedIDEBuildRef.current !== completedBuildId &&
+          typeof document !== 'undefined' &&
+          document.visibilityState === 'visible'
+
+        if (finalStatus === 'completed' && !previewPreparedRef.current && !shouldAutoOpenIDE) {
           previewPreparedRef.current = true
           void preparePreview(true)
+        }
+
+        if (
+          shouldAutoOpenIDE
+        ) {
+          autoOpenedIDEBuildRef.current = completedBuildId
+          setIsAutoOpeningIDE(true)
+          void (async () => {
+            try {
+              await openBuildFilesInIDE(completedBuildId)
+            } catch (error) {
+              console.error('Auto-open IDE after build completion failed:', error)
+            } finally {
+              setIsAutoOpeningIDE(false)
+            }
+          })()
         }
         break
       }
@@ -2051,6 +2097,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     setShowPreview(false)
     setIsPreparingPreview(false)
     previewPreparedRef.current = false
+    autoOpenedIDEBuildRef.current = null
+    setIsAutoOpeningIDE(false)
     wsReconnectAttempts.current = 0
 
     setBuildState({
@@ -2234,6 +2282,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     setCreatedProjectId(null)
     wsReconnectAttempts.current = 0
     previewPreparedRef.current = false
+    autoOpenedIDEBuildRef.current = null
+    setIsAutoOpeningIDE(false)
 
     addSystemMessage(`Starting ${buildMode} build for: "${appDescription}"`)
     addSystemMessage(`Tech stack: ${buildTechStackSummary()}`)
@@ -2342,6 +2392,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   // Create project and open in IDE
   const openInIDE = async () => {
     try {
+      setIsAutoOpeningIDE(false)
       await ensureProjectCreated()
       if (onNavigateToIDE) {
         onNavigateToIDE()
@@ -3224,6 +3275,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                     onOpenIDE={openInIDE}
                     onDownload={handleDownloadBuild}
                     isCreating={isCreatingProject}
+                    isAutoOpeningIDE={isAutoOpeningIDE}
                     isPreparingPreview={isPreparingPreview}
                     showPreview={showPreview}
                   />

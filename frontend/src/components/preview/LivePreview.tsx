@@ -374,11 +374,12 @@ export default function LivePreview({
 
   // Auto-start preview when autoStart prop is true
   useEffect(() => {
-    if (!autoStart || status?.active || loading) return
+    const activeForCurrentProject = status?.active && status.project_id === projectId
+    if (!autoStart || !projectId || activeForCurrentProject || loading) return
     if (lastAutoStartedProjectRef.current === projectId) return
     lastAutoStartedProjectRef.current = projectId
     void startPreview()
-  }, [autoStart, projectId, status?.active, loading, startPreview])
+  }, [autoStart, projectId, status?.active, status?.project_id, loading, startPreview])
 
   useEffect(() => {
     if (!autoStart && lastAutoStartedProjectRef.current === projectId) {
