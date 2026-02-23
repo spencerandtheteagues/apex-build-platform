@@ -111,10 +111,15 @@ type AuthService struct {
 
 // JWTClaims represents the JWT token claims
 type JWTClaims struct {
-	UserID   uint   `json:"user_id"`
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Role     string `json:"role"`
+	UserID              uint   `json:"user_id"`
+	Username            string `json:"username"`
+	Email               string `json:"email"`
+	Role                string `json:"role"`
+	IsAdmin             bool   `json:"is_admin"`
+	IsSuperAdmin        bool   `json:"is_super_admin"`
+	HasUnlimitedCredits bool   `json:"has_unlimited_credits"`
+	BypassBilling       bool   `json:"bypass_billing"`
+	BypassRateLimits    bool   `json:"bypass_rate_limits"`
 	jwt.RegisteredClaims
 }
 
@@ -213,10 +218,15 @@ func (a *AuthService) GenerateTokensWithMetadata(user *models.User, metadata *Re
 
 	// Create access token claims
 	accessClaims := &JWTClaims{
-		UserID:   user.ID,
-		Username: user.Username,
-		Email:    user.Email,
-		Role:     a.getUserRole(user),
+		UserID:              user.ID,
+		Username:            user.Username,
+		Email:               user.Email,
+		Role:                a.getUserRole(user),
+		IsAdmin:             user.IsAdmin,
+		IsSuperAdmin:        user.IsSuperAdmin,
+		HasUnlimitedCredits: user.HasUnlimitedCredits,
+		BypassBilling:       user.BypassBilling,
+		BypassRateLimits:    user.BypassRateLimits,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(accessExpiresAt),
 			IssuedAt:  jwt.NewNumericDate(now),

@@ -4045,6 +4045,7 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	hasIndexHTML := false
 	hasFrontendEntry := false
 	hasTSXOrJSX := false
+	hasBundlerConfig := false // vite/webpack/parcel config → index.html optional
 	sourceFiles := 0
 
 	for _, file := range files {
@@ -4063,13 +4064,31 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 			hasTSXOrJSX = true
 		}
 
-		switch path {
-		case "package.json":
-			hasPackageJSON = true
-			packageJSON = file.Content
-		case "index.html", "public/index.html", "src/index.html":
+		// Accept index.html anywhere in the tree
+		if strings.HasSuffix(path, "index.html") {
 			hasIndexHTML = true
-		case "src/main.tsx", "src/main.jsx", "src/index.tsx", "src/index.jsx", "app/page.tsx", "app/page.jsx":
+		}
+
+		// Bundler configs make index.html optional (bundler generates it)
+		if strings.Contains(path, "vite.config") || strings.Contains(path, "webpack.config") ||
+			strings.Contains(path, "parcel") || strings.Contains(path, "craco.config") {
+			hasBundlerConfig = true
+		}
+
+		switch path {
+		case "package.json", "frontend/package.json":
+			if !hasPackageJSON || path == "frontend/package.json" {
+				// Prefer frontend/package.json for React analysis (has actual deps)
+				hasPackageJSON = true
+				packageJSON = file.Content
+			}
+		case "index.html", "public/index.html", "src/index.html",
+			"frontend/index.html", "frontend/public/index.html":
+			hasIndexHTML = true
+		case "src/main.tsx", "src/main.jsx", "src/index.tsx", "src/index.jsx",
+			"app/page.tsx", "app/page.jsx",
+			"frontend/src/main.tsx", "frontend/src/main.jsx",
+			"frontend/src/index.tsx", "frontend/src/index.jsx":
 			hasFrontendEntry = true
 		}
 	}
@@ -4092,7 +4111,7 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 			if hasReact && !hasScripts {
 				addError("package.json is missing runnable scripts (dev/start/build)")
 			}
-			if !isNext && !hasIndexHTML {
+			if !isNext && !hasIndexHTML && !hasBundlerConfig {
 				addError("Frontend app is missing an HTML entry point (index.html or public/index.html)")
 			}
 			if !hasFrontendEntry {
@@ -4767,6 +4786,13 @@ func sanitizeFilePath(path string) string {
 	cleaned := strings.TrimSpace(path)
 	if cleaned == "" {
 		return ""
+	}
+	// Strip AI-generated annotations like "(root)", "(entry)", "(config)", etc.
+	// These appear when the AI labels files with context hints e.g. "package.json (root)"
+	if idx := strings.Index(cleaned, " ("); idx != -1 {
+		if end := strings.Index(cleaned[idx:], ")"); end != -1 {
+			cleaned = strings.TrimSpace(cleaned[:idx] + cleaned[idx+end+1:])
+		}
 	}
 	// Normalize separators to avoid backslash traversal on Windows-style paths
 	cleaned = strings.ReplaceAll(cleaned, "\\", "/")

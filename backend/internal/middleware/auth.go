@@ -66,6 +66,11 @@ func RequireAuth(authService *auth.AuthService) gin.HandlerFunc {
 		c.Set("username", claims.Username)
 		c.Set("email", claims.Email)
 		c.Set("role", claims.Role)
+		c.Set("is_admin", claims.IsAdmin)
+		c.Set("is_super_admin", claims.IsSuperAdmin)
+		c.Set("has_unlimited_credits", claims.HasUnlimitedCredits)
+		c.Set("bypass_billing", claims.BypassBilling)
+		c.Set("bypass_rate_limits", claims.BypassRateLimits)
 		c.Set("token_claims", claims)
 		c.Set("raw_token", token) // Store raw token for logout blacklisting
 
@@ -180,6 +185,11 @@ func OptionalAuth(authService *auth.AuthService) gin.HandlerFunc {
 		c.Set("username", claims.Username)
 		c.Set("email", claims.Email)
 		c.Set("role", claims.Role)
+		c.Set("is_admin", claims.IsAdmin)
+		c.Set("is_super_admin", claims.IsSuperAdmin)
+		c.Set("has_unlimited_credits", claims.HasUnlimitedCredits)
+		c.Set("bypass_billing", claims.BypassBilling)
+		c.Set("bypass_rate_limits", claims.BypassRateLimits)
 		c.Set("token_claims", claims)
 		c.Set("authenticated", true)
 
