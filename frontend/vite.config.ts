@@ -8,18 +8,20 @@ import viteCompression from 'vite-plugin-compression'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const isAnalyze = mode === 'analyze'
+  const isCI = process.env.CI === 'true' || process.env.RENDER === 'true'
+  const enableCompression = env.ENABLE_ASSET_COMPRESSION === 'true' || (!isCI && mode === 'production')
 
   return {
     plugins: [
       react(),
       // Gzip compression for production builds
-      viteCompression({
+      enableCompression && viteCompression({
         algorithm: 'gzip',
         ext: '.gz',
         threshold: 10240, // Only compress files > 10KB
       }),
       // Brotli compression (better compression ratio)
-      viteCompression({
+      enableCompression && viteCompression({
         algorithm: 'brotliCompress',
         ext: '.br',
         threshold: 10240,

@@ -91,13 +91,14 @@ USER nginx
 # Environment variables
 ENV TZ=UTC
 ENV NODE_ENV=production
+ENV PORT=3000
 
 # Expose port
 EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+    CMD sh -c 'curl -f "http://localhost:${PORT:-3000}/health" || exit 1'
 
 # Start nginx via entrypoint
 ENTRYPOINT ["/docker-entrypoint.sh"]

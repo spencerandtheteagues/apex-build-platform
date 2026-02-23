@@ -6,6 +6,10 @@
 set -e
 
 echo "🚀 APEX.BUILD Frontend starting..."
+PORT="${PORT:-3000}"
+
+# Render sets PORT dynamically for Docker web services. Patch nginx config at runtime.
+sed -i "s/__PORT__/${PORT}/g" /etc/nginx/nginx.conf
 
 # Runtime environment variable substitution
 if [ -n "$VITE_API_URL" ] || [ -n "$VITE_WS_URL" ]; then
@@ -38,7 +42,7 @@ chown -R nginx:nginx /usr/share/nginx/html 2>/dev/null || true
 echo "🔧 Testing nginx configuration..."
 nginx -t
 
-echo "🌐 Starting APEX.BUILD Frontend on port 3000..."
+echo "🌐 Starting APEX.BUILD Frontend on port ${PORT}..."
 echo "📡 API URL: ${VITE_API_URL:-http://localhost:8080/api/v1}"
 echo "🔌 WebSocket URL: ${VITE_WS_URL:-ws://localhost:8080/ws}"
 

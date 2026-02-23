@@ -49,11 +49,6 @@ services:
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
     autoDeploy: true
-    scaling:
-      minInstances: 1
-      maxInstances: 3
-      targetMemoryPercent: 80
-      targetCPUPercent: 80
 
   # ============================================
   # Frontend Static Site
@@ -67,7 +62,6 @@ services:
     plan: starter
     branch: main
     healthCheckPath: /health
-    buildCommand: ""
     envVars:
       - key: VITE_API_URL
         value: https://apex-backend-5ypy.onrender.com/api/v1
