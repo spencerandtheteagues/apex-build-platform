@@ -123,10 +123,11 @@ Click "Build App" in the top navigation bar. This is the main page for creating 
 
 **Step 2: Write a description**
 In the large text box, describe what you want to build. Be as specific as you can. For example:
-- "Build a todo app with user login, task categories, due dates, and a dark theme"
-- "Create a blog with posts, comments, user profiles, and an admin panel"
+- "Build a full-stack project management app with kanban boards, drag-and-drop tasks, team member assignment, JWT auth, and a React dashboard with sprint velocity charts"
+- "Create a personal finance tracker with transaction categorization, monthly budget goals, spending trend charts, CSV import/export, and a dark-themed React + Tailwind UI"
+- "Build a real-time team chat app with channels, direct messages, emoji reactions, file sharing, and WebSocket-powered delivery using Node.js and React"
 
-The more detail you include, the better the result. Mention specific features, pages, and design preferences.
+The more detail you include, the better the result. Describe specific features, data models, pages, tech stack preferences, and design goals.
 
 **Step 3: Choose your settings**
 - **Build Mode**: Pick "Fast Build" (~3-5 min) for quick prototypes, or "Full Build" (~10+ min) for production-quality code

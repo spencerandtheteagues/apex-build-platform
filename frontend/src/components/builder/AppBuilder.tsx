@@ -369,9 +369,9 @@ const PremiumTextarea: React.FC<PremiumTextareaProps> = ({ value, onChange, maxL
         placeholder="Describe the app you want to build...
 
 For example:
-- Build a todo app with user authentication, categories, and due dates
-- Create a dashboard to track cryptocurrency prices with charts
-- Make an e-commerce store with product listings and a shopping cart"
+- Build a full-stack project management app with kanban boards, drag-and-drop task cards, team member assignment, due dates, priority levels, and real-time progress tracking. Include JWT auth, a REST API backend, and a React dashboard with charts showing sprint velocity and burndown.
+- Create a personal finance dashboard that connects to mock bank data, categorizes transactions automatically, shows spending trends with interactive charts, supports budget goals, and sends alerts when limits are exceeded. Use React, TypeScript, and a Node.js API.
+- Build a real-time collaborative whiteboard app where multiple users can draw, add sticky notes, shapes, and text together. Include room creation with shareable links, undo/redo history, and export to PNG."
         className={cn(
           "relative w-full h-56 bg-transparent rounded-xl px-5 py-4",
           "text-white placeholder-gray-500 text-base leading-relaxed",
@@ -2753,18 +2753,68 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                   <p className="builder-quick-examples-label text-sm text-gray-500 mb-4 font-medium">Quick examples:</p>
                   <div className="flex flex-wrap gap-3">
                     {[
-                      'Todo app with auth',
-                      'Blog with comments',
-                      'Chat application',
-                      'Dashboard with charts',
-                      'E-commerce store',
-                    ].map((example) => (
+                      {
+                        label: '📋 Project Manager',
+                        prompt: `Build a full-stack project management app with the following features:
+- Kanban board with drag-and-drop task cards across columns (Backlog, In Progress, Review, Done)
+- Task cards with title, description, assignee, priority (low/medium/high/critical), due date, and labels
+- Team workspace with user authentication (JWT), role-based access (admin/member/viewer)
+- Project dashboard showing sprint progress, task completion charts (bar + pie), and team velocity
+- Real-time updates when teammates move cards or add comments
+- REST API backend (Node.js/Express or Go), PostgreSQL database, React + TypeScript frontend with Tailwind CSS`
+                      },
+                      {
+                        label: '💰 Finance Tracker',
+                        prompt: `Build a personal finance dashboard with these features:
+- Transaction ledger with income/expense entries, categories (Food, Transport, Housing, Entertainment, etc.), and tags
+- Auto-categorization based on transaction description keywords
+- Monthly budget goals per category with visual progress bars and over-budget alerts
+- Interactive charts: spending by category (donut), monthly trend (line), income vs expenses (bar)
+- CSV import for bank statements, and CSV/PDF export for reports
+- Recurring transaction tracking (subscriptions, rent, salary)
+- React + TypeScript frontend, Node.js API backend, SQLite or PostgreSQL database, Tailwind CSS dark theme`
+                      },
+                      {
+                        label: '💬 Team Chat',
+                        prompt: `Build a real-time team chat application with:
+- Multiple channels/rooms (public and private) with channel descriptions and member lists
+- Direct messages between users with online presence indicators (online/away/offline)
+- Message threading (reply in thread), reactions with emoji picker, and message editing/deletion
+- File and image sharing with preview thumbnails
+- Full-text message search across channels
+- User profiles with avatar upload, display name, and status message
+- JWT authentication with refresh tokens, WebSocket for real-time delivery
+- React + TypeScript frontend, Node.js backend with Socket.io, PostgreSQL, Tailwind CSS`
+                      },
+                      {
+                        label: '📊 Analytics Dashboard',
+                        prompt: `Build a SaaS analytics dashboard with the following:
+- Multi-site tracking: users can add multiple websites and view stats per site
+- Key metrics: pageviews, unique visitors, bounce rate, avg session duration, top pages, referrer sources
+- Interactive charts using Recharts or Chart.js: line chart for traffic over time, bar chart for top pages, world map for geography
+- Date range picker with presets (Today, Last 7 days, Last 30 days, Custom)
+- Real-time visitor count (WebSocket) showing who is on the site right now
+- API key management for SDK integration, and a lightweight JS tracking snippet to embed
+- React + TypeScript, Node.js/Express API, PostgreSQL with time-series aggregation, Tailwind CSS`
+                      },
+                      {
+                        label: '🛒 E-Commerce Store',
+                        prompt: `Build a full-featured e-commerce store with:
+- Product catalog with categories, tags, search/filter (price range, rating, in-stock), and sort options
+- Product pages with image gallery (multiple photos), size/color variant selectors, stock indicator, and reviews with star ratings
+- Shopping cart with persistent state, quantity controls, and promo code / discount support
+- Checkout flow: address form, shipping method selection, Stripe payment integration (test mode), and order confirmation email
+- Customer accounts: order history, saved addresses, wishlist
+- Admin dashboard: add/edit/delete products, manage orders (pending/shipped/delivered), inventory alerts
+- React + TypeScript frontend, Node.js/Express backend, PostgreSQL, Tailwind CSS, Stripe SDK`
+                      },
+                    ].map(({ label, prompt }) => (
                       <button
-                        key={example}
-                        onClick={() => setAppDescription(example)}
+                        key={label}
+                        onClick={() => setAppDescription(prompt)}
                         className="quick-example-btn px-5 py-2.5 text-sm bg-gray-900/80 hover:bg-gray-800 text-gray-300 rounded-lg transition-all duration-200 border border-gray-800 hover:border-red-900/60 hover:text-white hover:shadow-lg hover:shadow-red-900/20"
                       >
-                        {example}
+                        {label}
                       </button>
                     ))}
                   </div>
