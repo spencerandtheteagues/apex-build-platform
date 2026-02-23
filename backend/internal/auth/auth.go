@@ -115,6 +115,7 @@ type JWTClaims struct {
 	Username            string `json:"username"`
 	Email               string `json:"email"`
 	Role                string `json:"role"`
+	SubscriptionType    string `json:"subscription_type"`
 	IsAdmin             bool   `json:"is_admin"`
 	IsSuperAdmin        bool   `json:"is_super_admin"`
 	HasUnlimitedCredits bool   `json:"has_unlimited_credits"`
@@ -222,6 +223,7 @@ func (a *AuthService) GenerateTokensWithMetadata(user *models.User, metadata *Re
 		Username:            user.Username,
 		Email:               user.Email,
 		Role:                a.getUserRole(user),
+		SubscriptionType:    user.SubscriptionType,
 		IsAdmin:             user.IsAdmin,
 		IsSuperAdmin:        user.IsSuperAdmin,
 		HasUnlimitedCredits: user.HasUnlimitedCredits,
