@@ -185,7 +185,7 @@ For code files, use this exact format:
 			res, err := a.byokManager.ReserveCredits(opts.UserID, estimatedCost)
 			if err != nil {
 				if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
-					return nil, fmt.Errorf("INSUFFICIENT_CREDITS")
+					return nil, fmt.Errorf("INSUFFICIENT_CREDITS: %s", insufficientCreditsBuildMessage)
 				}
 				return nil, fmt.Errorf("failed to reserve credits")
 			}
@@ -198,6 +198,9 @@ For code files, use this exact format:
 	if err != nil {
 		if a.byokManager != nil && reservation != nil {
 			_ = a.byokManager.FinalizeCredits(reservation, 0)
+		}
+		if isInsufficientCreditsErrorMessage(err.Error()) {
+			return nil, fmt.Errorf("INSUFFICIENT_CREDITS: %s", insufficientCreditsBuildMessage)
 		}
 		log.Printf("AI generation failed: %v", err)
 		return nil, fmt.Errorf("AI generation failed: %w", err)

@@ -49,3 +49,11 @@
 - `frontend`: `npm run lint` ✅
 - `frontend`: `npm run test -- --run` ✅ (includes `LivePreview` tests)
 - `frontend`: `npm run build` ✅ (Vite chunk-size warnings only)
+
+## Session 2026-02-23 - New User Credits + Clear INSUFFICIENT_CREDITS Build Failures
+
+### Bugs Fixed
+1. **New registrations blocked from builds** - `AuthService.CreateUser()` now grants `has_unlimited_credits=true` by default for newly registered users so they can run builds immediately instead of failing with zero credits.
+2. **INSUFFICIENT_CREDITS retry loop** - Agent manager now treats `INSUFFICIENT_CREDITS` as non-retriable and prevents recovery/retry loops for the same task.
+3. **Build failure UX for credit errors** - Agent task failures now surface a clear user-facing message: `Build paused: Your account has insufficient credits. Please add credits in Settings or contact support.`
+4. **AI adapter error propagation** - Agent AI adapter now preserves and propagates a clear `INSUFFICIENT_CREDITS` message through the build error chain to frontend build status consumers.

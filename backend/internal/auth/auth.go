@@ -18,24 +18,24 @@ import (
 )
 
 var (
-	ErrInvalidCredentials   = errors.New("invalid credentials")
-	ErrTokenExpired         = errors.New("token expired")
-	ErrInvalidToken         = errors.New("invalid token")
-	ErrTokenBlacklisted     = errors.New("token has been revoked")
-	ErrUserNotFound         = errors.New("user not found")
-	ErrUserExists           = errors.New("user already exists")
-	ErrRefreshTokenUsed     = errors.New("refresh token has already been used")
-	ErrRefreshTokenRevoked  = errors.New("refresh token has been revoked")
-	ErrRefreshTokenExpired  = errors.New("refresh token has expired")
-	ErrRefreshTokenNotFound = errors.New("refresh token not found")
+	ErrInvalidCredentials     = errors.New("invalid credentials")
+	ErrTokenExpired           = errors.New("token expired")
+	ErrInvalidToken           = errors.New("invalid token")
+	ErrTokenBlacklisted       = errors.New("token has been revoked")
+	ErrUserNotFound           = errors.New("user not found")
+	ErrUserExists             = errors.New("user already exists")
+	ErrRefreshTokenUsed       = errors.New("refresh token has already been used")
+	ErrRefreshTokenRevoked    = errors.New("refresh token has been revoked")
+	ErrRefreshTokenExpired    = errors.New("refresh token has expired")
+	ErrRefreshTokenNotFound   = errors.New("refresh token not found")
 	ErrTokenFamilyCompromised = errors.New("token family compromised - possible token reuse attack")
 )
 
 // TokenBlacklist manages revoked tokens with automatic TTL-based cleanup
 type TokenBlacklist struct {
-	tokens  map[string]time.Time // token -> expiration time
-	mu      sync.RWMutex
-	stopCh  chan struct{}
+	tokens map[string]time.Time // token -> expiration time
+	mu     sync.RWMutex
+	stopCh chan struct{}
 }
 
 // Global token blacklist instance
@@ -669,15 +669,16 @@ func (a *AuthService) CreateUser(req *RegisterRequest) (*models.User, error) {
 	}
 
 	user := &models.User{
-		Username:         req.Username,
-		Email:           req.Email,
-		PasswordHash:    hashedPassword,
-		FullName:        req.FullName,
-		IsActive:        true,
-		IsVerified:      false,
-		SubscriptionType: "free",
-		PreferredTheme:  "cyberpunk",
-		PreferredAI:     "auto",
+		Username:            req.Username,
+		Email:               req.Email,
+		PasswordHash:        hashedPassword,
+		FullName:            req.FullName,
+		IsActive:            true,
+		IsVerified:          false,
+		SubscriptionType:    "free",
+		HasUnlimitedCredits: true,
+		PreferredTheme:      "cyberpunk",
+		PreferredAI:         "auto",
 	}
 
 	return user, nil

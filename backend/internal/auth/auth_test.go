@@ -548,6 +548,8 @@ func TestCreateUser(t *testing.T) {
 				assert.True(t, user.IsActive)
 				assert.False(t, user.IsVerified)
 				assert.Equal(t, "free", user.SubscriptionType)
+				assert.True(t, user.HasUnlimitedCredits)
+				assert.False(t, user.BypassBilling)
 				assert.Equal(t, "cyberpunk", user.PreferredTheme)
 				assert.Equal(t, "auto", user.PreferredAI)
 			}

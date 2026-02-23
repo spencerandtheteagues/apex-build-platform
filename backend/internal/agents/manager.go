@@ -29,6 +29,8 @@ var (
 	errBuildBudgetExceeded = errors.New("build request budget exceeded")
 )
 
+const insufficientCreditsBuildMessage = "Build paused: Your account has insufficient credits. Please add credits in Settings or contact support."
+
 type consensusDecision string
 
 const (
@@ -1473,22 +1475,24 @@ func (am *AgentManager) processResult(result *TaskResult) {
 		}
 
 		// Track the error for learning
+		errorMsg := result.Error.Error()
 		errorAttempt := ErrorAttempt{
 			AttemptNumber: task.RetryCount + 1,
-			Error:         result.Error.Error(),
+			Error:         errorMsg,
 			Timestamp:     time.Now(),
 			Context:       fmt.Sprintf("Attempt %d of %d", task.RetryCount+1, task.MaxRetries),
 		}
 		task.ErrorHistory = append(task.ErrorHistory, errorAttempt)
 		task.RetryCount++
+		insufficientCredits := isInsufficientCreditsErrorMessage(errorMsg)
 		nonRetriable := am.isNonRetriableAIError(result.Error)
-		retryStrategy := am.determineRetryStrategy(result.Error.Error(), task)
+		retryStrategy := am.determineRetryStrategy(errorMsg, task)
 		if nonRetriable {
 			retryStrategy = "non_retriable"
 		}
 
 		// Collaborative incident mode: providers discuss and vote on recovery strategy.
-		if buildErr == nil && (nonRetriable || task.RetryCount >= 1 || strings.Contains(strings.ToLower(result.Error.Error()), "all_providers_failed")) {
+		if !insufficientCredits && buildErr == nil && (nonRetriable || task.RetryCount >= 1 || strings.Contains(strings.ToLower(errorMsg), "all_providers_failed")) {
 			decision, votes := am.runFailureConsensus(build, agent, task, result.Error, retryStrategy)
 			if task.Input == nil {
 				task.Input = map[string]any{}
@@ -1577,9 +1581,16 @@ func (am *AgentManager) processResult(result *TaskResult) {
 			if nonRetriable {
 				finalMessage = "Task failed due to a non-retriable provider/model configuration error."
 			}
+			if insufficientCredits {
+				finalMessage = insufficientCreditsBuildMessage
+			}
 
 			agent.Status = StatusError
-			agent.Error = fmt.Sprintf("Failed after %d attempts: %s", task.RetryCount, result.Error.Error())
+			if insufficientCredits {
+				agent.Error = insufficientCreditsBuildMessage
+			} else {
+				agent.Error = fmt.Sprintf("Failed after %d attempts: %s", task.RetryCount, errorMsg)
+			}
 			task.Status = TaskFailed
 			task.Error = agent.Error
 			agent.UpdatedAt = time.Now()
@@ -4363,6 +4374,7 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 	// Analyze error for smart retry strategy
 	errorMsg := result.Error.Error()
 	retryStrategy := am.determineRetryStrategy(errorMsg, task)
+	insufficientCredits := isInsufficientCreditsErrorMessage(errorMsg)
 	nonRetriable := am.isNonRetriableAIError(result.Error)
 	if nonRetriable {
 		retryStrategy = "non_retriable"
@@ -4421,9 +4433,16 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 		if nonRetriable {
 			finalMessage = "Task failed due to a non-retriable provider/model configuration error."
 		}
+		if insufficientCredits {
+			finalMessage = insufficientCreditsBuildMessage
+		}
 
 		agent.Status = StatusError
-		agent.Error = fmt.Sprintf("Failed after %d attempts: %s", task.RetryCount, errorMsg)
+		if insufficientCredits {
+			agent.Error = insufficientCreditsBuildMessage
+		} else {
+			agent.Error = fmt.Sprintf("Failed after %d attempts: %s", task.RetryCount, errorMsg)
+		}
 		task.Status = TaskFailed
 		task.Error = agent.Error
 		agent.UpdatedAt = time.Now()
@@ -4460,11 +4479,16 @@ func (am *AgentManager) isNonRetriableAIError(err error) bool {
 	return am.isNonRetriableAIErrorMessage(err.Error())
 }
 
+func isInsufficientCreditsErrorMessage(errorMsg string) bool {
+	return strings.Contains(strings.ToLower(errorMsg), "insufficient_credits")
+}
+
 func (am *AgentManager) isNonRetriableAIErrorMessage(errorMsg string) bool {
 	errorLower := strings.ToLower(errorMsg)
 
 	if strings.Contains(errorLower, "build not active") ||
-		strings.Contains(errorLower, "build request budget exceeded") {
+		strings.Contains(errorLower, "build request budget exceeded") ||
+		strings.Contains(errorLower, "insufficient_credits") {
 		return true
 	}
 
