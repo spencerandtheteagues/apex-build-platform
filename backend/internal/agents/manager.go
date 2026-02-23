@@ -1351,6 +1351,24 @@ func (am *AgentManager) executeTask(task *Task) {
 
 	// Role-aware token limits scaled by power mode
 	maxTokens := am.getMaxTokensForRole(agent.Role, build.PowerMode)
+	if am.isLocalDevStrictPreviewBuild(build) {
+		switch agent.Role {
+		case RoleArchitect, RoleDatabase, RoleTesting, RoleSolver:
+			// Complex strict preview builds frequently truncate schema/seed/test outputs.
+			// Give these roles more room to return complete files.
+			boosted := maxTokens * 3 / 2
+			if boosted > maxTokens {
+				maxTokens = boosted
+			}
+		}
+	}
+	if task.RetryCount > 0 && taskHasRecentTruncationError(task) {
+		// Prefer a larger response budget when the prior attempt was truncated.
+		boosted := maxTokens * 3 / 2
+		if boosted > maxTokens {
+			maxTokens = boosted
+		}
+	}
 	if build.MaxTokensPerRequest > 0 && build.MaxTokensPerRequest < maxTokens {
 		maxTokens = build.MaxTokensPerRequest
 	}
@@ -4204,26 +4222,27 @@ EXAMPLE OUTPUT FORMAT:
 - createdAt: DateTime` + techHint + baseRules,
 
 		RoleArchitect: `You are the Architect Agent — a senior systems architect who designs production-grade software architectures.
-Your job: make concrete technology decisions and output architectural code/configuration.
+Your job: make concrete technology decisions and produce a concise implementation blueprint for the coding agents.
+
+CRITICAL:
+- Do NOT output full application source code or many code/config files.
+- Do NOT duplicate backend/frontend/database agent responsibilities.
+- Keep output compact and complete enough to guide implementation.
 
 YOUR OUTPUT MUST INCLUDE:
 - Exact library versions (e.g., "express@4.18.2", not just "express")
-- Project structure with directory layout
-- Configuration files (tsconfig.json, package.json, docker-compose.yml)
-- Middleware stack and request pipeline
-- Authentication/authorization strategy with implementation details
-- Database connection and ORM configuration
-- Environment variable schema
+- Directory layout / monorepo structure
+- Ownership map: which agent creates which files
+- API surface summary (key routes/resources only)
+- Data model/entity summary with relationships
+- Auth/session strategy
+- Environment variable schema (key names and purpose)
+- Build/run scripts expected at root and in workspaces
 
-OUTPUT CONCRETE FILES — not diagrams or descriptions. Every config file must be complete and valid.
-
-MANDATORY ROOT FILES for every full-stack project:
-- package.json (plain filename, NO annotations) — root workspace package with workspaces config
-- docker-compose.yml — full dev environment
-- .env.example — all required environment variables documented
-- .gitignore — comprehensive ignores
-
-EXAMPLE: Output a real package.json with all dependencies, a real tsconfig.json, a real docker-compose.yml.` + techHint + baseRules,
+OUTPUT FORMAT:
+- Prefer plain markdown sections and bullet lists (no diagrams required)
+- If you include files, limit to SMALL blueprint docs only (e.g. ARCHITECTURE.md, docs/file-map.md)
+- Never emit large code blocks for runtime source files` + techHint + baseRules,
 
 		RoleFrontend: `You are the Frontend Agent — an expert UI engineer who builds beautiful, responsive, production-ready interfaces.
 You specialize in modern React with TypeScript, Vite, and Tailwind CSS.
@@ -4559,6 +4578,7 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 	var codeBuffer strings.Builder
 	inCodeBlock := false
 	currentLanguage := ""
+	parserWarnings := make([]string, 0, 1)
 
 	for i, line := range lines {
 		trimmedLine := strings.TrimSpace(line)
@@ -4657,6 +4677,9 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 		currentFile.Size = int64(len(currentFile.Content))
 		output.Files = append(output.Files, *currentFile)
 	}
+	if inCodeBlock {
+		parserWarnings = append(parserWarnings, "AI response ended with an unterminated code block; final file output may be truncated")
+	}
 
 	// If no files were extracted but we have response content, treat the whole response as a single file
 	if len(output.Files) == 0 && len(response) > 100 {
@@ -4674,6 +4697,7 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 			output.Messages = []string{response}
 		}
 	}
+	output.Messages = append(output.Messages, parserWarnings...)
 
 	return output
 }
@@ -4816,7 +4840,7 @@ func getErrorString(err error) string {
 func (am *AgentManager) isCodeGenerationTask(taskType TaskType) bool {
 	switch taskType {
 	case TaskGenerateFile, TaskGenerateAPI, TaskGenerateUI, TaskGenerateSchema, TaskFix,
-		TaskArchitecture, TaskTest:
+		TaskTest:
 		return true
 	}
 	return false
@@ -5424,11 +5448,19 @@ func analyzeFrontendPackageJSON(content string) (hasReact bool, hasReactDOM bool
 
 // verifyGeneratedCode performs quick build verification on generated code
 func (am *AgentManager) verifyGeneratedCode(buildID string, output *TaskOutput) (bool, []string) {
-	if output == nil || len(output.Files) == 0 {
+	if output == nil {
 		return true, nil // Nothing to verify
 	}
 
 	errors := make([]string, 0)
+	for _, msg := range output.Messages {
+		if strings.Contains(strings.ToLower(msg), "unterminated code block") {
+			errors = append(errors, fmt.Sprintf("AI response parsing warning: %s", msg))
+		}
+	}
+	if len(output.Files) == 0 {
+		return len(errors) == 0, errors
+	}
 
 	// Quick syntax checks on generated files
 	for _, file := range output.Files {
@@ -5485,6 +5517,9 @@ func (am *AgentManager) quickSyntaxCheck(file GeneratedFile) []string {
 		if strings.Count(content, "```")%2 != 0 {
 			errors = append(errors, fmt.Sprintf("%s: Contains unmatched markdown code fence", file.Path))
 		}
+		if tailErr := detectLikelyTruncatedJSTSFile(file.Path, content); tailErr != "" {
+			errors = append(errors, tailErr)
+		}
 
 	case "go":
 		// Only enforce package declaration for actual Go source files.
@@ -5521,6 +5556,50 @@ func (am *AgentManager) quickSyntaxCheck(file GeneratedFile) []string {
 	}
 
 	return errors
+}
+
+func detectLikelyTruncatedJSTSFile(path, content string) string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return ""
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if last == "" {
+		return ""
+	}
+
+	// Catch abrupt EOFs that commonly come from token-truncated model output.
+	incompleteTailPatterns := []*regexp.Regexp{
+		regexp.MustCompile(`^(const|let|var|import|export|return|await|throw|new)\b\s*$`),
+		regexp.MustCompile(`^(if|for|while|switch|catch)\b.*$`),
+		regexp.MustCompile(`^(async\s+)?function\b.*$`),
+	}
+	for _, re := range incompleteTailPatterns {
+		if re.MatchString(last) {
+			return fmt.Sprintf("%s: Likely truncated source file (abrupt EOF after '%s')", path, last)
+		}
+	}
+
+	if strings.HasSuffix(last, "=") || strings.HasSuffix(last, "=>") ||
+		strings.HasSuffix(last, ".") || strings.HasSuffix(last, ",") ||
+		strings.HasSuffix(last, ":") || strings.HasSuffix(last, "(") ||
+		strings.HasSuffix(last, "[") {
+		return fmt.Sprintf("%s: Likely truncated source file (abrupt EOF near '%s')", path, last)
+	}
+
+	return ""
+}
+
+func taskHasRecentTruncationError(task *Task) bool {
+	if task == nil || len(task.ErrorHistory) == 0 {
+		return false
+	}
+	last := strings.ToLower(task.ErrorHistory[len(task.ErrorHistory)-1].Error)
+	return strings.Contains(last, "unterminated code block") ||
+		strings.Contains(last, "likely truncated source file") ||
+		strings.Contains(last, "abrupt eof")
 }
 
 // hasEmptyFunctions checks if content has empty function bodies

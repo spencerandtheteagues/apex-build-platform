@@ -452,6 +452,64 @@ func TestCanCreateAutomatedFixTask_DedupesActiveAndRecent(t *testing.T) {
 	}
 }
 
+func TestParseTaskOutputFlagsUnterminatedCodeBlock(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	resp := "// File: packages/backend/src/database/seed.ts\n" +
+		"```typescript\n" +
+		"export async function seed() {\n" +
+		"  const"
+
+	out := am.parseTaskOutput(TaskGenerateSchema, resp)
+	if len(out.Files) != 1 {
+		t.Fatalf("expected one parsed file, got %d", len(out.Files))
+	}
+	joined := strings.Join(out.Messages, " | ")
+	if !strings.Contains(strings.ToLower(joined), "unterminated code block") {
+		t.Fatalf("expected parser warning, got %q", joined)
+	}
+
+	ok, errs := am.verifyGeneratedCode("build-test", out)
+	if ok {
+		t.Fatalf("expected verification failure due to parser warning/truncation")
+	}
+	if !containsError(errs, "unterminated code block") {
+		t.Fatalf("expected parser warning surfaced in verification errors, got %v", errs)
+	}
+}
+
+func TestQuickSyntaxCheckDetectsLikelyTruncatedTypeScriptEOF(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	errs := am.quickSyntaxCheck(GeneratedFile{
+		Path:     "packages/backend/src/database/seed.ts",
+		Language: "typescript",
+		Content:  "export async function seed() {\n  const",
+	})
+	if !containsError(errs, "Likely truncated source file") {
+		t.Fatalf("expected truncation error, got %v", errs)
+	}
+}
+
+func TestTaskHasRecentTruncationError(t *testing.T) {
+	t.Parallel()
+
+	if taskHasRecentTruncationError(nil) {
+		t.Fatalf("expected false for nil task")
+	}
+	task := &Task{
+		ErrorHistory: []ErrorAttempt{
+			{Error: "some other failure"},
+			{Error: "AI response parsing warning: unterminated code block; final file output may be truncated"},
+		},
+	}
+	if !taskHasRecentTruncationError(task) {
+		t.Fatalf("expected truncation error detection")
+	}
+}
+
 func TestCancelAutomatedRecoveryTasksForLoopCap(t *testing.T) {
 	t.Parallel()
 
