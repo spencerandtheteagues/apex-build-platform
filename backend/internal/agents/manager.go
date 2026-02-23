@@ -3366,7 +3366,8 @@ ABSOLUTE RULES:
    WRONG:   // File: package.json (root)
    WRONG:   // File: src/index.tsx (entry point)
 9. For React/Vite apps ALWAYS generate: index.html at project root AND vite.config.ts
-10. React apps MUST include both 'react' and 'react-dom' in package.json dependencies`
+10. React apps MUST include both 'react' and 'react-dom' in package.json dependencies
+11. Before finishing, self-check: no placeholder text, valid package.json scripts, and real runnable entry points`
 
 	// Build tech stack context if available
 	techHint := ""
@@ -4122,7 +4123,7 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	}
 
 	if hasTSXOrJSX && hasPackageJSON {
-		hasReact, hasReactDOM, isNext, hasScripts, pkgErr := analyzeFrontendPackageJSON(packageJSON)
+		hasReact, hasReactDOM, isNext, hasScripts, missingScripts, pkgErr := analyzeFrontendPackageJSON(packageJSON)
 		// Only enforce frontend rules if this is actually a frontend/React app
 		isFrontendApp := hasReact || isNext
 		if isFrontendApp {
@@ -4133,7 +4134,7 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 				addError("package.json includes react but is missing react-dom")
 			}
 			if hasScripts == false && (hasReact || isNext) {
-				addError("package.json is missing runnable scripts (dev/start/build)")
+				addError(fmt.Sprintf("package.json is missing runnable scripts (%s)", strings.Join(missingScripts, "/")))
 			}
 			if !isNext && !hasIndexHTML && !hasBundlerConfig {
 				addError("Frontend app is missing an HTML entry point (index.html or public/index.html)")
@@ -4147,15 +4148,15 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	return errors
 }
 
-func analyzeFrontendPackageJSON(content string) (hasReact bool, hasReactDOM bool, isNext bool, hasScripts bool, err error) {
+func analyzeFrontendPackageJSON(content string) (hasReact bool, hasReactDOM bool, isNext bool, hasScripts bool, missingScripts []string, err error) {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
-		return false, false, false, false, fmt.Errorf("package.json is empty")
+		return false, false, false, false, []string{"dev", "build", "start"}, fmt.Errorf("package.json is empty")
 	}
 
 	var pkg map[string]any
 	if err := json.Unmarshal([]byte(trimmed), &pkg); err != nil {
-		return false, false, false, false, err
+		return false, false, false, false, []string{"dev", "build", "start"}, err
 	}
 
 	getObject := func(value any) map[string]any {
@@ -4180,23 +4181,30 @@ func analyzeFrontendPackageJSON(content string) (hasReact bool, hasReactDOM bool
 		return false
 	}
 
-	scripts := getObject(pkg["scripts"])
-	for _, script := range []string{"dev", "start", "build"} {
-		if scripts == nil {
-			continue
-		}
-		if raw, ok := scripts[script]; ok {
-			if value, ok := raw.(string); ok && strings.TrimSpace(value) != "" {
-				hasScripts = true
-				break
-			}
-		}
-	}
-
 	hasReact = hasDependency("react")
 	hasReactDOM = hasDependency("react-dom")
 	isNext = hasDependency("next")
-	return hasReact, hasReactDOM, isNext, hasScripts, nil
+
+	scripts := getObject(pkg["scripts"])
+	requiredScripts := []string{"dev", "build"}
+	if isNext {
+		requiredScripts = append(requiredScripts, "start")
+	}
+	missingScripts = make([]string, 0, len(requiredScripts))
+	for _, script := range requiredScripts {
+		if scripts == nil {
+			missingScripts = append(missingScripts, script)
+			continue
+		}
+		raw, ok := scripts[script]
+		value, isString := raw.(string)
+		if !ok || !isString || strings.TrimSpace(value) == "" {
+			missingScripts = append(missingScripts, script)
+		}
+	}
+	hasScripts = len(missingScripts) == 0
+
+	return hasReact, hasReactDOM, isNext, hasScripts, missingScripts, nil
 }
 
 // verifyGeneratedCode performs quick build verification on generated code
@@ -4220,13 +4228,19 @@ func (am *AgentManager) verifyGeneratedCode(buildID string, output *TaskOutput) 
 
 		// Check for placeholder code
 		placeholders := []string{
+			"TODO",
+			"FIXME",
 			"// TODO:",
 			"// FIXME:",
 			"throw new Error('Not implemented')",
+			"throw new Error(\"Not implemented\")",
 			"raise NotImplementedError",
 			"panic(\"not implemented\")",
 			"// ... rest of implementation",
 			"/* placeholder */",
+			"[complete file content here]",
+			"[complete code here]",
+			"your implementation here",
 		}
 		for _, p := range placeholders {
 			if strings.Contains(content, p) {

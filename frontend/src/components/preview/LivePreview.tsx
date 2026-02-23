@@ -94,6 +94,8 @@ export default function LivePreview({
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string>('')
+  const [iframeLoading, setIframeLoading] = useState(false)
+  const [iframeError, setIframeError] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [activeTab, setActiveTab] = useState<ActiveTab>('preview')
@@ -268,11 +270,25 @@ export default function LivePreview({
     setError(null)
     setLoading(false)
     setPreviewUrl('')
+    setIframeLoading(false)
+    setIframeError(null)
     setConnected(false)
     setActiveSandbox(false)
     clearDevTools()
     lastAutoStartedProjectRef.current = null
   }, [projectId, clearDevTools])
+
+  useEffect(() => {
+    if (status?.active && previewSrc) {
+      setIframeLoading(true)
+      setIframeError(null)
+      return
+    }
+    if (!status?.active) {
+      setIframeLoading(false)
+      setIframeError(null)
+    }
+  }, [status?.active, previewSrc])
 
   // Fetch preview status
   const fetchStatus = useCallback(async () => {
@@ -289,6 +305,8 @@ export default function LivePreview({
         setConnected(true)
       } else {
         setPreviewUrl('')
+        setIframeLoading(false)
+        setIframeError(null)
         setConnected(false)
       }
     } catch (err: any) {
@@ -299,6 +317,8 @@ export default function LivePreview({
         // Preview not running - that's OK
         setStatus(null)
         setPreviewUrl('')
+        setIframeLoading(false)
+        setIframeError(null)
       }
       setConnected(false)
     }
@@ -328,6 +348,8 @@ export default function LivePreview({
         if (activeProjectIdRef.current !== requestProjectId) return
         setStatus(response.data.preview)
         setPreviewUrl(response.data.preview?.url || response.data.url || '')
+        setIframeLoading(true)
+        setIframeError(null)
         setConnected(true)
         setActiveSandbox(response.data.sandbox ?? useSandbox)
         setRefreshKey(prev => prev + 1)
@@ -374,6 +396,8 @@ export default function LivePreview({
       })
       setStatus(null)
       setPreviewUrl('')
+      setIframeLoading(false)
+      setIframeError(null)
       setConnected(false)
       setActiveSandbox(false)
     } catch (err: any) {
@@ -386,6 +410,8 @@ export default function LivePreview({
   // Refresh preview
   const refreshPreview = async () => {
     try {
+      setIframeLoading(true)
+      setIframeError(null)
       await apiService.client.post('/preview/refresh', {
         project_id: projectId,
         sandbox: activeSandbox
@@ -543,7 +569,7 @@ export default function LivePreview({
   return (
     <div
       ref={containerRef}
-      className={`flex flex-col bg-gray-900 border border-gray-700 rounded-lg overflow-hidden ${className}`}
+      className={`min-h-0 flex flex-col bg-gray-900 border border-gray-700 rounded-lg overflow-hidden ${className}`}
     >
       {/* Toolbar */}
       <div className="flex items-center justify-between px-3 py-2 bg-gray-800/50 border-b border-gray-700">
@@ -847,7 +873,7 @@ export default function LivePreview({
       <div className="flex-1 overflow-hidden">
         {/* Preview Tab */}
         {activeTab === 'preview' && (
-          <div className="h-full flex items-center justify-center bg-gray-950 overflow-auto p-4">
+          <div className="relative h-full flex items-center justify-center bg-gray-950 overflow-auto p-4">
             {error && (
               <div className="flex flex-col items-center justify-center text-red-400">
                 <AlertCircle className="w-12 h-12 mb-3" />
@@ -879,9 +905,17 @@ export default function LivePreview({
 
             {status?.active && previewSrc && (
               <div
-                className="bg-white rounded-lg shadow-2xl overflow-hidden transition-all duration-300"
+                className="relative bg-white rounded-lg shadow-2xl overflow-hidden transition-all duration-300"
                 style={getViewportStyle()}
               >
+                {iframeLoading && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/90 text-gray-700 pointer-events-none">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Loading app preview...</span>
+                    </div>
+                  </div>
+                )}
                 <iframe
                   ref={iframeRef}
                   key={`${refreshKey}-${previewSrc}`}
@@ -889,7 +923,28 @@ export default function LivePreview({
                   className="w-full h-full border-0"
                   title="Live Preview"
                   sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                  onLoad={() => {
+                    setIframeLoading(false)
+                    setIframeError(null)
+                  }}
+                  onError={() => {
+                    setIframeLoading(false)
+                    setIframeError('Preview frame failed to load. Try Refresh or restart preview.')
+                  }}
                 />
+              </div>
+            )}
+
+            {status?.active && !previewSrc && !error && (
+              <div className="flex flex-col items-center justify-center text-gray-400">
+                <Loader2 className="w-8 h-8 animate-spin mb-3" />
+                <p className="text-sm">Starting preview server...</p>
+              </div>
+            )}
+
+            {status?.active && iframeError && !error && (
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 px-4 py-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 text-yellow-200 text-sm">
+                {iframeError}
               </div>
             )}
           </div>

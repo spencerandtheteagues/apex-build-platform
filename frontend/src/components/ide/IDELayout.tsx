@@ -818,7 +818,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
 
             {/* Live Preview Pane */}
             {showPreview && currentProject && (
-              <div className="w-1/2 border-l border-gray-800 min-w-0">
+              <div className="w-1/2 border-l border-gray-800 min-w-0 min-h-0 flex">
                 <Suspense fallback={<EditorLoadingFallback />}>
                   <LivePreview
                     projectId={currentProject.id}

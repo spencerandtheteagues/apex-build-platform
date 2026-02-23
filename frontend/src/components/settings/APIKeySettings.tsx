@@ -138,6 +138,20 @@ const COST_COLORS = {
   high: 'text-red-400',
 }
 
+function isLocalOllamaUrl(value: string): boolean {
+  const trimmed = value.trim()
+  if (!trimmed) return false
+
+  const parseCandidate = /^[a-z]+:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
+  try {
+    const parsed = new URL(parseCandidate)
+    const host = parsed.hostname.toLowerCase()
+    return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1'
+  } catch {
+    return false
+  }
+}
+
 export default function APIKeySettings() {
   const [keys, setKeys] = useState<Record<string, KeyState>>({})
   const [inputValues, setInputValues] = useState<Record<string, string>>({})
@@ -364,6 +378,7 @@ export default function APIKeySettings() {
           const isValid = keyState?.isValid ?? false
           const selectedModel = keyState?.selectedModel || provider.models[0]?.id
           const selectedModelInfo = provider.models.find(m => m.id === selectedModel) || provider.models[0]
+          const isLocalOllama = provider.id === 'ollama' && isLocalOllamaUrl(inputValues[provider.id] || '')
 
           return (
             <div
@@ -485,6 +500,30 @@ export default function APIKeySettings() {
                       >
                         {deleting[provider.id] ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                       </button>
+                    </div>
+                  )}
+
+                  {isLocalOllama && (
+                    <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3 space-y-2">
+                      <p className="text-sm text-cyan-100">
+                        <span className="font-medium">📡 Local Ollama detected.</span>{' '}
+                        Your Ollama server at localhost is only accessible from your browser. To use it with cloud builds,
+                        expose it via: <code className="px-1 py-0.5 rounded bg-black/30 text-cyan-200">ngrok http 11434</code>{' '}
+                        and use the public ngrok URL instead.
+                      </p>
+                      <details className="group">
+                        <summary className="cursor-pointer text-xs text-cyan-300 hover:text-cyan-200 select-none">
+                          Quick Setup
+                        </summary>
+                        <div className="mt-2 rounded-md border border-cyan-500/20 bg-black/20 p-3 text-xs text-cyan-100 space-y-2">
+                          <p>Option A (ngrok):</p>
+                          <code className="block px-2 py-1 rounded bg-black/30 text-cyan-200">ngrok http 11434</code>
+                          <p>Use the generated <span className="font-mono">https://*.ngrok-free.app</span> URL in this field.</p>
+                          <p>Option B (Cloudflare Tunnel):</p>
+                          <code className="block px-2 py-1 rounded bg-black/30 text-cyan-200">cloudflared tunnel --url http://localhost:11434</code>
+                          <p>Then paste the public <span className="font-mono">https://*.trycloudflare.com</span> URL here.</p>
+                        </div>
+                      </details>
                     </div>
                   )}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -181,6 +182,9 @@ func (m *BYOKManager) ValidateKey(ctx context.Context, userID uint, provider str
 	}
 
 	err = client.Health(ctx)
+	if err != nil && AIProvider(provider) == ProviderOllama {
+		err = normalizeOllamaValidationError(apiKey, err)
+	}
 	valid := err == nil
 
 	// Update validity status in DB
@@ -189,6 +193,47 @@ func (m *BYOKManager) ValidateKey(ctx context.Context, userID uint, provider str
 		Update("is_valid", valid)
 
 	return valid, err
+}
+
+func isLocalOllamaURL(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return false
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Hostname() == "" {
+		return false
+	}
+
+	switch strings.ToLower(parsed.Hostname()) {
+	case "localhost", "127.0.0.1", "0.0.0.0", "::1":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeOllamaValidationError(baseURL string, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	msg := strings.ToLower(err.Error())
+	unreachable := strings.Contains(msg, "status 403") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "server not reachable")
+
+	if unreachable {
+		if isLocalOllamaURL(baseURL) {
+			return fmt.Errorf("Could not reach Ollama server — if it's running locally, you need to expose it via a public URL (for example ngrok/cloudflared). Original error: %v", err)
+		}
+		return fmt.Errorf("Could not reach Ollama server — if it's running locally, you need to expose it via a public URL. Original error: %v", err)
+	}
+
+	return err
 }
 
 // GetRouterForUser creates an AI router that uses the user's keys where available,

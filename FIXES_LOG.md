@@ -32,3 +32,20 @@
 ### Why
 - Production frontend was attempting a legacy Socket.IO handshake against a backend realtime endpoint that may not support Socket.IO on that path, causing repeated 404 console noise.
 - Build UI could misclassify status due to websocket/payload mismatch and default unknown statuses to `failed`, producing "Failed at 90%" without a corresponding backend error reason.
+
+## Session 2026-02-23 - BYOK Ollama Relay Guidance + Preview UX + Build Quality Guardrails
+
+### Bugs Fixed
+1. **Ollama BYOK localhost confusion (frontend UX)** - Added `isLocalOllamaUrl()` detection in `APIKeySettings` and an inline warning banner when users enter `localhost`/`127.0.0.1`/`0.0.0.0`/`::1`, including a collapsible Quick Setup guide for `ngrok` and `cloudflared`.
+2. **Ollama BYOK validation error messaging (backend)** - Normalized unreachable/403 Ollama validation errors to return actionable guidance: local Ollama must be exposed via a public URL for cloud-hosted builds.
+3. **Preview pane loading/running feedback** - `LivePreview` now tracks iframe loading/error state, shows a loading overlay while the app frame initializes, and shows a clearer frame-load error hint instead of a silent blank pane.
+4. **Preview pane layout robustness in IDE split view** - Added `min-h-0`/flex containment to the IDE preview pane wrapper and preview root to prevent flexbox height collapse/hidden preview content in the IDE layout.
+5. **Build quality readiness validation** - Fixed `package.json` script validation to require actual runnable frontend scripts (`dev` + `build`, plus `start` for Next.js) instead of passing when any single script exists.
+6. **Build quality placeholder detection** - Expanded generated-code validation to catch common placeholder markers (generic `TODO`/`FIXME`, not-implemented variants, and bracketed template placeholders like `[complete file content here]`).
+7. **Agent prompt guardrail tightening** - Added an explicit self-check requirement to core agent system rules for runnable entry points, valid package scripts, and zero placeholder text before completion.
+
+### Validation
+- `frontend`: `npm run typecheck` ✅
+- `frontend`: `npm run lint` ✅
+- `frontend`: `npm run test -- --run` ✅ (includes `LivePreview` tests)
+- `frontend`: `npm run build` ✅ (Vite chunk-size warnings only)
