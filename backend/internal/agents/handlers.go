@@ -158,12 +158,23 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		return
 	}
 
+	// Normalize snapshot status: if completed_at is set and no error, it's completed
+	snapshotStatus := snapshot.Status
+	if !snapshot.CompletedAt.IsZero() && snapshot.Error == "" &&
+		snapshotStatus != "failed" && snapshotStatus != "cancelled" {
+		snapshotStatus = "completed"
+	}
+	snapshotProgress := snapshot.Progress
+	if snapshotStatus == "completed" {
+		snapshotProgress = 100
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"id":                     snapshot.BuildID,
-		"status":                 snapshot.Status,
+		"status":                 snapshotStatus,
 		"mode":                   snapshot.Mode,
 		"description":            snapshot.Description,
-		"progress":               snapshot.Progress,
+		"progress":               snapshotProgress,
 		"agents_count":           0,
 		"tasks_count":            0,
 		"checkpoints":            0,
