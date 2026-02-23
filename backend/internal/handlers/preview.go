@@ -83,14 +83,20 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 		return
 	}
 
-	// Auto-detect entry point if not specified
-	if req.EntryPoint == "" {
-		req.EntryPoint = h.detectEntryPoint(req.ProjectID)
-	}
-
 	// Auto-detect framework if not specified
 	if req.Framework == "" {
 		req.Framework = h.detectFramework(req.ProjectID)
+	}
+
+	// Auto-detect entry point if not specified.
+	// For modern app frameworks we should target a TS/JS source entry (esbuild-compatible),
+	// not index.html which causes "No loader is configured for .html" failures.
+	if req.EntryPoint == "" {
+		if req.Framework == "vanilla" {
+			req.EntryPoint = h.detectEntryPoint(req.ProjectID)
+		} else {
+			req.EntryPoint = h.detectBundleEntryPoint(req.ProjectID)
+		}
 	}
 
 	config := &preview.PreviewConfig{
