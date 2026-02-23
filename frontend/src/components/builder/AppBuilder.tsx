@@ -51,7 +51,14 @@ import {
 import { GitHubImportWizard } from '@/components/import/GitHubImportWizard'
 import { OnboardingTour } from './OnboardingTour'
 import { BuildHistory } from './BuildHistory'
-import { isTerminalBuildStatus, reconcileBuildPayloadWithCompletedDetail } from './buildRestore'
+import {
+  extractBuildFailureReason,
+  isTerminalBuildStatus,
+  mergeBuildStatusWithTerminalPrecedence,
+  normalizeBuildStatus,
+  reconcileBuildPayloadWithCompletedDetail,
+  resolveBuildCompletedEventStatus,
+} from './buildRestore'
 import LivePreview from '@/components/preview/LivePreview'
 
 // ============================================================================
@@ -124,6 +131,7 @@ interface BuildState {
   qualityGateRequired?: boolean
   qualityGateStatus?: 'pending' | 'running' | 'passed' | 'failed'
   qualityGateStage?: string
+  errorMessage?: string
 }
 
 type BuildMode = 'fast' | 'full'
@@ -1187,26 +1195,38 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
     switch (type) {
       case 'build:state':
-        setBuildState(prev => ({
-          ...prev,
-          ...data,
-          agents: Object.values(data.agents || {}),
-          powerMode: data.power_mode || data.powerMode || prev?.powerMode,
-          currentPhase: data.phase || prev?.currentPhase,
-          qualityGateRequired: typeof data.quality_gate_required === 'boolean' ? data.quality_gate_required : prev?.qualityGateRequired,
-          qualityGateStage: data.quality_gate_stage || prev?.qualityGateStage,
-          qualityGateStatus:
-            typeof data.quality_gate_passed === 'boolean'
-              ? (data.quality_gate_passed ? 'passed' : 'failed')
-              : data.quality_gate_active
-                ? 'running'
-                : prev?.qualityGateStatus,
-        }))
+        setBuildState(prev => {
+          const nextStatus = mergeBuildStatusWithTerminalPrecedence(prev?.status, data.status)
+          const nextErrorMessage = extractBuildFailureReason(data)
+          return ({
+            ...prev,
+            ...data,
+            status: (nextStatus || prev?.status || 'pending') as BuildState['status'],
+            progress: (prev && isTerminalBuildStatus(prev.status) && typeof data.progress === 'number')
+              ? (prev.status === 'completed' ? 100 : prev.progress)
+              : (typeof data.progress === 'number' ? clampPercent(data.progress) : prev?.progress ?? 0),
+            agents: Object.values(data.agents || {}),
+            powerMode: data.power_mode || data.powerMode || prev?.powerMode,
+            currentPhase: data.phase || prev?.currentPhase,
+            qualityGateRequired: typeof data.quality_gate_required === 'boolean' ? data.quality_gate_required : prev?.qualityGateRequired,
+            qualityGateStage: data.quality_gate_stage || prev?.qualityGateStage,
+            qualityGateStatus:
+              typeof data.quality_gate_passed === 'boolean'
+                ? (data.quality_gate_passed ? 'passed' : 'failed')
+                : data.quality_gate_active
+                  ? 'running'
+                  : prev?.qualityGateStatus,
+            errorMessage: nextErrorMessage || prev?.errorMessage,
+          })
+        })
         break
 
       case 'build:progress':
         setBuildState(prev => {
           if (!prev) return null
+          if (isTerminalBuildStatus(prev.status)) {
+            return prev
+          }
           const updates: Partial<BuildState> = {}
 
           if (typeof data.progress === 'number') {
@@ -1214,8 +1234,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           }
 
           // Apply status transition (e.g. planning → in_progress)
-          if (data.status) {
-            updates.status = data.status
+          const mergedStatus = mergeBuildStatusWithTerminalPrecedence(prev.status, data.status)
+          if (mergedStatus) {
+            updates.status = mergedStatus as BuildState['status']
           }
 
           if (data.phase === 'provider_check' && data.available_providers) {
@@ -1374,11 +1395,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       case 'build:completed': {
         setIsBuilding(false)
         clearActiveBuildId()
-        const finalStatus = data.status === 'completed' ? 'completed' : 'failed'
+        const finalStatus = resolveBuildCompletedEventStatus(data.status)
+        const failureReason = finalStatus === 'failed' ? extractBuildFailureReason(data) : undefined
         if (finalStatus === 'completed') {
           addSystemMessage(`Build completed successfully! ${data.files_count || 0} files generated.`)
         } else {
           addSystemMessage(`Build finished with errors. ${data.files_count || 0} files generated.`)
+          if (failureReason) {
+            addSystemMessage(`Failure reason: ${failureReason}`)
+          }
         }
         setBuildState(prev => prev
           ? {
@@ -1391,6 +1416,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
             qualityGateStatus: typeof data.quality_gate_passed === 'boolean'
               ? (data.quality_gate_passed ? 'passed' : 'failed')
               : (finalStatus === 'completed' ? 'passed' : 'failed'),
+            errorMessage: failureReason,
           }
           : null
         )
@@ -1484,6 +1510,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         if (data.recoverable) {
           break
         }
+        {
+          const failureReason = extractBuildFailureReason(data)
+          if (failureReason && failureReason !== data.error) {
+            addSystemMessage(`Failure reason: ${failureReason}`)
+          }
+        }
         setIsBuilding(false)
         clearActiveBuildId()
         setBuildState(prev => prev
@@ -1495,6 +1527,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
             qualityGateRequired: typeof data.quality_gate_required === 'boolean' ? data.quality_gate_required : true,
             qualityGateStage: typeof data.quality_gate_stage === 'string' ? data.quality_gate_stage : prev.qualityGateStage,
             qualityGateStatus: 'failed',
+            errorMessage: extractBuildFailureReason(data) || prev.errorMessage,
           }
           : null
         )
@@ -1505,7 +1538,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         setBuildState(prev => prev
           ? {
             ...prev,
-            status: data.status || prev.status,
+            status: (mergeBuildStatusWithTerminalPrecedence(prev.status, data.status) || prev.status) as BuildState['status'],
             currentPhase: data.phase || prev.currentPhase,
             qualityGateRequired: typeof data.quality_gate_required === 'boolean' ? data.quality_gate_required : prev.qualityGateRequired,
             qualityGateStage: typeof data.quality_gate_stage === 'string' ? data.quality_gate_stage : prev.qualityGateStage,
@@ -1519,11 +1552,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         addSystemMessage('Build initialized, spawning agents...')
         setBuildState(prev => prev ? {
           ...prev,
-          status: data.status || 'planning',
+          status: ((normalizeBuildStatus(data.status) || 'planning') as BuildState['status']),
           powerMode: data.power_mode || data.powerMode || prev.powerMode,
           currentPhase: data.phase || prev.currentPhase || 'Planning',
           qualityGateRequired: true,
           qualityGateStatus: prev.qualityGateStatus || 'pending',
+          errorMessage: undefined,
         } : null)
         break
 
@@ -1967,9 +2001,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
     payload = reconcileBuildPayloadWithCompletedDetail(payload, options?.fallbackDetail)
 
-    const statusValue = String(payload.status || 'failed')
-    const validStatuses = new Set(['idle', 'pending', 'planning', 'in_progress', 'testing', 'reviewing', 'completed', 'failed', 'cancelled'])
-    const status = (validStatuses.has(statusValue) ? statusValue : 'failed') as BuildState['status']
+    const status = (normalizeBuildStatus(payload.status) || 'pending') as BuildState['status']
     const files = normalizeGeneratedFiles(payload.files || [])
 
     const agents: Agent[] = Array.isArray(payload.agents)
@@ -2043,6 +2075,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
               : 'pending',
       qualityGateStage: payload.quality_gate_stage || undefined,
       availableProviders: Array.isArray(payload.available_providers) ? payload.available_providers : undefined,
+      errorMessage: extractBuildFailureReason(payload),
     })
 
     const shouldReconnectLive = !isTerminalBuildStatus(status) && options?.reconnectLive !== false && payload.live !== false
@@ -3099,6 +3132,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                   </div>
                 </CardHeader>
                 <CardContent className="flex-1 flex flex-col overflow-hidden p-5">
+                  {buildState.status === 'failed' && buildState.errorMessage && (
+                    <div className="mb-4 rounded-lg border border-red-500/40 bg-red-950/30 px-4 py-3 text-sm text-red-200">
+                      Failure reason: {buildState.errorMessage}
+                    </div>
+                  )}
                   {/* Terminal Output */}
                   <TerminalOutput messages={chatMessages} isBuilding={isBuilding} />
 

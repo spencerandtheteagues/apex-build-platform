@@ -40,6 +40,16 @@ export interface CollaborationEventData {
 // Debug mode - only log in development
 const DEBUG = import.meta.env.DEV
 
+export const isSocketIoEndpointUnavailableError = (error: unknown): boolean => {
+  const message = typeof error === 'string'
+    ? error
+    : (error && typeof error === 'object' && 'message' in error && typeof (error as any).message === 'string'
+      ? (error as any).message
+      : '')
+
+  return /\b404\b|not found|xhr poll error/i.test(message)
+}
+
 export class WebSocketService {
   private socket: Socket | null = null
   private reconnectAttempts = 0
@@ -80,6 +90,14 @@ export class WebSocketService {
     })
   }
 
+  private getSocketIoConnectionConfig(): { url?: string; path: string } {
+    const baseUrl = this.getWsUrl().replace(/\/$/, '')
+    if (!baseUrl) {
+      return { path: '/ws/socket.io' }
+    }
+    return { url: baseUrl, path: '/ws/socket.io' }
+  }
+
   // Get WebSocket URL for current environment
   private getWsUrl(): string {
     // Check for Vite environment variable
@@ -108,16 +126,17 @@ export class WebSocketService {
     }
 
     this.isConnecting = true
-    const wsUrl = this.getWsUrl()
+    const { url, path } = this.getSocketIoConnectionConfig()
 
     try {
-      this.socket = io(wsUrl ? `${wsUrl}/ws` : '/ws', {
+      this.socket = io(url, {
+        path,
         auth: {
           token,
         },
         transports: ['websocket', 'polling'],
         timeout: 10000,
-        reconnection: true,
+        reconnection: false,
         reconnectionAttempts: this.maxReconnectAttempts,
         reconnectionDelay: this.reconnectDelay,
         reconnectionDelayMax: 5000,
@@ -142,6 +161,16 @@ export class WebSocketService {
         this.socket!.on('connect_error', (error) => {
           clearTimeout(connectTimeout)
           this.isConnecting = false
+          const unsupported = isSocketIoEndpointUnavailableError(error)
+          if (unsupported) {
+            this.socket?.disconnect()
+            this.socket = null
+            if (DEBUG) {
+              console.warn('[WS] Collaboration Socket.IO endpoint unavailable on this deployment; disabling realtime collaboration socket.')
+            }
+            reject(new Error('Real-time collaboration is unavailable on this deployment.'))
+            return
+          }
           console.error('❌ WebSocket connection error:', error)
           reject(error)
         })
@@ -261,6 +290,9 @@ export class WebSocketService {
   }
 
   private scheduleReconnect(): void {
+    if (!this.socket) {
+      return
+    }
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error('🔄 Maximum reconnect attempts reached')
       return

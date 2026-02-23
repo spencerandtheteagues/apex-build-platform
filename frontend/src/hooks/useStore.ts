@@ -311,10 +311,6 @@ export const useStore = create<StoreState & StoreActions>()(
               state.isAuthLoading = false
             })
 
-            // Connect WebSocket
-            const token = response.tokens.access_token
-            await websocketService.connect(token)
-
             get().addNotification({
               type: 'success',
               title: 'Login Successful',
@@ -353,10 +349,6 @@ export const useStore = create<StoreState & StoreActions>()(
               state.isLoading = false  // Legacy
               state.isAuthLoading = false
             })
-
-            // Connect WebSocket
-            const token = response.tokens.access_token
-            await websocketService.connect(token)
 
             get().addNotification({
               type: 'success',
