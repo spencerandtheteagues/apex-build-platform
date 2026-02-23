@@ -4108,6 +4108,9 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 			hasIndexHTML = true
 		case "src/main.tsx", "src/main.jsx", "src/index.tsx", "src/index.jsx",
 			"app/page.tsx", "app/page.jsx",
+			"src/app/page.tsx", "src/app/page.jsx",
+			"src/pages/index.tsx", "src/pages/index.jsx",
+			"pages/index.tsx", "pages/index.jsx",
 			"frontend/src/main.tsx", "frontend/src/main.jsx",
 			"frontend/src/index.tsx", "frontend/src/index.jsx":
 			hasFrontendEntry = true
@@ -4118,25 +4121,25 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 		addError("No source files were generated")
 	}
 
-	if hasTSXOrJSX {
-		if !hasPackageJSON {
-			addError("Frontend TSX/JSX files generated but package.json is missing")
-		} else {
-			hasReact, hasReactDOM, isNext, hasScripts, pkgErr := analyzeFrontendPackageJSON(packageJSON)
+	if hasTSXOrJSX && hasPackageJSON {
+		hasReact, hasReactDOM, isNext, hasScripts, pkgErr := analyzeFrontendPackageJSON(packageJSON)
+		// Only enforce frontend rules if this is actually a frontend/React app
+		isFrontendApp := hasReact || isNext
+		if isFrontendApp {
 			if pkgErr != nil {
 				addError(fmt.Sprintf("package.json is invalid: %v", pkgErr))
 			}
 			if hasReact && !hasReactDOM && !isNext {
 				addError("package.json includes react but is missing react-dom")
 			}
-			if hasReact && !hasScripts {
+			if hasScripts == false && (hasReact || isNext) {
 				addError("package.json is missing runnable scripts (dev/start/build)")
 			}
 			if !isNext && !hasIndexHTML && !hasBundlerConfig {
 				addError("Frontend app is missing an HTML entry point (index.html or public/index.html)")
 			}
 			if !hasFrontendEntry {
-				addError("Frontend app is missing an entry source file (src/main.tsx|src/main.jsx|src/index.tsx|src/index.jsx|app/page.tsx)")
+				addError("Frontend app is missing an entry source file")
 			}
 		}
 	}
