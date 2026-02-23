@@ -89,13 +89,13 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 	}
 
 	// Auto-detect entry point if not specified.
-	// For modern app frameworks we should target a TS/JS source entry (esbuild-compatible),
-	// not index.html which causes "No loader is configured for .html" failures.
+	// Prefer a JS/TS source entry whenever available (works with esbuild for React/SPA projects).
+	// Fallback to HTML-style entry only when no source entry exists.
 	if req.EntryPoint == "" {
-		if req.Framework == "vanilla" {
-			req.EntryPoint = h.detectEntryPoint(req.ProjectID)
+		if bundleEntry := h.detectBundleEntryPoint(req.ProjectID); bundleEntry != "" {
+			req.EntryPoint = bundleEntry
 		} else {
-			req.EntryPoint = h.detectBundleEntryPoint(req.ProjectID)
+			req.EntryPoint = h.detectEntryPoint(req.ProjectID)
 		}
 	}
 
@@ -866,7 +866,7 @@ func (h *PreviewHandler) detectBundleEntryPoint(projectID uint) string {
 		}
 	}
 
-	return "src/index.js"
+	return ""
 }
 
 // ========== BACKEND SERVER CONTROL ENDPOINTS ==========
