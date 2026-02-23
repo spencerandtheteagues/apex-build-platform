@@ -46,7 +46,12 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userID.(uint)
+	if !ok {
+		log.Printf("StartBuild: invalid user_id type %T", userID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user context"})
+		return
+	}
 	log.Printf("StartBuild: user_id=%d", uid)
 
 	// Parse request

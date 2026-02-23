@@ -193,8 +193,17 @@ For code files, use this exact format:
 		}
 	}
 
-	// Execute the request using Generate method on the selected router
-	response, err := targetRouter.Generate(ctx, request)
+	// Execute the request using Generate method on the selected router.
+	// Add a timeout when the caller did not provide one to prevent hung providers
+	// from freezing the build pipeline indefinitely.
+	genCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var genCancel context.CancelFunc
+		genCtx, genCancel = context.WithTimeout(ctx, 90*time.Second)
+		defer genCancel()
+	}
+
+	response, err := targetRouter.Generate(genCtx, request)
 	if err != nil {
 		if a.byokManager != nil && reservation != nil {
 			_ = a.byokManager.FinalizeCredits(reservation, 0)

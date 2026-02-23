@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"apex-build/internal/agents"
@@ -55,15 +57,54 @@ func main() {
 	}
 	log.Println("Environment configuration loaded")
 
+	// Load basic config early so we can bind the HTTP port immediately.
+	appConfig := loadConfig()
+	port := appConfig.Port
+	if port == "" {
+		port = "8080"
+	}
+
+	// Start a bootstrap HTTP listener immediately so Render health checks succeed
+	// while slower initialization (DB, migrations, AI services) is still running.
+	var startupReady atomic.Bool
+	var activeRouter atomic.Value // stores *gin.Engine
+
+	bootstrapRouter := gin.New()
+	bootstrapRouter.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status": "starting",
+			"ready":  startupReady.Load(),
+		})
+	})
+	bootstrapRouter.NoRoute(func(c *gin.Context) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "server starting",
+			"ready": startupReady.Load(),
+		})
+	})
+	activeRouter.Store(bootstrapRouter)
+
+	serverErrors := make(chan error, 1)
+	httpServer := &http.Server{
+		Addr:              ":" + port,
+		ReadHeaderTimeout: 10 * time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			activeRouter.Load().(*gin.Engine).ServeHTTP(w, r)
+		}),
+	}
+	go func() {
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			serverErrors <- err
+		}
+	}()
+	log.Printf("Bootstrap HTTP listener started on port %s (health endpoint ready immediately)", port)
+
 	// SECURITY: Validate all required secrets before starting
 	// This will fail fast in production if secrets are missing or invalid
 	secretsConfig, err := config.ValidateAndLogSecrets()
 	if err != nil {
 		log.Fatalf("CRITICAL: Secrets validation failed - cannot start server: %v", err)
 	}
-
-	// Load application configuration
-	appConfig := loadConfig()
 
 	// Initialize database
 	database, err := db.NewDatabase(appConfig.Database)
@@ -139,6 +180,11 @@ func main() {
 	// Initialize Agent Orchestration System
 	aiAdapter := agents.NewAIRouterAdapter(aiRouter, byokManager)
 	agentManager := agents.NewAgentManager(aiAdapter, database.GetDB())
+	if recovered, recoverErr := agentManager.RecoverStaleBuildsOnStartup(); recoverErr != nil {
+		log.Printf("WARNING: Failed to recover stale builds on startup: %v", recoverErr)
+	} else if recovered > 0 {
+		log.Printf("Recovered %d stale in-progress build(s) after restart", recovered)
+	}
 	wsHub := agents.NewWSHub(agentManager)
 	buildHandler := agents.NewBuildHandler(agentManager, wsHub)
 
@@ -502,13 +548,11 @@ func main() {
 		rotationHandler,  // Key rotation (admin)
 	)
 
-	// Start server
-	port := appConfig.Port
-	if port == "" {
-		port = "8080"
-	}
+	// Activate the full router now that all services are initialized.
+	activeRouter.Store(router)
+	startupReady.Store(true)
 
-	log.Printf("Server starting on port %s", port)
+	log.Printf("Server ready on port %s", port)
 	log.Printf("Health check: http://localhost:%s/health", port)
 	log.Printf("API documentation: http://localhost:%s/docs", port)
 	log.Println("")
@@ -519,8 +563,11 @@ func main() {
 		log.Println("Running in DEVELOPMENT mode - some security checks relaxed")
 	}
 
-	if err := router.Run(":" + port); err != nil {
+	done := make(chan struct{})
+	select {
+	case err := <-serverErrors:
 		log.Fatalf("CRITICAL: Failed to start server: %v", err)
+	case <-done:
 	}
 }
 

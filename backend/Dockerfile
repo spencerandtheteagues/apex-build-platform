@@ -103,7 +103,7 @@ ENV GRACEFUL_SHUTDOWN_TIMEOUT=30s
 EXPOSE 8080
 
 # Health check - checks /health endpoint every 30 seconds
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 # Run the application

@@ -418,8 +418,8 @@ func (am *AgentManager) buildTimeoutForMode(mode BuildMode) time.Duration {
 func (am *AgentManager) inactivityMonitor(buildID string) {
 	// Check every 15 seconds
 	checkInterval := 15 * time.Second
-	inactivityThreshold := 45 * time.Second
-	maxInactivityWarnings := 3
+	inactivityThreshold := 120 * time.Second
+	maxInactivityWarnings := 5
 	warningCount := 0
 
 	ticker := time.NewTicker(checkInterval)
@@ -1320,6 +1320,10 @@ func (am *AgentManager) resultProcessor() {
 
 // processResult handles a task result with retry logic and build verification
 func (am *AgentManager) processResult(result *TaskResult) {
+	if result == nil {
+		return
+	}
+
 	am.mu.RLock()
 	agent, agentExists := am.agents[result.AgentID]
 	am.mu.RUnlock()
@@ -1367,6 +1371,12 @@ func (am *AgentManager) processResult(result *TaskResult) {
 	}
 
 	if result.Success {
+		if result.Output == nil {
+			log.Printf("Warning: successful task result for agent %s has nil output", result.AgentID)
+			agent.mu.Unlock()
+			return
+		}
+
 		// NEW: Verify generated code before marking complete (for code generation tasks)
 		if task != nil && am.isCodeGenerationTask(task.Type) && result.Output != nil {
 			agent.mu.Unlock() // Release lock during verification
@@ -3266,7 +3276,8 @@ func (am *AgentManager) Unsubscribe(buildID string, ch chan *WSMessage) {
 // broadcast sends a message to all subscribers of a build
 func (am *AgentManager) broadcast(buildID string, msg *WSMessage) {
 	am.mu.RLock()
-	subs := am.subscribers[buildID]
+	subs := make([]chan *WSMessage, len(am.subscribers[buildID]))
+	copy(subs, am.subscribers[buildID])
 	am.mu.RUnlock()
 
 	for _, ch := range subs {
@@ -3276,6 +3287,25 @@ func (am *AgentManager) broadcast(buildID string, msg *WSMessage) {
 			// Channel full, skip
 		}
 	}
+}
+
+// RecoverStaleBuildsOnStartup marks interrupted builds from a previous process as failed.
+func (am *AgentManager) RecoverStaleBuildsOnStartup() (int64, error) {
+	if am.db == nil {
+		return 0, nil
+	}
+
+	now := time.Now()
+	result := am.db.Model(&models.CompletedBuild{}).
+		Where("status IN ?", []string{"in_progress", "planning", "building", "testing", "reviewing"}).
+		Updates(map[string]any{
+			"status":       "failed",
+			"error":        "Server restarted during build - please retry",
+			"updated_at":   now,
+			"completed_at": now,
+		})
+
+	return result.RowsAffected, result.Error
 }
 
 // RollbackToCheckpoint restores the build to a previous checkpoint

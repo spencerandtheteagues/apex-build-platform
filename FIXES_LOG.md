@@ -72,3 +72,19 @@
 - `frontend`: `npm run lint` ✅
 - `frontend`: `npm run build` ✅ (existing Vite warnings only)
 - `backend`: `GOCACHE=/tmp/gocache go build -p 1 ./... 2>&1 | head -20` ✅ (no output)
+
+## Session 2026-02-23 - Backend Startup Crash + Render Health Timing + Agent Crash Guards
+
+### Bugs Fixed
+1. **Render health check startup grace too short (backend Dockerfile)** - Increased container health check `start-period` to `120s`, `timeout` to `10s`, and `retries` to `5` to avoid premature container kills during cold start.
+2. **Backend port bind delayed until after slow init (backend main)** - Added an early bootstrap HTTP listener that binds `PORT` immediately and serves `/health` during startup, then atomically swaps to the full Gin router once initialization completes.
+3. **Unsafe auth context type assertion (agent handlers)** - Replaced `userID.(uint)` in build start handler with a safe assertion and `500` response on type mismatch.
+4. **Over-aggressive inactivity warnings (agent manager)** - Increased inactivity threshold from `45s` to `120s` and warning count from `3` to `5` to better tolerate slow AI provider responses.
+5. **AI generation hang protection (agent adapter)** - Added a default `90s` context timeout around `targetRouter.Generate(...)` when callers do not provide a deadline.
+6. **WebSocket subscriber broadcast race (agent manager)** - `broadcast()` now copies subscriber channels under `RLock` before iterating.
+7. **Nil task result/output crash guards (agent manager)** - Added guards for nil `TaskResult` and unexpected successful results with nil output.
+8. **WebSocket send-channel double close (agent websocket hub)** - Added `sync.Once` protected channel close helper and replaced all direct `close(conn.send)` calls.
+9. **Stale builds stuck after restart (agent manager/main)** - Added startup recovery that marks persisted `completed_builds` rows in `in_progress`/`planning`/`building`/`testing`/`reviewing` as `failed` with a restart interruption message.
+
+### Validation
+- `backend`: `cd backend && GOCACHE=/tmp/gocache go build -p 1 ./... 2>&1 | head -20` ✅ (no output)

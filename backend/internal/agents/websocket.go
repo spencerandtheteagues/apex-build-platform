@@ -81,6 +81,7 @@ type WSConnection struct {
 	buildID string
 	userID  uint
 	send    chan []byte
+	closeOnce sync.Once
 }
 
 type broadcastMessage struct {
@@ -125,7 +126,7 @@ func (h *WSHub) run() {
 			if conns, ok := h.connections[conn.buildID]; ok {
 				if _, ok := conns[conn]; ok {
 					delete(conns, conn)
-					close(conn.send)
+					conn.closeSend()
 				}
 			}
 			h.mu.Unlock()
@@ -142,13 +143,19 @@ func (h *WSHub) run() {
 				case conn.send <- msg.message:
 				default:
 					h.mu.Lock()
-					close(conn.send)
+					conn.closeSend()
 					delete(h.connections[msg.buildID], conn)
 					h.mu.Unlock()
 				}
 			}
 		}
 	}
+}
+
+func (c *WSConnection) closeSend() {
+	c.closeOnce.Do(func() {
+		close(c.send)
+	})
 }
 
 // Broadcast sends a message to all connections for a build
@@ -506,7 +513,7 @@ func (h *WSHub) CloseAllConnections(buildID string) {
 	defer h.mu.Unlock()
 
 	for conn := range h.connections[buildID] {
-		close(conn.send)
+		conn.closeSend()
 	}
 	delete(h.connections, buildID)
 }
