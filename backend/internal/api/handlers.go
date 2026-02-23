@@ -946,14 +946,23 @@ func (s *Server) AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		userID, err := s.auth.ExtractUserFromToken(tokenString)
+		claims, err := s.auth.ValidateToken(tokenString)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			c.Abort()
 			return
 		}
 
-		c.Set("user_id", userID)
+		// Set all user context including bypass/admin flags for quota middleware
+		c.Set("user_id", claims.UserID)
+		c.Set("username", claims.Username)
+		c.Set("email", claims.Email)
+		c.Set("role", claims.Role)
+		c.Set("is_admin", claims.IsAdmin)
+		c.Set("is_super_admin", claims.IsSuperAdmin)
+		c.Set("has_unlimited_credits", claims.HasUnlimitedCredits)
+		c.Set("bypass_billing", claims.BypassBilling)
+		c.Set("bypass_rate_limits", claims.BypassRateLimits)
 		c.Next()
 	}
 }
