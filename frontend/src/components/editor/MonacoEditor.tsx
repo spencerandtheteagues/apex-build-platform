@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
 import { useCollaboration, RemoteCursor } from '@/hooks/useCollaboration'
 import { MultiplayerCursors, UserPresenceIndicator } from './MultiplayerCursors'
+import { ensureMonacoWorkersInitialized } from '@monaco-worker-setup'
 import { File, AICapability, AIProvider, CompletionItem } from '@/types'
 import { Button, Badge, Loading } from '@/components/ui'
 import { apiService } from '@/services/api'
@@ -257,106 +258,118 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
     useEffect(() => {
       if (!editorRef.current) return
 
-      // Register custom themes
-      Object.entries(EDITOR_THEMES).forEach(([themeName, themeData]) => {
-        monaco.editor.defineTheme(`apex-${themeName}`, themeData)
-      })
+      let disposed = false
+      let editorInstance: monaco.editor.IStandaloneCodeEditor | null = null
 
-      // Create editor instance
-      const editorInstance = monaco.editor.create(editorRef.current, {
-        value: value || (file?.content || ''),
-        language: getLanguageFromFile(file?.name || ''),
-        theme: `apex-${themeId}`,
-        automaticLayout: true,
-        readOnly,
-        fontSize: 14,
-        fontFamily: '"Fira Code", "SF Mono", Monaco, Menlo, Consolas, monospace',
-        lineNumbers: 'on',
-        minimap: { enabled: true },
-        scrollBeyondLastLine: false,
-        wordWrap: 'on',
-        tabSize: 2,
-        insertSpaces: true,
-        folding: true,
-        foldingHighlight: true,
-        bracketPairColorization: { enabled: true },
-        guides: {
-          bracketPairs: true,
-          indentation: true,
-        },
-        suggest: {
-          showKeywords: true,
-          showSnippets: true,
-        },
-        quickSuggestions: {
-          other: true,
-          comments: true,
-          strings: true,
-        },
-      })
+      const initialize = async () => {
+        // Keep Monaco worker bundles on the lazy editor path instead of app entry.
+        await ensureMonacoWorkersInitialized()
+        if (disposed || !editorRef.current) return
 
-      // Set up event listeners
-      editorInstance.onDidChangeModelContent(() => {
-        const currentValue = editorInstance.getValue()
-        onChange?.(currentValue)
+        // Register custom themes
+        Object.entries(EDITOR_THEMES).forEach(([themeName, themeData]) => {
+          monaco.editor.defineTheme(`apex-${themeName}`, themeData)
+        })
 
-        // Notify collaboration about typing
-        if (enableCollaboration) {
-          startTyping()
-        }
-      })
+        // Create editor instance
+        editorInstance = monaco.editor.create(editorRef.current, {
+          value: value || (file?.content || ''),
+          language: getLanguageFromFile(file?.name || ''),
+          theme: `apex-${themeId}`,
+          automaticLayout: true,
+          readOnly,
+          fontSize: 14,
+          fontFamily: '"Fira Code", "SF Mono", Monaco, Menlo, Consolas, monospace',
+          lineNumbers: 'on',
+          minimap: { enabled: true },
+          scrollBeyondLastLine: false,
+          wordWrap: 'on',
+          tabSize: 2,
+          insertSpaces: true,
+          folding: true,
+          foldingHighlight: true,
+          bracketPairColorization: { enabled: true },
+          guides: {
+            bracketPairs: true,
+            indentation: true,
+          },
+          suggest: {
+            showKeywords: true,
+            showSnippets: true,
+          },
+          quickSuggestions: {
+            other: true,
+            comments: true,
+            strings: true,
+          },
+        })
 
-      // Cursor position change handler for collaboration
-      editorInstance.onDidChangeCursorPosition((e) => {
-        if (enableCollaboration && fileId && fileName) {
-          updateCursor(e.position.lineNumber, e.position.column)
-        }
-      })
+        // Set up event listeners
+        editorInstance.onDidChangeModelContent(() => {
+          const currentValue = editorInstance!.getValue()
+          onChange?.(currentValue)
 
-      // Selection change handler for collaboration
-      editorInstance.onDidChangeCursorSelection((e) => {
-        if (enableCollaboration) {
-          const selection = e.selection
-          if (selection.isEmpty()) {
-            clearSelection()
-          } else {
-            updateSelection(
-              selection.startLineNumber,
-              selection.startColumn,
-              selection.endLineNumber,
-              selection.endColumn
-            )
+          // Notify collaboration about typing
+          if (enableCollaboration) {
+            startTyping()
           }
+        })
+
+        // Cursor position change handler for collaboration
+        editorInstance.onDidChangeCursorPosition((e) => {
+          if (enableCollaboration && fileId && fileName) {
+            updateCursor(e.position.lineNumber, e.position.column)
+          }
+        })
+
+        // Selection change handler for collaboration
+        editorInstance.onDidChangeCursorSelection((e) => {
+          if (enableCollaboration) {
+            const selection = e.selection
+            if (selection.isEmpty()) {
+              clearSelection()
+            } else {
+              updateSelection(
+                selection.startLineNumber,
+                selection.startColumn,
+                selection.endLineNumber,
+                selection.endColumn
+              )
+            }
+          }
+        })
+
+        // Keyboard shortcuts
+        editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+          onSave?.(editorInstance!.getValue())
+        })
+
+        // AI integration shortcuts
+        editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => {
+          setShowAIPrompt(true)
+          setAICapability('code_completion')
+        })
+
+        editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyK, () => {
+          setShowAIPrompt(true)
+          setAICapability('explanation')
+        })
+
+        setEditor(editorInstance)
+
+        // Expose editor instance via ref
+        if (typeof ref === 'function') {
+          ref(editorInstance)
+        } else if (ref) {
+          ref.current = editorInstance
         }
-      })
-
-      // Keyboard shortcuts
-      editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-        onSave?.(editorInstance.getValue())
-      })
-
-      // AI integration shortcuts
-      editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => {
-        setShowAIPrompt(true)
-        setAICapability('code_completion')
-      })
-
-      editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyK, () => {
-        setShowAIPrompt(true)
-        setAICapability('explanation')
-      })
-
-      setEditor(editorInstance)
-
-      // Expose editor instance via ref
-      if (typeof ref === 'function') {
-        ref(editorInstance)
-      } else if (ref) {
-        ref.current = editorInstance
       }
 
+      void initialize()
+
       return () => {
-        editorInstance.dispose()
+        disposed = true
+        editorInstance?.dispose()
       }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])

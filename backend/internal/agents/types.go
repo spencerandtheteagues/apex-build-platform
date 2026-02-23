@@ -146,19 +146,21 @@ type GeneratedFile struct {
 
 // Build represents an entire app-building session
 type Build struct {
-	ID          string            `json:"id"`
-	UserID      uint              `json:"user_id"`
-	ProjectID   *uint             `json:"project_id,omitempty"`
-	Status      BuildStatus       `json:"status"`
-	Mode        BuildMode         `json:"mode"`
-	PowerMode   PowerMode         `json:"power_mode"`
-	Description string            `json:"description"` // User's app description
-	TechStack   *TechStack        `json:"tech_stack,omitempty"`
-	Plan        *BuildPlan        `json:"plan,omitempty"`
-	Agents      map[string]*Agent `json:"agents"`
-	Tasks       []*Task           `json:"tasks"`
-	Checkpoints []*Checkpoint     `json:"checkpoints"`
-	Progress    int               `json:"progress"` // 0-100
+	ID                  string            `json:"id"`
+	UserID              uint              `json:"user_id"`
+	ProjectID           *uint             `json:"project_id,omitempty"`
+	Status              BuildStatus       `json:"status"`
+	Mode                BuildMode         `json:"mode"`
+	PowerMode           PowerMode         `json:"power_mode"`
+	ProviderMode        string            `json:"provider_mode,omitempty"` // platform or byok
+	RequirePreviewReady bool              `json:"require_preview_ready,omitempty"`
+	Description         string            `json:"description"` // User's app description
+	TechStack           *TechStack        `json:"tech_stack,omitempty"`
+	Plan                *BuildPlan        `json:"plan,omitempty"`
+	Agents              map[string]*Agent `json:"agents"`
+	Tasks               []*Task           `json:"tasks"`
+	Checkpoints         []*Checkpoint     `json:"checkpoints"`
+	Progress            int               `json:"progress"` // 0-100
 	// Guardrails
 	MaxAgents                 int        `json:"max_agents,omitempty"`
 	MaxRetries                int        `json:"max_retries,omitempty"`
@@ -349,13 +351,14 @@ type WSMessage struct {
 
 // BuildRequest is the input for starting a new build
 type BuildRequest struct {
-	Description  string     `json:"description"`
-	Prompt       string     `json:"prompt,omitempty"`        // Detailed build prompt (falls back to Description)
-	Mode         BuildMode  `json:"mode"`
-	PowerMode    PowerMode  `json:"power_mode,omitempty"`    // max, balanced, fast — controls model quality
-	ProviderMode string     `json:"provider_mode,omitempty"` // platform or byok
-	ProjectName  string     `json:"project_name,omitempty"`
-	TechStack    *TechStack `json:"tech_stack,omitempty"`    // Optional override
+	Description         string     `json:"description"`
+	Prompt              string     `json:"prompt,omitempty"` // Detailed build prompt (falls back to Description)
+	Mode                BuildMode  `json:"mode"`
+	PowerMode           PowerMode  `json:"power_mode,omitempty"`    // max, balanced, fast — controls model quality
+	ProviderMode        string     `json:"provider_mode,omitempty"` // platform or byok
+	RequirePreviewReady bool       `json:"require_preview_ready,omitempty"`
+	ProjectName         string     `json:"project_name,omitempty"`
+	TechStack           *TechStack `json:"tech_stack,omitempty"` // Optional override
 }
 
 // BuildResponse is returned when a build is created

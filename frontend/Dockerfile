@@ -81,6 +81,7 @@ RUN mkdir -p /var/cache/nginx /var/log/nginx /run && \
     chown -R nginx:nginx /var/cache/nginx && \
     chown -R nginx:nginx /var/log/nginx && \
     chown -R nginx:nginx /run && \
+    chown -R nginx:nginx /etc/nginx && \
     chown -R nginx:nginx /etc/nginx/conf.d && \
     touch /run/nginx.pid && \
     chown nginx:nginx /run/nginx.pid

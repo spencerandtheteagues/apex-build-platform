@@ -30,14 +30,34 @@ services:
         fromDatabase:
           name: apex-db
           property: connectionString
+      - key: FRONTEND_URL
+        value: https://apex-frontend-gigq.onrender.com
+      - key: CORS_ORIGINS
+        value: https://apex-frontend-gigq.onrender.com,https://apex.build
       - key: REDIS_URL
         sync: false  # Use Upstash Redis (Render free tier has no managed Redis)
       - key: JWT_SECRET
         generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
       - key: SECRETS_MASTER_KEY
         generateValue: true
+      - key: ADMIN_SEED_PASSWORD
+        sync: false
+      - key: SPENCER_SEED_PASSWORD
+        sync: false
       - key: EXECUTION_FORCE_CONTAINER
         value: "false"  # Render doesn't support Docker-in-Docker; use process sandbox
+      - key: BUILD_MAX_REQUESTS
+        value: "80"
+      - key: BUILD_MAX_REQUESTS_FAST
+        value: "80"
+      - key: BUILD_MAX_REQUESTS_FULL
+        value: "150"
+      - key: BUILD_TIMEOUT_FAST_SECONDS
+        value: "300"
+      - key: BUILD_TIMEOUT_FULL_SECONDS
+        value: "900"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: OPENAI_API_KEY

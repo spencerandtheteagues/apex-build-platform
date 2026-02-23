@@ -11,6 +11,12 @@ PORT="${PORT:-3000}"
 # Render sets PORT dynamically for Docker web services. Patch nginx config at runtime.
 sed -i "s/__PORT__/${PORT}/g" /etc/nginx/nginx.conf
 
+# nginx warns if a "user" directive is present while the master process is not root.
+# Keep root-based behavior intact, but strip the directive for non-root containers.
+if [ "$(id -u)" != "0" ]; then
+    sed -i '/^[[:space:]]*user[[:space:]]\+/d' /etc/nginx/nginx.conf
+fi
+
 # Runtime environment variable substitution
 if [ -n "$VITE_API_URL" ] || [ -n "$VITE_WS_URL" ]; then
     echo "📝 Updating runtime configuration..."

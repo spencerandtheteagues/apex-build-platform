@@ -125,16 +125,27 @@ func main() {
 		jwtSecret = appConfig.JWTSecret // Fallback for dev
 	}
 	authService := auth.NewAuthService(jwtSecret)
+	authService.SetDB(database.DB)
 
-	// Initialize AI router with all providers (Claude, OpenAI, Gemini, Grok)
-	// NOTE: Ollama is explicitly excluded from the global router to enforce BYOK policy.
-	// Users must configure their own local Ollama URL in settings.
+	// Initialize AI router with all providers (Claude, OpenAI, Gemini, Grok).
+	// Production keeps Ollama disabled globally to preserve strict BYOK behavior.
+	// In development, allow a local Ollama fallback only when explicitly configured
+	// and no cloud platform keys are present, so local smoke tests can exercise the
+	// full app-building pipeline.
+	ollamaRouterURL := ""
+	hasCloudProviderKey := appConfig.ClaudeAPIKey != "" || appConfig.OpenAIAPIKey != "" ||
+		appConfig.GeminiAPIKey != "" || appConfig.GrokAPIKey != ""
+	if !config.IsProductionEnvironment() && appConfig.OllamaBaseURL != "" && !hasCloudProviderKey {
+		ollamaRouterURL = appConfig.OllamaBaseURL
+		log.Printf("DEV MODE: Enabling global Ollama fallback for app builds at %s", ollamaRouterURL)
+	}
+
 	aiRouter := ai.NewAIRouter(
 		appConfig.ClaudeAPIKey,
 		appConfig.OpenAIAPIKey,
 		appConfig.GeminiAPIKey,
 		appConfig.GrokAPIKey,
-		"", // Ollama disabled globally - strictly BYOK
+		ollamaRouterURL,
 	)
 
 	log.Println("Multi-AI integration initialized:")
@@ -142,7 +153,11 @@ func main() {
 	log.Printf("   - OpenAI API: %s", getStatusIcon(appConfig.OpenAIAPIKey != ""))
 	log.Printf("   - Gemini API: %s", getStatusIcon(appConfig.GeminiAPIKey != ""))
 	log.Printf("   - Grok API:   %s", getStatusIcon(appConfig.GrokAPIKey != ""))
-	log.Printf("   - Ollama:     ❌ Disabled globally (User must configure in BYOK settings)")
+	if ollamaRouterURL != "" {
+		log.Printf("   - Ollama:     ✅ Dev fallback enabled (%s)", ollamaRouterURL)
+	} else {
+		log.Printf("   - Ollama:     ❌ Disabled globally (BYOK-only in production)")
+	}
 
 	// Initialize Secrets Manager with validated master key
 	// SECURITY: Use validated key from secretsConfig, with fallback for development ONLY

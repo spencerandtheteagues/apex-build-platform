@@ -41,8 +41,12 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# Check Docker Compose
-if ! command -v docker-compose &> /dev/null; then
+# Check Docker Compose (support both legacy and plugin forms)
+if command -v docker-compose &> /dev/null; then
+    COMPOSE_CMD="docker-compose"
+elif docker compose version &> /dev/null; then
+    COMPOSE_CMD="docker compose"
+else
     print_error "Docker Compose is not installed"
     exit 1
 fi
@@ -51,7 +55,7 @@ print_success "Prerequisites check passed"
 
 # Validate Docker Compose configuration
 print_status "Validating Docker Compose configuration..."
-if docker-compose config --quiet; then
+if $COMPOSE_CMD config --quiet; then
     print_success "Docker Compose configuration is valid"
 else
     print_error "Docker Compose configuration has errors"
@@ -62,7 +66,6 @@ fi
 print_status "Checking required files..."
 
 required_files=(
-    ".env"
     "docker-compose.yml"
     "backend/Dockerfile"
     "backend/main.go"
@@ -87,6 +90,15 @@ else
     for file in "${missing_files[@]}"; do
         echo "  - $file"
     done
+    exit 1
+fi
+
+if [[ -f ".env" ]]; then
+    print_success ".env file present"
+elif [[ -f ".env.example" ]]; then
+    print_warning ".env missing; falling back to .env.example/defaults for validation"
+else
+    print_error "Missing both .env and .env.example"
     exit 1
 fi
 
@@ -143,7 +155,7 @@ for file in "${frontend_files[@]}"; do
     fi
 done
 
-if [[ ${#frontend_files[@]} -eq 0 ]]; then
+if [[ ${#missing_frontend[@]} -eq 0 ]]; then
     print_success "Frontend structure is complete"
 else
     print_warning "Some frontend files are missing:"
@@ -154,7 +166,11 @@ fi
 
 # Check environment variables
 print_status "Checking environment configuration..."
-source .env 2>/dev/null || true
+if [[ -f ".env" ]]; then
+    source .env 2>/dev/null || true
+elif [[ -f ".env.example" ]]; then
+    source .env.example 2>/dev/null || true
+fi
 
 required_env_vars=(
     "DATABASE_URL"
@@ -182,28 +198,28 @@ fi
 print_status "Testing Docker services configuration..."
 
 # Test postgres service
-if docker-compose config | grep -q "postgres:"; then
+if $COMPOSE_CMD config | grep -q "postgres:"; then
     print_success "PostgreSQL service configured"
 else
     print_error "PostgreSQL service not found"
 fi
 
 # Test redis service
-if docker-compose config | grep -q "redis:"; then
+if $COMPOSE_CMD config | grep -q "redis:"; then
     print_success "Redis service configured"
 else
     print_error "Redis service not found"
 fi
 
 # Test API service
-if docker-compose config | grep -q "api:"; then
+if $COMPOSE_CMD config | grep -q "api:"; then
     print_success "API service configured"
 else
     print_error "API service not found"
 fi
 
 # Test frontend service
-if docker-compose config | grep -q "frontend:"; then
+if $COMPOSE_CMD config | grep -q "frontend:"; then
     print_success "Frontend service configured"
 else
     print_error "Frontend service not found"

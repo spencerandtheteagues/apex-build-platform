@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -31,9 +32,9 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 		PowerFast:     "gemini-2.5-flash-lite",
 	},
 	ai.ProviderOllama: {
-		PowerMax:      "deepseek-r1:18b",
-		PowerBalanced: "deepseek-r1:8b",
-		PowerFast:     "deepseek-r1:8b",
+		PowerMax:      "deepseek-r1:14b",
+		PowerBalanced: "deepseek-r1:7b",
+		PowerFast:     "deepseek-r1:7b",
 	},
 }
 
@@ -42,12 +43,38 @@ func selectModelForPowerMode(provider ai.AIProvider, mode PowerMode) string {
 	if mode == "" {
 		mode = PowerFast // Default to cheapest
 	}
+	if provider == ai.ProviderOllama {
+		if model := selectOllamaModelOverride(mode); model != "" {
+			return model
+		}
+	}
 	if providerModels, ok := modelsByPowerMode[provider]; ok {
 		if model, ok := providerModels[mode]; ok {
 			return model
 		}
 	}
 	return "" // Empty string = let the AI client pick its own default
+}
+
+func selectOllamaModelOverride(mode PowerMode) string {
+	switch mode {
+	case PowerMax:
+		if v := strings.TrimSpace(os.Getenv("OLLAMA_MODEL_MAX")); v != "" {
+			return v
+		}
+	case PowerBalanced:
+		if v := strings.TrimSpace(os.Getenv("OLLAMA_MODEL_BALANCED")); v != "" {
+			return v
+		}
+	default:
+		if v := strings.TrimSpace(os.Getenv("OLLAMA_MODEL_FAST")); v != "" {
+			return v
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("OLLAMA_MODEL_DEFAULT")); v != "" {
+		return v
+	}
+	return ""
 }
 
 // AIRouterAdapter adapts the existing AI router to the agent system interface
@@ -148,6 +175,24 @@ For code files, use this exact format:
 	}
 	if maxTokens > 24000 {
 		maxTokens = 24000
+	}
+	// Local Ollama inference slows dramatically with large token budgets in the
+	// multi-agent pipeline. Cap aggressively so local/dev builds remain usable.
+	if aiProvider == ai.ProviderOllama {
+		switch opts.PowerMode {
+		case PowerMax:
+			if maxTokens > 3072 {
+				maxTokens = 3072
+			}
+		case PowerBalanced:
+			if maxTokens > 2048 {
+				maxTokens = 2048
+			}
+		default: // PowerFast / unset
+			if maxTokens > 1536 {
+				maxTokens = 1536
+			}
+		}
 	}
 
 	temperature := opts.Temperature
@@ -614,6 +659,33 @@ func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []ai.AIProvi
 		return a.GetAvailableProviders()
 	}
 
+	allowedBYOKProviders := map[ai.AIProvider]bool{}
+	if keys, keyErr := a.byokManager.GetKeys(userID); keyErr != nil {
+		log.Printf("Failed to load BYOK keys for user %d: %v", userID, keyErr)
+	} else {
+		for _, key := range keys {
+			if !key.IsActive {
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(key.Provider)) {
+			case "anthropic", "claude":
+				allowedBYOKProviders[ai.ProviderClaude] = true
+			case "openai", "gpt4", "gpt-4":
+				allowedBYOKProviders[ai.ProviderGPT4] = true
+			case "gemini", "google":
+				allowedBYOKProviders[ai.ProviderGemini] = true
+			case "ollama":
+				allowedBYOKProviders[ai.ProviderOllama] = true
+			case "grok", "xai", "x.ai":
+				allowedBYOKProviders[ai.ProviderGrok] = true
+			}
+		}
+	}
+	if len(allowedBYOKProviders) == 0 {
+		log.Printf("No active BYOK providers found in key metadata for user %d", userID)
+		return nil
+	}
+
 	healthStatus := userRouter.GetHealthStatus()
 	available := make([]ai.AIProvider, 0)
 
@@ -630,6 +702,9 @@ func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []ai.AIProvi
 	isInGracePeriod := time.Since(a.startupTime) < startupGracePeriod
 
 	for aiProvider, agentProvider := range providerMappings {
+		if !allowedBYOKProviders[aiProvider] {
+			continue
+		}
 		if healthy, exists := healthStatus[aiProvider]; exists {
 			// Health status is known
 			if healthy {
@@ -694,4 +769,14 @@ func (a *AIRouterAdapter) GetAvailableProviders() []ai.AIProvider {
 
 	log.Printf("Available providers: %v", available)
 	return available
+}
+
+// HasConfiguredProviders reports whether any platform/BYOK provider client is configured.
+func (a *AIRouterAdapter) HasConfiguredProviders() bool {
+	if a == nil || a.router == nil {
+		return false
+	}
+
+	healthStatus := a.router.GetHealthStatus()
+	return len(healthStatus) > 0
 }

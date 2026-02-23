@@ -2,8 +2,6 @@
 # Complete development and local testing environment
 # Usage: docker-compose up -d
 
-version: '3.8'
-
 services:
   # ============================================
   # Database Services
@@ -22,7 +20,9 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database/init:/docker-entrypoint-initdb.d:ro
+      # Optional init scripts mount. Disabled by default because an empty/host-protected
+      # directory can crash-loop Postgres on some local Docker setups.
+      # - ./database/init:/docker-entrypoint-initdb.d:ro
     networks:
       - apex-network
     healthcheck:
@@ -71,6 +71,8 @@ services:
         VERSION: ${VERSION:-dev}
     container_name: apex-api
     restart: unless-stopped
+    env_file:
+      - .env
     ports:
       - "8080:8080"
     environment:
@@ -87,9 +89,12 @@ services:
       REDIS_URL: redis://redis:6379
 
       # AI API Keys
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      OLLAMA_MODEL_DEFAULT: ${OLLAMA_MODEL_DEFAULT:-}
+      OLLAMA_MODEL_FAST: ${OLLAMA_MODEL_FAST:-}
+      OLLAMA_MODEL_BALANCED: ${OLLAMA_MODEL_BALANCED:-}
+      OLLAMA_MODEL_MAX: ${OLLAMA_MODEL_MAX:-}
+      BUILD_PREVIEW_HTTP_SMOKE: ${BUILD_PREVIEW_HTTP_SMOKE:-true}
 
       # Authentication
       JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-key-change-in-production}
@@ -124,6 +129,8 @@ services:
         condition: service_healthy
     networks:
       - apex-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - api_uploads:/app/uploads
       - api_logs:/app/logs

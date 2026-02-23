@@ -1,8 +1,10 @@
 package agents
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateFinalBuildReadiness(t *testing.T) {
@@ -79,6 +81,175 @@ func TestValidateFinalBuildReadiness(t *testing.T) {
 			t.Fatalf("unexpected readiness errors: %v", errs)
 		}
 	})
+
+	t.Run("rejects_unresolved_patch_markers", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "moneyflow",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  }
+}`,
+			},
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "src/main.tsx", Content: "import React from 'react';"},
+			{Path: "src/App.tsx", Content: "const x = 1;\n<<<<<<< SEARCH\nconst a = 1;\n=======\nconst a = 2;\n>>>>>>> REPLACE\nexport default function App(){ return <div>{x}</div> }"},
+		}
+
+		errs := am.validateFinalBuildReadiness(nil, files)
+		if len(errs) == 0 {
+			t.Fatalf("expected readiness errors for unresolved patch markers")
+		}
+		if !containsError(errs, "unresolved patch/merge markers") {
+			t.Fatalf("expected unresolved marker error, got %v", errs)
+		}
+	})
+
+	t.Run("rejects_frontend_backend_hybrid_source", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "todo-app",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "express": "^4.18.2"
+  }
+}`,
+			},
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "src/main.tsx", Content: "import React from 'react';"},
+			{Path: "src/App.tsx", Content: "import React from 'react';\nimport express from 'express';\nexport default function App(){ return <div/> }"},
+		}
+
+		errs := am.validateFinalBuildReadiness(nil, files)
+		if !containsError(errs, "mixes frontend React and backend Express code") {
+			t.Fatalf("expected hybrid source error, got %v", errs)
+		}
+	})
+
+	t.Run("rejects_explanatory_prose_appended_to_source", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "todo-app",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  }
+}`,
+			},
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "src/main.tsx", Content: "import React from 'react';"},
+			{Path: "src/components/App.tsx", Content: "export default function App(){ return <div/> }\n\nThis implementation includes:\n1. Input validation\n2. Authentication"},
+		}
+
+		errs := am.validateFinalBuildReadiness(nil, files)
+		if !containsError(errs, "contains explanatory prose appended to source code") {
+			t.Fatalf("expected prose-appended source error, got %v", errs)
+		}
+	})
+
+	t.Run("accepts_monorepo_apps_web_frontend_entry", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "agency-ops",
+  "workspaces": ["apps/web"],
+  "scripts": { "build": "npm run build --workspaces" },
+  "dependencies": { "react": "^18.3.0", "react-dom": "^18.3.0" }
+}`,
+			},
+			{Path: "apps/web/index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "apps/web/src/main.tsx", Content: "import React from 'react'; import ReactDOM from 'react-dom/client';"},
+			{Path: "apps/web/src/App.tsx", Content: "export default function App(){ return <div/> }"},
+		}
+
+		errs := am.validateFinalBuildReadiness(nil, files)
+		if containsError(errs, "missing an entry source file") {
+			t.Fatalf("unexpected missing frontend entry for apps/web monorepo output: %v", errs)
+		}
+		if containsError(errs, "missing an HTML entry point") {
+			t.Fatalf("unexpected missing HTML entry for apps/web monorepo output: %v", errs)
+		}
+	})
+
+	t.Run("accepts_monorepo_packages_frontend_entry", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "agency-ops",
+  "workspaces": ["packages/frontend", "packages/backend"],
+  "scripts": { "build": "npm run build --workspaces" },
+  "dependencies": { "react": "^18.3.0", "react-dom": "^18.3.0" }
+}`,
+			},
+			{Path: "packages/frontend/index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "packages/frontend/src/main.tsx", Content: "import React from 'react'; import ReactDOM from 'react-dom/client';"},
+			{Path: "packages/frontend/src/App.tsx", Content: "export default function App(){ return <div/> }"},
+		}
+
+		errs := am.validateFinalBuildReadiness(nil, files)
+		if containsError(errs, "missing an entry source file") {
+			t.Fatalf("unexpected missing frontend entry for packages/frontend monorepo output: %v", errs)
+		}
+		if containsError(errs, "missing an HTML entry point") {
+			t.Fatalf("unexpected missing HTML entry for packages/frontend monorepo output: %v", errs)
+		}
+	})
+
+	t.Run("rejects_mixed_backend_persistence_stacks", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "mixed-backend",
+  "scripts": { "build": "tsc" },
+  "dependencies": { "react": "^18.3.0", "react-dom": "^18.3.0" }
+}`,
+			},
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "src/main.tsx", Content: "import React from 'react';"},
+			{Path: "apps/api/src/db.ts", Content: "import { PrismaClient } from '@prisma/client'; const prisma = new PrismaClient();"},
+			{Path: "apps/api/src/models/task.ts", Content: "import { Schema, model } from 'mongoose'; const taskSchema = new Schema({}); export default model('Task', taskSchema);"},
+		}
+
+		errs := am.validateFinalBuildReadiness(nil, files)
+		if !containsError(errs, "mixes multiple persistence stacks") {
+			t.Fatalf("expected mixed persistence stack error, got %v", errs)
+		}
+	})
 }
 
 func containsError(errors []string, want string) bool {
@@ -88,4 +259,189 @@ func containsError(errors []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestVerifyGeneratedFrontendPreviewReadiness(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+
+	t.Run("missing_build_script", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "preview-test",
+  "scripts": {
+    "dev": "vite"
+  }
+}`,
+			},
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "src/main.tsx", Content: "console.log('x')"},
+		}
+
+		errs := am.verifyGeneratedFrontendPreviewReadiness(files, false)
+		if !containsError(errs, "missing a build script") {
+			t.Fatalf("expected missing build script error, got %v", errs)
+		}
+	})
+
+	t.Run("no_deps_build_script_succeeds", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := exec.LookPath("npm"); err != nil {
+			t.Skip("npm not available")
+		}
+
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "preview-test",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"console.log('ok')\""
+  }
+}`,
+			},
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "src/main.js", Content: "console.log('ok')"},
+		}
+
+		errs := am.verifyGeneratedFrontendPreviewReadiness(files, false)
+		if len(errs) != 0 {
+			t.Fatalf("expected preview verification success, got %v", errs)
+		}
+	})
+
+	t.Run("invalid_dependency_subpath_fails_preflight", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "preview-test",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"console.log('ok')\""
+  },
+  "dependencies": {
+    "@shadcn/ui/navigation": "^1.0.0"
+  }
+}`,
+			},
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "src/main.js", Content: "console.log('ok')"},
+		}
+
+		errs := am.verifyGeneratedFrontendPreviewReadiness(files, false)
+		if !containsError(errs, "dependency check failed") {
+			t.Fatalf("expected dependency preflight failure, got %v", errs)
+		}
+		if !containsError(errs, "subpath import") {
+			t.Fatalf("expected subpath dependency error, got %v", errs)
+		}
+	})
+}
+
+func TestNormalizeGeneratedFileContent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("repairs_doubled_single_quotes_in_code", func(t *testing.T) {
+		t.Parallel()
+
+		in := "import { defineConfig } from ''vite'';\nconst p = ''./src'';\n"
+		got := normalizeGeneratedFileContent("vite.config.ts", in)
+		if strings.Contains(got, "''vite''") || strings.Contains(got, "''./src''") {
+			t.Fatalf("expected doubled single quotes to be repaired, got %q", got)
+		}
+		if !strings.Contains(got, "from 'vite'") {
+			t.Fatalf("expected repaired vite import, got %q", got)
+		}
+	})
+
+	t.Run("does_not_touch_non_code_without_strong_indicators", func(t *testing.T) {
+		t.Parallel()
+
+		in := "author: O''Reilly"
+		got := normalizeGeneratedFileContent("notes.txt", in)
+		if got != in {
+			t.Fatalf("unexpected normalization for non-code content: %q", got)
+		}
+	})
+
+	t.Run("repairs_pg_query_resultrow_generic_mismatch_pattern", func(t *testing.T) {
+		t.Parallel()
+
+		in := `import pg, { QueryResultRow } from 'pg';
+export async function query<T extends QueryResultRow>(text: string, params?: any[]): Promise<pg.QueryResult<T>> {
+  const result = await pool.query<T>(text, params);
+  return result;
+}`
+		got := normalizeGeneratedFileContent("packages/backend/src/config/database.ts", in)
+		if strings.Contains(got, "import pg, { QueryResultRow } from 'pg';") {
+			t.Fatalf("expected pg import normalization, got %q", got)
+		}
+		if !strings.Contains(got, "T extends pg.QueryResultRow = pg.QueryResultRow") {
+			t.Fatalf("expected pg generic normalization, got %q", got)
+		}
+	})
+}
+
+func TestCanCreateAutomatedFixTask_DedupesActiveAndRecent(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		Mode:  ModeFast,
+		Tasks: []*Task{},
+	}
+
+	if !am.canCreateAutomatedFixTask(build, "fix_review_issues") {
+		t.Fatalf("expected fix task creation allowed for empty build")
+	}
+
+	build.Tasks = append(build.Tasks, &Task{
+		ID:        "t1",
+		Type:      TaskFix,
+		Status:    TaskPending,
+		CreatedAt: time.Now(),
+		Input: map[string]any{
+			"action": "fix_review_issues",
+		},
+	})
+	if am.canCreateAutomatedFixTask(build, "fix_review_issues") {
+		t.Fatalf("expected active pending fix task to block duplicate creation")
+	}
+
+	build.Tasks[0].Status = TaskCompleted
+	build.Tasks[0].CreatedAt = time.Now()
+	if am.canCreateAutomatedFixTask(build, "fix_review_issues") {
+		t.Fatalf("expected recent completed fix task to block duplicate creation")
+	}
+
+	build.Tasks[0].CreatedAt = time.Now().Add(-30 * time.Second)
+	if !am.canCreateAutomatedFixTask(build, "fix_review_issues") {
+		t.Fatalf("expected old completed fix task to allow new creation")
+	}
+}
+
+func TestSummarizePreviewInstallFailure(t *testing.T) {
+	t.Parallel()
+
+	out := `npm ERR! code E404
+npm ERR! 404 Not Found - GET https://registry.npmjs.org/@hooked%2fui - Not found
+npm ERR! 404
+`
+	got := summarizePreviewInstallFailure(out)
+	if !strings.Contains(got, "package not found on npm registry") {
+		t.Fatalf("expected npm 404 summary, got %q", got)
+	}
+	if !strings.Contains(got, "@hooked%2fui") && !strings.Contains(got, "@hooked/ui") {
+		t.Fatalf("expected package identifier in summary, got %q", got)
+	}
 }

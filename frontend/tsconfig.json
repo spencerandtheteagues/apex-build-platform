@@ -29,7 +29,8 @@
       "@services/*": ["src/services/*"],
       "@types/*": ["src/types/*"],
       "@utils/*": ["src/utils/*"],
-      "@styles/*": ["src/styles/*"]
+      "@styles/*": ["src/styles/*"],
+      "@monaco-worker-setup": ["src/components/editor/setupMonacoWorkers"]
     }
   },
   "include": ["src"],

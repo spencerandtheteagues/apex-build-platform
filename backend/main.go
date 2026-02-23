@@ -57,6 +57,7 @@ func main() {
 	authService := auth.NewAuthService(
 		os.Getenv("JWT_SECRET"),
 	)
+	authService.SetDB(db)
 
 	// Initialize WebSocket hub
 	wsHub := websocket.NewHub()

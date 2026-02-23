@@ -3,15 +3,21 @@
 package agents
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"mime"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,6 +72,7 @@ type AIRouter interface {
 	Generate(ctx context.Context, provider ai.AIProvider, prompt string, opts GenerateOptions) (*ai.AIResponse, error)
 	GetAvailableProviders() []ai.AIProvider
 	GetAvailableProvidersForUser(userID uint) []ai.AIProvider
+	HasConfiguredProviders() bool
 }
 
 // GenerateOptions for AI generation requests
@@ -138,25 +145,31 @@ func (am *AgentManager) CreateBuild(userID uint, req *BuildRequest) (*Build, err
 	if powerMode == "" {
 		powerMode = PowerFast // Default to cheapest models when not explicitly set
 	}
+	providerMode := strings.ToLower(strings.TrimSpace(req.ProviderMode))
+	if providerMode != "byok" {
+		providerMode = "platform"
+	}
 
 	build := &Build{
-		ID:          buildID,
-		UserID:      userID,
-		Status:      BuildPending,
-		Mode:        mode,
-		PowerMode:   powerMode,
-		Description: req.Description,
-		TechStack:   req.TechStack,
-		Agents:      make(map[string]*Agent),
-		Tasks:       make([]*Task, 0),
-		Checkpoints: make([]*Checkpoint, 0),
-		Progress:    0,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:                  buildID,
+		UserID:              userID,
+		Status:              BuildPending,
+		Mode:                mode,
+		PowerMode:           powerMode,
+		ProviderMode:        providerMode,
+		RequirePreviewReady: req.RequirePreviewReady,
+		Description:         req.Description,
+		TechStack:           req.TechStack,
+		Agents:              make(map[string]*Agent),
+		Tasks:               make([]*Task, 0),
+		Checkpoints:         make([]*Checkpoint, 0),
+		Progress:            0,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 
 	// Apply guardrails for cost control
-	maxAgents, maxRetries, maxRequests, maxTokens := am.defaultBuildLimits(mode)
+	maxAgents, maxRetries, maxRequests, maxTokens := am.defaultBuildLimitsForBuild(build)
 	// Ensure power mode token scaling isn't capped by conservative defaults
 	if !am.hasTokenLimitOverride(mode) {
 		minTokens := am.getPowerModeTokenCap(powerMode)
@@ -206,15 +219,35 @@ func (am *AgentManager) StartBuild(buildID string) error {
 		BuildID:   buildID,
 		Timestamp: time.Now(),
 		Data: map[string]any{
-			"status":      string(BuildPlanning),
-			"description": build.Description,
-			"mode":        string(build.Mode),
-			"power_mode":  string(build.PowerMode),
+			"status":        string(BuildPlanning),
+			"description":   build.Description,
+			"mode":          string(build.Mode),
+			"power_mode":    string(build.PowerMode),
+			"provider_mode": build.ProviderMode,
 		},
 	})
 
-	// Platform builds always use backend-configured providers (Claude/OpenAI/Gemini).
-	availableProviders := am.getAvailableProvidersWithGracePeriod()
+	usePlatformKeys := am.buildUsesPlatformKeys(build)
+	if !usePlatformKeys && !am.userHasActiveBYOKKey(build.UserID) {
+		build.mu.Lock()
+		build.Status = BuildFailed
+		build.Error = "No active BYOK providers configured for this user"
+		build.UpdatedAt = time.Now()
+		build.mu.Unlock()
+		am.persistBuildSnapshot(build, nil)
+		am.broadcast(buildID, &WSMessage{
+			Type:      WSBuildError,
+			BuildID:   buildID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"error":   "No active BYOK providers configured",
+				"details": "This build requested provider_mode=byok, but no active BYOK keys are configured for the current user.",
+			},
+		})
+		return fmt.Errorf("no active BYOK providers configured")
+	}
+
+	availableProviders := am.getAvailableProvidersWithGracePeriodForBuild(build)
 	if len(availableProviders) == 0 {
 		build.mu.Lock()
 		build.Status = BuildFailed
@@ -228,7 +261,7 @@ func (am *AgentManager) StartBuild(buildID string) error {
 			Timestamp: time.Now(),
 			Data: map[string]any{
 				"error":   "No AI providers available",
-				"details": "Please check your API key configuration. Ensure at least one of Claude, GPT, or Gemini API keys is configured and valid. If using BYOK, verify your provider is running and accessible.",
+				"details": "Please check your AI provider configuration. For platform mode, configure Claude/OpenAI/Gemini keys. For BYOK mode, verify your user BYOK provider is configured and reachable.",
 			},
 		})
 		return fmt.Errorf("no AI providers available")
@@ -358,7 +391,7 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	am.taskQueue <- planTask
 
 	// Start build timeout goroutine - fail cleanly if build exceeds SLA.
-	go am.buildTimeoutHandler(buildID, build.Mode)
+	go am.buildTimeoutHandler(buildID)
 
 	// Start inactivity monitor - fail build if no AI activity for 45 seconds
 	go am.inactivityMonitor(buildID)
@@ -368,22 +401,22 @@ func (am *AgentManager) StartBuild(buildID string) error {
 }
 
 // buildTimeoutHandler fails builds that run past timeout instead of marking them as completed.
-func (am *AgentManager) buildTimeoutHandler(buildID string, mode BuildMode) {
-	timeout := am.buildTimeoutForMode(mode)
+func (am *AgentManager) buildTimeoutHandler(buildID string) {
+	am.mu.RLock()
+	build, exists := am.builds[buildID]
+	am.mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	timeout := am.buildTimeoutForBuild(build)
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	select {
 	case <-timer.C:
 	case <-am.ctx.Done():
-		return
-	}
-
-	am.mu.RLock()
-	build, exists := am.builds[buildID]
-	am.mu.RUnlock()
-
-	if !exists {
 		return
 	}
 
@@ -406,12 +439,132 @@ func (am *AgentManager) buildTimeoutForMode(mode BuildMode) time.Duration {
 		envKey = "BUILD_TIMEOUT_FULL_SECONDS"
 	}
 
+	// Local Ollama (single-provider, dev mode) is substantially slower than cloud providers.
+	// Raise the default timeout only when the operator has not already set an explicit timeout.
+	if _, explicitlySet := os.LookupEnv(envKey); !explicitlySet && am.isLocalDevSingleOllamaProfile() {
+		if mode == ModeFull {
+			defaultSeconds = 1800 // 30 minutes for local full builds
+		} else {
+			defaultSeconds = 900 // 15 minutes for local fast builds
+		}
+	}
+
 	seconds := envInt(envKey, defaultSeconds)
 	if seconds < 30 {
 		seconds = 30
 	}
 
 	return time.Duration(seconds) * time.Second
+}
+
+func (am *AgentManager) buildTimeoutForBuild(build *Build) time.Duration {
+	if build == nil {
+		return am.buildTimeoutForMode(ModeFast)
+	}
+
+	defaultSeconds := 240 // fast: 4 minutes
+	envKey := "BUILD_TIMEOUT_FAST_SECONDS"
+	if build.Mode == ModeFull {
+		defaultSeconds = 600 // full: 10 minutes
+		envKey = "BUILD_TIMEOUT_FULL_SECONDS"
+	}
+
+	explicitSeconds, explicitlySet := os.LookupEnv(envKey)
+	if !explicitlySet {
+		switch {
+		case am.isLocalDevSingleOllamaProfile():
+			if build.Mode == ModeFull {
+				defaultSeconds = 1800
+			} else {
+				defaultSeconds = 900
+			}
+		case am.isLocalDevStrictPreviewBuild(build):
+			// Strict preview-ready verification (including install/build/preview smoke)
+			// needs more headroom locally, even with cloud providers.
+			if build.Mode == ModeFull {
+				defaultSeconds = 1800
+			} else {
+				defaultSeconds = 900
+			}
+		}
+	}
+
+	seconds := defaultSeconds
+	if explicitlySet {
+		if parsed, err := strconv.Atoi(strings.TrimSpace(explicitSeconds)); err == nil {
+			seconds = parsed
+		}
+	}
+	if seconds < 30 {
+		seconds = 30
+	}
+
+	return time.Duration(seconds) * time.Second
+}
+
+func (am *AgentManager) isLocalDevStrictPreviewBuild(build *Build) bool {
+	if am == nil || build == nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("ENVIRONMENT")), "production") {
+		return false
+	}
+	return build.RequirePreviewReady
+}
+
+func (am *AgentManager) isLocalDevSingleOllamaProfile() bool {
+	if am == nil || am.aiRouter == nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("ENVIRONMENT")), "production") {
+		return false
+	}
+	if strings.TrimSpace(os.Getenv("OLLAMA_BASE_URL")) == "" {
+		return false
+	}
+
+	providers := am.aiRouter.GetAvailableProviders()
+	return len(providers) == 1 && providers[0] == ai.ProviderOllama
+}
+
+func (am *AgentManager) buildUsesPlatformKeys(build *Build) bool {
+	if build == nil {
+		return true
+	}
+	return strings.ToLower(strings.TrimSpace(build.ProviderMode)) != "byok"
+}
+
+func (am *AgentManager) userHasActiveBYOKKey(userID uint) bool {
+	if am == nil || am.db == nil || userID == 0 {
+		return false
+	}
+
+	var count int64
+	if err := am.db.Model(&models.UserAPIKey{}).
+		Where("user_id = ? AND is_active = ? AND deleted_at IS NULL", userID, true).
+		Count(&count).Error; err != nil {
+		log.Printf("Failed to check BYOK keys for user %d: %v", userID, err)
+		return false
+	}
+	return count > 0
+}
+
+func (am *AgentManager) getAvailableProvidersWithGracePeriodForBuild(build *Build) []ai.AIProvider {
+	if build != nil && !am.buildUsesPlatformKeys(build) {
+		providers := am.aiRouter.GetAvailableProvidersForUser(build.UserID)
+		if len(providers) == 0 {
+			log.Printf("No BYOK providers available for user %d", build.UserID)
+		}
+		return providers
+	}
+	return am.getAvailableProvidersWithGracePeriod()
+}
+
+func (am *AgentManager) getCurrentlyAvailableProvidersForBuild(build *Build) []ai.AIProvider {
+	if build != nil && !am.buildUsesPlatformKeys(build) {
+		return am.aiRouter.GetAvailableProvidersForUser(build.UserID)
+	}
+	return am.aiRouter.GetAvailableProviders()
 }
 
 // inactivityMonitor checks for build inactivity and broadcasts errors if AI isn't responding
@@ -617,11 +770,13 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 		return fmt.Errorf("build %s not found", buildID)
 	}
 
-	// Platform builds always use backend-configured providers.
-	availableProviders := am.aiRouter.GetAvailableProviders()
+	availableProviders := am.getCurrentlyAvailableProvidersForBuild(build)
 
 	if len(availableProviders) == 0 {
-		return fmt.Errorf("no AI providers available - please check API key configuration")
+		if am.buildUsesPlatformKeys(build) {
+			return fmt.Errorf("no AI providers available - please check API key configuration")
+		}
+		return fmt.Errorf("no AI providers available for this user BYOK build - please check BYOK key configuration")
 	}
 
 	// Define mandatory and optional roles.
@@ -639,6 +794,19 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 	}
 
 	roles := append([]AgentRole{}, mandatoryRoles...)
+
+	// Local single-provider Ollama builds benefit from a smaller team to reduce latency and timeout risk.
+	// Keep architecture + code generation + review, and skip database/testing specialists by default.
+	if am.isLocalDevSingleOllamaProfile() {
+		mandatoryRoles = []AgentRole{
+			RoleArchitect,
+			RoleBackend,
+			RoleFrontend,
+			RoleReviewer,
+		}
+		roles = append([]AgentRole{}, mandatoryRoles...)
+		log.Printf("Build %s using reduced local Ollama agent profile (%d roles)", buildID, len(mandatoryRoles))
+	}
 
 	// Enforce max agents (excluding lead)
 	if build.MaxAgents > 0 {
@@ -909,6 +1077,14 @@ func (am *AgentManager) getAvailableProvidersWithGracePeriod() []ai.AIProvider {
 	// Try immediate check first
 	providers := am.aiRouter.GetAvailableProviders()
 	if len(providers) > 0 {
+		return providers
+	}
+
+	// If no providers are configured at all, fail fast instead of waiting through
+	// the startup grace period (which only helps when providers exist but health
+	// checks haven't reported yet).
+	if !am.aiRouter.HasConfiguredProviders() {
+		log.Printf("No AI providers configured; skipping startup grace period")
 		return providers
 	}
 
@@ -1192,7 +1368,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		Temperature:     temperature,
 		SystemPrompt:    systemPrompt,
 		PowerMode:       build.PowerMode,
-		UsePlatformKeys: true,
+		UsePlatformKeys: am.buildUsesPlatformKeys(build),
 	})
 
 	if err != nil {
@@ -1805,7 +1981,7 @@ func (am *AgentManager) ensureProblemSolverAgent(buildID string) *Agent {
 	}
 	build.mu.RUnlock()
 
-	availableProviders := am.aiRouter.GetAvailableProviders()
+	availableProviders := am.getCurrentlyAvailableProvidersForBuild(build)
 	if len(availableProviders) == 0 {
 		log.Printf("Build %s: unable to spawn solver agent (no providers available)", buildID)
 		return nil
@@ -2028,6 +2204,27 @@ func (am *AgentManager) handleTestCompletion(build *Build, output *TaskOutput) {
 	}
 
 	if hasFailures {
+		if !am.canCreateAutomatedFixTask(build, "fix_tests") {
+			log.Printf("Test failures detected in build %s, but automated test-fix loop cap reached; proceeding to final validation", build.ID)
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSBuildProgress,
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"message":               "Test failures detected, but automated fix loop cap reached. Proceeding to final validation for concrete errors.",
+					"phase":                 "testing",
+					"status":                string(BuildTesting),
+					"quality_gate_required": true,
+					"quality_gate_active":   true,
+					"quality_gate_stage":    "testing",
+				},
+			})
+			build.mu.Lock()
+			build.UpdatedAt = time.Now()
+			build.mu.Unlock()
+			return
+		}
+
 		log.Printf("Test failures detected in build %s, creating fix task", build.ID)
 
 		fixTask := &Task{
@@ -2101,6 +2298,27 @@ func (am *AgentManager) handleReviewCompletion(build *Build, output *TaskOutput)
 	}
 
 	if hasCritical {
+		if !am.canCreateAutomatedFixTask(build, "fix_review_issues") {
+			log.Printf("Critical review issues found in build %s, but automated review-fix loop cap reached; proceeding to final validation", build.ID)
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSBuildProgress,
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"message":               "Critical issues found in review, but automated fix loop cap reached. Proceeding to final validation for concrete errors.",
+					"phase":                 "reviewing",
+					"status":                string(BuildReviewing),
+					"quality_gate_required": true,
+					"quality_gate_active":   true,
+					"quality_gate_stage":    "review",
+				},
+			})
+			build.mu.Lock()
+			build.UpdatedAt = time.Now()
+			build.mu.Unlock()
+			return
+		}
+
 		log.Printf("Critical review issues found in build %s, creating fix task", build.ID)
 
 		fixTask := &Task{
@@ -2165,6 +2383,84 @@ func (am *AgentManager) cancelPendingTasks(build *Build) {
 			task.Status = TaskCancelled
 		}
 	}
+}
+
+func (am *AgentManager) canCreateAutomatedFixTask(build *Build, action string) bool {
+	if build == nil || strings.TrimSpace(action) == "" {
+		return true
+	}
+
+	if am.hasRecentOrActiveAutomatedFixTask(build, action) {
+		return false
+	}
+
+	limit := am.maxAutomatedFixLoops(build, action)
+	if limit <= 0 {
+		return true
+	}
+
+	count := 0
+	build.mu.RLock()
+	for _, task := range build.Tasks {
+		if task == nil || task.Type != TaskFix {
+			continue
+		}
+		taskAction, _ := task.Input["action"].(string)
+		if taskAction == action {
+			count++
+		}
+	}
+	build.mu.RUnlock()
+	return count < limit
+}
+
+func (am *AgentManager) hasRecentOrActiveAutomatedFixTask(build *Build, action string) bool {
+	if build == nil || strings.TrimSpace(action) == "" {
+		return false
+	}
+
+	now := time.Now()
+	const duplicateCooldown = 20 * time.Second
+
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+
+	for _, task := range build.Tasks {
+		if task == nil || task.Type != TaskFix {
+			continue
+		}
+		taskAction, _ := task.Input["action"].(string)
+		if taskAction != action {
+			continue
+		}
+
+		if task.Status == TaskPending || task.Status == TaskInProgress {
+			return true
+		}
+		if !task.CreatedAt.IsZero() && now.Sub(task.CreatedAt) <= duplicateCooldown {
+			return true
+		}
+	}
+	return false
+}
+
+func (am *AgentManager) maxAutomatedFixLoops(build *Build, action string) int {
+	defaultLimit := 3
+	envKey := "BUILD_MAX_FIX_LOOPS"
+	if action == "fix_review_issues" {
+		envKey = "BUILD_MAX_REVIEW_FIX_LOOPS"
+	} else if action == "fix_tests" {
+		envKey = "BUILD_MAX_TEST_FIX_LOOPS"
+	}
+
+	limit := envInt(envKey, defaultLimit)
+	if am.isLocalDevStrictPreviewBuild(build) && limit < 6 {
+		limit = 6
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	return limit
 }
 
 // updateBuildProgress calculates and updates overall build progress
@@ -2279,6 +2575,28 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 	}
 	progress := build.Progress
 	buildError := strings.TrimSpace(build.Error)
+	lastTaskError := ""
+	if buildError == "" && anyFailed {
+		for i := len(build.Tasks) - 1; i >= 0; i-- {
+			task := build.Tasks[i]
+			if task == nil || task.Status != TaskFailed {
+				continue
+			}
+			if msg := strings.TrimSpace(task.Error); msg != "" {
+				lastTaskError = msg
+				break
+			}
+			for j := len(task.ErrorHistory) - 1; j >= 0; j-- {
+				if msg := strings.TrimSpace(task.ErrorHistory[j].Error); msg != "" {
+					lastTaskError = msg
+					break
+				}
+			}
+			if lastTaskError != "" {
+				break
+			}
+		}
+	}
 	build.mu.Unlock()
 
 	allFiles := am.collectGeneratedFiles(build)
@@ -2295,9 +2613,7 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 				build.Status = BuildReviewing
 				build.CompletedAt = nil
 				build.UpdatedAt = now
-				if build.Progress < 95 {
-					build.Progress = 95
-				}
+				build.Progress = 95
 				build.Error = fmt.Sprintf("Final output validation failed: %s", errorSummary)
 				progress = build.Progress
 				build.mu.Unlock()
@@ -2381,10 +2697,18 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 		if buildError == "" {
 			if status == BuildCancelled {
 				buildError = "Build was cancelled before completion."
+			} else if lastTaskError != "" {
+				buildError = lastTaskError
 			} else {
 				buildError = "One or more tasks failed before build completion."
 			}
 		}
+		build.mu.Lock()
+		if strings.TrimSpace(build.Error) == "" {
+			build.Error = buildError
+			build.UpdatedAt = time.Now()
+		}
+		build.mu.Unlock()
 
 		am.createCheckpoint(build, checkpointName, checkpointDescription)
 		am.broadcast(build.ID, &WSMessage{
@@ -2766,6 +3090,7 @@ func (am *AgentManager) collectGeneratedFiles(build *Build) []GeneratedFile {
 				continue
 			}
 			file.Path = sanitized
+			file.Content = normalizeGeneratedFileContent(file.Path, file.Content)
 
 			existing, exists := filesByPath[sanitized]
 			if !exists {
@@ -2802,6 +3127,63 @@ func (am *AgentManager) collectGeneratedFiles(build *Build) []GeneratedFile {
 		result = append(result, filesByPath[path])
 	}
 	return result
+}
+
+func normalizeGeneratedFileContent(path, content string) string {
+	if strings.TrimSpace(content) == "" || !strings.Contains(content, "''") {
+		return normalizeGeneratedTypeScriptInteropPatterns(path, content)
+	}
+
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".js", ".jsx", ".ts", ".tsx", ".json", ".css", ".scss", ".html", ".md", ".yml", ".yaml":
+	default:
+		return content
+	}
+
+	// Heuristic repair for a common model corruption pattern where single quotes are doubled
+	// throughout code/config files (e.g. import { defineConfig } from ''vite'').
+	// Only apply when multiple code-like indicators are present to avoid changing intentional SQL escaping.
+	indicators := []string{
+		"from ''", "import ''", "require(''", "''./", "''../", "''@",
+		" = ''", ": ''", "'';", "''}", "''react", "''vite", "''/api",
+	}
+	hits := 0
+	for _, needle := range indicators {
+		if strings.Contains(content, needle) {
+			hits++
+		}
+	}
+	if hits < 2 {
+		return normalizeGeneratedTypeScriptInteropPatterns(path, content)
+	}
+
+	content = strings.ReplaceAll(content, "''", "'")
+	return normalizeGeneratedTypeScriptInteropPatterns(path, content)
+}
+
+func normalizeGeneratedTypeScriptInteropPatterns(path, content string) string {
+	if strings.TrimSpace(content) == "" {
+		return content
+	}
+
+	normalizedPath := strings.ToLower(strings.TrimSpace(path))
+	// Common `pg` typing mismatch emitted by models:
+	// `import pg, { QueryResultRow } from 'pg'` combined with `pg.QueryResult<T>`
+	// can fail under some tsconfig/module-resolution combos.
+	if strings.HasSuffix(normalizedPath, "config/database.ts") &&
+		strings.Contains(content, "import pg, { QueryResultRow } from 'pg';") &&
+		strings.Contains(content, "Promise<pg.QueryResult<T>>") &&
+		strings.Contains(content, "pool.query<T>(") {
+		content = strings.Replace(content, "import pg, { QueryResultRow } from 'pg';", "import pg from 'pg';", 1)
+		content = strings.Replace(content,
+			"export async function query<T extends QueryResultRow>(text: string, params?: any[]): Promise<pg.QueryResult<T>> {",
+			"export async function query<T extends pg.QueryResultRow = pg.QueryResultRow>(text: string, params?: any[]): Promise<pg.QueryResult<T>> {",
+			1,
+		)
+	}
+
+	return content
 }
 
 // agentPriority pairs an agent with its execution priority
@@ -3120,7 +3502,7 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 		Temperature:     am.getTemperatureForRole(RoleLead),
 		SystemPrompt:    am.getSystemPrompt(RoleLead, build),
 		PowerMode:       build.PowerMode,
-		UsePlatformKeys: true,
+		UsePlatformKeys: am.buildUsesPlatformKeys(build),
 	})
 
 	if err != nil {
@@ -3208,6 +3590,34 @@ func (am *AgentManager) defaultBuildLimits(mode BuildMode) (int, int, int, int) 
 	}
 	if maxTokens < 0 {
 		maxTokens = 0
+	}
+
+	return maxAgents, maxRetries, maxRequests, maxTokens
+}
+
+func (am *AgentManager) defaultBuildLimitsForBuild(build *Build) (int, int, int, int) {
+	mode := ModeFast
+	if build != nil && build.Mode != "" {
+		mode = build.Mode
+	}
+
+	maxAgents, maxRetries, maxRequests, maxTokens := am.defaultBuildLimits(mode)
+
+	// Local strict preview-ready builds legitimately need more request budget because
+	// they run review/fix loops plus preview verification (npm install/build/preview).
+	// Apply a dev-only floor so fast mode doesn't die at the default 30-request cap.
+	if am.isLocalDevStrictPreviewBuild(build) {
+		requestFloor := 120
+		if mode == ModeFull {
+			requestFloor = 180
+		}
+		if maxRequests > 0 && maxRequests < requestFloor {
+			log.Printf("Applying local strict preview request budget floor for build mode=%s: %d -> %d", mode, maxRequests, requestFloor)
+			maxRequests = requestFloor
+		}
+		if maxRetries < 3 {
+			maxRetries = 3
+		}
 	}
 
 	return maxAgents, maxRetries, maxRequests, maxTokens
@@ -4324,6 +4734,7 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	hasTSXOrJSX := false
 	hasBundlerConfig := false // vite/webpack/parcel config → index.html optional
 	sourceFiles := 0
+	backendStacks := map[string]bool{}
 
 	for _, file := range files {
 		path := strings.ToLower(strings.TrimSpace(file.Path))
@@ -4331,10 +4742,20 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 			continue
 		}
 
+		if hasUnresolvedPatchOrMergeMarkers(file.Content) {
+			addError(fmt.Sprintf("%s contains unresolved patch/merge markers", file.Path))
+		}
+
 		ext := strings.ToLower(filepath.Ext(path))
 		switch ext {
 		case ".js", ".jsx", ".ts", ".tsx", ".go", ".py", ".rs", ".java", ".kt", ".swift", ".php", ".rb", ".c", ".cc", ".cpp", ".cs":
 			sourceFiles++
+			for _, msg := range detectSourceArtifactAnomalies(file.Path, file.Content, ext) {
+				addError(msg)
+			}
+			for _, stack := range detectBackendPersistenceStacks(file.Path, file.Content) {
+				backendStacks[stack] = true
+			}
 		}
 
 		if ext == ".tsx" || ext == ".jsx" {
@@ -4367,6 +4788,14 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 			"src/app/page.tsx", "src/app/page.jsx",
 			"src/pages/index.tsx", "src/pages/index.jsx",
 			"pages/index.tsx", "pages/index.jsx",
+			"apps/web/src/main.tsx", "apps/web/src/main.jsx",
+			"apps/web/src/index.tsx", "apps/web/src/index.jsx",
+			"packages/frontend/src/main.tsx", "packages/frontend/src/main.jsx",
+			"packages/frontend/src/index.tsx", "packages/frontend/src/index.jsx",
+			"packages/web/src/main.tsx", "packages/web/src/main.jsx",
+			"packages/web/src/index.tsx", "packages/web/src/index.jsx",
+			"web/src/main.tsx", "web/src/main.jsx",
+			"web/src/index.tsx", "web/src/index.jsx",
 			"frontend/src/main.tsx", "frontend/src/main.jsx",
 			"frontend/src/index.tsx", "frontend/src/index.jsx":
 			hasFrontendEntry = true
@@ -4376,12 +4805,21 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	if sourceFiles == 0 {
 		addError("No source files were generated")
 	}
+	if mixed := summarizeMixedPersistenceStacks(backendStacks); mixed != "" {
+		addError(mixed)
+	}
 
-	if hasTSXOrJSX && hasPackageJSON {
-		hasReact, hasReactDOM, isNext, hasScripts, missingScripts, pkgErr := analyzeFrontendPackageJSON(packageJSON)
-		// Only enforce frontend rules if this is actually a frontend/React app
-		isFrontendApp := hasReact || isNext
-		if isFrontendApp {
+	isFrontendApp := hasTSXOrJSX || hasBundlerConfig || hasIndexHTML || hasFrontendEntry || hasPackageJSON
+	if isFrontendApp {
+		hasReact := false
+		hasReactDOM := false
+		isNext := false
+		hasScripts := false
+		var missingScripts []string
+
+		if hasPackageJSON {
+			var pkgErr error
+			hasReact, hasReactDOM, isNext, hasScripts, missingScripts, pkgErr = analyzeFrontendPackageJSON(packageJSON)
 			if pkgErr != nil {
 				addError(fmt.Sprintf("package.json is invalid: %v", pkgErr))
 			}
@@ -4391,16 +4829,405 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 			if hasScripts == false && (hasReact || isNext) {
 				addError(fmt.Sprintf("package.json is missing runnable scripts (%s)", strings.Join(missingScripts, "/")))
 			}
-			if !isNext && !hasIndexHTML && !hasBundlerConfig {
-				addError("Frontend app is missing an HTML entry point (index.html or public/index.html)")
-			}
-			if !hasFrontendEntry {
-				addError("Frontend app is missing an entry source file")
+		}
+
+		// TSX/JSX output is a strong frontend signal even when dependencies/scripts are incomplete.
+		// This catches broken generations that forgot to include react/react-dom or entry files.
+		if !isNext && !hasIndexHTML && !hasBundlerConfig {
+			addError("Frontend app is missing an HTML entry point (index.html or public/index.html)")
+		}
+		if !hasFrontendEntry {
+			addError("Frontend app is missing an entry source file")
+		}
+
+		if am.shouldRunPreviewReadinessVerification(build) {
+			for _, msg := range am.verifyGeneratedFrontendPreviewReadiness(files, build != nil && build.RequirePreviewReady) {
+				addError(msg)
 			}
 		}
 	}
 
 	return errors
+}
+
+func (am *AgentManager) shouldRunPreviewReadinessVerification(build *Build) bool {
+	if build != nil && build.RequirePreviewReady {
+		return true
+	}
+	val := strings.TrimSpace(strings.ToLower(os.Getenv("BUILD_REQUIRE_PREVIEW_READY_DEFAULT")))
+	return val == "1" || val == "true" || val == "yes"
+}
+
+type previewManifest struct {
+	Scripts         map[string]string `json:"scripts"`
+	Dependencies    map[string]string `json:"dependencies"`
+	DevDependencies map[string]string `json:"devDependencies"`
+}
+
+var npmPackageNamePattern = regexp.MustCompile(`^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`)
+
+func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []GeneratedFile, forceHTTPProbe bool) []string {
+	if len(files) == 0 {
+		return nil
+	}
+
+	prefix := ""
+	packagePath := ""
+	for _, f := range files {
+		switch strings.ToLower(strings.TrimSpace(f.Path)) {
+		case "frontend/package.json":
+			prefix = "frontend/"
+			packagePath = f.Path
+		case "package.json":
+			if packagePath == "" {
+				packagePath = f.Path
+			}
+		}
+	}
+	if packagePath == "" {
+		return []string{"Preview verification skipped: package.json not found for frontend app"}
+	}
+
+	var manifest previewManifest
+	pkgContent := ""
+	for _, f := range files {
+		if f.Path == packagePath {
+			pkgContent = f.Content
+			break
+		}
+	}
+	if strings.TrimSpace(pkgContent) == "" {
+		return []string{fmt.Sprintf("Preview verification failed: %s is empty", packagePath)}
+	}
+	if err := json.Unmarshal([]byte(pkgContent), &manifest); err != nil {
+		return []string{fmt.Sprintf("Preview verification failed: %s is invalid JSON (%v)", packagePath, err)}
+	}
+	if manifest.Scripts == nil {
+		manifest.Scripts = map[string]string{}
+	}
+	if _, ok := manifest.Scripts["build"]; !ok {
+		return []string{"Preview verification failed: package.json is missing a build script"}
+	}
+
+	if _, err := exec.LookPath("npm"); err != nil {
+		return []string{"Preview verification failed: npm is not available on the build host"}
+	}
+
+	tmpDir, err := os.MkdirTemp("", "apex-preview-verify-*")
+	if err != nil {
+		return []string{fmt.Sprintf("Preview verification failed: unable to create temp dir (%v)", err)}
+	}
+	defer os.RemoveAll(tmpDir)
+
+	writtenFiles := 0
+	for _, f := range files {
+		if strings.TrimSpace(f.Path) == "" || f.Content == "" {
+			continue
+		}
+		path := filepath.ToSlash(strings.TrimPrefix(filepath.ToSlash(f.Path), "./"))
+		if prefix != "" {
+			if !strings.HasPrefix(strings.ToLower(path), prefix) {
+				continue
+			}
+			path = strings.TrimPrefix(path, prefix)
+		}
+		path = strings.TrimPrefix(path, "/")
+		if path == "" || strings.Contains(path, "..") {
+			continue
+		}
+		fullPath := filepath.Join(tmpDir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			return []string{fmt.Sprintf("Preview verification failed: mkdir %s (%v)", path, err)}
+		}
+		if err := os.WriteFile(fullPath, []byte(f.Content), 0644); err != nil {
+			return []string{fmt.Sprintf("Preview verification failed: write %s (%v)", path, err)}
+		}
+		writtenFiles++
+	}
+	if writtenFiles == 0 {
+		return []string{"Preview verification failed: no frontend files were materialized for verification"}
+	}
+
+	issues := make([]string, 0, 3)
+	if depIssues := validatePreviewManifestDependencies(manifest); len(depIssues) > 0 {
+		for _, issue := range depIssues {
+			issues = append(issues, "Preview verification dependency check failed: "+issue)
+		}
+		return issues
+	}
+	depCount := len(manifest.Dependencies) + len(manifest.DevDependencies)
+	if depCount > 0 {
+		if out, err := runPreviewCheckCommand(tmpDir, 2*time.Minute, "npm", "install", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
+			issues = append(issues, fmt.Sprintf("Preview verification install failed: %s", summarizePreviewInstallFailure(out)))
+			return issues
+		}
+	}
+
+	if out, err := runPreviewCheckCommand(tmpDir, 90*time.Second, "npm", "run", "build"); err != nil {
+		issues = append(issues, fmt.Sprintf("Preview verification build failed: %s", truncatePreviewCommandOutput(out)))
+		return issues
+	}
+
+	if buildUsesPreviewHTTPProbe(manifest.Scripts, forceHTTPProbe) {
+		if msg := runPreviewHTTPProbe(tmpDir); msg != "" {
+			issues = append(issues, msg)
+		}
+	}
+
+	return issues
+}
+
+func buildUsesPreviewHTTPProbe(scripts map[string]string, force bool) bool {
+	if scripts == nil {
+		return false
+	}
+	if _, ok := scripts["preview"]; !ok {
+		return false
+	}
+	if force {
+		return true
+	}
+	val := strings.TrimSpace(strings.ToLower(os.Getenv("BUILD_PREVIEW_HTTP_SMOKE")))
+	return val == "1" || val == "true" || val == "yes"
+}
+
+func runPreviewCheckCommand(workDir string, timeout time.Duration, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = workDir
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		return buf.String(), fmt.Errorf("%s timed out after %s", name, timeout)
+	}
+	return buf.String(), err
+}
+
+func runPreviewHTTPProbe(workDir string) string {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Sprintf("Preview verification preview probe failed: unable to allocate local port (%v)", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "npm", "run", "preview", "--", "--host", "127.0.0.1", "--port", strconv.Itoa(port))
+	cmd.Dir = workDir
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Start(); err != nil {
+		return fmt.Sprintf("Preview verification preview start failed: %v", err)
+	}
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	}()
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	deadline := time.Now().Add(20 * time.Second)
+	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
+	for time.Now().Before(deadline) {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		resp, err := client.Do(req)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+				return ""
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Sprintf("Preview verification preview probe failed: %s", truncatePreviewCommandOutput(out.String()))
+}
+
+func truncatePreviewCommandOutput(output string) string {
+	s := strings.TrimSpace(output)
+	if s == "" {
+		return "command failed with no output"
+	}
+	if len(s) > 400 {
+		return s[:400] + "..."
+	}
+	return s
+}
+
+func validatePreviewManifestDependencies(manifest previewManifest) []string {
+	issues := make([]string, 0, 4)
+	seen := map[string]bool{}
+	checkSet := func(kind string, deps map[string]string) {
+		for name, version := range deps {
+			trimmedName := strings.TrimSpace(name)
+			if trimmedName == "" {
+				issues = append(issues, fmt.Sprintf("%s contains an empty dependency name", kind))
+				continue
+			}
+			if seen[kind+":"+trimmedName] {
+				continue
+			}
+			seen[kind+":"+trimmedName] = true
+
+			if !npmPackageNamePattern.MatchString(trimmedName) {
+				issues = append(issues, fmt.Sprintf("%s contains invalid npm package name %q", kind, trimmedName))
+			}
+			if strings.Count(trimmedName, "/") > 1 {
+				issues = append(issues, fmt.Sprintf("%s contains subpath import %q as a dependency (package.json must use package names only)", kind, trimmedName))
+			}
+			if strings.TrimSpace(version) == "" {
+				issues = append(issues, fmt.Sprintf("%s dependency %q has an empty version", kind, trimmedName))
+			}
+		}
+	}
+	checkSet("dependencies", manifest.Dependencies)
+	checkSet("devDependencies", manifest.DevDependencies)
+	return dedupePreviewIssues(issues)
+}
+
+func dedupePreviewIssues(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
+	for _, msg := range in {
+		msg = strings.TrimSpace(msg)
+		if msg == "" || seen[msg] {
+			continue
+		}
+		seen[msg] = true
+		out = append(out, msg)
+	}
+	return out
+}
+
+func summarizePreviewInstallFailure(output string) string {
+	s := strings.TrimSpace(output)
+	if s == "" {
+		return "command failed with no output"
+	}
+	// npm 404 package not found is a common model hallucination; extract the package for a clearer error.
+	if strings.Contains(s, "npm ERR! code E404") {
+		if m := regexp.MustCompile(`404 Not Found - GET .*?/(@?[^\s]+) - Not found`).FindStringSubmatch(s); len(m) == 2 {
+			pkg := strings.TrimSpace(m[1])
+			if pkg != "" {
+				return fmt.Sprintf("package not found on npm registry: %s", pkg)
+			}
+		}
+	}
+	return truncatePreviewCommandOutput(s)
+}
+
+func detectSourceArtifactAnomalies(path string, content string, ext string) []string {
+	if strings.TrimSpace(content) == "" {
+		return nil
+	}
+
+	errors := make([]string, 0, 2)
+	contentLower := strings.ToLower(content)
+
+	// Explanatory prose frequently leaks into source outputs after the model finishes code generation.
+	if strings.Contains(content, "This implementation includes:") ||
+		strings.Contains(content, "Here is the implementation:") ||
+		strings.Contains(content, "Explanation:") {
+		errors = append(errors, fmt.Sprintf("%s contains explanatory prose appended to source code", path))
+	}
+
+	// Detect obvious frontend/backend framework mixing inside React component files.
+	// These are almost never valid in a client entry/component and indicate model drift.
+	if ext == ".tsx" || ext == ".jsx" {
+		hasReact := strings.Contains(contentLower, "from 'react'") || strings.Contains(contentLower, "from \"react\"") ||
+			strings.Contains(contentLower, "react.")
+		hasExpress := strings.Contains(contentLower, "from 'express'") || strings.Contains(contentLower, "from \"express\"") ||
+			strings.Contains(contentLower, "require('express')") || strings.Contains(contentLower, "require(\"express\")")
+		if hasReact && hasExpress {
+			errors = append(errors, fmt.Sprintf("%s mixes frontend React and backend Express code in the same source file", path))
+		}
+	}
+
+	return errors
+}
+
+func detectBackendPersistenceStacks(path string, content string) []string {
+	pathLower := strings.ToLower(path)
+	contentLower := strings.ToLower(content)
+	stacks := make([]string, 0, 4)
+	add := func(name string) {
+		for _, s := range stacks {
+			if s == name {
+				return
+			}
+		}
+		stacks = append(stacks, name)
+	}
+
+	if strings.Contains(pathLower, "drizzle.config") ||
+		strings.Contains(contentLower, "drizzle-orm") ||
+		strings.Contains(contentLower, "drizzle-kit") {
+		add("drizzle")
+	}
+	if strings.Contains(pathLower, "schema.prisma") ||
+		strings.Contains(contentLower, "@prisma/client") ||
+		strings.Contains(contentLower, "new prismaclient") {
+		add("prisma")
+	}
+	if strings.Contains(contentLower, "from 'mongoose'") || strings.Contains(contentLower, "from \"mongoose\"") ||
+		strings.Contains(contentLower, "new schema<") || strings.Contains(contentLower, "mongoose.connect(") {
+		add("mongoose")
+	}
+	if strings.Contains(contentLower, "from 'sequelize'") || strings.Contains(contentLower, "from \"sequelize\"") ||
+		strings.Contains(contentLower, "sequelize.define(") || strings.Contains(contentLower, "new sequelize(") {
+		add("sequelize")
+	}
+	if strings.Contains(contentLower, "from 'typeorm'") || strings.Contains(contentLower, "from \"typeorm\"") ||
+		strings.Contains(contentLower, "@entity(") || strings.Contains(contentLower, "datasource(") {
+		add("typeorm")
+	}
+	return stacks
+}
+
+func summarizeMixedPersistenceStacks(stacks map[string]bool) string {
+	if len(stacks) <= 1 {
+		return ""
+	}
+	names := make([]string, 0, len(stacks))
+	for name := range stacks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return fmt.Sprintf("Backend app mixes multiple persistence stacks (%s); generated app should use one database ORM/ODM stack consistently", strings.Join(names, ", "))
+}
+
+func hasUnresolvedPatchOrMergeMarkers(content string) bool {
+	if content == "" {
+		return false
+	}
+
+	// Common merge conflict markers.
+	if strings.Contains(content, "<<<<<<<") || strings.Contains(content, ">>>>>>>") {
+		return true
+	}
+
+	// Agent patch-style SEARCH/REPLACE marker blocks sometimes leak into output.
+	// Require both terms plus a separator/marker signal to reduce false positives.
+	hasSearch := strings.Contains(content, "SEARCH:") || strings.Contains(content, "<<<<<<< SEARCH")
+	hasReplace := strings.Contains(content, "REPLACE:") || strings.Contains(content, ">>>>>>> REPLACE")
+	if hasSearch && hasReplace {
+		if strings.Contains(content, "=======") || strings.Contains(content, "<<<<<<< SEARCH") || strings.Contains(content, ">>>>>>> REPLACE") {
+			return true
+		}
+	}
+
+	return false
 }
 
 func analyzeFrontendPackageJSON(content string) (hasReact bool, hasReactDOM bool, isNext bool, hasScripts bool, missingScripts []string, err error) {
@@ -4869,7 +5696,7 @@ RATIONALE: <single short sentence>`,
 			Temperature:     0.2,
 			SystemPrompt:    "You are an incident commander. Vote for the safest path to complete the build.",
 			PowerMode:       PowerFast,
-			UsePlatformKeys: true,
+			UsePlatformKeys: am.buildUsesPlatformKeys(build),
 		})
 		cancel()
 

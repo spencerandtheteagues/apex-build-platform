@@ -61,22 +61,24 @@ func (b *ESBuildBundler) detectEsbuild() {
 
 	// Try multiple ways to find esbuild
 	paths := []string{
-		"esbuild",                                    // In PATH
-		"npx esbuild",                               // Via npx
 		"./node_modules/.bin/esbuild",              // Local node_modules
+		"esbuild",                                    // In PATH
+		"npx --yes esbuild",                         // Via npx (may download)
 		"/usr/local/bin/esbuild",                   // Common global location
 	}
 
 	for _, path := range paths {
+		probeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		var cmd *exec.Cmd
 		if strings.Contains(path, " ") {
 			parts := strings.Split(path, " ")
-			cmd = exec.Command(parts[0], append(parts[1:], "--version")...)
+			cmd = exec.CommandContext(probeCtx, parts[0], append(parts[1:], "--version")...)
 		} else {
-			cmd = exec.Command(path, "--version")
+			cmd = exec.CommandContext(probeCtx, path, "--version")
 		}
 
 		output, err := cmd.Output()
+		cancel()
 		if err == nil {
 			version := strings.TrimSpace(string(output))
 			b.esbuildPath = path

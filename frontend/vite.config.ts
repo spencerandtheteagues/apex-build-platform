@@ -10,6 +10,9 @@ export default defineConfig(({ mode }) => {
   const isAnalyze = mode === 'analyze'
   const isCI = process.env.CI === 'true' || process.env.RENDER === 'true'
   const enableCompression = env.ENABLE_ASSET_COMPRESSION === 'true' || (!isCI && mode === 'production')
+  const monacoWorkerSetupModule = env.VITE_MONACO_FULL_LANGUAGE_WORKERS === 'true'
+    ? './src/components/editor/setupMonacoWorkers.full.ts'
+    : './src/components/editor/setupMonacoWorkers.ts'
 
   return {
     plugins: [
@@ -64,6 +67,7 @@ export default defineConfig(({ mode }) => {
         '@types': path.resolve(__dirname, './src/types'),
         '@utils': path.resolve(__dirname, './src/utils'),
         '@styles': path.resolve(__dirname, './src/styles'),
+        '@monaco-worker-setup': path.resolve(__dirname, monacoWorkerSetupModule),
       },
     },
 
