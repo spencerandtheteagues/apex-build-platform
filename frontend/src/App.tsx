@@ -567,7 +567,7 @@ function App() {
             <ErrorBoundary>
               {currentProject ? (
                 <Suspense fallback={<ViewLoadingFallback label="Loading IDE..." />}>
-                  <IDELayout />
+                  <IDELayout key={currentProject.id} />
                 </Suspense>
               ) : (
                 <div className="h-full flex flex-col items-center justify-center bg-black text-gray-400">

@@ -134,6 +134,12 @@ export default function LivePreview({
 
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const activeProjectIdRef = useRef(projectId)
+  const lastAutoStartedProjectRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    activeProjectIdRef.current = projectId
+  }, [projectId])
 
   useEffect(() => {
     if (!showDevTools && activeTab !== 'preview') {
@@ -256,22 +262,39 @@ export default function LivePreview({
     setNetworkRequests([])
   }, [])
 
+  // Reset per-project preview state when switching projects so stale iframes/status do not bleed across IDE sessions.
+  useEffect(() => {
+    setStatus(null)
+    setError(null)
+    setLoading(false)
+    setPreviewUrl('')
+    setConnected(false)
+    setActiveSandbox(false)
+    clearDevTools()
+    lastAutoStartedProjectRef.current = null
+  }, [projectId, clearDevTools])
+
   // Fetch preview status
   const fetchStatus = useCallback(async () => {
+    const requestProjectId = projectId
     try {
       const response = await apiService.client.get(`/preview/status/${projectId}`, {
         params: { sandbox: activeSandbox || useSandbox ? '1' : '0' }
       })
+      if (activeProjectIdRef.current !== requestProjectId) return
       setStatus(response.data.preview)
       if (response.data.preview?.active) {
         setPreviewUrl(response.data.preview.url)
         setConnected(true)
       } else {
+        setPreviewUrl('')
         setConnected(false)
       }
     } catch (err: any) {
+      if (activeProjectIdRef.current !== requestProjectId) return
       // Preview not running - that's OK
       setStatus(null)
+      setPreviewUrl('')
       setConnected(false)
     }
   }, [projectId, activeSandbox, useSandbox])
@@ -285,6 +308,7 @@ export default function LivePreview({
 
   // Start preview with retry logic for rate limiting (429)
   const startPreview = useCallback(async () => {
+    const requestProjectId = projectId
     setLoading(true)
     setError(null)
     clearDevTools() // Clear old console/network data
@@ -296,6 +320,7 @@ export default function LivePreview({
           project_id: projectId,
           sandbox: useSandbox
         })
+        if (activeProjectIdRef.current !== requestProjectId) return
         setStatus(response.data.preview)
         setPreviewUrl(response.data.preview?.url || response.data.url || '')
         setConnected(true)
@@ -304,6 +329,7 @@ export default function LivePreview({
         setLoading(false)
         return
       } catch (err: any) {
+        if (activeProjectIdRef.current !== requestProjectId) return
         const status = err.response?.status
         if (status === 429 && attempt < maxRetries) {
           // Rate limited — wait with exponential backoff before retry
@@ -314,17 +340,24 @@ export default function LivePreview({
         break
       }
     }
-    setLoading(false)
+    if (activeProjectIdRef.current === requestProjectId) {
+      setLoading(false)
+    }
   }, [projectId, clearDevTools, useSandbox])
 
   // Auto-start preview when autoStart prop is true
-  const autoStartRef = useRef(false)
   useEffect(() => {
-    if (autoStart && !autoStartRef.current && !status?.active && !loading) {
-      autoStartRef.current = true
-      startPreview()
+    if (!autoStart || status?.active || loading) return
+    if (lastAutoStartedProjectRef.current === projectId) return
+    lastAutoStartedProjectRef.current = projectId
+    void startPreview()
+  }, [autoStart, projectId, status?.active, loading, startPreview])
+
+  useEffect(() => {
+    if (!autoStart && lastAutoStartedProjectRef.current === projectId) {
+      lastAutoStartedProjectRef.current = null
     }
-  }, [autoStart, status?.active, loading, startPreview])
+  }, [autoStart, projectId])
 
   // Stop preview
   const stopPreview = async () => {

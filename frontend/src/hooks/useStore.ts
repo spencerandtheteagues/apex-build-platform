@@ -532,7 +532,16 @@ export const useStore = create<StoreState & StoreActions>()(
         // Direct setter for current project (synchronous, no API call)
         setCurrentProject: (project: Project) => {
           set((state) => {
+            const changedProject = state.currentProject?.id !== project.id
             state.currentProject = project
+            if (changedProject) {
+              state.files = []
+              state.fileTree = []
+              state.openFiles = []
+              state.activeFileId = null
+              state.isLoading = true  // Legacy
+              state.isFilesLoading = true
+            }
           })
           // Fetch files for the project
           get().fetchFiles(project.id)

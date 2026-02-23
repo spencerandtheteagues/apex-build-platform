@@ -51,6 +51,7 @@ import {
 import { GitHubImportWizard } from '@/components/import/GitHubImportWizard'
 import { OnboardingTour } from './OnboardingTour'
 import { BuildHistory } from './BuildHistory'
+import { isTerminalBuildStatus, reconcileBuildPayloadWithCompletedDetail } from './buildRestore'
 import LivePreview from '@/components/preview/LivePreview'
 
 // ============================================================================
@@ -1807,6 +1808,17 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       return currentProject
     }
 
+    if (!options?.forceNew && createdProjectId && currentProject?.id !== createdProjectId) {
+      try {
+        const existingProject = await apiService.getProject(createdProjectId)
+        setCurrentProject(existingProject)
+        addSystemMessage(`Opened existing project "${existingProject.name}"`)
+        return existingProject
+      } catch {
+        addSystemMessage('Existing project for this build was not found. Recreating from build files...')
+      }
+    }
+
     const files = options?.files && options.files.length > 0
       ? options.files
       : await resolveGeneratedFiles()
@@ -1953,6 +1965,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       }
     }
 
+    payload = reconcileBuildPayloadWithCompletedDetail(payload, options?.fallbackDetail)
+
     const statusValue = String(payload.status || 'failed')
     const validStatuses = new Set(['idle', 'pending', 'planning', 'in_progress', 'testing', 'reviewing', 'completed', 'failed', 'cancelled'])
     const status = (validStatuses.has(statusValue) ? statusValue : 'failed') as BuildState['status']
@@ -2031,7 +2045,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       availableProviders: Array.isArray(payload.available_providers) ? payload.available_providers : undefined,
     })
 
-    const shouldReconnectLive = options?.reconnectLive !== false && payload.live !== false
+    const shouldReconnectLive = !isTerminalBuildStatus(status) && options?.reconnectLive !== false && payload.live !== false
     const active = isActiveBuildStatus(status)
 
     if (active) {
@@ -2119,7 +2133,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         await openBuildFilesInIDE(buildId, completed)
         return
       }
-      await hydrateBuildContext(buildId, { reconnectLive: true, notify: true, fallbackDetail: completed })
+      await hydrateBuildContext(buildId, {
+        reconnectLive: !isTerminalBuildStatus(String(completed.status || '')),
+        notify: true,
+        fallbackDetail: completed,
+      })
     } catch (error) {
       addSystemMessage('Failed to open build. Please try again.')
     }
