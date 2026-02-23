@@ -2222,6 +2222,8 @@ func (am *AgentManager) handleTestCompletion(build *Build, output *TaskOutput) {
 			build.mu.Lock()
 			build.UpdatedAt = time.Now()
 			build.mu.Unlock()
+			am.cancelAutomatedRecoveryTasksForLoopCap(build)
+			am.checkBuildCompletion(build)
 			return
 		}
 
@@ -2316,6 +2318,8 @@ func (am *AgentManager) handleReviewCompletion(build *Build, output *TaskOutput)
 			build.mu.Lock()
 			build.UpdatedAt = time.Now()
 			build.mu.Unlock()
+			am.cancelAutomatedRecoveryTasksForLoopCap(build)
+			am.checkBuildCompletion(build)
 			return
 		}
 
@@ -2461,6 +2465,44 @@ func (am *AgentManager) maxAutomatedFixLoops(build *Build, action string) int {
 		limit = 0
 	}
 	return limit
+}
+
+func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
+	if build == nil {
+		return
+	}
+
+	isRecoveryAction := func(action string) bool {
+		switch strings.TrimSpace(action) {
+		case "fix_review_issues", "fix_tests", "regression_test", "post_fix_review":
+			return true
+		default:
+			return false
+		}
+	}
+
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	cancelled := 0
+	for _, task := range build.Tasks {
+		if task == nil {
+			continue
+		}
+		if task.Status != TaskPending && task.Status != TaskInProgress {
+			continue
+		}
+		action, _ := task.Input["action"].(string)
+		if !isRecoveryAction(action) {
+			continue
+		}
+		task.Status = TaskCancelled
+		cancelled++
+	}
+	if cancelled > 0 {
+		build.UpdatedAt = time.Now()
+		log.Printf("Build %s: cancelled %d automated recovery task(s) after loop cap", build.ID, cancelled)
+	}
 }
 
 // updateBuildProgress calculates and updates overall build progress
@@ -3131,7 +3173,8 @@ func (am *AgentManager) collectGeneratedFiles(build *Build) []GeneratedFile {
 
 func normalizeGeneratedFileContent(path, content string) string {
 	if strings.TrimSpace(content) == "" || !strings.Contains(content, "''") {
-		return normalizeGeneratedTypeScriptInteropPatterns(path, content)
+		content = normalizeGeneratedTypeScriptInteropPatterns(path, content)
+		return normalizeGeneratedTSConfigBuildExcludes(path, content)
 	}
 
 	ext := strings.ToLower(filepath.Ext(path))
@@ -3155,11 +3198,13 @@ func normalizeGeneratedFileContent(path, content string) string {
 		}
 	}
 	if hits < 2 {
-		return normalizeGeneratedTypeScriptInteropPatterns(path, content)
+		content = normalizeGeneratedTypeScriptInteropPatterns(path, content)
+		return normalizeGeneratedTSConfigBuildExcludes(path, content)
 	}
 
 	content = strings.ReplaceAll(content, "''", "'")
-	return normalizeGeneratedTypeScriptInteropPatterns(path, content)
+	content = normalizeGeneratedTypeScriptInteropPatterns(path, content)
+	return normalizeGeneratedTSConfigBuildExcludes(path, content)
 }
 
 func normalizeGeneratedTypeScriptInteropPatterns(path, content string) string {
@@ -3184,6 +3229,73 @@ func normalizeGeneratedTypeScriptInteropPatterns(path, content string) string {
 	}
 
 	return content
+}
+
+func normalizeGeneratedTSConfigBuildExcludes(path, content string) string {
+	if strings.TrimSpace(content) == "" {
+		return content
+	}
+
+	normalizedPath := strings.ToLower(filepath.ToSlash(strings.TrimSpace(path)))
+	if filepath.Base(normalizedPath) != "tsconfig.json" {
+		return content
+	}
+	if !strings.Contains(normalizedPath, "backend/") && !strings.Contains(normalizedPath, "/api/") &&
+		!strings.HasPrefix(normalizedPath, "backend/") && !strings.HasPrefix(normalizedPath, "api/") {
+		return content
+	}
+
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(content), &cfg); err != nil {
+		return content
+	}
+
+	include, _ := cfg["include"].([]any)
+	hasSrcInclude := false
+	for _, v := range include {
+		s, _ := v.(string)
+		s = strings.ToLower(strings.TrimSpace(s))
+		if strings.Contains(s, "src") {
+			hasSrcInclude = true
+			break
+		}
+	}
+	if !hasSrcInclude {
+		return content
+	}
+
+	exclude, _ := cfg["exclude"].([]any)
+	existing := make(map[string]bool, len(exclude))
+	for _, v := range exclude {
+		if s, ok := v.(string); ok {
+			existing[s] = true
+		}
+	}
+
+	changed := false
+	for _, pattern := range []string{
+		"src/**/__tests__/**",
+		"src/**/*.test.ts",
+		"src/**/*.test.tsx",
+		"src/**/*.spec.ts",
+		"src/**/*.spec.tsx",
+	} {
+		if existing[pattern] {
+			continue
+		}
+		exclude = append(exclude, pattern)
+		changed = true
+	}
+	if !changed {
+		return content
+	}
+	cfg["exclude"] = exclude
+
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return content
+	}
+	return string(b)
 }
 
 // agentPriority pairs an agent with its execution priority
@@ -4774,9 +4886,11 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 		}
 
 		switch path {
-		case "package.json", "frontend/package.json":
-			if !hasPackageJSON || path == "frontend/package.json" {
-				// Prefer frontend/package.json for React analysis (has actual deps)
+		case "package.json", "frontend/package.json", "web/package.json",
+			"apps/web/package.json", "packages/frontend/package.json", "packages/web/package.json":
+			if !hasPackageJSON || path == "frontend/package.json" || path == "packages/frontend/package.json" ||
+				path == "web/package.json" || path == "packages/web/package.json" || path == "apps/web/package.json" {
+				// Prefer an actual frontend package manifest over the workspace root for React analysis.
 				hasPackageJSON = true
 				packageJSON = file.Content
 			}
@@ -4957,7 +5071,7 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 	}
 	depCount := len(manifest.Dependencies) + len(manifest.DevDependencies)
 	if depCount > 0 {
-		if out, err := runPreviewCheckCommand(tmpDir, 2*time.Minute, "npm", "install", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
+		if out, err := runPreviewCheckCommand(tmpDir, 2*time.Minute, "npm", "install", "--include=dev", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
 			issues = append(issues, fmt.Sprintf("Preview verification install failed: %s", summarizePreviewInstallFailure(out)))
 			return issues
 		}
@@ -5123,6 +5237,25 @@ func summarizePreviewInstallFailure(output string) string {
 				return fmt.Sprintf("package not found on npm registry: %s", pkg)
 			}
 		}
+	}
+	// Prefer npm error lines over warning spam (deprecations are common and often not the actual cause).
+	errLines := make([]string, 0, 6)
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, "npm ERR!") {
+			errLines = append(errLines, line)
+		}
+	}
+	if len(errLines) > 0 {
+		return truncatePreviewCommandOutput(strings.Join(errLines, "\n"))
+	}
+	// Fallback: tail the output to capture the final failure context rather than leading warnings.
+	lines := strings.Split(s, "\n")
+	if len(lines) > 8 {
+		return truncatePreviewCommandOutput(strings.Join(lines[len(lines)-8:], "\n"))
 	}
 	return truncatePreviewCommandOutput(s)
 }

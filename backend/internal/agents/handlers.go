@@ -812,7 +812,10 @@ func (h *BuildHandler) getBuildSnapshot(userID uint, buildID string) (*models.Co
 	}
 
 	var snapshot models.CompletedBuild
-	if err := h.db.Where("build_id = ? AND user_id = ?", buildID, userID).First(&snapshot).Error; err != nil {
+	if err := h.db.Where("build_id = ? AND user_id = ?", buildID, userID).
+		Order("updated_at DESC").
+		Order("id DESC").
+		First(&snapshot).Error; err != nil {
 		return nil, err
 	}
 	return &snapshot, nil

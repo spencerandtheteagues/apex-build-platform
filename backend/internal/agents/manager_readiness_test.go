@@ -390,6 +390,28 @@ export async function query<T extends QueryResultRow>(text: string, params?: any
 			t.Fatalf("expected pg generic normalization, got %q", got)
 		}
 	})
+
+	t.Run("adds_backend_tsconfig_test_excludes_for_build", func(t *testing.T) {
+		t.Parallel()
+
+		in := `{
+  "compilerOptions": {
+    "target": "ES2022"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}`
+		got := normalizeGeneratedFileContent("packages/backend/tsconfig.json", in)
+		if !strings.Contains(got, `"src/**/__tests__/**"`) {
+			t.Fatalf("expected __tests__ exclude, got %s", got)
+		}
+		if !strings.Contains(got, `"src/**/*.test.ts"`) {
+			t.Fatalf("expected test exclude, got %s", got)
+		}
+		if !strings.Contains(got, `"node_modules"`) || !strings.Contains(got, `"dist"`) {
+			t.Fatalf("expected original excludes to remain, got %s", got)
+		}
+	})
 }
 
 func TestCanCreateAutomatedFixTask_DedupesActiveAndRecent(t *testing.T) {
@@ -430,6 +452,40 @@ func TestCanCreateAutomatedFixTask_DedupesActiveAndRecent(t *testing.T) {
 	}
 }
 
+func TestCancelAutomatedRecoveryTasksForLoopCap(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "b1",
+		Tasks: []*Task{
+			{ID: "t1", Type: TaskFix, Status: TaskInProgress, Input: map[string]any{"action": "fix_review_issues"}},
+			{ID: "t2", Type: TaskTest, Status: TaskPending, Input: map[string]any{"action": "regression_test"}},
+			{ID: "t3", Type: TaskReview, Status: TaskPending, Input: map[string]any{"action": "post_fix_review"}},
+			{ID: "t4", Type: TaskReview, Status: TaskCompleted, Input: map[string]any{"action": "post_fix_review"}},
+			{ID: "t5", Type: TaskGenerateUI, Status: TaskInProgress, Input: map[string]any{"action": "generate_ui"}},
+		},
+	}
+
+	am.cancelAutomatedRecoveryTasksForLoopCap(build)
+
+	if build.Tasks[0].Status != TaskCancelled {
+		t.Fatalf("expected fix task to be cancelled, got %s", build.Tasks[0].Status)
+	}
+	if build.Tasks[1].Status != TaskCancelled {
+		t.Fatalf("expected regression test task to be cancelled, got %s", build.Tasks[1].Status)
+	}
+	if build.Tasks[2].Status != TaskCancelled {
+		t.Fatalf("expected post-fix review task to be cancelled, got %s", build.Tasks[2].Status)
+	}
+	if build.Tasks[3].Status != TaskCompleted {
+		t.Fatalf("expected completed task unchanged, got %s", build.Tasks[3].Status)
+	}
+	if build.Tasks[4].Status != TaskInProgress {
+		t.Fatalf("expected non-recovery task unchanged, got %s", build.Tasks[4].Status)
+	}
+}
+
 func TestSummarizePreviewInstallFailure(t *testing.T) {
 	t.Parallel()
 
@@ -444,4 +500,22 @@ npm ERR! 404
 	if !strings.Contains(got, "@hooked%2fui") && !strings.Contains(got, "@hooked/ui") {
 		t.Fatalf("expected package identifier in summary, got %q", got)
 	}
+
+	t.Run("prefers_npm_err_lines_over_warning_spam", func(t *testing.T) {
+		t.Parallel()
+
+		out := `npm WARN deprecated foo@1.0.0: old
+npm WARN deprecated bar@1.0.0: old
+npm ERR! code 1
+npm ERR! path /tmp/app/node_modules/bcrypt
+npm ERR! command failed
+npm ERR! command sh -c node-pre-gyp install --fallback-to-build`
+		got := summarizePreviewInstallFailure(out)
+		if strings.Contains(got, "npm WARN deprecated") {
+			t.Fatalf("expected warning spam to be omitted, got %q", got)
+		}
+		if !strings.Contains(got, "npm ERR! code 1") || !strings.Contains(got, "node-pre-gyp") {
+			t.Fatalf("expected npm error lines, got %q", got)
+		}
+	})
 }
