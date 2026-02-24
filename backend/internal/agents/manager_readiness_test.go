@@ -41,6 +41,38 @@ func TestValidateFinalBuildReadiness(t *testing.T) {
 		}
 	})
 
+	t.Run("accepts_frontend_start_plus_build_without_dev", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "moneyflow",
+  "scripts": {
+    "start": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}`,
+			},
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "src/main.tsx", Content: "import React from 'react';"},
+			{Path: "src/App.tsx", Content: "export default function App(){ return <div>ok</div> }"},
+		}
+
+		errs := am.validateFinalBuildReadiness(nil, files)
+		if containsError(errs, "missing runnable scripts") {
+			t.Fatalf("expected start+build to satisfy frontend script rule, got %v", errs)
+		}
+	})
+
 	t.Run("incomplete_frontend_output", func(t *testing.T) {
 		t.Parallel()
 
@@ -346,6 +378,112 @@ func TestVerifyGeneratedFrontendPreviewReadiness(t *testing.T) {
 			t.Fatalf("expected subpath dependency error, got %v", errs)
 		}
 	})
+
+	t.Run("missing_imported_dependency_fails_preflight", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := exec.LookPath("npm"); err != nil {
+			t.Skip("npm not available")
+		}
+
+		files := []GeneratedFile{
+			{
+				Path: "frontend/package.json",
+				Content: `{
+  "name": "preview-test",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}`,
+			},
+			{Path: "frontend/index.html", Content: "<!doctype html><html><body><div id=\"root\"></div><script type=\"module\" src=\"/src/main.tsx\"></script></body></html>"},
+			{Path: "frontend/src/main.tsx", Content: "import React from 'react'; import ReactDOM from 'react-dom/client'; import axios from 'axios'; console.log(axios); ReactDOM.createRoot(document.getElementById('root')!).render(<div />);"},
+		}
+
+		errs := am.verifyGeneratedFrontendPreviewReadiness(files, false)
+		if !containsError(errs, `does not declare dependency "axios"`) {
+			t.Fatalf("expected missing imported dependency error, got %v", errs)
+		}
+	})
+
+	t.Run("ignores_test_only_imports_for_preflight", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := exec.LookPath("npm"); err != nil {
+			t.Skip("npm not available")
+		}
+
+		files := []GeneratedFile{
+			{
+				Path: "frontend/package.json",
+				Content: `{
+  "name": "preview-test",
+  "private": true,
+  "scripts": { "build": "node -e \"console.log('ok')\"" },
+  "dependencies": { "react": "^18.2.0", "react-dom": "^18.2.0" }
+}`,
+			},
+			{Path: "frontend/index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "frontend/src/main.tsx", Content: "import React from 'react'; console.log(React);"},
+			{Path: "frontend/src/__tests__/setupTests.ts", Content: "import { jest } from '@jest/globals'; console.log(jest);"},
+		}
+
+		errs := am.verifyGeneratedFrontendPreviewReadiness(files, false)
+		if containsError(errs, "@jest/globals") {
+			t.Fatalf("expected test-only import to be ignored, got %v", errs)
+		}
+	})
+
+	t.Run("ignores_vitest_config_imports_for_preflight", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{Path: "frontend/src/main.tsx", Content: "import React from 'react'; console.log(React);"},
+			{Path: "frontend/vitest.config.ts", Content: "import { defineConfig } from 'vitest/config'; export default defineConfig({});"},
+		}
+		manifest := previewManifest{
+			Dependencies: map[string]string{"react": "^18.2.0"},
+		}
+
+		errs := validateGeneratedImportDependencies(files, "frontend/", manifest)
+		if containsError(errs, "vitest/config") || containsError(errs, `dependency "vitest"`) {
+			t.Fatalf("expected vitest config imports to be ignored, got %v", errs)
+		}
+	})
+
+	t.Run("frontend_tsc_without_tsconfig_fails_preflight", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "preview-test",
+  "private": true,
+  "scripts": { "build": "tsc && vite build", "dev": "vite" },
+  "dependencies": { "react": "^18.2.0", "react-dom": "^18.2.0" },
+  "devDependencies": { "typescript": "^5.0.0", "vite": "^5.0.0" }
+}`,
+			},
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "src/main.tsx", Content: "import React from 'react'; console.log(React);"},
+		}
+
+		errs := am.verifyGeneratedFrontendPreviewReadiness(files, false)
+		if !containsError(errs, "build script runs tsc but tsconfig.json is missing") {
+			t.Fatalf("expected missing frontend tsconfig preflight error, got %v", errs)
+		}
+	})
 }
 
 func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
@@ -395,6 +533,29 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 		errs := am.verifyGeneratedBackendBuildReadiness(files)
 		if len(errs) != 0 {
 			t.Fatalf("expected backend verification success, got %v", errs)
+		}
+	})
+
+	t.Run("tsc_root_mismatch_fails_preflight", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{
+				Path: "backend/package.json",
+				Content: `{
+  "name": "api",
+  "private": true,
+  "scripts": { "build": "tsc" },
+  "devDependencies": { "typescript": "^5.0.0" }
+}`,
+			},
+			{Path: "backend/src/server.ts", Content: "console.log('ok')"},
+			{Path: "tsconfig.json", Content: `{"compilerOptions":{"target":"ES2022"}}`},
+		}
+
+		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		if !containsError(errs, "backend/tsconfig.json is missing") {
+			t.Fatalf("expected backend tsconfig root mismatch error, got %v", errs)
 		}
 	})
 }
@@ -461,6 +622,23 @@ export async function query<T extends QueryResultRow>(text: string, params?: any
 		}
 		if !strings.Contains(got, `"node_modules"`) || !strings.Contains(got, `"dist"`) {
 			t.Fatalf("expected original excludes to remain, got %s", got)
+		}
+	})
+
+	t.Run("adds_frontend_module_resolution_for_esnext_jsx", func(t *testing.T) {
+		t.Parallel()
+
+		in := `{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "jsx": "react-jsx"
+  },
+  "include": ["src"]
+}`
+		got := normalizeGeneratedFileContent("frontend/tsconfig.json", in)
+		if !strings.Contains(got, `"moduleResolution": "Node"`) {
+			t.Fatalf("expected frontend moduleResolution normalization, got %s", got)
 		}
 	})
 }

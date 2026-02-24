@@ -2492,13 +2492,58 @@ func (am *AgentManager) maxAutomatedFixLoops(build *Build, action string) int {
 	}
 
 	limit := envInt(envKey, defaultLimit)
-	if am.isLocalDevStrictPreviewBuild(build) && limit < 6 {
-		limit = 6
+	if am.isLocalDevStrictPreviewBuild(build) && limit < 2 {
+		limit = 2
 	}
 	if limit < 0 {
 		limit = 0
 	}
 	return limit
+}
+
+func summarizeReadinessErrorClass(errors []string) string {
+	if len(errors) == 0 {
+		return ""
+	}
+	joined := strings.ToLower(strings.Join(errors, "; "))
+	switch {
+	case strings.Contains(joined, "dependency check failed"):
+		return "dependency_check"
+	case strings.Contains(joined, "missing a build script"):
+		return "missing_build_script"
+	case strings.Contains(joined, "tsconfig.json is missing"):
+		return "missing_tsconfig"
+	case strings.Contains(joined, "preview verification build failed"):
+		return "preview_build_failed"
+	case strings.Contains(joined, "backend verification build failed"):
+		return "backend_build_failed"
+	case strings.Contains(joined, "unresolved patch/merge markers"):
+		return "unresolved_patch_markers"
+	case strings.Contains(joined, "missing an html entry point"):
+		return "missing_html_entry"
+	case strings.Contains(joined, "missing an entry source file"):
+		return "missing_frontend_entry"
+	default:
+		// Fall back to the first readiness error prefix for stable grouping.
+		first := strings.TrimSpace(strings.ToLower(errors[0]))
+		if idx := strings.Index(first, ":"); idx > 0 {
+			first = strings.TrimSpace(first[:idx])
+		}
+		if len(first) > 120 {
+			first = first[:120]
+		}
+		return first
+	}
+}
+
+func readinessErrorClassFromBuildError(buildErr string) string {
+	s := strings.TrimSpace(strings.ToLower(buildErr))
+	if s == "" {
+		return ""
+	}
+	s = strings.TrimPrefix(s, "final output validation failed after automated recovery: ")
+	s = strings.TrimPrefix(s, "final output validation failed: ")
+	return summarizeReadinessErrorClass([]string{s})
 }
 
 func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
@@ -2690,9 +2735,28 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 		readinessErrors := am.validateFinalBuildReadiness(build, allFiles)
 		if len(readinessErrors) > 0 {
 			errorSummary := strings.Join(readinessErrors, "; ")
+			currentErrorClass := summarizeReadinessErrorClass(readinessErrors)
 			now = time.Now()
 
 			build.mu.Lock()
+			priorErrorClass := readinessErrorClassFromBuildError(build.Error)
+			repeatedClass := build.ReadinessRecoveryAttempts > 0 && priorErrorClass != "" && priorErrorClass == currentErrorClass
+			if repeatedClass {
+				build.Status = BuildFailed
+				build.CompletedAt = &now
+				build.UpdatedAt = now
+				if build.Progress > 99 {
+					build.Progress = 99
+				}
+				buildError = fmt.Sprintf("Final output validation failed after repeated recovery (%s): %s", currentErrorClass, errorSummary)
+				build.Error = buildError
+				status = build.Status
+				progress = build.Progress
+				build.mu.Unlock()
+				am.cancelAutomatedRecoveryTasksForLoopCap(build)
+				goto completion_finalize
+			}
+
 			if build.ReadinessRecoveryAttempts < 1 {
 				build.ReadinessRecoveryAttempts++
 				build.Status = BuildReviewing
@@ -2758,6 +2822,8 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 			build.mu.Unlock()
 		}
 	}
+
+completion_finalize:
 
 	if status == BuildCompleted {
 		// Persist completion first so a completed_build row exists before auto-linking a project.
@@ -3296,14 +3362,40 @@ func normalizeGeneratedTSConfigBuildExcludes(path, content string) string {
 	if filepath.Base(normalizedPath) != "tsconfig.json" {
 		return content
 	}
-	if !strings.Contains(normalizedPath, "backend/") && !strings.Contains(normalizedPath, "/api/") &&
-		!strings.HasPrefix(normalizedPath, "backend/") && !strings.HasPrefix(normalizedPath, "api/") {
-		return content
-	}
-
 	var cfg map[string]any
 	if err := json.Unmarshal([]byte(content), &cfg); err != nil {
 		return content
+	}
+
+	compilerOptions, _ := cfg["compilerOptions"].(map[string]any)
+	changed := false
+
+	// Frontend TS/Vite apps frequently fail with TS2792 on package imports when the model
+	// emits `module: "ESNext"` but omits `moduleResolution`.
+	if compilerOptions != nil {
+		_, hasModuleResolution := compilerOptions["moduleResolution"]
+		moduleValue, _ := compilerOptions["module"].(string)
+		jsxValue, _ := compilerOptions["jsx"].(string)
+		if !hasModuleResolution &&
+			strings.EqualFold(strings.TrimSpace(moduleValue), "ESNext") &&
+			strings.TrimSpace(jsxValue) != "" {
+			compilerOptions["moduleResolution"] = "Node"
+			cfg["compilerOptions"] = compilerOptions
+			changed = true
+		}
+	}
+
+	isBackendTSConfig := strings.Contains(normalizedPath, "backend/") || strings.Contains(normalizedPath, "/api/") ||
+		strings.HasPrefix(normalizedPath, "backend/") || strings.HasPrefix(normalizedPath, "api/")
+	if !isBackendTSConfig {
+		if !changed {
+			return content
+		}
+		b, err := json.MarshalIndent(cfg, "", "  ")
+		if err != nil {
+			return content
+		}
+		return string(b)
 	}
 
 	include, _ := cfg["include"].([]any)
@@ -3317,7 +3409,14 @@ func normalizeGeneratedTSConfigBuildExcludes(path, content string) string {
 		}
 	}
 	if !hasSrcInclude {
-		return content
+		if !changed {
+			return content
+		}
+		b, err := json.MarshalIndent(cfg, "", "  ")
+		if err != nil {
+			return content
+		}
+		return string(b)
 	}
 
 	exclude, _ := cfg["exclude"].([]any)
@@ -3328,7 +3427,6 @@ func normalizeGeneratedTSConfigBuildExcludes(path, content string) string {
 		}
 	}
 
-	changed := false
 	for _, pattern := range []string{
 		"src/**/__tests__/**",
 		"src/**/*.test.ts",
@@ -5053,6 +5151,171 @@ type previewManifest struct {
 }
 
 var npmPackageNamePattern = regexp.MustCompile(`^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`)
+var generatedImportPathPattern = regexp.MustCompile(`(?m)(?:^|\s)(?:import\s+(?:type\s+)?(?:[^'"]+\s+from\s+)?|export\s+[^'"]+\s+from\s+|import\s*\(|require\()\s*['"]([^'"]+)['"]`)
+
+func packageNameFromImportPath(spec string) string {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return ""
+	}
+	if strings.HasPrefix(spec, ".") || strings.HasPrefix(spec, "/") || strings.HasPrefix(spec, "#") ||
+		strings.HasPrefix(spec, "node:") || strings.HasPrefix(spec, "http://") || strings.HasPrefix(spec, "https://") {
+		return ""
+	}
+	// Common path aliases in generated apps; these are project-local imports.
+	if strings.HasPrefix(spec, "@/") || strings.HasPrefix(spec, "~/") {
+		return ""
+	}
+	if strings.HasPrefix(spec, "@") {
+		parts := strings.Split(spec, "/")
+		if len(parts) >= 2 {
+			return parts[0] + "/" + parts[1]
+		}
+		return spec
+	}
+	if i := strings.Index(spec, "/"); i >= 0 {
+		return spec[:i]
+	}
+	return spec
+}
+
+func validateGeneratedImportDependencies(files []GeneratedFile, prefix string, manifest previewManifest) []string {
+	declared := map[string]bool{}
+	for name := range manifest.Dependencies {
+		declared[strings.TrimSpace(name)] = true
+	}
+	for name := range manifest.DevDependencies {
+		declared[strings.TrimSpace(name)] = true
+	}
+
+	nodeBuiltins := map[string]bool{
+		"fs": true, "path": true, "url": true, "http": true, "https": true, "crypto": true,
+		"stream": true, "events": true, "util": true, "os": true, "zlib": true, "buffer": true,
+		"timers": true, "assert": true, "tty": true, "net": true, "tls": true, "dns": true,
+		"child_process": true,
+	}
+	ignorePkgs := map[string]bool{
+		"vite/client": true,
+	}
+
+	var issues []string
+	seenMissing := map[string]bool{}
+	prefixLower := strings.ToLower(prefix)
+
+	for _, f := range files {
+		path := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(f.Path), "./"))
+		if path == "" || strings.TrimSpace(f.Content) == "" {
+			continue
+		}
+		if prefixLower != "" && !strings.HasPrefix(strings.ToLower(path), prefixLower) {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs":
+		default:
+			continue
+		}
+		pathLower := strings.ToLower(path)
+		if strings.Contains(pathLower, "/__tests__/") ||
+			strings.Contains(pathLower, "/test/") ||
+			strings.Contains(pathLower, "/tests/") ||
+			strings.Contains(pathLower, ".test.") ||
+			strings.Contains(pathLower, ".spec.") ||
+			strings.HasSuffix(pathLower, "jest.config.js") ||
+			strings.HasSuffix(pathLower, "jest.config.ts") ||
+			strings.HasSuffix(pathLower, "vitest.config.ts") ||
+			strings.HasSuffix(pathLower, "vitest.config.js") ||
+			strings.HasSuffix(pathLower, "setuptests.ts") ||
+			strings.HasSuffix(pathLower, "setuptests.tsx") {
+			continue
+		}
+
+		for _, match := range generatedImportPathPattern.FindAllStringSubmatch(f.Content, -1) {
+			if len(match) != 2 {
+				continue
+			}
+			spec := strings.TrimSpace(match[1])
+			pkg := packageNameFromImportPath(spec)
+			if pkg == "" || ignorePkgs[pkg] || nodeBuiltins[pkg] {
+				continue
+			}
+			if declared[pkg] {
+				continue
+			}
+			if seenMissing[pkg] {
+				continue
+			}
+			seenMissing[pkg] = true
+			issues = append(issues, fmt.Sprintf("source imports %q but package.json does not declare dependency %q", spec, pkg))
+		}
+	}
+	return dedupePreviewIssues(issues)
+}
+
+func detectBackendTypeScriptBuildRootMismatch(files []GeneratedFile, prefix string, manifest previewManifest) string {
+	buildScript := strings.ToLower(strings.TrimSpace(manifest.Scripts["build"]))
+	if prefix == "" || buildScript == "" || !strings.Contains(buildScript, "tsc") {
+		return ""
+	}
+
+	hasBackendTSConfig := false
+	hasRootTSConfig := false
+	prefixLower := strings.ToLower(prefix)
+	for _, f := range files {
+		path := strings.ToLower(filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(f.Path), "./")))
+		if path == "tsconfig.json" {
+			hasRootTSConfig = true
+		}
+		if strings.HasPrefix(path, prefixLower) && path == prefixLower+"tsconfig.json" {
+			hasBackendTSConfig = true
+		}
+	}
+	if !hasBackendTSConfig && hasRootTSConfig {
+		return "backend package build script runs tsc but backend/tsconfig.json is missing (only root tsconfig.json exists)"
+	}
+	return ""
+}
+
+func detectFrontendTypeScriptBuildRootMismatch(files []GeneratedFile, prefix string, manifest previewManifest) string {
+	buildScript := strings.ToLower(strings.TrimSpace(manifest.Scripts["build"]))
+	if buildScript == "" || !strings.Contains(buildScript, "tsc") {
+		return ""
+	}
+
+	prefixLower := strings.ToLower(prefix)
+	hasFrontendTSConfig := false
+	hasAnyTSConfig := false
+	for _, f := range files {
+		path := strings.ToLower(filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(f.Path), "./")))
+		if filepath.Base(path) != "tsconfig.json" {
+			continue
+		}
+		hasAnyTSConfig = true
+		if prefixLower == "" {
+			if path == "tsconfig.json" {
+				hasFrontendTSConfig = true
+			}
+			continue
+		}
+		if strings.HasPrefix(path, prefixLower) && path == prefixLower+"tsconfig.json" {
+			hasFrontendTSConfig = true
+		}
+	}
+
+	if hasFrontendTSConfig {
+		return ""
+	}
+	if prefixLower == "" {
+		if hasAnyTSConfig {
+			return "frontend build script runs tsc but root tsconfig.json is missing or not materialized in the selected frontend package"
+		}
+		return "frontend build script runs tsc but tsconfig.json is missing"
+	}
+	if hasAnyTSConfig {
+		return fmt.Sprintf("frontend package build script runs tsc but %stsconfig.json is missing (tsconfig exists elsewhere)", prefix)
+	}
+	return fmt.Sprintf("frontend package build script runs tsc but %stsconfig.json is missing", prefix)
+}
 
 func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []GeneratedFile, forceHTTPProbe bool) []string {
 	if len(files) == 0 {
@@ -5142,6 +5405,15 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 			issues = append(issues, "Preview verification dependency check failed: "+issue)
 		}
 		return issues
+	}
+	if importIssues := validateGeneratedImportDependencies(files, prefix, manifest); len(importIssues) > 0 {
+		for _, issue := range importIssues {
+			issues = append(issues, "Preview verification dependency check failed: "+issue)
+		}
+		return issues
+	}
+	if rootMismatch := detectFrontendTypeScriptBuildRootMismatch(files, prefix, manifest); rootMismatch != "" {
+		return []string{"Preview verification failed: " + rootMismatch}
 	}
 	depCount := len(manifest.Dependencies) + len(manifest.DevDependencies)
 	if depCount > 0 {
@@ -5263,6 +5535,15 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 			issues = append(issues, "Backend verification dependency check failed: "+issue)
 		}
 		return issues
+	}
+	if importIssues := validateGeneratedImportDependencies(files, prefix, manifest); len(importIssues) > 0 {
+		for _, issue := range importIssues {
+			issues = append(issues, "Backend verification dependency check failed: "+issue)
+		}
+		return issues
+	}
+	if rootMismatch := detectBackendTypeScriptBuildRootMismatch(files, prefix, manifest); rootMismatch != "" {
+		return []string{"Backend verification failed: " + rootMismatch}
 	}
 
 	depCount := len(manifest.Dependencies) + len(manifest.DevDependencies)
@@ -5594,12 +5875,12 @@ func hasUnresolvedPatchOrMergeMarkers(content string) bool {
 func analyzeFrontendPackageJSON(content string) (hasReact bool, hasReactDOM bool, isNext bool, hasScripts bool, missingScripts []string, err error) {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
-		return false, false, false, false, []string{"dev", "build", "start"}, fmt.Errorf("package.json is empty")
+		return false, false, false, false, []string{"build", "dev|preview|start"}, fmt.Errorf("package.json is empty")
 	}
 
 	var pkg map[string]any
 	if err := json.Unmarshal([]byte(trimmed), &pkg); err != nil {
-		return false, false, false, false, []string{"dev", "build", "start"}, err
+		return false, false, false, false, []string{"build", "dev|preview|start"}, err
 	}
 
 	getObject := func(value any) map[string]any {
@@ -5629,20 +5910,26 @@ func analyzeFrontendPackageJSON(content string) (hasReact bool, hasReactDOM bool
 	isNext = hasDependency("next")
 
 	scripts := getObject(pkg["scripts"])
-	requiredScripts := []string{"dev", "build"}
-	if isNext {
-		requiredScripts = append(requiredScripts, "start")
-	}
-	missingScripts = make([]string, 0, len(requiredScripts))
-	for _, script := range requiredScripts {
+	hasNonEmptyScript := func(name string) bool {
 		if scripts == nil {
-			missingScripts = append(missingScripts, script)
-			continue
+			return false
 		}
-		raw, ok := scripts[script]
+		raw, ok := scripts[name]
 		value, isString := raw.(string)
-		if !ok || !isString || strings.TrimSpace(value) == "" {
-			missingScripts = append(missingScripts, script)
+		return ok && isString && strings.TrimSpace(value) != ""
+	}
+
+	missingScripts = make([]string, 0, 2)
+	if !hasNonEmptyScript("build") {
+		missingScripts = append(missingScripts, "build")
+	}
+	if isNext {
+		if !hasNonEmptyScript("start") {
+			missingScripts = append(missingScripts, "start")
+		}
+	} else {
+		if !(hasNonEmptyScript("dev") || hasNonEmptyScript("preview") || hasNonEmptyScript("start")) {
+			missingScripts = append(missingScripts, "dev|preview|start")
 		}
 	}
 	hasScripts = len(missingScripts) == 0
