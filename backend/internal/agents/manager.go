@@ -2346,6 +2346,29 @@ func (am *AgentManager) handleReviewCompletion(build *Build, output *TaskOutput)
 	}
 
 	if hasCritical {
+		if am.isLocalDevStrictPreviewBuild(build) {
+			log.Printf("Critical review issues found in build %s, but local strict-preview mode skips review-fix loops; proceeding to final validation", build.ID)
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSBuildProgress,
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"message":               "Critical review issues found, but local strict-preview mode skips review-fix loops to reduce cost. Proceeding to final validation.",
+					"phase":                 "reviewing",
+					"status":                string(BuildReviewing),
+					"quality_gate_required": true,
+					"quality_gate_active":   true,
+					"quality_gate_stage":    "review",
+				},
+			})
+			build.mu.Lock()
+			build.UpdatedAt = time.Now()
+			build.mu.Unlock()
+			am.cancelAutomatedRecoveryTasksForLoopCap(build)
+			am.checkBuildCompletion(build)
+			return
+		}
+
 		build.mu.RLock()
 		readinessRecoveryAttempts := build.ReadinessRecoveryAttempts
 		existingBuildError := strings.ToLower(strings.TrimSpace(build.Error))
@@ -2664,6 +2687,470 @@ func dependencyRepairPlacementHint(pkg string) string {
 	}
 }
 
+func dependencyVersionHint(pkg string) string {
+	switch strings.ToLower(strings.TrimSpace(pkg)) {
+	case "zod":
+		return "^3.23.8"
+	case "body-parser":
+		return "^1.20.2"
+	case "bcrypt":
+		return "^5.1.1"
+	case "@vitejs/plugin-react":
+		return "^4.3.4"
+	case "@vitejs/plugin-react-swc":
+		return "^3.7.2"
+	case "vite":
+		return "^5.4.10"
+	case "typescript":
+		return "^5.6.3"
+	default:
+		return "*"
+	}
+}
+
+func dependencyShouldBeDev(pkg string) bool {
+	pkg = strings.ToLower(strings.TrimSpace(pkg))
+	switch {
+	case pkg == "":
+		return false
+	case strings.HasPrefix(pkg, "@types/"):
+		return true
+	case pkg == "typescript" || pkg == "vite" || strings.HasPrefix(pkg, "@vitejs/"):
+		return true
+	case pkg == "vitest" || pkg == "jest" || strings.HasPrefix(pkg, "@testing-library/"):
+		return true
+	default:
+		return false
+	}
+}
+
+func parseMissingDependenciesByVerificationScope(errors []string) (frontendPkgs []string, backendPkgs []string) {
+	if len(errors) == 0 {
+		return nil, nil
+	}
+	reMissing := regexp.MustCompile(`does not declare dependency "([^"]+)"`)
+	frontSet := map[string]bool{}
+	backSet := map[string]bool{}
+	for _, msg := range errors {
+		matches := reMissing.FindStringSubmatch(strings.TrimSpace(msg))
+		if len(matches) != 2 {
+			continue
+		}
+		pkg := strings.TrimSpace(matches[1])
+		if pkg == "" {
+			continue
+		}
+		lower := strings.ToLower(msg)
+		if strings.Contains(lower, "preview verification dependency check failed") {
+			frontSet[pkg] = true
+		}
+		if strings.Contains(lower, "backend verification dependency check failed") {
+			backSet[pkg] = true
+		}
+	}
+	for pkg := range frontSet {
+		frontendPkgs = append(frontendPkgs, pkg)
+	}
+	for pkg := range backSet {
+		backendPkgs = append(backendPkgs, pkg)
+	}
+	sort.Strings(frontendPkgs)
+	sort.Strings(backendPkgs)
+	return frontendPkgs, backendPkgs
+}
+
+func findGeneratedManifestPath(files []GeneratedFile, candidates []string) string {
+	for _, candidate := range candidates {
+		for _, f := range files {
+			if strings.EqualFold(strings.TrimSpace(f.Path), candidate) {
+				return f.Path
+			}
+		}
+	}
+	return ""
+}
+
+func patchManifestDependenciesJSON(content string, pkgs []string) (string, []string) {
+	if strings.TrimSpace(content) == "" || len(pkgs) == 0 {
+		return content, nil
+	}
+
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+		return content, nil
+	}
+	if manifest == nil {
+		return content, nil
+	}
+
+	getSection := func(name string) map[string]any {
+		if existing, ok := manifest[name].(map[string]any); ok && existing != nil {
+			return existing
+		}
+		m := map[string]any{}
+		manifest[name] = m
+		return m
+	}
+
+	deps := getSection("dependencies")
+	devDeps := getSection("devDependencies")
+	added := make([]string, 0, len(pkgs))
+	for _, pkg := range pkgs {
+		pkg = strings.TrimSpace(pkg)
+		if pkg == "" {
+			continue
+		}
+		if _, ok := deps[pkg]; ok {
+			continue
+		}
+		if _, ok := devDeps[pkg]; ok {
+			continue
+		}
+		target := deps
+		section := "dependencies"
+		if dependencyShouldBeDev(pkg) {
+			target = devDeps
+			section = "devDependencies"
+		}
+		target[pkg] = dependencyVersionHint(pkg)
+		added = append(added, fmt.Sprintf("%s -> %s", pkg, section))
+	}
+	if len(added) == 0 {
+		return content, nil
+	}
+
+	updated, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return content, nil
+	}
+	return string(updated), added
+}
+
+func (am *AgentManager) patchGeneratedFileContent(build *Build, targetPath, newContent string) bool {
+	if build == nil {
+		return false
+	}
+	targetPath = sanitizeFilePath(targetPath)
+	if targetPath == "" || strings.TrimSpace(newContent) == "" {
+		return false
+	}
+
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	for i := len(build.Tasks) - 1; i >= 0; i-- {
+		task := build.Tasks[i]
+		if task == nil || task.Output == nil || !am.isCodeGenerationTask(task.Type) {
+			continue
+		}
+		for j := len(task.Output.Files) - 1; j >= 0; j-- {
+			f := &task.Output.Files[j]
+			if sanitizeFilePath(f.Path) != targetPath {
+				continue
+			}
+			if strings.TrimSpace(f.Content) == strings.TrimSpace(newContent) {
+				return false
+			}
+			f.Path = targetPath
+			f.Content = newContent
+			f.Size = int64(len(newContent))
+			if f.Language == "" {
+				f.Language = "json"
+			}
+			build.UpdatedAt = time.Now()
+			return true
+		}
+	}
+	return false
+}
+
+func (am *AgentManager) applyDeterministicManifestDependencyRepair(build *Build, readinessErrors []string) (bool, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return false, ""
+	}
+	frontendPkgs, backendPkgs := parseMissingDependenciesByVerificationScope(readinessErrors)
+	if len(frontendPkgs) == 0 && len(backendPkgs) == 0 {
+		return false, ""
+	}
+
+	files := am.collectGeneratedFiles(build)
+	if len(files) == 0 {
+		return false, ""
+	}
+
+	frontendCandidates := []string{
+		"frontend/package.json",
+		"client/package.json",
+		"web/package.json",
+		"apps/web/package.json",
+		"apps/frontend/package.json",
+		"packages/web/package.json",
+		"packages/frontend/package.json",
+		"package.json",
+	}
+	backendCandidates := []string{
+		"backend/package.json",
+		"api/package.json",
+		"server/package.json",
+		"apps/api/package.json",
+		"apps/server/package.json",
+		"packages/backend/package.json",
+		"packages/api/package.json",
+		"package.json",
+	}
+
+	type req struct {
+		path string
+		pkgs []string
+		role string
+	}
+	reqs := make([]req, 0, 2)
+	if len(frontendPkgs) > 0 {
+		if p := findGeneratedManifestPath(files, frontendCandidates); p != "" {
+			reqs = append(reqs, req{path: p, pkgs: frontendPkgs, role: "frontend"})
+		}
+	}
+	if len(backendPkgs) > 0 {
+		if p := findGeneratedManifestPath(files, backendCandidates); p != "" {
+			mergedIntoExisting := false
+			for i := range reqs {
+				if strings.EqualFold(reqs[i].path, p) {
+					reqs[i].pkgs = append(reqs[i].pkgs, backendPkgs...)
+					reqs[i].role = "frontend/backend"
+					mergedIntoExisting = true
+					break
+				}
+			}
+			if !mergedIntoExisting {
+				reqs = append(reqs, req{path: p, pkgs: backendPkgs, role: "backend"})
+			}
+		}
+	}
+	if len(reqs) == 0 {
+		return false, ""
+	}
+
+	contentByPath := map[string]string{}
+	for _, f := range files {
+		contentByPath[sanitizeFilePath(f.Path)] = f.Content
+	}
+
+	applied := false
+	summaries := make([]string, 0, len(reqs))
+	for _, r := range reqs {
+		content := contentByPath[sanitizeFilePath(r.path)]
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		updated, added := patchManifestDependenciesJSON(content, r.pkgs)
+		if len(added) == 0 {
+			continue
+		}
+		if !am.patchGeneratedFileContent(build, r.path, updated) {
+			continue
+		}
+		applied = true
+		summaries = append(summaries, fmt.Sprintf("%s %s (%s)", r.role, r.path, strings.Join(added, ", ")))
+	}
+	if !applied {
+		return false, ""
+	}
+	return true, strings.Join(summaries, "; ")
+}
+
+func parsePreviewSyntaxErrorTargetFiles(errors []string) []string {
+	if len(errors) == 0 {
+		return nil
+	}
+	joined := strings.Join(errors, "\n")
+	if !strings.Contains(joined, "TS1002") && !strings.Contains(joined, "TS1005") {
+		return nil
+	}
+	re := regexp.MustCompile(`(?m)([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx))\(\d+,\d+\): error TS(?:1002|1005)\b`)
+	matches := re.FindAllStringSubmatch(joined, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	paths := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if len(m) != 2 {
+			continue
+		}
+		p := sanitizeFilePath(strings.TrimSpace(m[1]))
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func repairDoubleSingleQuoteCorruption(path, content string) (string, bool) {
+	if strings.TrimSpace(content) == "" || strings.Count(content, "''") < 2 {
+		return content, false
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".ts", ".tsx", ".js", ".jsx", ".json":
+	default:
+		return content, false
+	}
+	// Aggressive repair on targeted syntax-error files only.
+	repaired := strings.ReplaceAll(content, "''", "'")
+	repaired = normalizeGeneratedFileContent(path, repaired)
+	if repaired == content {
+		return content, false
+	}
+	return repaired, true
+}
+
+func (am *AgentManager) applyDeterministicQuoteSyntaxRepair(build *Build, readinessErrors []string) (bool, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return false, ""
+	}
+	targets := parsePreviewSyntaxErrorTargetFiles(readinessErrors)
+	if len(targets) == 0 {
+		return false, ""
+	}
+	files := am.collectGeneratedFiles(build)
+	if len(files) == 0 {
+		return false, ""
+	}
+	contentByPath := map[string]string{}
+	for _, f := range files {
+		contentByPath[sanitizeFilePath(f.Path)] = f.Content
+	}
+
+	applied := false
+	summaries := make([]string, 0, len(targets))
+	for _, target := range targets {
+		content := contentByPath[target]
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		repaired, changed := repairDoubleSingleQuoteCorruption(target, content)
+		if !changed {
+			continue
+		}
+		if !am.patchGeneratedFileContent(build, target, repaired) {
+			continue
+		}
+		applied = true
+		summaries = append(summaries, target)
+	}
+	if !applied {
+		return false, ""
+	}
+	return true, fmt.Sprintf("quote-correction on %s", strings.Join(summaries, ", "))
+}
+
+func parseMissingTypePackagesFromBuildErrors(errors []string) []string {
+	if len(errors) == 0 {
+		return nil
+	}
+	re := regexp.MustCompile(`TS7016: Could not find a declaration file for module '([^']+)'`)
+	seen := map[string]bool{}
+	pkgs := make([]string, 0)
+	for _, msg := range errors {
+		matches := re.FindAllStringSubmatch(msg, -1)
+		for _, m := range matches {
+			if len(m) != 2 {
+				continue
+			}
+			mod := strings.TrimSpace(m[1])
+			if mod == "" {
+				continue
+			}
+			typePkg := typePackageForModule(mod)
+			if typePkg == "" || seen[typePkg] {
+				continue
+			}
+			seen[typePkg] = true
+			pkgs = append(pkgs, typePkg)
+		}
+	}
+	sort.Strings(pkgs)
+	return pkgs
+}
+
+func typePackageForModule(module string) string {
+	module = strings.TrimSpace(module)
+	if module == "" {
+		return ""
+	}
+	switch module {
+	case "express", "cors", "jsonwebtoken", "body-parser", "bcrypt", "uuid":
+		return "@types/" + module
+	case "react", "react/jsx-runtime":
+		return "@types/react"
+	case "react-dom", "react-dom/client":
+		return "@types/react-dom"
+	}
+	// Skip modules that commonly bundle types or don't map cleanly.
+	if strings.HasPrefix(module, "@") {
+		return ""
+	}
+	return ""
+}
+
+func (am *AgentManager) applyDeterministicTypeDeclarationRepair(build *Build, readinessErrors []string) (bool, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return false, ""
+	}
+	typePkgs := parseMissingTypePackagesFromBuildErrors(readinessErrors)
+	if len(typePkgs) == 0 {
+		return false, ""
+	}
+
+	files := am.collectGeneratedFiles(build)
+	if len(files) == 0 {
+		return false, ""
+	}
+
+	candidates := []string{
+		"frontend/package.json",
+		"client/package.json",
+		"web/package.json",
+		"apps/web/package.json",
+		"apps/frontend/package.json",
+		"packages/web/package.json",
+		"packages/frontend/package.json",
+		"backend/package.json",
+		"api/package.json",
+		"server/package.json",
+		"apps/api/package.json",
+		"packages/backend/package.json",
+		"package.json",
+	}
+	manifestPath := findGeneratedManifestPath(files, candidates)
+	if manifestPath == "" {
+		return false, ""
+	}
+
+	var current string
+	for _, f := range files {
+		if strings.EqualFold(sanitizeFilePath(f.Path), sanitizeFilePath(manifestPath)) {
+			current = f.Content
+			break
+		}
+	}
+	if strings.TrimSpace(current) == "" {
+		return false, ""
+	}
+
+	updated, added := patchManifestDependenciesJSON(current, typePkgs)
+	if len(added) == 0 {
+		return false, ""
+	}
+	if !am.patchGeneratedFileContent(build, manifestPath, updated) {
+		return false, ""
+	}
+	return true, fmt.Sprintf("%s (%s)", manifestPath, strings.Join(added, ", "))
+}
+
 func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
 	if build == nil {
 		return
@@ -2875,6 +3362,105 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 				goto completion_finalize
 			}
 
+			canAttemptDeterministicRepair := build.ReadinessRecoveryAttempts < 1
+			build.mu.Unlock()
+			if canAttemptDeterministicRepair {
+				if repaired, summary := am.applyDeterministicManifestDependencyRepair(build, readinessErrors); repaired {
+					build.mu.Lock()
+					build.UpdatedAt = now
+					build.Status = BuildReviewing
+					build.CompletedAt = nil
+					if build.Progress < 90 {
+						build.Progress = 90
+					}
+					build.Error = fmt.Sprintf("Final output validation failed: %s (applied deterministic manifest repair: %s)", errorSummary, summary)
+					progress = build.Progress
+					build.mu.Unlock()
+
+					am.broadcast(build.ID, &WSMessage{
+						Type:      WSBuildProgress,
+						BuildID:   build.ID,
+						Timestamp: now,
+						Data: map[string]any{
+							"phase":                 "validation",
+							"status":                string(BuildReviewing),
+							"progress":              progress,
+							"message":               "Applied deterministic package.json dependency repair. Re-running final validation before solver recovery.",
+							"quality_gate_required": true,
+							"quality_gate_active":   true,
+							"quality_gate_stage":    "validation",
+							"validation_errors":     readinessErrors,
+							"manifest_repair":       summary,
+						},
+					})
+					am.checkBuildCompletion(build)
+					return
+				}
+				if repaired, summary := am.applyDeterministicQuoteSyntaxRepair(build, readinessErrors); repaired {
+					build.mu.Lock()
+					build.UpdatedAt = now
+					build.Status = BuildReviewing
+					build.CompletedAt = nil
+					if build.Progress < 90 {
+						build.Progress = 90
+					}
+					build.Error = fmt.Sprintf("Final output validation failed: %s (applied deterministic syntax repair: %s)", errorSummary, summary)
+					progress = build.Progress
+					build.mu.Unlock()
+
+					am.broadcast(build.ID, &WSMessage{
+						Type:      WSBuildProgress,
+						BuildID:   build.ID,
+						Timestamp: now,
+						Data: map[string]any{
+							"phase":                 "validation",
+							"status":                string(BuildReviewing),
+							"progress":              progress,
+							"message":               "Applied deterministic syntax repair for generated source files. Re-running final validation before solver recovery.",
+							"quality_gate_required": true,
+							"quality_gate_active":   true,
+							"quality_gate_stage":    "validation",
+							"validation_errors":     readinessErrors,
+							"syntax_repair":         summary,
+						},
+					})
+					am.checkBuildCompletion(build)
+					return
+				}
+				if repaired, summary := am.applyDeterministicTypeDeclarationRepair(build, readinessErrors); repaired {
+					build.mu.Lock()
+					build.UpdatedAt = now
+					build.Status = BuildReviewing
+					build.CompletedAt = nil
+					if build.Progress < 90 {
+						build.Progress = 90
+					}
+					build.Error = fmt.Sprintf("Final output validation failed: %s (applied deterministic type-package repair: %s)", errorSummary, summary)
+					progress = build.Progress
+					build.mu.Unlock()
+
+					am.broadcast(build.ID, &WSMessage{
+						Type:      WSBuildProgress,
+						BuildID:   build.ID,
+						Timestamp: now,
+						Data: map[string]any{
+							"phase":                 "validation",
+							"status":                string(BuildReviewing),
+							"progress":              progress,
+							"message":               "Applied deterministic TypeScript type-package repair. Re-running final validation before solver recovery.",
+							"quality_gate_required": true,
+							"quality_gate_active":   true,
+							"quality_gate_stage":    "validation",
+							"validation_errors":     readinessErrors,
+							"type_package_repair":   summary,
+						},
+					})
+					am.checkBuildCompletion(build)
+					return
+				}
+			}
+			build.mu.Lock()
+
 			if build.ReadinessRecoveryAttempts < 1 {
 				build.ReadinessRecoveryAttempts++
 				build.Status = BuildReviewing
@@ -2933,9 +3519,11 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 			if build.Status != BuildFailed && build.Status != BuildCancelled {
 				build.Status = BuildCompleted
 				build.Progress = 100
+				build.Error = ""
 				build.CompletedAt = &now
 				status = build.Status
 				progress = build.Progress
+				buildError = ""
 			} else {
 				status = build.Status
 				progress = build.Progress
@@ -5620,7 +6208,7 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 	}
 	depCount := len(manifest.Dependencies) + len(manifest.DevDependencies)
 	if depCount > 0 {
-		if out, err := runPreviewCheckCommand(tmpDir, 2*time.Minute, "npm", "install", "--include=dev", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
+		if out, err := runPreviewCheckCommand(tmpDir, 2*time.Minute, "npm", "install", "--legacy-peer-deps", "--include=dev", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
 			issues = append(issues, fmt.Sprintf("Preview verification install failed: %s", summarizePreviewInstallFailure(out)))
 			return issues
 		}
@@ -5751,7 +6339,7 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 
 	depCount := len(manifest.Dependencies) + len(manifest.DevDependencies)
 	if depCount > 0 {
-		if out, err := runPreviewCheckCommand(tmpDir, 2*time.Minute, "npm", "install", "--include=dev", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
+		if out, err := runPreviewCheckCommand(tmpDir, 2*time.Minute, "npm", "install", "--legacy-peer-deps", "--include=dev", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
 			issues = append(issues, fmt.Sprintf("Backend verification install failed: %s", summarizePreviewInstallFailure(out)))
 			return issues
 		}

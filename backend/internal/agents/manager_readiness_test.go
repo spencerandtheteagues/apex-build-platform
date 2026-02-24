@@ -884,3 +884,102 @@ func TestExtractDependencyRepairHintsFromReadinessErrors(t *testing.T) {
 		t.Fatalf("expected vite plugin-specific repair hint, got %q", joined)
 	}
 }
+
+func TestParseMissingDependenciesByVerificationScope(t *testing.T) {
+	t.Parallel()
+
+	errs := []string{
+		`Preview verification dependency check failed: source imports "zod" but package.json does not declare dependency "zod"`,
+		`Preview verification dependency check failed: source imports "@vitejs/plugin-react" but package.json does not declare dependency "@vitejs/plugin-react"`,
+		`Backend verification dependency check failed: source imports "bcrypt" but package.json does not declare dependency "bcrypt"`,
+	}
+
+	frontend, backend := parseMissingDependenciesByVerificationScope(errs)
+	if got := strings.Join(frontend, ","); got != "@vitejs/plugin-react,zod" {
+		t.Fatalf("unexpected frontend deps: %q", got)
+	}
+	if got := strings.Join(backend, ","); got != "bcrypt" {
+		t.Fatalf("unexpected backend deps: %q", got)
+	}
+}
+
+func TestPatchManifestDependenciesJSON(t *testing.T) {
+	t.Parallel()
+
+	updated, added := patchManifestDependenciesJSON(`{
+  "name": "app",
+  "dependencies": {
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}`, []string{"zod", "@vitejs/plugin-react", "react"})
+
+	if len(added) != 2 {
+		t.Fatalf("expected 2 added dependencies, got %v", added)
+	}
+	if !strings.Contains(strings.Join(added, ","), "zod -> dependencies") {
+		t.Fatalf("expected zod in dependencies, got %v", added)
+	}
+	if !strings.Contains(strings.Join(added, ","), "@vitejs/plugin-react -> devDependencies") {
+		t.Fatalf("expected vite plugin in devDependencies, got %v", added)
+	}
+	if !strings.Contains(updated, `"zod": "^3.23.8"`) {
+		t.Fatalf("expected zod version hint, got %s", updated)
+	}
+	if !strings.Contains(updated, `"@vitejs/plugin-react": "^4.3.4"`) {
+		t.Fatalf("expected vite plugin version hint, got %s", updated)
+	}
+}
+
+func TestParsePreviewSyntaxErrorTargetFiles(t *testing.T) {
+	t.Parallel()
+
+	errs := []string{
+		"Preview verification build failed: src/components/LoginForm.tsx(14,49): error TS1002: Unterminated string literal.\n" +
+			"src/components/LoginForm.tsx(15,5): error TS1005: ',' expected.\n" +
+			"src/App.tsx(2,1): error TS1005: ',' expected.",
+	}
+
+	targets := parsePreviewSyntaxErrorTargetFiles(errs)
+	got := strings.Join(targets, ",")
+	want := "src/App.tsx,src/components/LoginForm.tsx"
+	if got != want {
+		t.Fatalf("unexpected syntax target files: got %q want %q", got, want)
+	}
+}
+
+func TestRepairDoubleSingleQuoteCorruption(t *testing.T) {
+	t.Parallel()
+
+	input := "import React from ''react'';\nconst x = ''hello'';\n"
+	out, changed := repairDoubleSingleQuoteCorruption("src/components/LoginForm.tsx", input)
+	if !changed {
+		t.Fatalf("expected quote corruption repair to trigger")
+	}
+	if strings.Contains(out, "''react''") || strings.Contains(out, "''hello''") {
+		t.Fatalf("expected doubled single quotes to be repaired, got %q", out)
+	}
+	if !strings.Contains(out, "'react'") || !strings.Contains(out, "'hello'") {
+		t.Fatalf("expected normalized single-quoted strings, got %q", out)
+	}
+}
+
+func TestParseMissingTypePackagesFromBuildErrors(t *testing.T) {
+	t.Parallel()
+
+	errs := []string{
+		"Preview verification build failed: src/api/routes/auth.ts(1,24): error TS7016: Could not find a declaration file for module 'express'. '/tmp/x/node_modules/express/index.js' implicitly has an 'any' type.\n" +
+			"src/api/server.ts(2,18): error TS7016: Could not find a declaration file for module 'cors'.\n" +
+			"src/App.tsx(1,19): error TS7016: Could not find a declaration file for module 'react'.\n" +
+			"src/main.tsx(2,22): error TS7016: Could not find a declaration file for module 'react-dom/client'.\n" +
+			"src/lib/x.ts(3,1): error TS7016: Could not find a declaration file for module '@scoped/pkg'.",
+	}
+
+	got := strings.Join(parseMissingTypePackagesFromBuildErrors(errs), ",")
+	want := "@types/cors,@types/express,@types/react,@types/react-dom"
+	if got != want {
+		t.Fatalf("unexpected parsed type packages: got %q want %q", got, want)
+	}
+}
