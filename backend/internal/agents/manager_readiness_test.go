@@ -348,6 +348,57 @@ func TestVerifyGeneratedFrontendPreviewReadiness(t *testing.T) {
 	})
 }
 
+func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+
+	t.Run("missing_build_script", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{
+				Path: "backend/package.json",
+				Content: `{
+  "name": "api",
+  "scripts": { "dev": "tsx src/server.ts" }
+}`,
+			},
+			{Path: "backend/src/server.ts", Content: "console.log('x')"},
+		}
+
+		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		if !containsError(errs, "missing a build script") {
+			t.Fatalf("expected missing build script error, got %v", errs)
+		}
+	})
+
+	t.Run("no_deps_build_script_succeeds", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := exec.LookPath("npm"); err != nil {
+			t.Skip("npm not available")
+		}
+
+		files := []GeneratedFile{
+			{
+				Path: "backend/package.json",
+				Content: `{
+  "name": "api",
+  "private": true,
+  "scripts": { "build": "node -e \"console.log('ok')\"" }
+}`,
+			},
+			{Path: "backend/src/server.js", Content: "console.log('ok')"},
+		}
+
+		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		if len(errs) != 0 {
+			t.Fatalf("expected backend verification success, got %v", errs)
+		}
+	})
+}
+
 func TestNormalizeGeneratedFileContent(t *testing.T) {
 	t.Parallel()
 

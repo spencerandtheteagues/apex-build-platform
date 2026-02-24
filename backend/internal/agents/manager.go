@@ -5029,6 +5029,11 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 			}
 		}
 	}
+	if am.shouldRunPreviewReadinessVerification(build) {
+		for _, msg := range am.verifyGeneratedBackendBuildReadiness(files) {
+			addError(msg)
+		}
+	}
 
 	return errors
 }
@@ -5158,6 +5163,122 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 	}
 
 	return issues
+}
+
+func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFile) []string {
+	if len(files) == 0 {
+		return nil
+	}
+
+	backendPackagePaths := []string{
+		"backend/package.json",
+		"api/package.json",
+		"server/package.json",
+		"apps/api/package.json",
+		"apps/server/package.json",
+		"packages/backend/package.json",
+		"packages/api/package.json",
+	}
+	prefix := ""
+	packagePath := ""
+	for _, candidate := range backendPackagePaths {
+		for _, f := range files {
+			if strings.EqualFold(strings.TrimSpace(f.Path), candidate) {
+				packagePath = f.Path
+				prefix = strings.TrimSuffix(filepath.ToSlash(candidate), "package.json")
+				break
+			}
+		}
+		if packagePath != "" {
+			break
+		}
+	}
+	if packagePath == "" {
+		return nil
+	}
+
+	var manifest previewManifest
+	pkgContent := ""
+	for _, f := range files {
+		if f.Path == packagePath {
+			pkgContent = f.Content
+			break
+		}
+	}
+	if strings.TrimSpace(pkgContent) == "" {
+		return []string{fmt.Sprintf("Backend verification failed: %s is empty", packagePath)}
+	}
+	if err := json.Unmarshal([]byte(pkgContent), &manifest); err != nil {
+		return []string{fmt.Sprintf("Backend verification failed: %s is invalid JSON (%v)", packagePath, err)}
+	}
+	if manifest.Scripts == nil {
+		manifest.Scripts = map[string]string{}
+	}
+	if _, ok := manifest.Scripts["build"]; !ok {
+		return []string{"Backend verification failed: backend package.json is missing a build script"}
+	}
+
+	if _, err := exec.LookPath("npm"); err != nil {
+		return []string{"Backend verification failed: npm is not available on the build host"}
+	}
+
+	tmpDir, err := os.MkdirTemp("", "apex-backend-verify-*")
+	if err != nil {
+		return []string{fmt.Sprintf("Backend verification failed: unable to create temp dir (%v)", err)}
+	}
+	defer os.RemoveAll(tmpDir)
+
+	writtenFiles := 0
+	for _, f := range files {
+		if strings.TrimSpace(f.Path) == "" || f.Content == "" {
+			continue
+		}
+		path := filepath.ToSlash(strings.TrimPrefix(filepath.ToSlash(f.Path), "./"))
+		if prefix != "" {
+			if !strings.HasPrefix(strings.ToLower(path), strings.ToLower(prefix)) {
+				continue
+			}
+			path = strings.TrimPrefix(path, prefix)
+		}
+		path = strings.TrimPrefix(path, "/")
+		if path == "" || strings.Contains(path, "..") {
+			continue
+		}
+		fullPath := filepath.Join(tmpDir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			return []string{fmt.Sprintf("Backend verification failed: mkdir %s (%v)", path, err)}
+		}
+		if err := os.WriteFile(fullPath, []byte(f.Content), 0644); err != nil {
+			return []string{fmt.Sprintf("Backend verification failed: write %s (%v)", path, err)}
+		}
+		writtenFiles++
+	}
+	if writtenFiles == 0 {
+		return []string{"Backend verification failed: no backend files were materialized for verification"}
+	}
+
+	issues := make([]string, 0, 2)
+	if depIssues := validatePreviewManifestDependencies(manifest); len(depIssues) > 0 {
+		for _, issue := range depIssues {
+			issues = append(issues, "Backend verification dependency check failed: "+issue)
+		}
+		return issues
+	}
+
+	depCount := len(manifest.Dependencies) + len(manifest.DevDependencies)
+	if depCount > 0 {
+		if out, err := runPreviewCheckCommand(tmpDir, 2*time.Minute, "npm", "install", "--include=dev", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
+			issues = append(issues, fmt.Sprintf("Backend verification install failed: %s", summarizePreviewInstallFailure(out)))
+			return issues
+		}
+	}
+
+	if out, err := runPreviewCheckCommand(tmpDir, 90*time.Second, "npm", "run", "build"); err != nil {
+		issues = append(issues, fmt.Sprintf("Backend verification build failed: %s", summarizePreviewBuildFailure(out)))
+		return issues
+	}
+
+	return nil
 }
 
 func buildUsesPreviewHTTPProbe(scripts map[string]string, force bool) bool {
