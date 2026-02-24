@@ -484,6 +484,34 @@ func TestVerifyGeneratedFrontendPreviewReadiness(t *testing.T) {
 			t.Fatalf("expected missing frontend tsconfig preflight error, got %v", errs)
 		}
 	})
+
+	t.Run("selects_monorepo_frontend_package_for_preflight", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := exec.LookPath("npm"); err != nil {
+			t.Skip("npm not available")
+		}
+
+		files := []GeneratedFile{
+			{
+				Path: "apps/web/package.json",
+				Content: `{
+  "name": "web",
+  "private": true,
+  "scripts": { "build": "node -e \"console.log('ok')\"" },
+  "dependencies": { "react": "^18.2.0", "react-dom": "^18.2.0" }
+}`,
+			},
+			{Path: "apps/web/index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "apps/web/src/main.tsx", Content: "import React from 'react'; import ReactDOM from 'react-dom/client'; ReactDOM.createRoot(document.getElementById('root')!).render(<div />);"},
+			{Path: "backend/src/server.ts", Content: "import bcrypt from 'bcrypt'; import bodyParser from 'body-parser'; console.log(bcrypt, bodyParser);"},
+		}
+
+		errs := am.verifyGeneratedFrontendPreviewReadiness(files, false)
+		if containsError(errs, `dependency "bcrypt"`) || containsError(errs, `dependency "body-parser"`) {
+			t.Fatalf("expected backend imports to be ignored by frontend preflight, got %v", errs)
+		}
+	})
 }
 
 func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
@@ -824,5 +852,35 @@ RollupError: Could not resolve "./components/dashboard/Dashboard"`
 	}
 	if !strings.Contains(got, "TS2307") && !strings.Contains(got, "RollupError") {
 		t.Fatalf("expected actionable build error summary, got %q", got)
+	}
+}
+
+func TestExtractDependencyRepairHintsFromReadinessErrors(t *testing.T) {
+	t.Parallel()
+
+	errs := []string{
+		`Preview verification dependency check failed: source imports "react-router-dom" but package.json does not declare dependency "react-router-dom"`,
+		`Preview verification dependency check failed: source imports "vitest/config" but package.json does not declare dependency "vitest"`,
+		`Preview verification dependency check failed: source imports "@vitejs/plugin-react" but package.json does not declare dependency "@vitejs/plugin-react"`,
+	}
+	hints := extractDependencyRepairHintsFromReadinessErrors(errs)
+	if len(hints) == 0 {
+		t.Fatalf("expected dependency repair hints")
+	}
+	joined := strings.Join(hints, "\n")
+	if !strings.Contains(joined, "react-router-dom") || !strings.Contains(joined, "vitest") {
+		t.Fatalf("expected missing package names in hints, got %q", joined)
+	}
+	if !strings.Contains(joined, "Preserve and satisfy imports") {
+		t.Fatalf("expected import-preservation hint, got %q", joined)
+	}
+	if !strings.Contains(joined, "vitest -> devDependencies") {
+		t.Fatalf("expected devDependencies placement guidance for vitest, got %q", joined)
+	}
+	if !strings.Contains(joined, "@vitejs/plugin-react -> devDependencies") {
+		t.Fatalf("expected devDependencies placement guidance for vite plugin, got %q", joined)
+	}
+	if !strings.Contains(joined, "vite.config.ts in ESM syntax") {
+		t.Fatalf("expected vite plugin-specific repair hint, got %q", joined)
 	}
 }

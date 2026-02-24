@@ -806,6 +806,18 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 		}
 		roles = append([]AgentRole{}, mandatoryRoles...)
 		log.Printf("Build %s using reduced local Ollama agent profile (%d roles)", buildID, len(mandatoryRoles))
+	} else if am.isLocalDevStrictPreviewBuild(build) {
+		// Local strict preview builds already run deterministic frontend/backend build verification.
+		// Skipping the testing specialist reduces token spend and avoids test-framework drift.
+		mandatoryRoles = []AgentRole{
+			RoleArchitect,
+			RoleDatabase,
+			RoleBackend,
+			RoleFrontend,
+			RoleReviewer,
+		}
+		roles = append([]AgentRole{}, mandatoryRoles...)
+		log.Printf("Build %s using reduced local strict-preview agent profile (%d roles, testing agent disabled)", buildID, len(mandatoryRoles))
 	}
 
 	// Enforce max agents (excluding lead)
@@ -2334,6 +2346,34 @@ func (am *AgentManager) handleReviewCompletion(build *Build, output *TaskOutput)
 	}
 
 	if hasCritical {
+		build.mu.RLock()
+		readinessRecoveryAttempts := build.ReadinessRecoveryAttempts
+		existingBuildError := strings.ToLower(strings.TrimSpace(build.Error))
+		build.mu.RUnlock()
+
+		if readinessRecoveryAttempts > 0 && strings.Contains(existingBuildError, "final output validation failed") {
+			log.Printf("Critical review issues found in build %s during readiness recovery; skipping review-fix loop and proceeding to final validation", build.ID)
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSBuildProgress,
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"message":               "Readiness recovery is already active. Skipping additional review-fix loops and finalizing with current validation errors if they persist.",
+					"phase":                 "reviewing",
+					"status":                string(BuildReviewing),
+					"quality_gate_required": true,
+					"quality_gate_active":   true,
+					"quality_gate_stage":    "review",
+				},
+			})
+			build.mu.Lock()
+			build.UpdatedAt = time.Now()
+			build.mu.Unlock()
+			am.cancelAutomatedRecoveryTasksForLoopCap(build)
+			am.checkBuildCompletion(build)
+			return
+		}
+
 		if !am.canCreateAutomatedFixTask(build, "fix_review_issues") {
 			log.Printf("Critical review issues found in build %s, but automated review-fix loop cap reached; proceeding to final validation", build.ID)
 			am.broadcast(build.ID, &WSMessage{
@@ -2544,6 +2584,84 @@ func readinessErrorClassFromBuildError(buildErr string) string {
 	s = strings.TrimPrefix(s, "final output validation failed after automated recovery: ")
 	s = strings.TrimPrefix(s, "final output validation failed: ")
 	return summarizeReadinessErrorClass([]string{s})
+}
+
+func extractDependencyRepairHintsFromReadinessErrors(errors []string) []string {
+	if len(errors) == 0 {
+		return nil
+	}
+	pkgSet := map[string]bool{}
+	specSet := map[string]bool{}
+	for _, msg := range errors {
+		msg = strings.TrimSpace(msg)
+		if msg == "" {
+			continue
+		}
+		if m := regexp.MustCompile(`does not declare dependency "([^"]+)"`).FindStringSubmatch(msg); len(m) == 2 {
+			pkgSet[m[1]] = true
+		}
+		if m := regexp.MustCompile(`source imports "([^"]+)"`).FindStringSubmatch(msg); len(m) == 2 {
+			specSet[m[1]] = true
+		}
+	}
+	if len(pkgSet) == 0 && len(specSet) == 0 {
+		return nil
+	}
+
+	pkgs := make([]string, 0, len(pkgSet))
+	for pkg := range pkgSet {
+		pkgs = append(pkgs, pkg)
+	}
+	sort.Strings(pkgs)
+
+	specs := make([]string, 0, len(specSet))
+	for spec := range specSet {
+		specs = append(specs, spec)
+	}
+	sort.Strings(specs)
+
+	hints := make([]string, 0, 3)
+	if len(pkgs) > 0 {
+		hints = append(hints, fmt.Sprintf("Update package.json dependencies/devDependencies to include missing package(s): %s", strings.Join(pkgs, ", ")))
+		placementHints := make([]string, 0, len(pkgs))
+		for _, pkg := range pkgs {
+			if hint := dependencyRepairPlacementHint(pkg); hint != "" {
+				placementHints = append(placementHints, hint)
+			}
+		}
+		if len(placementHints) > 0 {
+			hints = append(hints, "Package placement guidance: "+strings.Join(placementHints, "; "))
+		}
+	}
+	if len(specs) > 0 {
+		hints = append(hints, fmt.Sprintf("Preserve and satisfy imports used by source files (do not remove features just to silence errors): %s", strings.Join(specs, ", ")))
+	}
+	for _, spec := range specs {
+		if spec == "@vitejs/plugin-react" || spec == "@vitejs/plugin-react-swc" {
+			hints = append(hints, "If vite.config imports @vitejs/plugin-react* then add it to devDependencies and keep vite.config.ts in ESM syntax (import/export, not require).")
+			break
+		}
+	}
+	hints = append(hints, "If a config-only import (jest/vitest config) is not needed for runtime/preview, keep config self-consistent or remove the unused config file and related scripts together.")
+	return hints
+}
+
+func dependencyRepairPlacementHint(pkg string) string {
+	pkg = strings.TrimSpace(pkg)
+	if pkg == "" {
+		return ""
+	}
+	lower := strings.ToLower(pkg)
+	switch {
+	case strings.HasPrefix(lower, "@types/"):
+		return fmt.Sprintf("%s -> devDependencies", pkg)
+	case lower == "typescript" || lower == "vite" || strings.HasPrefix(lower, "@vitejs/"):
+		return fmt.Sprintf("%s -> devDependencies", pkg)
+	case lower == "vitest" || lower == "jest" || strings.HasPrefix(lower, "@testing-library/"):
+		return fmt.Sprintf("%s -> devDependencies (unless tests are intentionally removed)", pkg)
+	default:
+		return fmt.Sprintf("%s -> dependencies", pkg)
+	}
 }
 
 func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
@@ -2791,6 +2909,9 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 					Input: map[string]any{
 						"validation_errors": readinessErrors,
 					},
+				}
+				if hints := extractDependencyRepairHintsFromReadinessErrors(readinessErrors); len(hints) > 0 {
+					failedTask.Input["repair_hints"] = hints
 				}
 				am.enqueueRecoveryTask(build.ID, failedTask, fmt.Errorf("final output validation failed: %s", errorSummary))
 				return
@@ -4067,6 +4188,28 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 `, errStr, fixGuidance)
 	}
 
+	repairHintsContext := ""
+	if task != nil && task.Input != nil {
+		if hints, ok := task.Input["repair_hints"]; ok {
+			switch v := hints.(type) {
+			case []string:
+				if len(v) > 0 {
+					repairHintsContext = fmt.Sprintf("\n<repair_hints>\n- %s\n</repair_hints>\n", strings.Join(v, "\n- "))
+				}
+			case []any:
+				items := make([]string, 0, len(v))
+				for _, item := range v {
+					if s := strings.TrimSpace(fmt.Sprintf("%v", item)); s != "" {
+						items = append(items, s)
+					}
+				}
+				if len(items) > 0 {
+					repairHintsContext = fmt.Sprintf("\n<repair_hints>\n- %s\n</repair_hints>\n", strings.Join(items, "\n- "))
+				}
+			}
+		}
+	}
+
 	techStackContext := ""
 	if build != nil && build.TechStack != nil {
 		if summary := formatTechStackSummary(build.TechStack); summary != "" {
@@ -4139,9 +4282,28 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 		}
 	}
 
+	deliveryConstraintsContext := ""
+	if build != nil && am.isLocalDevStrictPreviewBuild(build) {
+		switch task.Type {
+		case TaskPlan, TaskArchitecture, TaskGenerateUI, TaskGenerateAPI, TaskGenerateSchema:
+			deliveryConstraintsContext = `
+<delivery_constraints>
+- Optimize for first-pass preview-ready success and low retry cost.
+- Use a SINGLE-REPO layout (NO monorepo/workspaces/apps/packages split).
+- Frontend stack: React + Vite + TypeScript.
+- Backend stack: Express + TypeScript.
+- Database access: PostgreSQL via pg only (NO Prisma, Drizzle, TypeORM, Mongoose).
+- Avoid extra frameworks/tooling unless explicitly required by the user (no added test frameworks by default).
+- Prioritize a fully working vertical slice first: authentication + dashboard + exactly one CRUD resource with real backend persistence.
+- If the user requested broader scope, implement the core slice first and leave additional modules only if time/files budget clearly allows.
+</delivery_constraints>
+`
+		}
+	}
+
 	// Prune app description if total prompt would be too long
 	appDescription := build.Description
-	if len(appDescription)+len(errorContext)+len(agentContext)+len(teamCoordinationContext) > 30000 {
+	if len(appDescription)+len(errorContext)+len(agentContext)+len(teamCoordinationContext)+len(deliveryConstraintsContext) > 30000 {
 		if len(appDescription) > 2000 {
 			appDescription = appDescription[:2000] + "... (description truncated)"
 		}
@@ -4152,6 +4314,8 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 Description: %s
 
 App being built: %s
+%s
+%s
 %s
 %s
 %s
@@ -4199,7 +4363,7 @@ FORBIDDEN OUTPUTS:
 - Incomplete implementations
 
 Build the REAL, COMPLETE implementation now.`,
-		task.Type, task.Description, appDescription, techStackContext, errorContext, agentContext, teamCoordinationContext)
+		task.Type, task.Description, appDescription, techStackContext, errorContext, repairHintsContext, agentContext, teamCoordinationContext, deliveryConstraintsContext)
 }
 
 func formatTechStackSummary(stack *TechStack) string {
@@ -4325,6 +4489,27 @@ ABSOLUTE RULES:
 		}
 	}
 
+	localStrictStackLock := ""
+	localStrictScopeHint := ""
+	if len(build) > 0 && build[0] != nil && am.isLocalDevStrictPreviewBuild(build[0]) {
+		localStrictStackLock = `
+
+LOCAL STRICT BUILD STACK LOCK (cost-control mode):
+- Default to a SINGLE-REPO app (NO monorepo/workspaces) unless the user explicitly requires one
+- Frontend: React + Vite + TypeScript
+- Backend: Express + TypeScript
+- Database: PostgreSQL via pg only
+- Do NOT mix ORMs or data stacks (NO Prisma/Drizzle/TypeORM/Mongoose combinations)
+- Do NOT introduce extra test frameworks unless explicitly requested`
+
+		localStrictScopeHint = `
+
+LOCAL STRICT BUILD DELIVERY PRIORITY:
+- Optimize for a runnable preview-pane app first, not maximum feature breadth
+- Deliver a complete vertical slice first: auth + dashboard + one CRUD module with real persistence
+- Only expand into secondary modules after the core slice is fully runnable and integrated`
+	}
+
 	prompts := map[AgentRole]string{
 		RoleLead: `You are the Lead Agent coordinating the APEX.BUILD platform.
 You oversee all specialist agents and serve as the primary communicator with users.
@@ -4362,7 +4547,7 @@ EXAMPLE OUTPUT FORMAT:
 - id: UUID (primary key)
 - email: string (unique, indexed)
 - passwordHash: string
-- createdAt: DateTime` + techHint + baseRules,
+- createdAt: DateTime` + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
 
 		RoleArchitect: `You are the Architect Agent — a senior systems architect who designs production-grade software architectures.
 Your job: make concrete technology decisions and produce a concise implementation blueprint for the coding agents.
@@ -4385,7 +4570,7 @@ YOUR OUTPUT MUST INCLUDE:
 OUTPUT FORMAT:
 - Prefer plain markdown sections and bullet lists (no diagrams required)
 - If you include files, limit to SMALL blueprint docs only (e.g. ARCHITECTURE.md, docs/file-map.md)
-- Never emit large code blocks for runtime source files` + techHint + baseRules,
+- Never emit large code blocks for runtime source files` + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
 
 		RoleFrontend: `You are the Frontend Agent — an expert UI engineer who builds beautiful, responsive, production-ready interfaces.
 You specialize in modern React with TypeScript, Vite, and Tailwind CSS.
@@ -5324,14 +5509,32 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 
 	prefix := ""
 	packagePath := ""
-	for _, f := range files {
-		switch strings.ToLower(strings.TrimSpace(f.Path)) {
-		case "frontend/package.json":
-			prefix = "frontend/"
-			packagePath = f.Path
-		case "package.json":
-			if packagePath == "" {
+	frontendPackageCandidates := []string{
+		"frontend/package.json",
+		"client/package.json",
+		"web/package.json",
+		"apps/web/package.json",
+		"apps/frontend/package.json",
+		"packages/web/package.json",
+		"packages/frontend/package.json",
+	}
+	for _, candidate := range frontendPackageCandidates {
+		for _, f := range files {
+			if strings.EqualFold(strings.TrimSpace(f.Path), candidate) {
 				packagePath = f.Path
+				prefix = strings.TrimSuffix(filepath.ToSlash(candidate), "package.json")
+				break
+			}
+		}
+		if packagePath != "" {
+			break
+		}
+	}
+	if packagePath == "" {
+		for _, f := range files {
+			if strings.EqualFold(strings.TrimSpace(f.Path), "package.json") {
+				packagePath = f.Path
+				break
 			}
 		}
 	}
