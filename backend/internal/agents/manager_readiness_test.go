@@ -577,3 +577,23 @@ npm ERR! command sh -c node-pre-gyp install --fallback-to-build`
 		}
 	})
 }
+
+func TestSummarizePreviewBuildFailure(t *testing.T) {
+	t.Parallel()
+
+	out := `> agency-frontend@1.0.0 build
+> vite build
+
+The CJS build of Vite's Node API is deprecated.
+src/App.tsx(3,27): error TS2307: Cannot find module './components/dashboard/Dashboard'
+error during build:
+RollupError: Could not resolve "./components/dashboard/Dashboard"`
+
+	got := summarizePreviewBuildFailure(out)
+	if strings.Contains(strings.ToLower(got), "deprecated") {
+		t.Fatalf("expected deprecation warning to be filtered, got %q", got)
+	}
+	if !strings.Contains(got, "TS2307") && !strings.Contains(got, "RollupError") {
+		t.Fatalf("expected actionable build error summary, got %q", got)
+	}
+}

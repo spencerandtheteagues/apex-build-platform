@@ -1529,6 +1529,22 @@ func (am *AgentManager) processResult(result *TaskResult) {
 
 	agent.mu.Lock()
 	task := agent.CurrentTask
+	if task == nil || task.ID != result.TaskID {
+		// Stale/out-of-order result for a task this agent is no longer executing.
+		agent.mu.Unlock()
+		log.Printf("Dropping stale task result for agent %s: result task=%s current task=%v", result.AgentID, result.TaskID, func() string {
+			if task == nil {
+				return "<nil>"
+			}
+			return task.ID
+		}())
+		return
+	}
+	if task.Status == TaskCancelled {
+		agent.mu.Unlock()
+		log.Printf("Dropping result for cancelled task %s (agent %s)", task.ID, result.AgentID)
+		return
+	}
 
 	build, buildErr := am.GetBuild(agent.BuildID)
 	buildInactive := false
@@ -2618,20 +2634,29 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 		return
 	}
 
+	build.mu.RLock()
+	phasedPipelineComplete := build.PhasedPipelineComplete
+	readinessRecoveryAttempts := build.ReadinessRecoveryAttempts
+	currentStatus := build.Status
+	build.mu.RUnlock()
+	if !phasedPipelineComplete && readinessRecoveryAttempts == 0 &&
+		currentStatus != BuildTesting && currentStatus != BuildReviewing {
+		// Avoid transient "all tasks complete" windows between phased task batches
+		// (e.g. phase N finished, phase N+1 not yet queued) from triggering final validation.
+		return
+	}
+
 	build.mu.Lock()
 	now := time.Now()
-	build.CompletedAt = &now
 	build.UpdatedAt = now
 
 	status := build.Status
 	if status != BuildFailed && status != BuildCancelled {
 		if anyFailed {
 			status = BuildFailed
-		} else {
-			status = BuildCompleted
-			build.Progress = 100
+			build.Status = status
+			build.CompletedAt = &now
 		}
-		build.Status = status
 	}
 	progress := build.Progress
 	buildError := strings.TrimSpace(build.Error)
@@ -2661,7 +2686,7 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 
 	allFiles := am.collectGeneratedFiles(build)
 
-	if status == BuildCompleted {
+	if status != BuildFailed && status != BuildCancelled {
 		readinessErrors := am.validateFinalBuildReadiness(build, allFiles)
 		if len(readinessErrors) > 0 {
 			errorSummary := strings.Join(readinessErrors, "; ")
@@ -2717,6 +2742,19 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 			build.Error = buildError
 			status = build.Status
 			progress = build.Progress
+			build.mu.Unlock()
+		} else {
+			build.mu.Lock()
+			if build.Status != BuildFailed && build.Status != BuildCancelled {
+				build.Status = BuildCompleted
+				build.Progress = 100
+				build.CompletedAt = &now
+				status = build.Status
+				progress = build.Progress
+			} else {
+				status = build.Status
+				progress = build.Progress
+			}
 			build.mu.Unlock()
 		}
 	}
@@ -3445,6 +3483,13 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string,
 
 		log.Printf("Build %s: Phase %s complete", build.ID, phase.name)
 	}
+
+	build.mu.Lock()
+	build.PhasedPipelineComplete = true
+	build.UpdatedAt = time.Now()
+	build.mu.Unlock()
+	am.updateBuildProgress(build)
+	am.checkBuildCompletion(build)
 }
 
 // assignPhaseAgents creates tasks for a group of agents and assigns them.
@@ -5102,7 +5147,7 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 	}
 
 	if out, err := runPreviewCheckCommand(tmpDir, 90*time.Second, "npm", "run", "build"); err != nil {
-		issues = append(issues, fmt.Sprintf("Preview verification build failed: %s", truncatePreviewCommandOutput(out)))
+		issues = append(issues, fmt.Sprintf("Preview verification build failed: %s", summarizePreviewBuildFailure(out)))
 		return issues
 	}
 
@@ -5280,6 +5325,44 @@ func summarizePreviewInstallFailure(output string) string {
 	lines := strings.Split(s, "\n")
 	if len(lines) > 8 {
 		return truncatePreviewCommandOutput(strings.Join(lines[len(lines)-8:], "\n"))
+	}
+	return truncatePreviewCommandOutput(s)
+}
+
+func summarizePreviewBuildFailure(output string) string {
+	s := strings.TrimSpace(output)
+	if s == "" {
+		return "command failed with no output"
+	}
+
+	// Prefer actionable failure lines over noisy warnings (e.g. Vite deprecation banners).
+	lines := strings.Split(s, "\n")
+	matches := make([]string, 0, 8)
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "warning") || strings.Contains(lower, "deprecated") {
+			continue
+		}
+		if strings.Contains(lower, "error") ||
+			strings.Contains(line, "TS") ||
+			strings.Contains(line, "ERR!") ||
+			strings.Contains(lower, "cannot find module") ||
+			strings.Contains(lower, "failed to resolve") ||
+			strings.Contains(lower, "rolluperror") {
+			matches = append(matches, line)
+		}
+	}
+	if len(matches) > 0 {
+		return truncatePreviewCommandOutput(strings.Join(matches, "\n"))
+	}
+
+	// Fall back to tail output rather than head so we capture the terminal failure context.
+	if len(lines) > 10 {
+		return truncatePreviewCommandOutput(strings.Join(lines[len(lines)-10:], "\n"))
 	}
 	return truncatePreviewCommandOutput(s)
 }

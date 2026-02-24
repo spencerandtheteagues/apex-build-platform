@@ -168,6 +168,7 @@ type Build struct {
 	MaxTokensPerRequest       int        `json:"max_tokens_per_request,omitempty"`
 	RequestsUsed              int        `json:"requests_used,omitempty"`
 	ReadinessRecoveryAttempts int        `json:"readiness_recovery_attempts,omitempty"`
+	PhasedPipelineComplete    bool       `json:"phased_pipeline_complete,omitempty"`
 	CreatedAt                 time.Time  `json:"created_at"`
 	UpdatedAt                 time.Time  `json:"updated_at"`
 	CompletedAt               *time.Time `json:"completed_at,omitempty"`
