@@ -106,38 +106,40 @@ type Message struct {
 // WebSocket upgrader configuration
 // SECURITY: Strict origin checking - no empty origins in production
 var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
+	ReadBufferSize:  4096,
+	WriteBufferSize: 4096,
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 
-		// Get allowed origins from environment or use defaults
-		allowedOriginsEnv := os.Getenv("CORS_ALLOWED_ORIGINS")
-		var allowedOrigins []string
-		if allowedOriginsEnv != "" {
-			allowedOrigins = strings.Split(allowedOriginsEnv, ",")
-		} else {
-			allowedOrigins = []string{
-				"http://localhost:3000",
-				"http://localhost:5173",
-				"http://127.0.0.1:3000",
-				"http://127.0.0.1:5173",
-				"https://apex.build",
-				"https://www.apex.build",
-				"https://apex-frontend-gigq.onrender.com",
+		// Allow env-configured origins first
+		if envOrigins := os.Getenv("CORS_ALLOWED_ORIGINS"); envOrigins != "" {
+			for _, allowed := range strings.Split(envOrigins, ",") {
+				if strings.TrimSpace(allowed) == origin {
+					return true
+				}
 			}
-		}
-
-		for _, allowed := range allowedOrigins {
-			if strings.TrimSpace(allowed) == origin {
+			// Allow empty origin in non-production for testing tools
+			if origin == "" && os.Getenv("ENVIRONMENT") != "production" {
 				return true
 			}
+			return false
 		}
 
-		// SECURITY: Only allow empty origin in non-production for testing tools
-		env := os.Getenv("ENVIRONMENT")
-		if origin == "" && env != "production" {
+		// Non-production: allow all for local development
+		if os.Getenv("ENVIRONMENT") != "production" {
 			return true
+		}
+
+		// Production default: strict origin check
+		allowedOrigins := []string{
+			"https://apex.build",
+			"https://www.apex.build",
+			"https://apex-frontend-gigq.onrender.com",
+		}
+		for _, allowed := range allowedOrigins {
+			if origin == allowed {
+				return true
+			}
 		}
 
 		return false

@@ -43,7 +43,13 @@ func SecurityHeaders() gin.HandlerFunc {
 			"worker-src 'self' blob:; " +
 			"child-src 'self';"
 		if isPreviewProxy {
-			csp += " frame-ancestors 'self' https://apex-frontend-gigq.onrender.com https://apex.build https://www.apex.build;"
+			frameAncestors := "'self' https://apex.build https://www.apex.build"
+			if extra := os.Getenv("FRAME_ANCESTORS_EXTRA"); extra != "" {
+				frameAncestors += " " + extra
+			} else if os.Getenv("ENVIRONMENT") != "production" {
+				frameAncestors += " https://apex-frontend-gigq.onrender.com"
+			}
+			csp += " frame-ancestors " + frameAncestors + ";"
 		}
 		c.Header("Content-Security-Policy", csp)
 

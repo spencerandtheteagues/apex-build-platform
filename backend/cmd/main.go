@@ -91,6 +91,9 @@ func main() {
 	httpServer := &http.Server{
 		Addr:              ":" + port,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      120 * time.Second, // Long for SSE/streaming build responses
+		IdleTimeout:       60 * time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			activeRouter.Load().(*gin.Engine).ServeHTTP(w, r)
 		}),
@@ -257,7 +260,7 @@ func main() {
 
 	// Initialize Code Search Engine
 	searchEngine := search.NewSearchEngine(database.GetDB())
-	searchHandler := handlers.NewSearchHandler(searchEngine)
+	searchHandler := handlers.NewSearchHandler(searchEngine, database.GetDB())
 
 	log.Println("Code Search Engine initialized (full-text, regex, symbol search)")
 
@@ -776,8 +779,10 @@ func setupRoutes(
 		router.GET("/metrics", metrics.PrometheusHandler())
 	}
 
-	// Health check endpoint
+	// Health check endpoints
 	router.GET("/health", server.Health)
+	router.GET("/health/deep", server.DeepHealth)
+	router.GET("/ready", server.DeepHealth) // Kubernetes readiness probe
 
 	// API documentation endpoint
 	router.GET("/docs", func(c *gin.Context) {

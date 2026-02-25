@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,10 +58,38 @@ func isUserAdmin(userID uint) bool {
 }
 
 var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
+	ReadBufferSize:  4096,
+	WriteBufferSize: 4096,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins in development
+		origin := r.Header.Get("Origin")
+
+		// Allow env-configured origins first
+		if envOrigins := os.Getenv("CORS_ALLOWED_ORIGINS"); envOrigins != "" {
+			for _, allowed := range strings.Split(envOrigins, ",") {
+				if strings.TrimSpace(allowed) == origin {
+					return true
+				}
+			}
+			return false
+		}
+
+		// Non-production: allow all for local development
+		if os.Getenv("ENVIRONMENT") != "production" {
+			return true
+		}
+
+		// Production: strict origin check
+		allowedOrigins := []string{
+			"https://apex.build",
+			"https://www.apex.build",
+			"https://apex-frontend-gigq.onrender.com",
+		}
+		for _, allowed := range allowedOrigins {
+			if origin == allowed {
+				return true
+			}
+		}
+		return false
 	},
 }
 

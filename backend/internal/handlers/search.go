@@ -6,18 +6,25 @@ import (
 	"strconv"
 
 	"apex-build/internal/search"
+	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // SearchHandler handles code search endpoints
 type SearchHandler struct {
 	engine *search.SearchEngine
+	db     *gorm.DB
 }
 
 // NewSearchHandler creates a new search handler
-func NewSearchHandler(engine *search.SearchEngine) *SearchHandler {
-	return &SearchHandler{engine: engine}
+func NewSearchHandler(engine *search.SearchEngine, db ...*gorm.DB) *SearchHandler {
+	h := &SearchHandler{engine: engine}
+	if len(db) > 0 {
+		h.db = db[0]
+	}
+	return h
 }
 
 // Search handles POST /api/v1/search
@@ -265,9 +272,15 @@ func (h *SearchHandler) ClearSearchHistory(c *gin.Context) {
 	})
 }
 
-// Helper to check project ownership
+// userOwnsProject checks if the user owns or has access to the project
 func (h *SearchHandler) userOwnsProject(userID, projectID uint) bool {
-	// This would normally query the database
-	// For now, allow all authenticated users
-	return true
+	if h.db == nil {
+		// No DB available — deny by default in production
+		return false
+	}
+	var project models.Project
+	if err := h.db.Select("id", "owner_id", "is_public").First(&project, projectID).Error; err != nil {
+		return false
+	}
+	return project.OwnerID == userID || project.IsPublic
 }

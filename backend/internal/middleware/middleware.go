@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -212,15 +213,22 @@ func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 
-		// List of allowed origins
-		allowedOrigins := []string{
-			"http://localhost:3000",
-			"http://localhost:5173",
-			"http://127.0.0.1:3000",
-			"https://apex.build",
-			"https://apex-build.web.app",
-			"https://apex-build.firebaseapp.com",
-			"https://apex-frontend-gigq.onrender.com",
+		// Build allowed origins list from env var or defaults
+		var allowedOrigins []string
+		if envOrigins := os.Getenv("CORS_ALLOWED_ORIGINS"); envOrigins != "" {
+			for _, o := range strings.Split(envOrigins, ",") {
+				allowedOrigins = append(allowedOrigins, strings.TrimSpace(o))
+			}
+		} else {
+			allowedOrigins = []string{
+				"http://localhost:3000",
+				"http://localhost:5173",
+				"http://127.0.0.1:3000",
+				"https://apex.build",
+				"https://apex-build.web.app",
+				"https://apex-build.firebaseapp.com",
+				"https://apex-frontend-gigq.onrender.com",
+			}
 		}
 
 		// Check if origin is allowed
