@@ -2,6 +2,7 @@
 // Beautiful, futuristic themes that make Replit look ancient
 
 import { Theme } from '@/types'
+import { steampunkTheme, steampunkMonacoTheme, steampunkAnimations } from './steampunk'
 
 export const themes: Record<string, Theme> = {
   cyberpunk: {
@@ -120,6 +121,8 @@ export const themes: Record<string, Theme> = {
       `,
     },
   },
+
+  steampunk: steampunkTheme,
 
   neonCity: {
     id: 'neonCity',
@@ -269,6 +272,9 @@ export const globalAnimations = `
   .animate-scale-in {
     animation: scaleIn 0.3s ease-out;
   }
+
+  /* Steampunk animations */
+  ${steampunkAnimations}
 `
 
 // Monaco Editor themes for each variant
@@ -380,6 +386,8 @@ export const monacoThemes = {
       'editor.selectionHighlightBackground': '#FF008033',
     },
   },
+
+  steampunk: steampunkMonacoTheme,
 }
 
 // Language-specific configurations
