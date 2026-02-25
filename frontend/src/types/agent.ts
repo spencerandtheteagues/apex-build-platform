@@ -222,3 +222,88 @@ export interface SendMessageRequest {
 export interface RollbackRequest {
   checkpoint_id: string
 }
+
+// --- FSM Integration Types ---
+// These map to the core.AgentFSM states and events from the backend.
+
+export type FSMState =
+  | 'idle'
+  | 'initializing'
+  | 'planning'
+  | 'executing'
+  | 'validating'
+  | 'retrying'
+  | 'rolling_back'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export type FSMEvent =
+  | 'start'
+  | 'initialized'
+  | 'plan_ready'
+  | 'step_complete'
+  | 'all_steps_complete'
+  | 'validation_pass'
+  | 'validation_fail'
+  | 'retry_exhausted'
+  | 'rollback_complete'
+  | 'rollback_failed'
+  | 'pause'
+  | 'resume'
+  | 'cancel'
+  | 'fatal_error'
+  | 'checkpoint_created'
+  | 'rollback'
+
+export type FSMWSMessageType =
+  | 'build:fsm:started'
+  | 'build:fsm:initialized'
+  | 'build:fsm:plan_ready'
+  | 'build:fsm:step_complete'
+  | 'build:fsm:all_steps_complete'
+  | 'build:fsm:validation_pass'
+  | 'build:fsm:validation_fail'
+  | 'build:fsm:retry_exhausted'
+  | 'build:fsm:rollback_complete'
+  | 'build:fsm:rollback_failed'
+  | 'build:fsm:paused'
+  | 'build:fsm:resumed'
+  | 'build:fsm:cancelled'
+  | 'build:fsm:fatal_error'
+  | 'build:fsm:checkpoint_created'
+  | 'build:fsm:rollback'
+  | 'build:guarantee:result'
+
+export interface FSMTransitionMessage {
+  type: FSMWSMessageType
+  build_id: string
+  timestamp: string
+  data: {
+    transition_id: string
+    from_state: FSMState
+    to_state: FSMState
+    event: FSMEvent
+    retry_count: number
+    step_id: string
+    duration_ms: number
+    progress: number
+    fsm_state: FSMState
+    elapsed_ms: number
+    error?: string
+    checkpoint_id?: string
+    metadata?: string
+  }
+}
+
+export interface GuaranteeResult {
+  success: boolean
+  attempts: number
+  score: number
+  verdict: 'pass' | 'soft_fail' | 'hard_fail'
+  rolled_back: boolean
+  checkpoint_id?: string
+  duration_ms: number
+  error?: string
+}

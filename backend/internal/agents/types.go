@@ -336,6 +336,25 @@ const (
 	WSPreviewReady    WSMessageType = "preview:ready"
 	WSUserMessage     WSMessageType = "user:message"
 	WSLeadResponse    WSMessageType = "lead:response"
+
+	// FSM integration message types (bridged from core.AgentFSM)
+	WSBuildFSMStarted        WSMessageType = "build:fsm:started"
+	WSBuildFSMInitialized    WSMessageType = "build:fsm:initialized"
+	WSBuildFSMPlanReady      WSMessageType = "build:fsm:plan_ready"
+	WSBuildFSMStepComplete   WSMessageType = "build:fsm:step_complete"
+	WSBuildFSMAllSteps       WSMessageType = "build:fsm:all_steps_complete"
+	WSBuildFSMValidationPass WSMessageType = "build:fsm:validation_pass"
+	WSBuildFSMValidationFail WSMessageType = "build:fsm:validation_fail"
+	WSBuildFSMRetryExhausted WSMessageType = "build:fsm:retry_exhausted"
+	WSBuildFSMRollbackDone   WSMessageType = "build:fsm:rollback_complete"
+	WSBuildFSMRollbackFail   WSMessageType = "build:fsm:rollback_failed"
+	WSBuildFSMPaused         WSMessageType = "build:fsm:paused"
+	WSBuildFSMResumed        WSMessageType = "build:fsm:resumed"
+	WSBuildFSMCancelled      WSMessageType = "build:fsm:cancelled"
+	WSBuildFSMFatalError     WSMessageType = "build:fsm:fatal_error"
+	WSBuildFSMCheckpoint     WSMessageType = "build:fsm:checkpoint_created"
+	WSBuildFSMRollback       WSMessageType = "build:fsm:rollback"
+	WSBuildGuaranteeResult   WSMessageType = "build:guarantee:result"
 )
 
 // WSMessage is the structure for WebSocket messages

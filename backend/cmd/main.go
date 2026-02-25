@@ -23,6 +23,7 @@ import (
 	"apex-build/internal/db"
 	"apex-build/internal/debugging"
 	"apex-build/internal/deploy"
+	deployalwayson "apex-build/internal/deploy/alwayson"
 	"apex-build/internal/deploy/providers"
 	"apex-build/internal/enterprise"
 	"apex-build/internal/extensions"
@@ -56,11 +57,8 @@ func main() {
 	log.Println("Environment configuration loaded")
 
 	// SECURITY: Validate all required secrets before starting
-	// This will fail fast in production if secrets are missing or invalid
-	secretsConfig, err := config.ValidateAndLogSecrets()
-	if err != nil {
-		log.Fatalf("CRITICAL: Secrets validation failed - cannot start server: %v", err)
-	}
+	// MustValidateSecrets calls ValidateAndLogSecrets and fatals on error
+	secretsConfig := config.MustValidateSecrets()
 
 	// Load application configuration
 	appConfig := loadConfig()
@@ -359,6 +357,18 @@ func main() {
 	hostingService := hosting.NewHostingService(database.GetDB())
 	hostingHandler := handlers.NewHostingHandler(database.GetDB(), hostingService)
 	log.Println("Native Hosting (.apex.app) initialized")
+
+	// Always-On Deployment Controller
+	alwaysOnController := deployalwayson.NewService(hostingService, nil)
+	alwaysOnController.SetInventoryProvider(func(ctx context.Context) ([]string, error) {
+		var ids []string
+		err := database.GetDB().WithContext(ctx).Model(&hosting.NativeDeployment{}).
+			Where("always_on = ? AND status != ?", true, hosting.StatusDeleted).
+			Pluck("id", &ids).Error
+		return ids, err
+	})
+	go alwaysOnController.Start(context.Background())
+	log.Println("Always-On deployment controller started")
 
 	// Initialize Managed Database Service
 	dbManagerConfig := &manageddb.ManagerConfig{
