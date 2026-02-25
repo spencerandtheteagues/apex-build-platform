@@ -1,0 +1,91 @@
+{
+  "id": "benchmark-fullstack-python",
+  "name": "Benchmark: Full-Stack Python FastAPI App",
+  "enabledWhenEnv": "PLAYWRIGHT_RUN_PREVIEW_PROXY_SCENARIOS",
+  "healthChecks": [
+    {
+      "name": "backend-health",
+      "url": "${PLAYWRIGHT_API_URL:-http://localhost:8080}/health",
+      "expectStatus": 200
+    }
+  ],
+  "authFlows": [
+    {
+      "name": "bench-python-auth",
+      "register": true,
+      "login": true,
+      "usernamePrefix": "pw_bench_py_",
+      "password": "BenchPython123!"
+    }
+  ],
+  "previewProxyScenarios": [
+    {
+      "name": "python-http-server-api",
+      "project": {
+        "name": "Benchmark Python API",
+        "description": "E2E benchmark: Python HTTP server with REST endpoints and JSON responses",
+        "language": "python"
+      },
+      "files": [
+        {
+          "path": "requirements.txt",
+          "content": "# no external deps needed for stdlib server"
+        },
+        {
+          "path": "server.py",
+          "content": "import http.server\nimport json\nimport os\nimport urllib.parse\n\nPORT = int(os.environ.get('PORT', '9100'))\n\nitems = [\n    {'id': 1, 'name': 'Widget A', 'price': 9.99, 'in_stock': True},\n    {'id': 2, 'name': 'Widget B', 'price': 19.99, 'in_stock': True},\n    {'id': 3, 'name': 'Widget C', 'price': 29.99, 'in_stock': False},\n]\n\nclass Handler(http.server.BaseHTTPRequestHandler):\n    def do_GET(self):\n        parsed = urllib.parse.urlparse(self.path)\n        path = parsed.path\n        qs = urllib.parse.parse_qs(parsed.query)\n\n        if path == '/api/health':\n            return self._json(200, {'status': 'healthy', 'language': 'python'})\n        if path == '/api/items':\n            in_stock = qs.get('in_stock', [None])[0]\n            result = items\n            if in_stock == 'true':\n                result = [i for i in items if i['in_stock']]\n            elif in_stock == 'false':\n                result = [i for i in items if not i['in_stock']]\n            return self._json(200, {'data': result, 'count': len(result)})\n        if path.startswith('/api/items/'):\n            try:\n                item_id = int(path.split('/')[-1])\n                item = next((i for i in items if i['id'] == item_id), None)\n                if item:\n                    return self._json(200, {'data': item})\n                return self._json(404, {'error': 'Item not found'})\n            except ValueError:\n                return self._json(400, {'error': 'Invalid item ID'})\n        self._json(404, {'error': 'Route not found'})\n\n    def _json(self, status, body):\n        data = json.dumps(body).encode()\n        self.send_response(status)\n        self.send_header('Content-Type', 'application/json')\n        self.send_header('Access-Control-Allow-Origin', '*')\n        self.send_header('Content-Length', str(len(data)))\n        self.end_headers()\n        self.wfile.write(data)\n\n    def log_message(self, fmt, *args):\n        pass  # suppress request logs\n\nif __name__ == '__main__':\n    server = http.server.HTTPServer(('127.0.0.1', PORT), Handler)\n    print(f'Python benchmark server listening on {PORT}')\n    server.serve_forever()\n"
+        },
+        {
+          "path": "/index.html",
+          "content": "<!doctype html><html lang=\"en\"><head><meta charset=\"UTF-8\"><title>Benchmark Python App</title></head><body><div id=\"app\"><h1>Python API Benchmark</h1><p>Full-stack Python benchmark application</p><div id=\"items\"></div></div><script>\nfetch('/api/items').then(r=>r.json()).then(d=>{\n  document.getElementById('items').innerHTML = d.data.map(i=>'<div>'+i.name+' - $'+i.price+'</div>').join('');\n});\n</script></body></html>"
+        }
+      ],
+      "preview": {
+        "entryPoint": "index.html",
+        "sandbox": false
+      },
+      "server": {
+        "entryFile": "server.py",
+        "command": "python server.py",
+        "requireBackend": true
+      },
+      "proxyAssertions": [
+        {
+          "path": "/",
+          "expectStatus": 200,
+          "bodyIncludes": "Python API Benchmark"
+        },
+        {
+          "path": "/api/health",
+          "expectStatus": 200,
+          "jsonPath": "language",
+          "jsonEquals": "python"
+        },
+        {
+          "path": "/api/items",
+          "expectStatus": 200,
+          "jsonPath": "count",
+          "jsonEquals": 3
+        },
+        {
+          "path": "/api/items?in_stock=true",
+          "expectStatus": 200,
+          "jsonPath": "count",
+          "jsonEquals": 2
+        },
+        {
+          "path": "/api/items/1",
+          "expectStatus": 200,
+          "jsonPath": "data.name",
+          "jsonEquals": "Widget A"
+        },
+        {
+          "path": "/api/items/999",
+          "expectStatus": 404,
+          "jsonPath": "error",
+          "jsonEquals": "Item not found"
+        }
+      ]
+    }
+  ]
+}

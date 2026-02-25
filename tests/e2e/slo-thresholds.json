@@ -1,0 +1,37 @@
+{
+  "$comment": "SLO thresholds enforced by nightly CI. Any threshold miss fails the pipeline.",
+  "global": {
+    "min_pass_rate": 0.95,
+    "min_total_tests": 15
+  },
+  "per_suite": {
+    "health": {
+      "description": "Backend health endpoint availability",
+      "min_pass_rate": 1.0
+    },
+    "auth": {
+      "description": "Auth register/login success rate",
+      "min_pass_rate": 1.0
+    },
+    "preflight": {
+      "description": "Build preflight endpoint accuracy",
+      "min_pass_rate": 1.0
+    },
+    "build-error": {
+      "description": "Build error path validation",
+      "min_pass_rate": 1.0
+    },
+    "preview-proxy": {
+      "description": "Full-stack preview proxy routing",
+      "min_pass_rate": 0.95
+    },
+    "route": {
+      "description": "Frontend route rendering",
+      "min_pass_rate": 0.95
+    },
+    "ui": {
+      "description": "UI element assertions",
+      "min_pass_rate": 0.95
+    }
+  }
+}

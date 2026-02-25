@@ -25,6 +25,7 @@ import (
 // ServerRunner manages backend server processes for preview sessions
 type ServerRunner struct {
 	db        *gorm.DB
+	runtime   RuntimeBackend
 	processes map[uint]*ServerProcess
 	mu        sync.RWMutex
 	portStart int
@@ -39,7 +40,8 @@ type ServerProcess struct {
 	Args        []string // Command arguments
 	EntryFile   string   // "server.js", "app.py", "main.go"
 	Port        int
-	Cmd         *exec.Cmd
+	RuntimeType string   // "host", "container", "sandbox-v2"
+	handle      *ProcessHandle
 	Stdout      *bytes.Buffer
 	Stderr      *bytes.Buffer
 	bufMu       sync.Mutex // Protects Stdout and Stderr buffer access
@@ -54,7 +56,6 @@ type ServerProcess struct {
 	EnvVars     map[string]string
 	stopChan    chan struct{}
 	stoppedChan chan struct{}
-	Cancel      context.CancelFunc
 	stopOnce    sync.Once
 	stoppedOnce sync.Once
 }
@@ -99,10 +100,99 @@ type ServerDetection struct {
 	Framework  string `json:"framework"` // express, fastapi, gin, etc.
 }
 
-// NewServerRunner creates a new server runner manager
+// RuntimeBackend abstracts server process execution.
+// The default hostRuntime uses os/exec. Future backends can route through
+// SandboxFactory for containerized preview execution.
+type RuntimeBackend interface {
+	// StartProcess creates and starts a server process.
+	StartProcess(cfg *ProcessStartConfig) (*ProcessHandle, error)
+	// Name returns the backend type for metrics/logging.
+	Name() string
+}
+
+// ProcessStartConfig holds the command configuration for starting a process.
+type ProcessStartConfig struct {
+	Command string
+	Args    []string
+	Dir     string
+	Env     []string
+}
+
+// ProcessHandle provides controls for a running process started by a RuntimeBackend.
+type ProcessHandle struct {
+	Pid        int
+	StdoutPipe io.ReadCloser
+	StderrPipe io.ReadCloser
+	// Wait blocks until the process exits. Returns exit code and error.
+	Wait func() (exitCode int, err error)
+	// SignalStop sends a graceful termination signal (SIGTERM on host).
+	SignalStop func()
+	// ForceKill immediately kills the process group (SIGKILL on host).
+	ForceKill func()
+}
+
+// hostRuntime starts server processes directly via os/exec on the host.
+type hostRuntime struct{}
+
+func (h *hostRuntime) Name() string { return "host" }
+
+func (h *hostRuntime) StartProcess(cfg *ProcessStartConfig) (*ProcessHandle, error) {
+	cmd := exec.Command(cfg.Command, cfg.Args...)
+	cmd.Dir = cfg.Dir
+	cmd.Env = cfg.Env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	pgid := -cmd.Process.Pid
+
+	return &ProcessHandle{
+		Pid:        cmd.Process.Pid,
+		StdoutPipe: stdoutPipe,
+		StderrPipe: stderrPipe,
+		Wait: func() (int, error) {
+			waitErr := cmd.Wait()
+			if waitErr != nil {
+				if exitErr, ok := waitErr.(*exec.ExitError); ok {
+					return exitErr.ExitCode(), waitErr
+				}
+				return 1, waitErr
+			}
+			return 0, nil
+		},
+		SignalStop: func() {
+			syscall.Kill(pgid, syscall.SIGTERM)
+		},
+		ForceKill: func() {
+			syscall.Kill(pgid, syscall.SIGKILL)
+		},
+	}, nil
+}
+
+// NewServerRunner creates a new server runner manager with the default host runtime.
 func NewServerRunner(db *gorm.DB) *ServerRunner {
+	return NewServerRunnerWithRuntime(db, &hostRuntime{})
+}
+
+// NewServerRunnerWithRuntime creates a ServerRunner with a custom RuntimeBackend.
+func NewServerRunnerWithRuntime(db *gorm.DB, rt RuntimeBackend) *ServerRunner {
+	if rt == nil {
+		rt = &hostRuntime{}
+	}
 	return &ServerRunner{
 		db:        db,
+		runtime:   rt,
 		processes: make(map[uint]*ServerProcess),
 		portStart: 9100, // Backend ports start at 9100 (preview uses 9000+)
 		portMap:   make(map[uint]int),
@@ -344,37 +434,36 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 	}
 
 	// Build command and args based on server type
-	var cmd *exec.Cmd
+	var cmdName string
 	var args []string
-	procCtx, procCancel := context.WithCancel(context.Background())
 
 	switch {
 	case config.Command == "node":
+		cmdName = "node"
 		args = []string{config.EntryFile}
-		cmd = exec.CommandContext(procCtx, "node", args...)
 
 	case config.Command == "python":
+		cmdName = "python"
 		args = []string{config.EntryFile}
-		cmd = exec.CommandContext(procCtx, "python", args...)
 
 	case config.Command == "uvicorn":
 		// FastAPI: uvicorn main:app --host 0.0.0.0 --port 9100
 		module := strings.TrimSuffix(config.EntryFile, ".py")
 		module = strings.ReplaceAll(module, "/", ".")
+		cmdName = "uvicorn"
 		args = []string{module + ":app", "--host", "0.0.0.0", "--port", fmt.Sprintf("%d", port)}
-		cmd = exec.CommandContext(procCtx, "uvicorn", args...)
 
 	case config.Command == "go run":
+		cmdName = "go"
 		if config.EntryFile != "" {
 			args = []string{"run", config.EntryFile}
 		} else {
 			args = []string{"run", "."}
 		}
-		cmd = exec.CommandContext(procCtx, "go", args...)
 
 	case config.Command == "cargo run":
+		cmdName = "cargo"
 		args = []string{"run"}
-		cmd = exec.CommandContext(procCtx, "cargo", args...)
 
 	default:
 		// Custom command
@@ -382,39 +471,40 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		if len(parts) == 0 {
 			return nil, fmt.Errorf("invalid command: %s", config.Command)
 		}
-		cmd = exec.CommandContext(procCtx, parts[0], append(parts[1:], config.EntryFile)...)
+		cmdName = parts[0]
+		args = append(parts[1:], config.EntryFile)
 	}
 
-	// Set working directory
-	cmd.Dir = workDir
-
-	// Set up process group for proper cleanup
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
-
-	// Set environment variables
+	// Build environment variables
 	env := os.Environ()
 	env = append(env, fmt.Sprintf("PORT=%d", port))
-	env = append(env, fmt.Sprintf("HOST=0.0.0.0"))
-	env = append(env, fmt.Sprintf("NODE_ENV=development"))
-	env = append(env, fmt.Sprintf("FLASK_ENV=development"))
-	env = append(env, fmt.Sprintf("DEBUG=true"))
+	env = append(env, "HOST=0.0.0.0")
+	env = append(env, "NODE_ENV=development")
+	env = append(env, "FLASK_ENV=development")
+	env = append(env, "DEBUG=true")
 
 	if config.EnvVars != nil {
 		for k, v := range config.EnvVars {
 			env = append(env, fmt.Sprintf("%s=%s", k, v))
 		}
 	}
-	cmd.Env = env
 
-	// Capture output
+	// Start process via runtime backend
+	handle, err := sr.runtime.StartProcess(&ProcessStartConfig{
+		Command: cmdName,
+		Args:    args,
+		Dir:     workDir,
+		Env:     env,
+	})
+	if err != nil {
+		sr.releasePort(config.ProjectID)
+		metrics.RecordPreviewBackendStart("start_failed")
+		return nil, fmt.Errorf("failed to start server: %w", err)
+	}
+
+	// Create output buffers
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
-
-	// Create multi-writers to capture and limit output
-	stdoutPipe, _ := cmd.StdoutPipe()
-	stderrPipe, _ := cmd.StderrPipe()
 
 	// Create process struct
 	proc := &ServerProcess{
@@ -423,50 +513,37 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		Args:        args,
 		EntryFile:   config.EntryFile,
 		Port:        port,
-		Cmd:         cmd,
+		RuntimeType: sr.runtime.Name(),
+		handle:      handle,
 		Stdout:      stdout,
 		Stderr:      stderr,
 		StartedAt:   time.Now(),
 		Ready:       false,
 		URL:         fmt.Sprintf("http://127.0.0.1:%d", port),
+		Pid:         handle.Pid,
 		WorkDir:     workDir,
 		EnvVars:     config.EnvVars,
 		stopChan:    make(chan struct{}),
 		stoppedChan: make(chan struct{}),
-		Cancel:      procCancel,
 	}
-
-	// Start the process
-	if err := cmd.Start(); err != nil {
-		procCancel()
-		sr.releasePort(config.ProjectID)
-		metrics.RecordPreviewBackendStart("start_failed")
-		return nil, fmt.Errorf("failed to start server: %w", err)
-	}
-
-	proc.Pid = cmd.Process.Pid
 
 	// Start output capture goroutines
-	go sr.captureOutput(stdoutPipe, stdout, proc)
-	go sr.captureOutput(stderrPipe, stderr, proc)
+	go sr.captureOutput(handle.StdoutPipe, stdout, proc)
+	go sr.captureOutput(handle.StderrPipe, stderr, proc)
 
 	// Wait for process completion in background
 	go func() {
-		err := cmd.Wait()
+		exitCode, waitErr := handle.Wait()
 		now := time.Now()
 		proc.Ready = false
 		proc.ExitedAt = &now
-		if err != nil {
-			proc.LastError = err.Error()
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				proc.ExitCode = exitErr.ExitCode()
-			} else {
-				proc.ExitCode = 1
-			}
+		proc.ExitCode = exitCode
+		if waitErr != nil {
+			proc.LastError = waitErr.Error()
 		}
 		proc.stopOnce.Do(func() { close(proc.stopChan) })
 		proc.stoppedOnce.Do(func() { close(proc.stoppedChan) })
-		metrics.RecordPreviewBackendProcessExit(classifyPreviewBackendExitReason(err, proc.ExitCode))
+		metrics.RecordPreviewBackendProcessExit(classifyPreviewBackendExitReason(waitErr, exitCode))
 	}()
 
 	// Wait for port to be ready
@@ -533,11 +610,8 @@ func (sr *ServerRunner) stopProcessLocked(projectID uint) error {
 	// Signal stop
 	proc.stopOnce.Do(func() { close(proc.stopChan) })
 
-	// Kill the process
+	// Kill the process via runtime handle
 	sr.killProcess(proc)
-	if proc.Cancel != nil {
-		proc.Cancel()
-	}
 
 	// Release port
 	sr.releasePort(projectID)
@@ -552,27 +626,21 @@ func (sr *ServerRunner) stopProcessLocked(projectID uint) error {
 }
 
 func (sr *ServerRunner) killProcess(proc *ServerProcess) {
-	if proc.Cmd == nil || proc.Cmd.Process == nil {
+	if proc.handle == nil {
 		return
 	}
 
 	// Try graceful shutdown first (SIGTERM)
-	syscall.Kill(-proc.Cmd.Process.Pid, syscall.SIGTERM)
+	proc.handle.SignalStop()
 
 	// Wait up to 5 seconds for graceful shutdown
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-proc.stoppedChan:
-			close(done)
-		case <-time.After(5 * time.Second):
-			// Force kill (SIGKILL)
-			syscall.Kill(-proc.Cmd.Process.Pid, syscall.SIGKILL)
-			close(done)
-		}
-	}()
-
-	<-done
+	select {
+	case <-proc.stoppedChan:
+		return
+	case <-time.After(5 * time.Second):
+		// Force kill (SIGKILL)
+		proc.handle.ForceKill()
+	}
 }
 
 // GetStatus returns the current status of a backend server

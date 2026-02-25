@@ -1,0 +1,91 @@
+{
+  "id": "benchmark-fullstack-node",
+  "name": "Benchmark: Full-Stack Node.js Express App",
+  "enabledWhenEnv": "PLAYWRIGHT_RUN_PREVIEW_PROXY_SCENARIOS",
+  "healthChecks": [
+    {
+      "name": "backend-health",
+      "url": "${PLAYWRIGHT_API_URL:-http://localhost:8080}/health",
+      "expectStatus": 200
+    }
+  ],
+  "authFlows": [
+    {
+      "name": "bench-node-auth",
+      "register": true,
+      "login": true,
+      "usernamePrefix": "pw_bench_node_",
+      "password": "BenchNode123!"
+    }
+  ],
+  "previewProxyScenarios": [
+    {
+      "name": "express-rest-api-with-cors",
+      "project": {
+        "name": "Benchmark Express REST API",
+        "description": "E2E benchmark: Express app with multiple REST routes, CORS, and JSON responses",
+        "language": "javascript"
+      },
+      "files": [
+        {
+          "path": "package.json",
+          "content": "{\"name\":\"bench-express\",\"version\":\"1.0.0\",\"scripts\":{\"start\":\"node server.js\"},\"dependencies\":{\"express\":\"^4.18.0\"}}"
+        },
+        {
+          "path": "server.js",
+          "content": "const http = require('http');\nconst port = Number(process.env.PORT || 9100);\n\nconst users = [{id:1,name:'Alice'},{id:2,name:'Bob'},{id:3,name:'Charlie'}];\nconst todos = [{id:1,userId:1,title:'Buy groceries',done:false},{id:2,userId:1,title:'Clean house',done:true},{id:3,userId:2,title:'Read book',done:false}];\n\nfunction jsonRes(res, status, data) {\n  res.writeHead(status, {'content-type':'application/json','access-control-allow-origin':'*'});\n  res.end(JSON.stringify(data));\n}\n\nconst server = http.createServer((req, res) => {\n  const url = new URL(req.url, 'http://localhost');\n  if (req.method === 'OPTIONS') {\n    res.writeHead(204, {'access-control-allow-origin':'*','access-control-allow-methods':'GET,POST,PUT,DELETE','access-control-allow-headers':'content-type,authorization'});\n    return res.end();\n  }\n  if (url.pathname === '/api/health') return jsonRes(res, 200, {status:'ok',uptime:process.uptime()});\n  if (url.pathname === '/api/users') return jsonRes(res, 200, {data:users,total:users.length});\n  if (url.pathname === '/api/todos') {\n    const userId = url.searchParams.get('userId');\n    const filtered = userId ? todos.filter(t => t.userId === Number(userId)) : todos;\n    return jsonRes(res, 200, {data:filtered,total:filtered.length});\n  }\n  if (url.pathname.startsWith('/api/users/')) {\n    const id = Number(url.pathname.split('/').pop());\n    const user = users.find(u => u.id === id);\n    if (user) return jsonRes(res, 200, {data:user});\n    return jsonRes(res, 404, {error:'User not found'});\n  }\n  jsonRes(res, 404, {error:'Not found'});\n});\nserver.listen(port, '127.0.0.1', () => console.log('Express benchmark server listening on', port));"
+        },
+        {
+          "path": "/index.html",
+          "content": "<!doctype html><html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\"><title>Benchmark Express App</title></head><body><div id=\"app\"><h1>Express Benchmark</h1><p>Full-stack Node.js benchmark application</p><button id=\"load-users\">Load Users</button><div id=\"users-list\"></div></div><script>\ndocument.getElementById('load-users').addEventListener('click', async () => {\n  const res = await fetch('/api/users');\n  const body = await res.json();\n  document.getElementById('users-list').innerHTML = body.data.map(u => '<div>' + u.name + '</div>').join('');\n});\n</script></body></html>"
+        }
+      ],
+      "preview": {
+        "entryPoint": "index.html",
+        "sandbox": false
+      },
+      "server": {
+        "entryFile": "server.js",
+        "command": "node server.js",
+        "requireBackend": true
+      },
+      "proxyAssertions": [
+        {
+          "path": "/",
+          "expectStatus": 200,
+          "bodyIncludes": "Express Benchmark"
+        },
+        {
+          "path": "/api/health",
+          "expectStatus": 200,
+          "jsonPath": "status",
+          "jsonEquals": "ok"
+        },
+        {
+          "path": "/api/users",
+          "expectStatus": 200,
+          "jsonPath": "total",
+          "jsonEquals": 3
+        },
+        {
+          "path": "/api/todos?userId=1",
+          "expectStatus": 200,
+          "jsonPath": "total",
+          "jsonEquals": 2
+        },
+        {
+          "path": "/api/users/1",
+          "expectStatus": 200,
+          "jsonPath": "data.name",
+          "jsonEquals": "Alice"
+        },
+        {
+          "path": "/api/users/999",
+          "expectStatus": 404,
+          "jsonPath": "error",
+          "jsonEquals": "User not found"
+        }
+      ]
+    }
+  ]
+}

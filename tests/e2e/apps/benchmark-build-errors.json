@@ -1,0 +1,40 @@
+{
+  "id": "benchmark-build-errors",
+  "name": "Benchmark: Build Error Paths + Preflight",
+  "healthChecks": [
+    {
+      "name": "backend-health",
+      "url": "${PLAYWRIGHT_API_URL:-http://localhost:8080}/health",
+      "expectStatus": 200
+    }
+  ],
+  "authFlows": [
+    {
+      "name": "bench-errors-auth",
+      "register": true,
+      "login": true,
+      "usernamePrefix": "pw_bench_err_",
+      "password": "BenchError123!"
+    }
+  ],
+  "preflightScenarios": [
+    {
+      "name": "preflight-returns-status",
+      "expectReady": true
+    }
+  ],
+  "buildErrorScenarios": [
+    {
+      "name": "empty-description-rejected",
+      "description": "",
+      "expectStatus": 400,
+      "expectErrorContains": "description"
+    },
+    {
+      "name": "whitespace-description-rejected",
+      "description": "   ",
+      "expectStatus": 400,
+      "expectErrorContains": "description"
+    }
+  ]
+}

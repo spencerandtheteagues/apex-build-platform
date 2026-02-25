@@ -148,14 +148,62 @@ jobs:
           echo "PLAYWRIGHT_EXIT_CODE=$EXIT_CODE" >> $GITHUB_ENV
           set -e
 
-      - name: Summarize reliability results and enforce threshold
+      - name: Summarize reliability results and enforce SLO thresholds
         working-directory: tests/e2e
         run: |
+          set +e
           node scripts/summarize-playwright-json.mjs \
             test-results/reliability-playwright.json \
             test-results/reliability-summary.json
-          cat test-results/reliability-summary.json
-          test "${PLAYWRIGHT_EXIT_CODE:-0}" -eq 0
+          SUMMARIZE_EXIT=$?
+          set -e
+
+          # Write GitHub Actions job summary
+          if [ -f test-results/reliability-summary.json ]; then
+            PASS_RATE=$(jq -r '.pass_rate' test-results/reliability-summary.json)
+            TOTAL=$(jq -r '.totals.total' test-results/reliability-summary.json)
+            PASSED=$(jq -r '.totals.passed' test-results/reliability-summary.json)
+            FAILED=$(jq -r '.totals.failed' test-results/reliability-summary.json)
+            SLO_PASSED=$(jq -r '.slo_passed' test-results/reliability-summary.json)
+            VIOLATIONS=$(jq -r '.slo_violations | length' test-results/reliability-summary.json)
+
+            echo "## Reliability Benchmark Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Pass Rate | ${PASS_RATE} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Total Tests | ${TOTAL} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Passed | ${PASSED} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Failed | ${FAILED} |" >> $GITHUB_STEP_SUMMARY
+            echo "| SLO Passed | ${SLO_PASSED} |" >> $GITHUB_STEP_SUMMARY
+            echo "| SLO Violations | ${VIOLATIONS} |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            # Per-suite breakdown
+            echo "### Per-Suite Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            jq -r '.per_suite | to_entries[] | "| \(.key) | \(.value.passed)/\(.value.total) | \(.value.pass_rate) |"' \
+              test-results/reliability-summary.json | \
+              (echo "| Suite | Passed/Total | Rate |"; echo "|-------|--------------|------|"; cat) >> $GITHUB_STEP_SUMMARY
+
+            # SLO violations
+            if [ "$VIOLATIONS" != "0" ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### SLO Violations" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              jq -r '.slo_violations[] | "- **\(.scope)**: \(.message)"' test-results/reliability-summary.json >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+          # Fail if SLO thresholds were violated or playwright itself failed
+          if [ "$SUMMARIZE_EXIT" -ne 0 ]; then
+            echo "::error::SLO thresholds violated"
+            exit 1
+          fi
+          if [ "${PLAYWRIGHT_EXIT_CODE:-0}" -ne 0 ]; then
+            echo "::error::Playwright tests failed with exit code ${PLAYWRIGHT_EXIT_CODE}"
+            exit 1
+          fi
 
       - name: Upload reliability artifacts
         if: always()

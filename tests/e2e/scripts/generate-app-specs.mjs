@@ -24,6 +24,8 @@ for (const file of manifestFiles) {
   const assertions = Array.isArray(manifest.uiAssertions) ? manifest.uiAssertions : [];
   const authFlows = Array.isArray(manifest.authFlows) ? manifest.authFlows : [];
   const previewProxyScenarios = Array.isArray(manifest.previewProxyScenarios) ? manifest.previewProxyScenarios : [];
+  const preflightScenarios = Array.isArray(manifest.preflightScenarios) ? manifest.preflightScenarios : [];
+  const buildErrorScenarios = Array.isArray(manifest.buildErrorScenarios) ? manifest.buildErrorScenarios : [];
 
   const routeTests = routes.map((route) => {
     const pathValue = route.path || '/';
@@ -234,6 +236,66 @@ for (const file of manifestFiles) {
   });`;
   }).join('\n');
 
+  const preflightTests = preflightScenarios.map((scenario, idx) => {
+    const scenarioName = scenario.name || `preflight-${idx + 1}`;
+    const expectReady = scenario.expectReady !== false;
+    const minProviders = Number.isInteger(scenario.expectMinProviders) ? scenario.expectMinProviders : 0;
+    return `
+  test('preflight: ${escapeTs(scenarioName)}', async ({ request }) => {
+    const apiBase = process.env.PLAYWRIGHT_API_URL || 'http://localhost:8080';
+    const suffix = \`\${Date.now()}-\${Math.floor(Math.random() * 100000)}\`;
+    const username = 'pw_preflight_' + suffix;
+    const email = username + '@example.com';
+
+    const registerRes = await request.post(apiBase + '/api/v1/auth/register', {
+      data: { username, email, password: 'Preflight123!', full_name: 'Playwright Preflight' }
+    });
+    expect([200, 201]).toContain(registerRes.status());
+    const registerBody = await registerRes.json();
+    const token = registerBody?.data?.tokens?.access_token ?? registerBody?.tokens?.access_token;
+    expect(typeof token).toBe('string');
+
+    const preflightRes = await request.post(apiBase + '/api/v1/build/preflight', {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    expect(preflightRes.ok()).toBeTruthy();
+    const body = await preflightRes.json();
+    expect(body.ready).toBe(${expectReady});
+    ${minProviders > 0 ? `expect(body.providers_available).toBeGreaterThanOrEqual(${minProviders});` : ''}
+  });`;
+  }).join('\n');
+
+  const buildErrorTests = buildErrorScenarios.map((scenario, idx) => {
+    const scenarioName = scenario.name || `build-error-${idx + 1}`;
+    const description = scenario.description != null ? String(scenario.description) : '';
+    const expectStatus = Number.isInteger(scenario.expectStatus) ? scenario.expectStatus : 400;
+    const expectErrorContains = scenario.expectErrorContains != null ? String(scenario.expectErrorContains) : '';
+    return `
+  test('build-error: ${escapeTs(scenarioName)}', async ({ request }) => {
+    const apiBase = process.env.PLAYWRIGHT_API_URL || 'http://localhost:8080';
+    const suffix = \`\${Date.now()}-\${Math.floor(Math.random() * 100000)}\`;
+    const username = 'pw_builderr_' + suffix;
+    const email = username + '@example.com';
+
+    const registerRes = await request.post(apiBase + '/api/v1/auth/register', {
+      data: { username, email, password: 'BuildErr123!', full_name: 'Playwright BuildErr' }
+    });
+    expect([200, 201]).toContain(registerRes.status());
+    const registerBody = await registerRes.json();
+    const token = registerBody?.data?.tokens?.access_token ?? registerBody?.tokens?.access_token;
+    expect(typeof token).toBe('string');
+
+    const buildRes = await request.post(apiBase + '/api/v1/build/start', {
+      headers: { Authorization: 'Bearer ' + token },
+      data: { description: ${JSON.stringify(description)} }
+    });
+    expect(buildRes.status()).toBe(${expectStatus});
+    ${expectErrorContains ? `const body = await buildRes.json();
+    const errorText = JSON.stringify(body).toLowerCase();
+    expect(errorText).toContain(${JSON.stringify(expectErrorContains.toLowerCase())});` : ''}
+  });`;
+  }).join('\n');
+
   const helperBlock = previewProxyScenarios.length > 0 ? `
 function joinProxyURLPath(baseURL, routePath) {
   const normalizedPath = routePath.startsWith('/') ? routePath : '/' + routePath;
@@ -262,7 +324,7 @@ function readJsonPath(obj, dottedPath) {
 
 // AUTO-GENERATED FILE. Source manifest: apps/${file}
 
-${helperBlock}test.describe('${escapeTs(manifest.name || id)} (${id})', () => {${healthTests}${routeTests}${uiTests}${authFlowTests}${previewProxyTests}
+${helperBlock}test.describe('${escapeTs(manifest.name || id)} (${id})', () => {${healthTests}${routeTests}${uiTests}${authFlowTests}${preflightTests}${buildErrorTests}${previewProxyTests}
 });
 `;
 

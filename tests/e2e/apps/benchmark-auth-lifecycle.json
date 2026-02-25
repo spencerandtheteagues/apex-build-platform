@@ -1,0 +1,27 @@
+{
+  "id": "benchmark-auth-lifecycle",
+  "name": "Benchmark: Auth Lifecycle + Preflight",
+  "healthChecks": [
+    {
+      "name": "backend-health",
+      "url": "${PLAYWRIGHT_API_URL:-http://localhost:8080}/health",
+      "expectStatus": 200
+    }
+  ],
+  "authFlows": [
+    {
+      "name": "register-login-full",
+      "register": true,
+      "login": true,
+      "usernamePrefix": "pw_bench_auth_",
+      "password": "BenchMark123!"
+    }
+  ],
+  "preflightScenarios": [
+    {
+      "name": "preflight-after-auth",
+      "expectReady": true,
+      "expectMinProviders": 1
+    }
+  ]
+}
