@@ -169,6 +169,7 @@ type Build struct {
 	RequestsUsed              int        `json:"requests_used,omitempty"`
 	ReadinessRecoveryAttempts int        `json:"readiness_recovery_attempts,omitempty"`
 	PhasedPipelineComplete    bool       `json:"phased_pipeline_complete,omitempty"`
+	DiffMode                  bool       `json:"diff_mode,omitempty"` // When true, changes require user review before applying
 	CreatedAt                 time.Time  `json:"created_at"`
 	UpdatedAt                 time.Time  `json:"updated_at"`
 	CompletedAt               *time.Time `json:"completed_at,omitempty"`
@@ -188,7 +189,8 @@ const (
 	BuildReviewing  BuildStatus = "reviewing"   // Code review phase
 	BuildCompleted  BuildStatus = "completed"   // Successfully finished
 	BuildFailed     BuildStatus = "failed"      // Build failed
-	BuildCancelled  BuildStatus = "cancelled"   // Manually cancelled
+	BuildCancelled       BuildStatus = "cancelled"        // Manually cancelled
+	BuildAwaitingReview  BuildStatus = "awaiting_review"  // Waiting for user to review proposed diffs
 )
 
 // BuildMode determines how the build is executed
@@ -358,6 +360,18 @@ const (
 	WSBuildFSMCheckpoint     WSMessageType = "build:fsm:checkpoint_created"
 	WSBuildFSMRollback       WSMessageType = "build:fsm:rollback"
 	WSBuildGuaranteeResult   WSMessageType = "build:guarantee:result"
+
+	// Spend tracking & budget events
+	WSSpendUpdate    WSMessageType = "spend:update"
+	WSBudgetExceeded WSMessageType = "budget:exceeded"
+	WSBudgetWarning  WSMessageType = "budget:warning"
+
+	// Diff workflow events
+	WSProposeDiff    WSMessageType = "agent:propose-diff"
+	WSEditsApplied   WSMessageType = "build:edits-applied"
+	WSAwaitingReview WSMessageType = "build:awaiting-review"
+	WSProtectedPath  WSMessageType = "agent:protected-path"
+	WSBuildRollback  WSMessageType = "build:rollback"
 )
 
 // WSMessage is the structure for WebSocket messages
@@ -379,6 +393,7 @@ type BuildRequest struct {
 	RequirePreviewReady bool       `json:"require_preview_ready,omitempty"`
 	ProjectName         string     `json:"project_name,omitempty"`
 	TechStack           *TechStack `json:"tech_stack,omitempty"` // Optional override
+	DiffMode            bool       `json:"diff_mode,omitempty"` // When true, proposed changes require user approval
 }
 
 // BuildResponse is returned when a build is created

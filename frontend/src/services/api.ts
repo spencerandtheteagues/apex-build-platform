@@ -411,6 +411,7 @@ export class ApiService {
       styling?: string
       extras?: string[]
     }
+    diff_mode?: boolean
   }): Promise<{
     build_id: string
     websocket_url: string

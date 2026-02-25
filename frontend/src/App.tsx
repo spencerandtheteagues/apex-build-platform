@@ -25,7 +25,7 @@ const AuthParticle: React.FC<{ delay: number; startX: number; startY: number }> 
   />
 );
 
-type AppView = 'builder' | 'ide' | 'admin' | 'explore' | 'settings'
+type AppView = 'builder' | 'ide' | 'admin' | 'explore' | 'settings' | 'spending'
 type UIColorScheme = 'red-dark' | 'blue-light'
 
 const AppBuilder = lazy(() =>
@@ -45,6 +45,8 @@ const GitHubImportWizard = lazy(() =>
 )
 const APIKeySettings = lazy(() => import('./components/settings/APIKeySettings'))
 const ModelSelector = lazy(() => import('./components/ai/ModelSelector'))
+const SpendDashboard = lazy(() => import('./components/spend/SpendDashboard'))
+const BudgetSettings = lazy(() => import('./components/budget/BudgetSettings'))
 
 const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
   <div className="h-full flex items-center justify-center bg-black/40">
@@ -511,6 +513,17 @@ function App() {
             <Globe className="w-4 h-4" />
             <span className="text-sm font-medium">Explore</span>
           </button>
+          <button
+            onClick={() => setCurrentView('spending')}
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
+              currentView === 'spending'
+                ? 'bg-orange-900/20 text-orange-400 border border-orange-900/50 shadow-sm shadow-orange-900/20'
+                : 'text-gray-400 hover:text-white hover:bg-gray-800'
+            }`}
+          >
+            <Zap className="w-4 h-4" />
+            <span className="text-sm font-medium">Spending</span>
+          </button>
           {/* Admin button - only show for admin users */}
           {(user?.is_admin || user?.is_super_admin) && (
             <button
@@ -605,6 +618,16 @@ function App() {
           </div>
         )}
 
+        {visitedViews.has('spending') && (
+          <div className={`absolute inset-0 overflow-y-auto ${currentView === 'spending' ? 'block' : 'hidden'}`}>
+            <ErrorBoundary>
+              <Suspense fallback={<ViewLoadingFallback label="Loading Spend Dashboard..." />}>
+                <SpendDashboard />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
+
         {visitedViews.has('settings') && (
           <div className={`absolute inset-0 overflow-y-auto ${currentView === 'settings' ? 'block' : 'hidden'}`}>
             <ErrorBoundary>
@@ -689,6 +712,18 @@ function App() {
                         Bring Your Own Keys - Add your own API keys to use your personal quotas and get better rates.
                       </p>
                       <APIKeySettings />
+                    </div>
+
+                    {/* Budget Caps Section */}
+                    <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                      <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                        <Shield className="w-5 h-5 text-red-400" />
+                        Budget Caps
+                      </h2>
+                      <p className="text-gray-400 text-sm mb-6">
+                        Set spending limits to control costs. Builds will stop or warn when caps are reached.
+                      </p>
+                      <BudgetSettings />
                     </div>
                   </div>
                 </div>

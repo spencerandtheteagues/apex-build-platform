@@ -63,6 +63,8 @@ type AgentManager struct {
 	subscribers map[string][]chan *WSMessage
 	aiRouter    AIRouter
 	db          *gorm.DB // Database connection for persisting completed builds
+	editStore   *ProposedEditStore
+	pathGuard   *PathGuard
 	mu          sync.RWMutex
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -114,6 +116,8 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 		resultQueue: make(chan *TaskResult, 100),
 		subscribers: make(map[string][]chan *WSMessage),
 		aiRouter:    aiRouter,
+		editStore:   NewProposedEditStore(),
+		pathGuard:   NewPathGuard(),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
@@ -4928,7 +4932,54 @@ func (am *AgentManager) RollbackToCheckpoint(buildID, checkpointID string) error
 	build.Status = BuildInProgress
 	build.UpdatedAt = time.Now()
 
-	log.Printf("Rolled back build %s to checkpoint %s", buildID, checkpointID)
+	// Restore files from checkpoint to filesystem
+	var restoredPaths []string
+	if len(targetCheckpoint.Files) > 0 {
+		for _, f := range targetCheckpoint.Files {
+			if f.Path == "" || f.Content == "" {
+				continue
+			}
+			dir := filepath.Dir(f.Path)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				log.Printf("WARNING: Failed to create dir for rollback file %s: %v", f.Path, err)
+				continue
+			}
+			if err := os.WriteFile(f.Path, []byte(f.Content), 0644); err != nil {
+				log.Printf("WARNING: Failed to restore rollback file %s: %v", f.Path, err)
+				continue
+			}
+			restoredPaths = append(restoredPaths, f.Path)
+		}
+
+		// Update file records in DB if project is set
+		if build.ProjectID != nil && am.db != nil {
+			for _, f := range targetCheckpoint.Files {
+				am.db.Model(&GeneratedFile{}).
+					Where("build_id = ? AND path = ?", buildID, f.Path).
+					Updates(map[string]interface{}{
+						"content":    f.Content,
+						"updated_at": time.Now(),
+					})
+			}
+		}
+	}
+
+	log.Printf("Rolled back build %s to checkpoint %s (%d files restored)", buildID, checkpointID, len(restoredPaths))
+
+	// Broadcast rollback event
+	go am.broadcast(buildID, &WSMessage{
+		Type:      WSBuildRollback,
+		BuildID:   buildID,
+		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"checkpoint_id":   checkpointID,
+			"checkpoint_name": targetCheckpoint.Name,
+			"files_restored":  len(restoredPaths),
+			"restored_paths":  restoredPaths,
+			"progress":        targetCheckpoint.Progress,
+		},
+	})
+
 	return nil
 }
 
@@ -4965,6 +5016,104 @@ func (am *AgentManager) CancelBuild(buildID string) error {
 	})
 
 	return nil
+}
+
+// KillAllBuilds cancels all active builds for a given user. Returns count killed.
+func (am *AgentManager) KillAllBuilds(userID uint) int {
+	am.mu.RLock()
+	var targets []string
+	for id, build := range am.builds {
+		if build.UserID == userID && build.Status != BuildCompleted && build.Status != BuildFailed && build.Status != BuildCancelled {
+			targets = append(targets, id)
+		}
+	}
+	am.mu.RUnlock()
+
+	killed := 0
+	for _, id := range targets {
+		if err := am.CancelBuild(id); err == nil {
+			killed++
+		}
+	}
+
+	if killed > 0 {
+		log.Printf("KillAllBuilds: killed %d builds for user %d", killed, userID)
+	}
+	return killed
+}
+
+// applyApprovedEdits writes approved proposed edits to the build's task output,
+// creates a checkpoint, broadcasts the result, and resumes the build.
+func (am *AgentManager) applyApprovedEdits(build *Build, edits []*ProposedEdit) {
+	if len(edits) == 0 {
+		return
+	}
+
+	build.mu.Lock()
+	// Inject approved edits as generated files in a synthetic task output
+	files := make([]GeneratedFile, 0, len(edits))
+	filePaths := make([]string, 0, len(edits))
+	for _, edit := range edits {
+		files = append(files, GeneratedFile{
+			Path:     edit.FilePath,
+			Content:  edit.ProposedContent,
+			Language: edit.Language,
+			Size:     int64(len(edit.ProposedContent)),
+			IsNew:    edit.OriginalContent == "",
+		})
+		filePaths = append(filePaths, edit.FilePath)
+	}
+
+	// Create a task to hold the approved files
+	now := time.Now()
+	task := &Task{
+		ID:          fmt.Sprintf("approved-edits-%d", now.UnixMilli()),
+		Type:        TaskGenerateFile,
+		Description: "User-approved proposed edits",
+		Status:      TaskCompleted,
+		CompletedAt: &now,
+		Output:      &TaskOutput{Files: files},
+	}
+	build.Tasks = append(build.Tasks, task)
+
+	// Resume build
+	if build.Status == BuildAwaitingReview {
+		build.Status = BuildInProgress
+	}
+	build.UpdatedAt = now
+	build.mu.Unlock()
+
+	// Broadcast edits applied
+	go am.broadcast(build.ID, &WSMessage{
+		Type:      WSEditsApplied,
+		BuildID:   build.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"files":   filePaths,
+			"count":   len(edits),
+			"message": fmt.Sprintf("%d proposed edits approved and applied", len(edits)),
+		},
+	})
+}
+
+// resumeBuildAfterReview resets the build from awaiting_review back to in_progress
+func (am *AgentManager) resumeBuildAfterReview(build *Build) {
+	build.mu.Lock()
+	if build.Status == BuildAwaitingReview {
+		build.Status = BuildInProgress
+		build.UpdatedAt = time.Now()
+	}
+	build.mu.Unlock()
+
+	go am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"status":  "in_progress",
+			"message": "Build resumed after review",
+		},
+	})
 }
 
 // Shutdown gracefully stops the agent manager

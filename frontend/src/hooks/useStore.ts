@@ -207,6 +207,82 @@ interface UIActions {
   updateTerminalOutput: (id: string, output: string) => void
 }
 
+// Spend slice
+interface SpendState {
+  dailySpend: number
+  monthlySpend: number
+  currentBuildSpend: number
+  spendEvents: Array<{
+    id: number
+    agent_role: string
+    provider: string
+    model: string
+    billed_cost: number
+    input_tokens: number
+    output_tokens: number
+    created_at: string
+  }>
+}
+
+interface SpendActions {
+  addSpendEvent: (event: SpendState['spendEvents'][0]) => void
+  setDailySpend: (amount: number) => void
+  setMonthlySpend: (amount: number) => void
+  addBuildSpend: (amount: number) => void
+  resetBuildSpend: () => void
+}
+
+// Budget slice
+interface BudgetCap {
+  id: number
+  cap_type: 'daily' | 'monthly' | 'per_build'
+  limit_usd: number
+  action: 'stop' | 'warn'
+  is_active: boolean
+  project_id?: number
+}
+
+interface BudgetState {
+  caps: BudgetCap[]
+  budgetExceeded: boolean
+  budgetWarning: boolean
+}
+
+interface BudgetActions {
+  setCaps: (caps: BudgetCap[]) => void
+  addCap: (cap: BudgetCap) => void
+  removeCap: (id: number) => void
+  setBudgetExceeded: (exceeded: boolean) => void
+  setBudgetWarning: (warning: boolean) => void
+  fetchCaps: () => Promise<void>
+}
+
+// Diff slice
+interface ProposedEdit {
+  id: string
+  build_id: string
+  agent_id: string
+  agent_role: string
+  file_path: string
+  original_content: string
+  proposed_content: string
+  language: string
+  status: 'pending' | 'approved' | 'rejected'
+}
+
+interface DiffState {
+  proposedEdits: ProposedEdit[]
+  diffMode: boolean
+}
+
+interface DiffActions {
+  setProposedEdits: (edits: ProposedEdit[]) => void
+  addProposedEdits: (edits: ProposedEdit[]) => void
+  updateEditStatus: (id: string, status: ProposedEdit['status']) => void
+  setDiffMode: (enabled: boolean) => void
+  clearProposedEdits: () => void
+}
+
 // Combined store interface
 interface StoreState
   extends AuthState,
@@ -215,7 +291,10 @@ interface StoreState
     EditorSliceState,
     CollaborationState,
     AIState,
-    UIState {
+    UIState,
+    SpendState,
+    BudgetState,
+    DiffState {
       apiService: typeof apiService
     }
 
@@ -226,7 +305,10 @@ interface StoreActions
     EditorActions,
     CollaborationActions,
     AIActions,
-    UIActions {}
+    UIActions,
+    SpendActions,
+    BudgetActions,
+    DiffActions {}
 
 // Create the store
 export const useStore = create<StoreState & StoreActions>()(
@@ -288,6 +370,21 @@ export const useStore = create<StoreState & StoreActions>()(
         notifications: [],
         terminals: [],
         activeTerminalId: null,
+
+        // Spend
+        dailySpend: 0,
+        monthlySpend: 0,
+        currentBuildSpend: 0,
+        spendEvents: [],
+
+        // Budget
+        caps: [],
+        budgetExceeded: false,
+        budgetWarning: false,
+
+        // Diff
+        proposedEdits: [],
+        diffMode: false,
 
         // Auth actions
         login: async (usernameOrEmail: string, password: string) => {
@@ -1091,6 +1188,91 @@ export const useStore = create<StoreState & StoreActions>()(
             }
           })
         },
+
+        // Spend actions
+        addSpendEvent: (event) => {
+          set((state) => {
+            state.spendEvents = [...state.spendEvents.slice(-99), event]
+            state.currentBuildSpend += event.billed_cost
+          })
+        },
+
+        setDailySpend: (amount: number) => {
+          set((state) => { state.dailySpend = amount })
+        },
+
+        setMonthlySpend: (amount: number) => {
+          set((state) => { state.monthlySpend = amount })
+        },
+
+        addBuildSpend: (amount: number) => {
+          set((state) => { state.currentBuildSpend += amount })
+        },
+
+        resetBuildSpend: () => {
+          set((state) => {
+            state.currentBuildSpend = 0
+            state.spendEvents = []
+          })
+        },
+
+        // Budget actions
+        setCaps: (caps) => {
+          set((state) => { state.caps = caps })
+        },
+
+        addCap: (cap) => {
+          set((state) => { state.caps.push(cap) })
+        },
+
+        removeCap: (id: number) => {
+          set((state) => {
+            state.caps = state.caps.filter(c => c.id !== id)
+          })
+        },
+
+        setBudgetExceeded: (exceeded: boolean) => {
+          set((state) => { state.budgetExceeded = exceeded })
+        },
+
+        setBudgetWarning: (warning: boolean) => {
+          set((state) => { state.budgetWarning = warning })
+        },
+
+        fetchCaps: async () => {
+          try {
+            const response = await apiService.client.get('/budget/caps')
+            set((state) => { state.caps = response.data?.caps || [] })
+          } catch (error) {
+            console.error('Failed to fetch budget caps:', error)
+          }
+        },
+
+        // Diff actions
+        setProposedEdits: (edits) => {
+          set((state) => { state.proposedEdits = edits })
+        },
+
+        addProposedEdits: (edits) => {
+          set((state) => {
+            state.proposedEdits = [...state.proposedEdits, ...edits]
+          })
+        },
+
+        updateEditStatus: (id: string, status: 'pending' | 'approved' | 'rejected') => {
+          set((state) => {
+            const edit = state.proposedEdits.find(e => e.id === id)
+            if (edit) edit.status = status
+          })
+        },
+
+        setDiffMode: (enabled: boolean) => {
+          set((state) => { state.diffMode = enabled })
+        },
+
+        clearProposedEdits: () => {
+          set((state) => { state.proposedEdits = [] })
+        },
       }))
     ),
     {
@@ -1166,6 +1348,18 @@ export const useDisconnect = () => useStore((state) => state.disconnect)
 export const useCreateTerminal = () => useStore((state) => state.createTerminal)
 export const useCloseTerminal = () => useStore((state) => state.closeTerminal)
 export const useSetActiveTerminal = () => useStore((state) => state.setActiveTerminal)
+export const useDailySpend = () => useStore((state) => state.dailySpend)
+export const useMonthlySpend = () => useStore((state) => state.monthlySpend)
+export const useCurrentBuildSpend = () => useStore((state) => state.currentBuildSpend)
+export const useSpendEvents = () => useStore((state) => state.spendEvents)
+export const useBudgetCaps = () => useStore((state) => state.caps)
+export const useBudgetExceeded = () => useStore((state) => state.budgetExceeded)
+export const useBudgetWarning = () => useStore((state) => state.budgetWarning)
+export const useProposedEdits = () => useStore((state) => state.proposedEdits)
+export const useDiffMode = () => useStore((state) => state.diffMode)
+export const useSetDiffMode = () => useStore((state) => state.setDiffMode)
+export const useFetchCaps = () => useStore((state) => state.fetchCaps)
+export const useResetBuildSpend = () => useStore((state) => state.resetBuildSpend)
 
 // Composite selectors with shallow equality for grouped state
 export const useAuth = () => useStore(

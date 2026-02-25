@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"apex-build/internal/git"
+	"apex-build/internal/handlers/export_templates"
 	"apex-build/internal/secrets"
 	"apex-build/pkg/models"
 
@@ -36,11 +37,14 @@ func (h *ExportHandler) ExportToGitHub(c *gin.Context) {
 	userID := c.GetUint("user_id")
 
 	var req struct {
-		ProjectID   uint   `json:"project_id" binding:"required"`
-		RepoName    string `json:"repo_name" binding:"required"`
-		Description string `json:"description"`
-		IsPrivate   bool   `json:"is_private"`
-		Token       string `json:"token"` // GitHub PAT — required for export
+		ProjectID        uint   `json:"project_id" binding:"required"`
+		RepoName         string `json:"repo_name" binding:"required"`
+		Description      string `json:"description"`
+		IsPrivate        bool   `json:"is_private"`
+		Token            string `json:"token"` // GitHub PAT — required for export
+		IncludeGitignore bool   `json:"include_gitignore"`
+		IncludeDockerfile bool  `json:"include_dockerfile"`
+		IncludeReadme    bool   `json:"include_readme"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -91,6 +95,38 @@ func (h *ExportHandler) ExportToGitHub(c *gin.Context) {
 		}
 	}
 
+	// Determine the tech stack from the project's language/framework
+	stack := project.Language
+	if project.Framework != "" {
+		stack = project.Framework
+	}
+
+	// Collect supplementary export files
+	type ExportFile struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	var extraFiles []ExportFile
+
+	if req.IncludeGitignore {
+		extraFiles = append(extraFiles, ExportFile{
+			Path:    ".gitignore",
+			Content: export_templates.GitignoreForStack(stack),
+		})
+	}
+	if req.IncludeDockerfile {
+		extraFiles = append(extraFiles, ExportFile{
+			Path:    "Dockerfile",
+			Content: export_templates.DockerfileForStack(stack),
+		})
+	}
+	if req.IncludeReadme {
+		extraFiles = append(extraFiles, ExportFile{
+			Path:    "README.md",
+			Content: export_templates.ReadmeForProject(project.Name, description, stack),
+		})
+	}
+
 	// Export the project
 	result, err := h.gitService.ExportToGitHub(
 		c.Request.Context(),
@@ -107,6 +143,10 @@ func (h *ExportHandler) ExportToGitHub(c *gin.Context) {
 		})
 		return
 	}
+
+	// Track how many extra files were included
+	extraFileCount := len(extraFiles)
+	_ = extraFileCount // Will be used when git service supports additional files
 
 	// Optionally store the token for future use
 	if req.Token != "" && h.secretsManager != nil {

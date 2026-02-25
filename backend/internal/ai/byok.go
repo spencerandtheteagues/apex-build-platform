@@ -83,17 +83,31 @@ func NewBYOKManager(db *gorm.DB, sm *secrets.SecretsManager, platformRouter *AIR
 	}
 }
 
-// SaveKey encrypts and stores a user's API key for a provider
+// SaveKey encrypts and stores a user's API key for a provider (global scope)
 func (m *BYOKManager) SaveKey(userID uint, provider, apiKey, modelPref string) error {
+	return m.SaveKeyForProject(userID, provider, apiKey, modelPref, nil)
+}
+
+// SaveKeyForProject encrypts and stores a user's API key, optionally scoped to a project.
+// If projectID is nil, the key is global (applies to all projects).
+func (m *BYOKManager) SaveKeyForProject(userID uint, provider, apiKey, modelPref string, projectID *uint) error {
 	// Encrypt the key
 	encrypted, salt, fingerprint, err := m.secretsManager.Encrypt(userID, apiKey)
 	if err != nil {
 		return fmt.Errorf("failed to encrypt API key: %w", err)
 	}
 
-	// Upsert: update existing or create new (including soft-deleted records)
+	now := time.Now()
+
+	// Build the WHERE clause based on whether this is project-scoped
 	var existing models.UserAPIKey
-	result := m.db.Unscoped().Where("user_id = ? AND provider = ?", userID, provider).First(&existing)
+	query := m.db.Unscoped().Where("user_id = ? AND provider = ?", userID, provider)
+	if projectID != nil {
+		query = query.Where("project_id = ?", *projectID)
+	} else {
+		query = query.Where("project_id IS NULL")
+	}
+	result := query.First(&existing)
 
 	if result.Error == nil {
 		// Update existing and ensure it's not deleted
@@ -105,6 +119,7 @@ func (m *BYOKManager) SaveKey(userID uint, provider, apiKey, modelPref string) e
 			"is_active":        true,
 			"is_valid":         false,
 			"deleted_at":       nil,
+			"last_rotated_at":  now,
 		}).Error
 	}
 
@@ -112,11 +127,13 @@ func (m *BYOKManager) SaveKey(userID uint, provider, apiKey, modelPref string) e
 	return m.db.Create(&models.UserAPIKey{
 		UserID:          userID,
 		Provider:        provider,
+		ProjectID:       projectID,
 		EncryptedKey:    encrypted,
 		KeySalt:         salt,
 		KeyFingerprint:  fingerprint,
 		ModelPreference: modelPref,
 		IsActive:        true,
+		LastRotatedAt:   &now,
 	}).Error
 }
 
@@ -125,6 +142,36 @@ func (m *BYOKManager) GetKeys(userID uint) ([]models.UserAPIKey, error) {
 	var keys []models.UserAPIKey
 	err := m.db.Where("user_id = ? AND deleted_at IS NULL", userID).Find(&keys).Error
 	return keys, err
+}
+
+// GetKeysForProject returns keys for a user filtered by project scope.
+// Returns both project-scoped keys and global keys.
+func (m *BYOKManager) GetKeysForProject(userID uint, projectID uint) ([]models.UserAPIKey, error) {
+	var keys []models.UserAPIKey
+	err := m.db.Where("user_id = ? AND deleted_at IS NULL AND (project_id = ? OR project_id IS NULL)", userID, projectID).
+		Find(&keys).Error
+	return keys, err
+}
+
+// GetKeyForProject resolves the best API key for a provider in the context of a project.
+// It checks for a project-scoped key first, then falls back to the user's global key.
+func (m *BYOKManager) GetKeyForProject(userID uint, provider string, projectID uint) (*models.UserAPIKey, error) {
+	// Try project-scoped key first
+	var projectKey models.UserAPIKey
+	err := m.db.Where("user_id = ? AND provider = ? AND project_id = ? AND is_active = ? AND deleted_at IS NULL",
+		userID, provider, projectID, true).First(&projectKey).Error
+	if err == nil {
+		return &projectKey, nil
+	}
+
+	// Fall back to global key (project_id IS NULL)
+	var globalKey models.UserAPIKey
+	err = m.db.Where("user_id = ? AND provider = ? AND project_id IS NULL AND is_active = ? AND deleted_at IS NULL",
+		userID, provider, true).First(&globalKey).Error
+	if err != nil {
+		return nil, fmt.Errorf("no key found for provider %s (checked project %d and global): %w", provider, projectID, err)
+	}
+	return &globalKey, nil
 }
 
 // DeleteKey removes a user's API key for a provider

@@ -16,6 +16,8 @@ import (
 	"apex-build/internal/agents"
 	"apex-build/internal/agents/autonomous"
 	"apex-build/internal/ai"
+	"apex-build/internal/budget"
+	"apex-build/internal/spend"
 	"apex-build/internal/api"
 	"apex-build/internal/auth"
 	"apex-build/internal/cache"
@@ -207,6 +209,20 @@ func main() {
 	buildHandler := agents.NewBuildHandler(agentManager, wsHub)
 
 	log.Println("Agent Orchestration System initialized")
+
+	// Initialize Spend Tracker (S2: Real-Time Spend Dashboard)
+	spendTracker := spend.NewSpendTracker(database.GetDB())
+	spendHandler := handlers.NewSpendHandler(spendTracker)
+	log.Println("Spend Tracker initialized (real-time cost tracking, per-agent attribution)")
+
+	// Initialize Budget Enforcer (S1: Hard Budget Caps)
+	budgetEnforcer := budget.NewBudgetEnforcer(database.GetDB(), spendTracker)
+	budgetHandler := handlers.NewBudgetHandler(budgetEnforcer)
+	budgetMiddleware := middleware.BudgetCheck(budgetEnforcer)
+	log.Println("Budget Enforcer initialized (daily/monthly/per-build caps, instant stop)")
+
+	// Initialize Protected Paths Handler (A3)
+	protectedPathsHandler := handlers.NewProtectedPathsHandler(database.GetDB())
 
 	// Initialize MCP Server (APEX.BUILD as MCP provider)
 	mcpServer := mcp.NewMCPServer("APEX.BUILD", "1.0.0")
@@ -576,6 +592,10 @@ func main() {
 		usageHandler,    // Usage tracking and quota API endpoints
 		quotaChecker,    // Quota enforcement middleware
 		rotationHandler, // Key rotation (admin)
+		spendHandler,      // Spend tracking dashboard
+		budgetHandler,     // Budget caps enforcement
+		budgetMiddleware,      // Budget enforcement middleware
+		protectedPathsHandler, // Protected paths management
 	)
 
 	// Activate the full router now that all services are initialized.
@@ -765,6 +785,10 @@ func setupRoutes(
 	usageHandler *handlers.UsageHandlers, // Usage tracking and quota API
 	quotaChecker *middleware.QuotaChecker, // Quota enforcement middleware
 	rotationHandler *handlers.RotationHandler, // Key rotation (admin)
+	spendHandler *handlers.SpendHandler, // Spend tracking dashboard
+	budgetHandler *handlers.BudgetHandler, // Budget caps enforcement
+	budgetMiddleware gin.HandlerFunc, // Budget enforcement middleware
+	protectedPathsHandler *handlers.ProtectedPathsHandler, // Protected paths management
 ) *gin.Engine {
 	// Set gin mode based on environment
 	if os.Getenv("ENVIRONMENT") == "production" {
@@ -867,9 +891,10 @@ func setupRoutes(
 			// Usage tracking and quota API endpoints (REVENUE PROTECTION)
 			usageHandler.RegisterUsageRoutes(protected)
 
-			// AI endpoints - with quota enforcement
+			// AI endpoints - with quota and budget enforcement
 			ai := protected.Group("/ai")
 			ai.Use(quotaChecker.CheckAIQuota()) // Enforce AI request quota
+			ai.Use(budgetMiddleware)             // Enforce budget caps
 			{
 				ai.POST("/generate", server.AIGenerate)
 				ai.GET("/usage", server.GetAIUsage)
@@ -891,6 +916,9 @@ func setupRoutes(
 				// Storage quota checked on file creation
 				projects.POST("/:id/files", quotaChecker.CheckStorageQuota(1024*1024), server.CreateFile) // Estimate 1MB
 				projects.GET("/:id/files", optimizedHandler.GetProjectFilesOptimized)                     // Optimized: no content loading for list
+
+				// Protected Paths (A3)
+				protectedPathsHandler.RegisterProtectedPathsRoutes(projects)
 			}
 
 			// File endpoints
@@ -1043,10 +1071,11 @@ func setupRoutes(
 				billing.GET("/config-status", paymentHandler.StripeConfigStatus)   // Check Stripe config
 			}
 
-			// Code Execution endpoints (the core of cloud IDE) - with quota enforcement
+			// Code Execution endpoints (the core of cloud IDE) - with quota + budget enforcement
 			if executionHandler != nil {
 				execute := protected.Group("/execute")
 				execute.Use(quotaChecker.CheckExecutionQuota(1)) // Check execution minutes quota
+				execute.Use(budgetMiddleware)                     // Enforce budget caps
 				{
 					execute.POST("", executionHandler.ExecuteCode)                           // Execute code snippet
 					execute.POST("/file", executionHandler.ExecuteFile)                      // Execute a file
@@ -1126,6 +1155,12 @@ func setupRoutes(
 				byok.GET("/usage", byokHandler.GetUsage)
 				byok.GET("/models", byokHandler.GetModels)
 			}
+
+			// Spend Tracking endpoints (S2: Real-Time Spend Dashboard)
+			spendHandler.RegisterRoutes(protected)
+
+			// Budget Caps endpoints (S1: Hard Budget Caps + Instant Stop)
+			budgetHandler.RegisterRoutes(protected)
 
 			// Admin endpoints (requires admin privileges)
 			admin := protected.Group("/admin")

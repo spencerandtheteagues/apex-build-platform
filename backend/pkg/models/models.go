@@ -437,8 +437,9 @@ type UserAPIKey struct {
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
 	// Ownership
-	UserID   uint   `json:"user_id" gorm:"not null;index;uniqueIndex:idx_user_provider"`
-	Provider string `json:"provider" gorm:"not null;size:20;uniqueIndex:idx_user_provider"` // claude, gpt4, gemini, grok
+	UserID    uint   `json:"user_id" gorm:"not null;index;uniqueIndex:idx_user_provider"`
+	Provider  string `json:"provider" gorm:"not null;size:20;uniqueIndex:idx_user_provider"` // claude, gpt4, gemini, grok
+	ProjectID *uint  `json:"project_id,omitempty" gorm:"index"` // nil = global key, set = project-scoped
 
 	// Encrypted key storage (never expose raw key in JSON)
 	EncryptedKey   string `json:"-" gorm:"not null"`
@@ -449,11 +450,13 @@ type UserAPIKey struct {
 	ModelPreference string `json:"model_preference" gorm:"size:100"` // e.g. "grok-4-fast", "claude-sonnet-4-20250514"
 
 	// Status and tracking
-	IsActive   bool       `json:"is_active" gorm:"default:true"`
-	IsValid    bool       `json:"is_valid" gorm:"default:false"`   // Set after key validation
-	LastUsed   *time.Time `json:"last_used,omitempty"`
-	UsageCount int64      `json:"usage_count" gorm:"default:0"`
-	TotalCost  float64    `json:"total_cost" gorm:"default:0.0"`   // Tracked cost through this key
+	IsActive             bool       `json:"is_active" gorm:"default:true"`
+	IsValid              bool       `json:"is_valid" gorm:"default:false"` // Set after key validation
+	LastUsed             *time.Time `json:"last_used,omitempty"`
+	UsageCount           int64      `json:"usage_count" gorm:"default:0"`
+	TotalCost            float64    `json:"total_cost" gorm:"default:0.0"` // Tracked cost through this key
+	LastRotatedAt        *time.Time `json:"last_rotated_at,omitempty"`
+	RotationReminderDays int        `json:"rotation_reminder_days" gorm:"default:90"`
 }
 
 // AIUsageLog records every AI API call for transparent cost tracking

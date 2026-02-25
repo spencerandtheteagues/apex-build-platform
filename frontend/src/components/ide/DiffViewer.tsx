@@ -16,6 +16,8 @@ interface DiffViewerProps {
   language: string
   onClose: () => void
   className?: string
+  onApprove?: () => void
+  onReject?: () => void
 }
 
 export const DiffViewer: React.FC<DiffViewerProps> = ({
@@ -25,7 +27,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   modifiedLabel = 'Modified',
   language,
   onClose,
-  className
+  className,
+  onApprove,
+  onReject
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const diffEditorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null)
@@ -94,6 +98,27 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
       {/* Editor Container */}
       <div ref={containerRef} className="flex-1" />
+
+      {(onApprove || onReject) && (
+        <div className="flex items-center gap-2 p-3 border-t border-gray-800 bg-gray-900/50">
+          {onApprove && (
+            <button
+              onClick={onApprove}
+              className="px-4 py-1.5 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg transition-colors"
+            >
+              Approve
+            </button>
+          )}
+          {onReject && (
+            <button
+              onClick={onReject}
+              className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white text-sm rounded-lg transition-colors"
+            >
+              Reject
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

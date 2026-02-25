@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"apex-build/internal/ai"
@@ -32,6 +34,7 @@ func (h *BYOKHandlers) SaveKey(c *gin.Context) {
 		Provider        string `json:"provider" binding:"required"`
 		APIKey          string `json:"api_key" binding:"required"`
 		ModelPreference string `json:"model_preference"`
+		ProjectID       *uint  `json:"project_id"` // optional: scope key to a specific project
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: provider and api_key are required"})
@@ -45,16 +48,20 @@ func (h *BYOKHandlers) SaveKey(c *gin.Context) {
 		return
 	}
 
-	if err := h.byokManager.SaveKey(userID, req.Provider, req.APIKey, req.ModelPreference); err != nil {
+	if err := h.byokManager.SaveKeyForProject(userID, req.Provider, req.APIKey, req.ModelPreference, req.ProjectID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save API key: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	resp := gin.H{
 		"success":  true,
 		"message":  "API key saved successfully",
 		"provider": req.Provider,
-	})
+	}
+	if req.ProjectID != nil {
+		resp["project_id"] = *req.ProjectID
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // GetKeys lists configured providers for a user (no raw keys exposed)
@@ -65,7 +72,19 @@ func (h *BYOKHandlers) GetKeys(c *gin.Context) {
 		return
 	}
 
-	keys, err := h.byokManager.GetKeys(userID)
+	// Optionally filter by project_id query param
+	var keys []models.UserAPIKey
+	var err error
+	if pidStr := c.Query("project_id"); pidStr != "" {
+		pid, parseErr := strconv.ParseUint(pidStr, 10, 32)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project_id"})
+			return
+		}
+		keys, err = h.byokManager.GetKeysForProject(userID, uint(pid))
+	} else {
+		keys, err = h.byokManager.GetKeys(userID)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve keys"})
 		return
@@ -74,18 +93,21 @@ func (h *BYOKHandlers) GetKeys(c *gin.Context) {
 	// Return safe metadata only (no raw keys, encrypted values, salts, or fingerprints)
 	type KeyInfo struct {
 		Provider        string     `json:"provider"`
+		ProjectID       *uint      `json:"project_id,omitempty"`
 		ModelPreference string     `json:"model_preference"`
 		IsActive        bool       `json:"is_active"`
 		IsValid         bool       `json:"is_valid"`
 		LastUsed        *time.Time `json:"last_used,omitempty"`
 		UsageCount      int64      `json:"usage_count"`
 		TotalCost       float64    `json:"total_cost"`
+		RotationAgeDays *int       `json:"rotation_age_days,omitempty"`
 	}
 
 	keyInfos := make([]KeyInfo, len(keys))
 	for i, k := range keys {
-		keyInfos[i] = KeyInfo{
+		info := KeyInfo{
 			Provider:        k.Provider,
+			ProjectID:       k.ProjectID,
 			ModelPreference: k.ModelPreference,
 			IsActive:        k.IsActive,
 			IsValid:         k.IsValid,
@@ -93,6 +115,12 @@ func (h *BYOKHandlers) GetKeys(c *gin.Context) {
 			UsageCount:      k.UsageCount,
 			TotalCost:       k.TotalCost,
 		}
+		// Compute rotation_age_days from last_rotated_at
+		if k.LastRotatedAt != nil {
+			ageDays := int(math.Floor(time.Since(*k.LastRotatedAt).Hours() / 24))
+			info.RotationAgeDays = &ageDays
+		}
+		keyInfos[i] = info
 	}
 
 	c.JSON(http.StatusOK, gin.H{

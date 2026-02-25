@@ -119,7 +119,7 @@ interface AIThought {
 
 interface BuildState {
   id: string
-  status: 'idle' | 'pending' | 'planning' | 'in_progress' | 'testing' | 'reviewing' | 'completed' | 'failed' | 'cancelled'
+  status: 'idle' | 'pending' | 'planning' | 'in_progress' | 'testing' | 'reviewing' | 'awaiting_review' | 'completed' | 'failed' | 'cancelled'
   progress: number
   agents: Agent[]
   tasks: Task[]
@@ -134,6 +134,7 @@ interface BuildState {
   errorMessage?: string
   websocketUrl?: string
   artifactRevision?: string
+  diffMode?: boolean
 }
 
 type BuildMode = 'fast' | 'full'
@@ -1802,6 +1803,52 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         })
         break
 
+      case 'spend:update':
+        if (data.billed_cost) {
+          addSystemMessage(`Agent ${data.agent_role || 'unknown'} spent $${Number(data.billed_cost).toFixed(4)}`)
+        }
+        break
+
+      case 'budget:exceeded':
+        addSystemMessage(`BUDGET EXCEEDED: ${data.message || 'Spending cap reached. Build stopped.'}`)
+        setBuildState(prev => prev ? { ...prev, status: 'failed', errorMessage: 'Budget exceeded' } : null)
+        break
+
+      case 'budget:warning':
+        addSystemMessage(`Budget warning: ${data.message || 'Approaching spending cap'}`)
+        break
+
+      case 'agent:propose-diff':
+        addSystemMessage(`Agent ${data.agent_role || 'unknown'} proposed changes to ${data.file_count || 'multiple'} file(s) — review required`)
+        setBuildState(prev => prev ? { ...prev, status: 'awaiting_review' } : null)
+        break
+
+      case 'build:edits-applied':
+        addSystemMessage(`Approved edits applied: ${data.files_count || 0} file(s) written`)
+        setBuildState(prev => prev ? { ...prev, status: 'in_progress' } : null)
+        break
+
+      case 'build:awaiting-review':
+        addSystemMessage('Build paused — awaiting diff review')
+        setBuildState(prev => prev ? { ...prev, status: 'awaiting_review' } : null)
+        break
+
+      case 'agent:protected-path':
+        addSystemMessage(`Protected path: ${data.path || 'unknown'} — agent cannot modify this file`)
+        break
+
+      case 'build:rollback':
+        addSystemMessage(`Rolled back to checkpoint "${data.checkpoint_name || 'unknown'}". ${data.files_restored || 0} file(s) restored.`)
+        setBuildState(prev => {
+          if (!prev) return null
+          return {
+            ...prev,
+            status: 'in_progress',
+            progress: typeof data.progress === 'number' ? data.progress : prev.progress,
+          }
+        })
+        break
+
       case 'preview:ready':
         if (data.url) {
           addSystemMessage('Preview ready')
@@ -2398,6 +2445,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         power_mode: powerMode,
         provider_mode: 'platform',
         tech_stack: techStackOverride || undefined,
+        diff_mode: false,
       })
 
       if (!response || !response.build_id) {

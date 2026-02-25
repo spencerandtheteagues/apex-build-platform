@@ -1186,6 +1186,200 @@ func isActiveBuildStatus(status string) bool {
 	}
 }
 
+// KillAllBuilds cancels all active builds for the authenticated user
+// POST /api/v1/build/kill-all
+func (h *BuildHandler) KillAllBuilds(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	killed := h.manager.KillAllBuilds(uid)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"killed":  killed,
+		"message": fmt.Sprintf("Killed %d active builds", killed),
+	})
+}
+
+// GetProposedEdits returns pending proposed edits for a build
+// GET /api/v1/build/:id/proposed-edits
+func (h *BuildHandler) GetProposedEdits(c *gin.Context) {
+	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	build, err := h.manager.GetBuild(buildID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		return
+	}
+	if uid != build.UserID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	edits := h.manager.editStore.GetAllEdits(buildID)
+	c.JSON(http.StatusOK, gin.H{
+		"build_id": buildID,
+		"edits":    edits,
+		"count":    len(edits),
+	})
+}
+
+// ApproveEdits approves specific proposed edits
+// POST /api/v1/build/:id/approve-edits
+func (h *BuildHandler) ApproveEdits(c *gin.Context) {
+	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	build, err := h.manager.GetBuild(buildID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		return
+	}
+	if uid != build.UserID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	var req struct {
+		EditIDs []string `json:"edit_ids" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	approved, err := h.manager.editStore.ApproveEdits(buildID, req.EditIDs)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Write approved files and resume build
+	h.manager.applyApprovedEdits(build, approved)
+
+	c.JSON(http.StatusOK, gin.H{
+		"approved": len(approved),
+		"message":  "Edits approved and applied",
+	})
+}
+
+// RejectEdits rejects specific proposed edits
+// POST /api/v1/build/:id/reject-edits
+func (h *BuildHandler) RejectEdits(c *gin.Context) {
+	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	build, err := h.manager.GetBuild(buildID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		return
+	}
+	if uid != build.UserID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	var req struct {
+		EditIDs []string `json:"edit_ids" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.manager.editStore.RejectEdits(buildID, req.EditIDs); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Check if there are remaining pending edits; if none, resume build
+	pending := h.manager.editStore.GetPendingEdits(buildID)
+	if len(pending) == 0 {
+		h.manager.resumeBuildAfterReview(build)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"rejected": len(req.EditIDs)})
+}
+
+// ApproveAllEdits approves all pending proposed edits
+// POST /api/v1/build/:id/approve-all
+func (h *BuildHandler) ApproveAllEdits(c *gin.Context) {
+	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	build, err := h.manager.GetBuild(buildID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		return
+	}
+	if uid != build.UserID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	approved := h.manager.editStore.ApproveAll(buildID)
+	h.manager.applyApprovedEdits(build, approved)
+
+	c.JSON(http.StatusOK, gin.H{
+		"approved": len(approved),
+		"message":  "All edits approved and applied",
+	})
+}
+
+// RejectAllEdits rejects all pending proposed edits
+// POST /api/v1/build/:id/reject-all
+func (h *BuildHandler) RejectAllEdits(c *gin.Context) {
+	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	build, err := h.manager.GetBuild(buildID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		return
+	}
+	if uid != build.UserID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	_ = h.manager.editStore.RejectAll(buildID)
+	h.manager.resumeBuildAfterReview(build)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "All edits rejected, build resuming",
+	})
+}
+
 // RegisterRoutes registers all build routes on the router
 func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	build := rg.Group("/build")
@@ -1203,6 +1397,14 @@ func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		build.GET("/:id/artifacts", h.GetBuildArtifacts)
 		build.POST("/:id/apply", h.ApplyBuildArtifacts)
 		build.POST("/:id/cancel", h.CancelBuild)
+		build.POST("/kill-all", h.KillAllBuilds)
+
+		// Diff workflow routes
+		build.GET("/:id/proposed-edits", h.GetProposedEdits)
+		build.POST("/:id/approve-edits", h.ApproveEdits)
+		build.POST("/:id/reject-edits", h.RejectEdits)
+		build.POST("/:id/approve-all", h.ApproveAllEdits)
+		build.POST("/:id/reject-all", h.RejectAllEdits)
 	}
 
 	// Build history endpoints
