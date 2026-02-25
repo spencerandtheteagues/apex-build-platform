@@ -34,6 +34,79 @@ func NewBuildHandler(manager *AgentManager, hub *WSHub) *BuildHandler {
 	}
 }
 
+// PreflightCheck validates provider credentials and billing status before a build.
+// POST /api/v1/build/preflight
+func (h *BuildHandler) PreflightCheck(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid, ok := userID.(uint)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user context"})
+		return
+	}
+
+	type preflightResult struct {
+		Ready      bool     `json:"ready"`
+		Providers  int      `json:"providers_available"`
+		Names      []string `json:"provider_names"`
+		ErrorCode  string   `json:"error_code,omitempty"`
+		Error      string   `json:"error,omitempty"`
+		Suggestion string   `json:"suggestion,omitempty"`
+	}
+
+	router := h.manager.aiRouter
+	if router == nil {
+		c.JSON(http.StatusServiceUnavailable, preflightResult{
+			ErrorCode:  "NO_ROUTER",
+			Error:      "AI routing service unavailable",
+			Suggestion: "Server configuration error — contact support",
+		})
+		return
+	}
+
+	if !router.HasConfiguredProviders() {
+		c.JSON(http.StatusServiceUnavailable, preflightResult{
+			ErrorCode:  "NO_PROVIDER",
+			Error:      "No AI providers configured",
+			Suggestion: "Add an API key for at least one AI provider in Settings",
+		})
+		return
+	}
+
+	providers := router.GetAvailableProvidersForUser(uid)
+	if len(providers) == 0 {
+		allProviders := router.GetAvailableProviders()
+		if len(allProviders) == 0 {
+			c.JSON(http.StatusServiceUnavailable, preflightResult{
+				ErrorCode:  "ALL_PROVIDERS_DOWN",
+				Error:      "All AI providers are currently unavailable",
+				Suggestion: "Check your API keys in Settings or try again shortly",
+			})
+			return
+		}
+		c.JSON(http.StatusPaymentRequired, preflightResult{
+			ErrorCode:  "INSUFFICIENT_CREDITS",
+			Error:      "No AI providers available for your account",
+			Suggestion: "Add credits or configure a personal API key in Settings",
+		})
+		return
+	}
+
+	names := make([]string, len(providers))
+	for i, p := range providers {
+		names[i] = string(p)
+	}
+
+	c.JSON(http.StatusOK, preflightResult{
+		Ready:     true,
+		Providers: len(providers),
+		Names:     names,
+	})
+}
+
 // StartBuild creates and starts a new build
 // POST /api/v1/build/start
 func (h *BuildHandler) StartBuild(c *gin.Context) {
@@ -73,6 +146,26 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 	}
 
 	log.Printf("StartBuild: description=%s, mode=%s", truncate(req.Description, 50), req.Mode)
+
+	// Preflight: fail fast if no providers are available for this user
+	if router := h.manager.aiRouter; router != nil {
+		if !router.HasConfiguredProviders() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error":      "No AI providers configured",
+				"error_code": "NO_PROVIDER",
+				"suggestion": "Add an API key for at least one AI provider in Settings",
+			})
+			return
+		}
+		if providers := router.GetAvailableProvidersForUser(uid); len(providers) == 0 {
+			c.JSON(http.StatusPaymentRequired, gin.H{
+				"error":      "No AI providers available for your account",
+				"error_code": "INSUFFICIENT_CREDITS",
+				"suggestion": "Add credits or configure a personal API key in Settings",
+			})
+			return
+		}
+	}
 
 	// Validate description
 	if len(req.Description) < 10 {
@@ -1093,6 +1186,7 @@ func isActiveBuildStatus(status string) bool {
 func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	build := rg.Group("/build")
 	{
+		build.POST("/preflight", h.PreflightCheck)
 		build.POST("/start", h.StartBuild)
 		build.GET("/:id", h.GetBuildDetails)
 		build.GET("/:id/status", h.GetBuildStatus)

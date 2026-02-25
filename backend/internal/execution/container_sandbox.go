@@ -472,11 +472,11 @@ ENV NODE_ENV=production
 	case "go":
 		return `FROM golang:1.22-bookworm
 RUN useradd -m -s /bin/false sandbox && \
-    mkdir -p /work /tmp && \
+    mkdir -p /work /tmp /tmp/go-cache /tmp/go-mod && \
     chown -R sandbox:sandbox /work /tmp /go
 USER sandbox
 WORKDIR /work
-ENV GOCACHE=/tmp/go-cache CGO_ENABLED=0
+ENV GOCACHE=/tmp/go-cache GOMODCACHE=/tmp/go-mod TMPDIR=/tmp CGO_ENABLED=0
 `
 	case "rust":
 		return `FROM rust:1.75-slim-bookworm
@@ -934,7 +934,7 @@ func (s *ContainerSandbox) getExecutionCommand(language, filename string) []stri
 // languageNeedsExecutableTmp returns true when /tmp must allow executing compiled artifacts.
 func (s *ContainerSandbox) languageNeedsExecutableTmp(language string) bool {
 	switch strings.ToLower(strings.TrimSpace(language)) {
-	case "go", "rust", "c", "cpp":
+	case "go", "rust", "c", "cpp", "java":
 		return true
 	default:
 		return false

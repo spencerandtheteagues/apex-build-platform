@@ -381,6 +381,19 @@ export class ApiService {
   }
 
   // Build endpoints (Agent Orchestration System)
+
+  async buildPreflight(): Promise<{
+    ready: boolean
+    providers_available: number
+    provider_names?: string[]
+    error_code?: string
+    error?: string
+    suggestion?: string
+  }> {
+    const response = await this.client.post('/build/preflight')
+    return response.data
+  }
+
   async startBuild(data: {
     description: string
     prompt?: string

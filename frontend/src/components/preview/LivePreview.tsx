@@ -602,19 +602,46 @@ export default function LivePreview({
       {/* Toolbar */}
       <div className="flex items-center justify-between px-3 py-2 bg-gray-800/50 border-b border-gray-700">
         <div className="flex items-center gap-2">
-          {/* Status indicator */}
+          {/* Health-driven status indicator */}
           <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs ${
-            connected ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-400'
-          }`}>
-            {connected ? (
+            loading ? 'bg-yellow-500/20 text-yellow-400' :
+            connected && status?.active && (!serverDetection?.has_backend || serverStatus?.running) ? 'bg-green-500/20 text-green-400' :
+            connected && status?.active && serverDetection?.has_backend && !serverStatus?.running ? 'bg-orange-500/20 text-orange-400' :
+            error || iframeError ? 'bg-red-500/20 text-red-400' :
+            'bg-gray-700 text-gray-400'
+          }`}
+            title={
+              loading ? 'Starting preview...' :
+              error ? `Error: ${error}` :
+              serverStatus?.last_error ? `Backend error: ${serverStatus.last_error}` :
+              serverStatus?.exit_code !== undefined && serverStatus.exit_code !== 0 ? `Backend exited with code ${serverStatus.exit_code}` :
+              undefined
+            }
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span>Starting</span>
+              </>
+            ) : connected && status?.active && (!serverDetection?.has_backend || serverStatus?.running) ? (
               <>
                 <Wifi className="w-3 h-3" />
-                <span>Live</span>
+                <span>Running</span>
+              </>
+            ) : connected && status?.active && serverDetection?.has_backend && !serverStatus?.running ? (
+              <>
+                <AlertCircle className="w-3 h-3" />
+                <span>Backend Down</span>
+              </>
+            ) : error || iframeError ? (
+              <>
+                <ShieldOff className="w-3 h-3" />
+                <span>Failed</span>
               </>
             ) : (
               <>
                 <WifiOff className="w-3 h-3" />
-                <span>Offline</span>
+                <span>Not Running</span>
               </>
             )}
           </div>

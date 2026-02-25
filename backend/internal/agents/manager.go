@@ -1885,7 +1885,9 @@ func (am *AgentManager) processResult(result *TaskResult) {
 		}
 
 		// Collaborative incident mode: providers discuss and vote on recovery strategy.
-		if !insufficientCredits && buildErr == nil && (nonRetriable || task.RetryCount >= 1 || strings.Contains(strings.ToLower(errorMsg), "all_providers_failed")) {
+		// Skip consensus entirely for auth/billing/credit failures — these are deterministic
+		// and no amount of retrying, provider switching, or solver spawning will fix them.
+		if !insufficientCredits && !nonRetriable && buildErr == nil && (task.RetryCount >= 1 || strings.Contains(strings.ToLower(errorMsg), "all_providers_failed")) {
 			decision, votes := am.runFailureConsensus(build, agent, task, result.Error, retryStrategy)
 			if task.Input == nil {
 				task.Input = map[string]any{}
@@ -1896,12 +1898,10 @@ func (am *AgentManager) processResult(result *TaskResult) {
 			switch decision {
 			case decisionSwitchProvider:
 				retryStrategy = "switch_provider"
-				nonRetriable = false
 			case decisionRetrySame:
 				if retryStrategy == "non_retriable" {
 					retryStrategy = "standard_retry"
 				}
-				nonRetriable = false
 			case decisionSpawnSolver:
 				nonRetriable = true
 				task.MaxRetries = task.RetryCount
@@ -7492,7 +7492,7 @@ func (am *AgentManager) strategyToDecision(strategy string) consensusDecision {
 	case "fix_and_retry", "standard_retry", "backoff", "reduce_context":
 		return decisionRetrySame
 	case "non_retriable":
-		return decisionSpawnSolver
+		return decisionAbort
 	case "abort":
 		return decisionAbort
 	default:

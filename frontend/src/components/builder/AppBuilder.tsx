@@ -1483,6 +1483,20 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           typeof document !== 'undefined' &&
           document.visibilityState === 'visible'
 
+        // Auto-apply artifacts server-side for atomic project creation
+        if (finalStatus === 'completed' && completedBuildId) {
+          void (async () => {
+            try {
+              const applied = await apiService.applyBuildArtifacts(completedBuildId)
+              if (applied.project_id) {
+                setCreatedProjectId(applied.project_id)
+              }
+            } catch (applyErr) {
+              console.warn('Auto-apply artifacts failed (non-fatal):', applyErr)
+            }
+          })()
+        }
+
         if (finalStatus === 'completed' && !previewPreparedRef.current && !shouldAutoOpenIDE) {
           previewPreparedRef.current = true
           void preparePreview(true)
@@ -2355,6 +2369,26 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     addSystemMessage(`AI Power: ${powerMode === 'max' ? 'MAX POWER (Opus 4.6 / GPT-5.2 Codex / Gemini 3 Pro)' : powerMode === 'balanced' ? 'Balanced (Sonnet 4.5 / GPT-5 / Gemini 3 Flash)' : 'Fast & Cheap (Haiku 4.5 / GPT-4o Mini / Flash Lite)'}`)
 
     try {
+      // Preflight: verify providers are available before starting build
+      try {
+        const preflight = await apiService.buildPreflight()
+        if (!preflight.ready) {
+          const errorMsg = preflight.suggestion || preflight.error || 'AI providers unavailable'
+          addSystemMessage(`Preflight failed: ${errorMsg}`)
+          setIsBuilding(false)
+          return
+        }
+      } catch (preflightErr: any) {
+        const errData = preflightErr?.response?.data
+        if (errData?.error_code) {
+          addSystemMessage(`Cannot start build: ${errData.error || errData.suggestion || 'Provider check failed'}`)
+          setIsBuilding(false)
+          return
+        }
+        // Non-fatal: preflight endpoint may not exist on older backends
+        console.warn('Preflight check failed (non-fatal):', preflightErr)
+      }
+
       const techStackOverride = buildTechStackOverride()
       const response = await apiService.startBuild({
         description: appDescription,
