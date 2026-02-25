@@ -1,0 +1,177 @@
+name: Reliability Benchmark (Nightly)
+
+on:
+  schedule:
+    - cron: '30 7 * * *'
+  workflow_dispatch:
+    inputs:
+      required_pass_rate:
+        description: Required pass rate (0.0-1.0) for generated E2E reliability suite
+        required: false
+        default: '1.0'
+      expected_min_tests:
+        description: Minimum expected generated test count
+        required: false
+        default: '15'
+
+concurrency:
+  group: reliability-benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  e2e-reliability:
+    name: E2E Reliability Benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: apex_test_pw
+          POSTGRES_DB: apex_build
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d apex_build"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      GO_VERSION: '1.23'
+      NODE_VERSION: '18'
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:5173
+      PLAYWRIGHT_API_URL: http://127.0.0.1:8080
+      PLAYWRIGHT_RUN_PREVIEW_PROXY_SCENARIOS: '1'
+      RELIABILITY_REQUIRED_PASS_RATE: ${{ inputs.required_pass_rate || '1.0' }}
+      RELIABILITY_EXPECTED_MIN_TESTS: ${{ inputs.expected_min_tests || '15' }}
+      DATABASE_URL: postgres://postgres:apex_test_pw@127.0.0.1:5432/apex_build?sslmode=disable
+      REDIS_URL: redis://127.0.0.1:6379
+      JWT_SECRET: benchmark-ci-jwt-secret-0123456789abcdefghijklmnopqrstuvwxyz
+      SECRETS_MASTER_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      ENVIRONMENT: development
+      GIN_MODE: release
+      BUILD_PREVIEW_HTTP_SMOKE: 'false'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            frontend/package-lock.json
+            tests/e2e/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install E2E deps
+        working-directory: tests/e2e
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: tests/e2e
+        run: npx playwright install --with-deps chromium firefox
+
+      - name: Start backend
+        working-directory: backend
+        run: |
+          nohup go run ./cmd/main.go > /tmp/apex-backend.log 2>&1 &
+          echo $! > /tmp/apex-backend.pid
+
+      - name: Wait for backend health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/health > /tmp/backend-health.json; then
+              cat /tmp/backend-health.json
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Backend failed to become healthy"
+          tail -200 /tmp/apex-backend.log || true
+          exit 1
+
+      - name: Start frontend
+        working-directory: frontend
+        env:
+          VITE_API_URL: http://127.0.0.1:8080/api/v1
+          VITE_WS_URL: ws://127.0.0.1:8080/ws
+        run: |
+          nohup npm run dev -- --host 127.0.0.1 --port 5173 > /tmp/apex-frontend.log 2>&1 &
+          echo $! > /tmp/apex-frontend.pid
+
+      - name: Wait for frontend
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:5173/ > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Frontend failed to start"
+          tail -200 /tmp/apex-frontend.log || true
+          exit 1
+
+      - name: Generate E2E specs (benchmark manifests enabled)
+        working-directory: tests/e2e
+        run: npm run generate
+
+      - name: Run reliability benchmark E2E (JSON report)
+        working-directory: tests/e2e
+        run: |
+          mkdir -p test-results
+          set +e
+          npx playwright test specs/generated --reporter=json > test-results/reliability-playwright.json
+          EXIT_CODE=$?
+          echo "PLAYWRIGHT_EXIT_CODE=$EXIT_CODE" >> $GITHUB_ENV
+          set -e
+
+      - name: Summarize reliability results and enforce threshold
+        working-directory: tests/e2e
+        run: |
+          node scripts/summarize-playwright-json.mjs \
+            test-results/reliability-playwright.json \
+            test-results/reliability-summary.json
+          cat test-results/reliability-summary.json
+          test "${PLAYWRIGHT_EXIT_CODE:-0}" -eq 0
+
+      - name: Upload reliability artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reliability-benchmark-artifacts
+          path: |
+            tests/e2e/test-results/reliability-playwright.json
+            tests/e2e/test-results/reliability-summary.json
+            tests/e2e/playwright-report
+            /tmp/apex-backend.log
+            /tmp/apex-frontend.log
+          retention-days: 14
+
+      - name: Stop background services
+        if: always()
+        run: |
+          if [ -f /tmp/apex-backend.pid ]; then kill "$(cat /tmp/apex-backend.pid)" || true; fi
+          if [ -f /tmp/apex-frontend.pid ]; then kill "$(cat /tmp/apex-frontend.pid)" || true; fi

@@ -132,6 +132,8 @@ interface BuildState {
   qualityGateStatus?: 'pending' | 'running' | 'passed' | 'failed'
   qualityGateStage?: string
   errorMessage?: string
+  websocketUrl?: string
+  artifactRevision?: string
 }
 
 type BuildMode = 'fast' | 'full'
@@ -943,6 +945,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     generatedFilesRef.current = generatedFiles
   }, [generatedFiles])
 
+  const buildStateRef = useRef<BuildState | null>(buildState)
+  useEffect(() => {
+    buildStateRef.current = buildState
+  }, [buildState])
+
   const { user, currentProject, createProject, setCurrentProject } = useStore()
   const persistActiveBuildId = useCallback((buildId: string) => {
     try {
@@ -1137,12 +1144,25 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   }
 
   // WebSocket URL builder
-  const buildWebSocketUrl = useCallback((buildId: string): string => {
+  const buildWebSocketUrl = useCallback((buildId: string, providedUrl?: string): string => {
     const token = localStorage.getItem('apex_access_token')
     const appendToken = (url: string) => {
       if (!token) return url
+      if (/[?&]token=/.test(url)) return url
       const separator = url.includes('?') ? '&' : '?'
       return `${url}${separator}token=${encodeURIComponent(token)}`
+    }
+
+    if (providedUrl && providedUrl.trim()) {
+      const raw = providedUrl.trim()
+      const absolute = /^wss?:\/\//i.test(raw)
+        ? raw
+        : (() => {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+            const normalized = raw.startsWith('/') ? raw : `/${raw}`
+            return `${protocol}//${window.location.host}${normalized}`
+          })()
+      return appendToken(absolute)
     }
 
     if (import.meta.env.VITE_WS_URL) {
@@ -1160,8 +1180,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   }, [])
 
   // WebSocket connection
-  const connectWebSocket = useCallback((buildId: string) => {
-    const wsUrl = buildWebSocketUrl(buildId)
+  const connectWebSocket = useCallback((buildId: string, providedUrl?: string) => {
+    const wsUrl = buildWebSocketUrl(buildId, providedUrl)
     console.log('Connecting to WebSocket:', wsUrl)
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -1200,7 +1220,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
         setTimeout(() => {
           if (isBuildingRef.current) {
-            connectWebSocket(buildId)
+            connectWebSocket(buildId, buildStateRef.current?.websocketUrl)
           }
         }, delay)
       } else if (wsReconnectAttempts.current >= maxWsReconnectAttempts) {
@@ -1826,6 +1846,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       }))
   }, [])
 
+  const normalizeArtifactManifestFiles = useCallback((payload: any) => {
+    const manifestFiles = payload?.manifest?.files
+    return normalizeGeneratedFiles(Array.isArray(manifestFiles) ? manifestFiles : [])
+  }, [normalizeGeneratedFiles])
+
   const mergeGeneratedFiles = useCallback((incoming: Array<{ path: string; content: string; language: string }>) => {
     if (!incoming || incoming.length === 0) return
     setGeneratedFiles(prev => {
@@ -1844,6 +1869,21 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
     const buildId = buildIdOverride || buildState?.id
     if (!buildId) return []
+
+    try {
+      const artifacts = await apiService.getBuildArtifacts(buildId)
+      const normalized = normalizeArtifactManifestFiles(artifacts)
+      if (normalized.length > 0) {
+        mergeGeneratedFiles(normalized)
+        setBuildState(prev => prev && prev.id === buildId
+          ? { ...prev, artifactRevision: artifacts.revision || prev.artifactRevision }
+          : prev
+        )
+        return normalized
+      }
+    } catch (error) {
+      // Ignore and fall back to legacy build files/completed build fetch
+    }
 
     try {
       const buildFiles = await apiService.getBuildFiles(buildId)
@@ -1868,7 +1908,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     }
 
     return []
-  }, [buildState?.id, mergeGeneratedFiles, normalizeGeneratedFiles])
+  }, [buildState?.id, mergeGeneratedFiles, normalizeArtifactManifestFiles, normalizeGeneratedFiles])
 
   const deriveProjectName = useCallback((source: string) => {
     const base = source || 'Generated App'
@@ -1883,6 +1923,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     projectName?: string
     description?: string
     forceNew?: boolean
+    buildId?: string
   }) => {
     if (!options?.forceNew && createdProjectId && currentProject?.id === createdProjectId) {
       return currentProject
@@ -1899,19 +1940,40 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       }
     }
 
-    const files = options?.files && options.files.length > 0
-      ? options.files
-      : await resolveGeneratedFiles()
-
-    if (files.length === 0) {
-      throw new Error('No files available to create project from')
-    }
-
     setIsCreatingProject(true)
     try {
       const projectNameSource = options?.projectName || appDescription || buildState?.description || 'Generated App'
       const projectName = deriveProjectName(projectNameSource)
       const projectDescription = options?.description || appDescription || buildState?.description || ''
+      const buildIdForApply = options?.buildId || buildState?.id
+
+      if (buildIdForApply) {
+        try {
+          const applyResponse = await apiService.applyBuildArtifacts(buildIdForApply, {
+            project_id: !options?.forceNew && createdProjectId ? createdProjectId : undefined,
+            project_name: projectName,
+            replace_missing: true,
+          })
+          const appliedProject = await apiService.getProject(applyResponse.project_id)
+          setCreatedProjectId(appliedProject.id)
+          setCurrentProject(appliedProject)
+          addSystemMessage(
+            `Project "${appliedProject.name}" ${applyResponse.result?.created_project ? 'created' : 'updated'} from canonical build artifacts (${applyResponse.result?.total_files ?? 0} files)`
+          )
+          return appliedProject
+        } catch (applyError) {
+          console.warn('Failed to apply canonical build artifacts, falling back to client-side file replay:', applyError)
+          addSystemMessage('Canonical build apply unavailable. Falling back to local file replay...')
+        }
+      }
+
+      const files = options?.files && options.files.length > 0
+        ? options.files
+        : await resolveGeneratedFiles(options?.buildId)
+
+      if (files.length === 0) {
+        throw new Error('No files available to create project from')
+      }
 
       const extensions = files.map(f => f.path.split('.').pop()?.toLowerCase() || '')
       let language = 'javascript'
@@ -2124,6 +2186,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       qualityGateStage: payload.quality_gate_stage || undefined,
       availableProviders: Array.isArray(payload.available_providers) ? payload.available_providers : undefined,
       errorMessage: extractBuildFailureReason(payload),
+      websocketUrl: typeof payload.websocket_url === 'string' ? payload.websocket_url : undefined,
+      artifactRevision: typeof payload.artifact_revision === 'string' ? payload.artifact_revision : undefined,
     })
 
     const shouldReconnectLive = !isTerminalBuildStatus(status) && options?.reconnectLive !== false && payload.live !== false
@@ -2193,6 +2257,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     setGeneratedFiles(files)
     await ensureProjectCreated({
       files,
+      buildId,
       projectName: completed.project_name || deriveProjectName(completed.description || 'Completed Build'),
       description: completed.description || '',
       forceNew: true,
@@ -2320,9 +2385,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         qualityGateRequired: true,
         qualityGateStatus: 'pending',
         qualityGateStage: '',
+        websocketUrl: typeof response.websocket_url === 'string' ? response.websocket_url : undefined,
       })
 
-      connectWebSocket(buildId)
+      connectWebSocket(buildId, response.websocket_url)
       addSystemMessage(`Build started! Build ID: ${buildId}`)
 
     } catch (error: unknown) {

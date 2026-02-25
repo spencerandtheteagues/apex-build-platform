@@ -441,8 +441,71 @@ export class ApiService {
     return response.data.files || []
   }
 
+  async getBuildArtifacts(buildId: string): Promise<{
+    build_id: string
+    manifest: {
+      build_id: string
+      revision: string
+      project_id?: number
+      source?: string
+      files: Array<{ path: string; content: string; language?: string }>
+      entrypoints?: Record<string, string>
+      runtime_hints?: Record<string, any>
+      verification?: Record<string, any>
+      warnings?: string[]
+      errors?: string[]
+    }
+    revision: string
+    files: number
+    source?: string
+    project_id?: number
+    live?: boolean
+  }> {
+    const response = await this.client.get(`/build/${buildId}/artifacts`)
+    return response.data
+  }
+
+  async applyBuildArtifacts(buildId: string, data?: {
+    project_id?: number
+    project_name?: string
+    replace_missing?: boolean
+  }): Promise<{
+    success: boolean
+    build_id: string
+    project_id: number
+    revision: string
+    result: {
+      project_id: number
+      created_project: boolean
+      inserted: number
+      updated: number
+      deleted: number
+      total_files: number
+      revision: string
+    }
+  }> {
+    const response = await this.client.post(`/build/${buildId}/apply`, data || {})
+    return response.data
+  }
+
   async cancelBuild(buildId: string): Promise<void> {
     await this.client.post(`/build/${buildId}/cancel`)
+  }
+
+  async startFullStackPreview(data: {
+    project_id: number
+    entry_point?: string
+    framework?: string
+    env_vars?: Record<string, string>
+    sandbox?: boolean
+    start_backend?: boolean
+    require_backend?: boolean
+    backend_entry_file?: string
+    backend_command?: string
+    backend_env_vars?: Record<string, string>
+  }): Promise<any> {
+    const response = await this.client.post('/preview/fullstack/start', data)
+    return response.data
   }
 
   // Build history endpoints

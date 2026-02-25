@@ -1,0 +1,59 @@
+{
+  "id": "apex-build-preview-proxy",
+  "name": "APEX.BUILD Preview Proxy (Full-stack)",
+  "enabledWhenEnv": "PLAYWRIGHT_RUN_PREVIEW_PROXY_SCENARIOS",
+  "previewProxyScenarios": [
+    {
+      "name": "routes-api-graphql-trpc",
+      "project": {
+        "name": "PW Preview Proxy Fixture",
+        "description": "Validates preview proxy routing for full-stack apps",
+        "language": "javascript"
+      },
+      "files": [
+        {
+          "path": "/index.html",
+          "content": "<!doctype html><html><body><h1>Preview Proxy Fixture</h1><script>console.log('fixture')</script></body></html>"
+        },
+        {
+          "path": "server.js",
+          "content": "const http = require('http'); const port = Number(process.env.PORT || 9100); const server = http.createServer((req, res) => { if (req.url.startsWith('/api/hello')) { res.writeHead(200, {'content-type':'application/json'}); return res.end(JSON.stringify({ ok: true, route: 'api', hello: 'world' })); } if (req.url.startsWith('/graphql')) { res.writeHead(200, {'content-type':'application/json'}); return res.end(JSON.stringify({ data: { ping: 'pong' } })); } if (req.url.startsWith('/trpc/ping')) { res.writeHead(200, {'content-type':'application/json'}); return res.end(JSON.stringify({ result: { data: 'trpc-ok' } })); } res.writeHead(404, {'content-type':'text/plain'}); res.end('not found'); }); server.listen(port, '127.0.0.1', () => console.log('listening', port));"
+        }
+      ],
+      "preview": {
+        "entryPoint": "index.html",
+        "sandbox": false
+      },
+      "server": {
+        "entryFile": "server.js",
+        "command": "node server.js",
+        "requireBackend": true
+      },
+      "proxyAssertions": [
+        {
+          "path": "/",
+          "expectStatus": 200,
+          "bodyIncludes": "Preview Proxy Fixture"
+        },
+        {
+          "path": "/api/hello",
+          "expectStatus": 200,
+          "jsonPath": "hello",
+          "jsonEquals": "world"
+        },
+        {
+          "path": "/graphql",
+          "expectStatus": 200,
+          "jsonPath": "data.ping",
+          "jsonEquals": "pong"
+        },
+        {
+          "path": "/trpc/ping",
+          "expectStatus": 200,
+          "jsonPath": "result.data",
+          "jsonEquals": "trpc-ok"
+        }
+      ]
+    }
+  ]
+}

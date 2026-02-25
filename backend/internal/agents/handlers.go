@@ -136,6 +136,11 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		build.mu.RLock()
 		defer build.mu.RUnlock()
 
+		errorMessage := build.Error
+		if strings.TrimSpace(errorMessage) == "" && build.Status == BuildFailed {
+			errorMessage = latestFailedTaskErrorLocked(build)
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"id":                    build.ID,
 			"status":                string(build.Status),
@@ -151,7 +156,7 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 			"created_at":            build.CreatedAt,
 			"updated_at":            build.UpdatedAt,
 			"completed_at":          build.CompletedAt,
-			"error":                 build.Error,
+			"error":                 errorMessage,
 			"live":                  true,
 		})
 		return
@@ -194,6 +199,29 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		"live":                   false,
 		"restored_from_snapshot": true,
 	})
+}
+
+// latestFailedTaskErrorLocked extracts the latest actionable task failure from a live build.
+// Callers must hold build.mu while invoking this helper.
+func latestFailedTaskErrorLocked(build *Build) string {
+	if build == nil {
+		return ""
+	}
+	for i := len(build.Tasks) - 1; i >= 0; i-- {
+		task := build.Tasks[i]
+		if task == nil || task.Status != TaskFailed {
+			continue
+		}
+		if msg := strings.TrimSpace(task.Error); msg != "" {
+			return msg
+		}
+		for j := len(task.ErrorHistory) - 1; j >= 0; j-- {
+			if msg := strings.TrimSpace(task.ErrorHistory[j].Error); msg != "" {
+				return msg
+			}
+		}
+	}
+	return ""
 }
 
 // GetBuildDetails returns full details of a build including agents and tasks
@@ -508,13 +536,8 @@ func (h *BuildHandler) GetGeneratedFiles(c *gin.Context) {
 		build.mu.RLock()
 		defer build.mu.RUnlock()
 
-		// Collect all generated files from tasks
-		files := make([]GeneratedFile, 0)
-		for _, task := range build.Tasks {
-			if task.Output != nil {
-				files = append(files, task.Output.Files...)
-			}
-		}
+		// Return the canonical deduplicated artifact set used for finalization/checkpointing.
+		files := h.manager.collectGeneratedFiles(build)
 
 		c.JSON(http.StatusOK, gin.H{
 			"build_id": buildID,
@@ -540,6 +563,192 @@ func (h *BuildHandler) GetGeneratedFiles(c *gin.Context) {
 		"files":    files,
 		"count":    len(files),
 		"live":     false,
+	})
+}
+
+// GetBuildArtifacts returns the canonical artifact manifest for a build.
+// GET /api/v1/build/:id/artifacts
+func (h *BuildHandler) GetBuildArtifacts(c *gin.Context) {
+	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	manifest, live, err := h.loadArtifactManifestForUser(uid, buildID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":   "build not found",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"build_id":   buildID,
+		"manifest":   manifest,
+		"live":       live,
+		"revision":   manifest.Revision,
+		"files":      len(manifest.Files),
+		"source":     manifest.Source,
+		"project_id": manifest.ProjectID,
+	})
+}
+
+// ApplyBuildArtifacts transactionally applies a build's canonical artifact manifest to a project.
+// POST /api/v1/build/:id/apply
+func (h *BuildHandler) ApplyBuildArtifacts(c *gin.Context) {
+	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	var req struct {
+		ProjectID      *uint  `json:"project_id"`
+		ProjectName    string `json:"project_name,omitempty"`
+		ReplaceMissing *bool  `json:"replace_missing,omitempty"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil && strings.TrimSpace(err.Error()) != "EOF" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid request",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	manifest, live, err := h.loadArtifactManifestForUser(uid, buildID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":   "build not found",
+			"details": err.Error(),
+		})
+		return
+	}
+	if len(manifest.Files) == 0 {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":   "no artifacts available",
+			"details": "This build has no canonical artifacts to apply.",
+		})
+		return
+	}
+
+	replaceMissing := true
+	if req.ReplaceMissing != nil {
+		replaceMissing = *req.ReplaceMissing
+	}
+
+	var result ApplyArtifactsResult
+	var targetProjectID uint
+	var createdProject bool
+
+	if h.db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database unavailable"})
+		return
+	}
+
+	err = h.db.Transaction(func(tx *gorm.DB) error {
+		var project models.Project
+		projectResolved := false
+
+		resolveExisting := func(projectID uint) error {
+			if err := tx.Where("id = ? AND owner_id = ?", projectID, uid).First(&project).Error; err != nil {
+				return err
+			}
+			projectResolved = true
+			return nil
+		}
+
+		switch {
+		case req.ProjectID != nil && *req.ProjectID != 0:
+			if err := resolveExisting(*req.ProjectID); err != nil {
+				return err
+			}
+		case manifest.ProjectID != nil && *manifest.ProjectID != 0:
+			if err := resolveExisting(*manifest.ProjectID); err != nil {
+				// Fall back to creating a new project if the old link no longer exists or is not accessible.
+				projectResolved = false
+			}
+		}
+
+		if !projectResolved {
+			description := strings.TrimSpace(manifest.Description)
+			if description == "" {
+				description = "Generated App"
+			}
+			created, err := createProjectForArtifactManifestTx(tx, uid, description, manifest)
+			if err != nil {
+				return err
+			}
+			project = *created
+			projectResolved = true
+			createdProject = true
+			if strings.TrimSpace(req.ProjectName) != "" {
+				if err := tx.Model(&models.Project{}).Where("id = ?", project.ID).Update("name", strings.TrimSpace(req.ProjectName)).Error; err != nil {
+					return err
+				}
+				project.Name = strings.TrimSpace(req.ProjectName)
+			}
+		}
+
+		applied, err := applyArtifactManifestTx(tx, &project, uid, manifest, replaceMissing)
+		if err != nil {
+			return err
+		}
+		result = applied
+		result.CreatedProject = createdProject
+		targetProjectID = project.ID
+
+		// Persist linkage for completed builds (idempotent even if the row does not exist yet).
+		if err := tx.Model(&models.CompletedBuild{}).
+			Where("build_id = ? AND user_id = ?", buildID, uid).
+			Updates(map[string]any{
+				"project_id":   project.ID,
+				"project_name": project.Name,
+				"updated_at":   time.Now(),
+			}).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "project not found or access denied"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "failed to apply build artifacts",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	if live {
+		if build, getErr := h.manager.GetBuild(buildID); getErr == nil {
+			build.mu.Lock()
+			build.ProjectID = &targetProjectID
+			build.UpdatedAt = time.Now()
+			build.mu.Unlock()
+		}
+	}
+	manifest.ProjectID = &targetProjectID
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":          true,
+		"build_id":         buildID,
+		"project_id":       targetProjectID,
+		"created_project":  result.CreatedProject,
+		"applied_revision": result.Manifest,
+		"applied_files":    result.AppliedFiles,
+		"deleted_files":    result.DeletedFiles,
+		"replace_missing":  replaceMissing,
+		"manifest":         manifest,
+		"message":          "Build artifacts applied successfully",
 	})
 }
 
@@ -832,6 +1041,45 @@ func parseBuildFiles(filesJSON string) ([]GeneratedFile, error) {
 	return files, nil
 }
 
+func (h *BuildHandler) loadArtifactManifestForUser(userID uint, buildID string) (BuildArtifactManifest, bool, error) {
+	if build, err := h.manager.GetBuild(buildID); err == nil {
+		if userID != build.UserID {
+			return BuildArtifactManifest{}, false, fmt.Errorf("access denied")
+		}
+
+		build.mu.RLock()
+		files := h.manager.collectGeneratedFiles(build)
+		projectID := build.ProjectID
+		buildError := strings.TrimSpace(build.Error)
+		buildStatus := string(build.Status)
+		build.mu.RUnlock()
+
+		manifest := buildArtifactManifest(buildID, "live", build.Description, projectID, files)
+		if buildError != "" {
+			manifest.Errors = append(manifest.Errors, buildError)
+		}
+		manifest.Verification["build_status"] = buildStatus
+		return manifest, true, nil
+	}
+
+	snapshot, err := h.getBuildSnapshot(userID, buildID)
+	if err != nil {
+		return BuildArtifactManifest{}, false, err
+	}
+	files, parseErr := parseBuildFiles(snapshot.FilesJSON)
+	if parseErr != nil {
+		return BuildArtifactManifest{}, false, parseErr
+	}
+
+	manifest := buildArtifactManifest(buildID, "snapshot", snapshot.Description, snapshot.ProjectID, files)
+	if strings.TrimSpace(snapshot.Error) != "" {
+		manifest.Errors = append(manifest.Errors, strings.TrimSpace(snapshot.Error))
+	}
+	manifest.Verification["build_status"] = snapshot.Status
+	manifest.GeneratedAt = snapshot.UpdatedAt
+	return manifest, false, nil
+}
+
 func isActiveBuildStatus(status string) bool {
 	switch status {
 	case string(BuildPending), string(BuildPlanning), string(BuildInProgress), string(BuildTesting), string(BuildReviewing):
@@ -854,6 +1102,8 @@ func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		build.GET("/:id/agents", h.GetAgents)
 		build.GET("/:id/tasks", h.GetTasks)
 		build.GET("/:id/files", h.GetGeneratedFiles)
+		build.GET("/:id/artifacts", h.GetBuildArtifacts)
+		build.POST("/:id/apply", h.ApplyBuildArtifacts)
 		build.POST("/:id/cancel", h.CancelBuild)
 	}
 

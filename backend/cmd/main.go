@@ -566,11 +566,11 @@ func main() {
 		communityHandler, hostingHandler, databaseHandler, debuggingHandler,
 		completionsHandler, extensionsHandler, enterpriseHandler, collabHub,
 		optimizedHandler,
-		byokHandler,   // BYOK API key management and model selection
-		exportHandler, // GitHub export (push projects to GitHub)
-		usageHandler,     // Usage tracking and quota API endpoints
-		quotaChecker,     // Quota enforcement middleware
-		rotationHandler,  // Key rotation (admin)
+		byokHandler,     // BYOK API key management and model selection
+		exportHandler,   // GitHub export (push projects to GitHub)
+		usageHandler,    // Usage tracking and quota API endpoints
+		quotaChecker,    // Quota enforcement middleware
+		rotationHandler, // Key rotation (admin)
 	)
 
 	// Activate the full router now that all services are initialized.
@@ -932,13 +932,14 @@ func setupRoutes(
 			// Live Preview endpoints
 			previewRoutes := protected.Group("/preview")
 			{
-				previewRoutes.POST("/start", previewHandler.StartPreview)                // Start preview server
-				previewRoutes.POST("/stop", previewHandler.StopPreview)                  // Stop preview server
-				previewRoutes.GET("/status/:projectId", previewHandler.GetPreviewStatus) // Get status
-				previewRoutes.POST("/refresh", previewHandler.RefreshPreview)            // Trigger reload
-				previewRoutes.POST("/hot-reload", previewHandler.HotReload)              // Hot reload file
-				previewRoutes.GET("/list", previewHandler.ListPreviews)                  // List active previews
-				previewRoutes.GET("/url/:projectId", previewHandler.GetPreviewURL)       // Get preview URL
+				previewRoutes.POST("/start", previewHandler.StartPreview)                    // Start preview server
+				previewRoutes.POST("/fullstack/start", previewHandler.StartFullStackPreview) // Start preview + backend runtime
+				previewRoutes.POST("/stop", previewHandler.StopPreview)                      // Stop preview server
+				previewRoutes.GET("/status/:projectId", previewHandler.GetPreviewStatus)     // Get status
+				previewRoutes.POST("/refresh", previewHandler.RefreshPreview)                // Trigger reload
+				previewRoutes.POST("/hot-reload", previewHandler.HotReload)                  // Hot reload file
+				previewRoutes.GET("/list", previewHandler.ListPreviews)                      // List active previews
+				previewRoutes.GET("/url/:projectId", previewHandler.GetPreviewURL)           // Get preview URL
 
 				// Bundler endpoints
 				previewRoutes.POST("/build", previewHandler.BuildProject)                       // Bundle project

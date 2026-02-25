@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"apex-build/internal/metrics"
 	"apex-build/pkg/models"
 
 	"gorm.io/gorm"
@@ -46,10 +47,16 @@ type ServerProcess struct {
 	Ready       bool
 	URL         string // Full URL to the server
 	Pid         int
+	ExitedAt    *time.Time
+	ExitCode    int
+	LastError   string
 	WorkDir     string
 	EnvVars     map[string]string
 	stopChan    chan struct{}
 	stoppedChan chan struct{}
+	Cancel      context.CancelFunc
+	stopOnce    sync.Once
+	stoppedOnce sync.Once
 }
 
 // ServerConfig contains configuration for starting a backend server
@@ -63,15 +70,18 @@ type ServerConfig struct {
 
 // ServerStatus represents the current state of a backend server
 type ServerStatus struct {
-	Running       bool      `json:"running"`
-	Port          int       `json:"port,omitempty"`
-	Pid           int       `json:"pid,omitempty"`
-	UptimeSeconds int64     `json:"uptime_seconds,omitempty"`
-	Command       string    `json:"command,omitempty"`
-	EntryFile     string    `json:"entry_file,omitempty"`
-	URL           string    `json:"url,omitempty"`
-	StartedAt     time.Time `json:"started_at,omitempty"`
-	Ready         bool      `json:"ready"`
+	Running       bool       `json:"running"`
+	Port          int        `json:"port,omitempty"`
+	Pid           int        `json:"pid,omitempty"`
+	UptimeSeconds int64      `json:"uptime_seconds,omitempty"`
+	Command       string     `json:"command,omitempty"`
+	EntryFile     string     `json:"entry_file,omitempty"`
+	URL           string     `json:"url,omitempty"`
+	StartedAt     time.Time  `json:"started_at,omitempty"`
+	Ready         bool       `json:"ready"`
+	ExitedAt      *time.Time `json:"exited_at,omitempty"`
+	ExitCode      int        `json:"exit_code,omitempty"`
+	LastError     string     `json:"last_error,omitempty"`
 }
 
 // ServerLogs contains captured server output
@@ -115,6 +125,9 @@ func (sr *ServerRunner) DetectServer(ctx context.Context, projectID uint) (*Serv
 	fileMap := make(map[string]string)
 	for _, f := range files {
 		fileMap[f.Path] = f.Content
+		if normalized := normalizeServerProjectPath(f.Path); normalized != "" {
+			fileMap[normalized] = f.Content
+		}
 	}
 
 	// Check for Node.js
@@ -287,7 +300,8 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 
 	// Check if already running
 	if proc, exists := sr.processes[config.ProjectID]; exists {
-		if proc.Ready {
+		if proc.Ready && proc.ExitedAt == nil {
+			metrics.RecordPreviewBackendStart("already_running")
 			return proc, nil
 		}
 		// Stop existing process if not ready
@@ -298,9 +312,11 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 	if config.Command == "" || config.EntryFile == "" {
 		detection, err := sr.DetectServer(ctx, config.ProjectID)
 		if err != nil {
+			metrics.RecordPreviewBackendStart("detect_failed")
 			return nil, fmt.Errorf("failed to detect server: %w", err)
 		}
 		if !detection.HasBackend {
+			metrics.RecordPreviewBackendStart("no_backend_detected")
 			return nil, fmt.Errorf("no backend server detected in project")
 		}
 		if config.Command == "" {
@@ -330,22 +346,23 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 	// Build command and args based on server type
 	var cmd *exec.Cmd
 	var args []string
+	procCtx, procCancel := context.WithCancel(context.Background())
 
 	switch {
 	case config.Command == "node":
 		args = []string{config.EntryFile}
-		cmd = exec.CommandContext(ctx, "node", args...)
+		cmd = exec.CommandContext(procCtx, "node", args...)
 
 	case config.Command == "python":
 		args = []string{config.EntryFile}
-		cmd = exec.CommandContext(ctx, "python", args...)
+		cmd = exec.CommandContext(procCtx, "python", args...)
 
 	case config.Command == "uvicorn":
 		// FastAPI: uvicorn main:app --host 0.0.0.0 --port 9100
 		module := strings.TrimSuffix(config.EntryFile, ".py")
 		module = strings.ReplaceAll(module, "/", ".")
 		args = []string{module + ":app", "--host", "0.0.0.0", "--port", fmt.Sprintf("%d", port)}
-		cmd = exec.CommandContext(ctx, "uvicorn", args...)
+		cmd = exec.CommandContext(procCtx, "uvicorn", args...)
 
 	case config.Command == "go run":
 		if config.EntryFile != "" {
@@ -353,11 +370,11 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		} else {
 			args = []string{"run", "."}
 		}
-		cmd = exec.CommandContext(ctx, "go", args...)
+		cmd = exec.CommandContext(procCtx, "go", args...)
 
 	case config.Command == "cargo run":
 		args = []string{"run"}
-		cmd = exec.CommandContext(ctx, "cargo", args...)
+		cmd = exec.CommandContext(procCtx, "cargo", args...)
 
 	default:
 		// Custom command
@@ -365,7 +382,7 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		if len(parts) == 0 {
 			return nil, fmt.Errorf("invalid command: %s", config.Command)
 		}
-		cmd = exec.CommandContext(ctx, parts[0], append(parts[1:], config.EntryFile)...)
+		cmd = exec.CommandContext(procCtx, parts[0], append(parts[1:], config.EntryFile)...)
 	}
 
 	// Set working directory
@@ -411,16 +428,19 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		Stderr:      stderr,
 		StartedAt:   time.Now(),
 		Ready:       false,
-		URL:         fmt.Sprintf("http://localhost:%d", port),
+		URL:         fmt.Sprintf("http://127.0.0.1:%d", port),
 		WorkDir:     workDir,
 		EnvVars:     config.EnvVars,
 		stopChan:    make(chan struct{}),
 		stoppedChan: make(chan struct{}),
+		Cancel:      procCancel,
 	}
 
 	// Start the process
 	if err := cmd.Start(); err != nil {
+		procCancel()
 		sr.releasePort(config.ProjectID)
+		metrics.RecordPreviewBackendStart("start_failed")
 		return nil, fmt.Errorf("failed to start server: %w", err)
 	}
 
@@ -432,8 +452,21 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 
 	// Wait for process completion in background
 	go func() {
-		defer close(proc.stoppedChan)
-		cmd.Wait()
+		err := cmd.Wait()
+		now := time.Now()
+		proc.Ready = false
+		proc.ExitedAt = &now
+		if err != nil {
+			proc.LastError = err.Error()
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				proc.ExitCode = exitErr.ExitCode()
+			} else {
+				proc.ExitCode = 1
+			}
+		}
+		proc.stopOnce.Do(func() { close(proc.stopChan) })
+		proc.stoppedOnce.Do(func() { close(proc.stoppedChan) })
+		metrics.RecordPreviewBackendProcessExit(classifyPreviewBackendExitReason(err, proc.ExitCode))
 	}()
 
 	// Wait for port to be ready
@@ -445,18 +478,42 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		select {
 		case <-proc.stoppedChan:
 			sr.releasePort(config.ProjectID)
+			metrics.RecordPreviewBackendStart("exited_before_ready")
 			return nil, fmt.Errorf("server process exited before becoming ready: %s", stderr.String())
 		default:
 			// Process still running but port not ready
 			sr.releasePort(config.ProjectID)
 			sr.killProcess(proc)
+			metrics.RecordPreviewBackendStart("not_ready_timeout")
 			return nil, fmt.Errorf("server did not start listening on port %d within 30 seconds", port)
 		}
 	}
 
 	sr.processes[config.ProjectID] = proc
+	metrics.RecordPreviewBackendStart("success")
 
 	return proc, nil
+}
+
+func classifyPreviewBackendExitReason(waitErr error, exitCode int) string {
+	if waitErr == nil {
+		return "clean"
+	}
+	if exitCode == 0 {
+		return "clean"
+	}
+	if exitCode == 137 || exitCode == 143 {
+		return "killed"
+	}
+	errLower := strings.ToLower(waitErr.Error())
+	switch {
+	case strings.Contains(errLower, "killed"), strings.Contains(errLower, "signal"):
+		return "killed"
+	case strings.Contains(errLower, "context canceled"), strings.Contains(errLower, "cancelled"):
+		return "cancelled"
+	default:
+		return "error"
+	}
 }
 
 // Stop stops a backend server process
@@ -474,10 +531,13 @@ func (sr *ServerRunner) stopProcessLocked(projectID uint) error {
 	}
 
 	// Signal stop
-	close(proc.stopChan)
+	proc.stopOnce.Do(func() { close(proc.stopChan) })
 
 	// Kill the process
 	sr.killProcess(proc)
+	if proc.Cancel != nil {
+		proc.Cancel()
+	}
 
 	// Release port
 	sr.releasePort(projectID)
@@ -529,9 +589,10 @@ func (sr *ServerRunner) GetStatus(projectID uint) *ServerStatus {
 	if !proc.StartedAt.IsZero() {
 		uptime = int64(time.Since(proc.StartedAt).Seconds())
 	}
-
+	running := proc.ExitedAt == nil
+	ready := proc.Ready && running
 	return &ServerStatus{
-		Running:       true,
+		Running:       running,
 		Port:          proc.Port,
 		Pid:           proc.Pid,
 		UptimeSeconds: uptime,
@@ -539,7 +600,10 @@ func (sr *ServerRunner) GetStatus(projectID uint) *ServerStatus {
 		EntryFile:     proc.EntryFile,
 		URL:           proc.URL,
 		StartedAt:     proc.StartedAt,
-		Ready:         proc.Ready,
+		Ready:         ready,
+		ExitedAt:      proc.ExitedAt,
+		ExitCode:      proc.ExitCode,
+		LastError:     proc.LastError,
 	}
 }
 
@@ -569,7 +633,11 @@ func (sr *ServerRunner) GetLogs(projectID uint) *ServerLogs {
 func (sr *ServerRunner) GetProcess(projectID uint) *ServerProcess {
 	sr.mu.RLock()
 	defer sr.mu.RUnlock()
-	return sr.processes[projectID]
+	proc := sr.processes[projectID]
+	if proc == nil || proc.ExitedAt != nil || !proc.Ready {
+		return nil
+	}
+	return proc
 }
 
 // Helper methods
@@ -684,7 +752,11 @@ func (sr *ServerRunner) writeProjectFiles(ctx context.Context, projectID uint, w
 			continue
 		}
 
-		filePath := filepath.Join(workDir, file.Path)
+		relativePath := normalizeServerProjectPath(file.Path)
+		if relativePath == "" {
+			continue
+		}
+		filePath := filepath.Join(workDir, relativePath)
 		// Validate path to prevent path traversal attacks
 		cleanPath := filepath.Clean(filePath)
 		if !strings.HasPrefix(cleanPath, cleanWorkDir+string(filepath.Separator)) && cleanPath != cleanWorkDir {
@@ -703,6 +775,21 @@ func (sr *ServerRunner) writeProjectFiles(ctx context.Context, projectID uint, w
 	}
 
 	return nil
+}
+
+func normalizeServerProjectPath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return ""
+	}
+	trimmed = strings.ReplaceAll(trimmed, "\\", "/")
+	trimmed = strings.TrimPrefix(trimmed, "./")
+	trimmed = strings.TrimPrefix(trimmed, "/")
+	trimmed = filepath.Clean(trimmed)
+	if trimmed == "." || trimmed == "" || strings.HasPrefix(trimmed, "..") {
+		return ""
+	}
+	return trimmed
 }
 
 // StopAll stops all running server processes (for cleanup)

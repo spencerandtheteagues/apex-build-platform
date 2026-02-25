@@ -45,6 +45,7 @@ export interface AgentEventHandlers {
 export class AgentApiService {
   private ws: WebSocket | null = null
   private buildId: string | null = null
+  private websocketUrl: string | null = null
   private reconnectAttempts = 0
   private maxReconnectAttempts = 5
   private reconnectDelay = 1000
@@ -61,6 +62,7 @@ export class AgentApiService {
     })
 
     this.buildId = response.build_id
+    this.websocketUrl = response.websocket_url || null
     return {
       ...response,
       status: response.status as AgentStatus
@@ -78,10 +80,12 @@ export class AgentApiService {
     this.isConnecting = true
 
     return new Promise((resolve, reject) => {
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const token = localStorage.getItem('apex_access_token')
-      const baseUrl = `${wsProtocol}//${window.location.host}/ws/build/${buildId}`
-      const wsUrl = token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl
+      const baseUrl = (this.websocketUrl && this.websocketUrl.trim()) ||
+        `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/build/${buildId}`
+      const wsUrl = token && !/[?&]token=/.test(baseUrl)
+        ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+        : baseUrl
 
       try {
         this.ws = new WebSocket(wsUrl)
@@ -296,6 +300,7 @@ export class AgentApiService {
       this.ws = null
     }
     this.buildId = null
+    this.websocketUrl = null
     this.handlers = {}
     this.messageQueue = []
   }

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"apex-build/internal/ai"
+	"apex-build/internal/metrics"
 	"apex-build/pkg/models"
 
 	"github.com/google/uuid"
@@ -590,6 +591,35 @@ func (am *AgentManager) inactivityMonitor(buildID string) {
 		build.mu.RLock()
 		status := build.Status
 		lastUpdate := build.UpdatedAt
+		pendingTasks := 0
+		inProgressTasks := 0
+		activeRecoveryTasks := 0
+		allTasksTerminal := true
+		for _, task := range build.Tasks {
+			if task == nil {
+				continue
+			}
+			switch task.Status {
+			case TaskPending:
+				pendingTasks++
+				allTasksTerminal = false
+			case TaskInProgress:
+				inProgressTasks++
+				allTasksTerminal = false
+			case TaskCompleted, TaskFailed, TaskCancelled:
+			default:
+				allTasksTerminal = false
+			}
+
+			if task.Status == TaskPending || task.Status == TaskInProgress {
+				if action, _ := task.Input["action"].(string); action != "" {
+					switch action {
+					case "fix_review_issues", "fix_tests", "regression_test", "post_fix_review", "solve_build_failure":
+						activeRecoveryTasks++
+					}
+				}
+			}
+		}
 		build.mu.RUnlock()
 
 		// Stop monitoring if build is complete or failed
@@ -599,6 +629,28 @@ func (am *AgentManager) inactivityMonitor(buildID string) {
 
 		// Check if there's been any activity
 		timeSinceUpdate := time.Since(lastUpdate)
+
+		// Self-heal builds that have reached a terminal task state but are still marked active.
+		// This covers finalization races where all tasks are done but checkBuildCompletion was not re-triggered.
+		if allTasksTerminal &&
+			(status == BuildPlanning || status == BuildInProgress || status == BuildTesting || status == BuildReviewing) &&
+			timeSinceUpdate > (2*checkInterval) {
+			log.Printf("Build %s: all tasks are terminal but build remains %s (idle %v). Re-running finalization.",
+				buildID, status, timeSinceUpdate.Round(time.Second))
+			am.checkBuildCompletion(build)
+			continue
+		}
+
+		// Hard-stop builds that are stuck in an active state beyond a stall threshold.
+		stallThreshold := am.buildStallTimeoutForBuild(build)
+		if timeSinceUpdate > stallThreshold &&
+			(status == BuildPlanning || status == BuildInProgress || status == BuildTesting || status == BuildReviewing) {
+			log.Printf("Build %s: stalled in %s for %v (pending=%d in_progress=%d recovery_active=%d); failing build",
+				buildID, status, timeSinceUpdate.Round(time.Second), pendingTasks, inProgressTasks, activeRecoveryTasks)
+			am.failBuildOnStall(buildID, status, timeSinceUpdate, pendingTasks, inProgressTasks, activeRecoveryTasks)
+			return
+		}
+
 		if timeSinceUpdate > inactivityThreshold {
 			warningCount++
 			log.Printf("Build %s: No activity for %v (warning %d/%d)", buildID, timeSinceUpdate.Round(time.Second), warningCount, maxInactivityWarnings)
@@ -640,6 +692,27 @@ func (am *AgentManager) inactivityMonitor(buildID string) {
 	}
 }
 
+func (am *AgentManager) buildStallTimeoutForBuild(build *Build) time.Duration {
+	defaultSeconds := 180 // fast builds should not sit idle for >3 minutes in active states
+	envKey := "BUILD_STALL_TIMEOUT_FAST_SECONDS"
+	if build != nil && build.Mode == ModeFull {
+		defaultSeconds = 420 // full builds get more headroom
+		envKey = "BUILD_STALL_TIMEOUT_FULL_SECONDS"
+	}
+	seconds := envInt(envKey, defaultSeconds)
+	if seconds < 90 {
+		seconds = 90
+	}
+
+	// Never exceed the global build timeout minus a small buffer.
+	buildTimeout := am.buildTimeoutForBuild(build)
+	maxAllowed := int(buildTimeout.Seconds()) - 30
+	if maxAllowed >= 90 && seconds > maxAllowed {
+		seconds = maxAllowed
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 // failBuildOnTimeout marks a timed-out build as failed and preserves partial artifacts.
 func (am *AgentManager) failBuildOnTimeout(buildID string, timeout time.Duration) {
 	am.mu.RLock()
@@ -673,6 +746,7 @@ func (am *AgentManager) failBuildOnTimeout(buildID string, timeout time.Duration
 		}
 	}
 	progress := build.Progress
+	mode := string(build.Mode)
 	build.mu.Unlock()
 
 	am.createCheckpoint(build, "Build Timed Out", "Build exceeded allowed execution time and was stopped")
@@ -700,8 +774,94 @@ func (am *AgentManager) failBuildOnTimeout(buildID string, timeout time.Duration
 	})
 
 	log.Printf("Build %s timed out: marked failed with %d files and %d cancelled tasks", buildID, len(allFiles), cancelledTasks)
+	metrics.RecordBuildFinalization(string(BuildFailed), mode, "timeout")
 
 	// Persist to database
+	am.persistCompletedBuild(build, allFiles)
+}
+
+// failBuildOnStall marks a build as failed when it remains active without progress beyond the stall threshold.
+func (am *AgentManager) failBuildOnStall(buildID string, status BuildStatus, idleFor time.Duration, pendingTasks, inProgressTasks, activeRecoveryTasks int) {
+	am.mu.RLock()
+	build, exists := am.builds[buildID]
+	am.mu.RUnlock()
+	if !exists {
+		return
+	}
+
+	build.mu.Lock()
+	if build.Status == BuildCompleted || build.Status == BuildFailed || build.Status == BuildCancelled {
+		build.mu.Unlock()
+		return
+	}
+
+	now := time.Now()
+	build.CompletedAt = &now
+	build.UpdatedAt = now
+	build.Status = BuildFailed
+	if strings.TrimSpace(build.Error) == "" {
+		build.Error = fmt.Sprintf(
+			"Build stalled in %s for %v (pending=%d, in_progress=%d, recovery_tasks=%d). Finalizing as failed.",
+			status, idleFor.Round(time.Second), pendingTasks, inProgressTasks, activeRecoveryTasks,
+		)
+	}
+
+	cancelledTasks := 0
+	mode := string(build.Mode)
+	for _, task := range build.Tasks {
+		if task == nil {
+			continue
+		}
+		if task.Status == TaskPending || task.Status == TaskInProgress {
+			task.Status = TaskCancelled
+			cancelledTasks++
+		}
+	}
+	progress := build.Progress
+	buildError := build.Error
+	build.mu.Unlock()
+
+	am.createCheckpoint(build, "Build Stalled", "Build entered a non-terminal active state and exceeded the stall threshold")
+
+	allFiles := am.collectGeneratedFiles(build)
+	qualityStage := "validation"
+	switch status {
+	case BuildTesting:
+		qualityStage = "testing"
+	case BuildReviewing:
+		qualityStage = "review"
+	}
+
+	am.broadcast(buildID, &WSMessage{
+		Type:      WSBuildError,
+		BuildID:   buildID,
+		Timestamp: now,
+		Data: map[string]any{
+			"status":                string(BuildFailed),
+			"error":                 "Build stalled",
+			"details":               buildError,
+			"progress":              progress,
+			"stalled":               true,
+			"stalled_status":        string(status),
+			"idle_for":              idleFor.Round(time.Second).String(),
+			"pending_tasks":         pendingTasks,
+			"in_progress_tasks":     inProgressTasks,
+			"active_recovery_tasks": activeRecoveryTasks,
+			"cancelled_tasks":       cancelledTasks,
+			"files_count":           len(allFiles),
+			"files":                 allFiles,
+			"recoverable":           false,
+			"quality_gate_required": true,
+			"quality_gate_passed":   false,
+			"quality_gate_stage":    qualityStage,
+		},
+	})
+
+	log.Printf("Build %s stalled: marked failed after %v idle in %s (pending=%d in_progress=%d recovery=%d)",
+		buildID, idleFor.Round(time.Second), status, pendingTasks, inProgressTasks, activeRecoveryTasks)
+	metrics.RecordBuildStall(string(status), mode)
+	metrics.RecordBuildFinalization(string(BuildFailed), mode, "stall")
+
 	am.persistCompletedBuild(build, allFiles)
 }
 
@@ -1846,8 +2006,17 @@ func (am *AgentManager) processResult(result *TaskResult) {
 				},
 			})
 
-			am.enqueueRecoveryTask(agent.BuildID, task, result.Error)
 			if build, err := am.GetBuild(agent.BuildID); err == nil {
+				if nonRetriable {
+					build.mu.Lock()
+					if strings.TrimSpace(build.Error) == "" {
+						build.Error = task.Error
+					}
+					build.UpdatedAt = time.Now()
+					build.mu.Unlock()
+				} else {
+					am.enqueueRecoveryTask(agent.BuildID, task, result.Error)
+				}
 				am.updateBuildProgress(build)
 				am.checkBuildCompletion(build)
 			}
@@ -2055,6 +2224,11 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 
 	build, getErr := am.GetBuild(buildID)
 	if getErr != nil {
+		return
+	}
+	if !am.canCreateAutomatedFixTask(build, "solve_build_failure") {
+		log.Printf("Build %s: skipping recovery solver task for failed task %s (loop cap or active recovery task already present)",
+			buildID, failedTask.ID)
 		return
 	}
 
@@ -3158,7 +3332,7 @@ func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
 
 	isRecoveryAction := func(action string) bool {
 		switch strings.TrimSpace(action) {
-		case "fix_review_issues", "fix_tests", "regression_test", "post_fix_review":
+		case "fix_review_issues", "fix_tests", "regression_test", "post_fix_review", "solve_build_failure":
 			return true
 		default:
 			return false
@@ -3288,8 +3462,10 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 	phasedPipelineComplete := build.PhasedPipelineComplete
 	readinessRecoveryAttempts := build.ReadinessRecoveryAttempts
 	currentStatus := build.Status
+	completedAtWasNil := build.CompletedAt == nil
+	buildMode := string(build.Mode)
 	build.mu.RUnlock()
-	if !phasedPipelineComplete && readinessRecoveryAttempts == 0 &&
+	if !anyFailed && !phasedPipelineComplete && readinessRecoveryAttempts == 0 &&
 		currentStatus != BuildTesting && currentStatus != BuildReviewing {
 		// Avoid transient "all tasks complete" windows between phased task batches
 		// (e.g. phase N finished, phase N+1 not yet queued) from triggering final validation.
@@ -3602,6 +3778,24 @@ completion_finalize:
 			},
 		})
 		log.Printf("Build %s finished with status %s (%d files)", build.ID, status, len(allFiles))
+	}
+	if completedAtWasNil {
+		reason := "terminal"
+		switch status {
+		case BuildCompleted:
+			reason = "success"
+		case BuildCancelled:
+			reason = "cancelled"
+		case BuildFailed:
+			if strings.Contains(strings.ToLower(buildError), "validation failed") {
+				reason = "validation_failed"
+			} else if strings.Contains(strings.ToLower(buildError), "insufficient credit") {
+				reason = "insufficient_credits"
+			} else if strings.Contains(strings.ToLower(buildError), "timeout") {
+				reason = "timeout"
+			}
+		}
+		metrics.RecordBuildFinalization(string(status), buildMode, reason)
 	}
 
 	// Persist to database
@@ -7029,8 +7223,17 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 			},
 		})
 
-		am.enqueueRecoveryTask(agent.BuildID, task, result.Error)
 		if build, err := am.GetBuild(agent.BuildID); err == nil {
+			if nonRetriable {
+				build.mu.Lock()
+				if strings.TrimSpace(build.Error) == "" {
+					build.Error = task.Error
+				}
+				build.UpdatedAt = time.Now()
+				build.mu.Unlock()
+			} else {
+				am.enqueueRecoveryTask(agent.BuildID, task, result.Error)
+			}
 			am.updateBuildProgress(build)
 			am.checkBuildCompletion(build)
 		}
@@ -7045,15 +7248,34 @@ func (am *AgentManager) isNonRetriableAIError(err error) bool {
 }
 
 func isInsufficientCreditsErrorMessage(errorMsg string) bool {
-	return strings.Contains(strings.ToLower(errorMsg), "insufficient_credits")
+	errorLower := strings.ToLower(errorMsg)
+	return strings.Contains(errorLower, "insufficient_credits") ||
+		strings.Contains(errorLower, "insufficient credits") ||
+		strings.Contains(errorLower, "quota exceeded") ||
+		strings.Contains(errorLower, "credit balance")
 }
 
 func (am *AgentManager) isNonRetriableAIErrorMessage(errorMsg string) bool {
 	errorLower := strings.ToLower(errorMsg)
 
+	authOrBillingFailure := strings.Contains(errorLower, "invalid api key") ||
+		strings.Contains(errorLower, "incorrect api key") ||
+		strings.Contains(errorLower, "api key is invalid") ||
+		strings.Contains(errorLower, "authentication failed") ||
+		strings.Contains(errorLower, "authentication error") ||
+		strings.Contains(errorLower, "unauthorized") ||
+		strings.Contains(errorLower, "permission denied") ||
+		strings.Contains(errorLower, "401") ||
+		strings.Contains(errorLower, "billing") ||
+		strings.Contains(errorLower, "payment required") ||
+		strings.Contains(errorLower, "quota exhausted") ||
+		strings.Contains(errorLower, "quota exceeded") ||
+		strings.Contains(errorLower, "insufficient credits")
+
 	if strings.Contains(errorLower, "build not active") ||
 		strings.Contains(errorLower, "build request budget exceeded") ||
-		strings.Contains(errorLower, "insufficient_credits") {
+		strings.Contains(errorLower, "insufficient_credits") ||
+		authOrBillingFailure {
 		return true
 	}
 

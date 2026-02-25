@@ -47,6 +47,9 @@ interface ServerStatus {
   entry_file?: string
   url?: string
   ready?: boolean
+  exited_at?: string
+  exit_code?: number
+  last_error?: string
 }
 
 interface ServerDetection {
@@ -341,17 +344,41 @@ export default function LivePreview({
     const maxRetries = 3
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const response = await apiService.client.post('/preview/start', {
-          project_id: projectId,
-          sandbox: useSandbox
-        })
+        let data: any
+        try {
+          data = await apiService.startFullStackPreview({
+            project_id: projectId,
+            sandbox: useSandbox,
+            start_backend: Boolean(serverDetection?.has_backend),
+            require_backend: false,
+            backend_entry_file: serverDetection?.entry_file,
+            backend_command: serverDetection?.command,
+          })
+        } catch (fullstackErr: any) {
+          const status = fullstackErr?.response?.status
+          if (status !== 404 && status !== 405) {
+            throw fullstackErr
+          }
+          // Backward compatibility with older deployments.
+          const response = await apiService.client.post('/preview/start', {
+            project_id: projectId,
+            sandbox: useSandbox
+          })
+          data = response.data
+        }
         if (activeProjectIdRef.current !== requestProjectId) return
-        setStatus(response.data.preview)
-        setPreviewUrl(response.data.preview?.url || response.data.url || '')
+        setStatus(data.preview)
+        setPreviewUrl(data.proxy_url || data.preview?.url || data.url || '')
         setIframeLoading(true)
         setIframeError(null)
         setConnected(true)
-        setActiveSandbox(response.data.sandbox ?? useSandbox)
+        setActiveSandbox(data.sandbox ?? useSandbox)
+        if (data.server) {
+          setServerStatus(data.server)
+        }
+        if (data.degraded && data.diagnostics?.backend_error) {
+          setError(`Preview degraded: ${data.diagnostics.backend_error}`)
+        }
         setRefreshKey(prev => prev + 1)
         setLoading(false)
         return

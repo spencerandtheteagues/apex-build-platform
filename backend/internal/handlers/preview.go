@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"apex-build/internal/auth"
 	"apex-build/internal/bundler"
+	"apex-build/internal/metrics"
 	"apex-build/internal/preview"
 	"apex-build/pkg/models"
 
@@ -117,6 +119,7 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 	}
 
 	if err != nil {
+		metrics.RecordPreviewStart("frontend", "error", req.Sandbox)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -136,7 +139,149 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 		response["docker_available"] = h.factory.IsDockerAvailable()
 	}
 
+	metrics.RecordPreviewStart("frontend", "success", req.Sandbox)
 	c.JSON(http.StatusOK, response)
+}
+
+// StartFullStackPreview starts the frontend preview and backend runtime in one operation.
+// POST /api/v1/preview/fullstack/start
+func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
+	userID := c.GetUint("user_id")
+
+	var req struct {
+		ProjectID      uint              `json:"project_id" binding:"required"`
+		EntryPoint     string            `json:"entry_point"`
+		Framework      string            `json:"framework"`
+		EnvVars        map[string]string `json:"env_vars"`
+		Sandbox        bool              `json:"sandbox"`
+		StartBackend   *bool             `json:"start_backend,omitempty"`
+		RequireBackend bool              `json:"require_backend,omitempty"`
+		BackendEntry   string            `json:"backend_entry_file,omitempty"`
+		BackendCommand string            `json:"backend_command,omitempty"`
+		BackendEnvVars map[string]string `json:"backend_env_vars,omitempty"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Verify project ownership
+	var project models.Project
+	if err := h.db.First(&project, req.ProjectID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	if req.Framework == "" {
+		req.Framework = h.detectFramework(req.ProjectID)
+	}
+	if req.EntryPoint == "" {
+		if bundleEntry := h.detectBundleEntryPoint(req.ProjectID); bundleEntry != "" {
+			req.EntryPoint = bundleEntry
+		} else {
+			req.EntryPoint = h.detectEntryPoint(req.ProjectID)
+		}
+	}
+
+	previewConfig := &preview.PreviewConfig{
+		ProjectID:  req.ProjectID,
+		EntryPoint: req.EntryPoint,
+		Framework:  req.Framework,
+		EnvVars:    req.EnvVars,
+	}
+
+	var previewStatus *preview.PreviewStatus
+	var err error
+	if h.factory != nil {
+		previewStatus, err = h.factory.StartPreview(c.Request.Context(), previewConfig, req.Sandbox)
+	} else {
+		previewStatus, err = h.server.StartPreview(c.Request.Context(), previewConfig)
+	}
+	if err != nil {
+		metrics.RecordPreviewStart("fullstack", "error", req.Sandbox)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+	previewStatus.URL = h.buildProxyURL(c, req.ProjectID)
+
+	startBackend := true
+	if req.StartBackend != nil {
+		startBackend = *req.StartBackend
+	}
+
+	var serverStatus *preview.ServerStatus
+	diagnostics := gin.H{
+		"preview_started":   true,
+		"backend_requested": startBackend,
+	}
+	degraded := false
+
+	if startBackend {
+		serverConfig := &preview.ServerConfig{
+			ProjectID: req.ProjectID,
+			EntryFile: req.BackendEntry,
+			Command:   req.BackendCommand,
+			EnvVars:   req.BackendEnvVars,
+		}
+		proc, startErr := h.serverRunner.Start(context.Background(), serverConfig)
+		if startErr != nil {
+			degraded = true
+			diagnostics["backend_started"] = false
+			diagnostics["backend_error"] = startErr.Error()
+			serverStatus = h.serverRunner.GetStatus(req.ProjectID)
+			if req.RequireBackend {
+				metrics.RecordPreviewStart("fullstack", "backend_required_failed", req.Sandbox)
+				c.JSON(http.StatusBadGateway, gin.H{
+					"success":     false,
+					"error":       "backend preview failed to start",
+					"details":     startErr.Error(),
+					"preview":     previewStatus,
+					"server":      serverStatus,
+					"proxy_url":   previewStatus.URL,
+					"diagnostics": diagnostics,
+					"degraded":    true,
+				})
+				return
+			}
+		} else {
+			h.linkServerToPreview(req.ProjectID, proc)
+			serverStatus = h.serverRunner.GetStatus(req.ProjectID)
+			diagnostics["backend_started"] = true
+			diagnostics["backend_port"] = proc.Port
+			diagnostics["backend_url"] = proc.URL
+			diagnostics["backend_detected_command"] = proc.Command
+		}
+	} else {
+		diagnostics["backend_started"] = false
+		diagnostics["backend_skipped"] = true
+	}
+
+	resp := gin.H{
+		"success":     true,
+		"preview":     previewStatus,
+		"server":      serverStatus,
+		"proxy_url":   previewStatus.URL,
+		"degraded":    degraded,
+		"diagnostics": diagnostics,
+		"message":     "Full-stack preview started",
+		"sandbox":     req.Sandbox,
+	}
+	if h.factory != nil {
+		resp["docker_available"] = h.factory.IsDockerAvailable()
+	}
+	if degraded {
+		metrics.RecordPreviewStart("fullstack", "degraded", req.Sandbox)
+	} else {
+		metrics.RecordPreviewStart("fullstack", "success", req.Sandbox)
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // StopPreview stops a live preview session
@@ -908,7 +1053,8 @@ func (h *PreviewHandler) StartServer(c *gin.Context) {
 		EnvVars:   req.EnvVars,
 	}
 
-	proc, err := h.serverRunner.Start(c.Request.Context(), config)
+	// Backend preview processes are long-lived and must not be tied to request cancellation.
+	proc, err := h.serverRunner.Start(context.Background(), config)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,

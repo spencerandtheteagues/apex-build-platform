@@ -26,14 +26,14 @@ import (
 
 // PreviewServer manages live preview sessions for projects
 type PreviewServer struct {
-	db        *gorm.DB
-	sessions  map[uint]*PreviewSession
-	mu        sync.RWMutex
-	upgrader  websocket.Upgrader
-	basePort  int
-	portMap   map[uint]int // projectID -> assigned port
-	portMu    sync.Mutex
-	bundler   *bundler.Service // Bundler service for React/Vue/TypeScript projects
+	db       *gorm.DB
+	sessions map[uint]*PreviewSession
+	mu       sync.RWMutex
+	upgrader websocket.Upgrader
+	basePort int
+	portMap  map[uint]int // projectID -> assigned port
+	portMu   sync.Mutex
+	bundler  *bundler.Service // Bundler service for React/Vue/TypeScript projects
 }
 
 // PreviewSession represents an active preview session
@@ -47,12 +47,12 @@ type PreviewSession struct {
 	mu            sync.RWMutex
 	server        *http.Server
 	stopChan      chan struct{}
-	stopOnce      sync.Once // Prevents double close of stopChan
+	stopOnce      sync.Once      // Prevents double close of stopChan
 	BackendServer *ServerProcess // Backend server process (if running)
 	// Bundler-related fields
-	IsBundled    bool                   // Whether the project uses bundling
-	BundleResult *bundler.BundleResult  // Cached bundle result
-	BundleConfig *bundler.BundleConfig  // Bundle configuration used
+	IsBundled    bool                  // Whether the project uses bundling
+	BundleResult *bundler.BundleResult // Cached bundle result
+	BundleConfig *bundler.BundleConfig // Bundle configuration used
 }
 
 // SafeClient wraps a WebSocket connection with a write mutex for thread-safe writes
@@ -83,10 +83,10 @@ type CachedFile struct {
 
 // PreviewConfig contains configuration for a preview session
 type PreviewConfig struct {
-	ProjectID    uint   `json:"project_id"`
-	EntryPoint   string `json:"entry_point"`   // e.g., "index.html" or "src/index.tsx"
-	Framework    string `json:"framework"`     // react, vue, vanilla, etc.
-	BuildCommand string `json:"build_command"` // Optional build step
+	ProjectID    uint              `json:"project_id"`
+	EntryPoint   string            `json:"entry_point"`   // e.g., "index.html" or "src/index.tsx"
+	Framework    string            `json:"framework"`     // react, vue, vanilla, etc.
+	BuildCommand string            `json:"build_command"` // Optional build step
 	EnvVars      map[string]string `json:"env_vars"`
 }
 
@@ -99,6 +99,52 @@ type PreviewStatus struct {
 	StartedAt  time.Time `json:"started_at"`
 	LastAccess time.Time `json:"last_access"`
 	Clients    int       `json:"connected_clients"`
+}
+
+var backendProxyPrefixes = []string{
+	"/api",
+	"/graphql",
+	"/trpc",
+	"/socket.io",
+	"/ws",
+}
+
+func normalizePreviewPath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return ""
+	}
+	trimmed = strings.ReplaceAll(trimmed, "\\", "/")
+	trimmed = strings.TrimPrefix(trimmed, "./")
+	trimmed = strings.TrimPrefix(trimmed, "/")
+	trimmed = strings.TrimSpace(trimmed)
+	if trimmed == "." || trimmed == "" {
+		return ""
+	}
+	return trimmed
+}
+
+func previewLookupVariations(path string) []string {
+	normalized := normalizePreviewPath(path)
+	if normalized == "" {
+		return nil
+	}
+	return []string{
+		normalized,
+		normalized + ".html",
+		normalized + "/index.html",
+		"public/" + normalized,
+		"src/" + normalized,
+	}
+}
+
+func shouldProxyToBackendPath(path string) bool {
+	for _, prefix := range backendProxyPrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // NewPreviewServer creates a new preview server manager
@@ -269,11 +315,17 @@ func (ps *PreviewServer) RefreshPreview(projectID uint, changedFiles []string) e
 	ctx := context.Background()
 	needsRebundle := false
 
-	for _, path := range changedFiles {
-		ps.updateFileCache(ctx, session, path)
+	normalizedChanged := make([]string, 0, len(changedFiles))
+	for _, changedPath := range changedFiles {
+		normalized := normalizePreviewPath(changedPath)
+		if normalized == "" {
+			continue
+		}
+		normalizedChanged = append(normalizedChanged, normalized)
+		ps.updateFileCache(ctx, session, normalized)
 
 		// Check if any changed file requires rebundling
-		ext := strings.ToLower(filepath.Ext(path))
+		ext := strings.ToLower(filepath.Ext(normalized))
 		if ext == ".ts" || ext == ".tsx" || ext == ".js" || ext == ".jsx" ||
 			ext == ".css" || ext == ".scss" || ext == ".json" {
 			needsRebundle = true
@@ -325,7 +377,7 @@ func (ps *PreviewServer) RefreshPreview(projectID uint, changedFiles []string) e
 
 	message := map[string]interface{}{
 		"type":  "reload",
-		"files": changedFiles,
+		"files": normalizedChanged,
 	}
 	msgBytes, _ := json.Marshal(message)
 
@@ -346,18 +398,23 @@ func (ps *PreviewServer) HotReload(projectID uint, filePath string, content stri
 		return nil
 	}
 
+	normalizedPath := normalizePreviewPath(filePath)
+	if normalizedPath == "" {
+		return nil
+	}
+
 	// Update cache
 	session.mu.Lock()
-	session.FileCache[filePath] = &CachedFile{
+	session.FileCache[normalizedPath] = &CachedFile{
 		Content:     content,
-		ContentType: ps.getContentType(filePath),
+		ContentType: ps.getContentType(normalizedPath),
 		ProcessedAt: time.Now(),
 		Size:        int64(len(content)),
 	}
 	session.mu.Unlock()
 
 	// Determine if hot reload is possible (CSS changes) or full reload needed
-	ext := filepath.Ext(filePath)
+	ext := filepath.Ext(normalizedPath)
 	reloadType := "full"
 	if ext == ".css" {
 		reloadType = "css"
@@ -372,7 +429,7 @@ func (ps *PreviewServer) HotReload(projectID uint, filePath string, content stri
 	message := map[string]interface{}{
 		"type":    "hot-reload",
 		"reload":  reloadType,
-		"file":    filePath,
+		"file":    normalizedPath,
 		"content": content,
 	}
 	msgBytes, _ := json.Marshal(message)
@@ -442,10 +499,14 @@ func (ps *PreviewServer) loadProjectFiles(ctx context.Context, session *PreviewS
 
 	// First, load all raw files into cache
 	for _, file := range files {
+		cachePath := normalizePreviewPath(file.Path)
+		if cachePath == "" {
+			continue
+		}
 		processed := ps.processFile(&file, config)
-		session.FileCache[file.Path] = &CachedFile{
+		session.FileCache[cachePath] = &CachedFile{
 			Content:     processed,
-			ContentType: ps.getContentType(file.Path),
+			ContentType: ps.getContentType(cachePath),
 			ProcessedAt: time.Now(),
 			Size:        int64(len(processed)),
 		}
@@ -534,29 +595,43 @@ func (ps *PreviewServer) loadProjectFiles(ctx context.Context, session *PreviewS
 }
 
 func (ps *PreviewServer) updateFileCache(ctx context.Context, session *PreviewSession, path string) error {
+	normalizedPath := normalizePreviewPath(path)
+	if normalizedPath == "" {
+		return fmt.Errorf("invalid preview path")
+	}
+
 	var file models.File
-	if err := ps.db.WithContext(ctx).
-		Where("project_id = ? AND path = ?", session.ProjectID, path).
-		First(&file).Error; err != nil {
-		return err
+	var lookupErr error
+	for _, candidate := range []string{normalizedPath, "/" + normalizedPath} {
+		err := ps.db.WithContext(ctx).
+			Where("project_id = ? AND path = ?", session.ProjectID, candidate).
+			First(&file).Error
+		if err == nil {
+			lookupErr = nil
+			break
+		}
+		lookupErr = err
+	}
+	if lookupErr != nil {
+		return lookupErr
 	}
 
 	session.mu.Lock()
-	session.FileCache[path] = &CachedFile{
+	session.FileCache[normalizedPath] = &CachedFile{
 		Content:     file.Content,
-		ContentType: ps.getContentType(path),
+		ContentType: ps.getContentType(normalizedPath),
 		ProcessedAt: time.Now(),
 		Size:        file.Size,
 	}
 
 	// If this is a bundled project and a source file changed, invalidate the bundle
 	if session.IsBundled {
-		ext := strings.ToLower(filepath.Ext(path))
+		ext := strings.ToLower(filepath.Ext(normalizedPath))
 		needsRebundle := ext == ".ts" || ext == ".tsx" || ext == ".js" || ext == ".jsx" ||
 			ext == ".css" || ext == ".scss" || ext == ".json"
 
 		if needsRebundle {
-			log.Printf("[preview] Source file %s changed, invalidating bundle for project %d", path, session.ProjectID)
+			log.Printf("[preview] Source file %s changed, invalidating bundle for project %d", normalizedPath, session.ProjectID)
 			// Invalidate the bundle cache
 			if ps.bundler != nil {
 				ps.bundler.InvalidateCache(session.ProjectID)
@@ -908,8 +983,8 @@ func (ps *PreviewServer) createFileHandler(session *PreviewSession, config *Prev
 		backendServer := session.BackendServer
 		session.mu.Unlock()
 
-		// If backend server is running and path starts with /api, proxy to backend
-		if backendServer != nil && backendServer.Ready && strings.HasPrefix(r.URL.Path, "/api") {
+		// Proxy backend routes for common full-stack patterns (REST, GraphQL, tRPC, socket.io, websockets).
+		if backendServer != nil && backendServer.Ready && shouldProxyToBackendPath(r.URL.Path) {
 			targetURL, err := url.Parse(backendServer.URL)
 			if err == nil {
 				proxy := httputil.NewSingleHostReverseProxy(targetURL)
@@ -928,27 +1003,20 @@ func (ps *PreviewServer) createFileHandler(session *PreviewSession, config *Prev
 
 		path := r.URL.Path
 		if path == "/" {
-			path = "/" + config.EntryPoint
-			if config.EntryPoint == "" {
-				path = "/index.html"
+			entryPoint := config.EntryPoint
+			if entryPoint == "" {
+				entryPoint = "index.html"
 			}
+			path = entryPoint
 		}
-		path = strings.TrimPrefix(path, "/")
+		path = normalizePreviewPath(path)
 
 		session.mu.RLock()
 		cached, exists := session.FileCache[path]
 		session.mu.RUnlock()
 
 		if !exists {
-			// Try common variations
-			variations := []string{
-				path,
-				path + ".html",
-				path + "/index.html",
-				"public/" + path,
-				"src/" + path,
-			}
-			for _, v := range variations {
+			for _, v := range previewLookupVariations(path) {
 				session.mu.RLock()
 				cached, exists = session.FileCache[v]
 				session.mu.RUnlock()
@@ -1025,29 +1093,29 @@ func (ps *PreviewServer) createWebSocketHandler(session *PreviewSession) http.Ha
 func (ps *PreviewServer) getContentType(path string) string {
 	ext := strings.ToLower(filepath.Ext(path))
 	types := map[string]string{
-		".html": "text/html; charset=utf-8",
-		".htm":  "text/html; charset=utf-8",
-		".css":  "text/css; charset=utf-8",
-		".js":   "application/javascript; charset=utf-8",
-		".mjs":  "application/javascript; charset=utf-8",
-		".json": "application/json; charset=utf-8",
-		".xml":  "application/xml; charset=utf-8",
-		".svg":  "image/svg+xml",
-		".png":  "image/png",
-		".jpg":  "image/jpeg",
-		".jpeg": "image/jpeg",
-		".gif":  "image/gif",
-		".ico":  "image/x-icon",
-		".woff": "font/woff",
-		".woff2": "font/woff2",
-		".ttf":  "font/ttf",
-		".eot":  "application/vnd.ms-fontobject",
-		".txt":  "text/plain; charset=utf-8",
-		".md":   "text/markdown; charset=utf-8",
-		".ts":   "application/typescript; charset=utf-8",
-		".tsx":  "application/typescript; charset=utf-8",
-		".jsx":  "application/javascript; charset=utf-8",
-		".vue":  "application/javascript; charset=utf-8",
+		".html":   "text/html; charset=utf-8",
+		".htm":    "text/html; charset=utf-8",
+		".css":    "text/css; charset=utf-8",
+		".js":     "application/javascript; charset=utf-8",
+		".mjs":    "application/javascript; charset=utf-8",
+		".json":   "application/json; charset=utf-8",
+		".xml":    "application/xml; charset=utf-8",
+		".svg":    "image/svg+xml",
+		".png":    "image/png",
+		".jpg":    "image/jpeg",
+		".jpeg":   "image/jpeg",
+		".gif":    "image/gif",
+		".ico":    "image/x-icon",
+		".woff":   "font/woff",
+		".woff2":  "font/woff2",
+		".ttf":    "font/ttf",
+		".eot":    "application/vnd.ms-fontobject",
+		".txt":    "text/plain; charset=utf-8",
+		".md":     "text/markdown; charset=utf-8",
+		".ts":     "application/typescript; charset=utf-8",
+		".tsx":    "application/typescript; charset=utf-8",
+		".jsx":    "application/javascript; charset=utf-8",
+		".vue":    "application/javascript; charset=utf-8",
 		".svelte": "application/javascript; charset=utf-8",
 	}
 
