@@ -644,8 +644,9 @@ func (dm *DatabaseManager) GetTables(db *ManagedDatabase, password string) ([]Ta
 				continue // skip invalid table names
 			}
 
-			// Get row count
-			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s", safeName)
+			// Get row count — use quoted identifier for defense-in-depth
+			quotedName, _ := quoteIdentifier(safeName)
+			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s", quotedName)
 			countResult, _ := dm.ExecuteQuery(db, countQuery, password)
 			var rowCount int64
 			if countResult != nil && len(countResult.Rows) > 0 && len(countResult.Rows[0]) > 0 {
@@ -678,6 +679,8 @@ func (dm *DatabaseManager) GetTableSchema(db *ManagedDatabase, tableName string,
 	case DatabaseTypeSQLite:
 		query = fmt.Sprintf("PRAGMA table_info(%s)", safeName)
 	case DatabaseTypePostgreSQL:
+		// safeName is validated by sanitizeIdentifier (alphanumeric + underscore only)
+		escapedName := escapeLiteral(safeName)
 		query = fmt.Sprintf(`
 			SELECT column_name, data_type, is_nullable, column_default,
 				   CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_pk
@@ -689,7 +692,7 @@ func (dm *DatabaseManager) GetTableSchema(db *ManagedDatabase, tableName string,
 				WHERE tc.table_name = '%s' AND tc.constraint_type = 'PRIMARY KEY'
 			) pk ON c.column_name = pk.column_name
 			WHERE c.table_name = '%s'
-			ORDER BY c.ordinal_position`, safeName, safeName)
+			ORDER BY c.ordinal_position`, escapedName, escapedName)
 	default:
 		return nil, fmt.Errorf("unsupported database type")
 	}
