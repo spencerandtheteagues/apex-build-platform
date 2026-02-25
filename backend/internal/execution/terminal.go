@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	terminalmux "apex-build/internal/terminal"
+
 	"github.com/creack/pty"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -22,46 +24,47 @@ import (
 
 // TerminalSession represents an interactive terminal session
 type TerminalSession struct {
-	ID          string    `json:"id"`
-	ProjectID   uint      `json:"project_id"`
-	UserID      uint      `json:"user_id"`
-	WorkDir     string    `json:"work_dir"`
-	Shell       string    `json:"shell"`
-	CreatedAt   time.Time `json:"created_at"`
-	LastActive  time.Time `json:"last_active"`
-	IsActive    bool      `json:"is_active"`
-	Rows        uint16    `json:"rows"`
-	Cols        uint16    `json:"cols"`
-	Name        string    `json:"name"`
+	ID         string    `json:"id"`
+	ProjectID  uint      `json:"project_id"`
+	UserID     uint      `json:"user_id"`
+	WorkDir    string    `json:"work_dir"`
+	Shell      string    `json:"shell"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastActive time.Time `json:"last_active"`
+	IsActive   bool      `json:"is_active"`
+	Rows       uint16    `json:"rows"`
+	Cols       uint16    `json:"cols"`
+	Name       string    `json:"name"`
 
 	// Internal fields
-	cmd         *exec.Cmd
-	pty         *os.File
-	ws          *websocket.Conn
-	wsMu        sync.Mutex
-	done        chan struct{}
-	history     []string
-	historyMu   sync.RWMutex
-	historyMax  int
-	customEnv   map[string]string
+	cmd        *exec.Cmd
+	pty        *os.File
+	ws         *websocket.Conn
+	wsMu       sync.Mutex
+	done       chan struct{}
+	history    []string
+	historyMu  sync.RWMutex
+	historyMax int
+	customEnv  map[string]string
 }
 
 // TerminalManager manages terminal sessions
 type TerminalManager struct {
-	sessions     map[string]*TerminalSession
-	sessionsMu   sync.RWMutex
-	upgrader     websocket.Upgrader
-	maxSessions  int
-	sessionTTL   time.Duration
+	sessions    map[string]*TerminalSession
+	sessionsMu  sync.RWMutex
+	upgrader    websocket.Upgrader
+	maxSessions int
+	sessionTTL  time.Duration
+	Multiplexer *terminalmux.Multiplexer
 }
 
 // TerminalMessage represents a message between client and terminal
 type TerminalMessage struct {
-	Type    string `json:"type"`
-	Data    string `json:"data,omitempty"`
-	Rows    uint16 `json:"rows,omitempty"`
-	Cols    uint16 `json:"cols,omitempty"`
-	Signal  string `json:"signal,omitempty"`
+	Type   string `json:"type"`
+	Data   string `json:"data,omitempty"`
+	Rows   uint16 `json:"rows,omitempty"`
+	Cols   uint16 `json:"cols,omitempty"`
+	Signal string `json:"signal,omitempty"`
 }
 
 // Terminal message types
@@ -82,6 +85,7 @@ func NewTerminalManager() *TerminalManager {
 		sessions:    make(map[string]*TerminalSession),
 		maxSessions: 100,
 		sessionTTL:  30 * time.Minute,
+		Multiplexer: terminalmux.NewMultiplexer(),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,

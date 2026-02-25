@@ -6,8 +6,11 @@ package execution
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"sync"
+
+	sandboxv2 "apex-build/internal/sandbox/v2"
 )
 
 // CodeExecutor defines the interface for code execution sandboxes
@@ -35,19 +38,28 @@ const (
 	SandboxTypeAuto      SandboxType = "auto"
 	SandboxTypeContainer SandboxType = "container"
 	SandboxTypeProcess   SandboxType = "process"
+	SandboxTypeV2        SandboxType = "v2"
 )
 
 // SandboxFactory creates and manages code execution sandboxes
 type SandboxFactory struct {
 	containerSandbox *ContainerSandbox
 	processSandbox   *Sandbox
+	v2Sandbox        *sandboxV2ExecutorAdapter
 	preferContainer  bool
+	preferV2         bool
 	mu               sync.RWMutex
 	initialized      bool
 }
 
 // SandboxFactoryConfig configures the sandbox factory
 type SandboxFactoryConfig struct {
+	// EnableV2 enables the sandbox-v2 runtime path (Docker SDK + gVisor/Firecracker modes)
+	EnableV2 bool
+
+	// PreferV2 selects sandbox-v2 for auto mode when available
+	PreferV2 bool
+
 	// PreferContainer attempts to use container sandbox when available
 	PreferContainer bool
 
@@ -57,13 +69,20 @@ type SandboxFactoryConfig struct {
 	// ProcessConfig for process-based execution (fallback)
 	ProcessConfig *SandboxConfig
 
+	// V2Config for sandbox-v2 execution
+	V2Config *sandboxv2.ManagerConfig
+
 	// ForceContainer fails if container sandbox is unavailable
 	ForceContainer bool
 }
 
 // DefaultSandboxFactoryConfig returns a production-ready configuration
 func DefaultSandboxFactoryConfig() *SandboxFactoryConfig {
+	enableV2 := os.Getenv("EXECUTION_SANDBOX_V2") == "true" || os.Getenv("SANDBOX_V2_ENABLED") == "true"
+	preferV2 := os.Getenv("EXECUTION_SANDBOX_V2_PREFER") == "true"
 	return &SandboxFactoryConfig{
+		EnableV2:        enableV2,
+		PreferV2:        preferV2 || enableV2,
 		PreferContainer: true,
 		ContainerConfig: DefaultContainerSandboxConfig(),
 		ProcessConfig:   DefaultSandboxConfig(),
@@ -81,6 +100,7 @@ func GetSandboxFactory() *SandboxFactory {
 	factoryOnce.Do(func() {
 		globalFactory = &SandboxFactory{
 			preferContainer: true,
+			preferV2:        os.Getenv("EXECUTION_SANDBOX_V2_PREFER") == "true",
 		}
 	})
 	return globalFactory
@@ -94,6 +114,21 @@ func NewSandboxFactory(config *SandboxFactoryConfig) (*SandboxFactory, error) {
 
 	factory := &SandboxFactory{
 		preferContainer: config.PreferContainer,
+		preferV2:        config.PreferV2,
+	}
+
+	enableV2 := config.EnableV2 || os.Getenv("EXECUTION_SANDBOX_V2") == "true" || os.Getenv("SANDBOX_V2_ENABLED") == "true"
+	if config.PreferV2 || os.Getenv("EXECUTION_SANDBOX_V2_PREFER") == "true" {
+		factory.preferV2 = true
+	}
+
+	if enableV2 {
+		v2Adapter, err := newSandboxV2ExecutorAdapter(config.V2Config)
+		if err != nil {
+			fmt.Printf("Warning: sandbox-v2 unavailable (%v), continuing with legacy sandboxes\n", err)
+		} else {
+			factory.v2Sandbox = v2Adapter
+		}
 	}
 
 	// Try to initialize container sandbox if preferred
@@ -134,6 +169,18 @@ func (f *SandboxFactory) Initialize(config *SandboxFactoryConfig) error {
 		config = DefaultSandboxFactoryConfig()
 	}
 
+	enableV2 := config.EnableV2 || os.Getenv("EXECUTION_SANDBOX_V2") == "true" || os.Getenv("SANDBOX_V2_ENABLED") == "true"
+	f.preferV2 = config.PreferV2 || os.Getenv("EXECUTION_SANDBOX_V2_PREFER") == "true"
+
+	if enableV2 && f.v2Sandbox == nil {
+		v2Adapter, err := newSandboxV2ExecutorAdapter(config.V2Config)
+		if err != nil {
+			fmt.Printf("Sandbox-v2 unavailable: %v\n", err)
+		} else {
+			f.v2Sandbox = v2Adapter
+		}
+	}
+
 	// Try container sandbox
 	if config.PreferContainer {
 		containerSandbox, err := NewContainerSandbox(config.ContainerConfig)
@@ -169,6 +216,12 @@ func (f *SandboxFactory) GetExecutor(sandboxType SandboxType) (CodeExecutor, err
 	}
 
 	switch sandboxType {
+	case SandboxTypeV2:
+		if f.v2Sandbox == nil {
+			return nil, fmt.Errorf("sandbox-v2 is not available")
+		}
+		return f.v2Sandbox, nil
+
 	case SandboxTypeContainer:
 		if f.containerSandbox == nil {
 			return nil, fmt.Errorf("container sandbox not available")
@@ -181,6 +234,9 @@ func (f *SandboxFactory) GetExecutor(sandboxType SandboxType) (CodeExecutor, err
 	case SandboxTypeAuto:
 		fallthrough
 	default:
+		if f.preferV2 && f.v2Sandbox != nil {
+			return f.v2Sandbox, nil
+		}
 		if f.preferContainer && f.containerSandbox != nil {
 			return &containerExecutorAdapter{f.containerSandbox}, nil
 		}
@@ -219,20 +275,26 @@ func (f *SandboxFactory) GetStats() map[string]interface{} {
 	defer f.mu.RUnlock()
 
 	stats := map[string]interface{}{
-		"container_available": f.containerSandbox != nil,
-		"prefer_container":    f.preferContainer,
+		"container_available":  f.containerSandbox != nil,
+		"sandbox_v2_available": f.v2Sandbox != nil,
+		"prefer_container":     f.preferContainer,
+		"prefer_v2":            f.preferV2,
+	}
+
+	if f.v2Sandbox != nil {
+		stats["sandbox_v2"] = f.v2Sandbox.Stats()
 	}
 
 	if f.containerSandbox != nil {
 		containerStats := f.containerSandbox.GetStats()
 		stats["container"] = map[string]interface{}{
-			"total_executions":     containerStats.TotalExecutions,
+			"total_executions":      containerStats.TotalExecutions,
 			"successful_executions": containerStats.SuccessfulExecs,
-			"failed_executions":    containerStats.FailedExecs,
-			"timeout_executions":   containerStats.TimeoutExecs,
-			"killed_executions":    containerStats.KilledExecs,
+			"failed_executions":     containerStats.FailedExecs,
+			"timeout_executions":    containerStats.TimeoutExecs,
+			"killed_executions":     containerStats.KilledExecs,
 			"concurrent_executions": containerStats.ConcurrentExecs,
-			"max_concurrent":       containerStats.MaxConcurrentExecs,
+			"max_concurrent":        containerStats.MaxConcurrentExecs,
 		}
 	}
 
@@ -255,6 +317,12 @@ func (f *SandboxFactory) Cleanup() error {
 	if f.containerSandbox != nil {
 		if err := f.containerSandbox.Cleanup(); err != nil {
 			errs = append(errs, fmt.Errorf("container sandbox cleanup: %w", err))
+		}
+	}
+
+	if f.v2Sandbox != nil {
+		if err := f.v2Sandbox.Cleanup(); err != nil {
+			errs = append(errs, fmt.Errorf("sandbox-v2 cleanup: %w", err))
 		}
 	}
 
@@ -326,10 +394,10 @@ func (a *processExecutorAdapter) Cleanup() error {
 
 // DockerStatus represents the Docker daemon status
 type DockerStatus struct {
-	Available   bool   `json:"available"`
-	Version     string `json:"version,omitempty"`
-	APIVersion  string `json:"api_version,omitempty"`
-	Error       string `json:"error,omitempty"`
+	Available  bool   `json:"available"`
+	Version    string `json:"version,omitempty"`
+	APIVersion string `json:"api_version,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 // CheckDockerStatus checks if Docker is available and returns status
@@ -392,6 +460,12 @@ func (f *SandboxFactory) GetCapabilities() SandboxCapabilities {
 		caps.NetworkIsolation = f.containerSandbox.config.DisableNetwork
 		caps.SeccompEnabled = f.containerSandbox.config.EnableSeccomp
 		caps.ReadOnlyRoot = f.containerSandbox.config.EnableReadOnlyRoot
+	} else if f.v2Sandbox != nil {
+		cfg := f.v2Sandbox.manager.Config()
+		caps.ContainerIsolation = true
+		caps.NetworkIsolation = !cfg.NetworkEnabled
+		caps.SeccompEnabled = true // runtime default seccomp in Docker/gVisor mode
+		caps.ReadOnlyRoot = cfg.ReadOnlyRootFS
 	}
 
 	return caps

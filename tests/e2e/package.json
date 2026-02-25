@@ -1,0 +1,16 @@
+{
+  "name": "apex-build-e2e-infra",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "generate": "node scripts/generate-app-specs.mjs",
+    "test": "npm run generate && playwright test",
+    "test:headed": "npm run generate && playwright test --headed",
+    "test:smoke": "npm run generate && playwright test specs/generated"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "typescript": "^5.9.2"
+  }
+}
