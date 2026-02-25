@@ -604,8 +604,14 @@ func main() {
 		log.Printf("Received signal %v, starting graceful shutdown...", sig)
 	}
 
-	// Give in-flight requests up to 15 seconds to complete
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// Give in-flight requests time to complete (default 30s, configurable)
+	shutdownTimeout := 30 * time.Second
+	if t := os.Getenv("GRACEFUL_SHUTDOWN_TIMEOUT"); t != "" {
+		if d, err := time.ParseDuration(t); err == nil {
+			shutdownTimeout = d
+		}
+	}
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
 	// 1. Stop accepting new HTTP connections and drain existing ones
