@@ -1,0 +1,31 @@
+{
+  "id": "apex-build-web",
+  "name": "APEX.BUILD Web",
+  "basePath": "/",
+  "healthChecks": [
+    {
+      "name": "backend-health",
+      "url": "${PLAYWRIGHT_API_URL:-http://localhost:8080}/health",
+      "expectStatus": 200
+    }
+  ],
+  "routes": [
+    {
+      "name": "home",
+      "path": "/",
+      "waitFor": "body"
+    },
+    {
+      "name": "auth-login",
+      "path": "/login",
+      "waitFor": "body"
+    }
+  ],
+  "uiAssertions": [
+    {
+      "name": "app-shell-renders",
+      "locator": "body",
+      "state": "visible"
+    }
+  ]
+}

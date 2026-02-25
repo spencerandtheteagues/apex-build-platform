@@ -1,0 +1,69 @@
+# APEX.BUILD per-project infrastructure overlay (Phase 0)
+# Usage:
+#   COMPOSE_PROJECT_NAME=apex-proj-123 \
+#   APEX_PROJECT_SLUG=proj-123 \
+#   docker compose -f docker-compose.yml -f docker-compose.project-sidecars.yml up -d
+#
+# This overlay provides project-scoped Postgres + Redis sidecars. The application service can
+# read the URLs below (or map them into its own env names) to get isolated infrastructure.
+
+services:
+  project-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PROJECT_POSTGRES_USER:-apex}
+      POSTGRES_PASSWORD: ${PROJECT_POSTGRES_PASSWORD:-apex_local_dev}
+      POSTGRES_DB: ${PROJECT_POSTGRES_DB:-apex_project}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - project_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${PROJECT_POSTGRES_PORT:-55432}:5432"
+    networks:
+      - apex-network
+    labels:
+      com.apex.project.slug: ${APEX_PROJECT_SLUG:-default}
+      com.apex.role: project-postgres-sidecar
+
+  project-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - project_redis_data:/data
+    ports:
+      - "${PROJECT_REDIS_PORT:-56379}:6379"
+    networks:
+      - apex-network
+    labels:
+      com.apex.project.slug: ${APEX_PROJECT_SLUG:-default}
+      com.apex.role: project-redis-sidecar
+
+  project-infra-env:
+    image: alpine:3.20
+    command: ["sh", "-lc", "echo PROJECT_DATABASE_URL=postgres://${PROJECT_POSTGRES_USER:-apex}:${PROJECT_POSTGRES_PASSWORD:-apex_local_dev}@project-postgres:5432/${PROJECT_POSTGRES_DB:-apex_project}; echo PROJECT_REDIS_URL=redis://project-redis:6379/0; sleep infinity"]
+    depends_on:
+      project-postgres:
+        condition: service_healthy
+      project-redis:
+        condition: service_healthy
+    profiles: ["debug-project-infra"]
+    networks:
+      - apex-network
+
+volumes:
+  project_postgres_data:
+    name: apex-${APEX_PROJECT_SLUG:-default}-postgres-data
+  project_redis_data:
+    name: apex-${APEX_PROJECT_SLUG:-default}-redis-data

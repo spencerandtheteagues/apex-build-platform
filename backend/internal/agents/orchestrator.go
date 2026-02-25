@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"apex-build/internal/agents/autonomous"
+	"apex-build/internal/agents/core"
 	"apex-build/internal/ai"
 
 	"github.com/google/uuid"
@@ -76,6 +77,9 @@ type OrchestrationState struct {
 	TaskStatus      map[string]TaskStatus
 	VerifyGates     []VerifyGate     // Build verification checkpoints
 	ResourceUsage   ResourceMetrics  // Track resource consumption
+
+	// FSM + Guarantee Engine context (nil-safe — orchestrator checks before use)
+	FSMContext      *BuildFSMContext
 }
 
 // VerifyGate represents a build verification checkpoint
@@ -147,6 +151,23 @@ func (o *BuildOrchestrator) StartOrchestration(buildID string) error {
 		cancel:       cancel,
 	}
 
+	// Initialize FSM + Guarantee Engine for this build
+	// Estimate total steps from task count (will be refined during planning)
+	build.mu.RLock()
+	totalSteps := len(build.Tasks)
+	build.mu.RUnlock()
+	if totalSteps < 5 {
+		totalSteps = 5 // minimum — planning, architecture, generation, testing, review
+	}
+
+	broadcastFn := MakeBroadcastFunc(o.hub)
+	fsmCtx, err := NewBuildFSMContext(buildID, totalSteps, broadcastFn)
+	if err != nil {
+		log.Printf("Orchestrator: Warning — FSM initialization failed for build %s: %v (continuing without FSM)", buildID, err)
+	} else {
+		state.FSMContext = fsmCtx
+	}
+
 	o.mu.Lock()
 	o.activeBuild[buildID] = state
 	o.mu.Unlock()
@@ -163,6 +184,10 @@ func (o *BuildOrchestrator) StartOrchestration(buildID string) error {
 // runPipeline executes the build pipeline
 func (o *BuildOrchestrator) runPipeline(build *Build, state *OrchestrationState) {
 	defer func() {
+		// Clean up FSM bridge
+		if state.FSMContext != nil {
+			state.FSMContext.Stop()
+		}
 		state.cancel()
 		o.mu.Lock()
 		delete(o.activeBuild, state.BuildID)
@@ -173,6 +198,10 @@ func (o *BuildOrchestrator) runPipeline(build *Build, state *OrchestrationState)
 	state.DependencyGraph = make(map[string][]string)
 	state.TaskStatus = make(map[string]TaskStatus)
 	state.VerifyGates = o.initializeVerifyGates()
+
+	// Start FSM lifecycle
+	o.fsmTransition(state, core.EventStart)       // idle → initializing
+	o.fsmTransition(state, core.EventInitialized)  // initializing → planning
 
 	// Phase 1: Planning
 	if err := o.executePlanningPhase(build, state); err != nil {
@@ -186,17 +215,26 @@ func (o *BuildOrchestrator) runPipeline(build *Build, state *OrchestrationState)
 		return
 	}
 
+	// FSM: planning → executing (plan is ready, begin execution phases)
+	o.fsmTransition(state, core.EventPlanReady)
+
 	// Phase 2: Architecture
 	if err := o.executeArchitecturePhase(build, state); err != nil {
 		o.handlePhaseError(build, state, PhaseArchitecting, err)
 		return
 	}
 
+	// FSM: mark architecture as a completed step
+	o.fsmTransition(state, core.EventStepComplete)
+
 	// Phase 3: Code Generation (with parallel execution)
 	if err := o.executeGenerationPhaseParallel(build, state); err != nil {
 		o.handlePhaseError(build, state, PhaseGenerating, err)
 		return
 	}
+
+	// FSM: mark generation as a completed step
+	o.fsmTransition(state, core.EventStepComplete)
 
 	// Verify Gate: Post-Generation (run actual build)
 	if !o.runVerifyGate(build, state, "post-generation") {
@@ -213,16 +251,25 @@ func (o *BuildOrchestrator) runPipeline(build *Build, state *OrchestrationState)
 		return
 	}
 
+	// FSM: mark testing as a completed step
+	o.fsmTransition(state, core.EventStepComplete)
+
 	// Phase 5: Review
 	if err := o.executeReviewPhase(build, state); err != nil {
 		o.handlePhaseError(build, state, PhaseReviewing, err)
 		return
 	}
 
+	// FSM: all execution steps complete → transition to validating
+	o.fsmTransition(state, core.EventAllStepsComplete)
+
 	// Final Verify Gate
 	if !o.runVerifyGate(build, state, "final") {
 		log.Printf("Orchestrator: Final verification has warnings but proceeding")
 	}
+
+	// FSM: validation passed → completed
+	o.fsmTransition(state, core.EventValidationPass)
 
 	// Complete
 	o.completeOrchestration(build, state)
@@ -881,12 +928,35 @@ func (o *BuildOrchestrator) completeOrchestration(build *Build, state *Orchestra
 	o.manager.persistCompletedBuild(build, allFiles)
 }
 
+// fsmTransition safely transitions the FSM if it exists. Logs warnings on error.
+func (o *BuildOrchestrator) fsmTransition(state *OrchestrationState, event core.AgentEvent) {
+	if state.FSMContext == nil {
+		return
+	}
+	if err := state.FSMContext.FSM.Transition(event); err != nil {
+		log.Printf("Orchestrator: FSM transition warning (event=%s): %v", event, err)
+	}
+}
+
+// fsmTransitionWithMeta safely transitions the FSM with metadata if it exists.
+func (o *BuildOrchestrator) fsmTransitionWithMeta(state *OrchestrationState, event core.AgentEvent, meta string) {
+	if state.FSMContext == nil {
+		return
+	}
+	if err := state.FSMContext.FSM.TransitionWithMeta(event, meta); err != nil {
+		log.Printf("Orchestrator: FSM transition warning (event=%s): %v", event, err)
+	}
+}
+
 // handlePhaseError handles errors during a phase
 func (o *BuildOrchestrator) handlePhaseError(build *Build, state *OrchestrationState, phase BuildPhase, err error) {
 	state.Phase = PhaseFailed
 	state.Errors = append(state.Errors, fmt.Sprintf("Phase %s failed: %v", phase, err))
 
 	log.Printf("Orchestrator: Build %s failed in phase %s: %v", build.ID, phase, err)
+
+	// Transition FSM to fatal error → will trigger rolling_back or failed
+	o.fsmTransitionWithMeta(state, core.EventFatalError, err.Error())
 
 	build.mu.Lock()
 	build.Status = BuildFailed

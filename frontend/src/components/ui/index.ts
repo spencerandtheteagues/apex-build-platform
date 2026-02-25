@@ -62,3 +62,18 @@ export type { ProgressProps } from './progress'
 
 export { AnimatedBackground } from './AnimatedBackground'
 export type { AnimatedBackgroundProps } from './AnimatedBackground'
+
+// 100% Success Guarantee Engine UI
+export { GuaranteeBadge } from './guarantee/GuaranteeBadge'
+export type { GuaranteeBadgeProps } from './guarantee/GuaranteeBadge'
+
+export { ValidationPanel } from './guarantee/ValidationPanel'
+export type { ValidationPanelProps } from './guarantee/ValidationPanel'
+
+// Checkpoint Timeline
+export { CheckpointTimeline } from './checkpoint/CheckpointTimeline'
+export type { CheckpointTimelineProps, TimelineCheckpoint } from './checkpoint/CheckpointTimeline'
+
+// CRT/Scanline Overlay
+export { ScanlineOverlay } from './ScanlineOverlay'
+export type { ScanlineOverlayProps } from './ScanlineOverlay'

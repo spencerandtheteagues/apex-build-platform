@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patchesStrategicMerge:
+  - patches.yaml
+images:
+  - name: apex-build/backend
+    newName: ghcr.io/spencerandtheteagues/apex-build/backend
+    newTag: prod
+  - name: apex-build/frontend
+    newName: ghcr.io/spencerandtheteagues/apex-build/frontend
+    newTag: prod
+  - name: apex-build/sandbox-v2
+    newName: ghcr.io/spencerandtheteagues/apex-build/sandbox-v2
+    newTag: prod
+  - name: apex-build/alwayson-controller
+    newName: ghcr.io/spencerandtheteagues/apex-build/alwayson-controller
+    newTag: prod

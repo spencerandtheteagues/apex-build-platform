@@ -18,7 +18,7 @@ export interface User {
   subscription_end?: string
   monthly_ai_requests: number
   monthly_ai_cost: number
-  preferred_theme: 'cyberpunk' | 'matrix' | 'synthwave' | 'neonCity'
+  preferred_theme: 'cyberpunk' | 'matrix' | 'synthwave' | 'neonCity' | 'steampunk'
   preferred_ai: 'auto' | 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama'
   created_at: string
   updated_at: string

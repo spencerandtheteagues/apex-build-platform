@@ -34,6 +34,7 @@ type ContainerSandbox struct {
 	imageCache      map[string]bool
 	imageCacheMu    sync.RWMutex
 	stats           *SandboxStats
+	pkgCache        *PackageCacheManager
 }
 
 // ContainerSandboxConfig holds container sandbox configuration
@@ -54,28 +55,30 @@ type ContainerSandboxConfig struct {
 	LanguageLimits map[string]*LanguageResourceLimits
 
 	// Security settings
-	EnableSeccomp     bool
-	EnableAppArmor    bool
-	EnableReadOnlyRoot bool
+	EnableSeccomp       bool
+	EnableAppArmor      bool
+	EnableReadOnlyRoot  bool
 	DropAllCapabilities bool
-	NoNewPrivileges   bool
+	NoNewPrivileges     bool
 
 	// Network settings
-	DisableNetwork    bool
-	NetworkMode       string // none, bridge, host (default: none)
+	DisableNetwork bool
+	NetworkMode    string // none, bridge, host (default: none)
 
 	// Filesystem settings
-	TmpfsSize         string // size of /tmp tmpfs mount (default: 64m)
-	WorkDirSize       string // size of /work tmpfs mount (default: 32m)
+	TmpfsSize           string // size of /tmp tmpfs mount (default: 64m)
+	WorkDirSize         string // size of /work tmpfs mount (default: 32m)
+	EnablePackageCache  bool
+	PackageCacheBaseDir string
 
 	// Logging
-	EnableAuditLog    bool
-	AuditLogPath      string
+	EnableAuditLog bool
+	AuditLogPath   string
 
 	// Cleanup settings
-	AutoCleanup       bool
-	CleanupInterval   time.Duration
-	MaxContainerAge   time.Duration
+	AutoCleanup     bool
+	CleanupInterval time.Duration
+	MaxContainerAge time.Duration
 
 	// Concurrent execution limits
 	MaxConcurrentExecs int32
@@ -92,13 +95,13 @@ type LanguageResourceLimits struct {
 
 // containerExecution tracks an active container execution
 type containerExecution struct {
-	ID           string
-	ContainerID  string
-	Language     string
-	StartTime    time.Time
-	TempDir      string
-	Cancel       context.CancelFunc
-	Done         chan struct{}
+	ID          string
+	ContainerID string
+	Language    string
+	StartTime   time.Time
+	TempDir     string
+	Cancel      context.CancelFunc
+	Done        chan struct{}
 }
 
 // AuditLogger handles security audit logging
@@ -138,27 +141,29 @@ type SandboxStats struct {
 // DefaultContainerSandboxConfig returns production-ready default configuration
 func DefaultContainerSandboxConfig() *ContainerSandboxConfig {
 	return &ContainerSandboxConfig{
-		DockerSocket:         "/var/run/docker.sock",
-		ImagePrefix:          "apex-sandbox",
-		DefaultMemoryLimit:   256 * 1024 * 1024, // 256MB
-		DefaultCPULimit:      0.5,
-		DefaultTimeout:       30 * time.Second,
-		DefaultPidsLimit:     100,
-		EnableSeccomp:        true,
-		EnableAppArmor:       runtime.GOOS == "linux",
-		EnableReadOnlyRoot:   true,
-		DropAllCapabilities:  true,
-		NoNewPrivileges:      true,
-		DisableNetwork:       true,
-		NetworkMode:          "none",
-		TmpfsSize:            "64m",
-		WorkDirSize:          "32m",
-		EnableAuditLog:       true,
-		AuditLogPath:         "/var/log/apex-sandbox/audit.log",
-		AutoCleanup:          true,
-		CleanupInterval:      5 * time.Minute,
-		MaxContainerAge:      10 * time.Minute,
-		MaxConcurrentExecs:   50,
+		DockerSocket:        "/var/run/docker.sock",
+		ImagePrefix:         "apex-sandbox",
+		DefaultMemoryLimit:  256 * 1024 * 1024, // 256MB
+		DefaultCPULimit:     0.5,
+		DefaultTimeout:      30 * time.Second,
+		DefaultPidsLimit:    100,
+		EnableSeccomp:       true,
+		EnableAppArmor:      runtime.GOOS == "linux",
+		EnableReadOnlyRoot:  true,
+		DropAllCapabilities: true,
+		NoNewPrivileges:     true,
+		DisableNetwork:      true,
+		NetworkMode:         "none",
+		TmpfsSize:           "64m",
+		WorkDirSize:         "32m",
+		EnablePackageCache:  true,
+		PackageCacheBaseDir: filepath.Join(os.TempDir(), "apex-sandbox-pkg-cache"),
+		EnableAuditLog:      true,
+		AuditLogPath:        "/var/log/apex-sandbox/audit.log",
+		AutoCleanup:         true,
+		CleanupInterval:     5 * time.Minute,
+		MaxContainerAge:     10 * time.Minute,
+		MaxConcurrentExecs:  50,
 		LanguageLimits: map[string]*LanguageResourceLimits{
 			"python": {
 				MemoryLimit: 256 * 1024 * 1024,
@@ -219,6 +224,14 @@ func NewContainerSandbox(config *ContainerSandboxConfig) (*ContainerSandbox, err
 		config = DefaultContainerSandboxConfig()
 	}
 
+	// Docker Desktop/non-Linux hosts can reject our custom seccomp profile while the
+	// Linux production path should keep seccomp enabled by default.
+	if runtime.GOOS != "linux" && config.EnableSeccomp {
+		cfgCopy := *config
+		cfgCopy.EnableSeccomp = false
+		config = &cfgCopy
+	}
+
 	// Create base temp directory
 	baseTempDir := filepath.Join(os.TempDir(), "apex-container-sandbox")
 	if err := os.MkdirAll(baseTempDir, 0755); err != nil {
@@ -231,6 +244,7 @@ func NewContainerSandbox(config *ContainerSandboxConfig) (*ContainerSandbox, err
 		baseTempDir: baseTempDir,
 		imageCache:  make(map[string]bool),
 		stats:       &SandboxStats{},
+		pkgCache:    NewPackageCacheManager(config.PackageCacheBaseDir, config.EnablePackageCache),
 	}
 
 	// Check Docker availability
@@ -728,6 +742,10 @@ func (s *ContainerSandbox) runContainer(ctx context.Context, exec *containerExec
 
 	// Build docker run command
 	args := s.buildDockerArgs(exec, filename, limits, imageName)
+	if stdin != "" {
+		// Required for piping stdin into `docker run`.
+		args = append(args[:1], append([]string{"-i"}, args[1:]...)...)
+	}
 
 	// Create docker command
 	cmd := osexec.CommandContext(ctx, "docker", args...)
@@ -810,8 +828,12 @@ func (s *ContainerSandbox) buildDockerArgs(exec *containerExecution, filename st
 	}
 
 	// Tmpfs mounts
+	tmpfsFlags := "rw,exec,nosuid,size=%s,mode=1777,uid=1000,gid=1000"
+	if !s.languageNeedsExecutableTmp(exec.Language) {
+		tmpfsFlags = "rw,noexec,nosuid,size=%s,mode=1777,uid=1000,gid=1000"
+	}
 	args = append(args,
-		"--tmpfs", fmt.Sprintf("/tmp:rw,noexec,nosuid,size=%s", limits.TmpfsSize),
+		"--tmpfs", fmt.Sprintf("/tmp:"+tmpfsFlags, limits.TmpfsSize),
 	)
 
 	// Network isolation
@@ -825,6 +847,20 @@ func (s *ContainerSandbox) buildDockerArgs(exec *containerExecution, filename st
 	args = append(args,
 		"-v", fmt.Sprintf("%s:/work:ro", exec.TempDir),
 	)
+
+	// Shared package caches for faster warm starts (Replit-parity behavior)
+	if s.pkgCache != nil && s.pkgCache.Enabled() {
+		for _, cacheMount := range s.pkgCache.MountsForLanguage(exec.Language) {
+			mode := "rw"
+			if cacheMount.ReadOnly {
+				mode = "ro"
+			}
+			args = append(args, "-v", fmt.Sprintf("%s:%s:%s", cacheMount.HostPath, cacheMount.ContainerPath, mode))
+			for k, v := range cacheMount.EnvironmentMap {
+				args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
+			}
+		}
+	}
 
 	// Set user
 	args = append(args, "--user", "sandbox")
@@ -877,7 +913,8 @@ func (s *ContainerSandbox) getExecutionCommand(language, filename string) []stri
 	case "python":
 		return []string{"python3", "-u", filename}
 	case "javascript":
-		return []string{"node", filename}
+		// `--jitless` avoids executable-memory permission issues in hardened container runtimes.
+		return []string{"node", "--jitless", filename}
 	case "go":
 		return []string{"sh", "-c", fmt.Sprintf("go run %s", filename)}
 	case "rust":
@@ -891,6 +928,16 @@ func (s *ContainerSandbox) getExecutionCommand(language, filename string) []stri
 		return []string{"sh", "-c", fmt.Sprintf("g++ -o /tmp/main -std=c++17 %s && /tmp/main", filename)}
 	default:
 		return []string{"sh", "-c", "echo 'Unsupported language'"}
+	}
+}
+
+// languageNeedsExecutableTmp returns true when /tmp must allow executing compiled artifacts.
+func (s *ContainerSandbox) languageNeedsExecutableTmp(language string) bool {
+	switch strings.ToLower(strings.TrimSpace(language)) {
+	case "go", "rust", "c", "cpp":
+		return true
+	default:
+		return false
 	}
 }
 

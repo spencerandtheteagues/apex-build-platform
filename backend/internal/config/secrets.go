@@ -12,9 +12,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
+	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -25,6 +29,16 @@ const (
 	EnvStaging     = "staging"
 	EnvDevelopment = "development"
 	EnvTest        = "test"
+)
+
+// Minimum entropy bits required for production secrets
+const (
+	MinEntropyBitsJWT       = 128
+	MinEntropyBitsMasterKey = 256
+	MinJWTSecretLength      = 32
+	MinMasterKeyBytes       = 32
+	MinDatabaseURLLength    = 10
+	MinStripeKeyLength      = 20
 )
 
 // SecretRequirement defines a required secret and its validation rules
@@ -47,14 +61,14 @@ type SecretsConfig struct {
 	SecretsMasterKey string
 
 	// External services
-	StripeSecretKey    string
+	StripeSecretKey     string
 	StripeWebhookSecret string
 
 	// Database
 	DatabaseURL string
 
 	// Environment
-	Environment string
+	Environment  string
 	IsProduction bool
 }
 
@@ -88,7 +102,7 @@ func DefaultSecretRequirements() []SecretRequirement {
 			EnvVar:      "JWT_SECRET",
 			Description: "Secret key for signing JWT tokens",
 			Required:    true,
-			MinLength:   32,
+			MinLength:   MinJWTSecretLength,
 			Validator:   validateJWTSecret,
 		},
 		{
@@ -96,7 +110,7 @@ func DefaultSecretRequirements() []SecretRequirement {
 			EnvVar:      "SECRETS_MASTER_KEY",
 			Description: "AES-256 master key for encrypting user secrets (base64 encoded)",
 			Required:    true,
-			MinLength:   32,
+			MinLength:   MinMasterKeyBytes,
 			Validator:   validateMasterKey,
 		},
 		{
@@ -104,7 +118,7 @@ func DefaultSecretRequirements() []SecretRequirement {
 			EnvVar:      "DATABASE_URL",
 			Description: "PostgreSQL connection string",
 			Required:    true,
-			MinLength:   10,
+			MinLength:   MinDatabaseURLLength,
 			Validator:   validateDatabaseURL,
 		},
 		{
@@ -112,7 +126,7 @@ func DefaultSecretRequirements() []SecretRequirement {
 			EnvVar:      "STRIPE_SECRET_KEY",
 			Description: "Stripe API secret key for payment processing",
 			Required:    false, // Optional - payments disabled without it
-			MinLength:   20,
+			MinLength:   MinStripeKeyLength,
 			Validator:   validateStripeKey,
 		},
 		{
@@ -120,13 +134,15 @@ func DefaultSecretRequirements() []SecretRequirement {
 			EnvVar:      "STRIPE_WEBHOOK_SECRET",
 			Description: "Stripe webhook signature verification secret",
 			Required:    false,
-			MinLength:   20,
-			Validator:   nil,
+			MinLength:   MinStripeKeyLength,
+			Validator:   validateStripeWebhookSecret,
 		},
 	}
 }
 
-// ValidateSecrets validates all required secrets and returns a SecretsConfig
+// ValidateSecrets validates all required secrets and returns a SecretsConfig.
+// In production, this will return a non-nil error if any required secret is
+// missing or invalid — callers MUST treat this as fatal.
 func ValidateSecrets() (*SecretsConfig, error) {
 	env := GetEnvironment()
 	isProduction := IsProductionEnvironment()
@@ -189,16 +205,25 @@ func ValidateSecrets() (*SecretsConfig, error) {
 	// In production, enforce critical secrets are present
 	if isProduction {
 		if config.SecretsMasterKey == "" {
-			return nil, errors.New("CRITICAL: SECRETS_MASTER_KEY is required in production - encrypted user data will be lost without it")
+			return nil, errors.New("FATAL: SECRETS_MASTER_KEY is required in production - encrypted user data will be lost without it")
 		}
 		if config.JWTSecret == "" {
-			return nil, errors.New("CRITICAL: JWT_SECRET is required in production - authentication will not work")
+			return nil, errors.New("FATAL: JWT_SECRET is required in production - authentication will not work")
+		}
+		if config.DatabaseURL == "" {
+			return nil, errors.New("FATAL: DATABASE_URL is required in production - no database connection possible")
 		}
 	}
 
 	// In production, fail on any validation errors
 	if isProduction && validationErr.HasErrors() {
 		return nil, validationErr
+	}
+
+	// In staging, fail on missing required secrets (treat like prod for secrets)
+	if IsStagingEnvironment() && len(validationErr.Missing) > 0 {
+		return nil, fmt.Errorf("staging environment requires all production secrets: %s",
+			strings.Join(validationErr.Missing, ", "))
 	}
 
 	// Log warnings in development
@@ -209,14 +234,15 @@ func ValidateSecrets() (*SecretsConfig, error) {
 	return config, nil
 }
 
-// ValidateAndLogSecrets validates secrets and logs configuration status
-// This should be called at application startup
+// ValidateAndLogSecrets validates secrets and logs configuration status.
+// This should be called at application startup.
+// Returns a fatal error in production if secrets are invalid.
 func ValidateAndLogSecrets() (*SecretsConfig, error) {
 	log.Println("Validating secrets configuration...")
 
 	config, err := ValidateSecrets()
 	if err != nil {
-		log.Printf("CRITICAL: Secrets validation failed: %v", err)
+		log.Printf("FATAL: Secrets validation failed: %v", err)
 		return nil, err
 	}
 
@@ -277,36 +303,70 @@ func IsStagingEnvironment() bool {
 	return env == EnvStaging || env == "stage"
 }
 
-// Validators for specific secret types
+// --- Strict Validators ---
 
+// validateJWTSecret enforces a strong JWT signing key.
 func validateJWTSecret(secret string) error {
-	// Check for known weak/placeholder values
+	// Blocklist of known weak/placeholder values
 	weakSecrets := []string{
 		"secret",
 		"jwt-secret",
+		"jwt_secret",
 		"your-secret",
 		"changeme",
 		"password",
 		"test",
 		"dev",
 		"development",
+		"example",
+		"default",
+		"placeholder",
+		"replace-me",
+		"todo",
+		"fixme",
+		"apex-build-secret",
 	}
 
 	lower := strings.ToLower(secret)
 	for _, weak := range weakSecrets {
-		if strings.Contains(lower, weak) {
-			return errors.New("contains weak/placeholder value")
+		if lower == weak || strings.Contains(lower, weak) {
+			return fmt.Errorf("contains weak/placeholder value %q", weak)
 		}
 	}
 
-	// Check for sufficient entropy (at least some variety)
-	if isLowEntropy(secret) {
-		return errors.New("appears to have low entropy")
+	// Reject if it's entirely alphabetic or entirely numeric
+	allAlpha := true
+	allDigit := true
+	for _, c := range secret {
+		if !unicode.IsLetter(c) {
+			allAlpha = false
+		}
+		if !unicode.IsDigit(c) {
+			allDigit = false
+		}
+	}
+	if allAlpha {
+		return errors.New("must contain non-alphabetic characters for sufficient entropy")
+	}
+	if allDigit {
+		return errors.New("must contain non-numeric characters for sufficient entropy")
+	}
+
+	// Shannon entropy check
+	entropy := shannonEntropy(secret)
+	if entropy < 3.0 {
+		return fmt.Errorf("entropy too low (%.1f bits/char, need >= 3.0)", entropy)
+	}
+
+	// Reject repeating patterns like "abcabc" or "aaaaaa"
+	if hasRepeatingPattern(secret) {
+		return errors.New("appears to contain a repeating pattern")
 	}
 
 	return nil
 }
 
+// validateMasterKey enforces a valid AES-256 key.
 func validateMasterKey(key string) error {
 	// Must be valid base64
 	decoded, err := base64.StdEncoding.DecodeString(key)
@@ -315,57 +375,173 @@ func validateMasterKey(key string) error {
 	}
 
 	// Must be exactly 32 bytes (256 bits) for AES-256
-	if len(decoded) != 32 {
-		return fmt.Errorf("must decode to exactly 32 bytes, got %d", len(decoded))
+	if len(decoded) != MinMasterKeyBytes {
+		return fmt.Errorf("must decode to exactly %d bytes (got %d) for AES-256", MinMasterKeyBytes, len(decoded))
+	}
+
+	// Check that the key isn't all zeros or trivially weak
+	allZero := true
+	for _, b := range decoded {
+		if b != 0 {
+			allZero = false
+			break
+		}
+	}
+	if allZero {
+		return errors.New("master key is all zeros — this is not a valid encryption key")
+	}
+
+	// Check byte-level entropy
+	byteEntropy := byteEntropy(decoded)
+	if byteEntropy < 4.0 {
+		return fmt.Errorf("master key byte entropy too low (%.1f, need >= 4.0)", byteEntropy)
 	}
 
 	return nil
 }
 
-func validateDatabaseURL(url string) error {
-	// Must contain postgres:// or postgresql://
-	if !strings.HasPrefix(url, "postgres://") && !strings.HasPrefix(url, "postgresql://") {
-		return errors.New("must be a PostgreSQL connection URL")
+// validateDatabaseURL checks for a valid PostgreSQL connection string.
+func validateDatabaseURL(rawURL string) error {
+	if !strings.HasPrefix(rawURL, "postgres://") && !strings.HasPrefix(rawURL, "postgresql://") {
+		return errors.New("must be a PostgreSQL connection URL (postgres:// or postgresql://)")
 	}
 
-	// Check for placeholder values
-	if strings.Contains(url, "localhost") || strings.Contains(url, "127.0.0.1") {
-		// Only warn, don't fail - might be valid for some setups
-		return nil
+	// Parse the URL to validate structure
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("malformed URL: %w", err)
+	}
+
+	// Must have a host
+	if parsed.Hostname() == "" {
+		return errors.New("database URL must include a hostname")
+	}
+
+	// In production, reject default/example passwords
+	if parsed.User != nil {
+		password, hasPassword := parsed.User.Password()
+		if hasPassword {
+			weakPasswords := []string{"password", "postgres", "changeme", "test", "example", "apex_build_2024"}
+			for _, weak := range weakPasswords {
+				if strings.EqualFold(password, weak) {
+					return fmt.Errorf("database password %q is a known default — use a strong password in production", weak)
+				}
+			}
+		}
 	}
 
 	return nil
 }
 
+// validateStripeKey checks the Stripe secret key format.
 func validateStripeKey(key string) error {
-	// Stripe keys have specific prefixes
 	if !strings.HasPrefix(key, "sk_live_") && !strings.HasPrefix(key, "sk_test_") {
 		return errors.New("must start with sk_live_ or sk_test_")
 	}
 
-	// Check for placeholder
+	// Reject obvious placeholders
+	placeholderPattern := regexp.MustCompile(`^sk_(live|test)_[xX]+$`)
+	if placeholderPattern.MatchString(key) {
+		return errors.New("appears to be a placeholder value (all x's)")
+	}
+
 	if key == "sk_test_xxx" || key == "sk_live_xxx" {
 		return errors.New("appears to be a placeholder value")
+	}
+
+	// Stripe keys are typically 100+ chars
+	if len(key) < 30 {
+		return errors.New("Stripe key appears truncated (expected 30+ characters)")
 	}
 
 	return nil
 }
 
-// isLowEntropy checks if a string has suspiciously low entropy
+// validateStripeWebhookSecret checks webhook signing secret format.
+func validateStripeWebhookSecret(secret string) error {
+	if !strings.HasPrefix(secret, "whsec_") {
+		return errors.New("must start with whsec_")
+	}
+	if len(secret) < 30 {
+		return errors.New("webhook secret appears truncated")
+	}
+	return nil
+}
+
+// --- Entropy Helpers ---
+
+// shannonEntropy calculates Shannon entropy in bits per character.
+func shannonEntropy(s string) float64 {
+	if len(s) == 0 {
+		return 0
+	}
+	freq := make(map[rune]float64)
+	for _, c := range s {
+		freq[c]++
+	}
+	length := float64(len([]rune(s)))
+	entropy := 0.0
+	for _, count := range freq {
+		p := count / length
+		if p > 0 {
+			entropy -= p * math.Log2(p)
+		}
+	}
+	return entropy
+}
+
+// byteEntropy calculates Shannon entropy over raw bytes.
+func byteEntropy(data []byte) float64 {
+	if len(data) == 0 {
+		return 0
+	}
+	freq := make(map[byte]float64)
+	for _, b := range data {
+		freq[b]++
+	}
+	length := float64(len(data))
+	entropy := 0.0
+	for _, count := range freq {
+		p := count / length
+		if p > 0 {
+			entropy -= p * math.Log2(p)
+		}
+	}
+	return entropy
+}
+
+// isLowEntropy checks if a string has suspiciously low entropy (legacy compat)
 func isLowEntropy(s string) bool {
 	if len(s) < 16 {
 		return true
 	}
-
-	// Count unique characters
-	unique := make(map[rune]bool)
-	for _, c := range s {
-		unique[c] = true
-	}
-
-	// Should have reasonable variety
-	return len(unique) < len(s)/4
+	return shannonEntropy(s) < 2.5
 }
+
+// hasRepeatingPattern detects simple repeating patterns (e.g., "abcabc").
+func hasRepeatingPattern(s string) bool {
+	n := len(s)
+	if n < 6 {
+		return false
+	}
+	// Check for repeating substrings of length 1 to n/2
+	for patLen := 1; patLen <= n/2; patLen++ {
+		pattern := s[:patLen]
+		isRepeat := true
+		for i := patLen; i < n; i++ {
+			if s[i] != pattern[i%patLen] {
+				isRepeat = false
+				break
+			}
+		}
+		if isRepeat {
+			return true
+		}
+	}
+	return false
+}
+
+// --- Key Generation ---
 
 // GenerateSecureSecret generates a cryptographically secure random secret
 func GenerateSecureSecret(length int) (string, error) {
@@ -378,12 +554,14 @@ func GenerateSecureSecret(length int) (string, error) {
 
 // GenerateMasterKey generates a new AES-256 master key
 func GenerateMasterKey() (string, error) {
-	bytes := make([]byte, 32) // 256 bits
+	bytes := make([]byte, MinMasterKeyBytes)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", fmt.Errorf("failed to generate master key: %w", err)
 	}
 	return base64.StdEncoding.EncodeToString(bytes), nil
 }
+
+// --- JWT Rotation ---
 
 // JWTRotationValidator supports validating tokens during key rotation
 type JWTRotationValidator struct {
@@ -434,8 +612,10 @@ func (v *JWTRotationValidator) ValidateToken(tokenString string, claims jwt.Clai
 	return nil, fmt.Errorf("token validation failed: %w", err)
 }
 
-// RequireProductionSecrets returns an error if any production-required secrets are missing
-// Use this to enforce strict validation in critical code paths
+// --- Production Enforcement Helpers ---
+
+// RequireProductionSecrets returns an error if any production-required secrets are missing.
+// Use this to enforce strict validation in critical code paths.
 func RequireProductionSecrets(secrets ...string) error {
 	var missing []string
 	for _, secret := range secrets {
@@ -449,23 +629,34 @@ func RequireProductionSecrets(secrets ...string) error {
 	return nil
 }
 
-// MustGetSecret returns the value of a secret or panics if not set
-// Only use this during initialization when the secret is absolutely required
+// MustValidateSecrets calls ValidateSecrets and fatally logs if it fails.
+// This is the recommended startup call — it guarantees the process exits
+// immediately if secrets are misconfigured.
+func MustValidateSecrets() *SecretsConfig {
+	config, err := ValidateAndLogSecrets()
+	if err != nil {
+		log.Fatalf("FATAL: Cannot start server — secrets validation failed: %v", err)
+	}
+	return config
+}
+
+// MustGetSecret returns the value of a secret or panics if not set.
+// Only use this during initialization when the secret is absolutely required.
 func MustGetSecret(envVar string) string {
 	value := os.Getenv(envVar)
 	if value == "" {
-		panic(fmt.Sprintf("CRITICAL: Required secret %s is not set", envVar))
+		panic(fmt.Sprintf("FATAL: Required secret %s is not set", envVar))
 	}
 	return value
 }
 
-// GetSecretWithDefault returns a secret value or a default for development
-// Logs a warning when using the default
+// GetSecretWithDefault returns a secret value or a default for development.
+// Logs a warning when using the default.
 func GetSecretWithDefault(envVar, defaultValue string) string {
 	value := os.Getenv(envVar)
 	if value == "" {
 		if IsProductionEnvironment() {
-			log.Printf("CRITICAL: %s not set in production environment", envVar)
+			log.Printf("FATAL: %s not set in production environment", envVar)
 		} else {
 			log.Printf("WARNING: %s not set, using development default", envVar)
 		}
@@ -474,14 +665,16 @@ func GetSecretWithDefault(envVar, defaultValue string) string {
 	return value
 }
 
+// --- Rotation Info ---
+
 // SecretRotationInfo provides information about secret rotation status
 type SecretRotationInfo struct {
-	SecretName       string
-	HasCurrent       bool
-	HasOld           bool
-	RotationActive   bool
-	RotationStarted  time.Time
-	RecommendedEnd   time.Time
+	SecretName      string
+	HasCurrent      bool
+	HasOld          bool
+	RotationActive  bool
+	RotationStarted time.Time
+	RecommendedEnd  time.Time
 }
 
 // GetJWTRotationInfo returns information about JWT secret rotation status
@@ -497,8 +690,7 @@ func GetJWTRotationInfo() SecretRotationInfo {
 	}
 
 	if info.RotationActive {
-		// Recommend completing rotation within 24 hours
-		info.RotationStarted = time.Now() // Would need persistence for accurate tracking
+		info.RotationStarted = time.Now()
 		info.RecommendedEnd = info.RotationStarted.Add(24 * time.Hour)
 	}
 

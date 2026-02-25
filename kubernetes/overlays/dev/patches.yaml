@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apex-backend-config
+  namespace: apex-build
+data:
+  ENVIRONMENT: "development"
+  GIN_MODE: "debug"
+  DB_SSL_MODE: "disable"
+  ENABLE_TRACING: "false"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apex-backend
+  namespace: apex-build
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: backend
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: EXECUTION_FORCE_CONTAINER
+              value: "false"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apex-frontend
+  namespace: apex-build
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: frontend
+          imagePullPolicy: IfNotPresent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apex-sandbox-v2
+  namespace: apex-build
+spec:
+  replicas: 1
