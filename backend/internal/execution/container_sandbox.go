@@ -224,6 +224,14 @@ func NewContainerSandbox(config *ContainerSandboxConfig) (*ContainerSandbox, err
 		config = DefaultContainerSandboxConfig()
 	}
 
+	// Docker Desktop/non-Linux hosts can reject our custom seccomp profile while the
+	// Linux production path should keep seccomp enabled by default.
+	if runtime.GOOS != "linux" && config.EnableSeccomp {
+		cfgCopy := *config
+		cfgCopy.EnableSeccomp = false
+		config = &cfgCopy
+	}
+
 	// Create base temp directory
 	baseTempDir := filepath.Join(os.TempDir(), "apex-container-sandbox")
 	if err := os.MkdirAll(baseTempDir, 0755); err != nil {
@@ -734,6 +742,10 @@ func (s *ContainerSandbox) runContainer(ctx context.Context, exec *containerExec
 
 	// Build docker run command
 	args := s.buildDockerArgs(exec, filename, limits, imageName)
+	if stdin != "" {
+		// Required for piping stdin into `docker run`.
+		args = append(args[:1], append([]string{"-i"}, args[1:]...)...)
+	}
 
 	// Create docker command
 	cmd := osexec.CommandContext(ctx, "docker", args...)
@@ -816,8 +828,12 @@ func (s *ContainerSandbox) buildDockerArgs(exec *containerExecution, filename st
 	}
 
 	// Tmpfs mounts
+	tmpfsFlags := "rw,exec,nosuid,size=%s,mode=1777,uid=1000,gid=1000"
+	if !s.languageNeedsExecutableTmp(exec.Language) {
+		tmpfsFlags = "rw,noexec,nosuid,size=%s,mode=1777,uid=1000,gid=1000"
+	}
 	args = append(args,
-		"--tmpfs", fmt.Sprintf("/tmp:rw,noexec,nosuid,size=%s", limits.TmpfsSize),
+		"--tmpfs", fmt.Sprintf("/tmp:"+tmpfsFlags, limits.TmpfsSize),
 	)
 
 	// Network isolation
@@ -897,7 +913,8 @@ func (s *ContainerSandbox) getExecutionCommand(language, filename string) []stri
 	case "python":
 		return []string{"python3", "-u", filename}
 	case "javascript":
-		return []string{"node", filename}
+		// `--jitless` avoids executable-memory permission issues in hardened container runtimes.
+		return []string{"node", "--jitless", filename}
 	case "go":
 		return []string{"sh", "-c", fmt.Sprintf("go run %s", filename)}
 	case "rust":
@@ -911,6 +928,16 @@ func (s *ContainerSandbox) getExecutionCommand(language, filename string) []stri
 		return []string{"sh", "-c", fmt.Sprintf("g++ -o /tmp/main -std=c++17 %s && /tmp/main", filename)}
 	default:
 		return []string{"sh", "-c", "echo 'Unsupported language'"}
+	}
+}
+
+// languageNeedsExecutableTmp returns true when /tmp must allow executing compiled artifacts.
+func (s *ContainerSandbox) languageNeedsExecutableTmp(language string) bool {
+	switch strings.ToLower(strings.TrimSpace(language)) {
+	case "go", "rust", "c", "cpp":
+		return true
+	default:
+		return false
 	}
 }
 
