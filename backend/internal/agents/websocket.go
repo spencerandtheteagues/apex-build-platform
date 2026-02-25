@@ -49,12 +49,18 @@ func validateWebSocketToken(tokenString string) (*WebSocketClaims, error) {
 	return nil, errors.New("invalid token claims")
 }
 
-// isUserAdmin checks if a user has admin privileges
-// In production, this should query the database
-func isUserAdmin(userID uint) bool {
-	// TODO: Implement proper admin check via database query
-	// For now, return false to enforce strict ownership
-	return false
+// isUserAdminDB checks if a user has admin privileges by querying the database.
+// Returns false if DB is unavailable (safe default).
+func isUserAdminDB(am *AgentManager, userID uint) bool {
+	if am == nil || am.db == nil {
+		return false
+	}
+	var isAdmin bool
+	err := am.db.Raw("SELECT is_admin FROM users WHERE id = ? AND deleted_at IS NULL", userID).Scan(&isAdmin).Error
+	if err != nil {
+		return false
+	}
+	return isAdmin
 }
 
 var upgrader = websocket.Upgrader{
@@ -244,7 +250,7 @@ func (h *WSHub) HandleWebSocket(c *gin.Context) {
 	}
 
 	// Verify user has access to this build
-	if uid != build.UserID && !isUserAdmin(uid) {
+	if uid != build.UserID && !isUserAdminDB(h.manager, uid) {
 		log.Printf("WebSocket connection rejected: user %d not authorized for build %s (owner: %d)", uid, buildID, build.UserID)
 		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized for this build"})
 		return
@@ -399,8 +405,9 @@ func (c *WSConnection) handleMessage(message []byte) {
 		}
 
 	case "build:cancel":
-		// User wants to cancel the build
-		// TODO: Implement build cancellation
+		if err := c.hub.manager.CancelBuild(c.buildID); err != nil {
+			log.Printf("Failed to cancel build %s: %v", c.buildID, err)
+		}
 
 	case "build:rollback":
 		// User wants to rollback to a checkpoint

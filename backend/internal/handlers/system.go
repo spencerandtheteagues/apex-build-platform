@@ -99,19 +99,10 @@ func (h *Handler) ExecuteCode(c *gin.Context) {
 		return
 	}
 
-	// TODO: Implement actual code execution in a sandboxed environment
-	// For now, return a mock response
-	c.JSON(http.StatusOK, StandardResponse{
-		Success: true,
-		Data: map[string]interface{}{
-			"execution_id": "exec_" + time.Now().Format("20060102150405"),
-			"status":       "completed",
-			"output":       "Code execution not yet implemented. This is a placeholder response.",
-			"error":        "",
-			"exit_code":    0,
-			"duration":     100,
-		},
-		Message: "Code execution feature coming soon",
+	c.JSON(http.StatusNotImplemented, StandardResponse{
+		Success: false,
+		Error:   "Code execution is not yet available",
+		Code:    "NOT_IMPLEMENTED",
 	})
 }
 

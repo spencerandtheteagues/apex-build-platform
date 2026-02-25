@@ -4932,6 +4932,41 @@ func (am *AgentManager) RollbackToCheckpoint(buildID, checkpointID string) error
 	return nil
 }
 
+// CancelBuild cancels a running build and updates its status
+func (am *AgentManager) CancelBuild(buildID string) error {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	build, exists := am.builds[buildID]
+	if !exists {
+		return fmt.Errorf("build %s not found", buildID)
+	}
+
+	if build.Status == BuildCompleted || build.Status == BuildCancelled || build.Status == BuildFailed {
+		return fmt.Errorf("build %s already in terminal state: %s", buildID, build.Status)
+	}
+
+	build.Status = BuildCancelled
+	now := time.Now()
+	build.CompletedAt = &now
+	build.UpdatedAt = now
+	build.Error = "cancelled by user"
+
+	log.Printf("Build %s cancelled by user", buildID)
+
+	// Broadcast cancellation to subscribers
+	go am.broadcast(buildID, &WSMessage{
+		Type:      "build:cancelled",
+		BuildID:   buildID,
+		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"message": "Build cancelled by user",
+		},
+	})
+
+	return nil
+}
+
 // Shutdown gracefully stops the agent manager
 func (am *AgentManager) Shutdown() {
 	am.cancel()

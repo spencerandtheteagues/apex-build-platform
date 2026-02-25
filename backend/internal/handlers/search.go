@@ -246,26 +246,19 @@ func (h *SearchHandler) SearchAndReplace(c *gin.Context) {
 }
 
 // GetSearchHistory handles GET /api/v1/search/history
-// Returns user's recent search queries
+// Returns user's recent search queries (not yet persisted)
 func (h *SearchHandler) GetSearchHistory(c *gin.Context) {
-	// userID := c.GetUint("user_id")
 	projectID, _ := strconv.ParseUint(c.Query("project_id"), 10, 32)
 
-	// TODO: Implement search history storage
-	// For now, return empty history
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"history": []gin.H{},
+		"success":    true,
+		"history":    []gin.H{},
 		"project_id": projectID,
 	})
 }
 
 // ClearSearchHistory handles DELETE /api/v1/search/history
-// Clears user's search history
 func (h *SearchHandler) ClearSearchHistory(c *gin.Context) {
-	// userID := c.GetUint("user_id")
-
-	// TODO: Implement search history storage
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Search history cleared",

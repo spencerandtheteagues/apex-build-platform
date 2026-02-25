@@ -175,13 +175,26 @@ func getCSRFSecret() string {
 	return secret
 }
 
-// RateLimitHeaders adds rate limiting headers
+// RateLimitHeaders adds rate limiting headers with actual token counts
 func RateLimitHeaders() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Add rate limiting headers
-		c.Header("X-RateLimit-Limit", "1000")
-		c.Header("X-RateLimit-Remaining", "999") // TODO: Implement actual counting
-		c.Header("X-RateLimit-Reset", "3600")
+		limit := 1000
+		remaining := limit - 1 // default if limiter unavailable
+
+		if globalRateLimiter != nil {
+			limiter := globalRateLimiter.GetLimiter(c.ClientIP())
+			tokens := int(limiter.Tokens())
+			if tokens < remaining {
+				remaining = tokens
+			}
+			if remaining < 0 {
+				remaining = 0
+			}
+		}
+
+		c.Header("X-RateLimit-Limit", strconv.Itoa(limit))
+		c.Header("X-RateLimit-Remaining", strconv.Itoa(remaining))
+		c.Header("X-RateLimit-Reset", "60")
 
 		c.Next()
 	}
