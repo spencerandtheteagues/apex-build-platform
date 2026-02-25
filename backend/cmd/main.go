@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"apex-build/internal/agents"
@@ -588,12 +590,38 @@ func main() {
 		log.Println("Running in DEVELOPMENT mode - some security checks relaxed")
 	}
 
-	done := make(chan struct{})
+	// Graceful shutdown: listen for SIGTERM/SIGINT (Render, K8s, Docker stop)
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
 	select {
 	case err := <-serverErrors:
 		log.Fatalf("CRITICAL: Failed to start server: %v", err)
-	case <-done:
+	case sig := <-quit:
+		log.Printf("Received signal %v, starting graceful shutdown...", sig)
 	}
+
+	// Give in-flight requests up to 15 seconds to complete
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer shutdownCancel()
+
+	// 1. Stop accepting new HTTP connections and drain existing ones
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP server shutdown error: %v", err)
+	}
+	log.Println("HTTP server stopped")
+
+	// 2. Stop all preview backend processes (prevents orphan child processes)
+	if sr := previewHandler.GetServerRunner(); sr != nil {
+		sr.StopAll(shutdownCtx)
+		log.Println("Preview backend processes stopped")
+	}
+
+	// 3. Shutdown agent manager (cancels in-flight builds, closes task queues)
+	agentManager.Shutdown()
+	log.Println("Agent manager stopped")
+
+	log.Println("Graceful shutdown complete")
 }
 
 // AppConfig holds all application configuration (non-secret)

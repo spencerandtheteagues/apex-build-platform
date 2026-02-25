@@ -1975,9 +1975,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
             `Project "${appliedProject.name}" ${applyResponse.result?.created_project ? 'created' : 'updated'} from canonical build artifacts (${applyResponse.result?.total_files ?? 0} files)`
           )
           return appliedProject
-        } catch (applyError) {
-          console.warn('Failed to apply canonical build artifacts, falling back to client-side file replay:', applyError)
-          addSystemMessage('Canonical build apply unavailable. Falling back to local file replay...')
+        } catch (applyError: any) {
+          const errorMsg = applyError?.response?.data?.error || applyError?.message || 'Unknown error'
+          addSystemMessage(`Failed to apply build artifacts: ${errorMsg}`)
+          throw new Error(`Build artifact apply failed: ${errorMsg}`)
         }
       }
 
