@@ -167,7 +167,11 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 		}
 	}
 
-	// Validate description
+	// Validate description (trim whitespace before checking)
+	req.Description = strings.TrimSpace(req.Description)
+	if req.Prompt != "" {
+		req.Prompt = strings.TrimSpace(req.Prompt)
+	}
 	if len(req.Description) < 10 {
 		log.Printf("StartBuild: description too short (%d chars)", len(req.Description))
 		c.JSON(http.StatusBadRequest, gin.H{

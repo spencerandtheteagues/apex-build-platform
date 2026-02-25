@@ -160,6 +160,8 @@ func TestStartBuildRejectsShortDescription(t *testing.T) {
 		{"empty", ""},
 		{"too short", "hi"},
 		{"whitespace only", "         "},
+		{"whitespace bypass attempt", "                    "}, // 20 spaces would pass len>=10 without trim
+		{"padded short", "   ab   "},
 	}
 
 	for _, tc := range tests {
