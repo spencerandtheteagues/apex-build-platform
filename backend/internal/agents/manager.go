@@ -2850,10 +2850,31 @@ func extractDependencyRepairHintsFromReadinessErrors(errors []string) []string {
 	pkgSet := map[string]bool{}
 	specSet := map[string]bool{}
 	var manifestHints []string
+	var integrationHints []string
 	for _, msg := range errors {
 		msg = strings.TrimSpace(msg)
 		if msg == "" {
 			continue
+		}
+		if strings.HasPrefix(msg, "integration: ") {
+			detail := strings.TrimPrefix(msg, "integration: ")
+			integrationHints = append(integrationHints,
+				"INTEGRATION ERROR: "+detail+
+					"\nFix: ensure frontend API calls and backend routes use the same paths, ports, and CORS origins. "+
+					"Backend MUST configure CORS to allow the frontend origin.")
+		}
+		if strings.HasPrefix(msg, "missing_deliverable: README") {
+			manifestHints = append(manifestHints,
+				"MISSING REQUIRED FILE: README.md\n"+
+					"You MUST create a README.md with: project title, tech stack list, setup instructions "+
+					"(npm install / go mod download / pip install), run instructions for frontend and backend, "+
+					"and environment variable documentation.")
+		}
+		if strings.HasPrefix(msg, "missing_deliverable: .env.example") {
+			manifestHints = append(manifestHints,
+				"MISSING REQUIRED FILE: .env.example\n"+
+					"You MUST create a .env.example listing every environment variable the app reads "+
+					"(process.env.*, import.meta.env.VITE_*, os.environ.get, os.Getenv) with example values.")
 		}
 		if strings.HasPrefix(msg, "missing_manifest: package.json") {
 			manifestHints = append(manifestHints,
@@ -2879,7 +2900,7 @@ func extractDependencyRepairHintsFromReadinessErrors(errors []string) []string {
 			specSet[m[1]] = true
 		}
 	}
-	if len(pkgSet) == 0 && len(specSet) == 0 && len(manifestHints) == 0 {
+	if len(pkgSet) == 0 && len(specSet) == 0 && len(manifestHints) == 0 && len(integrationHints) == 0 {
 		return nil
 	}
 
@@ -2919,6 +2940,7 @@ func extractDependencyRepairHintsFromReadinessErrors(errors []string) []string {
 	}
 	hints = append(hints, "If a config-only import (jest/vitest config) is not needed for runtime/preview, keep config self-consistent or remove the unused config file and related scripts together.")
 	hints = append(hints, manifestHints...)
+	hints = append(hints, integrationHints...)
 	return hints
 }
 
@@ -3795,6 +3817,216 @@ func (am *AgentManager) applyDeterministicMissingManifestRepair(build *Build, re
 	return true, strings.Join(repairSummaries, "; ")
 }
 
+// applyDeterministicMissingDeliverableRepair generates README.md and .env.example
+// when they are missing. These files are critical for users to run the generated app.
+func (am *AgentManager) applyDeterministicMissingDeliverableRepair(build *Build, readinessErrors []string) (bool, string) {
+	if build == nil {
+		return false, ""
+	}
+	needsReadme := false
+	needsEnvExample := false
+	for _, msg := range readinessErrors {
+		if strings.HasPrefix(msg, "missing_deliverable: README") {
+			needsReadme = true
+		}
+		if strings.HasPrefix(msg, "missing_deliverable: .env.example") {
+			needsEnvExample = true
+		}
+	}
+	if !needsReadme && !needsEnvExample {
+		return false, ""
+	}
+
+	build.mu.RLock()
+	stack := build.TechStack
+	desc := build.Description
+	build.mu.RUnlock()
+	existingFiles := am.collectGeneratedFiles(build)
+
+	var repairSummaries []string
+
+	// --- Generate README.md ---
+	if needsReadme {
+		fe, be, db := "", "", ""
+		fePort, bePort := 5173, 3001
+		if stack != nil {
+			fe = stack.Frontend
+			be = stack.Backend
+			db = stack.Database
+			if fe != "" {
+				fePort = canonicalFrontendPort(fe)
+			}
+			if be != "" {
+				bePort = canonicalBackendPort(be)
+			}
+		}
+
+		var sb strings.Builder
+		// App name: first sentence of description, or "App"
+		appName := "App"
+		if idx := strings.IndexAny(desc, ".!?\n"); idx > 0 && idx < 60 {
+			appName = strings.TrimSpace(desc[:idx])
+		} else if len(desc) > 5 && len(desc) < 60 {
+			appName = strings.TrimSpace(desc)
+		}
+
+		sb.WriteString(fmt.Sprintf("# %s\n\n", appName))
+		sb.WriteString("## Tech Stack\n")
+		if fe != "" {
+			sb.WriteString(fmt.Sprintf("- Frontend: %s (dev server port %d)\n", fe, fePort))
+		}
+		if be != "" {
+			sb.WriteString(fmt.Sprintf("- Backend: %s (API port %d)\n", be, bePort))
+		}
+		if db != "" {
+			sb.WriteString(fmt.Sprintf("- Database: %s\n", db))
+		}
+
+		sb.WriteString("\n## Setup\n\n")
+
+		if be != "" && fe != "" {
+			sb.WriteString("### Install Dependencies\n```bash\n")
+			sb.WriteString("# Frontend\ncd frontend && npm install\n\n")
+			switch strings.ToLower(strings.TrimSpace(be)) {
+			case "express", "express.js", "node.js", "node":
+				sb.WriteString("# Backend\ncd backend && npm install\n")
+			case "go", "golang":
+				sb.WriteString("# Backend\ncd backend && go mod download\n")
+			case "python", "fastapi":
+				sb.WriteString("# Backend\ncd backend && pip install -r requirements.txt\n")
+			}
+			sb.WriteString("```\n\n")
+		} else if fe != "" {
+			sb.WriteString("### Install Dependencies\n```bash\nnpm install\n```\n\n")
+		} else if be != "" {
+			switch strings.ToLower(strings.TrimSpace(be)) {
+			case "express", "express.js", "node.js", "node":
+				sb.WriteString("### Install Dependencies\n```bash\nnpm install\n```\n\n")
+			case "go", "golang":
+				sb.WriteString("### Install Dependencies\n```bash\ngo mod download\n```\n\n")
+			case "python", "fastapi":
+				sb.WriteString("### Install Dependencies\n```bash\npip install -r requirements.txt\n```\n\n")
+			}
+		}
+
+		sb.WriteString("### Environment Variables\n")
+		sb.WriteString("Copy `.env.example` to `.env` and fill in your values:\n```bash\ncp .env.example .env\n```\n\n")
+
+		sb.WriteString("### Run\n```bash\n")
+		if be != "" && fe != "" {
+			sb.WriteString("# Terminal 1 — Backend\n")
+			switch strings.ToLower(strings.TrimSpace(be)) {
+			case "express", "express.js", "node.js", "node":
+				sb.WriteString("cd backend && npm run dev\n\n")
+			case "go", "golang":
+				sb.WriteString("cd backend && go run main.go\n\n")
+			case "python", "fastapi":
+				sb.WriteString("cd backend && uvicorn main:app --reload\n\n")
+			}
+			sb.WriteString("# Terminal 2 — Frontend\ncd frontend && npm run dev\n")
+		} else if fe != "" {
+			sb.WriteString("npm run dev\n")
+		} else if be != "" {
+			switch strings.ToLower(strings.TrimSpace(be)) {
+			case "express", "express.js", "node.js", "node":
+				sb.WriteString("npm run dev\n")
+			case "go", "golang":
+				sb.WriteString("go run main.go\n")
+			case "python", "fastapi":
+				sb.WriteString("uvicorn main:app --reload\n")
+			}
+		}
+		sb.WriteString("```\n\n")
+
+		if fe != "" {
+			sb.WriteString(fmt.Sprintf("Open http://localhost:%d\n", fePort))
+		}
+
+		am.createGeneratedFile(build, "README.md", sb.String())
+		repairSummaries = append(repairSummaries, "generated README.md")
+	}
+
+	// --- Generate .env.example ---
+	if needsEnvExample {
+		// Scan all generated files for environment variable references.
+		envVarSet := map[string]string{}
+		processEnvRe := regexp.MustCompile(`process\.env\.([A-Z][A-Z0-9_]+)`)
+		osGetenvRe := regexp.MustCompile(`os\.(?:Getenv|environ\.get)\(\s*["']([A-Z][A-Z0-9_]+)["']`)
+		viteEnvRe := regexp.MustCompile(`import\.meta\.env\.(VITE_[A-Z][A-Z0-9_]+)`)
+
+		for _, f := range existingFiles {
+			for _, m := range processEnvRe.FindAllStringSubmatch(f.Content, -1) {
+				envVarSet[m[1]] = ""
+			}
+			for _, m := range osGetenvRe.FindAllStringSubmatch(f.Content, -1) {
+				envVarSet[m[1]] = ""
+			}
+			for _, m := range viteEnvRe.FindAllStringSubmatch(f.Content, -1) {
+				envVarSet[m[1]] = ""
+			}
+		}
+
+		// Add canonical vars based on stack.
+		if stack != nil {
+			if stack.Database != "" {
+				envVarSet["DATABASE_URL"] = "postgresql://postgres:password@localhost:5432/app"
+			}
+			if stack.Backend != "" {
+				envVarSet["PORT"] = fmt.Sprintf("%d", canonicalBackendPort(stack.Backend))
+			}
+			if stack.Frontend != "" && stack.Backend != "" {
+				envVarSet["VITE_API_URL"] = fmt.Sprintf("http://localhost:%d", canonicalBackendPort(stack.Backend))
+			}
+		}
+
+		if len(envVarSet) > 0 {
+			// Provide sensible example values for known variable names.
+			knownExamples := map[string]string{
+				"DATABASE_URL":   "postgresql://postgres:password@localhost:5432/app",
+				"PORT":           "3001",
+				"JWT_SECRET":     "your-secret-key-change-in-production",
+				"SECRET_KEY":     "your-secret-key-change-in-production",
+				"SECRET":         "your-secret-key-change-in-production",
+				"NODE_ENV":       "development",
+				"ALLOWED_ORIGINS": "http://localhost:5173",
+				"REDIS_URL":      "redis://localhost:6379",
+				"MONGO_URI":      "mongodb://localhost:27017/app",
+			}
+
+			var envLines []string
+			// Sort for deterministic output.
+			keys := make([]string, 0, len(envVarSet))
+			for k := range envVarSet {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				v := envVarSet[k]
+				if v == "" {
+					if example, ok := knownExamples[k]; ok {
+						v = example
+					} else if strings.HasSuffix(k, "_URL") {
+						v = "http://localhost:3001"
+					} else if strings.HasSuffix(k, "_KEY") || strings.HasSuffix(k, "_SECRET") || strings.HasSuffix(k, "_TOKEN") {
+						v = "your-value-here"
+					} else {
+						v = "your-value-here"
+					}
+				}
+				envLines = append(envLines, fmt.Sprintf("%s=%s", k, v))
+			}
+
+			am.createGeneratedFile(build, ".env.example", strings.Join(envLines, "\n")+"\n")
+			repairSummaries = append(repairSummaries, "generated .env.example")
+		}
+	}
+
+	if len(repairSummaries) == 0 {
+		return false, ""
+	}
+	return true, strings.Join(repairSummaries, "; ")
+}
+
 func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
 	if build == nil {
 		return
@@ -4161,6 +4393,37 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 							"quality_gate_stage":      "validation",
 							"validation_errors":       readinessErrors,
 							"missing_manifest_repair": summary,
+						},
+					})
+					am.checkBuildCompletion(build)
+					return
+				}
+				if repaired, summary := am.applyDeterministicMissingDeliverableRepair(build, readinessErrors); repaired {
+					build.mu.Lock()
+					build.UpdatedAt = now
+					build.Status = BuildReviewing
+					build.CompletedAt = nil
+					if build.Progress < 90 {
+						build.Progress = 90
+					}
+					build.Error = fmt.Sprintf("Final output validation failed: %s (applied deliverable repair: %s)", errorSummary, summary)
+					progress = build.Progress
+					build.mu.Unlock()
+
+					am.broadcast(build.ID, &WSMessage{
+						Type:      WSBuildProgress,
+						BuildID:   build.ID,
+						Timestamp: now,
+						Data: map[string]any{
+							"phase":                    "validation",
+							"status":                   string(BuildReviewing),
+							"progress":                 progress,
+							"message":                  fmt.Sprintf("Auto-repair: %s. Re-running final validation.", summary),
+							"quality_gate_required":    true,
+							"quality_gate_active":      true,
+							"quality_gate_stage":       "validation",
+							"validation_errors":        readinessErrors,
+							"deliverable_repair":       summary,
 						},
 					})
 					am.checkBuildCompletion(build)
@@ -5805,6 +6068,17 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 			// Include architecture decisions for implementation agents
 			if archOutput := am.getCompletedTaskOutput(build, TaskArchitecture); archOutput != "" {
 				agentContext += fmt.Sprintf("\n<architecture_context>\n%s\n</architecture_context>\n", archOutput)
+				// Extract and re-inject the api_contract block at top level for visual prominence.
+				// This ensures frontend and backend agents see the agreed ports/CORS without digging
+				// through the full architecture text.
+				if (agent.Role == RoleFrontend || agent.Role == RoleBackend) {
+					if contractStart := strings.Index(archOutput, "<api_contract>"); contractStart >= 0 {
+						if contractEnd := strings.Index(archOutput, "</api_contract>"); contractEnd >= 0 {
+							contract := archOutput[contractStart : contractEnd+len("</api_contract>")]
+							agentContext += fmt.Sprintf("\n%s\n", contract)
+						}
+					}
+				}
 			}
 		}
 		if agent.Role == RoleBackend {
@@ -5983,6 +6257,31 @@ func formatTechStackSummary(stack *TechStack) string {
 
 // buildTechStackDirective produces a strong, role-specific tech stack constraint for the prompt.
 // This overrides the model's defaults so it uses the stack the user explicitly selected.
+// canonicalBackendPort returns the standard port for a backend framework.
+// These are injected into prompts so frontend and backend agents agree without guessing.
+func canonicalBackendPort(backend string) int {
+	switch strings.ToLower(strings.TrimSpace(backend)) {
+	case "express", "express.js", "node.js", "node":
+		return 3001
+	case "go", "golang":
+		return 8080
+	case "python", "fastapi":
+		return 8000
+	default:
+		return 3001
+	}
+}
+
+// canonicalFrontendPort returns the standard dev-server port for a frontend framework.
+func canonicalFrontendPort(frontend string) int {
+	switch strings.ToLower(strings.TrimSpace(frontend)) {
+	case "next.js", "nextjs":
+		return 3000
+	default:
+		return 5173 // Vite default
+	}
+}
+
 func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 	if stack == nil {
 		return ""
@@ -6020,9 +6319,14 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 		// For full-stack builds: frontend files MUST NOT import any backend/server frameworks.
 		// The frontend calls the backend via HTTP (fetch/axios).
 		if stack.Backend != "" {
+			backendPort := canonicalBackendPort(stack.Backend)
 			lines = append(lines, "- CRITICAL: Frontend files (.tsx/.jsx/.ts) must NEVER import or require server-side packages.")
 			lines = append(lines, "  FORBIDDEN in frontend files: `import express`, `require('express')`, `import fastapi`, `import http from 'http'` (server listen), any Go imports.")
 			lines = append(lines, "  Frontend communicates with the backend via HTTP fetch() or axios calls to the backend's API endpoints.")
+			lines = append(lines, fmt.Sprintf("- API_BASE_URL: The backend API runs at http://localhost:%d.", backendPort))
+			lines = append(lines, fmt.Sprintf("  All fetch()/axios calls MUST use http://localhost:%d as the base URL.", backendPort))
+			lines = append(lines, fmt.Sprintf("  Create src/config.ts or src/api.ts with: export const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:%d'", backendPort))
+			lines = append(lines, fmt.Sprintf("  Add VITE_API_URL=http://localhost:%d to .env.example", backendPort))
 		}
 	} else if stack.Frontend == "" && stack.Backend != "" {
 		// Backend-only: explicitly say there is no frontend
@@ -6043,16 +6347,32 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 			lines = append(lines, "  □ package.json — manifest with all dependencies (express, cors, etc.) and scripts (start/dev)")
 			lines = append(lines, "  □ tsconfig.json — TypeScript compiler config")
 			lines = append(lines, "  □ src/server.ts (or server.ts) — Express entry file with app.listen()")
+			if stack.Frontend != "" {
+				fePort := canonicalFrontendPort(stack.Frontend)
+				lines = append(lines, "  PORT: Backend MUST listen on port 3001 — app.listen(3001).")
+				lines = append(lines, fmt.Sprintf("  CORS: Import cors and add: app.use(cors({ origin: ['http://localhost:%d', 'http://localhost:3000'], credentials: true }))", fePort))
+				lines = append(lines, "    'cors' MUST be in package.json dependencies (not devDependencies).")
+			}
 		case "go", "golang":
 			lines = append(lines, "  Use Go with net/http or chi router. Entry: main.go. Module: go.mod required.")
 			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
 			lines = append(lines, "  □ go.mod — Go module manifest (module name + go 1.21)")
 			lines = append(lines, "  □ main.go (or cmd/main.go) — main() function entry point")
+			if stack.Frontend != "" {
+				fePort := canonicalFrontendPort(stack.Frontend)
+				lines = append(lines, "  PORT: Backend MUST listen on :8080 — http.ListenAndServe(\":8080\", ...)")
+				lines = append(lines, fmt.Sprintf("  CORS: Set 'Access-Control-Allow-Origin: http://localhost:%d' header for all responses (including OPTIONS preflight).", fePort))
+			}
 		case "python", "fastapi":
 			lines = append(lines, "  Use Python with FastAPI. Entry: main.py. Dependencies: requirements.txt.")
 			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
 			lines = append(lines, "  □ requirements.txt — all pip packages (fastapi, uvicorn, sqlalchemy, etc.)")
 			lines = append(lines, "  □ main.py (or app/main.py) — FastAPI app entry with uvicorn.run()")
+			if stack.Frontend != "" {
+				fePort := canonicalFrontendPort(stack.Frontend)
+				lines = append(lines, "  PORT: Backend MUST run uvicorn on port 8000 — uvicorn.run(app, host='0.0.0.0', port=8000)")
+				lines = append(lines, fmt.Sprintf("  CORS: Add CORSMiddleware: origins=['http://localhost:%d', 'http://localhost:3000'], allow_credentials=True, allow_methods=['*'], allow_headers=['*']", fePort))
+			}
 		}
 	} else if stack.Backend == "" && stack.Frontend != "" {
 		// Frontend-only: explicitly say there is no backend
@@ -6261,7 +6581,24 @@ YOUR OUTPUT MUST INCLUDE:
 OUTPUT FORMAT:
 - Prefer plain markdown sections and bullet lists (no diagrams required)
 - If you include files, limit to SMALL blueprint docs only (e.g. ARCHITECTURE.md, docs/file-map.md)
-- Never emit large code blocks for runtime source files` + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
+- Never emit large code blocks for runtime source files
+
+MANDATORY FOR FULL-STACK BUILDS: When both a frontend and backend are present, your output MUST include an <api_contract> XML section:
+<api_contract>
+backend_port: (number — the port the backend listens on)
+frontend_port: (number — the port the frontend dev server runs on)
+cors_origins: (comma-separated list of allowed origins, e.g. http://localhost:5173)
+api_base_url: (what frontend code uses, e.g. http://localhost:3001)
+endpoints:
+  - GET /api/health — response: { status: "ok" }
+  - POST /api/todos — request: { title: string } — response: { id, title, done }
+  (list all API routes)
+env_vars:
+  - DATABASE_URL=postgresql://postgres:password@localhost:5432/app
+  - PORT=3001
+  (list all environment variables with example values)
+</api_contract>
+This contract will be shared with Frontend and Backend agents to ensure they connect correctly.` + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
 
 		RoleFrontend: `You are the Frontend Agent — an expert UI engineer who builds beautiful, responsive, production-ready interfaces.
 You specialize in modern React with TypeScript, Vite, and Tailwind CSS.
@@ -6865,6 +7202,152 @@ func (am *AgentManager) isCodeGenerationTask(taskType TaskType) bool {
 	return false
 }
 
+// checkIntegrationCoherence verifies that full-stack builds have matching API routes,
+// CORS configuration, and consistent port numbers between frontend and backend.
+func (am *AgentManager) checkIntegrationCoherence(build *Build, files []GeneratedFile) []string {
+	if build == nil || build.TechStack == nil {
+		return nil
+	}
+	fe := strings.TrimSpace(build.TechStack.Frontend)
+	be := strings.TrimSpace(build.TechStack.Backend)
+	if fe == "" || be == "" {
+		return nil // only check full-stack builds
+	}
+
+	var issues []string
+
+	// Regex patterns for frontend API calls.
+	fetchPathRe := regexp.MustCompile(`fetch\s*\(\s*[` + "`" + `'"]((/api/[^` + "`" + `'"?\s]+))`)
+	axiosPathRe := regexp.MustCompile(`axios\s*\.\s*(?:get|post|put|delete|patch|request)\s*\(\s*[` + "`" + `'"]((/api/[^` + "`" + `'"?\s]+))`)
+	apiBaseCallRe := regexp.MustCompile(`API_BASE[^+\n]*\+\s*[` + "`" + `'"](/[^` + "`" + `'"?\s]+)`)
+
+	// Regex patterns for backend route registrations.
+	expressRouteRe := regexp.MustCompile(`(?:app|router)\s*\.\s*(?:get|post|put|delete|patch|use)\s*\(\s*['"]([^'"]+)['"]`)
+	goRouteRe := regexp.MustCompile(`(?:HandleFunc|Handle)\s*\(\s*"([^"]+)"`)
+	fastAPIRouteRe := regexp.MustCompile(`@app\s*\.\s*(?:get|post|put|delete|patch)\s*\(\s*['"]([^'"]+)['"]`)
+
+	// CORS check patterns.
+	expressCORSRe := regexp.MustCompile(`cors\s*\(|Access-Control-Allow-Origin`)
+	goCORSRe := regexp.MustCompile(`Access-Control-Allow-Origin`)
+	fastapiCORSRe := regexp.MustCompile(`CORSMiddleware|add_middleware`)
+
+	beNorm := strings.ToLower(strings.TrimSpace(be))
+	canonicalPort := canonicalBackendPort(be)
+
+	// Collect frontend API call paths and backend routes.
+	frontendPaths := map[string]bool{}
+	backendRoutes := map[string]bool{}
+	hasCORS := false
+	portOK := true
+
+	for _, f := range files {
+		path := strings.ToLower(strings.TrimSpace(f.Path))
+		ext := strings.ToLower(filepath.Ext(path))
+		content := f.Content
+
+		// Skip node_modules
+		if strings.Contains(path, "node_modules/") {
+			continue
+		}
+
+		// Frontend files: scan for API calls.
+		if ext == ".ts" || ext == ".tsx" || ext == ".js" || ext == ".jsx" {
+			for _, m := range fetchPathRe.FindAllStringSubmatch(content, -1) {
+				if len(m) >= 2 {
+					frontendPaths[m[1]] = true
+				}
+			}
+			for _, m := range axiosPathRe.FindAllStringSubmatch(content, -1) {
+				if len(m) >= 2 {
+					frontendPaths[m[1]] = true
+				}
+			}
+			for _, m := range apiBaseCallRe.FindAllStringSubmatch(content, -1) {
+				if len(m) >= 2 {
+					frontendPaths[m[1]] = true
+				}
+			}
+		}
+
+		// Backend files: scan for routes and CORS.
+		switch beNorm {
+		case "express", "express.js", "node.js", "node":
+			if ext == ".ts" || ext == ".js" {
+				for _, m := range expressRouteRe.FindAllStringSubmatch(content, -1) {
+					if len(m) >= 2 {
+						backendRoutes[m[1]] = true
+					}
+				}
+				if expressCORSRe.MatchString(content) {
+					hasCORS = true
+				}
+				// Check for wrong port (anything other than canonical).
+				wrongPortRe := regexp.MustCompile(`listen\s*\(\s*(\d{4,5})\s*[,)]`)
+				for _, m := range wrongPortRe.FindAllStringSubmatch(content, -1) {
+					if len(m) >= 2 {
+						if port := m[1]; port != fmt.Sprintf("%d", canonicalPort) && port != "process.env.PORT" {
+							portOK = false
+						}
+					}
+				}
+			}
+		case "go", "golang":
+			if ext == ".go" {
+				for _, m := range goRouteRe.FindAllStringSubmatch(content, -1) {
+					if len(m) >= 2 {
+						backendRoutes[m[1]] = true
+					}
+				}
+				if goCORSRe.MatchString(content) {
+					hasCORS = true
+				}
+			}
+		case "python", "fastapi":
+			if ext == ".py" {
+				for _, m := range fastAPIRouteRe.FindAllStringSubmatch(content, -1) {
+					if len(m) >= 2 {
+						backendRoutes[m[1]] = true
+					}
+				}
+				if fastapiCORSRe.MatchString(content) {
+					hasCORS = true
+				}
+			}
+		}
+	}
+
+	// Check: any frontend /api/... call must have a matching backend route.
+	// We do a prefix-match to handle routes with path params (e.g. /api/todos/:id).
+	if len(frontendPaths) > 0 && len(backendRoutes) > 0 {
+		for fePath := range frontendPaths {
+			matched := false
+			for bePath := range backendRoutes {
+				// Normalize: strip trailing path-param segments for matching.
+				beBase := regexp.MustCompile(`[/:][{:].*`).ReplaceAllString(bePath, "")
+				if fePath == bePath || fePath == beBase || strings.HasPrefix(fePath, beBase+"/") || strings.HasPrefix(bePath, fePath) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				issues = append(issues, fmt.Sprintf("integration: frontend calls %s but backend has no matching route", fePath))
+			}
+		}
+	}
+
+	// Check: CORS must be configured when frontend and backend coexist.
+	if !hasCORS {
+		issues = append(issues, "integration: backend has no CORS configuration — frontend requests will be blocked by the browser")
+	}
+
+	// Check: port mismatch.
+	if !portOK {
+		issues = append(issues, fmt.Sprintf("integration: backend listens on wrong port — must use port %d (or $PORT) to match frontend configuration", canonicalPort))
+	}
+
+	return issues
+}
+
 // validateFinalBuildReadiness checks whether final artifacts are likely runnable.
 // It catches incomplete frontend outputs that otherwise appear "successful" but cannot preview.
 func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []GeneratedFile) []string {
@@ -6895,6 +7378,8 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	hasNodeFiles := false  // any .ts/.tsx/.js/.jsx file
 	hasGoFiles := false    // any .go file
 	hasPyFiles := false    // any .py file
+	hasReadme := false
+	hasEnvExample := false
 
 	// Derive metadata from the tech stack selected by the user (if available).
 	// This overrides inferences from generated files, ensuring the validator
@@ -6950,6 +7435,12 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 		}
 		if path == "requirements.txt" || path == "pyproject.toml" {
 			hasPyManifest = true
+		}
+		if strings.HasSuffix(path, "readme.md") {
+			hasReadme = true
+		}
+		if path == ".env.example" || strings.HasSuffix(path, "/.env.example") {
+			hasEnvExample = true
 		}
 
 		if ext == ".tsx" || ext == ".jsx" {
@@ -7016,6 +7507,16 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 		addError("missing_manifest: requirements.txt (Python project has no requirements.txt)")
 	}
 
+	// README.md and .env.example are mandatory for full builds.
+	// They ensure users can actually run the app. Fast/frontend-only builds skip the .env check.
+	isFastBuild := build != nil && build.Mode == "fast"
+	if !hasReadme && !isFastBuild {
+		addError("missing_deliverable: README.md (every build must include setup and run instructions)")
+	}
+	if !hasEnvExample && hasNodeFiles && !isFastBuild {
+		addError("missing_deliverable: .env.example (list all environment variables with example values)")
+	}
+
 	// A package.json alone does not signal a frontend app — Node/Express backends also have one.
 	// Require at least one genuine frontend indicator (TSX/JSX source, bundler config,
 	// index.html entry, or a known frontend entry path) alongside any package.json.
@@ -7076,12 +7577,34 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 		}
 	}
 
+	// Integration coherence: for full-stack builds, verify frontend and backend agree on
+	// ports, API routes, and CORS. Only checked after basic structural validation passes
+	// to avoid noisy errors on fundamentally broken output.
+	if build != nil && build.TechStack != nil && build.TechStack.Frontend != "" && build.TechStack.Backend != "" {
+		for _, msg := range am.checkIntegrationCoherence(build, files) {
+			addError(msg)
+		}
+	}
+
 	return errors
 }
 
 func (am *AgentManager) shouldRunPreviewReadinessVerification(build *Build) bool {
 	if build != nil && build.RequirePreviewReady {
 		return true
+	}
+	// For cloud provider builds (Claude, GPT-4, Gemini, Grok), always compile-verify.
+	// These flagship models produce code users expect to run immediately — verify it does.
+	// Skip for Ollama (local models have limited context/quality; verification adds too much latency).
+	if build != nil {
+		build.mu.RLock()
+		for _, agent := range build.Agents {
+			if agent != nil && agent.Provider != ai.ProviderOllama && agent.Provider != "" {
+				build.mu.RUnlock()
+				return true
+			}
+		}
+		build.mu.RUnlock()
 	}
 	val := strings.TrimSpace(strings.ToLower(os.Getenv("BUILD_REQUIRE_PREVIEW_READY_DEFAULT")))
 	return val == "1" || val == "true" || val == "yes"
@@ -7403,6 +7926,92 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 		return nil
 	}
 
+	// --- Go backend: run `go build ./...` ---
+	hasGoFiles := false
+	hasGoMod := false
+	for _, f := range files {
+		p := strings.ToLower(strings.TrimSpace(f.Path))
+		if strings.HasSuffix(p, ".go") {
+			hasGoFiles = true
+		}
+		if p == "go.mod" || strings.HasSuffix(p, "/go.mod") {
+			hasGoMod = true
+		}
+	}
+	if hasGoFiles && hasGoMod {
+		if _, err := exec.LookPath("go"); err == nil {
+			goTmpDir, err := os.MkdirTemp("", "apex-go-verify-*")
+			if err == nil {
+				defer os.RemoveAll(goTmpDir)
+				for _, f := range files {
+					if strings.TrimSpace(f.Path) == "" || f.Content == "" {
+						continue
+					}
+					rel := filepath.FromSlash(strings.TrimPrefix(strings.TrimSpace(f.Path), "./"))
+					if strings.Contains(rel, "..") {
+						continue
+					}
+					full := filepath.Join(goTmpDir, rel)
+					if mkErr := os.MkdirAll(filepath.Dir(full), 0755); mkErr == nil {
+						_ = os.WriteFile(full, []byte(f.Content), 0644)
+					}
+				}
+				if out, buildErr := runPreviewCheckCommand(goTmpDir, 60*time.Second, "go", "build", "./..."); buildErr != nil {
+					trimmed := strings.TrimSpace(out)
+					if len(trimmed) > 500 {
+						trimmed = trimmed[:500] + "..."
+					}
+					return []string{fmt.Sprintf("Go backend build failed: %s", trimmed)}
+				}
+			}
+		}
+		return nil // Go backend compiled successfully
+	}
+
+	// --- Python backend: check syntax with py_compile ---
+	hasPyFiles := false
+	for _, f := range files {
+		if strings.HasSuffix(strings.ToLower(strings.TrimSpace(f.Path)), ".py") {
+			hasPyFiles = true
+			break
+		}
+	}
+	if hasPyFiles {
+		if _, err := exec.LookPath("python3"); err == nil {
+			pyTmpDir, err := os.MkdirTemp("", "apex-py-verify-*")
+			if err == nil {
+				defer os.RemoveAll(pyTmpDir)
+				var pyIssues []string
+				for _, f := range files {
+					if !strings.HasSuffix(strings.ToLower(strings.TrimSpace(f.Path)), ".py") || strings.TrimSpace(f.Content) == "" {
+						continue
+					}
+					rel := filepath.FromSlash(strings.TrimPrefix(strings.TrimSpace(f.Path), "./"))
+					if strings.Contains(rel, "..") {
+						continue
+					}
+					full := filepath.Join(pyTmpDir, rel)
+					if mkErr := os.MkdirAll(filepath.Dir(full), 0755); mkErr == nil {
+						if writeErr := os.WriteFile(full, []byte(f.Content), 0644); writeErr == nil {
+							if out, compileErr := runPreviewCheckCommand(pyTmpDir, 15*time.Second, "python3", "-m", "py_compile", rel); compileErr != nil {
+								trimmed := strings.TrimSpace(out)
+								if len(trimmed) > 300 {
+									trimmed = trimmed[:300] + "..."
+								}
+								pyIssues = append(pyIssues, fmt.Sprintf("Python syntax error in %s: %s", f.Path, trimmed))
+							}
+						}
+					}
+				}
+				if len(pyIssues) > 0 {
+					return pyIssues
+				}
+			}
+		}
+		return nil // Python backend verified (or python3 unavailable — skip gracefully)
+	}
+
+	// --- Node.js backend (existing logic) ---
 	backendPackagePaths := []string{
 		"backend/package.json",
 		"api/package.json",
