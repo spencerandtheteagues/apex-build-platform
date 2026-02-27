@@ -2849,10 +2849,28 @@ func extractDependencyRepairHintsFromReadinessErrors(errors []string) []string {
 	}
 	pkgSet := map[string]bool{}
 	specSet := map[string]bool{}
+	var manifestHints []string
 	for _, msg := range errors {
 		msg = strings.TrimSpace(msg)
 		if msg == "" {
 			continue
+		}
+		if strings.HasPrefix(msg, "missing_manifest: package.json") {
+			manifestHints = append(manifestHints,
+				"MISSING REQUIRED FILE: package.json\n"+
+					"You MUST create a complete package.json with all dependencies referenced in the TypeScript/JavaScript files, "+
+					"correct start/build scripts for the framework (Express: \"start\": \"ts-node src/server.ts\"; "+
+					"React+Vite: \"dev\": \"vite\"), and devDependencies for TypeScript types (@types/*).")
+		} else if strings.HasPrefix(msg, "missing_manifest: go.mod") {
+			manifestHints = append(manifestHints,
+				"MISSING REQUIRED FILE: go.mod\n"+
+					"You MUST create a go.mod file with the module name and Go version (e.g. module app\\n\\ngo 1.21), "+
+					"plus require entries for all third-party packages imported in the .go files.")
+		} else if strings.HasPrefix(msg, "missing_manifest: requirements.txt") {
+			manifestHints = append(manifestHints,
+				"MISSING REQUIRED FILE: requirements.txt\n"+
+					"You MUST create a requirements.txt with all pip packages imported in the Python files "+
+					"(e.g. fastapi>=0.104.1, uvicorn[standard]>=0.24.0, sqlalchemy>=2.0.23, etc.).")
 		}
 		if m := regexp.MustCompile(`does not declare dependency "([^"]+)"`).FindStringSubmatch(msg); len(m) == 2 {
 			pkgSet[m[1]] = true
@@ -2861,7 +2879,7 @@ func extractDependencyRepairHintsFromReadinessErrors(errors []string) []string {
 			specSet[m[1]] = true
 		}
 	}
-	if len(pkgSet) == 0 && len(specSet) == 0 {
+	if len(pkgSet) == 0 && len(specSet) == 0 && len(manifestHints) == 0 {
 		return nil
 	}
 
@@ -2900,6 +2918,7 @@ func extractDependencyRepairHintsFromReadinessErrors(errors []string) []string {
 		}
 	}
 	hints = append(hints, "If a config-only import (jest/vitest config) is not needed for runtime/preview, keep config self-consistent or remove the unused config file and related scripts together.")
+	hints = append(hints, manifestHints...)
 	return hints
 }
 
@@ -3094,6 +3113,44 @@ func (am *AgentManager) patchGeneratedFileContent(build *Build, targetPath, newC
 			build.UpdatedAt = time.Now()
 			return true
 		}
+	}
+	return false
+}
+
+// createGeneratedFile injects a new file into the most recently completed code-gen task.
+// Unlike patchGeneratedFileContent, this creates files that do not yet exist.
+func (am *AgentManager) createGeneratedFile(build *Build, path, content string) bool {
+	if build == nil || strings.TrimSpace(path) == "" || strings.TrimSpace(content) == "" {
+		return false
+	}
+	sanitized := sanitizeFilePath(path)
+	if sanitized == "" {
+		return false
+	}
+
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	for i := len(build.Tasks) - 1; i >= 0; i-- {
+		task := build.Tasks[i]
+		if task == nil || task.Output == nil || !am.isCodeGenerationTask(task.Type) || task.Status != TaskCompleted {
+			continue
+		}
+		// Don't duplicate an existing file.
+		for _, f := range task.Output.Files {
+			if sanitizeFilePath(f.Path) == sanitized {
+				return false
+			}
+		}
+		task.Output.Files = append(task.Output.Files, GeneratedFile{
+			Path:     path,
+			Content:  content,
+			Language: am.detectLanguage(path),
+			Size:     int64(len(content)),
+			IsNew:    true,
+		})
+		build.UpdatedAt = time.Now()
+		return true
 	}
 	return false
 }
@@ -3438,12 +3495,20 @@ func (am *AgentManager) applyDeterministicMixedCodeRepair(build *Build, readines
 		if !hasBackend {
 			continue
 		}
-		// Strip lines containing backend import tokens
+		// Strip actual backend import statements from frontend files.
+		// Skip comment lines — they may reference backend concepts for documentation purposes.
 		lines := strings.Split(f.Content, "\n")
 		cleaned := lines[:0]
 		removed := 0
 		for _, line := range lines {
-			lineLower := strings.ToLower(strings.TrimSpace(line))
+			trimmed := strings.TrimSpace(line)
+			// Never strip comment lines — only real import/require statements.
+			isComment := strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "*")
+			if isComment {
+				cleaned = append(cleaned, line)
+				continue
+			}
+			lineLower := strings.ToLower(trimmed)
 			drop := false
 			for _, tok := range backendImportTokens {
 				if strings.Contains(lineLower, strings.ToLower(tok)) {
@@ -3470,6 +3535,264 @@ func (am *AgentManager) applyDeterministicMixedCodeRepair(build *Build, readines
 		return false, ""
 	}
 	return true, strings.Join(summaries, "; ")
+}
+
+// applyDeterministicMissingManifestRepair creates missing project manifest files
+// (package.json, go.mod, requirements.txt) by scanning the generated source files.
+func (am *AgentManager) applyDeterministicMissingManifestRepair(build *Build, readinessErrors []string) (bool, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return false, ""
+	}
+
+	// Check if any error is about a missing manifest.
+	hasMissingManifest := false
+	for _, e := range readinessErrors {
+		if strings.Contains(e, "missing_manifest:") {
+			hasMissingManifest = true
+			break
+		}
+	}
+	if !hasMissingManifest {
+		return false, ""
+	}
+
+	files := am.collectGeneratedFiles(build)
+	if len(files) == 0 {
+		return false, ""
+	}
+
+	// Known package versions for package.json generation.
+	knownVersions := map[string]string{
+		"express": "^4.18.2", "cors": "^2.8.5", "helmet": "^7.1.0",
+		"morgan": "^1.10.0", "body-parser": "^1.20.2", "jsonwebtoken": "^9.0.2",
+		"bcryptjs": "^2.4.3", "pg": "^8.11.3", "mongoose": "^8.0.3",
+		"zod": "^3.22.4", "axios": "^1.6.2", "dotenv": "^16.3.1",
+		"uuid": "^9.0.1", "multer": "^1.4.5-lts.1", "express-validator": "^7.0.1",
+		"cookie-parser": "^1.4.6", "socket.io": "^4.6.2",
+		"react": "^18.2.0", "react-dom": "^18.2.0", "react-router-dom": "^6.20.1",
+		"@tanstack/react-query": "^5.13.4", "next": "^14.0.4",
+		"typescript": "^5.3.3", "ts-node": "^10.9.2", "ts-node-dev": "^2.0.0",
+		"vite": "^5.0.10", "@vitejs/plugin-react": "^4.2.1",
+		"@types/express": "^4.17.21", "@types/node": "^20.10.6",
+		"@types/cors": "^2.8.17", "@types/jsonwebtoken": "^9.0.5",
+		"@types/bcryptjs": "^2.4.6", "@types/pg": "^8.10.9",
+		"@types/morgan": "^1.9.9", "@types/uuid": "^9.0.7",
+		"@types/multer": "^1.4.11", "@types/cookie-parser": "^1.4.6",
+		"@types/react": "^18.2.45", "@types/react-dom": "^18.2.18",
+	}
+
+	// Node built-in modules to skip when scanning imports.
+	nodeBuiltins := map[string]bool{
+		"fs": true, "path": true, "http": true, "https": true, "os": true,
+		"crypto": true, "url": true, "util": true, "events": true, "stream": true,
+		"buffer": true, "net": true, "child_process": true, "cluster": true,
+		"querystring": true, "readline": true, "zlib": true, "assert": true,
+		"process": true, "console": true, "timers": true, "module": true,
+	}
+
+	importRe := regexp.MustCompile(`(?m)(?:import\s+(?:type\s+)?(?:[^'";\n]+\s+from\s+)?|require\s*\(\s*)['"]([^'"]+)['"]`)
+
+	var repairSummaries []string
+
+	// --- package.json repair ---
+	needsPackageJSON := false
+	for _, e := range readinessErrors {
+		if strings.Contains(e, "missing_manifest: package.json") {
+			needsPackageJSON = true
+			break
+		}
+	}
+	if needsPackageJSON {
+		deps := map[string]string{}
+		devDeps := map[string]string{}
+		hasExpress := false
+		hasReact := false
+		hasNext := false
+
+		for _, f := range files {
+			ext := strings.ToLower(filepath.Ext(f.Path))
+			if ext != ".ts" && ext != ".tsx" && ext != ".js" && ext != ".jsx" {
+				continue
+			}
+			for _, m := range importRe.FindAllStringSubmatch(f.Content, -1) {
+				spec := m[1]
+				pkg := packageNameFromImportPath(spec)
+				if pkg == "" || nodeBuiltins[pkg] {
+					continue
+				}
+				switch pkg {
+				case "express", "express.js":
+					hasExpress = true
+				case "react":
+					hasReact = true
+				case "next":
+					hasNext = true
+				}
+				ver := knownVersions[pkg]
+				if ver == "" {
+					ver = "*"
+				}
+				if strings.HasPrefix(pkg, "@types/") || pkg == "typescript" || pkg == "vite" ||
+					strings.HasPrefix(pkg, "@vitejs/") || pkg == "ts-node" || pkg == "ts-node-dev" {
+					devDeps[pkg] = ver
+				} else {
+					deps[pkg] = ver
+				}
+			}
+		}
+
+		// Always include typescript toolchain in devDeps for TS projects.
+		devDeps["typescript"] = knownVersions["typescript"]
+		if !hasNext {
+			devDeps["@types/node"] = knownVersions["@types/node"]
+		}
+
+		// Determine scripts based on project type.
+		scripts := map[string]string{}
+		if hasNext {
+			scripts["dev"] = "next dev"
+			scripts["build"] = "next build"
+			scripts["start"] = "next start"
+		} else if hasExpress {
+			scripts["start"] = "ts-node src/server.ts"
+			scripts["dev"] = "ts-node-dev --respawn src/server.ts"
+			scripts["build"] = "tsc"
+		} else if hasReact {
+			scripts["dev"] = "vite"
+			scripts["build"] = "tsc && vite build"
+			scripts["start"] = "vite preview"
+		} else {
+			scripts["start"] = "ts-node src/index.ts"
+			scripts["dev"] = "ts-node-dev --respawn src/index.ts"
+			scripts["build"] = "tsc"
+		}
+
+		manifest := map[string]any{
+			"name":            "app",
+			"version":         "1.0.0",
+			"private":         true,
+			"scripts":         scripts,
+			"dependencies":    deps,
+			"devDependencies": devDeps,
+		}
+		content, err := json.MarshalIndent(manifest, "", "  ")
+		if err == nil {
+			if am.createGeneratedFile(build, "package.json", string(content)) {
+				repairSummaries = append(repairSummaries, "Created missing package.json by scanning TypeScript imports")
+			}
+		}
+	}
+
+	// --- go.mod repair ---
+	needsGoMod := false
+	for _, e := range readinessErrors {
+		if strings.Contains(e, "missing_manifest: go.mod") {
+			needsGoMod = true
+			break
+		}
+	}
+	if needsGoMod {
+		goImportRe := regexp.MustCompile(`(?m)^\s*"(([a-z0-9\-]+\.)+[a-z]{2,}/[^"]+)"`)
+		thirdPartyPkgs := map[string]bool{}
+		for _, f := range files {
+			if strings.ToLower(filepath.Ext(f.Path)) != ".go" {
+				continue
+			}
+			for _, m := range goImportRe.FindAllStringSubmatch(f.Content, -1) {
+				pkg := m[1]
+				// Skip stdlib (no dots before first /) and test packages.
+				if !strings.Contains(strings.Split(pkg, "/")[0], ".") {
+					continue
+				}
+				thirdPartyPkgs[pkg] = true
+			}
+		}
+		var sb strings.Builder
+		sb.WriteString("module app\n\ngo 1.21\n")
+		if len(thirdPartyPkgs) > 0 {
+			sb.WriteString("\nrequire (\n")
+			for pkg := range thirdPartyPkgs {
+				sb.WriteString(fmt.Sprintf("\t%s v0.0.0\n", pkg))
+			}
+			sb.WriteString(")\n")
+		}
+		if am.createGeneratedFile(build, "go.mod", sb.String()) {
+			repairSummaries = append(repairSummaries, "Created missing go.mod by scanning Go imports")
+		}
+	}
+
+	// --- requirements.txt repair ---
+	needsReqs := false
+	for _, e := range readinessErrors {
+		if strings.Contains(e, "missing_manifest: requirements.txt") {
+			needsReqs = true
+			break
+		}
+	}
+	if needsReqs {
+		pyVersions := map[string]string{
+			"fastapi": "fastapi>=0.104.1", "uvicorn": "uvicorn[standard]>=0.24.0",
+			"sqlalchemy": "sqlalchemy>=2.0.23", "alembic": "alembic>=1.13.0",
+			"pydantic": "pydantic>=2.5.3", "psycopg2": "psycopg2-binary>=2.9.9",
+			"python_jose": "python-jose[cryptography]>=3.3.0",
+			"passlib":     "passlib[bcrypt]>=1.7.4",
+			"python_multipart": "python-multipart>=0.0.6",
+			"aiofiles":    "aiofiles>=23.2.1",
+			"httpx":       "httpx>=0.26.0",
+			"requests":    "requests>=2.31.0",
+			"flask":       "flask>=3.0.0",
+			"django":      "django>=5.0",
+			"pymongo":     "pymongo>=4.6.1",
+			"redis":       "redis>=5.0.1",
+			"celery":      "celery>=5.3.6",
+			"boto3":       "boto3>=1.34.0",
+			"pandas":      "pandas>=2.1.4",
+			"numpy":       "numpy>=1.26.2",
+			"pytest":      "pytest>=7.4.3",
+		}
+		pyImportRe := regexp.MustCompile(`(?m)^(?:import|from)\s+([a-zA-Z0-9_]+)`)
+		pkgSet := map[string]bool{}
+		for _, f := range files {
+			if strings.ToLower(filepath.Ext(f.Path)) != ".py" {
+				continue
+			}
+			for _, m := range pyImportRe.FindAllStringSubmatch(f.Content, -1) {
+				mod := strings.ToLower(m[1])
+				// Skip stdlib-ish modules.
+				stdlibMods := map[string]bool{
+					"os": true, "sys": true, "json": true, "re": true, "typing": true,
+					"datetime": true, "time": true, "math": true, "random": true,
+					"pathlib": true, "io": true, "abc": true, "enum": true,
+					"dataclasses": true, "functools": true, "itertools": true,
+					"collections": true, "hashlib": true, "hmac": true,
+					"base64": true, "uuid": true, "logging": true, "traceback": true,
+				}
+				if stdlibMods[mod] {
+					continue
+				}
+				pkgSet[mod] = true
+			}
+		}
+		var lines []string
+		for mod := range pkgSet {
+			if pinned, ok := pyVersions[mod]; ok {
+				lines = append(lines, pinned)
+			} else {
+				lines = append(lines, mod)
+			}
+		}
+		sort.Strings(lines)
+		if len(lines) > 0 {
+			if am.createGeneratedFile(build, "requirements.txt", strings.Join(lines, "\n")+"\n") {
+				repairSummaries = append(repairSummaries, "Created missing requirements.txt by scanning Python imports")
+			}
+		}
+	}
+
+	if len(repairSummaries) == 0 {
+		return false, ""
+	}
+	return true, strings.Join(repairSummaries, "; ")
 }
 
 func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
@@ -3807,6 +4130,37 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 							"quality_gate_stage":    "validation",
 							"validation_errors":     readinessErrors,
 							"mixed_code_repair":     summary,
+						},
+					})
+					am.checkBuildCompletion(build)
+					return
+				}
+				if repaired, summary := am.applyDeterministicMissingManifestRepair(build, readinessErrors); repaired {
+					build.mu.Lock()
+					build.UpdatedAt = now
+					build.Status = BuildReviewing
+					build.CompletedAt = nil
+					if build.Progress < 90 {
+						build.Progress = 90
+					}
+					build.Error = fmt.Sprintf("Final output validation failed: %s (applied missing manifest repair: %s)", errorSummary, summary)
+					progress = build.Progress
+					build.mu.Unlock()
+
+					am.broadcast(build.ID, &WSMessage{
+						Type:      WSBuildProgress,
+						BuildID:   build.ID,
+						Timestamp: now,
+						Data: map[string]any{
+							"phase":                   "validation",
+							"status":                  string(BuildReviewing),
+							"progress":                progress,
+							"message":                 fmt.Sprintf("Auto-repair: %s. Re-running final validation.", summary),
+							"quality_gate_required":   true,
+							"quality_gate_active":     true,
+							"quality_gate_stage":      "validation",
+							"validation_errors":       readinessErrors,
+							"missing_manifest_repair": summary,
 						},
 					})
 					am.checkBuildCompletion(build)
@@ -5479,8 +5833,15 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 					fileList.WriteString(fmt.Sprintf("// File: %s\n```%s\n%s\n```\n\n", f.Path, f.Language, f.Content))
 				}
 				content := fileList.String()
-				if len(content) > 15000 {
-					content = content[:15000] + "\n... (truncated)"
+				// Cloud flagship models (Claude, GPT-4, Gemini, Grok) have large context windows.
+				// Give them the full codebase so reviewer/solver can see every file.
+				// Ollama models have limited context — keep the tighter limit.
+				codeContextLimit := 15000
+				if agent.Provider != ai.ProviderOllama && agent.Provider != "" {
+					codeContextLimit = 100000
+				}
+				if len(content) > codeContextLimit {
+					content = content[:codeContextLimit] + "\n... (truncated)"
 				}
 				block := "code_to_review"
 				if agent.Role == RoleSolver {
@@ -5642,10 +6003,19 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 		switch strings.ToLower(strings.TrimSpace(fe)) {
 		case "react", "react/vite":
 			lines = append(lines, "  Use Vite + TypeScript for React. Entry: src/main.tsx. Root component: src/App.tsx.")
+			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
+			lines = append(lines, "  □ package.json (react, react-dom, vite, typescript), tsconfig.json, vite.config.ts, index.html")
+			lines = append(lines, "  □ src/main.tsx (entry), src/App.tsx (root component), src/index.css")
 		case "next.js", "nextjs":
 			lines = append(lines, "  Use Next.js with TypeScript. App Router (app/ directory). Entry: app/page.tsx.")
+			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
+			lines = append(lines, "  □ package.json (next, react, react-dom, typescript), tsconfig.json, next.config.js")
+			lines = append(lines, "  □ app/page.tsx (entry page), app/layout.tsx (root layout)")
 		case "vue", "vue.js":
 			lines = append(lines, "  Use Vue 3 + Vite + TypeScript.")
+			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
+			lines = append(lines, "  □ package.json (vue, vite, typescript), tsconfig.json, vite.config.ts, index.html")
+			lines = append(lines, "  □ src/main.ts (entry), src/App.vue (root component)")
 		}
 		// For full-stack builds: frontend files MUST NOT import any backend/server frameworks.
 		// The frontend calls the backend via HTTP (fetch/axios).
@@ -5669,10 +6039,20 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 		switch strings.ToLower(strings.TrimSpace(be)) {
 		case "express", "express.js", "node.js", "node":
 			lines = append(lines, "  Use Express + TypeScript. Entry: src/server.ts or server.ts.")
+			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
+			lines = append(lines, "  □ package.json — manifest with all dependencies (express, cors, etc.) and scripts (start/dev)")
+			lines = append(lines, "  □ tsconfig.json — TypeScript compiler config")
+			lines = append(lines, "  □ src/server.ts (or server.ts) — Express entry file with app.listen()")
 		case "go", "golang":
 			lines = append(lines, "  Use Go with net/http or chi router. Entry: main.go. Module: go.mod required.")
+			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
+			lines = append(lines, "  □ go.mod — Go module manifest (module name + go 1.21)")
+			lines = append(lines, "  □ main.go (or cmd/main.go) — main() function entry point")
 		case "python", "fastapi":
 			lines = append(lines, "  Use Python with FastAPI. Entry: main.py. Dependencies: requirements.txt.")
+			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
+			lines = append(lines, "  □ requirements.txt — all pip packages (fastapi, uvicorn, sqlalchemy, etc.)")
+			lines = append(lines, "  □ main.py (or app/main.py) — FastAPI app entry with uvicorn.run()")
 		}
 	} else if stack.Backend == "" && stack.Frontend != "" {
 		// Frontend-only: explicitly say there is no backend
@@ -6510,6 +6890,11 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	hasBundlerConfig := false // vite/webpack/parcel config → index.html optional
 	sourceFiles := 0
 	backendStacks := map[string]bool{}
+	hasGoMod := false
+	hasPyManifest := false // requirements.txt or pyproject.toml
+	hasNodeFiles := false  // any .ts/.tsx/.js/.jsx file
+	hasGoFiles := false    // any .go file
+	hasPyFiles := false    // any .py file
 
 	// Derive metadata from the tech stack selected by the user (if available).
 	// This overrides inferences from generated files, ensuring the validator
@@ -6550,6 +6935,21 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 			for _, stack := range detectBackendPersistenceStacks(file.Path, file.Content) {
 				backendStacks[stack] = true
 			}
+		}
+
+		switch ext {
+		case ".ts", ".tsx", ".js", ".jsx":
+			hasNodeFiles = true
+		case ".go":
+			hasGoFiles = true
+		case ".py":
+			hasPyFiles = true
+		}
+		if path == "go.mod" {
+			hasGoMod = true
+		}
+		if path == "requirements.txt" || path == "pyproject.toml" {
+			hasPyManifest = true
 		}
 
 		if ext == ".tsx" || ext == ".jsx" {
@@ -6603,6 +7003,17 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	}
 	if mixed := summarizeMixedPersistenceStacks(backendStacks); mixed != "" {
 		addError(mixed)
+	}
+
+	// Manifest existence checks: ensure project manifests are present for the detected language(s).
+	if hasNodeFiles && !hasPackageJSON {
+		addError("missing_manifest: package.json (TypeScript/Node.js project has no package.json)")
+	}
+	if hasGoFiles && !hasGoMod {
+		addError("missing_manifest: go.mod (Go project has no go.mod module manifest)")
+	}
+	if hasPyFiles && !hasPyManifest {
+		addError("missing_manifest: requirements.txt (Python project has no requirements.txt)")
 	}
 
 	// A package.json alone does not signal a frontend app — Node/Express backends also have one.

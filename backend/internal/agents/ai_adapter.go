@@ -33,8 +33,8 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 	},
 	ai.ProviderOllama: {
 		PowerMax:      "deepseek-r1:14b",
-		PowerBalanced: "deepseek-r1:7b",
-		PowerFast:     "deepseek-r1:7b",
+		PowerBalanced: "deepseek-r1:14b",
+		PowerFast:     "deepseek-r1:14b",
 	},
 }
 
