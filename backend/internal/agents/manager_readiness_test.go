@@ -33,6 +33,8 @@ func TestValidateFinalBuildReadiness(t *testing.T) {
 			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
 			{Path: "src/main.tsx", Content: "import React from 'react';"},
 			{Path: "src/App.tsx", Content: "export const App = () => <div>ok</div>;"},
+			{Path: "README.md", Content: "# MoneyFlow\n\n## Setup\n```bash\nnpm install && npm run dev\n```\n"},
+			{Path: ".env.example", Content: "VITE_API_URL=http://localhost:3001\n"},
 		}
 
 		errs := am.validateFinalBuildReadiness(nil, files)
