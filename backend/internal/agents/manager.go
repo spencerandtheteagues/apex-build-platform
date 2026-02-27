@@ -4255,7 +4255,90 @@ func (am *AgentManager) collectGeneratedFiles(build *Build) []GeneratedFile {
 	return result
 }
 
+// stripPatchOrMergeMarkersFromContent removes SEARCH/REPLACE diff blocks and git merge
+// conflict markers from generated file content. Models (especially deepseek) sometimes
+// emit these when generating new files from scratch, which is always a model error.
+// Strategy: keep the "new/replace" side of each conflict block.
+func stripPatchOrMergeMarkersFromContent(content string) string {
+	if !strings.Contains(content, "<<<<<<<") {
+		return content
+	}
+
+	// Handle SEARCH/REPLACE blocks:
+	//   <<<<<<< SEARCH
+	//   [old - may be empty]
+	//   =======
+	//   [new content to keep]
+	//   >>>>>>> REPLACE
+	// Also handle git merge conflicts:
+	//   <<<<<<< HEAD
+	//   [ours]
+	//   =======
+	//   [theirs - keep this]
+	//   >>>>>>> branch
+
+	result := content
+
+	// Iteratively resolve conflict blocks until none remain.
+	for strings.Contains(result, "<<<<<<<") {
+		startIdx := strings.Index(result, "<<<<<<<")
+		if startIdx == -1 {
+			break
+		}
+		// Find the separator (=======) — must be on its own line.
+		sepSearchArea := result[startIdx:]
+		relSepIdx := -1
+		for _, sepCandidate := range []string{"\n=======\n", "\n======="} {
+			if idx := strings.Index(sepSearchArea, sepCandidate); idx != -1 {
+				relSepIdx = idx + len(sepCandidate)
+				break
+			}
+		}
+		if relSepIdx == -1 {
+			// No separator found — remove just the <<< line and continue.
+			endOfLine := strings.Index(result[startIdx:], "\n")
+			if endOfLine == -1 {
+				result = result[:startIdx]
+			} else {
+				result = result[:startIdx] + result[startIdx+endOfLine+1:]
+			}
+			continue
+		}
+
+		sepIdx := startIdx + relSepIdx
+
+		// Find the end marker (>>>>>>>)
+		endSearchArea := result[sepIdx:]
+		relEndIdx := strings.Index(endSearchArea, ">>>>>>>")
+		var newContent string
+		if relEndIdx != -1 {
+			endIdx := sepIdx + relEndIdx
+			// Keep everything between separator and end marker.
+			newContent = result[sepIdx : endIdx]
+			// Remove the >>>>>>> line itself.
+			endOfEndLine := strings.Index(result[endIdx:], "\n")
+			var after string
+			if endOfEndLine == -1 {
+				after = ""
+			} else {
+				after = result[endIdx+endOfEndLine+1:]
+			}
+			result = result[:startIdx] + newContent + after
+		} else {
+			// No end marker — take everything after the separator.
+			newContent = result[sepIdx:]
+			result = result[:startIdx] + newContent
+		}
+	}
+
+	return result
+}
+
 func normalizeGeneratedFileContent(path, content string) string {
+	// Strip patch/merge markers that deepseek and other models sometimes emit.
+	// Must run before other normalization so downstream checks see clean content.
+	content = stripPatchOrMergeMarkersFromContent(content)
+
 	if strings.TrimSpace(content) == "" || !strings.Contains(content, "''") {
 		content = normalizeGeneratedTypeScriptInteropPatterns(path, content)
 		return normalizeGeneratedTSConfigBuildExcludes(path, content)
@@ -5233,9 +5316,7 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 
 	techStackContext := ""
 	if build != nil && build.TechStack != nil {
-		if summary := formatTechStackSummary(build.TechStack); summary != "" {
-			techStackContext = fmt.Sprintf("\nTech Stack Preference: %s\n", summary)
-		}
+		techStackContext = buildTechStackDirective(build.TechStack, agent)
 	}
 
 	// Inter-agent context sharing: inject upstream outputs for downstream agents
@@ -5382,6 +5463,8 @@ FORBIDDEN OUTPUTS:
 - Placeholder functions
 - Demo or example code
 - Incomplete implementations
+- Git merge conflict markers (<<<<<<< / ======= / >>>>>>>)
+- SEARCH/REPLACE diff blocks — output COMPLETE files only, never diffs
 
 Build the REAL, COMPLETE implementation now.`,
 		task.Type, task.Description, appDescription, techStackContext, errorContext, repairHintsContext, agentContext, teamCoordinationContext, deliveryConstraintsContext)
@@ -5410,6 +5493,81 @@ func formatTechStackSummary(stack *TechStack) string {
 	}
 
 	return strings.Join(parts, " | ")
+}
+
+// buildTechStackDirective produces a strong, role-specific tech stack constraint for the prompt.
+// This overrides the model's defaults so it uses the stack the user explicitly selected.
+func buildTechStackDirective(stack *TechStack, agent *Agent) string {
+	if stack == nil {
+		return ""
+	}
+
+	// Determine what this agent cares about.
+	isFrontend := agent == nil || agent.Role == RoleFrontend || agent.Role == RoleArchitect ||
+		agent.Role == RolePlanner || agent.Role == RoleReviewer || agent.Role == RoleSolver
+	isBackend := agent == nil || agent.Role == RoleBackend || agent.Role == RoleArchitect ||
+		agent.Role == RolePlanner || agent.Role == RoleReviewer || agent.Role == RoleSolver
+
+	var lines []string
+
+	if stack.Frontend != "" && isFrontend {
+		fe := stack.Frontend
+		lines = append(lines, fmt.Sprintf("- Frontend framework: %s (MANDATORY — do not substitute another framework)", fe))
+		// Stack-specific hints
+		switch strings.ToLower(strings.TrimSpace(fe)) {
+		case "react", "react/vite":
+			lines = append(lines, "  Use Vite + TypeScript for React. Entry: src/main.tsx. Root component: src/App.tsx.")
+		case "next.js", "nextjs":
+			lines = append(lines, "  Use Next.js with TypeScript. App Router (app/ directory). Entry: app/page.tsx.")
+		case "vue", "vue.js":
+			lines = append(lines, "  Use Vue 3 + Vite + TypeScript.")
+		}
+	} else if stack.Frontend == "" && stack.Backend != "" {
+		// Backend-only: explicitly say there is no frontend
+		lines = append(lines, "- NO frontend: this is a backend-only project. Do NOT generate React, HTML, or frontend files.")
+	}
+
+	if stack.Styling != "" && isFrontend && stack.Frontend != "" {
+		lines = append(lines, fmt.Sprintf("- CSS/Styling: %s (MANDATORY)", stack.Styling))
+	}
+
+	if stack.Backend != "" && isBackend {
+		be := stack.Backend
+		lines = append(lines, fmt.Sprintf("- Backend framework: %s (MANDATORY — do not substitute another framework)", be))
+		switch strings.ToLower(strings.TrimSpace(be)) {
+		case "express", "express.js", "node.js", "node":
+			lines = append(lines, "  Use Express + TypeScript. Entry: src/server.ts or server.ts.")
+		case "go", "golang":
+			lines = append(lines, "  Use Go with net/http or chi router. Entry: main.go. Module: go.mod required.")
+		case "python", "fastapi":
+			lines = append(lines, "  Use Python with FastAPI. Entry: main.py. Dependencies: requirements.txt.")
+		}
+	} else if stack.Backend == "" && stack.Frontend != "" {
+		// Frontend-only: explicitly say there is no backend
+		lines = append(lines, "- NO backend server: this is a frontend-only project. Do NOT generate Express, Go, or Python server files.")
+	}
+
+	if stack.Database != "" && isBackend {
+		db := stack.Database
+		lines = append(lines, fmt.Sprintf("- Database: %s (MANDATORY)", db))
+		switch strings.ToLower(strings.TrimSpace(db)) {
+		case "postgresql", "postgres":
+			lines = append(lines, "  Use the 'pg' library (NOT Prisma, Drizzle, TypeORM, or any ORM) for PostgreSQL.")
+		case "mongodb", "mongo":
+			lines = append(lines, "  Use 'mongoose' or the official 'mongodb' driver. NOT an SQL/relational ORM.")
+		}
+	}
+
+	if len(stack.Extras) > 0 {
+		lines = append(lines, fmt.Sprintf("- Additional requirements: %s", strings.Join(stack.Extras, ", ")))
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf("\n<tech_stack_requirements>\nThe user has explicitly selected the following tech stack. You MUST use exactly these technologies:\n%s\n</tech_stack_requirements>\n",
+		strings.Join(lines, "\n"))
 }
 
 func (am *AgentManager) getTeamCoordinationBrief(build *Build, task *Task, agent *Agent) string {
@@ -6221,6 +6379,25 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	sourceFiles := 0
 	backendStacks := map[string]bool{}
 
+	// Derive metadata from the tech stack selected by the user (if available).
+	// This overrides inferences from generated files, ensuring the validator
+	// applies the right rules even when the model generates incomplete structure.
+	techStackFrontend := ""
+	techStackBackend := ""
+	isNextFromStack := false
+	isFrontendOnlyFromStack := false
+	isBackendOnlyFromStack := false
+	if build != nil && build.TechStack != nil {
+		techStackFrontend = strings.TrimSpace(build.TechStack.Frontend)
+		techStackBackend = strings.TrimSpace(build.TechStack.Backend)
+		feNorm := strings.ToLower(techStackFrontend)
+		isNextFromStack = strings.Contains(feNorm, "next")
+		isFrontendOnlyFromStack = techStackFrontend != "" && techStackBackend == ""
+		isBackendOnlyFromStack = techStackBackend != "" && techStackFrontend == ""
+	}
+	_ = isFrontendOnlyFromStack // used below
+	_ = isBackendOnlyFromStack  // used below
+
 	for _, file := range files {
 		path := strings.ToLower(strings.TrimSpace(file.Path))
 		if path == "" {
@@ -6299,17 +6476,21 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	// A package.json alone does not signal a frontend app — Node/Express backends also have one.
 	// Require at least one genuine frontend indicator (TSX/JSX source, bundler config,
 	// index.html entry, or a known frontend entry path) alongside any package.json.
-	isFrontendApp := hasTSXOrJSX || hasBundlerConfig || hasIndexHTML || hasFrontendEntry
+	// For backend-only tech stacks, skip frontend validation entirely.
+	isFrontendApp := !isBackendOnlyFromStack && (hasTSXOrJSX || hasBundlerConfig || hasIndexHTML || hasFrontendEntry)
 	if isFrontendApp {
 		hasReact := false
 		hasReactDOM := false
-		isNext := false
+		// isNext: true when Next.js is selected in tech stack OR when package.json declares next.
+		isNext := isNextFromStack
 		hasScripts := false
 		var missingScripts []string
 
 		if hasPackageJSON {
 			var pkgErr error
-			hasReact, hasReactDOM, isNext, hasScripts, missingScripts, pkgErr = analyzeFrontendPackageJSON(packageJSON)
+			var pkgIsNext bool
+			hasReact, hasReactDOM, pkgIsNext, hasScripts, missingScripts, pkgErr = analyzeFrontendPackageJSON(packageJSON)
+			isNext = isNext || pkgIsNext
 			if pkgErr != nil {
 				addError(fmt.Sprintf("package.json is invalid: %v", pkgErr))
 			}
@@ -6323,12 +6504,17 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 
 		// TSX/JSX output is a strong frontend signal even when dependencies/scripts are incomplete.
 		// This catches broken generations that forgot to include react/react-dom or entry files.
+		// Next.js builds do NOT require an index.html (Next.js generates HTML at runtime).
 		if !isNext && !hasIndexHTML && !hasBundlerConfig {
 			addError("Frontend app is missing an HTML entry point (index.html or public/index.html)")
 		}
-		// index.html is a valid top-level entry for non-bundler and CDN-hosted apps.
-		// Only require a JS/TS entry file (src/main.tsx etc.) when there is no HTML entry.
-		if !hasFrontendEntry && !hasIndexHTML {
+		// For Next.js: any TSX component under app/, pages/, or src/app/, src/pages/ counts as entry.
+		// For non-Next.js: require a recognized entry file OR an index.html.
+		effectiveHasFrontendEntry := hasFrontendEntry
+		if isNext && hasTSXOrJSX {
+			effectiveHasFrontendEntry = true // any .tsx component is a valid Next.js entry
+		}
+		if !effectiveHasFrontendEntry && !hasIndexHTML {
 			addError("Frontend app is missing an entry source file")
 		}
 
