@@ -134,30 +134,41 @@ func main() {
 
 	// Initialize AI router with all providers (Claude, OpenAI, Gemini, Grok).
 	// Production keeps Ollama disabled globally to preserve strict BYOK behavior.
-	// In development, allow a local Ollama fallback only when explicitly configured
-	// and no cloud platform keys are present, so local smoke tests can exercise the
-	// full app-building pipeline.
+	// In development, when OLLAMA_BASE_URL is explicitly set, run in Ollama-only mode:
+	// cloud API keys from the OS environment are excluded so the build pipeline uses
+	// only the local model. This prevents ambient shell exports (e.g. XAI_API_KEY set
+	// globally in /etc/profile.d) from leaking into the agent router and causing
+	// the multi-provider team path to activate when Ollama-only is intended.
 	ollamaRouterURL := ""
-	hasCloudProviderKey := appConfig.ClaudeAPIKey != "" || appConfig.OpenAIAPIKey != "" ||
-		appConfig.GeminiAPIKey != "" || appConfig.GrokAPIKey != ""
-	if !config.IsProductionEnvironment() && appConfig.OllamaBaseURL != "" && !hasCloudProviderKey {
+	claudeKey := appConfig.ClaudeAPIKey
+	openaiKey := appConfig.OpenAIAPIKey
+	geminiKey := appConfig.GeminiAPIKey
+	grokKey := appConfig.GrokAPIKey
+
+	if !config.IsProductionEnvironment() && appConfig.OllamaBaseURL != "" {
 		ollamaRouterURL = appConfig.OllamaBaseURL
-		log.Printf("DEV MODE: Enabling global Ollama fallback for app builds at %s", ollamaRouterURL)
+		// Suppress cloud keys so the router sees only Ollama and the single-provider
+		// Ollama profile activates (isLocalDevSingleOllamaProfile → true).
+		claudeKey = ""
+		openaiKey = ""
+		geminiKey = ""
+		grokKey = ""
+		log.Printf("DEV MODE: Ollama-only mode — cloud API keys suppressed, using %s", ollamaRouterURL)
 	}
 
 	aiRouter := ai.NewAIRouter(
-		appConfig.ClaudeAPIKey,
-		appConfig.OpenAIAPIKey,
-		appConfig.GeminiAPIKey,
-		appConfig.GrokAPIKey,
+		claudeKey,
+		openaiKey,
+		geminiKey,
+		grokKey,
 		ollamaRouterURL,
 	)
 
 	log.Println("Multi-AI integration initialized:")
-	log.Printf("   - Claude API: %s", getStatusIcon(appConfig.ClaudeAPIKey != ""))
-	log.Printf("   - OpenAI API: %s", getStatusIcon(appConfig.OpenAIAPIKey != ""))
-	log.Printf("   - Gemini API: %s", getStatusIcon(appConfig.GeminiAPIKey != ""))
-	log.Printf("   - Grok API:   %s", getStatusIcon(appConfig.GrokAPIKey != ""))
+	log.Printf("   - Claude API: %s", getStatusIcon(claudeKey != ""))
+	log.Printf("   - OpenAI API: %s", getStatusIcon(openaiKey != ""))
+	log.Printf("   - Gemini API: %s", getStatusIcon(geminiKey != ""))
+	log.Printf("   - Grok API:   %s", getStatusIcon(grokKey != ""))
 	if ollamaRouterURL != "" {
 		log.Printf("   - Ollama:     ✅ Dev fallback enabled (%s)", ollamaRouterURL)
 	} else {

@@ -161,10 +161,12 @@ For code files, use this exact format:
 		aiProvider = ai.ProviderGPT4
 	case ai.ProviderGemini:
 		aiProvider = ai.ProviderGemini
+	case ai.ProviderGrok:
+		aiProvider = ai.ProviderGrok
 	case ai.ProviderOllama:
 		aiProvider = ai.ProviderOllama
 	default:
-		aiProvider = ai.ProviderClaude
+		aiProvider = ai.ProviderOllama // Safer default: prefer local model over broken cloud fallback
 	}
 	log.Printf("Mapped agent provider %s to AI provider %s", provider, aiProvider)
 

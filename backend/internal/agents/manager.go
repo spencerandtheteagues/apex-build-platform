@@ -6296,7 +6296,10 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 		addError(mixed)
 	}
 
-	isFrontendApp := hasTSXOrJSX || hasBundlerConfig || hasIndexHTML || hasFrontendEntry || hasPackageJSON
+	// A package.json alone does not signal a frontend app — Node/Express backends also have one.
+	// Require at least one genuine frontend indicator (TSX/JSX source, bundler config,
+	// index.html entry, or a known frontend entry path) alongside any package.json.
+	isFrontendApp := hasTSXOrJSX || hasBundlerConfig || hasIndexHTML || hasFrontendEntry
 	if isFrontendApp {
 		hasReact := false
 		hasReactDOM := false
@@ -6323,7 +6326,9 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 		if !isNext && !hasIndexHTML && !hasBundlerConfig {
 			addError("Frontend app is missing an HTML entry point (index.html or public/index.html)")
 		}
-		if !hasFrontendEntry {
+		// index.html is a valid top-level entry for non-bundler and CDN-hosted apps.
+		// Only require a JS/TS entry file (src/main.tsx etc.) when there is no HTML entry.
+		if !hasFrontendEntry && !hasIndexHTML {
 			addError("Frontend app is missing an entry source file")
 		}
 
