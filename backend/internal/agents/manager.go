@@ -6136,6 +6136,18 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 		}
 	}
 
+	// Load user-uploaded assets and inject into agent context so agents can reference
+	// uploaded images, CSVs, PDFs, etc. when generating code (e.g. "use my logo.png")
+	assetsContext := ""
+	if build != nil && build.ProjectID != nil && *build.ProjectID != 0 && am.db != nil {
+		var assets []models.ProjectAsset
+		if err := am.db.Where("project_id = ? AND deleted_at IS NULL", *build.ProjectID).
+			Order("created_at ASC").
+			Find(&assets).Error; err == nil && len(assets) > 0 {
+			assetsContext = "\n" + buildUploadedAssetsContext(assets) + "\n"
+		}
+	}
+
 	teamCoordinationContext := ""
 	if build != nil {
 		if brief := am.getTeamCoordinationBrief(build, task, agent); brief != "" {
@@ -6175,6 +6187,7 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 Description: %s
 
 App being built: %s
+%s
 %s
 %s
 %s
@@ -6227,7 +6240,7 @@ FORBIDDEN OUTPUTS:
 - Mixing frontend and backend code in the same file: NEVER put Express/server imports in a .tsx/.jsx React component file; NEVER put React JSX in a backend Go/Python/Express file
 
 Build the REAL, COMPLETE implementation now.`,
-		task.Type, task.Description, appDescription, techStackContext, errorContext, repairHintsContext, agentContext, teamCoordinationContext, deliveryConstraintsContext)
+		task.Type, task.Description, appDescription, techStackContext, errorContext, repairHintsContext, agentContext, assetsContext, teamCoordinationContext, deliveryConstraintsContext)
 }
 
 func formatTechStackSummary(stack *TechStack) string {
@@ -6279,6 +6292,40 @@ func canonicalFrontendPort(frontend string) int {
 		return 3000
 	default:
 		return 5173 // Vite default
+	}
+}
+
+// buildUploadedAssetsContext builds the <uploaded_assets> XML block that is injected
+// into agent prompts. Agents can reference files by original name in generated code.
+func buildUploadedAssetsContext(assets []models.ProjectAsset) string {
+	if len(assets) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("<uploaded_assets>\n")
+	sb.WriteString("The user has uploaded the following files for this project. Reference them by original name in your generated code.\n\n")
+	for i, a := range assets {
+		sb.WriteString(fmt.Sprintf("File %d: %s\n", i+1, a.OriginalName))
+		sb.WriteString(fmt.Sprintf("  Type: %s | Size: %s | Uploaded: %s\n",
+			a.FileType, formatProjectAssetSize(a.FileSize), a.CreatedAt.Format("2006-01-02")))
+		if a.ContentPreview != "" {
+			sb.WriteString(fmt.Sprintf("  Preview:\n    %s\n",
+				strings.ReplaceAll(a.ContentPreview, "\n", "\n    ")))
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString("</uploaded_assets>")
+	return sb.String()
+}
+
+func formatProjectAssetSize(bytes int64) string {
+	switch {
+	case bytes >= 1024*1024:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/1024/1024)
+	case bytes >= 1024:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/1024)
+	default:
+		return fmt.Sprintf("%d B", bytes)
 	}
 }
 

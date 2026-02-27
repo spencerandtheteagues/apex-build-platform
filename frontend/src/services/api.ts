@@ -2341,6 +2341,37 @@ export class ApiService {
     )
     return { message: response.data.message }
   }
+
+  // ========== PROJECT ASSET ENDPOINTS ==========
+
+  async listAssets(projectId: number): Promise<import('@/types').ProjectAsset[]> {
+    const response = await this.client.get<{
+      success: boolean
+      assets: import('@/types').ProjectAsset[]
+      count: number
+    }>(`/projects/${projectId}/assets`)
+    return response.data.assets || []
+  }
+
+  async uploadAsset(projectId: number, nativeFile: Blob): Promise<{
+    asset: import('@/types').ProjectAsset
+    message: string
+  }> {
+    const formData = new FormData()
+    formData.append('file', nativeFile)
+    const response = await this.client.post<{
+      success: boolean
+      asset: import('@/types').ProjectAsset
+      message: string
+    }>(`/projects/${projectId}/assets`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return { asset: response.data.asset, message: response.data.message }
+  }
+
+  async deleteAsset(projectId: number, assetId: number): Promise<void> {
+    await this.client.delete(`/projects/${projectId}/assets/${assetId}`)
+  }
 }
 
 // ---------------------------------------------------------------------------

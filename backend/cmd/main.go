@@ -928,6 +928,11 @@ func setupRoutes(
 				projects.POST("/:id/files", quotaChecker.CheckStorageQuota(1024*1024), server.CreateFile) // Estimate 1MB
 				projects.GET("/:id/files", optimizedHandler.GetProjectFilesOptimized)                     // Optimized: no content loading for list
 
+				// Asset upload endpoints — users upload images, CSVs, PDFs etc for AI agents to use
+				projects.POST("/:id/assets", server.UploadAsset)
+				projects.GET("/:id/assets", server.ListAssets)
+				projects.DELETE("/:id/assets/:assetId", server.DeleteAsset)
+
 				// Protected Paths (A3)
 				protectedPathsHandler.RegisterProtectedPathsRoutes(projects)
 			}

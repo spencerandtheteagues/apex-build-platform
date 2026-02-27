@@ -1010,3 +1010,18 @@ export interface CompletionStats {
   cache_hit_rate: number
   provider_requests: Record<string, number>
 }
+
+// User-uploaded assets for AI agent context
+export interface ProjectAsset {
+  id: number
+  created_at: string
+  project_id: number
+  user_id: number
+  original_name: string
+  stored_name: string
+  mime_type: string
+  file_size: number
+  file_type: 'image' | 'video' | 'csv' | 'pdf' | 'text' | 'other'
+  content_preview?: string
+  storage_path: string
+}

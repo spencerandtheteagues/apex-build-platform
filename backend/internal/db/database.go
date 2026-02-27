@@ -240,6 +240,8 @@ func (d *Database) Migrate() error {
 		&hosting.SSLCertificate{},
 		// Completed build history (persist builds across restarts)
 		&models.CompletedBuild{},
+		// User-uploaded assets for AI agents (images, CSVs, PDFs, etc.)
+		&models.ProjectAsset{},
 	)
 
 	if err != nil {

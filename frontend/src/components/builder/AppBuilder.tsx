@@ -47,7 +47,8 @@ import {
   Server,
   Globe,
   Layers,
-  Github
+  Github,
+  Upload
 } from 'lucide-react'
 import { GitHubImportWizard } from '@/components/import/GitHubImportWizard'
 import { OnboardingTour } from './OnboardingTour'
@@ -61,6 +62,7 @@ import {
   resolveBuildCompletedEventStatus,
 } from './buildRestore'
 import LivePreview from '@/components/preview/LivePreview'
+import { AssetUploader } from '@/components/project/AssetUploader'
 
 // ============================================================================
 // TYPES
@@ -2871,6 +2873,20 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                     maxLength={2000}
                   />
                 </div>
+
+                {/* Asset Uploader — upload files for AI agents to use */}
+                {createdProjectId && (
+                  <div className="mb-10">
+                    <h3 className="builder-section-heading text-xl font-bold text-gray-200 mb-5 flex items-center gap-3">
+                      <Upload className="w-6 h-6 text-red-400" />
+                      Project Files
+                    </h3>
+                    <AssetUploader projectId={createdProjectId} />
+                    <p className="mt-2 text-xs text-gray-600">
+                      Uploaded files are automatically included in AI agent context — just describe what you want.
+                    </p>
+                  </div>
+                )}
 
                 {/* Tech Stack Selection */}
                 <div className="mb-10">

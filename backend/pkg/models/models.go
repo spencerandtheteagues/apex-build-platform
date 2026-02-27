@@ -491,6 +491,33 @@ type AIUsageLog struct {
 	MonthKey string `json:"month_key" gorm:"size:7;index"` // "2026-01" for monthly aggregation
 }
 
+// ProjectAsset stores user-uploaded files (images, CSVs, PDFs, etc.) that AI agents
+// automatically use when building the project. Users just say "use my logo" or
+// "build a dashboard from this CSV" and the agent has the file in its context.
+type ProjectAsset struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	ProjectID uint `json:"project_id" gorm:"not null;index"`
+	UserID    uint `json:"user_id" gorm:"not null;index"`
+
+	// File metadata
+	OriginalName string `json:"original_name" gorm:"size:255;not null"`
+	StoredName   string `json:"stored_name" gorm:"size:255;not null"`   // UUID-based filename
+	MimeType     string `json:"mime_type" gorm:"size:127"`
+	FileSize     int64  `json:"file_size"`
+	FileType     string `json:"file_type" gorm:"size:20"` // image, video, csv, pdf, text, other
+
+	// Extracted preview injected into AI agent context
+	// Images: "W×H px, PNG" | CSV: headers + first row | Text/PDF: first 500 chars
+	ContentPreview string `json:"content_preview,omitempty" gorm:"type:text"`
+
+	// Path on disk: uploads/projects/{projectID}/{storedName}
+	StoragePath string `json:"storage_path" gorm:"size:512;not null"`
+}
+
 // CompletedBuild stores a completed build for history and retrieval
 type CompletedBuild struct {
 	ID        uint           `json:"id" gorm:"primarykey"`
