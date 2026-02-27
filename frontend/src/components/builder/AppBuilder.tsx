@@ -2078,6 +2078,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   }, [
     appDescription,
     buildState?.description,
+    buildState?.id,
     createProject,
     currentProject,
     createdProjectId,

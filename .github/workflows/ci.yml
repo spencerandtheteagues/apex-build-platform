@@ -427,7 +427,7 @@ jobs:
         run: |
           npx serve -l 5173 dist &
           sleep 3
-          npx playwright test --project=chromium || true
+          npx playwright test --project=chromium
 
       - name: Upload E2E test results
         uses: actions/upload-artifact@v4

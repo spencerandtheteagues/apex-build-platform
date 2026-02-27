@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
@@ -249,6 +250,15 @@ export default defineConfig(({ mode }) => {
       // Remove pure annotations for better dead code elimination
       legalComments: 'none',
       treeShaking: true,
+    },
+
+    test: {
+      globals: true,
+      environment: 'jsdom',
+      coverage: {
+        provider: 'c8',
+        reporter: ['text', 'lcov'],
+      },
     },
   }
 })

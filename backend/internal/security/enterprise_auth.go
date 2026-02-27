@@ -430,37 +430,69 @@ type Session struct {
 	Metadata         map[string]interface{} `json:"metadata"`
 }
 
-// TODO: Implement these interfaces and types
+// Placeholder interfaces and types for enterprise auth subsystems.
+// These are intentionally minimal stubs — full implementations require
+// external service integrations (SMS gateway, geo-IP, threat feeds, etc.).
 type (
-	SessionStore interface{}
-	AuditStore   interface{}
-	DeviceStore  interface{}
-	SMSProvider  interface{}
-	EmailProvider interface{}
-	AlertSystem  struct{}
-	RiskScorer   struct{}
-	MLModel      struct{}
+	SessionStore       interface{}
+	AuditStore         interface{}
+	DeviceStore        interface{}
+	SMSProvider        interface{}
+	EmailProvider      interface{}
+	AlertSystem        struct{}
+	RiskScorer         struct{}
+	MLModel            struct{}
 	GeoLocationService struct{}
-	ThreatIntel struct{}
-	TOTPConfig    struct{}
-	BatteryInfo   struct{}
-	NetworkInfo   struct{}
+	ThreatIntel        struct{}
+	TOTPConfig         struct{}
+	BatteryInfo        struct{}
+	NetworkInfo        struct{}
 )
 
-// Stub implementations for now
-func NewMFAService() *MFAService { return &MFAService{} }
-func NewSessionService() *SessionService { return &SessionService{} }
-func NewAuditLogger() *AuditLogger { return &AuditLogger{} }
-func NewDeviceTracker() *DeviceTracker { return &DeviceTracker{} }
-func NewRiskAnalyzer() *RiskAnalyzer { return &RiskAnalyzer{} }
+var errNotImplemented = fmt.Errorf("enterprise auth: not yet implemented")
 
-func (eal *AuditLogger) LogEvent(event *SecurityEvent) {}
-func (ra *RiskAnalyzer) AnalyzeLoginAttempt(user *models.User, device *DeviceFingerprint, ip string) (float64, error) { return 0.3, nil }
-func (ra *RiskAnalyzer) GetRiskFactors(user *models.User, device *DeviceFingerprint, ip string) []string { return []string{} }
-func (ss *SessionService) CreateSession(user *models.User, device *DeviceFingerprint, ip string) (*Session, error) { return &Session{}, nil }
-func (mfa *MFAService) SetupTOTP(userID uint) (*MFASetupResult, error) { return &MFASetupResult{Success: true}, nil }
-func (mfa *MFAService) SetupSMS(userID uint) (*MFASetupResult, error) { return &MFASetupResult{Success: true}, nil }
-func (mfa *MFAService) SetupEmail(userID uint) (*MFASetupResult, error) { return &MFASetupResult{Success: true}, nil }
-func (mfa *MFAService) GetMFAToken(userID uint, mfaType string) (*MFAToken, error) { return &MFAToken{}, nil }
-func (mfa *MFAService) VerifyTOTP(secret, code string) bool { return true }
+func NewMFAService() *MFAService       { return &MFAService{} }
+func NewSessionService() *SessionService { return &SessionService{} }
+func NewAuditLogger() *AuditLogger     { return &AuditLogger{} }
+func NewDeviceTracker() *DeviceTracker { return &DeviceTracker{} }
+func NewRiskAnalyzer() *RiskAnalyzer   { return &RiskAnalyzer{} }
+
+func (eal *AuditLogger) LogEvent(event *SecurityEvent) {
+	// No-op until audit store is wired
+}
+func (ra *RiskAnalyzer) AnalyzeLoginAttempt(user *models.User, device *DeviceFingerprint, ip string) (float64, error) {
+	// Default low risk until ML model is integrated
+	return 0.3, nil
+}
+func (ra *RiskAnalyzer) GetRiskFactors(user *models.User, device *DeviceFingerprint, ip string) []string {
+	return []string{}
+}
+func (ss *SessionService) CreateSession(user *models.User, device *DeviceFingerprint, ip string) (*Session, error) {
+	return &Session{
+		ID:        fmt.Sprintf("sess_%d_%d", user.ID, time.Now().UnixNano()),
+		UserID:    user.ID,
+		IPAddress: ip,
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+		IsActive:  true,
+	}, nil
+}
+
+// MFA stubs — these MUST return errors so callers never silently bypass verification.
+func (mfa *MFAService) SetupTOTP(userID uint) (*MFASetupResult, error) {
+	return nil, errNotImplemented
+}
+func (mfa *MFAService) SetupSMS(userID uint) (*MFASetupResult, error) {
+	return nil, errNotImplemented
+}
+func (mfa *MFAService) SetupEmail(userID uint) (*MFASetupResult, error) {
+	return nil, errNotImplemented
+}
+func (mfa *MFAService) GetMFAToken(userID uint, mfaType string) (*MFAToken, error) {
+	return nil, errNotImplemented
+}
+func (mfa *MFAService) VerifyTOTP(secret, code string) bool {
+	// SECURITY: must default to false — returning true would bypass MFA
+	return false
+}
 func (mfa *MFAService) UpdateMFAToken(token *MFAToken) {}

@@ -397,7 +397,7 @@ export default function LivePreview({
     if (activeProjectIdRef.current === requestProjectId) {
       setLoading(false)
     }
-  }, [projectId, clearDevTools, useSandbox])
+  }, [projectId, clearDevTools, useSandbox, serverDetection])
 
   // Auto-start preview when autoStart prop is true
   useEffect(() => {

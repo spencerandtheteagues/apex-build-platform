@@ -1,5 +1,20 @@
 // Package pricing provides centralized AI pricing and billing utilities.
-// It computes platform costs, BYOK routing fees, and credit multipliers.
+//
+// Pricing formula:
+//
+//	BilledCost = max(RawCost(model) × profitMargin × powerSurcharge, RawCost)
+//
+// Where:
+//   - RawCost = actual API cost for the specific model based on token usage
+//   - profitMargin = our markup (default 1.5 = 50%), configurable via APEX_PROFIT_MARGIN
+//   - powerSurcharge = extra charge for power modes that use more resources
+//     (fast=1.0, balanced=1.12, max=1.25) — reflects actual orchestration overhead
+//     with a small margin buffer. Model routing already selects more expensive
+//     models for higher power modes; the surcharge covers retries, longer context
+//     windows, and heavier orchestration.
+//
+// No-loss guarantee: BilledCost is always >= RawCost, even if env overrides
+// set profitMargin or surcharges below 1.0 by mistake.
 package pricing
 
 import (
@@ -18,6 +33,7 @@ const (
 )
 
 // ModelPricing defines per-1M token pricing for a model.
+// These MUST match the actual API pricing from each provider.
 type ModelPricing struct {
 	InputPer1M  float64
 	OutputPer1M float64
@@ -32,9 +48,9 @@ type ProviderPricing struct {
 // Engine computes pricing, billing, and token estimates.
 type Engine struct {
 	providers            map[string]ProviderPricing
-	powerMultipliers     map[string]float64
+	profitMargin         float64            // our markup on top of raw API cost (1.5 = 50%)
+	powerSurcharges      map[string]float64 // additional surcharge per power mode
 	byokRoutingFeePer1M  float64
-	safetyMultiplier     float64
 	defaultPowerMode     string
 	defaultMaxTokensHint int
 }
@@ -53,8 +69,9 @@ func Get() *Engine {
 }
 
 func newEngineFromEnv() *Engine {
-	// Defaults are conservative and can be tuned via env without code changes.
 	engine := &Engine{
+		// Actual API pricing per provider/model (what they charge us per 1M tokens).
+		// These must be kept in sync with each provider's published pricing.
 		providers: map[string]ProviderPricing{
 			"claude": {
 				Default: ModelPricing{InputPer1M: 3.00, OutputPer1M: 15.00},
@@ -94,28 +111,43 @@ func newEngineFromEnv() *Engine {
 				Models:  map[string]ModelPricing{},
 			},
 		},
-		powerMultipliers: map[string]float64{
-			ModeFast:     1.60,
-			ModeBalanced: 1.80,
-			ModeMax:      2.00,
+
+		// Our profit margin: 1.5 = 50% markup on API cost.
+		profitMargin: 1.50,
+
+		// Power mode surcharges — reflects actual extra cost of orchestration.
+		// Higher modes cost more because they use longer context, more retries,
+		// multi-agent coordination, and heavier validation loops.
+		// Values set slightly above break-even to maintain margin on overhead.
+		powerSurcharges: map[string]float64{
+			ModeFast:     1.00, // no surcharge — single-pass, minimal orchestration
+			ModeBalanced: 1.12, // 12% — retry loops, extended context, multi-step validation
+			ModeMax:      1.25, // 25% — full orchestration: retries, long context, parallel agents, verification
 		},
+
 		byokRoutingFeePer1M:  0.25,
-		safetyMultiplier:     1.00,
 		defaultPowerMode:     ModeFast,
 		defaultMaxTokensHint: 2000,
 	}
 
-	// Optional environment overrides
+	// Environment overrides — change pricing without redeploying
+	engine.profitMargin = getEnvFloat("APEX_PROFIT_MARGIN", engine.profitMargin)
 	engine.byokRoutingFeePer1M = getEnvFloat("BYOK_ROUTING_FEE_PER_1M", engine.byokRoutingFeePer1M)
-	engine.safetyMultiplier = getEnvFloat("PRICING_SAFETY_MULTIPLIER", engine.safetyMultiplier)
-	engine.powerMultipliers[ModeFast] = getEnvFloat("PRICING_MULTIPLIER_FAST", engine.powerMultipliers[ModeFast])
-	engine.powerMultipliers[ModeBalanced] = getEnvFloat("PRICING_MULTIPLIER_BALANCED", engine.powerMultipliers[ModeBalanced])
-	engine.powerMultipliers[ModeMax] = getEnvFloat("PRICING_MULTIPLIER_MAX", engine.powerMultipliers[ModeMax])
+	engine.powerSurcharges[ModeFast] = getEnvFloat("APEX_POWER_SURCHARGE_FAST", engine.powerSurcharges[ModeFast])
+	engine.powerSurcharges[ModeBalanced] = getEnvFloat("APEX_POWER_SURCHARGE_BALANCED", engine.powerSurcharges[ModeBalanced])
+	engine.powerSurcharges[ModeMax] = getEnvFloat("APEX_POWER_SURCHARGE_MAX", engine.powerSurcharges[ModeMax])
 
 	return engine
 }
 
 // BilledCost returns the user-facing cost (USD) for a request.
+//
+//	BilledCost = max(RawCost × profitMargin × powerSurcharge, RawCost)
+//
+// The no-loss floor guarantees we never charge less than our API cost,
+// even if env overrides accidentally set margin/surcharges below 1.0.
+//
+// For BYOK users we only charge a flat routing fee since they pay the API directly.
 func (e *Engine) BilledCost(provider, model string, inputTokens, outputTokens int, powerMode string, isBYOK bool) float64 {
 	providerKey := normalizeProvider(provider)
 	if providerKey == "ollama" {
@@ -126,12 +158,18 @@ func (e *Engine) BilledCost(provider, model string, inputTokens, outputTokens in
 		return roundUSD((float64(totalTokens) / 1_000_000.0) * e.byokRoutingFeePer1M)
 	}
 
-	raw := e.RawCost(providerKey, model, inputTokens, outputTokens)
-	multiplier := e.powerMultiplier(powerMode)
-	return roundUSD(raw * multiplier * e.safetyMultiplier)
+	apiCost := e.RawCost(providerKey, model, inputTokens, outputTokens)
+	surcharge := e.powerSurcharge(powerMode)
+	billed := roundUSD(apiCost * e.profitMargin * surcharge)
+
+	// No-loss guarantee: never bill less than what the API charges us.
+	if billed < apiCost {
+		return apiCost
+	}
+	return billed
 }
 
-// RawCost returns the platform cost (USD) before markup.
+// RawCost returns the actual API cost (USD) — what the provider charges us.
 func (e *Engine) RawCost(provider, model string, inputTokens, outputTokens int) float64 {
 	pricing := e.modelPricing(provider, model)
 	inputCost := (float64(inputTokens) / 1_000_000.0) * pricing.InputPer1M
@@ -146,6 +184,16 @@ func (e *Engine) EstimateCost(provider, model string, promptChars int, maxTokens
 	}
 	inputTokens := e.estimateInputTokens(promptChars)
 	return e.BilledCost(provider, model, inputTokens, maxTokens, powerMode, isBYOK)
+}
+
+// ProfitMargin returns the current profit margin multiplier.
+func (e *Engine) ProfitMargin() float64 {
+	return e.profitMargin
+}
+
+// PowerMultiplier returns the power surcharge for a power mode.
+func (e *Engine) PowerMultiplier(powerMode string) float64 {
+	return e.powerSurcharge(powerMode)
 }
 
 // DefaultModel returns a reasonable default model for a provider and power mode.
@@ -191,15 +239,10 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 	}
 }
 
-// PowerMultiplier returns the billing multiplier for a power mode.
-func (e *Engine) PowerMultiplier(powerMode string) float64 {
-	return e.powerMultiplier(powerMode)
-}
-
-func (e *Engine) powerMultiplier(powerMode string) float64 {
+func (e *Engine) powerSurcharge(powerMode string) float64 {
 	mode := normalizePowerMode(powerMode, e.defaultPowerMode)
-	if m, ok := e.powerMultipliers[mode]; ok {
-		return m
+	if s, ok := e.powerSurcharges[mode]; ok {
+		return s
 	}
 	return 1.0
 }
