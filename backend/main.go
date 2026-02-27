@@ -218,12 +218,23 @@ func initAI() (*ai.AIRouter, error) {
 		log.Println("⚠️  Grok (xAI) API key not configured")
 	}
 
-	if claudeKey == "" && openAIKey == "" && geminiKey == "" && grokKey == "" {
+	// Ollama URL for local/remote inference (free, no API key needed)
+	ollamaURL := os.Getenv("OLLAMA_URL")
+	if ollamaURL == "" {
+		ollamaURL = os.Getenv("OLLAMA_HOST")
+	}
+	if ollamaURL != "" {
+		log.Printf("✅ Ollama configured at %s", ollamaURL)
+	} else {
+		log.Println("⚠️  Ollama not configured (set OLLAMA_URL to enable free local AI)")
+	}
+
+	if claudeKey == "" && openAIKey == "" && geminiKey == "" && grokKey == "" && ollamaURL == "" {
 		log.Println("⚠️  No AI clients configured - some features will use mock responses")
 	}
 
-	// Initialize AI router with available keys (Grok passed as first extra key)
-	return ai.NewAIRouter(claudeKey, openAIKey, geminiKey, grokKey), nil
+	// Initialize AI router with available keys (Grok passed as first extra key, Ollama URL as second)
+	return ai.NewAIRouter(claudeKey, openAIKey, geminiKey, grokKey, ollamaURL), nil
 }
 
 func setupRouter(handler *handlers.Handler) *gin.Engine {
