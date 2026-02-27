@@ -26,6 +26,33 @@ const (
 	RoleLead      AgentRole = "lead"      // Coordinates all agents (main contact point)
 )
 
+// UserRoleCategory maps user-facing role categories to backend agent roles.
+// These simplify the 10 internal roles into 4 intuitive categories for the UI.
+type UserRoleCategory string
+
+const (
+	CategoryArchitect UserRoleCategory = "architect" // planner + architect + reviewer
+	CategoryCoder     UserRoleCategory = "coder"     // frontend + backend + database
+	CategoryTester    UserRoleCategory = "tester"     // testing
+	CategoryDevOps    UserRoleCategory = "devops"     // devops + solver
+)
+
+// ExpandUserCategory returns the backend agent roles for a user-facing category.
+func ExpandUserCategory(cat UserRoleCategory) []AgentRole {
+	switch cat {
+	case CategoryArchitect:
+		return []AgentRole{RolePlanner, RoleArchitect, RoleReviewer}
+	case CategoryCoder:
+		return []AgentRole{RoleFrontend, RoleBackend, RoleDatabase}
+	case CategoryTester:
+		return []AgentRole{RoleTesting}
+	case CategoryDevOps:
+		return []AgentRole{RoleDevOps, RoleSolver}
+	default:
+		return nil
+	}
+}
+
 // AgentStatus represents the current state of an agent
 type AgentStatus string
 
@@ -169,8 +196,9 @@ type Build struct {
 	RequestsUsed              int        `json:"requests_used,omitempty"`
 	ReadinessRecoveryAttempts int        `json:"readiness_recovery_attempts,omitempty"`
 	PhasedPipelineComplete    bool       `json:"phased_pipeline_complete,omitempty"`
-	DiffMode                  bool       `json:"diff_mode,omitempty"` // When true, changes require user review before applying
-	CreatedAt                 time.Time  `json:"created_at"`
+	DiffMode                  bool              `json:"diff_mode,omitempty"` // When true, changes require user review before applying
+	RoleAssignments           map[string]string `json:"role_assignments,omitempty"` // User-specified provider per role category
+	CreatedAt                 time.Time         `json:"created_at"`
 	UpdatedAt                 time.Time  `json:"updated_at"`
 	CompletedAt               *time.Time `json:"completed_at,omitempty"`
 	Error                     string     `json:"error,omitempty"`
@@ -393,7 +421,8 @@ type BuildRequest struct {
 	RequirePreviewReady bool       `json:"require_preview_ready,omitempty"`
 	ProjectName         string     `json:"project_name,omitempty"`
 	TechStack           *TechStack `json:"tech_stack,omitempty"` // Optional override
-	DiffMode            bool       `json:"diff_mode,omitempty"` // When true, proposed changes require user approval
+	DiffMode            bool              `json:"diff_mode,omitempty"`            // When true, proposed changes require user approval
+	RoleAssignments     map[string]string `json:"role_assignments,omitempty"`     // Optional: user-specified provider per role category (architect→claude, coder→gpt4, etc.)
 }
 
 // BuildResponse is returned when a build is created

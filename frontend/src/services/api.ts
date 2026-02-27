@@ -390,6 +390,8 @@ export class ApiService {
     ready: boolean
     providers_available: number
     provider_names?: string[]
+    provider_statuses?: Record<string, 'available' | 'unavailable'>
+    has_byok?: boolean
     error_code?: string
     error?: string
     suggestion?: string
@@ -412,6 +414,7 @@ export class ApiService {
       extras?: string[]
     }
     diff_mode?: boolean
+    role_assignments?: Record<string, string>
   }): Promise<{
     build_id: string
     websocket_url: string

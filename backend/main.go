@@ -174,6 +174,10 @@ func initAI() (*ai.AIRouter, error) {
 		openAIKey = os.Getenv("OPENAI_SECRET_KEY")
 	}
 	geminiKey := os.Getenv("GOOGLE_AI_API_KEY")
+	grokKey := os.Getenv("XAI_API_KEY")
+	if grokKey == "" {
+		grokKey = os.Getenv("GROK_API_KEY")
+	}
 
 	// Check for placeholder values
 	if claudeKey == "sk-ant-api03-your-claude-key-here" {
@@ -184,6 +188,9 @@ func initAI() (*ai.AIRouter, error) {
 	}
 	if geminiKey == "your-gemini-key-here" {
 		geminiKey = ""
+	}
+	if grokKey == "your-grok-key-here" {
+		grokKey = ""
 	}
 
 	// Log which clients will be initialized
@@ -205,12 +212,18 @@ func initAI() (*ai.AIRouter, error) {
 		log.Println("⚠️  Gemini API key not configured")
 	}
 
-	if claudeKey == "" && openAIKey == "" && geminiKey == "" {
+	if grokKey != "" {
+		log.Println("✅ Grok (xAI) API key configured")
+	} else {
+		log.Println("⚠️  Grok (xAI) API key not configured")
+	}
+
+	if claudeKey == "" && openAIKey == "" && geminiKey == "" && grokKey == "" {
 		log.Println("⚠️  No AI clients configured - some features will use mock responses")
 	}
 
-	// Initialize AI router with available keys
-	return ai.NewAIRouter(claudeKey, openAIKey, geminiKey), nil
+	// Initialize AI router with available keys (Grok passed as first extra key)
+	return ai.NewAIRouter(claudeKey, openAIKey, geminiKey, grokKey), nil
 }
 
 func setupRouter(handler *handlers.Handler) *gin.Engine {

@@ -151,7 +151,10 @@ func (am *AgentManager) CreateBuild(userID uint, req *BuildRequest) (*Build, err
 		powerMode = PowerFast // Default to cheapest models when not explicitly set
 	}
 	providerMode := strings.ToLower(strings.TrimSpace(req.ProviderMode))
-	if providerMode != "byok" {
+	if providerMode == "" && am.userHasActiveBYOKKey(userID) {
+		// Auto-detect: if user has BYOK keys and frontend didn't specify, use BYOK
+		providerMode = "byok"
+	} else if providerMode != "byok" {
 		providerMode = "platform"
 	}
 
@@ -165,6 +168,7 @@ func (am *AgentManager) CreateBuild(userID uint, req *BuildRequest) (*Build, err
 		RequirePreviewReady: req.RequirePreviewReady,
 		Description:         req.Description,
 		TechStack:           req.TechStack,
+		RoleAssignments:     req.RoleAssignments,
 		Agents:              make(map[string]*Agent),
 		Tasks:               make([]*Task, 0),
 		Checkpoints:         make([]*Checkpoint, 0),
@@ -1008,8 +1012,8 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 		roles = append(roles, optionalRoles...)
 	}
 
-	// Determine provider assignments based on availability
-	providerAssignments := am.assignProvidersToRoles(availableProviders, roles)
+	// Determine provider assignments — respects user overrides if provided
+	providerAssignments := am.assignProvidersToRolesWithOverrides(availableProviders, roles, build.RoleAssignments)
 
 	// Broadcast provider availability status
 	providerNames := make([]string, len(availableProviders))
@@ -1150,6 +1154,57 @@ func (am *AgentManager) assignProvidersToRoles(providers []ai.AIProvider, roles 
 	// Log final assignments
 	for role, provider := range assignments {
 		log.Printf("Agent %s -> Provider %s", role, provider)
+	}
+
+	return assignments
+}
+
+// assignProvidersToRolesWithOverrides applies user-specified role assignments
+// on top of the default auto-assignment policy. If userAssignments is nil/empty,
+// this falls through to the standard assignProvidersToRoles.
+func (am *AgentManager) assignProvidersToRolesWithOverrides(
+	providers []ai.AIProvider,
+	roles []AgentRole,
+	userAssignments map[string]string,
+) map[AgentRole]ai.AIProvider {
+	if len(userAssignments) == 0 {
+		return am.assignProvidersToRoles(providers, roles)
+	}
+
+	// Build availability lookup
+	available := make(map[ai.AIProvider]bool)
+	for _, p := range providers {
+		available[p] = true
+	}
+
+	// Start with auto-assignments as baseline
+	assignments := am.assignProvidersToRoles(providers, roles)
+
+	// Override with user preferences where the provider is actually available
+	for catStr, provStr := range userAssignments {
+		cat := UserRoleCategory(catStr)
+		provider := ai.AIProvider(provStr)
+
+		if !available[provider] {
+			log.Printf("User assigned %s→%s but provider unavailable; keeping auto-assignment", cat, provider)
+			continue
+		}
+
+		expandedRoles := ExpandUserCategory(cat)
+		if expandedRoles == nil {
+			log.Printf("Unknown user role category: %s; ignoring", cat)
+			continue
+		}
+
+		for _, role := range expandedRoles {
+			assignments[role] = provider
+		}
+		log.Printf("User override: %s roles → %s", cat, provider)
+	}
+
+	// Log final assignments with source info
+	for role, provider := range assignments {
+		log.Printf("Agent %s -> Provider %s (with user overrides)", role, provider)
 	}
 
 	return assignments

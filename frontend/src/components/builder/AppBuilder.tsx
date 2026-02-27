@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
+import ModelRoleConfig from './ModelRoleConfig'
 import { useThemeLogo } from '@/hooks/useThemeLogo'
 import apiService, { CompletedBuildDetail } from '@/services/api'
 import {
@@ -882,6 +883,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   const [selectedStack, setSelectedStack] = useState<Set<string>>(new Set([AUTO_STACK_ID]))
   const [powerMode, setPowerMode] = useState<'fast' | 'balanced' | 'max'>('fast')
 
+  // Model role assignment state
+  const [roleConfigMode, setRoleConfigMode] = useState<'auto' | 'manual'>('auto')
+  const [roleAssignments, setRoleAssignments] = useState<Record<string, string>>({})
+  const [providerStatuses, setProviderStatuses] = useState<Record<string, string>>({})
+  const [hasBYOK, setHasBYOK] = useState(false)
+
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
@@ -950,6 +957,26 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   useEffect(() => {
     buildStateRef.current = buildState
   }, [buildState])
+
+  // Fetch provider statuses for model role config
+  useEffect(() => {
+    apiService.buildPreflight().then(result => {
+      if (result.provider_statuses) {
+        setProviderStatuses(result.provider_statuses)
+      }
+      if (result.has_byok) {
+        setHasBYOK(true)
+      }
+    }).catch(() => {
+      // Non-fatal: preflight may not be available
+    })
+  }, [])
+
+  // Validate role assignments in manual mode
+  const isRoleAssignmentValid = useMemo(() => {
+    if (roleConfigMode === 'auto') return true
+    return 'architect' in roleAssignments && 'coder' in roleAssignments
+  }, [roleConfigMode, roleAssignments])
 
   const { user, currentProject, createProject, setCurrentProject } = useStore()
   const persistActiveBuildId = useCallback((buildId: string) => {
@@ -2418,7 +2445,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     addSystemMessage(`AI Power: ${powerMode === 'max' ? 'MAX POWER (Opus 4.6 / GPT-5.2 Codex / Gemini 3 Pro)' : powerMode === 'balanced' ? 'Balanced (Sonnet 4.5 / GPT-5 / Gemini 3 Flash)' : 'Fast & Cheap (Haiku 4.5 / GPT-4o Mini / Flash Lite)'}`)
 
     try {
-      // Preflight: verify providers are available before starting build
+      // Preflight: verify providers are available before starting build.
+      // Always use the fresh preflight result for provider_mode to avoid stale state
+      // (e.g. user added/removed BYOK keys in Settings since this component mounted).
+      let freshProviderMode: 'platform' | 'byok' | undefined
       try {
         const preflight = await apiService.buildPreflight()
         if (!preflight.ready) {
@@ -2427,6 +2457,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           setIsBuilding(false)
           return
         }
+        // Update state with fresh values
+        const freshHasBYOK = !!preflight.has_byok
+        setHasBYOK(freshHasBYOK)
+        freshProviderMode = freshHasBYOK ? 'byok' : 'platform'
+        if (preflight.provider_statuses) {
+          setProviderStatuses(preflight.provider_statuses)
+        }
       } catch (preflightErr: any) {
         const errData = preflightErr?.response?.data
         if (errData?.error_code) {
@@ -2434,7 +2471,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           setIsBuilding(false)
           return
         }
-        // Non-fatal: preflight endpoint may not exist on older backends
+        // Non-fatal: preflight endpoint may not exist on older backends.
+        // Leave freshProviderMode undefined so backend uses its own detection.
         console.warn('Preflight check failed (non-fatal):', preflightErr)
       }
 
@@ -2444,9 +2482,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         prompt: appDescription,
         mode: buildMode,
         power_mode: powerMode,
-        provider_mode: 'platform',
+        provider_mode: freshProviderMode,
         tech_stack: techStackOverride || undefined,
         diff_mode: false,
+        role_assignments: roleConfigMode === 'manual' ? roleAssignments : undefined,
       })
 
       if (!response || !response.build_id) {
@@ -2776,8 +2815,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
         {/* Main Content */}
         {!buildState ? (
-          // App Description Input
-          <div className="max-w-4xl mx-auto">
+          // App Description Input + Model Config (2-column layout)
+          <div className="max-w-7xl mx-auto">
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr,380px] gap-6 items-start">
+            {/* Left Column: Build Configuration */}
             <Card variant="cyberpunk" glow="intense" className="builder-main-card border-2 border-red-900/40 bg-black/60 backdrop-blur-xl">
               <CardContent className="p-8 md:p-10">
                 {/* Build Mode Toggle */}
@@ -2860,9 +2901,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                   </h3>
                   <div className="grid grid-cols-3 gap-3">
                     {([
-                      { id: 'fast' as const, label: 'Fast & Cheap', icon: <Zap className="w-5 h-5" />, desc: 'Haiku 4.5 / GPT-4o Mini / Gemini Flash Lite', color: 'green', cost: '1.6x', multiplier: '1.6x', perBuild: 'Lowest cost' },
-                      { id: 'balanced' as const, label: 'Balanced', icon: <Sparkles className="w-5 h-5" />, desc: 'Sonnet 4.5 / GPT-5 / Gemini 3 Flash', color: 'yellow', cost: '1.8x', multiplier: '1.8x', perBuild: 'Best balance' },
-                      { id: 'max' as const, label: 'Max Power', icon: <Rocket className="w-5 h-5" />, desc: 'Opus 4.6 / GPT-5.2 Codex / Gemini 3 Pro', color: 'red', cost: '2.0x', multiplier: '2.0x', perBuild: 'Highest quality' },
+                      { id: 'fast' as const, label: 'Fast & Cheap', icon: <Zap className="w-5 h-5" />, desc: 'Haiku 4.5 / GPT-4o Mini / Gemini Flash Lite', color: 'green', cost: '1.5x', multiplier: '1.5x', perBuild: 'Lowest cost' },
+                      { id: 'balanced' as const, label: 'Balanced', icon: <Sparkles className="w-5 h-5" />, desc: 'Sonnet 4.5 / GPT-5 / Gemini 3 Flash', color: 'yellow', cost: '1.68x', multiplier: '1.68x', perBuild: 'Best balance' },
+                      { id: 'max' as const, label: 'Max Power', icon: <Rocket className="w-5 h-5" />, desc: 'Opus 4.6 / GPT-5.2 Codex / Gemini 3 Pro', color: 'red', cost: '1.88x', multiplier: '1.88x', perBuild: 'Highest quality' },
                     ]).map((mode) => (
                       <button
                         key={mode.id}
@@ -2910,8 +2951,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                   </div>
                   <div className="mt-3 p-3 rounded-lg bg-gray-900/50 border border-gray-800/50">
                     <p className="text-[11px] text-gray-500 leading-relaxed">
-                      <strong className="text-gray-400">Pricing:</strong> Fast mode uses budget-friendly models with the lowest platform multiplier.
-                      Balanced and Max Power use higher‑tier models with increased multipliers.
+                      <strong className="text-gray-400">Pricing:</strong> Cost = API cost × 50% margin × power surcharge.
+                      Higher power modes use premium models and more orchestration.
                       {powerMode === 'max' && <span className="text-red-400/80"> Max Power models: Opus 4.6 ($15/$75 per MTok), GPT‑5.2 Codex ($8/$24), Gemini 3 Pro ($2/$6).</span>}
                       {powerMode === 'balanced' && <span className="text-yellow-400/80"> Balanced models: Sonnet 4.5 ($3/$15 per MTok), GPT‑5 ($5/$15), Gemini 3 Flash ($0.50/$1.50).</span>}
                       {powerMode === 'fast' && <span className="text-green-400/80"> Fast models: Haiku 4.5 ($0.25/$1.25 per MTok), GPT‑4o Mini ($0.15/$0.60), Gemini Flash Lite ($0.075/$0.30).</span>}
@@ -2924,7 +2965,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                 <div className="space-y-4">
                   <EpicBuildButton
                     onClick={startBuild}
-                    disabled={!appDescription.trim()}
+                    disabled={!appDescription.trim() || !isRoleAssignmentValid}
                     isLoading={isBuilding}
                   />
 
@@ -3022,6 +3063,18 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Right Column: Model Role Configuration */}
+            <div className="lg:sticky lg:top-6">
+              <ModelRoleConfig
+                mode={roleConfigMode}
+                onModeChange={setRoleConfigMode}
+                assignments={roleAssignments}
+                onAssignmentsChange={setRoleAssignments}
+                providerStatuses={providerStatuses}
+              />
+            </div>
+            </div>{/* end grid */}
 
             {/* Build History */}
             <BuildHistory onOpenBuild={openCompletedBuild} />

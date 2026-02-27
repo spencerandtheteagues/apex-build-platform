@@ -164,7 +164,7 @@ function App() {
     if (!isAuthenticated) return
 
     const preferredAI = provider && provider.length > 0 ? provider : 'auto'
-    const allowedProviders = new Set(['auto', 'claude', 'gpt4', 'gemini'])
+    const allowedProviders = new Set(['auto', 'claude', 'gpt4', 'gemini', 'grok', 'ollama'])
     if (!allowedProviders.has(preferredAI)) {
       return
     }

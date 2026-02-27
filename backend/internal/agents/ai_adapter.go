@@ -694,6 +694,7 @@ func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []ai.AIProvi
 		ai.ProviderClaude: ai.ProviderClaude,
 		ai.ProviderGPT4:   ai.ProviderGPT4,
 		ai.ProviderGemini: ai.ProviderGemini,
+		ai.ProviderGrok:   ai.ProviderGrok,
 		ai.ProviderOllama: ai.ProviderOllama,
 	}
 
@@ -742,6 +743,7 @@ func (a *AIRouterAdapter) GetAvailableProviders() []ai.AIProvider {
 		ai.ProviderClaude: ai.ProviderClaude,
 		ai.ProviderGPT4:   ai.ProviderGPT4,
 		ai.ProviderGemini: ai.ProviderGemini,
+		ai.ProviderGrok:   ai.ProviderGrok,
 		ai.ProviderOllama: ai.ProviderOllama,
 	}
 

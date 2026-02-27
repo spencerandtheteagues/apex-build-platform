@@ -49,12 +49,14 @@ func (h *BuildHandler) PreflightCheck(c *gin.Context) {
 	}
 
 	type preflightResult struct {
-		Ready      bool     `json:"ready"`
-		Providers  int      `json:"providers_available"`
-		Names      []string `json:"provider_names"`
-		ErrorCode  string   `json:"error_code,omitempty"`
-		Error      string   `json:"error,omitempty"`
-		Suggestion string   `json:"suggestion,omitempty"`
+		Ready            bool              `json:"ready"`
+		Providers        int               `json:"providers_available"`
+		Names            []string          `json:"provider_names"`
+		ProviderStatuses map[string]string `json:"provider_statuses,omitempty"`
+		HasBYOK          bool              `json:"has_byok"`
+		ErrorCode        string            `json:"error_code,omitempty"`
+		Error            string            `json:"error,omitempty"`
+		Suggestion       string            `json:"suggestion,omitempty"`
 	}
 
 	router := h.manager.aiRouter
@@ -96,14 +98,44 @@ func (h *BuildHandler) PreflightCheck(c *gin.Context) {
 	}
 
 	names := make([]string, len(providers))
+	availSet := make(map[string]bool)
 	for i, p := range providers {
 		names[i] = string(p)
+		availSet[string(p)] = true
 	}
 
+	// Build provider status map: always include 4 platform providers,
+	// plus any BYOK-only providers (like ollama) that are actually available.
+	statuses := make(map[string]string)
+	for _, k := range []string{"claude", "gpt4", "gemini", "grok"} {
+		if availSet[k] {
+			statuses[k] = "available"
+		} else {
+			statuses[k] = "unavailable"
+		}
+	}
+	// Include Ollama in the status map when the user has it configured (even if offline).
+	// This ensures the frontend shows the Ollama card so users can assign roles to it.
+	if availSet["ollama"] {
+		statuses["ollama"] = "available"
+	} else if h.db != nil {
+		var ollamaKeyCount int64
+		h.db.Model(&models.UserAPIKey{}).
+			Where("user_id = ? AND LOWER(provider) = 'ollama' AND is_active = ? AND deleted_at IS NULL", uid, true).
+			Count(&ollamaKeyCount)
+		if ollamaKeyCount > 0 {
+			statuses["ollama"] = "unavailable"
+		}
+	}
+
+	hasBYOK := h.manager.userHasActiveBYOKKey(uid)
+
 	c.JSON(http.StatusOK, preflightResult{
-		Ready:     true,
-		Providers: len(providers),
-		Names:     names,
+		Ready:            true,
+		Providers:        len(providers),
+		Names:            names,
+		ProviderStatuses: statuses,
+		HasBYOK:          hasBYOK,
 	})
 }
 
@@ -179,6 +211,28 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 			"details": "Please provide a more detailed description of the app you want to build",
 		})
 		return
+	}
+
+	// Validate role_assignments if provided
+	if req.RoleAssignments != nil {
+		validCats := map[string]bool{"architect": true, "coder": true, "tester": true, "devops": true}
+		validProvs := map[string]bool{"claude": true, "gpt4": true, "gemini": true, "grok": true, "ollama": true}
+		for cat, prov := range req.RoleAssignments {
+			if !validCats[cat] {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "invalid role category",
+					"details": fmt.Sprintf("Unknown role category: %s. Valid: architect, coder, tester, devops", cat),
+				})
+				return
+			}
+			if !validProvs[prov] {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "invalid provider",
+					"details": fmt.Sprintf("Unknown provider: %s. Valid: claude, gpt4, gemini, grok, ollama", prov),
+				})
+				return
+			}
+		}
 	}
 
 	// Create the build
