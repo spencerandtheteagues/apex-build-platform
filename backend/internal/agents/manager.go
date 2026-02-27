@@ -1558,8 +1558,9 @@ func (am *AgentManager) executeTask(task *Task) {
 	systemPrompt := am.getSystemPrompt(agent.Role, build)
 	log.Printf("Built prompt for task (prompt_length: %d, system_prompt_length: %d)", len(prompt), len(systemPrompt))
 
-	// Execute using AI router
-	ctx, cancel := context.WithTimeout(am.ctx, 5*time.Minute)
+	// Execute using AI router — local Ollama inference can be slow for large models,
+	// so use a generous 15-minute timeout per task.
+	ctx, cancel := context.WithTimeout(am.ctx, 15*time.Minute)
 	defer cancel()
 
 	// Broadcast that the agent is generating
@@ -3384,6 +3385,93 @@ func (am *AgentManager) applyDeterministicTypeDeclarationRepair(build *Build, re
 	return true, fmt.Sprintf("%s (%s)", manifestPath, strings.Join(added, ", "))
 }
 
+// applyDeterministicMixedCodeRepair strips server-framework imports (Express, etc.) from
+// frontend React component files (.tsx/.jsx). These lines are always wrong in a React file.
+func (am *AgentManager) applyDeterministicMixedCodeRepair(build *Build, readinessErrors []string) (bool, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return false, ""
+	}
+	hasMixed := false
+	for _, e := range readinessErrors {
+		if strings.Contains(e, "mixes frontend") {
+			hasMixed = true
+			break
+		}
+	}
+	if !hasMixed {
+		return false, ""
+	}
+
+	files := am.collectGeneratedFiles(build)
+	if len(files) == 0 {
+		return false, ""
+	}
+
+	// Patterns that are never valid in a React .tsx/.jsx file
+	backendImportTokens := []string{
+		"from 'express'", `from "express"`,
+		"require('express')", `require("express")`,
+		"from 'fastapi'", `from "fastapi"`,
+		"from 'http'", // node:http listen — not axios-style
+		"require('http')", `require("http")`,
+		"from 'fs'", `from "fs"`,
+		"require('fs')", `require("fs")`,
+		"from 'path'", `from "path"`,
+		"require('path')", `require("path")`,
+	}
+
+	applied := false
+	var summaries []string
+	for _, f := range files {
+		ext := strings.ToLower(filepath.Ext(f.Path))
+		if ext != ".tsx" && ext != ".jsx" {
+			continue
+		}
+		contentLower := strings.ToLower(f.Content)
+		hasBackend := false
+		for _, tok := range backendImportTokens {
+			if strings.Contains(contentLower, strings.ToLower(tok)) {
+				hasBackend = true
+				break
+			}
+		}
+		if !hasBackend {
+			continue
+		}
+		// Strip lines containing backend import tokens
+		lines := strings.Split(f.Content, "\n")
+		cleaned := lines[:0]
+		removed := 0
+		for _, line := range lines {
+			lineLower := strings.ToLower(strings.TrimSpace(line))
+			drop := false
+			for _, tok := range backendImportTokens {
+				if strings.Contains(lineLower, strings.ToLower(tok)) {
+					drop = true
+					break
+				}
+			}
+			if drop {
+				removed++
+			} else {
+				cleaned = append(cleaned, line)
+			}
+		}
+		if removed == 0 {
+			continue
+		}
+		if !am.patchGeneratedFileContent(build, f.Path, strings.Join(cleaned, "\n")) {
+			continue
+		}
+		applied = true
+		summaries = append(summaries, fmt.Sprintf("%s (removed %d backend import line(s))", f.Path, removed))
+	}
+	if !applied {
+		return false, ""
+	}
+	return true, strings.Join(summaries, "; ")
+}
+
 func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
 	if build == nil {
 		return
@@ -3688,6 +3776,37 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 							"quality_gate_stage":    "validation",
 							"validation_errors":     readinessErrors,
 							"type_package_repair":   summary,
+						},
+					})
+					am.checkBuildCompletion(build)
+					return
+				}
+				if repaired, summary := am.applyDeterministicMixedCodeRepair(build, readinessErrors); repaired {
+					build.mu.Lock()
+					build.UpdatedAt = now
+					build.Status = BuildReviewing
+					build.CompletedAt = nil
+					if build.Progress < 90 {
+						build.Progress = 90
+					}
+					build.Error = fmt.Sprintf("Final output validation failed: %s (applied deterministic mixed-code repair: %s)", errorSummary, summary)
+					progress = build.Progress
+					build.mu.Unlock()
+
+					am.broadcast(build.ID, &WSMessage{
+						Type:      WSBuildProgress,
+						BuildID:   build.ID,
+						Timestamp: now,
+						Data: map[string]any{
+							"phase":                 "validation",
+							"status":                string(BuildReviewing),
+							"progress":              progress,
+							"message":               "Applied deterministic mixed-code repair (stripped backend imports from frontend files). Re-running final validation.",
+							"quality_gate_required": true,
+							"quality_gate_active":   true,
+							"quality_gate_stage":    "validation",
+							"validation_errors":     readinessErrors,
+							"mixed_code_repair":     summary,
 						},
 					})
 					am.checkBuildCompletion(build)
@@ -4694,7 +4813,12 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	timeout := time.After(5 * time.Minute)
+	// Allow more time when running with local Ollama (large models are slow).
+	phaseTimeout := 5 * time.Minute
+	if am.isLocalDevSingleOllamaProfile() {
+		phaseTimeout = 25 * time.Minute
+	}
+	timeout := time.After(phaseTimeout)
 
 	for {
 		select {
@@ -5465,6 +5589,7 @@ FORBIDDEN OUTPUTS:
 - Incomplete implementations
 - Git merge conflict markers (<<<<<<< / ======= / >>>>>>>)
 - SEARCH/REPLACE diff blocks — output COMPLETE files only, never diffs
+- Mixing frontend and backend code in the same file: NEVER put Express/server imports in a .tsx/.jsx React component file; NEVER put React JSX in a backend Go/Python/Express file
 
 Build the REAL, COMPLETE implementation now.`,
 		task.Type, task.Description, appDescription, techStackContext, errorContext, repairHintsContext, agentContext, teamCoordinationContext, deliveryConstraintsContext)
@@ -5521,6 +5646,13 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 			lines = append(lines, "  Use Next.js with TypeScript. App Router (app/ directory). Entry: app/page.tsx.")
 		case "vue", "vue.js":
 			lines = append(lines, "  Use Vue 3 + Vite + TypeScript.")
+		}
+		// For full-stack builds: frontend files MUST NOT import any backend/server frameworks.
+		// The frontend calls the backend via HTTP (fetch/axios).
+		if stack.Backend != "" {
+			lines = append(lines, "- CRITICAL: Frontend files (.tsx/.jsx/.ts) must NEVER import or require server-side packages.")
+			lines = append(lines, "  FORBIDDEN in frontend files: `import express`, `require('express')`, `import fastapi`, `import http from 'http'` (server listen), any Go imports.")
+			lines = append(lines, "  Frontend communicates with the backend via HTTP fetch() or axios calls to the backend's API endpoints.")
 		}
 	} else if stack.Frontend == "" && stack.Backend != "" {
 		// Backend-only: explicitly say there is no frontend
@@ -6505,14 +6637,17 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 		// TSX/JSX output is a strong frontend signal even when dependencies/scripts are incomplete.
 		// This catches broken generations that forgot to include react/react-dom or entry files.
 		// Next.js builds do NOT require an index.html (Next.js generates HTML at runtime).
-		if !isNext && !hasIndexHTML && !hasBundlerConfig {
+		// Full-stack builds: the backend serves HTML — don't require index.html in source.
+		isFullStack := techStackFrontend != "" && techStackBackend != ""
+		if !isNext && !hasIndexHTML && !hasBundlerConfig && !isFullStack {
 			addError("Frontend app is missing an HTML entry point (index.html or public/index.html)")
 		}
 		// For Next.js: any TSX component under app/, pages/, or src/app/, src/pages/ counts as entry.
-		// For non-Next.js: require a recognized entry file OR an index.html.
+		// For full-stack React apps: any TSX/JSX file counts as a valid frontend entry because
+		// models often place files under frontend/, client/, web/, or src/frontend/ subdirectories.
 		effectiveHasFrontendEntry := hasFrontendEntry
-		if isNext && hasTSXOrJSX {
-			effectiveHasFrontendEntry = true // any .tsx component is a valid Next.js entry
+		if (isNext || isFullStack) && hasTSXOrJSX {
+			effectiveHasFrontendEntry = true
 		}
 		if !effectiveHasFrontendEntry && !hasIndexHTML {
 			addError("Frontend app is missing an entry source file")

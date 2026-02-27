@@ -77,7 +77,7 @@ func NewOllamaClient(baseURL string) *OllamaClient {
 	return &OllamaClient{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 300 * time.Second, // Longer timeout for local inference
+			Timeout: 900 * time.Second, // 15-minute timeout for local inference (large models can be slow)
 		},
 		usage: &ProviderUsage{
 			Provider: ProviderOllama,
