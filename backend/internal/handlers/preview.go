@@ -587,6 +587,13 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 		return
 	}
 
+	// Check whether the backend server is also running for this project, so we can
+	// inject the backend proxy URL into the HTML and make fetch() calls work.
+	backendProxyURL := ""
+	if serverStatus := h.serverRunner.GetStatus(uint(projectID)); serverStatus != nil && serverStatus.Running {
+		backendProxyURL = h.buildBackendProxyURL(c, uint(projectID))
+	}
+
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.FlushInterval = -1
 	proxy.ModifyResponse = func(resp *http.Response) error {
@@ -601,7 +608,7 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 		}
 		_ = resp.Body.Close()
 
-		rewritten := h.rewritePreviewHTMLForProxy(string(originalBody), uint(projectID))
+		rewritten := h.rewritePreviewHTMLForProxyWithBackend(string(originalBody), uint(projectID), backendProxyURL)
 		resp.Body = io.NopCloser(bytes.NewBufferString(rewritten))
 		resp.ContentLength = int64(len(rewritten))
 		resp.Header.Set("Content-Length", strconv.Itoa(len(rewritten)))
@@ -705,7 +712,78 @@ func (h *PreviewHandler) buildProxyURL(c *gin.Context, projectID uint) string {
 	return base + "?token=" + url.QueryEscape(token)
 }
 
+// ProxyBackend proxies API calls from the preview frontend to the running backend process.
+// This makes full-stack preview work: the frontend's fetch('http://localhost:3001/api/...')
+// is rewritten by a client-side script to hit this proxy URL instead.
+// GET/POST/etc /api/v1/preview/backend-proxy/:projectId/*path
+func (h *PreviewHandler) ProxyBackend(c *gin.Context) {
+	projectIDStr := c.Param("projectId")
+	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	userID, resolveErr := h.resolveUserID(c)
+	if resolveErr != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": resolveErr.Error()})
+		return
+	}
+
+	var project models.Project
+	if dbErr := h.db.First(&project, uint(projectID)).Error; dbErr != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// Look up the running backend server port for this project
+	serverStatus := h.serverRunner.GetStatus(uint(projectID))
+	if serverStatus == nil || !serverStatus.Running {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Backend server not running"})
+		return
+	}
+
+	targetURL, parseErr := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", serverStatus.Port))
+	if parseErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build backend proxy"})
+		return
+	}
+
+	// Strip the /backend-proxy/:projectId prefix — forward just the path
+	c.Request.URL.Path = c.Param("path")
+	if c.Request.URL.Path == "" {
+		c.Request.URL.Path = "/"
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy.FlushInterval = -1
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, proxyErr error) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":"Backend proxy unavailable"}`))
+	}
+	proxy.ServeHTTP(c.Writer, c.Request)
+}
+
+// buildBackendProxyURL returns the public URL for the backend proxy for a given project.
+func (h *PreviewHandler) buildBackendProxyURL(c *gin.Context, projectID uint) string {
+	scheme := "https"
+	host := c.Request.Host
+	if c.Request.Header.Get("X-Forwarded-Proto") == "" && c.Request.TLS == nil {
+		scheme = "http"
+	}
+	return fmt.Sprintf("%s://%s/api/v1/preview/backend-proxy/%d", scheme, host, projectID)
+}
+
 func (h *PreviewHandler) rewritePreviewHTMLForProxy(html string, projectID uint) string {
+	return h.rewritePreviewHTMLForProxyWithBackend(html, projectID, "")
+}
+
+func (h *PreviewHandler) rewritePreviewHTMLForProxyWithBackend(html string, projectID uint, backendProxyURL string) string {
 	prefix := fmt.Sprintf("/api/v1/preview/proxy/%d", projectID)
 	replaced := strings.NewReplacer(
 		`src="/`, `src="`+prefix+`/`,
@@ -729,6 +807,44 @@ func (h *PreviewHandler) rewritePreviewHTMLForProxy(html string, projectID uint)
 	replaced = strings.ReplaceAll(replaced, `url("`+prefix+`//`, `url("//`)
 	replaced = strings.ReplaceAll(replaced, `url('`+prefix+`//`, `url('//`)
 	replaced = strings.ReplaceAll(replaced, `url(`+prefix+`//`, `url(//`)
+
+	// Inject a script that patches fetch() / XHR to route localhost API calls through
+	// the backend proxy. This makes full-stack preview work without requiring the
+	// generated app to know the apex.build preview URL.
+	if backendProxyURL != "" {
+		backendScript := fmt.Sprintf(`<script>
+(function(){
+  var _bp=%q;
+  var _re=/http:\/\/localhost:(3001|8000|8080|3000|5000|4000)/g;
+  var _of=window.fetch;
+  window.fetch=function(u,o){
+    if(typeof u==='string')u=u.replace(_re,_bp);
+    else if(u instanceof Request){var _u=u.url.replace(_re,_bp);if(_u!==u.url)u=new Request(_u,u);}
+    return _of.call(this,u,o);
+  };
+  var _ox=XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open=function(m,u){
+    if(typeof u==='string')u=u.replace(_re,_bp);
+    return _ox.apply(this,arguments);
+  };
+  window.__APEX_BACKEND_URL__=_bp;
+  if(!window.import)window.import={meta:{env:{}}};
+  window.import.meta={env:{VITE_API_URL:_bp,REACT_APP_API_URL:_bp}};
+})();
+</script>`, backendProxyURL)
+		// Inject before </head> or at top of <body>
+		if idx := strings.Index(replaced, "</head>"); idx >= 0 {
+			replaced = replaced[:idx] + backendScript + replaced[idx:]
+		} else if idx := strings.Index(replaced, "<body"); idx >= 0 {
+			end := strings.Index(replaced[idx:], ">")
+			if end >= 0 {
+				insertAt := idx + end + 1
+				replaced = replaced[:insertAt] + backendScript + replaced[insertAt:]
+			}
+		} else {
+			replaced = backendScript + replaced
+		}
+	}
 
 	return replaced
 }

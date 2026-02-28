@@ -893,6 +893,9 @@ func setupRoutes(
 		{
 			previewProxy.Any("/proxy/:projectId", previewHandler.ProxyPreview)
 			previewProxy.Any("/proxy/:projectId/*path", previewHandler.ProxyPreview)
+			// Backend proxy: routes fetch() calls from the preview frontend to the running backend
+			previewProxy.Any("/backend-proxy/:projectId", previewHandler.ProxyBackend)
+			previewProxy.Any("/backend-proxy/:projectId/*path", previewHandler.ProxyBackend)
 		}
 
 		// Protected routes (authentication required)
