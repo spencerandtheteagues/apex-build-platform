@@ -556,9 +556,9 @@ const Hero: React.FC<LandingProps> = ({ onGetStarted }) => (
         flexWrap: 'wrap', justifyContent: 'center',
       }}>
       {[
+        { val: '$19',    label: 'per month' },
         { val: '~$0.05', label: 'avg build cost' },
         { val: '< 5 min', label: 'avg build time' },
-        { val: '0%', label: 'markup on AI costs' },
       ].map(s => (
         <div key={s.label} style={{ textAlign: 'center' }}>
           <div style={{ fontFamily: fontHero, fontSize: '1.6rem', fontWeight: 900, color: C.green }}>
@@ -633,9 +633,9 @@ const CostSection: React.FC<LandingProps> = ({ onGetStarted }) => (
             Know exactly what every task costs you.
           </SectionTitle>
           <SectionSub>
-            Watch your spend update live — by agent, by task, by token. Apex.Build passes
-            through API costs at zero markup. No subscription hiding usage, no surprise bills.
-            Just a transparent ticker you can watch in real time.
+            Watch your spend update live — by agent, by task, by token. Every API call
+            is tracked and shown as it happens. No black-box subscriptions hiding what
+            you're actually using. Just a transparent cost ticker, always visible.
           </SectionSub>
         </motion.div>
 
@@ -688,10 +688,10 @@ const CostSection: React.FC<LandingProps> = ({ onGetStarted }) => (
         }}>
           <AlertCircle size={16} style={{ color: C.accent, flexShrink: 0, marginTop: 2 }} />
           <p style={{ fontFamily: fontBody, fontSize: '0.8rem', color: C.textSub, lineHeight: 1.6, margin: 0 }}>
-            <strong style={{ color: C.text }}>Compare:</strong> Replit charges $25/mo flat.
-            A typical Apex.Build app generation costs{' '}
-            <strong style={{ color: C.green }}>$0.02 – $0.40</strong> total.
-            Most users spend less in a week than one Replit subscription.
+            <strong style={{ color: C.text }}>Compare:</strong> Replit charges $25/mo and
+            hides what each action costs. Apex.Build is{' '}
+            <strong style={{ color: C.green }}>$19/mo</strong> — and shows you a live
+            cost breakdown for every build, every agent, every token.
           </p>
         </div>
       </motion.div>
@@ -939,10 +939,10 @@ const ProvidersSection: React.FC = () => (
   }}>
     <motion.div {...fadeUp} style={{ textAlign:'center', marginBottom:44 }}>
       <SectionLabel>AI Providers</SectionLabel>
-      <SectionTitle style={{ textAlign:'center' }}>Use any AI. Pay exactly what it costs.</SectionTitle>
+      <SectionTitle style={{ textAlign:'center' }}>Use any AI. See exactly what it costs.</SectionTitle>
       <SectionSub center>
         Every provider, every model — with live cost visibility for each one.
-        Bring your own API keys and pay provider rates directly.
+        Or bring your own API keys and route requests directly to the provider.
       </SectionSub>
     </motion.div>
     <div style={{
@@ -976,7 +976,7 @@ const ProvidersSection: React.FC = () => (
     <motion.div {...fadeUp} style={{ textAlign:'center', marginTop:28 }}>
       <span style={{ display:'inline-flex', alignItems:'center', gap:7, fontFamily:fontBody, fontSize:'0.85rem', color:C.textSub }}>
         <Check size={15} style={{ color:C.accent }} />
-        Bring your own API keys — pay provider rates with zero Apex.Build markup
+        Bring your own API keys to route requests directly to the provider
       </span>
     </motion.div>
   </section>
@@ -1021,7 +1021,7 @@ const CTASection: React.FC<LandingProps> = ({ onGetStarted }) => (
         onMouseLeave={e => { (e.target as HTMLElement).style.transform='translateY(0)'; (e.target as HTMLElement).style.boxShadow='0 0 36px rgba(255,0,51,0.4), 0 4px 22px rgba(0,0,0,0.5)' }}>
           Create Free Account <ArrowRight size={17} />
         </button>
-        <span style={{ fontFamily:fontBody, fontSize:'0.78rem', color:C.textMuted }}>No credit card required</span>
+        <span style={{ fontFamily:fontBody, fontSize:'0.78rem', color:C.textMuted }}>$19/month · cancel any time</span>
       </div>
     </motion.div>
   </section>
