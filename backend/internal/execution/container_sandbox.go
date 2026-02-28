@@ -253,13 +253,6 @@ func NewContainerSandbox(config *ContainerSandboxConfig) (*ContainerSandbox, err
 		return nil, fmt.Errorf("Docker is not available - container sandbox requires Docker")
 	}
 
-	// Generate seccomp profile
-	seccompPath := filepath.Join(baseTempDir, "seccomp-profile.json")
-	if err := sandbox.writeSeccompProfile(seccompPath); err != nil {
-		return nil, fmt.Errorf("failed to write seccomp profile: %w", err)
-	}
-	sandbox.seccompProfile = seccompPath
-
 	// Initialize audit logger
 	if config.EnableAuditLog {
 		auditDir := filepath.Dir(config.AuditLogPath)
@@ -573,10 +566,15 @@ func (s *ContainerSandbox) Execute(ctx context.Context, language, code, stdin st
 	// Get resource limits for language
 	limits := s.getResourceLimits(language)
 
-	// Create temp directory for code
+	// Create temp directory for code.
+	// Use 0755 so sandbox users with a different UID from the host user (common when
+	// different images assign different UIDs to the sandbox user) can read the directory.
 	tempDir, err := os.MkdirTemp(s.baseTempDir, fmt.Sprintf("exec-%s-", execID[:8]))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	if err := os.Chmod(tempDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to chmod temp directory: %w", err)
 	}
 
 	// Create execution context with timeout
@@ -817,10 +815,14 @@ func (s *ContainerSandbox) buildDockerArgs(exec *containerExecution, filename st
 		"--security-opt=no-new-privileges:true",
 	}
 
-	// Add seccomp profile
-	if s.config.EnableSeccomp && s.seccompProfile != "" {
-		args = append(args, "--security-opt", fmt.Sprintf("seccomp=%s", s.seccompProfile))
+	// Seccomp: use Docker's builtin profile (actively maintained, works on all kernels).
+	// A custom allowlist of syscalls would need constant updates as new kernel syscalls
+	// are added; Docker's builtin handles this automatically.
+	// When EnableSeccomp is false (e.g. non-Linux hosts), run unconfined.
+	if !s.config.EnableSeccomp {
+		args = append(args, "--security-opt", "seccomp=unconfined")
 	}
+	// EnableSeccomp=true → no --security-opt seccomp flag → Docker uses its builtin profile
 
 	// Read-only root filesystem
 	if s.config.EnableReadOnlyRoot {
@@ -843,9 +845,11 @@ func (s *ContainerSandbox) buildDockerArgs(exec *containerExecution, filename st
 		args = append(args, "--network="+s.config.NetworkMode)
 	}
 
-	// Mount code directory (read-only)
+	// Mount code directory (read-only).
+	// The ",z" suffix relabels the mount for SELinux-enabled hosts (e.g. Fedora/RHEL)
+	// so the container process can read the files without a permission-denied error.
 	args = append(args,
-		"-v", fmt.Sprintf("%s:/work:ro", exec.TempDir),
+		"-v", fmt.Sprintf("%s:/work:ro,z", exec.TempDir),
 	)
 
 	// Shared package caches for faster warm starts (Replit-parity behavior)
@@ -855,7 +859,7 @@ func (s *ContainerSandbox) buildDockerArgs(exec *containerExecution, filename st
 			if cacheMount.ReadOnly {
 				mode = "ro"
 			}
-			args = append(args, "-v", fmt.Sprintf("%s:%s:%s", cacheMount.HostPath, cacheMount.ContainerPath, mode))
+			args = append(args, "-v", fmt.Sprintf("%s:%s:%s,z", cacheMount.HostPath, cacheMount.ContainerPath, mode))
 			for k, v := range cacheMount.EnvironmentMap {
 				args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 			}
