@@ -47,6 +47,7 @@ const APIKeySettings = lazy(() => import('./components/settings/APIKeySettings')
 const ModelSelector = lazy(() => import('./components/ai/ModelSelector'))
 const SpendDashboard = lazy(() => import('./components/spend/SpendDashboard'))
 const BudgetSettings = lazy(() => import('./components/budget/BudgetSettings'))
+const LandingPage = lazy(() => import('./pages/Landing').then(m => ({ default: m.LandingPage })))
 
 const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
   <div className="h-full flex items-center justify-center bg-black/40">
@@ -59,6 +60,7 @@ function App() {
   const [visitedViews, setVisitedViews] = useState<Set<AppView>>(() => new Set(['builder']))
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false)
   const [showGitHubImport, setShowGitHubImport] = useState(false)
+  const [showLanding, setShowLanding] = useState(true)
   const [isAuthMode, setIsAuthMode] = useState<'login' | 'register'>('login')
   const [authData, setAuthData] = useState({
     username: '',
@@ -223,6 +225,18 @@ function App() {
           </div>
         </div>
       </div>
+    )
+  }
+
+  // Landing page — shown to unauthenticated visitors before the auth form
+  if (!isAuthenticated && showLanding) {
+    return (
+      <Suspense fallback={<div style={{ background: '#000', minHeight: '100vh' }} />}>
+        <LandingPage onGetStarted={(mode) => {
+          if (mode) setIsAuthMode(mode)
+          setShowLanding(false)
+        }} />
+      </Suspense>
     )
   }
 
