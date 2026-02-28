@@ -56,14 +56,18 @@ LABEL org.opencontainers.image.description="Multi-AI Cloud Development Platform 
 LABEL org.opencontainers.image.vendor="APEX.BUILD"
 LABEL org.opencontainers.image.source="https://github.com/apex-build/apex-build"
 
-# Install runtime dependencies + Node.js for esbuild (preview bundling)
+# Install runtime dependencies + Node.js (esbuild bundling) + Python3 (FastAPI/Flask preview)
 RUN apk --no-cache add \
     ca-certificates \
     tzdata \
     curl \
     nodejs \
     npm \
+    python3 \
+    py3-pip \
     && npm install -g esbuild@0.24.2 \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && ln -sf /usr/bin/pip3 /usr/bin/pip \
     && rm -rf /var/cache/apk/* /root/.npm /tmp/*
 
 # Create non-root user for security

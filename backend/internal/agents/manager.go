@@ -6396,9 +6396,11 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 			lines = append(lines, "  □ src/server.ts (or server.ts) — Express entry file with app.listen()")
 			if stack.Frontend != "" {
 				fePort := canonicalFrontendPort(stack.Frontend)
-				lines = append(lines, "  PORT: Backend MUST listen on port 3001 — app.listen(3001).")
+				lines = append(lines, "  PORT: Backend MUST read process.env.PORT with fallback — const PORT = process.env.PORT || 3001; app.listen(PORT)")
 				lines = append(lines, fmt.Sprintf("  CORS: Import cors and add: app.use(cors({ origin: ['http://localhost:%d', 'http://localhost:3000'], credentials: true }))", fePort))
 				lines = append(lines, "    'cors' MUST be in package.json dependencies (not devDependencies).")
+			} else {
+				lines = append(lines, "  PORT: Backend MUST read process.env.PORT with fallback — const PORT = process.env.PORT || 3001; app.listen(PORT)")
 			}
 		case "go", "golang":
 			lines = append(lines, "  Use Go with net/http or chi router. Entry: main.go. Module: go.mod required.")
@@ -6407,8 +6409,10 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 			lines = append(lines, "  □ main.go (or cmd/main.go) — main() function entry point")
 			if stack.Frontend != "" {
 				fePort := canonicalFrontendPort(stack.Frontend)
-				lines = append(lines, "  PORT: Backend MUST listen on :8080 — http.ListenAndServe(\":8080\", ...)")
+				lines = append(lines, `  PORT: Backend MUST read PORT env var — port := os.Getenv("PORT"); if port == "" { port = "8080" }; http.ListenAndServe(":"+port, ...)`)
 				lines = append(lines, fmt.Sprintf("  CORS: Set 'Access-Control-Allow-Origin: http://localhost:%d' header for all responses (including OPTIONS preflight).", fePort))
+			} else {
+				lines = append(lines, `  PORT: Backend MUST read PORT env var — port := os.Getenv("PORT"); if port == "" { port = "8080" }; http.ListenAndServe(":"+port, ...)`)
 			}
 		case "python", "fastapi":
 			lines = append(lines, "  Use Python with FastAPI. Entry: main.py. Dependencies: requirements.txt.")
@@ -6417,8 +6421,10 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 			lines = append(lines, "  □ main.py (or app/main.py) — FastAPI app entry with uvicorn.run()")
 			if stack.Frontend != "" {
 				fePort := canonicalFrontendPort(stack.Frontend)
-				lines = append(lines, "  PORT: Backend MUST run uvicorn on port 8000 — uvicorn.run(app, host='0.0.0.0', port=8000)")
+				lines = append(lines, "  PORT: Backend MUST read PORT env var — import os; port = int(os.environ.get('PORT', 8000)); uvicorn.run(app, host='0.0.0.0', port=port)")
 				lines = append(lines, fmt.Sprintf("  CORS: Add CORSMiddleware: origins=['http://localhost:%d', 'http://localhost:3000'], allow_credentials=True, allow_methods=['*'], allow_headers=['*']", fePort))
+			} else {
+				lines = append(lines, "  PORT: Backend MUST read PORT env var — import os; port = int(os.environ.get('PORT', 8000)); uvicorn.run(app, host='0.0.0.0', port=port)")
 			}
 		}
 	} else if stack.Backend == "" && stack.Frontend != "" {

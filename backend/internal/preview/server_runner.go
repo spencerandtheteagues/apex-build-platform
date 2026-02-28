@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -225,7 +226,9 @@ func (sr *ServerRunner) DetectServer(ctx context.Context, projectID uint) (*Serv
 		if strings.Contains(content, `"start"`) || strings.Contains(content, `"serve"`) {
 			detection.HasBackend = true
 			detection.ServerType = "node"
-			detection.Command = "node"
+			// Use "npm" command — runs `npm run start` which handles TypeScript compilation
+			// (ts-node, esbuild, tsc+node) transparently via the generated package.json scripts.
+			detection.Command = "npm"
 
 			// Detect framework
 			if strings.Contains(content, `"express"`) {
@@ -240,12 +243,15 @@ func (sr *ServerRunner) DetectServer(ctx context.Context, projectID uint) (*Serv
 				detection.Framework = "nestjs"
 			}
 
-			// Find entry file
+			// Find entry file — JS first (pre-compiled output), then TypeScript sources
 			nodeEntries := []string{
 				"server.js", "index.js", "app.js", "main.js",
 				"src/server.js", "src/index.js", "src/app.js", "src/main.js",
 				"server/index.js", "server/app.js",
 				"dist/index.js", "dist/server.js",
+				// TypeScript sources — started via npm run start which handles compilation
+				"server.ts", "index.ts", "app.ts", "main.ts",
+				"src/server.ts", "src/index.ts", "src/app.ts", "src/main.ts",
 			}
 			for _, entry := range nodeEntries {
 				if _, exists := fileMap[entry]; exists {
@@ -431,6 +437,9 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		if err := sr.writeProjectFiles(ctx, config.ProjectID, workDir); err != nil {
 			return nil, fmt.Errorf("failed to write project files: %w", err)
 		}
+		// Install dependencies before starting the server — this is what makes
+		// `npm run start`, `python main.py`, and `go run .` actually work.
+		sr.installDependencies(workDir)
 	}
 
 	// Build command and args based on server type
@@ -438,20 +447,27 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 	var args []string
 
 	switch {
+	case config.Command == "npm":
+		// Node.js backend started via npm run start — handles TypeScript, esbuild, ts-node, etc.
+		cmdName = "npm"
+		args = []string{"run", "start"}
+
 	case config.Command == "node":
 		cmdName = "node"
 		args = []string{config.EntryFile}
 
 	case config.Command == "python":
-		cmdName = "python"
+		cmdName = "python3"
 		args = []string{config.EntryFile}
 
 	case config.Command == "uvicorn":
-		// FastAPI: uvicorn main:app --host 0.0.0.0 --port 9100
+		// FastAPI: python3 -m uvicorn main:app --host 0.0.0.0 --port 9100
+		// Use "python3 -m uvicorn" instead of bare "uvicorn" so it works
+		// even when pip install used --user and ~/.local/bin isn't in PATH.
 		module := strings.TrimSuffix(config.EntryFile, ".py")
 		module = strings.ReplaceAll(module, "/", ".")
-		cmdName = "uvicorn"
-		args = []string{module + ":app", "--host", "0.0.0.0", "--port", fmt.Sprintf("%d", port)}
+		cmdName = "python3"
+		args = []string{"-m", "uvicorn", module + ":app", "--host", "0.0.0.0", "--port", fmt.Sprintf("%d", port)}
 
 	case config.Command == "go run":
 		cmdName = "go"
@@ -546,8 +562,8 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		metrics.RecordPreviewBackendProcessExit(classifyPreviewBackendExitReason(waitErr, exitCode))
 	}()
 
-	// Wait for port to be ready
-	ready := sr.waitForPort(port, 30*time.Second, proc.stopChan)
+	// Wait for port to be ready — 90 seconds to allow for JIT compilation and slow starts
+	ready := sr.waitForPort(port, 90*time.Second, proc.stopChan)
 	proc.Ready = ready
 
 	if !ready {
@@ -562,7 +578,7 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 			sr.releasePort(config.ProjectID)
 			sr.killProcess(proc)
 			metrics.RecordPreviewBackendStart("not_ready_timeout")
-			return nil, fmt.Errorf("server did not start listening on port %d within 30 seconds", port)
+			return nil, fmt.Errorf("server did not start listening on port %d within 90 seconds", port)
 		}
 	}
 
@@ -570,6 +586,68 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 	metrics.RecordPreviewBackendStart("success")
 
 	return proc, nil
+}
+
+// installDependencies installs language-specific dependencies in workDir before
+// starting the backend server. Failures are logged but not fatal — the server may
+// still start (e.g., if dependencies are already in node_modules or in the PATH).
+func (sr *ServerRunner) installDependencies(workDir string) {
+	// Node.js — npm install (handles package-lock.json, installs TypeScript, ts-node, etc.)
+	if _, err := os.Stat(filepath.Join(workDir, "package.json")); err == nil {
+		if npmPath, lookErr := exec.LookPath("npm"); lookErr == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, npmPath, "install", "--prefer-offline", "--no-audit", "--no-fund", "--loglevel=error")
+			cmd.Dir = workDir
+			if out, runErr := cmd.CombinedOutput(); runErr != nil {
+				log.Printf("[server_runner] npm install failed in %s: %v\n%s", workDir, runErr, truncateInstallOutput(out))
+			} else {
+				log.Printf("[server_runner] npm install succeeded in %s", workDir)
+			}
+		}
+	}
+
+	// Python — pip install -r requirements.txt
+	if _, err := os.Stat(filepath.Join(workDir, "requirements.txt")); err == nil {
+		pip := "pip3"
+		if _, lookErr := exec.LookPath("pip3"); lookErr != nil {
+			pip = "pip"
+		}
+		if _, lookErr := exec.LookPath(pip); lookErr == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, pip, "install", "-r", "requirements.txt", "-q", "--break-system-packages")
+			cmd.Dir = workDir
+			if out, runErr := cmd.CombinedOutput(); runErr != nil {
+				log.Printf("[server_runner] pip install failed in %s: %v\n%s", workDir, runErr, truncateInstallOutput(out))
+			} else {
+				log.Printf("[server_runner] pip install succeeded in %s", workDir)
+			}
+		}
+	}
+
+	// Go — go mod download (fetches modules; go run will compile on first execution)
+	if _, err := os.Stat(filepath.Join(workDir, "go.mod")); err == nil {
+		if goPath, lookErr := exec.LookPath("go"); lookErr == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, goPath, "mod", "download")
+			cmd.Dir = workDir
+			if out, runErr := cmd.CombinedOutput(); runErr != nil {
+				log.Printf("[server_runner] go mod download failed in %s: %v\n%s", workDir, runErr, truncateInstallOutput(out))
+			} else {
+				log.Printf("[server_runner] go mod download succeeded in %s", workDir)
+			}
+		}
+	}
+}
+
+func truncateInstallOutput(out []byte) string {
+	s := strings.TrimSpace(string(out))
+	if len(s) > 400 {
+		return s[:400] + "..."
+	}
+	return s
 }
 
 func classifyPreviewBackendExitReason(waitErr error, exitCode int) string {
