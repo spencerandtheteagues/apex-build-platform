@@ -51,6 +51,7 @@ import {
   Upload
 } from 'lucide-react'
 import { GitHubImportWizard } from '@/components/import/GitHubImportWizard'
+import { BuyCreditsModal } from '@/components/billing/BuyCreditsModal'
 import { OnboardingTour } from './OnboardingTour'
 import { BuildHistory } from './BuildHistory'
 import {
@@ -902,6 +903,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   const previewPreparedRef = useRef(false)
   const autoOpenedIDEBuildRef = useRef<string | null>(null)
   const [isAutoOpeningIDE, setIsAutoOpeningIDE] = useState(false)
+  const [showBuyCredits, setShowBuyCredits] = useState(false)
+  const [buyCreditsReason, setBuyCreditsReason] = useState<string | undefined>(undefined)
 
   const thoughtGroups = useMemo(() => {
     const groups = new Map<string, { agent: Agent; thoughts: AIThought[] }>()
@@ -2537,7 +2540,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           errorMsg = error.message
         }
 
-        if (error.response?.status === 401) {
+        if (error.response?.status === 402 || (error.response?.data as any)?.error_code === 'INSUFFICIENT_CREDITS') {
+          setBuyCreditsReason('Your credit balance has run out. Purchase credits to continue building.')
+          setShowBuyCredits(true)
+          setIsBuilding(false)
+          return
+        } else if (error.response?.status === 401) {
           errorMsg = 'Authentication required. Please log in to start a build.'
         } else if (error.response?.status === 403) {
           errorMsg = 'You do not have permission to start builds.'
@@ -2686,6 +2694,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
   return (
     <div className="app-builder-root min-h-screen overflow-y-auto bg-black text-white relative">
+      {/* Buy Credits Modal */}
+      {showBuyCredits && (
+        <BuyCreditsModal
+          reason={buyCreditsReason}
+          onClose={() => setShowBuyCredits(false)}
+        />
+      )}
+
       {/* Onboarding Tour - shows on first visit */}
       <OnboardingTour />
 

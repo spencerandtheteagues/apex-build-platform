@@ -8,7 +8,7 @@ import CostTicker from './components/ide/CostTicker'
 // Import ErrorBoundary directly to be safe
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input, AnimatedBackground } from './components/ui'
-import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown, Key, Palette } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown, Key, Palette, CreditCard } from 'lucide-react'
 import './styles/globals.css'
 import './styles/auth-animations.css'
 
@@ -47,6 +47,7 @@ const APIKeySettings = lazy(() => import('./components/settings/APIKeySettings')
 const ModelSelector = lazy(() => import('./components/ai/ModelSelector'))
 const SpendDashboard = lazy(() => import('./components/spend/SpendDashboard'))
 const BudgetSettings = lazy(() => import('./components/budget/BudgetSettings'))
+const BillingSettings = lazy(() => import('./components/billing/BillingSettings'))
 const LandingPage = lazy(() => import('./pages/Landing').then(m => ({ default: m.LandingPage })))
 
 const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
@@ -62,6 +63,7 @@ function App() {
   const [showGitHubImport, setShowGitHubImport] = useState(false)
   const [showLanding, setShowLanding] = useState(true)
   const [isAuthMode, setIsAuthMode] = useState<'login' | 'register'>('login')
+  const [pendingPlanType, setPendingPlanType] = useState<string | null>(null)
   const [authData, setAuthData] = useState({
     username: '',
     email: '',
@@ -90,6 +92,15 @@ function App() {
     register,
     updateProfile,
   } = useStore()
+
+  // After auth, redirect to Settings/Billing if user clicked a paid plan CTA
+  useEffect(() => {
+    if (isAuthenticated && pendingPlanType && pendingPlanType !== 'free') {
+      setCurrentView('settings')
+      setVisitedViews(prev => new Set([...prev, 'settings']))
+      setPendingPlanType(null)
+    }
+  }, [isAuthenticated, pendingPlanType])
 
   // Handle authentication
   const handleAuth = async (e: React.FormEvent) => {
@@ -232,8 +243,9 @@ function App() {
   if (!isAuthenticated && showLanding) {
     return (
       <Suspense fallback={<div style={{ background: '#000', minHeight: '100vh' }} />}>
-        <LandingPage onGetStarted={(mode) => {
+        <LandingPage onGetStarted={(mode, planType) => {
           if (mode) setIsAuthMode(mode)
+          if (planType && planType !== 'free') setPendingPlanType(planType)
           setShowLanding(false)
         }} />
       </Suspense>
@@ -738,6 +750,18 @@ function App() {
                         Set spending limits to control costs. Builds will stop or warn when caps are reached.
                       </p>
                       <BudgetSettings />
+                    </div>
+
+                    {/* Billing & Credits Section */}
+                    <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                      <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                        <CreditCard className="w-5 h-5 text-red-400" />
+                        Billing & Credits
+                      </h2>
+                      <p className="text-gray-400 text-sm mb-6">
+                        Manage your subscription, buy AI credits, and view invoice history.
+                      </p>
+                      <BillingSettings />
                     </div>
                   </div>
                 </div>

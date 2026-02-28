@@ -202,7 +202,16 @@ func (h *PaymentHandlers) HandleWebhook(c *gin.Context) {
 
 // handleCheckoutCompleted processes checkout.session.completed events
 func (h *PaymentHandlers) handleCheckoutCompleted(event *payments.WebhookEvent) {
-	log.Printf("Checkout completed for customer: %s, subscription: %s", event.CustomerID, event.SubscriptionID)
+	log.Printf("Checkout completed for customer: %s, type: %s", event.CustomerID, event.Metadata["type"])
+
+	// Route to the right handler based on purchase type
+	if event.Metadata["type"] == "credit_purchase" {
+		h.handleCreditPurchaseCompleted(event)
+		return
+	}
+
+	// Default: subscription checkout
+	log.Printf("Checkout subscription completed for customer: %s, subscription: %s", event.CustomerID, event.SubscriptionID)
 
 	// Find user by Stripe customer ID
 	var user models.User
@@ -223,10 +232,10 @@ func (h *PaymentHandlers) handleCheckoutCompleted(event *payments.WebhookEvent) 
 
 	// Update user subscription info
 	updates := map[string]interface{}{
-		"stripe_customer_id":   event.CustomerID,
-		"subscription_id":      event.SubscriptionID,
-		"subscription_status":  string(event.Status),
-		"billing_cycle_start":  event.PeriodStart,
+		"stripe_customer_id":  event.CustomerID,
+		"subscription_id":     event.SubscriptionID,
+		"subscription_status": string(event.Status),
+		"billing_cycle_start": event.PeriodStart,
 	}
 
 	if event.PlanType != "" {
@@ -237,7 +246,51 @@ func (h *PaymentHandlers) handleCheckoutCompleted(event *payments.WebhookEvent) 
 		log.Printf("Failed to update user subscription: %v", err)
 	}
 
+	// Grant initial credits for the new subscription — invoice.paid will also fire,
+	// but only for the *first* subscription invoiced via checkout; subsequent renewals
+	// are handled exclusively by invoice.paid, so we skip the initial grant here to
+	// avoid double-crediting. (Stripe always fires invoice.paid for subscription payments.)
 	log.Printf("User %s subscription updated to %s", user.Email, event.PlanType)
+}
+
+// handleCreditPurchaseCompleted credits the user's account after a successful one-time payment.
+func (h *PaymentHandlers) handleCreditPurchaseCompleted(event *payments.WebhookEvent) {
+	creditUSDStr, ok := event.Metadata["credit_usd"]
+	if !ok || creditUSDStr == "" {
+		log.Printf("Credit purchase webhook missing credit_usd metadata")
+		return
+	}
+	creditAmt, err := strconv.ParseFloat(creditUSDStr, 64)
+	if err != nil || creditAmt <= 0 {
+		log.Printf("Invalid credit_usd in webhook metadata: %s", creditUSDStr)
+		return
+	}
+
+	// Locate user
+	var user models.User
+	if err := h.db.Where("stripe_customer_id = ?", event.CustomerID).First(&user).Error; err != nil {
+		if userIDStr, ok := event.Metadata["user_id"]; ok {
+			if err2 := h.db.First(&user, userIDStr).Error; err2 != nil {
+				log.Printf("User not found for credit purchase webhook: %v", err2)
+				return
+			}
+			// Save the Stripe customer ID for future lookups
+			h.db.Model(&user).Update("stripe_customer_id", event.CustomerID)
+		} else {
+			log.Printf("Cannot locate user for credit purchase: no customer or user_id")
+			return
+		}
+	}
+
+	// Add credits atomically
+	if err := h.db.Model(&models.User{}).
+		Where("id = ?", user.ID).
+		Update("credit_balance", gorm.Expr("credit_balance + ?", creditAmt)).Error; err != nil {
+		log.Printf("Failed to add credits to user %d: %v", user.ID, err)
+		return
+	}
+
+	log.Printf("Added $%.2f credits to user %s (id=%d)", creditAmt, user.Email, user.ID)
 }
 
 // handleSubscriptionUpdate processes subscription update events
@@ -296,7 +349,7 @@ func (h *PaymentHandlers) handleSubscriptionDeleted(event *payments.WebhookEvent
 	log.Printf("User %s downgraded to free plan", user.Email)
 }
 
-// handleInvoicePaid processes invoice.paid events
+// handleInvoicePaid processes invoice.paid events — marks subscription active and allocates monthly credits.
 func (h *PaymentHandlers) handleInvoicePaid(event *payments.WebhookEvent) {
 	log.Printf("Invoice paid for customer: %s, amount: %d %s",
 		event.CustomerID, event.Amount, event.Currency)
@@ -313,7 +366,23 @@ func (h *PaymentHandlers) handleInvoicePaid(event *payments.WebhookEvent) {
 		log.Printf("Failed to update subscription status: %v", err)
 	}
 
-	log.Printf("Invoice payment recorded for user %s", user.Email)
+	// Allocate monthly credits based on the user's current plan
+	planType := payments.PlanType(user.SubscriptionType)
+	if planType == "" {
+		planType = payments.PlanFree
+	}
+	plan := payments.GetPlanByType(planType)
+	if plan != nil && plan.MonthlyCreditsUSD > 0 {
+		if err := h.db.Model(&models.User{}).
+			Where("id = ?", user.ID).
+			Update("credit_balance", gorm.Expr("credit_balance + ?", plan.MonthlyCreditsUSD)).Error; err != nil {
+			log.Printf("Failed to allocate monthly credits to user %d: %v", user.ID, err)
+		} else {
+			log.Printf("Allocated $%.2f monthly credits to user %s (plan=%s)", plan.MonthlyCreditsUSD, user.Email, planType)
+		}
+	}
+
+	log.Printf("Invoice payment processed for user %s", user.Email)
 }
 
 // handleInvoicePaymentFailed processes invoice.payment_failed events
@@ -990,6 +1059,102 @@ func (h *PaymentHandlers) StripeConfigStatus(c *gin.Context) {
 		"data": gin.H{
 			"configured": configured,
 			"test_mode":  testMode,
+		},
+	})
+}
+
+// PurchaseCredits creates a Stripe one-time checkout session for an AI credit top-up.
+// POST /api/v1/billing/credits/purchase
+func (h *PaymentHandlers) PurchaseCredits(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "User not authenticated", "code": "UNAUTHORIZED"})
+		return
+	}
+
+	var req struct {
+		AmountUSD  int64  `json:"amount_usd" binding:"required"`
+		SuccessURL string `json:"success_url" binding:"required"`
+		CancelURL  string `json:"cancel_url" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "amount_usd, success_url, and cancel_url are required", "code": "INVALID_REQUEST"})
+		return
+	}
+
+	var user models.User
+	if err := h.db.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "User not found", "code": "USER_NOT_FOUND"})
+		return
+	}
+
+	if !h.stripeService.IsConfigured() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "Payment system is not configured", "code": "STRIPE_NOT_CONFIGURED"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// Ensure Stripe customer exists
+	customerID := user.StripeCustomerID
+	if customerID == "" {
+		cust, err := h.stripeService.CreateCustomer(ctx, user.Email, user.FullName, map[string]string{
+			"user_id":  strconv.FormatUint(uint64(user.ID), 10),
+			"username": user.Username,
+		})
+		if err != nil {
+			log.Printf("Failed to create Stripe customer: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to create billing profile", "code": "CUSTOMER_CREATION_FAILED"})
+			return
+		}
+		h.db.Model(&user).Update("stripe_customer_id", cust.ID)
+		customerID = cust.ID
+	}
+
+	meta := map[string]string{
+		"user_id":  strconv.FormatUint(uint64(user.ID), 10),
+		"username": user.Username,
+		"email":    user.Email,
+	}
+
+	result, err := h.stripeService.CreateCreditPurchaseSession(ctx, customerID, req.AmountUSD, req.SuccessURL, req.CancelURL, meta)
+	if err != nil {
+		log.Printf("Failed to create credit purchase session: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error(), "code": "CHECKOUT_CREATION_FAILED"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"session_id":   result.SessionID,
+			"checkout_url": result.URL,
+		},
+	})
+}
+
+// GetCreditBalance returns the authenticated user's current credit balance.
+// GET /api/v1/billing/credits/balance
+func (h *PaymentHandlers) GetCreditBalance(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "User not authenticated", "code": "UNAUTHORIZED"})
+		return
+	}
+
+	var user models.User
+	if err := h.db.Select("id, credit_balance, has_unlimited_credits, bypass_billing").First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "User not found", "code": "USER_NOT_FOUND"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"balance":           user.CreditBalance,
+			"has_unlimited":     user.HasUnlimitedCredits,
+			"bypass_billing":    user.BypassBilling,
+			"available_packs":   payments.CreditPacks(),
 		},
 	})
 }

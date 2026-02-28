@@ -199,6 +199,33 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 		}
 	}
 
+	// Hard stop: check credit balance before creating the build.
+	// BYOK users (own API keys) and admin bypass flags are exempt.
+	if h.db != nil {
+		bypassBilling, _ := c.Get("bypass_billing")
+		hasUnlimited, _ := c.Get("has_unlimited_credits")
+		bypass := false
+		if b, ok := bypassBilling.(bool); ok && b {
+			bypass = true
+		}
+		if b, ok := hasUnlimited.(bool); ok && b {
+			bypass = true
+		}
+		if !bypass && !h.manager.userHasActiveBYOKKey(uid) {
+			var creditBalance float64
+			h.db.Raw("SELECT credit_balance FROM users WHERE id = ?", uid).Scan(&creditBalance)
+			if creditBalance <= 0 {
+				c.JSON(http.StatusPaymentRequired, gin.H{
+					"error":          "Insufficient credits",
+					"error_code":     "INSUFFICIENT_CREDITS",
+					"suggestion":     "Purchase credits to continue building",
+					"credit_balance": creditBalance,
+				})
+				return
+			}
+		}
+	}
+
 	// Validate description (trim whitespace before checking)
 	req.Description = strings.TrimSpace(req.Description)
 	if req.Prompt != "" {

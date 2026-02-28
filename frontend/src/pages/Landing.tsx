@@ -423,7 +423,7 @@ const HeroDemo: React.FC = () => {
 
 // ─── Navbar ───────────────────────────────────────────────────────────────────
 
-interface LandingProps { onGetStarted: (mode?: 'login' | 'register') => void }
+interface LandingProps { onGetStarted: (mode?: 'login' | 'register', planType?: string) => void }
 
 const Navbar: React.FC<LandingProps> = ({ onGetStarted }) => {
   const [scrolled, setScrolled] = useState(false)
@@ -450,7 +450,7 @@ const Navbar: React.FC<LandingProps> = ({ onGetStarted }) => {
         filter: 'drop-shadow(0 0 8px rgba(255,0,51,0.45))',
       }} />
       <div style={{ display: 'flex', gap: 28, alignItems: 'center' }}>
-        {[['cost','Pricing / Cost'],['agents','AI Team'],['how','How It Works'],['stacks','Stacks']].map(([id,l]) => (
+        {[['agents','AI Team'],['how','How It Works'],['stacks','Stacks'],['pricing','Pricing']].map(([id,l]) => (
           <button key={id} onClick={() => go(id)} style={{
             background: 'none', border: 'none', color: C.textSub,
             cursor: 'pointer', fontSize: '0.83rem', fontFamily: fontBody,
@@ -641,7 +641,7 @@ const CostSection: React.FC<LandingProps> = ({ onGetStarted }) => (
 
         <motion.div {...stagger(1)} style={{ marginTop: 28, display: 'flex', flexDirection: 'column', gap: 14 }}>
           {[
-            { icon: DollarSign,   title: 'Zero Markup',       desc: 'You pay exactly what the AI provider charges. We add $0.00 on top.' },
+            { icon: DollarSign,   title: 'Transparent Credit Pricing', desc: 'Managed credits at cost + a fixed margin. Or bring your own API keys with just a $0.25/1M routing fee.' },
             { icon: Activity,     title: 'Live Token Counter', desc: 'Watch tokens and dollars tick up per agent as the build runs.' },
             { icon: BarChart3,    title: 'Full Cost Breakdown',desc: 'See cost by agent, task, provider, and model in one dashboard.' },
             { icon: TrendingDown, title: 'Use Cheaper Models', desc: 'Assign budget models to routine tasks, premium models where it matters.' },
@@ -689,9 +689,9 @@ const CostSection: React.FC<LandingProps> = ({ onGetStarted }) => (
           <AlertCircle size={16} style={{ color: C.accent, flexShrink: 0, marginTop: 2 }} />
           <p style={{ fontFamily: fontBody, fontSize: '0.8rem', color: C.textSub, lineHeight: 1.6, margin: 0 }}>
             <strong style={{ color: C.text }}>Compare:</strong> Replit charges $25/mo and
-            hides what each action costs. Apex.Build is{' '}
-            <strong style={{ color: C.green }}>$19/mo</strong> — and shows you a live
-            cost breakdown for every build, every agent, every token.
+            hides what each action costs. Apex.Build shows you a{' '}
+            <strong style={{ color: C.green }}>live cost breakdown</strong> for every build,
+            every agent, every token — so you always know exactly what you're spending.
           </p>
         </div>
       </motion.div>
@@ -982,6 +982,236 @@ const ProvidersSection: React.FC = () => (
   </section>
 )
 
+// ─── Pricing ──────────────────────────────────────────────────────────────────
+
+const PLANS = [
+  {
+    name: 'Free',
+    tagline: 'Evaluate the platform',
+    price: '$0',
+    period: '/month',
+    credits: null as string | null,
+    markup: 'BYOK — $0.25 / 1M token routing fee',
+    highlight: false,
+    cta: 'Start Free (BYOK)',
+    ctaMode: 'register' as const,
+    planType: 'free',
+    color: 'rgba(255,255,255,0.55)',
+    features: [
+      'Bring your own API keys',
+      'All 5 AI agents',
+      'All tech stacks',
+      'Full cost transparency dashboard',
+    ],
+    notIncluded: ['Managed AI credits', 'Priority build queue'],
+  },
+  {
+    name: 'Builder',
+    tagline: 'For solo developers',
+    price: '$19',
+    period: '/month',
+    credits: '$10 in managed AI credits / mo',
+    markup: 'Overage at cost + 50%',
+    highlight: false,
+    cta: 'Get Builder',
+    ctaMode: 'register' as const,
+    planType: 'builder',
+    color: '#ff0033',
+    features: [
+      '$10 in managed AI credits / mo',
+      'All 5 AI agents',
+      'All 6 AI providers',
+      'All tech stacks',
+      'Full cost transparency dashboard',
+      'Live per-token cost tracking',
+    ],
+    notIncluded: ['Priority build queue'],
+  },
+  {
+    name: 'Pro',
+    tagline: 'Best value',
+    price: '$49',
+    period: '/month',
+    credits: '$35 in managed AI credits / mo',
+    markup: 'Overage at cost + 40%',
+    highlight: true,
+    cta: 'Go Pro',
+    ctaMode: 'register' as const,
+    planType: 'pro',
+    color: '#34d399',
+    features: [
+      '$35 in managed AI credits / mo',
+      'All 5 AI agents',
+      'All 6 AI providers',
+      'All tech stacks',
+      'Full cost transparency dashboard',
+      'Live per-token cost tracking',
+      'Priority build queue',
+    ],
+    notIncluded: [] as string[],
+  },
+  {
+    name: 'Team',
+    tagline: 'For teams',
+    price: '$99',
+    period: '/month',
+    credits: '$80 in managed AI credits / mo',
+    markup: 'Overage at cost + 30%',
+    highlight: false,
+    cta: 'Start Team',
+    ctaMode: 'register' as const,
+    planType: 'team',
+    color: '#a78bfa',
+    features: [
+      '$80 in managed AI credits / mo',
+      'All 5 AI agents',
+      'All 6 AI providers',
+      'All tech stacks',
+      'Full cost transparency dashboard',
+      'Live per-token cost tracking',
+      'Priority build queue',
+      'Shared team workspace',
+      'Up to 5 seats',
+    ],
+    notIncluded: [] as string[],
+  },
+]
+
+const PricingSection: React.FC<LandingProps> = ({ onGetStarted }) => (
+  <section id="pricing" style={{
+    padding: 'clamp(60px,8vw,100px) clamp(1rem,8vw,6rem)',
+    borderTop: `1px solid ${C.borderDim}`,
+    background: 'linear-gradient(180deg, rgba(255,0,51,0.025) 0%, transparent 80%)',
+  }}>
+    <motion.div {...fadeUp} style={{ textAlign:'center', marginBottom: 44 }}>
+      <SectionLabel>Pricing</SectionLabel>
+      <SectionTitle style={{ textAlign:'center' }}>
+        Simple, transparent pricing.
+      </SectionTitle>
+      <SectionSub center>
+        Platform access fee + managed AI credits. You always see exactly what each build
+        costs — before, during, and after. No black boxes.
+      </SectionSub>
+    </motion.div>
+
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+      gap: 20, maxWidth: 1160, margin: '0 auto',
+      alignItems: 'stretch',
+    }}>
+      {PLANS.map((plan, i) => (
+        <motion.div key={plan.name} {...stagger(i)}
+          style={{
+            position: 'relative',
+            background: plan.highlight ? 'rgba(52,211,153,0.06)' : C.surface,
+            border: `1px solid ${plan.highlight ? C.greenBorder : C.borderDim}`,
+            borderRadius: 14,
+            padding: '30px 26px 26px',
+            display: 'flex', flexDirection: 'column',
+            boxShadow: plan.highlight ? '0 0 40px rgba(52,211,153,0.08)' : 'none',
+          }}
+          whileHover={{ y: -4, borderColor: plan.highlight ? C.green : C.border }}>
+
+          {plan.highlight && (
+            <div style={{
+              position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)',
+              background: 'linear-gradient(135deg,#34d399,#059669)',
+              color: '#000', fontSize: '0.7rem', fontFamily: fontBody,
+              fontWeight: 800, padding: '4px 14px', borderRadius: 100,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              whiteSpace: 'nowrap',
+            }}>
+              Most Popular
+            </div>
+          )}
+
+          {/* Name + tagline */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontFamily: fontHero, fontWeight: 800, fontSize: '0.88rem', color: plan.color, letterSpacing: '0.07em', marginBottom: 5 }}>
+              {plan.name.toUpperCase()}
+            </div>
+            <div style={{ fontFamily: fontBody, fontSize: '0.8rem', color: C.textMuted }}>
+              {plan.tagline}
+            </div>
+          </div>
+
+          {/* Price */}
+          <div style={{ marginBottom: 20 }}>
+            <span style={{ fontFamily: fontHero, fontWeight: 900, fontSize: '2.4rem', color: C.text }}>
+              {plan.price}
+            </span>
+            <span style={{ fontFamily: fontBody, fontSize: '0.87rem', color: C.textMuted }}>
+              {plan.period}
+            </span>
+            {plan.credits && (
+              <div style={{ marginTop: 6, fontSize: '0.78rem', fontFamily: fontBody, color: plan.highlight ? C.green : C.textSub }}>
+                {plan.credits}
+              </div>
+            )}
+            <div style={{ marginTop: 4, fontSize: '0.72rem', fontFamily: fontBody, color: C.textMuted }}>
+              {plan.markup}
+            </div>
+          </div>
+
+          {/* CTA */}
+          <button onClick={() => onGetStarted(plan.ctaMode, plan.planType)} style={{
+            background: plan.highlight
+              ? 'linear-gradient(135deg,#34d399,#059669)'
+              : plan.name === 'Free'
+                ? 'none'
+                : `rgba(255,255,255,0.05)`,
+            border: plan.highlight
+              ? 'none'
+              : `1px solid ${plan.name === 'Free' ? C.borderDim : plan.color + '55'}`,
+            color: plan.highlight ? '#000' : plan.name === 'Free' ? C.textSub : plan.color,
+            padding: '10px 20px', borderRadius: 8,
+            cursor: 'pointer', fontSize: '0.88rem',
+            fontFamily: fontBody, fontWeight: plan.highlight ? 800 : 600,
+            marginBottom: 22, width: '100%',
+            transition: 'all 0.2s',
+          }}>
+            {plan.cta}
+          </button>
+
+          {/* Divider */}
+          <div style={{ width: '100%', height: 1, background: C.borderDim, marginBottom: 18 }} />
+
+          {/* Features */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+            {plan.features.map(f => (
+              <div key={f} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <Check size={13} style={{ color: plan.highlight ? C.green : C.accent, flexShrink: 0, marginTop: 3 }} />
+                <span style={{ fontFamily: fontBody, fontSize: '0.82rem', color: C.textSub, lineHeight: 1.5 }}>
+                  {f}
+                </span>
+              </div>
+            ))}
+            {plan.notIncluded.map(f => (
+              <div key={f} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', opacity: 0.38 }}>
+                <span style={{ width: 13, flexShrink: 0, textAlign: 'center', fontSize: '0.85rem', color: C.textMuted, lineHeight: 1, marginTop: 2 }}>–</span>
+                <span style={{ fontFamily: fontBody, fontSize: '0.82rem', color: C.textMuted, lineHeight: 1.5, textDecoration: 'line-through' }}>
+                  {f}
+                </span>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      ))}
+    </div>
+
+    <motion.p {...fadeUp} style={{
+      textAlign: 'center', marginTop: 28,
+      fontFamily: fontBody, fontSize: '0.76rem', color: C.textMuted, lineHeight: 1.65,
+      maxWidth: 580, margin: '28px auto 0',
+    }}>
+      All plans include real-time cost tracking per agent, task, and token.
+      Managed credits expire monthly and do not roll over.
+      BYOK plan charges only the $0.25 / 1M token routing fee — no subscription required.
+    </motion.p>
+  </section>
+)
+
 // ─── Final CTA ────────────────────────────────────────────────────────────────
 
 const CTASection: React.FC<LandingProps> = ({ onGetStarted }) => (
@@ -1021,7 +1251,7 @@ const CTASection: React.FC<LandingProps> = ({ onGetStarted }) => (
         onMouseLeave={e => { (e.target as HTMLElement).style.transform='translateY(0)'; (e.target as HTMLElement).style.boxShadow='0 0 36px rgba(255,0,51,0.4), 0 4px 22px rgba(0,0,0,0.5)' }}>
           Create Free Account <ArrowRight size={17} />
         </button>
-        <span style={{ fontFamily:fontBody, fontSize:'0.78rem', color:C.textMuted }}>$19/month · cancel any time</span>
+        <span style={{ fontFamily:fontBody, fontSize:'0.78rem', color:C.textMuted }}>Free BYOK tier available · Builder from $19/mo</span>
       </div>
     </motion.div>
   </section>
@@ -1080,6 +1310,7 @@ export const LandingPage: React.FC<LandingProps> = ({ onGetStarted }) => (
     <TechStacks />
     <FeaturesSection />
     <ProvidersSection />
+    <PricingSection onGetStarted={onGetStarted} />
     <CTASection onGetStarted={onGetStarted} />
     <Footer onGetStarted={onGetStarted} />
   </div>

@@ -898,6 +898,10 @@ func setupRoutes(
 			previewProxy.Any("/backend-proxy/:projectId/*path", previewHandler.ProxyBackend)
 		}
 
+		// Stripe webhook — must be unauthenticated (Stripe sends this, not users)
+		// Raw body is required for signature verification — do NOT add body parsers here
+		v1.POST("/billing/webhook", paymentHandler.HandleWebhook)
+
 		// Protected routes (authentication required)
 		protected := v1.Group("/")
 		protected.Use(server.AuthMiddleware())
@@ -1088,6 +1092,8 @@ func setupRoutes(
 				billing.GET("/payment-methods", paymentHandler.GetPaymentMethods)  // Get payment methods
 				billing.GET("/check-limit/:type", paymentHandler.CheckUsageLimit)  // Check usage limit
 				billing.GET("/config-status", paymentHandler.StripeConfigStatus)   // Check Stripe config
+				billing.POST("/credits/purchase", paymentHandler.PurchaseCredits)  // Buy AI credits (one-time)
+				billing.GET("/credits/balance", paymentHandler.GetCreditBalance)   // Get current credit balance
 			}
 
 			// Code Execution endpoints (the core of cloud IDE) - with quota + budget enforcement

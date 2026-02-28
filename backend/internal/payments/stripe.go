@@ -299,6 +299,89 @@ func (s *StripeService) CreateCheckoutSession(ctx context.Context, customerID, p
 	}, nil
 }
 
+// CreditPack defines a one-time credit purchase option.
+type CreditPack struct {
+	AmountUSD int64   `json:"amount_usd"` // price charged in USD (whole dollars)
+	CreditUSD float64 `json:"credit_usd"` // credit value added to the account
+	Label     string  `json:"label"`
+}
+
+// CreditPacks returns the available credit purchase options.
+func CreditPacks() []CreditPack {
+	return []CreditPack{
+		{10, 10.00, "$10 Credits"},
+		{25, 25.00, "$25 Credits"},
+		{50, 50.00, "$50 Credits"},
+		{100, 100.00, "$100 Credits"},
+	}
+}
+
+// CreateCreditPurchaseSession creates a Stripe Checkout session for a one-time credit top-up.
+// amountUSD must be one of the valid pack sizes (10, 25, 50, 100).
+func (s *StripeService) CreateCreditPurchaseSession(ctx context.Context, customerID string, amountUSD int64, successURL, cancelURL string, metadata map[string]string) (*CheckoutSessionResult, error) {
+	if !s.IsConfigured() {
+		return nil, errors.New("stripe is not configured")
+	}
+
+	// Validate the amount against known packs
+	var pack *CreditPack
+	for _, p := range CreditPacks() {
+		if p.AmountUSD == amountUSD {
+			pack = &p
+			break
+		}
+	}
+	if pack == nil {
+		return nil, fmt.Errorf("invalid credit pack amount: %d", amountUSD)
+	}
+
+	// Merge caller metadata with purchase-specific fields
+	m := map[string]string{
+		"type":       "credit_purchase",
+		"credit_usd": fmt.Sprintf("%.2f", pack.CreditUSD),
+	}
+	for k, v := range metadata {
+		m[k] = v
+	}
+
+	params := &stripe.CheckoutSessionParams{
+		Mode: stripe.String(string(stripe.CheckoutSessionModePayment)),
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				Quantity: stripe.Int64(1),
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency:   stripe.String("usd"),
+					UnitAmount: stripe.Int64(amountUSD * 100), // cents
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name:        stripe.String(pack.Label),
+						Description: stripe.String(fmt.Sprintf("%.2f USD in Apex.Build AI credits", pack.CreditUSD)),
+					},
+				},
+			},
+		},
+		SuccessURL: stripe.String(successURL),
+		CancelURL:  stripe.String(cancelURL),
+		Metadata:   m,
+	}
+
+	if customerID != "" {
+		params.Customer = stripe.String(customerID)
+	} else {
+		params.CustomerCreation = stripe.String("always")
+	}
+
+	sess, err := checkoutsession.New(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create credit purchase session: %w", err)
+	}
+
+	return &CheckoutSessionResult{
+		SessionID:  sess.ID,
+		URL:        sess.URL,
+		CustomerID: string(sess.Customer.ID),
+	}, nil
+}
+
 // CreateBillingPortalSession creates a Stripe billing portal session
 func (s *StripeService) CreateBillingPortalSession(ctx context.Context, customerID, returnURL string) (*PortalSessionResult, error) {
 	if !s.IsConfigured() {

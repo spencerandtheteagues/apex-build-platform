@@ -2372,6 +2372,100 @@ export class ApiService {
   async deleteAsset(projectId: number, assetId: number): Promise<void> {
     await this.client.delete(`/projects/${projectId}/assets/${assetId}`)
   }
+
+  // ── Billing: credit purchase & balance ───────────────────────────────────
+
+  async purchaseCredits(params: {
+    amount_usd: number
+    success_url: string
+    cancel_url: string
+  }): Promise<{ success: boolean; data?: { session_id: string; checkout_url: string }; error?: string }> {
+    const response = await this.client.post('/billing/credits/purchase', params)
+    return response.data
+  }
+
+  async getCreditBalance(): Promise<{
+    success: boolean
+    data?: {
+      balance: number
+      has_unlimited: boolean
+      bypass_billing: boolean
+      available_packs: Array<{ AmountUSD: number; CreditUSD: number; Label: string }>
+    }
+  }> {
+    const response = await this.client.get('/billing/credits/balance')
+    return response.data
+  }
+
+  async getSubscription(): Promise<{
+    success: boolean
+    data?: {
+      plan_type: string
+      plan_name: string
+      status: string
+      current_period_end: string
+      cancel_at_period_end?: boolean
+      cancel_at?: string
+      monthly_credits_usd?: number
+    }
+  }> {
+    const response = await this.client.get('/billing/subscription')
+    return response.data
+  }
+
+  async getPlans(): Promise<{
+    success: boolean
+    data?: {
+      plans: Array<{
+        type: string
+        name: string
+        monthly_price_cents: number
+        monthly_price_id: string
+        monthly_credits_usd: number
+        is_popular: boolean
+        features: string[]
+      }>
+    }
+  }> {
+    const response = await this.client.get('/billing/plans')
+    return response.data
+  }
+
+  async createCheckoutSession(params: {
+    price_id: string
+    success_url: string
+    cancel_url: string
+  }): Promise<{ success: boolean; data?: { session_id: string; checkout_url: string }; error?: string }> {
+    const response = await this.client.post('/billing/checkout', params)
+    return response.data
+  }
+
+  async createBillingPortalSession(return_url: string): Promise<{
+    success: boolean
+    data?: { portal_url: string }
+    error?: string
+  }> {
+    const response = await this.client.post('/billing/portal', { return_url })
+    return response.data
+  }
+
+  async getInvoices(): Promise<{
+    success: boolean
+    data?: {
+      invoices: Array<{
+        id: string
+        amount_paid: number
+        currency: string
+        status: string
+        created: number
+        hosted_invoice_url: string
+        description: string
+      }>
+    }
+  }> {
+    const response = await this.client.get('/billing/invoices')
+    return response.data
+  }
 }
 
 // ---------------------------------------------------------------------------

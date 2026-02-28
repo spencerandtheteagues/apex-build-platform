@@ -2,9 +2,10 @@
 // Real-time cost display for IDE status bar with expandable breakdown
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { DollarSign, TrendingUp, ChevronUp, Activity, Zap } from 'lucide-react'
+import { DollarSign, TrendingUp, ChevronUp, Activity, Zap, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import apiService from '@/services/api'
+import { BuyCreditsModal } from '@/components/billing/BuyCreditsModal'
 
 interface UsageData {
   totalCost: number
@@ -36,6 +37,7 @@ export default function CostTicker({ className }: CostTickerProps) {
   const [usage, setUsage] = useState<UsageData | null>(null)
   const [billing, setBilling] = useState<BillingData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showBuyCredits, setShowBuyCredits] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
   const fetchUsage = useCallback(async () => {
@@ -119,9 +121,23 @@ export default function CostTicker({ className }: CostTickerProps) {
       >
         <DollarSign className={cn('w-3 h-3', monthColor)} />
         <span className="text-gray-400">Credits:</span>
-        <span className={cn('font-mono font-medium', billing?.hasUnlimitedCredits ? 'text-emerald-400' : 'text-white')}>
+        <span className={cn(
+          'font-mono font-medium',
+          billing?.hasUnlimitedCredits ? 'text-emerald-400' :
+          (billing?.creditBalance ?? 1) <= 0 ? 'text-red-400' :
+          (billing?.creditBalance ?? 99) < 2 ? 'text-yellow-400' : 'text-white'
+        )}>
           {creditDisplay}
         </span>
+        {!billing?.hasUnlimitedCredits && !billing?.bypassBilling && (billing?.creditBalance ?? 1) <= 1 && (
+          <button
+            onClick={e => { e.stopPropagation(); setShowBuyCredits(true) }}
+            className="flex items-center gap-0.5 text-[10px] text-red-400 hover:text-red-300 border border-red-500/30 rounded px-1.5 py-0.5 transition-colors"
+            title="Buy more credits"
+          >
+            <Plus className="w-2.5 h-2.5" /> Add
+          </button>
+        )}
         <span className="text-gray-600">|</span>
         <span className="text-gray-400">Month:</span>
         <span className={cn('font-mono font-medium', monthColor)}>
@@ -246,12 +262,26 @@ export default function CostTicker({ className }: CostTickerProps) {
           {/* Footer */}
           <div className="px-4 py-2 border-t border-gray-800/50 text-[10px] text-gray-600 flex items-center justify-between">
             <span>Updates every 10s</span>
-            <span className="flex items-center gap-1">
-              <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-              Live
-            </span>
+            <div className="flex items-center gap-3">
+              {!billing?.hasUnlimitedCredits && !billing?.bypassBilling && (
+                <button
+                  onClick={() => { setIsExpanded(false); setShowBuyCredits(true) }}
+                  className="flex items-center gap-1 text-[10px] text-red-400 hover:text-red-300 transition-colors"
+                >
+                  <Plus className="w-2.5 h-2.5" /> Buy Credits
+                </button>
+              )}
+              <span className="flex items-center gap-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                Live
+              </span>
+            </div>
           </div>
         </div>
+      )}
+
+      {showBuyCredits && (
+        <BuyCreditsModal onClose={() => setShowBuyCredits(false)} />
       )}
     </div>
   )
