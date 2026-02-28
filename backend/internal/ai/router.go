@@ -20,13 +20,23 @@ const (
 	MaxCodeLength = 50000
 )
 
+// ProviderHealthDetail holds detailed health info for a single provider.
+type ProviderHealthDetail struct {
+	// Status is one of: "ok", "no_credits", "auth_error", "timeout", "error", "unknown"
+	Status string `json:"status"`
+	// Balance is nil when unknown, 0 when known-depleted, positive when known.
+	// Populated only when we can infer it (e.g. a depleted-credit error implies 0).
+	Balance *float64 `json:"balance"`
+}
+
 // AIRouter intelligently routes AI requests to the optimal provider
 type AIRouter struct {
-	clients     map[AIProvider]AIClient
-	config      *RouterConfig
-	rateLimits  map[AIProvider]*rateLimiter
-	mu          sync.RWMutex
-	healthCheck map[AIProvider]bool
+	clients      map[AIProvider]AIClient
+	config       *RouterConfig
+	rateLimits   map[AIProvider]*rateLimiter
+	mu           sync.RWMutex
+	healthCheck  map[AIProvider]bool
+	healthStatus map[AIProvider]string // "ok", "no_credits", "auth_error", "timeout", "error", "unknown"
 }
 
 // GetDefaultProvider returns the configured default provider for a capability.
@@ -99,10 +109,11 @@ func NewAIRouter(claudeKey, openAIKey, geminiKey string, extraKeys ...string) *A
 	}
 
 	router := &AIRouter{
-		clients:     clients,
-		config:      config,
-		rateLimits:  rateLimits,
-		healthCheck: make(map[AIProvider]bool),
+		clients:      clients,
+		config:       config,
+		rateLimits:   rateLimits,
+		healthCheck:  make(map[AIProvider]bool),
+		healthStatus: make(map[AIProvider]string),
 	}
 
 	// Start health monitoring
@@ -186,6 +197,7 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 		if strings.Contains(errStr, "RATE_LIMIT") || strings.Contains(errStr, "QUOTA_EXCEEDED") {
 			r.mu.Lock()
 			r.healthCheck[provider] = false
+			r.healthStatus[provider] = "no_credits"
 			r.mu.Unlock()
 			log.Printf("Marked provider %s as temporarily unhealthy due to quota/rate limit", provider)
 		}
@@ -212,6 +224,7 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 					if strings.Contains(fallbackErrStr, "RATE_LIMIT") || strings.Contains(fallbackErrStr, "QUOTA_EXCEEDED") {
 						r.mu.Lock()
 						r.healthCheck[fallbackProvider] = false
+						r.healthStatus[fallbackProvider] = "no_credits"
 						r.mu.Unlock()
 					}
 				} else {
@@ -405,6 +418,41 @@ func (r *AIRouter) monitorHealth() {
 	}
 }
 
+// classifyProviderError returns a short status string describing a health-check error.
+func classifyProviderError(err error) string {
+	if err == nil {
+		return "ok"
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "credit balance") ||
+		strings.Contains(msg, "insufficient_funds") ||
+		strings.Contains(msg, "billing") ||
+		strings.Contains(msg, "quota_exceeded") ||
+		strings.Contains(msg, "out of credits") ||
+		strings.Contains(msg, "exceeded your") ||
+		strings.Contains(msg, "you have exceeded") ||
+		strings.Contains(msg, "rate_limit_exceeded") ||
+		strings.Contains(msg, "resource_exhausted"):
+		return "no_credits"
+	case strings.Contains(msg, "invalid api key") ||
+		strings.Contains(msg, "api key not found") ||
+		strings.Contains(msg, "api_key") ||
+		strings.Contains(msg, "unauthorized") ||
+		strings.Contains(msg, "authentication") ||
+		strings.Contains(msg, "permission denied") ||
+		strings.Contains(msg, " 401") ||
+		strings.Contains(msg, " 403"):
+		return "auth_error"
+	case strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "context deadline"):
+		return "timeout"
+	default:
+		return "error"
+	}
+}
+
 // performHealthChecks checks health of all providers
 func (r *AIRouter) performHealthChecks() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -416,21 +464,24 @@ func (r *AIRouter) performHealthChecks() {
 		wg.Add(1)
 		go func(p AIProvider, c AIClient) {
 			defer wg.Done()
-			healthy := true
 
 			// Use a per-provider timeout to prevent one slow provider from blocking others
 			providerCtx, providerCancel := context.WithTimeout(ctx, 10*time.Second)
 			defer providerCancel()
 
-			if err := c.Health(providerCtx); err != nil {
-				log.Printf("Health check failed for provider %s: %v", p, err)
-				healthy = false
+			err := c.Health(providerCtx)
+			status := classifyProviderError(err)
+			healthy := (status == "ok")
+
+			if err != nil {
+				log.Printf("Health check failed for provider %s [%s]: %v", p, status, err)
 			} else {
 				log.Printf("Health check passed for provider %s", p)
 			}
 
 			r.mu.Lock()
 			r.healthCheck[p] = healthy
+			r.healthStatus[p] = status
 			r.mu.Unlock()
 		}(provider, client)
 	}
@@ -512,7 +563,7 @@ func (r *AIRouter) UpdateConfig(config *RouterConfig) {
 	}
 }
 
-// GetHealthStatus returns current health status of all providers
+// GetHealthStatus returns current health status of all providers (bool map, kept for compat).
 func (r *AIRouter) GetHealthStatus() map[AIProvider]bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -523,6 +574,36 @@ func (r *AIRouter) GetHealthStatus() map[AIProvider]bool {
 	}
 
 	return status
+}
+
+// zeroBalance is a helper to return a pointer to 0.0.
+func zeroBalance() *float64 { v := 0.0; return &v }
+
+// GetDetailedHealthStatus returns rich status info for each provider.
+// Status values: "ok", "no_credits", "auth_error", "timeout", "error", "unknown"
+// Balance is nil when unknown, 0.0 when known-depleted.
+// NOTE: Balance reflects only what can be inferred from health-check errors; it does
+// not query the provider billing APIs in real time.
+func (r *AIRouter) GetDetailedHealthStatus() map[string]*ProviderHealthDetail {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make(map[string]*ProviderHealthDetail, len(r.clients))
+	for provider := range r.clients {
+		status, ok := r.healthStatus[provider]
+		if !ok || status == "" {
+			status = "unknown"
+		}
+		var balance *float64
+		if status == "no_credits" {
+			balance = zeroBalance() // known to be depleted
+		}
+		result[string(provider)] = &ProviderHealthDetail{
+			Status:  status,
+			Balance: balance,
+		}
+	}
+	return result
 }
 
 // min returns the minimum of two integers

@@ -41,10 +41,10 @@ func NewServer(database *db.Database, authService *auth.AuthService, aiRouter *a
 func (s *Server) Health(c *gin.Context) {
 	// For basic health checks, just return OK quickly
 	// This prevents timeouts when database connections are stale
-	aiHealth := s.aiRouter.GetHealthStatus()
+	aiHealth := s.aiRouter.GetDetailedHealthStatus()
 	healthyProviders := 0
-	for _, healthy := range aiHealth {
-		if healthy {
+	for _, detail := range aiHealth {
+		if detail.Status == "ok" {
 			healthyProviders++
 		}
 	}
@@ -72,10 +72,10 @@ func (s *Server) DeepHealth(c *gin.Context) {
 	}
 
 	// Check AI providers health
-	aiHealth := s.aiRouter.GetHealthStatus()
+	aiHealth := s.aiRouter.GetDetailedHealthStatus()
 	healthyProviders := 0
-	for _, healthy := range aiHealth {
-		if healthy {
+	for _, detail := range aiHealth {
+		if detail.Status == "ok" {
 			healthyProviders++
 		}
 	}
