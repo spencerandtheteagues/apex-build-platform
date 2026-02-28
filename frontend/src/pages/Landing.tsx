@@ -557,8 +557,8 @@ const Hero: React.FC<LandingProps> = ({ onGetStarted }) => (
       }}>
       {[
         { val: '$19',    label: 'per month' },
-        { val: '~$0.05', label: 'avg build cost' },
-        { val: '< 5 min', label: 'avg build time' },
+        { val: '5',      label: 'AI agents per build' },
+        { val: '6',      label: 'AI providers supported' },
       ].map(s => (
         <div key={s.label} style={{ textAlign: 'center' }}>
           <div style={{ fontFamily: fontHero, fontSize: '1.6rem', fontWeight: 900, color: C.green }}>
