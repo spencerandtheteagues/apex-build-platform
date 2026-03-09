@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"apex-build/internal/auth"
 	"apex-build/internal/bundler"
@@ -30,6 +32,7 @@ type PreviewHandler struct {
 	serverRunner   *preview.ServerRunner
 	bundlerService *bundler.Service
 	authService    *auth.AuthService
+	requireSandbox bool
 }
 
 // NewPreviewHandler creates a new preview handler
@@ -40,6 +43,7 @@ func NewPreviewHandler(db *gorm.DB, server *preview.PreviewServer, authService *
 		serverRunner:   preview.NewServerRunner(db),
 		bundlerService: bundler.NewService(db),
 		authService:    authService,
+		requireSandbox: previewSandboxRequired(),
 	}
 }
 
@@ -52,12 +56,22 @@ func NewPreviewHandlerWithFactory(db *gorm.DB, factory *preview.PreviewServerFac
 		serverRunner:   preview.NewServerRunner(db),
 		bundlerService: bundler.NewService(db),
 		authService:    authService,
+		requireSandbox: previewSandboxRequired(),
 	}
 }
 
 // FeatureStatus summarizes preview subsystem readiness for health reporting.
 func (h *PreviewHandler) FeatureStatus() map[string]interface{} {
 	bundlerStatus := h.bundlerService.Status()
+	serverRunnerStatus := map[string]interface{}{
+		"available": h.backendPreviewAvailable(),
+	}
+	if h.serverRunner != nil {
+		serverRunnerStatus["runtime"] = h.serverRunner.RuntimeName()
+	}
+	if !h.backendPreviewAvailable() {
+		serverRunnerStatus["reason"] = h.backendPreviewDisabledReason()
+	}
 	status := map[string]interface{}{
 		"bundler": map[string]interface{}{
 			"available":   bundlerStatus.Available,
@@ -65,17 +79,14 @@ func (h *PreviewHandler) FeatureStatus() map[string]interface{} {
 			"cache_stats": bundlerStatus.CacheStats,
 			"last_error":  bundlerStatus.LastError,
 		},
+		"server_runner": serverRunnerStatus,
 	}
 
 	if h.factory != nil {
 		status["docker"] = h.factory.GetDockerStatus()
 	}
-
-	if h.serverRunner != nil {
-		status["server_runner"] = map[string]interface{}{
-			"available": true,
-		}
-	}
+	status["sandbox_required"] = h.requireSandbox
+	status["sandbox_ready"] = !h.requireSandbox || (h.factory != nil && h.factory.IsDockerAvailable())
 
 	return status
 }
@@ -133,6 +144,14 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 		EnvVars:    req.EnvVars,
 	}
 
+	useSandbox, sandboxErr := h.resolveRequestedPreviewSandbox(req.Sandbox)
+	if sandboxErr != nil {
+		metrics.RecordPreviewStart("frontend", "sandbox_unavailable", true)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": sandboxErr.Error()})
+		return
+	}
+	req.Sandbox = useSandbox
+
 	var status *preview.PreviewStatus
 	var err error
 
@@ -140,6 +159,10 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 	if h.factory != nil {
 		status, err = h.factory.StartPreview(c.Request.Context(), config, req.Sandbox)
 	} else {
+		if req.Sandbox {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sandbox preview is required but not configured"})
+			return
+		}
 		status, err = h.server.StartPreview(c.Request.Context(), config)
 	}
 
@@ -151,6 +174,7 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 
 	// Override URL to use proxy so it's accessible from the browser
 	status.URL = h.buildProxyURL(c, req.ProjectID)
+	h.setPreviewAccessCookie(c, req.ProjectID)
 
 	response := gin.H{
 		"success": true,
@@ -219,11 +243,23 @@ func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
 		EnvVars:    req.EnvVars,
 	}
 
+	useSandbox, sandboxErr := h.resolveRequestedPreviewSandbox(req.Sandbox)
+	if sandboxErr != nil {
+		metrics.RecordPreviewStart("fullstack", "sandbox_unavailable", true)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": sandboxErr.Error()})
+		return
+	}
+	req.Sandbox = useSandbox
+
 	var previewStatus *preview.PreviewStatus
 	var err error
 	if h.factory != nil {
 		previewStatus, err = h.factory.StartPreview(c.Request.Context(), previewConfig, req.Sandbox)
 	} else {
+		if req.Sandbox {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sandbox preview is required but not configured"})
+			return
+		}
 		previewStatus, err = h.server.StartPreview(c.Request.Context(), previewConfig)
 	}
 	if err != nil {
@@ -235,6 +271,7 @@ func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
 		return
 	}
 	previewStatus.URL = h.buildProxyURL(c, req.ProjectID)
+	h.setPreviewAccessCookie(c, req.ProjectID)
 
 	startBackend := true
 	if req.StartBackend != nil {
@@ -249,6 +286,27 @@ func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
 	degraded := false
 
 	if startBackend {
+		if !h.backendPreviewAvailable() {
+			degraded = true
+			diagnostics["backend_started"] = false
+			diagnostics["backend_error"] = h.backendPreviewDisabledReason()
+			if req.RequireBackend {
+				metrics.RecordPreviewStart("fullstack", "backend_required_failed", req.Sandbox)
+				c.JSON(http.StatusBadGateway, gin.H{
+					"success":     false,
+					"error":       "backend preview failed to start",
+					"details":     diagnostics["backend_error"],
+					"preview":     previewStatus,
+					"server":      serverStatus,
+					"proxy_url":   previewStatus.URL,
+					"diagnostics": diagnostics,
+					"degraded":    true,
+				})
+				return
+			}
+			goto response
+		}
+
 		serverConfig := &preview.ServerConfig{
 			ProjectID: req.ProjectID,
 			EntryFile: req.BackendEntry,
@@ -288,6 +346,7 @@ func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
 		diagnostics["backend_skipped"] = true
 	}
 
+response:
 	resp := gin.H{
 		"success":     true,
 		"preview":     previewStatus,
@@ -337,6 +396,24 @@ func (h *PreviewHandler) StopPreview(c *gin.Context) {
 	}
 
 	var err error
+	useSandbox, sandboxErr := h.resolveRequestedPreviewSandbox(req.Sandbox)
+	if sandboxErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": sandboxErr.Error()})
+		return
+	}
+	req.Sandbox = useSandbox
+
+	backendStopped := false
+	if h.backendPreviewAvailable() {
+		if serverStatus := h.serverRunner.GetStatus(req.ProjectID); serverStatus != nil && serverStatus.Running {
+			if stopErr := h.serverRunner.Stop(c.Request.Context(), req.ProjectID); stopErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": stopErr.Error()})
+				return
+			}
+			h.unlinkServerFromPreview(req.ProjectID)
+			backendStopped = true
+		}
+	}
 	if h.factory != nil {
 		err = h.factory.StopPreview(c.Request.Context(), req.ProjectID, req.Sandbox)
 	} else {
@@ -349,8 +426,9 @@ func (h *PreviewHandler) StopPreview(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Preview stopped",
+		"success":         true,
+		"message":         "Preview stopped",
+		"backend_stopped": backendStopped,
 	})
 }
 
@@ -377,20 +455,30 @@ func (h *PreviewHandler) GetPreviewStatus(c *gin.Context) {
 		return
 	}
 
-	status := h.server.GetPreviewStatus(uint(projectID))
-	if h.factory != nil {
-		useSandbox := c.Query("sandbox") == "true" || c.Query("sandbox") == "1"
-		status = h.getPreviewStatus(uint(projectID), useSandbox)
+	useSandbox, sandboxErr := h.resolveRequestedPreviewSandbox(c.Query("sandbox") == "true" || c.Query("sandbox") == "1")
+	if sandboxErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": sandboxErr.Error()})
+		return
 	}
+
+	status, activeSandbox := h.getPreviewStatus(uint(projectID), useSandbox)
 
 	// Override URL to proxy
 	if status != nil && status.Active {
+		h.setPreviewAccessCookie(c, uint(projectID))
 		status.URL = h.buildProxyURL(c, uint(projectID))
+	}
+
+	var serverStatus *preview.ServerStatus
+	if h.backendPreviewAvailable() {
+		serverStatus = h.serverRunner.GetStatus(uint(projectID))
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"preview": status,
+		"sandbox": activeSandbox,
+		"server":  serverStatus,
 	})
 }
 
@@ -422,7 +510,12 @@ func (h *PreviewHandler) RefreshPreview(c *gin.Context) {
 		return
 	}
 
-	useSandbox := req.Sandbox
+	useSandbox, sandboxErr := h.resolveRequestedPreviewSandbox(req.Sandbox)
+	if sandboxErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": sandboxErr.Error()})
+		return
+	}
+	req.Sandbox = useSandbox
 	if h.factory != nil {
 		if err := h.factory.RefreshPreview(req.ProjectID, req.ChangedFiles, useSandbox); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -467,6 +560,11 @@ func (h *PreviewHandler) HotReload(c *gin.Context) {
 		return
 	}
 
+	if h.requireSandbox {
+		c.JSON(http.StatusConflict, gin.H{"error": "hot reload is unavailable while secure sandbox preview is enforced; use refresh instead"})
+		return
+	}
+
 	if err := h.server.HotReload(req.ProjectID, req.FilePath, req.Content); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -497,6 +595,9 @@ func (h *PreviewHandler) ListPreviews(c *gin.Context) {
 
 	// Filter previews to only user's projects
 	allPreviews := h.server.GetAllPreviews()
+	if h.factory != nil {
+		allPreviews = h.factory.GetAllPreviews()
+	}
 	userPreviews := make([]*preview.PreviewStatus, 0)
 	for _, p := range allPreviews {
 		if projectIDs[p.ProjectID] {
@@ -534,13 +635,15 @@ func (h *PreviewHandler) GetPreviewURL(c *gin.Context) {
 		return
 	}
 
-	status := h.server.GetPreviewStatus(uint(projectID))
-	if h.factory != nil {
-		useSandbox := c.Query("sandbox") == "true" || c.Query("sandbox") == "1"
-		status = h.getPreviewStatus(uint(projectID), useSandbox)
+	useSandbox, sandboxErr := h.resolveRequestedPreviewSandbox(c.Query("sandbox") == "true" || c.Query("sandbox") == "1")
+	if sandboxErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": sandboxErr.Error()})
+		return
 	}
 
-	if !status.Active {
+	status, activeSandbox := h.getPreviewStatus(uint(projectID), useSandbox)
+
+	if status == nil || !status.Active {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"error":   "Preview not running",
@@ -548,11 +651,14 @@ func (h *PreviewHandler) GetPreviewURL(c *gin.Context) {
 		return
 	}
 
+	h.setPreviewAccessCookie(c, uint(projectID))
+
 	c.JSON(http.StatusOK, gin.H{
 		"success":    true,
 		"url":        h.buildProxyURL(c, uint(projectID)),
 		"port":       status.Port,
 		"started_at": status.StartedAt,
+		"sandbox":    activeSandbox,
 	})
 }
 
@@ -565,28 +671,17 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
 		return
 	}
+	if h.handlePreviewCORS(c) {
+		return
+	}
 
-	userID, err := h.resolveUserID(c)
+	userID, err := h.resolvePreviewUserID(c, uint(projectID))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
-	token := h.extractToken(c)
-	if token != "" {
-		secure := c.Request.TLS != nil
-		if forwardedProto := strings.TrimSpace(strings.Split(c.GetHeader("X-Forwarded-Proto"), ",")[0]); forwardedProto != "" {
-			secure = strings.EqualFold(forwardedProto, "https")
-		}
-		http.SetCookie(c.Writer, &http.Cookie{
-			Name:     "apex_preview_token",
-			Value:    token,
-			Path:     fmt.Sprintf("/api/v1/preview/proxy/%d", uint(projectID)),
-			MaxAge:   3600,
-			HttpOnly: true,
-			Secure:   secure,
-			SameSite: http.SameSiteLaxMode,
-		})
-	}
+	previewToken := h.issuePreviewAccessToken(c, uint(projectID))
+	h.setPreviewAccessCookie(c, uint(projectID))
 
 	// Verify project ownership
 	var project models.Project
@@ -600,7 +695,7 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 	}
 
 	useSandbox := c.Query("sandbox") == "true" || c.Query("sandbox") == "1"
-	status := h.getPreviewStatus(uint(projectID), useSandbox)
+	status, _ := h.getPreviewStatus(uint(projectID), useSandbox)
 	if status == nil || !status.Active {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Preview not running"})
 		return
@@ -615,13 +710,16 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 	// Check whether the backend server is also running for this project, so we can
 	// inject the backend proxy URL into the HTML and make fetch() calls work.
 	backendProxyURL := ""
-	if serverStatus := h.serverRunner.GetStatus(uint(projectID)); serverStatus != nil && serverStatus.Running {
-		backendProxyURL = h.buildBackendProxyURL(c, uint(projectID))
+	if h.backendPreviewAvailable() {
+		if serverStatus := h.serverRunner.GetStatus(uint(projectID)); serverStatus != nil && serverStatus.Running {
+			backendProxyURL = h.buildBackendProxyURL(c, uint(projectID))
+		}
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.FlushInterval = -1
 	proxy.ModifyResponse = func(resp *http.Response) error {
+		h.applyPreviewResponseHeaders(resp.Header, c.GetHeader("Origin"), strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html"))
 		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
 		if !strings.Contains(contentType, "text/html") {
 			return nil
@@ -633,13 +731,14 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 		}
 		_ = resp.Body.Close()
 
-		rewritten := h.rewritePreviewHTMLForProxyWithBackend(string(originalBody), uint(projectID), backendProxyURL)
+		rewritten := h.rewritePreviewHTMLForProxyWithBackend(string(originalBody), uint(projectID), backendProxyURL, previewToken)
 		resp.Body = io.NopCloser(bytes.NewBufferString(rewritten))
 		resp.ContentLength = int64(len(rewritten))
 		resp.Header.Set("Content-Length", strconv.Itoa(len(rewritten)))
 		return nil
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, proxyErr error) {
+		h.applyPreviewResponseHeaders(w.Header(), c.GetHeader("Origin"), false)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte(`{"error":"Preview proxy unavailable"}`))
@@ -660,24 +759,12 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 		// Strip auth token from proxied request
 		query := req.URL.Query()
 		query.Del("token")
+		query.Del("preview_token")
 		req.URL.RawQuery = query.Encode()
 	}
 
+	h.applyPreviewResponseHeaders(c.Writer.Header(), c.GetHeader("Origin"), false)
 	proxy.ServeHTTP(c.Writer, c.Request)
-}
-
-func (h *PreviewHandler) getPreviewStatus(projectID uint, useSandbox bool) *preview.PreviewStatus {
-	if h.factory != nil {
-		status := h.factory.GetPreviewStatus(projectID, useSandbox)
-		if status.Active {
-			return status
-		}
-		if useSandbox {
-			return h.factory.GetPreviewStatus(projectID, false)
-		}
-		return status
-	}
-	return h.server.GetPreviewStatus(projectID)
 }
 
 func (h *PreviewHandler) resolveUserID(c *gin.Context) (uint, error) {
@@ -710,10 +797,122 @@ func (h *PreviewHandler) extractToken(c *gin.Context) string {
 	if token := c.Query("token"); token != "" {
 		return token
 	}
+	return ""
+}
+
+func (h *PreviewHandler) extractPreviewToken(c *gin.Context) string {
+	if token := c.Query("preview_token"); token != "" {
+		return token
+	}
 	if token, err := c.Cookie("apex_preview_token"); err == nil && token != "" {
 		return token
 	}
+	if token := c.Query("token"); token != "" {
+		return token
+	}
 	return ""
+}
+
+func (h *PreviewHandler) resolvePreviewUserID(c *gin.Context, projectID uint) (uint, error) {
+	if userID := c.GetUint("user_id"); userID != 0 {
+		return userID, nil
+	}
+	if userID, err := h.resolveUserID(c); err == nil {
+		return userID, nil
+	}
+	if h.authService == nil {
+		return 0, fmt.Errorf("auth service unavailable")
+	}
+	previewToken := h.extractPreviewToken(c)
+	if previewToken == "" {
+		return 0, fmt.Errorf("authentication required")
+	}
+	claims, err := h.authService.ValidatePreviewToken(previewToken, projectID)
+	if err != nil {
+		return 0, err
+	}
+	return claims.UserID, nil
+}
+
+func (h *PreviewHandler) issuePreviewAccessToken(c *gin.Context, projectID uint) string {
+	if projectID == 0 || h.authService == nil {
+		return ""
+	}
+	if existing, ok := c.Get("preview_access_token"); ok {
+		if token, ok := existing.(string); ok && token != "" {
+			return token
+		}
+	}
+	if previewToken := h.extractPreviewToken(c); previewToken != "" {
+		if _, err := h.authService.ValidatePreviewToken(previewToken, projectID); err == nil {
+			c.Set("preview_access_token", previewToken)
+			return previewToken
+		}
+	}
+	userID := c.GetUint("user_id")
+	if userID == 0 {
+		fullToken := h.extractToken(c)
+		if fullToken == "" {
+			return ""
+		}
+		claims, err := h.authService.ValidateToken(fullToken)
+		if err != nil {
+			return ""
+		}
+		userID = claims.UserID
+	}
+	token, err := h.authService.GeneratePreviewToken(userID, projectID, time.Hour)
+	if err != nil {
+		return ""
+	}
+	c.Set("preview_access_token", token)
+	return token
+}
+
+func previewCookieSecure(c *gin.Context) bool {
+	secure := c.Request.TLS != nil
+	if forwardedProto := strings.TrimSpace(strings.Split(c.GetHeader("X-Forwarded-Proto"), ",")[0]); forwardedProto != "" {
+		secure = strings.EqualFold(forwardedProto, "https")
+	}
+	return secure
+}
+
+func (h *PreviewHandler) setPreviewAccessCookie(c *gin.Context, projectID uint) {
+	token := h.issuePreviewAccessToken(c, projectID)
+	if token == "" {
+		return
+	}
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "apex_preview_token",
+		Value:    token,
+		Path:     "/api/v1/preview",
+		MaxAge:   3600,
+		HttpOnly: true,
+		Secure:   previewCookieSecure(c),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func (h *PreviewHandler) handlePreviewCORS(c *gin.Context) bool {
+	h.applyPreviewResponseHeaders(c.Writer.Header(), c.GetHeader("Origin"), false)
+	if c.Request.Method == http.MethodOptions {
+		c.Status(http.StatusNoContent)
+		return true
+	}
+	return false
+}
+
+func (h *PreviewHandler) applyPreviewResponseHeaders(headers http.Header, origin string, htmlDocument bool) {
+	if strings.EqualFold(strings.TrimSpace(origin), "null") {
+		headers.Set("Access-Control-Allow-Origin", "null")
+		headers.Set("Access-Control-Allow-Credentials", "true")
+		headers.Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+		headers.Set("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Requested-With")
+		headers.Add("Vary", "Origin")
+	}
+	if htmlDocument {
+		headers.Set("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-popups allow-modals")
+	}
 }
 
 func (h *PreviewHandler) buildProxyURL(c *gin.Context, projectID uint) string {
@@ -730,11 +929,11 @@ func (h *PreviewHandler) buildProxyURL(c *gin.Context, projectID uint) string {
 	}
 
 	base := fmt.Sprintf("%s://%s/api/v1/preview/proxy/%d", scheme, host, projectID)
-	token := h.extractToken(c)
+	token := h.issuePreviewAccessToken(c, projectID)
 	if token == "" {
 		return base
 	}
-	return base + "?token=" + url.QueryEscape(token)
+	return base + "?preview_token=" + url.QueryEscape(token)
 }
 
 // ProxyBackend proxies API calls from the preview frontend to the running backend process.
@@ -742,6 +941,13 @@ func (h *PreviewHandler) buildProxyURL(c *gin.Context, projectID uint) string {
 // is rewritten by a client-side script to hit this proxy URL instead.
 // GET/POST/etc /api/v1/preview/backend-proxy/:projectId/*path
 func (h *PreviewHandler) ProxyBackend(c *gin.Context) {
+	if !h.ensureBackendPreviewAvailable(c) {
+		return
+	}
+	if h.handlePreviewCORS(c) {
+		return
+	}
+
 	projectIDStr := c.Param("projectId")
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {
@@ -749,11 +955,12 @@ func (h *PreviewHandler) ProxyBackend(c *gin.Context) {
 		return
 	}
 
-	userID, resolveErr := h.resolveUserID(c)
+	userID, resolveErr := h.resolvePreviewUserID(c, uint(projectID))
 	if resolveErr != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": resolveErr.Error()})
 		return
 	}
+	h.setPreviewAccessCookie(c, uint(projectID))
 
 	var project models.Project
 	if dbErr := h.db.First(&project, uint(projectID)).Error; dbErr != nil {
@@ -787,10 +994,16 @@ func (h *PreviewHandler) ProxyBackend(c *gin.Context) {
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.FlushInterval = -1
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, proxyErr error) {
+		h.applyPreviewResponseHeaders(w.Header(), c.GetHeader("Origin"), false)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte(`{"error":"Backend proxy unavailable"}`))
 	}
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		h.applyPreviewResponseHeaders(resp.Header, c.GetHeader("Origin"), false)
+		return nil
+	}
+	h.applyPreviewResponseHeaders(c.Writer.Header(), c.GetHeader("Origin"), false)
 	proxy.ServeHTTP(c.Writer, c.Request)
 }
 
@@ -805,10 +1018,10 @@ func (h *PreviewHandler) buildBackendProxyURL(c *gin.Context, projectID uint) st
 }
 
 func (h *PreviewHandler) rewritePreviewHTMLForProxy(html string, projectID uint) string {
-	return h.rewritePreviewHTMLForProxyWithBackend(html, projectID, "")
+	return h.rewritePreviewHTMLForProxyWithBackend(html, projectID, "", "")
 }
 
-func (h *PreviewHandler) rewritePreviewHTMLForProxyWithBackend(html string, projectID uint, backendProxyURL string) string {
+func (h *PreviewHandler) rewritePreviewHTMLForProxyWithBackend(html string, projectID uint, backendProxyURL string, previewToken string) string {
 	prefix := fmt.Sprintf("/api/v1/preview/proxy/%d", projectID)
 	replaced := strings.NewReplacer(
 		`src="/`, `src="`+prefix+`/`,
@@ -836,27 +1049,63 @@ func (h *PreviewHandler) rewritePreviewHTMLForProxyWithBackend(html string, proj
 	// Inject a script that patches fetch() / XHR to route localhost API calls through
 	// the backend proxy. This makes full-stack preview work without requiring the
 	// generated app to know the apex.build preview URL.
-	if backendProxyURL != "" {
+	if backendProxyURL != "" || previewToken != "" {
 		backendScript := fmt.Sprintf(`<script>
 (function(){
   var _bp=%q;
+  var _pt=%q;
   var _re=/http:\/\/localhost:(3001|8000|8080|3000|5000|4000)/g;
+  var _px=%q;
+  var _apiPrefixes=['/api','/graphql','/trpc','/socket.io','/ws'];
+  function _appendToken(u){
+    if(!_pt)return u;
+    try{
+      var _url=new URL(u, window.location.href);
+      if(_url.searchParams.get('preview_token')!==_pt){
+        _url.searchParams.set('preview_token', _pt);
+      }
+      return _url.toString();
+    }catch(_e){
+      return u;
+    }
+  }
+  function _rewrite(u){
+    if(typeof u!=='string') return u;
+    var _next=u.replace(_re,_bp);
+    if(_next===u && u.charAt(0)==='/'){
+      for(var i=0;i<_apiPrefixes.length;i++){
+        if(u.indexOf(_apiPrefixes[i])===0){
+          _next=_bp+u;
+          break;
+        }
+      }
+    }
+    if(_next.indexOf(_px)===0 || _next.indexOf(_bp)===0){
+      _next=_appendToken(_next);
+    }
+    return _next;
+  }
   var _of=window.fetch;
   window.fetch=function(u,o){
-    if(typeof u==='string')u=u.replace(_re,_bp);
-    else if(u instanceof Request){var _u=u.url.replace(_re,_bp);if(_u!==u.url)u=new Request(_u,u);}
+    if(typeof u==='string')u=_rewrite(u);
+    else if(u instanceof Request){var _u=_rewrite(u.url);if(_u!==u.url)u=new Request(_u,u);}
     return _of.call(this,u,o);
   };
   var _ox=XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open=function(m,u){
-    if(typeof u==='string')u=u.replace(_re,_bp);
+    if(typeof u==='string')u=_rewrite(u);
     return _ox.apply(this,arguments);
   };
   window.__APEX_BACKEND_URL__=_bp;
   if(!window.import)window.import={meta:{env:{}}};
   window.import.meta={env:{VITE_API_URL:_bp,REACT_APP_API_URL:_bp}};
+  try{
+    if(window.location.search.indexOf('preview_token=')!==-1){
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+    }
+  }catch(_e){}
 })();
-</script>`, backendProxyURL)
+</script>`, backendProxyURL, previewToken, prefix)
 		// Inject before </head> or at top of <body>
 		if idx := strings.Index(replaced, "</head>"); idx >= 0 {
 			replaced = replaced[:idx] + backendScript + replaced[idx:]
@@ -879,9 +1128,12 @@ func (h *PreviewHandler) rewritePreviewHTMLForProxyWithBackend(html string, proj
 func (h *PreviewHandler) GetDockerStatus(c *gin.Context) {
 	if h.factory == nil {
 		c.JSON(http.StatusOK, gin.H{
-			"success":   true,
-			"available": false,
-			"message":   "Docker container previews not configured",
+			"success":                   true,
+			"available":                 false,
+			"message":                   "Docker container previews not configured",
+			"sandbox_required":          h.requireSandbox,
+			"backend_preview_available": h.backendPreviewAvailable(),
+			"backend_preview_reason":    h.backendPreviewDisabledReason(),
 		})
 		return
 	}
@@ -889,15 +1141,81 @@ func (h *PreviewHandler) GetDockerStatus(c *gin.Context) {
 	status := h.factory.GetDockerStatus()
 
 	c.JSON(http.StatusOK, gin.H{
-		"success":          true,
-		"available":        status.Available,
-		"container_count":  status.ContainerCount,
-		"max_containers":   status.MaxContainers,
-		"total_created":    status.TotalCreated,
-		"failed_count":     status.FailedCount,
-		"total_build_ms":   status.TotalBuildTime,
-		"total_runtime_ms": status.TotalRuntime,
+		"success":                   true,
+		"available":                 status.Available,
+		"container_count":           status.ContainerCount,
+		"max_containers":            status.MaxContainers,
+		"total_created":             status.TotalCreated,
+		"failed_count":              status.FailedCount,
+		"total_build_ms":            status.TotalBuildTime,
+		"total_runtime_ms":          status.TotalRuntime,
+		"sandbox_required":          h.requireSandbox,
+		"backend_preview_available": h.backendPreviewAvailable(),
+		"backend_preview_reason":    h.backendPreviewDisabledReason(),
 	})
+}
+
+func previewSandboxRequired() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("ENVIRONMENT")), "production") ||
+		strings.EqualFold(strings.TrimSpace(os.Getenv("PREVIEW_FORCE_CONTAINER")), "true")
+}
+
+func (h *PreviewHandler) resolveRequestedPreviewSandbox(requested bool) (bool, error) {
+	if requested || h.requireSandbox {
+		if h.factory == nil || !h.factory.IsDockerAvailable() {
+			return false, fmt.Errorf("secure preview mode requires Docker container previews, but Docker preview is not available")
+		}
+	}
+	if h.requireSandbox {
+		return true, nil
+	}
+	if requested {
+		return true, nil
+	}
+	return false, nil
+}
+
+func (h *PreviewHandler) backendPreviewAvailable() bool {
+	return h.serverRunner != nil && !h.requireSandbox
+}
+
+func (h *PreviewHandler) backendPreviewDisabledReason() string {
+	if h.requireSandbox {
+		return "Backend runtime preview is disabled while secure sandbox preview is enforced"
+	}
+	if h.serverRunner == nil {
+		return "Backend runtime preview is not configured"
+	}
+	return ""
+}
+
+func (h *PreviewHandler) getPreviewStatus(projectID uint, preferredSandbox bool) (*preview.PreviewStatus, bool) {
+	if h.factory != nil {
+		primary := h.factory.GetPreviewStatus(projectID, preferredSandbox)
+		if primary != nil && primary.Active {
+			return primary, preferredSandbox
+		}
+		fallback := h.factory.GetPreviewStatus(projectID, !preferredSandbox)
+		if fallback != nil && fallback.Active {
+			return fallback, !preferredSandbox
+		}
+		if primary != nil {
+			return primary, preferredSandbox
+		}
+		return fallback, !preferredSandbox
+	}
+	return h.server.GetPreviewStatus(projectID), false
+}
+
+func (h *PreviewHandler) ensureBackendPreviewAvailable(c *gin.Context) bool {
+	if h.backendPreviewAvailable() {
+		return true
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"success": false,
+		"error":   h.backendPreviewDisabledReason(),
+	})
+	return false
 }
 
 // Helper methods
@@ -1160,6 +1478,10 @@ func (h *PreviewHandler) detectBundleEntryPoint(projectID uint) string {
 // StartServer starts a backend server for a project
 // POST /api/v1/preview/server/start
 func (h *PreviewHandler) StartServer(c *gin.Context) {
+	if !h.ensureBackendPreviewAvailable(c) {
+		return
+	}
+
 	userID := c.GetUint("user_id")
 
 	var req struct {
@@ -1221,6 +1543,10 @@ func (h *PreviewHandler) StartServer(c *gin.Context) {
 // StopServer stops a backend server for a project
 // POST /api/v1/preview/server/stop
 func (h *PreviewHandler) StopServer(c *gin.Context) {
+	if !h.ensureBackendPreviewAvailable(c) {
+		return
+	}
+
 	userID := c.GetUint("user_id")
 
 	var req struct {
@@ -1285,6 +1611,16 @@ func (h *PreviewHandler) GetServerStatus(c *gin.Context) {
 		return
 	}
 
+	if !h.backendPreviewAvailable() {
+		c.JSON(http.StatusOK, gin.H{
+			"success":   true,
+			"available": false,
+			"reason":    h.backendPreviewDisabledReason(),
+			"server":    nil,
+		})
+		return
+	}
+
 	status := h.serverRunner.GetStatus(uint(projectID))
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1313,6 +1649,17 @@ func (h *PreviewHandler) GetServerLogs(c *gin.Context) {
 
 	if project.OwnerID != userID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	if !h.backendPreviewAvailable() {
+		c.JSON(http.StatusOK, gin.H{
+			"success":   true,
+			"available": false,
+			"reason":    h.backendPreviewDisabledReason(),
+			"stdout":    "",
+			"stderr":    "",
+		})
 		return
 	}
 

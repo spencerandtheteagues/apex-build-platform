@@ -118,6 +118,9 @@ export default function LivePreview({
   const [useSandbox, setUseSandbox] = useState(false)
   const [activeSandbox, setActiveSandbox] = useState(false)
   const [dockerAvailable, setDockerAvailable] = useState(false)
+  const [sandboxRequired, setSandboxRequired] = useState(false)
+  const [backendPreviewAvailable, setBackendPreviewAvailable] = useState(true)
+  const [backendPreviewReason, setBackendPreviewReason] = useState('')
 
   // Bundler state
   const [bundlerAvailable, setBundlerAvailable] = useState(false)
@@ -174,9 +177,12 @@ export default function LivePreview({
     try {
       const url = new URL(previewSrc)
       url.searchParams.delete('token')
+      url.searchParams.delete('preview_token')
       return url.toString()
     } catch {
-      return previewSrc.replace(/([?&]token=)[^&]+/, '$1•••')
+      return previewSrc
+        .replace(/([?&]token=)[^&]+/, '$1•••')
+        .replace(/([?&]preview_token=)[^&]+/, '$1•••')
     }
   }, [previewSrc])
 
@@ -185,7 +191,15 @@ export default function LivePreview({
     const checkCapabilities = async () => {
       try {
         const response = await apiService.client.get('/preview/docker/status')
-        setDockerAvailable(response.data.available === true)
+        const previewDockerAvailable = response.data.available === true
+        const previewSandboxRequired = response.data.sandbox_required === true
+        setDockerAvailable(previewDockerAvailable)
+        setSandboxRequired(previewSandboxRequired)
+        setBackendPreviewAvailable(response.data.backend_preview_available !== false)
+        setBackendPreviewReason(response.data.backend_preview_reason || '')
+        if (previewSandboxRequired) {
+          setUseSandbox(true)
+        }
       } catch {
         setDockerAvailable(false)
       }
@@ -304,9 +318,20 @@ export default function LivePreview({
       if (activeProjectIdRef.current !== requestProjectId) return
       setStatus(response.data.preview)
       if (response.data.preview?.active) {
+        if (typeof response.data.sandbox === 'boolean') {
+          setActiveSandbox(response.data.sandbox)
+        }
+        if (response.data.server !== undefined) {
+          setServerStatus(response.data.server)
+        }
         setPreviewUrl(response.data.preview.url)
         setConnected(true)
       } else {
+        if (response.data.server !== undefined) {
+          setServerStatus(response.data.server)
+        } else {
+          setServerStatus(null)
+        }
         setPreviewUrl('')
         setIframeLoading(false)
         setIframeError(null)
@@ -367,14 +392,18 @@ export default function LivePreview({
           data = response.data
         }
         if (activeProjectIdRef.current !== requestProjectId) return
+        const actualSandbox = typeof data.sandbox === 'boolean' ? data.sandbox : useSandbox
         setStatus(data.preview)
         setPreviewUrl(data.proxy_url || data.preview?.url || data.url || '')
         setIframeLoading(true)
         setIframeError(null)
         setConnected(true)
-        setActiveSandbox(data.sandbox ?? useSandbox)
+        setActiveSandbox(actualSandbox)
+        setUseSandbox(actualSandbox)
         if (data.server) {
           setServerStatus(data.server)
+        } else {
+          setServerStatus(null)
         }
         if (data.degraded && data.diagnostics?.backend_error) {
           setError(`Preview degraded: ${data.diagnostics.backend_error}`)
@@ -428,6 +457,7 @@ export default function LivePreview({
       setIframeError(null)
       setConnected(false)
       setActiveSandbox(false)
+      setServerStatus(null)
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to stop preview')
     } finally {
@@ -682,12 +712,19 @@ export default function LivePreview({
             <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-gray-600">
               {/* Server status indicator */}
               <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs ${
+                !backendPreviewAvailable
+                  ? 'bg-gray-700 text-gray-400'
+                  :
                 serverStatus?.running
                   ? 'bg-purple-500/20 text-purple-400'
                   : 'bg-gray-700 text-gray-400'
-              }`}>
+              }`}
+                title={!backendPreviewAvailable && backendPreviewReason ? backendPreviewReason : undefined}
+              >
                 <Server className="w-3 h-3" />
-                <span>{serverStatus?.running ? `API :${serverStatus.port}` : 'API Off'}</span>
+                <span>
+                  {!backendPreviewAvailable ? 'API Disabled' : serverStatus?.running ? `API :${serverStatus.port}` : 'API Off'}
+                </span>
               </div>
 
               {/* Server start/stop button */}
@@ -704,9 +741,9 @@ export default function LivePreview({
               ) : (
                 <button
                   onClick={startServer}
-                  disabled={serverLoading}
+                  disabled={serverLoading || !backendPreviewAvailable}
                   className="flex items-center gap-1 px-2 py-1 bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 rounded-md text-xs transition-colors disabled:opacity-50"
-                  title={`Start ${serverDetection.framework || serverDetection.server_type} Server`}
+                  title={backendPreviewAvailable ? `Start ${serverDetection.framework || serverDetection.server_type} Server` : (backendPreviewReason || 'Backend preview is unavailable')}
                 >
                   {serverLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Power className="w-3 h-3" />}
                   Start API
@@ -727,6 +764,11 @@ export default function LivePreview({
                   <FileText className="w-3.5 h-3.5" />
                 </button>
               )}
+            </div>
+          )}
+          {serverDetection?.has_backend && !backendPreviewAvailable && backendPreviewReason && (
+            <div className="ml-2 text-[11px] text-gray-500">
+              {backendPreviewReason}
             </div>
           )}
 
@@ -873,12 +915,21 @@ export default function LivePreview({
                         type="checkbox"
                         checked={useSandbox}
                         onChange={(e) => setUseSandbox(e.target.checked)}
-                        disabled={!dockerAvailable}
+                        disabled={!dockerAvailable || sandboxRequired}
                         className="rounded bg-gray-700 border-gray-600 text-cyan-500 disabled:opacity-40"
                       />
                     </label>
-                    {!dockerAvailable && (
+                    {sandboxRequired ? (
+                      <p className="text-[10px] text-cyan-500 -mt-1">
+                        Secure preview is enforced by the server
+                      </p>
+                    ) : !dockerAvailable ? (
                       <p className="text-[10px] text-gray-600 -mt-1">Docker not available on server</p>
+                    ) : null}
+                    {sandboxRequired && !dockerAvailable && (
+                      <p className="text-[10px] text-amber-400 -mt-1">
+                        Secure preview is required, but Docker is currently unavailable
+                      </p>
                     )}
 
                     {/* Bundler Status */}

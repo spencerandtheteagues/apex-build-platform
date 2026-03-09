@@ -15,6 +15,7 @@ import (
 	"apex-build/internal/db"
 	"apex-build/internal/pricing"
 	"apex-build/internal/startup"
+	"apex-build/internal/usage"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +29,7 @@ type Server struct {
 	auth      *auth.AuthService
 	aiRouter  *ai.AIRouter
 	byok      *ai.BYOKManager
+	usage     *usage.Tracker
 	readiness *startup.Registry
 }
 
@@ -43,6 +45,10 @@ func NewServer(database *db.Database, authService *auth.AuthService, aiRouter *a
 
 func (s *Server) SetReadinessRegistry(registry *startup.Registry) {
 	s.readiness = registry
+}
+
+func (s *Server) SetUsageTracker(tracker *usage.Tracker) {
+	s.usage = tracker
 }
 
 // Health endpoint - Returns quickly for load balancer health checks
@@ -527,6 +533,17 @@ func (s *Server) AIGenerate(c *gin.Context) {
 
 	// Persist request after cost adjustments
 	s.db.DB.Create(dbRequest)
+
+	if s.usage != nil {
+		var projectID *uint
+		if dbRequest.ProjectID != nil {
+			projectID = dbRequest.ProjectID
+		}
+		tokensUsed := dbRequest.TokensUsed
+		if err := s.usage.RecordAIRequest(c.Request.Context(), userID.(uint), projectID, string(response.Provider), tokensUsed); err != nil {
+			fmt.Printf("usage tracker: failed to record AI request for user %d: %v\n", userID.(uint), err)
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"request_id": response.ID,
@@ -1041,7 +1058,10 @@ func (s *Server) AuthMiddleware() gin.HandlerFunc {
 // SECURITY: No longer uses wildcard (*) - validates against allowed origins
 func (s *Server) CORSMiddleware() gin.HandlerFunc {
 	// Get allowed origins from environment or use defaults
-	allowedOriginsEnv := os.Getenv("CORS_ALLOWED_ORIGINS")
+	allowedOriginsEnv := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	if allowedOriginsEnv == "" {
+		allowedOriginsEnv = strings.TrimSpace(os.Getenv("CORS_ORIGINS"))
+	}
 	var allowedOrigins []string
 	if allowedOriginsEnv != "" {
 		allowedOrigins = strings.Split(allowedOriginsEnv, ",")

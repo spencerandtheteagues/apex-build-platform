@@ -1,348 +1,150 @@
 # Handoff 3
 
-## Purpose
-
-This handoff captures the exact verified state of the repo at the time this file was written, what was already completed and verified before the latest unfinished interaction work began, what new issues were found in the latest audit, what partial implementation work was started but not finished, and what still needs to be completed next.
-
-## Repo State At Handoff
+## Current Status
 
 - Branch: `main`
-- HEAD when this handoff was prepared: `de15e08`
-- The worktree is dirty with many modified files and several untracked files.
-- The current uncommitted changes include unfinished backend and frontend interaction-control work and must **not** be pushed as part of any ship commit until they are completed and re-verified.
+- Last pushed commit on GitHub before this local work: `21e9509` (`docs: add handoff3 status`)
+- This handoff file has now been updated to reflect the latest completed local work
+- The current interaction-control / user-steering slice is now materially implemented and verified locally
+- The current changes are **local only** unless explicitly pushed later
 
-## What Was Already Completed And Verified Before The Latest Unfinished Work
+## What Was Completed In This Pass
 
-These items were completed in earlier passes and were already verified locally before the current unfinished interaction/permission work started:
+### Backend: build interaction, websocket, and permission control
 
-- Runtime API and WebSocket config fixes were shipped so runtime overrides are consumed consistently in deployed environments.
-- Expired-auth flow no longer redirects to a dead `/login` path.
-- Free signups no longer receive unlimited credits by default.
-- Refresh tokens are no longer stored raw; only hashed persistence remains, with migration support.
-- Execution records now allow missing `project_id` for snippet execution.
-- Project execution was hardened to run the actual workspace command in the container sandbox instead of pretending to run the project while only executing an entry file.
-- Go runtime/version inconsistencies were previously aligned in the verified slice that had already been shipped.
-- Startup/runtime hardening was improved:
-  - stricter production/staging secret validation
-  - seed-account fallback made opt-in instead of silent
-  - deploy script secret handling improved
-  - `/health/features` expanded
-  - frontend CSP tightened and bootstrap assets moved out of inline HTML
-  - help UI lazy-loaded
-- GitHub-facing docs were refreshed in earlier completed passes.
-
-### Previously Verified Green Checks
-
-These passed before the latest unfinished interaction work started:
-
-- `go test ./...`
-- `go test -race ./...`
-- `go vet ./...`
-- `frontend`: `npm run typecheck`
-- `frontend`: `npm run lint`
-- `frontend`: `npm test -- --run`
-- `frontend`: `npm run build`
-
-## New Audit Findings From The Latest Deep Pass
-
-These were the most important additional findings from the latest audit:
-
-1. Main builder chat is mostly advisory and not truly actionable.
-   - Backend `SendMessage` / `processUserMessage` produces a lead response, but does not provide robust steering, waiting, permission, or durable conversation semantics.
-   - Relevant files:
-     - `backend/internal/agents/manager.go`
-     - `backend/internal/agents/handlers.go`
-     - `frontend/src/components/builder/AppBuilder.tsx`
-
-2. Build activity and chat are not durable enough.
-   - `chatMessages` and `aiThoughts` are mostly local UI state.
-   - Build restore/hydration does not reliably repopulate interaction state.
-
-3. User messages can fail silently in the builder.
-   - The frontend appends local chat immediately, but only sends through the websocket if the socket is open.
-   - There is no proper queue, ack, or failure state.
-
-4. Review-required flow is incomplete.
-   - The builder can enter an `awaiting_review` style state, but the diff review UI is not properly wired into that flow.
-   - `DiffReviewPanel.tsx` exists, but the main builder loop does not fully integrate it.
-
-5. Main build websocket leaks a goroutine per connection.
-   - The forwarder goroutine reading `updateChan` can remain stuck after unsubscribe because the channel is not closed and there is no forwarder stop signal.
-   - Relevant file:
-     - `backend/internal/agents/websocket.go`
-
-6. Main build websocket exposes `build:start`, which can duplicate orchestration.
-   - `StartBuild` already launches builds asynchronously.
-   - Websocket-triggered `build:start` is a duplicate path and should be removed or made safely idempotent.
-
-7. Autonomous websocket control path is too permissive.
-   - The autonomous agent websocket path was identified as too trusting.
-   - It needs real user/auth checks and origin validation.
-
-8. Autonomous pause/resume loses the prior state.
-   - Resume behavior returns to a generic executing state instead of restoring the paused-from state like validating/planning/executing.
-
-## Frontend Build UX Audit Summary
-
-The frontend build experience still needs real-time steering and visibility improvements:
-
-- stale or empty activity after build restore
-- silent message failure when websocket is unavailable
-- weak or under-modeled waiting/action-required states
-- `awaiting_review` dead end in the builder flow
-- task timeline is not exposed clearly enough to the user
-- old `AgentPanel` / `agentApi` code appears stale relative to the live backend contract
-
-## Partial Implementation Started But Not Finished
-
-The following work was started in this session, but it was **not** fully completed, verified, or made safe to push.
-
-### 1. Backend interaction state types
-
-File:
-
-- `backend/internal/agents/types.go`
-
-Started additions included:
-
-- `BuildConversationRole`
-- `BuildConversationKind`
-- `BuildPermissionScope`
-- `BuildPermissionDecision`
-- `BuildPermissionMode`
-- `BuildPermissionRequestStatus`
-- `BuildConversationMessage`
-- `BuildPermissionRule`
-- `BuildPermissionRequest`
-- `BuildInteractionState`
-
-Started model extension:
-
-- `Build.Interaction BuildInteractionState`
-
-Started websocket message types:
-
-- `build:interaction`
-- `build:user-input-required`
-- `build:user-input-resolved`
-- `build:permission-request`
-- `build:permission-update`
-
-### 2. New interaction helper file
-
-File:
-
-- `backend/internal/agents/interaction.go` (untracked)
-
-This file was started to hold:
-
-- interaction-state copying helpers
-- conversation append/persist helpers
-- steering notes
-- permission rule/request normalization
-- wait-state resolution
-- lead JSON-plan parsing
-- prompt-context building for interaction-aware task prompting
-- manager helpers such as:
-  - `GetBuildInteraction`
-  - `GetBuildMessages`
-  - `broadcastInteractionUpdate`
-  - `PauseBuild`
-  - `ResumeBuild`
-  - `SetPermissionRule`
-  - `ResolvePermissionRequest`
-  - `enqueueUserRevisionTask`
-  - `waitForBuildInteractionClear`
-
-This file exists locally but is unfinished and unverified.
-
-### 3. Persisting interaction state in completed builds
-
-File:
-
-- `backend/pkg/models/models.go`
-
-Started addition:
-
-- `InteractionJSON string` on `CompletedBuild`
-
-Migration files started:
-
-- `backend/migrations/000008_build_interactions.up.sql`
-- `backend/migrations/000008_build_interactions.down.sql`
-
-These were intended to add/drop `interaction_json` on `completed_builds`.
-
-### 4. Agent manager changes
-
-File:
-
-- `backend/internal/agents/manager.go`
-
-Started work included:
-
-- refactoring `SendMessage` to delegate to `SendMessageWithClientToken`
-- appending and persisting interaction messages
-- clearing wait state when the user replies
-- broadcasting interaction updates
-- structured JSON prompting for lead responses
-- interpreting lead output into:
-  - steering notes
-  - wait-state questions
-  - permission requests
-  - revision task enqueueing for terminal builds
-- making `executeTask` wait on interaction state before running AI work
-- injecting interaction context into task prompts
-- making completion/wait logic aware of paused and waiting builds
-- persisting `interaction_json` in build snapshots
-
-This file is mid-edit and must be treated as unverified.
-
-### 5. Agent handlers changes
-
-File:
-
-- `backend/internal/agents/handlers.go`
-
-Started work included:
-
-- adding `interaction` to live and snapshot build responses
-- adding `messages` to details/completed-build responses
-- allowing `client_token` on `SendMessage`
-- adding new handlers:
-  - `GetMessages`
-  - `GetPermissions`
-  - `SetPermissionRule`
-  - `ResolvePermissionRequest`
-  - `PauseBuild`
-  - `ResumeBuild`
-- started route registration for:
-  - `GET /build/:id/messages`
-  - `GET /build/:id/permissions`
-  - `POST /build/:id/permissions/rules`
-  - `POST /build/:id/permissions/requests/:requestId/resolve`
-  - `POST /build/:id/pause`
-  - `POST /build/:id/resume`
-- added `parseBuildInteraction(...)`
-
-This file is mid-edit and must be re-read carefully before continuing.
-
-### 6. Build websocket changes
-
-File:
-
-- `backend/internal/agents/websocket.go`
-
-This work was started but not finished. Intended changes included:
-
-- adding a forwarder stop signal to avoid the leaked goroutine
-- changing `readPump(updateChan)` to accept a stop signal
-- removing `build:start`
-- accepting both legacy and current inbound message shapes:
+- Build websocket auth/origin handling is now aligned with the shared websocket auth/origin helpers instead of using a separate ad hoc path.
+- Autonomous websocket control no longer skips auth in development-style fashion.
+- Build websocket no longer accepts `build:start` as an active orchestration path. Deprecated commands are ignored instead of duplicating build launches.
+- Build websocket forwarder leak was fixed by stopping the forwarding goroutine when the connection closes.
+- Build websocket now accepts a wider set of inbound control/message shapes for compatibility:
   - `user:message`
   - `user_message`
-  - `command` with `data.command`
   - `pause`
   - `resume`
   - `build:pause`
   - `build:resume`
-- including `messages` and `interaction` in initial `build:state`
-- possibly adding helper parsing utilities
+  - `command` with `data.command`
+- Initial `build:state` websocket payload now includes durable conversation `messages` and `interaction`.
+- Build interaction permission rules were hardened:
+  - deny rules are now surfaced into prompt context
+  - allow-once rules are consumed instead of silently persisting forever
+  - deny rules can suppress repeated asks
+  - permission resolutions now distinguish `once` vs `build`
+- Snapshot-backed `/build/:id/permissions` now works instead of only live-build lookup.
+- `awaiting_review` is now treated as an active/resumable build status in the backend.
 
-This file is modified locally but incomplete.
+### Backend: autonomous agent correctness
 
-## Still Needs To Be Completed
+- Autonomous pause/resume now restores the task to the paused-from state instead of always resuming to `executing`.
+- Autonomous websocket initial state now exposes `paused_from`.
+- Autonomous logging was hardened to avoid panicking on short task IDs.
 
-### Highest Priority
+### Frontend: user steering, visibility, and review flow
 
-1. Do not push the current unfinished interaction-control code as a ship commit.
-2. Finish and stabilize the backend interaction implementation.
-3. Finish and stabilize the frontend builder interaction/visibility implementation.
-4. Re-run the full verification suite only after the code is made coherent again.
+- `AppBuilder` now hydrates persisted build `messages` and `interaction` instead of only relying on local ephemeral state.
+- Stale chat/activity is cleared on restore instead of carrying forward unrelated local UI residue.
+- User build messages are now sent through the API with `client_token` support instead of depending on an open websocket.
+- Optimistic user messages now reconcile correctly and show `pending` / `failed` states instead of failing silently.
+- Pause / resume controls were added to the builder UI.
+- Pending permission requests now render in the builder UI with actions:
+  - allow once
+  - allow for build
+  - deny
+- Pre-approval controls were added for common local resources:
+  - Docker
+  - Git
+  - localhost network access
+- The builder now shows a task timeline so users can see what the AI team is doing in real time.
+- `awaiting_review` flow is now integrated with `DiffReviewPanel`, including reload and reopen behavior.
+- Follow-up iteration after a completed/failed build now works correctly in the UI:
+  - if the user asks for another pass, the frontend will leave terminal state and show the resumed build instead of staying visually stuck at `completed`
+- Websocket message handling now uses a ref-backed live handler instead of a stale closure-prone path.
 
-### Backend Work Still Needed
+### Frontend: bundle hygiene
 
-- Complete `backend/internal/agents/websocket.go`
-  - fix the goroutine leak
-  - remove or harden duplicate `build:start`
-  - make message parsing backward-compatible and explicit
-  - include durable interaction state in initial websocket state
-- Patch autonomous websocket auth/origin handling
-  - use real websocket auth helpers
-  - reject unauthorized control connections
-  - enforce origin policy
-- Fix autonomous pause/resume to restore the prior state instead of always returning to executing
-- Re-read and finish:
-  - `backend/internal/agents/types.go`
-  - `backend/internal/agents/interaction.go`
-  - `backend/internal/agents/manager.go`
-  - `backend/internal/agents/handlers.go`
-  - `backend/internal/agents/websocket.go`
-- Ensure interaction persistence is coherent and migration-safe
+- `DiffReviewPanel` now lazy-loads `DiffViewer` so the new review flow does not statically pin that IDE diff module into the builder path.
 
-### Frontend Work Still Needed
+## Tests Added In This Pass
 
-- Patch `frontend/src/services/api.ts`
-  - add build-message retrieval
-  - add permission retrieval and mutation
-  - add pause/resume endpoints
-  - add reliable build-message send with client token support
-- Patch `frontend/src/components/builder/AppBuilder.tsx`
-  - clear stale local-only chat/thought state on hydrate
-  - hydrate server-provided `messages` and `interaction`
-  - render real paused/waiting/action-required states
-  - add pause/resume controls
-  - add pending permission request UI
-  - model local-resource permission options like a CLI:
-    - allow once
-    - allow for build
-    - deny
-  - make user message delivery reliable with pending/sent/failed state
-  - reconnect live builds in review/pause/wait states
-  - wire in `DiffReviewPanel` for review-required flows
-  - expose tasks as a clearer real-time timeline
-- Evaluate whether stale `agentApi` / `AgentPanel` code should be updated or retired
+- `backend/internal/agents/interaction_test.go`
+  - verifies allow-once permission rules are consumed
+  - verifies denied permissions appear in prompt context
+- `backend/internal/agents/autonomous/agent_test.go`
+  - verifies autonomous pause/resume restores the paused-from state
 
-### Test Work Still Needed
+## Key Additional Bug Found And Fixed During This Pass
 
-After the unfinished implementation is completed, run:
+While adding regression coverage, one unrelated but real bug was discovered and fixed:
 
-- `gofmt` on all changed Go files
+- autonomous task logging could panic on short task IDs because it sliced `task.ID[:8]` unconditionally
+
+That is now fixed.
+
+## Verified Locally After The Latest Changes
+
+### Backend
+
 - `go test ./...`
 - `go test -race ./...`
 - `go vet ./...`
-- `frontend`: `npm run typecheck`
-- `frontend`: `npm run lint`
-- `frontend`: `npm test -- --run`
-- `frontend`: `npm run build`
 
-Recommended additional tests:
+### Frontend
 
-- backend handler tests for:
-  - `SendMessage` with `client_token`
-  - build message retrieval
-  - permission rule set/resolve
-  - pause/resume endpoints
-- websocket parsing tests if helper extraction is added
-- autonomous websocket auth tests
-- frontend tests for build interaction normalization and restore behavior
+- `npm run typecheck`
+- `npm run lint`
+- `npm test -- --run`
+- `npm run build`
 
-## Current Dirty Worktree Snapshot
+## Important Behavioral Improvement
 
-At the time of this handoff, the worktree includes many modified files and these notable untracked files:
+One subtle orchestration bug was fixed late in the pass:
 
-- `OLLAMA_PIPELINE_TEST_INSTRUCTIONS.md`
-- `backend/internal/agents/interaction.go`
-- `backend/internal/collaboration/project_access.go`
-- `backend/internal/collaboration/project_access_test.go`
-- `backend/internal/handlers/collaboration.go`
-- `backend/internal/handlers/collaboration_test.go`
+- when a build was waiting for user input, a user reply previously cleared the waiting state **before** the lead agent had processed the reply
+- that could let work resume one cycle too early and miss the new instruction
+- now the build stays blocked until the lead agent processes the reply and resolves the interaction state
+
+## Remaining Work Worth Tracking
+
+These are the notable follow-ups that still remain after this pass:
+
+1. Push strategy
+   - The current interaction-control changes are local only unless explicitly committed and pushed.
+
+2. Stale agent UI code
+   - `frontend/src/services/agentApi.ts`
+   - `frontend/src/components/agent/AgentPanel.tsx`
+   - These still look stale / unused relative to the now-active builder interaction path.
+   - They are not currently the primary user path, but should either be updated to match the live contract or retired.
+
+3. Frontend bundle size
+   - Monaco and `ts.worker` remain the dominant production bundle warnings.
+   - This is still a real optimization target, but not a correctness blocker for the interaction-control feature set.
+
+4. Broader launch audit
+   - The current pass focused heavily on the unfinished builder interaction / permission / visibility slice.
+   - If another deep launch-readiness pass happens, the next likely targets are:
+     - stale/unused frontend surfaces
+     - remaining CSP/perf hardening
+     - any additional public-execution abuse controls beyond the already-completed execution hardening
+
+## Current Files Touched In This Pass
+
 - `backend/internal/handlers/websocket_auth.go`
-- `backend/migrations/000008_build_interactions.down.sql`
-- `backend/migrations/000008_build_interactions.up.sql`
+- `backend/internal/agents/interaction.go`
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/websocket.go`
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/autonomous/agent.go`
+- `backend/internal/agents/autonomous/handlers.go`
+- `backend/internal/agents/interaction_test.go`
+- `backend/internal/agents/autonomous/agent_test.go`
+- `frontend/src/services/api.ts`
+- `frontend/src/components/builder/AppBuilder.tsx`
+- `frontend/src/components/diff/DiffReviewPanel.tsx`
 
-These were left intentionally uncommitted at the time this handoff was created.
+## Important Context For The Next AI
 
-## Safe Next Step
-
-The next AI should first read the current modified files carefully, decide whether to salvage or back out the unfinished interaction work, and only then continue implementation. Nothing in the current unfinished interaction-control slice should be treated as verified.
+- The earlier version of this handoff described the interaction-control work as unfinished WIP.
+- That is no longer accurate.
+- The builder interaction / permission / pause-resume / diff-review path is now substantially wired through and verified locally.
+- The next AI should treat this handoff as the current truth, not the older “unfinished” snapshot.

@@ -81,8 +81,8 @@ func (h *UsageHandlers) GetCurrentUsage(c *gin.Context) {
 	response := gin.H{
 		"success": true,
 		"data": gin.H{
-			"user_id":  userID,
-			"plan":     string(plan),
+			"user_id":   userID,
+			"plan":      string(plan),
 			"unlimited": unlimited,
 			"usage": gin.H{
 				"projects": gin.H{
@@ -100,11 +100,11 @@ func (h *UsageHandlers) GetCurrentUsage(c *gin.Context) {
 					"limit_formatted":   formatBytes(currentUsage.StorageLimit),
 				},
 				"ai_requests": gin.H{
-					"current":     currentUsage.AIRequests,
-					"limit":       currentUsage.AIRequestsLimit,
-					"percentage":  calculatePercentage(int64(currentUsage.AIRequests), int64(currentUsage.AIRequestsLimit)),
-					"unlimited":   currentUsage.AIRequestsLimit == -1 || unlimited,
-					"period":      "monthly",
+					"current":      currentUsage.AIRequests,
+					"limit":        currentUsage.AIRequestsLimit,
+					"percentage":   calculatePercentage(int64(currentUsage.AIRequests), int64(currentUsage.AIRequestsLimit)),
+					"unlimited":    currentUsage.AIRequestsLimit == -1 || unlimited,
+					"period":       "monthly",
 					"period_start": currentUsage.PeriodStart,
 					"period_end":   currentUsage.PeriodEnd,
 				},
@@ -116,7 +116,7 @@ func (h *UsageHandlers) GetCurrentUsage(c *gin.Context) {
 					"period":     "daily",
 				},
 			},
-			"warnings": getUsageWarnings(currentUsage, unlimited),
+			"warnings":  getUsageWarnings(currentUsage, unlimited),
 			"cached_at": currentUsage.CachedAt,
 		},
 	}
@@ -198,6 +198,7 @@ func (h *UsageHandlers) GetLimits(c *gin.Context) {
 	// Get limits for all plans
 	allPlans := map[string]usage.PlanLimits{
 		"free":       usage.GetPlanLimits(usage.PlanFree),
+		"builder":    usage.GetPlanLimits(usage.PlanBuilder),
 		"pro":        usage.GetPlanLimits(usage.PlanPro),
 		"team":       usage.GetPlanLimits(usage.PlanTeam),
 		"enterprise": usage.GetPlanLimits(usage.PlanEnterprise),
@@ -214,17 +215,21 @@ func (h *UsageHandlers) GetLimits(c *gin.Context) {
 					"price_monthly": 0,
 					"price_yearly":  0,
 				},
+				"builder": gin.H{
+					"price_monthly": 1900,  // $19
+					"price_yearly":  18240, // $182.40
+				},
 				"pro": gin.H{
-					"price_monthly": 1200, // $12
-					"price_yearly":  12000, // $120 (2 months free)
+					"price_monthly": 4900,  // $49
+					"price_yearly":  47040, // $470.40
 				},
 				"team": gin.H{
-					"price_monthly": 2900, // $29
-					"price_yearly":  29000, // $290 (2 months free)
+					"price_monthly": 9900,  // $99
+					"price_yearly":  95040, // $950.40
 				},
 				"enterprise": gin.H{
-					"price_monthly": 7900, // $79
-					"price_yearly":  79000, // $790 (2 months free)
+					"price_monthly": 0,
+					"price_yearly":  0,
 				},
 			},
 		},

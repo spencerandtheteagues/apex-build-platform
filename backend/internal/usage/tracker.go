@@ -32,6 +32,7 @@ type PlanType string
 
 const (
 	PlanFree       PlanType = "free"
+	PlanBuilder    PlanType = "builder"
 	PlanPro        PlanType = "pro"
 	PlanTeam       PlanType = "team"
 	PlanEnterprise PlanType = "enterprise"
@@ -56,19 +57,26 @@ func GetPlanLimits(plan PlanType) PlanLimits {
 			AIRequests:       1000,              // 1000/month
 			ExecutionMinutes: 10,                // 10 min/day
 		}
+	case PlanBuilder:
+		return PlanLimits{
+			Projects:         -1,
+			StorageBytes:     5 * 1024 * 1024 * 1024, // 5GB
+			AIRequests:       -1,                     // Credit-based billing
+			ExecutionMinutes: 240,                    // 4 hours/day
+		}
 	case PlanPro:
 		return PlanLimits{
-			Projects:         25,
-			StorageBytes:     5 * 1024 * 1024 * 1024, // 5GB
-			AIRequests:       10000,                   // 10000/month
-			ExecutionMinutes: 120,                     // 120 min/day (2 hours)
+			Projects:         -1,
+			StorageBytes:     20 * 1024 * 1024 * 1024, // 20GB
+			AIRequests:       -1,                      // Credit-based billing
+			ExecutionMinutes: 720,                     // 12 hours/day
 		}
 	case PlanTeam:
 		return PlanLimits{
-			Projects:         100,
-			StorageBytes:     25 * 1024 * 1024 * 1024, // 25GB
-			AIRequests:       50000,                    // 50000/month
-			ExecutionMinutes: 480,                      // 480 min/day (8 hours)
+			Projects:         -1,
+			StorageBytes:     100 * 1024 * 1024 * 1024, // 100GB
+			AIRequests:       -1,                       // Credit-based billing
+			ExecutionMinutes: 1440,                     // 24 hours/day
 		}
 	case PlanEnterprise, PlanOwner:
 		return PlanLimits{
@@ -89,7 +97,7 @@ type UsageRecord struct {
 	CreatedAt time.Time `json:"created_at" gorm:"index"`
 	UserID    uint      `json:"user_id" gorm:"not null;index"`
 	Type      UsageType `json:"type" gorm:"not null;index;size:50"`
-	Amount    int64     `json:"amount" gorm:"not null"`     // Amount used (bytes, count, seconds, etc.)
+	Amount    int64     `json:"amount" gorm:"not null"` // Amount used (bytes, count, seconds, etc.)
 	ProjectID *uint     `json:"project_id,omitempty" gorm:"index"`
 	Metadata  string    `json:"metadata,omitempty" gorm:"type:text"` // JSON metadata
 }
@@ -122,7 +130,7 @@ type CurrentUsage struct {
 	ProjectsLimit    int       `json:"projects_limit"`
 	StorageBytes     int64     `json:"storage_bytes"`
 	StorageLimit     int64     `json:"storage_limit"`
-	AIRequests       int       `json:"ai_requests"`       // This month
+	AIRequests       int       `json:"ai_requests"` // This month
 	AIRequestsLimit  int       `json:"ai_requests_limit"`
 	ExecutionMinutes int       `json:"execution_minutes"` // Today
 	ExecutionLimit   int       `json:"execution_limit"`
@@ -133,8 +141,8 @@ type CurrentUsage struct {
 
 // UsageHistory represents historical usage data
 type UsageHistory struct {
-	UserID uint                `json:"user_id"`
-	Daily  []DailyUsagePoint   `json:"daily"`
+	UserID  uint                `json:"user_id"`
+	Daily   []DailyUsagePoint   `json:"daily"`
 	Monthly []MonthlyUsagePoint `json:"monthly"`
 }
 
@@ -308,15 +316,15 @@ func (t *Tracker) calculateCurrentUsage(ctx context.Context, userID uint, plan P
 	limits := GetPlanLimits(plan)
 
 	usage := &CurrentUsage{
-		UserID:           userID,
-		Plan:             plan,
-		ProjectsLimit:    limits.Projects,
-		StorageLimit:     limits.StorageBytes,
-		AIRequestsLimit:  limits.AIRequests,
-		ExecutionLimit:   limits.ExecutionMinutes,
-		PeriodStart:      time.Now().UTC().Truncate(24 * time.Hour).AddDate(0, 0, -time.Now().Day()+1), // First of month
-		PeriodEnd:        time.Now().UTC().Truncate(24 * time.Hour).AddDate(0, 1, -time.Now().Day()),   // Last of month
-		CachedAt:         time.Now().UTC(),
+		UserID:          userID,
+		Plan:            plan,
+		ProjectsLimit:   limits.Projects,
+		StorageLimit:    limits.StorageBytes,
+		AIRequestsLimit: limits.AIRequests,
+		ExecutionLimit:  limits.ExecutionMinutes,
+		PeriodStart:     time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -time.Now().Day()+1), // First of month
+		PeriodEnd:       time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 1, -time.Now().Day()),   // Last of month
+		CachedAt:        time.Now().UTC(),
 	}
 
 	// Get project count
@@ -343,12 +351,11 @@ func (t *Tracker) calculateCurrentUsage(ctx context.Context, userID uint, plan P
 
 	// Get AI requests this month
 	currentMonth := time.Now().UTC().Format("2006-01")
-	var aiRequests int64
-	if err := t.db.WithContext(ctx).Raw(`
-		SELECT COALESCE(total, 0) FROM monthly_usage_summaries
-		WHERE user_id = ? AND type = ? AND month = ?
-	`, userID, UsageAIRequests, currentMonth).Scan(&aiRequests).Error; err != nil {
-		// If no record exists, count from ai_requests table
+	aiRequests, found, err := t.lookupMonthlySummary(ctx, userID, UsageAIRequests, currentMonth)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get AI usage summary: %w", err)
+	}
+	if !found {
 		t.db.WithContext(ctx).Raw(`
 			SELECT COUNT(*) FROM ai_requests
 			WHERE user_id = ? AND created_at >= date_trunc('month', CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
@@ -358,12 +365,11 @@ func (t *Tracker) calculateCurrentUsage(ctx context.Context, userID uint, plan P
 
 	// Get execution minutes today
 	today := time.Now().UTC().Truncate(24 * time.Hour)
-	var execMinutes int64
-	if err := t.db.WithContext(ctx).Raw(`
-		SELECT COALESCE(total, 0) FROM daily_usage_summaries
-		WHERE user_id = ? AND type = ? AND date = ?
-	`, userID, UsageExecutionMinutes, today).Scan(&execMinutes).Error; err != nil {
-		// If no record exists, calculate from executions table
+	execMinutes, found, err := t.lookupDailySummary(ctx, userID, UsageExecutionMinutes, today)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get execution usage summary: %w", err)
+	}
+	if !found {
 		t.db.WithContext(ctx).Raw(`
 			SELECT COALESCE(SUM(duration / 60000), 0) FROM executions
 			WHERE user_id = ? AND created_at >= ? AND created_at < ?
@@ -372,6 +378,36 @@ func (t *Tracker) calculateCurrentUsage(ctx context.Context, userID uint, plan P
 	usage.ExecutionMinutes = int(execMinutes)
 
 	return usage, nil
+}
+
+func (t *Tracker) lookupMonthlySummary(ctx context.Context, userID uint, usageType UsageType, month string) (int64, bool, error) {
+	var summary MonthlyUsageSummary
+	err := t.db.WithContext(ctx).
+		Select("total").
+		Where("user_id = ? AND type = ? AND month = ?", userID, usageType, month).
+		Take(&summary).Error
+	if err == gorm.ErrRecordNotFound {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return summary.Total, true, nil
+}
+
+func (t *Tracker) lookupDailySummary(ctx context.Context, userID uint, usageType UsageType, date time.Time) (int64, bool, error) {
+	var summary DailyUsageSummary
+	err := t.db.WithContext(ctx).
+		Select("total").
+		Where("user_id = ? AND type = ? AND date = ?", userID, usageType, date).
+		Take(&summary).Error
+	if err == gorm.ErrRecordNotFound {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return summary.Total, true, nil
 }
 
 // CheckQuota checks if a user has exceeded their quota for a specific usage type

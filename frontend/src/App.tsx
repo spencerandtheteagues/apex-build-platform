@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { useStore } from './hooks/useStore'
+import apiService from './services/api'
 import CostTicker from './components/ide/CostTicker'
 // Import ErrorBoundary directly to be safe
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
@@ -68,14 +69,52 @@ const getProjectIdFromPath = (): number | null => {
   return Number.isInteger(projectId) && projectId > 0 ? projectId : null
 }
 
+const getInitialRouteState = (): {
+  projectId: number | null
+  currentView: AppView
+  showLanding: boolean
+} => {
+  const projectId = getProjectIdFromPath()
+  if (typeof window === 'undefined') {
+    return {
+      projectId,
+      currentView: projectId ? 'ide' : 'builder',
+      showLanding: projectId == null,
+    }
+  }
+
+  const pathname = window.location.pathname.replace(/\/+$/, '') || '/'
+  const params = new URLSearchParams(window.location.search)
+  const wantsBilling = pathname === '/billing' || pathname === '/settings' || pathname === '/settings/billing' || params.has('success') || params.has('canceled') || params.has('credits') || params.has('billing')
+  const wantsSpending = pathname === '/spending'
+  const wantsExplore = pathname === '/explore'
+
+  if (projectId) {
+    return { projectId, currentView: 'ide', showLanding: false }
+  }
+  if (wantsBilling) {
+    return { projectId: null, currentView: 'settings', showLanding: false }
+  }
+  if (wantsSpending) {
+    return { projectId: null, currentView: 'spending', showLanding: false }
+  }
+  if (wantsExplore) {
+    return { projectId: null, currentView: 'explore', showLanding: false }
+  }
+
+  return { projectId: null, currentView: 'builder', showLanding: true }
+}
+
 function App() {
-  const initialProjectIdRef = useRef<number | null>(getProjectIdFromPath())
+  const initialRouteRef = useRef(getInitialRouteState())
+  const initialProjectIdRef = useRef<number | null>(initialRouteRef.current.projectId)
   const pendingProjectIdRef = useRef<number | null>(initialProjectIdRef.current)
-  const [currentView, setCurrentView] = useState<AppView>('builder')
-  const [visitedViews, setVisitedViews] = useState<Set<AppView>>(() => new Set(['builder']))
+  const [currentView, setCurrentView] = useState<AppView>(initialRouteRef.current.currentView)
+  const [visitedViews, setVisitedViews] = useState<Set<AppView>>(() => new Set([initialRouteRef.current.currentView]))
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false)
   const [showGitHubImport, setShowGitHubImport] = useState(false)
-  const [showLanding, setShowLanding] = useState(() => initialProjectIdRef.current == null)
+  const [showLanding, setShowLanding] = useState(initialRouteRef.current.showLanding)
+  const [sessionBootstrapComplete, setSessionBootstrapComplete] = useState(false)
   const [isAuthMode, setIsAuthMode] = useState<'login' | 'register'>('login')
   const [pendingPlanType, setPendingPlanType] = useState<string | null>(null)
   const [authData, setAuthData] = useState({
@@ -104,9 +143,41 @@ function App() {
     currentProject, // We need this to check if we can safely render the IDE
     login,
     register,
+    refreshUser,
     selectProject,
     updateProfile,
   } = useStore()
+
+  useEffect(() => {
+    let cancelled = false
+
+    const bootstrapSession = async () => {
+      if (isAuthenticated || !apiService.hasRefreshToken()) {
+        if (!cancelled) {
+          setSessionBootstrapComplete(true)
+        }
+        return
+      }
+
+      try {
+        await apiService.refreshToken()
+        await refreshUser()
+      } catch (error) {
+        console.error('Session bootstrap failed:', error)
+        apiService.clearStoredAuth()
+      } finally {
+        if (!cancelled) {
+          setSessionBootstrapComplete(true)
+        }
+      }
+    }
+
+    void bootstrapSession()
+
+    return () => {
+      cancelled = true
+    }
+  }, [isAuthenticated, refreshUser])
 
   // After auth, redirect to Settings/Billing if user clicked a paid plan CTA
   useEffect(() => {
@@ -248,7 +319,7 @@ function App() {
   const logoSrc = uiColorScheme === 'blue-light' ? '/logo-blue.png' : '/logo.png'
 
   // Loading screen
-  if (isLoading) {
+  if (isLoading || !sessionBootstrapComplete) {
     return (
       <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
         {/* Animated cyberpunk background */}
@@ -271,7 +342,7 @@ function App() {
     return (
       <Suspense fallback={<div style={{ background: '#000', minHeight: '100vh' }} />}>
         <LandingPage onGetStarted={(mode, planType) => {
-          if (mode) setIsAuthMode(mode)
+          if (mode === 'login' || mode === 'register') setIsAuthMode(mode)
           if (planType && planType !== 'free') setPendingPlanType(planType)
           setShowLanding(false)
         }} />

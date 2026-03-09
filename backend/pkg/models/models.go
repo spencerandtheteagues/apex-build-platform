@@ -536,6 +536,7 @@ type CompletedBuild struct {
 	PowerMode   string     `json:"power_mode" gorm:"size:10"`            // fast, balanced, max
 	TechStack   string     `json:"tech_stack" gorm:"type:text"`          // JSON blob of tech stack
 	FilesJSON   string     `json:"-" gorm:"column:files_json;type:text"` // JSON array of generated files
+	InteractionJSON string `json:"-" gorm:"column:interaction_json;type:text"`
 	FilesCount  int        `json:"files_count" gorm:"default:0"`
 	TotalCost   float64    `json:"total_cost" gorm:"default:0.0"` // Total AI cost in USD
 	Progress    int        `json:"progress" gorm:"default:100"`

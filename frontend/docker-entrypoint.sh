@@ -24,8 +24,8 @@ if [ -n "$VITE_API_URL" ] || [ -n "$VITE_WS_URL" ]; then
     # Create a config file that can be loaded by the app
     cat > /usr/share/nginx/html/config.js << EOF
 window.__APEX_CONFIG__ = {
-  API_URL: "${VITE_API_URL:-http://localhost:8080/api/v1}",
-  WS_URL: "${VITE_WS_URL:-ws://localhost:8080/ws}",
+  API_URL: "${VITE_API_URL:-}",
+  WS_URL: "${VITE_WS_URL:-}",
   VERSION: "${APP_VERSION:-1.0.0}",
   ENVIRONMENT: "${NODE_ENV:-production}",
   FEATURES: {
@@ -49,8 +49,8 @@ echo "🔧 Testing nginx configuration..."
 nginx -t
 
 echo "🌐 Starting APEX.BUILD Frontend on port ${PORT}..."
-echo "📡 API URL: ${VITE_API_URL:-http://localhost:8080/api/v1}"
-echo "🔌 WebSocket URL: ${VITE_WS_URL:-ws://localhost:8080/ws}"
+echo "📡 API URL: ${VITE_API_URL:-<auto>}"
+echo "🔌 WebSocket URL: ${VITE_WS_URL:-<auto>}"
 
 # Execute the command passed to the container
 exec "$@"

@@ -139,11 +139,15 @@ func (h *CompletionsHandler) GetCompletionStats(c *gin.Context) {
 }
 
 // RegisterCompletionRoutes registers all completion API routes
-func (h *CompletionsHandler) RegisterCompletionRoutes(rg *gin.RouterGroup) {
+func (h *CompletionsHandler) RegisterCompletionRoutes(rg *gin.RouterGroup, meteredMiddlewares ...gin.HandlerFunc) {
 	completionRoutes := rg.Group("/completions")
 	{
-		completionRoutes.POST("", h.GetCompletions)
-		completionRoutes.POST("/inline", h.GetInlineCompletion)
+		metered := completionRoutes.Group("/")
+		if len(meteredMiddlewares) > 0 {
+			metered.Use(meteredMiddlewares...)
+		}
+		metered.POST("", h.GetCompletions)
+		metered.POST("/inline", h.GetInlineCompletion)
 		completionRoutes.POST("/accept", h.AcceptCompletion)
 	}
 }

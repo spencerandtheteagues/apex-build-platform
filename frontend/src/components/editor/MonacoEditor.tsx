@@ -6,6 +6,7 @@ import * as monaco from 'monaco-editor'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
 import { useCollaboration, RemoteCursor } from '@/hooks/useCollaboration'
+import collaborationService, { type Operation } from '@/services/collaboration'
 import { MultiplayerCursors, UserPresenceIndicator } from './MultiplayerCursors'
 import { ensureMonacoWorkersInitialized } from '@monaco-worker-setup'
 import { File, AICapability, AIProvider, CompletionItem } from '@/types'
@@ -38,6 +39,97 @@ function debounce<T extends (...args: any[]) => any>(
     timeoutId = setTimeout(() => {
       func(...args)
     }, wait)
+  }
+}
+
+const buildOperationsFromChanges = (changes: readonly monaco.editor.IModelContentChange[]): Operation[] => {
+  const operations: Operation[] = []
+  let offsetDelta = 0
+
+  const sortedChanges = [...changes].sort((a, b) => a.rangeOffset - b.rangeOffset)
+  for (const change of sortedChanges) {
+    const position = change.rangeOffset + offsetDelta
+
+    if (change.rangeLength > 0) {
+      operations.push({
+        type: 'delete',
+        position,
+        count: change.rangeLength,
+      })
+    }
+
+    if (change.text.length > 0) {
+      operations.push({
+        type: 'insert',
+        position,
+        text: change.text,
+      })
+    }
+
+    offsetDelta += change.text.length - change.rangeLength
+  }
+
+  return operations
+}
+
+const applyOperationsToEditor = (
+  editor: monaco.editor.IStandaloneCodeEditor,
+  operations: Operation[]
+): void => {
+  const model = editor.getModel()
+  if (!model || operations.length === 0) {
+    return
+  }
+
+  const edits: monaco.editor.IIdentifiedSingleEditOperation[] = []
+  for (const operation of operations) {
+    switch (operation.type) {
+      case 'insert': {
+        const position = model.getPositionAt(operation.position)
+        edits.push({
+          range: new monaco.Range(
+            position.lineNumber,
+            position.column,
+            position.lineNumber,
+            position.column
+          ),
+          text: operation.text || '',
+        })
+        break
+      }
+      case 'delete': {
+        const start = model.getPositionAt(operation.position)
+        const end = model.getPositionAt(operation.position + (operation.count || 0))
+        edits.push({
+          range: new monaco.Range(
+            start.lineNumber,
+            start.column,
+            end.lineNumber,
+            end.column
+          ),
+          text: '',
+        })
+        break
+      }
+      default:
+        break
+    }
+  }
+
+  edits.sort((left, right) => {
+    const leftOffset = model.getOffsetAt({
+      lineNumber: left.range.startLineNumber,
+      column: left.range.startColumn,
+    })
+    const rightOffset = model.getOffsetAt({
+      lineNumber: right.range.startLineNumber,
+      column: right.range.startColumn,
+    })
+    return rightOffset - leftOffset
+  })
+
+  if (edits.length > 0) {
+    editor.executeEdits('collaboration', edits)
   }
 }
 
@@ -210,6 +302,8 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
     const [completionsEnabled, setCompletionsEnabled] = useState(enableInlineCompletions)
     const lastCompletionRef = useRef<CompletionItem | null>(null)
     const completionProviderRef = useRef<monaco.IDisposable | null>(null)
+    const applyingRemoteChangeRef = useRef(false)
+    const currentFileRef = useRef<{ fileId?: number; fileName?: string }>({ fileId: file?.id, fileName: file?.name })
 
     const { theme, currentProject, room } = useStore()
 
@@ -227,13 +321,14 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
       isConnected: isCollabConnected,
       remoteCursors,
       activeUsers,
-      updateCursor,
       updateSelection,
       clearSelection,
       startTyping,
       stopTyping,
       followUser,
       stopFollowing,
+      sendOperation,
+      requestSync,
       getAllCursors,
       getCursorsForFile,
     } = useCollaboration({
@@ -249,10 +344,35 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
           )
         }
       }, [followingUserId, editor]),
+      onOperation: useCallback((targetFileId: number, operations: Operation[]) => {
+        if (!editor || !fileId || targetFileId !== fileId) {
+          return
+        }
+
+        applyingRemoteChangeRef.current = true
+        applyOperationsToEditor(editor, operations)
+      }, [editor, fileId]),
+      onSyncResponse: useCallback((targetFileId: number, content: string) => {
+        if (!editor || !fileId || targetFileId !== fileId) {
+          return
+        }
+
+        const model = editor.getModel()
+        if (!model || model.getValue() === content) {
+          return
+        }
+
+        applyingRemoteChangeRef.current = true
+        model.setValue(content)
+      }, [editor, fileId]),
     })
 
     // Get cursors for current file as array
     const fileCursors = fileId ? getCursorsForFile(fileId) : getAllCursors()
+
+    useEffect(() => {
+      currentFileRef.current = { fileId, fileName }
+    }, [fileId, fileName])
 
     // Initialize Monaco Editor
     useEffect(() => {
@@ -305,20 +425,41 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
         })
 
         // Set up event listeners
-        editorInstance.onDidChangeModelContent(() => {
+        editorInstance.onDidChangeModelContent((event) => {
           const currentValue = editorInstance!.getValue()
+
+          if (applyingRemoteChangeRef.current) {
+            applyingRemoteChangeRef.current = false
+            onChange?.(currentValue)
+            return
+          }
+
           onChange?.(currentValue)
 
           // Notify collaboration about typing
           if (enableCollaboration) {
             startTyping()
+
+            const currentFile = currentFileRef.current
+            if (currentFile.fileId) {
+              const operations = buildOperationsFromChanges(event.changes)
+              if (operations.length > 0) {
+                sendOperation(currentFile.fileId, operations)
+              }
+            }
           }
         })
 
         // Cursor position change handler for collaboration
         editorInstance.onDidChangeCursorPosition((e) => {
-          if (enableCollaboration && fileId && fileName) {
-            updateCursor(e.position.lineNumber, e.position.column)
+          const currentFile = currentFileRef.current
+          if (enableCollaboration && currentFile.fileId && currentFile.fileName) {
+            collaborationService.updateCursor(
+              currentFile.fileId,
+              currentFile.fileName,
+              e.position.lineNumber,
+              e.position.column
+            )
           }
         })
 
@@ -386,12 +527,19 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
       if (editor && file) {
         const model = editor.getModel()
         if (model) {
+          applyingRemoteChangeRef.current = true
           model.setValue(file.content)
           const language = getLanguageFromFile(file.name)
           monaco.editor.setModelLanguage(model, language)
         }
       }
     }, [file, editor])
+
+    useEffect(() => {
+      if (editor && fileId && isCollabConnected) {
+        requestSync(fileId)
+      }
+    }, [editor, fileId, isCollabConnected, requestSync])
 
     // Register inline completion provider for AI ghost-text suggestions
     useEffect(() => {

@@ -86,7 +86,7 @@ const QUICK_ACTIONS = [
 const PROVIDER_OPTIONS = [
   { id: 'auto', label: 'Auto', icon: <Zap size={14} /> },
   { id: 'claude', label: 'Claude', icon: <Sparkles size={14} /> },
-  { id: 'gpt4', label: 'GPT-4', icon: <Braces size={14} /> },
+  { id: 'gpt4', label: 'GPT-5', icon: <Braces size={14} /> },
   { id: 'gemini', label: 'Gemini', icon: <Wand2 size={14} /> },
 ]
 

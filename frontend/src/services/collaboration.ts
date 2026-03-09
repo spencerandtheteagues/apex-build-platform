@@ -221,6 +221,7 @@ export interface CollabEvents {
 export class CollaborationService extends EventEmitter {
   private ws: WebSocket | null = null
   private roomId: string | null = null
+  private projectId: number | undefined
   private userId: number = 0
   private username: string = ''
   private reconnectAttempts = 0
@@ -261,6 +262,12 @@ export class CollaborationService extends EventEmitter {
         this.isConnecting = false
         this.reconnectAttempts = 0
         this.startHeartbeat()
+        if (this.roomId) {
+          this.send({
+            type: 'join_room',
+            data: { room_id: this.roomId, project_id: this.projectId }
+          })
+        }
         this.emit('connected')
         console.log('[Collab] Connected to collaboration server')
         resolve()
@@ -297,6 +304,7 @@ export class CollaborationService extends EventEmitter {
       this.ws.close(1000, 'User disconnected')
       this.ws = null
       this.roomId = null
+      this.projectId = undefined
       this.users.clear()
       this.emit('disconnected', 'User disconnected')
     }
@@ -636,6 +644,13 @@ export class CollaborationService extends EventEmitter {
   }
 
   joinRoom(roomId: string, projectId?: number): void {
+    const isSameRoom = this.roomId === roomId && this.projectId === projectId
+    if (isSameRoom && this.ws?.readyState === WebSocket.OPEN) {
+      return
+    }
+
+    this.roomId = roomId
+    this.projectId = projectId
     this.send({
       type: 'join_room',
       data: { room_id: roomId, project_id: projectId }
@@ -646,6 +661,8 @@ export class CollaborationService extends EventEmitter {
     if (this.roomId) {
       this.send({ type: 'leave_room' })
     }
+    this.roomId = null
+    this.projectId = undefined
   }
 
   updateCursor(fileId: number, fileName: string, line: number, column: number): void {

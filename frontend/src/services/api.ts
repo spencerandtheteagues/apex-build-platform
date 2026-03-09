@@ -2,7 +2,7 @@
 // Handles all communication with the Go backend
 
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
-import { getConfiguredApiUrl } from '@/config/runtime'
+import { getConfiguredApiUrl, getConfiguredWsUrl } from '@/config/runtime'
 import {
   User,
   Project,
@@ -89,6 +89,30 @@ const resolveApiHost = (baseURL: string, fallbackHost: string): string => {
   }
 }
 
+const ensureWebSocketRoot = (baseURL: string): string => {
+  const normalized = baseURL.replace(/\/+$/, '')
+  if (!normalized) {
+    return normalized
+  }
+
+  if (normalized.endsWith('/ws')) {
+    return normalized
+  }
+
+  return `${normalized}/ws`
+}
+
+const resolveWebSocketBaseUrl = (apiBaseURL: string, fallbackHost: string): string => {
+  const configuredWsUrl = getConfiguredWsUrl()
+  if (configuredWsUrl) {
+    return ensureWebSocketRoot(configuredWsUrl)
+  }
+
+  const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = resolveApiHost(apiBaseURL, fallbackHost)
+  return `${protocol}//${host}/ws`
+}
+
 export class ApiService {
   public client: AxiosInstance
   private baseURL: string
@@ -169,6 +193,14 @@ export class ApiService {
     localStorage.removeItem('apex_refresh_token')
     localStorage.removeItem('apex_token_expires')
     localStorage.removeItem('apex_user')
+  }
+
+  clearStoredAuth(): void {
+    this.clearAuth()
+  }
+
+  hasRefreshToken(): boolean {
+    return Boolean(this.getRefreshToken())
   }
 
   // Generic HTTP methods for components that need direct access
@@ -457,8 +489,97 @@ export class ApiService {
     return response.data
   }
 
-  async sendBuildMessage(buildId: string, message: string): Promise<void> {
-    await this.client.post(`/build/${buildId}/message`, { content: message })
+  async sendBuildMessage(buildId: string, message: string, clientToken?: string): Promise<void> {
+    await this.client.post(`/build/${buildId}/message`, {
+      content: message,
+      client_token: clientToken,
+    })
+  }
+
+  async getBuildMessages(buildId: string): Promise<{
+    messages: BuildConversationMessage[]
+    interaction: BuildInteractionState
+    live: boolean
+  }> {
+    const response = await this.client.get(`/build/${buildId}/messages`)
+    return response.data
+  }
+
+  async getBuildPermissions(buildId: string): Promise<{
+    interaction: BuildInteractionState
+    rules: BuildPermissionRule[]
+    requests: BuildPermissionRequest[]
+    live: boolean
+  }> {
+    const response = await this.client.get(`/build/${buildId}/permissions`)
+    return response.data
+  }
+
+  async setBuildPermissionRule(buildId: string, data: {
+    scope: string
+    target: string
+    decision?: string
+    mode?: string
+    reason?: string
+  }): Promise<{
+    interaction: BuildInteractionState
+    rule: BuildPermissionRule
+  }> {
+    const response = await this.client.post(`/build/${buildId}/permissions/rules`, data)
+    return response.data
+  }
+
+  async resolveBuildPermissionRequest(buildId: string, requestId: string, data: {
+    decision: string
+    mode?: string
+    note?: string
+  }): Promise<{
+    interaction: BuildInteractionState
+    request: BuildPermissionRequest
+  }> {
+    const response = await this.client.post(`/build/${buildId}/permissions/requests/${requestId}/resolve`, data)
+    return response.data
+  }
+
+  async pauseBuild(buildId: string, reason?: string): Promise<{
+    status: string
+    interaction: BuildInteractionState
+  }> {
+    const response = await this.client.post(`/build/${buildId}/pause`, reason ? { reason } : {})
+    return response.data
+  }
+
+  async resumeBuild(buildId: string, reason?: string): Promise<{
+    status: string
+    interaction: BuildInteractionState
+  }> {
+    const response = await this.client.post(`/build/${buildId}/resume`, reason ? { reason } : {})
+    return response.data
+  }
+
+  async getBuildProposedEdits(buildId: string): Promise<{
+    build_id: string
+    edits: ProposedBuildEdit[]
+    count: number
+  }> {
+    const response = await this.client.get(`/build/${buildId}/proposed-edits`)
+    return response.data
+  }
+
+  async approveBuildEdits(buildId: string, editIds: string[]): Promise<void> {
+    await this.client.post(`/build/${buildId}/approve-edits`, { edit_ids: editIds })
+  }
+
+  async rejectBuildEdits(buildId: string, editIds: string[]): Promise<void> {
+    await this.client.post(`/build/${buildId}/reject-edits`, { edit_ids: editIds })
+  }
+
+  async approveAllBuildEdits(buildId: string): Promise<void> {
+    await this.client.post(`/build/${buildId}/approve-all`)
+  }
+
+  async rejectAllBuildEdits(buildId: string): Promise<void> {
+    await this.client.post(`/build/${buildId}/reject-all`)
   }
 
   async getBuildCheckpoints(buildId: string): Promise<any[]> {
@@ -1589,11 +1710,7 @@ export class ApiService {
       )
       return response.data.data?.shells || []
     } catch {
-      // Default shells if API fails
-      return [
-        { name: 'bash', path: '/bin/bash' },
-        { name: 'sh', path: '/bin/sh' },
-      ]
+      return []
     }
   }
 
@@ -1601,20 +1718,24 @@ export class ApiService {
    * Get WebSocket URL for terminal connection
    */
   getTerminalWebSocketUrl(sessionId: string): string {
-    const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const token = this.getAuthToken()
+    const fallbackHost = typeof window !== 'undefined' ? window.location.host : 'localhost:8080'
+    const baseUrl = `${resolveWebSocketBaseUrl(this.baseURL, fallbackHost)}/terminal/${encodeURIComponent(sessionId)}`
 
-    // Use API URL if available
-    if (this.baseURL) {
+    const withToken = (rawUrl: string): string => {
+      if (!token) {
+        return rawUrl
+      }
       try {
-        const url = new URL(this.baseURL)
-        return `${protocol}//${url.host}/ws/terminal/${sessionId}`
+        const url = new URL(rawUrl)
+        url.searchParams.set('token', token)
+        return url.toString()
       } catch {
-        // Fall through to default
+        return `${rawUrl}?token=${encodeURIComponent(token)}`
       }
     }
 
-    const host = typeof window !== 'undefined' ? window.location.host : 'localhost:8080'
-    return `${protocol}//${host}/ws/terminal/${sessionId}`
+    return withToken(baseUrl)
   }
 
   // ========== AI CODE REVIEW ENDPOINTS ==========
@@ -2138,9 +2259,9 @@ export class ApiService {
 
   // Get WebSocket URL for debug events
   getDebugWebSocketUrl(sessionId: string): string {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = resolveApiHost(this.baseURL, window.location.host)
-    return `${protocol}//${host}/ws/debug/${sessionId}`
+    const baseUrl = `${resolveWebSocketBaseUrl(this.baseURL, window.location.host)}/debug/${encodeURIComponent(sessionId)}`
+    const token = this.getAuthToken()
+    return token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl
   }
 
   // ========== HOSTING SYSTEM ENDPOINTS (*.apex.app) ==========
@@ -2291,9 +2412,9 @@ export class ApiService {
    * Get WebSocket URL for deployment logs streaming
    */
   getDeploymentLogsWebSocketUrl(deploymentId: string): string {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = resolveApiHost(this.baseURL, window.location.host)
-    return `${protocol}//${host}/ws/deploy/${encodeURIComponent(deploymentId)}`
+    const baseUrl = `${resolveWebSocketBaseUrl(this.baseURL, window.location.host)}/deploy/${encodeURIComponent(deploymentId)}`
+    const token = this.getAuthToken()
+    return token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl
   }
 
   // ========== PLAN USAGE QUOTA ENDPOINTS ==========
@@ -2431,8 +2552,8 @@ export class ApiService {
 
   async createCheckoutSession(params: {
     price_id: string
-    success_url: string
-    cancel_url: string
+    success_url?: string
+    cancel_url?: string
   }): Promise<{ success: boolean; data?: { session_id: string; checkout_url: string }; error?: string }> {
     const response = await this.client.post('/billing/checkout', params)
     return response.data
@@ -2994,9 +3115,76 @@ export interface CompletedBuildSummary {
   resumable?: boolean
 }
 
+export interface BuildConversationMessage {
+  id: string
+  role: 'user' | 'lead' | 'system'
+  kind?: string
+  content: string
+  agent_id?: string
+  agent_role?: string
+  client_token?: string
+  requires_response?: boolean
+  blocking?: boolean
+  timestamp: string
+  status?: string
+}
+
+export interface BuildPermissionRule {
+  id: string
+  scope: string
+  target: string
+  decision: string
+  mode: string
+  reason?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface BuildPermissionRequest {
+  id: string
+  scope: string
+  target: string
+  reason: string
+  command_preview?: string
+  requested_by_id?: string
+  requested_by_role?: string
+  blocking?: boolean
+  status: 'pending' | 'allowed' | 'denied'
+  mode?: string
+  resolution_note?: string
+  requested_at: string
+  resolved_at?: string
+}
+
+export interface BuildInteractionState {
+  messages?: BuildConversationMessage[]
+  steering_notes?: string[]
+  pending_question?: string
+  waiting_for_user?: boolean
+  paused?: boolean
+  pause_reason?: string
+  permission_rules?: BuildPermissionRule[]
+  permission_requests?: BuildPermissionRequest[]
+  attention_required?: boolean
+}
+
+export interface ProposedBuildEdit {
+  id: string
+  build_id: string
+  agent_id: string
+  agent_role: string
+  file_path: string
+  original_content: string
+  proposed_content: string
+  language: string
+  status: 'pending' | 'approved' | 'rejected'
+}
+
 export interface CompletedBuildDetail extends CompletedBuildSummary {
   files: { path: string; content: string; language: string; size: number; is_new: boolean }[]
   error?: string
+  messages?: BuildConversationMessage[]
+  interaction?: BuildInteractionState
 }
 
 // Create singleton instance

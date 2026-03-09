@@ -3,51 +3,17 @@
 package agents
 
 import (
+	apihandlers "apex-build/internal/handlers"
 	"encoding/json"
-	"errors"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 )
-
-// WebSocketClaims represents JWT claims for WebSocket authentication
-type WebSocketClaims struct {
-	UserID  uint `json:"user_id"`
-	IsAdmin bool `json:"is_admin"`
-	jwt.RegisteredClaims
-}
-
-// validateWebSocketToken validates a JWT token for WebSocket connections
-func validateWebSocketToken(tokenString string) (*WebSocketClaims, error) {
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		return nil, errors.New("JWT_SECRET not configured")
-	}
-
-	token, err := jwt.ParseWithClaims(tokenString, &WebSocketClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return []byte(secret), nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	if claims, ok := token.Claims.(*WebSocketClaims); ok && token.Valid {
-		return claims, nil
-	}
-
-	return nil, errors.New("invalid token claims")
-}
 
 // isUserAdminDB checks if a user has admin privileges by querying the database.
 // Returns false if DB is unavailable (safe default).
@@ -66,37 +32,7 @@ func isUserAdminDB(am *AgentManager, userID uint) bool {
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-
-		// Allow env-configured origins first
-		if envOrigins := os.Getenv("CORS_ALLOWED_ORIGINS"); envOrigins != "" {
-			for _, allowed := range strings.Split(envOrigins, ",") {
-				if strings.TrimSpace(allowed) == origin {
-					return true
-				}
-			}
-			return false
-		}
-
-		// Non-production: allow all for local development
-		if os.Getenv("ENVIRONMENT") != "production" {
-			return true
-		}
-
-		// Production: strict origin check
-		allowedOrigins := []string{
-			"https://apex.build",
-			"https://www.apex.build",
-			"https://apex-frontend-gigq.onrender.com",
-		}
-		for _, allowed := range allowedOrigins {
-			if origin == allowed {
-				return true
-			}
-		}
-		return false
-	},
+	CheckOrigin:     apihandlers.AllowedWebSocketOrigin,
 }
 
 // WSHub manages WebSocket connections for builds
@@ -111,11 +47,11 @@ type WSHub struct {
 
 // WSConnection represents a single WebSocket connection
 type WSConnection struct {
-	hub     *WSHub
-	conn    *websocket.Conn
-	buildID string
-	userID  uint
-	send    chan []byte
+	hub       *WSHub
+	conn      *websocket.Conn
+	buildID   string
+	userID    uint
+	send      chan []byte
 	closeOnce sync.Once
 }
 
@@ -226,27 +162,11 @@ func (h *WSHub) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	// Get user ID from context (set by auth middleware) or from token query param
-	var uid uint
-	if userID, exists := c.Get("user_id"); exists {
-		uid, _ = userID.(uint)
-	} else {
-		// Check for token in query parameter for WebSocket connections
-		token := c.Query("token")
-		if token == "" {
-			log.Printf("WebSocket connection rejected: no authentication for build %s", buildID)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
-			return
-		}
-		// Validate the token and extract user ID
-		// This should use the same JWT validation as the auth middleware
-		claims, err := validateWebSocketToken(token)
-		if err != nil {
-			log.Printf("WebSocket connection rejected: invalid token for build %s: %v", buildID, err)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
-			return
-		}
-		uid = claims.UserID
+	uid, err := apihandlers.WebSocketUserID(c)
+	if err != nil {
+		log.Printf("WebSocket connection rejected: auth failed for build %s: %v", buildID, err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
 	}
 
 	// Verify user has access to this build
@@ -278,20 +198,29 @@ func (h *WSHub) HandleWebSocket(c *gin.Context) {
 
 	// Subscribe to agent manager updates
 	updateChan := make(chan *WSMessage, 100)
+	forwardDone := make(chan struct{})
 	h.manager.Subscribe(buildID, updateChan)
 
 	// Forward agent updates to WebSocket
 	go func() {
-		for msg := range updateChan {
-			data, err := json.Marshal(msg)
-			if err != nil {
-				log.Printf("Failed to marshal WebSocket message for build %s: %v", buildID, err)
-				continue
-			}
+		for {
 			select {
-			case wsConn.send <- data:
-			default:
-				log.Printf("WebSocket send buffer full for build %s, dropping message", buildID)
+			case <-forwardDone:
+				return
+			case msg := <-updateChan:
+				if msg == nil {
+					continue
+				}
+				data, err := json.Marshal(msg)
+				if err != nil {
+					log.Printf("Failed to marshal WebSocket message for build %s: %v", buildID, err)
+					continue
+				}
+				select {
+				case wsConn.send <- data:
+				default:
+					log.Printf("WebSocket send buffer full for build %s, dropping message", buildID)
+				}
 			}
 		}
 	}()
@@ -318,7 +247,7 @@ func (h *WSHub) HandleWebSocket(c *gin.Context) {
 
 	// Start connection handlers
 	go wsConn.writePump()
-	go wsConn.readPump(updateChan)
+	go wsConn.readPump(updateChan, forwardDone)
 }
 
 // writePump sends messages to the WebSocket connection
@@ -352,8 +281,9 @@ func (c *WSConnection) writePump() {
 }
 
 // readPump reads messages from the WebSocket connection
-func (c *WSConnection) readPump(updateChan chan *WSMessage) {
+func (c *WSConnection) readPump(updateChan chan *WSMessage, forwardDone chan struct{}) {
 	defer func() {
+		close(forwardDone)
 		c.hub.manager.Unsubscribe(c.buildID, updateChan)
 		c.hub.unregister <- c
 		c.conn.Close()
@@ -382,8 +312,12 @@ func (c *WSConnection) readPump(updateChan chan *WSMessage) {
 // handleMessage processes incoming WebSocket messages
 func (c *WSConnection) handleMessage(message []byte) {
 	var msg struct {
-		Type    string `json:"type"`
-		Content string `json:"content"`
+		Type         string         `json:"type"`
+		Content      string         `json:"content"`
+		Message      string         `json:"message"`
+		ClientToken  string         `json:"client_token"`
+		CheckpointID string         `json:"checkpoint_id"`
+		Data         map[string]any `json:"data"`
 	}
 
 	if err := json.Unmarshal(message, &msg); err != nil {
@@ -391,17 +325,15 @@ func (c *WSConnection) handleMessage(message []byte) {
 		return
 	}
 
-	switch msg.Type {
-	case "user:message":
-		// User is sending a message to the lead agent
-		if err := c.hub.manager.SendMessage(c.buildID, msg.Content); err != nil {
-			log.Printf("Failed to send message to lead agent: %v", err)
-		}
+	msgType := strings.ToLower(strings.TrimSpace(msg.Type))
+	command := strings.ToLower(strings.TrimSpace(stringValue(msg.Data["command"])))
+	content := firstNonEmpty(msg.Content, msg.Message, stringValue(msg.Data["content"]), stringValue(msg.Data["message"]))
+	clientToken := firstNonEmpty(msg.ClientToken, stringValue(msg.Data["client_token"]))
 
-	case "build:start":
-		// User wants to start the build
-		if err := c.hub.manager.StartBuild(c.buildID); err != nil {
-			log.Printf("Failed to start build: %v", err)
+	switch msgType {
+	case "user:message", "user_message":
+		if err := c.hub.manager.SendMessageWithClientToken(c.buildID, content, clientToken); err != nil {
+			log.Printf("Failed to send message to lead agent: %v", err)
 		}
 
 	case "build:cancel":
@@ -410,15 +342,52 @@ func (c *WSConnection) handleMessage(message []byte) {
 		}
 
 	case "build:rollback":
-		// User wants to rollback to a checkpoint
-		var rollbackMsg struct {
-			CheckpointID string `json:"checkpoint_id"`
-		}
-		if err := json.Unmarshal(message, &rollbackMsg); err == nil {
-			if err := c.hub.manager.RollbackToCheckpoint(c.buildID, rollbackMsg.CheckpointID); err != nil {
+		checkpointID := firstNonEmpty(msg.CheckpointID, stringValue(msg.Data["checkpoint_id"]))
+		if checkpointID != "" {
+			if err := c.hub.manager.RollbackToCheckpoint(c.buildID, checkpointID); err != nil {
 				log.Printf("Failed to rollback: %v", err)
 			}
 		}
+
+	case "pause", "build:pause":
+		if _, err := c.hub.manager.PauseBuild(c.buildID, "Paused from WebSocket command"); err != nil {
+			log.Printf("Failed to pause build %s: %v", c.buildID, err)
+		}
+
+	case "resume", "build:resume":
+		if _, err := c.hub.manager.ResumeBuild(c.buildID, "Resumed from WebSocket command"); err != nil {
+			log.Printf("Failed to resume build %s: %v", c.buildID, err)
+		}
+
+	case "command":
+		switch command {
+		case "pause":
+			if _, err := c.hub.manager.PauseBuild(c.buildID, "Paused from WebSocket command"); err != nil {
+				log.Printf("Failed to pause build %s: %v", c.buildID, err)
+			}
+		case "resume":
+			if _, err := c.hub.manager.ResumeBuild(c.buildID, "Resumed from WebSocket command"); err != nil {
+				log.Printf("Failed to resume build %s: %v", c.buildID, err)
+			}
+		case "cancel":
+			if err := c.hub.manager.CancelBuild(c.buildID); err != nil {
+				log.Printf("Failed to cancel build %s: %v", c.buildID, err)
+			}
+		case "rollback":
+			checkpointID := firstNonEmpty(msg.CheckpointID, stringValue(msg.Data["checkpoint_id"]))
+			if checkpointID != "" {
+				if err := c.hub.manager.RollbackToCheckpoint(c.buildID, checkpointID); err != nil {
+					log.Printf("Failed to rollback build %s: %v", c.buildID, err)
+				}
+			}
+		case "start":
+			log.Printf("Ignoring deprecated build:start websocket command for build %s", c.buildID)
+		default:
+			log.Printf("Unknown WebSocket command type: %s", command)
+		}
+
+	case "build:start":
+		log.Printf("Ignoring deprecated build:start websocket event for build %s", c.buildID)
 
 	default:
 		log.Printf("Unknown WebSocket message type: %s", msg.Type)
@@ -435,6 +404,7 @@ func (c *WSConnection) sendBuildState() {
 
 	build.mu.RLock()
 	defer build.mu.RUnlock()
+	interaction := copyBuildInteractionStateLocked(build)
 
 	// Convert agents map to a serializable format
 	agentsList := make([]map[string]any, 0, len(build.Agents))
@@ -519,6 +489,8 @@ func (c *WSConnection) sendBuildState() {
 			"updated_at":   build.UpdatedAt,
 			"completed_at": build.CompletedAt,
 			"error":        build.Error,
+			"messages":     interaction.Messages,
+			"interaction":  interaction,
 		},
 	}
 
@@ -552,4 +524,23 @@ func (h *WSHub) CloseAllConnections(buildID string) {
 		conn.closeSend()
 	}
 	delete(h.connections, buildID)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func stringValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return ""
+	}
 }

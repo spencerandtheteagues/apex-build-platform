@@ -237,7 +237,7 @@ func TestBilledCost_MultiModelTask(t *testing.T) {
 	calls := []call{
 		{"claude", "claude-opus-4-6", 5000, 3000},           // architect
 		{"gpt4", "gpt-5", 8000, 4000},                       // coder
-		{"gemini", "gemini-3-flash-preview", 10000, 5000},    // reviewer
+		{"gemini", "gemini-3-flash-preview", 10000, 5000},   // reviewer
 		{"grok", "grok-4-fast", 3000, 1000},                  // quick check
 	}
 

@@ -171,6 +171,109 @@ type GeneratedFile struct {
 	IsNew    bool   `json:"is_new"` // True if created, false if modified
 }
 
+type BuildConversationRole string
+
+const (
+	ConversationRoleUser   BuildConversationRole = "user"
+	ConversationRoleLead   BuildConversationRole = "lead"
+	ConversationRoleSystem BuildConversationRole = "system"
+)
+
+type BuildConversationKind string
+
+const (
+	ConversationKindMessage           BuildConversationKind = "message"
+	ConversationKindQuestion          BuildConversationKind = "question"
+	ConversationKindDirective         BuildConversationKind = "directive"
+	ConversationKindPermissionRequest BuildConversationKind = "permission_request"
+	ConversationKindPermissionUpdate  BuildConversationKind = "permission_update"
+)
+
+type BuildPermissionScope string
+
+const (
+	PermissionScopeProgram    BuildPermissionScope = "program"
+	PermissionScopeFilesystem BuildPermissionScope = "filesystem"
+	PermissionScopeNetwork    BuildPermissionScope = "network"
+	PermissionScopeService    BuildPermissionScope = "service"
+)
+
+type BuildPermissionDecision string
+
+const (
+	PermissionDecisionAsk   BuildPermissionDecision = "ask"
+	PermissionDecisionAllow BuildPermissionDecision = "allow"
+	PermissionDecisionDeny  BuildPermissionDecision = "deny"
+)
+
+type BuildPermissionMode string
+
+const (
+	PermissionModeOnce  BuildPermissionMode = "once"
+	PermissionModeBuild BuildPermissionMode = "build"
+)
+
+type BuildPermissionRequestStatus string
+
+const (
+	PermissionRequestPending BuildPermissionRequestStatus = "pending"
+	PermissionRequestAllowed BuildPermissionRequestStatus = "allowed"
+	PermissionRequestDenied  BuildPermissionRequestStatus = "denied"
+)
+
+type BuildConversationMessage struct {
+	ID               string                `json:"id"`
+	Role             BuildConversationRole `json:"role"`
+	Kind             BuildConversationKind `json:"kind"`
+	Content          string                `json:"content"`
+	AgentID          string                `json:"agent_id,omitempty"`
+	AgentRole        string                `json:"agent_role,omitempty"`
+	ClientToken      string                `json:"client_token,omitempty"`
+	RequiresResponse bool                  `json:"requires_response,omitempty"`
+	Blocking         bool                  `json:"blocking,omitempty"`
+	Timestamp        time.Time             `json:"timestamp"`
+	Status           string                `json:"status,omitempty"`
+}
+
+type BuildPermissionRule struct {
+	ID        string                  `json:"id"`
+	Scope     BuildPermissionScope    `json:"scope"`
+	Target    string                  `json:"target"`
+	Decision  BuildPermissionDecision `json:"decision"`
+	Mode      BuildPermissionMode     `json:"mode"`
+	Reason    string                  `json:"reason,omitempty"`
+	CreatedAt time.Time               `json:"created_at"`
+	UpdatedAt time.Time               `json:"updated_at"`
+}
+
+type BuildPermissionRequest struct {
+	ID             string                       `json:"id"`
+	Scope          BuildPermissionScope         `json:"scope"`
+	Target         string                       `json:"target"`
+	Reason         string                       `json:"reason"`
+	CommandPreview string                       `json:"command_preview,omitempty"`
+	RequestedByID  string                       `json:"requested_by_id,omitempty"`
+	RequestedByRole string                      `json:"requested_by_role,omitempty"`
+	Blocking       bool                         `json:"blocking,omitempty"`
+	Status         BuildPermissionRequestStatus `json:"status"`
+	Mode           BuildPermissionMode          `json:"mode,omitempty"`
+	ResolutionNote string                       `json:"resolution_note,omitempty"`
+	RequestedAt    time.Time                    `json:"requested_at"`
+	ResolvedAt     *time.Time                   `json:"resolved_at,omitempty"`
+}
+
+type BuildInteractionState struct {
+	Messages          []BuildConversationMessage `json:"messages,omitempty"`
+	SteeringNotes     []string                   `json:"steering_notes,omitempty"`
+	PendingQuestion   string                     `json:"pending_question,omitempty"`
+	WaitingForUser    bool                       `json:"waiting_for_user,omitempty"`
+	Paused            bool                       `json:"paused,omitempty"`
+	PauseReason       string                     `json:"pause_reason,omitempty"`
+	PermissionRules   []BuildPermissionRule      `json:"permission_rules,omitempty"`
+	PermissionRequests []BuildPermissionRequest  `json:"permission_requests,omitempty"`
+	AttentionRequired bool                       `json:"attention_required,omitempty"`
+}
+
 // Build represents an entire app-building session
 type Build struct {
 	ID                  string            `json:"id"`
@@ -198,6 +301,7 @@ type Build struct {
 	PhasedPipelineComplete    bool       `json:"phased_pipeline_complete,omitempty"`
 	DiffMode                  bool              `json:"diff_mode,omitempty"` // When true, changes require user review before applying
 	RoleAssignments           map[string]string `json:"role_assignments,omitempty"` // User-specified provider per role category
+	Interaction               BuildInteractionState `json:"interaction,omitempty"`
 	CreatedAt                 time.Time         `json:"created_at"`
 	UpdatedAt                 time.Time  `json:"updated_at"`
 	CompletedAt               *time.Time `json:"completed_at,omitempty"`
@@ -400,6 +504,11 @@ const (
 	WSAwaitingReview WSMessageType = "build:awaiting-review"
 	WSProtectedPath  WSMessageType = "agent:protected-path"
 	WSBuildRollback  WSMessageType = "build:rollback"
+	WSBuildInteraction       WSMessageType = "build:interaction"
+	WSBuildUserInputRequired WSMessageType = "build:user-input-required"
+	WSBuildUserInputResolved WSMessageType = "build:user-input-resolved"
+	WSBuildPermissionRequest WSMessageType = "build:permission-request"
+	WSBuildPermissionUpdate  WSMessageType = "build:permission-update"
 )
 
 // WSMessage is the structure for WebSocket messages

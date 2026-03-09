@@ -565,14 +565,14 @@ Press Ctrl+H (Cmd+H on Mac) to open Find and Replace within the current file.`,
         id: 'terminal',
         title: 'Terminal',
         tags: ['terminal', 'shell', 'command', 'npm', 'run', 'bash'],
-        content: `The Terminal (bottom panel) gives you a full command-line shell in your browser.
+        content: `The Terminal (bottom panel) gives you a project shell inside the APEX.BUILD runtime when that feature is enabled for your environment.
 
 **What you can do:**
 - Run your project: npm start, python app.py, go run main.go
 - Install packages: npm install, pip install, go get
 - Run tests: npm test, pytest, go test
 - Use git commands: git status, git commit
-- Run any shell command
+- Work inside the current project workspace
 
 **Controls:**
 - Click the Terminal tab in the bottom panel to open it
@@ -584,7 +584,8 @@ Press Ctrl+H (Cmd+H on Mac) to open Find and Replace within the current file.`,
 **Supported shells:** bash, sh, zsh
 
 **Tips:**
-- The terminal has full interactive support (it uses a real PTY)
+- Public or production deployments may disable browser terminal access entirely for security
+- When terminal access is disabled, use execution/deploy flows instead of expecting a fallback shell
 - You can resize the terminal by dragging the top edge
 - Multiple terminal sessions are supported`,
       },
@@ -891,7 +892,7 @@ Lists open PRs with title, state, author, and branch info.
 **Requirements:**
 - A GitHub account
 - A personal access token with repo permissions (for private repos)
-- Pro plan or higher (GitHub export is not available on the Free tier)`,
+- GitHub access for the repository you want to create or connect`,
       },
     ],
   },
@@ -1107,50 +1108,53 @@ Both are tracked separately in the history, so you can see every change regardle
       {
         id: 'plans',
         title: 'Subscription plans',
-        tags: ['plan', 'subscription', 'free', 'pro', 'team', 'enterprise', 'pricing'],
-        content: `APEX.BUILD offers four subscription tiers:
+        tags: ['plan', 'subscription', 'free', 'builder', 'pro', 'team', 'enterprise', 'pricing'],
+        content: `APEX.BUILD offers five subscription tiers:
 
 **Free — $0/month**
-- 500 AI requests/month (using platform keys)
+- BYOK only for managed AI access
 - 3 projects
-- 1 GB storage
-- 50 min/day code execution
+- 100 MB storage
+- 10 min/day code execution
 - 1 collaborator per project
-- BYOK: Available (use your own keys + routing fee)
+- No included managed AI credits
 
-**Pro — $12/month**
-- 5,000 AI requests/month
+**Builder — $19/month**
+- Entry paid plan for managed AI usage
 - Unlimited projects
-- 10 GB storage
-- 500 min/day execution
+- 5 GB storage
+- 240 min/day execution
 - 3 collaborators per project
 - GitHub export
-- Priority AI routing
-- 14-day free trial
+- Managed AI credits included
 
-**Team — $29/month**
-- 25,000 AI requests/month
+**Pro — $49/month**
+- Higher managed AI allowance with better throughput
 - Unlimited projects
-- 50 GB storage
-- 2,000 min/day execution
+- 20 GB storage
+- 720 min/day execution
 - Unlimited collaborators
-- Custom integrations
-- 14-day free trial
+- Priority AI routing
 
-**Enterprise — $79/month**
-- Unlimited AI requests
-- Unlimited everything
+**Team — $99/month**
+- Shared team workspace limits with larger managed AI allowance
+- Unlimited projects
+- 100 GB storage
+- 1,440 min/day execution
+- Team collaboration features
+
+**Enterprise — Contact sales**
+- Custom commercial terms and controls
 - SAML SSO
 - SCIM provisioning
 - RBAC (Role-Based Access Control)
 - Audit logging
 - 99.9% SLA
 - Dedicated support
-- 30-day free trial
 
-**Important:** BYOK (Bring Your Own Key) is available on ALL plans and does not count toward your monthly AI request limits, but it does include a small routing fee.
+**Important:** BYOK (Bring Your Own Key) is available on all plans. Free users rely on BYOK for AI generation, while paid plans add managed AI credits and higher platform limits.
 
-Annual billing saves 20%.`,
+See the in-app billing page for the current live allowance numbers and credit balance.`,
       },
       {
         id: 'credits',

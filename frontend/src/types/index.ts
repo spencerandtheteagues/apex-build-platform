@@ -14,7 +14,7 @@ export interface User {
   has_unlimited_credits?: boolean
   bypass_billing?: boolean
   credit_balance?: number
-  subscription_type: 'free' | 'pro' | 'team'
+  subscription_type: 'free' | 'builder' | 'pro' | 'team' | 'enterprise' | 'owner'
   subscription_end?: string
   monthly_ai_requests: number
   monthly_ai_cost: number
@@ -121,7 +121,7 @@ export interface ProviderUsage {
 export interface Execution {
   id: number
   execution_id: string
-  project_id: number
+  project_id?: number | null
   project?: Project
   user_id: number
   user?: User

@@ -124,6 +124,13 @@ type JWTClaims struct {
 	jwt.RegisteredClaims
 }
 
+// PreviewTokenClaims scopes access to preview proxy endpoints for a single project.
+type PreviewTokenClaims struct {
+	UserID    uint `json:"user_id"`
+	ProjectID uint `json:"project_id"`
+	jwt.RegisteredClaims
+}
+
 // TokenPair represents access and refresh tokens
 type TokenPair struct {
 	AccessToken           string    `json:"access_token"`
@@ -345,6 +352,65 @@ func (a *AuthService) ValidateToken(tokenString string) (*JWTClaims, error) {
 		return nil, ErrInvalidToken
 	}
 
+	return claims, nil
+}
+
+// GeneratePreviewToken creates a short-lived token scoped to preview access for a single project.
+func (a *AuthService) GeneratePreviewToken(userID, projectID uint, ttl time.Duration) (string, error) {
+	if userID == 0 || projectID == 0 {
+		return "", fmt.Errorf("preview token requires both user_id and project_id")
+	}
+	if ttl <= 0 {
+		ttl = time.Hour
+	}
+
+	now := time.Now()
+	claims := &PreviewTokenClaims{
+		UserID:    userID,
+		ProjectID: projectID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   fmt.Sprintf("preview:%d:%d", userID, projectID),
+			Audience:  jwt.ClaimStrings{"preview"},
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(a.jwtSecret)
+}
+
+// ValidatePreviewToken validates a preview-scoped JWT and optionally binds it to a project.
+func (a *AuthService) ValidatePreviewToken(tokenString string, projectID uint) (*PreviewTokenClaims, error) {
+	claims := &PreviewTokenClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return a.jwtSecret, nil
+	})
+	if err != nil {
+		return nil, ErrInvalidToken
+	}
+	if !token.Valid {
+		return nil, ErrInvalidToken
+	}
+	hasPreviewAudience := false
+	for _, audience := range claims.Audience {
+		if audience == "preview" {
+			hasPreviewAudience = true
+			break
+		}
+	}
+	if !hasPreviewAudience {
+		return nil, ErrInvalidToken
+	}
+	if projectID != 0 && claims.ProjectID != projectID {
+		return nil, ErrInvalidToken
+	}
+	if claims.UserID == 0 || claims.ProjectID == 0 {
+		return nil, ErrInvalidToken
+	}
 	return claims, nil
 }
 

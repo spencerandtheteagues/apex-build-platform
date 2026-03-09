@@ -512,7 +512,7 @@ export const SteampunkDashboard: React.FC<SteampunkDashboardProps> = ({ onNaviga
               </h3>
               {[
                 { name: 'Claude Opus', color: '#d97706', status: 'Ready' },
-                { name: 'GPT-4 Turbo', color: '#4ade80', status: 'Ready' },
+                { name: 'GPT-5', color: '#4ade80', status: 'Ready' },
                 { name: 'Gemini Pro', color: '#3b82f6', status: 'Ready' },
               ].map((ai) => (
                 <div

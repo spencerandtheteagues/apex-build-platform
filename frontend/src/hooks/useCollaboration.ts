@@ -2,7 +2,7 @@
 // Real-time multiplayer cursor and presence management
 
 import { useEffect, useCallback, useState, useRef } from 'react'
-import { collaborationService, UserPresence, CursorInfo, SelectionInfo } from '@/services/collaboration'
+import { collaborationService, UserPresence, CursorInfo, SelectionInfo, Operation } from '@/services/collaboration'
 import { useStore } from './useStore'
 
 export interface RemoteCursor {
@@ -28,6 +28,8 @@ export interface UseCollaborationOptions {
   onSelectionUpdate?: (cursor: RemoteCursor) => void
   onTypingStart?: (userId: number, username: string) => void
   onTypingStop?: (userId: number, username: string) => void
+  onOperation?: (fileId: number, operations: Operation[], version: number, userId: number) => void
+  onSyncResponse?: (fileId: number, content: string, version: number) => void
 }
 
 export function useCollaboration(options: UseCollaborationOptions = {}) {
@@ -42,6 +44,8 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
     onSelectionUpdate,
     onTypingStart,
     onTypingStop,
+    onOperation,
+    onSyncResponse,
   } = options
 
   const [isConnected, setIsConnected] = useState(false)
@@ -202,6 +206,14 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
       onTypingStop?.(userId, username)
     }
 
+    const handleOperationEvent = (targetFileId: number, operations: Operation[], version: number, sourceUserId: number) => {
+      onOperation?.(targetFileId, operations, version, sourceUserId)
+    }
+
+    const handleSyncResponseEvent = (targetFileId: number, content: string, version: number) => {
+      onSyncResponse?.(targetFileId, content, version)
+    }
+
     // Subscribe to events
     collaborationService.on('connected', handleConnected)
     collaborationService.on('disconnected', handleDisconnected)
@@ -212,6 +224,8 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
     collaborationService.on('selectionUpdate', handleSelectionUpdate)
     collaborationService.on('typingStart', handleTypingStartEvent)
     collaborationService.on('typingStop', handleTypingStopEvent)
+    collaborationService.on('operation', handleOperationEvent)
+    collaborationService.on('syncResponse', handleSyncResponseEvent)
 
     // Check if already connected
     setIsConnected(collaborationService.isConnected())
@@ -226,8 +240,10 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
       collaborationService.off('selectionUpdate', handleSelectionUpdate)
       collaborationService.off('typingStart', handleTypingStartEvent)
       collaborationService.off('typingStop', handleTypingStopEvent)
+      collaborationService.off('operation', handleOperationEvent)
+      collaborationService.off('syncResponse', handleSyncResponseEvent)
     }
-  }, [user?.id, onUserJoined, onUserLeft, onCursorUpdate, onSelectionUpdate, onTypingStart, onTypingStop, presenceToRemoteCursor])
+  }, [user?.id, onUserJoined, onUserLeft, onCursorUpdate, onSelectionUpdate, onTypingStart, onTypingStop, onOperation, onSyncResponse, presenceToRemoteCursor])
 
   // Join room when roomId/projectId changes
   useEffect(() => {
@@ -300,6 +316,14 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
     collaborationService.stopFollowing()
   }, [])
 
+  const sendOperation = useCallback((targetFileId: number, operations: Operation[]) => {
+    collaborationService.sendOperation(targetFileId, operations)
+  }, [])
+
+  const requestSync = useCallback((targetFileId: number) => {
+    collaborationService.requestSync(targetFileId)
+  }, [])
+
   // Get cursors for a specific file
   const getCursorsForFile = useCallback((targetFileId: number): RemoteCursor[] => {
     return Array.from(remoteCursors.values()).filter(c => c.fileId === targetFileId)
@@ -333,6 +357,8 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
     stopTyping,
     followUser,
     stopFollowing,
+    sendOperation,
+    requestSync,
     getCursorsForFile,
     getAllCursors,
   }

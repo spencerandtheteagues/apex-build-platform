@@ -89,6 +89,7 @@ type CollabClient struct {
 	email      string
 	avatarURL  string
 	roomID     string
+	projectID  uint
 	permission PermissionLevel
 	lastSeen   time.Time
 	mu         sync.RWMutex
@@ -123,6 +124,8 @@ type CollabHub struct {
 	clients         map[uint]*CollabClient
 	presenceManager *PresenceManager
 	otEngine        *OTEngine
+	accessResolver  AccessResolver
+	fileStore       FileStore
 	register        chan *CollabClient
 	unregister      chan *CollabClient
 	broadcast       chan *broadcastMsg
@@ -141,19 +144,33 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 4096,
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
+		if envOrigins := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS")); envOrigins != "" || strings.TrimSpace(os.Getenv("CORS_ORIGINS")) != "" {
+			if envOrigins == "" {
+				envOrigins = strings.TrimSpace(os.Getenv("CORS_ORIGINS"))
+			}
+			for _, allowed := range strings.Split(envOrigins, ",") {
+				if strings.TrimSpace(allowed) == origin {
+					return true
+				}
+			}
+			return origin == "" && os.Getenv("ENVIRONMENT") != "production"
+		}
+
 		allowedOrigins := []string{
 			"http://localhost:3000",
 			"http://localhost:5173",
 			"http://localhost:3001",
 			"http://127.0.0.1:3000",
 			"https://apex.build",
+			"https://www.apex.build",
+			"https://apex-frontend-gigq.onrender.com",
 		}
 		for _, allowed := range allowedOrigins {
 			if origin == allowed {
 				return true
 			}
 		}
-		return origin == ""
+		return origin == "" && os.Getenv("ENVIRONMENT") != "production"
 	},
 }
 
@@ -168,6 +185,18 @@ func NewCollabHub() *CollabHub {
 		unregister:      make(chan *CollabClient),
 		broadcast:       make(chan *broadcastMsg, 256),
 	}
+}
+
+func (h *CollabHub) SetAccessResolver(resolver AccessResolver) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.accessResolver = resolver
+}
+
+func (h *CollabHub) SetFileStore(store FileStore) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.fileStore = store
 }
 
 // Run starts the hub's main loop
@@ -230,6 +259,7 @@ func (h *CollabHub) addClientToRoom(client *CollabClient) {
 	if room == nil {
 		room = &RoomState{
 			RoomID:       client.roomID,
+			ProjectID:    client.projectID,
 			Clients:      make(map[uint]*CollabClient),
 			Documents:    make(map[uint]*Document),
 			ActivityFeed: NewActivityFeed(client.roomID, 100),
@@ -237,6 +267,8 @@ func (h *CollabHub) addClientToRoom(client *CollabClient) {
 			CreatedAt:    time.Now(),
 		}
 		h.rooms[client.roomID] = room
+	} else if room.ProjectID == 0 && client.projectID > 0 {
+		room.ProjectID = client.projectID
 	}
 
 	room.mu.Lock()
@@ -460,34 +492,11 @@ func (h *CollabHub) HandleWebSocket(c *gin.Context) {
 		c.Set("email", email)
 	}
 
-	// Get room info from query
-	roomID := c.Query("room_id")
-	projectIDStr := c.Query("project_id")
-	permissionStr := c.DefaultQuery("permission", "editor")
-
-	var projectID uint
-	if projectIDStr != "" {
-		if pid, err := strconv.ParseUint(projectIDStr, 10, 32); err == nil {
-			projectID = uint(pid)
-		}
-	}
-
 	// Upgrade connection
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)
 		return
-	}
-
-	// Parse permission
-	permission := PermissionEditor
-	switch permissionStr {
-	case "viewer":
-		permission = PermissionViewer
-	case "admin":
-		permission = PermissionAdmin
-	case "owner":
-		permission = PermissionOwner
 	}
 
 	// Create client
@@ -498,18 +507,8 @@ func (h *CollabHub) HandleWebSocket(c *gin.Context) {
 		userID:     userID,
 		username:   username,
 		email:      email,
-		roomID:     roomID,
-		permission: permission,
+		permission: PermissionViewer,
 		lastSeen:   time.Now(),
-	}
-
-	// Set project ID in room if needed
-	if roomID != "" && projectID > 0 {
-		h.mu.Lock()
-		if room := h.rooms[roomID]; room != nil {
-			room.ProjectID = projectID
-		}
-		h.mu.Unlock()
 	}
 
 	// Register client
@@ -671,6 +670,38 @@ func (c *CollabClient) handleJoinRoom(msg CollabMessage) {
 		return
 	}
 
+	if data.ProjectID == 0 {
+		projectID, err := ProjectIDFromRoomID(data.RoomID)
+		if err != nil {
+			c.sendError("Invalid collaboration room")
+			return
+		}
+		data.ProjectID = projectID
+	}
+
+	expectedRoomID := ProjectRoomID(data.ProjectID)
+	if data.RoomID == "" {
+		data.RoomID = expectedRoomID
+	}
+	if data.RoomID != expectedRoomID {
+		c.sendError("Room does not match project")
+		return
+	}
+
+	access, err := c.hub.resolveProjectAccess(c.userID, data.ProjectID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrProjectAccessDenied):
+			c.sendError("Access denied")
+		case errors.Is(err, ErrProjectNotFound):
+			c.sendError("Project not found")
+		default:
+			log.Printf("collaboration access check failed for user %d project %d: %v", c.userID, data.ProjectID, err)
+			c.sendError("Failed to authorize collaboration room")
+		}
+		return
+	}
+
 	// Leave current room if in one
 	if c.roomID != "" && c.roomID != data.RoomID {
 		c.hub.mu.Lock()
@@ -679,20 +710,29 @@ func (c *CollabClient) handleJoinRoom(msg CollabMessage) {
 	}
 
 	c.mu.Lock()
-	c.roomID = data.RoomID
+	c.roomID = access.RoomID
+	c.projectID = access.ProjectID
+	c.permission = access.Permission
 	c.mu.Unlock()
 
 	c.hub.mu.Lock()
 	c.hub.addClientToRoom(c)
+	if room := c.hub.rooms[access.RoomID]; room != nil {
+		room.ProjectID = access.ProjectID
+	}
 	c.hub.mu.Unlock()
 
 	// Send confirmation
 	c.send <- mustMarshal(&CollabMessage{
 		Type:      MsgRoomJoined,
-		RoomID:    data.RoomID,
+		RoomID:    access.RoomID,
 		UserID:    c.userID,
 		Timestamp: time.Now(),
-		Data:      mustMarshal(map[string]interface{}{"success": true}),
+		Data: mustMarshal(map[string]interface{}{
+			"success":    true,
+			"project_id": access.ProjectID,
+			"permission": access.Permission,
+		}),
 	})
 }
 
@@ -707,6 +747,7 @@ func (c *CollabClient) handleLeaveRoom(msg CollabMessage) {
 
 	c.mu.Lock()
 	c.roomID = ""
+	c.projectID = 0
 	c.mu.Unlock()
 
 	c.send <- mustMarshal(&CollabMessage{
@@ -875,6 +916,19 @@ func (c *CollabClient) handleOperation(msg CollabMessage) {
 	op.UserID = c.userID
 	op.Timestamp = time.Now()
 
+	if err := c.hub.ensureDocumentAccess(c.roomID, op.FileID); err != nil {
+		switch {
+		case errors.Is(err, ErrFileNotFound):
+			c.sendError("File not found")
+		case errors.Is(err, ErrProjectAccessDenied):
+			c.sendError("File does not belong to this room")
+		default:
+			log.Printf("collaboration document load failed for room %s file %d: %v", c.roomID, op.FileID, err)
+			c.sendError("Unable to load collaboration document")
+		}
+		return
+	}
+
 	// Apply operation with OT
 	doc, transformedOps, err := c.hub.otEngine.Apply(op)
 	if err != nil {
@@ -925,6 +979,19 @@ func (c *CollabClient) handleSyncRequest(msg CollabMessage) {
 	}
 	if err := json.Unmarshal(msg.Data, &data); err != nil {
 		c.sendError("Invalid sync request")
+		return
+	}
+
+	if err := c.hub.ensureDocumentAccess(c.roomID, data.FileID); err != nil {
+		switch {
+		case errors.Is(err, ErrFileNotFound):
+			c.sendError("File not found")
+		case errors.Is(err, ErrProjectAccessDenied):
+			c.sendError("File does not belong to this room")
+		default:
+			log.Printf("collaboration sync failed for room %s file %d: %v", c.roomID, data.FileID, err)
+			c.sendError("Unable to sync collaboration document")
+		}
 		return
 	}
 
@@ -1147,6 +1214,31 @@ func (h *CollabHub) GetOTEngine() *OTEngine {
 	return h.otEngine
 }
 
+func (h *CollabHub) GetRoomUsers(roomID string) []map[string]interface{} {
+	presences := h.presenceManager.GetRoomPresence(roomID)
+	users := make([]map[string]interface{}, 0, len(presences))
+	for _, presence := range presences {
+		if presence == nil {
+			continue
+		}
+		users = append(users, map[string]interface{}{
+			"id":            presence.UserID,
+			"user_id":       presence.UserID,
+			"username":      presence.Username,
+			"email":         presence.Email,
+			"avatar_url":    presence.AvatarURL,
+			"color":         presence.Color,
+			"permission":    presence.Permission,
+			"status":        presence.Status,
+			"file_id":       presence.FileID,
+			"file_name":     presence.FileName,
+			"is_typing":     presence.IsTyping,
+			"last_activity": presence.LastActivity,
+		})
+	}
+	return users
+}
+
 // GetRoomState returns the state for a room
 func (h *CollabHub) GetRoomState(roomID string) *RoomState {
 	h.mu.RLock()
@@ -1170,4 +1262,45 @@ func (h *CollabHub) GetChatHistory(roomID string) []ChatMessage {
 	result := make([]ChatMessage, len(room.ChatHistory))
 	copy(result, room.ChatHistory)
 	return result
+}
+
+func (h *CollabHub) resolveProjectAccess(userID, projectID uint) (*ProjectAccess, error) {
+	h.mu.RLock()
+	resolver := h.accessResolver
+	h.mu.RUnlock()
+
+	if resolver == nil {
+		return nil, errors.New("collaboration access resolver is not configured")
+	}
+
+	return resolver(userID, projectID)
+}
+
+func (h *CollabHub) ResolveProjectAccess(userID, projectID uint) (*ProjectAccess, error) {
+	return h.resolveProjectAccess(userID, projectID)
+}
+
+func (h *CollabHub) ensureDocumentAccess(roomID string, fileID uint) error {
+	h.mu.RLock()
+	store := h.fileStore
+	room := h.rooms[roomID]
+	h.mu.RUnlock()
+
+	if store == nil {
+		return errors.New("collaboration file store is not configured")
+	}
+	if room == nil || room.ProjectID == 0 {
+		return errors.New("collaboration room is not initialized")
+	}
+
+	projectID, content, err := store.LoadFile(fileID)
+	if err != nil {
+		return err
+	}
+	if projectID != room.ProjectID {
+		return ErrProjectAccessDenied
+	}
+
+	h.otEngine.GetDocument(fileID, content)
+	return nil
 }

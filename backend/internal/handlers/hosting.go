@@ -35,23 +35,23 @@ func NewHostingHandler(db *gorm.DB, service *hosting.HostingService) *HostingHan
 
 // StartDeploymentRequest represents the request to start a deployment
 type StartDeploymentRequest struct {
-	ProjectID      uint              `json:"project_id" binding:"required"`
-	Subdomain      string            `json:"subdomain,omitempty"`
-	Port           int               `json:"port"`
-	BuildCommand   string            `json:"build_command"`
-	StartCommand   string            `json:"start_command"`
-	InstallCommand string            `json:"install_command"`
-	Framework      string            `json:"framework"`
-	NodeVersion    string            `json:"node_version"`
-	PythonVersion  string            `json:"python_version"`
-	GoVersion      string            `json:"go_version"`
-	MemoryLimit    int64             `json:"memory_limit"`
-	CPULimit       int64             `json:"cpu_limit"`
-	HealthCheckPath string           `json:"health_check_path"`
-	AutoScale      bool              `json:"auto_scale"`
-	MinInstances   int               `json:"min_instances"`
-	MaxInstances   int               `json:"max_instances"`
-	EnvVars        map[string]string `json:"env_vars"`
+	ProjectID       uint              `json:"project_id" binding:"required"`
+	Subdomain       string            `json:"subdomain,omitempty"`
+	Port            int               `json:"port"`
+	BuildCommand    string            `json:"build_command"`
+	StartCommand    string            `json:"start_command"`
+	InstallCommand  string            `json:"install_command"`
+	Framework       string            `json:"framework"`
+	NodeVersion     string            `json:"node_version"`
+	PythonVersion   string            `json:"python_version"`
+	GoVersion       string            `json:"go_version"`
+	MemoryLimit     int64             `json:"memory_limit"`
+	CPULimit        int64             `json:"cpu_limit"`
+	HealthCheckPath string            `json:"health_check_path"`
+	AutoScale       bool              `json:"auto_scale"`
+	MinInstances    int               `json:"min_instances"`
+	MaxInstances    int               `json:"max_instances"`
+	EnvVars         map[string]string `json:"env_vars"`
 
 	// Always-On configuration (Replit parity feature)
 	AlwaysOn          bool `json:"always_on"`
@@ -145,9 +145,9 @@ func (h *HostingHandler) StartDeployment(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusAccepted, gin.H{
-		"success":      true,
-		"deployment":   deployment,
-		"message":      "Deployment started",
+		"success":       true,
+		"deployment":    deployment,
+		"message":       "Deployment started",
 		"websocket_url": "/ws/deploy/" + deployment.ID,
 	})
 }
@@ -734,30 +734,25 @@ func (h *HostingHandler) RedeployLatest(c *gin.Context) {
 // HandleDeploymentWebSocket handles WebSocket connection for deployment updates
 // GET /ws/deploy/:deploymentId
 func (h *HostingHandler) HandleDeploymentWebSocket(c *gin.Context) {
+	userID, err := websocketUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
 	deploymentID := c.Param("deploymentId")
+	deployment, err := h.service.GetDeployment(deploymentID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
+		return
+	}
+	if deployment.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
 
 	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool {
-			origin := r.Header.Get("Origin")
-			// Allow requests with no origin (same-origin requests)
-			if origin == "" {
-				return true
-			}
-			// Allow known development and production origins
-			allowedOrigins := []string{
-				"http://localhost:3000",
-				"http://localhost:5173",
-				"http://localhost:8080",
-				"https://apex.build",
-				"https://www.apex.build",
-			}
-			for _, allowed := range allowedOrigins {
-				if origin == allowed {
-					return true
-				}
-			}
-			return false
-		},
+		CheckOrigin: allowedWebSocketOrigin,
 	}
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -1562,7 +1557,6 @@ func generateVerificationToken() string {
 	rand.Read(b)
 	return "apex-verify-" + hex.EncodeToString(b)
 }
-
 
 // detectFramework detects the framework from project files
 func detectFramework(language, framework string, files []models.File) string {

@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -18,6 +19,19 @@ type GitHandler struct {
 	db             *gorm.DB
 	gitService     *git.GitService
 	secretsManager *secrets.SecretsManager
+}
+
+var errProjectAccessDenied = errors.New("project access denied")
+
+func (h *GitHandler) ensureProjectOwner(projectID, userID uint) (*models.Project, error) {
+	var project models.Project
+	if err := h.db.First(&project, projectID).Error; err != nil {
+		return nil, err
+	}
+	if project.OwnerID != userID {
+		return nil, errProjectAccessDenied
+	}
+	return &project, nil
 }
 
 // NewGitHandler creates a new git handler
@@ -105,10 +119,20 @@ func (h *GitHandler) ConnectRepository(c *gin.Context) {
 // GetRepository returns the repository configuration for a project
 // GET /api/v1/git/repo/:projectId
 func (h *GitHandler) GetRepository(c *gin.Context) {
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("projectId")
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	if _, err := h.ensureProjectOwner(uint(projectID), userID); err != nil {
+		if errors.Is(err, errProjectAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
 		return
 	}
 
@@ -132,6 +156,15 @@ func (h *GitHandler) GetBranches(c *gin.Context) {
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	if _, err := h.ensureProjectOwner(uint(projectID), userID); err != nil {
+		if errors.Is(err, errProjectAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
 		return
 	}
 
@@ -161,6 +194,15 @@ func (h *GitHandler) GetCommits(c *gin.Context) {
 		return
 	}
 
+	if _, err := h.ensureProjectOwner(uint(projectID), userID); err != nil {
+		if errors.Is(err, errProjectAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
 	branch := c.DefaultQuery("branch", "")
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	token := h.getGitToken(userID, uint(projectID))
@@ -181,10 +223,20 @@ func (h *GitHandler) GetCommits(c *gin.Context) {
 // GetStatus returns the working tree status
 // GET /api/v1/git/status/:projectId
 func (h *GitHandler) GetStatus(c *gin.Context) {
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("projectId")
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	if _, err := h.ensureProjectOwner(uint(projectID), userID); err != nil {
+		if errors.Is(err, errProjectAccessDenied) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
 		return
 	}
 
@@ -282,14 +334,15 @@ func (h *GitHandler) Push(c *gin.Context) {
 
 	token := h.getGitToken(userID, req.ProjectID)
 
-	if err := h.gitService.Push(c.Request.Context(), req.ProjectID, token); err != nil {
+	message, err := h.gitService.Push(c.Request.Context(), req.ProjectID, token)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Pushed successfully",
+		"message": message,
 	})
 }
 

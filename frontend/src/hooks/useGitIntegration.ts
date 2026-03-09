@@ -201,16 +201,7 @@ export function useGitIntegration(projectId: number | undefined): UseGitIntegrat
       const mappedChanges = buildChangesFromStatus(statusRes)
       setChanges(mappedChanges)
 
-      if (repo?.repository?.branch) {
-        setRemoteStatus({
-          ahead: 0,
-          behind: 0,
-          remote: 'origin',
-          branch: repo.repository.branch,
-        })
-      } else {
-        setRemoteStatus(null)
-      }
+      setRemoteStatus(null)
     } catch (err: any) {
       setError(err.response?.data?.error || err.message || 'Failed to refresh git data')
     } finally {

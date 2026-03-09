@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 
 	sandboxv2 "apex-build/internal/sandbox/v2"
+
+	"github.com/google/uuid"
 )
 
 // CodeExecutor defines the interface for code execution sandboxes
@@ -94,6 +97,10 @@ var (
 	globalFactory *SandboxFactory
 	factoryOnce   sync.Once
 )
+
+func generateExecutionID() string {
+	return uuid.New().String()
+}
 
 // GetSandboxFactory returns the global sandbox factory instance
 func GetSandboxFactory() *SandboxFactory {
@@ -246,11 +253,26 @@ func (f *SandboxFactory) GetExecutor(sandboxType SandboxType) (CodeExecutor, err
 
 // Execute runs code using the preferred sandbox
 func (f *SandboxFactory) Execute(ctx context.Context, language, code, stdin string) (*ExecutionResult, error) {
+	return f.ExecuteWithID(ctx, "", language, code, stdin)
+}
+
+// ExecuteWithID runs code using the preferred sandbox while preserving a caller-supplied execution ID.
+func (f *SandboxFactory) ExecuteWithID(ctx context.Context, execID, language, code, stdin string) (*ExecutionResult, error) {
 	executor, err := f.GetExecutor(SandboxTypeAuto)
 	if err != nil {
 		return nil, err
 	}
-	return executor.Execute(ctx, language, code, stdin)
+
+	switch typed := executor.(type) {
+	case *containerExecutorAdapter:
+		return typed.sandbox.ExecuteWithID(ctx, execID, language, code, stdin)
+	case *processExecutorAdapter:
+		return typed.sandbox.ExecuteWithID(ctx, execID, language, code, stdin)
+	case *sandboxV2ExecutorAdapter:
+		return typed.ExecuteWithID(ctx, execID, language, code, stdin)
+	default:
+		return executor.Execute(ctx, language, code, stdin)
+	}
 }
 
 // ExecuteSecure runs code using container sandbox only (fails if unavailable)
@@ -268,6 +290,15 @@ func (f *SandboxFactory) ExecuteWorkspaceCommand(
 	language, workspaceDir, command, stdin string,
 	env map[string]string,
 ) (*ExecutionResult, error) {
+	return f.ExecuteWorkspaceCommandWithID(ctx, "", language, workspaceDir, command, stdin, env)
+}
+
+// ExecuteWorkspaceCommandWithID runs a writable workspace command while preserving a caller-supplied execution ID.
+func (f *SandboxFactory) ExecuteWorkspaceCommandWithID(
+	ctx context.Context,
+	execID, language, workspaceDir, command, stdin string,
+	env map[string]string,
+) (*ExecutionResult, error) {
 	f.mu.RLock()
 	containerSandbox := f.containerSandbox
 	f.mu.RUnlock()
@@ -276,14 +307,74 @@ func (f *SandboxFactory) ExecuteWorkspaceCommand(
 		return nil, fmt.Errorf("container sandbox not available")
 	}
 
-	return containerSandbox.ExecuteWorkspaceCommand(ctx, language, workspaceDir, command, stdin, env)
+	return containerSandbox.ExecuteWorkspaceCommandWithID(ctx, execID, language, workspaceDir, command, stdin, env)
+}
+
+// ExecuteFileWithID runs a file using the preferred sandbox while preserving a caller-supplied execution ID.
+func (f *SandboxFactory) ExecuteFileWithID(ctx context.Context, execID, filepath string, args []string, stdin string) (*ExecutionResult, error) {
+	executor, err := f.GetExecutor(SandboxTypeAuto)
+	if err != nil {
+		return nil, err
+	}
+
+	switch typed := executor.(type) {
+	case *processExecutorAdapter:
+		return typed.sandbox.ExecuteFileWithID(ctx, execID, filepath, args, stdin)
+	case *sandboxV2ExecutorAdapter:
+		return typed.ExecuteFileWithID(ctx, execID, filepath, args, stdin)
+	case *containerExecutorAdapter:
+		return nil, fmt.Errorf("file execution not supported in container sandbox - use Execute with code content")
+	default:
+		return executor.ExecuteFile(ctx, filepath, args, stdin)
+	}
+}
+
+// Kill stops an execution across any active sandbox runtime.
+func (f *SandboxFactory) Kill(execID string) error {
+	if strings.TrimSpace(execID) == "" {
+		return fmt.Errorf("execution ID is required")
+	}
+
+	f.mu.RLock()
+	v2Sandbox := f.v2Sandbox
+	containerSandbox := f.containerSandbox
+	processSandbox := f.processSandbox
+	f.mu.RUnlock()
+
+	var errs []error
+	if v2Sandbox != nil {
+		if err := v2Sandbox.Kill(execID); err == nil {
+			return nil
+		} else {
+			errs = append(errs, err)
+		}
+	}
+	if containerSandbox != nil {
+		if err := containerSandbox.Kill(execID); err == nil {
+			return nil
+		} else {
+			errs = append(errs, err)
+		}
+	}
+	if processSandbox != nil {
+		if err := processSandbox.Kill(execID); err == nil {
+			return nil
+		} else {
+			errs = append(errs, err)
+		}
+	}
+
+	if len(errs) == 0 {
+		return fmt.Errorf("execution %s not found", execID)
+	}
+	return fmt.Errorf("execution %s not found in active sandboxes", execID)
 }
 
 // IsContainerAvailable returns whether container sandbox is available
 func (f *SandboxFactory) IsContainerAvailable() bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.containerSandbox != nil
+	return f.containerSandbox != nil || f.v2Sandbox != nil
 }
 
 // GetStats returns combined statistics from all sandboxes
@@ -292,7 +383,7 @@ func (f *SandboxFactory) GetStats() map[string]interface{} {
 	defer f.mu.RUnlock()
 
 	stats := map[string]interface{}{
-		"container_available":  f.containerSandbox != nil,
+		"container_available":  f.containerSandbox != nil || f.v2Sandbox != nil,
 		"sandbox_v2_available": f.v2Sandbox != nil,
 		"prefer_container":     f.preferContainer,
 		"prefer_v2":            f.preferV2,

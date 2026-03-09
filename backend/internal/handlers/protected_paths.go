@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"apex-build/pkg/models"
+
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -19,17 +21,42 @@ func NewProtectedPathsHandler(db *gorm.DB) *ProtectedPathsHandler {
 	return &ProtectedPathsHandler{db: db}
 }
 
-// GetProtectedPaths returns the protected paths for a project.
-// GET /projects/:id/protected-paths
-func (h *ProtectedPathsHandler) GetProtectedPaths(c *gin.Context) {
+func (h *ProtectedPathsHandler) loadOwnedProject(c *gin.Context) (*models.Project, bool) {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return nil, false
+	}
+
 	projectID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project ID"})
+		return nil, false
+	}
+
+	var project models.Project
+	if err := h.db.Select("id", "owner_id").First(&project, projectID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
+		return nil, false
+	}
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return nil, false
+	}
+
+	return &project, true
+}
+
+// GetProtectedPaths returns the protected paths for a project.
+// GET /projects/:id/protected-paths
+func (h *ProtectedPathsHandler) GetProtectedPaths(c *gin.Context) {
+	project, ok := h.loadOwnedProject(c)
+	if !ok {
 		return
 	}
 
 	var raw string
-	if err := h.db.Table("projects").Where("id = ?", projectID).Pluck("protected_paths", &raw).Error; err != nil {
+	if err := h.db.Table("projects").Where("id = ?", project.ID).Pluck("protected_paths", &raw).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "project not found"})
 		return
 	}
@@ -45,9 +72,8 @@ func (h *ProtectedPathsHandler) GetProtectedPaths(c *gin.Context) {
 // UpdateProtectedPaths sets the protected paths for a project.
 // PUT /projects/:id/protected-paths
 func (h *ProtectedPathsHandler) UpdateProtectedPaths(c *gin.Context) {
-	projectID, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project ID"})
+	project, ok := h.loadOwnedProject(c)
+	if !ok {
 		return
 	}
 
@@ -60,7 +86,7 @@ func (h *ProtectedPathsHandler) UpdateProtectedPaths(c *gin.Context) {
 	}
 
 	data, _ := json.Marshal(req.Paths)
-	if err := h.db.Table("projects").Where("id = ?", projectID).Update("protected_paths", string(data)).Error; err != nil {
+	if err := h.db.Table("projects").Where("id = ?", project.ID).Update("protected_paths", string(data)).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update protected paths"})
 		return
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	appconfig "apex-build/internal/config"
 	manageddb "apex-build/internal/database"
 	"apex-build/internal/git"
 	"apex-build/internal/hosting"
@@ -56,7 +57,7 @@ func NewDatabase(config *Config) (*Database, error) {
 		config.Host, config.Port, config.User, config.Password,
 		config.DBName, config.SSLMode, config.TimeZone,
 	)
-	
+
 	// Open PostgreSQL connection
 	db, err = gorm.Open(postgres.Open(dsn), gormConfig)
 
@@ -72,8 +73,8 @@ func NewDatabase(config *Config) (*Database, error) {
 
 	// Set connection pool settings
 	// PERFORMANCE: Increased pool for better throughput under load
-	sqlDB.SetMaxIdleConns(25)      // Up from 10 - better for burst traffic
-	sqlDB.SetMaxOpenConns(200)     // Up from 100 - supports 1000+ concurrent users
+	sqlDB.SetMaxIdleConns(25)  // Up from 10 - better for burst traffic
+	sqlDB.SetMaxOpenConns(200) // Up from 100 - supports 1000+ concurrent users
 	sqlDB.SetConnMaxLifetime(time.Hour)
 	sqlDB.SetConnMaxIdleTime(10 * time.Minute) // Close idle connections after 10min
 
@@ -82,7 +83,9 @@ func NewDatabase(config *Config) (*Database, error) {
 	// Check if we should use the new migration system or fall back to GORM AutoMigrate
 	// Set DISABLE_AUTO_MIGRATE=true to skip GORM AutoMigrate and use golang-migrate only
 	disableAutoMigrate := strings.ToLower(os.Getenv("DISABLE_AUTO_MIGRATE")) == "true"
-	useFileMigrations := strings.ToLower(os.Getenv("USE_FILE_MIGRATIONS")) == "true"
+	useFileMigrations := strings.ToLower(os.Getenv("USE_FILE_MIGRATIONS")) == "true" ||
+		appconfig.IsProductionEnvironment() ||
+		appconfig.IsStagingEnvironment()
 
 	if useFileMigrations {
 		// Use golang-migrate with SQL files (production-ready)
@@ -117,6 +120,9 @@ func (d *Database) RunFileMigrations(config *Config) error {
 	// Find migrations directory
 	migrationsPath := findMigrationsPath()
 	if migrationsPath == "" {
+		if appconfig.IsProductionEnvironment() || appconfig.IsStagingEnvironment() {
+			return fmt.Errorf("migrations directory not found")
+		}
 		log.Println("⚠️ Migrations directory not found, falling back to GORM AutoMigrate")
 		return d.Migrate()
 	}
@@ -132,6 +138,9 @@ func (d *Database) RunFileMigrations(config *Config) error {
 
 	runner, err := manageddb.NewMigrationRunner(migrationConfig)
 	if err != nil {
+		if appconfig.IsProductionEnvironment() || appconfig.IsStagingEnvironment() {
+			return fmt.Errorf("failed to create migration runner: %w", err)
+		}
 		log.Printf("⚠️ Failed to create migration runner: %v", err)
 		log.Println("⚠️ Falling back to GORM AutoMigrate")
 		return d.Migrate()
@@ -146,11 +155,6 @@ func (d *Database) RunFileMigrations(config *Config) error {
 	status, err := runner.GetVersion()
 	if err == nil {
 		log.Printf("✅ File migrations completed. Version: %d", status.Version)
-	}
-
-	// Seed admin user after migrations
-	if err := d.seedAdminUser(); err != nil {
-		log.Printf("⚠️ Admin user seeding: %v", err)
 	}
 
 	return nil
@@ -257,11 +261,6 @@ func (d *Database) Migrate() error {
 	}
 
 	log.Println("✅ Database migrations completed successfully")
-
-	// Seed admin user
-	if err := d.seedAdminUser(); err != nil {
-		log.Printf("⚠️ Admin user seeding: %v", err)
-	}
 
 	return nil
 }
@@ -418,15 +417,15 @@ func (d *Database) GetStats() map[string]interface{} {
 
 	stats := sqlDB.Stats()
 	return map[string]interface{}{
-		"max_open_connections":     stats.MaxOpenConnections,
-		"open_connections":         stats.OpenConnections,
-		"in_use":                  stats.InUse,
-		"idle":                    stats.Idle,
-		"wait_count":              stats.WaitCount,
-		"wait_duration_ms":        stats.WaitDuration.Milliseconds(),
-		"max_idle_closed":         stats.MaxIdleClosed,
-		"max_idle_time_closed":    stats.MaxIdleTimeClosed,
-		"max_lifetime_closed":     stats.MaxLifetimeClosed,
+		"max_open_connections": stats.MaxOpenConnections,
+		"open_connections":     stats.OpenConnections,
+		"in_use":               stats.InUse,
+		"idle":                 stats.Idle,
+		"wait_count":           stats.WaitCount,
+		"wait_duration_ms":     stats.WaitDuration.Milliseconds(),
+		"max_idle_closed":      stats.MaxIdleClosed,
+		"max_idle_time_closed": stats.MaxIdleTimeClosed,
+		"max_lifetime_closed":  stats.MaxLifetimeClosed,
 	}
 }
 
@@ -476,9 +475,9 @@ type AIRequestRepository interface {
 }
 
 type UsageStats struct {
-	TotalRequests int     `json:"total_requests"`
-	TotalCost     float64 `json:"total_cost"`
-	TotalTokens   int     `json:"total_tokens"`
+	TotalRequests int                       `json:"total_requests"`
+	TotalCost     float64                   `json:"total_cost"`
+	TotalTokens   int                       `json:"total_tokens"`
 	ByProvider    map[string]*ProviderStats `json:"by_provider"`
 }
 

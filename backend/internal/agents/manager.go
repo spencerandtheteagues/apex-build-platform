@@ -1461,6 +1461,16 @@ func (am *AgentManager) executeTask(task *Task) {
 	}
 	log.Printf("Found build %s for task execution", build.ID)
 
+	if err := am.waitForBuildInteractionClear(build); err != nil {
+		am.resultQueue <- &TaskResult{
+			TaskID:  task.ID,
+			AgentID: agent.ID,
+			Success: false,
+			Error:   err,
+		}
+		return
+	}
+
 	// Apply retry strategy if this is a retry attempt
 	if task.RetryCount > 0 {
 		strategy := string(task.RetryStrategy)
@@ -4218,6 +4228,10 @@ func (am *AgentManager) updateBuildProgress(build *Build) {
 // checkBuildCompletion determines if the build is finished
 func (am *AgentManager) checkBuildCompletion(build *Build) {
 	build.mu.RLock()
+	if build.Interaction.Paused || build.Interaction.WaitingForUser {
+		build.mu.RUnlock()
+		return
+	}
 	allComplete := true
 	anyFailed := false
 	for _, task := range build.Tasks {
@@ -4688,6 +4702,10 @@ func (am *AgentManager) persistBuildSnapshot(build *Build, files []GeneratedFile
 			techStackJSON = string(b)
 		}
 	}
+	interactionJSON := ""
+	if b, err := json.Marshal(copyBuildInteractionStateLocked(build)); err == nil {
+		interactionJSON = string(b)
+	}
 
 	if files == nil {
 		files = am.collectGeneratedFiles(build)
@@ -4711,21 +4729,22 @@ func (am *AgentManager) persistBuildSnapshot(build *Build, files []GeneratedFile
 	}
 
 	snapshot := &models.CompletedBuild{
-		BuildID:     build.ID,
-		UserID:      build.UserID,
-		ProjectID:   build.ProjectID,
-		ProjectName: projectName,
-		Description: build.Description,
-		Status:      string(build.Status),
-		Mode:        string(build.Mode),
-		PowerMode:   string(build.PowerMode),
-		TechStack:   techStackJSON,
-		FilesJSON:   filesJSON,
-		FilesCount:  len(files),
-		Progress:    build.Progress,
-		DurationMs:  durationMs,
-		Error:       build.Error,
-		CompletedAt: build.CompletedAt,
+		BuildID:         build.ID,
+		UserID:          build.UserID,
+		ProjectID:       build.ProjectID,
+		ProjectName:     projectName,
+		Description:     build.Description,
+		Status:          string(build.Status),
+		Mode:            string(build.Mode),
+		PowerMode:       string(build.PowerMode),
+		TechStack:       techStackJSON,
+		FilesJSON:       filesJSON,
+		InteractionJSON: interactionJSON,
+		FilesCount:      len(files),
+		Progress:        build.Progress,
+		DurationMs:      durationMs,
+		Error:           build.Error,
+		CompletedAt:     build.CompletedAt,
 	}
 	build.mu.RUnlock()
 
@@ -4738,22 +4757,23 @@ func (am *AgentManager) persistBuildSnapshot(build *Build, files []GeneratedFile
 	err := am.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "build_id"}},
 		DoUpdates: clause.Assignments(map[string]any{
-			"user_id":      snapshot.UserID,
-			"project_id":   snapshot.ProjectID,
-			"project_name": snapshot.ProjectName,
-			"description":  snapshot.Description,
-			"status":       snapshot.Status,
-			"mode":         snapshot.Mode,
-			"power_mode":   snapshot.PowerMode,
-			"tech_stack":   snapshot.TechStack,
-			"files_json":   snapshot.FilesJSON,
-			"files_count":  snapshot.FilesCount,
-			"total_cost":   snapshot.TotalCost,
-			"progress":     snapshot.Progress,
-			"duration_ms":  snapshot.DurationMs,
-			"error":        snapshot.Error,
-			"completed_at": snapshot.CompletedAt,
-			"updated_at":   now,
+			"user_id":          snapshot.UserID,
+			"project_id":       snapshot.ProjectID,
+			"project_name":     snapshot.ProjectName,
+			"description":      snapshot.Description,
+			"status":           snapshot.Status,
+			"mode":             snapshot.Mode,
+			"power_mode":       snapshot.PowerMode,
+			"tech_stack":       snapshot.TechStack,
+			"files_json":       snapshot.FilesJSON,
+			"interaction_json": snapshot.InteractionJSON,
+			"files_count":      snapshot.FilesCount,
+			"total_cost":       snapshot.TotalCost,
+			"progress":         snapshot.Progress,
+			"duration_ms":      snapshot.DurationMs,
+			"error":            snapshot.Error,
+			"completed_at":     snapshot.CompletedAt,
+			"updated_at":       now,
 		}),
 	}).Create(snapshot).Error
 
@@ -5523,6 +5543,7 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 
 			build.mu.RLock()
 			buildFailed := build.Status == BuildFailed
+			buildBlocked := build.Interaction.Paused || build.Interaction.WaitingForUser
 			for _, id := range taskIDs {
 				for _, t := range build.Tasks {
 					if t.ID == id {
@@ -5540,6 +5561,9 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 
 			if buildFailed {
 				return false
+			}
+			if buildBlocked {
+				continue
 			}
 			if allDone {
 				return true
@@ -5572,14 +5596,25 @@ func (am *AgentManager) GetAgent(agentID string) (*Agent, error) {
 	return agent, nil
 }
 
-// SendMessage sends a user message to the build's lead agent
+// SendMessage sends a user message to the build's lead agent.
 func (am *AgentManager) SendMessage(buildID string, message string) error {
+	return am.SendMessageWithClientToken(buildID, message, "")
+}
+
+// SendMessageWithClientToken sends a user message to the build's lead agent and preserves
+// a caller-provided client token so the frontend can reconcile optimistic sends.
+func (am *AgentManager) SendMessageWithClientToken(buildID string, message string, clientToken string) error {
 	am.mu.RLock()
 	build, exists := am.builds[buildID]
 	am.mu.RUnlock()
 
 	if !exists {
 		return fmt.Errorf("build %s not found", buildID)
+	}
+
+	trimmedMessage := strings.TrimSpace(message)
+	if trimmedMessage == "" {
+		return fmt.Errorf("message cannot be empty")
 	}
 
 	// Find the lead agent
@@ -5597,18 +5632,43 @@ func (am *AgentManager) SendMessage(buildID string, message string) error {
 		return fmt.Errorf("no lead agent found for build %s", buildID)
 	}
 
-	// Broadcast user message
+	now := time.Now().UTC()
+	build.mu.Lock()
+	userMessage := appendBuildConversationMessageLocked(build, BuildConversationMessage{
+		Role:        ConversationRoleUser,
+		Kind:        ConversationKindMessage,
+		Content:     trimmedMessage,
+		ClientToken: strings.TrimSpace(clientToken),
+		Timestamp:   now,
+	})
+	waitingForLeadResponse := build.Interaction.WaitingForUser
+	if build.Interaction.WaitingForUser {
+		build.Interaction.PendingQuestion = ""
+	}
+	build.UpdatedAt = now
+	resolveWaitingStateLocked(build)
+	if waitingForLeadResponse {
+		build.Interaction.WaitingForUser = true
+		refreshInteractionAttentionLocked(build)
+	}
+	interaction := copyBuildInteractionStateLocked(build)
+	build.mu.Unlock()
+
+	am.persistBuildSnapshot(build, nil)
 	am.broadcast(buildID, &WSMessage{
 		Type:      WSUserMessage,
 		BuildID:   buildID,
-		Timestamp: time.Now(),
+		Timestamp: now,
 		Data: map[string]any{
-			"content": message,
+			"content":     trimmedMessage,
+			"message":     userMessage,
+			"interaction": interaction,
 		},
 	})
+	am.broadcastInteractionUpdate(buildID, interaction)
 
 	// Process message with lead agent
-	go am.processUserMessage(leadAgent, message)
+	go am.processUserMessage(leadAgent, trimmedMessage)
 
 	return nil
 }
@@ -5627,7 +5687,63 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 		return
 	}
 
-	prompt := fmt.Sprintf("User message: %s\n\nRespond helpfully and briefly.", message)
+	build.mu.RLock()
+	currentStatus := build.Status
+	currentProgress := build.Progress
+	currentPhase := "building"
+	switch build.Status {
+	case BuildPlanning:
+		currentPhase = "planning"
+	case BuildTesting:
+		currentPhase = "testing"
+	case BuildReviewing:
+		currentPhase = "review"
+	case BuildAwaitingReview:
+		currentPhase = "awaiting_review"
+	case BuildCompleted:
+		currentPhase = "completed"
+	case BuildFailed:
+		currentPhase = "failed"
+	}
+	interactionContext := buildInteractionPromptContext(build)
+	build.mu.RUnlock()
+
+	prompt := fmt.Sprintf(`You are processing a live user intervention for build %s.
+
+Current build status: %s
+Current build phase: %s
+Current build progress: %d%%
+
+User message:
+%s
+
+%s
+
+Return JSON only with this schema:
+{
+  "reply": "short response to show the user",
+  "apply_changes": true,
+  "requires_user_response": false,
+  "question": "",
+  "pause_build": false,
+  "resume_build": false,
+  "steering_updates": ["short directive for the build team"],
+  "permission_requests": [
+    {
+      "scope": "program|filesystem|network|service",
+      "target": "docker",
+      "reason": "why local access is needed",
+      "command_preview": "docker compose up",
+      "blocking": true
+    }
+  ]
+}
+
+Rules:
+- Set apply_changes=true when the user is asking for a product/code change and enough information exists.
+- If you need clarification or the user must complete an action, set requires_user_response=true and fill question.
+- Only request permissions for local machine tools/services when genuinely needed.
+- Be concise and operational.`, build.ID, currentStatus, currentPhase, currentProgress, message, interactionContext)
 
 	// Pre-authorize spend before calling AI — catches about-to-exceed budgets
 	// using a conservative per-request estimate rather than 0.
@@ -5681,18 +5797,149 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 		content = "No response returned."
 	}
 
+	plan := parseLeadMessagePlan(content)
+	reply := strings.TrimSpace(plan.Reply)
+	if reply == "" {
+		reply = content
+	}
+
+	now := time.Now().UTC()
+	var permissionRequests []BuildPermissionRequest
+	var interaction BuildInteractionState
+	var enqueueRevision bool
+	var enqueueRevisionRequest string
+
+	build.mu.Lock()
+	if plan.ResumeBuild {
+		build.Interaction.Paused = false
+		build.Interaction.PauseReason = ""
+	}
+	if plan.PauseBuild {
+		build.Interaction.Paused = true
+		build.Interaction.PauseReason = "Paused by lead agent after user intervention"
+	}
+
+	for _, steering := range plan.SteeringUpdates {
+		appendSteeringNoteLocked(build, steering)
+	}
+	if plan.ApplyChanges && len(plan.SteeringUpdates) == 0 {
+		appendSteeringNoteLocked(build, fmt.Sprintf("Latest user request: %s", message))
+	}
+
+	if plan.RequiresUserResponse {
+		build.Interaction.PendingQuestion = strings.TrimSpace(plan.Question)
+		build.Interaction.WaitingForUser = strings.TrimSpace(plan.Question) != ""
+	}
+
+	for _, req := range plan.PermissionRequests {
+		if created, ok := recordPermissionRequestLocked(build, req, agent); ok {
+			permissionRequests = append(permissionRequests, created)
+		}
+	}
+
+	leadMessage := appendBuildConversationMessageLocked(build, BuildConversationMessage{
+		Role:             ConversationRoleLead,
+		Kind:             ConversationKindMessage,
+		Content:          reply,
+		AgentID:          agent.ID,
+		AgentRole:        string(agent.Role),
+		RequiresResponse: plan.RequiresUserResponse,
+		Blocking:         plan.RequiresUserResponse || hasPendingBlockingPermissionRequestLocked(build),
+		Timestamp:        now,
+	})
+	_ = leadMessage
+
+	if plan.RequiresUserResponse && strings.TrimSpace(plan.Question) != "" {
+		appendBuildConversationMessageLocked(build, BuildConversationMessage{
+			Role:             ConversationRoleLead,
+			Kind:             ConversationKindQuestion,
+			Content:          strings.TrimSpace(plan.Question),
+			AgentID:          agent.ID,
+			AgentRole:        string(agent.Role),
+			RequiresResponse: true,
+			Blocking:         true,
+			Timestamp:        now,
+		})
+	}
+
+	build.UpdatedAt = now
+	resolveWaitingStateLocked(build)
+	interaction = copyBuildInteractionStateLocked(build)
+	if plan.ApplyChanges && !plan.RequiresUserResponse && !hasPendingBlockingPermissionRequestLocked(build) &&
+		(currentStatus == BuildCompleted || currentStatus == BuildFailed || currentStatus == BuildAwaitingReview) {
+		enqueueRevision = true
+		enqueueRevisionRequest = message
+	}
+	build.mu.Unlock()
+
+	am.persistBuildSnapshot(build, nil)
+
 	// Broadcast lead response
 	am.broadcast(agent.BuildID, &WSMessage{
 		Type:      WSLeadResponse,
 		BuildID:   agent.BuildID,
 		AgentID:   agent.ID,
-		Timestamp: time.Now(),
+		Timestamp: now,
 		Data: map[string]any{
-			"content":  content,
-			"provider": agent.Provider,
-			"model":    agent.Model,
+			"content":           reply,
+			"provider":          agent.Provider,
+			"model":             agent.Model,
+			"requires_response": plan.RequiresUserResponse,
+			"question":          strings.TrimSpace(plan.Question),
+			"interaction":       interaction,
 		},
 	})
+	if plan.RequiresUserResponse && strings.TrimSpace(plan.Question) != "" {
+		am.broadcast(agent.BuildID, &WSMessage{
+			Type:      WSBuildUserInputRequired,
+			BuildID:   agent.BuildID,
+			AgentID:   agent.ID,
+			Timestamp: now,
+			Data: map[string]any{
+				"question":    strings.TrimSpace(plan.Question),
+				"interaction": interaction,
+			},
+		})
+	}
+	for _, req := range permissionRequests {
+		am.broadcast(agent.BuildID, &WSMessage{
+			Type:      WSBuildPermissionRequest,
+			BuildID:   agent.BuildID,
+			AgentID:   agent.ID,
+			Timestamp: now,
+			Data: map[string]any{
+				"request":     req,
+				"interaction": interaction,
+			},
+		})
+	}
+	am.broadcastInteractionUpdate(agent.BuildID, interaction)
+	if !interaction.WaitingForUser {
+		am.broadcast(agent.BuildID, &WSMessage{
+			Type:      WSBuildUserInputResolved,
+			BuildID:   agent.BuildID,
+			AgentID:   agent.ID,
+			Timestamp: now,
+			Data: map[string]any{
+				"interaction": interaction,
+			},
+		})
+	}
+	if enqueueRevision {
+		if err := am.enqueueUserRevisionTask(build, enqueueRevisionRequest); err != nil {
+			log.Printf("Failed to enqueue revision task for build %s: %v", build.ID, err)
+			am.broadcast(agent.BuildID, &WSMessage{
+				Type:      "message:error",
+				BuildID:   agent.BuildID,
+				AgentID:   agent.ID,
+				Timestamp: time.Now().UTC(),
+				Data: map[string]any{
+					"error":   err.Error(),
+					"message": "I captured your requested changes, but I could not schedule the follow-up task automatically.",
+				},
+			})
+		}
+	}
 }
 
 // defaultBuildLimits returns guardrails based on build mode and environment overrides.
@@ -6249,6 +6496,13 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 		}
 	}
 
+	interactionContext := ""
+	if build != nil {
+		if ctx := buildInteractionPromptContext(build); ctx != "" {
+			interactionContext = "\n" + ctx + "\n"
+		}
+	}
+
 	deliveryConstraintsContext := ""
 	if build != nil && am.isLocalDevStrictPreviewBuild(build) {
 		switch task.Type {
@@ -6281,6 +6535,7 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 Description: %s
 
 App being built: %s
+%s
 %s
 %s
 %s
@@ -6334,7 +6589,7 @@ FORBIDDEN OUTPUTS:
 - Mixing frontend and backend code in the same file: NEVER put Express/server imports in a .tsx/.jsx React component file; NEVER put React JSX in a backend Go/Python/Express file
 
 Build the REAL, COMPLETE implementation now.`,
-		task.Type, task.Description, appDescription, techStackContext, errorContext, repairHintsContext, agentContext, assetsContext, teamCoordinationContext, deliveryConstraintsContext)
+		task.Type, task.Description, appDescription, techStackContext, errorContext, repairHintsContext, agentContext, assetsContext, teamCoordinationContext, interactionContext, deliveryConstraintsContext)
 }
 
 func formatTechStackSummary(stack *TechStack) string {

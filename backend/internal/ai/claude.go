@@ -109,8 +109,8 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		}, err
 	}
 
-	// Calculate cost (approximate based on Claude pricing)
-	cost := c.calculateCost(resp.Usage.InputTokens, resp.Usage.OutputTokens)
+	// Calculate cost based on actual model used
+	cost := c.calculateCost(resp.Usage.InputTokens, resp.Usage.OutputTokens, model)
 
 	// Update usage statistics
 	c.updateUsage(resp.Usage.InputTokens+resp.Usage.OutputTokens, cost, time.Since(startTime))
@@ -302,16 +302,21 @@ func (c *ClaudeClient) getMaxTokens(req *AIRequest) int {
 	}
 }
 
-// calculateCost estimates cost based on Claude pricing
-func (c *ClaudeClient) calculateCost(inputTokens, outputTokens int) float64 {
-	// Claude 3.5 Sonnet pricing (as of 2024)
-	inputCostPer1K := 0.003  // $0.003 per 1K input tokens
-	outputCostPer1K := 0.015 // $0.015 per 1K output tokens
-
-	inputCost := float64(inputTokens) / 1000.0 * inputCostPer1K
-	outputCost := float64(outputTokens) / 1000.0 * outputCostPer1K
-
-	return inputCost + outputCost
+// calculateCost estimates raw API cost based on Claude pricing.
+// Must stay in sync with pricing.go model table.
+func (c *ClaudeClient) calculateCost(inputTokens, outputTokens int, model string) float64 {
+	var inputPer1M, outputPer1M float64
+	switch model {
+	case "claude-opus-4-6":
+		inputPer1M, outputPer1M = 15.00, 75.00
+	case "claude-sonnet-4-5-20250929":
+		inputPer1M, outputPer1M = 3.00, 15.00
+	case "claude-haiku-4-5-20251001":
+		inputPer1M, outputPer1M = 0.25, 1.25
+	default:
+		inputPer1M, outputPer1M = 3.00, 15.00 // default to Sonnet pricing
+	}
+	return float64(inputTokens)/1_000_000.0*inputPer1M + float64(outputTokens)/1_000_000.0*outputPer1M
 }
 
 // updateUsage updates internal usage statistics (thread-safe)

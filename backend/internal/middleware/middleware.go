@@ -215,7 +215,10 @@ func CORS() gin.HandlerFunc {
 
 		// Build allowed origins list from env var or defaults
 		var allowedOrigins []string
-		if envOrigins := os.Getenv("CORS_ALLOWED_ORIGINS"); envOrigins != "" {
+		if envOrigins := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS")); envOrigins != "" || strings.TrimSpace(os.Getenv("CORS_ORIGINS")) != "" {
+			if envOrigins == "" {
+				envOrigins = strings.TrimSpace(os.Getenv("CORS_ORIGINS"))
+			}
 			for _, o := range strings.Split(envOrigins, ",") {
 				allowedOrigins = append(allowedOrigins, strings.TrimSpace(o))
 			}
@@ -225,6 +228,7 @@ func CORS() gin.HandlerFunc {
 				"http://localhost:5173",
 				"http://127.0.0.1:3000",
 				"https://apex.build",
+				"https://www.apex.build",
 				"https://apex-build.web.app",
 				"https://apex-build.firebaseapp.com",
 				"https://apex-frontend-gigq.onrender.com",

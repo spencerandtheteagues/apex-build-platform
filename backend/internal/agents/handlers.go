@@ -318,6 +318,7 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		if strings.TrimSpace(errorMessage) == "" && build.Status == BuildFailed {
 			errorMessage = latestFailedTaskErrorLocked(build)
 		}
+		interaction := copyBuildInteractionStateLocked(build)
 
 		c.JSON(http.StatusOK, gin.H{
 			"id":                    build.ID,
@@ -335,6 +336,7 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 			"updated_at":            build.UpdatedAt,
 			"completed_at":          build.CompletedAt,
 			"error":                 errorMessage,
+			"interaction":           interaction,
 			"live":                  true,
 		})
 		return
@@ -374,6 +376,7 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		"completed_at":           snapshot.CompletedAt,
 		"error":                  snapshot.Error,
 		"files_count":            snapshot.FilesCount,
+		"interaction":            parseBuildInteraction(snapshot.InteractionJSON),
 		"live":                   false,
 		"restored_from_snapshot": true,
 	})
@@ -429,6 +432,7 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 		for _, agent := range build.Agents {
 			agents = append(agents, agent)
 		}
+		interaction := copyBuildInteractionStateLocked(build)
 
 		c.JSON(http.StatusOK, gin.H{
 			"id":                    build.ID,
@@ -450,6 +454,8 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 			"completed_at":          build.CompletedAt,
 			"error":                 build.Error,
 			"files":                 h.manager.collectGeneratedFiles(build),
+			"messages":              interaction.Messages,
+			"interaction":           interaction,
 			"live":                  true,
 		})
 		return
@@ -465,6 +471,7 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 	}
 
 	files, _ := parseBuildFiles(snapshot.FilesJSON)
+	interaction := parseBuildInteraction(snapshot.InteractionJSON)
 
 	c.JSON(http.StatusOK, gin.H{
 		"id":                     snapshot.BuildID,
@@ -483,6 +490,8 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 		"completed_at":           snapshot.CompletedAt,
 		"error":                  snapshot.Error,
 		"files":                  files,
+		"messages":               interaction.Messages,
+		"interaction":            interaction,
 		"live":                   false,
 		"restored_from_snapshot": true,
 	})
@@ -511,7 +520,8 @@ func (h *BuildHandler) SendMessage(c *gin.Context) {
 
 	// Parse message
 	var req struct {
-		Content string `json:"content" binding:"required"`
+		Content     string `json:"content" binding:"required"`
+		ClientToken string `json:"client_token"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -522,7 +532,7 @@ func (h *BuildHandler) SendMessage(c *gin.Context) {
 	}
 
 	// Send message to lead agent
-	if err := h.manager.SendMessage(buildID, req.Content); err != nil {
+	if err := h.manager.SendMessageWithClientToken(buildID, req.Content, req.ClientToken); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "failed to send message",
 			"details": err.Error(),
@@ -533,6 +543,272 @@ func (h *BuildHandler) SendMessage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "sent",
 		"message": "Message sent to lead agent",
+	})
+}
+
+// GetMessages returns the persisted build conversation.
+// GET /api/v1/build/:id/messages
+func (h *BuildHandler) GetMessages(c *gin.Context) {
+	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	if build, err := h.manager.GetBuild(buildID); err == nil {
+		if uid != build.UserID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+		build.mu.RLock()
+		interaction := copyBuildInteractionStateLocked(build)
+		build.mu.RUnlock()
+		c.JSON(http.StatusOK, gin.H{
+			"messages":    interaction.Messages,
+			"interaction": interaction,
+			"live":        true,
+		})
+		return
+	}
+
+	snapshot, err := h.getBuildSnapshot(uid, buildID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		return
+	}
+
+	interaction := parseBuildInteraction(snapshot.InteractionJSON)
+	c.JSON(http.StatusOK, gin.H{
+		"messages":    interaction.Messages,
+		"interaction": interaction,
+		"live":        false,
+	})
+}
+
+// GetPermissions returns the local resource permission state for a build.
+// GET /api/v1/build/:id/permissions
+func (h *BuildHandler) GetPermissions(c *gin.Context) {
+	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	if build, err := h.manager.GetBuild(buildID); err == nil {
+		if uid != build.UserID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+
+		interaction, interactionErr := h.manager.GetBuildInteraction(buildID)
+		if interactionErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load permissions"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"interaction": interaction,
+			"rules":       interaction.PermissionRules,
+			"requests":    interaction.PermissionRequests,
+			"live":        true,
+		})
+		return
+	}
+
+	snapshot, err := h.getBuildSnapshot(uid, buildID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		return
+	}
+
+	interaction := parseBuildInteraction(snapshot.InteractionJSON)
+	c.JSON(http.StatusOK, gin.H{
+		"interaction": interaction,
+		"rules":       interaction.PermissionRules,
+		"requests":    interaction.PermissionRequests,
+		"live":        false,
+	})
+}
+
+// SetPermissionRule stores a pre-approved or denied local permission for the build.
+// POST /api/v1/build/:id/permissions/rules
+func (h *BuildHandler) SetPermissionRule(c *gin.Context) {
+	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	build, err := h.manager.GetBuild(buildID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		return
+	}
+	if uid != build.UserID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	var req struct {
+		Scope    string `json:"scope" binding:"required"`
+		Target   string `json:"target" binding:"required"`
+		Decision string `json:"decision"`
+		Mode     string `json:"mode"`
+		Reason   string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	interaction, rule, err := h.manager.SetPermissionRule(
+		buildID,
+		normalizePermissionScope(req.Scope),
+		req.Target,
+		normalizePermissionDecision(req.Decision),
+		normalizePermissionMode(req.Mode),
+		req.Reason,
+	)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"rule":        rule,
+		"interaction": interaction,
+	})
+}
+
+// ResolvePermissionRequest approves or denies a pending local resource request.
+// POST /api/v1/build/:id/permissions/requests/:requestId/resolve
+func (h *BuildHandler) ResolvePermissionRequest(c *gin.Context) {
+	buildID := c.Param("id")
+	requestID := c.Param("requestId")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	build, err := h.manager.GetBuild(buildID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		return
+	}
+	if uid != build.UserID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	var req struct {
+		Decision string `json:"decision" binding:"required"`
+		Mode     string `json:"mode"`
+		Note     string `json:"note"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	interaction, resolved, err := h.manager.ResolvePermissionRequest(
+		buildID,
+		requestID,
+		normalizePermissionDecision(req.Decision),
+		normalizePermissionMode(req.Mode),
+		req.Note,
+	)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"request":     resolved,
+		"interaction": interaction,
+	})
+}
+
+// PauseBuild pauses an active build between phases or queued tasks.
+// POST /api/v1/build/:id/pause
+func (h *BuildHandler) PauseBuild(c *gin.Context) {
+	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	build, err := h.manager.GetBuild(buildID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		return
+	}
+	if uid != build.UserID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	interaction, err := h.manager.PauseBuild(buildID, req.Reason)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":      "paused",
+		"interaction": interaction,
+	})
+}
+
+// ResumeBuild resumes a paused build.
+// POST /api/v1/build/:id/resume
+func (h *BuildHandler) ResumeBuild(c *gin.Context) {
+	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
+
+	build, err := h.manager.GetBuild(buildID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		return
+	}
+	if uid != build.UserID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	interaction, err := h.manager.ResumeBuild(buildID, req.Reason)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":      "resumed",
+		"interaction": interaction,
 	})
 }
 
@@ -1094,6 +1370,7 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 
 	// Parse stored files JSON
 	files, _ := parseBuildFiles(build.FilesJSON)
+	interaction := parseBuildInteraction(build.InteractionJSON)
 
 	var techStack any
 	if build.TechStack != "" {
@@ -1115,6 +1392,8 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 		"power_mode":   build.PowerMode,
 		"tech_stack":   techStack,
 		"files":        files,
+		"messages":     interaction.Messages,
+		"interaction":  interaction,
 		"files_count":  build.FilesCount,
 		"total_cost":   build.TotalCost,
 		"progress":     build.Progress,
@@ -1219,6 +1498,17 @@ func parseBuildFiles(filesJSON string) ([]GeneratedFile, error) {
 	return files, nil
 }
 
+func parseBuildInteraction(raw string) BuildInteractionState {
+	if strings.TrimSpace(raw) == "" {
+		return BuildInteractionState{}
+	}
+	var interaction BuildInteractionState
+	if err := json.Unmarshal([]byte(raw), &interaction); err != nil {
+		return BuildInteractionState{}
+	}
+	return interaction
+}
+
 func (h *BuildHandler) loadArtifactManifestForUser(userID uint, buildID string) (BuildArtifactManifest, bool, error) {
 	if build, err := h.manager.GetBuild(buildID); err == nil {
 		if userID != build.UserID {
@@ -1260,7 +1550,7 @@ func (h *BuildHandler) loadArtifactManifestForUser(userID uint, buildID string) 
 
 func isActiveBuildStatus(status string) bool {
 	switch status {
-	case string(BuildPending), string(BuildPlanning), string(BuildInProgress), string(BuildTesting), string(BuildReviewing):
+	case string(BuildPending), string(BuildPlanning), string(BuildInProgress), string(BuildTesting), string(BuildReviewing), string(BuildAwaitingReview):
 		return true
 	default:
 		return false
@@ -1470,6 +1760,12 @@ func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		build.GET("/:id", h.GetBuildDetails)
 		build.GET("/:id/status", h.GetBuildStatus)
 		build.POST("/:id/message", h.SendMessage)
+		build.GET("/:id/messages", h.GetMessages)
+		build.GET("/:id/permissions", h.GetPermissions)
+		build.POST("/:id/permissions/rules", h.SetPermissionRule)
+		build.POST("/:id/permissions/requests/:requestId/resolve", h.ResolvePermissionRequest)
+		build.POST("/:id/pause", h.PauseBuild)
+		build.POST("/:id/resume", h.ResumeBuild)
 		build.GET("/:id/checkpoints", h.GetCheckpoints)
 		build.POST("/:id/rollback/:checkpointId", h.RollbackCheckpoint)
 		build.GET("/:id/agents", h.GetAgents)

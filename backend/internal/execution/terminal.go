@@ -5,15 +5,19 @@ package execution
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
+	"apex-build/internal/auth"
+	appconfig "apex-build/internal/config"
 	terminalmux "apex-build/internal/terminal"
 
 	"github.com/creack/pty"
@@ -50,12 +54,14 @@ type TerminalSession struct {
 
 // TerminalManager manages terminal sessions
 type TerminalManager struct {
-	sessions    map[string]*TerminalSession
-	sessionsMu  sync.RWMutex
-	upgrader    websocket.Upgrader
-	maxSessions int
-	sessionTTL  time.Duration
-	Multiplexer *terminalmux.Multiplexer
+	sessions      map[string]*TerminalSession
+	sessionsMu    sync.RWMutex
+	upgrader      websocket.Upgrader
+	maxSessions   int
+	sessionTTL    time.Duration
+	enabled       bool
+	disableReason string
+	Multiplexer   *terminalmux.Multiplexer
 }
 
 // TerminalMessage represents a message between client and terminal
@@ -81,11 +87,14 @@ const (
 
 // NewTerminalManager creates a new terminal manager
 func NewTerminalManager() *TerminalManager {
+	enabled, disableReason := terminalFeatureState()
 	return &TerminalManager{
-		sessions:    make(map[string]*TerminalSession),
-		maxSessions: 100,
-		sessionTTL:  30 * time.Minute,
-		Multiplexer: terminalmux.NewMultiplexer(),
+		sessions:      make(map[string]*TerminalSession),
+		maxSessions:   100,
+		sessionTTL:    30 * time.Minute,
+		enabled:       enabled,
+		disableReason: disableReason,
+		Multiplexer:   terminalmux.NewMultiplexer(),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -106,6 +115,39 @@ func NewTerminalManager() *TerminalManager {
 			},
 		},
 	}
+}
+
+func terminalFeatureState() (bool, string) {
+	if raw, exists := os.LookupEnv("APEX_ENABLE_HOST_TERMINAL"); exists {
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "1", "true", "yes", "on":
+			return true, ""
+		default:
+			return false, "Interactive host terminals are disabled by APEX_ENABLE_HOST_TERMINAL."
+		}
+	}
+
+	if appconfig.IsProductionEnvironment() || appconfig.IsStagingEnvironment() {
+		return false, "Interactive host terminals are disabled on public deployments until a sandboxed terminal is implemented."
+	}
+
+	return false, "Interactive host terminals are disabled by default. Set APEX_ENABLE_HOST_TERMINAL=true only in trusted local development."
+}
+
+// IsEnabled reports whether interactive host terminals are available.
+func (tm *TerminalManager) IsEnabled() bool {
+	return tm != nil && tm.enabled
+}
+
+// DisabledReason returns the current terminal disable reason.
+func (tm *TerminalManager) DisabledReason() string {
+	if tm == nil {
+		return "Interactive terminals are unavailable."
+	}
+	if tm.disableReason != "" {
+		return tm.disableReason
+	}
+	return "Interactive terminals are unavailable."
 }
 
 // TerminalCreateOptions contains options for creating a terminal session
@@ -181,6 +223,10 @@ func (tm *TerminalManager) CreateSession(projectID, userID uint, workDir string)
 
 // CreateSessionWithOptions creates a new terminal session with custom options
 func (tm *TerminalManager) CreateSessionWithOptions(opts TerminalCreateOptions) (*TerminalSession, error) {
+	if !tm.IsEnabled() {
+		return nil, errors.New(tm.DisabledReason())
+	}
+
 	tm.sessionsMu.Lock()
 	defer tm.sessionsMu.Unlock()
 
@@ -448,6 +494,11 @@ func (ts *TerminalSession) GetHistory() []string {
 
 // HandleWebSocket handles WebSocket connection for a terminal session
 func (tm *TerminalManager) HandleWebSocket(c *gin.Context) {
+	if !tm.IsEnabled() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": tm.DisabledReason()})
+		return
+	}
+
 	sessionID := c.Param("sessionId")
 	if sessionID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session ID required"})
@@ -458,6 +509,16 @@ func (tm *TerminalManager) HandleWebSocket(c *gin.Context) {
 	session, exists := tm.GetSession(sessionID)
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	userID, err := terminalWebSocketUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+	if userID != session.UserID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
 		return
 	}
 
@@ -492,6 +553,39 @@ func (tm *TerminalManager) HandleWebSocket(c *gin.Context) {
 
 	// Handle incoming WebSocket messages
 	tm.handleWebSocketMessages(session, ws)
+}
+
+func terminalWebSocketUserID(c *gin.Context) (uint, error) {
+	if userIDValue, exists := c.Get("user_id"); exists {
+		if userID, ok := userIDValue.(uint); ok {
+			return userID, nil
+		}
+	}
+
+	token := strings.TrimSpace(c.Query("token"))
+	if token == "" {
+		return 0, errors.New("authentication required")
+	}
+
+	claims, err := validateTerminalWebSocketToken(token)
+	if err != nil {
+		return 0, errors.New("invalid or expired token")
+	}
+
+	return claims.UserID, nil
+}
+
+func validateTerminalWebSocketToken(tokenString string) (*auth.JWTClaims, error) {
+	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if secret == "" {
+		return nil, errors.New("JWT_SECRET not configured")
+	}
+
+	claims, err := auth.NewAuthService(secret).ValidateToken(tokenString)
+	if err != nil {
+		return nil, err
+	}
+	return claims, nil
 }
 
 // readFromPTY reads output from PTY and sends to WebSocket
@@ -600,8 +694,40 @@ func NewTerminalHandler(manager *TerminalManager) *TerminalHandler {
 	return &TerminalHandler{manager: manager}
 }
 
+func (h *TerminalHandler) getOwnedSession(c *gin.Context) (*TerminalSession, bool) {
+	userIDValue, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		return nil, false
+	}
+
+	userID, ok := userIDValue.(uint)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
+		return nil, false
+	}
+
+	sessionID := c.Param("id")
+	session, exists := h.manager.GetSession(sessionID)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return nil, false
+	}
+	if session.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return nil, false
+	}
+
+	return session, true
+}
+
 // CreateSessionHandler handles POST /api/v1/terminal/sessions
 func (h *TerminalHandler) CreateSessionHandler(c *gin.Context) {
+	if !h.manager.IsEnabled() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": h.manager.DisabledReason()})
+		return
+	}
+
 	userID, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
@@ -656,6 +782,11 @@ func (h *TerminalHandler) CreateSessionHandler(c *gin.Context) {
 
 // GetAvailableShellsHandler handles GET /api/v1/terminal/shells
 func (h *TerminalHandler) GetAvailableShellsHandler(c *gin.Context) {
+	if !h.manager.IsEnabled() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": h.manager.DisabledReason()})
+		return
+	}
+
 	shells := GetAvailableShells()
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -667,11 +798,8 @@ func (h *TerminalHandler) GetAvailableShellsHandler(c *gin.Context) {
 
 // GetSessionHandler handles GET /api/v1/terminal/sessions/:id
 func (h *TerminalHandler) GetSessionHandler(c *gin.Context) {
-	sessionID := c.Param("id")
-
-	session, exists := h.manager.GetSession(sessionID)
-	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+	session, ok := h.getOwnedSession(c)
+	if !ok {
 		return
 	}
 
@@ -736,9 +864,12 @@ func (h *TerminalHandler) ListSessionsHandler(c *gin.Context) {
 
 // DeleteSessionHandler handles DELETE /api/v1/terminal/sessions/:id
 func (h *TerminalHandler) DeleteSessionHandler(c *gin.Context) {
-	sessionID := c.Param("id")
+	session, ok := h.getOwnedSession(c)
+	if !ok {
+		return
+	}
 
-	if err := h.manager.DestroySession(sessionID); err != nil {
+	if err := h.manager.DestroySession(session.ID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
@@ -751,8 +882,6 @@ func (h *TerminalHandler) DeleteSessionHandler(c *gin.Context) {
 
 // ResizeSessionHandler handles POST /api/v1/terminal/sessions/:id/resize
 func (h *TerminalHandler) ResizeSessionHandler(c *gin.Context) {
-	sessionID := c.Param("id")
-
 	var req struct {
 		Rows uint16 `json:"rows" binding:"required"`
 		Cols uint16 `json:"cols" binding:"required"`
@@ -763,9 +892,8 @@ func (h *TerminalHandler) ResizeSessionHandler(c *gin.Context) {
 		return
 	}
 
-	session, exists := h.manager.GetSession(sessionID)
-	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+	session, ok := h.getOwnedSession(c)
+	if !ok {
 		return
 	}
 
@@ -782,11 +910,8 @@ func (h *TerminalHandler) ResizeSessionHandler(c *gin.Context) {
 
 // GetHistoryHandler handles GET /api/v1/terminal/sessions/:id/history
 func (h *TerminalHandler) GetHistoryHandler(c *gin.Context) {
-	sessionID := c.Param("id")
-
-	session, exists := h.manager.GetSession(sessionID)
-	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+	session, ok := h.getOwnedSession(c)
+	if !ok {
 		return
 	}
 

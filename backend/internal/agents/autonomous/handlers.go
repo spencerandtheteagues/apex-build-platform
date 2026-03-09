@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	sharedhandlers "apex-build/internal/handlers"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
@@ -55,7 +57,7 @@ func (h *Handler) StartTask(c *gin.Context) {
 	// Validate description length
 	if len(req.Description) < 10 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "description too short",
+			"error":   "description too short",
 			"details": "Please provide a more detailed description of what you want to build",
 		})
 		return
@@ -405,9 +407,7 @@ func (h *Handler) GetTaskArtifacts(c *gin.Context) {
 var wsUpgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins in development
-	},
+	CheckOrigin:     sharedhandlers.AllowedWebSocketOrigin,
 }
 
 // HandleWebSocket handles WebSocket connections for real-time task updates
@@ -424,20 +424,15 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	// Get user ID from query param (WebSocket can't use headers easily)
-	// In production, implement proper JWT validation
-	var uid uint
-	if userID, exists := c.Get("user_id"); exists {
-		uid = userID.(uint)
-	} else if tokenStr := c.Query("token"); tokenStr != "" {
-		// Validate token and extract user ID
-		// This would use the same JWT validation as auth middleware
-		// For now, we'll skip validation in development
-		log.Printf("WebSocket: Token provided but validation skipped in development")
+	uid, err := sharedhandlers.WebSocketUserID(c)
+	if err != nil {
+		log.Printf("Autonomous WebSocket rejected for task %s: %v", taskID, err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
 	}
 
-	// Verify ownership (if we have a user ID)
-	if uid != 0 && task.UserID != uid {
+	// Verify ownership
+	if task.UserID != uid {
 		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
 		return
 	}
@@ -451,6 +446,12 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 	defer conn.Close()
 
 	log.Printf("WebSocket connection established for task %s", taskID)
+	conn.SetReadLimit(512 * 1024)
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
 
 	// Create update channel
 	updateChan := make(chan *WSUpdate, 100)
@@ -465,6 +466,7 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 		Timestamp: time.Now(),
 		Data: map[string]interface{}{
 			"state":       task.State,
+			"paused_from": task.PausedFrom,
 			"progress":    task.Progress,
 			"description": task.Description,
 			"plan":        task.Plan,
@@ -510,11 +512,17 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 			if err := json.Unmarshal(message, &cmd); err == nil {
 				switch cmd.Type {
 				case "pause":
-					h.agent.PauseTask(taskID)
+					if err := h.agent.PauseTask(taskID); err != nil {
+						log.Printf("Failed to pause autonomous task %s: %v", taskID, err)
+					}
 				case "resume":
-					h.agent.ResumeTask(taskID)
+					if err := h.agent.ResumeTask(taskID); err != nil {
+						log.Printf("Failed to resume autonomous task %s: %v", taskID, err)
+					}
 				case "stop":
-					h.agent.StopTask(taskID)
+					if err := h.agent.StopTask(taskID); err != nil {
+						log.Printf("Failed to stop autonomous task %s: %v", taskID, err)
+					}
 				case "ping":
 					// Respond with pong
 					pong := map[string]interface{}{

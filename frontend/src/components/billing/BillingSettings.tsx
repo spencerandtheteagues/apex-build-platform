@@ -35,6 +35,24 @@ interface Invoice {
   description: string
 }
 
+const isPlaceholderPriceID = (priceID: string): boolean => {
+  const normalized = priceID.trim()
+  if (!normalized) {
+    return true
+  }
+
+  return new Set([
+    'price_builder_monthly',
+    'price_builder_annual',
+    'price_pro_monthly',
+    'price_pro_annual',
+    'price_team_monthly',
+    'price_team_annual',
+    'price_enterprise_monthly',
+    'price_enterprise_annual',
+  ]).has(normalized)
+}
+
 export function BillingSettings() {
   const [plans, setPlans] = useState<Plan[]>([])
   const [subscription, setSubscription] = useState<Subscription | null>(null)
@@ -46,6 +64,7 @@ export function BillingSettings() {
   const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null)
   const [portalLoading, setPortalLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<{ tone: 'success' | 'info'; message: string } | null>(null)
   const [showBuyCredits, setShowBuyCredits] = useState(false)
 
   const load = useCallback(async () => {
@@ -87,9 +106,36 @@ export function BillingSettings() {
 
   useEffect(() => { load() }, [load])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const url = new URL(window.location.href)
+    const params = url.searchParams
+
+    if (params.get('success') === 'true') {
+      setNotice({ tone: 'success', message: 'Checkout completed. Billing status will update as soon as Stripe confirms the payment.' })
+    } else if (params.get('canceled') === 'true') {
+      setNotice({ tone: 'info', message: 'Checkout was canceled. No changes were made to your subscription.' })
+    } else if (params.get('credits') === 'success') {
+      setNotice({ tone: 'success', message: 'Credit purchase completed. Your balance will refresh as soon as the payment is confirmed.' })
+    } else if (params.get('credits') === 'canceled') {
+      setNotice({ tone: 'info', message: 'Credit purchase was canceled. No charges were made.' })
+    } else {
+      return
+    }
+
+    params.delete('success')
+    params.delete('canceled')
+    params.delete('credits')
+    params.delete('billing')
+
+    const nextSearch = params.toString()
+    const nextUrl = `${url.pathname}${nextSearch ? `?${nextSearch}` : ''}${url.hash}`
+    window.history.replaceState({}, '', nextUrl)
+  }, [])
+
   const handleUpgrade = async (plan: Plan) => {
-    if (!plan.monthly_price_id || plan.monthly_price_id.startsWith('price_') && !plan.monthly_price_id.includes('_test_')) {
-      // price IDs not configured — open portal or show info
+    if (!plan.monthly_price_id || isPlaceholderPriceID(plan.monthly_price_id)) {
       setError('Stripe is not configured in this environment. Set STRIPE_PRICE_* environment variables.')
       return
     }
@@ -98,8 +144,6 @@ export function BillingSettings() {
     try {
       const result = await apiService.createCheckoutSession({
         price_id: plan.monthly_price_id,
-        success_url: window.location.href + '?billing=success',
-        cancel_url: window.location.href + '?billing=cancel',
       })
       if (result.success && result.data?.checkout_url) {
         window.location.href = result.data.checkout_url
@@ -149,6 +193,24 @@ export function BillingSettings() {
 
   return (
     <div className="space-y-6">
+      {notice && (
+        <div className={cn(
+          'flex items-start gap-3 p-3 rounded-lg border text-sm',
+          notice.tone === 'success'
+            ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+            : 'bg-blue-500/10 border-blue-500/25 text-blue-300'
+        )}>
+          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <span>{notice.message}</span>
+          <button
+            onClick={() => setNotice(null)}
+            className="ml-auto opacity-70 hover:opacity-100"
+            aria-label="Dismiss billing notice"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="flex items-start gap-3 p-3 bg-red-500/10 border border-red-500/25 rounded-lg text-sm text-red-400">

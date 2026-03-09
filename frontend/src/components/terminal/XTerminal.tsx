@@ -268,9 +268,8 @@ export const XTerminal = forwardRef<XTerminalRef, XTerminalProps>(({
         const message = err instanceof Error ? err.message : 'Failed to connect';
         setConnectionError(message);
         terminal.writeln(`\r\n\x1b[31mConnection failed: ${message}\x1b[0m`);
-        terminal.writeln('\x1b[33mTrying local terminal emulation...\x1b[0m');
-        terminal.writeln('');
-        terminal.writeln('\x1b[32mapex@build\x1b[0m:\x1b[34m~\x1b[0m$ ');
+        terminal.writeln('\x1b[33mBrowser terminal access is unavailable for this project or deployment.\x1b[0m');
+        terminal.writeln('\x1b[33mUse the run, preview, or deploy flows instead of an interactive fallback shell.\x1b[0m');
       }
     };
 

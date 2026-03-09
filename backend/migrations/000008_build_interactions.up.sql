@@ -1,0 +1,2 @@
+ALTER TABLE IF EXISTS completed_builds
+    ADD COLUMN IF NOT EXISTS interaction_json TEXT NOT NULL DEFAULT '';

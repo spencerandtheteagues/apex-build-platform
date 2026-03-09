@@ -22,6 +22,7 @@ import (
 
 	"apex-build/internal/execution"
 	"apex-build/internal/middleware"
+	"apex-build/internal/usage"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -85,6 +86,7 @@ type ExecutionHandler struct {
 	// ContainerRequired indicates whether container sandbox is required
 	// When true, execution will fail if Docker is unavailable
 	ContainerRequired bool
+	UsageTracker      *usage.Tracker
 }
 
 // ExecutionHandlerConfig configures the execution handler
@@ -215,6 +217,20 @@ func NewExecutionHandlerWithConfig(db *gorm.DB, config *ExecutionHandlerConfig) 
 	}, nil
 }
 
+func (h *ExecutionHandler) SetUsageTracker(tracker *usage.Tracker) {
+	h.UsageTracker = tracker
+}
+
+func (h *ExecutionHandler) recordExecutionUsage(ctx context.Context, userID uint, projectID *uint, durationMs int64) {
+	if h.UsageTracker == nil {
+		return
+	}
+
+	if err := h.UsageTracker.RecordExecution(ctx, userID, projectID, durationMs); err != nil {
+		log.Printf("usage tracker: failed to record execution usage for user %d: %v", userID, err)
+	}
+}
+
 // ExecuteCodeRequest represents a code execution request
 type ExecuteCodeRequest struct {
 	Code      string            `json:"code" binding:"required"`
@@ -291,35 +307,14 @@ func (h *ExecutionHandler) ExecuteCode(c *gin.Context) {
 		return
 	}
 
-	// Get the appropriate executor from factory (prefers container sandbox)
-	// SECURITY: Container sandbox is always preferred when available
-	var executor execution.CodeExecutor
-	var err error
-
-	if h.ContainerRequired {
-		// SECURITY: In production, require container sandbox
-		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeContainer)
-		if err != nil {
-			markExecutionFailed(h.DB, execRecord, "Secure container execution is required but unavailable")
-			c.JSON(http.StatusServiceUnavailable, StandardResponse{
-				Success: false,
-				Error:   "Secure container execution is required but unavailable",
-				Code:    "CONTAINER_REQUIRED",
-			})
-			return
-		}
-	} else {
-		// Use auto mode which prefers container but falls back to process
-		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeAuto)
-		if err != nil {
-			markExecutionFailed(h.DB, execRecord, "Failed to get execution sandbox: "+err.Error())
-			c.JSON(http.StatusInternalServerError, StandardResponse{
-				Success: false,
-				Error:   "Failed to get execution sandbox: " + err.Error(),
-				Code:    "SANDBOX_ERROR",
-			})
-			return
-		}
+	if h.ContainerRequired && !h.SandboxFactory.IsContainerAvailable() {
+		markExecutionFailed(h.DB, execRecord, "Secure container execution is required but unavailable")
+		c.JSON(http.StatusServiceUnavailable, StandardResponse{
+			Success: false,
+			Error:   "Secure container execution is required but unavailable",
+			Code:    "CONTAINER_REQUIRED",
+		})
+		return
 	}
 
 	// Create execution context with timeout
@@ -331,7 +326,7 @@ func (h *ExecutionHandler) ExecuteCode(c *gin.Context) {
 	defer cancel()
 
 	// Execute code using the secure sandbox
-	result, err := executor.Execute(ctx, req.Language, req.Code, req.Stdin)
+	result, err := h.SandboxFactory.ExecuteWithID(ctx, execRecord.ExecutionID, req.Language, req.Code, req.Stdin)
 	if err != nil {
 		markExecutionFailed(h.DB, execRecord, "Execution failed: "+err.Error())
 		c.JSON(http.StatusInternalServerError, StandardResponse{
@@ -358,6 +353,8 @@ func (h *ExecutionHandler) ExecuteCode(c *gin.Context) {
 		// Log error but don't fail the request
 		log.Printf("Failed to update execution record: %v", err)
 	}
+
+	h.recordExecutionUsage(c.Request.Context(), userID, execRecord.ProjectID, result.DurationMs)
 
 	// Include sandbox info in response for transparency
 	sandboxInfo := "container"
@@ -495,37 +492,16 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 		log.Printf("Failed to create execution record: %v", err)
 	}
 
-	// Get executor from factory
-	// SECURITY: For file execution, we need to read file content and use container sandbox
-	var executor execution.CodeExecutor
-	var err error
-
-	if h.ContainerRequired {
-		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeContainer)
-		if err != nil {
-			if execRecord.ID > 0 {
-				markExecutionFailed(h.DB, execRecord, "Secure container execution is required but unavailable")
-			}
-			c.JSON(http.StatusServiceUnavailable, StandardResponse{
-				Success: false,
-				Error:   "Secure container execution is required but unavailable",
-				Code:    "CONTAINER_REQUIRED",
-			})
-			return
+	if h.ContainerRequired && !h.SandboxFactory.IsContainerAvailable() {
+		if execRecord.ID > 0 {
+			markExecutionFailed(h.DB, execRecord, "Secure container execution is required but unavailable")
 		}
-	} else {
-		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeAuto)
-		if err != nil {
-			if execRecord.ID > 0 {
-				markExecutionFailed(h.DB, execRecord, "Failed to get execution sandbox")
-			}
-			c.JSON(http.StatusInternalServerError, StandardResponse{
-				Success: false,
-				Error:   "Failed to get execution sandbox",
-				Code:    "SANDBOX_ERROR",
-			})
-			return
-		}
+		c.JSON(http.StatusServiceUnavailable, StandardResponse{
+			Success: false,
+			Error:   "Secure container execution is required but unavailable",
+			Code:    "CONTAINER_REQUIRED",
+		})
+		return
 	}
 
 	// Create execution context with timeout
@@ -538,12 +514,12 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 
 	// Execute file - for container sandbox, we read the file content and execute as code
 	// since container sandbox doesn't support direct file execution
-	result, err := executor.ExecuteFile(ctx, filePath, req.Args, req.Stdin)
+	result, err := h.SandboxFactory.ExecuteFileWithID(ctx, execRecord.ExecutionID, filePath, req.Args, req.Stdin)
 	if err != nil {
 		// If file execution not supported (container sandbox), fall back to Execute with code
 		if err.Error() == "file execution not supported in container sandbox - use Execute with code content" {
 			// Read file content and execute as code
-			result, err = executor.Execute(ctx, file.Project.Language, file.Content, req.Stdin)
+			result, err = h.SandboxFactory.ExecuteWithID(ctx, execRecord.ExecutionID, file.Project.Language, file.Content, req.Stdin)
 			if err != nil {
 				if execRecord.ID > 0 {
 					markExecutionFailed(h.DB, execRecord, "Execution failed: "+err.Error())
@@ -585,6 +561,8 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 		}
 	}
 
+	h.recordExecutionUsage(c.Request.Context(), userID, execRecord.ProjectID, result.DurationMs)
+
 	// Include sandbox info
 	sandboxInfo := "container"
 	if !h.SandboxFactory.IsContainerAvailable() {
@@ -594,7 +572,7 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 	c.JSON(http.StatusOK, StandardResponse{
 		Success: true,
 		Data: map[string]interface{}{
-			"id":            result.ID,
+			"id":            execRecord.ExecutionID,
 			"status":        result.Status,
 			"output":        result.Output,
 			"error_output":  result.ErrorOutput,
@@ -801,7 +779,7 @@ func (h *ExecutionHandler) ExecuteProject(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	result, err := h.SandboxFactory.ExecuteWorkspaceCommand(ctx, project.Language, projectDir, runCmd, "", req.Env)
+	result, err := h.SandboxFactory.ExecuteWorkspaceCommandWithID(ctx, execRecord.ExecutionID, project.Language, projectDir, runCmd, "", req.Env)
 	if err != nil {
 		markExecutionFailed(h.DB, execRecord, "Project execution failed: "+err.Error())
 		c.JSON(http.StatusInternalServerError, StandardResponse{
@@ -825,6 +803,8 @@ func (h *ExecutionHandler) ExecuteProject(c *gin.Context) {
 	if err := h.DB.Save(execRecord).Error; err != nil {
 		log.Printf("Failed to update project execution record: %v", err)
 	}
+
+	h.recordExecutionUsage(c.Request.Context(), userID, execRecord.ProjectID, result.DurationMs)
 
 	// Include sandbox info
 	sandboxInfo := "container"
@@ -989,17 +969,15 @@ func (h *ExecutionHandler) StopExecution(c *gin.Context) {
 	}
 
 	// Try to kill the execution using the factory
-	executor, err := h.SandboxFactory.GetExecutor(execution.SandboxTypeAuto)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, StandardResponse{
-			Success: false,
-			Error:   "Failed to get executor",
-			Code:    "SANDBOX_ERROR",
+	if exec.Status != "running" {
+		c.JSON(http.StatusOK, StandardResponse{
+			Success: true,
+			Message: "Execution already completed",
 		})
 		return
 	}
 
-	if err := executor.Kill(execID); err != nil {
+	if err := h.SandboxFactory.Kill(execID); err != nil {
 		// Execution might already be completed
 		c.JSON(http.StatusOK, StandardResponse{
 			Success: true,

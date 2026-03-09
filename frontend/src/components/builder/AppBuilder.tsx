@@ -7,7 +7,14 @@ import { useStore } from '@/hooks/useStore'
 import { getConfiguredApiUrl, getConfiguredWsUrl } from '@/config/runtime'
 import ModelRoleConfig from './ModelRoleConfig'
 import { useThemeLogo } from '@/hooks/useThemeLogo'
-import apiService, { CompletedBuildDetail } from '@/services/api'
+import apiService, {
+  BuildConversationMessage as ApiBuildConversationMessage,
+  BuildInteractionState as ApiBuildInteractionState,
+  BuildPermissionRequest as ApiBuildPermissionRequest,
+  BuildPermissionRule as ApiBuildPermissionRule,
+  CompletedBuildDetail,
+  ProposedBuildEdit,
+} from '@/services/api'
 import {
   Button,
   Card,
@@ -65,6 +72,7 @@ import {
 } from './buildRestore'
 import LivePreview from '@/components/preview/LivePreview'
 import { AssetUploader } from '@/components/project/AssetUploader'
+import DiffReviewPanel from '@/components/diff/DiffReviewPanel'
 
 // ============================================================================
 // TYPES
@@ -109,6 +117,9 @@ interface ChatMessage {
   role: 'user' | 'lead' | 'system'
   content: string
   timestamp: Date
+  kind?: string
+  clientToken?: string
+  status?: 'pending' | 'sent' | 'failed'
 }
 
 interface AIThought {
@@ -140,7 +151,13 @@ interface BuildState {
   websocketUrl?: string
   artifactRevision?: string
   diffMode?: boolean
+  interaction?: ApiBuildInteractionState
 }
+
+type BuildPermissionRequest = ApiBuildPermissionRequest
+type BuildPermissionRule = ApiBuildPermissionRule
+type BuildInteractionState = ApiBuildInteractionState
+type ProposedEdit = ProposedBuildEdit
 
 type BuildMode = 'fast' | 'full'
 
@@ -171,7 +188,8 @@ const isActiveBuildStatus = (status?: string) =>
   status === 'planning' ||
   status === 'in_progress' ||
   status === 'testing' ||
-  status === 'reviewing'
+  status === 'reviewing' ||
+  status === 'awaiting_review'
 
 // ============================================================================
 // ANIMATED BACKGROUND COMPONENTS
@@ -846,12 +864,18 @@ const TerminalOutput: React.FC<{ messages: ChatMessage[]; isBuilding: boolean }>
             "flex items-start gap-2 mb-2",
             msg.role === 'system' && "text-gray-400",
             msg.role === 'lead' && "text-orange-400",
-            msg.role === 'user' && "text-cyan-400"
+            msg.role === 'user' && "text-cyan-400",
+            msg.status === 'failed' && "text-red-300",
+            msg.status === 'pending' && "opacity-80"
           )}
           style={{ animation: 'fade-in 0.2s ease-out', animationDelay: `${index * 30}ms` }}
         >
           <span className="text-red-500 select-none font-bold">{'>'}</span>
-          <span className="flex-1 break-words">{msg.content}</span>
+          <span className="flex-1 break-words">
+            {msg.content}
+            {msg.status === 'pending' && <span className="ml-2 text-[10px] text-yellow-400">sending</span>}
+            {msg.status === 'failed' && <span className="ml-2 text-[10px] text-red-400">failed</span>}
+          </span>
           <span className="text-gray-600 text-xs shrink-0">{msg.timestamp.toLocaleTimeString()}</span>
         </div>
       ))}
@@ -896,6 +920,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
+  const [permissionActionId, setPermissionActionId] = useState<string | null>(null)
+  const [buildActionPending, setBuildActionPending] = useState<'pause' | 'resume' | null>(null)
+  const [proposedEdits, setProposedEdits] = useState<ProposedEdit[]>([])
+  const [showDiffReview, setShowDiffReview] = useState(true)
 
   // AI Activity state
   const [aiThoughts, setAiThoughts] = useState<AIThought[]>([])
@@ -944,6 +972,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null)
+  const wsMessageHandlerRef = useRef<(message: any) => Promise<void>>(async () => {})
   const chatEndRef = useRef<HTMLDivElement>(null)
   const wsReconnectAttempts = useRef(0)
   const maxWsReconnectAttempts = 5
@@ -1001,7 +1030,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   }, [])
   const activePowerMode = buildState?.powerMode || powerMode
   const activeBuildStatuses = useMemo(
-    () => new Set<BuildState['status']>(['planning', 'in_progress', 'testing', 'reviewing']),
+    () => new Set<BuildState['status']>(['planning', 'in_progress', 'testing', 'reviewing', 'awaiting_review']),
     []
   )
   const isBuildActive = buildState ? activeBuildStatuses.has(buildState.status) : false
@@ -1059,6 +1088,17 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         return 'border-gray-600 bg-gray-500/10 text-gray-300'
     }
   }, [qualityGateLabel])
+  const interactionState = buildState?.interaction
+  const pendingQuestion = interactionState?.pending_question
+  const buildPaused = Boolean(interactionState?.paused)
+  const pendingPermissionRequests = useMemo(
+    () => (interactionState?.permission_requests || []).filter((request) => request.status === 'pending'),
+    [interactionState?.permission_requests]
+  )
+  const grantedPermissionRules = useMemo(
+    () => (interactionState?.permission_rules || []).filter((rule) => rule.decision === 'allow'),
+    [interactionState?.permission_rules]
+  )
 
   // Tech stack options
   const techStacks: TechStack[] = [
@@ -1236,7 +1276,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data)
-        void handleWebSocketMessage(message)
+        void wsMessageHandlerRef.current(message)
       } catch (e) {
         console.error('Failed to parse WebSocket message:', e)
       }
@@ -1266,7 +1306,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     }
 
     wsRef.current = ws
-  }, [buildWebSocketUrl]) // eslint-disable-line react-hooks/exhaustive-deps -- message handler is intentionally late-bound.
+  }, [buildWebSocketUrl])
 
   // Handle WebSocket messages
   const handleWebSocketMessage = async (message: any) => {
@@ -1296,24 +1336,31 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                   ? 'running'
                   : prev?.qualityGateStatus,
             errorMessage: nextErrorMessage || prev?.errorMessage,
+            interaction: normalizeInteraction(data.interaction, data.messages) || prev?.interaction,
           })
         })
+        syncInteractionState(data.interaction, data.messages)
+        if (data.status === 'awaiting_review') {
+          void loadProposedEdits(message.build_id || buildStateRef.current?.id)
+        }
         break
 
       case 'build:progress':
         setBuildState(prev => {
           if (!prev) return null
-          if (isTerminalBuildStatus(prev.status)) {
+          const updates: Partial<BuildState> = {}
+
+          // Apply status transition (e.g. planning → in_progress)
+          const mergedStatus = mergeBuildStatusWithTerminalPrecedence(prev.status, data.status)
+          const resumingFromTerminal = isTerminalBuildStatus(prev.status) && !!mergedStatus && !isTerminalBuildStatus(mergedStatus)
+          if (isTerminalBuildStatus(prev.status) && !resumingFromTerminal) {
             return prev
           }
-          const updates: Partial<BuildState> = {}
 
           if (typeof data.progress === 'number') {
             updates.progress = clampPercent(data.progress)
           }
 
-          // Apply status transition (e.g. planning → in_progress)
-          const mergedStatus = mergeBuildStatusWithTerminalPrecedence(prev.status, data.status)
           if (mergedStatus) {
             updates.status = mergedStatus as BuildState['status']
           }
@@ -1342,6 +1389,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
           if (data.inactivity_warning) {
             addSystemMessage(`${data.message}`)
+          }
+
+          if (resumingFromTerminal) {
+            setIsBuilding(true)
+            persistActiveBuildId(prev.id)
           }
 
           return { ...prev, ...updates }
@@ -1558,17 +1610,56 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       }
 
       case 'lead:response': {
-        const content = typeof data.content === 'string'
-          ? data.content
-          : JSON.stringify(data.content ?? '')
-        setChatMessages(prev => [...prev, {
-          id: Date.now().toString(),
-          role: 'lead',
-          content,
-          timestamp: new Date(),
-        }])
+        if (data.message) {
+          upsertConversationMessage(data.message)
+        } else {
+          const content = typeof data.content === 'string'
+            ? data.content
+            : JSON.stringify(data.content ?? '')
+          setChatMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            role: 'lead',
+            content,
+            timestamp: new Date(),
+            status: 'sent',
+          }])
+        }
+        syncInteractionState(data.interaction, data.message ? [data.message] : undefined)
         break
       }
+
+      case 'user:message':
+        if (data.message) {
+          upsertConversationMessage(data.message)
+        }
+        syncInteractionState(data.interaction, data.message ? [data.message] : undefined)
+        break
+
+      case 'build:interaction':
+        syncInteractionState(data.interaction, data.messages)
+        break
+
+      case 'build:user-input-required':
+        syncInteractionState(data.interaction, data.messages)
+        if (data.question) {
+          addSystemMessage(`Action needed: ${data.question}`)
+        }
+        break
+
+      case 'build:user-input-resolved':
+        syncInteractionState(data.interaction, data.messages)
+        break
+
+      case 'build:permission-request':
+        syncInteractionState(data.interaction, data.messages)
+        if (data.request?.reason) {
+          addSystemMessage(`Permission requested: ${data.request.reason}`)
+        }
+        break
+
+      case 'build:permission-update':
+        syncInteractionState(data.interaction, data.messages)
+        break
 
       case 'agent:thinking':
         setBuildState(prev => {
@@ -1857,6 +1948,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       case 'agent:propose-diff':
         addSystemMessage(`Agent ${data.agent_role || 'unknown'} proposed changes to ${data.file_count || 'multiple'} file(s) — review required`)
         setBuildState(prev => prev ? { ...prev, status: 'awaiting_review' } : null)
+        void loadProposedEdits(message.build_id || buildStateRef.current?.id)
         break
 
       case 'build:edits-applied':
@@ -1867,6 +1959,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       case 'build:awaiting-review':
         addSystemMessage('Build paused — awaiting diff review')
         setBuildState(prev => prev ? { ...prev, status: 'awaiting_review' } : null)
+        void loadProposedEdits(message.build_id || buildStateRef.current?.id)
         break
 
       case 'agent:protected-path':
@@ -1942,11 +2035,17 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
       case 'build:fsm:paused':
         addSystemMessage(`Build paused`)
+        syncInteractionState(data.interaction, data.messages)
         break
 
       case 'build:fsm:resumed':
         addSystemMessage(`Build resumed`)
-        setBuildState(prev => prev ? { ...prev, status: 'in_progress' } : null)
+        setBuildState(prev => prev ? {
+          ...prev,
+          status: 'in_progress',
+          interaction: normalizeInteraction(data.interaction, data.messages) || prev.interaction,
+        } : null)
+        syncInteractionState(data.interaction, data.messages)
         break
 
       case 'build:fsm:cancelled':
@@ -1971,6 +2070,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         break
     }
   }
+
+  wsMessageHandlerRef.current = handleWebSocketMessage
 
   // Add AI thought
   const addAiThought = (
@@ -2010,6 +2111,97 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       timestamp: new Date(),
     }])
   }
+
+  const normalizeConversationMessages = useCallback((messages: unknown): ChatMessage[] => {
+    if (!Array.isArray(messages)) return []
+    return messages
+      .filter((message): message is ApiBuildConversationMessage => Boolean(message && typeof message === 'object'))
+      .map((message) => ({
+        id: String(message.id || `${message.role || 'system'}-${message.timestamp || Date.now()}`),
+        role: (message.role === 'user' || message.role === 'lead' ? message.role : 'system') as ChatMessage['role'],
+        content: String(message.content || ''),
+        timestamp: message.timestamp ? new Date(message.timestamp) : new Date(),
+        kind: message.kind,
+        clientToken: message.client_token,
+        status: (message.status === 'failed' ? 'failed' : 'sent') as ChatMessage['status'],
+      }))
+      .filter((message) => message.content.trim().length > 0)
+  }, [])
+
+  const normalizeInteraction = useCallback((interaction: any, fallbackMessages?: unknown): BuildInteractionState | undefined => {
+    if (!interaction || typeof interaction !== 'object') {
+      if (Array.isArray(fallbackMessages) && fallbackMessages.length > 0) {
+        return { messages: fallbackMessages as ApiBuildConversationMessage[] }
+      }
+      return undefined
+    }
+
+    const normalizedMessages = Array.isArray(interaction.messages)
+      ? interaction.messages
+      : Array.isArray(fallbackMessages)
+        ? fallbackMessages
+        : []
+
+    return {
+      ...interaction,
+      messages: normalizedMessages,
+      steering_notes: Array.isArray(interaction.steering_notes) ? interaction.steering_notes : [],
+      permission_rules: Array.isArray(interaction.permission_rules) ? interaction.permission_rules : [],
+      permission_requests: Array.isArray(interaction.permission_requests) ? interaction.permission_requests : [],
+    }
+  }, [])
+
+  const syncInteractionState = useCallback((interaction: any, fallbackMessages?: unknown) => {
+    const normalizedInteraction = normalizeInteraction(interaction, fallbackMessages)
+    if (!normalizedInteraction) return
+
+    setBuildState(prev => prev ? { ...prev, interaction: normalizedInteraction } : prev)
+    if (Array.isArray(normalizedInteraction.messages)) {
+      setChatMessages(normalizeConversationMessages(normalizedInteraction.messages))
+    }
+  }, [normalizeConversationMessages, normalizeInteraction])
+
+  const upsertConversationMessage = useCallback((message: any) => {
+    if (!message || typeof message !== 'object') return
+    const [normalized] = normalizeConversationMessages([message])
+    if (!normalized) return
+
+    setChatMessages(prev => {
+      const byId = prev.findIndex((entry) => entry.id === normalized.id)
+      if (byId >= 0) {
+        const next = [...prev]
+        next[byId] = normalized
+        return next
+      }
+
+      if (normalized.clientToken) {
+        const byToken = prev.findIndex((entry) => entry.clientToken === normalized.clientToken)
+        if (byToken >= 0) {
+          const next = [...prev]
+          next[byToken] = normalized
+          return next
+        }
+      }
+
+      return [...prev, normalized]
+    })
+  }, [normalizeConversationMessages])
+
+  const loadProposedEdits = useCallback(async (buildIdOverride?: string) => {
+    const buildId = buildIdOverride || buildStateRef.current?.id
+    if (!buildId) return []
+
+    try {
+      const response = await apiService.getBuildProposedEdits(buildId)
+      const edits = Array.isArray(response.edits) ? response.edits : []
+      setProposedEdits(edits)
+      setShowDiffReview(edits.length > 0)
+      return edits
+    } catch (error) {
+      setProposedEdits([])
+      return []
+    }
+  }, [])
 
   const normalizeGeneratedFiles = useCallback((files: Array<any>) => {
     if (!Array.isArray(files)) return []
@@ -2289,6 +2481,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
     const status = (normalizeBuildStatus(payload.status) || 'pending') as BuildState['status']
     const files = normalizeGeneratedFiles(payload.files || [])
+    const interaction = normalizeInteraction(payload.interaction, payload.messages)
 
     const agents: Agent[] = Array.isArray(payload.agents)
       ? payload.agents.map((agent: any, index: number) => ({
@@ -2333,6 +2526,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
     setAppDescription(String(payload.description || appDescription || ''))
     setGeneratedFiles(files)
+    setChatMessages(normalizeConversationMessages(interaction?.messages || payload.messages))
+    setAiThoughts([])
+    setProposedEdits([])
+    setShowDiffReview(true)
     setCreatedProjectId(typeof payload.project_id === 'number' ? payload.project_id : null)
     setShowPreview(false)
     setIsPreparingPreview(false)
@@ -2366,6 +2563,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       errorMessage: extractBuildFailureReason(payload),
       websocketUrl: typeof payload.websocket_url === 'string' ? payload.websocket_url : undefined,
       artifactRevision: typeof payload.artifact_revision === 'string' ? payload.artifact_revision : undefined,
+      interaction,
     })
 
     const shouldReconnectLive = !isTerminalBuildStatus(status) && options?.reconnectLive !== false && payload.live !== false
@@ -2396,11 +2594,17 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     if (files.length === 0) {
       void resolveGeneratedFiles(buildId)
     }
+    if (status === 'awaiting_review') {
+      void loadProposedEdits(buildId)
+    }
   }, [
     appDescription,
     clearActiveBuildId,
     connectWebSocket,
+    loadProposedEdits,
     normalizeGeneratedFiles,
+    normalizeConversationMessages,
+    normalizeInteraction,
     persistActiveBuildId,
     powerMode,
     resolveGeneratedFiles,
@@ -2520,6 +2724,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     setGeneratedFiles([])
     setAiThoughts([])
     setChatMessages([])
+    setProposedEdits([])
+    setShowDiffReview(true)
     setShowPreview(false)
     setIsPreparingPreview(false)
     setCreatedProjectId(null)
@@ -2650,25 +2856,108 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     }
   }
 
-  // Send chat message
-  const sendChatMessage = () => {
-    if (!chatInput.trim() || !buildState?.id) return
-
-    setChatMessages(prev => [...prev, {
-      id: Date.now().toString(),
-      role: 'user',
-      content: chatInput,
-      timestamp: new Date(),
-    }])
-
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'user:message',
-        content: chatInput,
-      }))
+  const handlePauseBuild = async () => {
+    if (!buildState?.id || buildActionPending) return
+    setBuildActionPending('pause')
+    try {
+      const response = await apiService.pauseBuild(buildState.id, 'Paused from builder UI')
+      syncInteractionState(response.interaction)
+      addSystemMessage('Build paused')
+    } catch (error) {
+      addSystemMessage('Failed to pause build')
+    } finally {
+      setBuildActionPending(null)
     }
+  }
 
+  const handleResumeBuild = async () => {
+    if (!buildState?.id || buildActionPending) return
+    setBuildActionPending('resume')
+    try {
+      const response = await apiService.resumeBuild(buildState.id, 'Resumed from builder UI')
+      syncInteractionState(response.interaction)
+      addSystemMessage('Build resumed')
+    } catch (error) {
+      addSystemMessage('Failed to resume build')
+    } finally {
+      setBuildActionPending(null)
+    }
+  }
+
+  const handleResolvePermissionRequest = async (
+    requestId: string,
+    decision: 'allow' | 'deny',
+    mode: 'once' | 'build'
+  ) => {
+    if (!buildState?.id) return
+    setPermissionActionId(requestId)
+    try {
+      const response = await apiService.resolveBuildPermissionRequest(buildState.id, requestId, {
+        decision,
+        mode,
+      })
+      syncInteractionState(response.interaction)
+    } catch (error) {
+      addSystemMessage('Failed to update permission request')
+    } finally {
+      setPermissionActionId(null)
+    }
+  }
+
+  const handleSetPermissionPreset = async (
+    scope: string,
+    target: string,
+    decision: 'allow' | 'deny',
+    mode: 'build' = 'build',
+    reason?: string
+  ) => {
+    if (!buildState?.id) return
+    const presetId = `${scope}:${target}:${decision}`
+    setPermissionActionId(presetId)
+    try {
+      const response = await apiService.setBuildPermissionRule(buildState.id, {
+        scope,
+        target,
+        decision,
+        mode,
+        reason,
+      })
+      syncInteractionState(response.interaction)
+      addSystemMessage(`${decision === 'allow' ? 'Approved' : 'Denied'} ${target} for this build`)
+    } catch (error) {
+      addSystemMessage(`Failed to update ${target} permission`)
+    } finally {
+      setPermissionActionId(null)
+    }
+  }
+
+  // Send chat message
+  const sendChatMessage = async () => {
+    const content = chatInput.trim()
+    if (!content || !buildState?.id) return
+
+    const clientToken = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    setChatMessages(prev => [...prev, {
+      id: clientToken,
+      role: 'user',
+      content,
+      timestamp: new Date(),
+      clientToken,
+      status: 'pending',
+    }])
     setChatInput('')
+
+    try {
+      await apiService.sendBuildMessage(buildState.id, content, clientToken)
+      setChatMessages(prev => prev.map(message =>
+        message.clientToken === clientToken ? { ...message, status: 'sent' } : message
+      ))
+    } catch (error) {
+      setChatMessages(prev => prev.map(message =>
+        message.clientToken === clientToken ? { ...message, status: 'failed' } : message
+      ))
+      addSystemMessage('Message failed to send. Please try again.')
+    }
   }
 
   // Create project and open in IDE
@@ -3255,6 +3544,53 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                     )}
                   </div>
 
+                  {(buildPaused || pendingQuestion || pendingPermissionRequests.length > 0) && (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {buildPaused && (
+                        <Badge variant="outline" className="border-amber-500/50 bg-amber-500/10 text-amber-300">
+                          Paused
+                        </Badge>
+                      )}
+                      {pendingQuestion && (
+                        <Badge variant="outline" className="border-cyan-500/50 bg-cyan-500/10 text-cyan-300">
+                          Awaiting Reply
+                        </Badge>
+                      )}
+                      {pendingPermissionRequests.length > 0 && (
+                        <Badge variant="outline" className="border-violet-500/50 bg-violet-500/10 text-violet-300">
+                          {pendingPermissionRequests.length} Permission Request{pendingPermissionRequests.length === 1 ? '' : 's'}
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    {buildPaused ? (
+                      <Button
+                        size="sm"
+                        onClick={handleResumeBuild}
+                        disabled={buildActionPending !== null}
+                        className="bg-green-600 hover:bg-green-500"
+                      >
+                        <Play className="w-4 h-4 mr-2" />
+                        {buildActionPending === 'resume' ? 'Resuming...' : 'Resume Build'}
+                      </Button>
+                    ) : (
+                      isBuildActive && buildState.status !== 'awaiting_review' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handlePauseBuild}
+                          disabled={buildActionPending !== null}
+                          className="border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20"
+                        >
+                          <Pause className="w-4 h-4 mr-2" />
+                          {buildActionPending === 'pause' ? 'Pausing...' : 'Pause Build'}
+                        </Button>
+                      )
+                    )}
+                  </div>
+
                   {/* Pipeline telemetry */}
                   <div className="mt-4 grid grid-cols-1 gap-2">
                     <div className="flex items-center justify-between text-xs">
@@ -3532,6 +3868,188 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                 </CardContent>
               </Card>
 
+              {(pendingQuestion || pendingPermissionRequests.length > 0 || grantedPermissionRules.length > 0 || buildState.status === 'awaiting_review') && (
+                <Card variant="cyberpunk" className="border-2 border-violet-900/50 bg-black/60 backdrop-blur-sm">
+                  <CardHeader className="pb-4 border-b border-violet-900/30">
+                    <CardTitle className="text-xl flex items-center gap-3">
+                      <Shield className="w-7 h-7 text-violet-400" />
+                      Build Controls
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-5 space-y-4">
+                    {pendingQuestion && (
+                      <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-4">
+                        <div className="text-xs uppercase tracking-wide text-cyan-300">Awaiting Your Reply</div>
+                        <div className="mt-2 text-sm text-cyan-100">{pendingQuestion}</div>
+                      </div>
+                    )}
+
+                    {pendingPermissionRequests.length > 0 && (
+                      <div className="space-y-3">
+                        {pendingPermissionRequests.map((request) => (
+                          <div
+                            key={request.id}
+                            className="rounded-xl border border-violet-500/30 bg-violet-950/20 p-4"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-semibold text-violet-100">
+                                  {request.scope}: {request.target}
+                                </div>
+                                <div className="mt-1 text-sm text-gray-300">{request.reason}</div>
+                                {request.command_preview && (
+                                  <div className="mt-2 rounded bg-black/60 px-3 py-2 font-mono text-xs text-gray-300">
+                                    {request.command_preview}
+                                  </div>
+                                )}
+                              </div>
+                              <Badge variant="outline" className="border-violet-500/40 bg-violet-500/10 text-violet-300">
+                                {request.blocking ? 'Blocking' : 'Optional'}
+                              </Badge>
+                            </div>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() => handleResolvePermissionRequest(request.id, 'allow', 'once')}
+                                disabled={permissionActionId === request.id}
+                                className="bg-cyan-600 hover:bg-cyan-500"
+                              >
+                                Allow Once
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={() => handleResolvePermissionRequest(request.id, 'allow', 'build')}
+                                disabled={permissionActionId === request.id}
+                                className="bg-violet-600 hover:bg-violet-500"
+                              >
+                                Allow For Build
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleResolvePermissionRequest(request.id, 'deny', 'build')}
+                                disabled={permissionActionId === request.id}
+                                className="border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20"
+                              >
+                                Deny
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div>
+                      <div className="text-xs uppercase tracking-wide text-gray-500">Pre-Approve Common Local Tools</div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleSetPermissionPreset('program', 'docker', 'allow', 'build', 'User pre-approved Docker for this build')}
+                          disabled={permissionActionId === 'program:docker:allow'}
+                          className="border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
+                        >
+                          Allow Docker
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleSetPermissionPreset('program', 'git', 'allow', 'build', 'User pre-approved Git for this build')}
+                          disabled={permissionActionId === 'program:git:allow'}
+                          className="border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
+                        >
+                          Allow Git
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleSetPermissionPreset('network', 'localhost', 'allow', 'build', 'User pre-approved localhost network access for this build')}
+                          disabled={permissionActionId === 'network:localhost:allow'}
+                          className="border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
+                        >
+                          Allow Localhost
+                        </Button>
+                      </div>
+                      {grantedPermissionRules.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {grantedPermissionRules.map((rule) => (
+                            <Badge
+                              key={rule.id}
+                              variant="outline"
+                              className="border-green-500/40 bg-green-500/10 text-green-300"
+                            >
+                              {rule.scope}:{rule.target} ({rule.mode})
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {buildState.status === 'awaiting_review' && proposedEdits.length > 0 && !showDiffReview && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setShowDiffReview(true)}
+                        className="border-yellow-500/40 bg-yellow-500/10 text-yellow-300 hover:bg-yellow-500/20"
+                      >
+                        Reopen Diff Review
+                      </Button>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {buildState.tasks.length > 0 && (
+                <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
+                  <CardHeader className="pb-4 border-b border-gray-800">
+                    <CardTitle className="text-xl flex items-center gap-3">
+                      <Layers className="w-7 h-7 text-cyan-400" />
+                      Task Timeline
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-5">
+                    <div className="space-y-3 max-h-64 overflow-y-auto">
+                      {buildState.tasks.map((task) => (
+                        <div key={task.id} className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold text-white">{task.description}</div>
+                              <div className="mt-1 text-xs uppercase tracking-wide text-gray-500">
+                                {task.type}{task.assignedTo ? ` • ${task.assignedTo}` : ''}
+                              </div>
+                            </div>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                task.status === 'completed' && 'border-green-500/40 bg-green-500/10 text-green-300',
+                                task.status === 'failed' && 'border-red-500/40 bg-red-500/10 text-red-300',
+                                task.status === 'in_progress' && 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300',
+                                task.status === 'pending' && 'border-gray-600 bg-gray-500/10 text-gray-300'
+                              )}
+                            >
+                              {task.status.replace('_', ' ')}
+                            </Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {buildState.status === 'awaiting_review' && showDiffReview && proposedEdits.length > 0 && (
+                <Card variant="cyberpunk" className="border-2 border-yellow-700/40 bg-black/60 backdrop-blur-sm overflow-hidden">
+                  <DiffReviewPanel
+                    buildId={buildState.id}
+                    edits={proposedEdits}
+                    onEditsUpdated={() => {
+                      void loadProposedEdits(buildState.id)
+                    }}
+                    onClose={() => setShowDiffReview(false)}
+                  />
+                </Card>
+              )}
+
               {/* Terminal Output / Chat Interface */}
               <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm flex flex-col">
                 <CardHeader className="pb-4 border-b border-gray-800 shrink-0">
@@ -3568,12 +4086,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                           value={chatInput}
                           onChange={(e) => setChatInput(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && sendChatMessage()}
-                          placeholder="Message the lead agent..."
+                          placeholder={pendingQuestion || (buildPaused ? 'Build is paused. Tell the AI what to change or resume it.' : 'Message the lead agent...')}
                           className="flex-1 bg-black border-2 border-gray-700 rounded-xl px-5 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-red-600 focus:ring-2 focus:ring-red-900/30 transition-all"
                         />
                         <Button
                           onClick={sendChatMessage}
-                          disabled={!chatInput.trim()}
+                          disabled={!chatInput.trim() || !buildState?.id}
                           className="px-6 bg-red-600 hover:bg-red-500 font-semibold"
                         >
                           <Send className="w-5 h-5" />

@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
-import { Check, X, CheckCheck, XCircle, RefreshCw } from 'lucide-react'
-import { DiffViewer } from '@/components/ide/DiffViewer'
+import React, { Suspense, lazy, useState } from 'react'
+import { Check, X, CheckCheck, XCircle } from 'lucide-react'
 import apiService from '@/services/api'
+
+const DiffViewer = lazy(() => import('@/components/ide/DiffViewer').then((module) => ({ default: module.DiffViewer })))
 
 interface ProposedEdit {
   id: string
@@ -144,15 +145,23 @@ export const DiffReviewPanel: React.FC<DiffReviewPanelProps> = ({
         <div className="flex-1 flex flex-col">
           {selectedEdit ? (
             <>
-              <DiffViewer
-                originalContent={selectedEdit.original_content}
-                modifiedContent={selectedEdit.proposed_content}
-                originalLabel="Original"
-                modifiedLabel={`Proposed (${selectedEdit.agent_role})`}
-                language={selectedEdit.language}
-                onClose={() => setSelectedEdit(null)}
-                className="flex-1"
-              />
+              <Suspense
+                fallback={
+                  <div className="flex flex-1 items-center justify-center text-sm text-gray-500">
+                    Loading diff viewer...
+                  </div>
+                }
+              >
+                <DiffViewer
+                  originalContent={selectedEdit.original_content}
+                  modifiedContent={selectedEdit.proposed_content}
+                  originalLabel="Original"
+                  modifiedLabel={`Proposed (${selectedEdit.agent_role})`}
+                  language={selectedEdit.language}
+                  onClose={() => setSelectedEdit(null)}
+                  className="flex-1"
+                />
+              </Suspense>
               {selectedEdit.status === 'pending' && (
                 <div className="h-12 bg-gray-900 border-t border-gray-800 flex items-center justify-end gap-2 px-4">
                   <button

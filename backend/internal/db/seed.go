@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -162,15 +163,21 @@ func (d *Database) SeedSpencerUser() error {
 // RunSeeds runs all database seeds
 func (d *Database) RunSeeds() error {
 	log.Println("🌱 Running database seeds...")
+	var errs []string
 
 	if err := d.SeedAdminUser(); err != nil {
 		log.Printf("⚠️ Failed to seed admin user: %v", err)
+		errs = append(errs, fmt.Sprintf("admin seed: %v", err))
 	}
 
 	if err := d.SeedSpencerUser(); err != nil {
 		log.Printf("⚠️ Failed to seed spencer user: %v", err)
+		errs = append(errs, fmt.Sprintf("spencer seed: %v", err))
 	}
 
 	log.Println("🌱 Database seeding complete")
+	if len(errs) > 0 {
+		return fmt.Errorf(strings.Join(errs, "; "))
+	}
 	return nil
 }

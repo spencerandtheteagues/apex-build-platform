@@ -30,9 +30,7 @@ func NewDebuggingHandler(db *gorm.DB, debugService *debugging.DebugService) *Deb
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			CheckOrigin: func(r *http.Request) bool {
-				return true
-			},
+			CheckOrigin:     allowedWebSocketOrigin,
 		},
 	}
 }
@@ -82,8 +80,8 @@ func (h *DebuggingHandler) StartSession(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message":      "Debug session started",
-		"session":      session,
+		"message":       "Debug session started",
+		"session":       session,
 		"websocket_url": "/ws/debug/" + session.ID,
 	})
 }
@@ -153,12 +151,12 @@ func (h *DebuggingHandler) StopSession(c *gin.Context) {
 
 // SetBreakpointRequest represents the request to set a breakpoint
 type SetBreakpointRequest struct {
-	FileID    uint                    `json:"file_id" binding:"required"`
-	FilePath  string                  `json:"file_path" binding:"required"`
-	Line      int                     `json:"line" binding:"required"`
-	Column    int                     `json:"column"`
+	FileID    uint                     `json:"file_id" binding:"required"`
+	FilePath  string                   `json:"file_path" binding:"required"`
+	Line      int                      `json:"line" binding:"required"`
+	Column    int                      `json:"column"`
 	Type      debugging.BreakpointType `json:"type"`
-	Condition string                  `json:"condition"`
+	Condition string                   `json:"condition"`
 }
 
 // SetBreakpoint sets a breakpoint in the session
@@ -666,7 +664,22 @@ func (h *DebuggingHandler) RemoveWatch(c *gin.Context) {
 // HandleDebugWebSocket handles WebSocket connections for debug events
 // GET /ws/debug/:sessionId
 func (h *DebuggingHandler) HandleDebugWebSocket(c *gin.Context) {
+	userID, err := websocketUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
 	sessionID := c.Param("sessionId")
+	session, err := h.debugService.GetSession(sessionID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
+	if session.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
 
 	// Get event channel
 	eventCh, err := h.debugService.GetEventChannel(sessionID)

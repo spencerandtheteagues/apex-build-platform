@@ -25,8 +25,7 @@ import {
 } from '@/types'
 import { themes, getTheme } from '@/styles/themes'
 import apiService from '@/services/api'
-import collaborationService from '@/services/collaboration'
-import websocketService from '@/services/websocket'
+import collaborationService, { type ChatMessage as CollaborationChatMessage, type UserPresence } from '@/services/collaboration'
 
 // Helper function to extract error message from unknown error type
 const getErrorMessage = (error: unknown): string => {
@@ -47,6 +46,78 @@ const getErrorMessage = (error: unknown): string => {
   }
   return 'An unknown error occurred'
 }
+
+const collaborationPresenceToUser = (presence: UserPresence): User => {
+  const timestamp = presence.lastActivity.toISOString()
+  return {
+    id: presence.userId,
+    username: presence.username,
+    email: presence.email,
+    avatar_url: presence.avatarUrl,
+    is_active: true,
+    is_verified: true,
+    subscription_type: 'free',
+    monthly_ai_requests: 0,
+    monthly_ai_cost: 0,
+    preferred_theme: 'cyberpunk',
+    preferred_ai: 'auto',
+    created_at: timestamp,
+    updated_at: timestamp,
+  }
+}
+
+const collaborationRoomUserToUser = (rawUser: Record<string, unknown>): User => {
+  const timestamp = typeof rawUser.last_activity === 'string'
+    ? rawUser.last_activity
+    : new Date().toISOString()
+
+  return {
+    id: Number(rawUser.id ?? rawUser.user_id ?? 0),
+    username: String(rawUser.username ?? 'Unknown'),
+    email: String(rawUser.email ?? ''),
+    avatar_url: typeof rawUser.avatar_url === 'string' ? rawUser.avatar_url : undefined,
+    is_active: true,
+    is_verified: true,
+    subscription_type: 'free',
+    monthly_ai_requests: 0,
+    monthly_ai_cost: 0,
+    preferred_theme: 'cyberpunk',
+    preferred_ai: 'auto',
+    created_at: timestamp,
+    updated_at: timestamp,
+  }
+}
+
+const collaborationChatToMessage = (message: CollaborationChatMessage): ChatMessage => {
+  const timestamp = message.timestamp.toISOString()
+  return {
+    id: Number(message.id.replace(/\D+/g, '').slice(-9) || '0'),
+    room_id: 0,
+    user_id: message.userId,
+    message: message.message,
+    type: message.type as ChatMessage['type'],
+    is_edited: false,
+    created_at: timestamp,
+    updated_at: timestamp,
+    user: {
+      id: message.userId,
+      username: message.username,
+      email: '',
+      avatar_url: message.avatarUrl,
+      is_active: true,
+      is_verified: true,
+      subscription_type: 'free',
+      monthly_ai_requests: 0,
+      monthly_ai_cost: 0,
+      preferred_theme: 'cyberpunk',
+      preferred_ai: 'auto',
+      created_at: timestamp,
+      updated_at: timestamp,
+    },
+  }
+}
+
+let collaborationListenersBound = false
 
 type SessionResettableState = {
   user: User | null
@@ -513,7 +584,6 @@ export const useStore = create<StoreState & StoreActions>()(
             console.error('Logout error:', error)
           } finally {
             collaborationService.disconnect()
-            websocketService.disconnect()
 
             set((state) => {
               resetAuthenticatedWorkspaceState(state)
@@ -530,8 +600,10 @@ export const useStore = create<StoreState & StoreActions>()(
         refreshUser: async () => {
           try {
             const user = await apiService.getUserProfile()
+            localStorage.setItem('apex_user', JSON.stringify(user))
             set((state) => {
               state.user = user
+              state.isAuthenticated = true
             })
           } catch (error: unknown) {
             console.error('Failed to refresh user:', error)
@@ -795,10 +867,6 @@ export const useStore = create<StoreState & StoreActions>()(
               }
             })
 
-            // Send file change to collaboration room
-            if (websocketService.isConnected()) {
-              websocketService.sendFileChange(id, content, 1, 1)
-            }
           } catch (error: unknown) {
             get().addNotification({
               type: 'error',
@@ -894,10 +962,12 @@ export const useStore = create<StoreState & StoreActions>()(
             state.cursorPosition = { line, column }
           })
 
-          // Send cursor update to collaboration
-          const { activeFileId } = get()
-          if (activeFileId && websocketService.isConnected()) {
-            websocketService.sendCursorUpdate(activeFileId, line, column)
+          const { activeFileId, files } = get()
+          if (activeFileId && collaborationService.isConnected()) {
+            const activeFile = files.find((file) => file.id === activeFileId)
+            if (activeFile) {
+              collaborationService.updateCursor(activeFileId, activeFile.name, line, column)
+            }
           }
         },
 
@@ -952,9 +1022,103 @@ export const useStore = create<StoreState & StoreActions>()(
 
           try {
             const roomData = await apiService.joinCollabRoom(projectId)
+            const token = localStorage.getItem('apex_access_token')
+            const currentUser = get().user
+
+            if (!token || !currentUser) {
+              throw new Error('Authentication is required for collaboration')
+            }
+
+            if (!collaborationListenersBound) {
+              collaborationListenersBound = true
+
+              collaborationService.on('connected', () => {
+                set((state) => {
+                  state.isConnected = true
+                  state.isConnecting = false
+                })
+              })
+
+              collaborationService.on('disconnected', () => {
+                set((state) => {
+                  state.isConnected = false
+                  state.isConnecting = false
+                  state.connectedUsers = []
+                  state.collaborationUsers = []
+                  state.cursors = []
+                })
+              })
+
+              collaborationService.on('userListUpdate', (users: UserPresence[]) => {
+                const mappedUsers = users
+                  .filter((presence) => presence.userId !== get().user?.id)
+                  .map(collaborationPresenceToUser)
+                set((state) => {
+                  state.connectedUsers = mappedUsers
+                  state.collaborationUsers = mappedUsers
+                })
+              })
+
+              collaborationService.on('userJoined', (presence: UserPresence) => {
+                if (presence.userId === get().user?.id) {
+                  return
+                }
+                const joinedUser = collaborationPresenceToUser(presence)
+                set((state) => {
+                  const remainingUsers = state.connectedUsers.filter((user) => user.id !== joinedUser.id)
+                  state.connectedUsers = [...remainingUsers, joinedUser]
+                  state.collaborationUsers = state.connectedUsers
+                })
+              })
+
+              collaborationService.on('userLeft', (userId: number) => {
+                set((state) => {
+                  state.connectedUsers = state.connectedUsers.filter((user) => user.id !== userId)
+                  state.collaborationUsers = state.connectedUsers
+                })
+              })
+
+              collaborationService.on('chatMessage', (message: CollaborationChatMessage) => {
+                const mappedMessage = collaborationChatToMessage(message)
+                set((state) => {
+                  state.chat = [...state.chat, mappedMessage]
+                })
+              })
+
+              collaborationService.on('error', (error: string) => {
+                get().addNotification({
+                  type: 'error',
+                  title: 'Collaboration Error',
+                  message: error,
+                })
+              })
+            }
+
+            collaborationService.setUser(currentUser.id, currentUser.username)
+
+            if (!collaborationService.isConnected()) {
+              await collaborationService.connect(token)
+            }
+
+            collaborationService.joinRoom(roomData.room_id, projectId)
 
             set((state) => {
+              const initialUsers = Array.isArray(roomData.users)
+                ? roomData.users.reduce<User[]>((users, entry) => {
+                    if (typeof entry !== 'object' || entry === null) {
+                      return users
+                    }
+
+                    const mappedUser = collaborationRoomUserToUser(entry as unknown as Record<string, unknown>)
+                    if (mappedUser.id !== currentUser.id) {
+                      users.push(mappedUser)
+                    }
+                    return users
+                  }, [])
+                : []
               state.room = { id: 0, room_id: roomData.room_id, project_id: projectId } as CollabRoom
+              state.connectedUsers = initialUsers
+              state.collaborationUsers = initialUsers
               state.isConnected = collaborationService.isConnected()
               state.isConnecting = false
             })
@@ -994,14 +1158,17 @@ export const useStore = create<StoreState & StoreActions>()(
         },
 
         sendChatMessage: (message: string) => {
-          if (websocketService.isConnected()) {
-            websocketService.sendChatMessage(message)
+          if (collaborationService.isConnected()) {
+            collaborationService.sendChatMessage(message)
           }
         },
 
         updateCursor: (fileId: number, line: number, column: number) => {
-          if (websocketService.isConnected()) {
-            websocketService.sendCursorUpdate(fileId, line, column)
+          if (collaborationService.isConnected()) {
+            const file = get().files.find((entry) => entry.id === fileId)
+            if (file) {
+              collaborationService.updateCursor(fileId, file.name, line, column)
+            }
           }
         },
 
@@ -1030,11 +1197,6 @@ export const useStore = create<StoreState & StoreActions>()(
               state.isAILoading = false
               state.isAIGenerating = false
             })
-
-            // Broadcast AI request to collaboration room
-            if (websocketService.isConnected()) {
-              websocketService.broadcastAIRequest(response.request_id, data.capability)
-            }
 
             return response
           } catch (error: unknown) {

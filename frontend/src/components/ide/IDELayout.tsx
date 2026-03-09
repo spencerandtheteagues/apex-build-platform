@@ -16,7 +16,6 @@ import {
   useSafeAreaInsets,
 } from '@/hooks/useMobile'
 import apiService from '@/services/api'
-import websocketService from '@/services/websocket'
 import { File, AICapability, FileVersion } from '@/types'
 import {
   Button,
@@ -270,17 +269,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   // Handle file content change
   const handleFileChange = useCallback((fileId: number, content: string, paneId: string) => {
     paneUpdateFileContent(fileId, content, paneId)
-
-    // Send real-time collaboration updates
-    if (websocketService.isConnected() && currentProject) {
-      websocketService.sendFileChange(
-        fileId,
-        content,
-        1, // Default position
-        1
-      )
-    }
-  }, [paneUpdateFileContent, currentProject])
+  }, [paneUpdateFileContent])
 
   // Handle file save
   const handleFileSave = useCallback(async (fileId: number, content: string, paneId: string) => {

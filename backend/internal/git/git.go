@@ -73,35 +73,35 @@ type FileChange struct {
 
 // DiffResult represents the diff of a file
 type DiffResult struct {
-	Path      string   `json:"path"`
-	OldPath   string   `json:"old_path,omitempty"`
-	Additions int      `json:"additions"`
-	Deletions int      `json:"deletions"`
-	Hunks     []*Hunk  `json:"hunks"`
+	Path      string  `json:"path"`
+	OldPath   string  `json:"old_path,omitempty"`
+	Additions int     `json:"additions"`
+	Deletions int     `json:"deletions"`
+	Hunks     []*Hunk `json:"hunks"`
 }
 
 // Hunk represents a change hunk in a diff
 type Hunk struct {
-	OldStart  int      `json:"old_start"`
-	OldLines  int      `json:"old_lines"`
-	NewStart  int      `json:"new_start"`
-	NewLines  int      `json:"new_lines"`
-	Header    string   `json:"header"`
-	Lines     []string `json:"lines"`
+	OldStart int      `json:"old_start"`
+	OldLines int      `json:"old_lines"`
+	NewStart int      `json:"new_start"`
+	NewLines int      `json:"new_lines"`
+	Header   string   `json:"header"`
+	Lines    []string `json:"lines"`
 }
 
 // PullRequest represents a GitHub pull request
 type PullRequest struct {
-	Number    int       `json:"number"`
-	Title     string    `json:"title"`
-	Body      string    `json:"body"`
-	State     string    `json:"state"`
-	Author    string    `json:"author"`
-	Branch    string    `json:"branch"`
-	BaseBranch string   `json:"base_branch"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	URL       string    `json:"url"`
+	Number     int       `json:"number"`
+	Title      string    `json:"title"`
+	Body       string    `json:"body"`
+	State      string    `json:"state"`
+	Author     string    `json:"author"`
+	Branch     string    `json:"branch"`
+	BaseBranch string    `json:"base_branch"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	URL        string    `json:"url"`
 }
 
 // NewGitService creates a new git service
@@ -239,10 +239,19 @@ func (g *GitService) CreateCommit(ctx context.Context, projectID uint, message s
 }
 
 // Push pushes commits to remote
-func (g *GitService) Push(ctx context.Context, projectID uint, token string) error {
-	// For GitHub API, commits are pushed immediately when created
-	// This is a no-op for API-based git, but would be needed for actual git
-	return nil
+func (g *GitService) Push(ctx context.Context, projectID uint, token string) (string, error) {
+	repo, err := g.GetRepository(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+
+	switch repo.Provider {
+	case "github":
+		// GitHub API-based commits are pushed immediately at commit time.
+		return "GitHub commits are pushed immediately when created. No separate push is required.", nil
+	default:
+		return "", fmt.Errorf("provider not supported: %s", repo.Provider)
+	}
 }
 
 // Pull pulls changes from remote
@@ -282,16 +291,18 @@ func (g *GitService) SwitchBranch(ctx context.Context, projectID uint, branchNam
 		return err
 	}
 
-	// Update the current branch
+	previousBranch := repo.Branch
 	repo.Branch = branchName
-	repo.UpdatedAt = time.Now()
 
-	if err := g.db.WithContext(ctx).Save(repo).Error; err != nil {
+	// Pull the new branch content first so a failed sync does not leave stale state behind.
+	if err := g.pullFromGitHub(ctx, repo, token, projectID); err != nil {
+		repo.Branch = previousBranch
 		return err
 	}
 
-	// Pull the new branch content
-	return g.Pull(ctx, projectID, token)
+	repo.Branch = branchName
+	repo.UpdatedAt = time.Now()
+	return g.db.WithContext(ctx).Save(repo).Error
 }
 
 // GetPullRequests lists pull requests
@@ -344,8 +355,8 @@ func (g *GitService) getGitHubBranches(ctx context.Context, repo *Repository, to
 	}
 
 	var ghBranches []struct {
-		Name      string `json:"name"`
-		Commit    struct {
+		Name   string `json:"name"`
+		Commit struct {
 			SHA string `json:"sha"`
 		} `json:"commit"`
 		Protected bool `json:"protected"`
@@ -609,6 +620,10 @@ func (g *GitService) pullFromGitHub(ctx context.Context, repo *Repository, token
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("failed to fetch repository tree: github returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
 
 	var tree struct {
 		Tree []struct {
@@ -621,71 +636,103 @@ func (g *GitService) pullFromGitHub(ctx context.Context, repo *Repository, token
 		return err
 	}
 
-	// Download and update each file
-	for _, item := range tree.Tree {
-		if item.Type != "blob" {
-			continue
-		}
+	remotePaths := make(map[string]struct{}, len(tree.Tree))
 
-		// Get file content
-		blobURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/blobs/%s",
-			repo.RepoOwner, repo.RepoName, item.SHA)
+	return g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, item := range tree.Tree {
+			remotePaths[item.Path] = struct{}{}
 
-		req, _ := http.NewRequestWithContext(ctx, "GET", blobURL, nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Accept", "application/vnd.github.v3+json")
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			continue
-		}
-
-		var blob struct {
-			Content  string `json:"content"`
-			Encoding string `json:"encoding"`
-		}
-		json.NewDecoder(resp.Body).Decode(&blob)
-		resp.Body.Close()
-
-		var content string
-		if blob.Encoding == "base64" {
-			decoded, _ := base64.StdEncoding.DecodeString(strings.ReplaceAll(blob.Content, "\n", ""))
-			content = string(decoded)
-		} else {
-			content = blob.Content
-		}
-
-		// Update or create file in database
-		var file models.File
-		result := g.db.WithContext(ctx).Where("project_id = ? AND path = ?", projectID, item.Path).First(&file)
-		if result.Error != nil {
-			// Create new file
-			file = models.File{
-				ProjectID: projectID,
-				Name:      g.getFileName(item.Path),
-				Path:      item.Path,
-				Content:   content,
-				Size:      int64(len(content)),
-				MimeType:  g.getMimeType(item.Path),
-				Version:   1,
-				CreatedAt: time.Now(),
-				UpdatedAt: time.Now(),
+			if item.Type != "blob" {
+				continue
 			}
-			g.db.WithContext(ctx).Create(&file)
-		} else {
-			// Update existing file
+
+			blobURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/blobs/%s",
+				repo.RepoOwner, repo.RepoName, item.SHA)
+
+			req, _ := http.NewRequestWithContext(ctx, "GET", blobURL, nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return err
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+				resp.Body.Close()
+				return fmt.Errorf("failed to fetch blob %s: github returned %d: %s", item.Path, resp.StatusCode, strings.TrimSpace(string(body)))
+			}
+
+			var blob struct {
+				Content  string `json:"content"`
+				Encoding string `json:"encoding"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&blob); err != nil {
+				resp.Body.Close()
+				return err
+			}
+			resp.Body.Close()
+
+			var content string
+			if blob.Encoding == "base64" {
+				decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(blob.Content, "\n", ""))
+				if err != nil {
+					return fmt.Errorf("failed to decode blob %s: %w", item.Path, err)
+				}
+				content = string(decoded)
+			} else {
+				content = blob.Content
+			}
+
+			var file models.File
+			result := tx.Where("project_id = ? AND path = ?", projectID, item.Path).First(&file)
+			if result.Error != nil {
+				if result.Error != gorm.ErrRecordNotFound {
+					return result.Error
+				}
+				file = models.File{
+					ProjectID: projectID,
+					Name:      g.getFileName(item.Path),
+					Path:      item.Path,
+					Content:   content,
+					Size:      int64(len(content)),
+					MimeType:  g.getMimeType(item.Path),
+					Version:   1,
+					CreatedAt: time.Now(),
+					UpdatedAt: time.Now(),
+				}
+				if err := tx.Create(&file).Error; err != nil {
+					return err
+				}
+				continue
+			}
+
 			file.Content = content
 			file.Size = int64(len(content))
 			file.UpdatedAt = time.Now()
-			g.db.WithContext(ctx).Save(&file)
+			if err := tx.Save(&file).Error; err != nil {
+				return err
+			}
 		}
-	}
 
-	// Update last sync time
-	repo.LastSync = time.Now()
-	g.db.WithContext(ctx).Save(repo)
+		var existingFiles []models.File
+		if err := tx.Where("project_id = ?", projectID).Find(&existingFiles).Error; err != nil {
+			return err
+		}
 
-	return nil
+		for _, existingFile := range existingFiles {
+			if _, exists := remotePaths[existingFile.Path]; exists {
+				continue
+			}
+			if err := tx.Delete(&existingFile).Error; err != nil {
+				return err
+			}
+		}
+
+		repo.LastSync = time.Now()
+		return tx.Save(repo).Error
+	})
 }
 
 func (g *GitService) createGitHubBranch(ctx context.Context, repo *Repository, branchName, baseBranch, token string) (*Branch, error) {

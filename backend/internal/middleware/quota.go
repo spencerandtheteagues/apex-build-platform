@@ -16,20 +16,20 @@ import (
 
 // QuotaExceededResponse represents the response when quota is exceeded
 type QuotaExceededResponse struct {
-	Error       string                 `json:"error"`
-	Code        string                 `json:"code"`
-	UsageType   string                 `json:"usage_type"`
-	Current     int64                  `json:"current"`
-	Limit       int64                  `json:"limit"`
-	Plan        string                 `json:"plan"`
-	UpgradeURL  string                 `json:"upgrade_url"`
-	UpgradeMsg  string                 `json:"upgrade_message"`
-	NextPlan    string                 `json:"next_plan,omitempty"`
-	NextLimit   int64                  `json:"next_limit,omitempty"`
-	ResetTime   *time.Time             `json:"reset_time,omitempty"`
-	Details     map[string]interface{} `json:"details,omitempty"`
-	Timestamp   time.Time              `json:"timestamp"`
-	RequestID   string                 `json:"request_id,omitempty"`
+	Error      string                 `json:"error"`
+	Code       string                 `json:"code"`
+	UsageType  string                 `json:"usage_type"`
+	Current    int64                  `json:"current"`
+	Limit      int64                  `json:"limit"`
+	Plan       string                 `json:"plan"`
+	UpgradeURL string                 `json:"upgrade_url"`
+	UpgradeMsg string                 `json:"upgrade_message"`
+	NextPlan   string                 `json:"next_plan,omitempty"`
+	NextLimit  int64                  `json:"next_limit,omitempty"`
+	ResetTime  *time.Time             `json:"reset_time,omitempty"`
+	Details    map[string]interface{} `json:"details,omitempty"`
+	Timestamp  time.Time              `json:"timestamp"`
+	RequestID  string                 `json:"request_id,omitempty"`
 }
 
 // QuotaChecker holds the usage tracker for quota enforcement
@@ -115,7 +115,7 @@ func (q *QuotaChecker) CheckStorageQuota(estimatedBytes int64) gin.HandlerFunc {
 		)
 
 		if err != nil {
-			c.Next()
+			q.sendQuotaUnavailable(c, usage.UsageAIRequests)
 			return
 		}
 
@@ -153,7 +153,7 @@ func (q *QuotaChecker) CheckAIQuota() gin.HandlerFunc {
 		)
 
 		if err != nil {
-			c.Next()
+			q.sendQuotaUnavailable(c, usage.UsageExecutionMinutes)
 			return
 		}
 
@@ -343,6 +343,15 @@ func (q *QuotaChecker) sendQuotaExceeded(c *gin.Context, usageType usage.UsageTy
 	c.AbortWithStatusJSON(http.StatusTooManyRequests, response)
 }
 
+func (q *QuotaChecker) sendQuotaUnavailable(c *gin.Context, usageType usage.UsageType) {
+	c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+		"error":      "Usage limits are temporarily unavailable. Please retry shortly.",
+		"code":       "QUOTA_UNAVAILABLE",
+		"usage_type": string(usageType),
+		"timestamp":  time.Now().UTC(),
+	})
+}
+
 // getQuotaErrorMessage returns a user-friendly error message
 func getQuotaErrorMessage(usageType usage.UsageType, plan usage.PlanType) string {
 	switch usageType {
@@ -365,27 +374,32 @@ func getUpgradeMessage(usageType usage.UsageType, plan usage.PlanType) string {
 	case usage.PlanFree:
 		switch usageType {
 		case usage.UsageProjects:
-			return "Upgrade to Pro ($12/month) for 25 projects, or Team ($29/month) for 100 projects."
+			return "Upgrade to Builder ($19/month) for more projects and managed AI credits, or Pro ($49/month) for higher limits."
 		case usage.UsageStorageBytes:
-			return "Upgrade to Pro ($12/month) for 5GB storage, or Team ($29/month) for 25GB."
+			return "Upgrade to Builder ($19/month) for 5GB storage, or Pro ($49/month) for 20GB."
 		case usage.UsageAIRequests:
-			return "Upgrade to Pro ($12/month) for 10,000 AI requests/month, or Team ($29/month) for 50,000."
+			return "Upgrade to Builder ($19/month) for managed AI credits, or Pro ($49/month) for a larger monthly credit allotment."
 		case usage.UsageExecutionMinutes:
-			return "Upgrade to Pro ($12/month) for 2 hours/day execution time, or Team ($29/month) for 8 hours/day."
+			return "Upgrade to Builder ($19/month) for longer execution time, or Pro ($49/month) for even more capacity."
+		}
+	case usage.PlanBuilder:
+		switch usageType {
+		case usage.UsageProjects, usage.UsageStorageBytes, usage.UsageAIRequests, usage.UsageExecutionMinutes:
+			return "Upgrade to Pro ($49/month) for more credits and higher limits, or Team ($99/month) for shared team capacity."
 		}
 	case usage.PlanPro:
 		switch usageType {
 		case usage.UsageProjects:
-			return "Upgrade to Team ($29/month) for 100 projects, or Enterprise ($79/month) for unlimited."
+			return "Upgrade to Team ($99/month) for shared team capacity, or contact sales for Enterprise."
 		case usage.UsageStorageBytes:
-			return "Upgrade to Team ($29/month) for 25GB storage, or Enterprise ($79/month) for unlimited."
+			return "Upgrade to Team ($99/month) for 100GB storage, or contact sales for Enterprise."
 		case usage.UsageAIRequests:
-			return "Upgrade to Team ($29/month) for 50,000 AI requests/month, or Enterprise ($79/month) for unlimited."
+			return "Upgrade to Team ($99/month) for more seats and managed AI credits, or contact sales for Enterprise."
 		case usage.UsageExecutionMinutes:
-			return "Upgrade to Team ($29/month) for 8 hours/day execution time, or Enterprise ($79/month) for unlimited."
+			return "Upgrade to Team ($99/month) for more shared execution capacity, or contact sales for Enterprise."
 		}
 	case usage.PlanTeam:
-		return "Upgrade to Enterprise ($79/month) for unlimited usage across all features."
+		return "Contact sales for Enterprise for custom limits and support."
 	}
 	return "Contact sales for a custom enterprise plan."
 }
@@ -415,6 +429,8 @@ func getNextPlanInfo(usageType usage.UsageType, currentPlan usage.PlanType) (str
 func getNextPlan(current usage.PlanType) string {
 	switch current {
 	case usage.PlanFree:
+		return "builder"
+	case usage.PlanBuilder:
 		return "pro"
 	case usage.PlanPro:
 		return "team"
@@ -472,4 +488,3 @@ func formatInt(i int64) string {
 	}
 	return fmt.Sprintf("%d", i)
 }
-

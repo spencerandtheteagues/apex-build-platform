@@ -41,7 +41,7 @@ type ServerProcess struct {
 	Args        []string // Command arguments
 	EntryFile   string   // "server.js", "app.py", "main.go"
 	Port        int
-	RuntimeType string   // "host", "container", "sandbox-v2"
+	RuntimeType string // "host", "container", "sandbox-v2"
 	handle      *ProcessHandle
 	Stdout      *bytes.Buffer
 	Stderr      *bytes.Buffer
@@ -198,6 +198,14 @@ func NewServerRunnerWithRuntime(db *gorm.DB, rt RuntimeBackend) *ServerRunner {
 		portStart: 9100, // Backend ports start at 9100 (preview uses 9000+)
 		portMap:   make(map[uint]int),
 	}
+}
+
+// RuntimeName returns the active runtime backend name for diagnostics.
+func (sr *ServerRunner) RuntimeName() string {
+	if sr == nil || sr.runtime == nil {
+		return ""
+	}
+	return sr.runtime.Name()
 }
 
 // DetectServer auto-detects backend server configuration from project files

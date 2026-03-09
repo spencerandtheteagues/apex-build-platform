@@ -14,6 +14,7 @@ import (
 
 	"apex-build/internal/ai"
 	"apex-build/internal/pricing"
+	"apex-build/internal/usage"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -172,6 +173,8 @@ type CompletionService struct {
 
 	// Metrics
 	metrics *CompletionMetrics
+
+	usageTracker *usage.Tracker
 }
 
 // CompletionRateLimiter manages completion rate limits
@@ -225,6 +228,10 @@ func NewCompletionService(db *gorm.DB, aiRouter *ai.AIRouter, byokManager *ai.BY
 	go svc.cacheCleanupWorker()
 
 	return svc
+}
+
+func (s *CompletionService) SetUsageTracker(tracker *usage.Tracker) {
+	s.usageTracker = tracker
 }
 
 // GetCompletions returns AI-powered code completions
@@ -378,6 +385,20 @@ func (s *CompletionService) GetCompletions(ctx context.Context, userID uint, req
 		modelUsed := ai.GetModelUsed(aiResp, aiReq)
 		s.byokManager.RecordUsage(userID, projectID, string(aiResp.Provider), modelUsed, isBYOK,
 			inputTokens, outputTokens, cost, string(aiReq.Capability), time.Since(startTime), "success")
+	}
+
+	if s.usageTracker != nil && userID > 0 {
+		var projectID *uint
+		if req.ProjectID != 0 {
+			projectID = &req.ProjectID
+		}
+		tokensUsed := 0
+		if aiResp.Usage != nil {
+			tokensUsed = aiResp.Usage.TotalTokens
+		}
+		if err := s.usageTracker.RecordAIRequest(ctx, userID, projectID, string(aiResp.Provider), tokensUsed); err != nil {
+			fmt.Printf("usage tracker: failed to record completion request for user %d: %v\n", userID, err)
+		}
 	}
 
 	return response, nil

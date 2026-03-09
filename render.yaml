@@ -47,7 +47,9 @@ services:
       - key: SPENCER_SEED_PASSWORD
         sync: false
       - key: EXECUTION_FORCE_CONTAINER
-        value: "false"  # Render doesn't support Docker-in-Docker; use process sandbox
+        value: "true"  # Production requires container isolation; execution degrades safely if Docker is unavailable
+      - key: APEX_ENABLE_HOST_TERMINAL
+        value: "false"
       - key: BUILD_MAX_REQUESTS
         value: "80"
       - key: BUILD_MAX_REQUESTS_FAST
@@ -125,7 +127,6 @@ databases:
     plan: starter
     region: oregon
     postgresMajorVersion: 15
-    ipAllowList: []  # Allow all IPs (can restrict in production)
     # databaseName: apex_build
     # user: apex_user
 
@@ -139,5 +140,5 @@ databases:
 #   3. Set REDIS_URL in Render Dashboard → apex-api → Environment
 
 # Preview Environments (for PRs)
-previewsEnabled: true
+previewsEnabled: false
 previewsExpireAfterDays: 7

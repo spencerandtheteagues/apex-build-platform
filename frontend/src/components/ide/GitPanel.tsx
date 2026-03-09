@@ -373,7 +373,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               {git.remoteStatus.ahead === 0 && git.remoteStatus.behind === 0 && (
                 <span className="flex items-center gap-1 text-green-400">
                   <CheckCheck size={10} />
-                  Up to date
+                  Remote connected
                 </span>
               )}
             </div>

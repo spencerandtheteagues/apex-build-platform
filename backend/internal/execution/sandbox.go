@@ -16,8 +16,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // ExecutionResult contains the result of a code execution
@@ -143,8 +141,13 @@ func NewSandbox(config *SandboxConfig) (*Sandbox, error) {
 
 // Execute runs code in an isolated sandbox
 func (s *Sandbox) Execute(ctx context.Context, language, code string, stdin string) (*ExecutionResult, error) {
-	// Generate unique execution ID
-	execID := uuid.New().String()
+	return s.ExecuteWithID(ctx, "", language, code, stdin)
+}
+
+func (s *Sandbox) ExecuteWithID(ctx context.Context, execID, language, code string, stdin string) (*ExecutionResult, error) {
+	if strings.TrimSpace(execID) == "" {
+		execID = generateExecutionID()
+	}
 
 	// Create isolated temp directory for this execution
 	tempDir, err := os.MkdirTemp(s.baseTempDir, fmt.Sprintf("exec-%s-", execID[:8]))
@@ -205,7 +208,13 @@ func (s *Sandbox) Execute(ctx context.Context, language, code string, stdin stri
 
 // ExecuteFile runs a file in the sandbox
 func (s *Sandbox) ExecuteFile(ctx context.Context, filepath string, args []string, stdin string) (*ExecutionResult, error) {
-	execID := uuid.New().String()
+	return s.ExecuteFileWithID(ctx, "", filepath, args, stdin)
+}
+
+func (s *Sandbox) ExecuteFileWithID(ctx context.Context, execID, filepath string, args []string, stdin string) (*ExecutionResult, error) {
+	if strings.TrimSpace(execID) == "" {
+		execID = generateExecutionID()
+	}
 
 	// Detect language from file extension
 	language := detectLanguageFromFile(filepath)

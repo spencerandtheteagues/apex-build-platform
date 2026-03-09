@@ -112,7 +112,10 @@ var upgrader = websocket.Upgrader{
 		origin := r.Header.Get("Origin")
 
 		// Allow env-configured origins first
-		if envOrigins := os.Getenv("CORS_ALLOWED_ORIGINS"); envOrigins != "" {
+		if envOrigins := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS")); envOrigins != "" || strings.TrimSpace(os.Getenv("CORS_ORIGINS")) != "" {
+			if envOrigins == "" {
+				envOrigins = strings.TrimSpace(os.Getenv("CORS_ORIGINS"))
+			}
 			for _, allowed := range strings.Split(envOrigins, ",") {
 				if strings.TrimSpace(allowed) == origin {
 					return true

@@ -391,7 +391,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
             >
               <option value="auto">Auto-Select</option>
               <option value="claude">Claude</option>
-              <option value="gpt4">GPT-4</option>
+              <option value="gpt4">GPT-5</option>
               <option value="gemini">Gemini</option>
             </select>
 

@@ -262,4 +262,52 @@ describe('LivePreview', () => {
     setIntervalSpy.mockRestore()
     clearIntervalSpy.mockRestore()
   })
+
+  it('locks sandbox mode and disables backend preview controls when secure preview is enforced', async () => {
+    const mockGet = apiService.client.get as any
+
+    mockGet.mockImplementation(async (url: string) => {
+      if (url === '/preview/docker/status') {
+        return {
+          data: {
+            available: true,
+            sandbox_required: true,
+            backend_preview_available: false,
+            backend_preview_reason: 'Backend runtime preview is disabled while secure sandbox preview is enforced',
+          }
+        }
+      }
+      if (url === '/preview/bundler/status') return { data: { available: true } }
+      if (url.startsWith('/preview/status/')) return { data: { preview: { active: false } } }
+      if (url.startsWith('/preview/server/detect/')) {
+        return { data: { has_backend: true, framework: 'express', server_type: 'node' } }
+      }
+      if (url.startsWith('/preview/server/status/')) {
+        return {
+          data: {
+            available: false,
+            reason: 'Backend runtime preview is disabled while secure sandbox preview is enforced',
+            server: null,
+          }
+        }
+      }
+      if (url.startsWith('/preview/server/logs/')) return { data: { stdout: '', stderr: '' } }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+
+    const view = render(<LivePreview projectId={505} className="h-96" />)
+
+    await waitFor(() => {
+      expect(within(view.container).getByText('API Disabled')).toBeTruthy()
+    })
+
+    fireEvent.click(within(view.container).getByTitle('Settings'))
+
+    const sandboxToggle = within(view.container).getByLabelText('Docker Sandbox') as HTMLInputElement
+    expect(sandboxToggle.checked).toBe(true)
+    expect(sandboxToggle.disabled).toBe(true)
+
+    const startApiButton = within(view.container).getByRole('button', { name: /start api/i }) as HTMLButtonElement
+    expect(startApiButton.disabled).toBe(true)
+  })
 })

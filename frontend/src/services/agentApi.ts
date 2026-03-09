@@ -19,6 +19,7 @@ import {
   FileChange,
   TerminalEntry,
 } from '@/types/agent'
+import { getConfiguredWsUrl } from '@/config/runtime'
 import { apiService } from './api'
 import { generateId } from '@/lib/utils'
 
@@ -81,8 +82,12 @@ export class AgentApiService {
 
     return new Promise((resolve, reject) => {
       const token = localStorage.getItem('apex_access_token')
+      const configuredWsUrl = getConfiguredWsUrl().replace(/\/+$/, '')
+      const fallbackWsRoot = configuredWsUrl
+        ? (configuredWsUrl.endsWith('/ws') ? configuredWsUrl : `${configuredWsUrl}/ws`)
+        : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
       const baseUrl = (this.websocketUrl && this.websocketUrl.trim()) ||
-        `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/build/${buildId}`
+        `${fallbackWsRoot}/build/${buildId}`
       const wsUrl = token && !/[?&]token=/.test(baseUrl)
         ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
         : baseUrl

@@ -31,6 +31,7 @@ beforeEach(() => {
 
 afterEach(() => {
   localStorage.clear()
+  window.__APEX_CONFIG__ = undefined
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -76,7 +77,21 @@ describe('logout', () => {
 describe('getDeploymentLogsWebSocketUrl', () => {
   it('uses the backend deployment websocket route', () => {
     const service = new ApiService('/api/v1')
+    localStorage.setItem('apex_access_token', 'test-token')
 
-    expect(service.getDeploymentLogsWebSocketUrl('deploy-123')).toBe(`ws://${window.location.host}/ws/deploy/deploy-123`)
+    expect(service.getDeploymentLogsWebSocketUrl('deploy-123')).toBe(`ws://${window.location.host}/ws/deploy/deploy-123?token=test-token`)
+  })
+
+  it('prefers runtime websocket config for websocket routes', () => {
+    window.__APEX_CONFIG__ = {
+      WS_URL: 'wss://runtime.example/ws',
+    }
+
+    const service = new ApiService('/api/v1')
+    localStorage.setItem('apex_access_token', 'test-token')
+
+    expect(service.getDeploymentLogsWebSocketUrl('deploy-123')).toBe('wss://runtime.example/ws/deploy/deploy-123?token=test-token')
+    expect(service.getDebugWebSocketUrl('debug-123')).toBe('wss://runtime.example/ws/debug/debug-123?token=test-token')
+    expect(service.getTerminalWebSocketUrl('term-123')).toBe('wss://runtime.example/ws/terminal/term-123?token=test-token')
   })
 })

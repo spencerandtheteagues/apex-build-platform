@@ -266,10 +266,21 @@ func (h *DeployHandler) GetProviders(c *gin.Context) {
 // GetLatestDeployment returns the latest deployment for a project
 // GET /api/v1/deploy/projects/:projectId/latest
 func (h *DeployHandler) GetLatestDeployment(c *gin.Context) {
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("projectId")
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	var project models.Project
+	if err := h.db.Select("id", "owner_id").First(&project, uint(projectID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
 	}
 

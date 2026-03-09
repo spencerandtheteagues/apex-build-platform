@@ -18,8 +18,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // ContainerSandbox provides Docker-based isolated code execution
@@ -545,7 +543,13 @@ func (s *ContainerSandbox) buildImage(language, dockerfile string) error {
 
 // Execute runs code in an isolated container
 func (s *ContainerSandbox) Execute(ctx context.Context, language, code, stdin string) (*ExecutionResult, error) {
-	execID := uuid.New().String()
+	return s.ExecuteWithID(ctx, "", language, code, stdin)
+}
+
+func (s *ContainerSandbox) ExecuteWithID(ctx context.Context, execID, language, code, stdin string) (*ExecutionResult, error) {
+	if strings.TrimSpace(execID) == "" {
+		execID = generateExecutionID()
+	}
 	startTime := time.Now()
 
 	// Check concurrent execution limit
@@ -660,6 +664,14 @@ func (s *ContainerSandbox) ExecuteWorkspaceCommand(
 	language, workspaceDir, command, stdin string,
 	env map[string]string,
 ) (*ExecutionResult, error) {
+	return s.ExecuteWorkspaceCommandWithID(ctx, "", language, workspaceDir, command, stdin, env)
+}
+
+func (s *ContainerSandbox) ExecuteWorkspaceCommandWithID(
+	ctx context.Context,
+	execID, language, workspaceDir, command, stdin string,
+	env map[string]string,
+) (*ExecutionResult, error) {
 	if strings.TrimSpace(workspaceDir) == "" {
 		return nil, fmt.Errorf("workspace directory is required")
 	}
@@ -674,7 +686,9 @@ func (s *ContainerSandbox) ExecuteWorkspaceCommand(
 		return nil, fmt.Errorf("workspace command is required")
 	}
 
-	execID := uuid.New().String()
+	if strings.TrimSpace(execID) == "" {
+		execID = generateExecutionID()
+	}
 	startTime := time.Now()
 
 	current := atomic.AddInt32(&s.stats.ConcurrentExecs, 1)

@@ -162,14 +162,21 @@ func main() {
 	startupRegistry.MarkReady("primary_database", startup.TierCritical, "Primary database connected", nil)
 	defer database.Close()
 
-	// Run database seeds (create admin accounts)
-	if err := database.RunSeeds(); err != nil {
-		startupRegistry.MarkDegraded("database_seeding", startup.TierOptional, "Database seeds completed with warnings", map[string]any{
-			"error": err.Error(),
-		})
-		log.Printf("WARNING: Database seeding had issues: %v", err)
+	seedRuntimeAccounts := !(config.IsProductionEnvironment() || config.IsStagingEnvironment()) ||
+		strings.EqualFold(strings.TrimSpace(os.Getenv("ENABLE_RUNTIME_SEEDS")), "true")
+	if seedRuntimeAccounts {
+		if err := database.RunSeeds(); err != nil {
+			startupRegistry.MarkDegraded("database_seeding", startup.TierOptional, "Database seeds completed with warnings", map[string]any{
+				"error": err.Error(),
+			})
+			log.Printf("WARNING: Database seeding had issues: %v", err)
+		} else {
+			startupRegistry.MarkReady("database_seeding", startup.TierOptional, "Database seeds completed", nil)
+		}
 	} else {
-		startupRegistry.MarkReady("database_seeding", startup.TierOptional, "Database seeds completed", nil)
+		startupRegistry.MarkReady("database_seeding", startup.TierOptional, "Runtime database seeds skipped for this environment", map[string]any{
+			"enabled": false,
+		})
 	}
 
 	// Initialize authentication service with validated JWT secret
@@ -387,13 +394,41 @@ func main() {
 	log.Println("Code Search Engine initialized (full-text, regex, symbol search)")
 
 	// Initialize Live Preview Server
-	previewServer := preview.NewPreviewServer(database.GetDB())
-	previewHandler := handlers.NewPreviewHandler(database.GetDB(), previewServer, authService)
+	previewFactoryConfig := preview.DefaultFactoryConfig()
+	previewFactoryConfig.ForceContainerMode = strings.EqualFold(strings.TrimSpace(os.Getenv("ENVIRONMENT")), "production") ||
+		strings.EqualFold(strings.TrimSpace(os.Getenv("PREVIEW_FORCE_CONTAINER")), "true")
 
-	log.Println("Live Preview Server initialized (hot reload support)")
+	var previewHandler *handlers.PreviewHandler
+	previewFactory, previewFactoryErr := preview.NewPreviewServerFactory(database.GetDB(), previewFactoryConfig)
+	if previewFactoryErr != nil {
+		log.Printf("WARNING: Preview container factory unavailable: %v", previewFactoryErr)
+		previewHandler = handlers.NewPreviewHandler(database.GetDB(), preview.NewPreviewServer(database.GetDB()), authService)
+	} else {
+		previewHandler = handlers.NewPreviewHandlerWithFactory(database.GetDB(), previewFactory, authService)
+	}
+
+	log.Println("Live Preview Server initialized")
 	previewFeatureStatus := previewHandler.FeatureStatus()
+	if previewFactoryErr != nil {
+		previewFeatureStatus["factory_error"] = previewFactoryErr.Error()
+	}
+	if sandboxRequired, _ := previewFeatureStatus["sandbox_required"].(bool); sandboxRequired {
+		if sandboxReady, _ := previewFeatureStatus["sandbox_ready"].(bool); sandboxReady {
+			log.Println("SECURITY: Live preview sandbox enforcement enabled")
+		} else {
+			log.Println("WARNING: Live preview sandbox enforcement enabled, but Docker preview is unavailable")
+		}
+	}
 	if bundlerStatus, ok := previewFeatureStatus["bundler"].(map[string]interface{}); ok {
-		if available, ok := bundlerStatus["available"].(bool); ok && !available {
+		if sandboxRequired, _ := previewFeatureStatus["sandbox_required"].(bool); sandboxRequired {
+			if sandboxReady, _ := previewFeatureStatus["sandbox_ready"].(bool); !sandboxReady {
+				startupRegistry.MarkDegraded("preview_service", startup.TierOptional, "Live preview sandbox required but unavailable", previewFeatureStatus)
+			} else if available, ok := bundlerStatus["available"].(bool); ok && !available {
+				startupRegistry.MarkDegraded("preview_service", startup.TierOptional, "Preview service initialized with bundler unavailable", previewFeatureStatus)
+			} else {
+				startupRegistry.MarkReady("preview_service", startup.TierOptional, "Live preview service initialized", previewFeatureStatus)
+			}
+		} else if available, ok := bundlerStatus["available"].(bool); ok && !available {
 			startupRegistry.MarkDegraded("preview_service", startup.TierOptional, "Preview service initialized with bundler unavailable", previewFeatureStatus)
 		} else {
 			startupRegistry.MarkReady("preview_service", startup.TierOptional, "Live preview service initialized", previewFeatureStatus)
@@ -510,19 +545,23 @@ func main() {
 	// Create execution handler with security configuration
 	executionConfig := handlers.DefaultExecutionHandlerConfig()
 	executionConfig.ProjectsDir = projectsDir
+	executionTier := startup.TierOptional
+	if executionConfig.ForceContainer {
+		executionTier = startup.TierCritical
+	}
 
 	executionHandler, err := handlers.NewExecutionHandlerWithConfig(database.GetDB(), executionConfig)
 	if err != nil {
 		log.Printf("CRITICAL: Failed to initialize execution handler: %v", err)
 		log.Println("SECURITY: Code execution features are DISABLED")
 		if executionConfig.ForceContainer {
-			startupRegistry.MarkFailed("code_execution", startup.TierCritical, "Container sandbox required but execution handler failed to initialize", map[string]any{
+			startupRegistry.MarkFailed("code_execution", executionTier, "Container sandbox required but execution handler failed to initialize", map[string]any{
 				"error": err.Error(),
 			})
 			startupRegistry.SetPhase(startup.PhaseFailed)
 			log.Fatalf("CRITICAL: Code execution is required but failed to initialize: %v", err)
 		}
-		startupRegistry.MarkDegraded("code_execution", startup.TierOptional, "Code execution disabled", map[string]any{
+		startupRegistry.MarkDegraded("code_execution", executionTier, "Code execution disabled", map[string]any{
 			"error": err.Error(),
 		})
 	} else {
@@ -538,15 +577,18 @@ func main() {
 			log.Println("   - Memory limit: 256MB default")
 			log.Println("   - CPU limit: 0.5 cores default")
 			log.Println("   - Read-only root filesystem: enabled")
-			startupRegistry.MarkReady("code_execution", startup.TierOptional, "Container sandbox enabled", sandboxStatus)
+			startupRegistry.MarkReady("code_execution", executionTier, "Container sandbox enabled", sandboxStatus)
 		} else {
 			if executionConfig.ForceContainer {
-				log.Println("WARNING: Docker required but not available - execution DISABLED")
+				log.Println("CRITICAL: Docker required but not available - execution DISABLED")
+				startupRegistry.MarkFailed("code_execution", executionTier, "Code execution unavailable because the required container sandbox is missing", sandboxStatus)
+				startupRegistry.SetPhase(startup.PhaseFailed)
+				log.Fatalf("CRITICAL: Code execution requires a container sandbox, but none is available")
 			} else {
 				log.Println("WARNING: Docker not available - using process-based sandbox (less secure)")
 				log.Println("WARNING: Set EXECUTION_FORCE_CONTAINER=true to require Docker in production")
+				startupRegistry.MarkDegraded("code_execution", executionTier, "Execution running without container sandbox", sandboxStatus)
 			}
-			startupRegistry.MarkDegraded("code_execution", startup.TierOptional, "Execution running without container sandbox", sandboxStatus)
 		}
 	}
 
@@ -742,9 +784,13 @@ func main() {
 
 	// Initialize Real-Time Collaboration Hub
 	collabHub := collaboration.NewCollabHub()
+	collabAccessor := collaboration.NewDatabaseAdapter(database.GetDB())
+	collabHub.SetAccessResolver(collabAccessor.ResolveProjectAccess)
+	collabHub.SetFileStore(collabAccessor)
 	go collabHub.Run()
 	log.Println("Real-Time Collaboration initialized (OT, presence, cursor tracking)")
 	startupRegistry.MarkReady("collaboration", startup.TierOptional, "Real-time collaboration hub started", nil)
+	collaborationHandler := handlers.NewCollaborationHandler(collabHub, collabAccessor.ResolveProjectAccess)
 
 	// Initialize Key Rotation Handler (admin-only)
 	rotationHandler := handlers.NewRotationHandler(database.GetDB())
@@ -763,12 +809,16 @@ func main() {
 	}
 	usageHandler := handlers.NewUsageHandlers(database.GetDB(), usageTracker)
 	quotaChecker := middleware.NewQuotaChecker(usageTracker)
+	completionService.SetUsageTracker(usageTracker)
+	if executionHandler != nil {
+		executionHandler.SetUsageTracker(usageTracker)
+	}
 	log.Println("Usage Tracking & Quota Enforcement initialized (projects, storage, AI, execution)")
 	log.Println("   - Free: 3 projects, 100MB storage, 1000 AI/month, 10 exec min/day")
-	log.Println("   - Builder ($19/mo): 10 projects, 1GB storage, 5000 AI/month, 60 exec min/day")
-	log.Println("   - Pro ($49/mo): 25 projects, 5GB storage, 10000 AI/month, 120 exec min/day")
-	log.Println("   - Team ($99/mo): 100 projects, 25GB storage, 50000 AI/month, 480 exec min/day")
-	log.Println("   - Enterprise: Unlimited (contact sales)")
+	log.Println("   - Builder ($19/mo): unlimited projects, 5GB storage, credit-based AI, 240 exec min/day")
+	log.Println("   - Pro ($49/mo): unlimited projects, 20GB storage, credit-based AI, 720 exec min/day")
+	log.Println("   - Team ($99/mo): unlimited projects, 100GB storage, credit-based AI, 1440 exec min/day")
+	log.Println("   - Enterprise: unlimited")
 
 	// Initialize Prometheus Metrics and Business Metrics Collector
 	metricsEnabled := getEnv("ENABLE_METRICS", "true") == "true"
@@ -794,6 +844,7 @@ func main() {
 	// Initialize API server
 	server := api.NewServer(database, authService, aiRouter, byokManager)
 	server.SetReadinessRegistry(startupRegistry)
+	server.SetUsageTracker(usageTracker)
 
 	// Setup routes
 	router := setupRoutes(
@@ -805,7 +856,7 @@ func main() {
 		paymentHandler, executionHandler, deployHandler, packageHandler,
 		environmentHandler, // Environment configuration (Nix-like - Replit parity)
 		communityHandler, hostingHandler, databaseHandler, debuggingHandler,
-		completionsHandler, extensionsHandler, enterpriseHandler, collabHub,
+		completionsHandler, extensionsHandler, enterpriseHandler, collabHub, collaborationHandler,
 		optimizedHandler,
 		byokHandler,           // BYOK API key management and model selection
 		exportHandler,         // GitHub export (push projects to GitHub)
@@ -1062,7 +1113,7 @@ func setupRoutes(
 	hostingHandler *handlers.HostingHandler, databaseHandler *handlers.DatabaseHandler,
 	debuggingHandler *handlers.DebuggingHandler, completionsHandler *handlers.CompletionsHandler,
 	extensionsHandler *handlers.ExtensionsHandler, enterpriseHandler *handlers.EnterpriseHandler,
-	collabHub *collaboration.CollabHub,
+	collabHub *collaboration.CollabHub, collaborationHandler *handlers.CollaborationHandler,
 	optimizedHandler *handlers.OptimizedHandler, // PERFORMANCE: Optimized handlers with caching
 	byokHandler *handlers.BYOKHandlers, // BYOK API key management
 	exportHandler *handlers.ExportHandler, // GitHub export
@@ -1106,7 +1157,7 @@ func setupRoutes(
 			"version":     "1.0.0",
 			"description": "Next-generation cloud development platform with multi-AI integration",
 			"features": []string{
-				"Multi-AI integration (Claude, GPT-4, Gemini)",
+				"Multi-AI integration (Claude, OpenAI, Gemini)",
 				"Real-time code collaboration",
 				"Intelligent AI routing and fallbacks",
 				"Enterprise-grade security",
@@ -1377,7 +1428,7 @@ func setupRoutes(
 				billing.GET("/config-status", paymentHandler.StripeConfigStatus)   // Check Stripe config
 				billing.POST("/credits/purchase", paymentHandler.PurchaseCredits)  // Buy AI credits (one-time)
 				billing.GET("/credits/balance", paymentHandler.GetCreditBalance)   // Get current credit balance
-				billing.GET("/credits/ledger", paymentHandler.GetCreditLedger)    // Paginated credit history
+				billing.GET("/credits/ledger", paymentHandler.GetCreditLedger)     // Paginated credit history
 			}
 
 			// Code Execution endpoints (the core of cloud IDE) - with quota + budget enforcement
@@ -1450,7 +1501,7 @@ func setupRoutes(
 			debuggingHandler.RegisterRoutes(protected)
 
 			// AI Completions endpoints
-			completionsHandler.RegisterCompletionRoutes(protected)
+			completionsHandler.RegisterCompletionRoutes(protected, quotaChecker.CheckAIQuota(), budgetMiddleware)
 
 			// Extensions Marketplace endpoints
 			extensionsHandler.RegisterExtensionRoutes(protected)
@@ -1479,6 +1530,14 @@ func setupRoutes(
 
 			// Budget Caps endpoints (S1: Hard Budget Caps + Instant Stop)
 			budgetHandler.RegisterRoutes(protected)
+
+			// Collaboration room bootstrap endpoints for the dedicated /ws/collab service.
+			collab := protected.Group("/collab")
+			{
+				collab.POST("/join/:projectId", collaborationHandler.JoinRoom)
+				collab.POST("/leave/:roomId", collaborationHandler.LeaveRoom)
+				collab.GET("/users/:roomId", collaborationHandler.GetUsers)
+			}
 
 			// Admin endpoints (requires admin privileges)
 			admin := protected.Group("/admin")

@@ -37,14 +37,14 @@ func (h *ExportHandler) ExportToGitHub(c *gin.Context) {
 	userID := c.GetUint("user_id")
 
 	var req struct {
-		ProjectID        uint   `json:"project_id" binding:"required"`
-		RepoName         string `json:"repo_name" binding:"required"`
-		Description      string `json:"description"`
-		IsPrivate        bool   `json:"is_private"`
-		Token            string `json:"token"` // GitHub PAT — required for export
-		IncludeGitignore bool   `json:"include_gitignore"`
-		IncludeDockerfile bool  `json:"include_dockerfile"`
-		IncludeReadme    bool   `json:"include_readme"`
+		ProjectID         uint   `json:"project_id" binding:"required"`
+		RepoName          string `json:"repo_name" binding:"required"`
+		Description       string `json:"description"`
+		IsPrivate         bool   `json:"is_private"`
+		Token             string `json:"token"` // GitHub PAT — required for export
+		IncludeGitignore  bool   `json:"include_gitignore"`
+		IncludeDockerfile bool   `json:"include_dockerfile"`
+		IncludeReadme     bool   `json:"include_readme"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -183,12 +183,29 @@ func (h *ExportHandler) ExportToGitHub(c *gin.Context) {
 // GetExportStatus checks if a project is already connected to a GitHub repo
 // GET /api/v1/git/export/status/:projectId
 func (h *ExportHandler) GetExportStatus(c *gin.Context) {
+	userID := c.GetUint("user_id")
 	projectIDStr := c.Param("projectId")
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"error":   "Invalid project ID",
+		})
+		return
+	}
+
+	var project models.Project
+	if err := h.db.First(&project, uint(projectID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Project not found",
+		})
+		return
+	}
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"error":   "Access denied",
 		})
 		return
 	}

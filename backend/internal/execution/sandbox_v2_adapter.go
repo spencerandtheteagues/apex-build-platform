@@ -32,7 +32,12 @@ func newSandboxV2ExecutorAdapter(cfg *sandboxv2.ManagerConfig) (*sandboxV2Execut
 }
 
 func (a *sandboxV2ExecutorAdapter) Execute(ctx context.Context, language, code, stdin string) (*ExecutionResult, error) {
+	return a.ExecuteWithID(ctx, "", language, code, stdin)
+}
+
+func (a *sandboxV2ExecutorAdapter) ExecuteWithID(ctx context.Context, execID, language, code, stdin string) (*ExecutionResult, error) {
 	res, err := a.executor.Execute(ctx, sandboxv2.ExecuteRequest{
+		ID:       execID,
 		Language: language,
 		Code:     code,
 		Stdin:    stdin,
@@ -44,6 +49,10 @@ func (a *sandboxV2ExecutorAdapter) Execute(ctx context.Context, language, code, 
 }
 
 func (a *sandboxV2ExecutorAdapter) ExecuteFile(ctx context.Context, filePath string, args []string, stdin string) (*ExecutionResult, error) {
+	return a.ExecuteFileWithID(ctx, "", filePath, args, stdin)
+}
+
+func (a *sandboxV2ExecutorAdapter) ExecuteFileWithID(ctx context.Context, execID, filePath string, args []string, stdin string) (*ExecutionResult, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox v2 read file: %w", err)
@@ -53,7 +62,7 @@ func (a *sandboxV2ExecutorAdapter) ExecuteFile(ctx context.Context, filePath str
 	if lang == "" {
 		lang = "plaintext"
 	}
-	return a.Execute(ctx, lang, string(data), stdin)
+	return a.ExecuteWithID(ctx, execID, lang, string(data), stdin)
 }
 
 func (a *sandboxV2ExecutorAdapter) Kill(execID string) error {
