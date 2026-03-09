@@ -4,8 +4,11 @@
 package handlers
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"apex-build/internal/ai"
@@ -124,10 +127,10 @@ func (h *Handler) Register(c *gin.Context) {
 		Success: true,
 		Data: map[string]interface{}{
 			"user": map[string]interface{}{
-				"id":       user.ID,
-				"username": user.Username,
-				"email":    user.Email,
-				"full_name": user.FullName,
+				"id":                user.ID,
+				"username":          user.Username,
+				"email":             user.Email,
+				"full_name":         user.FullName,
 				"subscription_type": user.SubscriptionType,
 			},
 			"tokens": tokens,
@@ -206,13 +209,13 @@ func (h *Handler) Login(c *gin.Context) {
 		Success: true,
 		Data: map[string]interface{}{
 			"user": map[string]interface{}{
-				"id":       user.ID,
-				"username": user.Username,
-				"email":    user.Email,
-				"full_name": user.FullName,
+				"id":                user.ID,
+				"username":          user.Username,
+				"email":             user.Email,
+				"full_name":         user.FullName,
 				"subscription_type": user.SubscriptionType,
-				"preferred_theme": user.PreferredTheme,
-				"preferred_ai": user.PreferredAI,
+				"preferred_theme":   user.PreferredTheme,
+				"preferred_ai":      user.PreferredAI,
 			},
 			"tokens": tokens,
 		},
@@ -277,6 +280,13 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 
 // Logout handles user logout
 func (h *Handler) Logout(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		req.RefreshToken = ""
+	}
+
 	// Get the raw token from context and blacklist it
 	token, exists := middleware.GetRawToken(c)
 	if exists && token != "" {
@@ -289,6 +299,9 @@ func (h *Handler) Logout(c *gin.Context) {
 			})
 			return
 		}
+	}
+	if refreshToken := strings.TrimSpace(req.RefreshToken); refreshToken != "" {
+		_ = h.AuthService.RevokeRefreshToken(refreshToken)
 	}
 
 	c.JSON(http.StatusOK, StandardResponse{
@@ -333,20 +346,20 @@ func (h *Handler) GetProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, StandardResponse{
 		Success: true,
 		Data: map[string]interface{}{
-			"id":                 user.ID,
-			"username":           user.Username,
-			"email":             user.Email,
-			"full_name":         user.FullName,
-			"avatar_url":        user.AvatarURL,
-			"subscription_type": user.SubscriptionType,
-			"subscription_end":  user.SubscriptionEnd,
-			"is_verified":       user.IsVerified,
-			"preferred_theme":   user.PreferredTheme,
-			"preferred_ai":      user.PreferredAI,
+			"id":                  user.ID,
+			"username":            user.Username,
+			"email":               user.Email,
+			"full_name":           user.FullName,
+			"avatar_url":          user.AvatarURL,
+			"subscription_type":   user.SubscriptionType,
+			"subscription_end":    user.SubscriptionEnd,
+			"is_verified":         user.IsVerified,
+			"preferred_theme":     user.PreferredTheme,
+			"preferred_ai":        user.PreferredAI,
 			"monthly_ai_requests": user.MonthlyAIRequests,
-			"monthly_ai_cost":   user.MonthlyAICost,
-			"created_at":        user.CreatedAt,
-			"project_count":     len(user.Projects),
+			"monthly_ai_cost":     user.MonthlyAICost,
+			"created_at":          user.CreatedAt,
+			"project_count":       len(user.Projects),
 		},
 	})
 }

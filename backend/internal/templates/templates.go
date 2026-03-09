@@ -24,23 +24,23 @@ const (
 
 // Template represents a project template
 type Template struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	Category    TemplateCategory `json:"category"`
-	Language    string           `json:"language"`
-	Framework   string           `json:"framework,omitempty"`
-	Icon        string           `json:"icon"`
-	Tags        []string         `json:"tags"`
-	Difficulty  string           `json:"difficulty"` // beginner, intermediate, advanced
-	Files       []TemplateFile   `json:"files"`
-	Dependencies map[string]string `json:"dependencies,omitempty"`
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	Description     string            `json:"description"`
+	Category        TemplateCategory  `json:"category"`
+	Language        string            `json:"language"`
+	Framework       string            `json:"framework,omitempty"`
+	Icon            string            `json:"icon"`
+	Tags            []string          `json:"tags"`
+	Difficulty      string            `json:"difficulty"` // beginner, intermediate, advanced
+	Files           []TemplateFile    `json:"files"`
+	Dependencies    map[string]string `json:"dependencies,omitempty"`
 	DevDependencies map[string]string `json:"dev_dependencies,omitempty"`
-	Scripts     map[string]string `json:"scripts,omitempty"`
-	EnvVars     []EnvVar         `json:"env_vars,omitempty"`
-	Popular     bool             `json:"popular"`
-	New         bool             `json:"new"`
-	CreatedAt   time.Time        `json:"created_at"`
+	Scripts         map[string]string `json:"scripts,omitempty"`
+	EnvVars         []EnvVar          `json:"env_vars,omitempty"`
+	Popular         bool              `json:"popular"`
+	New             bool              `json:"new"`
+	CreatedAt       time.Time         `json:"created_at"`
 }
 
 // TemplateFile represents a file in a template
@@ -79,14 +79,14 @@ func GetAllTemplates() []Template {
 				"react-dom": "^18.2.0",
 			},
 			DevDependencies: map[string]string{
-				"@types/react":     "^18.2.0",
-				"@types/react-dom": "^18.2.0",
-				"typescript":       "^5.0.0",
-				"vite":             "^5.0.0",
+				"@types/react":         "^18.2.0",
+				"@types/react-dom":     "^18.2.0",
+				"typescript":           "^5.0.0",
+				"vite":                 "^5.0.0",
 				"@vitejs/plugin-react": "^4.0.0",
-				"tailwindcss":      "^3.4.0",
-				"autoprefixer":     "^10.4.0",
-				"postcss":          "^8.4.0",
+				"tailwindcss":          "^3.4.0",
+				"autoprefixer":         "^10.4.0",
+				"postcss":              "^8.4.0",
 			},
 			Scripts: map[string]string{
 				"dev":     "vite",
@@ -181,11 +181,11 @@ func GetAllTemplates() []Template {
 			Popular:     true,
 			Files:       getExpressAPIFiles(),
 			Dependencies: map[string]string{
-				"express":    "^4.18.0",
-				"cors":       "^2.8.0",
-				"dotenv":     "^16.0.0",
-				"helmet":     "^7.0.0",
-				"morgan":     "^1.10.0",
+				"express": "^4.18.0",
+				"cors":    "^2.8.0",
+				"dotenv":  "^16.0.0",
+				"helmet":  "^7.0.0",
+				"morgan":  "^1.10.0",
 			},
 			DevDependencies: map[string]string{
 				"nodemon": "^3.0.0",
@@ -242,12 +242,12 @@ func GetAllTemplates() []Template {
 			New:         true,
 			Files:       getT3StackFiles(),
 			Dependencies: map[string]string{
-				"next":          "^14.0.0",
-				"react":         "^18.2.0",
-				"@trpc/server":  "^10.0.0",
-				"@trpc/client":  "^10.0.0",
+				"next":           "^14.0.0",
+				"react":          "^18.2.0",
+				"@trpc/server":   "^10.0.0",
+				"@trpc/client":   "^10.0.0",
 				"@prisma/client": "^5.0.0",
-				"zod":           "^3.22.0",
+				"zod":            "^3.22.0",
 			},
 		},
 		{
@@ -1298,7 +1298,7 @@ func deleteItem(c *fiber.Ctx) error {
 			Path: "go.mod",
 			Content: `module myapi
 
-go 1.21
+go 1.23
 
 require github.com/gofiber/fiber/v2 v2.52.0
 `,

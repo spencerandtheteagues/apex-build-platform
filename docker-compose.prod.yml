@@ -39,9 +39,11 @@ services:
       - apex-network
     environment:
       - ENV=production
+      - ENVIRONMENT=production
       - DATABASE_URL=postgresql://apex_user:${POSTGRES_PASSWORD}@postgres:5432/apex_build?sslmode=require
       - REDIS_URL=redis://redis:6379/0
       - JWT_SECRET=${JWT_SECRET}
+      - SECRETS_MASTER_KEY=${SECRETS_MASTER_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GOOGLE_AI_API_KEY=${GOOGLE_AI_API_KEY}
@@ -57,7 +59,7 @@ services:
     labels:
       - "com.apex-build.service=backend"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/ready"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -273,8 +273,9 @@ export class ApiService {
   }
 
   async logout(): Promise<void> {
+    const refreshToken = this.getRefreshToken()
     try {
-      await this.client.post('/auth/logout')
+      await this.client.post('/auth/logout', refreshToken ? { refresh_token: refreshToken } : undefined)
     } finally {
       this.clearAuth()
     }
@@ -2289,10 +2290,10 @@ export class ApiService {
   /**
    * Get WebSocket URL for deployment logs streaming
    */
-  getDeploymentLogsWebSocketUrl(projectId: number): string {
+  getDeploymentLogsWebSocketUrl(deploymentId: string): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = resolveApiHost(this.baseURL, window.location.host)
-    return `${protocol}//${host}/ws/deployment/${projectId}/logs`
+    return `${protocol}//${host}/ws/deploy/${encodeURIComponent(deploymentId)}`
   }
 
   // ========== PLAN USAGE QUOTA ENDPOINTS ==========

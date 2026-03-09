@@ -34,23 +34,23 @@ const (
 
 // NativeDeployment represents a deployment to .apex.app native hosting
 type NativeDeployment struct {
-	ID        string           `json:"id" gorm:"primarykey;type:varchar(36)"`
-	CreatedAt time.Time        `json:"created_at"`
-	UpdatedAt time.Time        `json:"updated_at"`
-	DeletedAt gorm.DeletedAt   `json:"-" gorm:"index"`
+	ID        string         `json:"id" gorm:"primarykey;type:varchar(36)"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
 	// Project and user association
-	ProjectID uint   `json:"project_id" gorm:"not null;index"`
-	UserID    uint   `json:"user_id" gorm:"not null;index"`
+	ProjectID uint `json:"project_id" gorm:"not null;index"`
+	UserID    uint `json:"user_id" gorm:"not null;index"`
 
 	// Subdomain configuration
-	Subdomain        string `json:"subdomain" gorm:"uniqueIndex;not null;type:varchar(63)"` // [subdomain].apex.app
-	CustomSubdomain  string `json:"custom_subdomain,omitempty" gorm:"type:varchar(63)"`     // User-requested subdomain if different
-	SubdomainStatus  string `json:"subdomain_status" gorm:"default:'pending'"`              // pending, active, failed
+	Subdomain       string `json:"subdomain" gorm:"uniqueIndex;not null;type:varchar(63)"` // [subdomain].apex.app
+	CustomSubdomain string `json:"custom_subdomain,omitempty" gorm:"type:varchar(63)"`     // User-requested subdomain if different
+	SubdomainStatus string `json:"subdomain_status" gorm:"default:'pending'"`              // pending, active, failed
 
 	// Full URLs
-	URL        string `json:"url"`                                     // https://[subdomain].apex.app
-	PreviewURL string `json:"preview_url,omitempty"`                   // https://preview-[subdomain].apex.app
+	URL        string `json:"url"`                   // https://[subdomain].apex.app
+	PreviewURL string `json:"preview_url,omitempty"` // https://preview-[subdomain].apex.app
 
 	// Deployment status
 	Status          DeploymentStatus `json:"status" gorm:"not null;type:varchar(50);default:'pending'"`
@@ -69,47 +69,47 @@ type NativeDeployment struct {
 	Framework      string `json:"framework,omitempty" gorm:"type:varchar(50)"`
 	NodeVersion    string `json:"node_version,omitempty" gorm:"default:'18'"`
 	PythonVersion  string `json:"python_version,omitempty" gorm:"default:'3.11'"`
-	GoVersion      string `json:"go_version,omitempty" gorm:"default:'1.21'"`
+	GoVersion      string `json:"go_version,omitempty" gorm:"default:'1.23'"`
 
 	// Resource limits
-	MemoryLimit   int64 `json:"memory_limit" gorm:"default:512"`    // MB
-	CPULimit      int64 `json:"cpu_limit" gorm:"default:500"`       // millicores (1000 = 1 CPU)
-	StorageLimit  int64 `json:"storage_limit" gorm:"default:1024"`  // MB
-	BandwidthUsed int64 `json:"bandwidth_used" gorm:"default:0"`    // MB
+	MemoryLimit   int64 `json:"memory_limit" gorm:"default:512"`   // MB
+	CPULimit      int64 `json:"cpu_limit" gorm:"default:500"`      // millicores (1000 = 1 CPU)
+	StorageLimit  int64 `json:"storage_limit" gorm:"default:1024"` // MB
+	BandwidthUsed int64 `json:"bandwidth_used" gorm:"default:0"`   // MB
 
 	// Scaling configuration
-	AutoScale       bool  `json:"auto_scale" gorm:"default:false"`
-	MinInstances    int   `json:"min_instances" gorm:"default:1"`
-	MaxInstances    int   `json:"max_instances" gorm:"default:3"`
+	AutoScale        bool `json:"auto_scale" gorm:"default:false"`
+	MinInstances     int  `json:"min_instances" gorm:"default:1"`
+	MaxInstances     int  `json:"max_instances" gorm:"default:3"`
 	CurrentInstances int  `json:"current_instances" gorm:"default:0"`
 
 	// Health check configuration
-	HealthCheckPath     string        `json:"health_check_path" gorm:"default:'/health'"`
-	HealthCheckInterval int           `json:"health_check_interval" gorm:"default:30"` // seconds
-	HealthCheckTimeout  int           `json:"health_check_timeout" gorm:"default:5"`   // seconds
-	RestartOnFailure    bool          `json:"restart_on_failure" gorm:"default:true"`
-	MaxRestarts         int           `json:"max_restarts" gorm:"default:3"`
-	RestartCount        int           `json:"restart_count" gorm:"default:0"`
+	HealthCheckPath     string `json:"health_check_path" gorm:"default:'/health'"`
+	HealthCheckInterval int    `json:"health_check_interval" gorm:"default:30"` // seconds
+	HealthCheckTimeout  int    `json:"health_check_timeout" gorm:"default:5"`   // seconds
+	RestartOnFailure    bool   `json:"restart_on_failure" gorm:"default:true"`
+	MaxRestarts         int    `json:"max_restarts" gorm:"default:3"`
+	RestartCount        int    `json:"restart_count" gorm:"default:0"`
 
 	// Always-On configuration (Replit parity feature)
 	// When enabled, deployment stays running 24/7 with automatic restart on crash
 	AlwaysOn          bool       `json:"always_on" gorm:"default:false"`
-	AlwaysOnEnabled   *time.Time `json:"always_on_enabled_at,omitempty"`  // When always-on was enabled
-	LastKeepAlive     *time.Time `json:"last_keep_alive,omitempty"`       // Last keep-alive ping timestamp
+	AlwaysOnEnabled   *time.Time `json:"always_on_enabled_at,omitempty"`        // When always-on was enabled
+	LastKeepAlive     *time.Time `json:"last_keep_alive,omitempty"`             // Last keep-alive ping timestamp
 	KeepAliveInterval int        `json:"keep_alive_interval" gorm:"default:60"` // Keep-alive interval in seconds
-	SleepAfterMinutes int        `json:"sleep_after_minutes" gorm:"default:0"` // 0 = never sleep (always-on)
+	SleepAfterMinutes int        `json:"sleep_after_minutes" gorm:"default:0"`  // 0 = never sleep (always-on)
 
 	// DNS configuration
-	DNSRecordID     string `json:"dns_record_id,omitempty" gorm:"type:varchar(50)"`
-	DNSZoneID       string `json:"dns_zone_id,omitempty" gorm:"type:varchar(50)"`
+	DNSRecordID      string `json:"dns_record_id,omitempty" gorm:"type:varchar(50)"`
+	DNSZoneID        string `json:"dns_zone_id,omitempty" gorm:"type:varchar(50)"`
 	SSLCertificateID string `json:"ssl_certificate_id,omitempty" gorm:"type:varchar(50)"`
-	SSLStatus       string `json:"ssl_status" gorm:"default:'pending'"` // pending, active, expired, error
+	SSLStatus        string `json:"ssl_status" gorm:"default:'pending'"` // pending, active, expired, error
 
 	// Metrics
-	TotalRequests   int64     `json:"total_requests" gorm:"default:0"`
-	AvgResponseTime int64     `json:"avg_response_time" gorm:"default:0"` // ms
+	TotalRequests   int64      `json:"total_requests" gorm:"default:0"`
+	AvgResponseTime int64      `json:"avg_response_time" gorm:"default:0"` // ms
 	LastRequestAt   *time.Time `json:"last_request_at,omitempty"`
-	UptimeSeconds   int64     `json:"uptime_seconds" gorm:"default:0"`
+	UptimeSeconds   int64      `json:"uptime_seconds" gorm:"default:0"`
 
 	// Timestamps
 	BuildStartedAt   *time.Time `json:"build_started_at,omitempty"`
@@ -133,15 +133,15 @@ type DeploymentLog struct {
 	Level     string    `json:"level" gorm:"not null;type:varchar(20)"` // debug, info, warn, error
 	Source    string    `json:"source" gorm:"type:varchar(50)"`         // build, deploy, runtime, health
 	Message   string    `json:"message" gorm:"type:text"`
-	Metadata  string    `json:"metadata,omitempty" gorm:"type:text"`    // JSON metadata
+	Metadata  string    `json:"metadata,omitempty" gorm:"type:text"` // JSON metadata
 }
 
 // DeploymentEnvVar represents an environment variable for a deployment
 type DeploymentEnvVar struct {
-	ID           uint           `json:"id" gorm:"primarykey"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	DeletedAt    gorm.DeletedAt `json:"-" gorm:"index"`
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
 	DeploymentID string `json:"deployment_id" gorm:"not null;index;type:varchar(36)"`
 	ProjectID    uint   `json:"project_id" gorm:"not null;index"`
@@ -149,10 +149,10 @@ type DeploymentEnvVar struct {
 
 	// Variable details
 	Key         string `json:"key" gorm:"not null;type:varchar(255)"`
-	Value       string `json:"-" gorm:"type:text"`                  // Encrypted, hidden from JSON
+	Value       string `json:"-" gorm:"type:text"` // Encrypted, hidden from JSON
 	Description string `json:"description,omitempty" gorm:"type:varchar(500)"`
-	IsSecret    bool   `json:"is_secret" gorm:"default:false"`      // If true, never expose value
-	IsSystem    bool   `json:"is_system" gorm:"default:false"`      // System-managed env vars
+	IsSecret    bool   `json:"is_secret" gorm:"default:false"` // If true, never expose value
+	IsSystem    bool   `json:"is_system" gorm:"default:false"` // System-managed env vars
 
 	// Scope
 	Environment string `json:"environment" gorm:"default:'production'"` // production, preview, development
@@ -207,8 +207,8 @@ type DeploymentHistory struct {
 	ImageTag      string `json:"image_tag,omitempty" gorm:"type:varchar(100)"`
 
 	// Status at time of snapshot
-	Status       DeploymentStatus `json:"status" gorm:"type:varchar(50)"`
-	BuildLogs    string           `json:"build_logs,omitempty" gorm:"type:text"`
+	Status    DeploymentStatus `json:"status" gorm:"type:varchar(50)"`
+	BuildLogs string           `json:"build_logs,omitempty" gorm:"type:text"`
 
 	// Metrics at deployment time
 	BuildDuration  int64 `json:"build_duration,omitempty"`
@@ -228,7 +228,7 @@ type Subdomain struct {
 	UserID    uint   `json:"user_id" gorm:"not null;index"`
 
 	// Status
-	Status       string     `json:"status" gorm:"default:'active'"` // active, reserved, released
+	Status        string     `json:"status" gorm:"default:'active'"` // active, reserved, released
 	ReservedUntil *time.Time `json:"reserved_until,omitempty"`       // For temporary reservations
 
 	// DNS
@@ -292,33 +292,33 @@ type CustomDomain struct {
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
 	// Domain info
-	Domain     string `json:"domain" gorm:"uniqueIndex;not null;type:varchar(255)"` // e.g., "myapp.com"
-	ProjectID  uint   `json:"project_id" gorm:"not null;index"`
-	UserID     uint   `json:"user_id" gorm:"not null;index"`
+	Domain    string `json:"domain" gorm:"uniqueIndex;not null;type:varchar(255)"` // e.g., "myapp.com"
+	ProjectID uint   `json:"project_id" gorm:"not null;index"`
+	UserID    uint   `json:"user_id" gorm:"not null;index"`
 
 	// Verification
-	VerificationStatus string `json:"verification_status" gorm:"default:'pending'"` // pending, verified, failed
-	VerificationToken  string `json:"verification_token,omitempty"`                 // TXT record token for verification
+	VerificationStatus string     `json:"verification_status" gorm:"default:'pending'"` // pending, verified, failed
+	VerificationToken  string     `json:"verification_token,omitempty"`                 // TXT record token for verification
 	VerifiedAt         *time.Time `json:"verified_at,omitempty"`
 
 	// DNS configuration
-	DNSType        string `json:"dns_type" gorm:"default:'CNAME'"` // CNAME or A record
-	DNSTarget      string `json:"dns_target"`                      // Target for the DNS record
-	DNSVerified    bool   `json:"dns_verified" gorm:"default:false"`
-	DNSCheckedAt   *time.Time `json:"dns_checked_at,omitempty"`
+	DNSType      string     `json:"dns_type" gorm:"default:'CNAME'"` // CNAME or A record
+	DNSTarget    string     `json:"dns_target"`                      // Target for the DNS record
+	DNSVerified  bool       `json:"dns_verified" gorm:"default:false"`
+	DNSCheckedAt *time.Time `json:"dns_checked_at,omitempty"`
 
 	// SSL configuration
-	SSLStatus       string     `json:"ssl_status" gorm:"default:'pending'"` // pending, provisioning, active, failed
-	SSLProvider     string     `json:"ssl_provider" gorm:"default:'cloudflare'"` // cloudflare, letsencrypt
-	SSLCertificateID string    `json:"ssl_certificate_id,omitempty"`
-	SSLExpiresAt    *time.Time `json:"ssl_expires_at,omitempty"`
-	SSLAutoRenew    bool       `json:"ssl_auto_renew" gorm:"default:true"`
+	SSLStatus        string     `json:"ssl_status" gorm:"default:'pending'"`      // pending, provisioning, active, failed
+	SSLProvider      string     `json:"ssl_provider" gorm:"default:'cloudflare'"` // cloudflare, letsencrypt
+	SSLCertificateID string     `json:"ssl_certificate_id,omitempty"`
+	SSLExpiresAt     *time.Time `json:"ssl_expires_at,omitempty"`
+	SSLAutoRenew     bool       `json:"ssl_auto_renew" gorm:"default:true"`
 
 	// Link to active deployment
 	DeploymentID string `json:"deployment_id,omitempty" gorm:"type:varchar(36);index"`
 
 	// Status flags
-	IsActive  bool `json:"is_active" gorm:"default:false"` // Only active when verified and SSL is ready
+	IsActive  bool `json:"is_active" gorm:"default:false"`  // Only active when verified and SSL is ready
 	IsPrimary bool `json:"is_primary" gorm:"default:false"` // Primary custom domain for the project
 }
 
@@ -366,9 +366,9 @@ type SSLCertificate struct {
 	Issuer        string `json:"issuer" gorm:"type:varchar(100)"` // Let's Encrypt, Cloudflare, etc.
 
 	// Certificate data (encrypted)
-	CertificatePEM    string `json:"-" gorm:"type:text"` // Encrypted certificate
-	PrivateKeyPEM     string `json:"-" gorm:"type:text"` // Encrypted private key
-	CertificateChain  string `json:"-" gorm:"type:text"` // Encrypted certificate chain
+	CertificatePEM   string `json:"-" gorm:"type:text"` // Encrypted certificate
+	PrivateKeyPEM    string `json:"-" gorm:"type:text"` // Encrypted private key
+	CertificateChain string `json:"-" gorm:"type:text"` // Encrypted certificate chain
 
 	// Validity
 	IssuedAt  time.Time `json:"issued_at"`
@@ -376,10 +376,10 @@ type SSLCertificate struct {
 	IsValid   bool      `json:"is_valid" gorm:"default:true"`
 
 	// Renewal
-	AutoRenew      bool       `json:"auto_renew" gorm:"default:true"`
-	RenewalAttempts int       `json:"renewal_attempts" gorm:"default:0"`
-	LastRenewalAt  *time.Time `json:"last_renewal_at,omitempty"`
-	NextRenewalAt  *time.Time `json:"next_renewal_at,omitempty"`
+	AutoRenew       bool       `json:"auto_renew" gorm:"default:true"`
+	RenewalAttempts int        `json:"renewal_attempts" gorm:"default:0"`
+	LastRenewalAt   *time.Time `json:"last_renewal_at,omitempty"`
+	NextRenewalAt   *time.Time `json:"next_renewal_at,omitempty"`
 
 	// Linking
 	CustomDomainID *uint `json:"custom_domain_id,omitempty" gorm:"index"`

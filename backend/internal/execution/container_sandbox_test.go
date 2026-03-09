@@ -6,6 +6,7 @@ package execution
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -14,6 +15,10 @@ import (
 
 // skipIfNoDocker skips the test if Docker is not available
 func skipIfNoDocker(t *testing.T) {
+	if raceDetectorEnabled {
+		t.Skip("Docker-backed sandbox integration tests are skipped under -race")
+	}
+
 	cmd := exec.Command("docker", "info")
 	if err := cmd.Run(); err != nil {
 		t.Skip("Docker not available, skipping container sandbox tests")
@@ -38,6 +43,44 @@ func TestNewContainerSandbox(t *testing.T) {
 
 	if !sandbox.dockerAvailable {
 		t.Fatal("Docker should be available")
+	}
+}
+
+func TestContainerSandboxUsesIsolatedTempRoots(t *testing.T) {
+	skipIfNoDocker(t)
+
+	config := DefaultContainerSandboxConfig()
+	config.EnableAuditLog = false
+
+	first, err := NewContainerSandbox(config)
+	if err != nil {
+		t.Fatalf("Failed to create first sandbox: %v", err)
+	}
+	defer first.Cleanup()
+
+	second, err := NewContainerSandbox(config)
+	if err != nil {
+		t.Fatalf("Failed to create second sandbox: %v", err)
+	}
+	defer second.Cleanup()
+
+	if first.baseTempDir == second.baseTempDir {
+		t.Fatalf("Expected unique temp roots, both sandboxes used %q", first.baseTempDir)
+	}
+
+	if _, err := os.Stat(first.baseTempDir); err != nil {
+		t.Fatalf("First sandbox temp root missing: %v", err)
+	}
+	if _, err := os.Stat(second.baseTempDir); err != nil {
+		t.Fatalf("Second sandbox temp root missing: %v", err)
+	}
+
+	if err := first.Cleanup(); err != nil {
+		t.Fatalf("Failed to cleanup first sandbox: %v", err)
+	}
+
+	if _, err := os.Stat(second.baseTempDir); err != nil {
+		t.Fatalf("Second sandbox temp root should survive first cleanup: %v", err)
 	}
 }
 

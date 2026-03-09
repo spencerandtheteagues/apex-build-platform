@@ -97,6 +97,7 @@ Health endpoints:
 
 - Backend liveness: `/health`
 - Backend readiness: `/ready`
+- Backend feature readiness summary: `/health/features`
 - Frontend health: `/health`
 
 ## Documentation

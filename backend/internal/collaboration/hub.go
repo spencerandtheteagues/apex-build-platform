@@ -5,11 +5,16 @@ package collaboration
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"apex-build/internal/auth"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -18,31 +23,31 @@ import (
 // Message types for collaboration
 const (
 	// Connection messages
-	MsgJoinRoom       = "join_room"
-	MsgLeaveRoom      = "leave_room"
-	MsgRoomJoined     = "room_joined"
-	MsgRoomLeft       = "room_left"
-	MsgUserJoined     = "user_joined"
-	MsgUserLeft       = "user_left"
-	MsgError          = "error"
-	MsgHeartbeat      = "heartbeat"
+	MsgJoinRoom   = "join_room"
+	MsgLeaveRoom  = "leave_room"
+	MsgRoomJoined = "room_joined"
+	MsgRoomLeft   = "room_left"
+	MsgUserJoined = "user_joined"
+	MsgUserLeft   = "user_left"
+	MsgError      = "error"
+	MsgHeartbeat  = "heartbeat"
 
 	// Presence messages
-	MsgCursorUpdate     = "cursor_update"
-	MsgSelectionUpdate  = "selection_update"
-	MsgTypingStart      = "typing_start"
-	MsgTypingStop       = "typing_stop"
-	MsgFollowUser       = "follow_user"
-	MsgStopFollowing    = "stop_following"
-	MsgPresenceUpdate   = "presence_update"
-	MsgUserList         = "user_list"
+	MsgCursorUpdate    = "cursor_update"
+	MsgSelectionUpdate = "selection_update"
+	MsgTypingStart     = "typing_start"
+	MsgTypingStop      = "typing_stop"
+	MsgFollowUser      = "follow_user"
+	MsgStopFollowing   = "stop_following"
+	MsgPresenceUpdate  = "presence_update"
+	MsgUserList        = "user_list"
 
 	// Document messages
-	MsgOperation        = "operation"
-	MsgOperationAck     = "operation_ack"
-	MsgSyncRequest      = "sync_request"
-	MsgSyncResponse     = "sync_response"
-	MsgFileChange       = "file_change"
+	MsgOperation    = "operation"
+	MsgOperationAck = "operation_ack"
+	MsgSyncRequest  = "sync_request"
+	MsgSyncResponse = "sync_response"
+	MsgFileChange   = "file_change"
 
 	// Permission messages
 	MsgPermissionUpdate = "permission_update"
@@ -50,8 +55,8 @@ const (
 	MsgUserKicked       = "user_kicked"
 
 	// Chat messages
-	MsgChat             = "chat"
-	MsgChatHistory      = "chat_history"
+	MsgChat        = "chat"
+	MsgChatHistory = "chat_history"
 
 	// Voice/Video messages
 	MsgRTCOffer         = "rtc_offer"
@@ -60,8 +65,8 @@ const (
 	MsgMediaStateChange = "media_state_change"
 
 	// Activity messages
-	MsgActivity         = "activity"
-	MsgActivityFeed     = "activity_feed"
+	MsgActivity     = "activity"
+	MsgActivityFeed = "activity_feed"
 )
 
 // CollabMessage represents a collaboration message
@@ -76,17 +81,17 @@ type CollabMessage struct {
 
 // CollabClient represents a connected collaboration client
 type CollabClient struct {
-	conn          *websocket.Conn
-	hub           *CollabHub
-	send          chan []byte
-	userID        uint
-	username      string
-	email         string
-	avatarURL     string
-	roomID        string
-	permission    PermissionLevel
-	lastSeen      time.Time
-	mu            sync.RWMutex
+	conn       *websocket.Conn
+	hub        *CollabHub
+	send       chan []byte
+	userID     uint
+	username   string
+	email      string
+	avatarURL  string
+	roomID     string
+	permission PermissionLevel
+	lastSeen   time.Time
+	mu         sync.RWMutex
 }
 
 // RoomState holds the state for a collaboration room
@@ -416,14 +421,44 @@ func (h *CollabHub) cleanupInactiveUsers() {
 func (h *CollabHub) HandleWebSocket(c *gin.Context) {
 	// Get user from context
 	userIDInterface, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
-		return
-	}
+	var userID uint
+	var username string
+	var email string
 
-	userID := userIDInterface.(uint)
-	username, _ := c.Get("username")
-	email, _ := c.Get("email")
+	if exists {
+		if typedUserID, ok := userIDInterface.(uint); ok {
+			userID = typedUserID
+		}
+		if usernameValue, ok := c.Get("username"); ok {
+			if typedUsername, ok := usernameValue.(string); ok {
+				username = typedUsername
+			}
+		}
+		if emailValue, ok := c.Get("email"); ok {
+			if typedEmail, ok := emailValue.(string); ok {
+				email = typedEmail
+			}
+		}
+	} else {
+		token := c.Query("token")
+		if token == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+			return
+		}
+
+		claims, err := validateCollaborationWebSocketToken(token)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+			return
+		}
+
+		userID = claims.UserID
+		username = claims.Username
+		email = claims.Email
+		c.Set("user_id", userID)
+		c.Set("username", username)
+		c.Set("email", email)
+	}
 
 	// Get room info from query
 	roomID := c.Query("room_id")
@@ -461,8 +496,8 @@ func (h *CollabHub) HandleWebSocket(c *gin.Context) {
 		hub:        h,
 		send:       make(chan []byte, 256),
 		userID:     userID,
-		username:   username.(string),
-		email:      email.(string),
+		username:   username,
+		email:      email,
 		roomID:     roomID,
 		permission: permission,
 		lastSeen:   time.Now(),
@@ -483,6 +518,19 @@ func (h *CollabHub) HandleWebSocket(c *gin.Context) {
 	// Start goroutines
 	go client.writePump()
 	go client.readPump()
+}
+
+func validateCollaborationWebSocketToken(tokenString string) (*auth.JWTClaims, error) {
+	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if secret == "" {
+		return nil, errors.New("JWT_SECRET not configured")
+	}
+
+	claims, err := auth.NewAuthService(secret).ValidateToken(tokenString)
+	if err != nil {
+		return nil, err
+	}
+	return claims, nil
 }
 
 // Client methods

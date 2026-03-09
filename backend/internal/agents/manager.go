@@ -64,11 +64,11 @@ type providerVote struct {
 
 // AgentManager handles the lifecycle and coordination of AI agents
 type AgentManager struct {
-	agents       map[string]*Agent
-	builds       map[string]*Build
-	taskQueue    chan *Task
-	resultQueue  chan *TaskResult
-	subscribers  map[string][]chan *WSMessage
+	agents         map[string]*Agent
+	builds         map[string]*Build
+	taskQueue      chan *Task
+	resultQueue    chan *TaskResult
+	subscribers    map[string][]chan *WSMessage
 	aiRouter       AIRouter
 	db             *gorm.DB // Database connection for persisting completed builds
 	editStore      *ProposedEditStore
@@ -76,8 +76,8 @@ type AgentManager struct {
 	spendTracker   *spend.SpendTracker
 	budgetEnforcer *budget.BudgetEnforcer
 	mu             sync.RWMutex
-	ctx          context.Context
-	cancel       context.CancelFunc
+	ctx            context.Context
+	cancel         context.CancelFunc
 }
 
 // AIRouter interface for communicating with AI providers
@@ -2959,7 +2959,7 @@ func extractDependencyRepairHintsFromReadinessErrors(errors []string) []string {
 		} else if strings.HasPrefix(msg, "missing_manifest: go.mod") {
 			manifestHints = append(manifestHints,
 				"MISSING REQUIRED FILE: go.mod\n"+
-					"You MUST create a go.mod file with the module name and Go version (e.g. module app\\n\\ngo 1.21), "+
+					"You MUST create a go.mod file with the module name and Go version (e.g. module app\\n\\ngo 1.23), "+
 					"plus require entries for all third-party packages imported in the .go files.")
 		} else if strings.HasPrefix(msg, "missing_manifest: requirements.txt") {
 			manifestHints = append(manifestHints,
@@ -3804,7 +3804,7 @@ func (am *AgentManager) applyDeterministicMissingManifestRepair(build *Build, re
 			}
 		}
 		var sb strings.Builder
-		sb.WriteString("module app\n\ngo 1.21\n")
+		sb.WriteString("module app\n\ngo 1.23\n")
 		if len(thirdPartyPkgs) > 0 {
 			sb.WriteString("\nrequire (\n")
 			for pkg := range thirdPartyPkgs {
@@ -3830,21 +3830,21 @@ func (am *AgentManager) applyDeterministicMissingManifestRepair(build *Build, re
 			"fastapi": "fastapi>=0.104.1", "uvicorn": "uvicorn[standard]>=0.24.0",
 			"sqlalchemy": "sqlalchemy>=2.0.23", "alembic": "alembic>=1.13.0",
 			"pydantic": "pydantic>=2.5.3", "psycopg2": "psycopg2-binary>=2.9.9",
-			"python_jose": "python-jose[cryptography]>=3.3.0",
-			"passlib":     "passlib[bcrypt]>=1.7.4",
+			"python_jose":      "python-jose[cryptography]>=3.3.0",
+			"passlib":          "passlib[bcrypt]>=1.7.4",
 			"python_multipart": "python-multipart>=0.0.6",
-			"aiofiles":    "aiofiles>=23.2.1",
-			"httpx":       "httpx>=0.26.0",
-			"requests":    "requests>=2.31.0",
-			"flask":       "flask>=3.0.0",
-			"django":      "django>=5.0",
-			"pymongo":     "pymongo>=4.6.1",
-			"redis":       "redis>=5.0.1",
-			"celery":      "celery>=5.3.6",
-			"boto3":       "boto3>=1.34.0",
-			"pandas":      "pandas>=2.1.4",
-			"numpy":       "numpy>=1.26.2",
-			"pytest":      "pytest>=7.4.3",
+			"aiofiles":         "aiofiles>=23.2.1",
+			"httpx":            "httpx>=0.26.0",
+			"requests":         "requests>=2.31.0",
+			"flask":            "flask>=3.0.0",
+			"django":           "django>=5.0",
+			"pymongo":          "pymongo>=4.6.1",
+			"redis":            "redis>=5.0.1",
+			"celery":           "celery>=5.3.6",
+			"boto3":            "boto3>=1.34.0",
+			"pandas":           "pandas>=2.1.4",
+			"numpy":            "numpy>=1.26.2",
+			"pytest":           "pytest>=7.4.3",
 		}
 		pyImportRe := regexp.MustCompile(`(?m)^(?:import|from)\s+([a-zA-Z0-9_]+)`)
 		pkgSet := map[string]bool{}
@@ -4056,15 +4056,15 @@ func (am *AgentManager) applyDeterministicMissingDeliverableRepair(build *Build,
 		if len(envVarSet) > 0 {
 			// Provide sensible example values for known variable names.
 			knownExamples := map[string]string{
-				"DATABASE_URL":   "postgresql://postgres:password@localhost:5432/app",
-				"PORT":           "3001",
-				"JWT_SECRET":     "your-secret-key-change-in-production",
-				"SECRET_KEY":     "your-secret-key-change-in-production",
-				"SECRET":         "your-secret-key-change-in-production",
-				"NODE_ENV":       "development",
+				"DATABASE_URL":    "postgresql://postgres:password@localhost:5432/app",
+				"PORT":            "3001",
+				"JWT_SECRET":      "your-secret-key-change-in-production",
+				"SECRET_KEY":      "your-secret-key-change-in-production",
+				"SECRET":          "your-secret-key-change-in-production",
+				"NODE_ENV":        "development",
 				"ALLOWED_ORIGINS": "http://localhost:5173",
-				"REDIS_URL":      "redis://localhost:6379",
-				"MONGO_URI":      "mongodb://localhost:27017/app",
+				"REDIS_URL":       "redis://localhost:6379",
+				"MONGO_URI":       "mongodb://localhost:27017/app",
 			}
 
 			var envLines []string
@@ -4489,15 +4489,15 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 						BuildID:   build.ID,
 						Timestamp: now,
 						Data: map[string]any{
-							"phase":                    "validation",
-							"status":                   string(BuildReviewing),
-							"progress":                 progress,
-							"message":                  fmt.Sprintf("Auto-repair: %s. Re-running final validation.", summary),
-							"quality_gate_required":    true,
-							"quality_gate_active":      true,
-							"quality_gate_stage":       "validation",
-							"validation_errors":        readinessErrors,
-							"deliverable_repair":       summary,
+							"phase":                 "validation",
+							"status":                string(BuildReviewing),
+							"progress":              progress,
+							"message":               fmt.Sprintf("Auto-repair: %s. Re-running final validation.", summary),
+							"quality_gate_required": true,
+							"quality_gate_active":   true,
+							"quality_gate_stage":    "validation",
+							"validation_errors":     readinessErrors,
+							"deliverable_repair":    summary,
 						},
 					})
 					am.checkBuildCompletion(build)
@@ -5124,7 +5124,7 @@ func stripPatchOrMergeMarkersFromContent(content string) string {
 		if relEndIdx != -1 {
 			endIdx := sepIdx + relEndIdx
 			// Keep everything between separator and end marker.
-			newContent = result[sepIdx : endIdx]
+			newContent = result[sepIdx:endIdx]
 			// Remove the >>>>>>> line itself.
 			endOfEndLine := strings.Index(result[endIdx:], "\n")
 			var after string
@@ -6165,7 +6165,7 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 				// Extract and re-inject the api_contract block at top level for visual prominence.
 				// This ensures frontend and backend agents see the agreed ports/CORS without digging
 				// through the full architecture text.
-				if (agent.Role == RoleFrontend || agent.Role == RoleBackend) {
+				if agent.Role == RoleFrontend || agent.Role == RoleBackend {
 					if contractStart := strings.Index(archOutput, "<api_contract>"); contractStart >= 0 {
 						if contractEnd := strings.Index(archOutput, "</api_contract>"); contractEnd >= 0 {
 							contract := archOutput[contractStart : contractEnd+len("</api_contract>")]
@@ -6499,7 +6499,7 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 		case "go", "golang":
 			lines = append(lines, "  Use Go with net/http or chi router. Entry: main.go. Module: go.mod required.")
 			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
-			lines = append(lines, "  □ go.mod — Go module manifest (module name + go 1.21)")
+			lines = append(lines, "  □ go.mod — Go module manifest (module name + go 1.23)")
 			lines = append(lines, "  □ main.go (or cmd/main.go) — main() function entry point")
 			if stack.Frontend != "" {
 				fePort := canonicalFrontendPort(stack.Frontend)

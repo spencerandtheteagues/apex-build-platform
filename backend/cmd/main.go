@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,10 +17,9 @@ import (
 	"apex-build/internal/agents"
 	"apex-build/internal/agents/autonomous"
 	"apex-build/internal/ai"
-	"apex-build/internal/budget"
-	"apex-build/internal/spend"
 	"apex-build/internal/api"
 	"apex-build/internal/auth"
+	"apex-build/internal/budget"
 	"apex-build/internal/cache"
 	"apex-build/internal/collaboration"
 	"apex-build/internal/community"
@@ -43,6 +43,8 @@ import (
 	"apex-build/internal/preview"
 	"apex-build/internal/search"
 	"apex-build/internal/secrets"
+	"apex-build/internal/spend"
+	"apex-build/internal/startup"
 	"apex-build/internal/usage"
 	"apex-build/internal/websocket"
 
@@ -73,18 +75,35 @@ func main() {
 	// while slower initialization (DB, migrations, AI services) is still running.
 	var startupReady atomic.Bool
 	var activeRouter atomic.Value // stores *gin.Engine
+	startupRegistry := newStartupRegistry()
 
 	bootstrapRouter := gin.New()
 	bootstrapRouter.GET("/health", func(c *gin.Context) {
+		summary := startupRegistry.Snapshot()
 		c.JSON(http.StatusOK, gin.H{
-			"status": "starting",
-			"ready":  startupReady.Load(),
+			"status":  summary.Status,
+			"ready":   startupReady.Load() && summary.Ready,
+			"phase":   summary.Phase,
+			"startup": summary,
 		})
 	})
+	bootstrapRouter.GET("/ready", func(c *gin.Context) {
+		summary := startupRegistry.Snapshot()
+		statusCode := featureReadinessHTTPStatus(summary)
+		c.JSON(statusCode, summary)
+	})
+	bootstrapRouter.GET("/health/features", func(c *gin.Context) {
+		summary := startupRegistry.Snapshot()
+		statusCode := featureReadinessHTTPStatus(summary)
+		c.JSON(statusCode, summary)
+	})
 	bootstrapRouter.NoRoute(func(c *gin.Context) {
+		summary := startupRegistry.Snapshot()
 		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "server starting",
-			"ready": startupReady.Load(),
+			"error":   "server starting",
+			"ready":   startupReady.Load() && summary.Ready,
+			"phase":   summary.Phase,
+			"startup": summary,
 		})
 	})
 	activeRouter.Store(bootstrapRouter)
@@ -100,27 +119,57 @@ func main() {
 			activeRouter.Load().(*gin.Engine).ServeHTTP(w, r)
 		}),
 	}
+	listener, err := net.Listen("tcp", httpServer.Addr)
+	if err != nil {
+		startupRegistry.MarkFailed("bootstrap_http", startup.TierCritical, "Failed to bind bootstrap HTTP listener", map[string]any{
+			"error": err.Error(),
+		})
+		startupRegistry.SetPhase(startup.PhaseFailed)
+		log.Fatalf("CRITICAL: Failed to bind HTTP listener on %s: %v", httpServer.Addr, err)
+	}
 	go func() {
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 			serverErrors <- err
 		}
 	}()
+	startupRegistry.MarkReady("bootstrap_http", startup.TierCritical, "Bootstrap health listener accepting requests", map[string]any{
+		"addr": listener.Addr().String(),
+	})
 	log.Printf("Bootstrap HTTP listener started on port %s (health endpoint ready immediately)", port)
 
-	// SECURITY: Validate all required secrets before starting
-	// MustValidateSecrets calls ValidateAndLogSecrets and fatals on error
-	secretsConfig := config.MustValidateSecrets()
+	// SECURITY: Validate all required secrets before starting.
+	secretsConfig, err := config.ValidateAndLogSecrets()
+	if err != nil {
+		startupRegistry.MarkFailed("secrets_validation", startup.TierCritical, "Required secrets validation failed", map[string]any{
+			"error": err.Error(),
+		})
+		startupRegistry.SetPhase(startup.PhaseFailed)
+		log.Fatalf("FATAL: Cannot start server — secrets validation failed: %v", err)
+	}
+	startupRegistry.MarkReady("secrets_validation", startup.TierCritical, "Required secrets validated", map[string]any{
+		"environment": secretsConfig.Environment,
+	})
 
 	// Initialize database
 	database, err := db.NewDatabase(appConfig.Database)
 	if err != nil {
+		startupRegistry.MarkFailed("primary_database", startup.TierCritical, "Failed to connect to primary database", map[string]any{
+			"error": err.Error(),
+		})
+		startupRegistry.SetPhase(startup.PhaseFailed)
 		log.Fatalf("CRITICAL: Failed to connect to database: %v", err)
 	}
+	startupRegistry.MarkReady("primary_database", startup.TierCritical, "Primary database connected", nil)
 	defer database.Close()
 
 	// Run database seeds (create admin accounts)
 	if err := database.RunSeeds(); err != nil {
+		startupRegistry.MarkDegraded("database_seeding", startup.TierOptional, "Database seeds completed with warnings", map[string]any{
+			"error": err.Error(),
+		})
 		log.Printf("WARNING: Database seeding had issues: %v", err)
+	} else {
+		startupRegistry.MarkReady("database_seeding", startup.TierOptional, "Database seeds completed", nil)
 	}
 
 	// Initialize authentication service with validated JWT secret
@@ -131,6 +180,7 @@ func main() {
 	}
 	authService := auth.NewAuthService(jwtSecret)
 	authService.SetDB(database.DB)
+	startupRegistry.MarkReady("auth_service", startup.TierCritical, "Authentication service initialized", nil)
 
 	// Initialize AI router with all providers (Claude, OpenAI, Gemini, Grok).
 	// Production keeps Ollama disabled globally to preserve strict BYOK behavior.
@@ -174,12 +224,37 @@ func main() {
 	} else {
 		log.Printf("   - Ollama:     ❌ Disabled globally (BYOK-only in production)")
 	}
+	platformAIProviders := 0
+	if claudeKey != "" {
+		platformAIProviders++
+	}
+	if openaiKey != "" {
+		platformAIProviders++
+	}
+	if geminiKey != "" {
+		platformAIProviders++
+	}
+	if grokKey != "" {
+		platformAIProviders++
+	}
+	aiDetails := map[string]any{
+		"platform_provider_count": platformAIProviders,
+		"ollama_enabled":          ollamaRouterURL != "",
+		"byok_available":          true,
+	}
+	if platformAIProviders == 0 && ollamaRouterURL == "" {
+		startupRegistry.MarkDegraded("ai_platform", startup.TierOptional, "No platform AI providers configured; BYOK-only mode", aiDetails)
+	} else {
+		startupRegistry.MarkReady("ai_platform", startup.TierOptional, "AI router initialized", aiDetails)
+	}
 
 	// Initialize Secrets Manager with validated master key
 	// SECURITY: Use validated key from secretsConfig, with fallback for development ONLY
 	masterKey := secretsConfig.SecretsMasterKey
 	if masterKey == "" {
 		if config.IsProductionEnvironment() {
+			startupRegistry.MarkFailed("secrets_manager", startup.TierCritical, "SECRETS_MASTER_KEY missing in production", nil)
+			startupRegistry.SetPhase(startup.PhaseFailed)
 			log.Fatalf("CRITICAL: SECRETS_MASTER_KEY not set in production - refusing to start. " +
 				"Generate with: openssl rand -base64 32 and set as env var. " +
 				"Without a persistent key, all encrypted user data (API keys, secrets) will be permanently lost on restart.")
@@ -188,25 +263,33 @@ func main() {
 		var genErr error
 		masterKey, genErr = secrets.GenerateMasterKey()
 		if genErr != nil {
-			log.Printf("WARNING: Failed to generate master key: %v", genErr)
+			startupRegistry.MarkFailed("secrets_manager", startup.TierCritical, "Failed to generate development master key", map[string]any{
+				"error": genErr.Error(),
+			})
+			startupRegistry.SetPhase(startup.PhaseFailed)
+			log.Fatalf("CRITICAL: Failed to generate development master key: %v", genErr)
 		}
 		log.Println("DEV ONLY: Using ephemeral SECRETS_MASTER_KEY - encrypted data will not survive restart")
 	}
 
 	secretsManager, err := secrets.NewSecretsManager(masterKey)
 	if err != nil {
-		if config.IsProductionEnvironment() {
-			log.Fatalf("CRITICAL: Failed to initialize secrets manager: %v", err)
-		}
-		log.Printf("WARNING: Failed to initialize secrets manager: %v", err)
-	} else {
-		log.Println("Secrets Manager initialized with AES-256 encryption")
+		startupRegistry.MarkFailed("secrets_manager", startup.TierCritical, "Failed to initialize secrets manager", map[string]any{
+			"error": err.Error(),
+		})
+		startupRegistry.SetPhase(startup.PhaseFailed)
+		log.Fatalf("CRITICAL: Failed to initialize secrets manager: %v", err)
 	}
+	startupRegistry.MarkReady("secrets_manager", startup.TierCritical, "Secrets manager initialized", map[string]any{
+		"persistent_key": secretsConfig.SecretsMasterKey != "",
+	})
+	log.Println("Secrets Manager initialized with AES-256 encryption")
 
 	// Initialize BYOK (Bring Your Own Key) Manager
 	byokManager := ai.NewBYOKManager(database.GetDB(), secretsManager, aiRouter)
 	byokHandler := handlers.NewBYOKHandlers(byokManager)
 	log.Println("BYOK Manager initialized (user-provided API keys, per-provider cost tracking)")
+	startupRegistry.MarkReady("byok", startup.TierOptional, "BYOK manager initialized", nil)
 
 	// Initialize Agent Orchestration System
 	aiAdapter := agents.NewAIRouterAdapter(aiRouter, byokManager)
@@ -220,6 +303,7 @@ func main() {
 	buildHandler := agents.NewBuildHandler(agentManager, wsHub)
 
 	log.Println("Agent Orchestration System initialized")
+	startupRegistry.MarkReady("agent_orchestration", startup.TierOptional, "Agent orchestration services initialized", nil)
 
 	// Initialize Spend Tracker (S2: Real-Time Spend Dashboard)
 	spendTracker := spend.NewSpendTracker(database.GetDB())
@@ -286,6 +370,8 @@ func main() {
 	secretsHandler := handlers.NewSecretsHandler(database.GetDB(), secretsManager)
 	mcpHandler := handlers.NewMCPHandler(database.GetDB(), mcpServer, mcpConnManager, secretsManager)
 	templatesHandler := handlers.NewTemplatesHandler(database.GetDB())
+	startupRegistry.MarkReady("project_secrets", startup.TierOptional, "Project secrets handlers initialized", nil)
+	startupRegistry.MarkReady("mcp", startup.TierOptional, "MCP handlers initialized", nil)
 
 	log.Println("Project Templates System initialized (15+ starter templates)")
 
@@ -300,12 +386,23 @@ func main() {
 	previewHandler := handlers.NewPreviewHandler(database.GetDB(), previewServer, authService)
 
 	log.Println("Live Preview Server initialized (hot reload support)")
+	previewFeatureStatus := previewHandler.FeatureStatus()
+	if bundlerStatus, ok := previewFeatureStatus["bundler"].(map[string]interface{}); ok {
+		if available, ok := bundlerStatus["available"].(bool); ok && !available {
+			startupRegistry.MarkDegraded("preview_service", startup.TierOptional, "Preview service initialized with bundler unavailable", previewFeatureStatus)
+		} else {
+			startupRegistry.MarkReady("preview_service", startup.TierOptional, "Live preview service initialized", previewFeatureStatus)
+		}
+	} else {
+		startupRegistry.MarkReady("preview_service", startup.TierOptional, "Live preview service initialized", previewFeatureStatus)
+	}
 
 	// Initialize Git Integration Service
 	gitService := git.NewGitService(database.GetDB())
 	gitHandler := handlers.NewGitHandler(database.GetDB(), gitService, secretsManager)
 
 	log.Println("Git Integration initialized (GitHub support)")
+	startupRegistry.MarkReady("git_integration", startup.TierOptional, "Git integration initialized", nil)
 
 	// Initialize GitHub Import Handler (one-click repo import like replit.new)
 	importHandler := handlers.NewImportHandler(database.GetDB(), gitService, secretsManager)
@@ -331,9 +428,15 @@ func main() {
 	if stripeSecretKey != "" && stripeSecretKey != "sk_test_xxx" {
 		log.Println("Stripe Payment Integration initialized")
 		log.Printf("   - Plans: Free, Pro ($12/mo), Team ($29/mo), Enterprise ($99/mo)")
+		startupRegistry.MarkReady("payments", startup.TierOptional, "Stripe payment integration initialized", map[string]any{
+			"enabled": true,
+		})
 	} else {
 		log.Println("WARNING: Stripe not configured - payment features disabled")
 		log.Println("   Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET to enable")
+		startupRegistry.MarkDegraded("payments", startup.TierOptional, "Stripe not configured; payment features disabled", map[string]any{
+			"enabled": false,
+		})
 	}
 
 	// Log available plans
@@ -345,6 +448,7 @@ func main() {
 	wsHubRT := websocket.NewBatchedHub()
 	go wsHubRT.Run()
 	log.Println("WebSocket BatchedHub initialized (50ms batching, 16ms write coalescing)")
+	startupRegistry.MarkReady("realtime_updates", startup.TierOptional, "Realtime websocket hub initialized", nil)
 
 	// Initialize cache for performance optimization
 	// PERFORMANCE: 30s TTL cache with in-memory fallback when Redis unavailable
@@ -358,6 +462,23 @@ func main() {
 	} else {
 		log.Println("WARNING: REDIS_URL not set - using in-memory cache (set for production)")
 		redisCache = cache.NewRedisCache(cacheConfig)
+	}
+	cacheStatus := redisCache.Status()
+	cacheDetails := map[string]any{
+		"backend":              cacheStatus.Backend,
+		"redis_url_configured": redisURL != "",
+		"redis_connected":      cacheStatus.RedisConnected,
+	}
+	if cacheStatus.FallbackReason != "" {
+		cacheDetails["fallback_reason"] = cacheStatus.FallbackReason
+	}
+	if redisCache.HasRedisBackend() {
+		startupRegistry.MarkReady("redis_cache", startup.TierOptional, "Redis cache backend connected", map[string]any{
+			"backend":         "redis",
+			"redis_connected": cacheStatus.RedisConnected,
+		})
+	} else {
+		startupRegistry.MarkDegraded("redis_cache", startup.TierOptional, "Using in-memory cache fallback", cacheDetails)
 	}
 
 	// Initialize base Handler for dependent handlers
@@ -385,6 +506,16 @@ func main() {
 	if err != nil {
 		log.Printf("CRITICAL: Failed to initialize execution handler: %v", err)
 		log.Println("SECURITY: Code execution features are DISABLED")
+		if executionConfig.ForceContainer {
+			startupRegistry.MarkFailed("code_execution", startup.TierCritical, "Container sandbox required but execution handler failed to initialize", map[string]any{
+				"error": err.Error(),
+			})
+			startupRegistry.SetPhase(startup.PhaseFailed)
+			log.Fatalf("CRITICAL: Code execution is required but failed to initialize: %v", err)
+		}
+		startupRegistry.MarkDegraded("code_execution", startup.TierOptional, "Code execution disabled", map[string]any{
+			"error": err.Error(),
+		})
 	} else {
 		log.Println("Code Execution Engine initialized (10+ languages supported)")
 		log.Println("   - Languages: JavaScript, TypeScript, Python, Go, Rust, Java, C, C++, Ruby, PHP")
@@ -398,6 +529,7 @@ func main() {
 			log.Println("   - Memory limit: 256MB default")
 			log.Println("   - CPU limit: 0.5 cores default")
 			log.Println("   - Read-only root filesystem: enabled")
+			startupRegistry.MarkReady("code_execution", startup.TierOptional, "Container sandbox enabled", sandboxStatus)
 		} else {
 			if executionConfig.ForceContainer {
 				log.Println("WARNING: Docker required but not available - execution DISABLED")
@@ -405,6 +537,7 @@ func main() {
 				log.Println("WARNING: Docker not available - using process-based sandbox (less secure)")
 				log.Println("WARNING: Set EXECUTION_FORCE_CONTAINER=true to require Docker in production")
 			}
+			startupRegistry.MarkDegraded("code_execution", startup.TierOptional, "Execution running without container sandbox", sandboxStatus)
 		}
 	}
 
@@ -427,6 +560,25 @@ func main() {
 
 	deployHandler := handlers.NewDeployHandler(database.GetDB(), deployService)
 	log.Println("One-Click Deployment initialized (Vercel, Netlify, Render)")
+	availableDeployProviders := make([]string, 0, 3)
+	if vercelToken != "" {
+		availableDeployProviders = append(availableDeployProviders, string(deploy.ProviderVercel))
+	}
+	if netlifyToken != "" {
+		availableDeployProviders = append(availableDeployProviders, string(deploy.ProviderNetlify))
+	}
+	if renderToken != "" {
+		availableDeployProviders = append(availableDeployProviders, string(deploy.ProviderRender))
+	}
+	if len(availableDeployProviders) == 0 {
+		startupRegistry.MarkDegraded("deployment_providers", startup.TierOptional, "No deployment providers configured", map[string]any{
+			"providers": availableDeployProviders,
+		})
+	} else {
+		startupRegistry.MarkReady("deployment_providers", startup.TierOptional, "Deployment providers registered", map[string]any{
+			"providers": availableDeployProviders,
+		})
+	}
 
 	// Initialize Package Manager
 	packageHandler := handlers.NewPackageHandler(baseHandler)
@@ -438,15 +590,23 @@ func main() {
 
 	// Initialize Community/Sharing Marketplace
 	communityHandler := community.NewCommunityHandler(database.GetDB())
+	communityHealthy := true
 
 	// Run community migrations
 	if err := community.AutoMigrate(database.GetDB()); err != nil {
+		communityHealthy = false
 		log.Printf("WARNING: Community migration had issues: %v", err)
 	}
 
 	// Seed default categories
 	if err := community.SeedCategories(database.GetDB()); err != nil {
+		communityHealthy = false
 		log.Printf("WARNING: Category seeding had issues: %v", err)
+	}
+	if communityHealthy {
+		startupRegistry.MarkReady("community_marketplace", startup.TierOptional, "Community marketplace initialized", nil)
+	} else {
+		startupRegistry.MarkDegraded("community_marketplace", startup.TierOptional, "Community marketplace initialized with degraded setup", nil)
 	}
 
 	log.Println("Community Marketplace initialized (discover, share, fork projects)")
@@ -455,6 +615,7 @@ func main() {
 	hostingService := hosting.NewHostingService(database.GetDB())
 	hostingHandler := handlers.NewHostingHandler(database.GetDB(), hostingService)
 	log.Println("Native Hosting (.apex.app) initialized")
+	startupRegistry.MarkReady("native_hosting", startup.TierOptional, "Native hosting service initialized", nil)
 
 	// Always-On Deployment Controller
 	alwaysOnController := deployalwayson.NewService(hostingService, nil)
@@ -467,6 +628,7 @@ func main() {
 	})
 	go alwaysOnController.Start(context.Background())
 	log.Println("Always-On deployment controller started")
+	startupRegistry.MarkReady("always_on_controller", startup.TierOptional, "Always-on deployment controller started", nil)
 
 	// Initialize Managed Database Service
 	dbManagerConfig := &manageddb.ManagerConfig{
@@ -481,34 +643,46 @@ func main() {
 	var databaseHandler *handlers.DatabaseHandler
 	if err != nil {
 		log.Printf("WARNING: Managed Database service not available: %v", err)
+		startupRegistry.MarkDegraded("managed_databases", startup.TierOptional, "Managed database service unavailable", map[string]any{
+			"error": err.Error(),
+		})
 	} else {
 		databaseHandler = handlers.NewDatabaseHandler(database.GetDB(), dbManager, secretsManager)
 		// Initialize auto-provisioning dependencies for project creation
 		handlers.InitAutoProvisioningDeps(dbManager, secretsManager)
 		log.Println("Managed Database Service initialized (PostgreSQL, Redis, SQLite)")
 		log.Println("Auto-Provision PostgreSQL enabled for new projects")
+		startupRegistry.MarkReady("managed_databases", startup.TierOptional, "Managed database service initialized", nil)
 	}
 
 	// Initialize Debugging Service
 	debugService := debugging.NewDebugService(database.GetDB())
 	debuggingHandler := handlers.NewDebuggingHandler(database.GetDB(), debugService)
 	log.Println("Debugging Service initialized (breakpoints, stepping, watch expressions)")
+	startupRegistry.MarkReady("debugging_service", startup.TierOptional, "Debugging service initialized", nil)
 
 	// Initialize AI Completions Service
 	completionService := completions.NewCompletionService(database.GetDB(), aiRouter, byokManager)
 	completionsHandler := handlers.NewCompletionsHandler(completionService)
 	log.Println("AI Completions Service initialized (inline ghost-text, multi-provider)")
+	startupRegistry.MarkReady("completions_service", startup.TierOptional, "AI completions service initialized", nil)
 
 	// Initialize Extensions Marketplace
 	extensionService := extensions.NewService(database.GetDB())
 	extensionsHandler := handlers.NewExtensionsHandler(extensionService)
 	// Run extensions migrations
-	database.GetDB().AutoMigrate(
+	if err := database.GetDB().AutoMigrate(
 		&extensions.Extension{},
 		&extensions.ExtensionVersion{},
 		&extensions.ExtensionReview{},
 		&extensions.UserExtension{},
-	)
+	); err != nil {
+		startupRegistry.MarkDegraded("extensions_marketplace", startup.TierOptional, "Extensions migrations completed with warnings", map[string]any{
+			"error": err.Error(),
+		})
+	} else {
+		startupRegistry.MarkReady("extensions_marketplace", startup.TierOptional, "Extensions marketplace initialized", nil)
+	}
 	log.Println("Extensions Marketplace initialized (discover, install, publish)")
 
 	// Initialize Enterprise Services (SAML SSO, SCIM, RBAC, Audit)
@@ -526,7 +700,7 @@ func main() {
 	enterpriseHandler := handlers.NewEnterpriseHandler(database.GetDB(), samlService, scimService, auditService, rbacService)
 
 	// Run enterprise migrations
-	database.GetDB().AutoMigrate(
+	if err := database.GetDB().AutoMigrate(
 		&enterprise.Organization{},
 		&enterprise.OrganizationMember{},
 		&enterprise.Role{},
@@ -534,7 +708,13 @@ func main() {
 		&enterprise.AuditLog{},
 		&enterprise.RateLimit{},
 		&enterprise.Invitation{},
-	)
+	); err != nil {
+		startupRegistry.MarkDegraded("enterprise_features", startup.TierOptional, "Enterprise migrations completed with warnings", map[string]any{
+			"error": err.Error(),
+		})
+	} else {
+		startupRegistry.MarkReady("enterprise_features", startup.TierOptional, "Enterprise features initialized", nil)
+	}
 	log.Println("Enterprise Features initialized (SSO/SAML, SCIM, RBAC, Audit Logs)")
 
 	// Initialize Autonomous Agent System (CRITICAL Replit parity feature)
@@ -547,11 +727,13 @@ func main() {
 	log.Println("   - Building: Create files, install deps, run builds")
 	log.Println("   - Validation: Auto-test, lint, security scan")
 	log.Println("   - Recovery: Self-healing with retries and rollback")
+	startupRegistry.MarkReady("autonomous_agent", startup.TierOptional, "Autonomous agent system initialized", nil)
 
 	// Initialize Real-Time Collaboration Hub
 	collabHub := collaboration.NewCollabHub()
 	go collabHub.Run()
 	log.Println("Real-Time Collaboration initialized (OT, presence, cursor tracking)")
+	startupRegistry.MarkReady("collaboration", startup.TierOptional, "Real-time collaboration hub started", nil)
 
 	// Initialize Key Rotation Handler (admin-only)
 	rotationHandler := handlers.NewRotationHandler(database.GetDB())
@@ -560,7 +742,12 @@ func main() {
 	// Initialize Usage Tracker for quota enforcement (REVENUE PROTECTION)
 	usageTracker := usage.NewTracker(database.GetDB(), redisCache)
 	if err := usageTracker.Migrate(); err != nil {
+		startupRegistry.MarkDegraded("usage_tracking", startup.TierOptional, "Usage tracker migration completed with warnings", map[string]any{
+			"error": err.Error(),
+		})
 		log.Printf("WARNING: Usage tracker migration had issues: %v", err)
+	} else {
+		startupRegistry.MarkReady("usage_tracking", startup.TierOptional, "Usage tracking initialized", nil)
 	}
 	usageHandler := handlers.NewUsageHandlers(database.GetDB(), usageTracker)
 	quotaChecker := middleware.NewQuotaChecker(usageTracker)
@@ -586,10 +773,14 @@ func main() {
 		log.Println("   - Execution metrics: total, duration, queue_length, container_usage")
 		log.Println("   - Business metrics: active_users, total_projects, subscriptions")
 		log.Println("   - Metrics endpoint: GET /metrics")
+		startupRegistry.MarkReady("metrics", startup.TierOptional, "Prometheus metrics initialized", nil)
+	} else {
+		startupRegistry.MarkDegraded("metrics", startup.TierOptional, "Prometheus metrics disabled by configuration", nil)
 	}
 
 	// Initialize API server
 	server := api.NewServer(database, authService, aiRouter, byokManager)
+	server.SetReadinessRegistry(startupRegistry)
 
 	// Setup routes
 	router := setupRoutes(
@@ -603,19 +794,23 @@ func main() {
 		communityHandler, hostingHandler, databaseHandler, debuggingHandler,
 		completionsHandler, extensionsHandler, enterpriseHandler, collabHub,
 		optimizedHandler,
-		byokHandler,     // BYOK API key management and model selection
-		exportHandler,   // GitHub export (push projects to GitHub)
-		usageHandler,    // Usage tracking and quota API endpoints
-		quotaChecker,    // Quota enforcement middleware
-		rotationHandler, // Key rotation (admin)
-		spendHandler,      // Spend tracking dashboard
-		budgetHandler,     // Budget caps enforcement
+		byokHandler,           // BYOK API key management and model selection
+		exportHandler,         // GitHub export (push projects to GitHub)
+		usageHandler,          // Usage tracking and quota API endpoints
+		quotaChecker,          // Quota enforcement middleware
+		rotationHandler,       // Key rotation (admin)
+		spendHandler,          // Spend tracking dashboard
+		budgetHandler,         // Budget caps enforcement
 		budgetMiddleware,      // Budget enforcement middleware
 		protectedPathsHandler, // Protected paths management
 	)
 
 	// Activate the full router now that all services are initialized.
 	activeRouter.Store(router)
+	startupRegistry.MarkReady("http_routes", startup.TierCritical, "Application router activated", map[string]any{
+		"port": port,
+	})
+	startupRegistry.SetPhase(startup.PhaseReady)
 	startupReady.Store(true)
 
 	log.Printf("Server ready on port %s", port)
@@ -635,8 +830,13 @@ func main() {
 
 	select {
 	case err := <-serverErrors:
+		startupRegistry.MarkFailed("http_routes", startup.TierCritical, "HTTP server stopped unexpectedly", map[string]any{
+			"error": err.Error(),
+		})
+		startupRegistry.SetPhase(startup.PhaseFailed)
 		log.Fatalf("CRITICAL: Failed to start server: %v", err)
 	case sig := <-quit:
+		startupRegistry.SetPhase(startup.PhaseShuttingDown)
 		log.Printf("Received signal %v, starting graceful shutdown...", sig)
 	}
 
@@ -667,6 +867,49 @@ func main() {
 	log.Println("Agent manager stopped")
 
 	log.Println("Graceful shutdown complete")
+}
+
+func newStartupRegistry() *startup.Registry {
+	registry := startup.NewRegistry()
+	registry.Register("bootstrap_http", startup.TierCritical, "Waiting for bootstrap health listener", nil)
+	registry.Register("secrets_validation", startup.TierCritical, "Waiting for secrets validation", nil)
+	registry.Register("primary_database", startup.TierCritical, "Waiting for database connection", nil)
+	registry.Register("auth_service", startup.TierCritical, "Waiting for authentication service", nil)
+	registry.Register("secrets_manager", startup.TierCritical, "Waiting for secrets manager", nil)
+	registry.Register("http_routes", startup.TierCritical, "Waiting for application router activation", nil)
+	registry.Register("database_seeding", startup.TierOptional, "Waiting for database seeding", nil)
+	registry.Register("ai_platform", startup.TierOptional, "Waiting for AI router initialization", nil)
+	registry.Register("project_secrets", startup.TierOptional, "Waiting for project secrets handlers", nil)
+	registry.Register("mcp", startup.TierOptional, "Waiting for MCP handlers", nil)
+	registry.Register("byok", startup.TierOptional, "Waiting for BYOK manager", nil)
+	registry.Register("agent_orchestration", startup.TierOptional, "Waiting for agent orchestration services", nil)
+	registry.Register("preview_service", startup.TierOptional, "Waiting for live preview service", nil)
+	registry.Register("git_integration", startup.TierOptional, "Waiting for Git integration", nil)
+	registry.Register("payments", startup.TierOptional, "Waiting for payment provider setup", nil)
+	registry.Register("realtime_updates", startup.TierOptional, "Waiting for realtime websocket hub", nil)
+	registry.Register("redis_cache", startup.TierOptional, "Waiting for cache backend", nil)
+	registry.Register("code_execution", startup.TierOptional, "Waiting for code execution sandbox", nil)
+	registry.Register("deployment_providers", startup.TierOptional, "Waiting for deployment provider registration", nil)
+	registry.Register("community_marketplace", startup.TierOptional, "Waiting for community marketplace initialization", nil)
+	registry.Register("native_hosting", startup.TierOptional, "Waiting for native hosting service", nil)
+	registry.Register("always_on_controller", startup.TierOptional, "Waiting for always-on controller", nil)
+	registry.Register("managed_databases", startup.TierOptional, "Waiting for managed database service", nil)
+	registry.Register("debugging_service", startup.TierOptional, "Waiting for debugging service", nil)
+	registry.Register("completions_service", startup.TierOptional, "Waiting for completions service", nil)
+	registry.Register("extensions_marketplace", startup.TierOptional, "Waiting for extensions marketplace", nil)
+	registry.Register("enterprise_features", startup.TierOptional, "Waiting for enterprise features", nil)
+	registry.Register("autonomous_agent", startup.TierOptional, "Waiting for autonomous agent system", nil)
+	registry.Register("collaboration", startup.TierOptional, "Waiting for collaboration hub", nil)
+	registry.Register("usage_tracking", startup.TierOptional, "Waiting for usage tracker", nil)
+	registry.Register("metrics", startup.TierOptional, "Waiting for metrics subsystem", nil)
+	return registry
+}
+
+func featureReadinessHTTPStatus(summary startup.Summary) int {
+	if summary.Ready {
+		return http.StatusOK
+	}
+	return http.StatusServiceUnavailable
 }
 
 // AppConfig holds all application configuration (non-secret)
@@ -828,6 +1071,7 @@ func setupRoutes(
 	// Health check endpoints
 	router.GET("/health", server.Health)
 	router.GET("/health/deep", server.DeepHealth)
+	router.GET("/health/features", server.FeatureReadiness)
 	router.GET("/ready", server.DeepHealth) // Kubernetes readiness probe
 
 	// API documentation endpoint
@@ -917,7 +1161,7 @@ func setupRoutes(
 			// AI endpoints - with quota and budget enforcement
 			ai := protected.Group("/ai")
 			ai.Use(quotaChecker.CheckAIQuota()) // Enforce AI request quota
-			ai.Use(budgetMiddleware)             // Enforce budget caps
+			ai.Use(budgetMiddleware)            // Enforce budget caps
 			{
 				ai.POST("/generate", server.AIGenerate)
 				ai.GET("/usage", server.GetAIUsage)
@@ -971,36 +1215,45 @@ func setupRoutes(
 			autonomousHandler.RegisterRoutes(protected)
 
 			// Secrets Management endpoints
-			secretsRoutes := protected.Group("/secrets")
-			{
-				secretsRoutes.GET("", secretsHandler.ListSecrets)
-				secretsRoutes.POST("", secretsHandler.CreateSecret)
-				secretsRoutes.GET("/:id", secretsHandler.GetSecret)
-				secretsRoutes.PUT("/:id", secretsHandler.UpdateSecret)
-				secretsRoutes.DELETE("/:id", secretsHandler.DeleteSecret)
-				secretsRoutes.POST("/:id/rotate", secretsHandler.RotateSecret)
-				secretsRoutes.GET("/:id/audit", secretsHandler.GetAuditLog)
+			if secretsHandler != nil {
+				secretsRoutes := protected.Group("/secrets")
+				{
+					secretsRoutes.GET("", secretsHandler.ListSecrets)
+					secretsRoutes.POST("", secretsHandler.CreateSecret)
+					secretsRoutes.GET("/:id", secretsHandler.GetSecret)
+					secretsRoutes.PUT("/:id", secretsHandler.UpdateSecret)
+					secretsRoutes.DELETE("/:id", secretsHandler.DeleteSecret)
+					secretsRoutes.POST("/:id/rotate", secretsHandler.RotateSecret)
+					secretsRoutes.GET("/:id/audit", secretsHandler.GetAuditLog)
+				}
+
+				// Project-specific secrets (environment variables)
+				protected.GET("/projects/:id/secrets", secretsHandler.GetProjectSecrets)
+			} else {
+				registerUnavailableRoutes(protected, "/secrets", "Secrets management is currently unavailable")
+				protected.GET("/projects/:id/secrets", featureUnavailableHandler("Secrets management is currently unavailable"))
 			}
 
-			// Project-specific secrets (environment variables)
-			protected.GET("/projects/:id/secrets", secretsHandler.GetProjectSecrets)
-
 			// MCP Server Management endpoints
-			mcpRoutes := protected.Group("/mcp")
-			{
-				// External MCP server management
-				mcpRoutes.GET("/servers", mcpHandler.ListExternalServers)
-				mcpRoutes.POST("/servers", mcpHandler.AddExternalServer)
-				mcpRoutes.DELETE("/servers/:id", mcpHandler.DeleteExternalServer)
-				mcpRoutes.POST("/servers/:id/connect", mcpHandler.ConnectToServer)
-				mcpRoutes.POST("/servers/:id/disconnect", mcpHandler.DisconnectFromServer)
+			if mcpHandler != nil {
+				mcpRoutes := protected.Group("/mcp")
+				{
+					// External MCP server management
+					mcpRoutes.GET("/servers", mcpHandler.ListExternalServers)
+					mcpRoutes.POST("/servers", mcpHandler.AddExternalServer)
+					mcpRoutes.DELETE("/servers/:id", mcpHandler.DeleteExternalServer)
+					mcpRoutes.POST("/servers/:id/connect", mcpHandler.ConnectToServer)
+					mcpRoutes.POST("/servers/:id/disconnect", mcpHandler.DisconnectFromServer)
 
-				// Tool execution on connected MCP servers
-				mcpRoutes.POST("/servers/:id/tools/call", mcpHandler.CallTool)
-				mcpRoutes.GET("/servers/:id/resources", mcpHandler.ReadResource)
+					// Tool execution on connected MCP servers
+					mcpRoutes.POST("/servers/:id/tools/call", mcpHandler.CallTool)
+					mcpRoutes.GET("/servers/:id/resources", mcpHandler.ReadResource)
 
-				// Aggregated tools across all connected servers
-				mcpRoutes.GET("/tools", mcpHandler.GetAvailableTools)
+					// Aggregated tools across all connected servers
+					mcpRoutes.GET("/tools", mcpHandler.GetAvailableTools)
+				}
+			} else {
+				registerUnavailableRoutes(protected, "/mcp", "MCP integrations are currently unavailable")
 			}
 
 			// Project Templates endpoints
@@ -1105,7 +1358,7 @@ func setupRoutes(
 			if executionHandler != nil {
 				execute := protected.Group("/execute")
 				execute.Use(quotaChecker.CheckExecutionQuota(1)) // Check execution minutes quota
-				execute.Use(budgetMiddleware)                     // Enforce budget caps
+				execute.Use(budgetMiddleware)                    // Enforce budget caps
 				{
 					execute.POST("", executionHandler.ExecuteCode)                           // Execute code snippet
 					execute.POST("/file", executionHandler.ExecuteFile)                      // Execute a file
@@ -1129,6 +1382,9 @@ func setupRoutes(
 					terminal.GET("/sessions/:id/history", executionHandler.GetTerminalHistory)    // Get command history
 					terminal.GET("/shells", executionHandler.GetAvailableShells)                  // List available shells
 				}
+			} else {
+				registerUnavailableRoutes(protected, "/execute", "Code execution is currently unavailable")
+				registerUnavailableRoutes(protected, "/terminal", "Terminal sessions are currently unavailable")
 			}
 
 			// One-Click Deployment endpoints (Vercel, Netlify, Render)
@@ -1160,6 +1416,8 @@ func setupRoutes(
 			// Managed Database endpoints
 			if databaseHandler != nil {
 				databaseHandler.RegisterDatabaseRoutes(protected)
+			} else {
+				registerUnavailableRoutes(protected, "/projects/:id/databases", "Managed databases are currently unavailable")
 			}
 
 			// Debugging endpoints
@@ -1175,15 +1433,19 @@ func setupRoutes(
 			enterpriseHandler.RegisterEnterpriseRoutes(protected, v1)
 
 			// BYOK (Bring Your Own Key) endpoints
-			byok := protected.Group("/byok")
-			{
-				byok.POST("/keys", byokHandler.SaveKey)
-				byok.GET("/keys", byokHandler.GetKeys)
-				byok.DELETE("/keys/:provider", byokHandler.DeleteKey)
-				byok.PATCH("/keys/:provider", byokHandler.UpdateKeySettings)
-				byok.POST("/keys/:provider/validate", byokHandler.ValidateKey)
-				byok.GET("/usage", byokHandler.GetUsage)
-				byok.GET("/models", byokHandler.GetModels)
+			if byokHandler != nil {
+				byok := protected.Group("/byok")
+				{
+					byok.POST("/keys", byokHandler.SaveKey)
+					byok.GET("/keys", byokHandler.GetKeys)
+					byok.DELETE("/keys/:provider", byokHandler.DeleteKey)
+					byok.PATCH("/keys/:provider", byokHandler.UpdateKeySettings)
+					byok.POST("/keys/:provider/validate", byokHandler.ValidateKey)
+					byok.GET("/usage", byokHandler.GetUsage)
+					byok.GET("/models", byokHandler.GetModels)
+				}
+			} else {
+				registerUnavailableRoutes(protected, "/byok", "BYOK key management is currently unavailable")
 			}
 
 			// Spend Tracking endpoints (S2: Real-Time Spend Dashboard)
@@ -1215,10 +1477,16 @@ func setupRoutes(
 	// WebSocket endpoint for interactive terminal sessions
 	if executionHandler != nil {
 		router.GET("/ws/terminal/:sessionId", executionHandler.HandleTerminalWebSocket)
+	} else {
+		router.GET("/ws/terminal/:sessionId", featureUnavailableHandler("Terminal websocket is currently unavailable"))
 	}
 
 	// MCP WebSocket endpoint (for APEX.BUILD as MCP server)
-	router.GET("/mcp/ws", mcpHandler.HandleMCPWebSocket)
+	if mcpHandler != nil {
+		router.GET("/mcp/ws", mcpHandler.HandleMCPWebSocket)
+	} else {
+		router.GET("/mcp/ws", featureUnavailableHandler("MCP websocket is currently unavailable"))
+	}
 
 	// WebSocket endpoint for real-time collaboration
 	router.GET("/ws/collab", collabHub.HandleWebSocket)
@@ -1233,6 +1501,23 @@ func setupRoutes(
 	autonomousHandler.RegisterWebSocketRoute(router)
 
 	return router
+}
+
+func featureUnavailableHandler(message string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   message,
+			"code":    "FEATURE_UNAVAILABLE",
+		})
+	}
+}
+
+func registerUnavailableRoutes(parent *gin.RouterGroup, relativePath, message string) {
+	group := parent.Group(relativePath)
+	handler := featureUnavailableHandler(message)
+	group.Any("", handler)
+	group.Any("/*path", handler)
 }
 
 // Helper functions

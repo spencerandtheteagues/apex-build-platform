@@ -2,7 +2,9 @@ package api
 
 import (
 	"archive/zip"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -12,6 +14,7 @@ import (
 	"apex-build/internal/auth"
 	"apex-build/internal/db"
 	"apex-build/internal/pricing"
+	"apex-build/internal/startup"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -21,10 +24,11 @@ import (
 
 // Server represents the API server
 type Server struct {
-	db       *db.Database
-	auth     *auth.AuthService
-	aiRouter *ai.AIRouter
-	byok     *ai.BYOKManager
+	db        *db.Database
+	auth      *auth.AuthService
+	aiRouter  *ai.AIRouter
+	byok      *ai.BYOKManager
+	readiness *startup.Registry
 }
 
 // NewServer creates a new API server
@@ -37,57 +41,112 @@ func NewServer(database *db.Database, authService *auth.AuthService, aiRouter *a
 	}
 }
 
+func (s *Server) SetReadinessRegistry(registry *startup.Registry) {
+	s.readiness = registry
+}
+
 // Health endpoint - Returns quickly for load balancer health checks
 func (s *Server) Health(c *gin.Context) {
-	// For basic health checks, just return OK quickly
-	// This prevents timeouts when database connections are stale
-	aiHealth := s.aiRouter.GetDetailedHealthStatus()
-	healthyProviders := 0
-	for _, detail := range aiHealth {
-		if detail.Status == "ok" {
-			healthyProviders++
-		}
-	}
-
+	summary := s.readinessSummary()
+	aiHealth, healthyProviders := s.aiHealthSnapshot()
 	c.JSON(http.StatusOK, gin.H{
-		"status":            "healthy",
-		"database":          "connected",
-		"ai_providers":      aiHealth,
-		"healthy_providers": healthyProviders,
-		"total_providers":   len(aiHealth),
-		"version":           "1.0.0",
+		"status":                   topLevelHealthStatus(summary),
+		"ready":                    summary.Ready,
+		"phase":                    summary.Phase,
+		"database":                 "configured",
+		"ai_providers":             aiHealth,
+		"healthy_providers":        healthyProviders,
+		"total_providers":          len(aiHealth),
+		"version":                  "1.0.0",
+		"feature_readiness_status": summary.Status,
+		"startup":                  summary,
 	})
 }
 
 // DeepHealth endpoint - Full health check with database ping (for monitoring)
 func (s *Server) DeepHealth(c *gin.Context) {
+	summary := s.readinessSummary()
+
 	// Check database health with timeout
 	if err := s.db.Health(); err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"status":  "unhealthy",
+			"ready":   false,
 			"error":   "database connection failed",
 			"details": err.Error(),
+			"startup": summary,
 		})
 		return
 	}
 
 	// Check AI providers health
+	aiHealth, healthyProviders := s.aiHealthSnapshot()
+
+	statusCode := http.StatusOK
+	if !summary.Ready {
+		statusCode = http.StatusServiceUnavailable
+	}
+
+	c.JSON(statusCode, gin.H{
+		"status":                   topLevelHealthStatus(summary),
+		"ready":                    summary.Ready,
+		"database":                 "connected",
+		"ai_providers":             aiHealth,
+		"healthy_providers":        healthyProviders,
+		"total_providers":          len(aiHealth),
+		"version":                  "1.0.0",
+		"feature_readiness_status": summary.Status,
+		"startup":                  summary,
+	})
+}
+
+func (s *Server) FeatureReadiness(c *gin.Context) {
+	summary := s.readinessSummary()
+	statusCode := http.StatusOK
+	if !summary.Ready {
+		statusCode = http.StatusServiceUnavailable
+	}
+	c.JSON(statusCode, summary)
+}
+
+func (s *Server) readinessSummary() startup.Summary {
+	if s.readiness == nil {
+		return startup.Summary{
+			Phase:  startup.PhaseReady,
+			Status: "healthy",
+			Ready:  true,
+		}
+	}
+	return s.readiness.Snapshot()
+}
+
+func (s *Server) aiHealthSnapshot() (map[string]*ai.ProviderHealthDetail, int) {
+	if s.aiRouter == nil {
+		return map[string]*ai.ProviderHealthDetail{}, 0
+	}
+
 	aiHealth := s.aiRouter.GetDetailedHealthStatus()
 	healthyProviders := 0
 	for _, detail := range aiHealth {
-		if detail.Status == "ok" {
+		if detail != nil && detail.Status == "ok" {
 			healthyProviders++
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status":            "healthy",
-		"database":          "connected",
-		"ai_providers":      aiHealth,
-		"healthy_providers": healthyProviders,
-		"total_providers":   len(aiHealth),
-		"version":           "1.0.0",
-	})
+	return aiHealth, healthyProviders
+}
+
+func topLevelHealthStatus(summary startup.Summary) string {
+	if summary.Ready {
+		return "healthy"
+	}
+	if summary.Phase == startup.PhaseShuttingDown {
+		return "shutting_down"
+	}
+	if summary.Phase == startup.PhaseStarting {
+		return "starting"
+	}
+	return "unhealthy"
 }
 
 // Authentication endpoints
@@ -260,12 +319,22 @@ func (s *Server) RefreshToken(c *gin.Context) {
 
 // Logout invalidates the presented access token when possible.
 func (s *Server) Logout(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		req.RefreshToken = ""
+	}
+
 	authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
 	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
 		token := strings.TrimSpace(authHeader[7:])
 		if token != "" {
 			_ = s.auth.BlacklistToken(token)
 		}
+	}
+	if refreshToken := strings.TrimSpace(req.RefreshToken); refreshToken != "" {
+		_ = s.auth.RevokeRefreshToken(refreshToken)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

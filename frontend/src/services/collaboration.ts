@@ -1,6 +1,8 @@
 // APEX.BUILD Real-Time Collaboration Service
 // Yjs-inspired CRDT with OT fallback for concurrent editing
 
+import { getConfiguredWsUrl } from '@/config/runtime'
+
 // Browser-compatible EventEmitter implementation
 class EventEmitter {
   private events: Map<string, Set<(...args: any[]) => void>> = new Map()
@@ -121,6 +123,19 @@ export interface ActivityFeedItem {
   timestamp: Date
 }
 
+export const getCollaborationWebSocketUrl = (token: string): string => {
+  const fallbackBaseUrl = typeof window !== 'undefined'
+    ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
+    : 'ws://localhost:8080'
+
+  const configuredBaseUrl = getConfiguredWsUrl()
+  const baseUrl = (configuredBaseUrl || fallbackBaseUrl)
+    .replace(/\/+$/, '')
+    .replace(/\/ws$/, '')
+
+  return `${baseUrl}/ws/collab?token=${encodeURIComponent(token)}`
+}
+
 export interface RTCPeerState {
   peerId: number
   connected: boolean
@@ -232,7 +247,7 @@ export class CollaborationService extends EventEmitter {
     this.isConnecting = true
 
     return new Promise((resolve, reject) => {
-      const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/collab/ws?token=${token}`
+      const wsUrl = getCollaborationWebSocketUrl(token)
 
       this.ws = new WebSocket(wsUrl)
 

@@ -232,9 +232,10 @@ func NewContainerSandbox(config *ContainerSandboxConfig) (*ContainerSandbox, err
 		config = &cfgCopy
 	}
 
-	// Create base temp directory
-	baseTempDir := filepath.Join(os.TempDir(), "apex-container-sandbox")
-	if err := os.MkdirAll(baseTempDir, 0755); err != nil {
+	// Use a sandbox-specific temp root so concurrent sandboxes and test runs do not
+	// delete each other's workspaces during cleanup.
+	baseTempDir, err := os.MkdirTemp(os.TempDir(), "apex-container-sandbox-")
+	if err != nil {
 		return nil, fmt.Errorf("failed to create sandbox temp directory: %w", err)
 	}
 
@@ -463,7 +464,7 @@ WORKDIR /work
 ENV NODE_ENV=production
 `
 	case "go":
-		return `FROM golang:1.22-bookworm
+		return `FROM golang:1.23-bookworm
 RUN useradd -m -s /bin/false sandbox && \
     mkdir -p /work /tmp /tmp/go-cache /tmp/go-mod && \
     chown -R sandbox:sandbox /work /tmp /go
@@ -899,7 +900,7 @@ func (s *ContainerSandbox) getImageName(language string) string {
 	case "javascript":
 		return "node:20-slim"
 	case "go":
-		return "golang:1.22"
+		return "golang:1.23"
 	case "rust":
 		return "rust:1.75-slim"
 	case "java":
@@ -1111,12 +1112,17 @@ func (s *ContainerSandbox) GetActiveExecutions() int {
 
 // Cleanup cleans up all sandbox resources
 func (s *ContainerSandbox) Cleanup() error {
-	// Kill all active executions
-	s.executionsMu.Lock()
+	// Copy active execution IDs first so cleanup does not lock itself while calling Kill.
+	s.executionsMu.RLock()
+	ids := make([]string, 0, len(s.executions))
 	for id := range s.executions {
-		s.Kill(id)
+		ids = append(ids, id)
 	}
-	s.executionsMu.Unlock()
+	s.executionsMu.RUnlock()
+
+	for _, id := range ids {
+		_ = s.Kill(id)
+	}
 
 	// Cleanup orphaned containers
 	s.cleanupOrphanedContainers()

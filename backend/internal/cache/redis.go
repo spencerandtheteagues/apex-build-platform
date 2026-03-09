@@ -14,20 +14,29 @@ import (
 // Falls back to in-memory cache when Redis is unavailable
 type RedisCache struct {
 	// In-memory fallback cache
-	memCache    map[string]*cacheEntry
-	memMu       sync.RWMutex
+	memCache map[string]*cacheEntry
+	memMu    sync.RWMutex
 
 	// Redis connection (nil if not available)
 	redisClient RedisClient
+
+	// Backend status for readiness reporting
+	backend         string
+	fallbackReason  string
+	redisConfigured bool
 
 	// Configuration
 	defaultTTL time.Duration
 	maxMemSize int
 
 	// Stats
-	hits   int64
-	misses int64
+	hits    int64
+	misses  int64
 	statsMu sync.RWMutex
+}
+
+func (c *RedisCache) HasRedisBackend() bool {
+	return c != nil && c.redisClient != nil
 }
 
 // RedisClient interface for Redis operations
@@ -91,6 +100,14 @@ type CacheConfig struct {
 	FileCacheTTL time.Duration
 }
 
+// Status describes the active cache backend and any fallback reason.
+type Status struct {
+	Backend         string `json:"backend"`
+	RedisConfigured bool   `json:"redis_configured"`
+	RedisConnected  bool   `json:"redis_connected"`
+	FallbackReason  string `json:"fallback_reason,omitempty"`
+}
+
 // DefaultCacheConfig returns the default cache configuration
 func DefaultCacheConfig() *CacheConfig {
 	return &CacheConfig{
@@ -104,14 +121,21 @@ func DefaultCacheConfig() *CacheConfig {
 
 // NewRedisCache creates a new cache instance
 func NewRedisCache(config *CacheConfig) *RedisCache {
+	return newMemoryCache(config, false, "")
+}
+
+func newMemoryCache(config *CacheConfig, redisConfigured bool, fallbackReason string) *RedisCache {
 	if config == nil {
 		config = DefaultCacheConfig()
 	}
 
 	cache := &RedisCache{
-		memCache:   make(map[string]*cacheEntry),
-		defaultTTL: config.DefaultTTL,
-		maxMemSize: config.MaxMemoryItems,
+		memCache:        make(map[string]*cacheEntry),
+		defaultTTL:      config.DefaultTTL,
+		maxMemSize:      config.MaxMemoryItems,
+		backend:         "memory",
+		redisConfigured: redisConfigured,
+		fallbackReason:  fallbackReason,
 	}
 
 	// Start cleanup goroutine for expired entries
@@ -127,10 +151,12 @@ func NewRedisCacheWithClient(client RedisClient, config *CacheConfig) *RedisCach
 	}
 
 	cache := &RedisCache{
-		memCache:    make(map[string]*cacheEntry),
-		redisClient: client,
-		defaultTTL:  config.DefaultTTL,
-		maxMemSize:  config.MaxMemoryItems,
+		memCache:        make(map[string]*cacheEntry),
+		redisClient:     client,
+		defaultTTL:      config.DefaultTTL,
+		maxMemSize:      config.MaxMemoryItems,
+		backend:         "redis",
+		redisConfigured: true,
 	}
 
 	go cache.cleanupLoop()
@@ -235,6 +261,16 @@ func (c *RedisCache) DeletePattern(ctx context.Context, pattern string) error {
 	}
 
 	return nil
+}
+
+// Status reports which cache backend is active and whether Redis is in use.
+func (c *RedisCache) Status() Status {
+	return Status{
+		Backend:         c.backend,
+		RedisConfigured: c.redisConfigured,
+		RedisConnected:  c.redisClient != nil,
+		FallbackReason:  c.fallbackReason,
+	}
 }
 
 // GetJSON retrieves and unmarshals a JSON value

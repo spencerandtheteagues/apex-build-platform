@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS native_deployments (
     framework VARCHAR(50),
     node_version VARCHAR(20) DEFAULT '18',
     python_version VARCHAR(20) DEFAULT '3.11',
-    go_version VARCHAR(20) DEFAULT '1.21',
+    go_version VARCHAR(20) DEFAULT '1.23',
 
     -- Resource limits
     memory_limit BIGINT DEFAULT 512,

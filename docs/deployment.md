@@ -18,6 +18,7 @@ Backend health configuration:
 
 - bootstrap liveness: `/health`
 - readiness/deep health: `/ready`
+- feature readiness summary: `/health/features`
 
 Frontend health configuration:
 

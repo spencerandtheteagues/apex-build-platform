@@ -72,13 +72,13 @@ func NewRedisCacheFromURL(redisURL string, config *CacheConfig) *RedisCache {
 		config = DefaultCacheConfig()
 	}
 	if redisURL == "" {
-		return NewRedisCache(config)
+		return newMemoryCache(config, false, "REDIS_URL not set")
 	}
 
 	opts, err := goredis.ParseURL(redisURL)
 	if err != nil {
 		// Invalid URL — fall back to in-memory
-		return NewRedisCache(config)
+		return newMemoryCache(config, true, fmt.Sprintf("invalid REDIS_URL: %v", err))
 	}
 
 	client := goredis.NewClient(opts)
@@ -88,7 +88,7 @@ func NewRedisCacheFromURL(redisURL string, config *CacheConfig) *RedisCache {
 	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {
 		_ = client.Close()
-		return NewRedisCache(config)
+		return newMemoryCache(config, true, fmt.Sprintf("redis ping failed: %v", err))
 	}
 
 	return NewRedisCacheWithClient(&goRedisAdapter{client: client}, config)

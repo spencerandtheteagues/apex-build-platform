@@ -56,12 +56,24 @@ const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
   </div>
 )
 
+const getProjectIdFromPath = (): number | null => {
+  if (typeof window === 'undefined') return null
+
+  const match = window.location.pathname.match(/^\/project\/(\d+)\/?$/)
+  if (!match) return null
+
+  const projectId = Number(match[1])
+  return Number.isInteger(projectId) && projectId > 0 ? projectId : null
+}
+
 function App() {
+  const initialProjectIdRef = useRef<number | null>(getProjectIdFromPath())
+  const pendingProjectIdRef = useRef<number | null>(initialProjectIdRef.current)
   const [currentView, setCurrentView] = useState<AppView>('builder')
   const [visitedViews, setVisitedViews] = useState<Set<AppView>>(() => new Set(['builder']))
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false)
   const [showGitHubImport, setShowGitHubImport] = useState(false)
-  const [showLanding, setShowLanding] = useState(true)
+  const [showLanding, setShowLanding] = useState(() => initialProjectIdRef.current == null)
   const [isAuthMode, setIsAuthMode] = useState<'login' | 'register'>('login')
   const [pendingPlanType, setPendingPlanType] = useState<string | null>(null)
   const [authData, setAuthData] = useState({
@@ -90,6 +102,7 @@ function App() {
     currentProject, // We need this to check if we can safely render the IDE
     login,
     register,
+    selectProject,
     updateProfile,
   } = useStore()
 
@@ -101,6 +114,18 @@ function App() {
       setPendingPlanType(null)
     }
   }, [isAuthenticated, pendingPlanType])
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    const projectId = pendingProjectIdRef.current
+    if (!projectId) return
+
+    pendingProjectIdRef.current = null
+    setCurrentView('ide')
+    setVisitedViews(prev => new Set([...prev, 'ide']))
+    void selectProject(projectId)
+  }, [isAuthenticated, selectProject])
 
   // Handle authentication
   const handleAuth = async (e: React.FormEvent) => {

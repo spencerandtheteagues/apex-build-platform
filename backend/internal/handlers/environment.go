@@ -62,8 +62,8 @@ func (h *EnvironmentHandler) RegisterEnvironmentRoutes(rg *gin.RouterGroup) {
 // Stored as JSON in the Project.EnvironmentConfig field
 type EnvironmentConfig struct {
 	// Language runtime configuration
-	Language string `json:"language"`          // node, python, go, rust, java, ruby, php
-	Version  string `json:"version"`           // Runtime version (e.g., "20", "3.11", "1.21")
+	Language string `json:"language"` // node, python, go, rust, java, ruby, php
+	Version  string `json:"version"`  // Runtime version (e.g., "20", "3.11", "1.23")
 
 	// Package dependencies
 	Packages    []PackageDependency `json:"packages"`     // Language-specific packages
@@ -292,85 +292,85 @@ func (h *EnvironmentHandler) DetectEnvironment(c *gin.Context) {
 func (h *EnvironmentHandler) GetAvailableRuntimes(c *gin.Context) {
 	runtimes := []RuntimeInfo{
 		{
-			ID:          "node",
-			Name:        "Node.js",
-			Description: "JavaScript runtime built on Chrome's V8 engine",
-			Versions:    []string{"22", "20", "18", "16"},
-			Default:     "20",
+			ID:             "node",
+			Name:           "Node.js",
+			Description:    "JavaScript runtime built on Chrome's V8 engine",
+			Versions:       []string{"22", "20", "18", "16"},
+			Default:        "20",
 			PackageManager: "npm",
-			Icon:        "nodejs",
+			Icon:           "nodejs",
 		},
 		{
-			ID:          "python",
-			Name:        "Python",
-			Description: "Versatile programming language for web, data science, and more",
-			Versions:    []string{"3.12", "3.11", "3.10", "3.9"},
-			Default:     "3.11",
+			ID:             "python",
+			Name:           "Python",
+			Description:    "Versatile programming language for web, data science, and more",
+			Versions:       []string{"3.12", "3.11", "3.10", "3.9"},
+			Default:        "3.11",
 			PackageManager: "pip",
-			Icon:        "python",
+			Icon:           "python",
 		},
 		{
-			ID:          "go",
-			Name:        "Go",
-			Description: "Fast, efficient compiled language by Google",
-			Versions:    []string{"1.22", "1.21", "1.20"},
-			Default:     "1.21",
+			ID:             "go",
+			Name:           "Go",
+			Description:    "Fast, efficient compiled language by Google",
+			Versions:       []string{"1.23", "1.22", "1.21"},
+			Default:        "1.23",
 			PackageManager: "go",
-			Icon:        "go",
+			Icon:           "go",
 		},
 		{
-			ID:          "rust",
-			Name:        "Rust",
-			Description: "Memory-safe systems programming language",
-			Versions:    []string{"1.75", "1.74", "1.73"},
-			Default:     "1.75",
+			ID:             "rust",
+			Name:           "Rust",
+			Description:    "Memory-safe systems programming language",
+			Versions:       []string{"1.75", "1.74", "1.73"},
+			Default:        "1.75",
 			PackageManager: "cargo",
-			Icon:        "rust",
+			Icon:           "rust",
 		},
 		{
-			ID:          "java",
-			Name:        "Java",
-			Description: "Enterprise-grade, platform-independent language",
-			Versions:    []string{"21", "17", "11"},
-			Default:     "17",
+			ID:             "java",
+			Name:           "Java",
+			Description:    "Enterprise-grade, platform-independent language",
+			Versions:       []string{"21", "17", "11"},
+			Default:        "17",
 			PackageManager: "maven",
-			Icon:        "java",
+			Icon:           "java",
 		},
 		{
-			ID:          "ruby",
-			Name:        "Ruby",
-			Description: "Dynamic, elegant language optimized for developer happiness",
-			Versions:    []string{"3.3", "3.2", "3.1"},
-			Default:     "3.2",
+			ID:             "ruby",
+			Name:           "Ruby",
+			Description:    "Dynamic, elegant language optimized for developer happiness",
+			Versions:       []string{"3.3", "3.2", "3.1"},
+			Default:        "3.2",
 			PackageManager: "gem",
-			Icon:        "ruby",
+			Icon:           "ruby",
 		},
 		{
-			ID:          "php",
-			Name:        "PHP",
-			Description: "Popular server-side scripting language",
-			Versions:    []string{"8.3", "8.2", "8.1"},
-			Default:     "8.2",
+			ID:             "php",
+			Name:           "PHP",
+			Description:    "Popular server-side scripting language",
+			Versions:       []string{"8.3", "8.2", "8.1"},
+			Default:        "8.2",
 			PackageManager: "composer",
-			Icon:        "php",
+			Icon:           "php",
 		},
 		{
-			ID:          "deno",
-			Name:        "Deno",
-			Description: "Secure runtime for JavaScript and TypeScript",
-			Versions:    []string{"1.40", "1.39", "1.38"},
-			Default:     "1.40",
+			ID:             "deno",
+			Name:           "Deno",
+			Description:    "Secure runtime for JavaScript and TypeScript",
+			Versions:       []string{"1.40", "1.39", "1.38"},
+			Default:        "1.40",
 			PackageManager: "deno",
-			Icon:        "deno",
+			Icon:           "deno",
 		},
 		{
-			ID:          "bun",
-			Name:        "Bun",
-			Description: "Fast all-in-one JavaScript runtime",
-			Versions:    []string{"1.0", "0.8"},
-			Default:     "1.0",
+			ID:             "bun",
+			Name:           "Bun",
+			Description:    "Fast all-in-one JavaScript runtime",
+			Versions:       []string{"1.0", "0.8"},
+			Default:        "1.0",
 			PackageManager: "bun",
-			Icon:        "bun",
+			Icon:           "bun",
 		},
 	}
 
@@ -489,7 +489,7 @@ func (h *EnvironmentHandler) GetEnvironmentPresets(c *gin.Context) {
 			Name:        "Gin REST API",
 			Description: "High-performance Go web framework",
 			Language:    "go",
-			Version:     "1.21",
+			Version:     "1.23",
 			Packages: []PackageDependency{
 				{Name: "github.com/gin-gonic/gin", Version: "v1.9.1"},
 				{Name: "gorm.io/gorm", Version: "v1.25.0"},
@@ -717,7 +717,7 @@ func getDefaultEnvironmentConfig(language string) *EnvironmentConfig {
 		},
 		"go": {
 			Language: "go",
-			Version:  "1.21",
+			Version:  "1.23",
 			Packages: []PackageDependency{},
 			System:   []string{"git"},
 		},
@@ -806,7 +806,7 @@ func detectEnvironmentFromFiles(files []models.File, project *models.Project) *E
 		case "go.mod":
 			hasGoMod = true
 			config.Language = "go"
-			config.Version = "1.21"
+			config.Version = "1.23"
 		case "Cargo.toml":
 			hasCargoToml = true
 			config.Language = "rust"
@@ -925,7 +925,7 @@ func getDefaultVersionForLanguage(language string) string {
 		"javascript": "20",
 		"typescript": "20",
 		"python":     "3.11",
-		"go":         "1.21",
+		"go":         "1.23",
 		"rust":       "1.75",
 		"java":       "17",
 		"ruby":       "3.2",
@@ -1076,10 +1076,10 @@ func getPresetByID(presetID string) *EnvironmentPreset {
 			System: []string{"git"},
 		},
 		"fastapi": {
-			ID:          "fastapi",
-			Name:        "FastAPI Backend",
-			Language:    "python",
-			Version:     "3.11",
+			ID:       "fastapi",
+			Name:     "FastAPI Backend",
+			Language: "python",
+			Version:  "3.11",
 			Packages: []PackageDependency{
 				{Name: "fastapi", Version: ">=0.100.0"},
 				{Name: "uvicorn", Version: ">=0.23.0"},
@@ -1092,10 +1092,10 @@ func getPresetByID(presetID string) *EnvironmentPreset {
 			System: []string{"git", "curl"},
 		},
 		"gin-api": {
-			ID:          "gin-api",
-			Name:        "Gin REST API",
-			Language:    "go",
-			Version:     "1.21",
+			ID:       "gin-api",
+			Name:     "Gin REST API",
+			Language: "go",
+			Version:  "1.23",
 			Packages: []PackageDependency{
 				{Name: "github.com/gin-gonic/gin", Version: "v1.9.1"},
 				{Name: "gorm.io/gorm", Version: "v1.25.0"},
@@ -1106,10 +1106,10 @@ func getPresetByID(presetID string) *EnvironmentPreset {
 			System: []string{"git"},
 		},
 		"react-vite": {
-			ID:          "react-vite",
-			Name:        "React + Vite",
-			Language:    "node",
-			Version:     "20",
+			ID:       "react-vite",
+			Name:     "React + Vite",
+			Language: "node",
+			Version:  "20",
 			Packages: []PackageDependency{
 				{Name: "react", Version: "^18.0.0"},
 				{Name: "react-dom", Version: "^18.0.0"},
@@ -1122,10 +1122,10 @@ func getPresetByID(presetID string) *EnvironmentPreset {
 			System: []string{"git"},
 		},
 		"django": {
-			ID:          "django",
-			Name:        "Django Web App",
-			Language:    "python",
-			Version:     "3.11",
+			ID:       "django",
+			Name:     "Django Web App",
+			Language: "python",
+			Version:  "3.11",
 			Packages: []PackageDependency{
 				{Name: "django", Version: ">=4.2.0"},
 				{Name: "django-cors-headers", Version: ">=4.0.0"},
@@ -1137,10 +1137,10 @@ func getPresetByID(presetID string) *EnvironmentPreset {
 			System: []string{"git", "curl"},
 		},
 		"express": {
-			ID:          "express",
-			Name:        "Express.js API",
-			Language:    "node",
-			Version:     "20",
+			ID:       "express",
+			Name:     "Express.js API",
+			Language: "node",
+			Version:  "20",
 			Packages: []PackageDependency{
 				{Name: "express", Version: "^4.18.0"},
 				{Name: "cors", Version: "^2.8.0"},

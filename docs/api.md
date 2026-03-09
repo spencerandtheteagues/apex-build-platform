@@ -12,6 +12,9 @@ Non-versioned health endpoints:
 - `GET /health`
 - `GET /health/deep`
 - `GET /ready`
+- `GET /health/features`
+
+`/health/features` returns the startup/readiness summary for critical and optional backend services. It is the operational endpoint to inspect degraded-but-running features such as cache fallbacks, disabled payment providers, or optional subsystems that failed to initialize cleanly.
 
 ## Authentication
 

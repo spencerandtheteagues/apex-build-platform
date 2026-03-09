@@ -55,6 +55,31 @@ func NewPreviewHandlerWithFactory(db *gorm.DB, factory *preview.PreviewServerFac
 	}
 }
 
+// FeatureStatus summarizes preview subsystem readiness for health reporting.
+func (h *PreviewHandler) FeatureStatus() map[string]interface{} {
+	bundlerStatus := h.bundlerService.Status()
+	status := map[string]interface{}{
+		"bundler": map[string]interface{}{
+			"available":   bundlerStatus.Available,
+			"version":     bundlerStatus.Version,
+			"cache_stats": bundlerStatus.CacheStats,
+			"last_error":  bundlerStatus.LastError,
+		},
+	}
+
+	if h.factory != nil {
+		status["docker"] = h.factory.GetDockerStatus()
+	}
+
+	if h.serverRunner != nil {
+		status["server_runner"] = map[string]interface{}{
+			"available": true,
+		}
+	}
+
+	return status
+}
+
 // StartPreview starts a live preview session for a project
 // POST /api/v1/preview/start
 func (h *PreviewHandler) StartPreview(c *gin.Context) {

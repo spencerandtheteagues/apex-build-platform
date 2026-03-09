@@ -122,14 +122,14 @@ func (h *Handler) CreateProject(c *gin.Context) {
 
 	// Create project
 	project := models.Project{
-		Name:        req.Name,
-		Description: req.Description,
-		Language:    req.Language,
-		Framework:   req.Framework,
-		OwnerID:     userID,
-		IsPublic:    req.IsPublic != nil && *req.IsPublic,
-		Environment: req.Environment,
-		BuildConfig: make(map[string]interface{}),
+		Name:         req.Name,
+		Description:  req.Description,
+		Language:     req.Language,
+		Framework:    req.Framework,
+		OwnerID:      userID,
+		IsPublic:     req.IsPublic != nil && *req.IsPublic,
+		Environment:  req.Environment,
+		BuildConfig:  make(map[string]interface{}),
 		Dependencies: make(map[string]interface{}),
 	}
 
@@ -592,9 +592,9 @@ func main() {
 			Path:      "/go.mod",
 			Type:      "file",
 			MimeType:  "text/plain",
-			Content:   `module main
+			Content: `module main
 
-go 1.21`,
+go 1.23`,
 		},
 	}
 }
@@ -684,9 +684,9 @@ h1 {
 }
 
 // Additional helper functions for other frameworks would go here...
-func (h *Handler) createReactTSFiles(projectID uint) []models.File  { return []models.File{} }
-func (h *Handler) createNodeFiles(projectID uint) []models.File    { return []models.File{} }
-func (h *Handler) createNodeTSFiles(projectID uint) []models.File  { return []models.File{} }
+func (h *Handler) createReactTSFiles(projectID uint) []models.File   { return []models.File{} }
+func (h *Handler) createNodeFiles(projectID uint) []models.File      { return []models.File{} }
+func (h *Handler) createNodeTSFiles(projectID uint) []models.File    { return []models.File{} }
 func (h *Handler) createVanillaJSFiles(projectID uint) []models.File { return []models.File{} }
-func (h *Handler) createFlaskFiles(projectID uint) []models.File    { return []models.File{} }
-func (h *Handler) createDjangoFiles(projectID uint) []models.File   { return []models.File{} }
+func (h *Handler) createFlaskFiles(projectID uint) []models.File     { return []models.File{} }
+func (h *Handler) createDjangoFiles(projectID uint) []models.File    { return []models.File{} }

@@ -1,8 +1,39 @@
 /* @vitest-environment jsdom */
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { isAuthRefreshRequestUrl, reloadExpiredSession } from './api'
+import { ApiService, isAuthRefreshRequestUrl, reloadExpiredSession } from './api'
+
+const createStorageMock = (): Storage => {
+  const store = new Map<string, string>()
+
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      store.set(key, String(value))
+    },
+    removeItem: (key: string) => {
+      store.delete(key)
+    },
+    clear: () => {
+      store.clear()
+    },
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    get length() {
+      return store.size
+    },
+  } as Storage
+}
+
+beforeEach(() => {
+  vi.stubGlobal('localStorage', createStorageMock())
+})
+
+afterEach(() => {
+  localStorage.clear()
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
 
 describe('isAuthRefreshRequestUrl', () => {
   it('matches both current and legacy refresh endpoints', () => {
@@ -26,5 +57,26 @@ describe('reloadExpiredSession', () => {
     reloadExpiredSession({ reload })
 
     expect(reload).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('logout', () => {
+  it('sends the refresh token so the backend can revoke it', async () => {
+    const service = new ApiService('/api/v1')
+    localStorage.setItem('apex_refresh_token', 'refresh-token-value')
+    const post = vi.spyOn(service.client, 'post').mockResolvedValue({} as any)
+
+    await service.logout()
+
+    expect(post).toHaveBeenCalledWith('/auth/logout', { refresh_token: 'refresh-token-value' })
+    expect(localStorage.getItem('apex_refresh_token')).toBeNull()
+  })
+})
+
+describe('getDeploymentLogsWebSocketUrl', () => {
+  it('uses the backend deployment websocket route', () => {
+    const service = new ApiService('/api/v1')
+
+    expect(service.getDeploymentLogsWebSocketUrl('deploy-123')).toBe(`ws://${window.location.host}/ws/deploy/deploy-123`)
   })
 })

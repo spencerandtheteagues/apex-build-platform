@@ -170,7 +170,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.23'
           cache-dependency-path: backend/go.sum
 
       - name: Run database migrations
@@ -229,14 +229,17 @@ jobs:
           ATTEMPT=0
 
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            HEALTH=$(curl -s -o /dev/null -w "%{http_code}" https://api.apex.build/health || echo "000")
+            HEALTH_JSON=$(curl -fsS https://api.apex.build/ready || true)
+            STATUS=$(printf '%s' "$HEALTH_JSON" | jq -r '.status // "unavailable"' 2>/dev/null || echo "unavailable")
+            READY=$(printf '%s' "$HEALTH_JSON" | jq -r '.ready // "false"' 2>/dev/null || echo "false")
 
-            if [ "$HEALTH" = "200" ]; then
+            if [ "$STATUS" = "healthy" ] && [ "$READY" = "true" ]; then
               echo "Backend is healthy!"
+              echo "$HEALTH_JSON"
               exit 0
             fi
 
-            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Backend not ready (status: $HEALTH)"
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Backend not ready (status: $STATUS, ready: $READY)"
             ATTEMPT=$((ATTEMPT + 1))
             sleep 10
           done
@@ -318,10 +321,10 @@ jobs:
 
           # Test backend health endpoint
           echo "Testing backend health..."
-          BACKEND_HEALTH=$(curl -s https://api.apex.build/health)
+          BACKEND_HEALTH=$(curl -fsS https://api.apex.build/ready)
           echo "Backend health: $BACKEND_HEALTH"
 
-          if echo "$BACKEND_HEALTH" | grep -q '"status":"ok"'; then
+          if printf '%s' "$BACKEND_HEALTH" | jq -e '.status == "healthy"' >/dev/null; then
             echo "Backend health check passed"
           else
             echo "Backend health check failed"

@@ -26,16 +26,16 @@ const (
 
 // Package represents a package from any registry
 type Package struct {
-	Name        string    `json:"name"`
-	Version     string    `json:"version"`
-	Description string    `json:"description"`
-	Downloads   int64     `json:"downloads"`
-	Homepage    string    `json:"homepage"`
-	Repository  string    `json:"repository"`
-	License     string    `json:"license"`
-	Author      string    `json:"author"`
-	Keywords    []string  `json:"keywords"`
-	PublishedAt time.Time `json:"published_at"`
+	Name        string      `json:"name"`
+	Version     string      `json:"version"`
+	Description string      `json:"description"`
+	Downloads   int64       `json:"downloads"`
+	Homepage    string      `json:"homepage"`
+	Repository  string      `json:"repository"`
+	License     string      `json:"license"`
+	Author      string      `json:"author"`
+	Keywords    []string    `json:"keywords"`
+	PublishedAt time.Time   `json:"published_at"`
 	PackageType PackageType `json:"package_type"`
 }
 
@@ -60,13 +60,13 @@ type Maintainer struct {
 
 // InstalledPackage represents a package installed in a project
 type InstalledPackage struct {
-	Name           string      `json:"name"`
-	Version        string      `json:"version"`
-	IsDev          bool        `json:"is_dev"`
-	InstalledAt    time.Time   `json:"installed_at"`
-	LatestVersion  string      `json:"latest_version,omitempty"`
-	UpdateAvailable bool       `json:"update_available"`
-	PackageType    PackageType `json:"package_type"`
+	Name            string      `json:"name"`
+	Version         string      `json:"version"`
+	IsDev           bool        `json:"is_dev"`
+	InstalledAt     time.Time   `json:"installed_at"`
+	LatestVersion   string      `json:"latest_version,omitempty"`
+	UpdateAvailable bool        `json:"update_available"`
+	PackageType     PackageType `json:"package_type"`
 }
 
 // PackageManager defines the interface for package management operations
@@ -288,7 +288,7 @@ func CreateDependencyFile(db *gorm.DB, projectID uint, pkgType PackageType) (*mo
 	case PackageTypeGo:
 		fileName = "go.mod"
 		mimeType = "text/plain"
-		content = "module main\n\ngo 1.21\n"
+		content = "module main\n\ngo 1.23\n"
 	default:
 		return nil, fmt.Errorf("unsupported package type: %s", pkgType)
 	}

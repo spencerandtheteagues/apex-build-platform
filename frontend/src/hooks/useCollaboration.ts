@@ -53,6 +53,28 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
 
   const { user } = useStore()
 
+  useEffect(() => {
+    if (!user || !roomId) return
+
+    const token = localStorage.getItem('apex_access_token')
+    if (!token) {
+      setIsConnected(false)
+      return
+    }
+
+    collaborationService.setUser(user.id, user.username)
+
+    if (collaborationService.isConnected()) {
+      setIsConnected(true)
+      return
+    }
+
+    collaborationService.connect(token).catch((error) => {
+      console.error('[useCollaboration] Failed to connect:', error)
+      setIsConnected(false)
+    })
+  }, [roomId, user])
+
   // Convert UserPresence to RemoteCursor
   const presenceToRemoteCursor = useCallback((presence: UserPresence): RemoteCursor => ({
     userId: presence.userId,
