@@ -269,6 +269,17 @@ func (h *GitHandler) Push(c *gin.Context) {
 		return
 	}
 
+	// Verify project ownership
+	var project models.Project
+	if err := h.db.First(&project, req.ProjectID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
 	token := h.getGitToken(userID, req.ProjectID)
 
 	if err := h.gitService.Push(c.Request.Context(), req.ProjectID, token); err != nil {
@@ -341,6 +352,17 @@ func (h *GitHandler) CreateBranch(c *gin.Context) {
 		req.BaseBranch = "main"
 	}
 
+	// Verify project ownership
+	var project models.Project
+	if err := h.db.First(&project, req.ProjectID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
 	token := h.getGitToken(userID, req.ProjectID)
 
 	branch, err := h.gitService.CreateBranch(c.Request.Context(), req.ProjectID, req.BranchName, req.BaseBranch, token)
@@ -371,6 +393,17 @@ func (h *GitHandler) SwitchBranch(c *gin.Context) {
 		return
 	}
 
+	// Verify project ownership
+	var project models.Project
+	if err := h.db.First(&project, req.ProjectID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
 	token := h.getGitToken(userID, req.ProjectID)
 
 	if err := h.gitService.SwitchBranch(c.Request.Context(), req.ProjectID, req.BranchName, token); err != nil {
@@ -393,6 +426,17 @@ func (h *GitHandler) GetPullRequests(c *gin.Context) {
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+		return
+	}
+
+	// Verify project ownership
+	var project models.Project
+	if err := h.db.First(&project, uint(projectID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
 	}
 
@@ -432,6 +476,17 @@ func (h *GitHandler) CreatePullRequest(c *gin.Context) {
 
 	if req.Base == "" {
 		req.Base = "main"
+	}
+
+	// Verify project ownership
+	var project models.Project
+	if err := h.db.First(&project, req.ProjectID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if project.OwnerID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
 	}
 
 	token := h.getGitToken(userID, req.ProjectID)

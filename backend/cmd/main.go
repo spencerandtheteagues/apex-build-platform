@@ -765,9 +765,10 @@ func main() {
 	quotaChecker := middleware.NewQuotaChecker(usageTracker)
 	log.Println("Usage Tracking & Quota Enforcement initialized (projects, storage, AI, execution)")
 	log.Println("   - Free: 3 projects, 100MB storage, 1000 AI/month, 10 exec min/day")
-	log.Println("   - Pro ($12): 25 projects, 5GB storage, 10000 AI/month, 120 exec min/day")
-	log.Println("   - Team ($29): 100 projects, 25GB storage, 50000 AI/month, 480 exec min/day")
-	log.Println("   - Enterprise ($79): Unlimited")
+	log.Println("   - Builder ($19/mo): 10 projects, 1GB storage, 5000 AI/month, 60 exec min/day")
+	log.Println("   - Pro ($49/mo): 25 projects, 5GB storage, 10000 AI/month, 120 exec min/day")
+	log.Println("   - Team ($99/mo): 100 projects, 25GB storage, 50000 AI/month, 480 exec min/day")
+	log.Println("   - Enterprise: Unlimited (contact sales)")
 
 	// Initialize Prometheus Metrics and Business Metrics Collector
 	metricsEnabled := getEnv("ENABLE_METRICS", "true") == "true"

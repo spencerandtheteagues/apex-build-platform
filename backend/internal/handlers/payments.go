@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"apex-build/internal/payments"
@@ -48,19 +49,28 @@ func (h *PaymentHandlers) CreateCheckoutSession(c *gin.Context) {
 	}
 
 	var req struct {
-		PriceID    string `json:"price_id" binding:"required"`
-		SuccessURL string `json:"success_url" binding:"required"`
-		CancelURL  string `json:"cancel_url" binding:"required"`
+		PriceID string `json:"price_id" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"error":   "Invalid request: price_id, success_url, and cancel_url are required",
+			"error":   "Invalid request: price_id is required",
 			"code":    "INVALID_REQUEST",
 		})
 		return
 	}
+
+	// Generate redirect URLs server-side from configured base URL
+	appURL := strings.TrimRight(os.Getenv("APP_URL"), "/")
+	if appURL == "" {
+		appURL = strings.TrimRight(os.Getenv("FRONTEND_URL"), "/")
+	}
+	if appURL == "" {
+		appURL = "https://apex.build"
+	}
+	successURL := appURL + "/billing?success=true"
+	cancelURL := appURL + "/billing?canceled=true"
 
 	// Get user from database
 	var user models.User
@@ -118,7 +128,7 @@ func (h *PaymentHandlers) CreateCheckoutSession(c *gin.Context) {
 		"email":    user.Email,
 	}
 
-	result, err := h.stripeService.CreateCheckoutSession(ctx, customerID, req.PriceID, req.SuccessURL, req.CancelURL, metadata)
+	result, err := h.stripeService.CreateCheckoutSession(ctx, customerID, req.PriceID, successURL, cancelURL, metadata)
 	if err != nil {
 		log.Printf("Failed to create checkout session: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -1073,14 +1083,23 @@ func (h *PaymentHandlers) PurchaseCredits(c *gin.Context) {
 	}
 
 	var req struct {
-		AmountUSD  int64  `json:"amount_usd" binding:"required"`
-		SuccessURL string `json:"success_url" binding:"required"`
-		CancelURL  string `json:"cancel_url" binding:"required"`
+		AmountUSD int64 `json:"amount_usd" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "amount_usd, success_url, and cancel_url are required", "code": "INVALID_REQUEST"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "amount_usd is required", "code": "INVALID_REQUEST"})
 		return
 	}
+
+	// Generate redirect URLs server-side
+	creditAppURL := strings.TrimRight(os.Getenv("APP_URL"), "/")
+	if creditAppURL == "" {
+		creditAppURL = strings.TrimRight(os.Getenv("FRONTEND_URL"), "/")
+	}
+	if creditAppURL == "" {
+		creditAppURL = "https://apex.build"
+	}
+	creditSuccessURL := creditAppURL + "/billing?credits=success"
+	creditCancelURL := creditAppURL + "/billing?credits=canceled"
 
 	var user models.User
 	if err := h.db.First(&user, userID).Error; err != nil {
@@ -1117,7 +1136,7 @@ func (h *PaymentHandlers) PurchaseCredits(c *gin.Context) {
 		"email":    user.Email,
 	}
 
-	result, err := h.stripeService.CreateCreditPurchaseSession(ctx, customerID, req.AmountUSD, req.SuccessURL, req.CancelURL, meta)
+	result, err := h.stripeService.CreateCreditPurchaseSession(ctx, customerID, req.AmountUSD, creditSuccessURL, creditCancelURL, meta)
 	if err != nil {
 		log.Printf("Failed to create credit purchase session: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error(), "code": "CHECKOUT_CREATION_FAILED"})

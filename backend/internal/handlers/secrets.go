@@ -153,7 +153,7 @@ func (h *SecretsHandler) GetSecret(c *gin.Context) {
 	}
 
 	var secret secrets.Secret
-	if err := h.db.Where("id = ? AND owner_id = ?", secretID, userID).First(&secret).Error; err != nil {
+	if err := h.db.Where("id = ? AND user_id = ?", secretID, userID).First(&secret).Error; err != nil {
 		h.logAccess(uint(secretID), userID, "read", c.ClientIP(), c.GetHeader("User-Agent"), false, "Not found")
 		c.JSON(http.StatusNotFound, gin.H{"error": "Secret not found"})
 		return
@@ -196,7 +196,7 @@ func (h *SecretsHandler) UpdateSecret(c *gin.Context) {
 	}
 
 	var secret secrets.Secret
-	if err := h.db.Where("id = ? AND owner_id = ?", secretID, userID).First(&secret).Error; err != nil {
+	if err := h.db.Where("id = ? AND user_id = ?", secretID, userID).First(&secret).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Secret not found"})
 		return
 	}
@@ -244,7 +244,7 @@ func (h *SecretsHandler) DeleteSecret(c *gin.Context) {
 	}
 
 	var secret secrets.Secret
-	if err := h.db.Where("id = ? AND owner_id = ?", secretID, userID).First(&secret).Error; err != nil {
+	if err := h.db.Where("id = ? AND user_id = ?", secretID, userID).First(&secret).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Secret not found"})
 		return
 	}
@@ -269,7 +269,7 @@ func (h *SecretsHandler) RotateSecret(c *gin.Context) {
 	}
 
 	var secret secrets.Secret
-	if err := h.db.Where("id = ? AND owner_id = ?", secretID, userID).First(&secret).Error; err != nil {
+	if err := h.db.Where("id = ? AND user_id = ?", secretID, userID).First(&secret).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Secret not found"})
 		return
 	}
@@ -361,7 +361,7 @@ func (h *SecretsHandler) GetAuditLog(c *gin.Context) {
 
 	// Verify ownership
 	var secret secrets.Secret
-	if err := h.db.Where("id = ? AND owner_id = ?", secretID, userID).First(&secret).Error; err != nil {
+	if err := h.db.Where("id = ? AND user_id = ?", secretID, userID).First(&secret).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Secret not found"})
 		return
 	}
