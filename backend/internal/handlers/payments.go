@@ -151,63 +151,110 @@ func (h *PaymentHandlers) CreateCheckoutSession(c *gin.Context) {
 // HandleWebhook processes Stripe webhook events
 // POST /api/v1/billing/webhook
 func (h *PaymentHandlers) HandleWebhook(c *gin.Context) {
-	// Read the raw request body
 	payload, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		log.Printf("Failed to read webhook body: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   "Failed to read request body",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Failed to read request body"})
 		return
 	}
 
-	// Get the Stripe signature header
 	signature := c.GetHeader("Stripe-Signature")
-
-	// Process the webhook
 	event, err := h.stripeService.HandleWebhook(payload, signature)
 	if err != nil {
 		log.Printf("Webhook processing failed: %v", err)
 		if err == payments.ErrInvalidWebhook {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"error":   "Invalid webhook signature",
-			})
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid webhook signature"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   "Failed to process webhook",
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to process webhook"})
 		return
 	}
 
-	log.Printf("Processing webhook event: %s", event.Type)
+	log.Printf("Processing webhook event: %s (id=%s)", event.Type, event.EventID)
 
-	// Handle different event types
+	// Events that mutate credit_balance go through the idempotent transactional path.
+	// All others (subscription metadata updates) are idempotent by nature — a repeated
+	// overwrite of the same status value is harmless — so they go through the normal path.
 	switch event.Type {
 	case "checkout.session.completed":
 		h.handleCheckoutCompleted(event)
-
 	case "customer.subscription.created", "customer.subscription.updated":
 		h.handleSubscriptionUpdate(event)
-
 	case "customer.subscription.deleted":
 		h.handleSubscriptionDeleted(event)
-
 	case "invoice.paid":
 		h.handleInvoicePaid(event)
-
 	case "invoice.payment_failed":
 		h.handleInvoicePaymentFailed(event)
 	}
 
-	// Always return 200 to acknowledge receipt
-	c.JSON(http.StatusOK, gin.H{
-		"success":  true,
-		"received": true,
-	})
+	// Always 200 — Stripe will retry on non-2xx.
+	c.JSON(http.StatusOK, gin.H{"success": true, "received": true})
+}
+
+// applyCredit adds credits to a user inside an already-open transaction.
+// It records a CreditLedgerEntry and updates credit_balance atomically.
+// Returns errAlreadyProcessed (nil) if the stripe_event_id was already recorded.
+func (h *PaymentHandlers) applyCredit(
+	tx *gorm.DB,
+	userID uint,
+	amount float64,
+	entryType, description, stripeEventID, stripeInvoiceID, planType string,
+) error {
+	// Guard: only try dedup when a real Stripe event ID is present.
+	if stripeEventID != "" {
+		dedup := models.ProcessedStripeEvent{
+			StripeEventID: stripeEventID,
+			EventType:     entryType,
+			ProcessedAt:   time.Now(),
+		}
+		dedup.UserID = &userID
+		result := tx.Create(&dedup)
+		if result.Error != nil {
+			// Unique constraint violation means we already processed this event.
+			if strings.Contains(result.Error.Error(), "unique") ||
+				strings.Contains(result.Error.Error(), "duplicate") ||
+				strings.Contains(result.Error.Error(), "UNIQUE") {
+				log.Printf("Stripe event %s already processed — skipping duplicate", stripeEventID)
+				return nil
+			}
+			return fmt.Errorf("dedup insert failed: %w", result.Error)
+		}
+	}
+
+	// Read current balance inside the transaction to compute balance_after.
+	var user models.User
+	if err := tx.Select("id, credit_balance").First(&user, userID).Error; err != nil {
+		return fmt.Errorf("user lookup in credit tx: %w", err)
+	}
+
+	balanceAfter := user.CreditBalance + amount
+
+	// Write the immutable ledger entry.
+	entry := models.CreditLedgerEntry{
+		UserID:          userID,
+		AmountUSD:       amount,
+		BalanceAfterUSD: balanceAfter,
+		EntryType:       entryType,
+		Description:     description,
+		StripeEventID:   stripeEventID,
+		StripeInvoiceID: stripeInvoiceID,
+		PlanType:        planType,
+	}
+	if err := tx.Create(&entry).Error; err != nil {
+		return fmt.Errorf("ledger entry insert failed: %w", err)
+	}
+
+	// Update the cached credit_balance on the user row.
+	if err := tx.Model(&models.User{}).
+		Where("id = ?", userID).
+		Update("credit_balance", gorm.Expr("credit_balance + ?", amount)).Error; err != nil {
+		return fmt.Errorf("credit_balance update failed: %w", err)
+	}
+
+	log.Printf("Credit applied: user=%d type=%s amount=+$%.4f balance_after=$%.4f event=%s",
+		userID, entryType, amount, balanceAfter, stripeEventID)
+	return nil
 }
 
 // handleCheckoutCompleted processes checkout.session.completed events
@@ -264,43 +311,50 @@ func (h *PaymentHandlers) handleCheckoutCompleted(event *payments.WebhookEvent) 
 }
 
 // handleCreditPurchaseCompleted credits the user's account after a successful one-time payment.
+// Uses applyCredit inside a transaction so duplicate webhook deliveries are no-ops.
 func (h *PaymentHandlers) handleCreditPurchaseCompleted(event *payments.WebhookEvent) {
 	creditUSDStr, ok := event.Metadata["credit_usd"]
 	if !ok || creditUSDStr == "" {
-		log.Printf("Credit purchase webhook missing credit_usd metadata")
+		log.Printf("Credit purchase webhook missing credit_usd metadata (event=%s)", event.EventID)
 		return
 	}
 	creditAmt, err := strconv.ParseFloat(creditUSDStr, 64)
 	if err != nil || creditAmt <= 0 {
-		log.Printf("Invalid credit_usd in webhook metadata: %s", creditUSDStr)
+		log.Printf("Invalid credit_usd in webhook metadata: %s (event=%s)", creditUSDStr, event.EventID)
 		return
 	}
 
-	// Locate user
+	// Locate user — prefer stripe_customer_id, fall back to metadata user_id.
 	var user models.User
 	if err := h.db.Where("stripe_customer_id = ?", event.CustomerID).First(&user).Error; err != nil {
-		if userIDStr, ok := event.Metadata["user_id"]; ok {
-			if err2 := h.db.First(&user, userIDStr).Error; err2 != nil {
-				log.Printf("User not found for credit purchase webhook: %v", err2)
-				return
-			}
-			// Save the Stripe customer ID for future lookups
-			h.db.Model(&user).Update("stripe_customer_id", event.CustomerID)
-		} else {
-			log.Printf("Cannot locate user for credit purchase: no customer or user_id")
+		userIDStr, ok := event.Metadata["user_id"]
+		if !ok {
+			log.Printf("Cannot locate user for credit purchase: no customer or user_id (event=%s)", event.EventID)
 			return
 		}
+		if err2 := h.db.First(&user, userIDStr).Error; err2 != nil {
+			log.Printf("User not found for credit purchase webhook: %v (event=%s)", err2, event.EventID)
+			return
+		}
+		// Persist the Stripe customer ID for future lookups.
+		h.db.Model(&user).Update("stripe_customer_id", event.CustomerID)
 	}
 
-	// Add credits atomically
-	if err := h.db.Model(&models.User{}).
-		Where("id = ?", user.ID).
-		Update("credit_balance", gorm.Expr("credit_balance + ?", creditAmt)).Error; err != nil {
-		log.Printf("Failed to add credits to user %d: %v", user.ID, err)
-		return
+	txErr := h.db.Transaction(func(tx *gorm.DB) error {
+		return h.applyCredit(
+			tx,
+			user.ID,
+			creditAmt,
+			"credit_purchase",
+			fmt.Sprintf("One-time credit purchase ($%.2f)", creditAmt),
+			event.EventID,
+			"",
+			"",
+		)
+	})
+	if txErr != nil {
+		log.Printf("Credit purchase transaction failed for user %d: %v", user.ID, txErr)
 	}
-
-	log.Printf("Added $%.2f credits to user %s (id=%d)", creditAmt, user.Email, user.ID)
 }
 
 // handleSubscriptionUpdate processes subscription update events
@@ -360,39 +414,50 @@ func (h *PaymentHandlers) handleSubscriptionDeleted(event *payments.WebhookEvent
 }
 
 // handleInvoicePaid processes invoice.paid events — marks subscription active and allocates monthly credits.
+// Credit allocation is guarded by applyCredit's idempotency so retried webhooks are safe.
 func (h *PaymentHandlers) handleInvoicePaid(event *payments.WebhookEvent) {
-	log.Printf("Invoice paid for customer: %s, amount: %d %s",
-		event.CustomerID, event.Amount, event.Currency)
+	log.Printf("Invoice paid for customer: %s, amount: %d %s (event=%s)",
+		event.CustomerID, event.Amount, event.Currency, event.EventID)
 
-	// Find user by Stripe customer ID
 	var user models.User
 	if err := h.db.Where("stripe_customer_id = ?", event.CustomerID).First(&user).Error; err != nil {
-		log.Printf("User not found for invoice payment: %v", err)
+		log.Printf("User not found for invoice payment: %v (event=%s)", err, event.EventID)
 		return
 	}
 
-	// Ensure subscription is active
+	// Mark subscription active outside the credit transaction — this update is idempotent.
 	if err := h.db.Model(&user).Update("subscription_status", string(payments.StatusActive)).Error; err != nil {
 		log.Printf("Failed to update subscription status: %v", err)
 	}
 
-	// Allocate monthly credits based on the user's current plan
 	planType := payments.PlanType(user.SubscriptionType)
 	if planType == "" {
 		planType = payments.PlanFree
 	}
 	plan := payments.GetPlanByType(planType)
-	if plan != nil && plan.MonthlyCreditsUSD > 0 {
-		if err := h.db.Model(&models.User{}).
-			Where("id = ?", user.ID).
-			Update("credit_balance", gorm.Expr("credit_balance + ?", plan.MonthlyCreditsUSD)).Error; err != nil {
-			log.Printf("Failed to allocate monthly credits to user %d: %v", user.ID, err)
-		} else {
-			log.Printf("Allocated $%.2f monthly credits to user %s (plan=%s)", plan.MonthlyCreditsUSD, user.Email, planType)
-		}
+	if plan == nil || plan.MonthlyCreditsUSD <= 0 {
+		log.Printf("No credits to allocate for plan %s (user=%s event=%s)", planType, user.Email, event.EventID)
+		return
 	}
 
-	log.Printf("Invoice payment processed for user %s", user.Email)
+	txErr := h.db.Transaction(func(tx *gorm.DB) error {
+		return h.applyCredit(
+			tx,
+			user.ID,
+			plan.MonthlyCreditsUSD,
+			"monthly_allocation",
+			fmt.Sprintf("Monthly credit allocation — %s plan", planType),
+			event.EventID,
+			event.InvoiceID,
+			string(planType),
+		)
+	})
+	if txErr != nil {
+		log.Printf("Monthly allocation transaction failed for user %d: %v", user.ID, txErr)
+		return
+	}
+
+	log.Printf("Invoice payment processed for user %s (plan=%s credits=$%.2f)", user.Email, planType, plan.MonthlyCreditsUSD)
 }
 
 // handleInvoicePaymentFailed processes invoice.payment_failed events
@@ -1174,6 +1239,52 @@ func (h *PaymentHandlers) GetCreditBalance(c *gin.Context) {
 			"has_unlimited":     user.HasUnlimitedCredits,
 			"bypass_billing":    user.BypassBilling,
 			"available_packs":   payments.CreditPacks(),
+		},
+	})
+}
+
+// GetCreditLedger returns the paginated credit ledger for the authenticated user.
+// Each entry is an immutable record of a credit or debit event.
+// GET /api/v1/billing/credits/ledger
+func (h *PaymentHandlers) GetCreditLedger(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "User not authenticated", "code": "UNAUTHORIZED"})
+		return
+	}
+
+	limitStr := c.DefaultQuery("limit", "50")
+	offsetStr := c.DefaultQuery("offset", "0")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	offset, err := strconv.Atoi(offsetStr)
+	if err != nil || offset < 0 {
+		offset = 0
+	}
+
+	var entries []models.CreditLedgerEntry
+	if err := h.db.
+		Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&entries).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to fetch ledger", "code": "DATABASE_ERROR"})
+		return
+	}
+
+	var total int64
+	h.db.Model(&models.CreditLedgerEntry{}).Where("user_id = ?", userID).Count(&total)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"entries": entries,
+			"total":   total,
+			"limit":   limit,
+			"offset":  offset,
 		},
 	})
 }

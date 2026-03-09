@@ -40,6 +40,7 @@ type StripeService struct {
 
 // WebhookEvent represents a processed webhook event
 type WebhookEvent struct {
+	EventID         string                 `json:"event_id,omitempty"` // Stripe event ID (evt_...)
 	Type            string                 `json:"type"`
 	CustomerID      string                 `json:"customer_id,omitempty"`
 	SubscriptionID  string                 `json:"subscription_id,omitempty"`
@@ -579,10 +580,11 @@ func (s *StripeService) HandleWebhook(payload []byte, signature string) (*Webhoo
 		}
 	}
 
-	log.Printf("Processing Stripe webhook: %s", event.Type)
+	log.Printf("Processing Stripe webhook: %s (id=%s)", event.Type, event.ID)
 
 	webhookEvent := &WebhookEvent{
-		Type: string(event.Type),
+		EventID: event.ID,
+		Type:    string(event.Type),
 	}
 
 	// Process different event types

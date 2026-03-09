@@ -242,6 +242,9 @@ func (d *Database) Migrate() error {
 		&models.CompletedBuild{},
 		// User-uploaded assets for AI agents (images, CSVs, PDFs, etc.)
 		&models.ProjectAsset{},
+		// Stripe webhook idempotency and credit audit trail
+		&models.ProcessedStripeEvent{},
+		&models.CreditLedgerEntry{},
 	)
 
 	if err != nil {

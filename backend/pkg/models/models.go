@@ -543,3 +543,34 @@ type CompletedBuild struct {
 	Error       string     `json:"error,omitempty" gorm:"type:text"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
+
+// ProcessedStripeEvent tracks Stripe webhook events that have already been handled.
+// The unique index on StripeEventID is the idempotency guard: if a duplicate webhook
+// arrives, the INSERT fails and the handler returns 200 immediately without reprocessing.
+type ProcessedStripeEvent struct {
+	ID            uint      `json:"id" gorm:"primarykey"`
+	StripeEventID string    `json:"stripe_event_id" gorm:"uniqueIndex;not null;size:64"`
+	EventType     string    `json:"event_type" gorm:"not null;size:64;index"`
+	UserID        *uint     `json:"user_id,omitempty" gorm:"index"`
+	CustomerID    string    `json:"customer_id,omitempty" gorm:"size:64;index"`
+	ProcessedAt   time.Time `json:"processed_at" gorm:"not null;index"`
+}
+
+// CreditLedgerEntry is an immutable append-only record of every credit change.
+// credit_balance on the User is updated alongside each entry so existing read
+// paths keep working; the ledger provides the audit trail and deduplication anchor.
+type CreditLedgerEntry struct {
+	ID              uint      `json:"id" gorm:"primarykey"`
+	CreatedAt       time.Time `json:"created_at"`
+	UserID          uint      `json:"user_id" gorm:"not null;index"`
+	AmountUSD       float64   `json:"amount_usd" gorm:"not null"`    // positive = credit, negative = debit
+	BalanceAfterUSD float64   `json:"balance_after_usd" gorm:"not null"`
+	// Entry type: monthly_allocation | credit_purchase | admin_grant | spend_deduction | refund
+	EntryType       string `json:"entry_type" gorm:"not null;size:32;index"`
+	Description     string `json:"description" gorm:"size:255"`
+	// Stripe references (for reconciliation)
+	StripeEventID   string `json:"stripe_event_id,omitempty" gorm:"size:64;index"`
+	StripeInvoiceID string `json:"stripe_invoice_id,omitempty" gorm:"size:64;index"`
+	// Plan context (for monthly allocations)
+	PlanType        string `json:"plan_type,omitempty" gorm:"size:20"`
+}

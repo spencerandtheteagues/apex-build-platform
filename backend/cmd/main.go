@@ -1377,6 +1377,7 @@ func setupRoutes(
 				billing.GET("/config-status", paymentHandler.StripeConfigStatus)   // Check Stripe config
 				billing.POST("/credits/purchase", paymentHandler.PurchaseCredits)  // Buy AI credits (one-time)
 				billing.GET("/credits/balance", paymentHandler.GetCreditBalance)   // Get current credit balance
+				billing.GET("/credits/ledger", paymentHandler.GetCreditLedger)    // Paginated credit history
 			}
 
 			// Code Execution endpoints (the core of cloud IDE) - with quota + budget enforcement
