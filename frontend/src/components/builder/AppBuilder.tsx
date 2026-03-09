@@ -1886,6 +1886,85 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
           addSystemMessage('Preview ready')
         }
         break
+
+      case 'build:fsm:started':
+        addSystemMessage(`Build engine started`)
+        setBuildState(prev => prev ? { ...prev, status: 'planning' } : null)
+        break
+
+      case 'build:fsm:initialized':
+        addSystemMessage(`Build pipeline initialized`)
+        break
+
+      case 'build:fsm:plan_ready':
+        addSystemMessage(`Build plan ready — executing`)
+        setBuildState(prev => prev ? { ...prev, status: 'in_progress' } : null)
+        break
+
+      case 'build:fsm:step_complete':
+        if (typeof data.progress === 'number') {
+          setBuildState(prev => prev ? { ...prev, progress: Math.round(data.progress * 100) } : null)
+        }
+        break
+
+      case 'build:fsm:all_steps_complete':
+        addSystemMessage(`All build steps complete — validating`)
+        setBuildState(prev => prev ? { ...prev, status: 'reviewing', progress: 95 } : null)
+        break
+
+      case 'build:fsm:validation_pass':
+        addSystemMessage(`Build validated successfully`)
+        setBuildState(prev => prev ? { ...prev, qualityGateStatus: 'passed', progress: 100 } : null)
+        break
+
+      case 'build:fsm:validation_fail':
+        addSystemMessage(`Validation failed — retrying (attempt ${(data.retry_count ?? 0) + 1})`)
+        setBuildState(prev => prev ? { ...prev, qualityGateStatus: 'failed' } : null)
+        break
+
+      case 'build:fsm:retry_exhausted':
+        addSystemMessage(`All retry attempts exhausted — initiating rollback`)
+        break
+
+      case 'build:fsm:rollback_complete':
+        addSystemMessage(`Rollback complete — build failed after exhausting retries`)
+        setBuildState(prev => prev ? { ...prev, status: 'failed', errorMessage: 'Build failed after exhausting all retry attempts' } : null)
+        break
+
+      case 'build:fsm:rollback_failed':
+        addSystemMessage(`Rollback failed: ${data.error || 'unknown error'}`)
+        setBuildState(prev => prev ? { ...prev, status: 'failed', errorMessage: data.error || 'Rollback failed' } : null)
+        break
+
+      case 'build:fsm:paused':
+        addSystemMessage(`Build paused`)
+        break
+
+      case 'build:fsm:resumed':
+        addSystemMessage(`Build resumed`)
+        setBuildState(prev => prev ? { ...prev, status: 'in_progress' } : null)
+        break
+
+      case 'build:fsm:cancelled':
+        addSystemMessage(`Build cancelled`)
+        setBuildState(prev => prev ? { ...prev, status: 'cancelled' } : null)
+        break
+
+      case 'build:fsm:fatal_error':
+        addSystemMessage(`Fatal build error: ${data.error || 'unknown'}`)
+        setBuildState(prev => prev ? { ...prev, status: 'failed', errorMessage: data.error || 'Fatal error' } : null)
+        break
+
+      case 'build:fsm:checkpoint_created':
+        if (data.checkpoint_id) {
+          addSystemMessage(`Checkpoint saved`)
+          setBuildState(prev => {
+            if (!prev) return null
+            const checkpoint = { id: data.checkpoint_id, number: (prev.checkpoints?.length ?? 0) + 1, name: `Checkpoint ${(prev.checkpoints?.length ?? 0) + 1}`, description: data.step_id || '', progress: prev.progress, createdAt: data.timestamp || new Date().toISOString() }
+            return { ...prev, checkpoints: [...(prev.checkpoints ?? []), checkpoint] }
+          })
+        }
+        break
     }
   }
 

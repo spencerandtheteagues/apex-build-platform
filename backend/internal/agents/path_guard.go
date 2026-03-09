@@ -55,24 +55,43 @@ func (pg *PathGuard) CheckPaths(paths []string, patterns []string) *ErrProtected
 func (pg *PathGuard) matches(path, pattern string) bool {
 	// Handle ** recursive glob
 	if strings.Contains(pattern, "**") {
-		// Split pattern on **
+		// Split pattern on ** (only first occurrence)
 		parts := strings.SplitN(pattern, "**", 2)
 		prefix := strings.TrimRight(parts[0], "/")
 		suffix := strings.TrimLeft(parts[1], "/")
 
-		// Check if path starts with prefix
-		if prefix != "" && !strings.HasPrefix(path, prefix) {
-			return false
+		// ** alone (no prefix, no suffix) matches everything
+		if prefix == "" && suffix == "" {
+			return true
 		}
 
-		// Check if path ends with suffix (if any)
-		if suffix != "" {
-			matched, _ := filepath.Match(suffix, filepath.Base(path))
-			return matched
+		// Determine the remaining path after stripping the prefix
+		remaining := path
+		if prefix != "" {
+			// Path must start with "prefix/" or equal prefix exactly
+			if !strings.HasPrefix(path, prefix+"/") && path != prefix {
+				return false
+			}
+			if path == prefix {
+				// Path is exactly the prefix directory; only matches if suffix is also empty
+				return suffix == ""
+			}
+			// Strip "prefix/" from the front
+			remaining = path[len(prefix)+1:]
 		}
 
-		// ** with just prefix means everything under that dir
-		return true
+		// No suffix: ** matches everything under the prefix dir
+		if suffix == "" {
+			return true
+		}
+
+		// Try matching suffix against the full remaining path and against just its basename.
+		// This makes src/**/*.js match both src/Button.js and src/components/ui/Button.js.
+		if matched, _ := filepath.Match(suffix, remaining); matched {
+			return true
+		}
+		matched, _ := filepath.Match(suffix, filepath.Base(remaining))
+		return matched
 	}
 
 	// Try direct match

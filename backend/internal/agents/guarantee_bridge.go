@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"apex-build/internal/agents/core"
@@ -43,12 +44,21 @@ func NewBuildFSMContext(buildID string, totalSteps int, broadcastFn core.Broadca
 	// Create FSM
 	fsm := core.NewAgentFSM(cfg)
 
-	// Create validator (no smoke test runner in base config — Codex 5.3 provides that)
+	// Create validator — enable smoke test when env vars are set.
+	runSmokeTest := os.Getenv("APEX_SMOKE_TEST_ENABLED") == "true"
+	smokeCmd := os.Getenv("APEX_SMOKE_TEST_CMD") // e.g. "npm test" or "go test ./..."
+	var smokeRunner core.SmokeTestRunner
+	if runSmokeTest && smokeCmd != "" {
+		workDir := os.Getenv("APEX_SMOKE_TEST_WORKDIR")
+		smokeRunner = core.NewExecSmokeRunner(workDir)
+	}
+
 	validator, err := core.NewBuildValidator(core.ValidatorConfig{
 		MinimumPassScore: 0.8,
-		RunSmokeTest:     false, // enabled when SmokeTestRunner is available
+		RunSmokeTest:     runSmokeTest && smokeCmd != "",
+		SmokeTestCommand: smokeCmd,
 		SmokeTestTimeout: 30 * time.Second,
-	}, nil)
+	}, smokeRunner)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create validator: %w", err)
 	}

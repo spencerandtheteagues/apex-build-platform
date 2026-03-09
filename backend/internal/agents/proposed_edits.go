@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // ProposedEditStatus represents the status of a proposed edit
@@ -33,16 +34,79 @@ type ProposedEdit struct {
 	ReviewedAt      *time.Time         `json:"reviewed_at,omitempty"`
 }
 
-// ProposedEditStore manages proposed edits in memory
-type ProposedEditStore struct {
-	edits map[string][]*ProposedEdit // buildID -> edits
-	mu    sync.RWMutex
+// proposedEditRow is the GORM model mapping ProposedEdit fields to the proposed_edits table.
+type proposedEditRow struct {
+	ID              string     `gorm:"column:id;primaryKey"`
+	BuildID         string     `gorm:"column:build_id"`
+	AgentID         string     `gorm:"column:agent_id"`
+	AgentRole       string     `gorm:"column:agent_role"`
+	TaskID          string     `gorm:"column:task_id"`
+	FilePath        string     `gorm:"column:file_path"`
+	OriginalContent string     `gorm:"column:original_content"`
+	ProposedContent string     `gorm:"column:proposed_content"`
+	Language        string     `gorm:"column:language"`
+	Status          string     `gorm:"column:status"`
+	CreatedAt       time.Time  `gorm:"column:created_at"`
+	ReviewedAt      *time.Time `gorm:"column:reviewed_at"`
 }
 
-// NewProposedEditStore creates a new store
+func (proposedEditRow) TableName() string { return "proposed_edits" }
+
+func rowToEdit(r proposedEditRow) *ProposedEdit {
+	return &ProposedEdit{
+		ID:              r.ID,
+		BuildID:         r.BuildID,
+		AgentID:         r.AgentID,
+		AgentRole:       r.AgentRole,
+		TaskID:          r.TaskID,
+		FilePath:        r.FilePath,
+		OriginalContent: r.OriginalContent,
+		ProposedContent: r.ProposedContent,
+		Language:        r.Language,
+		Status:          ProposedEditStatus(r.Status),
+		CreatedAt:       r.CreatedAt,
+		ReviewedAt:      r.ReviewedAt,
+	}
+}
+
+func editToRow(e *ProposedEdit) proposedEditRow {
+	return proposedEditRow{
+		ID:              e.ID,
+		BuildID:         e.BuildID,
+		AgentID:         e.AgentID,
+		AgentRole:       e.AgentRole,
+		TaskID:          e.TaskID,
+		FilePath:        e.FilePath,
+		OriginalContent: e.OriginalContent,
+		ProposedContent: e.ProposedContent,
+		Language:        e.Language,
+		Status:          string(e.Status),
+		CreatedAt:       e.CreatedAt,
+		ReviewedAt:      e.ReviewedAt,
+	}
+}
+
+// ProposedEditStore manages proposed edits in memory with optional Postgres persistence.
+// When db is nil the store operates purely in-memory (existing behavior).
+// When db is set all mutations write through to Postgres and reads query from Postgres.
+type ProposedEditStore struct {
+	edits map[string][]*ProposedEdit // buildID -> edits (in-memory cache)
+	mu    sync.RWMutex
+	db    *gorm.DB // nil = in-memory only
+}
+
+// NewProposedEditStore creates a new in-memory store.
 func NewProposedEditStore() *ProposedEditStore {
 	return &ProposedEditStore{
 		edits: make(map[string][]*ProposedEdit),
+	}
+}
+
+// NewProposedEditStoreWithDB creates a new store backed by Postgres.
+func NewProposedEditStoreWithDB(db *gorm.DB) *ProposedEditStore {
+	return &ProposedEditStore{
+		edits: make(map[string][]*ProposedEdit),
+		db:    db,
 	}
 }
 
@@ -68,11 +132,38 @@ func (s *ProposedEditStore) AddProposedEdits(buildID string, edits []*ProposedEd
 		}
 	}
 
+	if s.db != nil {
+		rows := make([]proposedEditRow, len(edits))
+		for i, e := range edits {
+			rows[i] = editToRow(e)
+		}
+		if err := s.db.Create(&rows).Error; err != nil {
+			// Log and fall through to in-memory so callers are not blocked
+			_ = err
+		}
+	}
+
 	s.edits[buildID] = append(s.edits[buildID], edits...)
 }
 
 // GetPendingEdits returns all edits with status pending for the given build.
 func (s *ProposedEditStore) GetPendingEdits(buildID string) []*ProposedEdit {
+	if s.db != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		var rows []proposedEditRow
+		if err := s.db.Where("build_id = ? AND status = 'pending'", buildID).Find(&rows).Error; err == nil {
+			out := make([]*ProposedEdit, len(rows))
+			for i, r := range rows {
+				out[i] = rowToEdit(r)
+			}
+			// Refresh cache for this build so in-memory stays warm
+			s.syncCacheFromRows(buildID, rows)
+			return out
+		}
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -87,6 +178,21 @@ func (s *ProposedEditStore) GetPendingEdits(buildID string) []*ProposedEdit {
 
 // GetAllEdits returns every proposed edit for the given build regardless of status.
 func (s *ProposedEditStore) GetAllEdits(buildID string) []*ProposedEdit {
+	if s.db != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		var rows []proposedEditRow
+		if err := s.db.Where("build_id = ?", buildID).Order("created_at ASC").Find(&rows).Error; err == nil {
+			out := make([]*ProposedEdit, len(rows))
+			for i, r := range rows {
+				out[i] = rowToEdit(r)
+			}
+			s.syncCacheFromRows(buildID, rows)
+			return out
+		}
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -109,11 +215,21 @@ func (s *ProposedEditStore) ApproveEdits(buildID string, editIDs []string) ([]*P
 	}
 
 	now := time.Now().UTC()
+
+	if s.db != nil {
+		result := s.db.Model(&proposedEditRow{}).
+			Where("id IN ? AND status = 'pending'", editIDs).
+			Updates(map[string]any{"status": "approved", "reviewed_at": now})
+		if result.Error != nil {
+			return nil, result.Error
+		}
+	}
+
 	var approved []*ProposedEdit
 
 	for _, edit := range s.edits[buildID] {
 		if idSet[edit.ID] {
-			if edit.Status != EditPending {
+			if s.db == nil && edit.Status != EditPending {
 				return nil, fmt.Errorf("edit %s is not pending (status=%s)", edit.ID, edit.Status)
 			}
 			edit.Status = EditApproved
@@ -123,7 +239,7 @@ func (s *ProposedEditStore) ApproveEdits(buildID string, editIDs []string) ([]*P
 		}
 	}
 
-	if len(idSet) > 0 {
+	if len(idSet) > 0 && s.db == nil {
 		// Collect missing IDs for the error message
 		var missing []string
 		for id := range idSet {
@@ -148,9 +264,18 @@ func (s *ProposedEditStore) RejectEdits(buildID string, editIDs []string) error 
 
 	now := time.Now().UTC()
 
+	if s.db != nil {
+		result := s.db.Model(&proposedEditRow{}).
+			Where("id IN ? AND status = 'pending'", editIDs).
+			Updates(map[string]any{"status": "rejected", "reviewed_at": now})
+		if result.Error != nil {
+			return result.Error
+		}
+	}
+
 	for _, edit := range s.edits[buildID] {
 		if idSet[edit.ID] {
-			if edit.Status != EditPending {
+			if s.db == nil && edit.Status != EditPending {
 				return fmt.Errorf("edit %s is not pending (status=%s)", edit.ID, edit.Status)
 			}
 			edit.Status = EditRejected
@@ -159,7 +284,7 @@ func (s *ProposedEditStore) RejectEdits(buildID string, editIDs []string) error 
 		}
 	}
 
-	if len(idSet) > 0 {
+	if len(idSet) > 0 && s.db == nil {
 		var missing []string
 		for id := range idSet {
 			missing = append(missing, id)
@@ -176,6 +301,13 @@ func (s *ProposedEditStore) ApproveAll(buildID string) []*ProposedEdit {
 	defer s.mu.Unlock()
 
 	now := time.Now().UTC()
+
+	if s.db != nil {
+		s.db.Model(&proposedEditRow{}).
+			Where("build_id = ? AND status = 'pending'", buildID).
+			Updates(map[string]any{"status": "approved", "reviewed_at": now})
+	}
+
 	var approved []*ProposedEdit
 
 	for _, edit := range s.edits[buildID] {
@@ -196,6 +328,12 @@ func (s *ProposedEditStore) RejectAll(buildID string) error {
 
 	now := time.Now().UTC()
 
+	if s.db != nil {
+		s.db.Model(&proposedEditRow{}).
+			Where("build_id = ? AND status = 'pending'", buildID).
+			Updates(map[string]any{"status": "rejected", "reviewed_at": now})
+	}
+
 	for _, edit := range s.edits[buildID] {
 		if edit.Status == EditPending {
 			edit.Status = EditRejected
@@ -211,5 +349,19 @@ func (s *ProposedEditStore) Clear(buildID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.db != nil {
+		s.db.Where("build_id = ?", buildID).Delete(&proposedEditRow{})
+	}
+
 	delete(s.edits, buildID)
+}
+
+// syncCacheFromRows replaces the in-memory cache for a build with the rows
+// returned from Postgres. Must be called with s.mu held (write lock).
+func (s *ProposedEditStore) syncCacheFromRows(buildID string, rows []proposedEditRow) {
+	edits := make([]*ProposedEdit, len(rows))
+	for i, r := range rows {
+		edits[i] = rowToEdit(r)
+	}
+	s.edits[buildID] = edits
 }

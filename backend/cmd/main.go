@@ -232,6 +232,10 @@ func main() {
 	budgetMiddleware := middleware.BudgetCheck(budgetEnforcer)
 	log.Println("Budget Enforcer initialized (daily/monthly/per-build caps, instant stop)")
 
+	// Wire budget enforcer into agent manager so each AI Generate call is
+	// pre-authorized with a real estimated cost rather than 0.
+	agentManager.SetBudgetEnforcer(budgetEnforcer)
+
 	// Initialize Protected Paths Handler (A3)
 	protectedPathsHandler := handlers.NewProtectedPathsHandler(database.GetDB())
 

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"apex-build/internal/ai"
+	"apex-build/internal/budget"
 	"apex-build/internal/metrics"
 	"apex-build/internal/spend"
 	"apex-build/pkg/models"
@@ -38,7 +39,13 @@ var (
 	errBuildBudgetExceeded = errors.New("build request budget exceeded")
 )
 
-const insufficientCreditsBuildMessage = "Build paused: Your account has insufficient credits. Please add credits in Settings or contact support."
+const (
+	insufficientCreditsBuildMessage = "Build paused: Your account has insufficient credits. Please add credits in Settings or contact support."
+	// estimatedRequestCostUSD is a conservative upper-bound estimate used for
+	// budget pre-authorization before each AI Generate call. It prevents
+	// about-to-exceed scenarios that a post-call check would miss.
+	estimatedRequestCostUSD = 0.01
+)
 
 type consensusDecision string
 
@@ -62,12 +69,13 @@ type AgentManager struct {
 	taskQueue    chan *Task
 	resultQueue  chan *TaskResult
 	subscribers  map[string][]chan *WSMessage
-	aiRouter     AIRouter
-	db           *gorm.DB // Database connection for persisting completed builds
-	editStore    *ProposedEditStore
-	pathGuard    *PathGuard
-	spendTracker *spend.SpendTracker
-	mu           sync.RWMutex
+	aiRouter       AIRouter
+	db             *gorm.DB // Database connection for persisting completed builds
+	editStore      *ProposedEditStore
+	pathGuard      *PathGuard
+	spendTracker   *spend.SpendTracker
+	budgetEnforcer *budget.BudgetEnforcer
+	mu             sync.RWMutex
 	ctx          context.Context
 	cancel       context.CancelFunc
 }
@@ -126,6 +134,7 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 	if len(db) > 0 && db[0] != nil {
 		am.db = db[0]
 		am.spendTracker = spend.NewSpendTracker(db[0])
+		am.editStore = NewProposedEditStoreWithDB(db[0])
 	}
 
 	// Start background workers
@@ -134,6 +143,14 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 
 	log.Println("Agent Manager initialized")
 	return am
+}
+
+// SetBudgetEnforcer wires a BudgetEnforcer into the manager so that each AI
+// Generate call is pre-authorized with a real estimated cost rather than 0.
+func (am *AgentManager) SetBudgetEnforcer(enforcer *budget.BudgetEnforcer) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	am.budgetEnforcer = enforcer
 }
 
 // CreateBuild starts a new build session
@@ -1614,6 +1631,32 @@ func (am *AgentManager) executeTask(task *Task) {
 
 	// Role-aware temperature
 	temperature := am.getTemperatureForRole(agent.Role)
+
+	// Pre-authorize spend before calling AI — catches about-to-exceed budgets
+	// using a conservative per-request estimate rather than 0.
+	if am.budgetEnforcer != nil {
+		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, agent.BuildID, estimatedRequestCostUSD)
+		if preAuthErr == nil && !preAuth.Allowed {
+			am.broadcast(agent.BuildID, &WSMessage{
+				Type:      "budget:exceeded",
+				BuildID:   agent.BuildID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"reason":      preAuth.Reason,
+					"cap_type":    preAuth.CapType,
+					"limit_usd":   preAuth.LimitUSD,
+					"current_usd": preAuth.CurrentUSD,
+				},
+			})
+			am.resultQueue <- &TaskResult{
+				TaskID:  task.ID,
+				AgentID: agent.ID,
+				Success: false,
+				Error:   fmt.Errorf("budget cap exceeded: %s", preAuth.Reason),
+			}
+			return
+		}
+	}
 
 	response, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
@@ -5586,6 +5629,26 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 
 	prompt := fmt.Sprintf("User message: %s\n\nRespond helpfully and briefly.", message)
 
+	// Pre-authorize spend before calling AI — catches about-to-exceed budgets
+	// using a conservative per-request estimate rather than 0.
+	if am.budgetEnforcer != nil {
+		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, agent.BuildID, estimatedRequestCostUSD)
+		if preAuthErr == nil && !preAuth.Allowed {
+			am.broadcast(agent.BuildID, &WSMessage{
+				Type:      "budget:exceeded",
+				BuildID:   agent.BuildID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"reason":      preAuth.Reason,
+					"cap_type":    preAuth.CapType,
+					"limit_usd":   preAuth.LimitUSD,
+					"current_usd": preAuth.CurrentUSD,
+				},
+			})
+			return
+		}
+	}
+
 	response, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
 		MaxTokens:       2000,
@@ -9074,6 +9137,27 @@ RATIONALE: <single short sentence>`,
 			taskErr.Error(),
 			defaultStrategy,
 		)
+
+		// Pre-authorize spend before calling AI — catches about-to-exceed budgets
+		// using a conservative per-request estimate rather than 0.
+		if am.budgetEnforcer != nil {
+			preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, build.ID, estimatedRequestCostUSD)
+			if preAuthErr == nil && !preAuth.Allowed {
+				cancel()
+				am.broadcast(build.ID, &WSMessage{
+					Type:      "budget:exceeded",
+					BuildID:   build.ID,
+					Timestamp: time.Now(),
+					Data: map[string]any{
+						"reason":      preAuth.Reason,
+						"cap_type":    preAuth.CapType,
+						"limit_usd":   preAuth.LimitUSD,
+						"current_usd": preAuth.CurrentUSD,
+					},
+				})
+				return fallbackDecision, votes
+			}
+		}
 
 		resp, err := am.aiRouter.Generate(ctx, provider, prompt, GenerateOptions{
 			UserID:          build.UserID,
