@@ -179,6 +179,43 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 
 	log.Printf("StartBuild: description=%s, mode=%s", truncate(req.Description, 50), req.Mode)
 
+	// Validate description before running provider or billing checks so clients
+	// get actionable input errors instead of quota failures for malformed requests.
+	req.Description = strings.TrimSpace(req.Description)
+	if req.Prompt != "" {
+		req.Prompt = strings.TrimSpace(req.Prompt)
+	}
+	if len(req.Description) < 10 {
+		log.Printf("StartBuild: description too short (%d chars)", len(req.Description))
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "description too short",
+			"details": "Please provide a more detailed description of the app you want to build",
+		})
+		return
+	}
+
+	// Validate role_assignments if provided
+	if req.RoleAssignments != nil {
+		validCats := map[string]bool{"architect": true, "coder": true, "tester": true, "devops": true}
+		validProvs := map[string]bool{"claude": true, "gpt4": true, "gemini": true, "grok": true, "ollama": true}
+		for cat, prov := range req.RoleAssignments {
+			if !validCats[cat] {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "invalid role category",
+					"details": fmt.Sprintf("Unknown role category: %s. Valid: architect, coder, tester, devops", cat),
+				})
+				return
+			}
+			if !validProvs[prov] {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "invalid provider",
+					"details": fmt.Sprintf("Unknown provider: %s. Valid: claude, gpt4, gemini, grok, ollama", prov),
+				})
+				return
+			}
+		}
+	}
+
 	// Preflight: fail fast if no providers are available for this user
 	if router := h.manager.aiRouter; router != nil {
 		if !router.HasConfiguredProviders() {
@@ -220,42 +257,6 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 					"error_code":     "INSUFFICIENT_CREDITS",
 					"suggestion":     "Purchase credits to continue building",
 					"credit_balance": creditBalance,
-				})
-				return
-			}
-		}
-	}
-
-	// Validate description (trim whitespace before checking)
-	req.Description = strings.TrimSpace(req.Description)
-	if req.Prompt != "" {
-		req.Prompt = strings.TrimSpace(req.Prompt)
-	}
-	if len(req.Description) < 10 {
-		log.Printf("StartBuild: description too short (%d chars)", len(req.Description))
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "description too short",
-			"details": "Please provide a more detailed description of the app you want to build",
-		})
-		return
-	}
-
-	// Validate role_assignments if provided
-	if req.RoleAssignments != nil {
-		validCats := map[string]bool{"architect": true, "coder": true, "tester": true, "devops": true}
-		validProvs := map[string]bool{"claude": true, "gpt4": true, "gemini": true, "grok": true, "ollama": true}
-		for cat, prov := range req.RoleAssignments {
-			if !validCats[cat] {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error":   "invalid role category",
-					"details": fmt.Sprintf("Unknown role category: %s. Valid: architect, coder, tester, devops", cat),
-				})
-				return
-			}
-			if !validProvs[prov] {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error":   "invalid provider",
-					"details": fmt.Sprintf("Unknown provider: %s. Valid: claude, gpt4, gemini, grok, ollama", prov),
 				})
 				return
 			}
@@ -501,19 +502,37 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 // POST /api/v1/build/:id/message
 func (h *BuildHandler) SendMessage(c *gin.Context) {
 	buildID := c.Param("id")
-
-	// Verify build exists and ownership
-	build, err := h.manager.GetBuild(buildID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":   "build not found",
-			"details": err.Error(),
-		})
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
+	uid := userID.(uint)
 
-	userID, _ := c.Get("user_id")
-	if userID.(uint) != build.UserID {
+	// Verify build exists and ownership
+	restoredSession := false
+	build, err := h.manager.GetBuild(buildID)
+	if err != nil {
+		snapshot, snapErr := h.getBuildSnapshot(uid, buildID)
+		if snapErr != nil {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":   "build not found",
+				"details": err.Error(),
+			})
+			return
+		}
+
+		build, restoredSession, err = h.manager.restoreBuildSessionFromSnapshot(snapshot)
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error":   "build session unavailable",
+				"details": err.Error(),
+			})
+			return
+		}
+	}
+
+	if uid != build.UserID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
 		return
 	}
@@ -540,9 +559,17 @@ func (h *BuildHandler) SendMessage(c *gin.Context) {
 		return
 	}
 
+	interaction, interactionErr := h.manager.GetBuildInteraction(buildID)
+	if interactionErr != nil {
+		interaction = BuildInteractionState{}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"status":  "sent",
-		"message": "Message sent to lead agent",
+		"status":           "sent",
+		"message":          "Message sent to lead agent",
+		"interaction":      interaction,
+		"live":             true,
+		"restored_session": restoredSession,
 	})
 }
 

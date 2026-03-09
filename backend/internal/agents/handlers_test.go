@@ -2,14 +2,18 @@ package agents
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"apex-build/internal/ai"
+	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 // testRouter sets up a gin router with auth middleware stub and build handler.
@@ -27,7 +31,21 @@ func testRouter(am *AgentManager) *gin.Engine {
 	build := r.Group("/api/v1/build", auth)
 	build.POST("/preflight", h.PreflightCheck)
 	build.POST("/start", h.StartBuild)
+	build.POST("/:id/message", h.SendMessage)
 	return r
+}
+
+func openBuildTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&models.User{}, &models.UserAPIKey{}, &models.CompletedBuild{}); err != nil {
+		t.Fatalf("migrate sqlite: %v", err)
+	}
+	return db
 }
 
 func TestPreflightReturnsReadyWithProviders(t *testing.T) {
@@ -176,6 +194,108 @@ func TestStartBuildRejectsShortDescription(t *testing.T) {
 				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+func TestStartBuildValidatesMalformedRequestBeforeCreditCheck(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.User{
+		ID:            1,
+		Username:      "creditless-user",
+		Email:         "creditless@example.com",
+		PasswordHash:  "hashed",
+		CreditBalance: 0,
+	}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	am := &AgentManager{
+		db: db,
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	body, _ := json.Marshal(map[string]string{"description": "   "})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/start", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 before credit check, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSendMessageRestoresSnapshotBackedBuildSession(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "snapshot-build",
+		UserID:      1,
+		Description: "Build a kanban app with comments and drag and drop",
+		Status:      "completed",
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    100,
+		FilesCount:  1,
+		FilesJSON:   "[]",
+		CompletedAt: nil,
+	}).Error; err != nil {
+		t.Fatalf("create completed build: %v", err)
+	}
+
+	ctx := context.Background()
+	am := &AgentManager{
+		ctx:         ctx,
+		cancel:      func() {},
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+			generateResult: &ai.AIResponse{
+				Content: `{"reply":"I captured the change request.","apply_changes":false}`,
+			},
+		},
+	}
+
+	body, _ := json.Marshal(map[string]string{"content": "Add a bulk edit toolbar"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/snapshot-build/message", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp["live"] != true {
+		t.Fatalf("expected live=true, got %v", resp["live"])
+	}
+	if resp["restored_session"] != true {
+		t.Fatalf("expected restored_session=true, got %v", resp["restored_session"])
+	}
+
+	restored, err := am.GetBuild("snapshot-build")
+	if err != nil {
+		t.Fatalf("expected restored build in manager: %v", err)
+	}
+	restored.mu.RLock()
+	defer restored.mu.RUnlock()
+	if len(restored.Agents) == 0 {
+		t.Fatalf("expected restored build to have a lead agent")
+	}
+	if len(restored.Interaction.Messages) == 0 {
+		t.Fatalf("expected restored build interaction to contain the user message")
 	}
 }
 

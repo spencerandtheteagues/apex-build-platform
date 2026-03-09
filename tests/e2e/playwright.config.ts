@@ -1,7 +1,17 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173';
+const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5180';
 const apiBaseURL = process.env.PLAYWRIGHT_API_URL || 'http://localhost:8080';
+const includeFirefox = process.env.CI === 'true' || process.env.PLAYWRIGHT_INCLUDE_FIREFOX === 'true';
+
+const projects = [
+  { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+  { name: 'mobile', use: { ...devices['Pixel 5'] } },
+];
+
+if (includeFirefox) {
+  projects.splice(1, 0, { name: 'firefox', use: { ...devices['Desktop Firefox'] } });
+}
 
 export default defineConfig({
   testDir: './specs/generated',
@@ -20,9 +30,5 @@ export default defineConfig({
       'x-apex-api-base-url': apiBaseURL,
     },
   },
-  projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
-    { name: 'mobile', use: { ...devices['Pixel 5'] } },
-  ],
+  projects,
 });

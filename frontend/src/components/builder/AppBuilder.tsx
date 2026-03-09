@@ -149,6 +149,7 @@ interface BuildState {
   qualityGateStage?: string
   errorMessage?: string
   websocketUrl?: string
+  liveSession?: boolean
   artifactRevision?: string
   diffMode?: boolean
   interaction?: ApiBuildInteractionState
@@ -1270,6 +1271,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     ws.onopen = () => {
       console.log('WebSocket connected')
       wsReconnectAttempts.current = 0
+      setBuildState(prev => prev && prev.id === buildId ? { ...prev, liveSession: true } : prev)
       addSystemMessage('Connected to build server')
     }
 
@@ -1288,6 +1290,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
     ws.onclose = (event) => {
       console.log('WebSocket disconnected, code:', event.code)
+      setBuildState(prev => prev && prev.id === buildId ? { ...prev, liveSession: false } : prev)
 
       // Use ref to access current isBuilding state (prevents stale closure)
       if (isBuildingRef.current && wsReconnectAttempts.current < maxWsReconnectAttempts) {
@@ -2562,6 +2565,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       availableProviders: Array.isArray(payload.available_providers) ? payload.available_providers : undefined,
       errorMessage: extractBuildFailureReason(payload),
       websocketUrl: typeof payload.websocket_url === 'string' ? payload.websocket_url : undefined,
+      liveSession: payload.live !== false,
       artifactRevision: typeof payload.artifact_revision === 'string' ? payload.artifact_revision : undefined,
       interaction,
     })
@@ -2803,6 +2807,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
         qualityGateStatus: 'pending',
         qualityGateStage: '',
         websocketUrl: typeof response.websocket_url === 'string' ? response.websocket_url : undefined,
+        liveSession: true,
       })
 
       connectWebSocket(buildId, response.websocket_url)
@@ -2948,10 +2953,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     setChatInput('')
 
     try {
-      await apiService.sendBuildMessage(buildState.id, content, clientToken)
+      const response = await apiService.sendBuildMessage(buildState.id, content, clientToken)
       setChatMessages(prev => prev.map(message =>
         message.clientToken === clientToken ? { ...message, status: 'sent' } : message
       ))
+      syncInteractionState(response.interaction)
+      if (response.live && !buildStateRef.current?.liveSession) {
+        setBuildState(prev => prev && prev.id === buildState.id ? { ...prev, liveSession: true } : prev)
+        connectWebSocket(buildState.id, buildStateRef.current?.websocketUrl)
+      }
     } catch (error) {
       setChatMessages(prev => prev.map(message =>
         message.clientToken === clientToken ? { ...message, status: 'failed' } : message

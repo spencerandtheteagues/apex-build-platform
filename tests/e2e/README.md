@@ -14,5 +14,6 @@ Root Playwright infrastructure for APEX.BUILD Phase 4.
 - `npm test`
 
 Environment overrides:
-- `PLAYWRIGHT_BASE_URL` (default `http://localhost:5173`)
+- `PLAYWRIGHT_BASE_URL` (default `http://localhost:5180`)
 - `PLAYWRIGHT_API_URL` (default `http://localhost:8080`)
+- `PLAYWRIGHT_INCLUDE_FIREFOX=true` to include Firefox locally

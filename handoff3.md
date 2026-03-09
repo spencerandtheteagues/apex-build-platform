@@ -6,7 +6,79 @@
 - Last pushed commit on GitHub before this local work: `21e9509` (`docs: add handoff3 status`)
 - This handoff file has now been updated to reflect the latest completed local work
 - The current interaction-control / user-steering slice is now materially implemented and verified locally
-- The current changes are **local only** unless explicitly pushed later
+- This file is intended to travel with the next verified push
+
+## Latest Verified Follow-Up
+
+This pass focused on turning the remaining local launch blockers into a clean,
+verified state instead of relying on cached green runs.
+
+### Fixes completed
+
+1. Build input validation now happens before credit enforcement
+   - `backend/internal/agents/handlers.go`
+   - `POST /api/v1/build/start` no longer returns `402` for malformed requests like
+     empty or whitespace-only descriptions.
+   - Invalid build requests now return the expected `400` with actionable input
+     feedback before any billing/quota gate is consulted.
+
+2. Completed-build follow-up messaging now restores a live build session
+   - `backend/internal/agents/manager.go`
+   - `backend/internal/agents/handlers.go`
+   - `backend/internal/agents/handlers_test.go`
+   - `frontend/src/services/api.ts`
+   - `frontend/src/components/builder/AppBuilder.tsx`
+   - If a user reopens a saved completed build after the server no longer has the
+     in-memory build session, sending a new message now restores a lead-agent
+     session from the persisted build snapshot instead of failing with `404`.
+   - The frontend now reconnects to the live websocket stream when that restored
+     session comes back, so follow-up replies and revision passes surface in real time.
+
+3. Playwright smoke infrastructure is now stable and representative
+   - `tests/e2e/scripts/generate-app-specs.mjs`
+   - `tests/e2e/playwright.config.ts`
+   - `tests/e2e/README.md`
+   - `frontend/e2e/playwright.config.ts`
+   - `frontend/e2e/helpers/global-setup.ts`
+   - Generated smoke specs now:
+     - clear stale generated files before regeneration
+     - use synthetic per-scenario client IP headers so the real auth rate limiter
+       is not tripped by parallel smoke traffic
+     - default to the repo’s actual Vite port (`5180`)
+     - skip local Firefox/WebKit assumptions unless explicitly enabled or running in CI
+
+4. A clean-compile backend defect was found and fixed
+   - `backend/internal/agents/error_analyzer.go`
+   - A stale module import still referenced the old GitHub path instead of the
+     local module path, which caused clean `go test ./...` runs to fail.
+   - That import is now corrected.
+
+5. The new agent helper utilities now have direct regression coverage
+   - `backend/internal/agents/tooling_helpers_test.go`
+   - Added focused tests for:
+     - chunked file reassembly
+     - context selection of errored files under budget
+     - fenced JSON parsing in the error analyzer
+
+### Additional issue discovered while verifying
+
+- The new AI-assisted readiness-repair path in `backend/internal/agents/manager.go`
+  originally passed `[]GeneratedFile` into the context selector even though the
+  selector expects `map[path]content`.
+- That adapter mismatch is now fixed by normalizing generated files into a
+  `map[string]string` before selection.
+
+### Verified in this follow-up
+
+- `backend`: `go test -count=1 ./...`
+- `backend`: `go test -race ./...`
+- `backend`: `go vet ./...`
+- `frontend`: `npm run typecheck`
+- `frontend`: `npm run lint`
+- `frontend`: `npm test -- --run`
+- `frontend`: `npm run build`
+- `tests/e2e`: `PLAYWRIGHT_BASE_URL=http://127.0.0.1:5180 PLAYWRIGHT_API_URL=http://127.0.0.1:8080 npm run test:smoke`
+  - result: `24 passed`
 
 ## Render Deploy Follow-Up
 

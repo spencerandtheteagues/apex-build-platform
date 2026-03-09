@@ -489,11 +489,16 @@ export class ApiService {
     return response.data
   }
 
-  async sendBuildMessage(buildId: string, message: string, clientToken?: string): Promise<void> {
-    await this.client.post(`/build/${buildId}/message`, {
+  async sendBuildMessage(buildId: string, message: string, clientToken?: string): Promise<{
+    interaction?: BuildInteractionState
+    live?: boolean
+    restored_session?: boolean
+  }> {
+    const response = await this.client.post(`/build/${buildId}/message`, {
       content: message,
       client_token: clientToken,
     })
+    return response.data
   }
 
   async getBuildMessages(buildId: string): Promise<{

@@ -6,8 +6,61 @@ import { defineConfig, devices } from '@playwright/test';
  */
 
 // Read environment variables
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173';
+const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5180';
 const apiBaseURL = process.env.PLAYWRIGHT_API_URL || 'http://localhost:8080/api/v1';
+const includeFirefox = process.env.CI === 'true' || process.env.PLAYWRIGHT_INCLUDE_FIREFOX === 'true';
+const includeWebkit = process.env.CI === 'true' || process.env.PLAYWRIGHT_INCLUDE_WEBKIT === 'true';
+
+const browserProjects = [
+  {
+    name: 'chromium',
+    use: {
+      ...devices['Desktop Chrome'],
+      storageState: 'playwright/.auth/user.json',
+    },
+    dependencies: ['setup'],
+  },
+  {
+    name: 'mobile-chrome',
+    use: {
+      ...devices['Pixel 5'],
+      storageState: 'playwright/.auth/user.json',
+    },
+    dependencies: ['setup'],
+  },
+];
+
+if (includeFirefox) {
+  browserProjects.push({
+    name: 'firefox',
+    use: {
+      ...devices['Desktop Firefox'],
+      storageState: 'playwright/.auth/user.json',
+    },
+    dependencies: ['setup'],
+  });
+}
+
+if (includeWebkit) {
+  browserProjects.push(
+    {
+      name: 'webkit',
+      use: {
+        ...devices['Desktop Safari'],
+        storageState: 'playwright/.auth/user.json',
+      },
+      dependencies: ['setup'],
+    },
+    {
+      name: 'mobile-safari',
+      use: {
+        ...devices['iPhone 13'],
+        storageState: 'playwright/.auth/user.json',
+      },
+      dependencies: ['setup'],
+    },
+  );
+}
 
 export default defineConfig({
   // Test directory
@@ -82,55 +135,7 @@ export default defineConfig({
       testMatch: /.*\.cleanup\.ts/,
     },
 
-    // Desktop Chrome
-    {
-      name: 'chromium',
-      use: {
-        ...devices['Desktop Chrome'],
-        storageState: 'playwright/.auth/user.json',
-      },
-      dependencies: ['setup'],
-    },
-
-    // Desktop Firefox
-    {
-      name: 'firefox',
-      use: {
-        ...devices['Desktop Firefox'],
-        storageState: 'playwright/.auth/user.json',
-      },
-      dependencies: ['setup'],
-    },
-
-    // Desktop Safari
-    {
-      name: 'webkit',
-      use: {
-        ...devices['Desktop Safari'],
-        storageState: 'playwright/.auth/user.json',
-      },
-      dependencies: ['setup'],
-    },
-
-    // Mobile Chrome
-    {
-      name: 'mobile-chrome',
-      use: {
-        ...devices['Pixel 5'],
-        storageState: 'playwright/.auth/user.json',
-      },
-      dependencies: ['setup'],
-    },
-
-    // Mobile Safari
-    {
-      name: 'mobile-safari',
-      use: {
-        ...devices['iPhone 13'],
-        storageState: 'playwright/.auth/user.json',
-      },
-      dependencies: ['setup'],
-    },
+    ...browserProjects,
 
     // Tests that need fresh authentication (no stored state)
     {

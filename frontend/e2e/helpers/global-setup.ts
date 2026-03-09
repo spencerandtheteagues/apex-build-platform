@@ -24,7 +24,7 @@ async function globalSetup(config: FullConfig) {
   }
 
   // Set up environment variables
-  process.env.PLAYWRIGHT_BASE_URL = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173';
+  process.env.PLAYWRIGHT_BASE_URL = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5180';
   process.env.PLAYWRIGHT_API_URL = process.env.PLAYWRIGHT_API_URL || 'http://localhost:8080/api/v1';
 
   // Wait for services to be ready if needed
