@@ -13,7 +13,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${PROJECT_POSTGRES_USER:-apex}
-      POSTGRES_PASSWORD: ${PROJECT_POSTGRES_PASSWORD:-apex_local_dev}
+      POSTGRES_PASSWORD: ${PROJECT_POSTGRES_PASSWORD:-apex_project_pg_H4n7R2k9V5m1Q8x3}
       POSTGRES_DB: ${PROJECT_POSTGRES_DB:-apex_project}
       PGDATA: /var/lib/postgresql/data/pgdata
     healthcheck:
@@ -52,7 +52,7 @@ services:
 
   project-infra-env:
     image: alpine:3.20
-    command: ["sh", "-lc", "echo PROJECT_DATABASE_URL=postgres://${PROJECT_POSTGRES_USER:-apex}:${PROJECT_POSTGRES_PASSWORD:-apex_local_dev}@project-postgres:5432/${PROJECT_POSTGRES_DB:-apex_project}; echo PROJECT_REDIS_URL=redis://project-redis:6379/0; sleep infinity"]
+    command: ["sh", "-lc", "echo PROJECT_DATABASE_URL=postgres://${PROJECT_POSTGRES_USER:-apex}:${PROJECT_POSTGRES_PASSWORD:-apex_project_pg_H4n7R2k9V5m1Q8x3}@project-postgres:5432/${PROJECT_POSTGRES_DB:-apex_project}; echo PROJECT_REDIS_URL=redis://project-redis:6379/0; sleep infinity"]
     depends_on:
       project-postgres:
         condition: service_healthy

@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -275,6 +276,38 @@ func TestSecurityMiddleware(t *testing.T) {
 		assert.NotEmpty(t, w.Header().Get("Content-Security-Policy"))
 		assert.NotEmpty(t, w.Header().Get("Strict-Transport-Security"))
 	})
+
+	t.Run("uses strict CSP for normal API routes", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/test", nil)
+		router.ServeHTTP(w, req)
+
+		csp := w.Header().Get("Content-Security-Policy")
+		assert.Contains(t, csp, "default-src 'none'")
+		assert.Contains(t, csp, "frame-ancestors 'none'")
+		assert.NotContains(t, csp, "unsafe-inline")
+		assert.NotContains(t, csp, "unsafe-eval")
+	})
+
+	t.Run("preview proxy CSP only controls embedding", func(t *testing.T) {
+		t.Setenv("GO_ENV", "development")
+
+		previewRouter := gin.New()
+		previewRouter.Use(Security())
+		previewRouter.GET("/api/v1/preview/proxy/:projectId", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		})
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1/preview/proxy/123", nil)
+		previewRouter.ServeHTTP(w, req)
+
+		csp := w.Header().Get("Content-Security-Policy")
+		assert.True(t, strings.HasPrefix(csp, "frame-ancestors "))
+		assert.Contains(t, csp, "https://apex.build")
+		assert.Contains(t, csp, "base-uri 'self'")
+		assert.NotContains(t, csp, "default-src 'none'")
+	})
 }
 
 func TestRecoveryMiddleware(t *testing.T) {
@@ -307,9 +340,9 @@ func TestRecoveryMiddleware(t *testing.T) {
 
 func TestAPIKeyAuthMiddleware(t *testing.T) {
 	validAPIKeys := map[string]string{
-		"valid-api-key-1":   "service-a",
-		"valid-api-key-2":   "service-b",
-		"webhook-api-key":   "webhook-service",
+		"valid-api-key-1": "service-a",
+		"valid-api-key-2": "service-b",
+		"webhook-api-key": "webhook-service",
 	}
 
 	router := gin.New()

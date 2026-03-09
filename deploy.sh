@@ -1,99 +1,146 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# APEX.BUILD Production Deployment Script
-echo "🚀 Starting APEX.BUILD Production Deployment"
-echo "============================================="
+set -euo pipefail
 
-# Set environment variables
-export BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-export VERSION="2.0.0"
-export COMMIT_HASH="production"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NETWORK_NAME="${DOCKER_NETWORK:-apex-network}"
+POSTGRES_CONTAINER="${POSTGRES_CONTAINER_NAME:-apex-postgres}"
+REDIS_CONTAINER="${REDIS_CONTAINER_NAME:-apex-redis}"
+BACKEND_CONTAINER="${BACKEND_CONTAINER_NAME:-apex-backend}"
+POSTGRES_USER="${POSTGRES_USER:-postgres}"
+POSTGRES_DB="${POSTGRES_DB:-apex_build}"
+APP_PORT="${APP_PORT:-8080}"
 
-# Check if existing services are running
-echo "📋 Checking existing services..."
-if docker ps | grep -q "apex-postgres"; then
-    echo "✅ PostgreSQL already running"
-else
-    echo "❌ PostgreSQL not running - starting..."
-    docker run -d \
-        --name apex-postgres \
-        --network apex-network \
-        -e POSTGRES_DB=apex_build \
-        -e POSTGRES_USER=postgres \
-        -e POSTGRES_PASSWORD=apex_build_production_2024_secure \
-        -p 5432:5432 \
-        -v postgres_data:/var/lib/postgresql/data \
-        postgres:16-alpine
-fi
-
-if docker ps | grep -q "apex-redis"; then
-    echo "✅ Redis already running"
-else
-    echo "❌ Redis not running - starting..."
-    docker run -d \
-        --name apex-redis \
-        --network apex-network \
-        -p 6379:6379 \
-        -v redis_data:/data \
-        redis:7-alpine redis-server --requirepass apex_redis_production_2024_secure
-fi
-
-# Build the backend image
-echo "🔨 Building APEX.BUILD backend..."
-cd backend
-docker build -f Dockerfile.production -t apex-backend:production . || {
-    echo "❌ Build failed"
-    exit 1
+require_env() {
+    local name="$1"
+    if [[ -z "${!name:-}" ]]; then
+        echo "ERROR: ${name} must be set before running deploy.sh"
+        exit 1
+    fi
 }
 
-# Stop existing backend if running
-echo "🔄 Updating backend service..."
-docker stop apex-backend 2>/dev/null || true
-docker rm apex-backend 2>/dev/null || true
+append_optional_env() {
+    local name="$1"
+    if [[ -n "${!name:-}" ]]; then
+        docker_env_args+=("-e" "${name}=${!name}")
+    fi
+}
 
-# Start the backend service
-echo "🚀 Starting APEX.BUILD backend..."
-docker run -d \
-    --name apex-backend \
-    --network apex-network \
-    -p 8080:8080 \
-    -e ENV=production \
-    -e DATABASE_URL="postgresql://postgres:apex_build_production_2024_secure@apex-postgres:5432/apex_build" \
-    -e REDIS_URL="redis://apex-redis:6379" \
-    -e JWT_SECRET="apex_jwt_production_secret_2024_enterprise_grade_security" \
-    -e JWT_REFRESH_SECRET="apex_jwt_refresh_production_secret_2024_enterprise_grade" \
-    -e ANTHROPIC_API_KEY="sk-ant-api03-your-claude-key-here" \
-    -e OPENAI_API_KEY="sk-your-openai-key-here" \
-    -e GOOGLE_AI_API_KEY="your-gemini-key-here" \
-    -e LOG_LEVEL=info \
-    -e ENABLE_METRICS=true \
-    -e ENABLE_TRACING=true \
-    -v ./uploads:/app/uploads \
-    -v ./logs:/app/logs \
-    apex-backend:production
+container_exists() {
+    docker container inspect "$1" >/dev/null 2>&1
+}
 
-# Wait for services to be ready
-echo "⏳ Waiting for services to be ready..."
-sleep 10
+container_running() {
+    [[ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true)" == "true" ]]
+}
 
-# Check health
-echo "🏥 Checking deployment health..."
-if curl -f http://localhost:8080/health 2>/dev/null; then
-    echo "✅ APEX.BUILD backend is healthy!"
-else
-    echo "⚠️  Backend health check failed - checking logs..."
-    docker logs apex-backend --tail 20
+echo "Starting APEX.BUILD production deployment"
+echo "========================================="
+
+require_env POSTGRES_PASSWORD
+require_env REDIS_PASSWORD
+require_env JWT_SECRET
+require_env SECRETS_MASTER_KEY
+
+export BUILD_DATE="${BUILD_DATE:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
+export VERSION="${VERSION:-$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo production)}"
+export COMMIT_HASH="${COMMIT_HASH:-$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo production)}"
+
+DATABASE_URL="${DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_CONTAINER}:5432/${POSTGRES_DB}?sslmode=disable}"
+REDIS_URL="${REDIS_URL:-redis://:${REDIS_PASSWORD}@${REDIS_CONTAINER}:6379/0}"
+
+echo "Checking Docker network and volumes..."
+docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME" >/dev/null
+docker volume create postgres_data >/dev/null
+docker volume create redis_data >/dev/null
+mkdir -p "$ROOT_DIR/uploads" "$ROOT_DIR/logs"
+
+echo "Ensuring PostgreSQL is available..."
+if ! container_exists "$POSTGRES_CONTAINER"; then
+    docker run -d \
+        --name "$POSTGRES_CONTAINER" \
+        --network "$NETWORK_NAME" \
+        -e POSTGRES_DB="$POSTGRES_DB" \
+        -e POSTGRES_USER="$POSTGRES_USER" \
+        -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+        -p 5432:5432 \
+        -v postgres_data:/var/lib/postgresql/data \
+        postgres:16-alpine >/dev/null
+elif ! container_running "$POSTGRES_CONTAINER"; then
+    docker start "$POSTGRES_CONTAINER" >/dev/null
 fi
 
+echo "Ensuring Redis is available..."
+if ! container_exists "$REDIS_CONTAINER"; then
+    docker run -d \
+        --name "$REDIS_CONTAINER" \
+        --network "$NETWORK_NAME" \
+        -p 6379:6379 \
+        -v redis_data:/data \
+        redis:7-alpine \
+        redis-server --appendonly yes --requirepass "$REDIS_PASSWORD" >/dev/null
+elif ! container_running "$REDIS_CONTAINER"; then
+    docker start "$REDIS_CONTAINER" >/dev/null
+fi
+
+echo "Building backend image..."
+docker build -f "$ROOT_DIR/backend/Dockerfile.production" -t apex-backend:production "$ROOT_DIR/backend"
+
+echo "Replacing backend container..."
+docker rm -f "$BACKEND_CONTAINER" >/dev/null 2>&1 || true
+
+docker_env_args=(
+    "-e" "ENVIRONMENT=production"
+    "-e" "GIN_MODE=release"
+    "-e" "PORT=8080"
+    "-e" "DATABASE_URL=${DATABASE_URL}"
+    "-e" "REDIS_URL=${REDIS_URL}"
+    "-e" "REDIS_PASSWORD=${REDIS_PASSWORD}"
+    "-e" "JWT_SECRET=${JWT_SECRET}"
+    "-e" "SECRETS_MASTER_KEY=${SECRETS_MASTER_KEY}"
+    "-e" "EXECUTION_FORCE_CONTAINER=true"
+    "-e" "ENABLE_METRICS=${ENABLE_METRICS:-true}"
+    "-e" "ENABLE_TRACING=${ENABLE_TRACING:-false}"
+    "-e" "LOG_LEVEL=${LOG_LEVEL:-info}"
+    "-e" "BUILD_DATE=${BUILD_DATE}"
+    "-e" "VERSION=${VERSION}"
+    "-e" "GIT_COMMIT=${COMMIT_HASH}"
+)
+
+for optional_env in ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_AI_API_KEY GEMINI_API_KEY XAI_API_KEY STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET VERCEL_TOKEN NETLIFY_TOKEN RENDER_TOKEN; do
+    append_optional_env "$optional_env"
+done
+
+docker run -d \
+    --name "$BACKEND_CONTAINER" \
+    --network "$NETWORK_NAME" \
+    -p "${APP_PORT}:8080" \
+    "${docker_env_args[@]}" \
+    -v "$ROOT_DIR/uploads:/app/uploads" \
+    -v "$ROOT_DIR/logs:/app/logs" \
+    apex-backend:production >/dev/null
+
+echo "Waiting for backend readiness..."
+for attempt in $(seq 1 30); do
+    if curl -fsS "http://localhost:${APP_PORT}/ready" >/dev/null 2>&1; then
+        echo "Backend is ready."
+        break
+    fi
+
+    if [[ "$attempt" -eq 30 ]]; then
+        echo "Backend readiness check failed after 30 attempts."
+        docker logs "$BACKEND_CONTAINER" --tail 50
+        exit 1
+    fi
+
+    sleep 2
+done
+
 echo ""
-echo "🎉 APEX.BUILD Deployment Complete!"
-echo "=================================="
-echo "📊 Backend: http://localhost:8080"
-echo "🏥 Health:  http://localhost:8080/health"
-echo "💾 Database: localhost:5432"
-echo "🔄 Redis: localhost:6379"
+echo "Deployment complete"
+echo "==================="
+echo "Backend: http://localhost:${APP_PORT}"
+echo "Health:  http://localhost:${APP_PORT}/health"
+echo "Ready:   http://localhost:${APP_PORT}/ready"
 echo ""
-echo "📋 Container Status:"
 docker ps --filter "name=apex-"
-echo ""
-echo "🚀 APEX.BUILD is ready to compete!"

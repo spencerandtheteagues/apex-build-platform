@@ -3,8 +3,10 @@ package db
 import (
 	"log"
 	"os"
+	"strings"
 	"time"
 
+	"apex-build/internal/config"
 	"apex-build/pkg/models"
 
 	"golang.org/x/crypto/bcrypt"
@@ -12,16 +14,24 @@ import (
 
 // SECURITY: Get seed passwords from environment variables
 func getSeedPassword(envVar, defaultDev string) string {
-	password := os.Getenv(envVar)
+	password := strings.TrimSpace(os.Getenv(envVar))
 	if password != "" {
 		return password
 	}
-	// Only use default in non-production
-	if os.Getenv("ENVIRONMENT") == "production" {
-		log.Printf("⚠️  WARNING: %s not set in production - seed user will not be created", envVar)
+
+	switch {
+	case config.IsProductionEnvironment() || config.IsStagingEnvironment():
+		log.Printf("WARNING: %s not set in %s - seed user will not be created", envVar, config.GetEnvironment())
+		return ""
+	case config.GetEnvironment() == config.EnvTest:
+		return defaultDev
+	case strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_DEFAULT_SEED_PASSWORDS")), "true"):
+		log.Printf("WARNING: Using built-in development seed password for %s because ALLOW_DEFAULT_SEED_PASSWORDS=true", envVar)
+		return defaultDev
+	default:
+		log.Printf("INFO: %s not set and ALLOW_DEFAULT_SEED_PASSWORDS is false - skipping seed user creation", envVar)
 		return ""
 	}
-	return defaultDev
 }
 
 // SeedAdminUser creates the default admin account if it doesn't exist
@@ -41,15 +51,15 @@ func (d *Database) SeedAdminUser() error {
 	if result.Error == nil {
 		log.Println("✅ Admin user already exists - updating privileges and password")
 		d.DB.Model(&existingAdmin).Updates(map[string]interface{}{
-			"password_hash":        string(hashedPassword),
-			"is_admin":             true,
-			"is_super_admin":       true,
+			"password_hash":         string(hashedPassword),
+			"is_admin":              true,
+			"is_super_admin":        true,
 			"has_unlimited_credits": true,
-			"bypass_billing":       true,
-			"bypass_rate_limits":   true,
-			"subscription_type":   "owner",
-			"is_verified":         true,
-			"is_active":           true,
+			"bypass_billing":        true,
+			"bypass_rate_limits":    true,
+			"subscription_type":     "owner",
+			"is_verified":           true,
+			"is_active":             true,
 		})
 		return nil
 	}
@@ -105,15 +115,15 @@ func (d *Database) SeedSpencerUser() error {
 	if result.Error == nil {
 		log.Println("✅ Spencer user already exists - updating privileges and password")
 		d.DB.Model(&existingUser).Updates(map[string]interface{}{
-			"password_hash":        string(hashedPassword),
-			"is_admin":             true,
-			"is_super_admin":       true,
+			"password_hash":         string(hashedPassword),
+			"is_admin":              true,
+			"is_super_admin":        true,
 			"has_unlimited_credits": true,
-			"bypass_billing":       true,
-			"bypass_rate_limits":   true,
-			"subscription_type":   "owner",
-			"is_verified":         true,
-			"is_active":           true,
+			"bypass_billing":        true,
+			"bypass_rate_limits":    true,
+			"subscription_type":     "owner",
+			"is_verified":           true,
+			"is_active":             true,
 		})
 		return nil
 	}

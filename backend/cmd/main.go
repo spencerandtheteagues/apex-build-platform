@@ -309,12 +309,14 @@ func main() {
 	spendTracker := spend.NewSpendTracker(database.GetDB())
 	spendHandler := handlers.NewSpendHandler(spendTracker)
 	log.Println("Spend Tracker initialized (real-time cost tracking, per-agent attribution)")
+	startupRegistry.MarkReady("spend_tracking", startup.TierOptional, "Spend tracking dashboard initialized", nil)
 
 	// Initialize Budget Enforcer (S1: Hard Budget Caps)
 	budgetEnforcer := budget.NewBudgetEnforcer(database.GetDB(), spendTracker)
 	budgetHandler := handlers.NewBudgetHandler(budgetEnforcer)
 	budgetMiddleware := middleware.BudgetCheck(budgetEnforcer)
 	log.Println("Budget Enforcer initialized (daily/monthly/per-build caps, instant stop)")
+	startupRegistry.MarkReady("budget_enforcement", startup.TierOptional, "Budget enforcement initialized", nil)
 
 	// Wire budget enforcer into agent manager so each AI Generate call is
 	// pre-authorized with a real estimated cost rather than 0.
@@ -322,6 +324,7 @@ func main() {
 
 	// Initialize Protected Paths Handler (A3)
 	protectedPathsHandler := handlers.NewProtectedPathsHandler(database.GetDB())
+	startupRegistry.MarkReady("protected_paths", startup.TierOptional, "Protected paths handler initialized", nil)
 
 	// Initialize MCP Server (APEX.BUILD as MCP provider)
 	mcpServer := mcp.NewMCPServer("APEX.BUILD", "1.0.0")
@@ -372,12 +375,14 @@ func main() {
 	templatesHandler := handlers.NewTemplatesHandler(database.GetDB())
 	startupRegistry.MarkReady("project_secrets", startup.TierOptional, "Project secrets handlers initialized", nil)
 	startupRegistry.MarkReady("mcp", startup.TierOptional, "MCP handlers initialized", nil)
+	startupRegistry.MarkReady("project_templates", startup.TierOptional, "Project templates initialized", nil)
 
 	log.Println("Project Templates System initialized (15+ starter templates)")
 
 	// Initialize Code Search Engine
 	searchEngine := search.NewSearchEngine(database.GetDB())
 	searchHandler := handlers.NewSearchHandler(searchEngine, database.GetDB())
+	startupRegistry.MarkReady("code_search", startup.TierOptional, "Code search initialized", nil)
 
 	log.Println("Code Search Engine initialized (full-text, regex, symbol search)")
 
@@ -407,18 +412,22 @@ func main() {
 	// Initialize GitHub Import Handler (one-click repo import like replit.new)
 	importHandler := handlers.NewImportHandler(database.GetDB(), gitService, secretsManager)
 	log.Println("GitHub Import Wizard initialized (one-click repo import)")
+	startupRegistry.MarkReady("github_import", startup.TierOptional, "GitHub import initialized", nil)
 
 	// Initialize GitHub Export Handler (export projects to GitHub repos)
 	exportHandler := handlers.NewExportHandler(database.GetDB(), gitService, secretsManager)
 	log.Println("GitHub Export initialized (one-click export to GitHub)")
+	startupRegistry.MarkReady("github_export", startup.TierOptional, "GitHub export initialized", nil)
 
 	// Initialize Version History Handler (Replit parity feature)
 	versionHandler := handlers.NewVersionHandler(database.GetDB())
 	log.Println("Version History System initialized (diff viewing, restore, pinning)")
+	startupRegistry.MarkReady("version_history", startup.TierOptional, "Version history initialized", nil)
 
 	// Initialize Code Comments Handler (Replit parity feature)
 	commentsHandler := handlers.NewCommentsHandler(database.GetDB())
 	log.Println("Code Comments System initialized (inline threads, reactions, resolve)")
+	startupRegistry.MarkReady("code_comments", startup.TierOptional, "Code comments initialized", nil)
 
 	// Initialize Stripe Payment Service with validated key
 	// SECURITY: Use validated key from secretsConfig
@@ -583,10 +592,12 @@ func main() {
 	// Initialize Package Manager
 	packageHandler := handlers.NewPackageHandler(baseHandler)
 	log.Println("Package Manager initialized (NPM, PyPI, Go Modules)")
+	startupRegistry.MarkReady("package_management", startup.TierOptional, "Package management initialized", nil)
 
 	// Initialize Environment Handler (Nix-like reproducible environments - Replit parity)
 	environmentHandler := handlers.NewEnvironmentHandler(baseHandler)
 	log.Println("Environment Configuration initialized (Nix-like reproducible environments)")
+	startupRegistry.MarkReady("environment_configs", startup.TierOptional, "Environment configuration initialized", nil)
 
 	// Initialize Community/Sharing Marketplace
 	communityHandler := community.NewCommunityHandler(database.GetDB())
@@ -738,6 +749,7 @@ func main() {
 	// Initialize Key Rotation Handler (admin-only)
 	rotationHandler := handlers.NewRotationHandler(database.GetDB())
 	log.Println("Key Rotation Handler initialized (admin-only)")
+	startupRegistry.MarkReady("admin_controls", startup.TierOptional, "Admin controls initialized", nil)
 
 	// Initialize Usage Tracker for quota enforcement (REVENUE PROTECTION)
 	usageTracker := usage.NewTracker(database.GetDB(), redisCache)
@@ -879,17 +891,28 @@ func newStartupRegistry() *startup.Registry {
 	registry.Register("http_routes", startup.TierCritical, "Waiting for application router activation", nil)
 	registry.Register("database_seeding", startup.TierOptional, "Waiting for database seeding", nil)
 	registry.Register("ai_platform", startup.TierOptional, "Waiting for AI router initialization", nil)
+	registry.Register("spend_tracking", startup.TierOptional, "Waiting for spend tracking initialization", nil)
+	registry.Register("budget_enforcement", startup.TierOptional, "Waiting for budget enforcement initialization", nil)
+	registry.Register("protected_paths", startup.TierOptional, "Waiting for protected paths initialization", nil)
 	registry.Register("project_secrets", startup.TierOptional, "Waiting for project secrets handlers", nil)
 	registry.Register("mcp", startup.TierOptional, "Waiting for MCP handlers", nil)
+	registry.Register("project_templates", startup.TierOptional, "Waiting for project templates", nil)
+	registry.Register("code_search", startup.TierOptional, "Waiting for code search initialization", nil)
 	registry.Register("byok", startup.TierOptional, "Waiting for BYOK manager", nil)
 	registry.Register("agent_orchestration", startup.TierOptional, "Waiting for agent orchestration services", nil)
 	registry.Register("preview_service", startup.TierOptional, "Waiting for live preview service", nil)
 	registry.Register("git_integration", startup.TierOptional, "Waiting for Git integration", nil)
+	registry.Register("github_import", startup.TierOptional, "Waiting for GitHub import initialization", nil)
+	registry.Register("github_export", startup.TierOptional, "Waiting for GitHub export initialization", nil)
+	registry.Register("version_history", startup.TierOptional, "Waiting for version history initialization", nil)
+	registry.Register("code_comments", startup.TierOptional, "Waiting for code comments initialization", nil)
 	registry.Register("payments", startup.TierOptional, "Waiting for payment provider setup", nil)
 	registry.Register("realtime_updates", startup.TierOptional, "Waiting for realtime websocket hub", nil)
 	registry.Register("redis_cache", startup.TierOptional, "Waiting for cache backend", nil)
 	registry.Register("code_execution", startup.TierOptional, "Waiting for code execution sandbox", nil)
 	registry.Register("deployment_providers", startup.TierOptional, "Waiting for deployment provider registration", nil)
+	registry.Register("package_management", startup.TierOptional, "Waiting for package management initialization", nil)
+	registry.Register("environment_configs", startup.TierOptional, "Waiting for environment configuration initialization", nil)
 	registry.Register("community_marketplace", startup.TierOptional, "Waiting for community marketplace initialization", nil)
 	registry.Register("native_hosting", startup.TierOptional, "Waiting for native hosting service", nil)
 	registry.Register("always_on_controller", startup.TierOptional, "Waiting for always-on controller", nil)
@@ -900,6 +923,7 @@ func newStartupRegistry() *startup.Registry {
 	registry.Register("enterprise_features", startup.TierOptional, "Waiting for enterprise features", nil)
 	registry.Register("autonomous_agent", startup.TierOptional, "Waiting for autonomous agent system", nil)
 	registry.Register("collaboration", startup.TierOptional, "Waiting for collaboration hub", nil)
+	registry.Register("admin_controls", startup.TierOptional, "Waiting for admin controls initialization", nil)
 	registry.Register("usage_tracking", startup.TierOptional, "Waiting for usage tracker", nil)
 	registry.Register("metrics", startup.TierOptional, "Waiting for metrics subsystem", nil)
 	return registry

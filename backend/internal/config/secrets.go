@@ -146,6 +146,7 @@ func DefaultSecretRequirements() []SecretRequirement {
 func ValidateSecrets() (*SecretsConfig, error) {
 	env := GetEnvironment()
 	isProduction := IsProductionEnvironment()
+	isStrict := isProduction || IsStagingEnvironment()
 
 	config := &SecretsConfig{
 		Environment:  env,
@@ -160,7 +161,7 @@ func ValidateSecrets() (*SecretsConfig, error) {
 
 		// Check if required
 		if value == "" {
-			if req.Required && isProduction {
+			if req.Required && isStrict {
 				validationErr.Missing = append(validationErr.Missing, req.EnvVar)
 			} else if req.Required {
 				validationErr.Warnings = append(validationErr.Warnings,
@@ -171,7 +172,7 @@ func ValidateSecrets() (*SecretsConfig, error) {
 
 		// Check minimum length
 		if len(value) < req.MinLength {
-			if isProduction {
+			if isStrict {
 				validationErr.Invalid = append(validationErr.Invalid,
 					fmt.Sprintf("%s: too short (min %d characters)", req.EnvVar, req.MinLength))
 			} else {
@@ -183,7 +184,7 @@ func ValidateSecrets() (*SecretsConfig, error) {
 		// Run custom validator if present
 		if req.Validator != nil {
 			if err := req.Validator(value); err != nil {
-				if isProduction {
+				if isStrict {
 					validationErr.Invalid = append(validationErr.Invalid,
 						fmt.Sprintf("%s: %s", req.EnvVar, err.Error()))
 				} else {
@@ -193,6 +194,8 @@ func ValidateSecrets() (*SecretsConfig, error) {
 			}
 		}
 	}
+
+	applyRuntimeGuardrails(validationErr, env)
 
 	// Populate config with validated values
 	config.JWTSecret = os.Getenv("JWT_SECRET")
@@ -216,14 +219,8 @@ func ValidateSecrets() (*SecretsConfig, error) {
 	}
 
 	// In production, fail on any validation errors
-	if isProduction && validationErr.HasErrors() {
+	if isStrict && validationErr.HasErrors() {
 		return nil, validationErr
-	}
-
-	// In staging, fail on missing required secrets (treat like prod for secrets)
-	if IsStagingEnvironment() && len(validationErr.Missing) > 0 {
-		return nil, fmt.Errorf("staging environment requires all production secrets: %s",
-			strings.Join(validationErr.Missing, ", "))
 	}
 
 	// Log warnings in development
@@ -232,6 +229,107 @@ func ValidateSecrets() (*SecretsConfig, error) {
 	}
 
 	return config, nil
+}
+
+func applyRuntimeGuardrails(validationErr *SecretsValidationError, env string) {
+	if validationErr == nil {
+		return
+	}
+
+	strict := IsProductionEnvironment() || IsStagingEnvironment()
+	rules := []struct {
+		EnvVar       string
+		Description  string
+		InsecureVals []string
+	}{
+		{
+			EnvVar:      "JWT_SECRET",
+			Description: "JWT signing secret",
+			InsecureVals: []string{
+				"ApexLocalJwt7f4Hk2pQ9mW6xZ8cT1vN3rJ5uY0sL2",
+			},
+		},
+		{
+			EnvVar:      "DB_PASSWORD",
+			Description: "database password",
+			InsecureVals: []string{
+				"password",
+				"postgres",
+				"changeme",
+				"test",
+				"example",
+				"apex_secret_2024",
+				"apex_local_dev",
+				"apex_local_dev_only_change_me",
+				"apex_project_local_dev_only_change_me",
+				"apex_local_pg_l9m3q2v7x5k8n1r4",
+				"apex_project_pg_h4n7r2k9v5m1q8x3",
+			},
+		},
+		{
+			EnvVar:      "POSTGRES_PASSWORD",
+			Description: "database password",
+			InsecureVals: []string{
+				"password",
+				"postgres",
+				"changeme",
+				"test",
+				"example",
+				"apex_secret_2024",
+				"apex_local_dev",
+				"apex_local_dev_only_change_me",
+				"apex_project_local_dev_only_change_me",
+				"apex_local_pg_l9m3q2v7x5k8n1r4",
+				"apex_project_pg_h4n7r2k9v5m1q8x3",
+			},
+		},
+		{
+			EnvVar:      "ADMIN_SEED_PASSWORD",
+			Description: "seed user password",
+			InsecureVals: []string{
+				"admin-dev-password",
+				"admin",
+			},
+		},
+		{
+			EnvVar:      "SPENCER_SEED_PASSWORD",
+			Description: "seed user password",
+			InsecureVals: []string{
+				"spencer-dev-password",
+			},
+		},
+	}
+
+	for _, rule := range rules {
+		value, ok := os.LookupEnv(rule.EnvVar)
+		if !ok || strings.TrimSpace(value) == "" {
+			continue
+		}
+
+		lowerValue := strings.ToLower(strings.TrimSpace(value))
+		for _, insecure := range rule.InsecureVals {
+			if lowerValue != strings.ToLower(insecure) {
+				continue
+			}
+
+			message := fmt.Sprintf("%s uses insecure default %q for %s", rule.EnvVar, insecure, rule.Description)
+			if strict {
+				validationErr.Invalid = append(validationErr.Invalid, message)
+			} else {
+				validationErr.Warnings = append(validationErr.Warnings, fmt.Sprintf("%s (allowed in %s)", message, env))
+			}
+			break
+		}
+	}
+
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_DEFAULT_SEED_PASSWORDS")), "true") {
+		message := "ALLOW_DEFAULT_SEED_PASSWORDS=true enables built-in development seed credentials"
+		if strict {
+			validationErr.Invalid = append(validationErr.Invalid, message)
+		} else {
+			validationErr.Warnings = append(validationErr.Warnings, fmt.Sprintf("%s (allowed in %s)", message, env))
+		}
+	}
 }
 
 // ValidateAndLogSecrets validates secrets and logs configuration status.
@@ -421,7 +519,20 @@ func validateDatabaseURL(rawURL string) error {
 	if parsed.User != nil {
 		password, hasPassword := parsed.User.Password()
 		if hasPassword {
-			weakPasswords := []string{"password", "postgres", "changeme", "test", "example", "apex_build_2024"}
+			weakPasswords := []string{
+				"password",
+				"postgres",
+				"changeme",
+				"test",
+				"example",
+				"apex_build_2024",
+				"apex_secret_2024",
+				"apex_local_dev",
+				"apex_local_dev_only_change_me",
+				"apex_project_local_dev_only_change_me",
+				"apex_local_pg_l9m3q2v7x5k8n1r4",
+				"apex_project_pg_h4n7r2k9v5m1q8x3",
+			}
 			for _, weak := range weakPasswords {
 				if strings.EqualFold(password, weak) {
 					return fmt.Errorf("database password %q is a known default — use a strong password in production", weak)

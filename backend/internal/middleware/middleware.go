@@ -45,7 +45,7 @@ func ErrorHandler() gin.HandlerFunc {
 				param.ErrorMessage,
 			)
 		},
-		Output: gin.DefaultWriter,
+		Output:    gin.DefaultWriter,
 		SkipPaths: []string{"/health"},
 	})
 }
@@ -177,8 +177,8 @@ func RateLimit() gin.HandlerFunc {
 		// Check if request is allowed
 		if !limiter.Allow() {
 			c.JSON(http.StatusTooManyRequests, ErrorResponse{
-				Error:     "Rate limit exceeded",
-				Code:      "RATE_LIMIT_EXCEEDED",
+				Error: "Rate limit exceeded",
+				Code:  "RATE_LIMIT_EXCEEDED",
 				Details: map[string]interface{}{
 					"retry_after": "60s",
 					"limit":       "1000 requests per minute",
@@ -271,11 +271,7 @@ func Security() gin.HandlerFunc {
 		}
 		c.Header("X-XSS-Protection", "1; mode=block")
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
-		csp := "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https:; connect-src 'self' https: wss:"
-		if isPreviewProxy {
-			csp += "; frame-ancestors 'self' https://apex-frontend-gigq.onrender.com https://apex.build https://www.apex.build"
-		}
-		c.Header("Content-Security-Policy", csp)
+		c.Header("Content-Security-Policy", contentSecurityPolicy(c.Request.URL.Path))
 		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
 		c.Next()

@@ -3,7 +3,6 @@
 
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { useStore } from './hooks/useStore'
-import { HelpButton } from './components/help/HelpCenter'
 import CostTicker from './components/ide/CostTicker'
 // Import ErrorBoundary directly to be safe
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
@@ -49,6 +48,9 @@ const SpendDashboard = lazy(() => import('./components/spend/SpendDashboard'))
 const BudgetSettings = lazy(() => import('./components/budget/BudgetSettings'))
 const BillingSettings = lazy(() => import('./components/billing/BillingSettings'))
 const LandingPage = lazy(() => import('./pages/Landing').then(m => ({ default: m.LandingPage })))
+const HelpButton = lazy(() =>
+  import('./components/help/HelpCenter').then((m) => ({ default: m.HelpButton }))
+)
 
 const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
   <div className="h-full flex items-center justify-center bg-black/40">
@@ -808,7 +810,9 @@ function App() {
       )}
 
       {/* Floating Help Button */}
-      <HelpButton />
+      <Suspense fallback={null}>
+        <HelpButton />
+      </Suspense>
     </div>
   )
 }

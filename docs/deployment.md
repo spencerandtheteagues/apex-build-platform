@@ -54,6 +54,19 @@ Optional local tooling:
 - Redis Commander on `8082`
 - Prometheus on `9090`
 
+Local compose defaults are for local use only. Seed accounts are disabled unless you provide `ADMIN_SEED_PASSWORD` / `SPENCER_SEED_PASSWORD` or explicitly set `ALLOW_DEFAULT_SEED_PASSWORDS=true`.
+
+## Standalone Docker deploy script
+
+[`deploy.sh`](../deploy.sh) is now a guarded backend deployment path. It requires explicit values for:
+
+- `POSTGRES_PASSWORD`
+- `REDIS_PASSWORD`
+- `JWT_SECRET`
+- `SECRETS_MASTER_KEY`
+
+Optional provider tokens such as AI keys, Stripe, and deploy-provider credentials are passed through only when set. The script also enforces `EXECUTION_FORCE_CONTAINER=true` and checks `/ready` before reporting success.
+
 ## Release checklist
 
 Run before cutting a release or pushing a deploy commit:

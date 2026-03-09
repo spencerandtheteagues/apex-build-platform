@@ -67,6 +67,8 @@ npm run dev
 docker compose up --build
 ```
 
+Seed accounts are no longer silently created from built-in passwords during normal development runs. For local-only bootstrap users, either set `ADMIN_SEED_PASSWORD` and `SPENCER_SEED_PASSWORD`, or explicitly opt in with `ALLOW_DEFAULT_SEED_PASSWORDS=true`.
+
 This starts:
 
 - `postgres`
@@ -119,3 +121,8 @@ Relevant variables:
 - `VITE_WS_URL`
 
 This matters for Render and Docker deployments where API endpoints can differ between environments without requiring a rebuild.
+
+## Seed credentials and guardrails
+
+- `ALLOW_DEFAULT_SEED_PASSWORDS=true` is allowed only for development and test workflows.
+- Production and staging now reject known local-only defaults for database passwords, JWT secrets, and built-in seed credentials during startup validation.

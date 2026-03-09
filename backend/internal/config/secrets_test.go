@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/base64"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -279,6 +280,53 @@ func TestSecretsValidationError(t *testing.T) {
 	}
 	if noErr.HasErrors() {
 		t.Error("HasErrors() should return false when there are only warnings")
+	}
+}
+
+func TestValidateSecrets_StagingRejectsInsecureDefaults(t *testing.T) {
+	validMasterKey := make([]byte, 32)
+	for i := range validMasterKey {
+		validMasterKey[i] = byte(i + 1)
+	}
+
+	t.Setenv("GO_ENV", "staging")
+	t.Setenv("JWT_SECRET", "ApexLocalJwt7f4Hk2pQ9mW6xZ8cT1vN3rJ5uY0sL2")
+	t.Setenv("SECRETS_MASTER_KEY", base64.StdEncoding.EncodeToString(validMasterKey))
+	t.Setenv("DATABASE_URL", "postgres://postgres:apex_local_pg_L9m3Q2v7X5k8N1r4@db.internal:5432/apex_build?sslmode=require")
+
+	_, err := ValidateSecrets()
+	if err == nil {
+		t.Fatal("ValidateSecrets() should reject insecure local defaults in staging")
+	}
+
+	if !strings.Contains(err.Error(), "JWT_SECRET uses insecure default") {
+		t.Fatalf("expected staging validation error to mention JWT_SECRET, got %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "database password") {
+		t.Fatalf("expected staging validation error to mention database password, got %v", err)
+	}
+}
+
+func TestValidateSecrets_ProductionRejectsDefaultSeedPasswordMode(t *testing.T) {
+	validMasterKey := make([]byte, 32)
+	for i := range validMasterKey {
+		validMasterKey[i] = byte(i + 10)
+	}
+
+	t.Setenv("GO_ENV", "production")
+	t.Setenv("JWT_SECRET", "ProdJwtSecret_4ux8Pqm6sL2r9Vy1Tk7Zd3Nc5Hf0WaBe")
+	t.Setenv("SECRETS_MASTER_KEY", base64.StdEncoding.EncodeToString(validMasterKey))
+	t.Setenv("DATABASE_URL", "postgres://postgres:UltraSecureProdPassword987654321@db.internal:5432/apex_build?sslmode=require")
+	t.Setenv("ALLOW_DEFAULT_SEED_PASSWORDS", "true")
+
+	_, err := ValidateSecrets()
+	if err == nil {
+		t.Fatal("ValidateSecrets() should reject ALLOW_DEFAULT_SEED_PASSWORDS in production")
+	}
+
+	if !strings.Contains(err.Error(), "ALLOW_DEFAULT_SEED_PASSWORDS=true") {
+		t.Fatalf("expected production validation error to mention ALLOW_DEFAULT_SEED_PASSWORDS, got %v", err)
 	}
 }
 

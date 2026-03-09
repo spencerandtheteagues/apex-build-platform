@@ -34,24 +34,7 @@ func SecurityHeaders() gin.HandlerFunc {
 		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
 
 		// Content Security Policy
-		csp := "default-src 'self'; " +
-			"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://unpkg.com; " +
-			"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; " +
-			"font-src 'self' https://fonts.gstatic.com; " +
-			"img-src 'self' data: https:; " +
-			"connect-src 'self' wss: ws:; " +
-			"worker-src 'self' blob:; " +
-			"child-src 'self';"
-		if isPreviewProxy {
-			frameAncestors := "'self' https://apex.build https://www.apex.build"
-			if extra := os.Getenv("FRAME_ANCESTORS_EXTRA"); extra != "" {
-				frameAncestors += " " + extra
-			} else if os.Getenv("ENVIRONMENT") != "production" {
-				frameAncestors += " https://apex-frontend-gigq.onrender.com"
-			}
-			csp += " frame-ancestors " + frameAncestors + ";"
-		}
-		c.Header("Content-Security-Policy", csp)
+		c.Header("Content-Security-Policy", contentSecurityPolicy(c.Request.URL.Path))
 
 		// Referrer Policy
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -61,7 +44,7 @@ func SecurityHeaders() gin.HandlerFunc {
 
 		// Prevent caching of sensitive content
 		if c.Request.URL.Path == "/api/v1/auth/login" ||
-		   c.Request.URL.Path == "/api/v1/auth/register" {
+			c.Request.URL.Path == "/api/v1/auth/register" {
 			c.Header("Cache-Control", "no-store, no-cache, must-revalidate, private")
 			c.Header("Pragma", "no-cache")
 		}
@@ -70,13 +53,40 @@ func SecurityHeaders() gin.HandlerFunc {
 	}
 }
 
+func contentSecurityPolicy(path string) string {
+	if strings.HasPrefix(path, "/api/v1/preview/proxy/") {
+		return "frame-ancestors " + previewFrameAncestors() + "; base-uri 'self'; form-action 'self'"
+	}
+
+	return "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'"
+}
+
+func previewFrameAncestors() string {
+	frameAncestors := "'self' https://apex.build https://www.apex.build"
+	if extra := strings.TrimSpace(os.Getenv("FRAME_ANCESTORS_EXTRA")); extra != "" {
+		frameAncestors += " " + extra
+	} else if !isProductionEnvironment() {
+		frameAncestors += " https://apex-frontend-gigq.onrender.com"
+	}
+	return frameAncestors
+}
+
+func isProductionEnvironment() bool {
+	for _, key := range []string{"GO_ENV", "APEX_ENV", "ENVIRONMENT", "ENV"} {
+		if value := strings.ToLower(strings.TrimSpace(os.Getenv(key))); value == "production" || value == "prod" {
+			return true
+		}
+	}
+	return false
+}
+
 // CSRFProtection implements CSRF protection middleware
 func CSRFProtection() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Skip CSRF for GET requests and certain endpoints
 		if c.Request.Method == "GET" ||
-		   c.Request.URL.Path == "/health" ||
-		   c.Request.URL.Path == "/api/v1/auth/login" {
+			c.Request.URL.Path == "/health" ||
+			c.Request.URL.Path == "/api/v1/auth/login" {
 			c.Next()
 			return
 		}

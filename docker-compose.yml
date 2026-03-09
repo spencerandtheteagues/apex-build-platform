@@ -14,7 +14,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-apex_build}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apex_secret_2024}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apex_local_pg_L9m3Q2v7X5k8N1r4}
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "127.0.0.1:5432:5432"
@@ -77,11 +77,11 @@ services:
       - "127.0.0.1:8080:8080"
     environment:
       # Database
-      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-apex_secret_2024}@postgres:5432/${POSTGRES_DB:-apex_build}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-apex_local_pg_L9m3Q2v7X5k8N1r4}@postgres:5432/${POSTGRES_DB:-apex_build}?sslmode=disable
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: ${POSTGRES_USER:-postgres}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-apex_secret_2024}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-apex_local_pg_L9m3Q2v7X5k8N1r4}
       DB_NAME: ${POSTGRES_DB:-apex_build}
       DB_SSL_MODE: disable
 
@@ -97,7 +97,10 @@ services:
       BUILD_PREVIEW_HTTP_SMOKE: ${BUILD_PREVIEW_HTTP_SMOKE:-true}
 
       # Authentication
-      JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-key-change-in-production}
+      JWT_SECRET: ${JWT_SECRET:-ApexLocalJwt7f4Hk2pQ9mW6xZ8cT1vN3rJ5uY0sL2}
+      ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-}
+      SPENCER_SEED_PASSWORD: ${SPENCER_SEED_PASSWORD:-}
+      ALLOW_DEFAULT_SEED_PASSWORDS: ${ALLOW_DEFAULT_SEED_PASSWORDS:-false}
 
       # Server
       PORT: 8080
@@ -335,7 +338,7 @@ services:
     ports:
       - "127.0.0.1:9187:9187"
     environment:
-      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-apex_secret_2024}@postgres:5432/${POSTGRES_DB:-apex_build}?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-apex_local_pg_L9m3Q2v7X5k8N1r4}@postgres:5432/${POSTGRES_DB:-apex_build}?sslmode=disable"
     depends_on:
       postgres:
         condition: service_healthy
