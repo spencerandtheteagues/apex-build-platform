@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -186,6 +187,58 @@ func main() {
 
 	if !strings.Contains(result.Output, "Hello from Go sandbox!") {
 		t.Errorf("Expected output to contain 'Hello from Go sandbox!', got '%s'", result.Output)
+	}
+}
+
+func TestContainerSandboxExecuteWorkspaceCommand(t *testing.T) {
+	skipIfNoDocker(t)
+
+	config := DefaultContainerSandboxConfig()
+	config.EnableAuditLog = false
+
+	sandbox, err := NewContainerSandbox(config)
+	if err != nil {
+		t.Fatalf("Failed to create sandbox: %v", err)
+	}
+	defer sandbox.Cleanup()
+
+	workspaceDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspaceDir, "main.py"), []byte(`
+import os
+print(os.getenv("PROJECT_GREETING", "missing"))
+`), 0644); err != nil {
+		t.Fatalf("Failed to write workspace file: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	result, err := sandbox.ExecuteWorkspaceCommand(
+		ctx,
+		"python",
+		workspaceDir,
+		`printf "ready" > out.txt && python3 main.py`,
+		"",
+		map[string]string{"PROJECT_GREETING": "workspace-command"},
+	)
+	if err != nil {
+		t.Fatalf("Workspace execution failed: %v", err)
+	}
+
+	if result.Status != "completed" {
+		t.Fatalf("Expected status 'completed', got '%s'. Error: %s", result.Status, result.ErrorOutput)
+	}
+
+	if !strings.Contains(result.Output, "workspace-command") {
+		t.Fatalf("Expected output to contain env value, got %q", result.Output)
+	}
+
+	outBytes, err := os.ReadFile(filepath.Join(workspaceDir, "out.txt"))
+	if err != nil {
+		t.Fatalf("Expected workspace command to create out.txt: %v", err)
+	}
+	if string(outBytes) != "ready" {
+		t.Fatalf("Expected out.txt to contain ready, got %q", string(outBytes))
 	}
 }
 

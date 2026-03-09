@@ -183,7 +183,12 @@ func TestDockerArgsConstruction(t *testing.T) {
 		seccompProfile: "/tmp/seccomp.json",
 	}
 
-	args := sandbox.buildDockerArgs(exec, "main.py", limits, "apex-sandbox-python:latest")
+	args := sandbox.buildDockerArgs(exec, limits, "apex-sandbox-python:latest", containerRunOptions{
+		MountSource:   exec.TempDir,
+		MountReadOnly: true,
+		WorkDir:       "/work",
+		Command:       []string{"python3", "-u", "main.py"},
+	})
 
 	// Verify security-critical arguments are present
 	requiredArgs := []string{

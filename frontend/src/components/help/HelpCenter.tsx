@@ -1318,7 +1318,7 @@ Click "Rotate" to generate a new encryption key for a secret without changing it
 - Read-only filesystem (can't modify system files)
 - Memory limit: 256MB
 - CPU limit: 0.5 cores
-- Network isolation (optional)
+- Network isolation (enabled by default)
 - Seccomp syscall filtering (blocks dangerous system calls)
 - Automatic timeout enforcement
 

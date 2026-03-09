@@ -25,11 +25,11 @@ type User struct {
 	IsVerified bool `json:"is_verified" gorm:"default:false"`
 
 	// Admin and special privileges
-	IsAdmin           bool `json:"is_admin" gorm:"default:false"`
-	IsSuperAdmin      bool `json:"is_super_admin" gorm:"default:false"`
+	IsAdmin             bool `json:"is_admin" gorm:"default:false"`
+	IsSuperAdmin        bool `json:"is_super_admin" gorm:"default:false"`
 	HasUnlimitedCredits bool `json:"has_unlimited_credits" gorm:"default:false"`
-	BypassBilling     bool `json:"bypass_billing" gorm:"default:false"`
-	BypassRateLimits  bool `json:"bypass_rate_limits" gorm:"default:false"`
+	BypassBilling       bool `json:"bypass_billing" gorm:"default:false"`
+	BypassRateLimits    bool `json:"bypass_rate_limits" gorm:"default:false"`
 
 	// Subscription and billing (Stripe integration)
 	StripeCustomerID   string    `json:"stripe_customer_id" gorm:"index"`
@@ -69,9 +69,9 @@ type Project struct {
 	Framework   string `json:"framework"`                // react, next, django, gin, etc.
 
 	// Project ownership and access
-	OwnerID   uint `json:"owner_id" gorm:"not null"`
-	Owner     User `json:"owner" gorm:"foreignKey:OwnerID"`
-	IsPublic  bool `json:"is_public" gorm:"default:false"`
+	OwnerID    uint `json:"owner_id" gorm:"not null"`
+	Owner      User `json:"owner" gorm:"foreignKey:OwnerID"`
+	IsPublic   bool `json:"is_public" gorm:"default:false"`
 	IsArchived bool `json:"is_archived" gorm:"default:false"`
 
 	// Project structure
@@ -79,9 +79,9 @@ type Project struct {
 	EntryPoint    string `json:"entry_point"`                       // Main file (main.go, index.js, etc.)
 
 	// Runtime configuration
-	Environment map[string]interface{} `json:"environment" gorm:"serializer:json"` // Environment variables
+	Environment  map[string]interface{} `json:"environment" gorm:"serializer:json"`  // Environment variables
 	Dependencies map[string]interface{} `json:"dependencies" gorm:"serializer:json"` // Package.json, go.mod equivalent
-	BuildConfig map[string]interface{} `json:"build_config" gorm:"serializer:json"` // Build and run configuration
+	BuildConfig  map[string]interface{} `json:"build_config" gorm:"serializer:json"` // Build and run configuration
 
 	// Nix-like Environment Configuration (Replit parity feature)
 	// Stores reproducible environment settings: language runtime, packages, system deps
@@ -94,9 +94,9 @@ type Project struct {
 	CollabRoomID *uint `json:"collab_room_id"`
 
 	// Relationships
-	Files       []File       `json:"files" gorm:"foreignKey:ProjectID"`
-	Executions  []Execution  `json:"executions" gorm:"foreignKey:ProjectID"`
-	AIRequests  []AIRequest  `json:"ai_requests" gorm:"foreignKey:ProjectID"`
+	Files      []File      `json:"files" gorm:"foreignKey:ProjectID"`
+	Executions []Execution `json:"executions" gorm:"foreignKey:ProjectID"`
+	AIRequests []AIRequest `json:"ai_requests" gorm:"foreignKey:ProjectID"`
 }
 
 // File represents a file within a project
@@ -109,24 +109,24 @@ type File struct {
 	// File identification
 	ProjectID uint    `json:"project_id" gorm:"not null"`
 	Project   Project `json:"project" gorm:"foreignKey:ProjectID"`
-	Path      string  `json:"path" gorm:"not null"`      // Relative path from project root
-	Name      string  `json:"name" gorm:"not null"`      // File name with extension
-	Type      string  `json:"type" gorm:"not null"`      // file, directory
-	MimeType  string  `json:"mime_type"`                 // application/javascript, text/plain, etc.
+	Path      string  `json:"path" gorm:"not null"` // Relative path from project root
+	Name      string  `json:"name" gorm:"not null"` // File name with extension
+	Type      string  `json:"type" gorm:"not null"` // file, directory
+	MimeType  string  `json:"mime_type"`            // application/javascript, text/plain, etc.
 
 	// File content
-	Content string `json:"content" gorm:"type:text"`  // File contents
-	Size    int64  `json:"size" gorm:"default:0"`     // File size in bytes
-	Hash    string `json:"hash"`                      // SHA-256 hash for change detection
+	Content string `json:"content" gorm:"type:text"` // File contents
+	Size    int64  `json:"size" gorm:"default:0"`    // File size in bytes
+	Hash    string `json:"hash"`                     // SHA-256 hash for change detection
 
 	// Versioning
-	Version   int       `json:"version" gorm:"default:1"`
-	LastEditBy uint     `json:"last_edit_by"`
-	LastEditor User     `json:"last_editor" gorm:"foreignKey:LastEditBy"`
+	Version    int  `json:"version" gorm:"default:1"`
+	LastEditBy uint `json:"last_edit_by"`
+	LastEditor User `json:"last_editor" gorm:"foreignKey:LastEditBy"`
 
 	// File status
-	IsLocked bool `json:"is_locked" gorm:"default:false"`
-	LockedBy *uint `json:"locked_by"`
+	IsLocked bool       `json:"is_locked" gorm:"default:false"`
+	LockedBy *uint      `json:"locked_by"`
 	LockedAt *time.Time `json:"locked_at"`
 }
 
@@ -145,9 +145,9 @@ type Session struct {
 	UserAgent string `json:"user_agent"`
 
 	// Session state
-	IsActive  bool       `json:"is_active" gorm:"default:true"`
-	ExpiresAt time.Time  `json:"expires_at"`
-	LastSeen  time.Time  `json:"last_seen"`
+	IsActive  bool      `json:"is_active" gorm:"default:true"`
+	ExpiresAt time.Time `json:"expires_at"`
+	LastSeen  time.Time `json:"last_seen"`
 
 	// Current context
 	CurrentProjectID *uint    `json:"current_project_id"`
@@ -162,29 +162,29 @@ type AIRequest struct {
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
 	// Request identification
-	RequestID string `json:"request_id" gorm:"uniqueIndex;not null"` // UUID for tracking
-	UserID    uint   `json:"user_id" gorm:"not null"`
-	User      User   `json:"user" gorm:"foreignKey:UserID"`
-	ProjectID *uint  `json:"project_id"`
+	RequestID string   `json:"request_id" gorm:"uniqueIndex;not null"` // UUID for tracking
+	UserID    uint     `json:"user_id" gorm:"not null"`
+	User      User     `json:"user" gorm:"foreignKey:UserID"`
+	ProjectID *uint    `json:"project_id"`
 	Project   *Project `json:"project" gorm:"foreignKey:ProjectID"`
 
 	// AI request details
-	Provider   string `json:"provider" gorm:"not null"`    // claude, gpt4, gemini
-	Capability string `json:"capability" gorm:"not null"`  // code_generation, code_review, etc.
-	Prompt     string `json:"prompt" gorm:"type:text"`     // User's prompt
-	Code       string `json:"code" gorm:"type:text"`       // Code context if provided
-	Language   string `json:"language"`                    // Programming language
+	Provider   string                 `json:"provider" gorm:"not null"`       // claude, gpt4, gemini
+	Capability string                 `json:"capability" gorm:"not null"`     // code_generation, code_review, etc.
+	Prompt     string                 `json:"prompt" gorm:"type:text"`        // User's prompt
+	Code       string                 `json:"code" gorm:"type:text"`          // Code context if provided
+	Language   string                 `json:"language"`                       // Programming language
 	Context    map[string]interface{} `json:"context" gorm:"serializer:json"` // Additional context
 
 	// AI response
-	Response    string  `json:"response" gorm:"type:text"`    // AI's response
-	TokensUsed  int     `json:"tokens_used" gorm:"default:0"` // Total tokens consumed
-	Cost        float64 `json:"cost" gorm:"default:0.0"`      // Cost in USD
-	Duration    int64   `json:"duration" gorm:"default:0"`    // Response time in milliseconds
+	Response   string  `json:"response" gorm:"type:text"`    // AI's response
+	TokensUsed int     `json:"tokens_used" gorm:"default:0"` // Total tokens consumed
+	Cost       float64 `json:"cost" gorm:"default:0.0"`      // Cost in USD
+	Duration   int64   `json:"duration" gorm:"default:0"`    // Response time in milliseconds
 
 	// Request status
-	Status    string `json:"status" gorm:"default:'pending'"` // pending, completed, failed
-	ErrorMsg  string `json:"error_msg"`                       // Error message if failed
+	Status   string `json:"status" gorm:"default:'pending'"` // pending, completed, failed
+	ErrorMsg string `json:"error_msg"`                       // Error message if failed
 
 	// Quality feedback
 	UserRating   *int    `json:"user_rating"`   // 1-5 rating from user
@@ -199,23 +199,23 @@ type Execution struct {
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
 	// Execution identification
-	ExecutionID string  `json:"execution_id" gorm:"uniqueIndex;not null"` // UUID
-	ProjectID   uint    `json:"project_id" gorm:"not null"`
-	Project     Project `json:"project" gorm:"foreignKey:ProjectID"`
-	UserID      uint    `json:"user_id" gorm:"not null"`
-	User        User    `json:"user" gorm:"foreignKey:UserID"`
+	ExecutionID string   `json:"execution_id" gorm:"uniqueIndex;not null"` // UUID
+	ProjectID   *uint    `json:"project_id,omitempty" gorm:"index"`
+	Project     *Project `json:"project,omitempty" gorm:"foreignKey:ProjectID"`
+	UserID      uint     `json:"user_id" gorm:"not null"`
+	User        User     `json:"user" gorm:"foreignKey:UserID"`
 
 	// Execution context
-	Command     string `json:"command" gorm:"not null"`      // Command executed
-	Language    string `json:"language" gorm:"not null"`     // Programming language
+	Command     string                 `json:"command" gorm:"not null"`            // Command executed
+	Language    string                 `json:"language" gorm:"not null"`           // Programming language
 	Environment map[string]interface{} `json:"environment" gorm:"serializer:json"` // Environment variables
-	Input       string `json:"input" gorm:"type:text"`       // Input provided to execution
+	Input       string                 `json:"input" gorm:"type:text"`             // Input provided to execution
 
 	// Execution results
-	Output    string `json:"output" gorm:"type:text"`       // Standard output
-	ErrorOut  string `json:"error_out" gorm:"type:text"`    // Standard error
-	ExitCode  int    `json:"exit_code" gorm:"default:0"`    // Exit code
-	Duration  int64  `json:"duration" gorm:"default:0"`     // Execution time in milliseconds
+	Output   string `json:"output" gorm:"type:text"`    // Standard output
+	ErrorOut string `json:"error_out" gorm:"type:text"` // Standard error
+	ExitCode int    `json:"exit_code" gorm:"default:0"` // Exit code
+	Duration int64  `json:"duration" gorm:"default:0"`  // Execution time in milliseconds
 
 	// Execution state
 	Status      string     `json:"status" gorm:"default:'running'"` // running, completed, failed, timeout
@@ -240,9 +240,9 @@ type CollabRoom struct {
 	Project   *Project `json:"project" gorm:"foreignKey:ProjectID"`
 
 	// Room state
-	IsActive      bool `json:"is_active" gorm:"default:true"`
-	MaxUsers      int  `json:"max_users" gorm:"default:10"`
-	CurrentUsers  int  `json:"current_users" gorm:"default:0"`
+	IsActive     bool `json:"is_active" gorm:"default:true"`
+	MaxUsers     int  `json:"max_users" gorm:"default:10"`
+	CurrentUsers int  `json:"current_users" gorm:"default:0"`
 
 	// Collaboration settings
 	AllowAnonymous bool   `json:"allow_anonymous" gorm:"default:false"`
@@ -250,9 +250,9 @@ type CollabRoom struct {
 	Password       string `json:"password"` // Optional room password
 
 	// Relationships
-	Users       []User           `json:"users" gorm:"many2many:user_collab_rooms;"`
-	Cursors     []CursorPosition `json:"cursors" gorm:"foreignKey:RoomID"`
-	ChatMessages []ChatMessage   `json:"chat_messages" gorm:"foreignKey:RoomID"`
+	Users        []User           `json:"users" gorm:"many2many:user_collab_rooms;"`
+	Cursors      []CursorPosition `json:"cursors" gorm:"foreignKey:RoomID"`
+	ChatMessages []ChatMessage    `json:"chat_messages" gorm:"foreignKey:RoomID"`
 }
 
 // CursorPosition tracks user cursors in real-time collaboration
@@ -262,11 +262,11 @@ type CursorPosition struct {
 	UpdatedAt time.Time `json:"updated_at"`
 
 	// Position tracking
-	RoomID    uint `json:"room_id" gorm:"not null"`
-	UserID    uint `json:"user_id" gorm:"not null"`
-	User      User `json:"user" gorm:"foreignKey:UserID"`
-	FileID    uint `json:"file_id" gorm:"not null"`
-	File      File `json:"file" gorm:"foreignKey:FileID"`
+	RoomID uint `json:"room_id" gorm:"not null"`
+	UserID uint `json:"user_id" gorm:"not null"`
+	User   User `json:"user" gorm:"foreignKey:UserID"`
+	FileID uint `json:"file_id" gorm:"not null"`
+	File   File `json:"file" gorm:"foreignKey:FileID"`
 
 	// Cursor coordinates
 	Line   int `json:"line" gorm:"not null"`
@@ -291,11 +291,11 @@ type ChatMessage struct {
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
 	// Message details
-	RoomID    uint `json:"room_id" gorm:"not null"`
-	UserID    uint `json:"user_id" gorm:"not null"`
-	User      User `json:"user" gorm:"foreignKey:UserID"`
-	Message   string     `json:"message" gorm:"not null"`
-	Type      string     `json:"type" gorm:"default:'text'"` // text, system, code, file
+	RoomID  uint   `json:"room_id" gorm:"not null"`
+	UserID  uint   `json:"user_id" gorm:"not null"`
+	User    User   `json:"user" gorm:"foreignKey:UserID"`
+	Message string `json:"message" gorm:"not null"`
+	Type    string `json:"type" gorm:"default:'text'"` // text, system, code, file
 
 	// Message status
 	IsEdited bool       `json:"is_edited" gorm:"default:false"`
@@ -310,18 +310,18 @@ type FileVersion struct {
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
 	// File relationship
-	FileID    uint   `json:"file_id" gorm:"not null;index"`
-	File      *File  `json:"file,omitempty" gorm:"foreignKey:FileID"`
-	ProjectID uint   `json:"project_id" gorm:"not null;index"`
+	FileID    uint  `json:"file_id" gorm:"not null;index"`
+	File      *File `json:"file,omitempty" gorm:"foreignKey:FileID"`
+	ProjectID uint  `json:"project_id" gorm:"not null;index"`
 
 	// Version identification
-	Version     int    `json:"version" gorm:"not null"`          // Sequential version number
-	VersionHash string `json:"version_hash" gorm:"index"`        // SHA-256 hash for deduplication
+	Version     int    `json:"version" gorm:"not null"`   // Sequential version number
+	VersionHash string `json:"version_hash" gorm:"index"` // SHA-256 hash for deduplication
 
 	// Content snapshot
-	Content   string `json:"content" gorm:"type:text"`           // Full file content at this version
-	Size      int64  `json:"size" gorm:"default:0"`              // Content size in bytes
-	LineCount int    `json:"line_count" gorm:"default:0"`        // Number of lines
+	Content   string `json:"content" gorm:"type:text"`    // Full file content at this version
+	Size      int64  `json:"size" gorm:"default:0"`       // Content size in bytes
+	LineCount int    `json:"line_count" gorm:"default:0"` // Number of lines
 
 	// Change metadata
 	ChangeType    string `json:"change_type" gorm:"default:'edit'"` // create, edit, rename, restore
@@ -332,15 +332,15 @@ type FileVersion struct {
 	// Author information
 	AuthorID   uint   `json:"author_id" gorm:"not null"`
 	Author     *User  `json:"author,omitempty" gorm:"foreignKey:AuthorID"`
-	AuthorName string `json:"author_name"`                        // Cached for display
+	AuthorName string `json:"author_name"` // Cached for display
 
 	// File path at this version (captures renames)
 	FilePath string `json:"file_path" gorm:"not null"`
 	FileName string `json:"file_name" gorm:"not null"`
 
 	// Retention flags
-	IsPinned    bool `json:"is_pinned" gorm:"default:false"`     // Pinned versions are never auto-deleted
-	IsAutoSave  bool `json:"is_auto_save" gorm:"default:false"`  // Auto-save vs manual save
+	IsPinned   bool `json:"is_pinned" gorm:"default:false"`    // Pinned versions are never auto-deleted
+	IsAutoSave bool `json:"is_auto_save" gorm:"default:false"` // Auto-save vs manual save
 }
 
 // CodeComment represents an inline code comment for collaboration (Replit parity feature)
@@ -351,9 +351,9 @@ type CodeComment struct {
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
 	// File relationship
-	FileID    uint    `json:"file_id" gorm:"not null;index"`
-	File      *File   `json:"file,omitempty" gorm:"foreignKey:FileID"`
-	ProjectID uint    `json:"project_id" gorm:"not null;index"`
+	FileID    uint  `json:"file_id" gorm:"not null;index"`
+	File      *File `json:"file,omitempty" gorm:"foreignKey:FileID"`
+	ProjectID uint  `json:"project_id" gorm:"not null;index"`
 
 	// Position in file
 	StartLine   int `json:"start_line" gorm:"not null"`
@@ -365,10 +365,10 @@ type CodeComment struct {
 	Content string `json:"content" gorm:"type:text;not null"`
 
 	// Thread management
-	ParentID  *uint          `json:"parent_id" gorm:"index"`          // For replies
-	Parent    *CodeComment   `json:"parent,omitempty" gorm:"foreignKey:ParentID"`
-	Replies   []CodeComment  `json:"replies,omitempty" gorm:"foreignKey:ParentID"`
-	ThreadID  string         `json:"thread_id" gorm:"index"`          // Groups comments in same thread
+	ParentID *uint         `json:"parent_id" gorm:"index"` // For replies
+	Parent   *CodeComment  `json:"parent,omitempty" gorm:"foreignKey:ParentID"`
+	Replies  []CodeComment `json:"replies,omitempty" gorm:"foreignKey:ParentID"`
+	ThreadID string        `json:"thread_id" gorm:"index"` // Groups comments in same thread
 
 	// Author
 	AuthorID   uint   `json:"author_id" gorm:"not null"`
@@ -387,15 +387,16 @@ type CodeComment struct {
 
 // UserCollabRoom represents the many-to-many relationship between users and collaboration rooms
 type UserCollabRoom struct {
-	UserID      uint      `json:"user_id" gorm:"primarykey"`
-	CollabRoomID uint     `json:"collab_room_id" gorm:"primarykey"`
-	JoinedAt    time.Time `json:"joined_at"`
-	Role        string    `json:"role" gorm:"default:'member'"` // owner, admin, member, viewer
-	IsActive    bool      `json:"is_active" gorm:"default:true"`
+	UserID       uint      `json:"user_id" gorm:"primarykey"`
+	CollabRoomID uint      `json:"collab_room_id" gorm:"primarykey"`
+	JoinedAt     time.Time `json:"joined_at"`
+	Role         string    `json:"role" gorm:"default:'member'"` // owner, admin, member, viewer
+	IsActive     bool      `json:"is_active" gorm:"default:true"`
 }
 
-// RefreshToken stores refresh tokens for secure token rotation
-// Each refresh token can only be used once (rotation) and is stored for revocation
+// RefreshToken stores refresh tokens for secure token rotation.
+// The opaque client token is never persisted directly; Token and TokenHash both
+// store irreversible hashes for lookup and legacy-schema compatibility.
 type RefreshToken struct {
 	ID        uint           `json:"id" gorm:"primarykey"`
 	CreatedAt time.Time      `json:"created_at"`
@@ -403,29 +404,29 @@ type RefreshToken struct {
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
 	// Token identification
-	Token     string    `json:"-" gorm:"uniqueIndex;not null;size:512"` // The hashed refresh token
-	TokenHash string    `json:"-" gorm:"uniqueIndex;not null;size:64"`  // SHA-256 hash for lookup
-	UserID    uint      `json:"user_id" gorm:"not null;index"`
-	User      *User     `json:"user,omitempty" gorm:"foreignKey:UserID"`
+	Token     string `json:"-" gorm:"uniqueIndex;not null;size:512"` // Legacy compatibility column; stores only the token hash
+	TokenHash string `json:"-" gorm:"uniqueIndex;not null;size:64"`  // SHA-256 hash for lookup
+	UserID    uint   `json:"user_id" gorm:"not null;index"`
+	User      *User  `json:"user,omitempty" gorm:"foreignKey:UserID"`
 
 	// Token metadata
 	ExpiresAt time.Time `json:"expires_at" gorm:"not null;index"`
 	IssuedAt  time.Time `json:"issued_at" gorm:"not null"`
 
 	// Token state for rotation
-	Used      bool       `json:"used" gorm:"default:false;index"`       // Token has been used (rotated)
-	UsedAt    *time.Time `json:"used_at"`                               // When the token was used
-	Revoked   bool       `json:"revoked" gorm:"default:false;index"`    // Token has been revoked (logout/security)
-	RevokedAt *time.Time `json:"revoked_at"`                            // When the token was revoked
+	Used      bool       `json:"used" gorm:"default:false;index"`    // Token has been used (rotated)
+	UsedAt    *time.Time `json:"used_at"`                            // When the token was used
+	Revoked   bool       `json:"revoked" gorm:"default:false;index"` // Token has been revoked (logout/security)
+	RevokedAt *time.Time `json:"revoked_at"`                         // When the token was revoked
 
 	// Security tracking
-	IPAddress string `json:"ip_address"`                               // IP address that created this token
-	UserAgent string `json:"user_agent"`                               // User agent that created this token
-	DeviceID  string `json:"device_id" gorm:"index"`                   // Optional device identifier
+	IPAddress string `json:"ip_address"`             // IP address that created this token
+	UserAgent string `json:"user_agent"`             // User agent that created this token
+	DeviceID  string `json:"device_id" gorm:"index"` // Optional device identifier
 
 	// Token family for detecting token reuse attacks
 	// If a used token is presented again, we revoke the entire family
-	FamilyID  string `json:"family_id" gorm:"index;not null;size:36"`  // UUID linking related tokens
+	FamilyID string `json:"family_id" gorm:"index;not null;size:36"` // UUID linking related tokens
 }
 
 // UserAPIKey stores user's own API keys for BYOK (Bring Your Own Key)
@@ -439,7 +440,7 @@ type UserAPIKey struct {
 	// Ownership
 	UserID    uint   `json:"user_id" gorm:"not null;index;uniqueIndex:idx_user_provider"`
 	Provider  string `json:"provider" gorm:"not null;size:20;uniqueIndex:idx_user_provider"` // claude, gpt4, gemini, grok
-	ProjectID *uint  `json:"project_id,omitempty" gorm:"index"` // nil = global key, set = project-scoped
+	ProjectID *uint  `json:"project_id,omitempty" gorm:"index"`                              // nil = global key, set = project-scoped
 
 	// Encrypted key storage (never expose raw key in JSON)
 	EncryptedKey   string `json:"-" gorm:"not null"`
@@ -472,7 +473,7 @@ type AIUsageLog struct {
 	// Provider and model details
 	Provider string `json:"provider" gorm:"not null;size:20;index"` // claude, gpt4, gemini, grok
 	Model    string `json:"model" gorm:"not null;size:100"`         // Exact model used
-	IsBYOK   bool   `json:"is_byok" gorm:"default:false"`          // Whether user's own key was used
+	IsBYOK   bool   `json:"is_byok" gorm:"default:false"`           // Whether user's own key was used
 
 	// Token usage
 	InputTokens  int `json:"input_tokens" gorm:"default:0"`
@@ -505,7 +506,7 @@ type ProjectAsset struct {
 
 	// File metadata
 	OriginalName string `json:"original_name" gorm:"size:255;not null"`
-	StoredName   string `json:"stored_name" gorm:"size:255;not null"`   // UUID-based filename
+	StoredName   string `json:"stored_name" gorm:"size:255;not null"` // UUID-based filename
 	MimeType     string `json:"mime_type" gorm:"size:127"`
 	FileSize     int64  `json:"file_size"`
 	FileType     string `json:"file_type" gorm:"size:20"` // image, video, csv, pdf, text, other
@@ -525,20 +526,20 @@ type CompletedBuild struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
-	BuildID     string  `json:"build_id" gorm:"uniqueIndex;not null;size:64"` // UUID from agent system
-	UserID      uint    `json:"user_id" gorm:"not null;index"`
-	ProjectID   *uint   `json:"project_id,omitempty" gorm:"index"`
-	ProjectName string  `json:"project_name" gorm:"size:255"`
-	Description string  `json:"description" gorm:"type:text"`
-	Status      string  `json:"status" gorm:"size:20;index"` // completed, failed, cancelled
-	Mode        string  `json:"mode" gorm:"size:10"`         // fast, full
-	PowerMode   string  `json:"power_mode" gorm:"size:10"`   // fast, balanced, max
-	TechStack   string  `json:"tech_stack" gorm:"type:text"`  // JSON blob of tech stack
-	FilesJSON   string  `json:"-" gorm:"column:files_json;type:text"` // JSON array of generated files
-	FilesCount  int     `json:"files_count" gorm:"default:0"`
-	TotalCost   float64 `json:"total_cost" gorm:"default:0.0"` // Total AI cost in USD
-	Progress    int     `json:"progress" gorm:"default:100"`
-	DurationMs  int64   `json:"duration_ms" gorm:"default:0"` // Build duration in milliseconds
-	Error       string  `json:"error,omitempty" gorm:"type:text"`
+	BuildID     string     `json:"build_id" gorm:"uniqueIndex;not null;size:64"` // UUID from agent system
+	UserID      uint       `json:"user_id" gorm:"not null;index"`
+	ProjectID   *uint      `json:"project_id,omitempty" gorm:"index"`
+	ProjectName string     `json:"project_name" gorm:"size:255"`
+	Description string     `json:"description" gorm:"type:text"`
+	Status      string     `json:"status" gorm:"size:20;index"`          // completed, failed, cancelled
+	Mode        string     `json:"mode" gorm:"size:10"`                  // fast, full
+	PowerMode   string     `json:"power_mode" gorm:"size:10"`            // fast, balanced, max
+	TechStack   string     `json:"tech_stack" gorm:"type:text"`          // JSON blob of tech stack
+	FilesJSON   string     `json:"-" gorm:"column:files_json;type:text"` // JSON array of generated files
+	FilesCount  int        `json:"files_count" gorm:"default:0"`
+	TotalCost   float64    `json:"total_cost" gorm:"default:0.0"` // Total AI cost in USD
+	Progress    int        `json:"progress" gorm:"default:100"`
+	DurationMs  int64      `json:"duration_ms" gorm:"default:0"` // Build duration in milliseconds
+	Error       string     `json:"error,omitempty" gorm:"type:text"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }

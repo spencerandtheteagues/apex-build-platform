@@ -262,6 +262,23 @@ func (f *SandboxFactory) ExecuteSecure(ctx context.Context, language, code, stdi
 	return executor.Execute(ctx, language, code, stdin)
 }
 
+// ExecuteWorkspaceCommand runs a writable workspace command inside the container sandbox.
+func (f *SandboxFactory) ExecuteWorkspaceCommand(
+	ctx context.Context,
+	language, workspaceDir, command, stdin string,
+	env map[string]string,
+) (*ExecutionResult, error) {
+	f.mu.RLock()
+	containerSandbox := f.containerSandbox
+	f.mu.RUnlock()
+
+	if containerSandbox == nil {
+		return nil, fmt.Errorf("container sandbox not available")
+	}
+
+	return containerSandbox.ExecuteWorkspaceCommand(ctx, language, workspaceDir, command, stdin, env)
+}
+
 // IsContainerAvailable returns whether container sandbox is available
 func (f *SandboxFactory) IsContainerAvailable() bool {
 	f.mu.RLock()

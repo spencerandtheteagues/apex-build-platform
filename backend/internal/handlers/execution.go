@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"apex-build/internal/execution"
@@ -56,6 +57,23 @@ func sanitizeEntryPoint(entryPoint string) string {
 		}
 	}
 	return entryPoint
+}
+
+func normalizeProjectFilePath(path string) (string, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" || trimmed == "/" || trimmed == "." {
+		return "", nil
+	}
+
+	cleaned := filepath.Clean(strings.TrimPrefix(trimmed, "/"))
+	if cleaned == "." || cleaned == "" {
+		return "", nil
+	}
+	if filepath.IsAbs(cleaned) || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("invalid project file path %q", path)
+	}
+
+	return cleaned, nil
 }
 
 // ExecutionHandler handles code execution requests
@@ -112,7 +130,7 @@ func NewExecutionHandlerWithConfig(db *gorm.DB, config *ExecutionHandlerConfig) 
 		log.Printf("SECURITY: Docker sandbox available (version: %s)", dockerStatus.Version)
 		log.Println("SECURITY: Code execution will use container isolation with:")
 		log.Println("          - Seccomp syscall filtering")
-		log.Println("          - Network isolation (disabled by default)")
+		log.Println("          - Network isolation (enabled by default)")
 		log.Println("          - Memory limits (256MB default)")
 		log.Println("          - CPU limits (0.5 cores default)")
 		log.Println("          - Read-only root filesystem")
@@ -202,8 +220,8 @@ type ExecuteCodeRequest struct {
 	Code      string            `json:"code" binding:"required"`
 	Language  string            `json:"language" binding:"required"`
 	Stdin     string            `json:"stdin"`
-	Timeout   int               `json:"timeout"`   // Timeout in seconds
-	Env       map[string]string `json:"env"`       // Environment variables
+	Timeout   int               `json:"timeout"` // Timeout in seconds
+	Env       map[string]string `json:"env"`     // Environment variables
 	ProjectID uint              `json:"project_id"`
 }
 
@@ -261,7 +279,7 @@ func (h *ExecutionHandler) ExecuteCode(c *gin.Context) {
 	}
 
 	if req.ProjectID > 0 {
-		execRecord.ProjectID = req.ProjectID
+		execRecord.ProjectID = &req.ProjectID
 	}
 
 	if err := h.DB.Create(execRecord).Error; err != nil {
@@ -282,6 +300,7 @@ func (h *ExecutionHandler) ExecuteCode(c *gin.Context) {
 		// SECURITY: In production, require container sandbox
 		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeContainer)
 		if err != nil {
+			markExecutionFailed(h.DB, execRecord, "Secure container execution is required but unavailable")
 			c.JSON(http.StatusServiceUnavailable, StandardResponse{
 				Success: false,
 				Error:   "Secure container execution is required but unavailable",
@@ -293,6 +312,7 @@ func (h *ExecutionHandler) ExecuteCode(c *gin.Context) {
 		// Use auto mode which prefers container but falls back to process
 		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeAuto)
 		if err != nil {
+			markExecutionFailed(h.DB, execRecord, "Failed to get execution sandbox: "+err.Error())
 			c.JSON(http.StatusInternalServerError, StandardResponse{
 				Success: false,
 				Error:   "Failed to get execution sandbox: " + err.Error(),
@@ -313,6 +333,7 @@ func (h *ExecutionHandler) ExecuteCode(c *gin.Context) {
 	// Execute code using the secure sandbox
 	result, err := executor.Execute(ctx, req.Language, req.Code, req.Stdin)
 	if err != nil {
+		markExecutionFailed(h.DB, execRecord, "Execution failed: "+err.Error())
 		c.JSON(http.StatusInternalServerError, StandardResponse{
 			Success: false,
 			Error:   "Execution failed: " + err.Error(),
@@ -347,31 +368,31 @@ func (h *ExecutionHandler) ExecuteCode(c *gin.Context) {
 	c.JSON(http.StatusOK, StandardResponse{
 		Success: true,
 		Data: map[string]interface{}{
-			"id":             execRecord.ExecutionID,
-			"status":         result.Status,
-			"output":         result.Output,
-			"error_output":   result.ErrorOutput,
-			"exit_code":      result.ExitCode,
-			"duration_ms":    result.DurationMs,
-			"memory_used":    result.MemoryUsed,
-			"cpu_time_ms":    result.CPUTime,
-			"timed_out":      result.TimedOut,
-			"killed":         result.Killed,
-			"compile_error":  result.CompileError,
-			"language":       result.Language,
-			"started_at":     result.StartedAt,
-			"completed_at":   result.CompletedAt,
-			"sandbox_type":   sandboxInfo,
+			"id":            execRecord.ExecutionID,
+			"status":        result.Status,
+			"output":        result.Output,
+			"error_output":  result.ErrorOutput,
+			"exit_code":     result.ExitCode,
+			"duration_ms":   result.DurationMs,
+			"memory_used":   result.MemoryUsed,
+			"cpu_time_ms":   result.CPUTime,
+			"timed_out":     result.TimedOut,
+			"killed":        result.Killed,
+			"compile_error": result.CompileError,
+			"language":      result.Language,
+			"started_at":    result.StartedAt,
+			"completed_at":  result.CompletedAt,
+			"sandbox_type":  sandboxInfo,
 		},
 	})
 }
 
 // ExecuteFileRequest represents a file execution request
 type ExecuteFileRequest struct {
-	FileID    uint     `json:"file_id" binding:"required"`
-	Args      []string `json:"args"`
-	Stdin     string   `json:"stdin"`
-	Timeout   int      `json:"timeout"`
+	FileID  uint     `json:"file_id" binding:"required"`
+	Args    []string `json:"args"`
+	Stdin   string   `json:"stdin"`
+	Timeout int      `json:"timeout"`
 }
 
 // ExecuteFile handles POST /api/v1/execute/file
@@ -461,7 +482,7 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 	// Create execution record
 	execRecord := &models.Execution{
 		ExecutionID: uuid.New().String(),
-		ProjectID:   file.ProjectID,
+		ProjectID:   &file.ProjectID,
 		UserID:      userID,
 		Language:    file.Project.Language,
 		Command:     fmt.Sprintf("execute %s", file.Name),
@@ -482,6 +503,9 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 	if h.ContainerRequired {
 		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeContainer)
 		if err != nil {
+			if execRecord.ID > 0 {
+				markExecutionFailed(h.DB, execRecord, "Secure container execution is required but unavailable")
+			}
 			c.JSON(http.StatusServiceUnavailable, StandardResponse{
 				Success: false,
 				Error:   "Secure container execution is required but unavailable",
@@ -492,6 +516,9 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 	} else {
 		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeAuto)
 		if err != nil {
+			if execRecord.ID > 0 {
+				markExecutionFailed(h.DB, execRecord, "Failed to get execution sandbox")
+			}
 			c.JSON(http.StatusInternalServerError, StandardResponse{
 				Success: false,
 				Error:   "Failed to get execution sandbox",
@@ -518,6 +545,9 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 			// Read file content and execute as code
 			result, err = executor.Execute(ctx, file.Project.Language, file.Content, req.Stdin)
 			if err != nil {
+				if execRecord.ID > 0 {
+					markExecutionFailed(h.DB, execRecord, "Execution failed: "+err.Error())
+				}
 				c.JSON(http.StatusInternalServerError, StandardResponse{
 					Success: false,
 					Error:   "Execution failed: " + err.Error(),
@@ -526,6 +556,9 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 				return
 			}
 		} else {
+			if execRecord.ID > 0 {
+				markExecutionFailed(h.DB, execRecord, "Execution failed: "+err.Error())
+			}
 			c.JSON(http.StatusInternalServerError, StandardResponse{
 				Success: false,
 				Error:   "Execution failed: " + err.Error(),
@@ -543,7 +576,13 @@ func (h *ExecutionHandler) ExecuteFile(c *gin.Context) {
 		execRecord.Status = result.Status
 		execRecord.Duration = result.DurationMs
 		execRecord.MemoryUsed = result.MemoryUsed
-		h.DB.Save(execRecord)
+		execRecord.CPUTime = result.CPUTime
+		if result.CompletedAt != nil {
+			execRecord.CompletedAt = result.CompletedAt
+		}
+		if err := h.DB.Save(execRecord).Error; err != nil {
+			log.Printf("Failed to update file execution record: %v", err)
+		}
 	}
 
 	// Include sandbox info
@@ -653,29 +692,86 @@ func (h *ExecutionHandler) ExecuteProject(c *gin.Context) {
 
 	// Write all project files
 	for _, file := range project.Files {
-		if file.Type == "directory" {
-			os.MkdirAll(filepath.Join(projectDir, file.Path), 0755)
+		projectPath := file.Path
+		if strings.TrimSpace(projectPath) == "" {
+			projectPath = file.Name
+		}
+		normalizedPath, err := normalizeProjectFilePath(projectPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, StandardResponse{
+				Success: false,
+				Error:   "Project contains an invalid file path",
+				Code:    "INVALID_PROJECT_PATH",
+			})
+			return
+		}
+		if normalizedPath == "" {
 			continue
 		}
 
-		filePath := filepath.Join(projectDir, file.Path)
-		fileDir := filepath.Dir(filePath)
-		if err := os.MkdirAll(fileDir, 0755); err != nil {
+		if file.Type == "directory" {
+			if err := os.MkdirAll(filepath.Join(projectDir, normalizedPath), 0755); err != nil {
+				c.JSON(http.StatusInternalServerError, StandardResponse{
+					Success: false,
+					Error:   "Failed to prepare project directory",
+					Code:    "SYSTEM_ERROR",
+				})
+				return
+			}
 			continue
 		}
-		os.WriteFile(filePath, []byte(file.Content), 0644)
+
+		filePath := filepath.Join(projectDir, normalizedPath)
+		fileDir := filepath.Dir(filePath)
+		if err := os.MkdirAll(fileDir, 0755); err != nil {
+			c.JSON(http.StatusInternalServerError, StandardResponse{
+				Success: false,
+				Error:   "Failed to prepare project files",
+				Code:    "SYSTEM_ERROR",
+			})
+			return
+		}
+		if err := os.WriteFile(filePath, []byte(file.Content), 0644); err != nil {
+			c.JSON(http.StatusInternalServerError, StandardResponse{
+				Success: false,
+				Error:   "Failed to write project files",
+				Code:    "SYSTEM_ERROR",
+			})
+			return
+		}
 	}
 
 	// Determine run command
-	runCmd := req.Command
+	entryPoint := project.EntryPoint
+	if entryPoint == "" {
+		entryPoint = findEntryPoint(project.Language, project.Files)
+	}
+	runCmd := strings.TrimSpace(req.Command)
 	if runCmd == "" {
-		runCmd = getDefaultRunCommand(project.Language, project.Framework, project.EntryPoint)
+		runCmd = getDefaultRunCommand(project.Language, project.Framework, entryPoint)
+	}
+	if strings.TrimSpace(runCmd) == "" || strings.Contains(runCmd, "No run command configured") {
+		c.JSON(http.StatusBadRequest, StandardResponse{
+			Success: false,
+			Error:   "No runnable command is configured for this project",
+			Code:    "RUN_COMMAND_UNAVAILABLE",
+		})
+		return
+	}
+
+	if !h.SandboxFactory.IsContainerAvailable() {
+		c.JSON(http.StatusServiceUnavailable, StandardResponse{
+			Success: false,
+			Error:   "Project execution requires the container sandbox and full workspace support",
+			Code:    "PROJECT_EXECUTION_REQUIRES_CONTAINER",
+		})
+		return
 	}
 
 	// Create execution record
 	execRecord := &models.Execution{
 		ExecutionID: uuid.New().String(),
-		ProjectID:   project.ID,
+		ProjectID:   &project.ID,
 		UserID:      userID,
 		Language:    project.Language,
 		Command:     runCmd,
@@ -688,32 +784,13 @@ func (h *ExecutionHandler) ExecuteProject(c *gin.Context) {
 			execRecord.Environment[k] = v
 		}
 	}
-	h.DB.Create(execRecord)
-
-	// Get executor from factory
-	var executor execution.CodeExecutor
-	var err error
-
-	if h.ContainerRequired {
-		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeContainer)
-		if err != nil {
-			c.JSON(http.StatusServiceUnavailable, StandardResponse{
-				Success: false,
-				Error:   "Secure container execution is required but unavailable",
-				Code:    "CONTAINER_REQUIRED",
-			})
-			return
-		}
-	} else {
-		executor, err = h.SandboxFactory.GetExecutor(execution.SandboxTypeAuto)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, StandardResponse{
-				Success: false,
-				Error:   "Failed to get execution sandbox",
-				Code:    "SANDBOX_ERROR",
-			})
-			return
-		}
+	if err := h.DB.Create(execRecord).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, StandardResponse{
+			Success: false,
+			Error:   "Failed to create execution record",
+			Code:    "DATABASE_ERROR",
+		})
+		return
 	}
 
 	// Create execution context with timeout
@@ -724,36 +801,9 @@ func (h *ExecutionHandler) ExecuteProject(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// Find entry point
-	entryPoint := project.EntryPoint
-	if entryPoint == "" {
-		entryPoint = findEntryPoint(project.Language, project.Files)
-	}
-
-	// Execute the entry point file
-	var result *execution.ExecutionResult
-	if entryPoint != "" {
-		// Find the entry point file content
-		var entryContent string
-		for _, file := range project.Files {
-			if file.Path == entryPoint || file.Name == entryPoint {
-				entryContent = file.Content
-				break
-			}
-		}
-
-		if entryContent != "" {
-			// Execute the entry point content in the container
-			result, err = executor.Execute(ctx, project.Language, entryContent, "")
-		} else {
-			err = fmt.Errorf("entry point file not found: %s", entryPoint)
-		}
-	} else {
-		// No entry point found, try to find main file
-		err = fmt.Errorf("no entry point found for project")
-	}
-
+	result, err := h.SandboxFactory.ExecuteWorkspaceCommand(ctx, project.Language, projectDir, runCmd, "", req.Env)
 	if err != nil {
+		markExecutionFailed(h.DB, execRecord, "Project execution failed: "+err.Error())
 		c.JSON(http.StatusInternalServerError, StandardResponse{
 			Success: false,
 			Error:   "Project execution failed: " + err.Error(),
@@ -769,7 +819,12 @@ func (h *ExecutionHandler) ExecuteProject(c *gin.Context) {
 	execRecord.Status = result.Status
 	execRecord.Duration = result.DurationMs
 	execRecord.MemoryUsed = result.MemoryUsed
-	h.DB.Save(execRecord)
+	if result.CompletedAt != nil {
+		execRecord.CompletedAt = result.CompletedAt
+	}
+	if err := h.DB.Save(execRecord).Error; err != nil {
+		log.Printf("Failed to update project execution record: %v", err)
+	}
 
 	// Include sandbox info
 	sandboxInfo := "container"
@@ -780,7 +835,7 @@ func (h *ExecutionHandler) ExecuteProject(c *gin.Context) {
 	c.JSON(http.StatusOK, StandardResponse{
 		Success: true,
 		Data: map[string]interface{}{
-			"id":           result.ID,
+			"id":           execRecord.ExecutionID,
 			"status":       result.Status,
 			"output":       result.Output,
 			"error_output": result.ErrorOutput,
@@ -1030,12 +1085,12 @@ func (h *ExecutionHandler) GetExecutionStats(c *gin.Context) {
 
 	// Get user stats
 	var stats struct {
-		TotalExecutions  int64 `json:"total_executions"`
-		SuccessfulExecs  int64 `json:"successful_executions"`
-		FailedExecs      int64 `json:"failed_executions"`
-		TimeoutExecs     int64 `json:"timeout_executions"`
-		TotalCPUTime     int64 `json:"total_cpu_time_ms"`
-		TotalMemoryUsed  int64 `json:"total_memory_used_bytes"`
+		TotalExecutions  int64   `json:"total_executions"`
+		SuccessfulExecs  int64   `json:"successful_executions"`
+		FailedExecs      int64   `json:"failed_executions"`
+		TimeoutExecs     int64   `json:"timeout_executions"`
+		TotalCPUTime     int64   `json:"total_cpu_time_ms"`
+		TotalMemoryUsed  int64   `json:"total_memory_used_bytes"`
 		AvgExecutionTime float64 `json:"avg_execution_time_ms"`
 	}
 
@@ -1210,6 +1265,22 @@ func findEntryPoint(language string, files []models.File) string {
 	return ""
 }
 
+func markExecutionFailed(db *gorm.DB, execRecord *models.Execution, message string) {
+	if db == nil || execRecord == nil {
+		return
+	}
+
+	now := time.Now()
+	execRecord.Status = "failed"
+	execRecord.ErrorOut = message
+	execRecord.ExitCode = 1
+	execRecord.CompletedAt = &now
+
+	if err := db.Save(execRecord).Error; err != nil {
+		log.Printf("Failed to persist execution failure: %v", err)
+	}
+}
+
 // Cleanup cleans up handler resources
 func (h *ExecutionHandler) Cleanup() error {
 	if h.SandboxFactory != nil {
@@ -1221,7 +1292,7 @@ func (h *ExecutionHandler) Cleanup() error {
 // GetSandboxStatus returns the current sandbox status for health checks
 func (h *ExecutionHandler) GetSandboxStatus() map[string]interface{} {
 	status := map[string]interface{}{
-		"execution_enabled": h.SandboxFactory != nil,
+		"execution_enabled":  h.SandboxFactory != nil,
 		"container_required": h.ContainerRequired,
 	}
 

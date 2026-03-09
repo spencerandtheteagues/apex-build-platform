@@ -262,7 +262,7 @@ func (a *AuthService) GenerateTokensWithMetadata(user *models.User, metadata *Re
 		tokenHash := hashToken(refreshTokenString)
 
 		refreshTokenRecord := &models.RefreshToken{
-			Token:     refreshTokenString, // Store the actual token (could be hashed if needed)
+			Token:     tokenHash,
 			TokenHash: tokenHash,
 			UserID:    user.ID,
 			ExpiresAt: refreshExpiresAt,
@@ -676,7 +676,7 @@ func (a *AuthService) CreateUser(req *RegisterRequest) (*models.User, error) {
 		IsActive:            true,
 		IsVerified:          false,
 		SubscriptionType:    "free",
-		HasUnlimitedCredits: true,
+		HasUnlimitedCredits: false,
 		PreferredTheme:      "cyberpunk",
 		PreferredAI:         "auto",
 	}

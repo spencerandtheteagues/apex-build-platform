@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestNewAuthService(t *testing.T) {
@@ -548,13 +550,48 @@ func TestCreateUser(t *testing.T) {
 				assert.True(t, user.IsActive)
 				assert.False(t, user.IsVerified)
 				assert.Equal(t, "free", user.SubscriptionType)
-				assert.True(t, user.HasUnlimitedCredits)
+				assert.False(t, user.HasUnlimitedCredits)
 				assert.False(t, user.BypassBilling)
 				assert.Equal(t, "cyberpunk", user.PreferredTheme)
 				assert.Equal(t, "auto", user.PreferredAI)
 			}
 		})
 	}
+}
+
+func TestGenerateTokensWithMetadataStoresOnlyRefreshTokenHashes(t *testing.T) {
+	authService := NewAuthService("test-secret-key")
+
+	gormDB, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, gormDB.AutoMigrate(&models.User{}, &models.RefreshToken{}))
+
+	authService.SetDB(gormDB)
+
+	user := &models.User{
+		Username:         "dbuser",
+		Email:            "dbuser@example.com",
+		PasswordHash:     "hash",
+		IsActive:         true,
+		SubscriptionType: "free",
+	}
+	require.NoError(t, gormDB.Create(user).Error)
+
+	tokens, err := authService.GenerateTokensWithMetadata(user, &RefreshTokenMetadata{
+		IPAddress: "127.0.0.1",
+		UserAgent: "auth-test",
+		DeviceID:  "device-1",
+	})
+	require.NoError(t, err)
+
+	var stored models.RefreshToken
+	require.NoError(t, gormDB.First(&stored).Error)
+
+	expectedHash := hashToken(tokens.RefreshToken)
+	assert.Equal(t, expectedHash, stored.TokenHash)
+	assert.Equal(t, expectedHash, stored.Token)
+	assert.NotEqual(t, tokens.RefreshToken, stored.Token)
+	assert.NotEqual(t, tokens.RefreshToken, stored.TokenHash)
 }
 
 func TestPasswordStrengthCheck(t *testing.T) {

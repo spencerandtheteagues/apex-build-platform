@@ -104,6 +104,14 @@ type containerExecution struct {
 	Done        chan struct{}
 }
 
+type containerRunOptions struct {
+	MountSource   string
+	MountReadOnly bool
+	WorkDir       string
+	Command       []string
+	Env           map[string]string
+}
+
 // AuditLogger handles security audit logging
 type AuditLogger struct {
 	logPath string
@@ -619,12 +627,112 @@ func (s *ContainerSandbox) Execute(ctx context.Context, language, code, stdin st
 	}
 
 	// Build and run container
-	result := s.runContainer(execCtx, exec, filename, stdin, limits)
+	result := s.runContainer(execCtx, exec, limits, containerRunOptions{
+		MountSource:   tempDir,
+		MountReadOnly: true,
+		WorkDir:       "/work",
+		Command:       s.getExecutionCommand(exec.Language, filename),
+	}, stdin)
 
 	// Log execution
 	s.logExecution(exec, result)
 
 	// Update stats
+	atomic.AddInt64(&s.stats.TotalExecutions, 1)
+	switch result.Status {
+	case "completed":
+		atomic.AddInt64(&s.stats.SuccessfulExecs, 1)
+	case "timeout":
+		atomic.AddInt64(&s.stats.TimeoutExecs, 1)
+	case "killed":
+		atomic.AddInt64(&s.stats.KilledExecs, 1)
+	default:
+		atomic.AddInt64(&s.stats.FailedExecs, 1)
+	}
+
+	return result, nil
+}
+
+// ExecuteWorkspaceCommand runs a project workspace command inside the container sandbox.
+// The workspace mount is writable so build artifacts stay scoped to the ephemeral project dir.
+func (s *ContainerSandbox) ExecuteWorkspaceCommand(
+	ctx context.Context,
+	language, workspaceDir, command, stdin string,
+	env map[string]string,
+) (*ExecutionResult, error) {
+	if strings.TrimSpace(workspaceDir) == "" {
+		return nil, fmt.Errorf("workspace directory is required")
+	}
+	info, err := os.Stat(workspaceDir)
+	if err != nil {
+		return nil, fmt.Errorf("workspace directory unavailable: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("workspace path is not a directory")
+	}
+	if strings.TrimSpace(command) == "" {
+		return nil, fmt.Errorf("workspace command is required")
+	}
+
+	execID := uuid.New().String()
+	startTime := time.Now()
+
+	current := atomic.AddInt32(&s.stats.ConcurrentExecs, 1)
+	defer atomic.AddInt32(&s.stats.ConcurrentExecs, -1)
+
+	if current > s.config.MaxConcurrentExecs {
+		atomic.AddInt64(&s.stats.FailedExecs, 1)
+		return &ExecutionResult{
+			ID:          execID,
+			Status:      "failed",
+			ErrorOutput: "Too many concurrent executions. Please try again later.",
+			ExitCode:    1,
+			Language:    language,
+			StartedAt:   startTime,
+		}, nil
+	}
+
+	for {
+		max := atomic.LoadInt32(&s.stats.MaxConcurrentExecs)
+		if current <= max || atomic.CompareAndSwapInt32(&s.stats.MaxConcurrentExecs, max, current) {
+			break
+		}
+	}
+
+	limits := s.getResourceLimits(language)
+	execCtx, cancel := context.WithTimeout(ctx, limits.Timeout)
+
+	exec := &containerExecution{
+		ID:        execID,
+		Language:  language,
+		StartTime: startTime,
+		TempDir:   workspaceDir,
+		Cancel:    cancel,
+		Done:      make(chan struct{}),
+	}
+
+	s.executionsMu.Lock()
+	s.executions[execID] = exec
+	s.executionsMu.Unlock()
+
+	defer func() {
+		cancel()
+		close(exec.Done)
+		s.executionsMu.Lock()
+		delete(s.executions, execID)
+		s.executionsMu.Unlock()
+	}()
+
+	result := s.runContainer(execCtx, exec, limits, containerRunOptions{
+		MountSource:   workspaceDir,
+		MountReadOnly: false,
+		WorkDir:       "/work",
+		Command:       []string{"sh", "-lc", command},
+		Env:           env,
+	}, stdin)
+
+	s.logExecution(exec, result)
+
 	atomic.AddInt64(&s.stats.TotalExecutions, 1)
 	switch result.Status {
 	case "completed":
@@ -729,7 +837,13 @@ func extractJavaClassNameFromCode(code string) string {
 }
 
 // runContainer executes code in a Docker container
-func (s *ContainerSandbox) runContainer(ctx context.Context, exec *containerExecution, filename, stdin string, limits *LanguageResourceLimits) *ExecutionResult {
+func (s *ContainerSandbox) runContainer(
+	ctx context.Context,
+	exec *containerExecution,
+	limits *LanguageResourceLimits,
+	opts containerRunOptions,
+	stdin string,
+) *ExecutionResult {
 	result := &ExecutionResult{
 		ID:        exec.ID,
 		Language:  exec.Language,
@@ -740,7 +854,7 @@ func (s *ContainerSandbox) runContainer(ctx context.Context, exec *containerExec
 	imageName := s.getImageName(exec.Language)
 
 	// Build docker run command
-	args := s.buildDockerArgs(exec, filename, limits, imageName)
+	args := s.buildDockerArgs(exec, limits, imageName, opts)
 	if stdin != "" {
 		// Required for piping stdin into `docker run`.
 		args = append(args[:1], append([]string{"-i"}, args[1:]...)...)
@@ -798,7 +912,12 @@ func (s *ContainerSandbox) runContainer(ctx context.Context, exec *containerExec
 }
 
 // buildDockerArgs constructs the docker run command arguments
-func (s *ContainerSandbox) buildDockerArgs(exec *containerExecution, filename string, limits *LanguageResourceLimits, imageName string) []string {
+func (s *ContainerSandbox) buildDockerArgs(
+	exec *containerExecution,
+	limits *LanguageResourceLimits,
+	imageName string,
+	opts containerRunOptions,
+) []string {
 	containerName := fmt.Sprintf("apex-sandbox-%s", exec.ID[:12])
 	exec.ContainerID = containerName
 
@@ -846,11 +965,15 @@ func (s *ContainerSandbox) buildDockerArgs(exec *containerExecution, filename st
 		args = append(args, "--network="+s.config.NetworkMode)
 	}
 
-	// Mount code directory (read-only).
+	// Mount the execution workspace.
 	// The ",z" suffix relabels the mount for SELinux-enabled hosts (e.g. Fedora/RHEL)
 	// so the container process can read the files without a permission-denied error.
+	mountMode := "rw,z"
+	if opts.MountReadOnly {
+		mountMode = "ro,z"
+	}
 	args = append(args,
-		"-v", fmt.Sprintf("%s:/work:ro,z", exec.TempDir),
+		"-v", fmt.Sprintf("%s:/work:%s", opts.MountSource, mountMode),
 	)
 
 	// Shared package caches for faster warm starts (Replit-parity behavior)
@@ -866,18 +989,28 @@ func (s *ContainerSandbox) buildDockerArgs(exec *containerExecution, filename st
 			}
 		}
 	}
+	for k, v := range opts.Env {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
+	}
 
 	// Set user
 	args = append(args, "--user", "sandbox")
 
 	// Working directory
-	args = append(args, "-w", "/work")
+	workDir := opts.WorkDir
+	if workDir == "" {
+		workDir = "/work"
+	}
+	args = append(args, "-w", workDir)
 
 	// Add image
 	args = append(args, imageName)
 
 	// Add execution command
-	execCmd := s.getExecutionCommand(exec.Language, filename)
+	execCmd := opts.Command
+	if len(execCmd) == 0 {
+		execCmd = []string{"sh", "-lc", "echo 'No command configured'"}
+	}
 	args = append(args, execCmd...)
 
 	return args

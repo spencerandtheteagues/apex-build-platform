@@ -427,7 +427,7 @@ func main() {
 
 	if stripeSecretKey != "" && stripeSecretKey != "sk_test_xxx" {
 		log.Println("Stripe Payment Integration initialized")
-		log.Printf("   - Plans: Free, Pro ($12/mo), Team ($29/mo), Enterprise ($99/mo)")
+		log.Printf("   - Plans: Free, Builder ($19/mo), Pro ($49/mo), Team ($99/mo), Enterprise (contact sales)")
 		startupRegistry.MarkReady("payments", startup.TierOptional, "Stripe payment integration initialized", map[string]any{
 			"enabled": true,
 		})
@@ -525,7 +525,7 @@ func main() {
 		if containerAvail, ok := sandboxStatus["container_available"].(bool); ok && containerAvail {
 			log.Println("SECURITY: Docker container sandboxing ENABLED")
 			log.Println("   - Seccomp syscall filtering: enabled")
-			log.Println("   - Network isolation: disabled by default")
+			log.Println("   - Network isolation: enabled by default")
 			log.Println("   - Memory limit: 256MB default")
 			log.Println("   - CPU limit: 0.5 cores default")
 			log.Println("   - Read-only root filesystem: enabled")

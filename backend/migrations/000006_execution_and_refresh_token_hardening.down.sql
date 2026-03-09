@@ -1,0 +1,2 @@
+ALTER TABLE executions
+ALTER COLUMN project_id SET NOT NULL;
