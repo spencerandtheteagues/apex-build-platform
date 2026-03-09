@@ -16,6 +16,7 @@ import (
 
 	"apex-build/internal/agents/core"
 	"apex-build/internal/agents/guarantee"
+	"gorm.io/gorm"
 )
 
 // BuildFSMContext holds the FSM, validator, guarantee engine, and bridge for a single build.
@@ -28,13 +29,19 @@ type BuildFSMContext struct {
 
 // NewBuildFSMContext creates the full FSM + guarantee stack for a build.
 // The broadcastFn bridges FSM events to the WebSocket hub.
-func NewBuildFSMContext(buildID string, totalSteps int, broadcastFn core.BroadcastFunc) (*BuildFSMContext, error) {
-	// Create FSM
-	fsm := core.NewAgentFSM(core.AgentFSMConfig{
+// db is optional — when provided, checkpoints are persisted to Postgres.
+func NewBuildFSMContext(buildID string, totalSteps int, broadcastFn core.BroadcastFunc, db ...*gorm.DB) (*BuildFSMContext, error) {
+	cfg := core.AgentFSMConfig{
 		BuildID:    buildID,
 		MaxRetries: 3,
 		TotalSteps: totalSteps,
-	})
+	}
+	if len(db) > 0 && db[0] != nil {
+		cfg.CheckpointStore = core.NewPostgresCheckpointStore(db[0])
+	}
+
+	// Create FSM
+	fsm := core.NewAgentFSM(cfg)
 
 	// Create validator (no smoke test runner in base config — Codex 5.3 provides that)
 	validator, err := core.NewBuildValidator(core.ValidatorConfig{

@@ -25,6 +25,7 @@ import (
 
 	"apex-build/internal/ai"
 	"apex-build/internal/metrics"
+	"apex-build/internal/spend"
 	"apex-build/pkg/models"
 
 	"github.com/google/uuid"
@@ -56,18 +57,19 @@ type providerVote struct {
 
 // AgentManager handles the lifecycle and coordination of AI agents
 type AgentManager struct {
-	agents      map[string]*Agent
-	builds      map[string]*Build
-	taskQueue   chan *Task
-	resultQueue chan *TaskResult
-	subscribers map[string][]chan *WSMessage
-	aiRouter    AIRouter
-	db          *gorm.DB // Database connection for persisting completed builds
-	editStore   *ProposedEditStore
-	pathGuard   *PathGuard
-	mu          sync.RWMutex
-	ctx         context.Context
-	cancel      context.CancelFunc
+	agents       map[string]*Agent
+	builds       map[string]*Build
+	taskQueue    chan *Task
+	resultQueue  chan *TaskResult
+	subscribers  map[string][]chan *WSMessage
+	aiRouter     AIRouter
+	db           *gorm.DB // Database connection for persisting completed builds
+	editStore    *ProposedEditStore
+	pathGuard    *PathGuard
+	spendTracker *spend.SpendTracker
+	mu           sync.RWMutex
+	ctx          context.Context
+	cancel       context.CancelFunc
 }
 
 // AIRouter interface for communicating with AI providers
@@ -123,6 +125,7 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 	}
 	if len(db) > 0 && db[0] != nil {
 		am.db = db[0]
+		am.spendTracker = spend.NewSpendTracker(db[0])
 	}
 
 	// Start background workers
@@ -1672,6 +1675,34 @@ func (am *AgentManager) executeTask(task *Task) {
 	}
 
 	log.Printf("AI generation succeeded for task %s (response_length: %d)", task.ID, len(response.Content))
+
+	// Record spend for this agent AI call
+	if am.spendTracker != nil && response.Usage != nil {
+		build.mu.RLock()
+		projectID := build.ProjectID
+		powerMode := string(build.PowerMode)
+		usesPlatformKeys := am.buildUsesPlatformKeys(build)
+		build.mu.RUnlock()
+
+		si := spend.RecordSpendInput{
+			UserID:       build.UserID,
+			ProjectID:    projectID,
+			BuildID:      agent.BuildID,
+			AgentID:      agent.ID,
+			AgentRole:    string(agent.Role),
+			Provider:     string(agent.Provider),
+			Model:        modelUsed,
+			Capability:   string(task.Type),
+			IsBYOK:       !usesPlatformKeys,
+			InputTokens:  response.Usage.PromptTokens,
+			OutputTokens: response.Usage.CompletionTokens,
+			PowerMode:    powerMode,
+			Status:       "success",
+		}
+		if _, err := am.spendTracker.RecordSpend(si); err != nil {
+			log.Printf("spend: failed to record agent spend for build %s agent %s: %v", agent.BuildID, agent.ID, err)
+		}
+	}
 
 	// Parse the response into task output
 	output := am.parseTaskOutput(task.Type, response.Content)

@@ -18,6 +18,7 @@ import (
 	"apex-build/internal/ai"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // orchestratorAIAdapter bridges the agents.AIRouter to autonomous.AIProvider interface
@@ -53,6 +54,7 @@ func (a *orchestratorAIAdapter) Analyze(ctx context.Context, content string, ins
 type BuildOrchestrator struct {
 	manager     *AgentManager
 	hub         *WSHub
+	db          *gorm.DB
 	activeBuild map[string]*OrchestrationState
 	mu          sync.RWMutex
 }
@@ -120,12 +122,16 @@ const (
 )
 
 // NewBuildOrchestrator creates a new build orchestrator
-func NewBuildOrchestrator(manager *AgentManager, hub *WSHub) *BuildOrchestrator {
-	return &BuildOrchestrator{
+func NewBuildOrchestrator(manager *AgentManager, hub *WSHub, db ...*gorm.DB) *BuildOrchestrator {
+	o := &BuildOrchestrator{
 		manager:     manager,
 		hub:         hub,
 		activeBuild: make(map[string]*OrchestrationState),
 	}
+	if len(db) > 0 && db[0] != nil {
+		o.db = db[0]
+	}
+	return o
 }
 
 // StartOrchestration begins orchestrating a build
@@ -161,7 +167,7 @@ func (o *BuildOrchestrator) StartOrchestration(buildID string) error {
 	}
 
 	broadcastFn := MakeBroadcastFunc(o.hub)
-	fsmCtx, err := NewBuildFSMContext(buildID, totalSteps, broadcastFn)
+	fsmCtx, err := NewBuildFSMContext(buildID, totalSteps, broadcastFn, o.db)
 	if err != nil {
 		log.Printf("Orchestrator: Warning — FSM initialization failed for build %s: %v (continuing without FSM)", buildID, err)
 	} else {

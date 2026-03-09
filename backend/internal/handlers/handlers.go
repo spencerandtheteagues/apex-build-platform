@@ -11,6 +11,7 @@ import (
 	"apex-build/internal/ai"
 	"apex-build/internal/auth"
 	"apex-build/internal/middleware"
+	"apex-build/internal/spend"
 	"apex-build/internal/websocket"
 	"apex-build/pkg/models"
 
@@ -20,10 +21,11 @@ import (
 
 // Handler contains all the dependencies for API handlers
 type Handler struct {
-	DB          *gorm.DB
-	AIRouter    *ai.AIRouter
-	AuthService *auth.AuthService
-	WSHub       *websocket.Hub
+	DB           *gorm.DB
+	AIRouter     *ai.AIRouter
+	AuthService  *auth.AuthService
+	WSHub        *websocket.Hub
+	SpendTracker *spend.SpendTracker
 }
 
 // NewHandler creates a new handler instance

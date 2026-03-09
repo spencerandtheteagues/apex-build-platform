@@ -349,8 +349,8 @@ func main() {
 	var redisCache *cache.RedisCache
 	if redisURL != "" {
 		log.Printf("Redis cache connecting to: %s", redisURL)
-		// TODO: Initialize with Redis client when available
-		redisCache = cache.NewRedisCache(cacheConfig)
+		redisCache = cache.NewRedisCacheFromURL(redisURL, cacheConfig)
+		log.Println("Redis cache initialized (falls back to in-memory on connection failure)")
 	} else {
 		log.Println("WARNING: REDIS_URL not set - using in-memory cache (set for production)")
 		redisCache = cache.NewRedisCache(cacheConfig)
@@ -359,6 +359,7 @@ func main() {
 	// Initialize base Handler for dependent handlers
 	// Note: BatchedHub embeds *Hub, so we pass the embedded Hub for Handler compatibility
 	baseHandler := handlers.NewHandler(database.GetDB(), aiRouter, authService, wsHubRT.Hub)
+	baseHandler.SpendTracker = spendTracker
 
 	// Initialize OptimizedHandler with caching for better performance
 	// PERFORMANCE: Fixes N+1 queries with proper JOINs, adds cursor-based pagination

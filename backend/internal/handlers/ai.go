@@ -6,6 +6,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"apex-build/internal/ai"
 	"apex-build/internal/middleware"
+	"apex-build/internal/spend"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -219,6 +221,26 @@ func (h *Handler) GenerateAI(c *gin.Context) {
 
 	// Update user usage statistics
 	h.updateUserUsage(userID, aiResp.Usage)
+
+	// Record spend event so budget enforcement has real data
+	if h.SpendTracker != nil && aiResp.Usage != nil {
+		spendInput := spend.RecordSpendInput{
+			UserID:       userID,
+			Provider:     string(aiResp.Provider),
+			Model:        aiReq.Model,
+			Capability:   string(aiReq.Capability),
+			InputTokens:  aiResp.Usage.PromptTokens,
+			OutputTokens: aiResp.Usage.CompletionTokens,
+			DurationMs:   int(duration.Milliseconds()),
+			Status:       "success",
+		}
+		if req.ProjectID != nil {
+			spendInput.ProjectID = req.ProjectID
+		}
+		if _, err := h.SpendTracker.RecordSpend(spendInput); err != nil {
+			log.Printf("spend: failed to record spend for user %d: %v", userID, err)
+		}
+	}
 
 	c.JSON(http.StatusOK, StandardResponse{
 		Success: true,
