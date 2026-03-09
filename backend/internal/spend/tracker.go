@@ -138,7 +138,7 @@ func (t *SpendTracker) GetBreakdown(opts BreakdownOpts) ([]SpendBreakdownItem, e
 
 	query := t.db.Model(&SpendEvent{}).
 		Select(
-			groupCol+" as `key`, "+
+			groupCol+` as "key", `+
 				"COALESCE(SUM(billed_cost), 0) as billed_cost, "+
 				"COALESCE(SUM(raw_cost), 0) as raw_cost, "+
 				"COALESCE(SUM(input_tokens), 0) as input_tokens, "+
