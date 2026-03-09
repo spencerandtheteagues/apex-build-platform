@@ -79,6 +79,7 @@ WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /app/apex-server /app/apex-server
+COPY --from=builder /app/migrations /app/migrations
 
 # Copy timezone data
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo

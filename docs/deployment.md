@@ -20,6 +20,14 @@ Backend health configuration:
 - readiness/deep health: `/ready`
 - feature readiness summary: `/health/features`
 
+Backend production notes:
+
+- the backend image now ships the SQL migrations required for production startup
+- `SECRETS_MASTER_KEY` may be either:
+  - a base64-encoded 32-byte AES-256 key
+  - a strong raw secret string, which the backend deterministically derives into 32-byte key material
+- `EXECUTION_FORCE_CONTAINER=true` keeps public code execution fail-closed, but the core API still boots if Docker is unavailable in the host platform
+
 Frontend health configuration:
 
 - `/health`
@@ -99,5 +107,6 @@ npm test
 ## Deployment-specific notes
 
 - The backend starts a bootstrap HTTP listener early so load balancer health checks succeed while deeper initialization continues.
+- Production SQL migrations are packaged into the backend runtime image, so first-run container deploys do not depend on source files outside the image.
 - The frontend Nginx container serves `/config.js` and health checks from the same image used in production.
 - Keep [`backend/api/openapi.yaml`](../backend/api/openapi.yaml) updated when externally consumed endpoints change.

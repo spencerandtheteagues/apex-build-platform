@@ -464,35 +464,41 @@ func validateJWTSecret(secret string) error {
 	return nil
 }
 
-// validateMasterKey enforces a valid AES-256 key.
+// validateMasterKey accepts either:
+// 1. a base64-encoded 32-byte AES-256 key, or
+// 2. a strong raw secret that will be deterministically derived to 32 bytes.
+//
+// The raw-secret path exists so platforms like Render can provision a secure
+// persistent secret without requiring callers to pre-encode base64 values.
 func validateMasterKey(key string) error {
-	// Must be valid base64
-	decoded, err := base64.StdEncoding.DecodeString(key)
-	if err != nil {
-		return fmt.Errorf("must be valid base64 encoded: %w", err)
-	}
-
-	// Must be exactly 32 bytes (256 bits) for AES-256
-	if len(decoded) != MinMasterKeyBytes {
-		return fmt.Errorf("must decode to exactly %d bytes (got %d) for AES-256", MinMasterKeyBytes, len(decoded))
-	}
-
-	// Check that the key isn't all zeros or trivially weak
-	allZero := true
-	for _, b := range decoded {
-		if b != 0 {
-			allZero = false
-			break
+	if decoded, err := base64.StdEncoding.DecodeString(key); err == nil && len(decoded) == MinMasterKeyBytes {
+		// Check that the key isn't all zeros or trivially weak
+		allZero := true
+		for _, b := range decoded {
+			if b != 0 {
+				allZero = false
+				break
+			}
 		}
-	}
-	if allZero {
-		return errors.New("master key is all zeros — this is not a valid encryption key")
+		if allZero {
+			return errors.New("master key is all zeros — this is not a valid encryption key")
+		}
+
+		// Check byte-level entropy
+		byteEntropy := byteEntropy(decoded)
+		if byteEntropy < 4.0 {
+			return fmt.Errorf("master key byte entropy too low (%.1f, need >= 4.0)", byteEntropy)
+		}
+
+		return nil
 	}
 
-	// Check byte-level entropy
-	byteEntropy := byteEntropy(decoded)
-	if byteEntropy < 4.0 {
-		return fmt.Errorf("master key byte entropy too low (%.1f, need >= 4.0)", byteEntropy)
+	if len(key) < MinJWTSecretLength {
+		return fmt.Errorf("raw master key must be at least %d characters when not base64 encoded", MinJWTSecretLength)
+	}
+
+	if err := validateJWTSecret(key); err != nil {
+		return fmt.Errorf("raw master key is too weak: %w", err)
 	}
 
 	return nil

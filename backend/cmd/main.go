@@ -546,21 +546,11 @@ func main() {
 	executionConfig := handlers.DefaultExecutionHandlerConfig()
 	executionConfig.ProjectsDir = projectsDir
 	executionTier := startup.TierOptional
-	if executionConfig.ForceContainer {
-		executionTier = startup.TierCritical
-	}
 
 	executionHandler, err := handlers.NewExecutionHandlerWithConfig(database.GetDB(), executionConfig)
 	if err != nil {
-		log.Printf("CRITICAL: Failed to initialize execution handler: %v", err)
+		log.Printf("WARNING: Failed to initialize execution handler: %v", err)
 		log.Println("SECURITY: Code execution features are DISABLED")
-		if executionConfig.ForceContainer {
-			startupRegistry.MarkFailed("code_execution", executionTier, "Container sandbox required but execution handler failed to initialize", map[string]any{
-				"error": err.Error(),
-			})
-			startupRegistry.SetPhase(startup.PhaseFailed)
-			log.Fatalf("CRITICAL: Code execution is required but failed to initialize: %v", err)
-		}
 		startupRegistry.MarkDegraded("code_execution", executionTier, "Code execution disabled", map[string]any{
 			"error": err.Error(),
 		})
@@ -580,10 +570,8 @@ func main() {
 			startupRegistry.MarkReady("code_execution", executionTier, "Container sandbox enabled", sandboxStatus)
 		} else {
 			if executionConfig.ForceContainer {
-				log.Println("CRITICAL: Docker required but not available - execution DISABLED")
-				startupRegistry.MarkFailed("code_execution", executionTier, "Code execution unavailable because the required container sandbox is missing", sandboxStatus)
-				startupRegistry.SetPhase(startup.PhaseFailed)
-				log.Fatalf("CRITICAL: Code execution requires a container sandbox, but none is available")
+				log.Println("WARNING: Docker required but not available - execution DISABLED")
+				startupRegistry.MarkDegraded("code_execution", executionTier, "Code execution unavailable because the required container sandbox is missing", sandboxStatus)
 			} else {
 				log.Println("WARNING: Docker not available - using process-based sandbox (less secure)")
 				log.Println("WARNING: Set EXECUTION_FORCE_CONTAINER=true to require Docker in production")

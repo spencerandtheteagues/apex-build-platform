@@ -46,6 +46,7 @@ WORKDIR /app
 
 # Copy binary from builder stage
 COPY --from=builder /build/apex-build-server /app/
+COPY --from=builder /build/migrations /app/migrations
 
 # Copy any necessary config files
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/

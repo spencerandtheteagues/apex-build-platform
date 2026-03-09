@@ -8,6 +8,40 @@
 - The current interaction-control / user-steering slice is now materially implemented and verified locally
 - The current changes are **local only** unless explicitly pushed later
 
+## Render Deploy Follow-Up
+
+The backend Render deployment path was investigated directly with a production-like
+container boot against PostgreSQL. That uncovered multiple real startup blockers,
+not just one:
+
+1. `backend/cmd/main.go`
+   - startup treated missing Docker as too close to fatal when `EXECUTION_FORCE_CONTAINER=true`
+   - this is wrong for Render, because web services do not provide a Docker daemon
+   - fixed so code execution degrades cleanly while the core API still reaches readiness
+
+2. `backend/internal/config/secrets.go`
+   and `backend/internal/secrets/secrets.go`
+   - production secret validation previously required `SECRETS_MASTER_KEY` to be base64-encoded 32 bytes
+   - Render-style generated secrets are typically strong raw strings, not base64 material
+   - fixed so strong raw secrets are accepted and deterministically derived to 32-byte key material, while existing base64 keys still work unchanged
+
+3. `backend/Dockerfile`
+   and `backend/Dockerfile.production`
+   - production images previously copied only the binary, not the SQL migrations
+   - startup therefore failed in production with `migrations directory not found`
+   - fixed by copying `migrations/` into the runtime images
+
+4. `backend/migrations/000001_*`
+   and `backend/migrations/000002_*`
+   - the baseline SQL migrations used `CREATE INDEX CONCURRENTLY` / `DROP INDEX CONCURRENTLY`
+   - golang-migrate runs those files inside a transaction, so fresh PostgreSQL boots failed immediately
+   - fixed by making those index statements transaction-safe for first-run production deployments
+
+5. `frontend/src/components/ide/IDELayout.tsx`
+   and `frontend/src/components/preview/LivePreview.tsx`
+   - secure preview refresh now falls back from hot-reload to full refresh
+   - iframe sandbox no longer grants `allow-same-origin`, matching the hardened preview model
+
 ## What Was Completed In This Pass
 
 ### Backend: build interaction, websocket, and permission control
@@ -87,6 +121,16 @@ That is now fixed.
 - `go test ./...`
 - `go test -race ./...`
 - `go vet ./...`
+- Render-like cold boot:
+  - backend Docker image built from `backend/Dockerfile`
+  - PostgreSQL container started
+  - backend container started with:
+    - `ENVIRONMENT=production`
+    - `EXECUTION_FORCE_CONTAINER=true`
+    - raw Render-style `SECRETS_MASTER_KEY`
+    - no Docker socket available
+  - `/ready` reached HTTP 200 with `ready=true`
+  - startup correctly reported optional degraded features like `code_execution`, `preview_service`, `payments`, and `redis_cache` instead of crashing
 
 ### Frontend
 
@@ -94,6 +138,11 @@ That is now fixed.
 - `npm run lint`
 - `npm test -- --run`
 - `npm run build`
+- `docker build -f frontend/Dockerfile.prod -t apex-build-frontend-prod-test frontend`
+
+### Backend Containers
+
+- `docker build -f backend/Dockerfile.production -t apex-build-backend-prod-test backend`
 
 ## Important Behavioral Improvement
 
@@ -141,6 +190,19 @@ These are the notable follow-ups that still remain after this pass:
 - `frontend/src/services/api.ts`
 - `frontend/src/components/builder/AppBuilder.tsx`
 - `frontend/src/components/diff/DiffReviewPanel.tsx`
+- `backend/cmd/main.go`
+- `backend/Dockerfile`
+- `backend/Dockerfile.production`
+- `backend/internal/config/secrets.go`
+- `backend/internal/config/secrets_test.go`
+- `backend/internal/secrets/secrets.go`
+- `backend/internal/secrets/secrets_test.go`
+- `backend/migrations/000001_initial_schema.up.sql`
+- `backend/migrations/000001_initial_schema.down.sql`
+- `backend/migrations/000002_hosting_and_recent_features.up.sql`
+- `backend/migrations/000002_hosting_and_recent_features.down.sql`
+- `frontend/src/components/ide/IDELayout.tsx`
+- `frontend/src/components/preview/LivePreview.tsx`
 
 ## Important Context For The Next AI
 

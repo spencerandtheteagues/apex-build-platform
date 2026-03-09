@@ -288,7 +288,14 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
               content: content
             })
           } catch {
-            // Preview might not be running - ignore silently
+            try {
+              await apiService.post('/preview/refresh', {
+                project_id: currentProject.id,
+                changed_files: [file.path],
+              })
+            } catch {
+              // Preview might not be running - ignore silently
+            }
           }
         }
       }

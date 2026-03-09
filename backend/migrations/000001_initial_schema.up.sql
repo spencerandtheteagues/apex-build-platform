@@ -678,25 +678,25 @@ CREATE INDEX IF NOT EXISTS idx_managed_databases_user_id ON managed_databases(us
 -- ============================================================================
 -- PERFORMANCE INDEXES (from current database.go)
 -- ============================================================================
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_username_active ON users(username) WHERE is_active = true;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_email_verified ON users(email) WHERE is_verified = true;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_projects_owner_active ON projects(owner_id) WHERE deleted_at IS NULL;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_projects_public ON projects(is_public) WHERE is_public = true AND deleted_at IS NULL;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_projects_language ON projects(language) WHERE deleted_at IS NULL;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_files_project_path ON files(project_id, path) WHERE deleted_at IS NULL;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_files_hash ON files(hash) WHERE deleted_at IS NULL;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ai_requests_user_date ON ai_requests(user_id, created_at DESC);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ai_requests_provider_status ON ai_requests(provider, status);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ai_requests_capability ON ai_requests(capability);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_executions_project_date ON executions(project_id, created_at DESC);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_executions_user_status ON executions(user_id, status);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sessions_user_active ON sessions(user_id) WHERE is_active = true;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sessions_expires ON sessions(expires_at) WHERE is_active = true;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_collab_rooms_project ON collab_rooms(project_id) WHERE is_active = true;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cursor_positions_room_active ON cursor_positions(room_id) WHERE is_active = true;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_messages_room_date ON chat_messages(room_id, created_at DESC) WHERE deleted_at IS NULL;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_secrets_user_name ON secrets(user_id, name);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_secrets_project ON secrets(project_id) WHERE project_id IS NOT NULL;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_secret_audit_logs_secret ON secret_audit_logs(secret_id, created_at DESC);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_external_mcp_servers_user ON external_mcp_servers(user_id);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_external_mcp_servers_project ON external_mcp_servers(project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_username_active ON users(username) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_users_email_verified ON users(email) WHERE is_verified = true;
+CREATE INDEX IF NOT EXISTS idx_projects_owner_active ON projects(owner_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_projects_public ON projects(is_public) WHERE is_public = true AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_projects_language ON projects(language) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_files_project_path ON files(project_id, path) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_ai_requests_user_date ON ai_requests(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_requests_provider_status ON ai_requests(provider, status);
+CREATE INDEX IF NOT EXISTS idx_ai_requests_capability ON ai_requests(capability);
+CREATE INDEX IF NOT EXISTS idx_executions_project_date ON executions(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_executions_user_status ON executions(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_active ON sessions(user_id) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_collab_rooms_project ON collab_rooms(project_id) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_cursor_positions_room_active ON cursor_positions(room_id) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_chat_messages_room_date ON chat_messages(room_id, created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_secrets_user_name ON secrets(user_id, name);
+CREATE INDEX IF NOT EXISTS idx_secrets_project ON secrets(project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_secret_audit_logs_secret ON secret_audit_logs(secret_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_external_mcp_servers_user ON external_mcp_servers(user_id);
+CREATE INDEX IF NOT EXISTS idx_external_mcp_servers_project ON external_mcp_servers(project_id) WHERE project_id IS NOT NULL;

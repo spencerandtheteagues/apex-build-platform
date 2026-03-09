@@ -316,10 +316,10 @@ CREATE INDEX IF NOT EXISTS idx_ssl_certificates_subdomain_id ON ssl_certificates
 -- ============================================================================
 -- PERFORMANCE INDEXES FOR HOSTING SYSTEM
 -- ============================================================================
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_native_deployments_project ON native_deployments(project_id) WHERE deleted_at IS NULL;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_native_deployments_user_status ON native_deployments(user_id, status) WHERE deleted_at IS NULL;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_native_deployments_subdomain_active ON native_deployments(subdomain) WHERE deleted_at IS NULL;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_native_deployments_always_on ON native_deployments(always_on) WHERE always_on = true AND deleted_at IS NULL;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_deployment_logs_deployment_time ON deployment_logs(deployment_id, timestamp DESC);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_deployment_env_vars_deployment ON deployment_env_vars(deployment_id) WHERE deleted_at IS NULL;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_subdomains_name_status ON subdomains(name) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_native_deployments_project ON native_deployments(project_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_native_deployments_user_status ON native_deployments(user_id, status) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_native_deployments_subdomain_active ON native_deployments(subdomain) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_native_deployments_always_on ON native_deployments(always_on) WHERE always_on = true AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_deployment_logs_deployment_time ON deployment_logs(deployment_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_deployment_env_vars_deployment ON deployment_env_vars(deployment_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_subdomains_name_status ON subdomains(name) WHERE status = 'active';

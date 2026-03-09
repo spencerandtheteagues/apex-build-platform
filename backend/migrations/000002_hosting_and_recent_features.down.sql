@@ -2,13 +2,13 @@
 -- WARNING: This will delete all hosting data!
 
 -- Drop performance indexes first
-DROP INDEX CONCURRENTLY IF EXISTS idx_subdomains_name_status;
-DROP INDEX CONCURRENTLY IF EXISTS idx_deployment_env_vars_deployment;
-DROP INDEX CONCURRENTLY IF EXISTS idx_deployment_logs_deployment_time;
-DROP INDEX CONCURRENTLY IF EXISTS idx_native_deployments_always_on;
-DROP INDEX CONCURRENTLY IF EXISTS idx_native_deployments_subdomain_active;
-DROP INDEX CONCURRENTLY IF EXISTS idx_native_deployments_user_status;
-DROP INDEX CONCURRENTLY IF EXISTS idx_native_deployments_project;
+DROP INDEX IF EXISTS idx_subdomains_name_status;
+DROP INDEX IF EXISTS idx_deployment_env_vars_deployment;
+DROP INDEX IF EXISTS idx_deployment_logs_deployment_time;
+DROP INDEX IF EXISTS idx_native_deployments_always_on;
+DROP INDEX IF EXISTS idx_native_deployments_subdomain_active;
+DROP INDEX IF EXISTS idx_native_deployments_user_status;
+DROP INDEX IF EXISTS idx_native_deployments_project;
 
 -- Drop tables in reverse dependency order
 DROP TABLE IF EXISTS ssl_certificates CASCADE;

@@ -95,23 +95,40 @@ type SecretsManager struct {
 	iterations    int // PBKDF2 iterations
 }
 
-// NewSecretsManager creates a new secrets manager with the given master key
-func NewSecretsManager(masterKeyBase64 string) (*SecretsManager, error) {
-	if masterKeyBase64 == "" {
+// normalizeMasterKeyBytes accepts either a base64-encoded 32-byte key or a
+// strong raw secret and returns the 32-byte key material used by the manager.
+func normalizeMasterKeyBytes(masterKey string) ([]byte, error) {
+	if masterKey == "" {
 		return nil, ErrInvalidKey
 	}
 
-	masterKey, err := base64.StdEncoding.DecodeString(masterKeyBase64)
+	if decoded, err := base64.StdEncoding.DecodeString(masterKey); err == nil && len(decoded) == 32 {
+		return decoded, nil
+	}
+
+	derived := sha256.Sum256([]byte("apex-build/master-key/v1:" + masterKey))
+	return derived[:], nil
+}
+
+// NewSecretsManager creates a new secrets manager with the given master key.
+// The key may be provided either as a base64-encoded 32-byte value or as a
+// strong raw secret that will be deterministically derived to 32 bytes.
+func NewSecretsManager(masterKey string) (*SecretsManager, error) {
+	if masterKey == "" {
+		return nil, ErrInvalidKey
+	}
+
+	normalizedKey, err := normalizeMasterKeyBytes(masterKey)
 	if err != nil {
 		return nil, fmt.Errorf("invalid master key format: %w", err)
 	}
 
-	if len(masterKey) < 32 {
+	if len(normalizedKey) < 32 {
 		return nil, ErrInvalidKey
 	}
 
 	return &SecretsManager{
-		masterKey:  masterKey,
+		masterKey:  normalizedKey,
 		keyCache:   make(map[uint]*EncryptionKey),
 		iterations: 100000, // OWASP recommended minimum
 	}, nil

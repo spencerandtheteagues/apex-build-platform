@@ -126,7 +126,9 @@ func TestValidateMasterKey(t *testing.T) {
 		shouldErr bool
 	}{
 		{"valid 32-byte key", validKeyBase64, false},
+		{"valid strong raw secret", "Rdr7pQ2zLm4xVn8cHs5wTy9kBd3fJu6mZa1rNe0q", false},
 		{"too short (16 bytes)", shortKeyBase64, true},
+		{"weak raw secret", "render-generated", true},
 		{"invalid base64", "not-valid-base64!!!", true},
 		{"empty", "", true},
 	}
