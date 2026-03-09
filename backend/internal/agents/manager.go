@@ -75,8 +75,9 @@ type AgentManager struct {
 	pathGuard      *PathGuard
 	spendTracker   *spend.SpendTracker
 	budgetEnforcer *budget.BudgetEnforcer
-	errorAnalyzer  *ErrorAnalyzer // LLM-powered build error analysis (falls back to heuristics if AI unavailable)
+	errorAnalyzer  *ErrorAnalyzer   // LLM-powered build error analysis (falls back to heuristics if AI unavailable)
 	ctxSelector    *ContextSelector // smart file context selection for LLM prompts
+	chunkedEditor  *ChunkedEditor   // splits/reassembles large-file edits to stay within output token limits
 	mu             sync.RWMutex
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -132,6 +133,7 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 		pathGuard:     NewPathGuard(),
 		errorAnalyzer: NewErrorAnalyzer(aiRouter, ""),
 		ctxSelector:   NewContextSelector(),
+		chunkedEditor: NewChunkedEditor(),
 		ctx:           ctx,
 		cancel:        cancel,
 	}
@@ -1763,6 +1765,25 @@ func (am *AgentManager) executeTask(task *Task) {
 
 	// Parse the response into task output
 	output := am.parseTaskOutput(task.Type, response.Content)
+
+	// ── Chunked-edit pass 1: continuation for truncated files ──────────────
+	// When the AI hits its output-token limit mid-file, request the remainder
+	// so callers always receive complete files.
+	if len(output.TruncatedFiles) > 0 {
+		log.Printf("[chunked] %d truncated file(s) in task %s — requesting continuations",
+			len(output.TruncatedFiles), task.ID)
+		am.completeTruncatedFiles(ctx, task, build, agent, output)
+	}
+
+	// ── Chunked-edit pass 2: large-file repair for solver tasks ────────────
+	// When the solver must fix a file that is >ChunkThreshold lines the model
+	// can't return the entire replacement in one shot.  Process it in
+	// overlapping chunks so every line is covered.
+	if am.isCodeGenerationTask(task.Type) {
+		if rawHints := task.Input["repair_hints"]; rawHints != nil {
+			am.applyChunkedRepairToLargeFiles(ctx, task, build, agent, output)
+		}
+	}
 
 	// Broadcast completion thought with actual model and file details
 	fileNames := make([]string, 0, len(output.Files))
@@ -7534,6 +7555,7 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 	inCodeBlock := false
 	currentLanguage := ""
 	parserWarnings := make([]string, 0, 1)
+	var truncatedPaths []string
 
 	for i, line := range lines {
 		trimmedLine := strings.TrimSpace(line)
@@ -7634,6 +7656,17 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 	}
 	if inCodeBlock {
 		parserWarnings = append(parserWarnings, "AI response ended with an unterminated code block; final file output may be truncated")
+		// Save partial content of the in-progress file so continuations can extend it.
+		if currentFile != nil && codeBuffer.Len() > 0 {
+			currentFile.Content = strings.TrimSpace(codeBuffer.String())
+			currentFile.Size = int64(len(currentFile.Content))
+			output.Files = append(output.Files, *currentFile)
+			truncatedPaths = append(truncatedPaths, currentFile.Path)
+			currentFile = nil
+		}
+	}
+	if len(truncatedPaths) > 0 {
+		output.TruncatedFiles = truncatedPaths
 	}
 
 	// If no files were extracted but we have response content, treat the whole response as a single file
@@ -9860,4 +9893,299 @@ func sanitizeFilePath(path string) string {
 		return ""
 	}
 	return cleaned
+}
+
+// ─── Chunked-edit helpers ──────────────────────────────────────────────────
+
+// completeTruncatedFiles requests the remainder of any file that was cut off
+// during the main generation pass.  It modifies output.Files in-place,
+// appending the continuation to each truncated file's content.
+//
+// The method is best-effort: a failed continuation is logged and the partial
+// file is kept rather than discarded, so the build can still proceed.
+func (am *AgentManager) completeTruncatedFiles(
+	ctx context.Context,
+	task *Task,
+	build *Build,
+	agent *Agent,
+	output *TaskOutput,
+) {
+	for _, path := range output.TruncatedFiles {
+		// Find the truncated file in the output.
+		var target *GeneratedFile
+		for i := range output.Files {
+			if output.Files[i].Path == path {
+				target = &output.Files[i]
+				break
+			}
+		}
+		if target == nil || target.Content == "" {
+			continue
+		}
+
+		// Use the last OverlapLines as context so the model picks up exactly
+		// where it stopped without repeating already-written code.
+		lines := strings.Split(target.Content, "\n")
+		ctxStart := len(lines) - OverlapLines
+		if ctxStart < 0 {
+			ctxStart = 0
+		}
+		ctxLines := lines[ctxStart:]
+		ctxText := strings.Join(ctxLines, "\n")
+
+		continuationPrompt := fmt.Sprintf(
+			"You were generating the file `%s` but the response was cut off mid-file.\n\n"+
+				"Here are the last %d lines you wrote:\n\n```\n%s\n```\n\n"+
+				"Continue EXACTLY from where the code was cut off. "+
+				"Output ONLY the continuation — do not repeat the lines shown above. "+
+				"No explanation, no markdown fences.",
+			path, len(ctxLines), ctxText,
+		)
+
+		resp, err := am.aiRouter.Generate(ctx, agent.Provider, continuationPrompt, GenerateOptions{
+			UserID:      build.UserID,
+			MaxTokens:   4000,
+			Temperature: 0.1,
+			SystemPrompt: "You are completing a source file that was truncated. " +
+				"Output only the remaining code, starting from exactly where the file was cut off.",
+			PowerMode:       build.PowerMode,
+			UsePlatformKeys: am.buildUsesPlatformKeys(build),
+		})
+		if err != nil {
+			log.Printf("[chunked] continuation failed for %s in task %s: %v", path, task.ID, err)
+			continue
+		}
+
+		continuation := stripCodeFences(strings.TrimSpace(resp.Content))
+		if continuation == "" {
+			continue
+		}
+
+		// Trim overlap — if the model repeated any of the context lines, drop them.
+		continuation = trimLeadingOverlap(target.Content, continuation)
+
+		target.Content = target.Content + "\n" + continuation
+		target.Size = int64(len(target.Content))
+		log.Printf("[chunked] completed truncated file %s (+%d bytes)", path, len(continuation))
+	}
+
+	// Clear the flag — continuations have been applied.
+	output.TruncatedFiles = nil
+}
+
+// applyChunkedRepairToLargeFiles handles solver/reviewer tasks where a target
+// file is larger than ChunkThreshold.  Instead of regenerating the whole file
+// in one shot (which risks truncation), it splits the original into overlapping
+// chunks, repairs each chunk independently, and reassembles the result.
+//
+// Target files are identified from repair_hints in task.Input using the
+// "[file_path] instruction" format produced by RepairPlan.RepairHints().
+func (am *AgentManager) applyChunkedRepairToLargeFiles(
+	ctx context.Context,
+	task *Task,
+	build *Build,
+	agent *Agent,
+	output *TaskOutput,
+) {
+	// Extract (filePath → repair instruction) from repair_hints.
+	targetInstructions := am.parseRepairHintTargets(task)
+	if len(targetInstructions) == 0 {
+		return
+	}
+
+	// Collect all generated files for lookup.
+	allFiles := am.collectGeneratedFiles(build)
+	fileMap := make(map[string]string, len(allFiles))
+	for _, gf := range allFiles {
+		fileMap[gf.Path] = gf.Content
+	}
+
+	for filePath, instruction := range targetInstructions {
+		originalContent, ok := fileMap[filePath]
+		if !ok || !am.chunkedEditor.NeedsChunking(originalContent) {
+			// File not found or too small — normal single-shot path handles it.
+			continue
+		}
+
+		log.Printf("[chunked] large file detected for repair: %s (%d lines) — using chunk protocol",
+			filePath, countLines(originalContent))
+
+		repairedContent, err := am.executeChunkedFileRepair(ctx, build, agent, filePath, originalContent, instruction)
+		if err != nil {
+			log.Printf("[chunked] chunk repair failed for %s: %v — skipping", filePath, err)
+			continue
+		}
+
+		// Inject (or replace) the repaired file in output.Files.
+		replaced := false
+		for i := range output.Files {
+			if output.Files[i].Path == filePath {
+				output.Files[i].Content = repairedContent
+				output.Files[i].Size = int64(len(repairedContent))
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			lang := am.detectLanguage(filePath)
+			output.Files = append(output.Files, GeneratedFile{
+				Path:     filePath,
+				Content:  repairedContent,
+				Language: lang,
+				Size:     int64(len(repairedContent)),
+				IsNew:    false,
+			})
+		}
+		log.Printf("[chunked] chunk repair complete for %s (%d bytes)", filePath, len(repairedContent))
+	}
+}
+
+// executeChunkedFileRepair splits originalContent into overlapping chunks,
+// asks the LLM to apply repairInstruction to each chunk, and reassembles
+// the result.  Chunks where the LLM makes no changes are passed through
+// unchanged, keeping per-call cost low.
+func (am *AgentManager) executeChunkedFileRepair(
+	ctx context.Context,
+	build *Build,
+	agent *Agent,
+	filePath, originalContent, repairInstruction string,
+) (string, error) {
+	chunks := am.chunkedEditor.SplitIntoChunks(originalContent, DefaultChunkSize, OverlapLines)
+	if len(chunks) == 0 {
+		return originalContent, nil
+	}
+
+	results := make([]ChunkEditResult, 0, len(chunks))
+
+	for _, chunk := range chunks {
+		prompt := am.chunkedEditor.BuildChunkPrompt(chunk, repairInstruction)
+
+		resp, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
+			UserID:      build.UserID,
+			MaxTokens:   2000,
+			Temperature: 0.1,
+			SystemPrompt: "You are a precise code editor. Apply the given instruction to the " +
+				"code chunk and return ONLY the modified chunk. No explanation. No code fences.",
+			PowerMode:       PowerFast, // cost-efficient; chunk repairs don't need frontier reasoning
+			UsePlatformKeys: am.buildUsesPlatformKeys(build),
+		})
+		if err != nil {
+			log.Printf("[chunked] chunk %d/%d failed for %s: %v — using original",
+				chunk.Index+1, chunk.TotalChunks, filePath, err)
+			results = append(results, ChunkEditResult{
+				ChunkIndex:  chunk.Index,
+				EditedText:  chunk.Content,
+				ChangesMade: false,
+			})
+			continue
+		}
+
+		edited := stripCodeFences(strings.TrimSpace(resp.Content))
+		results = append(results, ChunkEditResult{
+			ChunkIndex:  chunk.Index,
+			EditedText:  edited,
+			ChangesMade: edited != strings.TrimSpace(chunk.Content),
+		})
+	}
+
+	SortChunkResults(results)
+	return am.chunkedEditor.ReassembleFromResults(originalContent, chunks, results), nil
+}
+
+// parseRepairHintTargets extracts a map of filePath → repair instruction from
+// the repair_hints stored in task.Input.  Hints follow the format produced by
+// RepairPlan.RepairHints(): "[file_path] instruction\nSuggested fix:\ncode".
+func (am *AgentManager) parseRepairHintTargets(task *Task) map[string]string {
+	if task == nil || task.Input == nil {
+		return nil
+	}
+	rawHints, ok := task.Input["repair_hints"]
+	if !ok {
+		return nil
+	}
+
+	var hints []string
+	switch v := rawHints.(type) {
+	case []string:
+		hints = v
+	case []any:
+		for _, item := range v {
+			if s := strings.TrimSpace(fmt.Sprintf("%v", item)); s != "" {
+				hints = append(hints, s)
+			}
+		}
+	default:
+		return nil
+	}
+
+	targets := make(map[string]string)
+	for _, hint := range hints {
+		// Match "[some/file.ts] instruction text"
+		if !strings.HasPrefix(hint, "[") {
+			continue
+		}
+		end := strings.Index(hint, "]")
+		if end == -1 {
+			continue
+		}
+		filePath := strings.TrimSpace(hint[1:end])
+		instruction := strings.TrimSpace(hint[end+1:])
+		if filePath == "" || filePath == "(see error)" || instruction == "" {
+			continue
+		}
+		// Combine hints for the same file (multiple hints → one combined instruction).
+		if existing, dup := targets[filePath]; dup {
+			targets[filePath] = existing + "\n" + instruction
+		} else {
+			targets[filePath] = instruction
+		}
+	}
+	return targets
+}
+
+// stripCodeFences removes markdown code-fence wrappers (```lang ... ```) from
+// a model response so the raw code can be appended or compared directly.
+func stripCodeFences(s string) string {
+	if idx := strings.Index(s, "```"); idx != -1 {
+		s = s[idx+3:]
+		// Skip optional language tag on first line.
+		if nl := strings.Index(s, "\n"); nl != -1 {
+			s = s[nl+1:]
+		}
+		if end := strings.LastIndex(s, "```"); end != -1 {
+			s = s[:end]
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
+// trimLeadingOverlap removes the leading lines of continuation that the model
+// repeated from the end of existing (overlap lines).  This prevents doubled
+// code when the continuation prompt echoes back context lines.
+func trimLeadingOverlap(existing, continuation string) string {
+	existLines := strings.Split(existing, "\n")
+	contLines := strings.Split(continuation, "\n")
+
+	// Find the longest suffix of existing that matches a prefix of continuation.
+	maxCheck := OverlapLines
+	if maxCheck > len(existLines) {
+		maxCheck = len(existLines)
+	}
+
+	for overlap := maxCheck; overlap > 0; overlap-- {
+		suffix := existLines[len(existLines)-overlap:]
+		if len(contLines) >= overlap {
+			match := true
+			for i := 0; i < overlap; i++ {
+				if strings.TrimSpace(suffix[i]) != strings.TrimSpace(contLines[i]) {
+					match = false
+					break
+				}
+			}
+			if match {
+				return strings.Join(contLines[overlap:], "\n")
+			}
+		}
+	}
+	return continuation
 }

@@ -156,10 +156,11 @@ const (
 
 // TaskOutput contains the results of a completed task
 type TaskOutput struct {
-	Files       []GeneratedFile `json:"files,omitempty"`
-	Messages    []string        `json:"messages,omitempty"`
-	Suggestions []string        `json:"suggestions,omitempty"`
-	Metrics     map[string]any  `json:"metrics,omitempty"`
+	Files          []GeneratedFile `json:"files,omitempty"`
+	Messages       []string        `json:"messages,omitempty"`
+	Suggestions    []string        `json:"suggestions,omitempty"`
+	Metrics        map[string]any  `json:"metrics,omitempty"`
+	TruncatedFiles []string        `json:"truncated_files,omitempty"` // file paths whose content was cut off mid-generation
 }
 
 // GeneratedFile represents a file created by an agent
