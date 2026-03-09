@@ -97,6 +97,9 @@ export default defineConfig(({ mode }) => {
 
       rollupOptions: {
         output: {
+          // Disable inline modulepreload polyfill so CSP needs no sha256 hash
+          modulePreload: false,
+
           // Optimize chunk naming for better caching
           chunkFileNames: 'assets/js/[name]-[hash].js',
           entryFileNames: 'assets/js/[name]-[hash].js',
