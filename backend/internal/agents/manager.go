@@ -75,6 +75,8 @@ type AgentManager struct {
 	pathGuard      *PathGuard
 	spendTracker   *spend.SpendTracker
 	budgetEnforcer *budget.BudgetEnforcer
+	errorAnalyzer  *ErrorAnalyzer // LLM-powered build error analysis (falls back to heuristics if AI unavailable)
+	ctxSelector    *ContextSelector // smart file context selection for LLM prompts
 	mu             sync.RWMutex
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -120,16 +122,18 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	am := &AgentManager{
-		agents:      make(map[string]*Agent),
-		builds:      make(map[string]*Build),
-		taskQueue:   make(chan *Task, 100),
-		resultQueue: make(chan *TaskResult, 100),
-		subscribers: make(map[string][]chan *WSMessage),
-		aiRouter:    aiRouter,
-		editStore:   NewProposedEditStore(),
-		pathGuard:   NewPathGuard(),
-		ctx:         ctx,
-		cancel:      cancel,
+		agents:        make(map[string]*Agent),
+		builds:        make(map[string]*Build),
+		taskQueue:     make(chan *Task, 100),
+		resultQueue:   make(chan *TaskResult, 100),
+		subscribers:   make(map[string][]chan *WSMessage),
+		aiRouter:      aiRouter,
+		editStore:     NewProposedEditStore(),
+		pathGuard:     NewPathGuard(),
+		errorAnalyzer: NewErrorAnalyzer(aiRouter, ""),
+		ctxSelector:   NewContextSelector(),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 	if len(db) > 0 && db[0] != nil {
 		am.db = db[0]
@@ -4555,8 +4559,29 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 						"validation_errors": readinessErrors,
 					},
 				}
-				if hints := extractDependencyRepairHintsFromReadinessErrors(readinessErrors); len(hints) > 0 {
-					failedTask.Input["repair_hints"] = hints
+				// Augment heuristic hints with AI-powered repair analysis.
+				// ErrorAnalyzer is non-blocking: LLM failure falls back to heuristics.
+				{
+					heuristicHints := extractDependencyRepairHintsFromReadinessErrors(readinessErrors)
+					contentByPath := make(map[string]string, len(allFiles))
+					for _, file := range allFiles {
+						sanitizedPath := sanitizeFilePath(file.Path)
+						if sanitizedPath == "" || strings.TrimSpace(file.Content) == "" {
+							continue
+						}
+						contentByPath[sanitizedPath] = file.Content
+					}
+					relevantFiles := am.ctxSelector.Select(contentByPath, readinessErrors, nil)
+					if plan, analyzeErr := am.errorAnalyzer.Analyze(am.ctx, readinessErrors, relevantFiles, build.UserID); analyzeErr == nil {
+						aiHints := plan.RepairHints()
+						if len(aiHints) > 0 {
+							failedTask.Input["repair_hints"] = aiHints
+						} else if len(heuristicHints) > 0 {
+							failedTask.Input["repair_hints"] = heuristicHints
+						}
+					} else if len(heuristicHints) > 0 {
+						failedTask.Input["repair_hints"] = heuristicHints
+					}
 				}
 				am.enqueueRecoveryTask(build.ID, failedTask, fmt.Errorf("final output validation failed: %s", errorSummary))
 				return
@@ -5599,6 +5624,178 @@ func (am *AgentManager) GetAgent(agentID string) (*Agent, error) {
 // SendMessage sends a user message to the build's lead agent.
 func (am *AgentManager) SendMessage(buildID string, message string) error {
 	return am.SendMessageWithClientToken(buildID, message, "")
+}
+
+func normalizeRestoredBuildStatus(snapshot *models.CompletedBuild) BuildStatus {
+	if snapshot == nil {
+		return BuildCompleted
+	}
+
+	status := BuildStatus(strings.TrimSpace(snapshot.Status))
+	switch status {
+	case BuildPending, BuildPlanning, BuildInProgress, BuildTesting, BuildReviewing, BuildCompleted, BuildFailed, BuildCancelled, BuildAwaitingReview:
+		return status
+	}
+
+	if snapshot.CompletedAt != nil && strings.TrimSpace(snapshot.Error) == "" {
+		return BuildCompleted
+	}
+	if strings.TrimSpace(snapshot.Error) != "" {
+		return BuildFailed
+	}
+	return BuildCompleted
+}
+
+func normalizeRestoredBuildMode(raw string) BuildMode {
+	mode := BuildMode(strings.TrimSpace(raw))
+	switch mode {
+	case ModeFast, ModeFull:
+		return mode
+	default:
+		return ModeFull
+	}
+}
+
+func normalizeRestoredPowerMode(raw string) PowerMode {
+	mode := PowerMode(strings.TrimSpace(raw))
+	switch mode {
+	case PowerFast, PowerBalanced, PowerMax:
+		return mode
+	default:
+		return PowerBalanced
+	}
+}
+
+func preferredLeadProviderOrder(availableProviders []ai.AIProvider) []ai.AIProvider {
+	if len(availableProviders) == 0 {
+		return nil
+	}
+
+	leadProvider := availableProviders[0]
+
+	for _, provider := range availableProviders {
+		if provider == ai.ProviderOllama {
+			leadProvider = ai.ProviderOllama
+			break
+		}
+	}
+
+	if leadProvider != ai.ProviderOllama {
+		for _, provider := range availableProviders {
+			if provider == ai.ProviderClaude {
+				leadProvider = ai.ProviderClaude
+				break
+			}
+			if provider == ai.ProviderGPT4 && leadProvider != ai.ProviderClaude {
+				leadProvider = ai.ProviderGPT4
+			}
+		}
+	}
+
+	order := make([]ai.AIProvider, 0, len(availableProviders))
+	order = append(order, leadProvider)
+	for _, provider := range availableProviders {
+		if provider != leadProvider {
+			order = append(order, provider)
+		}
+	}
+	return order
+}
+
+func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.CompletedBuild) (*Build, bool, error) {
+	if snapshot == nil {
+		return nil, false, fmt.Errorf("build snapshot is required")
+	}
+
+	am.mu.RLock()
+	if build, exists := am.builds[snapshot.BuildID]; exists {
+		am.mu.RUnlock()
+		return build, false, nil
+	}
+	am.mu.RUnlock()
+
+	mode := normalizeRestoredBuildMode(snapshot.Mode)
+	powerMode := normalizeRestoredPowerMode(snapshot.PowerMode)
+	maxAgents, maxRetries, maxRequests, maxTokens := am.defaultBuildLimits(mode)
+	providerMode := "platform"
+	if am.userHasActiveBYOKKey(snapshot.UserID) {
+		providerMode = "byok"
+	}
+
+	build := &Build{
+		ID:                  snapshot.BuildID,
+		UserID:              snapshot.UserID,
+		ProjectID:           snapshot.ProjectID,
+		Status:              normalizeRestoredBuildStatus(snapshot),
+		Mode:                mode,
+		PowerMode:           powerMode,
+		ProviderMode:        providerMode,
+		Description:         snapshot.Description,
+		Agents:              make(map[string]*Agent),
+		Tasks:               make([]*Task, 0),
+		Checkpoints:         make([]*Checkpoint, 0),
+		Progress:            snapshot.Progress,
+		MaxAgents:           maxAgents,
+		MaxRetries:          maxRetries,
+		MaxRequests:         maxRequests,
+		MaxTokensPerRequest: maxTokens,
+		Interaction:         parseBuildInteraction(snapshot.InteractionJSON),
+		CreatedAt:           snapshot.CreatedAt,
+		UpdatedAt:           snapshot.UpdatedAt,
+		CompletedAt:         snapshot.CompletedAt,
+		Error:               snapshot.Error,
+	}
+
+	if build.Status == BuildCompleted && build.Progress < 100 {
+		build.Progress = 100
+	}
+
+	am.mu.Lock()
+	if existing, exists := am.builds[build.ID]; exists {
+		am.mu.Unlock()
+		return existing, false, nil
+	}
+	am.builds[build.ID] = build
+	am.mu.Unlock()
+
+	availableProviders := am.getCurrentlyAvailableProvidersForBuild(build)
+	if len(availableProviders) == 0 {
+		am.mu.Lock()
+		delete(am.builds, build.ID)
+		am.mu.Unlock()
+		if am.buildUsesPlatformKeys(build) {
+			return nil, false, fmt.Errorf("no AI providers available to restore build session")
+		}
+		return nil, false, fmt.Errorf("no BYOK providers available to restore build session")
+	}
+
+	var leadAgent *Agent
+	var err error
+	for _, provider := range preferredLeadProviderOrder(availableProviders) {
+		leadAgent, err = am.spawnAgent(build.ID, RoleLead, provider)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		am.mu.Lock()
+		delete(am.builds, build.ID)
+		am.mu.Unlock()
+		return nil, false, fmt.Errorf("failed to restore lead agent: %w", err)
+	}
+
+	leadAgent.mu.Lock()
+	leadAgent.Status = StatusWorking
+	leadAgent.UpdatedAt = time.Now().UTC()
+	leadAgent.mu.Unlock()
+
+	build.mu.Lock()
+	resolveWaitingStateLocked(build)
+	build.UpdatedAt = time.Now().UTC()
+	build.mu.Unlock()
+
+	am.persistBuildSnapshot(build, nil)
+	return build, true, nil
 }
 
 // SendMessageWithClientToken sends a user message to the build's lead agent and preserves

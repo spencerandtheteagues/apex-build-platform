@@ -2,7 +2,9 @@ package agents
 
 import (
 	"fmt"
+	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -89,10 +91,14 @@ func editToRow(e *ProposedEdit) proposedEditRow {
 // ProposedEditStore manages proposed edits in memory with optional Postgres persistence.
 // When db is nil the store operates purely in-memory (existing behavior).
 // When db is set all mutations write through to Postgres and reads query from Postgres.
+//
+// DB failures are logged and counted but never silently discarded — callers can
+// inspect DBErrorCount to detect persistence degradation.
 type ProposedEditStore struct {
-	edits map[string][]*ProposedEdit // buildID -> edits (in-memory cache)
-	mu    sync.RWMutex
-	db    *gorm.DB // nil = in-memory only
+	edits       map[string][]*ProposedEdit // buildID -> edits (in-memory cache)
+	mu          sync.RWMutex
+	db          *gorm.DB    // nil = in-memory only
+	dbErrCount  atomic.Int64 // total DB write failures since startup
 }
 
 // NewProposedEditStore creates a new in-memory store.
@@ -138,8 +144,25 @@ func (s *ProposedEditStore) AddProposedEdits(buildID string, edits []*ProposedEd
 			rows[i] = editToRow(e)
 		}
 		if err := s.db.Create(&rows).Error; err != nil {
-			// Log and fall through to in-memory so callers are not blocked
-			_ = err
+			// Log the failure and count it for observability. We fall through to
+			// in-memory so the build continues, but the error is never silent.
+			s.dbErrCount.Add(1)
+			log.Printf("[proposed_edits] DB persist failed for build %s (%d edits): %v — falling back to in-memory", buildID, len(edits), err)
+		}
+	}
+
+	// Conflict detection: warn when two agents propose edits to the same file
+	// within the same build. The later edit wins but the conflict is logged so
+	// reviewers can inspect the diff.
+	existingPaths := make(map[string]bool, len(s.edits[buildID]))
+	for _, existing := range s.edits[buildID] {
+		if existing.Status == EditPending {
+			existingPaths[existing.FilePath] = true
+		}
+	}
+	for _, edit := range edits {
+		if existingPaths[edit.FilePath] {
+			log.Printf("[proposed_edits] CONFLICT: build %s already has a pending edit for %q — new edit from agent %s will shadow it", buildID, edit.FilePath, edit.AgentID)
 		}
 	}
 
@@ -364,4 +387,44 @@ func (s *ProposedEditStore) syncCacheFromRows(buildID string, rows []proposedEdi
 		edits[i] = rowToEdit(r)
 	}
 	s.edits[buildID] = edits
+}
+
+// DBErrorCount returns the total number of Postgres write failures since startup.
+// Non-zero values indicate the store has fallen back to in-memory persistence for
+// some edits and those will not survive a server restart.
+func (s *ProposedEditStore) DBErrorCount() int64 {
+	return s.dbErrCount.Load()
+}
+
+// HasPendingConflict returns true if there is already a pending edit for the
+// given file in this build. Callers can use this to gate downstream merge logic.
+func (s *ProposedEditStore) HasPendingConflict(buildID, filePath string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, edit := range s.edits[buildID] {
+		if edit.FilePath == filePath && edit.Status == EditPending {
+			return true
+		}
+	}
+	return false
+}
+
+// PendingConflicts returns all file paths that have more than one pending edit
+// within the given build. These files need conflict resolution before apply.
+func (s *ProposedEditStore) PendingConflicts(buildID string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	counts := make(map[string]int)
+	for _, edit := range s.edits[buildID] {
+		if edit.Status == EditPending {
+			counts[edit.FilePath]++
+		}
+	}
+	var conflicts []string
+	for path, n := range counts {
+		if n > 1 {
+			conflicts = append(conflicts, path)
+		}
+	}
+	return conflicts
 }

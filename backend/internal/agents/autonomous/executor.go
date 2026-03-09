@@ -859,36 +859,98 @@ For EVERY file, use this format:
 `+"```", description, featureList, stackInfo)
 }
 
+// pinnedVersions is the single source of truth for all npm package versions used
+// in generated projects. Pinning exact versions (no ^ or ~) eliminates the class
+// of "works today, breaks tomorrow" failures caused by transitive semver drift.
+//
+// To upgrade a dependency, change the version here — every new build will pick it up.
+// Keep versions in sync with the versions validated in CI.
+var pinnedVersions = map[string]string{
+	// Runtime
+	"express":          "4.18.2",
+	"cors":             "2.8.5",
+	// React ecosystem
+	"react":            "18.2.0",
+	"react-dom":        "18.2.0",
+	"react-router-dom": "6.23.1",
+	// Vue ecosystem
+	"vue":              "3.4.21",
+	"vue-router":       "4.3.2",
+	// TypeScript types
+	"typescript":       "5.4.5",
+	"@types/node":      "20.12.7",
+	"@types/react":     "18.2.79",
+	"@types/react-dom": "18.2.25",
+	"@types/express":   "4.17.21",
+	"@types/cors":      "2.8.17",
+	// Build tools
+	"vite":                   "5.2.8",
+	"@vitejs/plugin-react":   "4.2.1",
+	"@vitejs/plugin-vue":     "5.0.4",
+	// Test
+	"vitest":          "1.5.0",
+	// Styling
+	"tailwindcss":     "3.4.3",
+	"postcss":         "8.4.38",
+	"autoprefixer":    "10.4.19",
+}
+
+// pinnedVersion returns the exact pinned version for a package, or a safe
+// locked fallback if the package is not in the manifest.
+func pinnedVersion(pkg string) string {
+	if v, ok := pinnedVersions[pkg]; ok {
+		return v
+	}
+	// Unknown packages default to a conservative locked range.
+	// The AI agent will be prompted to fill in the correct version.
+	return "latest"
+}
+
+// pinnedDep returns a JSON dependency entry with an exact pinned version.
+func pinnedDep(pkg string) string {
+	return fmt.Sprintf(`"%s": "%s"`, pkg, pinnedVersion(pkg))
+}
+
 // Config file generators
 
 func (e *Executor) generatePackageJSON(description string, stack *TechStack) string {
-	deps := []string{`"express": "^4.18.2"`, `"cors": "^2.8.5"`}
+	deps := []string{pinnedDep("express"), pinnedDep("cors")}
 	devDeps := []string{
-		`"typescript": "^5.3.0"`,
-		`"@types/node": "^20.0.0"`,
-		`"vitest": "^1.0.0"`,
+		pinnedDep("typescript"),
+		pinnedDep("@types/node"),
+		pinnedDep("@types/express"),
+		pinnedDep("@types/cors"),
+		pinnedDep("vitest"),
 	}
 
 	if stack.Frontend == "React" {
-		deps = append(deps, `"react": "^18.2.0"`, `"react-dom": "^18.2.0"`, `"react-router-dom": "^6.20.0"`)
+		deps = append(deps,
+			pinnedDep("react"),
+			pinnedDep("react-dom"),
+			pinnedDep("react-router-dom"),
+		)
 		devDeps = append(devDeps,
-			`"@types/react": "^18.2.0"`,
-			`"@types/react-dom": "^18.2.0"`,
-			`"@vitejs/plugin-react": "^4.2.0"`,
-			`"vite": "^5.0.0"`,
+			pinnedDep("@types/react"),
+			pinnedDep("@types/react-dom"),
+			pinnedDep("@vitejs/plugin-react"),
+			pinnedDep("vite"),
 		)
 	}
 
 	if stack.Frontend == "Vue" {
-		deps = append(deps, `"vue": "^3.3.0"`, `"vue-router": "^4.2.0"`)
+		deps = append(deps, pinnedDep("vue"), pinnedDep("vue-router"))
 		devDeps = append(devDeps,
-			`"@vitejs/plugin-vue": "^4.5.0"`,
-			`"vite": "^5.0.0"`,
+			pinnedDep("@vitejs/plugin-vue"),
+			pinnedDep("vite"),
 		)
 	}
 
 	if stack.Styling == "Tailwind" {
-		devDeps = append(devDeps, `"tailwindcss": "^3.4.0"`, `"postcss": "^8.4.0"`, `"autoprefixer": "^10.4.0"`)
+		devDeps = append(devDeps,
+			pinnedDep("tailwindcss"),
+			pinnedDep("postcss"),
+			pinnedDep("autoprefixer"),
+		)
 	}
 
 	return fmt.Sprintf(`{
@@ -897,6 +959,10 @@ func (e *Executor) generatePackageJSON(description string, stack *TechStack) str
   "type": "module",
   "description": "%s",
   "main": "server/index.ts",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

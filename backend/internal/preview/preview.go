@@ -268,6 +268,13 @@ func (ps *PreviewServer) StopPreview(ctx context.Context, projectID uint) error 
 	}
 	session.mu.Unlock()
 
+	// Kill the backend server process (if any) before closing the HTTP server.
+	// Without this the child process keeps its port open after the session ends.
+	if session.BackendServer != nil {
+		session.BackendServer.Stop()
+		session.BackendServer = nil
+	}
+
 	// Stop HTTP server - use sync.Once to prevent double close
 	session.stopOnce.Do(func() {
 		close(session.stopChan)
@@ -1220,6 +1227,11 @@ func (ps *PreviewServer) CleanupIdleSessions(maxIdleTime time.Duration) {
 				client.Close()
 			}
 			session.Clients = make(map[*SafeClient]bool)
+			// Kill the backend server process to release its port.
+			if session.BackendServer != nil {
+				session.BackendServer.Stop()
+				session.BackendServer = nil
+			}
 			session.mu.Unlock()
 
 			// Stop session - use sync.Once to prevent double close

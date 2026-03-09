@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -183,9 +184,25 @@ func NewAuthService(jwtSecret string) *AuthService {
 	}
 }
 
-// SetDB sets the database connection for refresh token storage
+// SetDB sets the database connection for refresh token storage.
+// Must be called during server startup before any authentication requests are
+// processed. Without a database connection, refresh tokens are issued but not
+// persisted and cannot be rotated or revoked after a server restart.
 func (a *AuthService) SetDB(db *gorm.DB) {
 	a.db = db
+	log.Println("[auth] database configured — refresh tokens will be persisted and rotatable")
+}
+
+// warnRefreshTokenNoDBOnce ensures the no-DB warning is logged at most once per
+// process startup so it is visible without flooding the log.
+var warnRefreshTokenNoDBOnce sync.Once
+
+func warnRefreshTokenNoDB() {
+	warnRefreshTokenNoDBOnce.Do(func() {
+		log.Println("[auth] WARNING: AuthService has no database connection — refresh tokens will not be persisted. " +
+			"Token rotation and revocation are unavailable until SetDB() is called. " +
+			"This is a configuration error in production.")
+	})
 }
 
 // GetDB returns the database connection
@@ -259,7 +276,13 @@ func (a *AuthService) GenerateTokensWithMetadata(user *models.User, metadata *Re
 		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 
-	// If database is configured, store refresh token for rotation
+	// If database is configured, store refresh token for rotation.
+	// Without a database the refresh token is issued but not persisted — it
+	// cannot be rotated or revoked and will stop working on server restart.
+	// Call AuthService.SetDB() during server startup to enable full rotation.
+	if a.db == nil {
+		warnRefreshTokenNoDB()
+	}
 	if a.db != nil {
 		familyID := generateUUID()
 		if metadata != nil && metadata.FamilyID != "" {

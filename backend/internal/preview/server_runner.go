@@ -61,6 +61,30 @@ type ServerProcess struct {
 	stoppedOnce sync.Once
 }
 
+// Stop terminates the backend server process associated with this ServerProcess.
+// It first sends a graceful SIGTERM and waits up to 5 seconds for exit, then
+// force-kills with SIGKILL. Safe to call multiple times (idempotent via stopOnce).
+func (p *ServerProcess) Stop() {
+	if p == nil {
+		return
+	}
+	p.stopOnce.Do(func() {
+		if p.stopChan != nil {
+			close(p.stopChan)
+		}
+	})
+	if p.handle == nil {
+		return
+	}
+	p.handle.SignalStop()
+	select {
+	case <-p.stoppedChan:
+		// Exited gracefully.
+	case <-time.After(5 * time.Second):
+		p.handle.ForceKill()
+	}
+}
+
 // ServerConfig contains configuration for starting a backend server
 type ServerConfig struct {
 	ProjectID uint              `json:"project_id"`
