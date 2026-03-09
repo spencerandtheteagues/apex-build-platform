@@ -45,5 +45,14 @@ interface MonacoEnvironment {
 declare global {
   interface Window {
     MonacoEnvironment: MonacoEnvironment
+    __APEX_CONFIG__?: {
+      API_URL?: string
+      WS_URL?: string
+      VERSION?: string
+      ENVIRONMENT?: string
+      FEATURES?: Record<string, unknown>
+    }
   }
 }
+
+export {}

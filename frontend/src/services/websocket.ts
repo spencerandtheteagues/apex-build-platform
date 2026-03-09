@@ -1,6 +1,7 @@
 // APEX.BUILD WebSocket Service
 // Real-time collaboration with sub-20ms latency
 
+import { getConfiguredWsUrl } from '@/config/runtime'
 import { io, Socket } from 'socket.io-client'
 import {
   User,
@@ -11,6 +12,8 @@ import {
   FileChangeMessage,
   CursorUpdateMessage,
 } from '@/types'
+
+const DEFAULT_PRODUCTION_WS_URL = 'wss://api.apex.build'
 
 export type CollaborationEvent =
   | 'user-joined'
@@ -100,9 +103,9 @@ export class WebSocketService {
 
   // Get WebSocket URL for current environment
   private getWsUrl(): string {
-    // Check for Vite environment variable
-    if (import.meta.env.VITE_WS_URL) {
-      return import.meta.env.VITE_WS_URL
+    const configuredWsUrl = getConfiguredWsUrl()
+    if (configuredWsUrl) {
+      return configuredWsUrl
     }
 
     // Production detection - if running on Render, Firebase, or production domain
@@ -112,7 +115,7 @@ export class WebSocketService {
       || hostname === 'apex-frontend-gigq.onrender.com'
 
     if (isProduction) {
-      return 'wss://apex-backend-5ypy.onrender.com'
+      return DEFAULT_PRODUCTION_WS_URL
     }
 
     // Fallback for local development

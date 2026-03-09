@@ -1,6 +1,7 @@
 // APEX.BUILD Advanced AI Service
 // Multi-provider streaming support with intelligent routing
 
+import { getConfiguredApiUrl } from '@/config/runtime'
 import { AICapability, AIProvider, AIMessage } from '@/types'
 
 export interface AIStreamChunk {
@@ -65,8 +66,9 @@ export type StreamCallback = (chunk: AIStreamChunk) => void
 
 // Get API URL from environment or use default
 const getApiUrl = (): string => {
-  if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL
+  const configuredApiUrl = getConfiguredApiUrl()
+  if (configuredApiUrl) {
+    return configuredApiUrl
   }
   return '/api/v1'
 }

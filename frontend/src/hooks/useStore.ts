@@ -5,6 +5,7 @@ import { create } from 'zustand'
 import { devtools, subscribeWithSelector } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
 import { useShallow } from 'zustand/react/shallow'
+import type { Draft } from 'immer'
 import {
   User,
   Project,
@@ -24,6 +25,7 @@ import {
 } from '@/types'
 import { themes, getTheme } from '@/styles/themes'
 import apiService from '@/services/api'
+import collaborationService from '@/services/collaboration'
 import websocketService from '@/services/websocket'
 
 // Helper function to extract error message from unknown error type
@@ -44,6 +46,42 @@ const getErrorMessage = (error: unknown): string => {
     if (typeof errObj.message === 'string') return errObj.message
   }
   return 'An unknown error occurred'
+}
+
+type SessionResettableState = {
+  user: User | null
+  isAuthenticated: boolean
+  projects: Project[]
+  currentProject: Project | null
+  files: File[]
+  fileTree: any[]
+  openFiles: File[]
+  activeFileId: number | null
+  room: CollabRoom | null
+  connectedUsers: User[]
+  collaborationUsers: User[]
+  cursors: CursorPosition[]
+  chat: ChatMessage[]
+  isConnected: boolean
+  isConnecting: boolean
+}
+
+const resetAuthenticatedWorkspaceState = (state: Draft<SessionResettableState>) => {
+  state.user = null
+  state.isAuthenticated = false
+  state.projects = []
+  state.currentProject = null
+  state.files = []
+  state.fileTree = []
+  state.openFiles = []
+  state.activeFileId = null
+  state.room = null
+  state.connectedUsers = []
+  state.collaborationUsers = []
+  state.cursors = []
+  state.chat = []
+  state.isConnected = false
+  state.isConnecting = false
 }
 
 // Auth slice
@@ -471,18 +509,14 @@ export const useStore = create<StoreState & StoreActions>()(
         logout: async () => {
           try {
             await apiService.logout()
+          } catch (error: unknown) {
+            console.error('Logout error:', error)
+          } finally {
+            collaborationService.disconnect()
             websocketService.disconnect()
 
             set((state) => {
-              state.user = null
-              state.isAuthenticated = false
-              state.projects = []
-              state.currentProject = null
-              state.files = []
-              state.openFiles = []
-              state.room = null
-              state.connectedUsers = []
-              state.isConnected = false
+              resetAuthenticatedWorkspaceState(state)
             })
 
             get().addNotification({
@@ -490,8 +524,6 @@ export const useStore = create<StoreState & StoreActions>()(
               title: 'Logged Out',
               message: 'You have been logged out successfully.',
             })
-          } catch (error: unknown) {
-            console.error('Logout error:', error)
           }
         },
 
@@ -921,25 +953,16 @@ export const useStore = create<StoreState & StoreActions>()(
           try {
             const roomData = await apiService.joinCollabRoom(projectId)
 
-            if (!websocketService.isConnected()) {
-              const token = localStorage.getItem('apex_access_token')
-              if (token) {
-                await websocketService.connect(token)
-              }
-            }
-
-            await websocketService.joinRoom(roomData.room_id)
-
             set((state) => {
               state.room = { id: 0, room_id: roomData.room_id, project_id: projectId } as CollabRoom
-              state.isConnected = true
+              state.isConnected = collaborationService.isConnected()
               state.isConnecting = false
             })
 
             get().addNotification({
-              type: 'success',
-              title: 'Collaboration Started',
-              message: 'You are now collaborating in real-time!',
+              type: 'info',
+              title: 'Collaboration Ready',
+              message: 'The collaboration room is ready for this project.',
             })
           } catch (error: unknown) {
             set((state) => {
@@ -956,7 +979,8 @@ export const useStore = create<StoreState & StoreActions>()(
 
         leaveRoom: async () => {
           try {
-            await websocketService.leaveRoom()
+            collaborationService.leaveRoom()
+            collaborationService.disconnect()
             set((state) => {
               state.room = null
               state.connectedUsers = []

@@ -1,8 +1,8 @@
 /* @vitest-environment jsdom */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { isAuthRefreshRequestUrl } from './api'
+import { isAuthRefreshRequestUrl, reloadExpiredSession } from './api'
 
 describe('isAuthRefreshRequestUrl', () => {
   it('matches both current and legacy refresh endpoints', () => {
@@ -16,5 +16,15 @@ describe('isAuthRefreshRequestUrl', () => {
     expect(isAuthRefreshRequestUrl('/auth/logout')).toBe(false)
     expect(isAuthRefreshRequestUrl('/projects')).toBe(false)
     expect(isAuthRefreshRequestUrl()).toBe(false)
+  })
+})
+
+describe('reloadExpiredSession', () => {
+  it('reloads the current app instead of navigating to a missing login route', () => {
+    const reload = vi.fn()
+
+    reloadExpiredSession({ reload })
+
+    expect(reload).toHaveBeenCalledTimes(1)
   })
 })

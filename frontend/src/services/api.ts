@@ -2,6 +2,7 @@
 // Handles all communication with the Go backend
 
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
+import { getConfiguredApiUrl } from '@/config/runtime'
 import {
   User,
   Project,
@@ -41,21 +42,23 @@ import {
   CompletionStats,
 } from '@/types'
 
+const DEFAULT_PRODUCTION_API_BASE_URL = 'https://api.apex.build/api/v1'
+
 // Get API URL from environment or use default
 const getApiUrl = (): string => {
-  // Check for Vite environment variable
-  if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL
+  const configuredApiUrl = getConfiguredApiUrl()
+  if (configuredApiUrl) {
+    return configuredApiUrl
   }
 
   // Production detection - if running on a known production domain
   const hostname = typeof window !== 'undefined' ? window.location.hostname : ''
   if (hostname.includes('apex.build') || hostname.includes('web.app') || hostname.includes('firebaseapp.com')) {
-    return 'https://apex-backend-5ypy.onrender.com/api/v1'
+    return DEFAULT_PRODUCTION_API_BASE_URL
   }
   // Render staging/preview — derive backend from frontend hostname pattern
   if (hostname.includes('onrender.com')) {
-    return 'https://apex-backend-5ypy.onrender.com/api/v1'
+    return DEFAULT_PRODUCTION_API_BASE_URL
   }
 
   // Fallback to relative URL for development
@@ -65,6 +68,25 @@ const getApiUrl = (): string => {
 export const isAuthRefreshRequestUrl = (url?: string | null): boolean => {
   if (!url) return false
   return /\/auth\/(?:token\/)?refresh(?:[/?#]|$)/.test(url)
+}
+
+export const reloadExpiredSession = (
+  locationLike: Pick<Location, 'reload'> | null | undefined =
+    typeof window !== 'undefined' ? window.location : undefined
+): void => {
+  locationLike?.reload()
+}
+
+const resolveApiHost = (baseURL: string, fallbackHost: string): string => {
+  if (!baseURL || baseURL.startsWith('/')) {
+    return fallbackHost
+  }
+
+  try {
+    return new URL(baseURL).host
+  } catch {
+    return fallbackHost
+  }
 }
 
 export class ApiService {
@@ -117,7 +139,7 @@ export class ApiService {
             return this.client(originalRequest)
           } catch (refreshError) {
             this.clearAuth()
-            window.location.href = '/login'
+            reloadExpiredSession()
             return Promise.reject(refreshError)
           }
         }
@@ -2116,20 +2138,7 @@ export class ApiService {
   // Get WebSocket URL for debug events
   getDebugWebSocketUrl(sessionId: string): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    // Use appropriate host based on environment
-    let host: string
-    if (this.baseURL.includes('onrender.com')) {
-      host = 'apex-backend-5ypy.onrender.com'
-    } else if (this.baseURL.startsWith('/')) {
-      host = window.location.host
-    } else {
-      try {
-        const url = new URL(this.baseURL)
-        host = url.host
-      } catch {
-        host = window.location.host
-      }
-    }
+    const host = resolveApiHost(this.baseURL, window.location.host)
     return `${protocol}//${host}/ws/debug/${sessionId}`
   }
 
@@ -2282,19 +2291,7 @@ export class ApiService {
    */
   getDeploymentLogsWebSocketUrl(projectId: number): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    let host: string
-    if (this.baseURL.includes('onrender.com')) {
-      host = 'apex-backend-5ypy.onrender.com'
-    } else if (this.baseURL.startsWith('/')) {
-      host = window.location.host
-    } else {
-      try {
-        const url = new URL(this.baseURL)
-        host = url.host
-      } catch {
-        host = window.location.host
-      }
-    }
+    const host = resolveApiHost(this.baseURL, window.location.host)
     return `${protocol}//${host}/ws/deployment/${projectId}/logs`
   }
 

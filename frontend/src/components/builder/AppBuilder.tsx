@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
+import { getConfiguredApiUrl, getConfiguredWsUrl } from '@/config/runtime'
 import ModelRoleConfig from './ModelRoleConfig'
 import { useThemeLogo } from '@/hooks/useThemeLogo'
 import apiService, { CompletedBuildDetail } from '@/services/api'
@@ -1198,11 +1199,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       return appendToken(absolute)
     }
 
-    if (import.meta.env.VITE_WS_URL) {
-      const baseWsUrl = import.meta.env.VITE_WS_URL.replace(/\/ws\/?$/, '').replace(/\/$/, '')
+    const configuredWsUrl = getConfiguredWsUrl()
+    const configuredApiUrl = getConfiguredApiUrl()
+
+    if (configuredWsUrl) {
+      const baseWsUrl = configuredWsUrl.replace(/\/ws\/?$/, '').replace(/\/$/, '')
       return appendToken(`${baseWsUrl}/ws/build/${buildId}`)
-    } else if (import.meta.env.VITE_API_URL) {
-      const apiUrl = import.meta.env.VITE_API_URL.replace('/api/v1', '').replace(/\/$/, '')
+    } else if (configuredApiUrl) {
+      const apiUrl = configuredApiUrl.replace('/api/v1', '').replace(/\/$/, '')
       const wsProtocol = apiUrl.startsWith('https') ? 'wss' : 'ws'
       const wsHost = apiUrl.replace(/^https?:\/\//, '')
       return appendToken(`${wsProtocol}://${wsHost}/ws/build/${buildId}`)
