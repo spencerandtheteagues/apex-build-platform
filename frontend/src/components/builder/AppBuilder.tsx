@@ -3681,7 +3681,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                             {provider === 'claude'
                               ? 'Claude'
                               : (provider === 'gpt' || provider === 'gpt4')
-                                ? 'GPT-4'
+                                ? 'GPT-5'
                                 : provider === 'gemini'
                                   ? 'Gemini'
                                   : provider}
