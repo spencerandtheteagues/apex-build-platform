@@ -316,7 +316,7 @@ function App() {
   }, [uiColorScheme])
 
   // Theme-aware logo path
-  const logoSrc = uiColorScheme === 'blue-light' ? '/logo-blue.png' : '/logo.png'
+  const logoSrc = uiColorScheme === 'blue-light' ? '/logo-blue.png' : '/apex-build-logo-transparent.png'
 
   // Loading screen
   if (isLoading || !sessionBootstrapComplete) {
