@@ -328,20 +328,14 @@ const Nav: React.FC<LandingProps> = ({ onGetStarted }) => {
       <a href="#" style={{
         display: 'flex', alignItems: 'center', gap: 9, textDecoration: 'none',
       }}>
-        <div style={{
-          width: 30, height: 30, borderRadius: 7,
-          background: `linear-gradient(135deg, ${C.accent} 0%, #ff5500 100%)`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: `0 0 16px ${C.accentGlow}`,
-        }}>
-          <Zap size={16} color="#fff" fill="#fff" />
-        </div>
-        <span style={{
-          fontFamily: fHero, fontWeight: 900,
-          fontSize: '1.1rem', color: C.white, letterSpacing: '0.07em',
-        }}>
-          APEX<span style={{ color: C.accent }}>.BUILD</span>
-        </span>
+        <img
+          src="/apex-build-logo-transparent.png"
+          alt="APEX.BUILD"
+          style={{
+            height: 38, width: 'auto',
+            filter: 'drop-shadow(0 0 8px rgba(255,0,51,0.6))',
+          }}
+        />
       </a>
 
       <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
@@ -1288,13 +1282,12 @@ const FinalCTA: React.FC<LandingProps> = ({ onGetStarted }) => (
       transition={{ duration: 0.55 }}
       style={{ maxWidth: 600, margin: '0 auto' }}
     >
-      <div style={{
-        width: 56, height: 56, borderRadius: 14, margin: '0 auto 20px',
-        background: `linear-gradient(135deg, ${C.accent} 0%, #ff5500 100%)`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        boxShadow: `0 0 50px ${C.accentGlow}`,
-      }}>
-        <Zap size={30} color="#fff" fill="#fff" />
+      <div style={{ margin: '0 auto 20px', display: 'flex', justifyContent: 'center' }}>
+        <img
+          src="/apex-build-logo-transparent.png"
+          alt="APEX.BUILD"
+          style={{ height: 80, width: 'auto', filter: 'drop-shadow(0 0 20px rgba(255,0,51,0.6))' }}
+        />
       </div>
       <h2 style={{
         fontFamily: fHero, fontWeight: 900,
@@ -1347,16 +1340,11 @@ const Footer: React.FC = () => (
     flexWrap: 'wrap', gap: 12,
   }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-      <div style={{
-        width: 24, height: 24, borderRadius: 6,
-        background: `linear-gradient(135deg, ${C.accent}, #ff5500)`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <Zap size={12} color="#fff" fill="#fff" />
-      </div>
-      <span style={{ fontFamily: fHero, fontWeight: 900, fontSize: '0.88rem', color: C.white, letterSpacing: '0.07em' }}>
-        APEX<span style={{ color: C.accent }}>.BUILD</span>
-      </span>
+      <img
+        src="/apex-build-logo-transparent.png"
+        alt="APEX.BUILD"
+        style={{ height: 32, width: 'auto', filter: 'drop-shadow(0 0 6px rgba(255,0,51,0.5))' }}
+      />
     </div>
     <div style={{ fontFamily: fBody, fontSize: '0.73rem', color: C.textMuted }}>
       © {new Date().getFullYear()} Apex Build · Built with the models it powers
