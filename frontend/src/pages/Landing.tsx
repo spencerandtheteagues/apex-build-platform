@@ -3,6 +3,7 @@
 // Scroll: each bullet expands to a full rich detail section.
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
+import AnimatedBackground from '@/components/ui/AnimatedBackground'
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion'
 import {
   Bot, DollarSign, Terminal, GitBranch, Shield, Users,
@@ -1258,7 +1259,6 @@ const LightningField: React.FC = () => {
 
 const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
   const [mounted, setMounted] = useState(false)
-  const logoRef = useRef<HTMLImageElement>(null)
   useEffect(() => { const t = setTimeout(() => setMounted(true), 80); return () => clearTimeout(t) }, [])
 
   return (
@@ -1269,9 +1269,6 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
       padding: 'clamp(48px, 6vh, 72px) clamp(20px, 4vw, 48px) 24px',
       position: 'relative', overflow: 'hidden',
     }}>
-      {/* Accretion disk — logo in the black void at center */}
-      <AccretionDisk logoRef={logoRef} />
-
       {/* Background glow */}
       <div style={{
         position: 'absolute', top: '20%', left: '50%',
@@ -1290,7 +1287,6 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
       >
         <div style={{ marginBottom: 6, position: 'relative', display: 'inline-block' }}>
           <img
-            ref={logoRef}
             src="/apex-build-logo-transparent.png"
             alt="APEX-BUILD"
             style={{
@@ -2036,7 +2032,11 @@ const Footer: React.FC = () => (
 // ─── Landing page ─────────────────────────────────────────────────────────────
 
 const Landing: React.FC<LandingProps> = ({ onGetStarted }) => (
-  <div style={{ background: C.bg, minHeight: '100vh', color: C.text }}>
+  <div style={{ background: C.bg, minHeight: '100vh', color: C.text, position: 'relative' }}>
+    {/* Subtle animated particle background — covers entire page */}
+    <div style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
+      <AnimatedBackground variant="particles" intensity="low" interactive={false} />
+    </div>
     <Nav onGetStarted={onGetStarted} />
     <SideNav />
     <AboveFold onGetStarted={onGetStarted} />
