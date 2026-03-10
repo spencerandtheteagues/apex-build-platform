@@ -105,6 +105,51 @@ const getInitialRouteState = (): {
   return { projectId: null, currentView: 'builder', showLanding: true }
 }
 
+const LAST_PROJECT_STORAGE_KEY = 'apex_last_project_id'
+
+const getLastProjectStorageKey = (userId?: number | null): string =>
+  userId ? `${LAST_PROJECT_STORAGE_KEY}:${userId}` : LAST_PROJECT_STORAGE_KEY
+
+const readStoredLastProjectId = (userId?: number | null): number | null => {
+  if (typeof window === 'undefined') return null
+
+  const keys = userId ? [getLastProjectStorageKey(userId)] : [LAST_PROJECT_STORAGE_KEY]
+  for (const key of keys) {
+    try {
+      const rawValue = window.localStorage.getItem(key)
+      if (!rawValue) continue
+      const parsedValue = Number(rawValue)
+      if (Number.isInteger(parsedValue) && parsedValue > 0) {
+        return parsedValue
+      }
+    } catch {
+      return null
+    }
+  }
+
+  return null
+}
+
+const persistStoredLastProjectId = (userId: number | null | undefined, projectId: number): void => {
+  if (typeof window === 'undefined' || !projectId) return
+
+  try {
+    window.localStorage.setItem(getLastProjectStorageKey(userId), String(projectId))
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
+const clearStoredLastProjectId = (userId?: number | null): void => {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.removeItem(getLastProjectStorageKey(userId))
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
 function App() {
   const initialRouteRef = useRef(getInitialRouteState())
   const initialProjectIdRef = useRef<number | null>(initialRouteRef.current.projectId)
@@ -116,6 +161,8 @@ function App() {
   const [showGitHubImport, setShowGitHubImport] = useState(false)
   const [showLanding, setShowLanding] = useState(initialRouteRef.current.showLanding)
   const [sessionBootstrapComplete, setSessionBootstrapComplete] = useState(false)
+  const [recoverableProjectId, setRecoverableProjectId] = useState<number | null>(null)
+  const [isRestoringProject, setIsRestoringProject] = useState(false)
   const [isAuthMode, setIsAuthMode] = useState<'login' | 'register'>('login')
   const [pendingPlanType, setPendingPlanType] = useState<string | null>(null)
   const [builderStartOverSignal, setBuilderStartOverSignal] = useState(0)
@@ -148,6 +195,7 @@ function App() {
     register,
     refreshUser,
     selectProject,
+    setCurrentProject,
     updateProfile,
   } = useStore()
 
@@ -352,6 +400,56 @@ function App() {
     setVisitedViews(prev => new Set([...prev, 'ide']))
     void selectProject(projectId)
   }, [isAuthenticated, selectProject])
+
+  const restoreLastProject = useCallback(async (options?: { navigate?: boolean }) => {
+    if (!user?.id) return false
+
+    const storedProjectId = readStoredLastProjectId(user.id)
+    if (!storedProjectId) {
+      setRecoverableProjectId(null)
+      return false
+    }
+
+    setRecoverableProjectId(storedProjectId)
+    setIsRestoringProject(true)
+    try {
+      const project = await apiService.getProject(storedProjectId)
+      setCurrentProject(project)
+      if (options?.navigate) {
+        navigateToView('ide')
+      }
+      return true
+    } catch {
+      clearStoredLastProjectId(user.id)
+      setRecoverableProjectId(null)
+      return false
+    } finally {
+      setIsRestoringProject(false)
+    }
+  }, [navigateToView, setCurrentProject, user?.id])
+
+  useEffect(() => {
+    if (!user?.id) {
+      setRecoverableProjectId(null)
+      return
+    }
+
+    if (currentProject?.id) {
+      persistStoredLastProjectId(user.id, currentProject.id)
+      setRecoverableProjectId(currentProject.id)
+      return
+    }
+
+    setRecoverableProjectId(readStoredLastProjectId(user.id))
+  }, [currentProject?.id, user?.id])
+
+  useEffect(() => {
+    if (!isAuthenticated || currentProject || currentView !== 'ide' || isRestoringProject) return
+    if (pendingProjectIdRef.current) return
+    if (!recoverableProjectId) return
+
+    void restoreLastProject()
+  }, [currentProject, currentView, isAuthenticated, isRestoringProject, recoverableProjectId, restoreLastProject])
 
   // Handle authentication
   const handleAuth = async (e: React.FormEvent) => {
@@ -886,11 +984,25 @@ function App() {
                   <AlertTriangle className="w-16 h-16 text-yellow-500 mb-4" />
                   <h2 className="text-xl font-bold text-white mb-2">No Project Selected</h2>
                   <p className="max-w-md text-center mb-6">
-                    Please use the <span className="text-red-400 font-bold">Build App</span> tab to create or select a project before opening the IDE.
+                    Reopen your latest project or use <span className="text-red-400 font-bold">Build App</span> to recover a saved workflow and keep building.
                   </p>
-                  <Button onClick={() => navigateToView('builder')} variant="primary">
-                    Go to Builder
-                  </Button>
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    {recoverableProjectId && (
+                      <Button
+                        onClick={() => { void restoreLastProject({ navigate: true }) }}
+                        variant="primary"
+                        disabled={isRestoringProject}
+                      >
+                        {isRestoringProject ? 'Restoring Project...' : 'Open Last Project'}
+                      </Button>
+                    )}
+                    <Button onClick={() => navigateToView('builder')} variant={recoverableProjectId ? 'secondary' : 'primary'}>
+                      Go to Builder
+                    </Button>
+                    <Button onClick={handleStartNewBuild} variant="ghost">
+                      Fresh Build Prompt
+                    </Button>
+                  </div>
                 </div>
               )}
             </ErrorBoundary>
@@ -911,7 +1023,7 @@ function App() {
           <div className={`${shellScrollViewClass} ${currentView === 'explore' ? 'block' : 'hidden'}`}>
             <ErrorBoundary>
               <Suspense fallback={<ViewLoadingFallback label="Loading Explore..." />}>
-                <ExplorePage />
+                <ExplorePage onOpenProject={() => navigateToView('ide')} />
               </Suspense>
             </ErrorBoundary>
           </div>

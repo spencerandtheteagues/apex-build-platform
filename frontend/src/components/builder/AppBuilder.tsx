@@ -184,6 +184,7 @@ interface AppBuilderProps {
 }
 
 const ACTIVE_BUILD_STORAGE_KEY = 'apex_active_build_id'
+const LAST_WORKFLOW_BUILD_STORAGE_KEY = 'apex_last_workflow_build_id'
 
 const isActiveBuildStatus = (status?: string) =>
   status === 'pending' ||
@@ -839,7 +840,7 @@ const BuildCompleteCard: React.FC<{
                 disabled={isResetting}
               >
                 <RotateCcw className={cn("w-5 h-5 mr-2", isResetting && "animate-spin")} />
-                {isResetting ? 'Starting Over...' : 'New Build'}
+                {isResetting ? 'Starting Fresh...' : 'Start Fresh'}
               </Button>
             </div>
           </div>
@@ -998,6 +999,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const chatEndRef = useRef<HTMLDivElement>(null)
   const wsReconnectAttempts = useRef(0)
   const maxWsReconnectAttempts = 5
+  const skipAutoRestoreRef = useRef(false)
 
   // Ref to track current isBuilding state (prevents stale closure in WebSocket onclose)
   const isBuildingRef = useRef(isBuilding)
@@ -1038,20 +1040,62 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const { user, currentProject, createProject, setCurrentProject, addNotification } = useStore()
   const builderRootRef = useRef<HTMLDivElement>(null)
   const startOverSignalRef = useRef<number | undefined>(undefined)
-  const persistActiveBuildId = useCallback((buildId: string) => {
+  const getScopedStorageKey = useCallback((baseKey: string) => {
+    if (!user?.id) {
+      return baseKey
+    }
+    return `${baseKey}:${user.id}`
+  }, [user?.id])
+  const readStoredValue = useCallback((baseKey: string) => {
     try {
-      localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, buildId)
-    } catch (error) {
+      if (user?.id) {
+        const scopedValue = localStorage.getItem(getScopedStorageKey(baseKey))
+        if (scopedValue) {
+          return scopedValue
+        }
+      }
+      return localStorage.getItem(baseKey)
+    } catch {
+      return null
+    }
+  }, [getScopedStorageKey, user?.id])
+  const writeStoredValue = useCallback((baseKey: string, value: string) => {
+    try {
+      localStorage.setItem(baseKey, value)
+      if (user?.id) {
+        localStorage.setItem(getScopedStorageKey(baseKey), value)
+      }
+    } catch {
       // Ignore localStorage failures (private mode, quota, etc.)
     }
-  }, [])
-  const clearActiveBuildId = useCallback(() => {
+  }, [getScopedStorageKey, user?.id])
+  const clearStoredValue = useCallback((baseKey: string) => {
     try {
-      localStorage.removeItem(ACTIVE_BUILD_STORAGE_KEY)
-    } catch (error) {
+      localStorage.removeItem(baseKey)
+      if (user?.id) {
+        localStorage.removeItem(getScopedStorageKey(baseKey))
+      }
+    } catch {
       // Ignore localStorage failures
     }
-  }, [])
+  }, [getScopedStorageKey, user?.id])
+  const persistActiveBuildId = useCallback((buildId: string) => {
+    writeStoredValue(ACTIVE_BUILD_STORAGE_KEY, buildId)
+  }, [writeStoredValue])
+  const clearActiveBuildId = useCallback(() => {
+    clearStoredValue(ACTIVE_BUILD_STORAGE_KEY)
+  }, [clearStoredValue])
+  const getStoredActiveBuildId = useCallback(() => readStoredValue(ACTIVE_BUILD_STORAGE_KEY), [readStoredValue])
+  const persistLastWorkflowBuildId = useCallback((buildId: string) => {
+    writeStoredValue(LAST_WORKFLOW_BUILD_STORAGE_KEY, buildId)
+  }, [writeStoredValue])
+  const getStoredLastWorkflowBuildId = useCallback(
+    () => readStoredValue(LAST_WORKFLOW_BUILD_STORAGE_KEY),
+    [readStoredValue]
+  )
+  const clearLastWorkflowBuildId = useCallback(() => {
+    clearStoredValue(LAST_WORKFLOW_BUILD_STORAGE_KEY)
+  }, [clearStoredValue])
   const activePowerMode = buildState?.powerMode || powerMode
   const activeBuildStatuses = useMemo(
     () => new Set<BuildState['status']>(['planning', 'in_progress', 'testing', 'reviewing', 'awaiting_review']),
@@ -1134,7 +1178,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     createdProjectId
   )
 
-  const resetBuilderState = useCallback(() => {
+  const resetBuilderState = useCallback((options?: { clearPrompt?: boolean }) => {
     isBuildingRef.current = false
     buildStateRef.current = null
     wsReconnectAttempts.current = 0
@@ -1171,14 +1215,21 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     setShowBuyCredits(false)
     setBuyCreditsReason(undefined)
     setIsAutoOpeningIDE(false)
+    if (options?.clearPrompt) {
+      setAppDescription('')
+    }
     builderRootRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }, [clearActiveBuildId])
 
-  const handleStartOver = useCallback(async (options?: { skipConfirm?: boolean }) => {
+  const handleStartOver = useCallback(async (options?: { skipConfirm?: boolean; clearPrompt?: boolean }) => {
     const currentBuild = buildStateRef.current
     const activeBuild = Boolean(currentBuild?.id && isActiveBuildStatus(currentBuild.status))
+    const clearPrompt = options?.clearPrompt ?? true
 
     if (!hasBuilderSession && !activeBuild) {
+      if (clearPrompt) {
+        setAppDescription('')
+      }
       builderRootRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
@@ -1186,8 +1237,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     if (!options?.skipConfirm) {
       const confirmed = window.confirm(
         activeBuild
-          ? 'Cancel the current build and start a new one? Your prompt and stack settings will stay in place.'
-          : 'Clear this build session and start a new build? Your prompt and stack settings will stay in place.'
+          ? 'Cancel the current build and return to a fresh prompt? Your saved work will still appear in Recent Builds.'
+          : 'Clear this workflow and return to a fresh prompt? Your saved work will still appear in Recent Builds.'
       )
       if (!confirmed) return
     }
@@ -1204,19 +1255,25 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         }
       }
     } finally {
-      resetBuilderState()
+      if (cancelFailed && currentBuild?.id) {
+        persistLastWorkflowBuildId(currentBuild.id)
+        skipAutoRestoreRef.current = true
+      } else {
+        clearLastWorkflowBuildId()
+      }
+      resetBuilderState({ clearPrompt })
       addNotification({
         type: cancelFailed ? 'warning' : 'info',
-        title: cancelFailed ? 'Started Fresh Locally' : 'Ready for a New Build',
+        title: cancelFailed ? 'Fresh Start Ready' : 'Fresh Build Ready',
         message: cancelFailed
-          ? 'The live build could not be cancelled cleanly, but the builder has been reset so you can launch a new run.'
+          ? 'The live build could not be cancelled cleanly, but the builder has been reset to a blank prompt. Your saved files are still available in Recent Builds.'
           : activeBuild
-            ? 'The current build was cancelled and the builder is ready for a new run.'
-            : 'The builder was reset. Update your prompt and launch another build.',
+            ? 'The current build was cancelled. Your saved work is still available in Recent Builds.'
+            : 'The builder was reset to a blank prompt. You can reopen old work from Recent Builds at any time.',
       })
       setIsStartingOver(false)
     }
-  }, [addNotification, hasBuilderSession, resetBuilderState])
+  }, [addNotification, clearLastWorkflowBuildId, hasBuilderSession, persistLastWorkflowBuildId, resetBuilderState])
 
   useEffect(() => {
     if (startOverSignal === undefined) return
@@ -2697,6 +2754,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       artifactRevision: typeof payload.artifact_revision === 'string' ? payload.artifact_revision : undefined,
       interaction,
     })
+    persistLastWorkflowBuildId(buildId)
 
     const shouldReconnectLive = !isTerminalBuildStatus(status) && options?.reconnectLive !== false && payload.live !== false
     const active = isActiveBuildStatus(status)
@@ -2738,12 +2796,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     normalizeConversationMessages,
     normalizeInteraction,
     persistActiveBuildId,
+    persistLastWorkflowBuildId,
     powerMode,
     resolveGeneratedFiles,
   ])
 
   const openBuildFilesInIDE = useCallback(async (buildId: string, detail?: CompletedBuildDetail) => {
     const completed = detail || await apiService.getCompletedBuild(buildId)
+    persistLastWorkflowBuildId(buildId)
 
     if (completed.project_id) {
       try {
@@ -2782,6 +2842,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     ensureProjectCreated,
     normalizeGeneratedFiles,
     onNavigateToIDE,
+    persistLastWorkflowBuildId,
     resolveGeneratedFiles,
     setCurrentProject,
   ])
@@ -2817,36 +2878,56 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       return
     }
 
+    if (skipAutoRestoreRef.current) {
+      skipAutoRestoreRef.current = false
+      return
+    }
+
     let cancelled = false
-    const restoreActiveBuild = async () => {
-      let activeBuildId: string | null = null
-      try {
-        activeBuildId = localStorage.getItem(ACTIVE_BUILD_STORAGE_KEY)
-      } catch {
-        activeBuildId = null
-      }
-      if (!activeBuildId) return
+    const restoreLatestWorkflow = async () => {
+      const activeBuildId = getStoredActiveBuildId()
+      const candidateIds = [activeBuildId, getStoredLastWorkflowBuildId()].filter(
+        (value, index, values): value is string => Boolean(value) && values.indexOf(value) === index
+      )
 
-      try {
-        const status = await apiService.getBuildStatus(activeBuildId)
-        if (cancelled) return
+      for (const buildId of candidateIds) {
+        try {
+          const status = await apiService.getBuildStatus(buildId)
+          if (cancelled) return
 
-        if (isActiveBuildStatus(String(status?.status || ''))) {
-          await hydrateBuildContext(activeBuildId, { reconnectLive: true, notify: true })
+          if (isActiveBuildStatus(String(status?.status || ''))) {
+            await hydrateBuildContext(buildId, { reconnectLive: true, notify: true })
+            return
+          }
+
+          clearActiveBuildId()
+          await hydrateBuildContext(buildId, { reconnectLive: false, notify: true })
           return
+        } catch (error) {
+          if (buildId === activeBuildId) {
+            clearActiveBuildId()
+          }
+          const statusCode = (error as { response?: { status?: number } })?.response?.status
+          if (statusCode === 403 || statusCode === 404) {
+            clearLastWorkflowBuildId()
+          }
         }
-
-        clearActiveBuildId()
-      } catch {
-        clearActiveBuildId()
       }
     }
 
-    void restoreActiveBuild()
+    void restoreLatestWorkflow()
     return () => {
       cancelled = true
     }
-  }, [buildState?.id, clearActiveBuildId, hydrateBuildContext, user?.id])
+  }, [
+    buildState?.id,
+    clearActiveBuildId,
+    clearLastWorkflowBuildId,
+    getStoredActiveBuildId,
+    getStoredLastWorkflowBuildId,
+    hydrateBuildContext,
+    user?.id,
+  ])
 
   // Start build
   const startBuild = async () => {
@@ -2920,6 +3001,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
       const buildId = response.build_id
       persistActiveBuildId(buildId)
+      persistLastWorkflowBuildId(buildId)
 
       setBuildState({
         id: buildId,
@@ -3615,7 +3697,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             </div>{/* end grid */}
 
             {/* Build History */}
-            <BuildHistory onOpenBuild={openCompletedBuild} />
+            <BuildHistory userId={user?.id ?? null} onOpenBuild={openCompletedBuild} />
           </div>
         ) : (
           // Build Progress View
@@ -3732,10 +3814,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     >
                       <RotateCcw className={cn("w-4 h-4 mr-2", isStartingOver && "animate-spin")} />
                       {isStartingOver
-                        ? 'Starting Over...'
+                        ? 'Starting Fresh...'
                         : isBuildActive
-                          ? 'Cancel & Start Over'
-                          : 'New Build'}
+                          ? 'Cancel & Start Fresh'
+                          : 'Start Fresh'}
                     </Button>
                   </div>
 

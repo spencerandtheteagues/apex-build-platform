@@ -1,7 +1,7 @@
 // APEX-BUILD Build History
 // Shows completed builds with view/download/re-open functionality
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { cn } from '@/lib/utils'
 import apiService, { CompletedBuildSummary } from '@/services/api'
 import {
@@ -19,31 +19,59 @@ import {
 } from 'lucide-react'
 
 interface BuildHistoryProps {
+  userId?: number | null
   onOpenBuild?: (buildId: string, action?: 'resume' | 'open_files') => void
 }
 
-export const BuildHistory: React.FC<BuildHistoryProps> = ({ onOpenBuild }) => {
+export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild }) => {
   const [builds, setBuilds] = useState<CompletedBuildSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [downloading, setDownloading] = useState<string | null>(null)
 
-  useEffect(() => {
-    loadBuilds()
-  }, [])
+  const loadBuilds = useCallback(async () => {
+    if (!userId) {
+      setBuilds([])
+      setError(null)
+      setLoading(false)
+      return
+    }
 
-  const loadBuilds = async () => {
     try {
       setLoading(true)
+      setError(null)
       const data = await apiService.listBuilds(1, 10)
       setBuilds(data.builds || [])
     } catch (err: any) {
-      // Silently handle — might not have any builds yet
       setBuilds([])
+      setError('Unable to load recent builds right now.')
     } finally {
       setLoading(false)
     }
-  }
+  }, [userId])
+
+  useEffect(() => {
+    void loadBuilds()
+  }, [loadBuilds])
+
+  useEffect(() => {
+    if (!userId) return
+
+    const reload = () => {
+      if (document.visibilityState === 'hidden') {
+        return
+      }
+      void loadBuilds()
+    }
+
+    window.addEventListener('focus', reload)
+    document.addEventListener('visibilitychange', reload)
+
+    return () => {
+      window.removeEventListener('focus', reload)
+      document.removeEventListener('visibilitychange', reload)
+    }
+  }, [loadBuilds, userId])
 
   const handleDownload = async (build: CompletedBuildSummary) => {
     try {
@@ -109,7 +137,24 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ onOpenBuild }) => {
     )
   }
 
-  if (builds.length === 0) return null
+  if (builds.length === 0) {
+    if (!error) return null
+
+    return (
+      <div className="max-w-4xl mx-auto mt-8 rounded-xl border border-red-900/40 bg-red-950/20 px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-red-200">{error}</p>
+          <button
+            type="button"
+            onClick={() => { void loadBuilds() }}
+            className="rounded-lg border border-red-900/60 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-900/30"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-4xl mx-auto mt-8">
@@ -118,6 +163,10 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ onOpenBuild }) => {
         <h3 className="text-gray-400 font-semibold text-sm uppercase tracking-wider">Recent Builds</h3>
         <span className="text-xs text-gray-600 ml-auto">{builds.length} builds</span>
       </div>
+
+      <p className="mb-4 text-sm text-gray-500">
+        Saved on the server. You can reopen the workflow or code after logging back in.
+      </p>
 
       <div className="space-y-2.5">
         {builds.map((build) => (
@@ -171,7 +220,15 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ onOpenBuild }) => {
             </span>
 
             {/* Actions */}
-            <div className="flex items-center gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-1.5 shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+              <button
+                onClick={(e) => { e.stopPropagation(); onOpenBuild?.(build.build_id, 'resume') }}
+                className="hidden md:inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+                title="Continue workflow"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+                Continue
+              </button>
               <button
                 onClick={(e) => { e.stopPropagation(); handleDownload(build) }}
                 className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-colors"
@@ -186,7 +243,7 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ onOpenBuild }) => {
               <button
                 onClick={(e) => { e.stopPropagation(); onOpenBuild?.(build.build_id, 'open_files') }}
                 className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-colors"
-                title="Open build"
+                title="Open code in IDE"
               >
                 <FolderOpen className="w-4 h-4" />
               </button>

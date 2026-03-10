@@ -1,7 +1,7 @@
 // APEX-BUILD Explore / Community Page
 // Dark Demon Theme - Marketplace for projects, templates, and extensions
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
 import { useThemeLogo } from '@/hooks/useThemeLogo'
@@ -58,7 +58,11 @@ interface ProjectCard {
   isStarred?: boolean
 }
 
-export const ExplorePage = () => {
+interface ExplorePageProps {
+  onOpenProject?: () => void
+}
+
+export const ExplorePage: React.FC<ExplorePageProps> = ({ onOpenProject }) => {
   const logoSrc = useThemeLogo()
   const [activeTab, setActiveTab] = useState<'trending' | 'new' | 'popular'>('trending')
   const [searchQuery, setSearchQuery] = useState('')
@@ -66,6 +70,7 @@ export const ExplorePage = () => {
   const [projects, setProjects] = useState<ProjectCard[]>([])
   const [showFilters, setShowFilters] = useState(false)
   const [likedProjects, setLikedProjects] = useState<Set<string>>(new Set())
+  const [forkingProjectId, setForkingProjectId] = useState<string | null>(null)
   const [showPublishModal, setShowPublishModal] = useState(false)
   const [publishLoading, setPublishLoading] = useState(false)
   const [publishError, setPublishError] = useState<string | null>(null)
@@ -73,11 +78,12 @@ export const ExplorePage = () => {
   const [publishSearch, setPublishSearch] = useState('')
   const [userProjects, setUserProjects] = useState<Project[]>([])
   const [categories, setCategories] = useState<ProjectCategory[]>([])
+  const [selectedCategory, setSelectedCategory] = useState<string>('')
   const [categorySelections, setCategorySelections] = useState<Record<number, string[]>>({})
   const [categoryLoading, setCategoryLoading] = useState<Record<number, boolean>>({})
   const [expandedCategoryProjects, setExpandedCategoryProjects] = useState<Set<number>>(new Set())
 
-  const { setCurrentProject, addNotification } = useStore()
+  const { user, setCurrentProject, addNotification } = useStore()
 
   const handleLike = async (projectId: string) => {
     const numericId = Number(projectId)
@@ -147,59 +153,69 @@ export const ExplorePage = () => {
     }
   }
 
-  // Fetch projects from API
-  useEffect(() => {
-    const fetchProjects = async () => {
-      setIsLoading(true)
-      try {
-        // Map tab to sort order
-        let sort: 'trending' | 'recent' | 'stars' | 'forks' = 'trending'
-        if (activeTab === 'new') sort = 'recent'
-        if (activeTab === 'popular') sort = 'stars'
+  const fetchProjects = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      let sort: 'trending' | 'recent' | 'stars' | 'forks' = 'trending'
+      if (activeTab === 'new') sort = 'recent'
+      if (activeTab === 'popular') sort = 'stars'
 
-        const response = await apiService.searchPublicProjects({
-          q: searchQuery,
-          sort,
-          limit: 12
-        })
-        
-        // Transform API response to UI model if necessary, or use directly if compatible
-        // Assuming API returns compatible ProjectWithStats objects
-        const mapped = response.projects.map(p => ({
-          id: String(p.id),
-          title: p.name,
-          description: p.description || 'No description provided',
-          author: {
-            name: p.owner_username || 'Unknown',
-            avatar: p.owner_avatar_url || ''
-          },
-          stars: p.stats?.star_count || 0,
-          forks: p.stats?.fork_count || 0,
-          views: p.stats?.view_count || 0,
-          tags: p.topics || [p.language].filter(Boolean) as string[],
-          updatedAt: new Date(p.updated_at).toLocaleDateString(),
-          verified: p.is_verified || false,
-          isStarred: p.is_starred || false
-        }))
+      const response = await apiService.searchPublicProjects({
+        q: searchQuery,
+        category: selectedCategory || undefined,
+        sort,
+        limit: 12,
+      })
 
-        setProjects(mapped)
-        setLikedProjects(new Set(mapped.filter(p => p.isStarred).map(p => p.id)))
-      } catch (error) {
-        console.error('Failed to fetch projects:', error)
-      } finally {
-        setIsLoading(false)
-      }
+      const mapped = response.projects.map(p => ({
+        id: String(p.id),
+        title: p.name,
+        description: p.description || 'No description provided',
+        author: {
+          name: p.owner_username || 'Unknown',
+          avatar: p.owner_avatar_url || ''
+        },
+        stars: p.stats?.star_count || 0,
+        forks: p.stats?.fork_count || 0,
+        views: p.stats?.view_count || 0,
+        tags: p.topics || [p.language].filter(Boolean) as string[],
+        updatedAt: new Date(p.updated_at).toLocaleDateString(),
+        verified: p.is_verified || false,
+        isStarred: p.is_starred || false
+      }))
+
+      setProjects(mapped)
+      setLikedProjects(new Set(mapped.filter(p => p.isStarred).map(p => p.id)))
+    } catch (error) {
+      console.error('Failed to fetch projects:', error)
+    } finally {
+      setIsLoading(false)
     }
+  }, [activeTab, searchQuery, selectedCategory])
 
-    // Debounce search
+  useEffect(() => {
     const timer = setTimeout(() => {
-      fetchProjects()
+      void fetchProjects()
     }, 300)
 
     return () => clearTimeout(timer)
-  }, [activeTab, searchQuery])
+  }, [fetchProjects])
 
-  const handleFork = async (projectId: string) => {
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const categoriesData = await apiService.getCategories()
+        setCategories(categoriesData)
+      } catch (error) {
+        console.error('Failed to fetch categories:', error)
+      }
+    }
+
+    void fetchCategories()
+  }, [])
+
+  const handleFork = async (projectId: string, openAfterFork = false) => {
+    setForkingProjectId(projectId)
     try {
       const forked = await apiService.forkProject(Number(projectId))
       if (forked) {
@@ -207,8 +223,13 @@ export const ExplorePage = () => {
         addNotification({
           type: 'success',
           title: 'Project Forked',
-          message: 'Project forked successfully. You can find it in your projects.',
+          message: openAfterFork
+            ? 'Project forked successfully and opened in the IDE.'
+            : 'Project forked successfully. You can find it in your projects.',
         })
+        if (openAfterFork) {
+          onOpenProject?.()
+        }
       }
     } catch (error) {
       console.error('Failed to fork project:', error)
@@ -217,6 +238,31 @@ export const ExplorePage = () => {
         title: 'Fork Failed',
         message: 'Failed to fork project. Please try again.',
       })
+    } finally {
+      setForkingProjectId(null)
+    }
+  }
+
+  const handleOpenOwnProject = async (projectId: string) => {
+    setForkingProjectId(projectId)
+    try {
+      const project = await apiService.getProject(Number(projectId))
+      setCurrentProject(project)
+      addNotification({
+        type: 'success',
+        title: 'Project Opened',
+        message: 'Your project is now open in the IDE.',
+      })
+      onOpenProject?.()
+    } catch (error) {
+      console.error('Failed to open project:', error)
+      addNotification({
+        type: 'error',
+        title: 'Open Failed',
+        message: 'Unable to open this project right now.',
+      })
+    } finally {
+      setForkingProjectId(null)
     }
   }
 
@@ -389,6 +435,43 @@ export const ExplorePage = () => {
           </div>
         </div>
 
+        {showFilters && (
+          <div className="mb-8 rounded-2xl border border-gray-800 bg-gray-950/60 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('')}
+                className={cn(
+                  'rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors',
+                  selectedCategory === ''
+                    ? 'border-purple-500 bg-purple-500/15 text-purple-200'
+                    : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-white'
+                )}
+              >
+                All Categories
+              </button>
+              {categories.map((category) => (
+                <button
+                  key={category.slug}
+                  type="button"
+                  onClick={() => setSelectedCategory(category.slug)}
+                  className={cn(
+                    'rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors',
+                    selectedCategory === category.slug
+                      ? 'border-purple-500 bg-purple-500/15 text-purple-200'
+                      : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-white'
+                  )}
+                >
+                  {category.name}
+                </button>
+              ))}
+            </div>
+            <p className="mt-3 text-sm text-gray-500">
+              Use Explore as a starting point. Fork any public project into your workspace, then open it in the IDE and keep building.
+            </p>
+          </div>
+        )}
+
         {/* Content Grid */}
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -399,8 +482,21 @@ export const ExplorePage = () => {
             ))}
           </div>
         ) : (
+          projects.length === 0 ? (
+            <Card variant="cyberpunk" className="border border-gray-800 bg-gray-950/50">
+              <CardContent className="p-8 text-center">
+                <Globe className="mx-auto mb-4 h-10 w-10 text-gray-600" />
+                <h3 className="text-lg font-semibold text-white">No projects matched this search</h3>
+                <p className="mt-2 text-sm text-gray-500">
+                  Try a broader search, switch categories, or publish one of your own projects to seed the gallery.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {projects.map((project) => (
+            {projects.map((project) => {
+              const isOwnProject = user?.username && project.author.name === user.username
+              return (
               <Card
                 key={project.id}
                 variant="cyberpunk"
@@ -441,6 +537,14 @@ export const ExplorePage = () => {
                     {project.description}
                   </p>
 
+                  <div className="mb-4 flex items-center gap-3 text-xs text-gray-500">
+                    <span className="flex items-center gap-1">
+                      <Eye className="w-3.5 h-3.5" />
+                      {project.views}
+                    </span>
+                    <span>Updated {project.updatedAt}</span>
+                  </div>
+
                   {/* Tags */}
                   <div className="flex flex-wrap gap-1.5 mb-4">
                     {project.tags.slice(0, 3).map((tag) => (
@@ -475,17 +579,34 @@ export const ExplorePage = () => {
                       <Button
                         size="xs"
                         className="h-7 bg-gray-800 hover:bg-gray-700 text-white border border-gray-700"
-                        onClick={() => handleFork(project.id)}
+                        onClick={() => handleFork(project.id, false)}
+                        disabled={forkingProjectId === project.id}
                       >
                         <GitFork className="w-3.5 h-3.5 mr-1.5" />
-                        Fork
+                        {forkingProjectId === project.id ? 'Forking...' : 'Fork'}
+                      </Button>
+                      <Button
+                        size="xs"
+                        className="h-7 bg-purple-600 hover:bg-purple-500 text-white"
+                        onClick={() => {
+                          if (isOwnProject) {
+                            void handleOpenOwnProject(project.id)
+                            return
+                          }
+                          void handleFork(project.id, true)
+                        }}
+                        disabled={forkingProjectId === project.id}
+                      >
+                        <Rocket className="w-3.5 h-3.5 mr-1.5" />
+                        {isOwnProject ? 'Open in IDE' : 'Fork & Open'}
                       </Button>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-            ))}
+            )})}
           </div>
+          )
         )}
       </div>
 
