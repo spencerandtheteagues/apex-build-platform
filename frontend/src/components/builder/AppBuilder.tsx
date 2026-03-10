@@ -1049,10 +1049,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const readStoredValue = useCallback((baseKey: string) => {
     try {
       if (user?.id) {
-        const scopedValue = localStorage.getItem(getScopedStorageKey(baseKey))
-        if (scopedValue) {
-          return scopedValue
-        }
+        return localStorage.getItem(getScopedStorageKey(baseKey))
       }
       return localStorage.getItem(baseKey)
     } catch {
@@ -1061,20 +1058,22 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   }, [getScopedStorageKey, user?.id])
   const writeStoredValue = useCallback((baseKey: string, value: string) => {
     try {
-      localStorage.setItem(baseKey, value)
       if (user?.id) {
         localStorage.setItem(getScopedStorageKey(baseKey), value)
+        return
       }
+      localStorage.setItem(baseKey, value)
     } catch {
       // Ignore localStorage failures (private mode, quota, etc.)
     }
   }, [getScopedStorageKey, user?.id])
   const clearStoredValue = useCallback((baseKey: string) => {
     try {
-      localStorage.removeItem(baseKey)
       if (user?.id) {
         localStorage.removeItem(getScopedStorageKey(baseKey))
+        return
       }
+      localStorage.removeItem(baseKey)
     } catch {
       // Ignore localStorage failures
     }

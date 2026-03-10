@@ -427,8 +427,11 @@ function App() {
         navigateToView('ide')
       }
       return true
-    } catch {
-      clearStoredLastProjectId(user.id)
+    } catch (error) {
+      const statusCode = (error as { response?: { status?: number } })?.response?.status
+      if (statusCode === 403 || statusCode === 404) {
+        clearStoredLastProjectId(user.id)
+      }
       setRecoverableProjectId(null)
       return false
     } finally {
