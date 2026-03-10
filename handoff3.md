@@ -3,10 +3,78 @@
 ## Current Status
 
 - Branch: `main`
+- Latest pushed commit on GitHub: `057509c` (`fix: improve shell navigation and scrolling`)
 - Last pushed commit on GitHub before this local work: `21e9509` (`docs: add handoff3 status`)
 - This handoff file has now been updated to reflect the latest completed local work
 - The current interaction-control / user-steering slice is now materially implemented and verified locally
 - This file is intended to travel with the next verified push
+
+## Latest Frontend Shell Pass
+
+This pass finished the app-shell navigation and scrolling cleanup, then verified
+it against the live Render frontend instead of only relying on local build output.
+
+### Completed in `057509c`
+
+1. Builder reset / start-over flow is now first-class
+   - `frontend/src/App.tsx`
+   - `frontend/src/components/builder/AppBuilder.tsx`
+   - The shell header now exposes a global `New Build` action.
+   - Builder status cards also expose `Cancel & Start Over` / `New Build`.
+   - A restored build session can now be cleared cleanly without leaving stale
+     websocket state, chat history, preview state, or build-local residue behind.
+   - A subtle first-mount bug was fixed so a global start-over request is still
+     honored even if the builder view is only mounted after the user clicks it.
+
+2. Navigation is more usable across the app
+   - `frontend/src/App.tsx`
+   - Desktop keeps the horizontal shell nav, but mobile now gets a dedicated
+     workspace switcher menu with descriptions for each app area.
+   - The shell now shows clearer current-view context instead of leaving users to
+     infer where they are from content alone.
+
+3. Scrolling is now explicitly fixed in the admin panel and other high-traffic surfaces
+   - `frontend/src/components/admin/AdminDashboard.tsx`
+   - `frontend/src/pages/Explore.tsx`
+   - `frontend/src/components/spend/SpendDashboard.tsx`
+   - `frontend/src/components/project/ProjectList.tsx`
+   - `frontend/src/components/budget/CostConfirmationModal.tsx`
+   - `frontend/src/components/export/GitHubExportModal.tsx`
+   - `frontend/src/components/import/GitHubImportWizard.tsx`
+   - `frontend/src/components/builder/AppBuilder.tsx`
+   - Admin root layout no longer uses `min-h-screen` inside the shell, and admin
+     modals are now scroll-safe on smaller viewports.
+   - Explore and spend views now fit the shell better.
+   - High-traffic create/edit/import/export dialogs now use scroll-safe overlays
+     and bounded modal heights instead of assuming the viewport is always tall enough.
+
+4. Minor cleanup
+   - `frontend/src/pages/Landing.tsx`
+   - Removed a stale unused-disable comment so lint stays clean.
+
+### Verified after this pass
+
+- `frontend`: `npm run typecheck`
+- `frontend`: `npm run lint`
+- `frontend`: `npm test -- --run`
+- `frontend`: `npm run build`
+
+### Verified live on Render
+
+Frontend URL:
+- `https://apex-frontend-gigq.onrender.com`
+
+Live browser verification completed successfully with seeded admin auth:
+- admin dashboard scroll container was found and scrolled (`scrollTop` moved from `0` to `240`)
+- saved build history could be reopened
+- `Cancel & Start Over` / `New Build` returned the builder to a fresh prompt state
+- mobile workspace switcher opened and navigated into Settings successfully
+
+### Remaining follow-up after this pass
+
+- The main remaining frontend follow-up is still bundle-size optimization around
+  Monaco and `ts.worker`.
+- No new non-Stripe launch blocker was found in this navigation/scrolling pass.
 
 ## Latest Verified Follow-Up
 
