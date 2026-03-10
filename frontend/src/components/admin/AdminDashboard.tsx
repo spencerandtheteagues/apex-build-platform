@@ -277,7 +277,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
 
   if (!isAdmin) {
     return (
-      <div className="flex items-center justify-center h-screen bg-black">
+      <div className="flex min-h-full items-center justify-center bg-black p-6">
         <Card variant="cyberpunk" padding="lg" className="text-center">
           <Shield className="w-16 h-16 text-red-500 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-white mb-2">Access Denied</h2>
@@ -289,14 +289,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-black">
+      <div className="flex min-h-full items-center justify-center bg-black p-6">
         <Loading size="lg" variant="spinner" label="Loading Admin Dashboard..." />
       </div>
     )
   }
 
   return (
-    <div className={cn('min-h-screen bg-black p-6', className)}>
+    <div className={cn('min-h-full bg-black p-6 pb-16 md:pb-10', className)}>
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center gap-4 mb-4">
@@ -679,13 +679,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
 
       {/* User Edit Modal */}
       {showUserModal && selectedUser && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-          <Card variant="cyberpunk" padding="lg" className="w-full max-w-md">
-            <h3 className="text-xl font-bold text-white mb-6">
-              Edit User: {selectedUser.username}
-            </h3>
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 p-4">
+          <div className="flex min-h-full items-center justify-center">
+            <Card variant="cyberpunk" padding="lg" className="w-full max-w-md max-h-[calc(100vh-2rem)] overflow-y-auto">
+              <h3 className="text-xl font-bold text-white mb-6">
+                Edit User: {selectedUser.username}
+              </h3>
 
-            <div className="space-y-4">
+              <div className="space-y-4">
               {/* Privileges */}
               <div>
                 <label className="text-sm text-gray-400 mb-2 block">Privileges</label>
@@ -848,118 +849,123 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
                   Cancel
                 </Button>
               </div>
-            </div>
-          </Card>
+              </div>
+            </Card>
+          </div>
         </div>
       )}
 
       {/* Credits Modal */}
       {showCreditsModal && selectedUser && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-          <Card variant="cyberpunk" padding="lg" className="w-full max-w-md">
-            <h3 className="text-xl font-bold text-white mb-4">
-              Add Credits: {selectedUser.username}
-            </h3>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm text-gray-400 mb-2 block">Amount (USD)</label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={creditsAmount}
-                  onChange={(e) => setCreditsAmount(e.target.value)}
-                  className="bg-gray-900 border-gray-700"
-                />
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 p-4">
+          <div className="flex min-h-full items-center justify-center">
+            <Card variant="cyberpunk" padding="lg" className="w-full max-w-md max-h-[calc(100vh-2rem)] overflow-y-auto">
+              <h3 className="text-xl font-bold text-white mb-4">
+                Add Credits: {selectedUser.username}
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm text-gray-400 mb-2 block">Amount (USD)</label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={creditsAmount}
+                    onChange={(e) => setCreditsAmount(e.target.value)}
+                    className="bg-gray-900 border-gray-700"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm text-gray-400 mb-2 block">Reason</label>
+                  <Input
+                    type="text"
+                    value={creditsReason}
+                    onChange={(e) => setCreditsReason(e.target.value)}
+                    className="bg-gray-900 border-gray-700"
+                  />
+                </div>
+                <div className="flex gap-4 pt-2">
+                  <Button
+                    variant="primary"
+                    className="flex-1"
+                    onClick={() => addCredits(selectedUser.id, Number(creditsAmount || 0))}
+                  >
+                    Add Credits
+                  </Button>
+                  <Button variant="ghost" onClick={() => setShowCreditsModal(false)}>
+                    Cancel
+                  </Button>
+                </div>
               </div>
-              <div>
-                <label className="text-sm text-gray-400 mb-2 block">Reason</label>
-                <Input
-                  type="text"
-                  value={creditsReason}
-                  onChange={(e) => setCreditsReason(e.target.value)}
-                  className="bg-gray-900 border-gray-700"
-                />
-              </div>
-              <div className="flex gap-4 pt-2">
-                <Button
-                  variant="primary"
-                  className="flex-1"
-                  onClick={() => addCredits(selectedUser.id, Number(creditsAmount || 0))}
-                >
-                  Add Credits
-                </Button>
-                <Button variant="ghost" onClick={() => setShowCreditsModal(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </Card>
+            </Card>
+          </div>
         </div>
       )}
 
       {/* User Details Modal */}
       {showDetailsModal && detailsUser && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-          <Card variant="cyberpunk" padding="lg" className="w-full max-w-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-white">
-                User Details: {detailsUser.username}
-              </h3>
-              <Button variant="ghost" size="sm" onClick={() => setShowDetailsModal(false)}>
-                Close
-              </Button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-300">
-              <div>
-                <p className="text-gray-500">Email</p>
-                <p>{detailsUser.email}</p>
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 p-4">
+          <div className="flex min-h-full items-center justify-center">
+            <Card variant="cyberpunk" padding="lg" className="w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-white">
+                  User Details: {detailsUser.username}
+                </h3>
+                <Button variant="ghost" size="sm" onClick={() => setShowDetailsModal(false)}>
+                  Close
+                </Button>
               </div>
-              <div>
-                <p className="text-gray-500">Joined</p>
-                <p>{formatRelativeTime(detailsUser.created_at)}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Subscription</p>
-                <p>{detailsUser.subscription_type}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Credits</p>
-                <p>{detailsUser.has_unlimited_credits ? 'Unlimited' : `$${detailsUser.credit_balance.toFixed(2)}`}</p>
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <h4 className="text-lg font-semibold text-white mb-3">Recent AI Requests</h4>
-              {detailsRequests.length === 0 ? (
-                <p className="text-sm text-gray-500">No recent AI activity.</p>
-              ) : (
-                <div className="max-h-64 overflow-y-auto border border-gray-800 rounded-lg">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-800 text-gray-500">
-                        <th className="text-left px-3 py-2">Provider</th>
-                        <th className="text-left px-3 py-2">Model</th>
-                        <th className="text-left px-3 py-2">Tokens</th>
-                        <th className="text-left px-3 py-2">Cost</th>
-                        <th className="text-left px-3 py-2">Time</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {detailsRequests.map((req) => (
-                        <tr key={req.id} className="border-b border-gray-800/50">
-                          <td className="px-3 py-2">{req.provider}</td>
-                          <td className="px-3 py-2">{req.model || 'default'}</td>
-                          <td className="px-3 py-2">{req.total_tokens || 0}</td>
-                          <td className="px-3 py-2">${(req.cost || 0).toFixed(4)}</td>
-                          <td className="px-3 py-2">{formatRelativeTime(req.created_at)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-300">
+                <div>
+                  <p className="text-gray-500">Email</p>
+                  <p>{detailsUser.email}</p>
                 </div>
-              )}
-            </div>
-          </Card>
+                <div>
+                  <p className="text-gray-500">Joined</p>
+                  <p>{formatRelativeTime(detailsUser.created_at)}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Subscription</p>
+                  <p>{detailsUser.subscription_type}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Credits</p>
+                  <p>{detailsUser.has_unlimited_credits ? 'Unlimited' : `$${detailsUser.credit_balance.toFixed(2)}`}</p>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <h4 className="text-lg font-semibold text-white mb-3">Recent AI Requests</h4>
+                {detailsRequests.length === 0 ? (
+                  <p className="text-sm text-gray-500">No recent AI activity.</p>
+                ) : (
+                  <div className="max-h-64 overflow-y-auto border border-gray-800 rounded-lg">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-800 text-gray-500">
+                          <th className="text-left px-3 py-2">Provider</th>
+                          <th className="text-left px-3 py-2">Model</th>
+                          <th className="text-left px-3 py-2">Tokens</th>
+                          <th className="text-left px-3 py-2">Cost</th>
+                          <th className="text-left px-3 py-2">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detailsRequests.map((req) => (
+                          <tr key={req.id} className="border-b border-gray-800/50">
+                            <td className="px-3 py-2">{req.provider}</td>
+                            <td className="px-3 py-2">{req.model || 'default'}</td>
+                            <td className="px-3 py-2">{req.total_tokens || 0}</td>
+                            <td className="px-3 py-2">${(req.cost || 0).toFixed(4)}</td>
+                            <td className="px-3 py-2">{formatRelativeTime(req.created_at)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </Card>
+          </div>
         </div>
       )}
     </div>

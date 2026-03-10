@@ -253,7 +253,7 @@ export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose,
   };
 
   return (
-    <div className="w-full max-w-2xl bg-gray-900 rounded-2xl border border-gray-700 shadow-2xl overflow-hidden">
+    <div className="w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto bg-gray-900 rounded-2xl border border-gray-700 shadow-2xl">
       {/* Header with close button */}
       <div className="flex items-center justify-between p-6 border-b border-gray-700">
         <div>

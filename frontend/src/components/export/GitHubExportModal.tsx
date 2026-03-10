@@ -112,12 +112,13 @@ export default function GitHubExportModal({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 overflow-y-auto p-4">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
       {/* Modal */}
-      <div className="relative w-full max-w-lg mx-4 bg-gray-900/95 border border-gray-700/70 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden">
+      <div className="relative flex min-h-full items-center justify-center">
+        <div className="relative w-full max-w-lg bg-gray-900/95 border border-gray-700/70 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden max-h-[calc(100vh-2rem)]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800/50">
           <div className="flex items-center gap-3">
@@ -138,7 +139,7 @@ export default function GitHubExportModal({
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5">
+        <div className="max-h-[calc(100vh-7rem)] overflow-y-auto px-6 py-5">
           {step === 'configure' && (
             <div className="space-y-5">
               {/* Existing repo notice */}
@@ -381,6 +382,7 @@ export default function GitHubExportModal({
             </button>
           </div>
         )}
+        </div>
       </div>
     </div>
   )

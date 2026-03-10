@@ -711,7 +711,6 @@ function drawBoltPath(
 
 // ─── Accretion disk ───────────────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function drawRealisticBolt(
   ctx: CanvasRenderingContext2D,
   pts: LPt[],

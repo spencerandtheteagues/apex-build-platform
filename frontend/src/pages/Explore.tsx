@@ -312,7 +312,7 @@ export const ExplorePage = () => {
   )
 
   return (
-    <div className="h-full overflow-y-auto bg-black text-white p-6 pb-20">
+    <div className="min-h-full bg-black text-white p-6 pb-24 md:pb-20">
       {/* Background effects */}
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-purple-900/10 to-transparent" />
@@ -490,8 +490,9 @@ export const ExplorePage = () => {
       </div>
 
       {showPublishModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <Card variant="cyberpunk" padding="lg" className="w-full max-w-2xl">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 backdrop-blur-sm p-4">
+          <div className="flex min-h-full items-center justify-center">
+            <Card variant="cyberpunk" padding="lg" className="w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
               <CardTitle className="text-white">Publish a Project</CardTitle>
               <Button
@@ -629,7 +630,8 @@ export const ExplorePage = () => {
                 </div>
               )}
             </CardContent>
-          </Card>
+            </Card>
+          </div>
         </div>
       )}
     </div>

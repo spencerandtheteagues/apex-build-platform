@@ -558,8 +558,9 @@ export const ProjectList: React.FC<ProjectListProps> = ({
 
       {/* Create Project Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <Card variant="cyberpunk" className="w-full max-w-lg">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 backdrop-blur-sm p-4">
+          <div className="flex min-h-full items-center justify-center">
+            <Card variant="cyberpunk" className="w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Plus className="w-5 h-5 text-cyan-400" />
@@ -659,14 +660,16 @@ export const ProjectList: React.FC<ProjectListProps> = ({
                 </Button>
               </div>
             </CardFooter>
-          </Card>
+            </Card>
+          </div>
         </div>
       )}
 
       {/* Edit Project Modal */}
       {showEditModal && editProject && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <Card variant="cyberpunk" className="w-full max-w-lg">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 backdrop-blur-sm p-4">
+          <div className="flex min-h-full items-center justify-center">
+            <Card variant="cyberpunk" className="w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Edit3 className="w-5 h-5 text-cyan-400" />
@@ -769,7 +772,8 @@ export const ProjectList: React.FC<ProjectListProps> = ({
                 </Button>
               </div>
             </CardFooter>
-          </Card>
+            </Card>
+          </div>
         </div>
       )}
     </div>

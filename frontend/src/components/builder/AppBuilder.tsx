@@ -180,6 +180,7 @@ interface BuildTechStack {
 
 interface AppBuilderProps {
   onNavigateToIDE?: () => void
+  startOverSignal?: number
 }
 
 const ACTIVE_BUILD_STORAGE_KEY = 'apex_active_build_id'
@@ -721,18 +722,22 @@ const BuildCompleteCard: React.FC<{
   onPreview: () => void
   onOpenIDE: () => void
   onDownload: () => void
+  onStartOver: () => void
   isCreating: boolean
   isAutoOpeningIDE: boolean
   isPreparingPreview: boolean
+  isResetting: boolean
   showPreview: boolean
 }> = ({
   filesCount,
   onPreview,
   onOpenIDE,
   onDownload,
+  onStartOver,
   isCreating,
   isAutoOpeningIDE,
   isPreparingPreview,
+  isResetting,
   showPreview
 }) => {
   return (
@@ -826,6 +831,16 @@ const BuildCompleteCard: React.FC<{
                 <Download className="w-5 h-5 mr-2" />
                 Download ZIP
               </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                className="border-2 border-gray-700 text-gray-300 hover:bg-gray-800/60 transition-all font-semibold"
+                onClick={onStartOver}
+                disabled={isResetting}
+              >
+                <RotateCcw className={cn("w-5 h-5 mr-2", isResetting && "animate-spin")} />
+                {isResetting ? 'Starting Over...' : 'New Build'}
+              </Button>
             </div>
           </div>
         </div>
@@ -896,7 +911,7 @@ const TerminalOutput: React.FC<{ messages: ChatMessage[]; isBuilding: boolean }>
 // MAIN APP BUILDER COMPONENT
 // ============================================================================
 
-export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
+export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOverSignal }) => {
   // Build state
   const [buildMode, setBuildMode] = useState<BuildMode>('full')
   const [appDescription, setAppDescription] = useState('')
@@ -935,6 +950,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   const [isAutoOpeningIDE, setIsAutoOpeningIDE] = useState(false)
   const [showBuyCredits, setShowBuyCredits] = useState(false)
   const [buyCreditsReason, setBuyCreditsReason] = useState<string | undefined>(undefined)
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [showGitHubImport, setShowGitHubImport] = useState(false)
+  const [replitUrl, setReplitUrl] = useState('')
+  const [isImporting, setIsImporting] = useState(false)
+  const [rollbackCheckpointId, setRollbackCheckpointId] = useState<string | null>(null)
+  const [isStartingOver, setIsStartingOver] = useState(false)
 
   const thoughtGroups = useMemo(() => {
     const groups = new Map<string, { agent: Agent; thoughts: AIThought[] }>()
@@ -1014,7 +1035,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     return 'architect' in roleAssignments && 'coder' in roleAssignments
   }, [roleConfigMode, roleAssignments])
 
-  const { user, currentProject, createProject, setCurrentProject } = useStore()
+  const { user, currentProject, createProject, setCurrentProject, addNotification } = useStore()
+  const builderRootRef = useRef<HTMLDivElement>(null)
+  const startOverSignalRef = useRef<number | undefined>(undefined)
   const persistActiveBuildId = useCallback((buildId: string) => {
     try {
       localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, buildId)
@@ -1100,6 +1123,109 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     () => (interactionState?.permission_rules || []).filter((rule) => rule.decision === 'allow'),
     [interactionState?.permission_rules]
   )
+  const hasBuilderSession = Boolean(
+    buildState ||
+    isBuilding ||
+    generatedFiles.length > 0 ||
+    chatMessages.length > 0 ||
+    aiThoughts.length > 0 ||
+    proposedEdits.length > 0 ||
+    createdProjectId
+  )
+
+  const resetBuilderState = useCallback(() => {
+    isBuildingRef.current = false
+    buildStateRef.current = null
+    wsReconnectAttempts.current = 0
+
+    if (wsRef.current) {
+      wsRef.current.close()
+      wsRef.current = null
+    }
+
+    clearActiveBuildId()
+    previewPreparedRef.current = false
+    autoOpenedIDEBuildRef.current = null
+    setBuildState(null)
+    setIsBuilding(false)
+    setShowChat(true)
+    setShowPreview(false)
+    setIsPreparingPreview(false)
+    setGeneratedFiles([])
+    setCreatedProjectId(null)
+    setIsCreatingProject(false)
+    setChatMessages([])
+    setChatInput('')
+    setPermissionActionId(null)
+    setBuildActionPending(null)
+    setProposedEdits([])
+    setShowDiffReview(true)
+    setAiThoughts([])
+    setShowAiActivity(true)
+    setShowImportModal(false)
+    setShowGitHubImport(false)
+    setReplitUrl('')
+    setIsImporting(false)
+    setRollbackCheckpointId(null)
+    setShowBuyCredits(false)
+    setBuyCreditsReason(undefined)
+    setIsAutoOpeningIDE(false)
+    builderRootRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [clearActiveBuildId])
+
+  const handleStartOver = useCallback(async (options?: { skipConfirm?: boolean }) => {
+    const currentBuild = buildStateRef.current
+    const activeBuild = Boolean(currentBuild?.id && isActiveBuildStatus(currentBuild.status))
+
+    if (!hasBuilderSession && !activeBuild) {
+      builderRootRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+
+    if (!options?.skipConfirm) {
+      const confirmed = window.confirm(
+        activeBuild
+          ? 'Cancel the current build and start a new one? Your prompt and stack settings will stay in place.'
+          : 'Clear this build session and start a new build? Your prompt and stack settings will stay in place.'
+      )
+      if (!confirmed) return
+    }
+
+    setIsStartingOver(true)
+    let cancelFailed = false
+
+    try {
+      if (activeBuild && currentBuild?.id) {
+        try {
+          await apiService.cancelBuild(currentBuild.id)
+        } catch {
+          cancelFailed = true
+        }
+      }
+    } finally {
+      resetBuilderState()
+      addNotification({
+        type: cancelFailed ? 'warning' : 'info',
+        title: cancelFailed ? 'Started Fresh Locally' : 'Ready for a New Build',
+        message: cancelFailed
+          ? 'The live build could not be cancelled cleanly, but the builder has been reset so you can launch a new run.'
+          : activeBuild
+            ? 'The current build was cancelled and the builder is ready for a new run.'
+            : 'The builder was reset. Update your prompt and launch another build.',
+      })
+      setIsStartingOver(false)
+    }
+  }, [addNotification, hasBuilderSession, resetBuilderState])
+
+  useEffect(() => {
+    if (startOverSignal === undefined) return
+    if (startOverSignalRef.current === startOverSignal) return
+
+    startOverSignalRef.current = startOverSignal
+    if (startOverSignal === 0) return
+
+    void handleStartOver()
+  }, [handleStartOver, startOverSignal])
 
   // Tech stack options
   const techStacks: TechStack[] = [
@@ -3014,12 +3140,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
     }
   }
 
-  const [showImportModal, setShowImportModal] = useState(false)
-  const [showGitHubImport, setShowGitHubImport] = useState(false)
-  const [replitUrl, setReplitUrl] = useState('')
-  const [isImporting, setIsImporting] = useState(false)
-  const [rollbackCheckpointId, setRollbackCheckpointId] = useState<string | null>(null)
-
   const handleReplitImport = async () => {
     if (!replitUrl.trim()) return
     setIsImporting(true)
@@ -3075,7 +3195,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
   // ============================================================================
 
   return (
-    <div className="app-builder-root min-h-screen overflow-y-auto bg-black text-white relative">
+    <div ref={builderRootRef} className="app-builder-root min-h-full overflow-y-auto bg-black text-white relative">
       {/* Buy Credits Modal */}
       {showBuyCredits && (
         <BuyCreditsModal
@@ -3155,50 +3275,52 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
       </div>
 
       {/* Main content */}
-      <div className="relative z-10 p-6 md:p-8 lg:p-12">
+      <div className="relative z-10 p-6 pb-10 md:p-8 md:pb-12 lg:p-12 lg:pb-16">
         {/* Replit Import Modal */}
         {showImportModal && (
-          <div className="fixed inset-0 bg-black/95 flex items-center justify-center z-[100] p-4 backdrop-blur-md">
-            <Card variant="cyberpunk" glow="intense" className="w-full max-w-lg border-2 border-red-600/60" style={{ animation: 'fade-in-up 0.3s ease-out' }}>
-              <CardHeader>
-                <CardTitle className="text-2xl flex items-center gap-3">
-                  <Download className="w-7 h-7 text-red-500" />
-                  Import from Replit
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <p className="text-gray-400 leading-relaxed">
-                  Enter the URL of the Replit project you want to migrate to APEX-BUILD.
-                  Our agents will analyze the source and reconstruct it with optimized performance.
-                </p>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-300">Replit URL</label>
-                  <input
-                    type="text"
-                    value={replitUrl}
-                    onChange={(e) => setReplitUrl(e.target.value)}
-                    placeholder="https://replit.com/@username/project-name"
-                    className="w-full bg-black border-2 border-gray-700 rounded-xl px-4 py-3 text-white focus:border-red-600 focus:ring-2 focus:ring-red-900/30 outline-none transition-all"
-                  />
-                </div>
-                <div className="flex gap-4">
-                  <Button
-                    onClick={handleReplitImport}
-                    disabled={isImporting || !replitUrl.includes('replit.com')}
-                    className="flex-1 bg-red-600 hover:bg-red-500 font-semibold"
-                  >
-                    {isImporting ? 'Analyzing...' : 'Start Migration'}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => setShowImportModal(false)}
-                    className="border-2 border-gray-700 hover:bg-gray-900"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+          <div className="fixed inset-0 z-[100] overflow-y-auto bg-black/95 p-4 backdrop-blur-md">
+            <div className="flex min-h-full items-center justify-center">
+              <Card variant="cyberpunk" glow="intense" className="w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto border-2 border-red-600/60" style={{ animation: 'fade-in-up 0.3s ease-out' }}>
+                <CardHeader>
+                  <CardTitle className="text-2xl flex items-center gap-3">
+                    <Download className="w-7 h-7 text-red-500" />
+                    Import from Replit
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <p className="text-gray-400 leading-relaxed">
+                    Enter the URL of the Replit project you want to migrate to APEX-BUILD.
+                    Our agents will analyze the source and reconstruct it with optimized performance.
+                  </p>
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-gray-300">Replit URL</label>
+                    <input
+                      type="text"
+                      value={replitUrl}
+                      onChange={(e) => setReplitUrl(e.target.value)}
+                      placeholder="https://replit.com/@username/project-name"
+                      className="w-full bg-black border-2 border-gray-700 rounded-xl px-4 py-3 text-white focus:border-red-600 focus:ring-2 focus:ring-red-900/30 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="flex gap-4">
+                    <Button
+                      onClick={handleReplitImport}
+                      disabled={isImporting || !replitUrl.includes('replit.com')}
+                      className="flex-1 bg-red-600 hover:bg-red-500 font-semibold"
+                    >
+                      {isImporting ? 'Analyzing...' : 'Start Migration'}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => setShowImportModal(false)}
+                      className="border-2 border-gray-700 hover:bg-gray-900"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </div>
         )}
 
@@ -3599,6 +3721,20 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                         </Button>
                       )
                     )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => { void handleStartOver() }}
+                      disabled={isStartingOver}
+                      className="border-gray-600 bg-gray-900/50 text-gray-200 hover:bg-gray-800/80"
+                    >
+                      <RotateCcw className={cn("w-4 h-4 mr-2", isStartingOver && "animate-spin")} />
+                      {isStartingOver
+                        ? 'Starting Over...'
+                        : isBuildActive
+                          ? 'Cancel & Start Over'
+                          : 'New Build'}
+                    </Button>
                   </div>
 
                   {/* Pipeline telemetry */}
@@ -4120,9 +4256,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
                     onPreview={handlePreviewToggle}
                     onOpenIDE={openInIDE}
                     onDownload={handleDownloadBuild}
+                    onStartOver={() => { void handleStartOver() }}
                     isCreating={isCreatingProject}
                     isAutoOpeningIDE={isAutoOpeningIDE}
                     isPreparingPreview={isPreparingPreview}
+                    isResetting={isStartingOver}
                     showPreview={showPreview}
                   />
 
@@ -4167,11 +4305,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
 
       {/* GitHub Import Modal */}
       {showGitHubImport && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <GitHubImportWizard
-            onClose={() => setShowGitHubImport(false)}
-            onImported={handleGitHubImportSuccess}
-          />
+        <div className="fixed inset-0 z-[100] overflow-y-auto bg-black/90 backdrop-blur-sm p-4">
+          <div className="flex min-h-full items-center justify-center">
+            <GitHubImportWizard
+              onClose={() => setShowGitHubImport(false)}
+              onImported={handleGitHubImportSuccess}
+            />
+          </div>
         </div>
       )}
     </div>

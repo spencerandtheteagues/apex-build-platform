@@ -21,8 +21,9 @@ export const CostConfirmationModal: React.FC<CostConfirmationModalProps> = ({
   const isOverBudget = estimatedCostMax > Math.min(dailyRemaining, monthlyRemaining)
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-md w-full space-y-4">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm p-4">
+      <div className="flex min-h-full items-center justify-center">
+        <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-md w-full max-h-[calc(100vh-2rem)] overflow-y-auto space-y-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-yellow-900/30 flex items-center justify-center">
             <DollarSign size={20} className="text-yellow-400" />
@@ -77,6 +78,7 @@ export const CostConfirmationModal: React.FC<CostConfirmationModalProps> = ({
             <Zap size={16} />
             Start Build
           </button>
+        </div>
         </div>
       </div>
     </div>

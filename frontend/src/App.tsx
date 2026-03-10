@@ -1,7 +1,7 @@
 // APEX-BUILD Main Application
 // Dark Demon Theme - Cloud Development Platform
 
-import React, { useState, useEffect, useRef, lazy, Suspense } from 'react'
+import React, { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react'
 import { useStore } from './hooks/useStore'
 import apiService from './services/api'
 import CostTicker from './components/ide/CostTicker'
@@ -109,6 +109,7 @@ function App() {
   const initialRouteRef = useRef(getInitialRouteState())
   const initialProjectIdRef = useRef<number | null>(initialRouteRef.current.projectId)
   const pendingProjectIdRef = useRef<number | null>(initialProjectIdRef.current)
+  const workspaceMenuRef = useRef<HTMLDivElement | null>(null)
   const [currentView, setCurrentView] = useState<AppView>(initialRouteRef.current.currentView)
   const [visitedViews, setVisitedViews] = useState<Set<AppView>>(() => new Set([initialRouteRef.current.currentView]))
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false)
@@ -117,6 +118,7 @@ function App() {
   const [sessionBootstrapComplete, setSessionBootstrapComplete] = useState(false)
   const [isAuthMode, setIsAuthMode] = useState<'login' | 'register'>('login')
   const [pendingPlanType, setPendingPlanType] = useState<string | null>(null)
+  const [builderStartOverSignal, setBuilderStartOverSignal] = useState(0)
   const [authData, setAuthData] = useState({
     username: '',
     email: '',
@@ -135,6 +137,7 @@ function App() {
     if (typeof window === 'undefined') return 'auto'
     return localStorage.getItem('apex_default_model') || 'auto'
   })
+  const logoSrc = uiColorScheme === 'blue-light' ? '/logo-blue.png' : '/apex-build-logo-transparent.png'
 
   const {
     user,
@@ -147,6 +150,114 @@ function App() {
     selectProject,
     updateProfile,
   } = useStore()
+
+  const navigateToView = useCallback((view: AppView) => {
+    setCurrentView(view)
+    setShowSettingsDropdown(false)
+    if (view === 'builder') {
+      setShowLanding(false)
+    }
+  }, [])
+
+  const handleStartNewBuild = useCallback(() => {
+    navigateToView('builder')
+    setBuilderStartOverSignal((prev) => prev + 1)
+  }, [navigateToView])
+
+  const navigationItems = useMemo(() => {
+    const items: Array<{
+      view: AppView
+      label: string
+      icon: React.ReactNode
+      activeClassName: string
+    }> = [
+      {
+        view: 'builder',
+        label: 'Build App',
+        icon: <img src={logoSrc} alt="APEX" className="desktop-tab-logo w-7 h-7 object-contain" />,
+        activeClassName: 'bg-red-900/20 text-red-400 border border-red-900/50 shadow-sm shadow-red-900/20',
+      },
+      {
+        view: 'ide',
+        label: 'IDE',
+        icon: <Code2 className="w-4 h-4" />,
+        activeClassName: 'bg-red-900/20 text-red-400 border border-red-900/50 shadow-sm shadow-red-900/20',
+      },
+      {
+        view: 'explore',
+        label: 'Explore',
+        icon: <Globe className="w-4 h-4" />,
+        activeClassName: 'bg-purple-900/20 text-purple-400 border border-purple-900/50 shadow-sm shadow-purple-900/20',
+      },
+      {
+        view: 'spending',
+        label: 'Spending',
+        icon: <Zap className="w-4 h-4" />,
+        activeClassName: 'bg-orange-900/20 text-orange-400 border border-orange-900/50 shadow-sm shadow-orange-900/20',
+      },
+    ]
+
+    if (user?.is_admin || user?.is_super_admin) {
+      items.push({
+        view: 'admin',
+        label: 'Admin',
+        icon: <Shield className="w-4 h-4" />,
+        activeClassName: 'bg-purple-900/20 text-purple-400 border border-purple-900/50 shadow-sm shadow-purple-900/20',
+      })
+    }
+
+    return items
+  }, [logoSrc, user?.is_admin, user?.is_super_admin])
+
+  const viewMetadata = useMemo<Record<AppView, { label: string; description: string }>>(() => ({
+    builder: {
+      label: 'Build App',
+      description: 'Describe, iterate, and restart builds from one workspace.',
+    },
+    ide: {
+      label: 'IDE',
+      description: 'Inspect generated code, run the app, and make manual edits.',
+    },
+    admin: {
+      label: 'Admin',
+      description: 'Manage users, credits, and platform operations.',
+    },
+    explore: {
+      label: 'Explore',
+      description: 'Browse public projects, templates, and community builds.',
+    },
+    spending: {
+      label: 'Spending',
+      description: 'Track AI usage, credits, and export spend history.',
+    },
+    settings: {
+      label: 'Settings',
+      description: 'Configure providers, keys, billing, and budgets.',
+    },
+  }), [])
+
+  const currentViewMeta = viewMetadata[currentView]
+  const workspaceMenuItems = useMemo(
+    () => [
+      ...navigationItems.map((item) => ({
+        view: item.view,
+        label: item.label,
+        description: viewMetadata[item.view].description,
+        icon: item.icon,
+        activeClassName: item.activeClassName,
+      })),
+      {
+        view: 'settings' as AppView,
+        label: viewMetadata.settings.label,
+        description: viewMetadata.settings.description,
+        icon: <Settings className="w-4 h-4" />,
+        activeClassName: 'bg-red-900/20 text-red-400 border border-red-900/50 shadow-sm shadow-red-900/20',
+      },
+    ],
+    [navigationItems, viewMetadata]
+  )
+
+  const shellScrollViewClass = 'absolute inset-0 min-h-0 overflow-y-auto overscroll-contain'
 
   useEffect(() => {
     let cancelled = false
@@ -178,6 +289,30 @@ function App() {
       cancelled = true
     }
   }, [isAuthenticated, refreshUser])
+
+  useEffect(() => {
+    if (!showSettingsDropdown) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!workspaceMenuRef.current?.contains(event.target as Node)) {
+        setShowSettingsDropdown(false)
+      }
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowSettingsDropdown(false)
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [showSettingsDropdown])
 
   // After auth, redirect to Settings/Billing if user clicked a paid plan CTA
   useEffect(() => {
@@ -314,9 +449,6 @@ function App() {
     localStorage.setItem('apex_ui_color_scheme', uiColorScheme)
     document.documentElement.setAttribute('data-ui-theme', uiColorScheme === 'blue-light' ? 'blue' : 'red')
   }, [uiColorScheme])
-
-  // Theme-aware logo path
-  const logoSrc = uiColorScheme === 'blue-light' ? '/logo-blue.png' : '/apex-build-logo-transparent.png'
 
   // Loading screen
   if (isLoading || !sessionBootstrapComplete) {
@@ -587,9 +719,9 @@ function App() {
   return (
     <div className="h-screen flex flex-col bg-black">
       {/* Top Navigation */}
-      <div className="h-14 bg-black/90 border-b border-red-900/30 flex items-center justify-between px-4 z-50 relative">
+      <div className="min-h-14 shrink-0 bg-black/90 border-b border-red-900/30 px-4 py-2 z-50 relative flex flex-wrap items-center gap-3">
         {/* Logo */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <div className="w-16 h-16 flex items-center justify-center">
             <img
               src={logoSrc}
@@ -597,79 +729,101 @@ function App() {
               className="desktop-header-logo w-full h-full object-contain drop-shadow-[0_0_12px_rgba(239,68,68,0.5)]"
             />
           </div>
-          <span className="desktop-header-wordmark text-xl font-bold bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
-            APEX-BUILD
-          </span>
+          <div className="min-w-0">
+            <span className="desktop-header-wordmark hidden sm:inline text-xl font-bold bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
+              APEX-BUILD
+            </span>
+            <div className="sm:hidden text-[11px] uppercase tracking-[0.2em] text-gray-500">
+              {currentViewMeta.label}
+            </div>
+          </div>
         </div>
 
         {/* View Toggle */}
-        <div className="flex items-center gap-2 bg-gray-900/50 rounded-lg p-1 border border-gray-800">
+        <div className="hidden md:block order-3 w-full md:order-none md:flex-1 md:min-w-0">
+          <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide bg-gray-900/50 rounded-lg p-1 border border-gray-800">
+            {navigationItems.map((item) => (
+              <button
+                key={item.view}
+                onClick={() => navigateToView(item.view)}
+                className={`shrink-0 flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
+                  currentView === item.view
+                    ? item.activeClassName
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                }`}
+              >
+                {item.icon}
+                <span className="text-sm font-medium">{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="md:hidden flex-1 min-w-0" ref={workspaceMenuRef}>
           <button
-            onClick={() => setCurrentView('builder')}
-            className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
-              currentView === 'builder'
-                ? 'bg-red-900/20 text-red-400 border border-red-900/50 shadow-sm shadow-red-900/20'
-                : 'text-gray-400 hover:text-white hover:bg-gray-800'
-            }`}
+            type="button"
+            onClick={() => setShowSettingsDropdown((prev) => !prev)}
+            className="w-full flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/60 px-3 py-2 text-left"
+            aria-haspopup="menu"
+            aria-expanded={showSettingsDropdown}
           >
-            <img src={logoSrc} alt="APEX" className="desktop-tab-logo w-7 h-7 object-contain" />
-            <span className="text-sm font-medium">Build App</span>
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">Workspace</div>
+              <div className="truncate text-sm font-medium text-white">{currentViewMeta.label}</div>
+            </div>
+            <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showSettingsDropdown ? 'rotate-180' : ''}`} />
           </button>
-          <button
-            onClick={() => setCurrentView('ide')}
-            className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
-              currentView === 'ide'
-                ? 'bg-red-900/20 text-red-400 border border-red-900/50 shadow-sm shadow-red-900/20'
-                : 'text-gray-400 hover:text-white hover:bg-gray-800'
-            }`}
-          >
-            <Code2 className="w-4 h-4" />
-            <span className="text-sm font-medium">IDE</span>
-          </button>
-          <button
-            onClick={() => setCurrentView('explore')}
-            className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
-              currentView === 'explore'
-                ? 'bg-purple-900/20 text-purple-400 border border-purple-900/50 shadow-sm shadow-purple-900/20'
-                : 'text-gray-400 hover:text-white hover:bg-gray-800'
-            }`}
-          >
-            <Globe className="w-4 h-4" />
-            <span className="text-sm font-medium">Explore</span>
-          </button>
-          <button
-            onClick={() => setCurrentView('spending')}
-            className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
-              currentView === 'spending'
-                ? 'bg-orange-900/20 text-orange-400 border border-orange-900/50 shadow-sm shadow-orange-900/20'
-                : 'text-gray-400 hover:text-white hover:bg-gray-800'
-            }`}
-          >
-            <Zap className="w-4 h-4" />
-            <span className="text-sm font-medium">Spending</span>
-          </button>
-          {/* Admin button - only show for admin users */}
-          {(user?.is_admin || user?.is_super_admin) && (
-            <button
-              onClick={() => setCurrentView('admin')}
-              className={`flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
-                currentView === 'admin'
-                  ? 'bg-purple-900/20 text-purple-400 border border-purple-900/50 shadow-sm shadow-purple-900/20'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
-              }`}
-            >
-              <Shield className="w-4 h-4" />
-              <span className="text-sm font-medium">Admin</span>
-            </button>
+
+          {showSettingsDropdown && (
+            <div className="absolute left-4 right-4 top-full mt-2 rounded-xl border border-gray-800 bg-black/95 p-2 shadow-2xl shadow-black/60 backdrop-blur-xl">
+              <div className="max-h-[calc(100vh-9rem)] overflow-y-auto space-y-1 pr-1">
+                {workspaceMenuItems.map((item) => (
+                  <button
+                    key={item.view}
+                    type="button"
+                    onClick={() => navigateToView(item.view)}
+                    className={`w-full flex items-start gap-3 rounded-lg border px-3 py-3 text-left transition-all ${
+                      currentView === item.view
+                        ? item.activeClassName
+                        : 'border-transparent text-gray-300 hover:border-gray-800 hover:bg-gray-900/70'
+                    }`}
+                    role="menuitem"
+                  >
+                    <span className="mt-0.5 shrink-0">{item.icon}</span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold">{item.label}</span>
+                      <span className="block text-xs text-gray-500 leading-relaxed">{item.description}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
+        </div>
+
+        <div className="hidden lg:flex items-center gap-2 text-xs text-gray-500 min-w-0">
+          <span className="rounded-full border border-gray-800 bg-gray-900/60 px-2 py-1 uppercase tracking-[0.18em] text-gray-400">
+            {currentViewMeta.label}
+          </span>
+          <span className="truncate">{currentViewMeta.description}</span>
         </div>
 
         {/* User Info */}
         {user && (
-          <div className="flex items-center gap-3">
-            <CostTicker />
+          <div className="ml-auto flex items-center gap-2 shrink-0">
             <button
-              onClick={() => setCurrentView('settings')}
+              onClick={handleStartNewBuild}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-red-900/50 bg-red-950/30 text-red-300 transition-all duration-200 hover:bg-red-900/30 hover:text-white"
+              title="Start a new build"
+            >
+              <Rocket className="w-4 h-4" />
+              <span className="hidden sm:inline text-sm font-medium">New Build</span>
+            </button>
+            <div className="hidden xl:block">
+              <CostTicker />
+            </div>
+            <button
+              onClick={() => navigateToView('settings')}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all duration-200 ${
                 currentView === 'settings'
                   ? 'bg-red-900/20 text-red-400 border border-red-900/50'
@@ -679,7 +833,7 @@ function App() {
             >
               <Settings className="w-4 h-4" />
             </button>
-            <span className="text-sm text-gray-400">{user.username}</span>
+            <span className="hidden md:inline text-sm text-gray-400">{user.username}</span>
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-red-900/30">
               {user.username?.charAt(0).toUpperCase()}
             </div>
@@ -690,10 +844,13 @@ function App() {
       {/* Main Content - Wrapped in ErrorBoundary and safely rendered */}
       <div className="flex-1 overflow-hidden relative min-h-0">
         {visitedViews.has('builder') && (
-          <div className={`absolute inset-0 overflow-y-auto ${currentView === 'builder' ? 'block' : 'hidden'}`}>
+          <div className={`absolute inset-0 min-h-0 overflow-hidden ${currentView === 'builder' ? 'block' : 'hidden'}`}>
             <ErrorBoundary>
               <Suspense fallback={<ViewLoadingFallback label="Loading Builder..." />}>
-                <AppBuilder onNavigateToIDE={() => setCurrentView('ide')} />
+                <AppBuilder
+                  onNavigateToIDE={() => navigateToView('ide')}
+                  startOverSignal={builderStartOverSignal}
+                />
               </Suspense>
             </ErrorBoundary>
           </div>
@@ -713,7 +870,7 @@ function App() {
                   <p className="max-w-md text-center mb-6">
                     Please use the <span className="text-red-400 font-bold">Build App</span> tab to create or select a project before opening the IDE.
                   </p>
-                  <Button onClick={() => setCurrentView('builder')} variant="primary">
+                  <Button onClick={() => navigateToView('builder')} variant="primary">
                     Go to Builder
                   </Button>
                 </div>
@@ -723,7 +880,7 @@ function App() {
         )}
 
         {visitedViews.has('admin') && (
-          <div className={`absolute inset-0 ${currentView === 'admin' ? 'block' : 'hidden'}`}>
+          <div className={`${shellScrollViewClass} ${currentView === 'admin' ? 'block' : 'hidden'}`}>
             <ErrorBoundary>
               <Suspense fallback={<ViewLoadingFallback label="Loading Admin..." />}>
                 <AdminDashboard />
@@ -733,7 +890,7 @@ function App() {
         )}
 
         {visitedViews.has('explore') && (
-          <div className={`absolute inset-0 overflow-y-auto ${currentView === 'explore' ? 'block' : 'hidden'}`}>
+          <div className={`${shellScrollViewClass} ${currentView === 'explore' ? 'block' : 'hidden'}`}>
             <ErrorBoundary>
               <Suspense fallback={<ViewLoadingFallback label="Loading Explore..." />}>
                 <ExplorePage />
@@ -743,7 +900,7 @@ function App() {
         )}
 
         {visitedViews.has('spending') && (
-          <div className={`absolute inset-0 overflow-y-auto ${currentView === 'spending' ? 'block' : 'hidden'}`}>
+          <div className={`${shellScrollViewClass} ${currentView === 'spending' ? 'block' : 'hidden'}`}>
             <ErrorBoundary>
               <Suspense fallback={<ViewLoadingFallback label="Loading Spend Dashboard..." />}>
                 <SpendDashboard />
@@ -753,7 +910,7 @@ function App() {
         )}
 
         {visitedViews.has('settings') && (
-          <div className={`absolute inset-0 overflow-y-auto ${currentView === 'settings' ? 'block' : 'hidden'}`}>
+          <div className={`${shellScrollViewClass} ${currentView === 'settings' ? 'block' : 'hidden'}`}>
             <ErrorBoundary>
               <Suspense fallback={<ViewLoadingFallback label="Loading Settings..." />}>
                 <div className="min-h-full bg-black p-6">
@@ -871,10 +1028,12 @@ function App() {
 
       {/* GitHub Import Modal */}
       {showGitHubImport && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm p-4">
           <ErrorBoundary>
             <Suspense fallback={<ViewLoadingFallback label="Loading Import Wizard..." />}>
-              <GitHubImportWizard onClose={() => setShowGitHubImport(false)} />
+              <div className="flex min-h-full items-center justify-center">
+                <GitHubImportWizard onClose={() => setShowGitHubImport(false)} />
+              </div>
             </Suspense>
           </ErrorBoundary>
         </div>
