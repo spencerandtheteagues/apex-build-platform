@@ -3195,7 +3195,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   // ============================================================================
 
   return (
-    <div ref={builderRootRef} className="app-builder-root min-h-full overflow-y-auto bg-black text-white relative">
+    <div ref={builderRootRef} className="app-builder-root h-full min-h-0 overflow-y-auto overscroll-contain bg-black text-white relative">
       {/* Buy Credits Modal */}
       {showBuyCredits && (
         <BuyCreditsModal
