@@ -1297,9 +1297,6 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
       {/* Intro bilateral spider lightning — fires once on load from logo edges */}
       <IntroLightning logoRef={logoRef} />
 
-      {/* Continuous storm field */}
-      <LightningField />
-
       {/* Background glow */}
       <div style={{
         position: 'absolute', top: '20%', left: '50%',
