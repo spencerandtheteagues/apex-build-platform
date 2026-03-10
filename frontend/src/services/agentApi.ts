@@ -86,8 +86,10 @@ export class AgentApiService {
       const fallbackWsRoot = configuredWsUrl
         ? (configuredWsUrl.endsWith('/ws') ? configuredWsUrl : `${configuredWsUrl}/ws`)
         : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
-      const baseUrl = (this.websocketUrl && this.websocketUrl.trim()) ||
-        `${fallbackWsRoot}/build/${buildId}`
+      const isAbsoluteWsUrl = (url: string) => /^wss?:\/\//i.test(url)
+      const baseUrl = (this.websocketUrl && this.websocketUrl.trim() && isAbsoluteWsUrl(this.websocketUrl.trim()))
+        ? this.websocketUrl.trim()
+        : `${fallbackWsRoot}/build/${buildId}`
       const wsUrl = token && !/[?&]token=/.test(baseUrl)
         ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
         : baseUrl
