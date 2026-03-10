@@ -709,11 +709,9 @@ function drawBoltPath(
   ctx.restore()
 }
 
-// ─── Realistic lightning bolt draw — white-hot core, electric blue corona ──────
-// Real lightning: pure white core → pale blue inner → electric blue → deep blue haze
+// ─── Accretion disk ───────────────────────────────────────────────────────────
 
-interface IntroBolt { pts: LPt[]; isMain: boolean }
-
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function drawRealisticBolt(
   ctx: CanvasRenderingContext2D,
   pts: LPt[],
@@ -772,9 +770,9 @@ function drawRealisticBolt(
   ctx.restore()
 }
 
-// ─── One-shot bilateral intro lightning from logo edges ───────────────────────
+// ─── Accretion disk — logo sits in the black void at center ──────────────────
 
-const IntroLightning: React.FC<{ logoRef: React.RefObject<HTMLImageElement> }> = ({ logoRef }) => {
+const AccretionDisk: React.FC<{ logoRef: React.RefObject<HTMLImageElement> }> = ({ logoRef }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
@@ -783,181 +781,145 @@ const IntroLightning: React.FC<{ logoRef: React.RefObject<HTMLImageElement> }> =
     const canvas: HTMLCanvasElement = _cv
     const ctx = canvas.getContext('2d')!
 
-    canvas.width  = window.innerWidth
-    canvas.height = window.innerHeight
+    const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight }
+    resize()
+    window.addEventListener('resize', resize)
 
-    let raf = 0
-    let isDone = false
+    // Disk geometry
+    const TILT   = 0.30   // ry / rx — perspective foreshortening (~17° elevation view)
+    const IN_R   = 92     // inner radius — clear zone for the logo
+    const OUT_R  = 460    // outer edge of disk
 
-    let fired = false
+    // Ring definitions from innermost (white-hot) to outermost (deep violet-blue)
+    const RINGS = [
+      { r:  98, col: '#fff8e8', glow: '#ffe8aa', w: 10, op: 1.00 },
+      { r: 115, col: '#ffe566', glow: '#ffcc00', w: 12, op: 0.95 },
+      { r: 136, col: '#ffaa11', glow: '#ff8800', w: 14, op: 0.90 },
+      { r: 162, col: '#ff7700', glow: '#ff5500', w: 16, op: 0.85 },
+      { r: 192, col: '#ff3300', glow: '#cc2200', w: 18, op: 0.78 },
+      { r: 226, col: '#dd0044', glow: '#aa0033', w: 19, op: 0.68 },
+      { r: 264, col: '#990066', glow: '#770044', w: 20, op: 0.54 },
+      { r: 306, col: '#660099', glow: '#440077', w: 20, op: 0.40 },
+      { r: 352, col: '#3300cc', glow: '#1100aa', w: 20, op: 0.26 },
+      { r: 400, col: '#1100aa', glow: '#080077', w: 18, op: 0.15 },
+      { r: 450, col: '#080055', glow: '#040033', w: 16, op: 0.07 },
+    ]
 
-    function fire() {
-      if (fired) return
+    // Orbiting particles — Keplerian speeds (inner orbit faster)
+    const particles = Array.from({ length: 220 }, () => {
+      const r = IN_R + Math.random() * (OUT_R - IN_R)
+      return {
+        angle: Math.random() * Math.PI * 2,
+        r,
+        speed: 0.00055 * Math.pow(IN_R / r, 0.55) * (0.75 + Math.random() * 0.5),
+        size:  0.6 + Math.random() * 1.8,
+        bright: 0.45 + Math.random() * 0.55,
+      }
+    })
+
+    function getCenter() {
       const logo = logoRef.current
       const rect = logo?.getBoundingClientRect()
-      if (!rect || rect.width < 10) {
-        // Image hasn't loaded yet — wait for it
-        if (logo) logo.addEventListener('load', fire, { once: true })
-        return
-      }
-      fired = true
-      run(rect)
+      if (rect && rect.width > 10) return { cx: rect.left + rect.width / 2, cy: rect.top + rect.height * 0.50 }
+      return { cx: canvas.width / 2, cy: canvas.height * 0.30 }
     }
 
-    function run(rect: DOMRect) {
-      const cx    = canvas.width / 2
-      const cy    = canvas.height * 0.30
-      const lx    = (rect && rect.width > 10) ? rect.left              : cx - 80
-      const rx    = (rect && rect.width > 10) ? rect.right             : cx + 80
-      const oy    = (rect && rect.height > 0) ? rect.top + rect.height * 0.44 : cy
+    function drawHole(cx: number, cy: number) {
+      const hR  = IN_R * 1.12
+      const hRy = hR * TILT * 1.5
+      const g   = ctx.createRadialGradient(cx, cy, 0, cx, cy, hR * 1.4)
+      g.addColorStop(0,    'rgba(0,0,0,1)')
+      g.addColorStop(0.65, 'rgba(0,0,0,1)')
+      g.addColorStop(0.88, 'rgba(0,0,0,0.90)')
+      g.addColorStop(1,    'rgba(0,0,0,0)')
+      ctx.save()
+      ctx.fillStyle = g
+      ctx.beginPath()
+      ctx.ellipse(cx, cy, hR * 1.4, hRy * 1.4, 0, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
 
-      // ── Generate ONE main bolt per side + realistic short branches ──
-      function buildSide(side: 'L' | 'R'): IntroBolt[] {
-        const bolts: IntroBolt[] = []
-        const ox    = side === 'L' ? lx  : rx
-        const destX = side === 'L' ? -30 : canvas.width + 30
-        // Tiny end-point vertical jitter — horizontal bolt, not diagonal
-        const ey    = oy + (Math.random() - 0.5) * canvas.height * 0.04
+    function drawRingArc(cx: number, cy: number, ring: typeof RINGS[0], startA: number, endA: number, plasma: number, alphaScale: number) {
+      ctx.save()
+      ctx.globalAlpha = ring.op * plasma * alphaScale
+      ctx.strokeStyle = ring.col
+      ctx.shadowColor = ring.glow
+      ctx.shadowBlur  = ring.w * 2.2
+      ctx.lineWidth   = ring.w
+      ctx.lineCap     = 'round'
+      ctx.beginPath()
+      ctx.ellipse(cx, cy, ring.r, ring.r * TILT, 0, startA, endA)
+      ctx.stroke()
+      ctx.restore()
+    }
 
-        // ONE main bolt with low roughness = tight realistic channel
-        const main = generateBolt(ox, oy, destX, ey, 0.18)
-        bolts.push({ pts: main, isMain: true })
+    let raf: number
+    let lastTs = 0
 
-        // 4-8 short branches that fork off the main channel
-        // They go in the general direction of travel, angled ±35°
-        const travelAngle = side === 'L' ? Math.PI : 0
-        const used = new Set<number>()
-        const numBranches = 4 + Math.floor(Math.random() * 5)
+    function loop(ts: number) {
+      const dt = ts - lastTs; lastTs = ts
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-        for (let b = 0; b < numBranches; b++) {
-          // Pick a point spread across the bolt length
-          let idx: number
-          let tries = 0
-          do { idx = Math.floor(main.length * (0.10 + Math.random() * 0.85)); tries++ }
-          while (used.has(idx) && tries < 10)
-          used.add(idx)
-          if (idx >= main.length) continue
+      const { cx, cy } = getCenter()
+      const t = ts * 0.001  // seconds
 
-          const p   = main[idx]
-          // Fork angle: branch forward in travel direction, ±15–35°
-          const ang = travelAngle + (Math.random() < 0.5 ? 1 : -1) * (0.25 + Math.random() * 0.35)
-          // Short branch: 40–120px — realistic, doesn't stray far
-          const len = 40 + Math.random() * 80
-          const bx  = p.x + Math.cos(ang) * len
-          const by  = p.y + Math.sin(ang) * len
-          const br  = generateBolt(p.x, p.y, bx, by, 0.35)
-          bolts.push({ pts: br, isMain: false })
+      // Update particles
+      for (const p of particles) p.angle += p.speed * dt
 
-          // Occasional secondary fork off a branch (30% chance)
-          if (Math.random() < 0.30 && br.length > 3) {
-            const lp  = br[Math.floor(br.length * 0.5)]
-            const ang2 = ang + (Math.random() < 0.5 ? 1 : -1) * (0.2 + Math.random() * 0.3)
-            const len2 = 20 + Math.random() * 45
-            bolts.push({
-              pts: generateBolt(lp.x, lp.y, lp.x + Math.cos(ang2) * len2, lp.y + Math.sin(ang2) * len2, 0.40),
-              isMain: false,
-            })
-          }
-        }
-        return bolts
+      // ── Back half of disk (goes "behind" singularity, angles π→2π) ──
+      for (const ring of RINGS) {
+        const plasma = 0.72 + 0.28 * Math.sin(t * 1.1 - ring.r * 0.012)
+        drawRingArc(cx, cy, ring, Math.PI, Math.PI * 2, plasma, 0.55)
       }
 
-      const leftBolts  = buildSide('L')
-      const rightBolts = buildSide('R')
-      const allBolts   = [...leftBolts, ...rightBolts]
+      // ── Black hole center (covers back half) ──
+      drawHole(cx, cy)
 
-      // ── Return stroke timing ──
-      // Real lightning: 2–4 return strokes along same pre-ionized channel
-      // Quick blink pattern: bright → dark → bright → dark → bright → fade
-      const STROKES: [number, number, number, number][] = [
-        [0,   15,  90,  1.00],   // RS1 — primary, full power
-        [120, 132, 200, 0.78],   // RS2 — slightly dimmer
-        [235, 244, 305, 0.52],   // RS3 — weaker
-      ]
-      const FADE_START = 320
-      const FADE_DUR   = 420
-      const TOTAL_DUR  = FADE_START + FADE_DUR   // ~740ms total
-
-      const t0 = Date.now()
-
-      function getAlpha(now: number): { a: number; isPeak: boolean } {
-        const t = now - t0
-        if (t >= TOTAL_DUR) return { a: 0, isPeak: false }
-        if (t >= FADE_START) {
-          const ft = (t - FADE_START) / FADE_DUR
-          // Ease-out fade — quick drop then lingers slightly
-          return { a: Math.max(0, (1 - ft) * (1 - ft * 0.7) * 0.55), isPeak: false }
-        }
-        let best = 0, peak = false
-        for (const [s, pk, e, inten] of STROKES) {
-          if (t < s || t > e) continue
-          const a = t < pk
-            ? ((t - s) / (pk - s)) * inten            // fast attack
-            : inten * (1 - ((t - pk) / (e - pk)) * 0.6)  // decay
-          if (a > best) { best = a; peak = t <= pk + 12 }
-        }
-        return { a: best, isPeak: peak }
+      // ── Front half of disk (in front of singularity, angles 0→π) ──
+      for (const ring of RINGS) {
+        const plasma = 0.72 + 0.28 * Math.sin(t * 1.1 - ring.r * 0.012 + Math.PI * 0.4)
+        drawRingArc(cx, cy, ring, 0, Math.PI, plasma, 1.0)
       }
 
-      function loop() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height)
-        const now = Date.now()
-        const { a, isPeak } = getAlpha(now)
-
-        if (now - t0 >= TOTAL_DUR) { isDone = true; return }
-
-        // Bright white-blue screen flash at RS1 peak — feels like a real strike
-        if (isPeak && a > 0.85) {
-          ctx.save()
-          ctx.fillStyle = `rgba(200,220,255,${a * 0.14})`
-          ctx.fillRect(0, 0, canvas.width, canvas.height)
-          ctx.restore()
-        }
-
-        // Electric corona bloom at both origin points (logo edges)
-        const bloomR = isPeak ? 70 : 38
-        for (const ox of [lx, rx]) {
-          const g = ctx.createRadialGradient(ox, oy, 0, ox, oy, bloomR)
-          g.addColorStop(0,   `rgba(180,210,255,${a * 0.80})`)
-          g.addColorStop(0.25,`rgba(80,140,255, ${a * 0.45})`)
-          g.addColorStop(0.6, `rgba(30,80,200,  ${a * 0.18})`)
-          g.addColorStop(1,   'rgba(0,0,0,0)')
-          ctx.save()
-          ctx.fillStyle = g
-          ctx.beginPath()
-          ctx.arc(ox, oy, bloomR, 0, Math.PI * 2)
-          ctx.fill()
-          ctx.restore()
-        }
-
-        // Draw all bolts — branches first (behind), main bolt on top
-        for (const b of allBolts) {
-          if (!b.isMain) drawRealisticBolt(ctx, b.pts, a, isPeak, false)
-        }
-        for (const b of allBolts) {
-          if (b.isMain)  drawRealisticBolt(ctx, b.pts, a, isPeak, true)
-        }
-
-        raf = requestAnimationFrame(loop)
+      // ── Particles ──
+      for (const p of particles) {
+        const px    = cx + Math.cos(p.angle) * p.r
+        const py    = cy + Math.sin(p.angle) * p.r * TILT
+        const sinA  = Math.sin(p.angle)
+        // Skip particles inside the hole
+        if (Math.hypot(px - cx, (py - cy) / TILT) < IN_R * 0.88) continue
+        const depth = sinA > 0 ? 1.0 : 0.28   // front = bright, back = dim
+        const norm  = (p.r - IN_R) / (OUT_R - IN_R)
+        const col   = norm < 0.20 ? '#ffe888'
+                    : norm < 0.40 ? '#ff8800'
+                    : norm < 0.60 ? '#ff2244'
+                    : norm < 0.80 ? '#880099' : '#3300cc'
+        ctx.save()
+        ctx.globalAlpha = p.bright * depth * 0.70
+        ctx.fillStyle   = col
+        ctx.shadowColor = col
+        ctx.shadowBlur  = p.size * 8
+        ctx.beginPath()
+        ctx.arc(px, py, p.size, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
       }
+
+      // ── Final center overdraw — keep hole clean, logo visible ──
+      drawHole(cx, cy)
 
       raf = requestAnimationFrame(loop)
-    }  // end run()
-
-    // Fire immediately — if image has no dimensions yet, fire() waits for onload
-    const timer = setTimeout(fire, 0)
-
-    return () => {
-      clearTimeout(timer)
-      cancelAnimationFrame(raf)
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
     }
+
+    raf = requestAnimationFrame(loop)
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', resize) }
   }, [logoRef])
 
   return (
     <canvas
       ref={canvasRef}
-      style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 8 }}
+      style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0 }}
     />
   )
 }
@@ -1307,8 +1269,8 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
       padding: 'clamp(48px, 6vh, 72px) clamp(20px, 4vw, 48px) 24px',
       position: 'relative', overflow: 'hidden',
     }}>
-      {/* Intro bilateral spider lightning — fires once on load from logo edges */}
-      <IntroLightning logoRef={logoRef} />
+      {/* Accretion disk — logo in the black void at center */}
+      <AccretionDisk logoRef={logoRef} />
 
       {/* Background glow */}
       <div style={{
