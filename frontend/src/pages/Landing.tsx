@@ -3,7 +3,6 @@
 // Scroll: each bullet expands to a full rich detail section.
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import AnimatedBackground from '@/components/ui/AnimatedBackground'
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion'
 import {
   Bot, DollarSign, Terminal, GitBranch, Shield, Users,
@@ -1263,15 +1262,12 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
 
   return (
     <section style={{
-      minHeight: '100vh',
+      minHeight: '100vh', background: C.bg,
       display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
       padding: 'clamp(48px, 6vh, 72px) clamp(20px, 4vw, 48px) 24px',
       position: 'relative', overflow: 'hidden',
     }}>
-      {/* Animated particle background — above-fold only */}
-      <AnimatedBackground variant="particles" intensity="low" interactive={false} />
-
       {/* Background glow */}
       <div style={{
         position: 'absolute', top: '20%', left: '50%',
