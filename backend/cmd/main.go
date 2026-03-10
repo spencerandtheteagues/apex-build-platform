@@ -162,20 +162,26 @@ func main() {
 	startupRegistry.MarkReady("primary_database", startup.TierCritical, "Primary database connected", nil)
 	defer database.Close()
 
+	explicitSeedPasswords := db.HasExplicitSeedPasswords()
 	seedRuntimeAccounts := !(config.IsProductionEnvironment() || config.IsStagingEnvironment()) ||
-		strings.EqualFold(strings.TrimSpace(os.Getenv("ENABLE_RUNTIME_SEEDS")), "true")
+		strings.EqualFold(strings.TrimSpace(os.Getenv("ENABLE_RUNTIME_SEEDS")), "true") ||
+		explicitSeedPasswords
 	if seedRuntimeAccounts {
 		if err := database.RunSeeds(); err != nil {
 			startupRegistry.MarkDegraded("database_seeding", startup.TierOptional, "Database seeds completed with warnings", map[string]any{
-				"error": err.Error(),
+				"error":                   err.Error(),
+				"explicit_seed_passwords": explicitSeedPasswords,
 			})
 			log.Printf("WARNING: Database seeding had issues: %v", err)
 		} else {
-			startupRegistry.MarkReady("database_seeding", startup.TierOptional, "Database seeds completed", nil)
+			startupRegistry.MarkReady("database_seeding", startup.TierOptional, "Database seeds completed", map[string]any{
+				"explicit_seed_passwords": explicitSeedPasswords,
+			})
 		}
 	} else {
 		startupRegistry.MarkReady("database_seeding", startup.TierOptional, "Runtime database seeds skipped for this environment", map[string]any{
-			"enabled": false,
+			"enabled":                 false,
+			"explicit_seed_passwords": explicitSeedPasswords,
 		})
 	}
 

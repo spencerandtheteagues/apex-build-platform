@@ -13,6 +13,15 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// HasExplicitSeedPasswords reports whether runtime seed credentials were
+// explicitly supplied via environment variables. Unlike built-in development
+// defaults, these are safe to honor in production because the operator opted in
+// by providing real secrets.
+func HasExplicitSeedPasswords() bool {
+	return strings.TrimSpace(os.Getenv("ADMIN_SEED_PASSWORD")) != "" ||
+		strings.TrimSpace(os.Getenv("SPENCER_SEED_PASSWORD")) != ""
+}
+
 // SECURITY: Get seed passwords from environment variables
 func getSeedPassword(envVar, defaultDev string) string {
 	password := strings.TrimSpace(os.Getenv(envVar))

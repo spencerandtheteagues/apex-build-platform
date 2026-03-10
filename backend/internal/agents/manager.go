@@ -7648,12 +7648,6 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 		}
 	}
 
-	// Handle any remaining file content
-	if currentFile != nil && codeBuffer.Len() > 0 {
-		currentFile.Content = strings.TrimSpace(codeBuffer.String())
-		currentFile.Size = int64(len(currentFile.Content))
-		output.Files = append(output.Files, *currentFile)
-	}
 	if inCodeBlock {
 		parserWarnings = append(parserWarnings, "AI response ended with an unterminated code block; final file output may be truncated")
 		// Save partial content of the in-progress file so continuations can extend it.
@@ -7664,6 +7658,11 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 			truncatedPaths = append(truncatedPaths, currentFile.Path)
 			currentFile = nil
 		}
+	} else if currentFile != nil && codeBuffer.Len() > 0 {
+		// Handle any remaining file content for responses that ended cleanly.
+		currentFile.Content = strings.TrimSpace(codeBuffer.String())
+		currentFile.Size = int64(len(currentFile.Content))
+		output.Files = append(output.Files, *currentFile)
 	}
 	if len(truncatedPaths) > 0 {
 		output.TruncatedFiles = truncatedPaths

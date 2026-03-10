@@ -56,3 +56,32 @@ func TestGetSeedPassword(t *testing.T) {
 		}
 	})
 }
+
+func TestHasExplicitSeedPasswords(t *testing.T) {
+	t.Run("false when neither seed password is configured", func(t *testing.T) {
+		t.Setenv("ADMIN_SEED_PASSWORD", "")
+		t.Setenv("SPENCER_SEED_PASSWORD", "")
+
+		if HasExplicitSeedPasswords() {
+			t.Fatal("HasExplicitSeedPasswords() = true, want false")
+		}
+	})
+
+	t.Run("true when admin seed password is configured", func(t *testing.T) {
+		t.Setenv("ADMIN_SEED_PASSWORD", "TheStarsh1pKey!")
+		t.Setenv("SPENCER_SEED_PASSWORD", "")
+
+		if !HasExplicitSeedPasswords() {
+			t.Fatal("HasExplicitSeedPasswords() = false, want true")
+		}
+	})
+
+	t.Run("true when spencer seed password is configured", func(t *testing.T) {
+		t.Setenv("ADMIN_SEED_PASSWORD", "")
+		t.Setenv("SPENCER_SEED_PASSWORD", "another-strong-password")
+
+		if !HasExplicitSeedPasswords() {
+			t.Fatal("HasExplicitSeedPasswords() = false, want true")
+		}
+	})
+}
