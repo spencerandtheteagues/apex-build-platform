@@ -779,18 +779,26 @@ const IntroLightning: React.FC<{ logoRef: React.RefObject<HTMLImageElement> }> =
 
     let raf: number
     let isDone = false
+    let fired  = false
 
-    // One frame so logo is painted and we can measure it
-    raf = requestAnimationFrame(() => {
+    // Poll until the logo image is loaded and has non-zero layout dimensions,
+    // then fire. One rAF is not enough — the img may still be loading.
+    function waitAndFire() {
       const logo = logoRef.current
-      if (!logo) return
-
+      if (!logo) { raf = requestAnimationFrame(waitAndFire); return }
       const rect = logo.getBoundingClientRect()
-      const lx   = rect.left               // left edge of logo
-      const rx   = rect.right              // right edge of logo
-      const oy   = rect.top + rect.height * 0.44  // origin Y — slightly above mid (shoulder line)
+      if (rect.width < 10) { raf = requestAnimationFrame(waitAndFire); return }
+      if (fired) return
+      fired = true
+      startLightning(logo, rect)
+    }
+
+    function startLightning(_logo: HTMLImageElement, rect: DOMRect) {
+      const lx   = rect.left
+      const rx   = rect.right
+      const oy   = rect.top + rect.height * 0.44
       const W    = canvas.width
-      const vSpread = canvas.height * 0.20  // narrow vertical spread (±20% of viewport height)
+      const vSpread = canvas.height * 0.20
 
       // Build all bolt paths for one side
       function genSide(side: 'L' | 'R'): IntroBolt[] {
@@ -933,11 +941,13 @@ const IntroLightning: React.FC<{ logoRef: React.RefObject<HTMLImageElement> }> =
       }
 
       raf = requestAnimationFrame(loop)
-    })
+    }  // end startLightning
+
+    raf = requestAnimationFrame(waitAndFire)
 
     return () => {
       cancelAnimationFrame(raf)
-      if (!isDone && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height)
+      if (!isDone) ctx.clearRect(0, 0, canvas.width, canvas.height)
     }
   }, [logoRef])
 
