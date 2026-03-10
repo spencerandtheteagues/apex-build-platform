@@ -709,6 +709,248 @@ function drawBoltPath(
   ctx.restore()
 }
 
+// ─── Deep purple/blue drawing pass for intro bolts ────────────────────────────
+
+function drawIntroBolt(ctx: CanvasRenderingContext2D, pts: LPt[], alpha: number, isPeak: boolean) {
+  if (pts.length < 2 || alpha < 0.003) return
+  const path = () => {
+    ctx.beginPath()
+    ctx.moveTo(pts[0].x, pts[0].y)
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
+  }
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+
+  // Outer deep violet haze
+  ctx.save()
+  ctx.globalAlpha = alpha * (isPeak ? 0.52 : 0.24)
+  ctx.strokeStyle = '#5500aa'
+  ctx.lineWidth = 22
+  ctx.shadowColor = '#aa00ff'
+  ctx.shadowBlur = isPeak ? 60 : 32
+  path(); ctx.stroke()
+  ctx.restore()
+
+  // Electric indigo glow
+  ctx.save()
+  ctx.globalAlpha = alpha * 0.45
+  ctx.strokeStyle = '#2200ee'
+  ctx.lineWidth = 11
+  ctx.shadowColor = '#4400ff'
+  ctx.shadowBlur = 24
+  path(); ctx.stroke()
+  ctx.restore()
+
+  // Bright blue/indigo mid
+  ctx.save()
+  ctx.globalAlpha = alpha * 0.72
+  ctx.strokeStyle = '#5566ff'
+  ctx.lineWidth = 4.5
+  ctx.shadowColor = '#4477ff'
+  ctx.shadowBlur = 12
+  path(); ctx.stroke()
+  ctx.restore()
+
+  // White-hot core
+  ctx.save()
+  ctx.globalAlpha = alpha
+  ctx.strokeStyle = isPeak ? '#ffffff' : '#ddeeff'
+  ctx.lineWidth = 1.6
+  ctx.shadowColor = '#aabbff'
+  ctx.shadowBlur = 5
+  path(); ctx.stroke()
+  ctx.restore()
+}
+
+// ─── Logo intro lightning (one-shot bilateral spider burst) ───────────────────
+
+interface IntroBolt { pts: LPt[]; weight: number }
+
+const IntroLightning: React.FC<{ logoRef: React.RefObject<HTMLImageElement> }> = ({ logoRef }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  useEffect(() => {
+    const _cv = canvasRef.current
+    if (!_cv) return
+    const canvas: HTMLCanvasElement = _cv
+    const ctx = canvas.getContext('2d')!
+
+    canvas.width  = window.innerWidth
+    canvas.height = window.innerHeight
+
+    let raf: number
+    let isDone = false
+
+    // One frame so logo is painted and we can measure it
+    raf = requestAnimationFrame(() => {
+      const logo = logoRef.current
+      if (!logo) return
+
+      const rect = logo.getBoundingClientRect()
+      const lx   = rect.left               // left edge of logo
+      const rx   = rect.right              // right edge of logo
+      const oy   = rect.top + rect.height * 0.44  // origin Y — slightly above mid (shoulder line)
+      const W    = canvas.width
+      const vSpread = canvas.height * 0.20  // narrow vertical spread (±20% of viewport height)
+
+      // Build all bolt paths for one side
+      function genSide(side: 'L' | 'R'): IntroBolt[] {
+        const bolts: IntroBolt[] = []
+        const ox    = side === 'L' ? lx - 4 : rx + 4
+        const destX = side === 'L' ? -40 : W + 40
+        const dir   = side === 'L' ? Math.PI : 0   // base direction for spider legs
+
+        const numMain = 4 + Math.floor(Math.random() * 2)  // 4-5 main bolts
+        for (let m = 0; m < numMain; m++) {
+          const sy  = oy + (Math.random() - 0.5) * 28
+          // End: full screen width, narrow vertical band
+          const ey  = oy + (Math.random() - 0.5) * vSpread * 1.6
+          // Low roughness = tight horizontal channel
+          const main = generateBolt(ox, sy, destX, ey, 0.20)
+          bolts.push({ pts: main, weight: 1.0 })
+
+          // Branches off main — still biased outward, slightly wider spread
+          for (let i = Math.floor(main.length * 0.08); i < main.length - 2; i++) {
+            if (Math.random() < 0.14) {
+              const p  = main[i]
+              const pn = main[Math.min(i + 1, main.length - 1)]
+              const baseA = Math.atan2(pn.y - p.y, pn.x - p.x)
+              const bA    = baseA + (Math.random() - 0.5) * 0.85
+              const bLen  = 55 + Math.random() * 200
+              const bx = p.x + Math.cos(bA) * bLen
+              const by = p.y + Math.sin(bA) * bLen
+              const br = generateBolt(p.x, p.y, bx, by, 0.40)
+              bolts.push({ pts: br, weight: 0.58 })
+              // Sub-branch
+              if (Math.random() < 0.45 && br.length > 3) {
+                const lp = br[Math.floor(br.length * 0.55)]
+                const sa = bA + (Math.random() - 0.5) * 0.75
+                const sl = 30 + Math.random() * 90
+                bolts.push({
+                  pts: generateBolt(lp.x, lp.y, lp.x + Math.cos(sa) * sl, lp.y + Math.sin(sa) * sl, 0.55),
+                  weight: 0.30,
+                })
+              }
+            }
+          }
+
+          // Spider tendrils distributed along the bolt
+          const numSpiders = 7 + Math.floor(Math.random() * 9)
+          for (let s = 0; s < numSpiders; s++) {
+            const idx = Math.floor(main.length * (0.18 + Math.random() * 0.75))
+            if (idx >= main.length) continue
+            const p = main[idx]
+            // Spread outward sideways with narrow vertical variance
+            const sa  = dir + (Math.random() - 0.5) * 1.3
+            const sl  = 25 + Math.random() * 110
+            const tx  = p.x + Math.cos(sa) * sl
+            const ty  = p.y + Math.sin(sa) * sl
+            bolts.push({ pts: generateBolt(p.x, p.y, tx, ty, 0.62), weight: 0.24 })
+            // Tendril off tendril
+            if (Math.random() < 0.45) {
+              const sa2 = sa + (Math.random() - 0.5) * 0.9
+              const sl2 = 12 + Math.random() * 48
+              bolts.push({
+                pts: generateBolt(tx, ty, tx + Math.cos(sa2) * sl2, ty + Math.sin(sa2) * sl2, 0.70),
+                weight: 0.13,
+              })
+            }
+          }
+        }
+        return bolts
+      }
+
+      const allBolts = [...genSide('L'), ...genSide('R')]
+
+      // Return stroke schedule: [startMs, peakMs, endMs, intensity]
+      // Same channel re-illuminated — authentic multi-stroke lightning
+      const STROKES: [number, number, number, number][] = [
+        [0,   18,  110,  1.00],  // RS1 — blindingly bright
+        [135, 150, 240,  0.84],  // RS2
+        [268, 282, 365,  0.64],  // RS3
+        [392, 403, 472,  0.46],  // RS4 — faint
+      ]
+      const FADE_START = 500
+      const FADE_DUR   = 1600
+      const TOTAL_DUR  = FADE_START + FADE_DUR
+
+      const t0 = Date.now()
+
+      function getAlpha(now: number): { a: number; isPeak: boolean } {
+        const t = now - t0
+        if (t >= TOTAL_DUR) return { a: 0, isPeak: false }
+        if (t >= FADE_START) {
+          const ft = (t - FADE_START) / FADE_DUR
+          return { a: Math.max(0, (1 - ft) * (1 - ft) * 0.62), isPeak: false }
+        }
+        let best = 0, peak = false
+        for (const [s, pk, e, inten] of STROKES) {
+          if (t < s || t > e) continue
+          const a = t < pk
+            ? ((t - s) / (pk - s)) * inten
+            : inten * (1 - ((t - pk) / (e - pk)) * 0.55)
+          if (a > best) { best = a; peak = t <= pk + 15 }
+        }
+        return { a: best, isPeak: peak }
+      }
+
+      function loop() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        const now = Date.now()
+        const { a, isPeak } = getAlpha(now)
+
+        if (a <= 0.003) { isDone = true; return }
+
+        // Screen flash on first return stroke peak
+        if (isPeak && a > 0.7) {
+          ctx.save()
+          ctx.fillStyle = `rgba(100,80,255,${a * 0.11})`
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+          ctx.restore()
+        }
+
+        // Purple corona bloom at both logo edges
+        const bloomR = isPeak ? 65 : 35
+        for (const ox of [lx, rx]) {
+          const g = ctx.createRadialGradient(ox, oy, 0, ox, oy, bloomR * 1.8)
+          g.addColorStop(0,   `rgba(200,0,255,${a * 0.65})`)
+          g.addColorStop(0.3, `rgba(120,0,220,${a * 0.30})`)
+          g.addColorStop(0.7, `rgba(50,0,150, ${a * 0.10})`)
+          g.addColorStop(1,   'rgba(0,0,0,0)')
+          ctx.save()
+          ctx.fillStyle = g
+          ctx.beginPath()
+          ctx.arc(ox, oy, bloomR * 1.8, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.restore()
+        }
+
+        // Draw all bolts (same paths every frame — return strokes use same channel)
+        for (const b of allBolts) {
+          drawIntroBolt(ctx, b.pts, a * b.weight, isPeak)
+        }
+
+        raf = requestAnimationFrame(loop)
+      }
+
+      raf = requestAnimationFrame(loop)
+    })
+
+    return () => {
+      cancelAnimationFrame(raf)
+      if (!isDone && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height)
+    }
+  }, [logoRef])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 8 }}
+    />
+  )
+}
+
+// ─── Continuous storm field ────────────────────────────────────────────────────
+
 const LightningField: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -1041,6 +1283,7 @@ const LightningField: React.FC = () => {
 
 const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
   const [mounted, setMounted] = useState(false)
+  const logoRef = useRef<HTMLImageElement>(null)
   useEffect(() => { const t = setTimeout(() => setMounted(true), 80); return () => clearTimeout(t) }, [])
 
   return (
@@ -1051,7 +1294,10 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
       padding: 'clamp(48px, 6vh, 72px) clamp(20px, 4vw, 48px) 24px',
       position: 'relative', overflow: 'hidden',
     }}>
-      {/* Lightning field */}
+      {/* Intro bilateral spider lightning — fires once on load from logo edges */}
+      <IntroLightning logoRef={logoRef} />
+
+      {/* Continuous storm field */}
       <LightningField />
 
       {/* Background glow */}
@@ -1072,6 +1318,7 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
       >
         <div style={{ marginBottom: 6, position: 'relative', display: 'inline-block' }}>
           <img
+            ref={logoRef}
             src="/apex-build-logo-transparent.png"
             alt="APEX-BUILD"
             style={{
