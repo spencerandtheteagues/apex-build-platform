@@ -13,7 +13,7 @@ import {
   CursorUpdateMessage,
 } from '@/types'
 
-const DEFAULT_PRODUCTION_WS_URL = 'wss://api.apex.build'
+const DEFAULT_PRODUCTION_WS_URL = 'wss://apex-backend-5ypy.onrender.com/ws'
 
 export type CollaborationEvent =
   | 'user-joined'

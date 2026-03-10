@@ -4,8 +4,8 @@
 # Stage 1: Build
 FROM node:18-alpine AS builder
 
-ARG VITE_API_URL=https://api.apex.build/api/v1
-ARG VITE_WS_URL=wss://api.apex.build/ws
+ARG VITE_API_URL=https://apex-backend-5ypy.onrender.com/api/v1
+ARG VITE_WS_URL=wss://apex-backend-5ypy.onrender.com/ws
 
 # Set working directory
 WORKDIR /app

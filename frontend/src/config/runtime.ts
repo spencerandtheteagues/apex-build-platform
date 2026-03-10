@@ -6,6 +6,11 @@ type RuntimeConfig = {
   FEATURES?: Record<string, unknown>
 }
 
+const FALLBACK_RENDER_API_URL = 'https://apex-backend-5ypy.onrender.com/api/v1'
+const FALLBACK_RENDER_WS_URL = 'wss://apex-backend-5ypy.onrender.com/ws'
+const BROKEN_PRODUCTION_API_HOSTS = new Set(['api.apex.build'])
+const BROKEN_PRODUCTION_WS_HOSTS = new Set(['api.apex.build'])
+
 const readRuntimeConfig = (): RuntimeConfig => {
   if (typeof window === 'undefined' || !window.__APEX_CONFIG__) {
     return {}
@@ -17,20 +22,60 @@ const normalizeConfigValue = (value?: string): string => {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+export const normalizeConfiguredApiUrl = (value?: string): string => {
+  const normalized = normalizeConfigValue(value)
+  if (!normalized) {
+    return ''
+  }
+
+  try {
+    const parsed = new URL(normalized)
+    if (BROKEN_PRODUCTION_API_HOSTS.has(parsed.host)) {
+      return FALLBACK_RENDER_API_URL
+    }
+    if (!parsed.pathname || parsed.pathname === '/') {
+      parsed.pathname = '/api/v1'
+    }
+    return parsed.toString().replace(/\/$/, '')
+  } catch {
+    return normalized
+  }
+}
+
+export const normalizeConfiguredWsUrl = (value?: string): string => {
+  const normalized = normalizeConfigValue(value)
+  if (!normalized) {
+    return ''
+  }
+
+  try {
+    const parsed = new URL(normalized)
+    if (BROKEN_PRODUCTION_WS_HOSTS.has(parsed.host)) {
+      return FALLBACK_RENDER_WS_URL
+    }
+    if (!parsed.pathname || parsed.pathname === '/') {
+      parsed.pathname = '/ws'
+    }
+    return parsed.toString().replace(/\/$/, '')
+  } catch {
+    return normalized
+  }
+}
+
 export const getConfiguredApiUrl = (): string => {
-  const runtimeValue = normalizeConfigValue(readRuntimeConfig().API_URL)
+  const runtimeValue = normalizeConfiguredApiUrl(readRuntimeConfig().API_URL)
   if (runtimeValue) {
     return runtimeValue
   }
 
-  return normalizeConfigValue(import.meta.env.VITE_API_URL)
+  return normalizeConfiguredApiUrl(import.meta.env.VITE_API_URL)
 }
 
 export const getConfiguredWsUrl = (): string => {
-  const runtimeValue = normalizeConfigValue(readRuntimeConfig().WS_URL)
+  const runtimeValue = normalizeConfiguredWsUrl(readRuntimeConfig().WS_URL)
   if (runtimeValue) {
     return runtimeValue
   }
 
-  return normalizeConfigValue(import.meta.env.VITE_WS_URL)
+  return normalizeConfiguredWsUrl(import.meta.env.VITE_WS_URL)
 }

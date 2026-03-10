@@ -1,32 +1,30 @@
-/* @vitest-environment jsdom */
+import { describe, expect, it } from 'vitest'
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { normalizeConfiguredApiUrl, normalizeConfiguredWsUrl } from './runtime'
 
-import { getConfiguredApiUrl, getConfiguredWsUrl } from './runtime'
-
-describe('runtime config', () => {
-  afterEach(() => {
-    window.__APEX_CONFIG__ = undefined
-    vi.unstubAllEnvs()
+describe('normalizeConfiguredApiUrl', () => {
+  it('rewrites the broken production API custom domain to the live Render backend', () => {
+    expect(normalizeConfiguredApiUrl('https://api.apex.build')).toBe(
+      'https://apex-backend-5ypy.onrender.com/api/v1'
+    )
+    expect(normalizeConfiguredApiUrl('https://api.apex.build/api/v1')).toBe(
+      'https://apex-backend-5ypy.onrender.com/api/v1'
+    )
   })
 
-  it('prefers runtime API and WebSocket values over build-time env vars', () => {
-    vi.stubEnv('VITE_API_URL', 'https://build.example/api/v1')
-    vi.stubEnv('VITE_WS_URL', 'wss://build.example/ws')
-    window.__APEX_CONFIG__ = {
-      API_URL: 'https://runtime.example/api/v1',
-      WS_URL: 'wss://runtime.example/ws',
-    }
+  it('appends /api/v1 when a bare origin is provided', () => {
+    expect(normalizeConfiguredApiUrl('https://example.com')).toBe('https://example.com/api/v1')
+  })
+})
 
-    expect(getConfiguredApiUrl()).toBe('https://runtime.example/api/v1')
-    expect(getConfiguredWsUrl()).toBe('wss://runtime.example/ws')
+describe('normalizeConfiguredWsUrl', () => {
+  it('rewrites the broken production websocket custom domain to the live Render backend', () => {
+    expect(normalizeConfiguredWsUrl('wss://api.apex.build')).toBe(
+      'wss://apex-backend-5ypy.onrender.com/ws'
+    )
   })
 
-  it('falls back to build-time env vars when runtime config is unset', () => {
-    vi.stubEnv('VITE_API_URL', 'https://build.example/api/v1')
-    vi.stubEnv('VITE_WS_URL', 'wss://build.example/ws')
-
-    expect(getConfiguredApiUrl()).toBe('https://build.example/api/v1')
-    expect(getConfiguredWsUrl()).toBe('wss://build.example/ws')
+  it('appends /ws when a bare websocket origin is provided', () => {
+    expect(normalizeConfiguredWsUrl('wss://example.com')).toBe('wss://example.com/ws')
   })
 })
