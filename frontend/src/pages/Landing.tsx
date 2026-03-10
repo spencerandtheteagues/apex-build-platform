@@ -1263,12 +1263,15 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
 
   return (
     <section style={{
-      minHeight: '100vh', background: C.bg,
+      minHeight: '100vh',
       display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
       padding: 'clamp(48px, 6vh, 72px) clamp(20px, 4vw, 48px) 24px',
       position: 'relative', overflow: 'hidden',
     }}>
+      {/* Animated particle background — above-fold only */}
+      <AnimatedBackground variant="particles" intensity="low" interactive={false} />
+
       {/* Background glow */}
       <div style={{
         position: 'absolute', top: '20%', left: '50%',
@@ -2032,11 +2035,7 @@ const Footer: React.FC = () => (
 // ─── Landing page ─────────────────────────────────────────────────────────────
 
 const Landing: React.FC<LandingProps> = ({ onGetStarted }) => (
-  <div style={{ background: C.bg, minHeight: '100vh', color: C.text, position: 'relative' }}>
-    {/* Subtle animated particle background — covers entire page */}
-    <div style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
-      <AnimatedBackground variant="particles" intensity="low" interactive={false} />
-    </div>
+  <div style={{ background: C.bg, minHeight: '100vh', color: C.text }}>
     <Nav onGetStarted={onGetStarted} />
     <SideNav />
     <AboveFold onGetStarted={onGetStarted} />
