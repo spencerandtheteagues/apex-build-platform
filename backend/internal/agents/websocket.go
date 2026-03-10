@@ -87,6 +87,15 @@ func (h *WSHub) run() {
 			if h.connections[req.buildID] == nil {
 				h.connections[req.buildID] = make(map[*WSConnection]bool)
 			}
+			// Limit concurrent WebSocket connections per build to prevent DoS.
+			const maxConnsPerBuild = 20
+			if len(h.connections[req.buildID]) >= maxConnsPerBuild {
+				h.mu.Unlock()
+				log.Printf("WebSocket connection rejected for build %s: too many connections (%d)", req.buildID, maxConnsPerBuild)
+				req.conn.conn.WriteMessage(websocket.CloseMessage, []byte("too many connections"))
+				req.conn.conn.Close()
+				break
+			}
 			h.connections[req.buildID][req.conn] = true
 			h.mu.Unlock()
 

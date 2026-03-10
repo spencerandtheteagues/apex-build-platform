@@ -124,8 +124,18 @@ export class WebSocketService {
 
   // Connect to WebSocket server
   async connect(token: string): Promise<void> {
-    if (this.socket?.connected || this.isConnecting) {
+    if (this.isConnecting) {
       return
+    }
+    if (this.socket?.connected) {
+      return
+    }
+    // Tear down any stale socket before creating a new one to prevent
+    // duplicate event listeners from accumulating on reconnect.
+    if (this.socket) {
+      this.socket.removeAllListeners()
+      this.socket.disconnect()
+      this.socket = null
     }
 
     this.isConnecting = true

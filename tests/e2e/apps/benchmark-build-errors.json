@@ -1,6 +1,7 @@
 {
   "id": "benchmark-build-errors",
   "name": "Benchmark: Build Error Paths + Preflight",
+  "sharedAuth": true,
   "healthChecks": [
     {
       "name": "backend-health",

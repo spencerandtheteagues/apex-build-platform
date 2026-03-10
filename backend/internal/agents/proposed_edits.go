@@ -172,19 +172,19 @@ func (s *ProposedEditStore) AddProposedEdits(buildID string, edits []*ProposedEd
 // GetPendingEdits returns all edits with status pending for the given build.
 func (s *ProposedEditStore) GetPendingEdits(buildID string) []*ProposedEdit {
 	if s.db != nil {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-
 		var rows []proposedEditRow
 		if err := s.db.Where("build_id = ? AND status = 'pending'", buildID).Find(&rows).Error; err == nil {
 			out := make([]*ProposedEdit, len(rows))
 			for i, r := range rows {
 				out[i] = rowToEdit(r)
 			}
-			// Refresh cache for this build so in-memory stays warm
+			// Refresh the in-memory cache while holding the write lock.
+			s.mu.Lock()
 			s.syncCacheFromRows(buildID, rows)
+			s.mu.Unlock()
 			return out
 		}
+		// DB query failed — fall through to in-memory cache below.
 	}
 
 	s.mu.RLock()
@@ -202,18 +202,19 @@ func (s *ProposedEditStore) GetPendingEdits(buildID string) []*ProposedEdit {
 // GetAllEdits returns every proposed edit for the given build regardless of status.
 func (s *ProposedEditStore) GetAllEdits(buildID string) []*ProposedEdit {
 	if s.db != nil {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-
 		var rows []proposedEditRow
 		if err := s.db.Where("build_id = ?", buildID).Order("created_at ASC").Find(&rows).Error; err == nil {
 			out := make([]*ProposedEdit, len(rows))
 			for i, r := range rows {
 				out[i] = rowToEdit(r)
 			}
+			// Refresh the in-memory cache while holding the write lock.
+			s.mu.Lock()
 			s.syncCacheFromRows(buildID, rows)
+			s.mu.Unlock()
 			return out
 		}
+		// DB query failed — fall through to in-memory cache below.
 	}
 
 	s.mu.RLock()

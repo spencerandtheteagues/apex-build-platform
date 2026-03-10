@@ -153,7 +153,7 @@ func (h *Handler) Login(c *gin.Context) {
 
 	// Find user by username or email
 	var user models.User
-	if err := h.DB.Where("username = ? OR email = ?", req.Username, req.Username).First(&user).Error; err != nil {
+	if err := h.DB.Where("username = ? OR email = ?", req.Username, req.Email).First(&user).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusUnauthorized, StandardResponse{
 				Success: false,

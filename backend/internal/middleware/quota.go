@@ -115,7 +115,7 @@ func (q *QuotaChecker) CheckStorageQuota(estimatedBytes int64) gin.HandlerFunc {
 		)
 
 		if err != nil {
-			q.sendQuotaUnavailable(c, usage.UsageAIRequests)
+			q.sendQuotaUnavailable(c, usage.UsageStorageBytes)
 			return
 		}
 
@@ -153,7 +153,7 @@ func (q *QuotaChecker) CheckAIQuota() gin.HandlerFunc {
 		)
 
 		if err != nil {
-			q.sendQuotaUnavailable(c, usage.UsageExecutionMinutes)
+			q.sendQuotaUnavailable(c, usage.UsageAIRequests)
 			return
 		}
 

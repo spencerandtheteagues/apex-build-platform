@@ -1,6 +1,7 @@
 {
   "id": "benchmark-auth-lifecycle",
   "name": "Benchmark: Auth Lifecycle + Preflight",
+  "sharedAuth": true,
   "healthChecks": [
     {
       "name": "backend-health",

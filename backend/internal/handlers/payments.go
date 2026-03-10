@@ -337,7 +337,9 @@ func (h *PaymentHandlers) handleCreditPurchaseCompleted(event *payments.WebhookE
 			return
 		}
 		// Persist the Stripe customer ID for future lookups.
-		h.db.Model(&user).Update("stripe_customer_id", event.CustomerID)
+		if err3 := h.db.Model(&user).Update("stripe_customer_id", event.CustomerID).Error; err3 != nil {
+			log.Printf("Warning: failed to persist stripe_customer_id for user %d (event=%s): %v", user.ID, event.EventID, err3)
+		}
 	}
 
 	txErr := h.db.Transaction(func(tx *gorm.DB) error {

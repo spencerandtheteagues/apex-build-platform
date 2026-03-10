@@ -177,12 +177,20 @@ function App() {
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [uiColorScheme, setUIColorScheme] = useState<UIColorScheme>(() => {
     if (typeof window === 'undefined') return 'red-dark'
-    const saved = localStorage.getItem('apex_ui_color_scheme')
-    return saved === 'blue-light' ? 'blue-light' : 'red-dark'
+    try {
+      const saved = localStorage.getItem('apex_ui_color_scheme')
+      return saved === 'blue-light' ? 'blue-light' : 'red-dark'
+    } catch {
+      return 'red-dark'
+    }
   })
   const [defaultModel, setDefaultModel] = useState(() => {
     if (typeof window === 'undefined') return 'auto'
-    return localStorage.getItem('apex_default_model') || 'auto'
+    try {
+      return localStorage.getItem('apex_default_model') || 'auto'
+    } catch {
+      return 'auto'
+    }
   })
   const logoSrc = uiColorScheme === 'blue-light' ? '/logo-blue.png' : '/apex-build-logo-transparent.png'
 

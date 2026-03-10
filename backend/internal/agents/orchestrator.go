@@ -676,9 +676,14 @@ func (o *BuildOrchestrator) executeTasksInWaves(build *Build, state *Orchestrati
 		}
 
 		if len(ready) == 0 {
-			// Deadlock - remaining tasks have unmet dependencies
-			log.Printf("Orchestrator: Dependency deadlock detected with %d remaining tasks", len(remaining))
-			break
+			// Dependency cycle or unresolvable dependency — return an error so
+			// the caller can fail the build explicitly rather than silently
+			// treating an incomplete task graph as a success.
+			var stuck []string
+			for id := range remaining {
+				stuck = append(stuck, id)
+			}
+			return fmt.Errorf("dependency deadlock: %d tasks cannot run (unmet deps): %v", len(remaining), stuck)
 		}
 
 		// Limit parallel execution

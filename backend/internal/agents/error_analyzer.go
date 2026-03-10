@@ -292,13 +292,13 @@ func (a *ErrorAnalyzer) parseResponse(raw string, classified []ClassifiedError) 
 			content = content[:end]
 		}
 	}
-	// Find the outermost JSON object.
-	start := strings.Index(content, "{")
-	end := strings.LastIndex(content, "}")
-	if start == -1 || end == -1 || end <= start {
+	// Extract the first top-level JSON object by tracking brace depth.
+	// Using first-open to last-close is fragile when the model emits prose
+	// containing braces before the actual JSON object.
+	content = extractFirstJSONObject(content)
+	if content == "" {
 		return nil, fmt.Errorf("no JSON object found in response")
 	}
-	content = content[start : end+1]
 
 	var result struct {
 		Summary string       `json:"summary"`
@@ -377,3 +377,46 @@ func (p *RepairPlan) RepairHints() []string {
 const errorAnalyzerSystemPrompt = `You are an expert build error analyst for a full-stack TypeScript/Go platform.
 Your job is to read build errors and source code, identify the root cause, and produce
 precise file-level fixes. Be concise and specific. Output only valid JSON.`
+
+// extractFirstJSONObject scans s and returns the first syntactically complete
+// top-level JSON object (i.e. balanced braces).  It handles the common case
+// where the model emits prose or partial JSON before/after the actual object.
+// Returns an empty string if no complete object is found.
+func extractFirstJSONObject(s string) string {
+	depth := 0
+	inStr := false
+	escape := false
+	start := -1
+	runes := []rune(s)
+	for i, r := range runes {
+		if escape {
+			escape = false
+			continue
+		}
+		if inStr {
+			if r == '\\' {
+				escape = true
+			} else if r == '"' {
+				inStr = false
+			}
+			continue
+		}
+		switch r {
+		case '"':
+			inStr = true
+		case '{':
+			if depth == 0 {
+				start = i
+			}
+			depth++
+		case '}':
+			if depth > 0 {
+				depth--
+				if depth == 0 && start >= 0 {
+					return string(runes[start : i+1])
+				}
+			}
+		}
+	}
+	return ""
+}

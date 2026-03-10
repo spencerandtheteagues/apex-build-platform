@@ -3,7 +3,9 @@ package ai
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
 	"strings"
@@ -151,11 +153,13 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 		req.Temperature = 2.0
 	}
 
-	// Set reasonable max tokens default
+	// Set reasonable max tokens default.
+	// Code-generation tasks can request up to 32k tokens; keep the hard ceiling
+	// generous enough that large file outputs are never silently truncated.
 	if req.MaxTokens <= 0 {
-		req.MaxTokens = 2000
-	} else if req.MaxTokens > 8000 {
-		req.MaxTokens = 8000 // Cap to prevent excessive costs
+		req.MaxTokens = 4000
+	} else if req.MaxTokens > 32000 {
+		req.MaxTokens = 32000
 	}
 
 	// Select the best provider for this request
@@ -187,11 +191,31 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 		return nil, fmt.Errorf("rate limit exceeded for all available providers")
 	}
 
-	// Attempt to generate with primary provider
-	response, err := client.Generate(ctx, primaryReq)
-	if err != nil {
-		errStr := err.Error()
-		log.Printf("Error from provider %s: %v", provider, err)
+	// Attempt to generate with primary provider.
+	// Retry up to 2 extra times on transient network errors (important for
+	// Ollama-only mode where there is no fallback provider).
+	const maxRetries = 2
+	var response *AIResponse
+	var genErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(attempt) * 3 * time.Second
+			log.Printf("Retrying provider %s after transient error (attempt %d/%d, backoff %v): %v",
+				provider, attempt, maxRetries, backoff, genErr)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+		response, genErr = client.Generate(ctx, primaryReq)
+		if genErr == nil || !isTransientError(genErr) {
+			break
+		}
+	}
+	if genErr != nil {
+		errStr := genErr.Error()
+		log.Printf("Error from provider %s (after retries): %v", provider, genErr)
 
 		// Mark provider as temporarily unhealthy for quota/rate limit errors
 		if strings.Contains(errStr, "RATE_LIMIT") || strings.Contains(errStr, "QUOTA_EXCEEDED") {
@@ -237,6 +261,33 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 	}
 
 	return response, nil
+}
+
+// isTransientError returns true for errors that are safe to retry: network
+// resets, EOF, connection refused, and context-deadline-exceeded (but NOT
+// context-cancelled, which means the caller explicitly gave up).
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Never retry a caller-initiated cancellation.
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	// Deadline exceeded on the parent context also shouldn't be retried.
+	if errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "i/o timeout")
 }
 
 // requestForProvider prepares a provider-specific request copy.

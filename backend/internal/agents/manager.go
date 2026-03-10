@@ -1518,6 +1518,16 @@ func (am *AgentManager) executeTask(task *Task) {
 						"reason":       "retry_strategy",
 					},
 				})
+			} else {
+				// No alternative provider available (e.g. Ollama-only mode).
+				// Fall back to a simple backoff so we don't hammmer the same
+				// endpoint at full speed and give transient errors time to clear.
+				delay := time.Duration(task.RetryCount) * 3 * time.Second
+				if delay < 3*time.Second {
+					delay = 3 * time.Second
+				}
+				log.Printf("Switch provider strategy: no alternative available, applying %v backoff instead (attempt %d)", delay, task.RetryCount)
+				time.Sleep(delay)
 			}
 		case "reduce_context":
 			log.Printf("Reduce context strategy: will use 75%% tokens (attempt %d)", task.RetryCount)
@@ -9946,7 +9956,10 @@ func (am *AgentManager) getMaxTokensForRole(role AgentRole, powerMode ...PowerMo
 	return base
 }
 
-// getNextFallbackProvider returns the next provider in the fallback chain
+// getNextFallbackProvider returns the next provider in the fallback chain that
+// is actually available in the router.  If no alternative is available (e.g.
+// Ollama-only mode) it returns the current provider so callers can detect a
+// no-op switch and apply backoff instead of spinning into an instant failure.
 func (am *AgentManager) getNextFallbackProvider(current ai.AIProvider) ai.AIProvider {
 	chains := map[ai.AIProvider][]ai.AIProvider{
 		ai.ProviderClaude: {ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderOllama},
@@ -9954,9 +9967,22 @@ func (am *AgentManager) getNextFallbackProvider(current ai.AIProvider) ai.AIProv
 		ai.ProviderGemini: {ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderOllama},
 		ai.ProviderOllama: {ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini},
 	}
-	if chain, ok := chains[current]; ok && len(chain) > 0 {
-		return chain[0]
+	// Build a set of actually-available providers so we don't switch to a
+	// provider that will immediately fail with "client not available".
+	available := make(map[ai.AIProvider]bool)
+	if am.aiRouter != nil {
+		for _, p := range am.aiRouter.GetAvailableProviders() {
+			available[p] = true
+		}
 	}
+	if chain, ok := chains[current]; ok {
+		for _, candidate := range chain {
+			if available[candidate] {
+				return candidate
+			}
+		}
+	}
+	// No alternative available — return current so caller falls back to backoff.
 	return current
 }
 
