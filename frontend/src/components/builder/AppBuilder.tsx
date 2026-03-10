@@ -1115,6 +1115,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const interactionState = buildState?.interaction
   const pendingQuestion = interactionState?.pending_question
   const buildPaused = Boolean(interactionState?.paused)
+  const pendingRevisionRequests = interactionState?.pending_revisions || []
   const pendingPermissionRequests = useMemo(
     () => (interactionState?.permission_requests || []).filter((request) => request.status === 'pending'),
     [interactionState?.permission_requests]
@@ -2275,6 +2276,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       ...interaction,
       messages: normalizedMessages,
       steering_notes: Array.isArray(interaction.steering_notes) ? interaction.steering_notes : [],
+      pending_revisions: Array.isArray(interaction.pending_revisions) ? interaction.pending_revisions : [],
       permission_rules: Array.isArray(interaction.permission_rules) ? interaction.permission_rules : [],
       permission_requests: Array.isArray(interaction.permission_requests) ? interaction.permission_requests : [],
     }
@@ -4014,7 +4016,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 </CardContent>
               </Card>
 
-              {(pendingQuestion || pendingPermissionRequests.length > 0 || grantedPermissionRules.length > 0 || buildState.status === 'awaiting_review') && (
+              {(pendingQuestion || pendingRevisionRequests.length > 0 || pendingPermissionRequests.length > 0 || grantedPermissionRules.length > 0 || buildState.status === 'awaiting_review') && (
                 <Card variant="cyberpunk" className="border-2 border-violet-900/50 bg-black/60 backdrop-blur-sm">
                   <CardHeader className="pb-4 border-b border-violet-900/30">
                     <CardTitle className="text-xl flex items-center gap-3">
@@ -4027,6 +4029,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                       <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-4">
                         <div className="text-xs uppercase tracking-wide text-cyan-300">Awaiting Your Reply</div>
                         <div className="mt-2 text-sm text-cyan-100">{pendingQuestion}</div>
+                      </div>
+                    )}
+
+                    {pendingRevisionRequests.length > 0 && (
+                      <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 p-4">
+                        <div className="text-xs uppercase tracking-wide text-amber-300">Queued Change Requests</div>
+                        <div className="mt-2 text-sm text-amber-100">
+                          {pendingRevisionRequests.length} user-requested change{pendingRevisionRequests.length === 1 ? '' : 's'} will be applied in the next implementation pass.
+                        </div>
                       </div>
                     )}
 

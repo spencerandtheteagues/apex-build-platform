@@ -3,6 +3,7 @@ package agents
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 const (
 	maxBuildConversationMessages = 120
 	maxBuildSteeringNotes        = 16
+	maxPendingRevisions          = 8
 )
 
 type leadMessagePermissionRequest struct {
@@ -77,6 +79,9 @@ func copyBuildInteractionStateLocked(build *Build) BuildInteractionState {
 	copyNotes := make([]string, len(build.Interaction.SteeringNotes))
 	copy(copyNotes, build.Interaction.SteeringNotes)
 
+	copyPendingRevisions := make([]string, len(build.Interaction.PendingRevisions))
+	copy(copyPendingRevisions, build.Interaction.PendingRevisions)
+
 	copyRules := make([]BuildPermissionRule, len(build.Interaction.PermissionRules))
 	copy(copyRules, build.Interaction.PermissionRules)
 
@@ -86,6 +91,7 @@ func copyBuildInteractionStateLocked(build *Build) BuildInteractionState {
 	return BuildInteractionState{
 		Messages:           copyMessages,
 		SteeringNotes:      copyNotes,
+		PendingRevisions:   copyPendingRevisions,
 		PendingQuestion:    build.Interaction.PendingQuestion,
 		WaitingForUser:     build.Interaction.WaitingForUser,
 		Paused:             build.Interaction.Paused,
@@ -134,6 +140,25 @@ func appendSteeringNoteLocked(build *Build, note string) {
 	build.Interaction.SteeringNotes = append(build.Interaction.SteeringNotes, trimmed)
 	if len(build.Interaction.SteeringNotes) > maxBuildSteeringNotes {
 		build.Interaction.SteeringNotes = append([]string(nil), build.Interaction.SteeringNotes[len(build.Interaction.SteeringNotes)-maxBuildSteeringNotes:]...)
+	}
+}
+
+func appendPendingRevisionLocked(build *Build, request string) {
+	if build == nil {
+		return
+	}
+	trimmed := strings.TrimSpace(request)
+	if trimmed == "" {
+		return
+	}
+	for _, existing := range build.Interaction.PendingRevisions {
+		if strings.EqualFold(strings.TrimSpace(existing), trimmed) {
+			return
+		}
+	}
+	build.Interaction.PendingRevisions = append(build.Interaction.PendingRevisions, trimmed)
+	if len(build.Interaction.PendingRevisions) > maxPendingRevisions {
+		build.Interaction.PendingRevisions = append([]string(nil), build.Interaction.PendingRevisions[len(build.Interaction.PendingRevisions)-maxPendingRevisions:]...)
 	}
 }
 
@@ -301,6 +326,18 @@ func buildInteractionPromptContext(build *Build) string {
 		}
 		notes.WriteString("</user_steering>")
 		sections = append(sections, notes.String())
+	}
+
+	if len(build.Interaction.PendingRevisions) > 0 {
+		var revisions strings.Builder
+		revisions.WriteString("<queued_user_revisions>\n")
+		for _, note := range build.Interaction.PendingRevisions {
+			revisions.WriteString("- ")
+			revisions.WriteString(strings.TrimSpace(note))
+			revisions.WriteString("\n")
+		}
+		revisions.WriteString("</queued_user_revisions>")
+		sections = append(sections, revisions.String())
 	}
 
 	granted := make([]string, 0, len(build.Interaction.PermissionRules))
@@ -610,6 +647,10 @@ func (am *AgentManager) enqueueUserRevisionTask(build *Build, userRequest string
 	}
 
 	now := time.Now().UTC()
+	previousStatus := BuildPending
+	build.mu.RLock()
+	previousStatus = build.Status
+	build.mu.RUnlock()
 	task := &Task{
 		ID:          uuid.New().String(),
 		Type:        TaskFix,
@@ -664,7 +705,75 @@ func (am *AgentManager) enqueueUserRevisionTask(build *Build, userRequest string
 	}
 
 	am.persistBuildSnapshot(build, nil)
+	if previousStatus == BuildCompleted || previousStatus == BuildFailed || previousStatus == BuildCancelled {
+		am.startBuildMonitors(build.ID)
+	}
 	return nil
+}
+
+func (am *AgentManager) dispatchPendingRevision(build *Build) bool {
+	if build == nil {
+		return false
+	}
+
+	build.mu.Lock()
+	if len(build.Interaction.PendingRevisions) == 0 || build.Status == BuildCancelled {
+		build.mu.Unlock()
+		return false
+	}
+	queued := append([]string(nil), build.Interaction.PendingRevisions...)
+	build.Interaction.PendingRevisions = nil
+	build.UpdatedAt = time.Now().UTC()
+	interaction := copyBuildInteractionStateLocked(build)
+	build.mu.Unlock()
+
+	request := strings.Join(queued, "\n\n")
+	if err := am.enqueueUserRevisionTask(build, request); err != nil {
+		build.mu.Lock()
+		for i := len(queued) - 1; i >= 0; i-- {
+			build.Interaction.PendingRevisions = append([]string{queued[i]}, build.Interaction.PendingRevisions...)
+		}
+		if strings.TrimSpace(build.Error) == "" {
+			build.Error = fmt.Sprintf("Unable to schedule queued revision work: %v", err)
+		}
+		build.Status = BuildFailed
+		now := time.Now().UTC()
+		build.CompletedAt = &now
+		build.UpdatedAt = time.Now().UTC()
+		interaction = copyBuildInteractionStateLocked(build)
+		build.mu.Unlock()
+		am.persistBuildSnapshot(build, nil)
+		log.Printf("Build %s: failed to dispatch queued revision: %v", build.ID, err)
+		am.broadcast(build.ID, &WSMessage{
+			Type:      WSBuildError,
+			BuildID:   build.ID,
+			Timestamp: time.Now().UTC(),
+			Data: map[string]any{
+				"status":      string(BuildFailed),
+				"error":       "Queued revision could not be scheduled",
+				"details":     err.Error(),
+				"recoverable": false,
+				"interaction": interaction,
+			},
+		})
+		return false
+	}
+
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now().UTC(),
+		Data: map[string]any{
+			"phase":                 "user_feedback",
+			"status":                string(BuildInProgress),
+			"message":               "Applying queued user-requested changes in a follow-up implementation pass.",
+			"quality_gate_required": true,
+			"quality_gate_active":   true,
+			"quality_gate_stage":    "revision",
+			"interaction":           interaction,
+		},
+	})
+	return true
 }
 
 func (am *AgentManager) waitForBuildInteractionClear(build *Build) error {

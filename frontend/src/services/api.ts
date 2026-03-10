@@ -3164,6 +3164,7 @@ export interface BuildPermissionRequest {
 export interface BuildInteractionState {
   messages?: BuildConversationMessage[]
   steering_notes?: string[]
+  pending_revisions?: string[]
   pending_question?: string
   waiting_for_user?: boolean
   paused?: boolean

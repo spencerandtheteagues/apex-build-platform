@@ -33,8 +33,8 @@ type UserRoleCategory string
 const (
 	CategoryArchitect UserRoleCategory = "architect" // planner + architect + reviewer
 	CategoryCoder     UserRoleCategory = "coder"     // frontend + backend + database
-	CategoryTester    UserRoleCategory = "tester"     // testing
-	CategoryDevOps    UserRoleCategory = "devops"     // devops + solver
+	CategoryTester    UserRoleCategory = "tester"    // testing
+	CategoryDevOps    UserRoleCategory = "devops"    // devops + solver
 )
 
 // ExpandUserCategory returns the backend agent roles for a user-facing category.
@@ -248,31 +248,32 @@ type BuildPermissionRule struct {
 }
 
 type BuildPermissionRequest struct {
-	ID             string                       `json:"id"`
-	Scope          BuildPermissionScope         `json:"scope"`
-	Target         string                       `json:"target"`
-	Reason         string                       `json:"reason"`
-	CommandPreview string                       `json:"command_preview,omitempty"`
-	RequestedByID  string                       `json:"requested_by_id,omitempty"`
-	RequestedByRole string                      `json:"requested_by_role,omitempty"`
-	Blocking       bool                         `json:"blocking,omitempty"`
-	Status         BuildPermissionRequestStatus `json:"status"`
-	Mode           BuildPermissionMode          `json:"mode,omitempty"`
-	ResolutionNote string                       `json:"resolution_note,omitempty"`
-	RequestedAt    time.Time                    `json:"requested_at"`
-	ResolvedAt     *time.Time                   `json:"resolved_at,omitempty"`
+	ID              string                       `json:"id"`
+	Scope           BuildPermissionScope         `json:"scope"`
+	Target          string                       `json:"target"`
+	Reason          string                       `json:"reason"`
+	CommandPreview  string                       `json:"command_preview,omitempty"`
+	RequestedByID   string                       `json:"requested_by_id,omitempty"`
+	RequestedByRole string                       `json:"requested_by_role,omitempty"`
+	Blocking        bool                         `json:"blocking,omitempty"`
+	Status          BuildPermissionRequestStatus `json:"status"`
+	Mode            BuildPermissionMode          `json:"mode,omitempty"`
+	ResolutionNote  string                       `json:"resolution_note,omitempty"`
+	RequestedAt     time.Time                    `json:"requested_at"`
+	ResolvedAt      *time.Time                   `json:"resolved_at,omitempty"`
 }
 
 type BuildInteractionState struct {
-	Messages          []BuildConversationMessage `json:"messages,omitempty"`
-	SteeringNotes     []string                   `json:"steering_notes,omitempty"`
-	PendingQuestion   string                     `json:"pending_question,omitempty"`
-	WaitingForUser    bool                       `json:"waiting_for_user,omitempty"`
-	Paused            bool                       `json:"paused,omitempty"`
-	PauseReason       string                     `json:"pause_reason,omitempty"`
-	PermissionRules   []BuildPermissionRule      `json:"permission_rules,omitempty"`
-	PermissionRequests []BuildPermissionRequest  `json:"permission_requests,omitempty"`
-	AttentionRequired bool                       `json:"attention_required,omitempty"`
+	Messages           []BuildConversationMessage `json:"messages,omitempty"`
+	SteeringNotes      []string                   `json:"steering_notes,omitempty"`
+	PendingRevisions   []string                   `json:"pending_revisions,omitempty"`
+	PendingQuestion    string                     `json:"pending_question,omitempty"`
+	WaitingForUser     bool                       `json:"waiting_for_user,omitempty"`
+	Paused             bool                       `json:"paused,omitempty"`
+	PauseReason        string                     `json:"pause_reason,omitempty"`
+	PermissionRules    []BuildPermissionRule      `json:"permission_rules,omitempty"`
+	PermissionRequests []BuildPermissionRequest   `json:"permission_requests,omitempty"`
+	AttentionRequired  bool                       `json:"attention_required,omitempty"`
 }
 
 // Build represents an entire app-building session
@@ -293,20 +294,20 @@ type Build struct {
 	Checkpoints         []*Checkpoint     `json:"checkpoints"`
 	Progress            int               `json:"progress"` // 0-100
 	// Guardrails
-	MaxAgents                 int        `json:"max_agents,omitempty"`
-	MaxRetries                int        `json:"max_retries,omitempty"`
-	MaxRequests               int        `json:"max_requests,omitempty"`
-	MaxTokensPerRequest       int        `json:"max_tokens_per_request,omitempty"`
-	RequestsUsed              int        `json:"requests_used,omitempty"`
-	ReadinessRecoveryAttempts int        `json:"readiness_recovery_attempts,omitempty"`
-	PhasedPipelineComplete    bool       `json:"phased_pipeline_complete,omitempty"`
-	DiffMode                  bool              `json:"diff_mode,omitempty"` // When true, changes require user review before applying
-	RoleAssignments           map[string]string `json:"role_assignments,omitempty"` // User-specified provider per role category
+	MaxAgents                 int                   `json:"max_agents,omitempty"`
+	MaxRetries                int                   `json:"max_retries,omitempty"`
+	MaxRequests               int                   `json:"max_requests,omitempty"`
+	MaxTokensPerRequest       int                   `json:"max_tokens_per_request,omitempty"`
+	RequestsUsed              int                   `json:"requests_used,omitempty"`
+	ReadinessRecoveryAttempts int                   `json:"readiness_recovery_attempts,omitempty"`
+	PhasedPipelineComplete    bool                  `json:"phased_pipeline_complete,omitempty"`
+	DiffMode                  bool                  `json:"diff_mode,omitempty"`        // When true, changes require user review before applying
+	RoleAssignments           map[string]string     `json:"role_assignments,omitempty"` // User-specified provider per role category
 	Interaction               BuildInteractionState `json:"interaction,omitempty"`
-	CreatedAt                 time.Time         `json:"created_at"`
-	UpdatedAt                 time.Time  `json:"updated_at"`
-	CompletedAt               *time.Time `json:"completed_at,omitempty"`
-	Error                     string     `json:"error,omitempty"`
+	CreatedAt                 time.Time             `json:"created_at"`
+	UpdatedAt                 time.Time             `json:"updated_at"`
+	CompletedAt               *time.Time            `json:"completed_at,omitempty"`
+	Error                     string                `json:"error,omitempty"`
 
 	mu sync.RWMutex
 }
@@ -315,15 +316,15 @@ type Build struct {
 type BuildStatus string
 
 const (
-	BuildPending    BuildStatus = "pending"     // Waiting to start
-	BuildPlanning   BuildStatus = "planning"    // Creating build plan
-	BuildInProgress BuildStatus = "in_progress" // Actively building
-	BuildTesting    BuildStatus = "testing"     // Running tests
-	BuildReviewing  BuildStatus = "reviewing"   // Code review phase
-	BuildCompleted  BuildStatus = "completed"   // Successfully finished
-	BuildFailed     BuildStatus = "failed"      // Build failed
-	BuildCancelled       BuildStatus = "cancelled"        // Manually cancelled
-	BuildAwaitingReview  BuildStatus = "awaiting_review"  // Waiting for user to review proposed diffs
+	BuildPending        BuildStatus = "pending"         // Waiting to start
+	BuildPlanning       BuildStatus = "planning"        // Creating build plan
+	BuildInProgress     BuildStatus = "in_progress"     // Actively building
+	BuildTesting        BuildStatus = "testing"         // Running tests
+	BuildReviewing      BuildStatus = "reviewing"       // Code review phase
+	BuildCompleted      BuildStatus = "completed"       // Successfully finished
+	BuildFailed         BuildStatus = "failed"          // Build failed
+	BuildCancelled      BuildStatus = "cancelled"       // Manually cancelled
+	BuildAwaitingReview BuildStatus = "awaiting_review" // Waiting for user to review proposed diffs
 )
 
 // BuildMode determines how the build is executed
@@ -500,11 +501,11 @@ const (
 	WSBudgetWarning  WSMessageType = "budget:warning"
 
 	// Diff workflow events
-	WSProposeDiff    WSMessageType = "agent:propose-diff"
-	WSEditsApplied   WSMessageType = "build:edits-applied"
-	WSAwaitingReview WSMessageType = "build:awaiting-review"
-	WSProtectedPath  WSMessageType = "agent:protected-path"
-	WSBuildRollback  WSMessageType = "build:rollback"
+	WSProposeDiff            WSMessageType = "agent:propose-diff"
+	WSEditsApplied           WSMessageType = "build:edits-applied"
+	WSAwaitingReview         WSMessageType = "build:awaiting-review"
+	WSProtectedPath          WSMessageType = "agent:protected-path"
+	WSBuildRollback          WSMessageType = "build:rollback"
 	WSBuildInteraction       WSMessageType = "build:interaction"
 	WSBuildUserInputRequired WSMessageType = "build:user-input-required"
 	WSBuildUserInputResolved WSMessageType = "build:user-input-resolved"
@@ -523,16 +524,16 @@ type WSMessage struct {
 
 // BuildRequest is the input for starting a new build
 type BuildRequest struct {
-	Description         string     `json:"description"`
-	Prompt              string     `json:"prompt,omitempty"` // Detailed build prompt (falls back to Description)
-	Mode                BuildMode  `json:"mode"`
-	PowerMode           PowerMode  `json:"power_mode,omitempty"`    // max, balanced, fast — controls model quality
-	ProviderMode        string     `json:"provider_mode,omitempty"` // platform or byok
-	RequirePreviewReady bool       `json:"require_preview_ready,omitempty"`
-	ProjectName         string     `json:"project_name,omitempty"`
-	TechStack           *TechStack `json:"tech_stack,omitempty"` // Optional override
-	DiffMode            bool              `json:"diff_mode,omitempty"`            // When true, proposed changes require user approval
-	RoleAssignments     map[string]string `json:"role_assignments,omitempty"`     // Optional: user-specified provider per role category (architect→claude, coder→gpt4, etc.)
+	Description         string            `json:"description"`
+	Prompt              string            `json:"prompt,omitempty"` // Detailed build prompt (falls back to Description)
+	Mode                BuildMode         `json:"mode"`
+	PowerMode           PowerMode         `json:"power_mode,omitempty"`    // max, balanced, fast — controls model quality
+	ProviderMode        string            `json:"provider_mode,omitempty"` // platform or byok
+	RequirePreviewReady bool              `json:"require_preview_ready,omitempty"`
+	ProjectName         string            `json:"project_name,omitempty"`
+	TechStack           *TechStack        `json:"tech_stack,omitempty"`       // Optional override
+	DiffMode            bool              `json:"diff_mode,omitempty"`        // When true, proposed changes require user approval
+	RoleAssignments     map[string]string `json:"role_assignments,omitempty"` // Optional: user-specified provider per role category (architect→claude, coder→gpt4, etc.)
 }
 
 // BuildResponse is returned when a build is created

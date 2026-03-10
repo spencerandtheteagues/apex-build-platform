@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"apex-build/internal/ai"
@@ -14,14 +15,16 @@ type stubPreflight struct {
 	userProviders  []ai.AIProvider
 	generateResult *ai.AIResponse
 	generateErr    error
+	generateCalls  atomic.Int32
 }
 
 func (s *stubPreflight) Generate(_ context.Context, _ ai.AIProvider, _ string, _ GenerateOptions) (*ai.AIResponse, error) {
+	s.generateCalls.Add(1)
 	return s.generateResult, s.generateErr
 }
-func (s *stubPreflight) GetAvailableProviders() []ai.AIProvider   { return s.allProviders }
+func (s *stubPreflight) GetAvailableProviders() []ai.AIProvider              { return s.allProviders }
 func (s *stubPreflight) GetAvailableProvidersForUser(_ uint) []ai.AIProvider { return s.userProviders }
-func (s *stubPreflight) HasConfiguredProviders() bool             { return s.configured }
+func (s *stubPreflight) HasConfiguredProviders() bool                        { return s.configured }
 
 func TestDetermineRetryStrategyNonRetriable(t *testing.T) {
 	am := &AgentManager{}
@@ -67,9 +70,9 @@ func TestBuildErrorPopulatedOnFailure(t *testing.T) {
 	}
 
 	build := &Build{
-		ID:                    "test-error-surfacing",
-		UserID:                1,
-		Status:                BuildInProgress,
+		ID:                     "test-error-surfacing",
+		UserID:                 1,
+		Status:                 BuildInProgress,
 		PhasedPipelineComplete: true,
 		Tasks: []*Task{
 			{ID: "t1", Status: TaskCompleted},
@@ -101,10 +104,10 @@ func TestBuildErrorNotOverwrittenWhenAlreadySet(t *testing.T) {
 	}
 
 	build := &Build{
-		ID:                    "test-existing-error",
-		UserID:                1,
-		Status:                BuildInProgress,
-		Error:                 "Validation failed: missing entry point",
+		ID:                     "test-existing-error",
+		UserID:                 1,
+		Status:                 BuildInProgress,
+		Error:                  "Validation failed: missing entry point",
 		PhasedPipelineComplete: true,
 		Tasks: []*Task{
 			{ID: "t1", Status: TaskFailed, Error: "something else"},

@@ -425,14 +425,20 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	// Queue the planning task
 	am.taskQueue <- planTask
 
-	// Start build timeout goroutine - fail cleanly if build exceeds SLA.
-	go am.buildTimeoutHandler(buildID)
-
-	// Start inactivity monitor - fail build if no AI activity for 45 seconds
-	go am.inactivityMonitor(buildID)
+	am.startBuildMonitors(buildID)
 
 	log.Printf("Build %s started with lead agent %s, planning task %s queued", buildID, leadAgent.ID, planTask.ID)
 	return nil
+}
+
+func (am *AgentManager) startBuildMonitors(buildID string) {
+	if strings.TrimSpace(buildID) == "" {
+		return
+	}
+	// Build timeout goroutine - fail cleanly if build exceeds SLA.
+	go am.buildTimeoutHandler(buildID)
+	// Inactivity monitor - fail builds that stall in active states.
+	go am.inactivityMonitor(buildID)
 }
 
 // buildTimeoutHandler fails builds that run past timeout instead of marking them as completed.
@@ -1425,7 +1431,13 @@ func (am *AgentManager) taskDispatcher() {
 		select {
 		case <-am.ctx.Done():
 			return
-		case task := <-am.taskQueue:
+		case task, ok := <-am.taskQueue:
+			if !ok {
+				return
+			}
+			if task == nil {
+				continue
+			}
 			go am.executeTask(task)
 		}
 	}
@@ -1847,7 +1859,10 @@ func (am *AgentManager) resultProcessor() {
 		select {
 		case <-am.ctx.Done():
 			return
-		case result := <-am.resultQueue:
+		case result, ok := <-am.resultQueue:
+			if !ok {
+				return
+			}
 			am.processResult(result)
 		}
 	}
@@ -4277,6 +4292,7 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 	phasedPipelineComplete := build.PhasedPipelineComplete
 	readinessRecoveryAttempts := build.ReadinessRecoveryAttempts
 	currentStatus := build.Status
+	hasPendingRevisions := len(build.Interaction.PendingRevisions) > 0
 	completedAtWasNil := build.CompletedAt == nil
 	buildMode := string(build.Mode)
 	build.mu.RUnlock()
@@ -4285,6 +4301,11 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 		// Avoid transient "all tasks complete" windows between phased task batches
 		// (e.g. phase N finished, phase N+1 not yet queued) from triggering final validation.
 		return
+	}
+	if hasPendingRevisions && currentStatus != BuildCancelled {
+		if am.dispatchPendingRevision(build) {
+			return
+		}
 	}
 
 	build.mu.Lock()
@@ -5767,6 +5788,24 @@ func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.Complet
 		Error:               snapshot.Error,
 	}
 
+	if restoredFiles, err := parseBuildFiles(snapshot.FilesJSON); err == nil && len(restoredFiles) > 0 {
+		completedAt := snapshot.UpdatedAt
+		if snapshot.CompletedAt != nil && !snapshot.CompletedAt.IsZero() {
+			completedAt = *snapshot.CompletedAt
+		}
+		build.Tasks = append(build.Tasks, &Task{
+			ID:          fmt.Sprintf("snapshot-files-%s", snapshot.BuildID),
+			Type:        TaskGenerateFile,
+			Description: "Restored generated files from saved build snapshot",
+			Status:      TaskCompleted,
+			Output: &TaskOutput{
+				Files: restoredFiles,
+			},
+			CreatedAt:   snapshot.CreatedAt,
+			CompletedAt: &completedAt,
+		})
+	}
+
 	if build.Status == BuildCompleted && build.Progress < 100 {
 		build.Progress = 100
 	}
@@ -5963,6 +6002,37 @@ Rules:
 - Only request permissions for local machine tools/services when genuinely needed.
 - Be concise and operational.`, build.ID, currentStatus, currentPhase, currentProgress, message, interactionContext)
 
+	build.mu.Lock()
+	if build.MaxRequests > 0 && build.RequestsUsed >= build.MaxRequests {
+		build.mu.Unlock()
+		am.broadcast(agent.BuildID, &WSMessage{
+			Type:      WSBudgetExceeded,
+			BuildID:   agent.BuildID,
+			AgentID:   agent.ID,
+			Timestamp: time.Now().UTC(),
+			Data: map[string]any{
+				"message":      "Build request budget reached. Follow-up AI messages are blocked until you start a new build.",
+				"max_requests": build.MaxRequests,
+				"used":         build.RequestsUsed,
+			},
+		})
+		am.broadcast(agent.BuildID, &WSMessage{
+			Type:      "message:error",
+			BuildID:   agent.BuildID,
+			AgentID:   agent.ID,
+			Timestamp: time.Now().UTC(),
+			Data: map[string]any{
+				"error":   errBuildBudgetExceeded.Error(),
+				"message": "This build has reached its AI request budget. Start a new build to continue iterating.",
+			},
+		})
+		return
+	}
+	build.RequestsUsed++
+	build.UpdatedAt = time.Now().UTC()
+	build.mu.Unlock()
+	am.persistBuildSnapshot(build, nil)
+
 	// Pre-authorize spend before calling AI — catches about-to-exceed budgets
 	// using a conservative per-request estimate rather than 0.
 	if am.budgetEnforcer != nil {
@@ -6007,6 +6077,27 @@ Rules:
 		return
 	}
 
+	if am.spendTracker != nil && response.Usage != nil {
+		projectID := build.ProjectID
+		if _, spendErr := am.spendTracker.RecordSpend(spend.RecordSpendInput{
+			UserID:       build.UserID,
+			ProjectID:    projectID,
+			BuildID:      agent.BuildID,
+			AgentID:      agent.ID,
+			AgentRole:    string(agent.Role),
+			Provider:     string(agent.Provider),
+			Model:        ai.GetModelUsed(response, nil),
+			Capability:   "build_intervention",
+			IsBYOK:       !am.buildUsesPlatformKeys(build),
+			InputTokens:  response.Usage.PromptTokens,
+			OutputTokens: response.Usage.CompletionTokens,
+			PowerMode:    string(build.PowerMode),
+			Status:       "success",
+		}); spendErr != nil {
+			log.Printf("spend: failed to record intervention spend for build %s agent %s: %v", agent.BuildID, agent.ID, spendErr)
+		}
+	}
+
 	content := strings.TrimSpace(response.Content)
 	if content == "" && strings.TrimSpace(response.Error) != "" {
 		content = strings.TrimSpace(response.Error)
@@ -6026,6 +6117,7 @@ Rules:
 	var interaction BuildInteractionState
 	var enqueueRevision bool
 	var enqueueRevisionRequest string
+	var queueRevision bool
 
 	build.mu.Lock()
 	if plan.ResumeBuild {
@@ -6083,10 +6175,22 @@ Rules:
 	build.UpdatedAt = now
 	resolveWaitingStateLocked(build)
 	interaction = copyBuildInteractionStateLocked(build)
-	if plan.ApplyChanges && !plan.RequiresUserResponse && !hasPendingBlockingPermissionRequestLocked(build) &&
-		(currentStatus == BuildCompleted || currentStatus == BuildFailed || currentStatus == BuildAwaitingReview) {
-		enqueueRevision = true
-		enqueueRevisionRequest = message
+	if plan.ApplyChanges && !plan.RequiresUserResponse && !hasPendingBlockingPermissionRequestLocked(build) {
+		switch currentStatus {
+		case BuildCompleted, BuildFailed, BuildAwaitingReview:
+			enqueueRevision = true
+			enqueueRevisionRequest = message
+		default:
+			appendPendingRevisionLocked(build, message)
+			appendBuildConversationMessageLocked(build, BuildConversationMessage{
+				Role:      ConversationRoleSystem,
+				Kind:      ConversationKindDirective,
+				Content:   "Queued your requested changes for the next implementation pass.",
+				Timestamp: now,
+			})
+			queueRevision = true
+			interaction = copyBuildInteractionStateLocked(build)
+		}
 	}
 	build.mu.Unlock()
 
@@ -6140,6 +6244,22 @@ Rules:
 			Timestamp: now,
 			Data: map[string]any{
 				"interaction": interaction,
+			},
+		})
+	}
+	if queueRevision {
+		am.broadcast(agent.BuildID, &WSMessage{
+			Type:      WSBuildProgress,
+			BuildID:   agent.BuildID,
+			AgentID:   agent.ID,
+			Timestamp: now,
+			Data: map[string]any{
+				"phase":                 "user_feedback",
+				"status":                string(BuildInProgress),
+				"message":               "User-requested changes captured and queued for the next implementation pass.",
+				"quality_gate_required": true,
+				"quality_gate_active":   true,
+				"quality_gate_stage":    "revision",
 			},
 		})
 	}
