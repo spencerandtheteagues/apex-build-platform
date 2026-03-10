@@ -709,61 +709,70 @@ function drawBoltPath(
   ctx.restore()
 }
 
-// ─── Deep purple/blue drawing pass for intro bolts ────────────────────────────
+// ─── Realistic lightning bolt draw — white-hot core, electric blue corona ──────
+// Real lightning: pure white core → pale blue inner → electric blue → deep blue haze
 
-function drawIntroBolt(ctx: CanvasRenderingContext2D, pts: LPt[], alpha: number, isPeak: boolean) {
-  if (pts.length < 2 || alpha < 0.003) return
-  const path = () => {
+interface IntroBolt { pts: LPt[]; isMain: boolean }
+
+function drawRealisticBolt(
+  ctx: CanvasRenderingContext2D,
+  pts: LPt[],
+  alpha: number,
+  isPeak: boolean,
+  isMain: boolean,
+) {
+  if (pts.length < 2 || alpha < 0.004) return
+  const trace = () => {
     ctx.beginPath()
     ctx.moveTo(pts[0].x, pts[0].y)
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
   }
   ctx.lineCap = 'round'; ctx.lineJoin = 'round'
 
-  // Outer deep violet haze
+  const M = isMain ? 1.0 : 0.45   // branch width multiplier
+
+  // Layer 1 — wide atmospheric blue haze (ionized air column)
   ctx.save()
-  ctx.globalAlpha = alpha * (isPeak ? 0.52 : 0.24)
-  ctx.strokeStyle = '#5500aa'
-  ctx.lineWidth = 22
-  ctx.shadowColor = '#aa00ff'
-  ctx.shadowBlur = isPeak ? 60 : 32
-  path(); ctx.stroke()
+  ctx.globalAlpha = alpha * (isPeak ? 0.35 : 0.18)
+  ctx.strokeStyle = '#1a3aff'
+  ctx.lineWidth   = M * (isPeak ? 28 : 20)
+  ctx.shadowColor = '#2244ff'
+  ctx.shadowBlur  = isPeak ? 55 : 35
+  trace(); ctx.stroke()
   ctx.restore()
 
-  // Electric indigo glow
+  // Layer 2 — electric blue glow (the luminous plasma channel)
   ctx.save()
-  ctx.globalAlpha = alpha * 0.45
-  ctx.strokeStyle = '#2200ee'
-  ctx.lineWidth = 11
-  ctx.shadowColor = '#4400ff'
-  ctx.shadowBlur = 24
-  path(); ctx.stroke()
-  ctx.restore()
-
-  // Bright blue/indigo mid
-  ctx.save()
-  ctx.globalAlpha = alpha * 0.72
-  ctx.strokeStyle = '#5566ff'
-  ctx.lineWidth = 4.5
+  ctx.globalAlpha = alpha * (isPeak ? 0.70 : 0.50)
+  ctx.strokeStyle = '#5588ff'
+  ctx.lineWidth   = M * (isPeak ? 14 : 9)
   ctx.shadowColor = '#4477ff'
-  ctx.shadowBlur = 12
-  path(); ctx.stroke()
+  ctx.shadowBlur  = isPeak ? 30 : 18
+  trace(); ctx.stroke()
   ctx.restore()
 
-  // White-hot core
+  // Layer 3 — pale blue-white (transition zone)
+  ctx.save()
+  ctx.globalAlpha = alpha * 0.88
+  ctx.strokeStyle = '#aaccff'
+  ctx.lineWidth   = M * (isPeak ? 6 : 3.5)
+  ctx.shadowColor = '#99bbff'
+  ctx.shadowBlur  = isPeak ? 14 : 8
+  trace(); ctx.stroke()
+  ctx.restore()
+
+  // Layer 4 — white-hot core (actual discharge channel)
   ctx.save()
   ctx.globalAlpha = alpha
-  ctx.strokeStyle = isPeak ? '#ffffff' : '#ddeeff'
-  ctx.lineWidth = 1.6
-  ctx.shadowColor = '#aabbff'
-  ctx.shadowBlur = 5
-  path(); ctx.stroke()
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth   = M * (isPeak ? 2.8 : 1.4)
+  ctx.shadowColor = '#ffffff'
+  ctx.shadowBlur  = isPeak ? 8 : 4
+  trace(); ctx.stroke()
   ctx.restore()
 }
 
-// ─── Logo intro lightning (one-shot bilateral spider burst) ───────────────────
-
-interface IntroBolt { pts: LPt[]; weight: number }
+// ─── One-shot bilateral intro lightning from logo edges ───────────────────────
 
 const IntroLightning: React.FC<{ logoRef: React.RefObject<HTMLImageElement> }> = ({ logoRef }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -777,109 +786,97 @@ const IntroLightning: React.FC<{ logoRef: React.RefObject<HTMLImageElement> }> =
     canvas.width  = window.innerWidth
     canvas.height = window.innerHeight
 
-    let raf: number
+    let raf = 0
     let isDone = false
-    let fired  = false
 
-    // Poll until the logo image is loaded and has non-zero layout dimensions,
-    // then fire. One rAF is not enough — the img may still be loading.
-    function waitAndFire() {
-      const logo = logoRef.current
-      if (!logo) { raf = requestAnimationFrame(waitAndFire); return }
-      const rect = logo.getBoundingClientRect()
-      if (rect.width < 10) { raf = requestAnimationFrame(waitAndFire); return }
+    let fired = false
+
+    function fire() {
       if (fired) return
+      const logo = logoRef.current
+      const rect = logo?.getBoundingClientRect()
+      if (!rect || rect.width < 10) {
+        // Image hasn't loaded yet — wait for it
+        if (logo) logo.addEventListener('load', fire, { once: true })
+        return
+      }
       fired = true
-      startLightning(logo, rect)
+      run(rect)
     }
 
-    function startLightning(_logo: HTMLImageElement, rect: DOMRect) {
-      const lx   = rect.left
-      const rx   = rect.right
-      const oy   = rect.top + rect.height * 0.44
-      const W    = canvas.width
-      const vSpread = canvas.height * 0.20
+    function run(rect: DOMRect) {
+      const cx    = canvas.width / 2
+      const cy    = canvas.height * 0.30
+      const lx    = (rect && rect.width > 10) ? rect.left              : cx - 80
+      const rx    = (rect && rect.width > 10) ? rect.right             : cx + 80
+      const oy    = (rect && rect.height > 0) ? rect.top + rect.height * 0.44 : cy
 
-      // Build all bolt paths for one side
-      function genSide(side: 'L' | 'R'): IntroBolt[] {
+      // ── Generate ONE main bolt per side + realistic short branches ──
+      function buildSide(side: 'L' | 'R'): IntroBolt[] {
         const bolts: IntroBolt[] = []
-        const ox    = side === 'L' ? lx - 4 : rx + 4
-        const destX = side === 'L' ? -40 : W + 40
-        const dir   = side === 'L' ? Math.PI : 0   // base direction for spider legs
+        const ox    = side === 'L' ? lx  : rx
+        const destX = side === 'L' ? -30 : canvas.width + 30
+        // Tiny end-point vertical jitter — horizontal bolt, not diagonal
+        const ey    = oy + (Math.random() - 0.5) * canvas.height * 0.04
 
-        const numMain = 4 + Math.floor(Math.random() * 2)  // 4-5 main bolts
-        for (let m = 0; m < numMain; m++) {
-          const sy  = oy + (Math.random() - 0.5) * 28
-          // End: full screen width, narrow vertical band
-          const ey  = oy + (Math.random() - 0.5) * vSpread * 1.6
-          // Low roughness = tight horizontal channel
-          const main = generateBolt(ox, sy, destX, ey, 0.20)
-          bolts.push({ pts: main, weight: 1.0 })
+        // ONE main bolt with low roughness = tight realistic channel
+        const main = generateBolt(ox, oy, destX, ey, 0.18)
+        bolts.push({ pts: main, isMain: true })
 
-          // Branches off main — still biased outward, slightly wider spread
-          for (let i = Math.floor(main.length * 0.08); i < main.length - 2; i++) {
-            if (Math.random() < 0.14) {
-              const p  = main[i]
-              const pn = main[Math.min(i + 1, main.length - 1)]
-              const baseA = Math.atan2(pn.y - p.y, pn.x - p.x)
-              const bA    = baseA + (Math.random() - 0.5) * 0.85
-              const bLen  = 55 + Math.random() * 200
-              const bx = p.x + Math.cos(bA) * bLen
-              const by = p.y + Math.sin(bA) * bLen
-              const br = generateBolt(p.x, p.y, bx, by, 0.40)
-              bolts.push({ pts: br, weight: 0.58 })
-              // Sub-branch
-              if (Math.random() < 0.45 && br.length > 3) {
-                const lp = br[Math.floor(br.length * 0.55)]
-                const sa = bA + (Math.random() - 0.5) * 0.75
-                const sl = 30 + Math.random() * 90
-                bolts.push({
-                  pts: generateBolt(lp.x, lp.y, lp.x + Math.cos(sa) * sl, lp.y + Math.sin(sa) * sl, 0.55),
-                  weight: 0.30,
-                })
-              }
-            }
-          }
+        // 4-8 short branches that fork off the main channel
+        // They go in the general direction of travel, angled ±35°
+        const travelAngle = side === 'L' ? Math.PI : 0
+        const used = new Set<number>()
+        const numBranches = 4 + Math.floor(Math.random() * 5)
 
-          // Spider tendrils distributed along the bolt
-          const numSpiders = 7 + Math.floor(Math.random() * 9)
-          for (let s = 0; s < numSpiders; s++) {
-            const idx = Math.floor(main.length * (0.18 + Math.random() * 0.75))
-            if (idx >= main.length) continue
-            const p = main[idx]
-            // Spread outward sideways with narrow vertical variance
-            const sa  = dir + (Math.random() - 0.5) * 1.3
-            const sl  = 25 + Math.random() * 110
-            const tx  = p.x + Math.cos(sa) * sl
-            const ty  = p.y + Math.sin(sa) * sl
-            bolts.push({ pts: generateBolt(p.x, p.y, tx, ty, 0.62), weight: 0.24 })
-            // Tendril off tendril
-            if (Math.random() < 0.45) {
-              const sa2 = sa + (Math.random() - 0.5) * 0.9
-              const sl2 = 12 + Math.random() * 48
-              bolts.push({
-                pts: generateBolt(tx, ty, tx + Math.cos(sa2) * sl2, ty + Math.sin(sa2) * sl2, 0.70),
-                weight: 0.13,
-              })
-            }
+        for (let b = 0; b < numBranches; b++) {
+          // Pick a point spread across the bolt length
+          let idx: number
+          let tries = 0
+          do { idx = Math.floor(main.length * (0.10 + Math.random() * 0.85)); tries++ }
+          while (used.has(idx) && tries < 10)
+          used.add(idx)
+          if (idx >= main.length) continue
+
+          const p   = main[idx]
+          // Fork angle: branch forward in travel direction, ±15–35°
+          const ang = travelAngle + (Math.random() < 0.5 ? 1 : -1) * (0.25 + Math.random() * 0.35)
+          // Short branch: 40–120px — realistic, doesn't stray far
+          const len = 40 + Math.random() * 80
+          const bx  = p.x + Math.cos(ang) * len
+          const by  = p.y + Math.sin(ang) * len
+          const br  = generateBolt(p.x, p.y, bx, by, 0.35)
+          bolts.push({ pts: br, isMain: false })
+
+          // Occasional secondary fork off a branch (30% chance)
+          if (Math.random() < 0.30 && br.length > 3) {
+            const lp  = br[Math.floor(br.length * 0.5)]
+            const ang2 = ang + (Math.random() < 0.5 ? 1 : -1) * (0.2 + Math.random() * 0.3)
+            const len2 = 20 + Math.random() * 45
+            bolts.push({
+              pts: generateBolt(lp.x, lp.y, lp.x + Math.cos(ang2) * len2, lp.y + Math.sin(ang2) * len2, 0.40),
+              isMain: false,
+            })
           }
         }
         return bolts
       }
 
-      const allBolts = [...genSide('L'), ...genSide('R')]
+      const leftBolts  = buildSide('L')
+      const rightBolts = buildSide('R')
+      const allBolts   = [...leftBolts, ...rightBolts]
 
-      // Return stroke schedule: [startMs, peakMs, endMs, intensity]
-      // Same channel re-illuminated — authentic multi-stroke lightning
+      // ── Return stroke timing ──
+      // Real lightning: 2–4 return strokes along same pre-ionized channel
+      // Quick blink pattern: bright → dark → bright → dark → bright → fade
       const STROKES: [number, number, number, number][] = [
-        [0,   18,  110,  1.00],  // RS1 — blindingly bright
-        [135, 150, 240,  0.84],  // RS2
-        [268, 282, 365,  0.64],  // RS3
-        [392, 403, 472,  0.46],  // RS4 — faint
+        [0,   15,  90,  1.00],   // RS1 — primary, full power
+        [120, 132, 200, 0.78],   // RS2 — slightly dimmer
+        [235, 244, 305, 0.52],   // RS3 — weaker
       ]
-      const FADE_START = 500
-      const FADE_DUR   = 1600
-      const TOTAL_DUR  = FADE_START + FADE_DUR
+      const FADE_START = 320
+      const FADE_DUR   = 420
+      const TOTAL_DUR  = FADE_START + FADE_DUR   // ~740ms total
 
       const t0 = Date.now()
 
@@ -888,15 +885,16 @@ const IntroLightning: React.FC<{ logoRef: React.RefObject<HTMLImageElement> }> =
         if (t >= TOTAL_DUR) return { a: 0, isPeak: false }
         if (t >= FADE_START) {
           const ft = (t - FADE_START) / FADE_DUR
-          return { a: Math.max(0, (1 - ft) * (1 - ft) * 0.62), isPeak: false }
+          // Ease-out fade — quick drop then lingers slightly
+          return { a: Math.max(0, (1 - ft) * (1 - ft * 0.7) * 0.55), isPeak: false }
         }
         let best = 0, peak = false
         for (const [s, pk, e, inten] of STROKES) {
           if (t < s || t > e) continue
           const a = t < pk
-            ? ((t - s) / (pk - s)) * inten
-            : inten * (1 - ((t - pk) / (e - pk)) * 0.55)
-          if (a > best) { best = a; peak = t <= pk + 15 }
+            ? ((t - s) / (pk - s)) * inten            // fast attack
+            : inten * (1 - ((t - pk) / (e - pk)) * 0.6)  // decay
+          if (a > best) { best = a; peak = t <= pk + 12 }
         }
         return { a: best, isPeak: peak }
       }
@@ -906,48 +904,53 @@ const IntroLightning: React.FC<{ logoRef: React.RefObject<HTMLImageElement> }> =
         const now = Date.now()
         const { a, isPeak } = getAlpha(now)
 
-        if (a <= 0.003) { isDone = true; return }
+        if (now - t0 >= TOTAL_DUR) { isDone = true; return }
 
-        // Screen flash on first return stroke peak
-        if (isPeak && a > 0.7) {
+        // Bright white-blue screen flash at RS1 peak — feels like a real strike
+        if (isPeak && a > 0.85) {
           ctx.save()
-          ctx.fillStyle = `rgba(100,80,255,${a * 0.11})`
+          ctx.fillStyle = `rgba(200,220,255,${a * 0.14})`
           ctx.fillRect(0, 0, canvas.width, canvas.height)
           ctx.restore()
         }
 
-        // Purple corona bloom at both logo edges
-        const bloomR = isPeak ? 65 : 35
+        // Electric corona bloom at both origin points (logo edges)
+        const bloomR = isPeak ? 70 : 38
         for (const ox of [lx, rx]) {
-          const g = ctx.createRadialGradient(ox, oy, 0, ox, oy, bloomR * 1.8)
-          g.addColorStop(0,   `rgba(200,0,255,${a * 0.65})`)
-          g.addColorStop(0.3, `rgba(120,0,220,${a * 0.30})`)
-          g.addColorStop(0.7, `rgba(50,0,150, ${a * 0.10})`)
+          const g = ctx.createRadialGradient(ox, oy, 0, ox, oy, bloomR)
+          g.addColorStop(0,   `rgba(180,210,255,${a * 0.80})`)
+          g.addColorStop(0.25,`rgba(80,140,255, ${a * 0.45})`)
+          g.addColorStop(0.6, `rgba(30,80,200,  ${a * 0.18})`)
           g.addColorStop(1,   'rgba(0,0,0,0)')
           ctx.save()
           ctx.fillStyle = g
           ctx.beginPath()
-          ctx.arc(ox, oy, bloomR * 1.8, 0, Math.PI * 2)
+          ctx.arc(ox, oy, bloomR, 0, Math.PI * 2)
           ctx.fill()
           ctx.restore()
         }
 
-        // Draw all bolts (same paths every frame — return strokes use same channel)
+        // Draw all bolts — branches first (behind), main bolt on top
         for (const b of allBolts) {
-          drawIntroBolt(ctx, b.pts, a * b.weight, isPeak)
+          if (!b.isMain) drawRealisticBolt(ctx, b.pts, a, isPeak, false)
+        }
+        for (const b of allBolts) {
+          if (b.isMain)  drawRealisticBolt(ctx, b.pts, a, isPeak, true)
         }
 
         raf = requestAnimationFrame(loop)
       }
 
       raf = requestAnimationFrame(loop)
-    }  // end startLightning
+    }  // end run()
 
-    raf = requestAnimationFrame(waitAndFire)
+    // Fire immediately — if image has no dimensions yet, fire() waits for onload
+    const timer = setTimeout(fire, 0)
 
     return () => {
+      clearTimeout(timer)
       cancelAnimationFrame(raf)
-      if (!isDone) ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
     }
   }, [logoRef])
 
