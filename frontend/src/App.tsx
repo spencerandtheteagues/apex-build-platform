@@ -169,31 +169,46 @@ function App() {
       view: AppView
       label: string
       icon: React.ReactNode
+      color: string
+      glow: string
       activeClassName: string
+      inactiveClassName: string
     }> = [
       {
         view: 'builder',
         label: 'Build App',
-        icon: <img src={logoSrc} alt="APEX" className="desktop-tab-logo w-7 h-7 object-contain" />,
-        activeClassName: 'bg-red-900/20 text-red-400 border border-red-900/50 shadow-sm shadow-red-900/20',
+        icon: <img src={logoSrc} alt="APEX" className="desktop-tab-logo w-5 h-5 object-contain" />,
+        color: '#ff4466',
+        glow: 'rgba(255,0,51,0.5)',
+        activeClassName: 'border-[#ff0033] text-[#ff4466] bg-[rgba(255,0,51,0.15)] shadow-[0_0_12px_rgba(255,0,51,0.4)]',
+        inactiveClassName: 'border-[rgba(255,0,51,0.3)] text-[rgba(255,68,102,0.6)] hover:border-[#ff0033] hover:text-[#ff4466] hover:bg-[rgba(255,0,51,0.08)]',
       },
       {
         view: 'ide',
         label: 'IDE',
         icon: <Code2 className="w-4 h-4" />,
-        activeClassName: 'bg-red-900/20 text-red-400 border border-red-900/50 shadow-sm shadow-red-900/20',
+        color: '#7dc4ff',
+        glow: 'rgba(96,165,250,0.5)',
+        activeClassName: 'border-[#60a5fa] text-[#7dc4ff] bg-[rgba(96,165,250,0.15)] shadow-[0_0_12px_rgba(96,165,250,0.4)]',
+        inactiveClassName: 'border-[rgba(96,165,250,0.3)] text-[rgba(125,196,255,0.6)] hover:border-[#60a5fa] hover:text-[#7dc4ff] hover:bg-[rgba(96,165,250,0.08)]',
       },
       {
         view: 'explore',
         label: 'Explore',
         icon: <Globe className="w-4 h-4" />,
-        activeClassName: 'bg-purple-900/20 text-purple-400 border border-purple-900/50 shadow-sm shadow-purple-900/20',
+        color: '#b89eff',
+        glow: 'rgba(167,139,250,0.5)',
+        activeClassName: 'border-[#a78bfa] text-[#b89eff] bg-[rgba(167,139,250,0.15)] shadow-[0_0_12px_rgba(167,139,250,0.4)]',
+        inactiveClassName: 'border-[rgba(167,139,250,0.3)] text-[rgba(184,158,255,0.6)] hover:border-[#a78bfa] hover:text-[#b89eff] hover:bg-[rgba(167,139,250,0.08)]',
       },
       {
         view: 'spending',
         label: 'Spending',
         icon: <Zap className="w-4 h-4" />,
-        activeClassName: 'bg-orange-900/20 text-orange-400 border border-orange-900/50 shadow-sm shadow-orange-900/20',
+        color: '#ffd166',
+        glow: 'rgba(251,191,36,0.5)',
+        activeClassName: 'border-[#fbbf24] text-[#ffd166] bg-[rgba(251,191,36,0.15)] shadow-[0_0_12px_rgba(251,191,36,0.4)]',
+        inactiveClassName: 'border-[rgba(251,191,36,0.3)] text-[rgba(255,209,102,0.6)] hover:border-[#fbbf24] hover:text-[#ffd166] hover:bg-[rgba(251,191,36,0.08)]',
       },
     ]
 
@@ -202,7 +217,10 @@ function App() {
         view: 'admin',
         label: 'Admin',
         icon: <Shield className="w-4 h-4" />,
-        activeClassName: 'bg-purple-900/20 text-purple-400 border border-purple-900/50 shadow-sm shadow-purple-900/20',
+        color: '#4eedb0',
+        glow: 'rgba(52,211,153,0.5)',
+        activeClassName: 'border-[#34d399] text-[#4eedb0] bg-[rgba(52,211,153,0.15)] shadow-[0_0_12px_rgba(52,211,153,0.4)]',
+        inactiveClassName: 'border-[rgba(52,211,153,0.3)] text-[rgba(78,237,176,0.6)] hover:border-[#34d399] hover:text-[#4eedb0] hover:bg-[rgba(52,211,153,0.08)]',
       })
     }
 
@@ -741,19 +759,19 @@ function App() {
 
         {/* View Toggle */}
         <div className="hidden md:block order-3 w-full md:order-none md:flex-1 md:min-w-0">
-          <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide bg-gray-900/50 rounded-lg p-1 border border-gray-800">
+          <div className="flex items-center gap-2">
             {navigationItems.map((item) => (
               <button
                 key={item.view}
                 onClick={() => navigateToView(item.view)}
-                className={`shrink-0 flex items-center gap-2 px-4 py-1.5 rounded-md transition-all duration-200 ${
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-md border font-bold text-sm tracking-wide transition-all duration-200 ${
                   currentView === item.view
                     ? item.activeClassName
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                    : item.inactiveClassName
                 }`}
               >
                 {item.icon}
-                <span className="text-sm font-medium">{item.label}</span>
+                <span>{item.label}</span>
               </button>
             ))}
           </div>
