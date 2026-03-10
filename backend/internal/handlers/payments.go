@@ -67,7 +67,7 @@ func (h *PaymentHandlers) CreateCheckoutSession(c *gin.Context) {
 		appURL = strings.TrimRight(os.Getenv("FRONTEND_URL"), "/")
 	}
 	if appURL == "" {
-		appURL = "https://apex.build"
+		appURL = "https://apex-frontend-gigq.onrender.com"
 	}
 	successURL := appURL + "/billing?success=true"
 	cancelURL := appURL + "/billing?canceled=true"
@@ -1161,7 +1161,7 @@ func (h *PaymentHandlers) PurchaseCredits(c *gin.Context) {
 		creditAppURL = strings.TrimRight(os.Getenv("FRONTEND_URL"), "/")
 	}
 	if creditAppURL == "" {
-		creditAppURL = "https://apex.build"
+		creditAppURL = "https://apex-frontend-gigq.onrender.com"
 	}
 	creditSuccessURL := creditAppURL + "/billing?credits=success"
 	creditCancelURL := creditAppURL + "/billing?credits=canceled"

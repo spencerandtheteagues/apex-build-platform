@@ -7,7 +7,7 @@
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript)](https://typescriptlang.org)
 
-**Live:** [apex.build](https://apex.build) &nbsp;|&nbsp; **Contact:** [SpencerAndTheTeagues@gmail.com](mailto:SpencerAndTheTeagues@gmail.com)
+**Live:** [apex-frontend-gigq.onrender.com](https://apex-frontend-gigq.onrender.com) &nbsp;|&nbsp; **Contact:** [SpencerAndTheTeagues@gmail.com](mailto:SpencerAndTheTeagues@gmail.com)
 
 ---
 
