@@ -338,20 +338,41 @@ const Nav: React.FC<LandingProps> = ({ onGetStarted }) => {
         />
       </a>
 
-      <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         {[
-          { href: '#agents', label: 'AI Agents' },
-          { href: '#cost', label: 'Pricing' },
-          { href: '#ide', label: 'IDE' },
-          { href: '#byok', label: 'BYOK' },
+          { href: '#agents', label: 'AI Agents', color: '#b89eff', glow: 'rgba(167,139,250,0.9)' },
+          { href: '#cost',   label: 'Pricing',   color: '#4eedb0', glow: 'rgba(52,211,153,0.9)' },
+          { href: '#ide',    label: 'IDE',        color: '#7dc4ff', glow: 'rgba(96,165,250,0.9)' },
+          { href: '#byok',   label: 'BYOK',       color: '#ffd166', glow: 'rgba(251,191,36,0.9)' },
         ].map(l => (
-          <a key={l.href} href={l.href} style={{
-            fontFamily: fBody, fontSize: '0.82rem', color: C.textSub,
-            textDecoration: 'none', fontWeight: 500, letterSpacing: '0.01em',
-            transition: 'color 0.15s',
-          }}
-            onMouseEnter={e => (e.currentTarget.style.color = C.text)}
-            onMouseLeave={e => (e.currentTarget.style.color = C.textSub)}
+          <a key={l.href} href={l.href}
+            style={{
+              fontFamily: fBody, fontSize: '0.88rem', color: l.color,
+              textDecoration: 'none', fontWeight: 700, letterSpacing: '0.09em',
+              textTransform: 'uppercase' as const,
+              padding: '5px 11px', borderRadius: 6,
+              border: `1px solid ${l.glow.replace('0.9', '0.18')}`,
+              background: l.glow.replace('0.9', '0.07'),
+              textShadow: `0 0 10px ${l.glow}, 0 0 22px ${l.glow.replace('0.9', '0.45')}`,
+              boxShadow: `0 0 10px ${l.glow.replace('0.9', '0.12')}, inset 0 0 8px ${l.glow.replace('0.9', '0.05')}`,
+              transition: 'all 0.18s ease',
+            }}
+            onMouseEnter={e => {
+              const el = e.currentTarget as HTMLAnchorElement
+              el.style.background = l.glow.replace('0.9', '0.14')
+              el.style.border = `1px solid ${l.glow.replace('0.9', '0.45')}`
+              el.style.textShadow = `0 0 14px ${l.glow}, 0 0 30px ${l.glow}, 0 0 50px ${l.glow.replace('0.9', '0.5')}`
+              el.style.boxShadow = `0 0 18px ${l.glow.replace('0.9', '0.28')}, 0 0 40px ${l.glow.replace('0.9', '0.12')}, inset 0 0 12px ${l.glow.replace('0.9', '0.08')}`
+              el.style.transform = 'translateY(-1px)'
+            }}
+            onMouseLeave={e => {
+              const el = e.currentTarget as HTMLAnchorElement
+              el.style.background = l.glow.replace('0.9', '0.07')
+              el.style.border = `1px solid ${l.glow.replace('0.9', '0.18')}`
+              el.style.textShadow = `0 0 10px ${l.glow}, 0 0 22px ${l.glow.replace('0.9', '0.45')}`
+              el.style.boxShadow = `0 0 10px ${l.glow.replace('0.9', '0.12')}, inset 0 0 8px ${l.glow.replace('0.9', '0.05')}`
+              el.style.transform = 'translateY(0)'
+            }}
           >
             {l.label}
           </a>
@@ -586,202 +607,433 @@ const IDEDemo: React.FC = () => (
   </div>
 )
 
-// ─── Lightning Field ──────────────────────────────────────────────────────────
+// ─── Lightning Field — Canvas-based storm system ──────────────────────────────
 
-const LF_CSS = `
-@keyframes lf-flicker {
-  0%,100%{opacity:.93} 3%{opacity:.06} 7%{opacity:.91} 11%{opacity:.62}
-  15%{opacity:.03} 19%{opacity:.89} 23%{opacity:.74} 27%{opacity:.02}
-  31%{opacity:.95} 35%{opacity:.56} 39%{opacity:.88} 43%{opacity:.05}
-  47%{opacity:.92} 51%{opacity:.41} 55%{opacity:.97} 59%{opacity:.68}
-  63%{opacity:.11} 67%{opacity:.90} 71%{opacity:.52} 75%{opacity:.96}
-  79%{opacity:.22} 83%{opacity:.93} 87%{opacity:.58} 91%{opacity:.04}
-  95%{opacity:.85} 98%{opacity:.97}
-}
-@keyframes lf-branch {
-  0%,100%{opacity:.75} 9%{opacity:0} 18%{opacity:.88} 26%{opacity:.08}
-  35%{opacity:.82} 43%{opacity:.02} 52%{opacity:.78} 60%{opacity:.32}
-  69%{opacity:.85} 77%{opacity:.12} 86%{opacity:.90} 94%{opacity:.03}
-}
-@keyframes lf-tendril {
-  0%,100%{opacity:.48} 14%{opacity:0} 28%{opacity:.62} 40%{opacity:.06}
-  54%{opacity:.55} 66%{opacity:0} 78%{opacity:.52} 90%{opacity:.10}
-}
-@keyframes lf-hue {
-  0%  {filter:hue-rotate(0deg)   brightness(1.3)  saturate(2.2)}
-  16% {filter:hue-rotate(50deg)  brightness(2.2)  saturate(3.0)}
-  32% {filter:hue-rotate(-40deg) brightness(1.1)  saturate(1.8)}
-  48% {filter:hue-rotate(90deg)  brightness(2.6)  saturate(3.2)}
-  64% {filter:hue-rotate(-20deg) brightness(1.6)  saturate(2.4)}
-  80% {filter:hue-rotate(65deg)  brightness(2.0)  saturate(2.8)}
-  100%{filter:hue-rotate(0deg)   brightness(1.3)  saturate(2.2)}
-}
-@keyframes lf-surge {
-  0%,42%,58%,100%{opacity:0} 49%{opacity:.9} 50%{opacity:1} 51%{opacity:.7}
-}
-@keyframes lf-ambient-pulse {
-  0%,100%{opacity:.28} 50%{opacity:.48}
-}
-`
+type LPt = { x: number; y: number }
 
-// Bolt path layers: [deepBlue-haze, electricBlue-wide, violet-irid, electricBlue-mid, cyan-inner, iceBlue, white-core]
-const MC = ['#0800cc','#1a44ff','#9900ee','#0066ff','#22ccff','#aaddff','#ffffff']
-const MW = [42, 22, 14,  8, 4.5, 2.2, 1.0]
-const MO = [0.042, 0.10, 0.17, 0.31, 0.60, 0.88, 1.0]
-const BC = ['#0800cc','#1a44ff','#9900ee','#0066ff','#22ccff','#aaddff','#ffffff']
-const BW = [20, 11, 7, 4.5, 2.5, 1.4, 0.7]
-const BO = [0.032, 0.09, 0.14, 0.28, 0.56, 0.85, 1.0]
-const TC = ['#1a44ff','#0066ff','#22ccff','#aaddff','#ffffff']
-const TW = [8, 4, 2, 1.0, 0.5]
-const TO = [0.07, 0.20, 0.46, 0.80, 1.0]
+function generateBolt(x1: number, y1: number, x2: number, y2: number, roughness = 0.45, depth = 0): LPt[] {
+  const dist = Math.hypot(x2 - x1, y2 - y1)
+  if (dist < 5 || depth > 11) return [{ x: x1, y: y1 }, { x: x2, y: y2 }]
+  const mx = (x1 + x2) / 2, my = (y1 + y2) / 2
+  const nx = -(y2 - y1) / dist, ny = (x2 - x1) / dist
+  const disp = (Math.random() - 0.5) * roughness * dist
+  const mx2 = mx + nx * disp, my2 = my + ny * disp
+  return [
+    ...generateBolt(x1, y1, mx2, my2, roughness * 0.93, depth + 1).slice(0, -1),
+    { x: mx2, y: my2 },
+    ...generateBolt(mx2, my2, x2, y2, roughness * 0.93, depth + 1).slice(1),
+  ]
+}
 
-type BoltLayerProps = { d: string; c: string[]; w: number[]; o: number[]; fid: string; fid2: string; anim?: string; delay?: string }
-const BoltLayer: React.FC<BoltLayerProps> = ({ d, c, w, o, fid, fid2, anim = 'lf-flicker 1.18s ease-in-out infinite', delay = '0s' }) => (
-  <g style={{ animation: anim, animationDelay: delay }}>
-    <path d={d} stroke={c[0]} strokeWidth={w[0]} fill="none" opacity={o[0]} filter={`url(#${fid2})`} strokeLinecap="round" strokeLinejoin="round"/>
-    <path d={d} stroke={c[1]} strokeWidth={w[1]} fill="none" opacity={o[1]} filter={`url(#${fid2})`} strokeLinecap="round" strokeLinejoin="round"/>
-    <path d={d} stroke={c[2]} strokeWidth={w[2]} fill="none" opacity={o[2]} filter={`url(#${fid})`} strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'lf-hue 3.5s ease-in-out infinite', animationDelay: delay }}/>
-    <path d={d} stroke={c[3]} strokeWidth={w[3]} fill="none" opacity={o[3]} strokeLinecap="round" strokeLinejoin="round"/>
-    <path d={d} stroke={c[4]} strokeWidth={w[4]} fill="none" opacity={o[4]} strokeLinecap="round" strokeLinejoin="round"/>
-    <path d={d} stroke={c[5]} strokeWidth={w[5]} fill="none" opacity={o[5]} strokeLinecap="round" strokeLinejoin="round"/>
-    <path d={d} stroke={c[6]} strokeWidth={w[6]} fill="none" opacity={o[6]} strokeLinecap="round" strokeLinejoin="round"/>
-  </g>
-)
+interface LStrike {
+  main: LPt[]
+  branches: LPt[][]
+  spiders: LPt[][]
+  startTime: number
+  duration: number
+  intensity: number
+  endX: number
+  endY: number
+  isHorizontal: boolean
+  peakFired: boolean
+}
+
+interface LAfterGlow {
+  pts: LPt[]
+  born: number
+  dur: number
+  color: string
+}
+
+interface LThunder {
+  x: number
+  y: number
+  born: number
+  maxR: number
+}
+
+function drawBoltPath(
+  ctx: CanvasRenderingContext2D,
+  pts: LPt[],
+  alpha: number,
+  isPeak: boolean,
+  wMult = 1.0,
+  tint?: string,
+) {
+  if (pts.length < 2) return
+  const path = () => {
+    ctx.beginPath()
+    ctx.moveTo(pts[0].x, pts[0].y)
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
+  }
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+
+  // Layer 1 — outer ultraviolet/indigo haze
+  ctx.save()
+  ctx.globalAlpha = alpha * (isPeak ? 0.42 : 0.18)
+  ctx.strokeStyle = tint ?? (isPeak ? '#cc00ff' : '#4400cc')
+  ctx.lineWidth = wMult * 22
+  ctx.shadowColor = tint ?? (isPeak ? '#ee00ff' : '#5500ee')
+  ctx.shadowBlur = isPeak ? 50 : 28
+  path(); ctx.stroke()
+  ctx.restore()
+
+  // Layer 2 — electric blue wide glow
+  ctx.save()
+  ctx.globalAlpha = alpha * 0.38
+  ctx.strokeStyle = '#1155ff'
+  ctx.lineWidth = wMult * 11
+  ctx.shadowColor = '#0044ff'
+  ctx.shadowBlur = 22
+  path(); ctx.stroke()
+  ctx.restore()
+
+  // Layer 3 — cyan mid
+  ctx.save()
+  ctx.globalAlpha = alpha * 0.65
+  ctx.strokeStyle = '#33ccff'
+  ctx.lineWidth = wMult * 4.5
+  ctx.shadowColor = '#11bbff'
+  ctx.shadowBlur = 11
+  path(); ctx.stroke()
+  ctx.restore()
+
+  // Layer 4 — white-hot core
+  ctx.save()
+  ctx.globalAlpha = alpha
+  ctx.strokeStyle = isPeak ? '#ffffff' : '#ddf0ff'
+  ctx.lineWidth = wMult * 1.6
+  ctx.shadowColor = '#bbdeff'
+  ctx.shadowBlur = 5
+  path(); ctx.stroke()
+  ctx.restore()
+}
 
 const LightningField: React.FC = () => {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
   useEffect(() => {
-    const el = Object.assign(document.createElement('style'), { id: 'lf-css', textContent: LF_CSS })
-    document.head.appendChild(el)
-    return () => document.getElementById('lf-css')?.remove()
+    const _cv = canvasRef.current
+    if (!_cv) return
+    const canvas: HTMLCanvasElement = _cv
+    const ctx = canvas.getContext('2d')!
+    let raf: number
+    const strikes: LStrike[] = []
+    const afterglows: LAfterGlow[] = []
+    const thunderRings: LThunder[] = []
+    let nextStrikeAt = Date.now() + 400 + Math.random() * 800
+
+    // Target zones: [x%, y%] of viewport — hero CTA, feature grid, edges
+    const TARGETS = [
+      [0.50, 0.80], // "Start Building Free" button
+      [0.28, 0.62], // left feature column
+      [0.72, 0.62], // right feature column
+      [0.50, 0.52], // center feature area
+      [0.18, 0.40], // upper left
+      [0.82, 0.40], // upper right
+      [0.50, 0.35], // hero headline
+    ]
+
+    function resize() {
+      canvas.width = window.innerWidth
+      canvas.height = window.innerHeight
+    }
+    resize()
+    window.addEventListener('resize', resize)
+
+    function stormGap(): number {
+      const r = Math.random()
+      if (r < 0.22) return 200 + Math.random() * 400   // rapid double-strike
+      if (r < 0.60) return 900 + Math.random() * 2000  // normal
+      return 3000 + Math.random() * 4000                // eerie pause
+    }
+
+    function buildBranches(main: LPt[], roughMult = 1): LPt[][] {
+      const branches: LPt[][] = []
+      for (let i = Math.floor(main.length * 0.12); i < main.length - 2; i++) {
+        if (Math.random() < 0.12) {
+          const p = main[i], pn = main[Math.min(i + 1, main.length - 1)]
+          const baseAngle = Math.atan2(pn.y - p.y, pn.x - p.x)
+          const bAngle = baseAngle + (Math.random() - 0.5) * Math.PI * 1.0
+          const bLen = 40 + Math.random() * 160
+          const br = generateBolt(p.x, p.y, p.x + Math.cos(bAngle) * bLen, p.y + Math.sin(bAngle) * bLen, 0.55 * roughMult)
+          branches.push(br)
+          // sub-branch
+          if (Math.random() < 0.40) {
+            const lp = br[Math.floor(br.length * 0.55)]
+            const sa = bAngle + (Math.random() - 0.5) * Math.PI * 0.8
+            const sl = 18 + Math.random() * 65
+            branches.push(generateBolt(lp.x, lp.y, lp.x + Math.cos(sa) * sl, lp.y + Math.sin(sa) * sl, 0.65 * roughMult))
+          }
+        }
+      }
+      return branches
+    }
+
+    function buildSpiders(ex: number, ey: number, horizontal: boolean): LPt[][] {
+      const spiders: LPt[][] = []
+      const numLegs = 4 + Math.floor(Math.random() * 7)
+      for (let s = 0; s < numLegs; s++) {
+        // Horizontal bolts: spider legs spread laterally; vertical: radiate outward
+        const baseA = horizontal
+          ? (Math.random() < 0.5 ? Math.PI : 0) + (Math.random() - 0.5) * 1.0
+          : Math.random() * Math.PI * 2
+        const len = 22 + Math.random() * 110
+        const tx = ex + Math.cos(baseA) * len, ty = ey + Math.sin(baseA) * len
+        spiders.push(generateBolt(ex, ey, tx, ty, 0.72))
+        if (Math.random() < 0.55) {
+          const a2 = baseA + (Math.random() - 0.5) * 1.4
+          const l2 = 12 + Math.random() * 55
+          spiders.push(generateBolt(tx, ty, tx + Math.cos(a2) * l2, ty + Math.sin(a2) * l2, 0.78))
+        }
+      }
+      return spiders
+    }
+
+    function spawnStrike(forked = false, forkFrom?: LStrike) {
+      const W = canvas.width, H = canvas.height
+      const isHorizontal = !forked && Math.random() < 0.14  // 14% chance horizontal cloud-to-cloud
+
+      let sx: number, sy: number, ex: number, ey: number
+
+      if (isHorizontal) {
+        // Horizontal bolt across the top of the viewport
+        const side = Math.random() < 0.5
+        sx = side ? -10 : W + 10
+        sy = H * (0.03 + Math.random() * 0.30)
+        ex = side ? W * (0.55 + Math.random() * 0.45) : W * (Math.random() * 0.45)
+        ey = sy + (Math.random() - 0.5) * H * 0.12
+      } else if (forked && forkFrom) {
+        // Fork from same start zone as parent, slightly offset
+        const p0 = forkFrom.main[0]
+        sx = p0.x + (Math.random() - 0.5) * 60
+        sy = p0.y + (Math.random() - 0.5) * 30
+        // target near but not same endpoint
+        const t = TARGETS[Math.floor(Math.random() * TARGETS.length)]
+        ex = W * t[0] + (Math.random() - 0.5) * 120
+        ey = H * t[1] + (Math.random() - 0.5) * 60
+      } else {
+        const side = Math.random()
+        if (side < 0.55) { sx = W * (0.08 + Math.random() * 0.84); sy = -10 }
+        else if (side < 0.77) { sx = -10; sy = H * (0.02 + Math.random() * 0.40) }
+        else { sx = W + 10; sy = H * (0.02 + Math.random() * 0.40) }
+
+        if (Math.random() < 0.26) {
+          const t = TARGETS[Math.floor(Math.random() * TARGETS.length)]
+          ex = W * t[0] + (Math.random() - 0.5) * 80
+          ey = H * t[1] + (Math.random() - 0.5) * 35
+        } else {
+          ex = W * (0.05 + Math.random() * 0.90)
+          ey = H * (0.30 + Math.random() * 0.65)
+        }
+      }
+
+      const main = generateBolt(sx, sy, ex, ey, isHorizontal ? 0.28 : 0.46)
+      const intensity = forked
+        ? 0.28 + Math.random() * 0.45
+        : 0.42 + Math.random() * 0.58
+
+      strikes.push({
+        main,
+        branches: buildBranches(main),
+        spiders: buildSpiders(ex, ey, isHorizontal),
+        startTime: Date.now() + (forked ? 80 + Math.random() * 100 : 0),
+        duration: isHorizontal ? 280 + Math.random() * 180 : 350 + Math.random() * 280,
+        intensity,
+        endX: ex, endY: ey,
+        isHorizontal,
+        peakFired: false,
+      })
+    }
+
+    function drawAfterglows() {
+      const now = Date.now()
+      for (let i = afterglows.length - 1; i >= 0; i--) {
+        const ag = afterglows[i]
+        const t = (now - ag.born) / ag.dur
+        if (t >= 1) { afterglows.splice(i, 1); continue }
+        // Starts at ~0.07 alpha, fades to 0
+        const a = (1 - t) * (1 - t) * 0.065
+        if (ag.pts.length < 2) continue
+        ctx.save()
+        ctx.globalAlpha = a
+        ctx.strokeStyle = ag.color
+        ctx.lineWidth = 1.5
+        ctx.shadowColor = ag.color
+        ctx.shadowBlur = 8
+        ctx.lineCap = 'round'
+        ctx.beginPath()
+        ctx.moveTo(ag.pts[0].x, ag.pts[0].y)
+        for (let j = 1; j < ag.pts.length; j++) ctx.lineTo(ag.pts[j].x, ag.pts[j].y)
+        ctx.stroke()
+        ctx.restore()
+      }
+    }
+
+    function drawThunderRings() {
+      const now = Date.now()
+      for (let i = thunderRings.length - 1; i >= 0; i--) {
+        const tr = thunderRings[i]
+        const age = now - tr.born
+        const dur = 600
+        if (age >= dur) { thunderRings.splice(i, 1); continue }
+        const t = age / dur
+        const r = tr.maxR * t
+        const a = (1 - t) * 0.22
+        ctx.save()
+        ctx.globalAlpha = a
+        ctx.strokeStyle = `rgba(180,100,255,1)`
+        ctx.lineWidth = 2.5 * (1 - t * 0.5)
+        ctx.shadowColor = '#cc44ff'
+        ctx.shadowBlur = 18
+        ctx.beginPath()
+        ctx.arc(tr.x, tr.y, r, 0, Math.PI * 2)
+        ctx.stroke()
+        // Second ring, slightly delayed
+        if (t > 0.15) {
+          const r2 = tr.maxR * (t - 0.15) * 0.7
+          ctx.globalAlpha = (1 - t) * 0.12
+          ctx.lineWidth = 1.5
+          ctx.beginPath()
+          ctx.arc(tr.x, tr.y, r2, 0, Math.PI * 2)
+          ctx.stroke()
+        }
+        ctx.restore()
+      }
+    }
+
+    function drawStrike(s: LStrike): boolean {
+      const now = Date.now()
+      const age = now - s.startTime
+      if (age < 0) return true  // forked bolt waiting to start
+      if (age >= s.duration) {
+        // Retire — leave ionization afterglow on main bolt
+        afterglows.push({
+          pts: s.main,
+          born: now,
+          dur: 700 + Math.random() * 600,
+          color: s.isHorizontal ? '#aa66ff' : '#44aaff',
+        })
+        return false
+      }
+
+      // Phase & alpha
+      let alpha: number, isPeak: boolean
+      if (age < 50) {
+        alpha = (age / 50) * 0.22; isPeak = false
+      } else if (age < 105) {
+        alpha = 0.65 + ((age - 50) / 55) * 0.35; isPeak = false
+      } else if (age < 210) {
+        alpha = 1.0; isPeak = true
+        // Fire peak effects only once
+        if (!s.peakFired) {
+          s.peakFired = true
+          thunderRings.push({ x: s.endX, y: s.endY, born: now, maxR: 140 + Math.random() * 80 })
+        }
+      } else {
+        const t = (age - 210) / (s.duration - 210)
+        const flicker = Math.sin(age * 0.62) * 0.14 + Math.cos(age * 1.3) * 0.09 + Math.sin(age * 0.28) * 0.06
+        alpha = Math.max(0, (1 - t) * 0.80 + flicker)
+        isPeak = false
+      }
+
+      const a = alpha * s.intensity
+
+      // Screen flash at peak (more dramatic)
+      if (isPeak && a > 0.35) {
+        ctx.save()
+        ctx.fillStyle = `rgba(160,180,255,${a * 0.09})`
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.restore()
+      }
+
+      // Pre-strike ground glow: warm halo under the endpoint while leading
+      if (age < 105) {
+        const pregR = 80
+        const preA = (age / 105) * a * 0.30
+        const pg = ctx.createRadialGradient(s.endX, s.endY, 0, s.endX, s.endY, pregR)
+        pg.addColorStop(0,   `rgba(255,120,0,${preA})`)
+        pg.addColorStop(0.5, `rgba(200,50,0,${preA * 0.4})`)
+        pg.addColorStop(1,   'rgba(0,0,0,0)')
+        ctx.save()
+        ctx.fillStyle = pg
+        ctx.beginPath()
+        ctx.arc(s.endX, s.endY, pregR, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+      }
+
+      // UV/purple bloom at strike point
+      if (isPeak || (age >= 105 && age < 280)) {
+        const bloomR = isPeak ? 130 : 75
+        const g = ctx.createRadialGradient(s.endX, s.endY, 0, s.endX, s.endY, bloomR)
+        g.addColorStop(0,    `rgba(230,30,255, ${a * 0.65})`)
+        g.addColorStop(0.12, `rgba(170,0,255, ${a * 0.42})`)
+        g.addColorStop(0.35, `rgba(90,0,210,  ${a * 0.20})`)
+        g.addColorStop(0.7,  `rgba(30,0,100,  ${a * 0.07})`)
+        g.addColorStop(1,    'rgba(0,0,0,0)')
+        ctx.save()
+        ctx.fillStyle = g
+        ctx.beginPath()
+        ctx.arc(s.endX, s.endY, bloomR, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+      }
+
+      // Draw all bolt layers
+      const leaderMult = age < 50 ? 0.30 : 1.0
+      const tint = s.isHorizontal ? '#9900ff' : undefined
+      drawBoltPath(ctx, s.main, a, isPeak, leaderMult, tint)
+      s.branches.forEach(b => drawBoltPath(ctx, b, a * 0.62, isPeak, leaderMult * 0.52, tint))
+      if (age >= 50) {
+        s.spiders.forEach(sp => drawBoltPath(ctx, sp, a * 0.44, isPeak, 0.34, tint))
+      }
+
+      return true
+    }
+
+    function loop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      const now = Date.now()
+
+      if (now >= nextStrikeAt) {
+        spawnStrike()
+        nextStrikeAt = now + stormGap()
+        // Forked lightning: 25% chance to spawn sister bolt from same cloud
+        if (Math.random() < 0.25) {
+          const last = strikes[strikes.length - 1]
+          if (last) spawnStrike(true, last)
+        }
+        // Triple strike: 8% chance
+        if (Math.random() < 0.08) {
+          const last = strikes[strikes.length - 1]
+          if (last) setTimeout(() => spawnStrike(true, last), 200 + Math.random() * 180)
+        }
+      }
+
+      // Draw afterglow channels first (behind active bolts)
+      drawAfterglows()
+
+      // Draw active strikes
+      for (let i = strikes.length - 1; i >= 0; i--) {
+        if (!drawStrike(strikes[i])) strikes.splice(i, 1)
+      }
+
+      // Draw thunder shockwave rings on top
+      drawThunderRings()
+
+      raf = requestAnimationFrame(loop)
+    }
+
+    raf = requestAnimationFrame(loop)
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', resize) }
   }, [])
 
-  // LEFT BOLT paths
-  const LM = 'M168-10 L152 75 L172 145 L138 225 L162 305 L122 395 L150 468 L130 548 L158 625 L134 708 L160 785 L142 868 L162 960'
-  const LB1 = 'M138 225 L90 265 L118 308 L74 342 L98 378'
-  const LB1s= 'M90 265 L52 288 L68 318'
-  const LB1m= 'M52 288 L22 302'
-  const LB2 = 'M122 395 L68 432 L92 462 L50 488'
-  const LB2s= 'M68 432 L32 452'
-  const LB3 = 'M150 468 L96 502 L118 528 L80 548'
-  const LB4 = 'M130 548 L76 582 L100 615 L58 642'
-  const LB4s= 'M76 582 L38 600 L55 622'
-  const LB5 = 'M134 708 L82 742 L108 770 L68 792'
-  const LB5s= 'M82 742 L48 758'
-  const LB6 = 'M142 868 L86 905 L110 932'
-
-  // RIGHT BOLT paths (mirrored: x = 200 - Lx)
-  const RM = 'M32-10 L48 75 L28 145 L62 225 L38 305 L78 395 L50 468 L70 548 L42 625 L66 708 L40 785 L58 868 L38 960'
-  const RB1 = 'M62 225 L110 265 L82 308 L126 342 L102 378'
-  const RB1s= 'M110 265 L148 288 L132 318'
-  const RB1m= 'M148 288 L178 302'
-  const RB2 = 'M78 395 L132 432 L108 462 L150 488'
-  const RB2s= 'M132 432 L168 452'
-  const RB3 = 'M50 468 L104 502 L82 528 L120 548'
-  const RB4 = 'M70 548 L124 582 L100 615 L142 642'
-  const RB4s= 'M124 582 L162 600 L145 622'
-  const RB5 = 'M66 708 L118 742 L92 770 L132 792'
-  const RB5s= 'M118 742 L152 758'
-  const RB6 = 'M58 868 L114 905 L90 932'
-
-  // CENTER TOP paths
-  const CM = 'M96-5 L80 48 L108 95 L74 142 L102 186 L78 232 L96 278'
-  const CB1 = 'M74 142 L40 166 L60 192 L35 216'
-  const CB2 = 'M102 186 L138 210 L118 236 L146 258'
-  const CB1s= 'M40 166 L18 180'
-  const CB2s= 'M138 210 L162 224'
-
-  const makeDefs = (id: string) => (
-    <defs>
-      <filter id={`${id}-g1`} x="-80%" y="-80%" width="260%" height="260%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="8"/>
-      </filter>
-      <filter id={`${id}-g2`} x="-150%" y="-100%" width="400%" height="300%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="22"/>
-      </filter>
-    </defs>
-  )
-
   return (
-    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: 0 }}>
-
-      {/* ── AMBIENT red/blue atmospheric halos ── */}
-      <div style={{
-        position: 'absolute', top: '8%', left: '-4%', width: '22%', height: '55%',
-        background: 'radial-gradient(ellipse at 80% 30%, rgba(0,60,255,0.06) 0%, transparent 65%)',
-        animation: 'lf-ambient-pulse 4.2s ease-in-out infinite',
-      }}/>
-      <div style={{
-        position: 'absolute', top: '8%', right: '-4%', width: '22%', height: '55%',
-        background: 'radial-gradient(ellipse at 20% 30%, rgba(0,60,255,0.06) 0%, transparent 65%)',
-        animation: 'lf-ambient-pulse 4.2s ease-in-out infinite', animationDelay: '2.1s',
-      }}/>
-
-      {/* ── LEFT MEGA BOLT ── */}
-      <svg
-        style={{ position: 'absolute', left: 0, top: 0, width: 'clamp(80px,11vw,155px)', height: '100%' }}
-        viewBox="0 0 200 1000" preserveAspectRatio="xMaxYMid meet"
-      >
-        {makeDefs('lf-l')}
-        {/* Surge flash overlay */}
-        <BoltLayer d={LM} c={['#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff']} w={[60,40,28,18,10,5,2]} o={[0.06,0.1,0.12,0.15,0.2,0.3,0.5]} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-surge 5.3s ease-in-out infinite" delay="0s"/>
-        {/* Main channel */}
-        <BoltLayer d={LM} c={MC} w={MW} o={MO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-flicker 1.18s ease-in-out infinite" delay="0s"/>
-        {/* Major branches */}
-        <BoltLayer d={LB1} c={BC} w={BW} o={BO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-branch 0.72s ease-in-out infinite" delay="0.08s"/>
-        <BoltLayer d={LB2} c={BC} w={BW} o={BO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-branch 0.65s ease-in-out infinite" delay="0.19s"/>
-        <BoltLayer d={LB3} c={BC} w={BW} o={BO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-branch 0.78s ease-in-out infinite" delay="0.33s"/>
-        <BoltLayer d={LB4} c={BC} w={BW} o={BO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-branch 0.61s ease-in-out infinite" delay="0.44s"/>
-        <BoltLayer d={LB5} c={BC} w={BW} o={BO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-branch 0.83s ease-in-out infinite" delay="0.55s"/>
-        <BoltLayer d={LB6} c={BC} w={BW} o={BO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-branch 0.70s ease-in-out infinite" delay="0.62s"/>
-        {/* Sub-branches */}
-        <BoltLayer d={LB1s} c={TC} w={TW} o={TO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-tendril 0.48s ease-in-out infinite" delay="0.12s"/>
-        <BoltLayer d={LB2s} c={TC} w={TW} o={TO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-tendril 0.44s ease-in-out infinite" delay="0.26s"/>
-        <BoltLayer d={LB4s} c={TC} w={TW} o={TO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-tendril 0.52s ease-in-out infinite" delay="0.38s"/>
-        <BoltLayer d={LB5s} c={TC} w={TW} o={TO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-tendril 0.40s ease-in-out infinite" delay="0.50s"/>
-        {/* Micro tendrils */}
-        <BoltLayer d={LB1m} c={TC} w={[5,2.5,1.2,0.6,0.3]} o={TO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-tendril 0.36s ease-in-out infinite" delay="0.15s"/>
-        {/* Ground strike glow */}
-        <ellipse cx="162" cy="965" rx="30" ry="8" fill="rgba(80,120,255,0.18)" filter="url(#lf-l-g2)" style={{ animation: 'lf-flicker 1.18s ease-in-out infinite' }}/>
-        <ellipse cx="162" cy="965" rx="14" ry="4" fill="rgba(180,220,255,0.35)" filter="url(#lf-l-g1)" style={{ animation: 'lf-flicker 1.18s ease-in-out infinite' }}/>
-      </svg>
-
-      {/* ── RIGHT MEGA BOLT ── */}
-      <svg
-        style={{ position: 'absolute', right: 0, top: 0, width: 'clamp(80px,11vw,155px)', height: '100%' }}
-        viewBox="0 0 200 1000" preserveAspectRatio="xMinYMid meet"
-      >
-        {makeDefs('lf-r')}
-        <BoltLayer d={RM} c={['#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff']} w={[60,40,28,18,10,5,2]} o={[0.06,0.1,0.12,0.15,0.2,0.3,0.5]} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-surge 5.3s ease-in-out infinite" delay="2.65s"/>
-        <BoltLayer d={RM} c={MC} w={MW} o={MO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-flicker 1.18s ease-in-out infinite" delay="0.31s"/>
-        <BoltLayer d={RB1} c={BC} w={BW} o={BO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-branch 0.74s ease-in-out infinite" delay="0.09s"/>
-        <BoltLayer d={RB2} c={BC} w={BW} o={BO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-branch 0.67s ease-in-out infinite" delay="0.21s"/>
-        <BoltLayer d={RB3} c={BC} w={BW} o={BO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-branch 0.76s ease-in-out infinite" delay="0.34s"/>
-        <BoltLayer d={RB4} c={BC} w={BW} o={BO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-branch 0.63s ease-in-out infinite" delay="0.46s"/>
-        <BoltLayer d={RB5} c={BC} w={BW} o={BO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-branch 0.81s ease-in-out infinite" delay="0.57s"/>
-        <BoltLayer d={RB6} c={BC} w={BW} o={BO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-branch 0.69s ease-in-out infinite" delay="0.64s"/>
-        <BoltLayer d={RB1s} c={TC} w={TW} o={TO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-tendril 0.46s ease-in-out infinite" delay="0.14s"/>
-        <BoltLayer d={RB2s} c={TC} w={TW} o={TO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-tendril 0.42s ease-in-out infinite" delay="0.28s"/>
-        <BoltLayer d={RB4s} c={TC} w={TW} o={TO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-tendril 0.50s ease-in-out infinite" delay="0.40s"/>
-        <BoltLayer d={RB5s} c={TC} w={TW} o={TO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-tendril 0.38s ease-in-out infinite" delay="0.52s"/>
-        <BoltLayer d={RB1m} c={TC} w={[5,2.5,1.2,0.6,0.3]} o={TO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-tendril 0.34s ease-in-out infinite" delay="0.17s"/>
-        <ellipse cx="38" cy="965" rx="30" ry="8" fill="rgba(80,120,255,0.18)" filter="url(#lf-r-g2)" style={{ animation: 'lf-flicker 1.18s ease-in-out infinite', animationDelay: '0.31s' }}/>
-        <ellipse cx="38" cy="965" rx="14" ry="4" fill="rgba(180,220,255,0.35)" filter="url(#lf-r-g1)" style={{ animation: 'lf-flicker 1.18s ease-in-out infinite', animationDelay: '0.31s' }}/>
-      </svg>
-
-      {/* ── CENTER TOP BOLT (behind logo, atmospheric) ── */}
-      <svg
-        style={{ position: 'absolute', left: '50%', top: 0, transform: 'translateX(-50%)', width: 180, height: '52%', opacity: 0.55 }}
-        viewBox="0 0 200 300" preserveAspectRatio="xMidYMid meet"
-      >
-        {makeDefs('lf-c')}
-        <BoltLayer d={CM} c={MC} w={MW.map(v=>v*0.75)} o={MO} fid="lf-c-g1" fid2="lf-c-g2" anim="lf-flicker 1.18s ease-in-out infinite" delay="0.62s"/>
-        <BoltLayer d={CB1} c={BC} w={BW.map(v=>v*0.75)} o={BO} fid="lf-c-g1" fid2="lf-c-g2" anim="lf-branch 0.68s ease-in-out infinite" delay="0.20s"/>
-        <BoltLayer d={CB2} c={BC} w={BW.map(v=>v*0.75)} o={BO} fid="lf-c-g1" fid2="lf-c-g2" anim="lf-branch 0.73s ease-in-out infinite" delay="0.35s"/>
-        <BoltLayer d={CB1s} c={TC} w={TW.map(v=>v*0.75)} o={TO} fid="lf-c-g1" fid2="lf-c-g2" anim="lf-tendril 0.44s ease-in-out infinite" delay="0.25s"/>
-        <BoltLayer d={CB2s} c={TC} w={TW.map(v=>v*0.75)} o={TO} fid="lf-c-g1" fid2="lf-c-g2" anim="lf-tendril 0.50s ease-in-out infinite" delay="0.42s"/>
-      </svg>
-
-    </div>
+    <canvas
+      ref={canvasRef}
+      style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0 }}
+    />
   )
 }
 
