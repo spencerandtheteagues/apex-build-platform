@@ -1,0 +1,59 @@
+APEX.BUILD Proprietary Source License
+Copyright (c) 2025 Spencer Teague. All rights reserved.
+
+NOTICE: This is proprietary software. Read this license carefully before
+accessing, cloning, forking, or using any part of this repository.
+
+---
+
+1. VIEWING RIGHTS
+
+   This repository is made public for the sole purposes of:
+   (a) demonstrating the capabilities and architecture of the APEX.BUILD platform,
+   (b) facilitating due diligence by prospective acquirers and licensees, and
+   (c) professional portfolio purposes.
+
+   You MAY view and read the source code.
+   You MAY fork the repository on GitHub for the sole purpose of submitting
+   pull requests or filing issues (with no right to use the forked code).
+
+2. RESTRICTIONS
+
+   Without explicit prior written permission from the copyright holder, you
+   MAY NOT:
+
+   (a) Copy, reproduce, or redistribute any portion of this codebase.
+   (b) Use any portion of this codebase in a production system, commercial
+       product, or service, whether for profit or not.
+   (c) Modify, adapt, translate, or create derivative works based on this code.
+   (d) Sublicense, sell, rent, lease, or transfer rights in this codebase.
+   (e) Use this code to train, fine-tune, or inform any machine learning model
+       or AI system.
+   (f) Reverse engineer, decompile, or disassemble any compiled artifacts
+       produced from this codebase.
+
+3. NO WARRANTY
+
+   THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY
+   CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM OR IN CONNECTION WITH
+   THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+4. CONTACT FOR LICENSING
+
+   For acquisition inquiries, commercial licensing, or any permitted use
+   beyond viewing:
+
+   Spencer Teague
+   Email: SpencerAndTheTeagues@gmail.com
+   Phone: 512-666-7450 (Google Voice)
+
+5. ENFORCEMENT
+
+   Unauthorized use, copying, or distribution of this software constitutes
+   copyright infringement and will be pursued to the fullest extent permitted
+   by law.
+
+---
+
+"Built solo in Texas."
