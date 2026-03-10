@@ -1,59 +1,148 @@
 APEX.BUILD Proprietary Source License
-Copyright (c) 2025 Spencer Teague. All rights reserved.
+Copyright (c) 2025 Spencer Allen Teague. All Rights Reserved.
 
-NOTICE: This is proprietary software. Read this license carefully before
-accessing, cloning, forking, or using any part of this repository.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
----
+PROPRIETARY AND CONFIDENTIAL SOFTWARE
 
-1. VIEWING RIGHTS
+This software and all associated source code, object code, algorithms,
+data structures, interfaces, documentation, visual designs, and related
+materials (collectively, "the Software") are proprietary and confidential.
 
-   This repository is made public for the sole purposes of:
-   (a) demonstrating the capabilities and architecture of the APEX.BUILD platform,
-   (b) facilitating due diligence by prospective acquirers and licensees, and
-   (c) professional portfolio purposes.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-   You MAY view and read the source code.
-   You MAY fork the repository on GitHub for the sole purpose of submitting
-   pull requests or filing issues (with no right to use the forked code).
+1. SOLE AND EXCLUSIVE OWNERSHIP
 
-2. RESTRICTIONS
+   The Software is the sole and exclusive intellectual property of
+   Spencer Allen Teague ("the Owner").
 
-   Without explicit prior written permission from the copyright holder, you
-   MAY NOT:
+   The Software was independently conceived, designed, authored, and
+   developed by Spencer Allen Teague without the contribution,
+   assistance, or involvement of any employer, contractor, co-author,
+   co-developer, investor, or third party of any kind.
 
-   (a) Copy, reproduce, or redistribute any portion of this codebase.
-   (b) Use any portion of this codebase in a production system, commercial
-       product, or service, whether for profit or not.
-   (c) Modify, adapt, translate, or create derivative works based on this code.
-   (d) Sublicense, sell, rent, lease, or transfer rights in this codebase.
-   (e) Use this code to train, fine-tune, or inform any machine learning model
-       or AI system.
-   (f) Reverse engineer, decompile, or disassemble any compiled artifacts
-       produced from this codebase.
+   No work-made-for-hire relationship, joint authorship, co-ownership,
+   partnership, or assignment of rights — express, implied, or
+   constructive — has occurred or is claimed by any person or entity
+   other than Spencer Allen Teague.
 
-3. NO WARRANTY
+   All copyright, patent rights, trade secret rights, trademark rights,
+   and all other intellectual property rights in and to the Software,
+   in every jurisdiction worldwide, are owned exclusively and entirely
+   by Spencer Allen Teague. No other person or entity holds any right,
+   title, or interest in the Software.
 
-   THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-   OR IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY
-   CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM OR IN CONNECTION WITH
-   THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+2. ALL RIGHTS RESERVED
 
-4. CONTACT FOR LICENSING
+   All rights in the Software are expressly reserved by the Owner.
+   No rights are granted by implication, estoppel, or otherwise.
+   Possession of or access to this repository does not constitute a
+   license of any kind.
 
-   For acquisition inquiries, commercial licensing, or any permitted use
-   beyond viewing:
+3. PERMITTED USE — VIEWING ONLY
 
-   Spencer Teague
-   Email: SpencerAndTheTeagues@gmail.com
-   Phone: 512-666-7450 (Google Voice)
+   This repository is made publicly accessible solely for the following
+   limited purposes:
 
-5. ENFORCEMENT
+   (a) Viewing and evaluating the Software's architecture and capability
+       for potential acquisition or licensing discussions;
+   (b) Portfolio and professional demonstration purposes; and
+   (c) Filing issues or submitting pull requests at the Owner's
+       invitation (which does not grant any license to the forked code).
 
-   Unauthorized use, copying, or distribution of this software constitutes
-   copyright infringement and will be pursued to the fullest extent permitted
-   by law.
+   Any use beyond the above requires explicit prior written authorization
+   from Spencer Allen Teague.
 
----
+4. PROHIBITED USES
 
-"Built solo in Texas."
+   Without prior written permission from Spencer Allen Teague, no person
+   or entity may:
+
+   (a) Copy, reproduce, archive, or record any portion of the Software
+       by any means;
+   (b) Use any portion of the Software in any production system,
+       commercial product, commercial service, or non-commercial
+       project of any kind;
+   (c) Modify, adapt, translate, reverse engineer beyond what is
+       visibly published in this repository, or create derivative works
+       based on the Software or any part thereof;
+   (d) Distribute, publish, transmit, sublicense, sell, rent, lease,
+       assign, or transfer any rights in the Software;
+   (e) Use the Software or any portion thereof as training data,
+       fine-tuning data, evaluation data, alignment data, or input
+       data for any machine learning model, large language model,
+       generative artificial intelligence system, neural network,
+       or any similar automated learning system, whether commercial
+       or non-commercial;
+   (f) Remove, obscure, or alter this copyright notice, the ownership
+       declaration in Section 1, or any proprietary marking in the
+       Software;
+   (g) Represent or imply that any right to use the Software has been
+       granted absent a separate written license agreement.
+
+5. INTELLECTUAL PROPERTY RIGHTS
+
+   Title to the Software and all copies thereof remain with
+   Spencer Allen Teague at all times. The Software is protected
+   by United States copyright law (17 U.S.C. § 101 et seq.) and
+   by applicable laws of other jurisdictions.
+
+   The Owner's rights include but are not limited to all rights
+   enumerated under 17 U.S.C. § 106: the exclusive rights to
+   reproduce, prepare derivative works, distribute, publicly perform,
+   and publicly display the Software.
+
+6. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND
+   NON-INFRINGEMENT. THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE
+   OF THE SOFTWARE IS WITH THE USER.
+
+   IN NO EVENT SHALL SPENCER ALLEN TEAGUE BE LIABLE FOR ANY CLAIM,
+   DAMAGES, OR OTHER LIABILITY — INCLUDING DIRECT, INDIRECT, SPECIAL,
+   INCIDENTAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES — ARISING FROM,
+   OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR ANY USE OR INABILITY
+   TO USE THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+   DAMAGES.
+
+7. ENFORCEMENT
+
+   Any unauthorized copying, use, distribution, modification, or other
+   exploitation of the Software constitutes copyright infringement and
+   may subject the infringer to civil liability and criminal penalties
+   under applicable law, including but not limited to:
+
+   - Statutory damages of $750 to $150,000 per infringement under
+     17 U.S.C. § 504;
+   - Recovery of attorney's fees under 17 U.S.C. § 505;
+   - Criminal penalties under 17 U.S.C. § 506 for willful infringement.
+
+   The Owner reserves all rights to seek injunctive relief, damages,
+   and any other available legal and equitable remedies.
+
+8. GOVERNING LAW
+
+   This License shall be governed by and construed in accordance with
+   the laws of the State of Texas and the federal laws of the United
+   States of America. Any dispute arising under this License shall
+   be subject to the exclusive jurisdiction of the courts of Texas.
+
+9. CONTACT FOR LICENSING AND ACQUISITION
+
+   To inquire about licensing, acquisition, or any permitted use
+   beyond viewing, contact the Owner directly:
+
+   Spencer Allen Teague
+   Email:  SpencerAndTheTeagues@gmail.com
+   Phone:  512-666-7450 (Google Voice)
+
+   Serious inquiries only.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+© 2025 Spencer Allen Teague. All Rights Reserved.
+Built solo in Texas.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
