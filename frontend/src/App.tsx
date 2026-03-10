@@ -1,4 +1,4 @@
-// APEX.BUILD Main Application
+// APEX-BUILD Main Application
 // Dark Demon Theme - Cloud Development Platform
 
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react'
@@ -377,7 +377,7 @@ function App() {
                 {/* Animated title */}
                 <div>
                   <h1 className="auth-title text-3xl font-black tracking-wider">
-                    APEX.BUILD
+                    APEX-BUILD
                   </h1>
                   <p className="auth-tagline text-sm text-red-400/80 mt-1 flex items-center justify-center gap-2">
                     <Sparkles size={14} className="text-red-500" />
@@ -573,7 +573,7 @@ function App() {
             <p className="text-xs text-gray-600 flex items-center gap-2">
               <span className="inline-block w-8 h-px bg-gradient-to-r from-transparent via-red-900/50 to-transparent" />
               <span className="text-gray-500">
-                <span className="text-red-500/70">2026</span> APEX.BUILD - The Future of Development
+                <span className="text-red-500/70">2026</span> APEX-BUILD - The Future of Development
               </span>
               <span className="inline-block w-8 h-px bg-gradient-to-r from-transparent via-red-900/50 to-transparent" />
             </p>
@@ -598,7 +598,7 @@ function App() {
             />
           </div>
           <span className="desktop-header-wordmark text-xl font-bold bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
-            APEX.BUILD
+            APEX-BUILD
           </span>
         </div>
 

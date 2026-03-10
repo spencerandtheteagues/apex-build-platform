@@ -1,4 +1,4 @@
-// APEX.BUILD IDE Layout
+// APEX-BUILD IDE Layout
 // Dark Demon Theme - Fully responsive development environment interface
 // Optimized with React.lazy for Monaco Editor and XTerminal
 
@@ -162,7 +162,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
 
   // Terminal state
   const [terminalOutput, setTerminalOutput] = useState<string[]>([
-    'APEX.BUILD Terminal v1.0.0',
+    'APEX-BUILD Terminal v1.0.0',
     'Welcome to the future of development',
     ''
   ])
@@ -505,7 +505,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
           }
         }
       } else if (command === 'clear') {
-        setTerminalOutput(['APEX.BUILD Terminal v1.0.0', 'Welcome to the future of development', ''])
+        setTerminalOutput(['APEX-BUILD Terminal v1.0.0', 'Welcome to the future of development', ''])
       } else {
         setTerminalOutput(prev => [...prev, `Command not found: ${command}`])
       }
@@ -844,7 +844,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
         }}
       >
         {/* Loading overlay */}
-        <LoadingOverlay isVisible={isLoading} text="Loading APEX.BUILD..." />
+        <LoadingOverlay isVisible={isLoading} text="Loading APEX-BUILD..." />
 
         {/* Mobile Navigation */}
         <MobileNavigation
@@ -903,7 +903,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   return (
     <div className={cn('h-full flex flex-col bg-gray-950 min-h-0', className)}>
       {/* Loading overlay */}
-      <LoadingOverlay isVisible={isLoading} text="Loading APEX.BUILD..." />
+      <LoadingOverlay isVisible={isLoading} text="Loading APEX-BUILD..." />
 
       {/* Top bar */}
       <div className="h-12 bg-gray-900/95 backdrop-blur-md border-b border-gray-800 flex items-center justify-between px-4">
@@ -911,7 +911,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 bg-gradient-to-br from-red-500 to-red-900 rounded" />
-            <span className="text-lg font-bold text-white hidden sm:inline">APEX.BUILD</span>
+            <span className="text-lg font-bold text-white hidden sm:inline">APEX-BUILD</span>
           </div>
 
           {/* Navigation */}

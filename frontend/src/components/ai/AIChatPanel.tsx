@@ -1,4 +1,4 @@
-// APEX.BUILD AI Chat Panel
+// APEX-BUILD AI Chat Panel
 // Context-aware chat with @mentions, multi-turn conversations, and code insertion
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'

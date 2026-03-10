@@ -1,4 +1,4 @@
-// APEX.BUILD Agent Panel Component
+// APEX-BUILD Agent Panel Component
 // Main UI for the AI Autonomous Agent - task input, progress display, and controls
 
 import React, { useState, useRef, useEffect, useCallback, memo } from 'react'

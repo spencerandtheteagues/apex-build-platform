@@ -1,4 +1,4 @@
-// APEX.BUILD Agent Components
+// APEX-BUILD Agent Components
 // AI Autonomous Agent UI exports
 
 export { AgentPanel } from './AgentPanel'

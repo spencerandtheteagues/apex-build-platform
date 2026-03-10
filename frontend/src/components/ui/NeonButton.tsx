@@ -1,4 +1,4 @@
-// APEX.BUILD Neon Button Component
+// APEX-BUILD Neon Button Component
 // 22nd Century Steampunk design with multi-layer glow effects
 
 import React from 'react'

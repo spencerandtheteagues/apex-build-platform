@@ -1,4 +1,4 @@
-// APEX.BUILD 100% Success Guarantee Badge
+// APEX-BUILD 100% Success Guarantee Badge
 // A showpiece component — animated shield with real-time build confidence score,
 // pulsing when builds are in progress, triumphant glow on success.
 

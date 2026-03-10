@@ -1,4 +1,4 @@
-// APEX.BUILD Cyberpunk Avatar Component
+// APEX-BUILD Cyberpunk Avatar Component
 // Futuristic user avatars with holographic borders
 
 import React, { forwardRef, useState } from 'react'

@@ -1,4 +1,4 @@
-// APEX.BUILD API Service
+// APEX-BUILD API Service
 // Handles all communication with the Go backend
 
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'

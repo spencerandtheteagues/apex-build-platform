@@ -1,4 +1,4 @@
-// APEX.BUILD Deployment Panel Component
+// APEX-BUILD Deployment Panel Component
 // Native hosting deployment management with Always-On support
 
 import React, { useState, useEffect } from 'react'

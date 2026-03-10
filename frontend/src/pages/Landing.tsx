@@ -1,4 +1,4 @@
-// APEX.BUILD — Landing Page v2
+// APEX-BUILD — Landing Page v2
 // Above-fold: logo + 2-col feature bullets, no scroll required.
 // Scroll: each bullet expands to a full rich detail section.
 
@@ -48,7 +48,7 @@ const FEATURES = [
     color: '#a78bfa',
     bullet: '5 Specialized AI Agents build your app in parallel',
     heading: 'Five AI Specialists. One Complete App.',
-    sub: 'APEX.BUILD isn\'t a chatbot that writes code snippets. It\'s a team of five dedicated AI agents that plan, build, review, and fix your entire full-stack application — working simultaneously, each owning their layer.',
+    sub: 'APEX-BUILD isn\'t a chatbot that writes code snippets. It\'s a team of five dedicated AI agents that plan, build, review, and fix your entire full-stack application — working simultaneously, each owning their layer.',
     points: [
       { icon: '⬡', label: 'Architect', desc: 'Plans your database schema, API contracts, and folder structure before a single line of code is written. Catches design mistakes before they become tech debt.' },
       { icon: '⚙', label: 'Backend', desc: 'Generates production-grade REST APIs, JWT auth, and database layers in Go, Python, or Node.js. Real error handling, migrations, and middleware included.' },
@@ -65,7 +65,7 @@ const FEATURES = [
     color: '#34d399',
     bullet: 'Real-time cost counter — every token, every dollar, live',
     heading: 'No Surprises. Ever.',
-    sub: 'Every other AI platform hides the bill until you\'re shocked at month-end. APEX.BUILD shows you a live cost ticker — per agent, per model, per token — as the build runs. You always know what you\'re spending before it\'s spent.',
+    sub: 'Every other AI platform hides the bill until you\'re shocked at month-end. APEX-BUILD shows you a live cost ticker — per agent, per model, per token — as the build runs. You always know what you\'re spending before it\'s spent.',
     points: [
       { icon: '📊', label: 'Per-agent breakdown', desc: 'Cost attributed to each specialist agent individually. See exactly what the Architect spent vs. the Backend agent vs. the Reviewer.' },
       { icon: '💡', label: 'Per-model accuracy', desc: 'Each API call is billed at the actual provider rate — GPT-5 at $2.50/1M, Claude Haiku at $0.25/1M. No blended rates. No averaging.' },
@@ -82,7 +82,7 @@ const FEATURES = [
     color: '#60a5fa',
     bullet: 'Full cloud IDE — Monaco editor, live preview, sandboxed execution',
     heading: 'A Real IDE in Your Browser.',
-    sub: 'Not a code generator. Not a chat window. APEX.BUILD is a full cloud development environment — the same Monaco editor that powers VS Code, a complete file tree, live preview pane, and sandboxed code execution. Zero install. Zero config.',
+    sub: 'Not a code generator. Not a chat window. APEX-BUILD is a full cloud development environment — the same Monaco editor that powers VS Code, a complete file tree, live preview pane, and sandboxed code execution. Zero install. Zero config.',
     points: [
       { icon: '🖥', label: 'Monaco editor', desc: 'Full VS Code-class editor with syntax highlighting, IntelliSense, multi-file tabs, find & replace, and keyboard shortcuts.' },
       { icon: '🌐', label: '20+ languages', desc: 'TypeScript, JavaScript, Python, Go, Rust, Java, C++, Ruby, PHP, and more. Agents write in whatever your stack requires.' },
@@ -91,7 +91,7 @@ const FEATURES = [
       { icon: '🗂', label: 'Asset management', desc: 'Upload images, fonts, and files. Agents reference them automatically in generated code — no manual path wiring.' },
       { icon: '↩️', label: 'Version history', desc: 'Every agent change is versioned. Roll back any file to any previous state with one click.' },
     ],
-    useCase: 'Open APEX.BUILD on a Chromebook, an iPad, or any browser. Full professional IDE, all AI providers, instant code execution — zero install, zero config. Your dev environment lives in a tab.',
+    useCase: 'Open APEX-BUILD on a Chromebook, an iPad, or any browser. Full professional IDE, all AI providers, instant code execution — zero install, zero config. Your dev environment lives in a tab.',
     visual: 'ide',
   },
   {
@@ -100,7 +100,7 @@ const FEATURES = [
     color: '#D97757',
     bullet: 'Claude · GPT-5 · Gemini · Grok · Ollama — choose your AI',
     heading: 'Every Major AI Model. One Platform.',
-    sub: 'Different tasks call for different models. APEX.BUILD routes each agent\'s work to the right provider automatically based on your power mode — or you override manually. Switch mid-build. Mix providers. The platform handles the rest.',
+    sub: 'Different tasks call for different models. APEX-BUILD routes each agent\'s work to the right provider automatically based on your power mode — or you override manually. Switch mid-build. Mix providers. The platform handles the rest.',
     points: [
       { icon: '🟠', label: 'Claude (Anthropic)', desc: 'Best-in-class for code review, documentation, and complex multi-step reasoning. Haiku (fast), Sonnet (balanced), and Opus (max) available.' },
       { icon: '🟢', label: 'GPT-5 (OpenAI)', desc: 'Strong code generation with fast iteration loops. Full GPT-5 for flagship performance, GPT-4o-mini for cost-efficient tasks.' },
@@ -117,7 +117,7 @@ const FEATURES = [
     color: '#fbbf24',
     bullet: 'Git built-in — branches, commits, pull requests, from the IDE',
     heading: 'Git Without Leaving the Browser.',
-    sub: 'APEX.BUILD has full Git integration baked in. Create branches, commit AI-generated code, open pull requests, and push to GitHub — all from the same interface where agents build your app. Your main branch stays clean.',
+    sub: 'APEX-BUILD has full Git integration baked in. Create branches, commit AI-generated code, open pull requests, and push to GitHub — all from the same interface where agents build your app. Your main branch stays clean.',
     points: [
       { icon: '🌿', label: 'Branch management', desc: 'Create, switch, and delete branches. Agents automatically commit their work to the correct feature branch, not main.' },
       { icon: '⬆️', label: 'Push to GitHub', desc: 'One-click push with full ownership verification. Agents can only push to repos you own — no accidental cross-project writes.' },
@@ -134,12 +134,12 @@ const FEATURES = [
     color: '#f87171',
     bullet: 'Bring Your Own API Keys — full platform at $0.25/1M routing fee',
     heading: 'Your Keys. Your Cost. Our Platform.',
-    sub: 'Already have API contracts with Anthropic, OpenAI, Google, or xAI? Use them. Bring your own keys and pay only our flat $0.25/1M token routing fee. You get everything APEX.BUILD offers at raw provider cost — no markup.',
+    sub: 'Already have API contracts with Anthropic, OpenAI, Google, or xAI? Use them. Bring your own keys and pay only our flat $0.25/1M token routing fee. You get everything APEX-BUILD offers at raw provider cost — no markup.',
     points: [
       { icon: '💰', label: 'Zero markup on API cost', desc: 'BYOK users pay exactly what the AI provider charges. Our fee is $0.25 per 1M tokens — covering infrastructure and orchestration.' },
       { icon: '🔐', label: 'AES-256 encrypted storage', desc: 'Your keys are encrypted at rest with a unique per-user master key. Plaintext never touches the database. Never transmitted in logs.' },
       { icon: '🎛', label: 'Per-provider flexibility', desc: 'Use your Anthropic key for Claude agents, your OpenAI key for GPT-5 agents — mix and match keys per provider independently.' },
-      { icon: '✅', label: 'Instant validation', desc: 'Keys are validated on entry. APEX.BUILD alerts you if a key expires, hits rate limits, or runs out of credits — before a build fails mid-run.' },
+      { icon: '✅', label: 'Instant validation', desc: 'Keys are validated on entry. APEX-BUILD alerts you if a key expires, hits rate limits, or runs out of credits — before a build fails mid-run.' },
       { icon: '📊', label: 'BYOK usage analytics', desc: 'See token usage per provider, per model, per project — even when using your own keys. Full visibility.' },
     ],
     useCase: 'Enterprise teams with existing AI contracts typically save 60–70% vs. managed credits. Paste your key, hit validate, start building. Same full-stack AI IDE, a fraction of the cost.',
@@ -153,7 +153,7 @@ const FEATURES = [
     color: '#818cf8',
     bullet: 'Encrypted secrets vault with audit log & rotation',
     heading: 'Your Secrets Are Actually Secret.',
-    sub: 'APEX.BUILD has a built-in secrets vault. Store API keys, database URLs, webhook secrets, and credentials — AES-encrypted, scoped per project, never exposed in generated code. Agents reference secrets by name and never see the value.',
+    sub: 'APEX-BUILD has a built-in secrets vault. Store API keys, database URLs, webhook secrets, and credentials — AES-encrypted, scoped per project, never exposed in generated code. Agents reference secrets by name and never see the value.',
     points: [
       { icon: '🔒', label: 'AES-256 encryption at rest', desc: 'Every secret is encrypted with a unique per-user master key. The plaintext value is never stored in the database or transmitted in logs.' },
       { icon: '🏗', label: 'Project-scoped access', desc: 'Secrets belong to specific projects. Agents building Project A cannot read secrets from Project B, ever.' },
@@ -170,7 +170,7 @@ const FEATURES = [
     color: '#38bdf8',
     bullet: 'Real-time collaboration — multiple devs, one live session',
     heading: 'Build Together, Live.',
-    sub: 'APEX.BUILD supports real-time multi-user collaboration. Multiple developers can work in the same project simultaneously — see live cursors, watch AI agents build together, divide work across the team, and review output collectively.',
+    sub: 'APEX-BUILD supports real-time multi-user collaboration. Multiple developers can work in the same project simultaneously — see live cursors, watch AI agents build together, divide work across the team, and review output collectively.',
     points: [
       { icon: '👥', label: 'Live presence', desc: 'See exactly who\'s in the project, where their cursor is, and what they\'re looking at — in real time.' },
       { icon: '🤖', label: 'Shared AI sessions', desc: 'The entire team watches agent builds in real time — no screen sharing required. Everyone sees the same live output.' },
@@ -187,7 +187,7 @@ const FEATURES = [
     color: '#a3e635',
     bullet: 'MCP support — connect any external tool, API, or data source',
     heading: 'Connect Anything. Build With Everything.',
-    sub: 'APEX.BUILD supports the Model Context Protocol — the open standard for connecting AI agents to external tools, databases, and APIs. Your agents aren\'t limited to generating code. They can query your systems, read your data, and act on the real world.',
+    sub: 'APEX-BUILD supports the Model Context Protocol — the open standard for connecting AI agents to external tools, databases, and APIs. Your agents aren\'t limited to generating code. They can query your systems, read your data, and act on the real world.',
     points: [
       { icon: '🔌', label: 'Connect any MCP server', desc: 'Add any MCP-compatible server by URL. Agents gain immediate access to its tools and resources — no code changes required.' },
       { icon: '🛠', label: 'Live tool calling', desc: 'Agents call external tools mid-build — query your CRM, pull from your data warehouse, read your Notion docs, hit internal APIs.' },
@@ -204,7 +204,7 @@ const FEATURES = [
     color: '#fb923c',
     bullet: 'Project templates — skip boilerplate, start from working code',
     heading: 'Skip the Setup. Start With Something Real.',
-    sub: 'APEX.BUILD ships with battle-tested project templates for the most common app types. Start from a working foundation and let agents extend it — not build from zero every time. Every template is production-structured, not a tutorial skeleton.',
+    sub: 'APEX-BUILD ships with battle-tested project templates for the most common app types. Start from a working foundation and let agents extend it — not build from zero every time. Every template is production-structured, not a tutorial skeleton.',
     points: [
       { icon: '💳', label: 'SaaS starter', desc: 'Auth (JWT), billing (Stripe), user dashboard, subscription management, and REST API — all wired together and deployable.' },
       { icon: '⚡', label: 'REST API', desc: 'Go or Node.js API with JWT auth, PostgreSQL connection, middleware stack, and standard CRUD endpoints. Ready to extend.' },
@@ -238,7 +238,7 @@ const FEATURES = [
     color: '#e879f9',
     bullet: 'Export, deploy, or host — own your code, always',
     heading: 'Own What You Build. Forever.',
-    sub: 'Every app built in APEX.BUILD is 100% yours. Export full source code at any time, deploy to your own infrastructure, or use built-in hosting. Standard files, no proprietary formats, no vendor lock-in — ever.',
+    sub: 'Every app built in APEX-BUILD is 100% yours. Export full source code at any time, deploy to your own infrastructure, or use built-in hosting. Standard files, no proprietary formats, no vendor lock-in — ever.',
     points: [
       { icon: '📦', label: 'Full source export', desc: 'Download a complete zip of your project — all source files, configs, dependencies, and assets. Open it anywhere.' },
       { icon: '🚀', label: 'One-click deploy', desc: 'Deploy directly to Render, Railway, or Vercel from the IDE. Agents generate the platform-specific deploy config automatically.' },
@@ -246,7 +246,7 @@ const FEATURES = [
       { icon: '🐳', label: 'Docker + CI/CD', desc: 'Request a Dockerfile, GitHub Actions workflow, or Render Blueprint — agents generate complete, working configs.' },
       { icon: '⚙️', label: 'Environment configs', desc: 'Agents generate production `.env` templates, `.env.example` files, and deployment docs as part of every build.' },
     ],
-    useCase: 'Finish your app. Click Export. Get a zip. Hand it to your CTO, push it to your own AWS account, or deploy it to any platform. APEX.BUILD never holds your code hostage. It\'s yours from the first commit.',
+    useCase: 'Finish your app. Click Export. Get a zip. Hand it to your CTO, push it to your own AWS account, or deploy it to any platform. APEX-BUILD never holds your code hostage. It\'s yours from the first commit.',
     visual: 'export',
   },
 ]
@@ -330,7 +330,7 @@ const Nav: React.FC<LandingProps> = ({ onGetStarted }) => {
       }}>
         <img
           src="/apex-build-logo-transparent.png"
-          alt="APEX.BUILD"
+          alt="APEX-BUILD"
           style={{
             height: 38, width: 'auto',
             filter: 'drop-shadow(0 0 8px rgba(255,0,51,0.6))',
@@ -586,6 +586,205 @@ const IDEDemo: React.FC = () => (
   </div>
 )
 
+// ─── Lightning Field ──────────────────────────────────────────────────────────
+
+const LF_CSS = `
+@keyframes lf-flicker {
+  0%,100%{opacity:.93} 3%{opacity:.06} 7%{opacity:.91} 11%{opacity:.62}
+  15%{opacity:.03} 19%{opacity:.89} 23%{opacity:.74} 27%{opacity:.02}
+  31%{opacity:.95} 35%{opacity:.56} 39%{opacity:.88} 43%{opacity:.05}
+  47%{opacity:.92} 51%{opacity:.41} 55%{opacity:.97} 59%{opacity:.68}
+  63%{opacity:.11} 67%{opacity:.90} 71%{opacity:.52} 75%{opacity:.96}
+  79%{opacity:.22} 83%{opacity:.93} 87%{opacity:.58} 91%{opacity:.04}
+  95%{opacity:.85} 98%{opacity:.97}
+}
+@keyframes lf-branch {
+  0%,100%{opacity:.75} 9%{opacity:0} 18%{opacity:.88} 26%{opacity:.08}
+  35%{opacity:.82} 43%{opacity:.02} 52%{opacity:.78} 60%{opacity:.32}
+  69%{opacity:.85} 77%{opacity:.12} 86%{opacity:.90} 94%{opacity:.03}
+}
+@keyframes lf-tendril {
+  0%,100%{opacity:.48} 14%{opacity:0} 28%{opacity:.62} 40%{opacity:.06}
+  54%{opacity:.55} 66%{opacity:0} 78%{opacity:.52} 90%{opacity:.10}
+}
+@keyframes lf-hue {
+  0%  {filter:hue-rotate(0deg)   brightness(1.3)  saturate(2.2)}
+  16% {filter:hue-rotate(50deg)  brightness(2.2)  saturate(3.0)}
+  32% {filter:hue-rotate(-40deg) brightness(1.1)  saturate(1.8)}
+  48% {filter:hue-rotate(90deg)  brightness(2.6)  saturate(3.2)}
+  64% {filter:hue-rotate(-20deg) brightness(1.6)  saturate(2.4)}
+  80% {filter:hue-rotate(65deg)  brightness(2.0)  saturate(2.8)}
+  100%{filter:hue-rotate(0deg)   brightness(1.3)  saturate(2.2)}
+}
+@keyframes lf-surge {
+  0%,42%,58%,100%{opacity:0} 49%{opacity:.9} 50%{opacity:1} 51%{opacity:.7}
+}
+@keyframes lf-ambient-pulse {
+  0%,100%{opacity:.28} 50%{opacity:.48}
+}
+`
+
+// Bolt path layers: [deepBlue-haze, electricBlue-wide, violet-irid, electricBlue-mid, cyan-inner, iceBlue, white-core]
+const MC = ['#0800cc','#1a44ff','#9900ee','#0066ff','#22ccff','#aaddff','#ffffff']
+const MW = [42, 22, 14,  8, 4.5, 2.2, 1.0]
+const MO = [0.042, 0.10, 0.17, 0.31, 0.60, 0.88, 1.0]
+const BC = ['#0800cc','#1a44ff','#9900ee','#0066ff','#22ccff','#aaddff','#ffffff']
+const BW = [20, 11, 7, 4.5, 2.5, 1.4, 0.7]
+const BO = [0.032, 0.09, 0.14, 0.28, 0.56, 0.85, 1.0]
+const TC = ['#1a44ff','#0066ff','#22ccff','#aaddff','#ffffff']
+const TW = [8, 4, 2, 1.0, 0.5]
+const TO = [0.07, 0.20, 0.46, 0.80, 1.0]
+
+type BoltLayerProps = { d: string; c: string[]; w: number[]; o: number[]; fid: string; fid2: string; anim?: string; delay?: string }
+const BoltLayer: React.FC<BoltLayerProps> = ({ d, c, w, o, fid, fid2, anim = 'lf-flicker 1.18s ease-in-out infinite', delay = '0s' }) => (
+  <g style={{ animation: anim, animationDelay: delay }}>
+    <path d={d} stroke={c[0]} strokeWidth={w[0]} fill="none" opacity={o[0]} filter={`url(#${fid2})`} strokeLinecap="round" strokeLinejoin="round"/>
+    <path d={d} stroke={c[1]} strokeWidth={w[1]} fill="none" opacity={o[1]} filter={`url(#${fid2})`} strokeLinecap="round" strokeLinejoin="round"/>
+    <path d={d} stroke={c[2]} strokeWidth={w[2]} fill="none" opacity={o[2]} filter={`url(#${fid})`} strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'lf-hue 3.5s ease-in-out infinite', animationDelay: delay }}/>
+    <path d={d} stroke={c[3]} strokeWidth={w[3]} fill="none" opacity={o[3]} strokeLinecap="round" strokeLinejoin="round"/>
+    <path d={d} stroke={c[4]} strokeWidth={w[4]} fill="none" opacity={o[4]} strokeLinecap="round" strokeLinejoin="round"/>
+    <path d={d} stroke={c[5]} strokeWidth={w[5]} fill="none" opacity={o[5]} strokeLinecap="round" strokeLinejoin="round"/>
+    <path d={d} stroke={c[6]} strokeWidth={w[6]} fill="none" opacity={o[6]} strokeLinecap="round" strokeLinejoin="round"/>
+  </g>
+)
+
+const LightningField: React.FC = () => {
+  useEffect(() => {
+    const el = Object.assign(document.createElement('style'), { id: 'lf-css', textContent: LF_CSS })
+    document.head.appendChild(el)
+    return () => document.getElementById('lf-css')?.remove()
+  }, [])
+
+  // LEFT BOLT paths
+  const LM = 'M168-10 L152 75 L172 145 L138 225 L162 305 L122 395 L150 468 L130 548 L158 625 L134 708 L160 785 L142 868 L162 960'
+  const LB1 = 'M138 225 L90 265 L118 308 L74 342 L98 378'
+  const LB1s= 'M90 265 L52 288 L68 318'
+  const LB1m= 'M52 288 L22 302'
+  const LB2 = 'M122 395 L68 432 L92 462 L50 488'
+  const LB2s= 'M68 432 L32 452'
+  const LB3 = 'M150 468 L96 502 L118 528 L80 548'
+  const LB4 = 'M130 548 L76 582 L100 615 L58 642'
+  const LB4s= 'M76 582 L38 600 L55 622'
+  const LB5 = 'M134 708 L82 742 L108 770 L68 792'
+  const LB5s= 'M82 742 L48 758'
+  const LB6 = 'M142 868 L86 905 L110 932'
+
+  // RIGHT BOLT paths (mirrored: x = 200 - Lx)
+  const RM = 'M32-10 L48 75 L28 145 L62 225 L38 305 L78 395 L50 468 L70 548 L42 625 L66 708 L40 785 L58 868 L38 960'
+  const RB1 = 'M62 225 L110 265 L82 308 L126 342 L102 378'
+  const RB1s= 'M110 265 L148 288 L132 318'
+  const RB1m= 'M148 288 L178 302'
+  const RB2 = 'M78 395 L132 432 L108 462 L150 488'
+  const RB2s= 'M132 432 L168 452'
+  const RB3 = 'M50 468 L104 502 L82 528 L120 548'
+  const RB4 = 'M70 548 L124 582 L100 615 L142 642'
+  const RB4s= 'M124 582 L162 600 L145 622'
+  const RB5 = 'M66 708 L118 742 L92 770 L132 792'
+  const RB5s= 'M118 742 L152 758'
+  const RB6 = 'M58 868 L114 905 L90 932'
+
+  // CENTER TOP paths
+  const CM = 'M96-5 L80 48 L108 95 L74 142 L102 186 L78 232 L96 278'
+  const CB1 = 'M74 142 L40 166 L60 192 L35 216'
+  const CB2 = 'M102 186 L138 210 L118 236 L146 258'
+  const CB1s= 'M40 166 L18 180'
+  const CB2s= 'M138 210 L162 224'
+
+  const makeDefs = (id: string) => (
+    <defs>
+      <filter id={`${id}-g1`} x="-80%" y="-80%" width="260%" height="260%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="8"/>
+      </filter>
+      <filter id={`${id}-g2`} x="-150%" y="-100%" width="400%" height="300%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="22"/>
+      </filter>
+    </defs>
+  )
+
+  return (
+    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: 0 }}>
+
+      {/* ── AMBIENT red/blue atmospheric halos ── */}
+      <div style={{
+        position: 'absolute', top: '8%', left: '-4%', width: '22%', height: '55%',
+        background: 'radial-gradient(ellipse at 80% 30%, rgba(0,60,255,0.06) 0%, transparent 65%)',
+        animation: 'lf-ambient-pulse 4.2s ease-in-out infinite',
+      }}/>
+      <div style={{
+        position: 'absolute', top: '8%', right: '-4%', width: '22%', height: '55%',
+        background: 'radial-gradient(ellipse at 20% 30%, rgba(0,60,255,0.06) 0%, transparent 65%)',
+        animation: 'lf-ambient-pulse 4.2s ease-in-out infinite', animationDelay: '2.1s',
+      }}/>
+
+      {/* ── LEFT MEGA BOLT ── */}
+      <svg
+        style={{ position: 'absolute', left: 0, top: 0, width: 'clamp(80px,11vw,155px)', height: '100%' }}
+        viewBox="0 0 200 1000" preserveAspectRatio="xMaxYMid meet"
+      >
+        {makeDefs('lf-l')}
+        {/* Surge flash overlay */}
+        <BoltLayer d={LM} c={['#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff']} w={[60,40,28,18,10,5,2]} o={[0.06,0.1,0.12,0.15,0.2,0.3,0.5]} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-surge 5.3s ease-in-out infinite" delay="0s"/>
+        {/* Main channel */}
+        <BoltLayer d={LM} c={MC} w={MW} o={MO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-flicker 1.18s ease-in-out infinite" delay="0s"/>
+        {/* Major branches */}
+        <BoltLayer d={LB1} c={BC} w={BW} o={BO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-branch 0.72s ease-in-out infinite" delay="0.08s"/>
+        <BoltLayer d={LB2} c={BC} w={BW} o={BO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-branch 0.65s ease-in-out infinite" delay="0.19s"/>
+        <BoltLayer d={LB3} c={BC} w={BW} o={BO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-branch 0.78s ease-in-out infinite" delay="0.33s"/>
+        <BoltLayer d={LB4} c={BC} w={BW} o={BO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-branch 0.61s ease-in-out infinite" delay="0.44s"/>
+        <BoltLayer d={LB5} c={BC} w={BW} o={BO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-branch 0.83s ease-in-out infinite" delay="0.55s"/>
+        <BoltLayer d={LB6} c={BC} w={BW} o={BO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-branch 0.70s ease-in-out infinite" delay="0.62s"/>
+        {/* Sub-branches */}
+        <BoltLayer d={LB1s} c={TC} w={TW} o={TO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-tendril 0.48s ease-in-out infinite" delay="0.12s"/>
+        <BoltLayer d={LB2s} c={TC} w={TW} o={TO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-tendril 0.44s ease-in-out infinite" delay="0.26s"/>
+        <BoltLayer d={LB4s} c={TC} w={TW} o={TO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-tendril 0.52s ease-in-out infinite" delay="0.38s"/>
+        <BoltLayer d={LB5s} c={TC} w={TW} o={TO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-tendril 0.40s ease-in-out infinite" delay="0.50s"/>
+        {/* Micro tendrils */}
+        <BoltLayer d={LB1m} c={TC} w={[5,2.5,1.2,0.6,0.3]} o={TO} fid="lf-l-g1" fid2="lf-l-g2" anim="lf-tendril 0.36s ease-in-out infinite" delay="0.15s"/>
+        {/* Ground strike glow */}
+        <ellipse cx="162" cy="965" rx="30" ry="8" fill="rgba(80,120,255,0.18)" filter="url(#lf-l-g2)" style={{ animation: 'lf-flicker 1.18s ease-in-out infinite' }}/>
+        <ellipse cx="162" cy="965" rx="14" ry="4" fill="rgba(180,220,255,0.35)" filter="url(#lf-l-g1)" style={{ animation: 'lf-flicker 1.18s ease-in-out infinite' }}/>
+      </svg>
+
+      {/* ── RIGHT MEGA BOLT ── */}
+      <svg
+        style={{ position: 'absolute', right: 0, top: 0, width: 'clamp(80px,11vw,155px)', height: '100%' }}
+        viewBox="0 0 200 1000" preserveAspectRatio="xMinYMid meet"
+      >
+        {makeDefs('lf-r')}
+        <BoltLayer d={RM} c={['#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff']} w={[60,40,28,18,10,5,2]} o={[0.06,0.1,0.12,0.15,0.2,0.3,0.5]} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-surge 5.3s ease-in-out infinite" delay="2.65s"/>
+        <BoltLayer d={RM} c={MC} w={MW} o={MO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-flicker 1.18s ease-in-out infinite" delay="0.31s"/>
+        <BoltLayer d={RB1} c={BC} w={BW} o={BO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-branch 0.74s ease-in-out infinite" delay="0.09s"/>
+        <BoltLayer d={RB2} c={BC} w={BW} o={BO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-branch 0.67s ease-in-out infinite" delay="0.21s"/>
+        <BoltLayer d={RB3} c={BC} w={BW} o={BO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-branch 0.76s ease-in-out infinite" delay="0.34s"/>
+        <BoltLayer d={RB4} c={BC} w={BW} o={BO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-branch 0.63s ease-in-out infinite" delay="0.46s"/>
+        <BoltLayer d={RB5} c={BC} w={BW} o={BO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-branch 0.81s ease-in-out infinite" delay="0.57s"/>
+        <BoltLayer d={RB6} c={BC} w={BW} o={BO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-branch 0.69s ease-in-out infinite" delay="0.64s"/>
+        <BoltLayer d={RB1s} c={TC} w={TW} o={TO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-tendril 0.46s ease-in-out infinite" delay="0.14s"/>
+        <BoltLayer d={RB2s} c={TC} w={TW} o={TO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-tendril 0.42s ease-in-out infinite" delay="0.28s"/>
+        <BoltLayer d={RB4s} c={TC} w={TW} o={TO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-tendril 0.50s ease-in-out infinite" delay="0.40s"/>
+        <BoltLayer d={RB5s} c={TC} w={TW} o={TO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-tendril 0.38s ease-in-out infinite" delay="0.52s"/>
+        <BoltLayer d={RB1m} c={TC} w={[5,2.5,1.2,0.6,0.3]} o={TO} fid="lf-r-g1" fid2="lf-r-g2" anim="lf-tendril 0.34s ease-in-out infinite" delay="0.17s"/>
+        <ellipse cx="38" cy="965" rx="30" ry="8" fill="rgba(80,120,255,0.18)" filter="url(#lf-r-g2)" style={{ animation: 'lf-flicker 1.18s ease-in-out infinite', animationDelay: '0.31s' }}/>
+        <ellipse cx="38" cy="965" rx="14" ry="4" fill="rgba(180,220,255,0.35)" filter="url(#lf-r-g1)" style={{ animation: 'lf-flicker 1.18s ease-in-out infinite', animationDelay: '0.31s' }}/>
+      </svg>
+
+      {/* ── CENTER TOP BOLT (behind logo, atmospheric) ── */}
+      <svg
+        style={{ position: 'absolute', left: '50%', top: 0, transform: 'translateX(-50%)', width: 180, height: '52%', opacity: 0.55 }}
+        viewBox="0 0 200 300" preserveAspectRatio="xMidYMid meet"
+      >
+        {makeDefs('lf-c')}
+        <BoltLayer d={CM} c={MC} w={MW.map(v=>v*0.75)} o={MO} fid="lf-c-g1" fid2="lf-c-g2" anim="lf-flicker 1.18s ease-in-out infinite" delay="0.62s"/>
+        <BoltLayer d={CB1} c={BC} w={BW.map(v=>v*0.75)} o={BO} fid="lf-c-g1" fid2="lf-c-g2" anim="lf-branch 0.68s ease-in-out infinite" delay="0.20s"/>
+        <BoltLayer d={CB2} c={BC} w={BW.map(v=>v*0.75)} o={BO} fid="lf-c-g1" fid2="lf-c-g2" anim="lf-branch 0.73s ease-in-out infinite" delay="0.35s"/>
+        <BoltLayer d={CB1s} c={TC} w={TW.map(v=>v*0.75)} o={TO} fid="lf-c-g1" fid2="lf-c-g2" anim="lf-tendril 0.44s ease-in-out infinite" delay="0.25s"/>
+        <BoltLayer d={CB2s} c={TC} w={TW.map(v=>v*0.75)} o={TO} fid="lf-c-g1" fid2="lf-c-g2" anim="lf-tendril 0.50s ease-in-out infinite" delay="0.42s"/>
+      </svg>
+
+    </div>
+  )
+}
+
 // ─── Above-fold section ───────────────────────────────────────────────────────
 
 const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
@@ -600,6 +799,9 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
       padding: 'clamp(48px, 6vh, 72px) clamp(20px, 4vw, 48px) 24px',
       position: 'relative', overflow: 'hidden',
     }}>
+      {/* Lightning field */}
+      <LightningField />
+
       {/* Background glow */}
       <div style={{
         position: 'absolute', top: '20%', left: '50%',
@@ -617,32 +819,29 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
         style={{ textAlign: 'center', marginBottom: 12 }}
       >
         <div style={{ marginBottom: 6, position: 'relative', display: 'inline-block' }}>
-          {/* Red glow pool beneath the logo */}
-          <div style={{
-            position: 'absolute',
-            bottom: -18,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: '75%',
-            height: 28,
-            background: 'rgba(255,0,51,0.55)',
-            borderRadius: '50%',
-            filter: 'blur(22px)',
-            pointerEvents: 'none',
-            zIndex: 0,
-          }} />
           <img
             src="/apex-build-logo-transparent.png"
-            alt="APEX.BUILD"
+            alt="APEX-BUILD"
             style={{
               height: 'clamp(110px, 15vw, 170px)',
               width: 'auto',
               display: 'block',
               position: 'relative',
               zIndex: 1,
-              filter: 'drop-shadow(0 0 28px rgba(255,0,51,0.7)) drop-shadow(0 0 60px rgba(255,0,51,0.35))',
             }}
           />
+          {/* Red glow pool — only beneath the logo, like lava light on the floor */}
+          <div style={{
+            position: 'absolute',
+            bottom: -10,
+            left: '15%',
+            right: '15%',
+            height: 22,
+            background: 'radial-gradient(ellipse, rgba(255,30,0,0.75) 0%, rgba(200,0,0,0.4) 40%, transparent 75%)',
+            filter: 'blur(14px)',
+            pointerEvents: 'none',
+            zIndex: 0,
+          }} />
         </div>
 
         <p style={{
@@ -1285,7 +1484,7 @@ const FinalCTA: React.FC<LandingProps> = ({ onGetStarted }) => (
       <div style={{ margin: '0 auto 20px', display: 'flex', justifyContent: 'center' }}>
         <img
           src="/apex-build-logo-transparent.png"
-          alt="APEX.BUILD"
+          alt="APEX-BUILD"
           style={{ height: 80, width: 'auto', filter: 'drop-shadow(0 0 20px rgba(255,0,51,0.6))' }}
         />
       </div>
@@ -1342,7 +1541,7 @@ const Footer: React.FC = () => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
       <img
         src="/apex-build-logo-transparent.png"
-        alt="APEX.BUILD"
+        alt="APEX-BUILD"
         style={{ height: 32, width: 'auto', filter: 'drop-shadow(0 0 6px rgba(255,0,51,0.5))' }}
       />
     </div>

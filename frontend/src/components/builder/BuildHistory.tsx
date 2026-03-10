@@ -1,4 +1,4 @@
-// APEX.BUILD Build History
+// APEX-BUILD Build History
 // Shows completed builds with view/download/re-open functionality
 
 import React, { useState, useEffect } from 'react'

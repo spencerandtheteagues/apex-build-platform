@@ -1,4 +1,4 @@
-// APEX.BUILD Terminal Themes
+// APEX-BUILD Terminal Themes
 // Custom terminal color schemes matching IDE themes
 
 import { TerminalTheme } from './types';

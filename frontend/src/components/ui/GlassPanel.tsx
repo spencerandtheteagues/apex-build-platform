@@ -1,4 +1,4 @@
-// APEX.BUILD Glass Panel Component
+// APEX-BUILD Glass Panel Component
 // Frosted glass morphism with steampunk accents
 
 import React from 'react'

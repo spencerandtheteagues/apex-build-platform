@@ -1,4 +1,4 @@
-// APEX.BUILD Always-On Toggle Component
+// APEX-BUILD Always-On Toggle Component
 // Replit parity feature - keeps deployments running 24/7 with auto-restart
 
 import React, { useState, useEffect } from 'react'

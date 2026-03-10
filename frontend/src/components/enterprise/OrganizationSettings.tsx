@@ -1,4 +1,4 @@
-// APEX.BUILD Organization Settings
+// APEX-BUILD Organization Settings
 // Enterprise organization management, RBAC, and SSO configuration
 
 import React, { useState, useEffect } from 'react'

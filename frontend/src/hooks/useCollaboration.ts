@@ -1,4 +1,4 @@
-// APEX.BUILD Collaboration Hook
+// APEX-BUILD Collaboration Hook
 // Real-time multiplayer cursor and presence management
 
 import { useEffect, useCallback, useState, useRef } from 'react'

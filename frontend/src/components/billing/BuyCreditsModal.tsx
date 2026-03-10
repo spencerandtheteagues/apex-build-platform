@@ -1,4 +1,4 @@
-// APEX.BUILD — Buy Credits Modal
+// APEX-BUILD — Buy Credits Modal
 // One-time credit top-up via Stripe Checkout
 
 import React, { useState } from 'react'

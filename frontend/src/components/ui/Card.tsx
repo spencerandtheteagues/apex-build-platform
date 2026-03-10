@@ -1,4 +1,4 @@
-// APEX.BUILD Premium Futuristic Card Component
+// APEX-BUILD Premium Futuristic Card Component
 // Glass morphism, holographic effects, plasma borders, and HUD-style corners
 
 import React, { forwardRef, useState } from 'react'

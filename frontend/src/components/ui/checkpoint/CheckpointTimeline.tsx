@@ -1,4 +1,4 @@
-// APEX.BUILD Checkpoint Timeline UI
+// APEX-BUILD Checkpoint Timeline UI
 // Visual timeline of build checkpoints with rollback capability.
 // Shows state transitions, validation results, and retry attempts.
 

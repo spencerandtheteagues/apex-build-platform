@@ -1,4 +1,4 @@
-// APEX.BUILD Gear Loader Component
+// APEX-BUILD Gear Loader Component
 // Animated steampunk gears for loading states
 
 import React from 'react'

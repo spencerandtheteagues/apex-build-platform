@@ -1,4 +1,4 @@
-// APEX.BUILD Monaco Code Editor
+// APEX-BUILD Monaco Code Editor
 // Advanced code editor with multi-AI integration and multiplayer collaboration
 
 import React, { useEffect, useRef, useState, forwardRef, useCallback, useMemo } from 'react'
@@ -238,14 +238,14 @@ const EDITOR_THEMES = {
 
 // Language configurations
 const LANGUAGE_CONFIGS = {
-  javascript: { id: 'javascript', defaultCode: 'console.log("Hello APEX.BUILD!");' },
-  typescript: { id: 'typescript', defaultCode: 'console.log("Hello APEX.BUILD!");' },
-  python: { id: 'python', defaultCode: 'print("Hello APEX.BUILD!")' },
-  go: { id: 'go', defaultCode: 'package main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello APEX.BUILD!")\n}' },
-  rust: { id: 'rust', defaultCode: 'fn main() {\n    println!("Hello APEX.BUILD!");\n}' },
-  java: { id: 'java', defaultCode: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello APEX.BUILD!");\n    }\n}' },
-  cpp: { id: 'cpp', defaultCode: '#include <iostream>\n\nint main() {\n    std::cout << "Hello APEX.BUILD!" << std::endl;\n    return 0;\n}' },
-  html: { id: 'html', defaultCode: '<!DOCTYPE html>\n<html>\n<head>\n    <title>APEX.BUILD</title>\n</head>\n<body>\n    <h1>Hello APEX.BUILD!</h1>\n</body>\n</html>' },
+  javascript: { id: 'javascript', defaultCode: 'console.log("Hello APEX-BUILD!");' },
+  typescript: { id: 'typescript', defaultCode: 'console.log("Hello APEX-BUILD!");' },
+  python: { id: 'python', defaultCode: 'print("Hello APEX-BUILD!")' },
+  go: { id: 'go', defaultCode: 'package main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello APEX-BUILD!")\n}' },
+  rust: { id: 'rust', defaultCode: 'fn main() {\n    println!("Hello APEX-BUILD!");\n}' },
+  java: { id: 'java', defaultCode: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello APEX-BUILD!");\n    }\n}' },
+  cpp: { id: 'cpp', defaultCode: '#include <iostream>\n\nint main() {\n    std::cout << "Hello APEX-BUILD!" << std::endl;\n    return 0;\n}' },
+  html: { id: 'html', defaultCode: '<!DOCTYPE html>\n<html>\n<head>\n    <title>APEX-BUILD</title>\n</head>\n<body>\n    <h1>Hello APEX-BUILD!</h1>\n</body>\n</html>' },
   css: { id: 'css', defaultCode: 'body {\n    font-family: "Fira Code", monospace;\n    background: linear-gradient(135deg, #0a0a0f 0%, #001133 100%);\n    color: #00f5ff;\n}' },
   json: { id: 'json', defaultCode: '{\n  "name": "apex-build",\n  "version": "1.0.0",\n  "description": "Cyberpunk cloud development platform"\n}' },
 }

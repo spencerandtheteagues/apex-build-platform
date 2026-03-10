@@ -1,4 +1,4 @@
-// APEX.BUILD Managed Database Panel
+// APEX-BUILD Managed Database Panel
 // Comprehensive database management interface
 
 import React, { useState, useEffect, useCallback } from 'react'

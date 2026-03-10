@@ -1,4 +1,4 @@
-// APEX.BUILD Explore / Community Page
+// APEX-BUILD Explore / Community Page
 // Dark Demon Theme - Marketplace for projects, templates, and extensions
 
 import React, { useState, useEffect } from 'react'
@@ -333,7 +333,7 @@ export const ExplorePage = () => {
               </h1>
             </div>
             <p className="text-gray-400 max-w-xl">
-              Discover, fork, and contribute to thousands of open-source projects built on APEX.BUILD.
+              Discover, fork, and contribute to thousands of open-source projects built on APEX-BUILD.
             </p>
           </div>
 

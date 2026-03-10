@@ -1,4 +1,4 @@
-// APEX.BUILD Cyberpunk Badge Component
+// APEX-BUILD Cyberpunk Badge Component
 // Neon status badges and tags
 
 import React, { forwardRef } from 'react'

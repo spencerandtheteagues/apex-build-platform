@@ -1,4 +1,4 @@
-// APEX.BUILD — Billing Settings
+// APEX-BUILD — Billing Settings
 // Shows current plan, credit balance, plan upgrade options, and invoice history
 
 import React, { useState, useEffect, useCallback } from 'react'

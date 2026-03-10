@@ -1,4 +1,4 @@
-// APEX.BUILD IDE Left Panel
+// APEX-BUILD IDE Left Panel
 // File explorer, search, and git panels
 
 import React, { memo } from 'react'

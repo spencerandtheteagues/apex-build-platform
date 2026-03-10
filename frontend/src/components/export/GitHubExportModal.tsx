@@ -1,4 +1,4 @@
-// APEX.BUILD GitHub Export Modal
+// APEX-BUILD GitHub Export Modal
 // One-click export of projects to new GitHub repositories
 
 import React, { useState, useEffect } from 'react'

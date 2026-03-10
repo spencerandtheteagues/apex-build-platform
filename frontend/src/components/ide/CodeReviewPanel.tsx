@@ -1,4 +1,4 @@
-// APEX.BUILD AI Code Review Panel
+// APEX-BUILD AI Code Review Panel
 // Dark cyberpunk themed panel for AI-powered code analysis and quality scoring
 
 import React, { useState, useCallback } from 'react'

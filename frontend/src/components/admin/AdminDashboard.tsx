@@ -1,4 +1,4 @@
-// APEX.BUILD Admin Dashboard
+// APEX-BUILD Admin Dashboard
 // Enterprise administration interface with dark demon theme
 
 import React, { useState, useEffect, useCallback } from 'react'
@@ -305,7 +305,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ className }) => 
             <h1 className="text-3xl font-bold text-white neon-text-red">
               Admin Dashboard
             </h1>
-            <p className="text-gray-400">APEX.BUILD System Administration</p>
+            <p className="text-gray-400">APEX-BUILD System Administration</p>
           </div>
           <Button
             variant="ghost"

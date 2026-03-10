@@ -1,4 +1,4 @@
-// APEX.BUILD Scanline + CRT Overlay
+// APEX-BUILD Scanline + CRT Overlay
 // Adds retro CRT monitor effects: horizontal scanlines, screen curvature,
 // chromatic aberration, and a subtle vignette — pure CSS, zero performance cost.
 

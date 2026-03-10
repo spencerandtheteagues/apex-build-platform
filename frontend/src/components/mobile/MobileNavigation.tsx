@@ -1,4 +1,4 @@
-// APEX.BUILD Mobile Navigation Component
+// APEX-BUILD Mobile Navigation Component
 // Bottom tab bar and hamburger menu for mobile devices
 
 import React, { useState, useRef, useEffect } from 'react'
@@ -120,7 +120,7 @@ export const MobileNavigation: React.FC<MobileNavigationProps> = ({
             <div className="w-14 h-14 flex items-center justify-center">
               <img src={logoSrc} alt="APEX" className="mobile-menu-logo w-full h-full object-contain drop-shadow-[0_0_10px_rgba(239,68,68,0.45)]" />
             </div>
-            <span className="text-lg font-bold text-white">APEX.BUILD</span>
+            <span className="text-lg font-bold text-white">APEX-BUILD</span>
           </div>
           <button
             onClick={toggleMenu}
@@ -300,7 +300,7 @@ export const MobileNavigation: React.FC<MobileNavigationProps> = ({
             <div className="w-12 h-12 flex items-center justify-center">
               <img src={logoSrc} alt="APEX" className="mobile-header-logo w-full h-full object-contain drop-shadow-[0_0_8px_rgba(239,68,68,0.4)]" />
             </div>
-            <span className="text-sm font-bold text-white">APEX.BUILD</span>
+            <span className="text-sm font-bold text-white">APEX-BUILD</span>
           </div>
 
           {/* Actions */}

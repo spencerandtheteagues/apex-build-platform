@@ -1,4 +1,4 @@
-// APEX.BUILD Project Search Hook
+// APEX-BUILD Project Search Hook
 // Manages project-wide search state, results navigation, and replace functionality
 
 import { useState, useCallback, useRef } from 'react'

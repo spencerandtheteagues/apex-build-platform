@@ -1,4 +1,4 @@
-// APEX.BUILD Version History Panel
+// APEX-BUILD Version History Panel
 // Displays file version history and enables diff viewing/restoring
 
 import React, { useEffect, useState } from 'react'

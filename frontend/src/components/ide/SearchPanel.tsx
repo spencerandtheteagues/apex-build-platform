@@ -1,4 +1,4 @@
-// APEX.BUILD Search Panel
+// APEX-BUILD Search Panel
 // Project-wide search with regex, case-sensitive, whole-word toggles,
 // file filter, grouped results, replace functionality, and keyboard navigation
 

@@ -1,4 +1,4 @@
-// APEX.BUILD Deployment Components
+// APEX-BUILD Deployment Components
 // Native hosting with Always-On support (Replit parity)
 
 export { AlwaysOnToggle } from './AlwaysOnToggle'

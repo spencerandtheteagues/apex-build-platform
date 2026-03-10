@@ -1,4 +1,4 @@
-// APEX.BUILD 22nd Century Steampunk Theme
+// APEX-BUILD 22nd Century Steampunk Theme
 // Fusion of cyberpunk neon + Victorian brass + industrial machinery aesthetics
 // Designed to make every other IDE look like a plain text editor
 

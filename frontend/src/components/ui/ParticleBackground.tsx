@@ -1,4 +1,4 @@
-// APEX.BUILD Particle Background
+// APEX-BUILD Particle Background
 // Animated floating particles with energy lines
 
 import React, { useEffect, useRef, useCallback } from 'react'

@@ -1,4 +1,4 @@
-// APEX.BUILD Mobile Components Index
+// APEX-BUILD Mobile Components Index
 // Touch-optimized components for mobile devices
 
 export { MobileNavigation, MobilePanelSwitcher, touchTargetClass } from './MobileNavigation'

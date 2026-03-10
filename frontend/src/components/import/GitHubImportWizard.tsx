@@ -1,5 +1,5 @@
 // GitHubImportWizard.tsx
-// One-click GitHub repository import wizard for APEX.BUILD
+// One-click GitHub repository import wizard for APEX-BUILD
 // Similar to Replit's replit.new/URL feature
 
 import React, { useState, useEffect, useCallback } from 'react';

@@ -1,4 +1,4 @@
-// APEX.BUILD UI - Textarea Component
+// APEX-BUILD UI - Textarea Component
 // Cyberpunk-styled textarea with neon glow effects
 
 import * as React from 'react'

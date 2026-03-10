@@ -1,4 +1,4 @@
-// Split Pane Editor - APEX.BUILD
+// Split Pane Editor - APEX-BUILD
 // Multi-pane code editor with resizable splits
 
 import React, { lazy, Suspense, useCallback, useRef, useImperativeHandle, forwardRef } from 'react'

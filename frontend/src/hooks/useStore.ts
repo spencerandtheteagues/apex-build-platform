@@ -1,4 +1,4 @@
-// APEX.BUILD State Management
+// APEX-BUILD State Management
 // Zustand-based store with shallow equality selectors for performance optimization
 
 import { create } from 'zustand'
@@ -559,7 +559,7 @@ export const useStore = create<StoreState & StoreActions>()(
             get().addNotification({
               type: 'success',
               title: 'Registration Successful',
-              message: `Welcome to APEX.BUILD, ${user.username}!`,
+              message: `Welcome to APEX-BUILD, ${user.username}!`,
             })
           } catch (error: unknown) {
             set((state) => {

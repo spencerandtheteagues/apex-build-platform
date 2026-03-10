@@ -1,4 +1,4 @@
-// APEX.BUILD App Builder - Command Center Interface
+// APEX-BUILD App Builder - Command Center Interface
 // Dark Demon Theme - AI-Powered App Generation with Futuristic UI
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
@@ -3168,7 +3168,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE }) => {
               </CardHeader>
               <CardContent className="space-y-6">
                 <p className="text-gray-400 leading-relaxed">
-                  Enter the URL of the Replit project you want to migrate to APEX.BUILD.
+                  Enter the URL of the Replit project you want to migrate to APEX-BUILD.
                   Our agents will analyze the source and reconstruct it with optimized performance.
                 </p>
                 <div className="space-y-2">

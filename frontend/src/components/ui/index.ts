@@ -1,4 +1,4 @@
-// APEX.BUILD UI Components Index
+// APEX-BUILD UI Components Index
 // Cyberpunk design system exports
 
 export { Button, buttonVariants } from './Button'

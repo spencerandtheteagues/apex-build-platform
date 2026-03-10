@@ -1,4 +1,4 @@
-// APEX.BUILD Code Review Hook
+// APEX-BUILD Code Review Hook
 // State management for AI-powered code review features
 
 import { useState, useCallback, useMemo } from 'react'

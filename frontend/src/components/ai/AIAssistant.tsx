@@ -1,4 +1,4 @@
-// APEX.BUILD Multi-AI Assistant Interface
+// APEX-BUILD Multi-AI Assistant Interface
 // Cyberpunk AI chat interface with provider switching
 
 import React, { useState, useRef, useEffect } from 'react'
@@ -423,7 +423,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
             <Sparkles className="w-12 h-12 text-cyan-400/50 mb-4" />
             <h3 className="text-lg font-semibold text-gray-300 mb-2">
-              Welcome to APEX.BUILD AI Assistant
+              Welcome to APEX-BUILD AI Assistant
             </h3>
             <p className="text-gray-400 mb-4">
               Start a conversation to get help with coding, debugging, and more.

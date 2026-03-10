@@ -1,4 +1,4 @@
-// APEX.BUILD Git Integration Panel
+// APEX-BUILD Git Integration Panel
 // Full Git workflow: branch display, changed files, staging, commit, push/pull,
 // branch switching, and recent commit history
 

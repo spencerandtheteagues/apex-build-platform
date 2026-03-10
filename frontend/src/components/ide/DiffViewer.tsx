@@ -1,4 +1,4 @@
-// APEX.BUILD Diff Viewer
+// APEX-BUILD Diff Viewer
 // Side-by-side code comparison using Monaco Diff Editor
 
 import React, { useEffect, useRef, useState } from 'react'

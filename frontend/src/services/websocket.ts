@@ -1,4 +1,4 @@
-// APEX.BUILD WebSocket Service
+// APEX-BUILD WebSocket Service
 // Real-time collaboration with sub-20ms latency
 
 import { getConfiguredWsUrl } from '@/config/runtime'
@@ -157,7 +157,7 @@ export class WebSocketService {
           this.isConnecting = false
           this.reconnectAttempts = 0
           this.startHeartbeat()
-          this.log('✅ APEX.BUILD WebSocket connected')
+          this.log('✅ APEX-BUILD WebSocket connected')
           resolve()
         })
 

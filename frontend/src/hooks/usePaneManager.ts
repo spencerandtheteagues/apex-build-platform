@@ -1,4 +1,4 @@
-// Split Pane Manager Hook - APEX.BUILD
+// Split Pane Manager Hook - APEX-BUILD
 // Manages multiple editor panes with file tabs
 
 import { useState, useCallback, useMemo } from 'react'

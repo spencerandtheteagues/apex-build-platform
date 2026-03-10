@@ -1,4 +1,4 @@
-// APEX.BUILD Debug Variables View
+// APEX-BUILD Debug Variables View
 // Tree view of local and global variables with expandable objects,
 // type indicators, and inline primitive editing
 

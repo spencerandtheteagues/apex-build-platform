@@ -1,4 +1,4 @@
-// APEX.BUILD Cyberpunk Loading Components
+// APEX-BUILD Cyberpunk Loading Components
 // Futuristic loading spinners and animations
 
 import React, { forwardRef } from 'react'

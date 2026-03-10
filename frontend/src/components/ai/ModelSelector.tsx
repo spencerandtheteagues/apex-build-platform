@@ -1,4 +1,4 @@
-// APEX.BUILD Model Selector
+// APEX-BUILD Model Selector
 // Dropdown for selecting AI provider and model with speed/cost indicators
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'

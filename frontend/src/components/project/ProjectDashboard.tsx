@@ -1,4 +1,4 @@
-// APEX.BUILD Project Dashboard
+// APEX-BUILD Project Dashboard
 // Cyberpunk project overview and management interface
 
 import React, { useState, useEffect } from 'react'

@@ -1,4 +1,4 @@
-// APEX.BUILD Editor Components
+// APEX-BUILD Editor Components
 // Export all editor-related components
 
 export { MonacoEditor, EDITOR_THEMES, LANGUAGE_CONFIGS } from './MonacoEditor'

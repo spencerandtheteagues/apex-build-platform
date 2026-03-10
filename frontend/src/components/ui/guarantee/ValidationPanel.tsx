@@ -1,4 +1,4 @@
-// APEX.BUILD Validation Panel
+// APEX-BUILD Validation Panel
 // Shows real-time validation results during the guarantee loop:
 // check statuses, placeholder hits, smoke test output, score gauge.
 

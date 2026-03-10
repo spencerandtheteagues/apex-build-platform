@@ -1,4 +1,4 @@
-// APEX.BUILD Terminal WebSocket Service
+// APEX-BUILD Terminal WebSocket Service
 // Handles real-time communication with backend PTY
 
 import { apiService, TerminalSessionInfo, AvailableShell } from '@/services/api';

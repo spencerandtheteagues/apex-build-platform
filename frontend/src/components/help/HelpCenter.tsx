@@ -1,4 +1,4 @@
-// APEX.BUILD Help Center
+// APEX-BUILD Help Center
 // Comprehensive guide to every feature — written for both developers and beginners
 
 import React, { useState, useMemo } from 'react'
@@ -76,13 +76,13 @@ const helpSections: HelpSection[] = [
     id: 'getting-started',
     title: 'Getting Started',
     icon: <Rocket className="w-5 h-5" />,
-    description: 'New to APEX.BUILD? Start here.',
+    description: 'New to APEX-BUILD? Start here.',
     articles: [
       {
         id: 'what-is-apex',
-        title: 'What is APEX.BUILD?',
+        title: 'What is APEX-BUILD?',
         tags: ['intro', 'overview', 'about', 'what'],
-        content: `APEX.BUILD is an AI-powered cloud development platform that lets you build complete applications from a simple text description. Multiple AI agents work together to plan, code, test, and deploy your app — all from your browser.
+        content: `APEX-BUILD is an AI-powered cloud development platform that lets you build complete applications from a simple text description. Multiple AI agents work together to plan, code, test, and deploy your app — all from your browser.
 
 **What you can build:**
 - Full-stack web applications (frontend + backend + database)
@@ -103,7 +103,7 @@ No local setup required — everything runs in the cloud.`,
         title: 'Creating your account',
         tags: ['register', 'signup', 'account', 'login'],
         content: `**To create an account:**
-1. Go to the APEX.BUILD login page
+1. Go to the APEX-BUILD login page
 2. Click "Sign up" at the bottom
 3. Enter a username (3+ characters), email address, and password (8+ characters)
 4. Click "Create Account"
@@ -437,7 +437,7 @@ Builds are persisted in the database — they survive server restarts and are av
         id: 'import-options',
         title: 'Importing existing projects',
         tags: ['import', 'github', 'replit', 'migrate', 'existing'],
-        content: `You can bring existing projects into APEX.BUILD from other platforms:
+        content: `You can bring existing projects into APEX-BUILD from other platforms:
 
 **Import from GitHub**
 1. Click "Import from GitHub" on the Build App page
@@ -445,13 +445,13 @@ Builds are persisted in the database — they survive server restarts and are av
 3. Optionally add a GitHub personal access token (required for private repos)
 4. The wizard validates the URL and shows repo info (stars, language, size)
 5. Customize the project name and description
-6. Click Import — all files are pulled into a new APEX.BUILD project
+6. Click Import — all files are pulled into a new APEX-BUILD project
 
 **Migrate from Replit**
 1. Click "Migrate from Replit" on the Build App page
 2. Enter the Replit project URL
 3. Click "Import & Migrate"
-4. APEX.BUILD's agents analyze and reconstruct the project
+4. APEX-BUILD's agents analyze and reconstruct the project
 
 After import, the project opens in the IDE where you can edit, run, and deploy it.`,
       },
@@ -565,7 +565,7 @@ Press Ctrl+H (Cmd+H on Mac) to open Find and Replace within the current file.`,
         id: 'terminal',
         title: 'Terminal',
         tags: ['terminal', 'shell', 'command', 'npm', 'run', 'bash'],
-        content: `The Terminal (bottom panel) gives you a project shell inside the APEX.BUILD runtime when that feature is enabled for your environment.
+        content: `The Terminal (bottom panel) gives you a project shell inside the APEX-BUILD runtime when that feature is enabled for your environment.
 
 **What you can do:**
 - Run your project: npm start, python app.py, go run main.go
@@ -633,7 +633,7 @@ Click the external link icon to open the preview in a new browser tab.`,
 
 **Share** — Copies a shareable link to your clipboard so others can view your project.
 
-**Deploy** — Opens deployment options to push your app live to Vercel, Netlify, Render, or APEX.BUILD's native hosting (.apex.app).
+**Deploy** — Opens deployment options to push your app live to Vercel, Netlify, Render, or APEX-BUILD's native hosting (.apex.app).
 
 **Terminal Toggle** — Show/hide the bottom terminal panel.
 
@@ -697,7 +697,7 @@ Choose which AI provider to use, or leave on "Auto" for intelligent routing.`,
         id: 'ai-providers',
         title: 'AI providers and models',
         tags: ['claude', 'gpt', 'gemini', 'grok', 'ollama', 'models', 'provider'],
-        content: `APEX.BUILD integrates with multiple AI providers. Each has different strengths:
+        content: `APEX-BUILD integrates with multiple AI providers. Each has different strengths:
 
 **Claude (Anthropic)**
 - Models: Opus 4.6 (most capable), Sonnet 4.5 (balanced), Haiku 4.5 (fast)
@@ -726,7 +726,7 @@ Choose which AI provider to use, or leave on "Auto" for intelligent routing.`,
 - Requires: A running Ollama server on your machine or network
 
 **Auto mode (default):**
-When set to "Auto," APEX.BUILD intelligently routes your request to the best available provider based on the task complexity, available models, and your configuration.`,
+When set to "Auto," APEX-BUILD intelligently routes your request to the best available provider based on the task complexity, available models, and your configuration.`,
       },
     ],
   },
@@ -758,7 +758,7 @@ This is where you add your own API keys for each AI provider. See the BYOK artic
         id: 'byok-overview',
         title: 'BYOK: Bring Your Own Key',
         tags: ['byok', 'api key', 'own key', 'free', 'bring your own'],
-        content: `BYOK (Bring Your Own Key) lets you use your personal API keys from AI providers instead of APEX.BUILD's shared platform keys. This is one of APEX.BUILD's most powerful features.
+        content: `BYOK (Bring Your Own Key) lets you use your personal API keys from AI providers instead of APEX-BUILD's shared platform keys. This is one of APEX-BUILD's most powerful features.
 
 **Why use BYOK?**
 - **Lower costs** — You pay the AI provider directly at their rates plus a small routing fee ($0.25 per 1M tokens).
@@ -812,7 +812,7 @@ Click the "Delete" button on the provider card. This permanently removes the key
 1. Install Ollama from ollama.com
 2. Pull a model: ollama pull deepseek-r1:8b (or any model you want)
 3. Start Ollama: ollama serve (it runs on http://localhost:11434 by default)
-4. In APEX.BUILD Settings > BYOK > Ollama, enter your server URL
+4. In APEX-BUILD Settings > BYOK > Ollama, enter your server URL
 5. Click "Save & Activate"
 
 **Available local models:**
@@ -823,7 +823,7 @@ Click the "Delete" button on the provider card. This permanently removes the key
 
 **Requirements:**
 - Ollama must be running and accessible from your browser
-- If running APEX.BUILD in the cloud, Ollama needs to be on a reachable URL (not localhost)
+- If running APEX-BUILD in the cloud, Ollama needs to be on a reachable URL (not localhost)
 - More powerful models need more RAM (8b models need ~8GB, 70B models need ~48GB)
 
 **Pros:** Completely free, unlimited usage, full privacy
@@ -881,7 +881,7 @@ Lists open PRs with title, state, author, and branch info.
         id: 'github-export',
         title: 'Exporting to GitHub',
         tags: ['github', 'export', 'push', 'repository', 'new repo'],
-        content: `You can export any APEX.BUILD project to a GitHub repository.
+        content: `You can export any APEX-BUILD project to a GitHub repository.
 
 **How to export:**
 1. Open your project in the IDE
@@ -913,7 +913,7 @@ Lists open PRs with title, state, author, and branch info.
         content: `The Live Preview gives you a real browser view of your running application.
 
 **Starting the preview:**
-Click the Preview toggle in the IDE toolbar, then click Play. APEX.BUILD auto-detects your project type and starts the appropriate dev server (Node.js, Python, Go, etc.).
+Click the Preview toggle in the IDE toolbar, then click Play. APEX-BUILD auto-detects your project type and starts the appropriate dev server (Node.js, Python, Go, etc.).
 
 **Console tab:**
 Shows browser console output — equivalent to the DevTools console:
@@ -931,7 +931,7 @@ Shows all HTTP requests your app makes:
 - Filter by type (XHR, JS, CSS, Images)
 
 **Server auto-detection:**
-APEX.BUILD automatically detects your backend framework (Express, FastAPI, Gin, etc.) and starts the right server with the right command.`,
+APEX-BUILD automatically detects your backend framework (Express, FastAPI, Gin, etc.) and starts the right server with the right command.`,
       },
       {
         id: 'deploy-options',
@@ -954,7 +954,7 @@ APEX.BUILD automatically detects your backend framework (Express, FastAPI, Gin, 
 - Features: Persistent storage, cron jobs, background workers
 - Free tier available
 
-**APEX.BUILD Native (.apex.app)**
+**APEX-BUILD Native (.apex.app)**
 - Best for: Apps you want to host directly on APEX
 - Features: Container-based hosting, auto-scaling, SSL, health monitoring
 - Your app gets a URL like: your-app.apex.app
@@ -987,7 +987,7 @@ Each deployment is logged. You can view past deployments, redeploy previous vers
         id: 'collab-overview',
         title: 'Real-time collaboration',
         tags: ['collab', 'collaboration', 'team', 'multiplayer', 'real-time'],
-        content: `APEX.BUILD supports real-time collaborative editing, similar to Google Docs but for code.
+        content: `APEX-BUILD supports real-time collaborative editing, similar to Google Docs but for code.
 
 **Features:**
 - **Live cursors** — See where other people are editing in real time
@@ -1065,7 +1065,7 @@ Both are tracked separately in the history, so you can see every change regardle
         id: 'explore-page',
         title: 'Browsing community projects',
         tags: ['explore', 'community', 'discover', 'browse', 'templates'],
-        content: `The Explore page lets you discover projects shared by other APEX.BUILD users.
+        content: `The Explore page lets you discover projects shared by other APEX-BUILD users.
 
 **Tabs:**
 - **Trending** — Projects gaining popularity
@@ -1109,7 +1109,7 @@ Both are tracked separately in the history, so you can see every change regardle
         id: 'plans',
         title: 'Subscription plans',
         tags: ['plan', 'subscription', 'free', 'builder', 'pro', 'team', 'enterprise', 'pricing'],
-        content: `APEX.BUILD offers five subscription tiers:
+        content: `APEX-BUILD offers five subscription tiers:
 
 **Free — $0/month**
 - BYOK only for managed AI access
@@ -1315,7 +1315,7 @@ Click "Rotate" to generate a new encryption key for a secret without changing it
         id: 'code-execution-security',
         title: 'Code execution security',
         tags: ['sandbox', 'docker', 'security', 'execution', 'safe'],
-        content: `When you run code in APEX.BUILD, it executes in a secure sandbox:
+        content: `When you run code in APEX-BUILD, it executes in a secure sandbox:
 
 **Docker container sandboxing (default):**
 - Each execution runs in an isolated container
@@ -1351,7 +1351,7 @@ Your code runs safely without being able to affect other users or the platform. 
         id: 'templates-list',
         title: 'Project templates',
         tags: ['template', 'starter', 'boilerplate', 'scaffold'],
-        content: `APEX.BUILD includes 15+ starter templates for common project types:
+        content: `APEX-BUILD includes 15+ starter templates for common project types:
 
 - React SPA with Tailwind
 - Next.js Full-stack
@@ -1623,7 +1623,7 @@ export const HelpCenter: React.FC<HelpCenterProps> = ({ isOpen, onClose }) => {
                 </h2>
                 {!currentArticle && (
                   <p className="text-xs text-gray-500 mt-0.5">
-                    Everything you need to know about APEX.BUILD
+                    Everything you need to know about APEX-BUILD
                   </p>
                 )}
               </div>
@@ -1739,7 +1739,7 @@ export const HelpCenter: React.FC<HelpCenterProps> = ({ isOpen, onClose }) => {
             {helpSections.reduce((acc, s) => acc + s.articles.length, 0)} articles across{' '}
             {helpSections.length} topics
           </span>
-          <span className="text-xs text-gray-600">APEX.BUILD v1.0</span>
+          <span className="text-xs text-gray-600">APEX-BUILD v1.0</span>
         </div>
       </div>
     </div>

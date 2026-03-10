@@ -1,4 +1,4 @@
-// APEX.BUILD Terminal System
+// APEX-BUILD Terminal System
 // Full xterm.js integration with PTY backend support
 
 export { XTerminal } from './XTerminal';

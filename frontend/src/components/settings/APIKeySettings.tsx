@@ -1,4 +1,4 @@
-// APEX.BUILD API Key Settings
+// APEX-BUILD API Key Settings
 // Multi-provider BYOK with active toggles and per-provider model selectors
 
 import React, { useState, useEffect, useCallback } from 'react'

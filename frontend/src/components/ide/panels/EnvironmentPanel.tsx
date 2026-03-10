@@ -1,4 +1,4 @@
-// APEX.BUILD Environment Configuration Panel
+// APEX-BUILD Environment Configuration Panel
 // Nix-like reproducible environment system for project dependencies
 // Provides Replit parity for development environment configuration
 

@@ -1,4 +1,4 @@
-// APEX.BUILD Cost Ticker
+// APEX-BUILD Cost Ticker
 // Real-time cost display for IDE status bar with expandable breakdown
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'

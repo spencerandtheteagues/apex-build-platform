@@ -1,4 +1,4 @@
-// APEX.BUILD Onboarding Tour
+// APEX-BUILD Onboarding Tour
 // First-time user guided walkthrough explaining the app build process
 
 import React, { useState, useEffect, useCallback } from 'react'
@@ -31,7 +31,7 @@ interface TourStep {
 
 const tourSteps: TourStep[] = [
   {
-    title: 'Welcome to APEX.BUILD',
+    title: 'Welcome to APEX-BUILD',
     description: 'Build complete applications from a simple description. Our AI agents handle everything — planning, coding, testing, and deployment.',
     icon: <Rocket className="w-8 h-8" />,
     details: [

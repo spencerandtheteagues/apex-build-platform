@@ -1,4 +1,4 @@
-// APEX.BUILD Error Boundary Component
+// APEX-BUILD Error Boundary Component
 // Catches and handles React errors with cyberpunk styling
 
 import React, { Component, ErrorInfo, ReactNode } from 'react'
@@ -90,7 +90,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   copyErrorDetails = async () => {
     const errorDetails = `
-APEX.BUILD Error Report
+APEX-BUILD Error Report
 =======================
 Error ID: ${this.state.errorId}
 Time: ${new Date().toISOString()}
@@ -154,7 +154,7 @@ User Agent: ${navigator.userAgent}
                 </div>
                 <div>
                   <h1 className="text-xl font-bold text-white">System Error Detected</h1>
-                  <p className="text-xs text-red-400">APEX.BUILD Error Handler</p>
+                  <p className="text-xs text-red-400">APEX-BUILD Error Handler</p>
                 </div>
               </div>
 

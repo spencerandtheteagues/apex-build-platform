@@ -1,4 +1,4 @@
-// APEX.BUILD Debug Service
+// APEX-BUILD Debug Service
 // Frontend service for interacting with the backend debugging API
 // Supports JavaScript, TypeScript, Python, and Go debugging
 

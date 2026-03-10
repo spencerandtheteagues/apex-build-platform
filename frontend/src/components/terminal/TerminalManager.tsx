@@ -1,4 +1,4 @@
-// APEX.BUILD Terminal Manager Component
+// APEX-BUILD Terminal Manager Component
 // Multi-tab terminal with shell selection and PTY integration
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';

@@ -1,4 +1,4 @@
-// APEX.BUILD Package Manager Panel
+// APEX-BUILD Package Manager Panel
 // Search, install, and manage packages across npm, PyPI, and Go registries
 
 import React, { useState, useCallback, useEffect, useMemo } from 'react'

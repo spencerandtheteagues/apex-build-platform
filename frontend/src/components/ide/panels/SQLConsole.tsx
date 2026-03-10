@@ -1,4 +1,4 @@
-// APEX.BUILD SQL Console
+// APEX-BUILD SQL Console
 // Interactive SQL query execution with results visualization
 
 import React, { useState, useEffect } from 'react'

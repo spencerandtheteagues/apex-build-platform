@@ -1,4 +1,4 @@
-// APEX.BUILD UI - Progress Component
+// APEX-BUILD UI - Progress Component
 // Cyberpunk-styled progress bar with neon glow effects
 
 import * as React from 'react'

@@ -1,4 +1,4 @@
-// APEX.BUILD Animated Background
+// APEX-BUILD Animated Background
 // Cyberpunk world - Mesmerizing particle system with grid, orbs, and data streams
 
 import React, { useEffect, useRef, useCallback, useMemo } from 'react'

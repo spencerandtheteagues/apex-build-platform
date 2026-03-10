@@ -1,4 +1,4 @@
-// APEX.BUILD Agent API Service
+// APEX-BUILD Agent API Service
 // WebSocket connection and API calls for the AI Autonomous Agent
 
 import {

@@ -1,4 +1,4 @@
-// APEX.BUILD Inline Completion Provider
+// APEX-BUILD Inline Completion Provider
 // Monaco Editor integration for ghost text suggestions (Tab completion)
 
 import * as monaco from 'monaco-editor'

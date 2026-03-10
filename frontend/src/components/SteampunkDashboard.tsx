@@ -253,7 +253,7 @@ export const SteampunkDashboard: React.FC<SteampunkDashboardProps> = ({ onNaviga
         <div style={{ padding: '10px 20px 30px', display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{ color: '#ff3333', fontSize: '24px' }}>⚡</span>
           <span style={{ color: '#ff3333', fontSize: '20px', fontWeight: 'bold', letterSpacing: '2px' }}>
-            APEX.BUILD
+            APEX-BUILD
           </span>
         </div>
 

@@ -1,4 +1,4 @@
-// APEX.BUILD Git Integration Hook
+// APEX-BUILD Git Integration Hook
 // Manages Git state including branches, file changes, commits, and remote operations
 
 import { useState, useCallback, useEffect, useRef } from 'react'

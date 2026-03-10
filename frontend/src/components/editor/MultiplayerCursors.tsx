@@ -1,4 +1,4 @@
-// APEX.BUILD Multiplayer Cursors Component
+// APEX-BUILD Multiplayer Cursors Component
 // Real-time cursor visualization for Monaco editor collaboration
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'

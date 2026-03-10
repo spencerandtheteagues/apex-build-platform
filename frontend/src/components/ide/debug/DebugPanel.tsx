@@ -1,4 +1,4 @@
-// APEX.BUILD Debug Panel
+// APEX-BUILD Debug Panel
 // Complete debug panel with session controls, step toolbar, collapsible
 // sections for Variables / Watch / Call Stack / Breakpoints, debug console
 // input for expression evaluation, and keyboard shortcuts display

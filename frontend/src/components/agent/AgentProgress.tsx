@@ -1,4 +1,4 @@
-// APEX.BUILD Agent Progress Component
+// APEX-BUILD Agent Progress Component
 // Visual progress indicator with step highlighting and time tracking
 
 import React, { memo, useMemo } from 'react'

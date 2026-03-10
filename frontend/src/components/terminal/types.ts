@@ -1,4 +1,4 @@
-// APEX.BUILD Terminal Types
+// APEX-BUILD Terminal Types
 // Type definitions for the full-featured terminal system
 
 export interface TerminalTheme {

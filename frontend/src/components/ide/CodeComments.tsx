@@ -1,4 +1,4 @@
-// APEX.BUILD Code Comments Component
+// APEX-BUILD Code Comments Component
 // Inline code comments and threads for collaboration (Replit parity feature)
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'

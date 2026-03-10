@@ -1,4 +1,4 @@
-// APEX.BUILD Project List
+// APEX-BUILD Project List
 // Cyberpunk project browser and creator
 
 import React, { useState, useEffect } from 'react'
@@ -38,14 +38,14 @@ import {
 
 // Language configurations
 const LANGUAGE_CONFIGS: LanguageConfig[] = [
-  { id: 'javascript', name: 'JavaScript', extensions: ['js', 'jsx'], icon: '📜', color: '#f7df1e', monacoLanguage: 'javascript', defaultCode: 'console.log("Hello APEX.BUILD!");', runCommand: 'node' },
-  { id: 'typescript', name: 'TypeScript', extensions: ['ts', 'tsx'], icon: '🔷', color: '#3178c6', monacoLanguage: 'typescript', defaultCode: 'console.log("Hello APEX.BUILD!");', runCommand: 'tsx' },
-  { id: 'python', name: 'Python', extensions: ['py'], icon: '🐍', color: '#3776ab', monacoLanguage: 'python', defaultCode: 'print("Hello APEX.BUILD!")', runCommand: 'python' },
-  { id: 'go', name: 'Go', extensions: ['go'], icon: '🐹', color: '#00add8', monacoLanguage: 'go', defaultCode: 'package main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello APEX.BUILD!")\n}', runCommand: 'go run' },
-  { id: 'rust', name: 'Rust', extensions: ['rs'], icon: '🦀', color: '#dea584', monacoLanguage: 'rust', defaultCode: 'fn main() {\n    println!("Hello APEX.BUILD!");\n}', runCommand: 'cargo run' },
-  { id: 'java', name: 'Java', extensions: ['java'], icon: '☕', color: '#ed8b00', monacoLanguage: 'java', defaultCode: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello APEX.BUILD!");\n    }\n}', runCommand: 'java' },
-  { id: 'cpp', name: 'C++', extensions: ['cpp', 'cc', 'cxx'], icon: '⚙️', color: '#00599c', monacoLanguage: 'cpp', defaultCode: '#include <iostream>\n\nint main() {\n    std::cout << "Hello APEX.BUILD!" << std::endl;\n    return 0;\n}', runCommand: 'g++' },
-  { id: 'html', name: 'HTML/CSS/JS', extensions: ['html', 'css'], icon: '🌐', color: '#e34f26', monacoLanguage: 'html', defaultCode: '<!DOCTYPE html>\n<html>\n<head>\n    <title>APEX.BUILD</title>\n</head>\n<body>\n    <h1>Hello APEX.BUILD!</h1>\n</body>\n</html>', runCommand: 'serve' }
+  { id: 'javascript', name: 'JavaScript', extensions: ['js', 'jsx'], icon: '📜', color: '#f7df1e', monacoLanguage: 'javascript', defaultCode: 'console.log("Hello APEX-BUILD!");', runCommand: 'node' },
+  { id: 'typescript', name: 'TypeScript', extensions: ['ts', 'tsx'], icon: '🔷', color: '#3178c6', monacoLanguage: 'typescript', defaultCode: 'console.log("Hello APEX-BUILD!");', runCommand: 'tsx' },
+  { id: 'python', name: 'Python', extensions: ['py'], icon: '🐍', color: '#3776ab', monacoLanguage: 'python', defaultCode: 'print("Hello APEX-BUILD!")', runCommand: 'python' },
+  { id: 'go', name: 'Go', extensions: ['go'], icon: '🐹', color: '#00add8', monacoLanguage: 'go', defaultCode: 'package main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello APEX-BUILD!")\n}', runCommand: 'go run' },
+  { id: 'rust', name: 'Rust', extensions: ['rs'], icon: '🦀', color: '#dea584', monacoLanguage: 'rust', defaultCode: 'fn main() {\n    println!("Hello APEX-BUILD!");\n}', runCommand: 'cargo run' },
+  { id: 'java', name: 'Java', extensions: ['java'], icon: '☕', color: '#ed8b00', monacoLanguage: 'java', defaultCode: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello APEX-BUILD!");\n    }\n}', runCommand: 'java' },
+  { id: 'cpp', name: 'C++', extensions: ['cpp', 'cc', 'cxx'], icon: '⚙️', color: '#00599c', monacoLanguage: 'cpp', defaultCode: '#include <iostream>\n\nint main() {\n    std::cout << "Hello APEX-BUILD!" << std::endl;\n    return 0;\n}', runCommand: 'g++' },
+  { id: 'html', name: 'HTML/CSS/JS', extensions: ['html', 'css'], icon: '🌐', color: '#e34f26', monacoLanguage: 'html', defaultCode: '<!DOCTYPE html>\n<html>\n<head>\n    <title>APEX-BUILD</title>\n</head>\n<body>\n    <h1>Hello APEX-BUILD!</h1>\n</body>\n</html>', runCommand: 'serve' }
 ]
 
 const FRAMEWORKS = {

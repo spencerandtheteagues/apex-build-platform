@@ -1,4 +1,4 @@
-// APEX.BUILD Premium Input Component
+// APEX-BUILD Premium Input Component
 // Futuristic form fields with stunning animations and effects
 
 import React, { forwardRef, useState, useRef, useEffect, useCallback } from 'react'

@@ -1,4 +1,4 @@
-// APEX.BUILD Ultra-Futuristic Button Component
+// APEX-BUILD Ultra-Futuristic Button Component
 // Sharp, stylish buttons with glowing effects, ripples, and holographic variants
 
 import React, { forwardRef, useState, useRef, useCallback } from 'react'

@@ -1,4 +1,4 @@
-// APEX.BUILD Utility Functions
+// APEX-BUILD Utility Functions
 // Cyberpunk development platform utilities
 
 import { type ClassValue, clsx } from 'clsx'

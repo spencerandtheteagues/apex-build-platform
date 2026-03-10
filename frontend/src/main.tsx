@@ -1,4 +1,4 @@
-// APEX.BUILD Frontend Entry Point
+// APEX-BUILD Frontend Entry Point
 // Cyberpunk cloud development platform initialization
 
 import React from 'react'
@@ -8,7 +8,7 @@ import './styles/globals.css'
 
 // Console welcome message
 console.log(`
-🚀 APEX.BUILD v1.0.0
+🚀 APEX-BUILD v1.0.0
 ⚡ Cyberpunk Cloud Development Platform
 
 🔥 Features:

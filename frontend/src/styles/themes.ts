@@ -1,4 +1,4 @@
-// APEX.BUILD Cyberpunk Theme System
+// APEX-BUILD Cyberpunk Theme System
 // Beautiful, futuristic themes that make Replit look ancient
 
 import { Theme } from '@/types'
@@ -399,7 +399,7 @@ export const languageConfigs = {
     icon: '⚡',
     color: '#3178C6',
     monacoLanguage: 'typescript',
-    defaultCode: `// Welcome to APEX.BUILD TypeScript Environment
+    defaultCode: `// Welcome to APEX-BUILD TypeScript Environment
 // 1000x faster than Replit!
 
 interface User {
@@ -431,11 +431,11 @@ console.log("User created:", user);
     icon: '📜',
     color: '#F7DF1E',
     monacoLanguage: 'javascript',
-    defaultCode: `// Welcome to APEX.BUILD JavaScript Environment
+    defaultCode: `// Welcome to APEX-BUILD JavaScript Environment
 // Lightning fast execution!
 
 const greetUser = (name) => {
-  const greeting = \`Hello, \${name}! Welcome to APEX.BUILD!\`;
+  const greeting = \`Hello, \${name}! Welcome to APEX-BUILD!\`;
   return greeting;
 };
 
@@ -458,7 +458,7 @@ console.log(message);
     icon: '🐍',
     color: '#3776AB',
     monacoLanguage: 'python',
-    defaultCode: `# Welcome to APEX.BUILD Python Environment
+    defaultCode: `# Welcome to APEX-BUILD Python Environment
 # Supercharged with AI assistance!
 
 def fibonacci(n):
@@ -480,11 +480,11 @@ def fibonacci(n):
 fib_sequence = fibonacci(10)
 print(f"Fibonacci sequence: {fib_sequence}")
 
-# APEX.BUILD features:
+# APEX-BUILD features:
 # - Multi-AI integration (Claude, GPT-4, Gemini)
 # - Real-time collaboration
 # - Beautiful cyberpunk interface
-print("APEX.BUILD: Leaving Replit in the dust! 🚀")
+print("APEX-BUILD: Leaving Replit in the dust! 🚀")
 `,
     runCommand: 'python3',
     testCommand: 'pytest',
@@ -504,7 +504,7 @@ import (
 	"time"
 )
 
-// User represents a user in APEX.BUILD
+// User represents a user in APEX-BUILD
 type User struct {
 	ID       int       \`json:"id"\`
 	Name     string    \`json:"name"\`
@@ -522,11 +522,11 @@ func NewUser(name string) *User {
 
 func main() {
 	user := NewUser("Go Developer")
-	fmt.Printf("Welcome %s to APEX.BUILD!\\n", user.Name)
+	fmt.Printf("Welcome %s to APEX-BUILD!\\n", user.Name)
 	fmt.Printf("User ID: %d\\n", user.ID)
 	fmt.Printf("Joined: %s\\n", user.JoinedAt.Format(time.RFC3339))
 
-	fmt.Println("\\n🚀 APEX.BUILD Features:")
+	fmt.Println("\\n🚀 APEX-BUILD Features:")
 	fmt.Println("- Multi-AI assistance (Claude + GPT-4 + Gemini)")
 	fmt.Println("- 1000x faster than Replit")
 	fmt.Println("- Beautiful cyberpunk interface")
@@ -545,7 +545,7 @@ func main() {
     icon: '🦀',
     color: '#CE422B',
     monacoLanguage: 'rust',
-    defaultCode: `// Welcome to APEX.BUILD Rust Environment
+    defaultCode: `// Welcome to APEX-BUILD Rust Environment
 // Memory safety meets AI power!
 
 use std::collections::HashMap;
@@ -583,7 +583,7 @@ fn main() {
 
     dev.introduce();
 
-    println!("\\n🚀 APEX.BUILD: Where Rust meets AI!");
+    println!("\\n🚀 APEX-BUILD: Where Rust meets AI!");
     println!("- Claude for architectural insights");
     println!("- GPT-4 for code generation");
     println!("- Gemini for quick explanations");

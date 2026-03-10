@@ -1,4 +1,4 @@
-// APEX.BUILD File Tree Explorer
+// APEX-BUILD File Tree Explorer
 // Cyberpunk file system navigation with drag-drop support
 
 import React, { useState, useCallback, useMemo } from 'react'

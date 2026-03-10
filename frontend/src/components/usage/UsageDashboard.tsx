@@ -1,4 +1,4 @@
-// APEX.BUILD Usage Dashboard
+// APEX-BUILD Usage Dashboard
 // Comprehensive usage tracking with plan quotas, warnings, and upgrade prompts
 
 import React, { useState, useEffect, useCallback } from 'react'

@@ -1,4 +1,4 @@
-// APEX.BUILD Breakpoint Manager
+// APEX-BUILD Breakpoint Manager
 // Lists all breakpoints across files with enable/disable toggle,
 // conditional expression editor, remove actions, and "Remove All"
 

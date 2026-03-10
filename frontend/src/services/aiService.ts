@@ -1,4 +1,4 @@
-// APEX.BUILD Advanced AI Service
+// APEX-BUILD Advanced AI Service
 // Multi-provider streaming support with intelligent routing
 
 import { getConfiguredApiUrl } from '@/config/runtime'

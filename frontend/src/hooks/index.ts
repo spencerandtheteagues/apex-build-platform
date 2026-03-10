@@ -1,4 +1,4 @@
-// APEX.BUILD Hooks
+// APEX-BUILD Hooks
 // Export all custom hooks
 
 // Store hooks

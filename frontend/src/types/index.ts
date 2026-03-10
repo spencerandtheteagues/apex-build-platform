@@ -1,4 +1,4 @@
-// APEX.BUILD Frontend Types
+// APEX-BUILD Frontend Types
 // Matching the Go backend models for type safety
 
 export interface User {

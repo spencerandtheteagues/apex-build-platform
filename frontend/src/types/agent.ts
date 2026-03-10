@@ -1,4 +1,4 @@
-// APEX.BUILD AI Autonomous Agent Types
+// APEX-BUILD AI Autonomous Agent Types
 // Type definitions for the agentic build system
 
 export type AgentStatus =

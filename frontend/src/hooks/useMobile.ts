@@ -1,4 +1,4 @@
-// APEX.BUILD Mobile Detection and Responsiveness Hooks
+// APEX-BUILD Mobile Detection and Responsiveness Hooks
 // Touch-optimized utilities for mobile devices
 
 import { useState, useEffect, useCallback, useRef } from 'react'

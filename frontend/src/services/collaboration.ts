@@ -1,4 +1,4 @@
-// APEX.BUILD Real-Time Collaboration Service
+// APEX-BUILD Real-Time Collaboration Service
 // Yjs-inspired CRDT with OT fallback for concurrent editing
 
 import { getConfiguredWsUrl } from '@/config/runtime'

@@ -1,4 +1,4 @@
-// APEX.BUILD Asset Uploader
+// APEX-BUILD Asset Uploader
 // Users upload images, CSVs, PDFs, videos — AI agents automatically use them when building.
 // "Use my logo", "build a dashboard from this CSV" — it just works.
 

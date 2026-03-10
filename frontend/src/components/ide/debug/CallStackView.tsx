@@ -1,4 +1,4 @@
-// APEX.BUILD Debug Call Stack View
+// APEX-BUILD Debug Call Stack View
 // Displays the call stack with clickable frames to navigate source,
 // highlights the current (top) frame
 

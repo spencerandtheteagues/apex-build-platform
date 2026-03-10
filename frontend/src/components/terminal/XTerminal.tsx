@@ -1,4 +1,4 @@
-// APEX.BUILD XTerminal Component
+// APEX-BUILD XTerminal Component
 // Full xterm.js integration with all addons
 
 import React, { useEffect, useRef, useCallback, useState, forwardRef, useImperativeHandle } from 'react';
