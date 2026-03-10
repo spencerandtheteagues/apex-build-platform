@@ -603,7 +603,7 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
       minHeight: '100vh', background: C.bg,
       display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
-      padding: 'clamp(80px, 10vh, 100px) clamp(20px, 4vw, 48px) 40px',
+      padding: 'clamp(48px, 6vh, 72px) clamp(20px, 4vw, 48px) 24px',
       position: 'relative', overflow: 'hidden',
     }}>
       {/* Background glow */}
@@ -620,9 +620,9 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
         initial={{ opacity: 0, y: -20 }}
         animate={mounted ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-        style={{ textAlign: 'center', marginBottom: 20 }}
+        style={{ textAlign: 'center', marginBottom: 12 }}
       >
-        <div style={{ marginBottom: 10, position: 'relative', display: 'inline-block' }}>
+        <div style={{ marginBottom: 6, position: 'relative', display: 'inline-block' }}>
           {/* Red glow pool beneath the logo */}
           <div style={{
             position: 'absolute',
@@ -638,10 +638,10 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
             zIndex: 0,
           }} />
           <img
-            src="/apex-build-logo.png"
+            src="/apex-build-logo-transparent.png"
             alt="APEX.BUILD"
             style={{
-              height: 'clamp(140px, 20vw, 220px)',
+              height: 'clamp(110px, 15vw, 170px)',
               width: 'auto',
               display: 'block',
               position: 'relative',
@@ -654,7 +654,7 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
         <p style={{
           fontFamily: fBody, fontWeight: 600,
           fontSize: 'clamp(1rem, 2vw, 1.2rem)',
-          color: C.textSub, margin: '0 auto 6px',
+          color: C.textSub, margin: '0 auto 4px',
           letterSpacing: '0.01em',
         }}>
           The AI Cloud IDE that shows you the bill — in real time.
@@ -675,9 +675,9 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
         transition={{ duration: 0.6, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
         style={{
           display: 'grid', gridTemplateColumns: '1fr 1fr',
-          gap: '6px 24px',
-          width: '100%', maxWidth: 900,
-          margin: '0 auto 24px',
+          gap: '5px 20px',
+          width: '100%', maxWidth: 920,
+          margin: '0 auto 20px',
         }}
       >
         {FEATURES.map((f) => {
@@ -688,7 +688,7 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
               href={`#${f.id}`}
               style={{
                 display: 'flex', alignItems: 'center', gap: 10,
-                padding: '9px 13px', borderRadius: 9,
+                padding: '8px 13px', borderRadius: 9,
                 border: `1px solid ${C.borderDim}`,
                 background: C.surface,
                 textDecoration: 'none',
@@ -715,7 +715,7 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
                 <Icon size={12} color={f.color} />
               </div>
               <span style={{
-                fontFamily: fBody, fontSize: '0.82rem',
+                fontFamily: fBody, fontSize: '0.88rem',
                 color: C.text, fontWeight: 500, lineHeight: 1.3, flex: 1,
               }}>
                 {f.bullet}
