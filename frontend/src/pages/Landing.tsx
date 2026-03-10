@@ -622,26 +622,33 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
         style={{ textAlign: 'center', marginBottom: 20 }}
       >
-        <div style={{
-          display: 'inline-flex', alignItems: 'center', gap: 16,
-          marginBottom: 14,
-        }}>
+        <div style={{ marginBottom: 10, position: 'relative', display: 'inline-block' }}>
+          {/* Red glow pool beneath the logo */}
           <div style={{
-            width: 56, height: 56, borderRadius: 14,
-            background: `linear-gradient(135deg, ${C.accent} 0%, #ff5500 100%)`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: `0 0 50px ${C.accentGlow}, 0 0 100px rgba(255,0,51,0.08)`,
-          }}>
-            <Zap size={30} color="#fff" fill="#fff" />
-          </div>
-          <h1 style={{
-            fontFamily: fHero, fontWeight: 900,
-            fontSize: 'clamp(2.4rem, 5.5vw, 3.8rem)',
-            color: C.white, letterSpacing: '0.07em',
-            margin: 0, lineHeight: 1,
-          }}>
-            APEX<span style={{ color: C.accent }}>.BUILD</span>
-          </h1>
+            position: 'absolute',
+            bottom: -18,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: '75%',
+            height: 28,
+            background: 'rgba(255,0,51,0.55)',
+            borderRadius: '50%',
+            filter: 'blur(22px)',
+            pointerEvents: 'none',
+            zIndex: 0,
+          }} />
+          <img
+            src="/apex-build-logo.png"
+            alt="APEX.BUILD"
+            style={{
+              height: 'clamp(140px, 20vw, 220px)',
+              width: 'auto',
+              display: 'block',
+              position: 'relative',
+              zIndex: 1,
+              filter: 'drop-shadow(0 0 28px rgba(255,0,51,0.7)) drop-shadow(0 0 60px rgba(255,0,51,0.35))',
+            }}
+          />
         </div>
 
         <p style={{
@@ -673,15 +680,13 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
           margin: '0 auto 24px',
         }}
       >
-        {FEATURES.map((f, i) => {
+        {FEATURES.map((f) => {
           const Icon = f.icon
-          const isLeft = i < 6
           return (
             <a
               key={f.id}
               href={`#${f.id}`}
               style={{
-                gridColumn: isLeft ? 1 : 2,
                 display: 'flex', alignItems: 'center', gap: 10,
                 padding: '9px 13px', borderRadius: 9,
                 border: `1px solid ${C.borderDim}`,
