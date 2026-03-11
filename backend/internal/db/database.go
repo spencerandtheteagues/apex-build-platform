@@ -38,11 +38,34 @@ type Config struct {
 	TimeZone string
 }
 
+func resolveGormLogLevel() logger.LogLevel {
+	if level := strings.ToLower(strings.TrimSpace(os.Getenv("GORM_LOG_LEVEL"))); level != "" {
+		switch level {
+		case "silent":
+			return logger.Silent
+		case "error":
+			return logger.Error
+		case "warn", "warning":
+			return logger.Warn
+		case "info":
+			return logger.Info
+		default:
+			log.Printf("WARNING: unknown GORM_LOG_LEVEL=%q, falling back to environment default", level)
+		}
+	}
+
+	if appconfig.IsProductionEnvironment() || appconfig.IsStagingEnvironment() {
+		return logger.Warn
+	}
+
+	return logger.Info
+}
+
 // NewDatabase creates a new database connection
 func NewDatabase(config *Config) (*Database, error) {
 	// Configure GORM with custom logger
 	gormConfig := &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.Default.LogMode(resolveGormLogLevel()),
 		NowFunc: func() time.Time {
 			return time.Now().UTC()
 		},

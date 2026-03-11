@@ -1,10 +1,14 @@
 package agents
 
 import (
+	"context"
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
+
+	"apex-build/internal/ai"
 )
 
 func TestValidateFinalBuildReadiness(t *testing.T) {
@@ -732,6 +736,101 @@ func TestParseTaskOutputFlagsUnterminatedCodeBlock(t *testing.T) {
 	ok, errs := am.verifyGeneratedCode("build-test", out)
 	if ok {
 		t.Fatalf("expected verification failure due to parser warning/truncation")
+	}
+	if !containsError(errs, "unterminated code block") {
+		t.Fatalf("expected parser warning surfaced in verification errors, got %v", errs)
+	}
+}
+
+type truncationRouterStub struct {
+	response *ai.AIResponse
+	err      error
+}
+
+func (s *truncationRouterStub) Generate(context.Context, ai.AIProvider, string, GenerateOptions) (*ai.AIResponse, error) {
+	return s.response, s.err
+}
+
+func (s *truncationRouterStub) GetAvailableProviders() []ai.AIProvider {
+	return []ai.AIProvider{ai.ProviderClaude}
+}
+
+func (s *truncationRouterStub) GetAvailableProvidersForUser(uint) []ai.AIProvider {
+	return s.GetAvailableProviders()
+}
+
+func (s *truncationRouterStub) HasConfiguredProviders() bool {
+	return true
+}
+
+func TestCompleteTruncatedFilesClearsResolvedParserWarning(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{
+		aiRouter: &truncationRouterStub{
+			response: &ai.AIResponse{
+				Content: "value = 1\n}\n",
+			},
+		},
+	}
+
+	resp := "// File: packages/backend/src/database/seed.ts\n" +
+		"```typescript\n" +
+		"export async function seed() {\n" +
+		"  const"
+	out := am.parseTaskOutput(TaskGenerateSchema, resp)
+
+	am.completeTruncatedFiles(
+		context.Background(),
+		&Task{ID: "task-1"},
+		&Build{UserID: 1, PowerMode: PowerFast},
+		&Agent{Provider: ai.ProviderClaude},
+		out,
+	)
+
+	if len(out.TruncatedFiles) != 0 {
+		t.Fatalf("expected no unresolved truncated files, got %v", out.TruncatedFiles)
+	}
+	joined := strings.Join(out.Messages, " | ")
+	if strings.Contains(strings.ToLower(joined), "unterminated code block") {
+		t.Fatalf("expected parser warning to be removed after recovery, got %q", joined)
+	}
+
+	ok, errs := am.verifyGeneratedCode("build-test", out)
+	if !ok {
+		t.Fatalf("expected verification success after recovery, got %v", errs)
+	}
+}
+
+func TestCompleteTruncatedFilesKeepsUnresolvedParserWarning(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{
+		aiRouter: &truncationRouterStub{
+			err: errors.New("continuation unavailable"),
+		},
+	}
+
+	resp := "// File: packages/backend/src/database/seed.ts\n" +
+		"```typescript\n" +
+		"export async function seed() {\n" +
+		"  const"
+	out := am.parseTaskOutput(TaskGenerateSchema, resp)
+
+	am.completeTruncatedFiles(
+		context.Background(),
+		&Task{ID: "task-2"},
+		&Build{UserID: 1, PowerMode: PowerFast},
+		&Agent{Provider: ai.ProviderClaude},
+		out,
+	)
+
+	if len(out.TruncatedFiles) != 1 {
+		t.Fatalf("expected unresolved truncated file to remain tracked, got %v", out.TruncatedFiles)
+	}
+	ok, errs := am.verifyGeneratedCode("build-test", out)
+	if ok {
+		t.Fatalf("expected verification to fail while truncation remains unresolved")
 	}
 	if !containsError(errs, "unterminated code block") {
 		t.Fatalf("expected parser warning surfaced in verification errors, got %v", errs)

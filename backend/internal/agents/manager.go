@@ -9275,8 +9275,9 @@ func (am *AgentManager) verifyGeneratedCode(buildID string, output *TaskOutput) 
 	}
 
 	errors := make([]string, 0)
+	parserWarningIsFatal := len(output.TruncatedFiles) > 0 || len(output.Files) == 0
 	for _, msg := range output.Messages {
-		if strings.Contains(strings.ToLower(msg), "unterminated code block") {
+		if strings.Contains(strings.ToLower(msg), "unterminated code block") && parserWarningIsFatal {
 			errors = append(errors, fmt.Sprintf("AI response parsing warning: %s", msg))
 		}
 	}
@@ -10055,6 +10056,8 @@ func (am *AgentManager) completeTruncatedFiles(
 	agent *Agent,
 	output *TaskOutput,
 ) {
+	remainingTruncated := make([]string, 0, len(output.TruncatedFiles))
+
 	for _, path := range output.TruncatedFiles {
 		// Find the truncated file in the output.
 		var target *GeneratedFile
@@ -10065,6 +10068,7 @@ func (am *AgentManager) completeTruncatedFiles(
 			}
 		}
 		if target == nil || target.Content == "" {
+			remainingTruncated = append(remainingTruncated, path)
 			continue
 		}
 
@@ -10098,24 +10102,57 @@ func (am *AgentManager) completeTruncatedFiles(
 		})
 		if err != nil {
 			log.Printf("[chunked] continuation failed for %s in task %s: %v", path, task.ID, err)
+			remainingTruncated = append(remainingTruncated, path)
+			continue
+		}
+		if resp == nil {
+			log.Printf("[chunked] continuation returned nil response for %s in task %s", path, task.ID)
+			remainingTruncated = append(remainingTruncated, path)
 			continue
 		}
 
 		continuation := stripCodeFences(strings.TrimSpace(resp.Content))
 		if continuation == "" {
+			log.Printf("[chunked] continuation returned empty content for %s in task %s", path, task.ID)
+			remainingTruncated = append(remainingTruncated, path)
 			continue
 		}
 
 		// Trim overlap — if the model repeated any of the context lines, drop them.
 		continuation = trimLeadingOverlap(target.Content, continuation)
+		if strings.TrimSpace(continuation) == "" {
+			log.Printf("[chunked] continuation only repeated overlap for %s in task %s", path, task.ID)
+			remainingTruncated = append(remainingTruncated, path)
+			continue
+		}
 
 		target.Content = target.Content + "\n" + continuation
 		target.Size = int64(len(target.Content))
 		log.Printf("[chunked] completed truncated file %s (+%d bytes)", path, len(continuation))
 	}
 
-	// Clear the flag — continuations have been applied.
-	output.TruncatedFiles = nil
+	output.TruncatedFiles = remainingTruncated
+	if len(output.TruncatedFiles) == 0 {
+		output.Messages = removeUnterminatedCodeBlockWarnings(output.Messages)
+	}
+}
+
+func removeUnterminatedCodeBlockWarnings(messages []string) []string {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	filtered := messages[:0]
+	for _, msg := range messages {
+		if strings.Contains(strings.ToLower(msg), "unterminated code block") {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 // applyChunkedRepairToLargeFiles handles solver/reviewer tasks where a target
