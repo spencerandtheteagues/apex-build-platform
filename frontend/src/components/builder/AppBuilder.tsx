@@ -209,7 +209,27 @@ type ProviderModelTier = {
   name: string
 }
 
+type ProviderPanelState = {
+  provider: SupportedBuildProvider
+  configuredModel: ProviderModelTier
+  liveModelId: string
+  liveModelName: string
+  available: boolean
+  status: 'idle' | 'working' | 'thinking' | 'completed' | 'error' | 'unavailable'
+  statusLabel: string
+  agentCount: number
+  activeRoles: string[]
+  totalUpdates: number
+  currentTaskLabel?: string
+  latestThought?: AIThought
+  thoughts: AIThought[]
+  mismatch: boolean
+  multipleLiveModels: boolean
+}
+
 const MODEL_PANEL_ORDER: SupportedBuildProvider[] = ['claude', 'gpt4', 'gemini', 'grok']
+const MAX_AI_THOUGHTS = 240
+const MAX_PROVIDER_THOUGHTS = 36
 
 const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<SupportedBuildProvider, ProviderModelTier>> = {
   fast: {
@@ -286,16 +306,75 @@ const getModelTier = (mode: 'fast' | 'balanced' | 'max') => POWER_MODE_MODEL_CAT
 const getPowerModeModelSummary = (mode: 'fast' | 'balanced' | 'max') =>
   MODEL_PANEL_ORDER.map((provider) => getModelTier(mode)[provider].name).join(' / ')
 
+const canonicalizeModelId = (model?: string) => {
+  const value = String(model || '').trim()
+  if (!value) return ''
+
+  if (value.startsWith('gpt-5.4')) return 'gpt-5.4'
+  if (value.startsWith('gpt-4.1')) return 'gpt-4.1'
+  if (value.startsWith('gpt-4o-mini')) return 'gpt-4o-mini'
+  if (value.startsWith('gpt-4o')) return 'gpt-4o'
+
+  if (value.startsWith('claude-opus-4-6')) return 'claude-opus-4-6'
+  if (value.startsWith('claude-sonnet-4-6')) return 'claude-sonnet-4-6'
+  if (value.startsWith('claude-haiku-4-5')) return 'claude-haiku-4-5-20251001'
+
+  if (value.startsWith('gemini-3.1-pro-preview')) return 'gemini-3.1-pro-preview'
+  if (value.startsWith('gemini-3-flash-preview')) return 'gemini-3-flash-preview'
+  if (value.startsWith('gemini-2.5-flash-lite')) return 'gemini-2.5-flash-lite'
+
+  if (value.startsWith('grok-code-fast-1')) return 'grok-code-fast-1'
+  if (value.startsWith('grok-3-mini')) return 'grok-3-mini'
+  if (value.startsWith('grok-3')) return 'grok-3'
+
+  return value
+}
+
 const getModelDisplayName = (model?: string, fallbackMode: 'fast' | 'balanced' | 'max' = 'fast') => {
-  if (!model) return ''
+  const canonicalModel = canonicalizeModelId(model)
+  if (!canonicalModel) return ''
   for (const tier of Object.values(POWER_MODE_MODEL_CATALOG)) {
     for (const entry of Object.values(tier)) {
-      if (entry.id === model) return entry.name
+      if (entry.id === canonicalModel) return entry.name
     }
   }
-  const provider = normalizeProviderKey(model)
+  const provider = normalizeProviderKey(canonicalModel)
   if (provider) return getModelTier(fallbackMode)[provider].name
-  return model
+  return canonicalModel
+}
+
+const humanizeIdentifier = (value?: string) => {
+  const normalized = String(value || '')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+  if (!normalized) return ''
+  return normalized.replace(/\b\w/g, (match) => match.toUpperCase())
+}
+
+const getThoughtEventLabel = (thought: AIThought) => {
+  switch (thought.eventType) {
+    case 'agent:working':
+      return 'Task Started'
+    case 'agent:thinking':
+      return thought.isInternal ? 'Internal Thinking' : 'Thinking'
+    case 'agent:generating':
+      return 'Generating'
+    case 'agent:retrying':
+      return 'Retrying'
+    case 'agent:provider_switched':
+      return 'Provider Switch'
+    case 'agent:completed':
+      return 'Task Complete'
+    case 'agent:error':
+    case 'agent:generation_failed':
+      return 'Error'
+    case 'code:generated':
+      return 'Files Generated'
+    case 'spend:update':
+      return 'Spend'
+    default:
+      return humanizeIdentifier(thought.type)
+  }
 }
 
 const ThinkingDots: React.FC<{ className?: string }> = ({ className }) => {
@@ -1061,8 +1140,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
   // AI Activity state
   const [aiThoughts, setAiThoughts] = useState<AIThought[]>([])
-  const [showAiActivity, setShowAiActivity] = useState(true)
-  const aiActivityRef = useRef<HTMLDivElement>(null)
+  const providerActivityRefs = useRef<Record<SupportedBuildProvider, HTMLDivElement | null>>({
+    claude: null,
+    gpt4: null,
+    gemini: null,
+    grok: null,
+  })
   const previewPreparedRef = useRef(false)
   const autoOpenedIDEBuildRef = useRef<string | null>(null)
   const [isAutoOpeningIDE, setIsAutoOpeningIDE] = useState(false)
@@ -1074,41 +1157,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [isImporting, setIsImporting] = useState(false)
   const [rollbackCheckpointId, setRollbackCheckpointId] = useState<string | null>(null)
   const [isStartingOver, setIsStartingOver] = useState(false)
-
-  const thoughtGroups = useMemo(() => {
-    const groups = new Map<string, { agent: Agent; thoughts: AIThought[] }>()
-    const agents = buildState?.agents || []
-    for (const agent of agents) {
-      groups.set(agent.id, { agent, thoughts: [] })
-    }
-    for (const thought of aiThoughts) {
-      if (!thought.agentId) continue
-      if (!groups.has(thought.agentId)) {
-        groups.set(thought.agentId, {
-          agent: {
-            id: thought.agentId,
-            role: thought.agentRole,
-            provider: thought.provider,
-            model: thought.model,
-            status: 'working',
-            progress: 0,
-          },
-          thoughts: [],
-        })
-      }
-      const group = groups.get(thought.agentId)
-      if (!group) continue
-      // Keep header metadata synced with latest provider/model updates.
-      if (thought.provider) {
-        group.agent.provider = thought.provider
-      }
-      if (thought.model) {
-        group.agent.model = thought.model
-      }
-      group.thoughts.push(thought)
-    }
-    return Array.from(groups.values())
-  }, [aiThoughts, buildState?.agents])
 
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null)
@@ -1272,6 +1320,93 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         return 'border-gray-600 bg-gray-500/10 text-gray-300'
     }
   }, [qualityGateLabel])
+  const providerPanels = useMemo<ProviderPanelState[]>(() => {
+    const configuredTier = getModelTier(activePowerMode)
+    const availableProviders = new Set(
+      (buildState?.availableProviders || [])
+        .map((provider) => normalizeProviderKey(provider))
+        .filter((provider): provider is SupportedBuildProvider => provider !== null)
+    )
+
+    return MODEL_PANEL_ORDER.map((provider) => {
+      const configuredModel = configuredTier[provider]
+      const providerAgents = (buildState?.agents || []).filter((agent) => normalizeProviderKey(agent.provider) === provider)
+      const thoughts = aiThoughts
+        .filter((thought) => normalizeProviderKey(thought.provider) === provider)
+        .slice(-MAX_PROVIDER_THOUGHTS)
+      const latestThought = thoughts[thoughts.length - 1]
+      const actualModelIds = Array.from(new Set(
+        [
+          ...providerAgents.map((agent) => canonicalizeModelId(agent.model)).filter(Boolean),
+          ...thoughts.map((thought) => canonicalizeModelId(thought.model)).filter(Boolean),
+        ]
+      ))
+      const liveModelId = actualModelIds[actualModelIds.length - 1] || configuredModel.id
+      const available = availableProviders.size === 0 || availableProviders.has(provider)
+
+      const latestTaskDescription = providerAgents
+        .map((agent) => agent.currentTask?.description || agent.currentTask?.type)
+        .find(Boolean)
+      const latestTaskType = latestThought?.taskType || providerAgents
+        .map((agent) => agent.currentTask?.type)
+        .find(Boolean)
+
+      let status: ProviderPanelState['status'] = 'idle'
+      if (!available) {
+        status = 'unavailable'
+      } else if (latestThought?.type === 'error' || providerAgents.some((agent) => agent.status === 'error')) {
+        status = 'error'
+      } else if (isBuildActive && latestThought?.type === 'thinking' && latestThought.isInternal) {
+        status = 'thinking'
+      } else if (providerAgents.some((agent) => agent.status === 'working')) {
+        status = latestThought?.eventType === 'agent:generating' ? 'working' : 'working'
+      } else if (providerAgents.some((agent) => agent.status === 'completed')) {
+        status = 'completed'
+      }
+
+      const statusLabel = status === 'unavailable'
+        ? 'Unavailable'
+        : status === 'error'
+          ? 'Attention Needed'
+          : status === 'thinking'
+            ? 'Thinking Internally'
+            : status === 'working'
+              ? (latestThought?.eventType === 'agent:generating' ? 'Generating' : 'Working')
+              : status === 'completed'
+                ? 'Completed'
+                : isBuildActive
+                  ? 'Standby'
+                  : 'Waiting'
+
+      return {
+        provider,
+        configuredModel,
+        liveModelId,
+        liveModelName: getModelDisplayName(liveModelId, activePowerMode) || configuredModel.name,
+        available,
+        status,
+        statusLabel,
+        agentCount: providerAgents.length,
+        activeRoles: Array.from(new Set(providerAgents.map((agent) => humanizeIdentifier(agent.role)).filter(Boolean))),
+        totalUpdates: thoughts.length,
+        currentTaskLabel: latestThought?.content || latestTaskDescription || (latestTaskType ? humanizeIdentifier(latestTaskType) : undefined),
+        latestThought,
+        thoughts,
+        mismatch: actualModelIds.some((modelId) => modelId !== configuredModel.id),
+        multipleLiveModels: actualModelIds.length > 1,
+      }
+    })
+  }, [activePowerMode, aiThoughts, buildState?.agents, buildState?.availableProviders, isBuildActive])
+
+  useEffect(() => {
+    if (aiThoughts.length === 0) return
+    for (const provider of MODEL_PANEL_ORDER) {
+      providerActivityRefs.current[provider]?.scrollTo({
+        top: providerActivityRefs.current[provider]?.scrollHeight ?? 0,
+        behavior: 'smooth',
+      })
+    }
+  }, [aiThoughts.length])
   const interactionState = buildState?.interaction
   const pendingQuestion = interactionState?.pending_question
   const buildPaused = Boolean(interactionState?.paused)
@@ -1322,7 +1457,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     setProposedEdits([])
     setShowDiffReview(true)
     setAiThoughts([])
-    setShowAiActivity(true)
     setShowImportModal(false)
     setShowGitHubImport(false)
     setReplitUrl('')
@@ -1764,6 +1898,19 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             progress: Math.max(prev.progress, computeAgentProgressFloor(nextAgents)),
           }
         })
+        addAiThought(
+          message.agent_id,
+          data.agent_role,
+          data.provider,
+          data.model,
+          'action',
+          data.description || `Working on ${humanizeIdentifier(data.task_type) || 'current task'}`,
+          {
+            eventType: 'agent:working',
+            taskId: data.task_id,
+            taskType: data.task_type,
+          }
+        )
         break
 
       case 'agent:completed':
@@ -1786,6 +1933,19 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             progress: Math.max(prev.progress, computeAgentProgressFloor(nextAgents)),
           }
         })
+        addAiThought(
+          message.agent_id,
+          data.agent_role,
+          data.provider,
+          data.model,
+          'output',
+          data.content || `${humanizeIdentifier(data.agent_role) || 'Agent'} completed the current task`,
+          {
+            eventType: 'agent:completed',
+            taskId: data.task_id,
+            taskType: data.task_type,
+          }
+        )
         break
 
       case 'agent:error':
@@ -1808,6 +1968,19 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             progress: Math.max(prev.progress, computeAgentProgressFloor(nextAgents)),
           }
         })
+        addAiThought(
+          message.agent_id,
+          data.agent_role,
+          data.provider,
+          data.model,
+          'error',
+          data.error || 'Agent error',
+          {
+            eventType: 'agent:error',
+            taskId: data.task_id,
+            taskType: data.task_type,
+          }
+        )
         break
 
       case 'file:created':
@@ -1990,7 +2163,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             ),
           }
         })
-        addAiThought(message.agent_id, data.agent_role, data.provider, data.model, 'thinking', data.content)
+        addAiThought(message.agent_id, data.agent_role, data.provider, data.model, 'thinking', data.content, {
+          eventType: 'agent:thinking',
+          taskId: data.task_id,
+          taskType: data.task_type,
+          isInternal: true,
+        })
         break
 
       case 'agent:action':
@@ -2005,7 +2183,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             ),
           }
         })
-        addAiThought(message.agent_id, data.agent_role, data.provider, data.model, 'action', data.content)
+        addAiThought(message.agent_id, data.agent_role, data.provider, data.model, 'action', data.content, {
+          eventType: 'agent:action',
+          taskId: data.task_id,
+          taskType: data.task_type,
+        })
         break
 
       case 'agent:output':
@@ -2020,7 +2202,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             ),
           }
         })
-        addAiThought(message.agent_id, data.agent_role, data.provider, data.model, 'output', data.content)
+        addAiThought(message.agent_id, data.agent_role, data.provider, data.model, 'output', data.content, {
+          eventType: 'agent:output',
+          taskId: data.task_id,
+          taskType: data.task_type,
+          filesCount: typeof data.files_count === 'number' ? data.files_count : undefined,
+        })
         break
 
       case 'message:error':
@@ -2099,6 +2286,21 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           }
         })
         addSystemMessage(`AI generation failed for ${data.agent_role || 'agent'} (${data.provider || 'unknown'}): ${data.error || 'Unknown error'}`)
+        addAiThought(
+          message.agent_id,
+          data.agent_role,
+          data.provider,
+          data.model,
+          'error',
+          data.error || 'Generation failed',
+          {
+            eventType: 'agent:generation_failed',
+            taskId: data.task_id,
+            taskType: data.task_type,
+            retryCount: Number.isFinite(Number(data.retry_count ?? data.attempt)) ? Number(data.retry_count ?? data.attempt) : undefined,
+            maxRetries: Number.isFinite(Number(data.max_retries)) ? Number(data.max_retries) : undefined,
+          }
+        )
         {
           const retryCountRaw = data.retry_count ?? data.attempt
           const maxRetriesRaw = data.max_retries
@@ -2136,7 +2338,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           data.provider,
           data.model,
           'action',
-          data.content || `Generating code with ${data.provider}...`
+          data.content || `Generating code with ${data.provider}...`,
+          {
+            eventType: 'agent:generating',
+            taskId: data.task_id,
+            taskType: data.task_type,
+          }
         )
         break
 
@@ -2152,6 +2359,21 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             ),
           }
         })
+        addAiThought(
+          message.agent_id,
+          data.agent_role,
+          data.provider,
+          data.model,
+          'action',
+          data.message || `Retrying ${humanizeIdentifier(data.task_type) || 'task'}`,
+          {
+            eventType: 'agent:retrying',
+            taskId: data.task_id,
+            taskType: data.task_type,
+            retryCount: Number.isFinite(Number(data.retry_count ?? data.attempt)) ? Number(data.retry_count ?? data.attempt) : undefined,
+            maxRetries: Number.isFinite(Number(data.max_retries)) ? Number(data.max_retries) : undefined,
+          }
+        )
         {
           const retryCountRaw = data.retry_count ?? data.attempt
           const maxRetriesRaw = data.max_retries
@@ -2192,7 +2414,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             data.provider || '',
             data.model,
             'output',
-            outputSummary
+            outputSummary,
+            {
+              eventType: 'code:generated',
+              taskId: data.task_id,
+              taskType: data.task_type,
+              files: fileList,
+              filesCount: typeof data.files_count === 'number' ? data.files_count : fileList.length,
+            }
           )
         }
         if (data.files && Array.isArray(data.files)) {
@@ -2245,11 +2474,33 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             )
           }
         })
+        addAiThought(
+          message.agent_id,
+          data.agent_role,
+          data.new_provider || data.provider,
+          data.model,
+          'action',
+          `${humanizeIdentifier(data.agent_role) || 'Agent'} switched provider from ${humanizeIdentifier(data.old_provider) || 'unknown'} to ${humanizeIdentifier(data.new_provider) || 'unknown'}`,
+          {
+            eventType: 'agent:provider_switched',
+          }
+        )
         break
 
       case 'spend:update':
         if (data.billed_cost) {
           addSystemMessage(`Agent ${data.agent_role || 'unknown'} spent $${Number(data.billed_cost).toFixed(4)}`)
+          addAiThought(
+            message.agent_id,
+            data.agent_role || 'agent',
+            data.provider || '',
+            data.model,
+            'output',
+            `Spend recorded: $${Number(data.billed_cost).toFixed(4)} billed`,
+            {
+              eventType: 'spend:update',
+            }
+          )
         }
         break
 
@@ -2397,7 +2648,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     provider: string,
     model: string | undefined,
     type: AIThought['type'],
-    content: string
+    content: string,
+    metadata: Partial<Omit<AIThought, 'id' | 'agentId' | 'agentRole' | 'provider' | 'model' | 'type' | 'content' | 'timestamp'>> = {}
   ) => {
     const knownAgent = buildState?.agents.find(a => a.id === agentId)
     const thought: AIThought = {
@@ -2408,15 +2660,20 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       model: model || knownAgent?.model,
       type,
       content: content || `${agentRole || knownAgent?.role || 'Agent'} update`,
+      eventType: metadata.eventType,
+      taskId: metadata.taskId,
+      taskType: metadata.taskType,
+      files: metadata.files,
+      filesCount: metadata.filesCount,
+      retryCount: metadata.retryCount,
+      maxRetries: metadata.maxRetries,
+      isInternal: metadata.isInternal,
       timestamp: new Date(),
     }
     setAiThoughts(prev => {
       const updated = [...prev, thought]
-      return updated.slice(-100)
+      return updated.slice(-MAX_AI_THOUGHTS)
     })
-    setTimeout(() => {
-      aiActivityRef.current?.scrollTo({ top: aiActivityRef.current.scrollHeight, behavior: 'smooth' })
-    }, 50)
   }
 
   // Add system message
@@ -3079,7 +3336,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
     addSystemMessage(`Starting ${buildMode} build for: "${appDescription}"`)
     addSystemMessage(`Tech stack: ${buildTechStackSummary()}`)
-    addSystemMessage(`AI Power: ${powerMode === 'max' ? 'MAX POWER (Opus 4.6 / GPT-5.2 Codex / Gemini 3 Pro)' : powerMode === 'balanced' ? 'Balanced (Sonnet 4.5 / GPT-5 / Gemini 3 Flash)' : 'Fast & Cheap (Haiku 4.5 / GPT-4o Mini / Flash Lite)'}`)
+    addSystemMessage(`AI Power: ${powerMode === 'max' ? 'MAX POWER' : powerMode === 'balanced' ? 'Balanced' : 'Fast'} (${getPowerModeModelSummary(powerMode)})`)
 
     try {
       // Preflight: verify providers are available before starting build.
@@ -3651,9 +3908,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   </h3>
                   <div className="grid grid-cols-3 gap-3">
                     {([
-                      { id: 'fast' as const, label: 'Fast & Cheap', icon: <Zap className="w-5 h-5" />, desc: 'Haiku 4.5 / GPT-4o Mini / Gemini Flash Lite', color: 'green', cost: '1.5x', multiplier: '1.5x', perBuild: 'Lowest cost' },
-                      { id: 'balanced' as const, label: 'Balanced', icon: <Sparkles className="w-5 h-5" />, desc: 'Sonnet 4.5 / GPT-5 / Gemini 3 Flash', color: 'yellow', cost: '1.68x', multiplier: '1.68x', perBuild: 'Best balance' },
-                      { id: 'max' as const, label: 'Max Power', icon: <Rocket className="w-5 h-5" />, desc: 'Opus 4.6 / GPT-5.2 Codex / Gemini 3 Pro', color: 'red', cost: '1.88x', multiplier: '1.88x', perBuild: 'Highest quality' },
+                      { id: 'fast' as const, label: 'Fast & Cheap', icon: <Zap className="w-5 h-5" />, desc: getPowerModeModelSummary('fast'), color: 'green', cost: '1.5x', multiplier: '1.5x', perBuild: 'Lowest cost' },
+                      { id: 'balanced' as const, label: 'Balanced', icon: <Sparkles className="w-5 h-5" />, desc: getPowerModeModelSummary('balanced'), color: 'yellow', cost: '1.68x', multiplier: '1.68x', perBuild: 'Best balance' },
+                      { id: 'max' as const, label: 'Max Power', icon: <Rocket className="w-5 h-5" />, desc: getPowerModeModelSummary('max'), color: 'red', cost: '1.88x', multiplier: '1.88x', perBuild: 'Highest quality' },
                     ]).map((mode) => (
                       <button
                         key={mode.id}
@@ -3703,9 +3960,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     <p className="text-[11px] text-gray-500 leading-relaxed">
                       <strong className="text-gray-400">Pricing:</strong> Cost = API cost × 50% margin × power surcharge.
                       Higher power modes use premium models and more orchestration.
-                      {powerMode === 'max' && <span className="text-red-400/80"> Max Power models: Opus 4.6 ($15/$75 per MTok), GPT‑5.2 Codex ($8/$24), Gemini 3 Pro ($2/$6).</span>}
-                      {powerMode === 'balanced' && <span className="text-yellow-400/80"> Balanced models: Sonnet 4.5 ($3/$15 per MTok), GPT‑5 ($5/$15), Gemini 3 Flash ($0.50/$1.50).</span>}
-                      {powerMode === 'fast' && <span className="text-green-400/80"> Fast models: Haiku 4.5 ($0.25/$1.25 per MTok), GPT‑4o Mini ($0.15/$0.60), Gemini Flash Lite ($0.075/$0.30).</span>}
+                      {powerMode === 'max' && <span className="text-red-400/80"> Max Power models: {getPowerModeModelSummary('max')}.</span>}
+                      {powerMode === 'balanced' && <span className="text-yellow-400/80"> Balanced models: {getPowerModeModelSummary('balanced')}.</span>}
+                      {powerMode === 'fast' && <span className="text-green-400/80"> Fast models: {getPowerModeModelSummary('fast')}.</span>}
                       <span className="text-gray-500"> BYOK uses your own keys plus a small routing fee ($0.25 per MTok).</span>
                     </p>
                   </div>
@@ -3832,6 +4089,188 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         ) : (
           // Build Progress View
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
+            <div className="lg:col-span-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-4">
+                {providerPanels.map((panel) => {
+                  const ui = PROVIDER_UI[panel.provider]
+                  const isLive = panel.status === 'thinking' || panel.status === 'working'
+                  const statusBadgeClass =
+                    panel.status === 'error'
+                      ? 'border-red-500/50 bg-red-500/10 text-red-200'
+                      : panel.status === 'unavailable'
+                        ? 'border-gray-600 bg-gray-800/70 text-gray-300'
+                        : panel.status === 'completed'
+                          ? 'border-green-500/50 bg-green-500/10 text-green-200'
+                          : isLive
+                            ? 'border-white/20 bg-white/10 text-white'
+                            : 'border-gray-700 bg-gray-900/60 text-gray-300'
+
+                  return (
+                    <Card
+                      key={panel.provider}
+                      variant="cyberpunk"
+                      className={cn(
+                        'border-2 backdrop-blur-sm overflow-hidden',
+                        ui.cardClass,
+                        isLive && ui.activeClass,
+                        panel.status === 'error' && 'border-red-500/60 shadow-[0_0_24px_rgba(239,68,68,0.18)]',
+                        panel.mismatch && panel.status !== 'error' && 'border-amber-500/60 shadow-[0_0_24px_rgba(245,158,11,0.12)]'
+                      )}
+                    >
+                      <CardHeader className="pb-4 border-b border-white/10">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={cn('h-2.5 w-2.5 rounded-full', isLive ? `${ui.dotClass} animate-pulse` : 'bg-gray-600')} />
+                              <CardTitle className={cn('text-lg', ui.titleClass)}>
+                                {ui.label}
+                              </CardTitle>
+                              <Badge variant="outline" className={cn('text-[10px] uppercase tracking-[0.22em]', ui.badgeClass)}>
+                                {activePowerMode === 'max' ? 'Max Power' : activePowerMode === 'balanced' ? 'Balanced' : 'Fast'}
+                              </Badge>
+                              <Badge variant="outline" className={cn('text-[10px]', statusBadgeClass)}>
+                                {panel.statusLabel}
+                              </Badge>
+                            </div>
+                            <div className="mt-2 text-xs text-gray-400">
+                              {panel.activeRoles.length > 0
+                                ? `Roles: ${panel.activeRoles.join(' • ')}`
+                                : `No ${ui.label} agent assigned yet`}
+                            </div>
+                          </div>
+                          <div className="text-right text-[11px] text-gray-500">
+                            <div>{panel.agentCount} agent{panel.agentCount === 1 ? '' : 's'}</div>
+                            <div>{panel.totalUpdates} updates</div>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="pt-4">
+                        <div className="grid grid-cols-1 gap-3">
+                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                            <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-3">
+                              <div className="text-[10px] uppercase tracking-[0.22em] text-gray-500">Expected Model</div>
+                              <div className="mt-1 text-sm font-semibold text-white">{panel.configuredModel.name}</div>
+                              <div className="mt-1 text-[11px] font-mono text-gray-500 break-all">{panel.configuredModel.id}</div>
+                            </div>
+                            <div className={cn(
+                              'rounded-xl border px-3 py-3',
+                              panel.mismatch ? 'border-amber-500/40 bg-amber-950/20' : 'border-white/10 bg-black/30'
+                            )}>
+                              <div className="flex items-center gap-2">
+                                <div className="text-[10px] uppercase tracking-[0.22em] text-gray-500">Live Model</div>
+                                {panel.mismatch && (
+                                  <Badge variant="outline" className="border-amber-500/50 bg-amber-500/10 text-[10px] text-amber-200">
+                                    Mismatch
+                                  </Badge>
+                                )}
+                                {panel.multipleLiveModels && (
+                                  <Badge variant="outline" className="border-red-500/50 bg-red-500/10 text-[10px] text-red-200">
+                                    Multiple
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="mt-1 text-sm font-semibold text-white">{panel.liveModelName}</div>
+                              <div className="mt-1 text-[11px] font-mono text-gray-500 break-all">{panel.liveModelId}</div>
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-[10px] uppercase tracking-[0.22em] text-gray-500">Live Telemetry</div>
+                              {panel.latestThought?.taskType && (
+                                <Badge variant="outline" className="border-white/10 bg-white/5 text-[10px] text-gray-300">
+                                  {humanizeIdentifier(panel.latestThought.taskType)}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="mt-2 text-sm text-gray-200">
+                              {panel.currentTaskLabel || (panel.available ? 'Waiting for live model activity.' : 'Provider not available for this build.')}
+                            </div>
+                            {panel.status === 'thinking' && (
+                              <div className="mt-3 flex items-center gap-2 text-sm text-white">
+                                <span>Thinking internally</span>
+                                <ThinkingDots className={ui.titleClass} />
+                              </div>
+                            )}
+                          </div>
+
+                          <div
+                            ref={(node) => {
+                              providerActivityRefs.current[panel.provider] = node
+                            }}
+                            className="h-[26rem] overflow-y-auto pr-1 space-y-3 scrollbar-thin scrollbar-track-black scrollbar-thumb-white/10"
+                          >
+                            {panel.thoughts.length === 0 ? (
+                              <div className="rounded-xl border border-dashed border-white/10 bg-black/20 px-4 py-6 text-sm text-gray-400">
+                                {panel.available
+                                  ? 'No live activity yet. This card will stream every task, retry, generation step, and internal-thinking status for this provider.'
+                                  : 'This provider is currently unavailable, so no telemetry will appear here until it is enabled for the build.'}
+                              </div>
+                            ) : (
+                              panel.thoughts.map((thought) => (
+                                <div
+                                  key={thought.id}
+                                  className={cn(
+                                    'rounded-xl border px-3 py-3 transition-all',
+                                    thought.type === 'error' && 'border-red-500/40 bg-red-950/25',
+                                    thought.type === 'output' && 'border-green-500/30 bg-green-950/20',
+                                    thought.type === 'action' && 'border-cyan-500/30 bg-cyan-950/20',
+                                    thought.type === 'thinking' && !thought.isInternal && 'border-sky-500/20 bg-sky-950/15',
+                                    thought.isInternal && 'border-white/10 bg-white/[0.04]'
+                                  )}
+                                >
+                                  <div className="flex items-center gap-2 flex-wrap text-[10px]">
+                                    <span className="font-mono text-gray-500">
+                                      {thought.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                    </span>
+                                    <Badge variant="outline" className="border-white/10 bg-white/5 text-[10px] text-gray-200">
+                                      {getThoughtEventLabel(thought)}
+                                    </Badge>
+                                    {thought.taskType && (
+                                      <Badge variant="outline" className="border-white/10 bg-white/5 text-[10px] text-gray-400">
+                                        {humanizeIdentifier(thought.taskType)}
+                                      </Badge>
+                                    )}
+                                    {thought.retryCount !== undefined && thought.maxRetries !== undefined && (
+                                      <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-200">
+                                        Attempt {thought.retryCount}/{thought.maxRetries}
+                                      </Badge>
+                                    )}
+                                    {thought.isInternal && (
+                                      <Badge variant="outline" className="border-white/15 bg-white/5 text-[10px] text-white">
+                                        Internal
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="mt-2 text-sm leading-relaxed text-gray-100">
+                                    {thought.content}
+                                  </div>
+                                  {(thought.filesCount !== undefined || (thought.files && thought.files.length > 0)) && (
+                                    <div className="mt-2 text-xs text-gray-400">
+                                      {thought.filesCount !== undefined && (
+                                        <span>{thought.filesCount} file{thought.filesCount === 1 ? '' : 's'}</span>
+                                      )}
+                                      {thought.files && thought.files.length > 0 && (
+                                        <span>
+                                          {thought.filesCount !== undefined ? ' • ' : ''}
+                                          {thought.files.slice(0, 3).join(', ')}
+                                          {thought.files.length > 3 ? ` (+${thought.files.length - 3} more)` : ''}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+              </div>
+            </div>
+
             {/* Left Column - Agents & Status */}
             <div className="lg:col-span-1 space-y-6">
               {/* Build Status */}
@@ -4004,11 +4443,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                       })}
                     </div>
                     <div className="mt-2 text-[10px] text-gray-500">
-                      {activePowerMode === 'max'
-                        ? 'Opus 4.6 / GPT-5.2 Codex / Gemini 3 Pro'
-                        : activePowerMode === 'balanced'
-                          ? 'Sonnet 4.5 / GPT-5 / Gemini 3 Flash'
-                          : 'Haiku 4.5 / GPT-4o Mini / Gemini Flash Lite'}
+                      {getPowerModeModelSummary(activePowerMode)}
                     </div>
                   </div>
 
@@ -4017,26 +4452,19 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     <div className="mt-5 pt-5 border-t border-gray-800">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs text-gray-500 font-medium">AI Providers:</span>
-                        {buildState.availableProviders.map((provider) => (
-                          <Badge
-                            key={provider}
-                            variant="outline"
-                            className={cn(
-                              'text-xs',
-                              provider === 'claude' && 'border-orange-500/60 text-orange-400 bg-orange-500/10',
-                              (provider === 'gpt' || provider === 'gpt4') && 'border-green-500/60 text-green-400 bg-green-500/10',
-                              provider === 'gemini' && 'border-blue-500/60 text-blue-400 bg-blue-500/10'
-                            )}
-                          >
-                            {provider === 'claude'
-                              ? 'Claude'
-                              : (provider === 'gpt' || provider === 'gpt4')
-                                ? 'GPT-5'
-                                : provider === 'gemini'
-                                  ? 'Gemini'
-                                  : provider}
-                          </Badge>
-                        ))}
+                        {buildState.availableProviders.map((provider) => {
+                          const normalizedProvider = normalizeProviderKey(provider)
+                          const ui = normalizedProvider ? PROVIDER_UI[normalizedProvider] : null
+                          return (
+                            <Badge
+                              key={provider}
+                              variant="outline"
+                              className={cn('text-xs', ui?.badgeClass)}
+                            >
+                              {ui?.label || humanizeIdentifier(provider)}
+                            </Badge>
+                          )
+                        })}
                       </div>
                     </div>
                   )}
@@ -4114,101 +4542,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 </Card>
               )}
 
-              {/* AI Activity Panel */}
-              <Card variant="cyberpunk" className="border-2 border-purple-900/60 bg-black/60 backdrop-blur-sm">
-                <CardHeader className="pb-4 border-b border-purple-900/40">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-xl flex items-center gap-3">
-                      <Bot className="w-7 h-7 text-purple-400 animate-pulse" />
-                      AI Thinking
-                    </CardTitle>
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => setShowAiActivity(!showAiActivity)}
-                      className="hover:bg-purple-900/30"
-                    >
-                      <Eye className="w-5 h-5" />
-                    </Button>
-                  </div>
-                </CardHeader>
-                {showAiActivity && (
-                  <CardContent className="pt-5">
-                    <div
-                      ref={aiActivityRef}
-                      className="space-y-4 max-h-72 overflow-y-auto scrollbar-thin scrollbar-thumb-purple-900 scrollbar-track-gray-900"
-                    >
-                      {thoughtGroups.length === 0 ? (
-                        <div className="text-center text-gray-500 py-10">
-                          <Bot className="w-14 h-14 mx-auto mb-4 opacity-50 animate-pulse" />
-                          <p className="font-medium">Waiting for AI activity...</p>
-                        </div>
-                      ) : (
-                        thoughtGroups.map((group) => (
-                          <div
-                            key={group.agent.id}
-                            className="p-3 rounded-xl border border-purple-900/40 bg-black/40"
-                          >
-                            <div className="flex items-center gap-2 mb-3">
-                              <span className="text-xs font-semibold text-gray-300">
-                                {getAgentEmoji(group.agent.role)} {group.agent.role}
-                              </span>
-                              <Badge variant="outline" size="xs" className="text-[10px] uppercase tracking-wide">
-                                {group.agent.provider}
-                              </Badge>
-                              <span className="text-[10px] text-gray-500 font-mono">
-                                {group.agent.model || 'auto'}
-                              </span>
-                              <span className="ml-auto text-[10px] text-gray-600">
-                                {group.thoughts.length} updates
-                              </span>
-                            </div>
-                            {group.thoughts.length === 0 ? (
-                              <div className="text-xs text-gray-500 italic">No activity yet.</div>
-                            ) : (
-                              <div className="space-y-2">
-                                {group.thoughts.map((thought) => (
-                                  <div
-                                    key={thought.id}
-                                    className={cn(
-                                      'p-3 rounded-lg text-sm border-l-4 transition-all',
-                                      thought.type === 'thinking' && 'bg-purple-900/30 border-purple-500',
-                                      thought.type === 'action' && 'bg-cyan-900/30 border-cyan-500',
-                                      thought.type === 'output' && 'bg-green-900/30 border-green-500',
-                                      thought.type === 'error' && 'bg-red-900/30 border-red-500'
-                                    )}
-                                    style={{ animation: 'fade-in 0.2s ease-out' }}
-                                  >
-                                    <div className="flex items-center gap-2 mb-1.5">
-                                      <span className="text-[10px] text-gray-500 font-mono">
-                                        {thought.timestamp.toLocaleTimeString()}
-                                      </span>
-                                      {thought.model && (
-                                        <span className="text-[10px] text-gray-500 font-mono">
-                                          {thought.model}
-                                        </span>
-                                      )}
-                                    </div>
-                                    <p className={cn(
-                                      'text-xs leading-relaxed',
-                                      thought.type === 'thinking' && 'text-purple-300 italic',
-                                      thought.type === 'action' && 'text-cyan-300',
-                                      thought.type === 'output' && 'text-green-300 font-mono',
-                                      thought.type === 'error' && 'text-red-300'
-                                    )}>
-                                      {thought.content}
-                                    </p>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </CardContent>
-                )}
-              </Card>
             </div>
 
             {/* Middle/Right Column - Activity & Chat */}
