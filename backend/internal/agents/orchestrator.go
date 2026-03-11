@@ -905,38 +905,18 @@ func (o *BuildOrchestrator) waitForTasksOfType(build *Build, state *Orchestratio
 // completeOrchestration marks the build as complete
 func (o *BuildOrchestrator) completeOrchestration(build *Build, state *OrchestrationState) {
 	state.Phase = PhaseComplete
-	o.broadcastPhase(build.ID, state.Phase, "Build completed successfully!")
+	o.broadcastPhase(build.ID, state.Phase, "Generation complete — running final validation...")
 
 	build.mu.Lock()
-	build.Status = BuildCompleted
-	build.Progress = 100
-	now := time.Now()
-	build.CompletedAt = &now
-	build.UpdatedAt = now
+	if build.Status != BuildFailed && build.Status != BuildCancelled {
+		if build.Progress < 95 {
+			build.Progress = 95
+		}
+		build.UpdatedAt = time.Now()
+	}
 	build.mu.Unlock()
 
-	// Collect all generated files as safety net for the frontend
-	allFiles := o.manager.collectGeneratedFiles(build)
-
-	// Broadcast completion with full file manifest
-	o.hub.Broadcast(build.ID, &WSMessage{
-		Type:      WSBuildCompleted,
-		BuildID:   build.ID,
-		Timestamp: time.Now(),
-		Data: map[string]any{
-			"status":      string(BuildCompleted),
-			"progress":    100,
-			"duration_ms": time.Since(state.StartTime).Milliseconds(),
-			"message":     "Build completed successfully!",
-			"files_count": len(allFiles),
-			"files":       allFiles,
-		},
-	})
-
-	log.Printf("Orchestrator: Build %s completed in %v (%d files)", build.ID, time.Since(state.StartTime), len(allFiles))
-
-	// Persist to database
-	o.manager.persistCompletedBuild(build, allFiles)
+	o.manager.checkBuildCompletion(build)
 }
 
 // fsmTransition safely transitions the FSM if it exists. Logs warnings on error.
