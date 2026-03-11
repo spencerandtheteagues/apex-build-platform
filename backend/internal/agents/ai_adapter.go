@@ -22,7 +22,7 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 		PowerFast:     "claude-haiku-4-5-20251001",
 	},
 	ai.ProviderGPT4: {
-		PowerMax:      "gpt-5.2-codex",
+		PowerMax:      "gpt-5.4",
 		PowerBalanced: "gpt-5",
 		PowerFast:     "gpt-4o-mini",
 	},

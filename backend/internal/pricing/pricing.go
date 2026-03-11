@@ -84,7 +84,7 @@ func newEngineFromEnv() *Engine {
 			"gpt4": {
 				Default: ModelPricing{InputPer1M: 5.00, OutputPer1M: 15.00},
 				Models: map[string]ModelPricing{
-					"gpt-5.2-codex": {InputPer1M: 8.00, OutputPer1M: 24.00},
+					"gpt-5.4": {InputPer1M: 8.00, OutputPer1M: 24.00},
 					"gpt-5":         {InputPer1M: 5.00, OutputPer1M: 15.00},
 					"gpt-4o-mini":   {InputPer1M: 0.15, OutputPer1M: 0.60},
 				},
@@ -212,7 +212,7 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 		return "claude-haiku-4-5-20251001"
 	case "gpt4":
 		if mode == ModeMax {
-			return "gpt-5.2-codex"
+			return "gpt-5.4"
 		}
 		if mode == ModeBalanced {
 			return "gpt-5"

@@ -647,7 +647,7 @@ func GetAvailableModels() map[string][]ModelInfo {
 			{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", Speed: "fast", CostTier: "low", Description: "Fast and affordable"},
 		},
 		"gpt4": {
-			{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Speed: "medium", CostTier: "high", Description: "Most powerful — agentic coding"},
+			{ID: "gpt-5.4", Name: "GPT-5.4", Speed: "medium", CostTier: "high", Description: "Most powerful — agentic coding"},
 			{ID: "gpt-5", Name: "GPT-5", Speed: "medium", CostTier: "medium", Description: "Strong general purpose"},
 			{ID: "gpt-4o-mini", Name: "GPT-4o Mini", Speed: "fast", CostTier: "low", Description: "Fast and cheap"},
 		},

@@ -122,13 +122,13 @@ func (ear *EnhancedAIRouter) initializeProviders() {
 		},
 	}
 
-	// GPT-5.2 Codex - Best for code generation and documentation
+	// GPT-5.4 - Best for code generation and documentation
 	ear.providers["gpt5"] = &GPTProvider{
-		Name:    "GPT-5.2 Codex",
-		Version: "gpt-5.2-codex",
+		Name:    "GPT-5.4",
+		Version: "gpt-5.4",
 		Capabilities: &ProviderCapabilities{
-			Name:                "GPT-5.2 Codex",
-			Version:             "5.2",
+			Name:                "GPT-5.4",
+			Version:             "5.4",
 			MaxTokens:           128000,
 			SupportedLanguages:  []string{"go", "typescript", "javascript", "python", "rust", "java", "cpp", "html", "css"},
 			Strengths:           []string{"code_generation", "documentation", "unit_testing", "api_design"},

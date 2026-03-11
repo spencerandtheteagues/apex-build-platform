@@ -554,7 +554,7 @@ func (o *OpenAIClient) calculateCost(inputTokens, outputTokens int, model string
 	var inputCostPer1K, outputCostPer1K float64
 
 	switch model {
-	case "gpt-5.2-codex":
+	case "gpt-5.4", "gpt-5.4-pro", "gpt-5.4-2026-03-05":
 		inputCostPer1K = 0.008
 		outputCostPer1K = 0.024
 	case "gpt-5":
