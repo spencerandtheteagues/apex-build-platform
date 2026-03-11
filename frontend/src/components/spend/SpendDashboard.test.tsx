@@ -52,7 +52,7 @@ describe('SpendDashboard', () => {
                 id: 1,
                 created_at: '2026-02-26T10:00:00Z',
                 provider: 'claude',
-                model: 'claude-sonnet-4-5',
+                model: 'claude-sonnet-4-6',
                 agent_role: 'architect',
                 build_id: 'b-123',
                 input_tokens: 1000,

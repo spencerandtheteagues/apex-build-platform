@@ -68,7 +68,7 @@ const FEATURES = [
     sub: 'Every other AI platform hides the bill until you\'re shocked at month-end. APEX-BUILD shows you a live cost ticker — per agent, per model, per token — as the build runs. You always know what you\'re spending before it\'s spent.',
     points: [
       { icon: '📊', label: 'Per-agent breakdown', desc: 'Cost attributed to each specialist agent individually. See exactly what the Architect spent vs. the Backend agent vs. the Reviewer.' },
-      { icon: '💡', label: 'Per-model accuracy', desc: 'Each API call is billed at the actual provider rate — GPT-5 at $2.50/1M, Claude Haiku at $0.25/1M. No blended rates. No averaging.' },
+      { icon: '💡', label: 'Per-model accuracy', desc: 'Each API call is billed against the exact model tier in use — GPT-5.4, GPT-4.1, Claude Haiku, Gemini 3 Flash Preview, and Grok 3 are all tracked separately. No blended rates. No averaging.' },
       { icon: '🎯', label: 'Budget controls', desc: 'Set a spend limit per session or per project. Builds stop cleanly at the limit — no surprise overages.' },
       { icon: '📒', label: 'Immutable credit ledger', desc: 'Every credit deduction is logged with timestamp, agent, model, and token count. Full audit trail, always.' },
       { icon: '📈', label: 'Usage analytics', desc: 'See your spending patterns over time — by day, by project, by AI provider. Optimize where your credits go.' },
@@ -98,17 +98,17 @@ const FEATURES = [
     id: 'ai',
     icon: Cpu,
     color: '#D97757',
-    bullet: 'Claude · GPT-5 · Gemini · Grok · Ollama — choose your AI',
+    bullet: 'Claude · OpenAI · Gemini · Grok · Ollama — choose your AI',
     heading: 'Every Major AI Model. One Platform.',
     sub: 'Different tasks call for different models. APEX-BUILD routes each agent\'s work to the right provider automatically based on your power mode — or you override manually. Switch mid-build. Mix providers. The platform handles the rest.',
     points: [
       { icon: '🟠', label: 'Claude (Anthropic)', desc: 'Best-in-class for code review, documentation, and complex multi-step reasoning. Haiku (fast), Sonnet (balanced), and Opus (max) available.' },
-      { icon: '🟢', label: 'GPT-5 (OpenAI)', desc: 'Strong code generation with fast iteration loops. Full GPT-5 for flagship performance, GPT-4o-mini for cost-efficient tasks.' },
-      { icon: '🔵', label: 'Gemini (Google)', desc: 'Best for long-context tasks and multi-modal inputs. Flash-Lite (0.075¢/1M), Flash (0.50¢/1M), and Pro (2¢/1M).' },
-      { icon: '⬜', label: 'Grok (xAI)', desc: 'Fast, sharp reasoning. Great for logic-heavy and analysis tasks. Grok-4 (flagship), Grok-4-Fast (speed), Grok-3-Mini (budget).' },
+      { icon: '🟢', label: 'OpenAI', desc: 'Strong code generation with fast iteration loops. GPT-4o Mini handles fast work, GPT-4.1 covers balanced builds, and GPT-5.4 is reserved for max power.' },
+      { icon: '🔵', label: 'Gemini (Google)', desc: 'Best for long-context tasks and multi-modal inputs. Gemini 2.5 Flash Lite is the fast tier, Gemini 3 Flash Preview is balanced, and Gemini 3.1 Pro Preview is max.' },
+      { icon: '⬜', label: 'Grok (xAI)', desc: 'Sharp reasoning with a coding-focused max tier. Grok 3 Mini is fast, Grok 3 is balanced, and Grok Code Fast 1 is the current max model.' },
       { icon: '🟣', label: 'Ollama (Local / Free)', desc: 'Run Llama 3, Mistral, or any open-source model locally. Zero API cost. Complete privacy — your data never leaves your machine.' },
     ],
-    useCase: 'Power mode: Fast uses Haiku + GPT-4o-mini for boilerplate. Balanced uses Sonnet + GPT-5 for core logic. Max routes everything through Opus + GPT-5 + Grok-4 with full validation loops. Pick the tradeoff that fits your budget.',
+    useCase: 'Power mode: Fast uses Haiku 4.5 + GPT-4o Mini + Gemini 2.5 Flash Lite + Grok 3 Mini. Balanced uses Sonnet 4.6 + GPT-4.1 + Gemini 3 Flash Preview + Grok 3. Max uses Opus 4.6 + GPT-5.4 + Gemini 3.1 Pro Preview + Grok Code Fast 1. Pick the tradeoff that fits your budget.',
     visual: 'ai',
   },
   {
@@ -138,7 +138,7 @@ const FEATURES = [
     points: [
       { icon: '💰', label: 'Zero markup on API cost', desc: 'BYOK users pay exactly what the AI provider charges. Our fee is $0.25 per 1M tokens — covering infrastructure and orchestration.' },
       { icon: '🔐', label: 'AES-256 encrypted storage', desc: 'Your keys are encrypted at rest with a unique per-user master key. Plaintext never touches the database. Never transmitted in logs.' },
-      { icon: '🎛', label: 'Per-provider flexibility', desc: 'Use your Anthropic key for Claude agents, your OpenAI key for GPT-5 agents — mix and match keys per provider independently.' },
+      { icon: '🎛', label: 'Per-provider flexibility', desc: 'Use your Anthropic key for Claude agents, your OpenAI key for GPT-5.4 or GPT-4.1 agents, and separate keys for Gemini or Grok. Mix and match providers independently.' },
       { icon: '✅', label: 'Instant validation', desc: 'Keys are validated on entry. APEX-BUILD alerts you if a key expires, hits rate limits, or runs out of credits — before a build fails mid-run.' },
       { icon: '📊', label: 'BYOK usage analytics', desc: 'See token usage per provider, per model, per project — even when using your own keys. Full visibility.' },
     ],
@@ -398,10 +398,10 @@ const Nav: React.FC<LandingProps> = ({ onGetStarted }) => {
 
 const AGENT_COSTS = [
   { name: 'Architect', color: '#a78bfa', model: 'claude-opus-4-6',       tokens: 2840, cost: 0.0085 },
-  { name: 'Backend',   color: '#34d399', model: 'gpt-5',                 tokens: 5120, cost: 0.0128 },
-  { name: 'Frontend',  color: '#60a5fa', model: 'claude-sonnet-4-5',     tokens: 4890, cost: 0.0147 },
+  { name: 'Backend',   color: '#34d399', model: 'gpt-5.4',               tokens: 5120, cost: 0.0128 },
+  { name: 'Frontend',  color: '#60a5fa', model: 'claude-sonnet-4-6',     tokens: 4890, cost: 0.0147 },
   { name: 'Reviewer',  color: '#fbbf24', model: 'gemini-3-flash-preview', tokens: 1960, cost: 0.0010 },
-  { name: 'Solver',    color: '#f87171', model: 'grok-4-fast',            tokens:  820, cost: 0.0002 },
+  { name: 'Solver',    color: '#f87171', model: 'grok-3',                 tokens:  820, cost: 0.0002 },
 ]
 
 const CostTicker: React.FC = () => {
@@ -539,10 +539,10 @@ const CostTicker: React.FC = () => {
 // ─── Provider badge grid ──────────────────────────────────────────────────────
 
 const PROVIDERS = [
-  { name: 'Claude',  sub: 'Anthropic',    color: '#D97757', models: ['Haiku', 'Sonnet', 'Opus'],           costRange: '$0.25–$15/1M' },
-  { name: 'GPT-5',   sub: 'OpenAI',       color: '#10A37F', models: ['GPT-5', 'GPT-4o-mini'],              costRange: '$0.15–$2.50/1M' },
-  { name: 'Gemini',  sub: 'Google',       color: '#4285F4', models: ['Flash-Lite', 'Flash', 'Pro'],        costRange: '$0.075–$2/1M' },
-  { name: 'Grok',    sub: 'xAI',          color: '#e5e5e5', models: ['Grok-4', 'Grok-4-Fast', 'Grok-Mini'], costRange: '$0.20–$2/1M' },
+  { name: 'Claude',  sub: 'Anthropic',    color: '#D97757', models: ['Haiku 4.5', 'Sonnet 4.6', 'Opus 4.6'],                    costRange: 'Live per-model pricing' },
+  { name: 'OpenAI',  sub: 'GPT family',   color: '#10A37F', models: ['GPT-4o Mini', 'GPT-4.1', 'GPT-5.4'],                    costRange: 'Live per-model pricing' },
+  { name: 'Gemini',  sub: 'Google',       color: '#4285F4', models: ['2.5 Flash Lite', '3 Flash Preview', '3.1 Pro Preview'], costRange: 'Live per-model pricing' },
+  { name: 'Grok',    sub: 'xAI',          color: '#e5e5e5', models: ['Grok 3 Mini', 'Grok 3', 'Grok Code Fast 1'],            costRange: 'Live per-model pricing' },
   { name: 'Ollama',  sub: 'Local / Free', color: '#7C3AED', models: ['Llama 3', 'Mistral', 'Any model'],   costRange: 'Free' },
 ]
 
@@ -1798,7 +1798,7 @@ const PricingSection: React.FC<LandingProps> = ({ onGetStarted }) => (
           {
             tier: 'Builder', price: '$19', period: '/mo', highlight: false,
             tag: 'Solo developers',
-            features: ['All 5 AI agents', 'Claude · GPT-5 · Gemini · Grok', '5 active projects', 'Managed credits included', 'BYOK support ($0.25/1M)', 'Full cloud IDE'],
+            features: ['All 5 AI agents', 'Claude · OpenAI · Gemini · Grok', '5 active projects', 'Managed credits included', 'BYOK support ($0.25/1M)', 'Full cloud IDE'],
           },
           {
             tier: 'Pro', price: '$49', period: '/mo', highlight: true,

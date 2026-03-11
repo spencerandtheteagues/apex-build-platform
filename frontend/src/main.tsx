@@ -12,7 +12,7 @@ console.log(`
 ⚡ Cyberpunk Cloud Development Platform
 
 🔥 Features:
-   • Multi-AI Integration (Claude + GPT-5 + Gemini)
+   • Multi-AI Integration (Claude + OpenAI + Gemini + Grok)
    • Real-time Collaboration
    • Intelligent Code Editor
    • Cloud Execution Environment

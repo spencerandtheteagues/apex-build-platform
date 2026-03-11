@@ -69,24 +69,31 @@ export const AICodeAssistant: React.FC<AICodeAssistantProps> = ({
     },
     {
       id: 'claude',
-      name: 'Claude Opus 4.5',
+      name: 'Claude',
       icon: '🎭',
-      capabilities: ['Complex Logic', 'Code Analysis', 'Refactoring'],
+      capabilities: ['Opus 4.6', 'Sonnet 4.6', 'Haiku 4.5'],
+      performance: 93
+    },
+    {
+      id: 'gpt4',
+      name: 'OpenAI',
+      icon: '⚡',
+      capabilities: ['GPT-5.4', 'GPT-4.1', 'GPT-4o Mini'],
       performance: 92
     },
     {
-      id: 'gpt5',
-      name: 'GPT-5',
-      icon: '⚡',
-      capabilities: ['Code Generation', 'Documentation', 'Debugging'],
+      id: 'gemini',
+      name: 'Gemini',
+      icon: '💎',
+      capabilities: ['3.1 Pro Preview', '3 Flash Preview', '2.5 Flash Lite'],
       performance: 90
     },
     {
-      id: 'gemini',
-      name: 'Gemini 3',
-      icon: '💎',
-      capabilities: ['Optimization', 'Security', 'Performance'],
-      performance: 88
+      id: 'grok',
+      name: 'Grok',
+      icon: '✦',
+      capabilities: ['Code Fast 1', 'Grok 3', 'Grok 3 Mini'],
+      performance: 89
     }
   ];
 
