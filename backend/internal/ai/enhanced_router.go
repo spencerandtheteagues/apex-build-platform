@@ -123,7 +123,7 @@ func (ear *EnhancedAIRouter) initializeProviders() {
 	}
 
 	// GPT-5.4 - Best for code generation and documentation
-	ear.providers["gpt5"] = &GPTProvider{
+	ear.providers["gpt4"] = &GPTProvider{
 		Name:    "GPT-5.4",
 		Version: "gpt-5.4",
 		Capabilities: &ProviderCapabilities{
@@ -146,12 +146,12 @@ func (ear *EnhancedAIRouter) initializeProviders() {
 		},
 	}
 
-	// Gemini 3.1 Pro - Best for optimization and performance analysis
+	// Gemini 3.1 Pro Preview - Best for optimization and performance analysis
 	ear.providers["gemini"] = &GeminiProvider{
-		Name:    "Gemini 3.1 Pro",
+		Name:    "Gemini 3.1 Pro Preview",
 		Version: "gemini-3.1-pro-preview",
 		Capabilities: &ProviderCapabilities{
-			Name:                "Gemini 3.1 Pro",
+			Name:                "Gemini 3.1 Pro Preview",
 			Version:             "3.1",
 			MaxTokens:           1000000,
 			SupportedLanguages:  []string{"go", "typescript", "javascript", "python", "rust", "java", "cpp"},
@@ -221,7 +221,7 @@ func (ear *EnhancedAIRouter) analyzeRequest(request *AIRequest) (*RoutingStrateg
 		// High complexity, high quality needs - use ensemble
 		return &RoutingStrategy{
 			Type:      "parallel_ensemble",
-			Providers: []string{"claude", "gpt5"},
+			Providers: []string{"claude", "gpt4"},
 			Strategy:  "consensus_voting",
 		}, nil
 	}
@@ -230,7 +230,7 @@ func (ear *EnhancedAIRouter) analyzeRequest(request *AIRequest) (*RoutingStrateg
 		// Fast code generation - use best single provider
 		return &RoutingStrategy{
 			Type:      "single_best",
-			Providers: []string{"gpt5"},
+			Providers: []string{"gpt4"},
 			Strategy:  "fastest_quality",
 		}, nil
 	}
@@ -517,7 +517,7 @@ func (ear *EnhancedAIRouter) detectLanguage(request *AIRequest) string          
 func (ear *EnhancedAIRouter) classifyTask(request *AIRequest) string              { return "general" }
 func (ear *EnhancedAIRouter) selectBestProvider(analysis *RequestAnalysis) string { return "claude" }
 func (ear *EnhancedAIRouter) selectFallbackProvider(failed string, request *AIRequest) string {
-	return "gpt5"
+	return "gpt4"
 }
 func (ear *EnhancedAIRouter) explainRouting(strategy *RoutingStrategy, request *AIRequest) string {
 	return "Optimal routing selected"
