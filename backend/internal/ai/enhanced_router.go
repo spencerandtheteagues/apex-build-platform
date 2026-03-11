@@ -64,10 +64,10 @@ type EnsembleStrategy interface {
 
 // ModelOptimizer optimizes model selection and parameters
 type ModelOptimizer struct {
-	learningData    *LearningData
-	preferences     *UserPreferences
-	costOptimizer   *CostOptimizer
-	qualityTracker  *QualityTracker
+	learningData   *LearningData
+	preferences    *UserPreferences
+	costOptimizer  *CostOptimizer
+	qualityTracker *QualityTracker
 }
 
 // PerformanceMonitor tracks and analyzes AI provider performance
@@ -146,13 +146,13 @@ func (ear *EnhancedAIRouter) initializeProviders() {
 		},
 	}
 
-	// Gemini 3 Pro - Best for optimization and performance analysis
+	// Gemini 3.1 Pro - Best for optimization and performance analysis
 	ear.providers["gemini"] = &GeminiProvider{
-		Name:    "Gemini 3 Pro",
-		Version: "gemini-3-pro-preview",
+		Name:    "Gemini 3.1 Pro",
+		Version: "gemini-3.1-pro-preview",
 		Capabilities: &ProviderCapabilities{
-			Name:                "Gemini 3 Pro",
-			Version:             "3.0",
+			Name:                "Gemini 3.1 Pro",
+			Version:             "3.1",
 			MaxTokens:           1000000,
 			SupportedLanguages:  []string{"go", "typescript", "javascript", "python", "rust", "java", "cpp"},
 			Strengths:           []string{"optimization", "performance", "security", "large_context"},
@@ -350,14 +350,14 @@ func (ear *EnhancedAIRouter) generateWithEnsemble(ctx context.Context, request *
 	}
 
 	return &EnhancedAIResponse{
-		Response:      combinedResponse,
-		Strategy:      strategy.Strategy,
-		Provider:      "ensemble",
-		ResponseTime:  combinedResponse.GenerationTime,
-		Cached:        false,
+		Response:     combinedResponse,
+		Strategy:     strategy.Strategy,
+		Provider:     "ensemble",
+		ResponseTime: combinedResponse.GenerationTime,
+		Cached:       false,
 		EnsembleInfo: &EnsembleInfo{
-			Providers:    strategy.Providers,
-			ResponseCount: len(validResponses),
+			Providers:         strategy.Providers,
+			ResponseCount:     len(validResponses),
 			CombinationMethod: strategy.Strategy,
 		},
 	}, nil
@@ -384,11 +384,11 @@ func (ear *EnhancedAIRouter) generateWithChain(ctx context.Context, request *AIR
 		}
 
 		chain = append(chain, ChainStep{
-			Provider:     providerName,
-			Input:        currentRequest,
-			Output:       response,
-			Duration:     stepTime,
-			StepNumber:   i + 1,
+			Provider:   providerName,
+			Input:      currentRequest,
+			Output:     response,
+			Duration:   stepTime,
+			StepNumber: i + 1,
 		})
 
 		// Prepare input for next step
@@ -475,15 +475,15 @@ type (
 	}
 
 	EnhancedAIResponse struct {
-		Response     *AIResponse       `json:"response"`
-		Strategy     string            `json:"strategy"`
-		Provider     string            `json:"provider"`
-		ResponseTime time.Duration     `json:"response_time"`
-		Cached       bool             `json:"cached"`
+		Response     *AIResponse            `json:"response"`
+		Strategy     string                 `json:"strategy"`
+		Provider     string                 `json:"provider"`
+		ResponseTime time.Duration          `json:"response_time"`
+		Cached       bool                   `json:"cached"`
 		Metadata     map[string]interface{} `json:"metadata,omitempty"`
-		EnsembleInfo *EnsembleInfo    `json:"ensemble_info,omitempty"`
-		ChainInfo    *ChainInfo       `json:"chain_info,omitempty"`
-		HybridInfo   *HybridInfo      `json:"hybrid_info,omitempty"`
+		EnsembleInfo *EnsembleInfo          `json:"ensemble_info,omitempty"`
+		ChainInfo    *ChainInfo             `json:"chain_info,omitempty"`
+		HybridInfo   *HybridInfo            `json:"hybrid_info,omitempty"`
 	}
 
 	EnsembleInfo struct {
@@ -512,69 +512,105 @@ type (
 )
 
 // Stub implementations for complex methods
-func (ear *EnhancedAIRouter) analyzeComplexity(request *AIRequest) float64 { return 0.5 }
-func (ear *EnhancedAIRouter) detectLanguage(request *AIRequest) string { return "unknown" }
-func (ear *EnhancedAIRouter) classifyTask(request *AIRequest) string { return "general" }
+func (ear *EnhancedAIRouter) analyzeComplexity(request *AIRequest) float64        { return 0.5 }
+func (ear *EnhancedAIRouter) detectLanguage(request *AIRequest) string            { return "unknown" }
+func (ear *EnhancedAIRouter) classifyTask(request *AIRequest) string              { return "general" }
 func (ear *EnhancedAIRouter) selectBestProvider(analysis *RequestAnalysis) string { return "claude" }
-func (ear *EnhancedAIRouter) selectFallbackProvider(failed string, request *AIRequest) string { return "gpt5" }
-func (ear *EnhancedAIRouter) explainRouting(strategy *RoutingStrategy, request *AIRequest) string { return "Optimal routing selected" }
-func (ear *EnhancedAIRouter) prepareChainInput(original *AIRequest, previous *AIResponse, step int) *AIRequest { return original }
-func (ear *EnhancedAIRouter) decomposeRequest(request *AIRequest) ([]*AIRequest, error) { return []*AIRequest{request}, nil }
+func (ear *EnhancedAIRouter) selectFallbackProvider(failed string, request *AIRequest) string {
+	return "gpt5"
+}
+func (ear *EnhancedAIRouter) explainRouting(strategy *RoutingStrategy, request *AIRequest) string {
+	return "Optimal routing selected"
+}
+func (ear *EnhancedAIRouter) prepareChainInput(original *AIRequest, previous *AIResponse, step int) *AIRequest {
+	return original
+}
+func (ear *EnhancedAIRouter) decomposeRequest(request *AIRequest) ([]*AIRequest, error) {
+	return []*AIRequest{request}, nil
+}
 func (ear *EnhancedAIRouter) selectOptimalProviderForTask(task *AIRequest) string { return "claude" }
-func (ear *EnhancedAIRouter) combineSubTaskResults(responses []*AIResponse, original *AIRequest) (*AIResponse, error) { return responses[0], nil }
-func (ear *EnhancedAIRouter) getUsedProviders(responses []*AIResponse) []string { return []string{"claude"} }
+func (ear *EnhancedAIRouter) combineSubTaskResults(responses []*AIResponse, original *AIRequest) (*AIResponse, error) {
+	return responses[0], nil
+}
+func (ear *EnhancedAIRouter) getUsedProviders(responses []*AIResponse) []string {
+	return []string{"claude"}
+}
 
 // Stub provider implementations
 type (
-	ClaudeProvider struct{ Name, Version string; Capabilities *ProviderCapabilities }
-	GPTProvider    struct{ Name, Version string; Capabilities *ProviderCapabilities }
-	GeminiProvider struct{ Name, Version string; Capabilities *ProviderCapabilities }
+	ClaudeProvider struct {
+		Name, Version string
+		Capabilities  *ProviderCapabilities
+	}
+	GPTProvider struct {
+		Name, Version string
+		Capabilities  *ProviderCapabilities
+	}
+	GeminiProvider struct {
+		Name, Version string
+		Capabilities  *ProviderCapabilities
+	}
 )
 
-func (cp *ClaudeProvider) Generate(ctx context.Context, request *AIRequest) (*AIResponse, error) { return &AIResponse{}, nil }
+func (cp *ClaudeProvider) Generate(ctx context.Context, request *AIRequest) (*AIResponse, error) {
+	return &AIResponse{}, nil
+}
 func (cp *ClaudeProvider) GetCapabilities() *ProviderCapabilities { return cp.Capabilities }
-func (cp *ClaudeProvider) GetPerformanceMetrics() *ProviderPerformanceMetrics { return &ProviderPerformanceMetrics{} }
-func (cp *ClaudeProvider) IsHealthy() bool { return true }
+func (cp *ClaudeProvider) GetPerformanceMetrics() *ProviderPerformanceMetrics {
+	return &ProviderPerformanceMetrics{}
+}
+func (cp *ClaudeProvider) IsHealthy() bool       { return true }
 func (cp *ClaudeProvider) GetCost() *CostMetrics { return &CostMetrics{} }
 
-func (gp *GPTProvider) Generate(ctx context.Context, request *AIRequest) (*AIResponse, error) { return &AIResponse{}, nil }
+func (gp *GPTProvider) Generate(ctx context.Context, request *AIRequest) (*AIResponse, error) {
+	return &AIResponse{}, nil
+}
 func (gp *GPTProvider) GetCapabilities() *ProviderCapabilities { return gp.Capabilities }
-func (gp *GPTProvider) GetPerformanceMetrics() *ProviderPerformanceMetrics { return &ProviderPerformanceMetrics{} }
-func (gp *GPTProvider) IsHealthy() bool { return true }
+func (gp *GPTProvider) GetPerformanceMetrics() *ProviderPerformanceMetrics {
+	return &ProviderPerformanceMetrics{}
+}
+func (gp *GPTProvider) IsHealthy() bool       { return true }
 func (gp *GPTProvider) GetCost() *CostMetrics { return &CostMetrics{} }
 
-func (gmp *GeminiProvider) Generate(ctx context.Context, request *AIRequest) (*AIResponse, error) { return &AIResponse{}, nil }
+func (gmp *GeminiProvider) Generate(ctx context.Context, request *AIRequest) (*AIResponse, error) {
+	return &AIResponse{}, nil
+}
 func (gmp *GeminiProvider) GetCapabilities() *ProviderCapabilities { return gmp.Capabilities }
-func (gmp *GeminiProvider) GetPerformanceMetrics() *ProviderPerformanceMetrics { return &ProviderPerformanceMetrics{} }
-func (gmp *GeminiProvider) IsHealthy() bool { return true }
+func (gmp *GeminiProvider) GetPerformanceMetrics() *ProviderPerformanceMetrics {
+	return &ProviderPerformanceMetrics{}
+}
+func (gmp *GeminiProvider) IsHealthy() bool       { return true }
 func (gmp *GeminiProvider) GetCost() *CostMetrics { return &CostMetrics{} }
 
 // Stub constructors and types
-func NewProviderMetrics() *ProviderMetrics { return &ProviderMetrics{} }
-func NewResponseCache() *ResponseCache { return &ResponseCache{} }
-func NewEnsembleProcessor() *EnsembleProcessor { return &EnsembleProcessor{} }
-func NewModelOptimizer() *ModelOptimizer { return &ModelOptimizer{} }
+func NewProviderMetrics() *ProviderMetrics       { return &ProviderMetrics{} }
+func NewResponseCache() *ResponseCache           { return &ResponseCache{} }
+func NewEnsembleProcessor() *EnsembleProcessor   { return &EnsembleProcessor{} }
+func NewModelOptimizer() *ModelOptimizer         { return &ModelOptimizer{} }
 func NewPerformanceMonitor() *PerformanceMonitor { return &PerformanceMonitor{} }
 
 type (
-	ProviderMetrics             struct{}
-	ResponseCache               struct{}
-	ResponseValidator           struct{}
-	ResponseRanker              struct{}
-	LearningData                struct{}
-	UserPreferences             struct{}
-	CostOptimizer               struct{}
-	QualityTracker              struct{}
-	ProviderStats               struct{}
-	AlertManager                struct{}
-	SLAMonitor                  struct{}
-	CostTracker                 struct{}
-	QualityScorer               struct{}
-	ProviderPerformanceMetrics  struct{}
-	CostMetrics                 struct{}
+	ProviderMetrics            struct{}
+	ResponseCache              struct{}
+	ResponseValidator          struct{}
+	ResponseRanker             struct{}
+	LearningData               struct{}
+	UserPreferences            struct{}
+	CostOptimizer              struct{}
+	QualityTracker             struct{}
+	ProviderStats              struct{}
+	AlertManager               struct{}
+	SLAMonitor                 struct{}
+	CostTracker                struct{}
+	QualityScorer              struct{}
+	ProviderPerformanceMetrics struct{}
+	CostMetrics                struct{}
 )
 
-func (rc *ResponseCache) Get(key string) *AIResponse { return nil }
+func (rc *ResponseCache) Get(key string) *AIResponse                              { return nil }
 func (rc *ResponseCache) Set(key string, response *AIResponse, ttl time.Duration) {}
-func (ep *EnsembleProcessor) Combine(responses []*AIResponse, strategy string) (*AIResponse, error) { return responses[0], nil }
-func (pm *PerformanceMonitor) RecordGeneration(provider string, duration time.Duration, quality, cost float64) {}
+func (ep *EnsembleProcessor) Combine(responses []*AIResponse, strategy string) (*AIResponse, error) {
+	return responses[0], nil
+}
+func (pm *PerformanceMonitor) RecordGeneration(provider string, duration time.Duration, quality, cost float64) {
+}

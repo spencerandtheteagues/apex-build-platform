@@ -18,18 +18,23 @@ import (
 var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 	ai.ProviderClaude: {
 		PowerMax:      "claude-opus-4-6",
-		PowerBalanced: "claude-sonnet-4-5-20250929",
+		PowerBalanced: "claude-sonnet-4-6",
 		PowerFast:     "claude-haiku-4-5-20251001",
 	},
 	ai.ProviderGPT4: {
 		PowerMax:      "gpt-5.4",
-		PowerBalanced: "gpt-5",
+		PowerBalanced: "gpt-4.1",
 		PowerFast:     "gpt-4o-mini",
 	},
 	ai.ProviderGemini: {
-		PowerMax:      "gemini-3-pro-preview",
+		PowerMax:      "gemini-3.1-pro-preview",
 		PowerBalanced: "gemini-3-flash-preview",
 		PowerFast:     "gemini-2.5-flash-lite",
+	},
+	ai.ProviderGrok: {
+		PowerMax:      "grok-code-fast-1",
+		PowerBalanced: "grok-3",
+		PowerFast:     "grok-3-mini",
 	},
 	ai.ProviderOllama: {
 		PowerMax:      "deepseek-r1:14b",

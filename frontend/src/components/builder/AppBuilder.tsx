@@ -129,6 +129,14 @@ interface AIThought {
   provider: string
   model?: string
   type: 'thinking' | 'action' | 'output' | 'error'
+  eventType?: string
+  taskId?: string
+  taskType?: string
+  files?: string[]
+  filesCount?: number
+  retryCount?: number
+  maxRetries?: number
+  isInternal?: boolean
   content: string
   timestamp: Date
 }
@@ -193,6 +201,115 @@ const isActiveBuildStatus = (status?: string) =>
   status === 'testing' ||
   status === 'reviewing' ||
   status === 'awaiting_review'
+
+type SupportedBuildProvider = 'claude' | 'gpt4' | 'gemini' | 'grok'
+
+type ProviderModelTier = {
+  id: string
+  name: string
+}
+
+const MODEL_PANEL_ORDER: SupportedBuildProvider[] = ['claude', 'gpt4', 'gemini', 'grok']
+
+const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<SupportedBuildProvider, ProviderModelTier>> = {
+  fast: {
+    claude: { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
+    gpt4: { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
+    gemini: { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
+    grok: { id: 'grok-3-mini', name: 'Grok 3 Mini' },
+  },
+  balanced: {
+    claude: { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+    gpt4: { id: 'gpt-4.1', name: 'GPT-4.1' },
+    gemini: { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
+    grok: { id: 'grok-3', name: 'Grok 3' },
+  },
+  max: {
+    claude: { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
+    gpt4: { id: 'gpt-5.4', name: 'GPT-5.4' },
+    gemini: { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview' },
+    grok: { id: 'grok-code-fast-1', name: 'Grok Code Fast 1' },
+  },
+}
+
+const PROVIDER_UI: Record<SupportedBuildProvider, {
+  label: string
+  badgeClass: string
+  cardClass: string
+  activeClass: string
+  titleClass: string
+  dotClass: string
+}> = {
+  claude: {
+    label: 'Claude',
+    badgeClass: 'border-orange-500/60 text-orange-300 bg-orange-500/10',
+    cardClass: 'border-orange-500/35 bg-gradient-to-br from-orange-950/55 via-black to-orange-950/25',
+    activeClass: 'shadow-[0_0_28px_rgba(251,146,60,0.16)]',
+    titleClass: 'text-orange-200',
+    dotClass: 'bg-orange-400',
+  },
+  gpt4: {
+    label: 'OpenAI',
+    badgeClass: 'border-emerald-500/60 text-emerald-300 bg-emerald-500/10',
+    cardClass: 'border-emerald-500/35 bg-gradient-to-br from-emerald-950/55 via-black to-emerald-950/25',
+    activeClass: 'shadow-[0_0_28px_rgba(16,185,129,0.16)]',
+    titleClass: 'text-emerald-200',
+    dotClass: 'bg-emerald-400',
+  },
+  gemini: {
+    label: 'Gemini',
+    badgeClass: 'border-sky-500/60 text-sky-300 bg-sky-500/10',
+    cardClass: 'border-sky-500/35 bg-gradient-to-br from-sky-950/55 via-black to-sky-950/25',
+    activeClass: 'shadow-[0_0_28px_rgba(56,189,248,0.16)]',
+    titleClass: 'text-sky-200',
+    dotClass: 'bg-sky-400',
+  },
+  grok: {
+    label: 'Grok',
+    badgeClass: 'border-fuchsia-500/60 text-fuchsia-300 bg-fuchsia-500/10',
+    cardClass: 'border-fuchsia-500/35 bg-gradient-to-br from-fuchsia-950/55 via-black to-fuchsia-950/25',
+    activeClass: 'shadow-[0_0_28px_rgba(217,70,239,0.16)]',
+    titleClass: 'text-fuchsia-200',
+    dotClass: 'bg-fuchsia-400',
+  },
+}
+
+const normalizeProviderKey = (provider?: string): SupportedBuildProvider | null => {
+  const value = String(provider || '').toLowerCase()
+  if (value === 'gpt' || value === 'gpt4' || value === 'openai') return 'gpt4'
+  if (value === 'claude' || value === 'gemini' || value === 'grok') return value
+  return null
+}
+
+const getModelTier = (mode: 'fast' | 'balanced' | 'max') => POWER_MODE_MODEL_CATALOG[mode]
+
+const getPowerModeModelSummary = (mode: 'fast' | 'balanced' | 'max') =>
+  MODEL_PANEL_ORDER.map((provider) => getModelTier(mode)[provider].name).join(' / ')
+
+const getModelDisplayName = (model?: string, fallbackMode: 'fast' | 'balanced' | 'max' = 'fast') => {
+  if (!model) return ''
+  for (const tier of Object.values(POWER_MODE_MODEL_CATALOG)) {
+    for (const entry of Object.values(tier)) {
+      if (entry.id === model) return entry.name
+    }
+  }
+  const provider = normalizeProviderKey(model)
+  if (provider) return getModelTier(fallbackMode)[provider].name
+  return model
+}
+
+const ThinkingDots: React.FC<{ className?: string }> = ({ className }) => {
+  const [count, setCount] = useState(1)
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setCount((prev) => (prev === 3 ? 1 : prev + 1))
+    }, 420)
+    return () => window.clearInterval(id)
+  }, [])
+
+  return <span className={cn('font-mono tracking-[0.2em]', className)}>{'.'.repeat(count)}</span>
+}
 
 // ============================================================================
 // ANIMATED BACKGROUND COMPONENTS

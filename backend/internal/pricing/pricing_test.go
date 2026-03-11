@@ -235,10 +235,10 @@ func TestBilledCost_MultiModelTask(t *testing.T) {
 	}
 
 	calls := []call{
-		{"claude", "claude-opus-4-6", 5000, 3000},           // architect
-		{"gpt4", "gpt-5", 8000, 4000},                       // coder
-		{"gemini", "gemini-3-flash-preview", 10000, 5000},   // reviewer
-		{"grok", "grok-4-fast", 3000, 1000},                  // quick check
+		{"claude", "claude-opus-4-6", 5000, 3000},         // architect
+		{"gpt4", "gpt-5", 8000, 4000},                     // coder
+		{"gemini", "gemini-3-flash-preview", 10000, 5000}, // reviewer
+		{"grok", "grok-4-fast", 3000, 1000},               // quick check
 	}
 
 	var totalRaw, totalBilled float64
@@ -453,11 +453,17 @@ func TestDefaultModel(t *testing.T) {
 		want      string
 	}{
 		{"claude", "fast", "claude-haiku-4-5-20251001"},
+		{"claude", "balanced", "claude-sonnet-4-6"},
 		{"claude", "max", "claude-opus-4-6"},
 		{"gpt4", "fast", "gpt-4o-mini"},
+		{"gpt4", "balanced", "gpt-4.1"},
 		{"gpt4", "max", "gpt-5.4"},
 		{"gemini", "fast", "gemini-2.5-flash-lite"},
-		{"grok", "fast", "grok-4-fast"},
+		{"gemini", "balanced", "gemini-3-flash-preview"},
+		{"gemini", "max", "gemini-3.1-pro-preview"},
+		{"grok", "fast", "grok-3-mini"},
+		{"grok", "balanced", "grok-3"},
+		{"grok", "max", "grok-code-fast-1"},
 	}
 
 	for _, tt := range tests {

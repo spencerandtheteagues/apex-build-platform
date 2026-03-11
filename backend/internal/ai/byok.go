@@ -642,19 +642,24 @@ func (m *BYOKManager) decryptUserKey(key models.UserAPIKey) (string, error) {
 func GetAvailableModels() map[string][]ModelInfo {
 	return map[string][]ModelInfo{
 		"claude": {
-			{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", Speed: "slow", CostTier: "high", Description: "Most powerful — reasoning, coding, architecture"},
-			{ID: "claude-sonnet-4-5-20250929", Name: "Claude Sonnet 4.5", Speed: "medium", CostTier: "medium", Description: "Balanced quality and speed"},
-			{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", Speed: "fast", CostTier: "low", Description: "Fast and affordable"},
+			{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", Speed: "slow", CostTier: "high", Description: "MAX — latest flagship reasoning and coding model"},
+			{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", Speed: "medium", CostTier: "medium", Description: "BALANCED — strong quality with lower cost"},
+			{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", Speed: "fast", CostTier: "low", Description: "FAST — cheapest Claude tier"},
 		},
 		"gpt4": {
-			{ID: "gpt-5.4", Name: "GPT-5.4", Speed: "medium", CostTier: "high", Description: "Most powerful — agentic coding"},
-			{ID: "gpt-5", Name: "GPT-5", Speed: "medium", CostTier: "medium", Description: "Strong general purpose"},
-			{ID: "gpt-4o-mini", Name: "GPT-4o Mini", Speed: "fast", CostTier: "low", Description: "Fast and cheap"},
+			{ID: "gpt-5.4", Name: "GPT-5.4", Speed: "slow", CostTier: "high", Description: "MAX — latest frontier OpenAI model"},
+			{ID: "gpt-4.1", Name: "GPT-4.1", Speed: "medium", CostTier: "medium", Description: "BALANCED — best current mid-tier OpenAI coding model"},
+			{ID: "gpt-4o-mini", Name: "GPT-4o Mini", Speed: "fast", CostTier: "low", Description: "FAST — mini OpenAI tier"},
 		},
 		"gemini": {
-			{ID: "gemini-3-pro-preview", Name: "Gemini 3 Pro", Speed: "slow", CostTier: "high", Description: "State-of-the-art reasoning"},
-			{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash", Speed: "medium", CostTier: "medium", Description: "Fast frontier performance"},
-			{ID: "gemini-2.5-flash-lite", Name: "Gemini 2.5 Flash Lite", Speed: "fast", CostTier: "low", Description: "Cheapest and fastest"},
+			{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview", Speed: "slow", CostTier: "high", Description: "MAX — latest Gemini frontier model"},
+			{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash Preview", Speed: "medium", CostTier: "medium", Description: "BALANCED — fast reasoning tier"},
+			{ID: "gemini-2.5-flash-lite", Name: "Gemini 2.5 Flash Lite", Speed: "fast", CostTier: "low", Description: "FAST — lowest-cost Gemini tier"},
+		},
+		"grok": {
+			{ID: "grok-code-fast-1", Name: "Grok Code Fast 1", Speed: "medium", CostTier: "high", Description: "MAX — current Grok coding model"},
+			{ID: "grok-3", Name: "Grok 3", Speed: "medium", CostTier: "medium", Description: "BALANCED — stronger reasoning tier"},
+			{ID: "grok-3-mini", Name: "Grok 3 Mini", Speed: "fast", CostTier: "low", Description: "FAST — mini Grok tier"},
 		},
 		"ollama": {
 			{ID: "deepseek-r1:18b", Name: "DeepSeek-R1 (18b)", Speed: "variable", CostTier: "free", Description: "Reasoning model (local)"},

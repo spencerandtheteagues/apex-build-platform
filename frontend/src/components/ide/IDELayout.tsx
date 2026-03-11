@@ -194,6 +194,15 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     disconnect,
     logout
   } = useStore()
+  const initializedProjectViewRef = useRef(false)
+
+  useEffect(() => {
+    if (initializedProjectViewRef.current) return
+    if (!currentProject) return
+
+    setViewMode('dashboard')
+    initializedProjectViewRef.current = true
+  }, [currentProject])
 
   // Update panel states when responsive breakpoints change
   useEffect(() => {

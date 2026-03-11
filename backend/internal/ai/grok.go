@@ -209,13 +209,13 @@ func (g *GrokClient) getModel(req *AIRequest) string {
 
 	switch req.Capability {
 	case CapabilityCodeGeneration, CapabilityRefactoring, CapabilityArchitecture:
-		return "grok-4" // Flagship for complex tasks
+		return "grok-code-fast-1" // Latest coding-specialized model
 	case CapabilityCodeCompletion:
-		return "grok-4-fast" // Fast for completions
+		return "grok-3-mini" // Fast tier
 	case CapabilityCodeReview, CapabilityDebugging:
-		return "grok-4" // Flagship for analysis
+		return "grok-3" // Balanced reasoning tier
 	default:
-		return "grok-4-fast" // Default to fast model
+		return "grok-3-mini" // Default to fast model
 	}
 }
 
@@ -295,7 +295,7 @@ func (g *GrokClient) GetProvider() AIProvider {
 // Health checks if Grok API is accessible
 func (g *GrokClient) Health(ctx context.Context) error {
 	testReq := &grokRequest{
-		Model: "grok-4-fast",
+		Model: "grok-3-mini",
 		Messages: []grokMessage{
 			{Role: "user", Content: "Hello"},
 		},
@@ -349,17 +349,26 @@ func (g *GrokClient) calculateCost(inputTokens, outputTokens int, model string) 
 	var inputCostPer1M, outputCostPer1M float64
 
 	switch model {
-	case "grok-4":
-		inputCostPer1M = 2.00   // $2.00 per 1M input tokens
-		outputCostPer1M = 10.00 // $10.00 per 1M output tokens
-	case "grok-4-fast":
-		inputCostPer1M = 0.20  // $0.20 per 1M input tokens
-		outputCostPer1M = 0.50 // $0.50 per 1M output tokens
+	case "grok-code-fast-1":
+		inputCostPer1M = 2.00
+		outputCostPer1M = 15.00
+	case "grok-3":
+		inputCostPer1M = 3.00
+		outputCostPer1M = 15.00
 	case "grok-3-mini":
-		inputCostPer1M = 0.30  // $0.30 per 1M input tokens
-		outputCostPer1M = 0.50 // $0.50 per 1M output tokens
+		inputCostPer1M = 0.30
+		outputCostPer1M = 0.50
+	case "grok-4":
+		inputCostPer1M = 2.00
+		outputCostPer1M = 10.00
+	case "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning":
+		inputCostPer1M = 2.00
+		outputCostPer1M = 5.00
+	case "grok-4-fast":
+		inputCostPer1M = 0.20
+		outputCostPer1M = 0.50
 	default:
-		inputCostPer1M = 0.20 // Default to grok-4-fast pricing
+		inputCostPer1M = 0.30
 		outputCostPer1M = 0.50
 	}
 

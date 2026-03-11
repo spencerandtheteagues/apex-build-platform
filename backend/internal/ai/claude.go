@@ -76,8 +76,8 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	// Build user prompt
 	userPrompt := c.buildUserPrompt(req)
 
-	// Select model - respect explicit override or use Sonnet 4.5
-	model := "claude-sonnet-4-5-20250929"
+	// Select model - respect explicit override or use Sonnet 4.6
+	model := "claude-sonnet-4-6"
 	if req.Model != "" {
 		model = req.Model
 	}
@@ -308,11 +308,13 @@ func (c *ClaudeClient) calculateCost(inputTokens, outputTokens int, model string
 	var inputPer1M, outputPer1M float64
 	switch model {
 	case "claude-opus-4-6":
-		inputPer1M, outputPer1M = 15.00, 75.00
+		inputPer1M, outputPer1M = 5.00, 25.00
+	case "claude-sonnet-4-6":
+		inputPer1M, outputPer1M = 3.00, 15.00
 	case "claude-sonnet-4-5-20250929":
 		inputPer1M, outputPer1M = 3.00, 15.00
 	case "claude-haiku-4-5-20251001":
-		inputPer1M, outputPer1M = 0.25, 1.25
+		inputPer1M, outputPer1M = 1.00, 5.00
 	default:
 		inputPer1M, outputPer1M = 3.00, 15.00 // default to Sonnet pricing
 	}

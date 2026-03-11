@@ -62,18 +62,23 @@ export default function ModelSelector({ value, onChange, compact = false, classN
         setModels({
           claude: [
             { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', speed: 'slow', cost_tier: 'high', description: 'Most powerful — reasoning & coding' },
-            { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', speed: 'medium', cost_tier: 'medium', description: 'Balanced quality and speed' },
-            { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', speed: 'fast', cost_tier: 'low', description: 'Fast and affordable' },
+            { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', speed: 'medium', cost_tier: 'medium', description: 'Balanced quality and speed' },
+            { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
           ],
           gpt4: [
-            { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', speed: 'medium', cost_tier: 'high', description: 'Most powerful — agentic coding' },
-            { id: 'gpt-5', name: 'GPT-5', speed: 'medium', cost_tier: 'medium', description: 'Strong general purpose' },
-            { id: 'gpt-4o-mini', name: 'GPT-4o Mini', speed: 'fast', cost_tier: 'low', description: 'Fast and cheap' },
+            { id: 'gpt-5.4', name: 'GPT-5.4', speed: 'slow', cost_tier: 'high', description: 'Max tier — latest frontier OpenAI model' },
+            { id: 'gpt-4.1', name: 'GPT-4.1', speed: 'medium', cost_tier: 'medium', description: 'Balanced tier — best current mid-tier coder' },
+            { id: 'gpt-4o-mini', name: 'GPT-4o Mini', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
           ],
           gemini: [
-            { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', speed: 'slow', cost_tier: 'high', description: 'State-of-the-art reasoning' },
-            { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', speed: 'medium', cost_tier: 'medium', description: 'Fast frontier performance' },
-            { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', speed: 'fast', cost_tier: 'low', description: 'Cheapest and fastest' },
+            { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview', speed: 'slow', cost_tier: 'high', description: 'Max tier — latest Gemini frontier model' },
+            { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview', speed: 'medium', cost_tier: 'medium', description: 'Balanced tier — fast reasoning' },
+            { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
+          ],
+          grok: [
+            { id: 'grok-code-fast-1', name: 'Grok Code Fast 1', speed: 'medium', cost_tier: 'high', description: 'Max tier — latest Grok coding model' },
+            { id: 'grok-3', name: 'Grok 3', speed: 'medium', cost_tier: 'medium', description: 'Balanced tier — stronger reasoning' },
+            { id: 'grok-3-mini', name: 'Grok 3 Mini', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
           ],
           ollama: [
             { id: 'deepseek-r1:18b', name: 'DeepSeek-R1 (18b)', speed: 'variable', cost_tier: 'free', description: 'Reasoning model (local)' },

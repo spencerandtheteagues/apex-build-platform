@@ -76,34 +76,41 @@ func newEngineFromEnv() *Engine {
 			"claude": {
 				Default: ModelPricing{InputPer1M: 3.00, OutputPer1M: 15.00},
 				Models: map[string]ModelPricing{
-					"claude-opus-4-6":            {InputPer1M: 15.00, OutputPer1M: 75.00},
+					"claude-opus-4-6":            {InputPer1M: 5.00, OutputPer1M: 25.00},
+					"claude-sonnet-4-6":          {InputPer1M: 3.00, OutputPer1M: 15.00},
 					"claude-sonnet-4-5-20250929": {InputPer1M: 3.00, OutputPer1M: 15.00},
-					"claude-haiku-4-5-20251001":  {InputPer1M: 0.25, OutputPer1M: 1.25},
+					"claude-haiku-4-5-20251001":  {InputPer1M: 1.00, OutputPer1M: 5.00},
 				},
 			},
 			"gpt4": {
-				Default: ModelPricing{InputPer1M: 5.00, OutputPer1M: 15.00},
+				Default: ModelPricing{InputPer1M: 2.00, OutputPer1M: 8.00},
 				Models: map[string]ModelPricing{
-					"gpt-5.4": {InputPer1M: 8.00, OutputPer1M: 24.00},
-					"gpt-5":         {InputPer1M: 5.00, OutputPer1M: 15.00},
+					"gpt-5.4":       {InputPer1M: 2.50, OutputPer1M: 15.00},
+					"gpt-4.1":       {InputPer1M: 2.00, OutputPer1M: 8.00},
 					"gpt-4o-mini":   {InputPer1M: 0.15, OutputPer1M: 0.60},
+					"gpt-5.2-codex": {InputPer1M: 1.75, OutputPer1M: 14.00}, // legacy
+					"gpt-5":         {InputPer1M: 1.25, OutputPer1M: 10.00}, // legacy
+					"gpt-4o":        {InputPer1M: 2.50, OutputPer1M: 10.00}, // legacy
 				},
 			},
 			"gemini": {
-				Default: ModelPricing{InputPer1M: 0.50, OutputPer1M: 1.50},
+				Default: ModelPricing{InputPer1M: 0.75, OutputPer1M: 3.00},
 				Models: map[string]ModelPricing{
+					"gemini-3.1-pro-preview": {InputPer1M: 3.00, OutputPer1M: 15.00},
 					"gemini-3-pro-preview":   {InputPer1M: 2.00, OutputPer1M: 6.00},
-					"gemini-3-flash-preview": {InputPer1M: 0.50, OutputPer1M: 1.50},
-					"gemini-2.5-flash-lite":  {InputPer1M: 0.075, OutputPer1M: 0.30},
+					"gemini-3-flash-preview": {InputPer1M: 0.75, OutputPer1M: 3.00},
+					"gemini-2.5-flash-lite":  {InputPer1M: 0.10, OutputPer1M: 0.40},
 				},
 			},
 			"grok": {
-				Default: ModelPricing{InputPer1M: 0.20, OutputPer1M: 0.50},
+				Default: ModelPricing{InputPer1M: 3.00, OutputPer1M: 15.00},
 				Models: map[string]ModelPricing{
-					"grok-4-heavy":      {InputPer1M: 2.00, OutputPer1M: 10.00},
-					"grok-4.1-thinking": {InputPer1M: 0.30, OutputPer1M: 0.50},
-					"grok-4.1":          {InputPer1M: 0.30, OutputPer1M: 0.50},
-					"grok-4-fast":       {InputPer1M: 0.20, OutputPer1M: 0.50},
+					"grok-code-fast-1":            {InputPer1M: 2.00, OutputPer1M: 15.00},
+					"grok-3":                      {InputPer1M: 3.00, OutputPer1M: 15.00},
+					"grok-3-mini":                 {InputPer1M: 0.30, OutputPer1M: 0.50},
+					"grok-4-1-fast-reasoning":     {InputPer1M: 2.00, OutputPer1M: 5.00}, // legacy
+					"grok-4-1-fast-non-reasoning": {InputPer1M: 2.00, OutputPer1M: 5.00}, // legacy
+					"grok-4-fast":                 {InputPer1M: 0.20, OutputPer1M: 0.50}, // legacy
 				},
 			},
 			"ollama": {
@@ -207,7 +214,7 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 			return "claude-opus-4-6"
 		}
 		if mode == ModeBalanced {
-			return "claude-sonnet-4-5-20250929"
+			return "claude-sonnet-4-6"
 		}
 		return "claude-haiku-4-5-20251001"
 	case "gpt4":
@@ -215,12 +222,12 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 			return "gpt-5.4"
 		}
 		if mode == ModeBalanced {
-			return "gpt-5"
+			return "gpt-4.1"
 		}
 		return "gpt-4o-mini"
 	case "gemini":
 		if mode == ModeMax {
-			return "gemini-3-pro-preview"
+			return "gemini-3.1-pro-preview"
 		}
 		if mode == ModeBalanced {
 			return "gemini-3-flash-preview"
@@ -228,12 +235,12 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 		return "gemini-2.5-flash-lite"
 	case "grok":
 		if mode == ModeMax {
-			return "grok-4-heavy"
+			return "grok-code-fast-1"
 		}
 		if mode == ModeBalanced {
-			return "grok-4.1-thinking"
+			return "grok-3"
 		}
-		return "grok-4-fast"
+		return "grok-3-mini"
 	default:
 		return ""
 	}

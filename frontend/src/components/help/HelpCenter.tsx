@@ -231,19 +231,19 @@ The user avatar in the top-right shows your username. Your session persists acro
         content: `Power Mode controls which AI models build your app. Higher power = better code quality and higher cost.
 
 **Fast & Cheap (1.6x platform cost) — Default**
-- Models: Claude Haiku 4.5, GPT-4o Mini, Gemini 2.5 Flash Lite
+- Models: Claude Haiku 4.5, GPT-4o Mini, Gemini 2.5 Flash Lite, Grok 3 Mini
 - Speed: Fastest responses
 - Quality: Good for simple apps and prototypes
 - Best for: Testing ideas, learning, budget-conscious builds
 
 **Balanced (1.8x platform cost)**
-- Models: Claude Sonnet 4.5, GPT-5, Gemini 3 Flash
+- Models: Claude Sonnet 4.6, GPT-4.1, Gemini 3 Flash Preview, Grok 3
 - Speed: Moderate
 - Quality: Solid production-quality code
 - Best for: Most real-world applications
 
 **Max Power (2.0x platform cost)**
-- Models: Claude Opus 4.6, GPT-5.2 Codex, Gemini 3 Pro
+- Models: Claude Opus 4.6, GPT-5.4, Gemini 3.1 Pro Preview, Grok Code Fast 1
 - Speed: Slower (larger models take longer)
 - Quality: Highest possible — most capable models
 - Best for: Complex apps, mission-critical code, production builds
@@ -700,22 +700,22 @@ Choose which AI provider to use, or leave on "Auto" for intelligent routing.`,
         content: `APEX-BUILD integrates with multiple AI providers. Each has different strengths:
 
 **Claude (Anthropic)**
-- Models: Opus 4.6 (most capable), Sonnet 4.5 (balanced), Haiku 4.5 (fast)
+- Models: Opus 4.6 (most capable), Sonnet 4.6 (balanced), Haiku 4.5 (fast)
 - Strengths: Excellent code quality, long context understanding, careful reasoning
 - Best for: Complex code generation, debugging, architecture
 
 **GPT (OpenAI)**
-- Models: GPT-5.2 Codex (most capable), GPT-5 (balanced), GPT-4o Mini (fast)
+- Models: GPT-5.4 (most capable), GPT-4.1 (balanced), GPT-4o Mini (fast)
 - Strengths: Wide knowledge, creative solutions, strong at many languages
 - Best for: General coding tasks, multi-language projects
 
 **Gemini (Google)**
-- Models: Gemini 3 Pro (most capable), Gemini 3 Flash (balanced), Gemini 2.5 Flash Lite (fast)
+- Models: Gemini 3.1 Pro Preview (most capable), Gemini 3 Flash Preview (balanced), Gemini 2.5 Flash Lite (fast)
 - Strengths: Fast responses, good at documentation, strong reasoning
 - Best for: Quick tasks, documentation, data processing code
 
 **Grok (xAI)**
-- Models: Grok 4 Heavy, Grok 4.1 Thinking, Grok 4.1, Grok 4 Fast
+- Models: Grok Code Fast 1 (most capable), Grok 3 (balanced), Grok 3 Mini (fast)
 - Strengths: Real-time knowledge, creative problem-solving
 - Best for: Cutting-edge tasks, up-to-date solutions
 

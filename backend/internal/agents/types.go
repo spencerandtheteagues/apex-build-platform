@@ -339,9 +339,9 @@ const (
 type PowerMode string
 
 const (
-	PowerMax      PowerMode = "max"      // Latest, most powerful models (Claude Opus, GPT-5.2-Codex, Gemini 3 Pro)
-	PowerBalanced PowerMode = "balanced" // Best balance of quality and speed (Sonnet 4.5, GPT-5, Gemini 3 Flash)
-	PowerFast     PowerMode = "fast"     // Cheapest, fastest models (Haiku 4.5, GPT-4o-mini, Gemini 2.5 Flash Lite)
+	PowerMax      PowerMode = "max"      // Latest frontier tier (Opus 4.6, GPT-5.4, Gemini 3.1 Pro, Grok Code Fast 1)
+	PowerBalanced PowerMode = "balanced" // Mid-tier quality/speed balance (Sonnet 4.6, GPT-4.1, Gemini 3 Flash, Grok 3)
+	PowerFast     PowerMode = "fast"     // Cheapest mini tier (Haiku 4.5, GPT-4o-mini, Gemini 2.5 Flash Lite, Grok 3 Mini)
 )
 
 // CreditMultiplier returns the credit usage multiplier for a power mode
