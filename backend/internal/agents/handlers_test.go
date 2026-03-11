@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"apex-build/internal/ai"
@@ -32,6 +33,8 @@ func testRouter(am *AgentManager) *gin.Engine {
 	build.POST("/preflight", h.PreflightCheck)
 	build.POST("/start", h.StartBuild)
 	build.POST("/:id/message", h.SendMessage)
+	rg := r.Group("/api/v1", auth)
+	rg.GET("/builds/:buildId/download", h.DownloadCompletedBuild)
 	return r
 }
 
@@ -296,6 +299,139 @@ func TestSendMessageRestoresSnapshotBackedBuildSession(t *testing.T) {
 	}
 	if len(restored.Interaction.Messages) == 0 {
 		t.Fatalf("expected restored build interaction to contain the user message")
+	}
+}
+
+func TestDownloadCompletedBuildRejectsFailedSnapshot(t *testing.T) {
+	db := openBuildTestDB(t)
+	filesJSON, err := json.Marshal([]GeneratedFile{
+		{Path: "server/package.json", Content: `{"name":"api","scripts":{"build":"node -e \"console.log('ok')\""}}`},
+	})
+	if err != nil {
+		t.Fatalf("marshal files: %v", err)
+	}
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:    "failed-build",
+		UserID:     1,
+		Status:     "failed",
+		FilesCount: 1,
+		FilesJSON:  string(filesJSON),
+	}).Error; err != nil {
+		t.Fatalf("create completed build snapshot: %v", err)
+	}
+
+	am := &AgentManager{db: db}
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/builds/failed-build/download", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "build is not exportable") {
+		t.Fatalf("expected exportable error, got %s", w.Body.String())
+	}
+}
+
+func TestDownloadCompletedBuildRejectsInvalidCompletedSnapshot(t *testing.T) {
+	db := openBuildTestDB(t)
+	filesJSON, err := json.Marshal([]GeneratedFile{
+		{
+			Path: "package.json",
+			Content: `{
+  "name": "demo",
+  "private": true,
+  "scripts": { "build": "node -e \"console.log('ok')\"" }
+}`,
+		},
+		{
+			Path: "server/package.json",
+			Content: `{
+  "name": "api",
+  "private": true,
+  "scripts": { "dev": "tsx src/index.ts" }
+}`,
+		},
+		{Path: "server/src/index.ts", Content: "console.log('broken')"},
+	})
+	if err != nil {
+		t.Fatalf("marshal files: %v", err)
+	}
+	techStackJSON, err := json.Marshal(TechStack{Backend: "Node.js"})
+	if err != nil {
+		t.Fatalf("marshal tech stack: %v", err)
+	}
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:    "invalid-completed-build",
+		UserID:     1,
+		Status:     "completed",
+		TechStack:  string(techStackJSON),
+		FilesCount: 2,
+		FilesJSON:  string(filesJSON),
+	}).Error; err != nil {
+		t.Fatalf("create completed build snapshot: %v", err)
+	}
+
+	am := &AgentManager{db: db}
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/builds/invalid-completed-build/download", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "failed final validation") {
+		t.Fatalf("expected validation failure, got %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "missing a build script") {
+		t.Fatalf("expected missing build script hint, got %s", w.Body.String())
+	}
+}
+
+func TestDownloadCompletedBuildStreamsValidSnapshot(t *testing.T) {
+	db := openBuildTestDB(t)
+	filesJSON, err := json.Marshal([]GeneratedFile{
+		{
+			Path: "server/package.json",
+			Content: `{
+  "name": "api",
+  "private": true,
+  "scripts": { "build": "node -e \"console.log('ok')\"" }
+}`,
+		},
+		{Path: "server/src/index.js", Content: "console.log('ok')"},
+		{Path: "README.md", Content: "# Demo\n\nRun instructions."},
+		{Path: ".env.example", Content: "PORT=3001\n"},
+	})
+	if err != nil {
+		t.Fatalf("marshal files: %v", err)
+	}
+	techStackJSON, err := json.Marshal(TechStack{Backend: "Node.js"})
+	if err != nil {
+		t.Fatalf("marshal tech stack: %v", err)
+	}
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "valid-completed-build",
+		UserID:      1,
+		Status:      "completed",
+		ProjectName: "demo",
+		TechStack:   string(techStackJSON),
+		FilesCount:  2,
+		FilesJSON:   string(filesJSON),
+	}).Error; err != nil {
+		t.Fatalf("create completed build snapshot: %v", err)
+	}
+
+	am := &AgentManager{db: db}
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/builds/valid-completed-build/download", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); !strings.Contains(got, "application/zip") {
+		t.Fatalf("expected zip content type, got %q", got)
 	}
 }
 

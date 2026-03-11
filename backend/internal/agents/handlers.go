@@ -1472,6 +1472,43 @@ func (h *BuildHandler) DownloadCompletedBuild(c *gin.Context) {
 		return
 	}
 
+	buildStatus := normalizeRestoredBuildStatus(&build)
+	if buildStatus != BuildCompleted {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":        "build is not exportable",
+			"details":      "Only completed, validated builds can be downloaded as ZIP archives.",
+			"build_status": build.Status,
+		})
+		return
+	}
+
+	if h.manager != nil {
+		validationBuild := &Build{
+			ID:                  build.BuildID,
+			UserID:              build.UserID,
+			Status:              buildStatus,
+			Mode:                BuildMode(build.Mode),
+			PowerMode:           PowerMode(build.PowerMode),
+			RequirePreviewReady: true,
+			Description:         build.Description,
+		}
+		if strings.TrimSpace(build.TechStack) != "" {
+			var techStack TechStack
+			if err := json.Unmarshal([]byte(build.TechStack), &techStack); err == nil {
+				validationBuild.TechStack = &techStack
+			}
+		}
+		if validationErrors := h.manager.validateFinalBuildReadiness(validationBuild, files); len(validationErrors) > 0 {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":             "build artifacts failed final validation",
+				"details":           "This snapshot is incomplete or broken and cannot be exported as a ZIP archive.",
+				"build_status":      build.Status,
+				"validation_errors": validationErrors,
+			})
+			return
+		}
+	}
+
 	projectName := strings.TrimSpace(build.ProjectName)
 	if projectName == "" {
 		projectName = "apex-build"

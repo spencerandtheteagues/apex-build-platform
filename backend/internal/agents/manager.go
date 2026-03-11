@@ -8127,6 +8127,7 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	}
 
 	hasPackageJSON := false
+	hasBackendPackageJSON := false
 	packageJSON := ""
 	hasIndexHTML := false
 	hasFrontendEntry := false
@@ -8228,6 +8229,10 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 				hasPackageJSON = true
 				packageJSON = file.Content
 			}
+		case "backend/package.json", "api/package.json", "server/package.json",
+			"apps/api/package.json", "apps/server/package.json",
+			"packages/backend/package.json", "packages/api/package.json":
+			hasBackendPackageJSON = true
 		case "index.html", "public/index.html", "src/index.html",
 			"frontend/index.html", "frontend/public/index.html":
 			hasIndexHTML = true
@@ -8258,7 +8263,7 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	}
 
 	// Manifest existence checks: ensure project manifests are present for the detected language(s).
-	if hasNodeFiles && !hasPackageJSON {
+	if hasNodeFiles && !(hasPackageJSON || hasBackendPackageJSON) {
 		addError("missing_manifest: package.json (TypeScript/Node.js project has no package.json)")
 	}
 	if hasGoFiles && !hasGoMod {
