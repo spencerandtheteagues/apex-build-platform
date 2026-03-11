@@ -15,7 +15,7 @@
 
 APEX.BUILD is a full-stack cloud development platform where you describe what you want to build in plain English and a coordinated team of AI agents writes the code, reviews it, fixes it, tests it, and deploys it — while you watch in real time and stay in complete control of every decision.
 
-This is not a toy. It runs production-grade multi-agent orchestration backed by six AI providers (Claude, GPT-5, Gemini, Grok, Ollama, and your own keys), a Monaco-powered IDE identical to VS Code, live preview with hot reload, one-click deployment to Vercel / Netlify / Render, real-time multiplayer collaboration, a full Git workflow, and a billing system with per-token cost tracking, hard budget caps, and an immutable transaction ledger so you always know exactly what you spent and why.
+This is not a toy. It runs production-grade multi-agent orchestration backed by six AI providers (Claude, OpenAI, Gemini, Grok, Ollama, and your own keys), a Monaco-powered IDE identical to VS Code, live preview with hot reload, one-click deployment to Vercel / Netlify / Render, real-time multiplayer collaboration, a full Git workflow, and a billing system with per-token cost tracking, hard budget caps, and an immutable transaction ledger so you always know exactly what you spent and why.
 
 ---
 
@@ -47,7 +47,7 @@ If you have used Replit, Bolt, v0, or any AI coding platform, you have hit the s
 
 | Pain Point | Replit / Bolt / v0 | APEX.BUILD |
 |---|---|---|
-| **Locked into one AI** | Replit uses its own model. Bolt uses Claude only. v0 uses GPT-4o only. Zero choice. | Six providers: Claude, GPT-5, Gemini, Grok, Ollama, or your own keys. Switch per task. Mix mid-build. |
+| **Locked into one AI** | Replit uses its own model. Bolt uses Claude only. v0 uses GPT-4o only. Zero choice. | Six providers: Claude, OpenAI, Gemini, Grok, Ollama, or your own keys. Switch per task. Mix mid-build. |
 | **Opaque, unpredictable bills** | Credits vanish with no explanation. No per-request visibility. | Real-time per-token cost ticker on every request. Immutable credit ledger. Budget cap enforcement before anything expensive runs. |
 | **Always-on pricing gouges you** | Replit charges extra monthly per app to stay awake. Free apps spin down. | Deploy once to Vercel, Netlify, or Render. Your app lives on your account. Hosting cost is between you and the host, not APEX. |
 | **Your code is trapped** | Replit makes leaving awkward. Bolt has no export. Code lives on their servers. | Full GitHub export any time. Git push to your own repo. Your code is yours. Always. |
@@ -73,11 +73,11 @@ When the build completes, proposed changes appear in a full diff review panel. Y
 
 ### Three Power Modes
 
-**Fast** — Haiku 4.5 + GPT-4o Mini + Gemini Flash Lite. Fastest turnaround, lowest cost. Best for scaffolding, boilerplate, and rapid iteration.
+**Fast** — Haiku 4.5 + GPT-4o Mini + Gemini 2.5 Flash Lite + Grok 3 Mini. Fastest turnaround, lowest cost. Best for scaffolding, boilerplate, and rapid iteration.
 
-**Balanced** — Sonnet 4.5 + GPT-5 + Gemini Flash. The sweet spot for real work. Production-quality output at a reasonable price.
+**Balanced** — Sonnet 4.6 + GPT-4.1 + Gemini 3 Flash Preview + Grok 3. The sweet spot for real work. Production-quality output at a reasonable price.
 
-**Max** — Opus 4.6 + GPT-5.2 Codex + Gemini Pro + Grok-4. Every agent runs its strongest model. Full validation loops, deep code review, maximum quality. For code going to production.
+**Max** — Opus 4.6 + GPT-5.4 + Gemini 3.1 Pro Preview + Grok Code Fast 1. Every agent runs its strongest model. Full validation loops, deep code review, maximum quality. For code going to production.
 
 ### Full-Featured IDE
 
@@ -111,9 +111,9 @@ APEX.BUILD treats AI providers as interchangeable infrastructure. The AI router 
 
 **Intelligent routing** — Assigns the best model to each task type based on your power mode.
 
-**Automatic fallback chains** — If Claude is rate-limited or down, the router falls back to GPT-5, then Grok, then Ollama, then Gemini. Builds do not fail because one provider has an outage.
+**Automatic fallback chains** — If Claude is rate-limited or down, the router falls back across OpenAI, Grok, Ollama, and Gemini. Builds do not fail because one provider has an outage.
 
-**Rate limit awareness** — Per-provider request budgets enforced in real time: Claude 100 req/min, GPT-5 80, Gemini 120, Grok 100, Ollama unlimited.
+**Rate limit awareness** — Per-provider request budgets enforced in real time: Claude 100 req/min, OpenAI 80, Gemini 120, Grok 100, Ollama unlimited.
 
 **Cost ceiling enforcement** — Maximum spend per request enforced per provider. Requests that would exceed the ceiling are rerouted to a cheaper model in the same chain.
 
@@ -121,10 +121,10 @@ APEX.BUILD treats AI providers as interchangeable infrastructure. The AI router 
 
 | Provider | Best For | Available Models |
 |---|---|---|
-| **Claude (Anthropic)** | Complex reasoning, code review, documentation | Opus 4.6, Sonnet 4.5, Haiku 4.5 |
-| **GPT-5 (OpenAI)** | Agentic coding, fast iteration | GPT-5.2 Codex, GPT-5, GPT-4o Mini |
-| **Gemini (Google)** | Long-context, multi-modal, budget tasks | Gemini 3 Pro, 3 Flash, 2.5 Flash Lite |
-| **Grok (xAI)** | Logic, analysis, sharp reasoning | Grok-4, Grok-4 Fast, Grok-3 Mini |
+| **Claude (Anthropic)** | Complex reasoning, code review, documentation | Opus 4.6, Sonnet 4.6, Haiku 4.5 |
+| **OpenAI** | Agentic coding, fast iteration | GPT-5.4, GPT-4.1, GPT-4o Mini |
+| **Gemini (Google)** | Long-context, multi-modal, budget tasks | Gemini 3.1 Pro Preview, Gemini 3 Flash Preview, Gemini 2.5 Flash Lite |
+| **Grok (xAI)** | Logic, analysis, sharp reasoning | Grok Code Fast 1, Grok 3, Grok 3 Mini |
 | **Ollama (Local)** | Privacy, zero cost, offline/air-gapped | DeepSeek-R1, Llama 3, Mistral, any GGUF |
 | **BYOK** | Your own quotas and billing | Anything your keys allow |
 

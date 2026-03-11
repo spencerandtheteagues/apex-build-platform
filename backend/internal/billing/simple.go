@@ -90,7 +90,7 @@ func GetPlans() []Plan {
 				"2,000 AI Requests/month",
 				"500 Code Generations/month",
 				"10GB Storage",
-				"All AI Models (Claude, GPT-5, Gemini)",
+				"All AI Providers (Claude, OpenAI, Gemini, Grok)",
 				"Advanced Code Editor",
 				"Email Support",
 				"Custom Themes",

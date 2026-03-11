@@ -487,10 +487,10 @@ APEX.BUILD offers BYOK on ALL tiers, including free. This is a major differentia
 
 | Provider | Models Available |
 |----------|-----------------|
-| **Claude** | Opus 4.5, Sonnet 4, Haiku 3.5 |
-| **GPT-4** | GPT-4o, GPT-4o Mini, o1, o1-mini |
-| **Gemini** | 2.0 Flash, 1.5 Pro, 1.5 Flash |
-| **Grok** | Grok 4, Grok 4 Fast, Grok 3 Mini |
+| **Claude** | Opus 4.6, Sonnet 4.6, Haiku 4.5 |
+| **OpenAI** | GPT-5.4, GPT-4.1, GPT-4o Mini |
+| **Gemini** | Gemini 3.1 Pro Preview, Gemini 3 Flash Preview, Gemini 2.5 Flash Lite |
+| **Grok** | Grok Code Fast 1, Grok 3, Grok 3 Mini |
 | **Ollama** | Llama 3.1, CodeLlama, DeepSeek, Qwen 2.5, Mistral |
 
 **BYOK Benefits:**

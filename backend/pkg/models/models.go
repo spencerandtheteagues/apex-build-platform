@@ -448,7 +448,7 @@ type UserAPIKey struct {
 	KeyFingerprint string `json:"-" gorm:"not null"`
 
 	// User preferences for this provider
-	ModelPreference string `json:"model_preference" gorm:"size:100"` // e.g. "grok-4-fast", "claude-sonnet-4-20250514"
+	ModelPreference string `json:"model_preference" gorm:"size:100"` // e.g. "grok-3", "claude-sonnet-4-6"
 
 	// Status and tracking
 	IsActive             bool       `json:"is_active" gorm:"default:true"`

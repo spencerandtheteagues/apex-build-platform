@@ -36,7 +36,7 @@ const (
 type AIRequest struct {
 	ID                 string                 `json:"id"`
 	Provider           AIProvider             `json:"provider"`
-	Model              string                 `json:"model,omitempty"`     // Explicit model override (e.g. "grok-4-fast", "claude-sonnet-4-20250514")
+	Model              string                 `json:"model,omitempty"`     // Explicit model override (e.g. "grok-3", "claude-sonnet-4-6")
 	Capability         AICapability           `json:"capability"`
 	Prompt             string                 `json:"prompt"`
 	Code               string                 `json:"code,omitempty"`

@@ -98,13 +98,13 @@ func NewEnhancedAIRouter() *EnhancedAIRouter {
 
 // initializeProviders sets up all AI service providers
 func (ear *EnhancedAIRouter) initializeProviders() {
-	// Claude Opus 4.5 - Best for complex reasoning and code analysis
+	// Claude Opus 4.6 - Best for complex reasoning and code analysis
 	ear.providers["claude"] = &ClaudeProvider{
-		Name:    "Claude Opus 4.5",
-		Version: "opus-4.5-20251101",
+		Name:    "Claude Opus 4.6",
+		Version: "opus-4.6",
 		Capabilities: &ProviderCapabilities{
-			Name:                "Claude Opus 4.5",
-			Version:             "4.5",
+			Name:                "Claude Opus 4.6",
+			Version:             "4.6",
 			MaxTokens:           200000,
 			SupportedLanguages:  []string{"go", "typescript", "javascript", "python", "rust", "java", "cpp", "html", "css"},
 			Strengths:           []string{"complex_reasoning", "code_analysis", "refactoring", "architecture", "debugging"},
