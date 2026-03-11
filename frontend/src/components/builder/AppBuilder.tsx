@@ -1413,14 +1413,28 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
     if (providedUrl && providedUrl.trim()) {
       const raw = providedUrl.trim()
-      const absolute = /^wss?:\/\//i.test(raw)
-        ? raw
-        : (() => {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-            const normalized = raw.startsWith('/') ? raw : `/${raw}`
-            return `${protocol}//${window.location.host}${normalized}`
-          })()
-      return appendToken(absolute)
+      if (/^wss?:\/\//i.test(raw)) {
+        return appendToken(raw)
+      }
+      // Relative URL from server — resolve against the configured backend WS URL,
+      // NOT window.location.host (which is the frontend host, not the backend).
+      const configuredWsBase = getConfiguredWsUrl()
+      const configuredApiBase = getConfiguredApiUrl()
+      if (configuredWsBase) {
+        const backendRoot = configuredWsBase.replace(/\/ws\/?$/, '').replace(/\/$/, '')
+        const normalized = raw.startsWith('/') ? raw : `/${raw}`
+        return appendToken(`${backendRoot}${normalized}`)
+      } else if (configuredApiBase) {
+        const apiRoot = configuredApiBase.replace('/api/v1', '').replace(/\/$/, '')
+        const wsProtocol = apiRoot.startsWith('https') ? 'wss' : 'ws'
+        const wsHost = apiRoot.replace(/^https?:\/\//, '')
+        const normalized = raw.startsWith('/') ? raw : `/${raw}`
+        return appendToken(`${wsProtocol}://${wsHost}${normalized}`)
+      } else {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+        const normalized = raw.startsWith('/') ? raw : `/${raw}`
+        return appendToken(`${protocol}//${window.location.host}${normalized}`)
+      }
     }
 
     const configuredWsUrl = getConfiguredWsUrl()
