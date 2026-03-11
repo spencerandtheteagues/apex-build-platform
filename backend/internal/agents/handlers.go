@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"apex-build/internal/applog"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -274,12 +275,14 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 		return
 	}
 	log.Printf("StartBuild: build created with ID %s", build.ID)
+	applog.BuildStarted(build.ID, uid, string(req.Mode), string(req.PowerMode), req.Description)
 
 	// Start the build process asynchronously
 	go func() {
 		log.Printf("StartBuild: starting async build process for %s", build.ID)
 		if err := h.manager.StartBuild(build.ID); err != nil {
 			log.Printf("Error starting build %s: %v", build.ID, err)
+			applog.BuildFailed(build.ID, uid, err.Error(), 0)
 		}
 	}()
 

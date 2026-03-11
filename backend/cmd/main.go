@@ -18,6 +18,7 @@ import (
 	"apex-build/internal/agents/autonomous"
 	"apex-build/internal/ai"
 	"apex-build/internal/api"
+	"apex-build/internal/applog"
 	"apex-build/internal/auth"
 	"apex-build/internal/budget"
 	"apex-build/internal/cache"
@@ -63,6 +64,9 @@ func main() {
 		}
 	}
 	log.Println("Environment configuration loaded")
+
+	// Init structured logger (JSON in production, text in dev)
+	applog.Init()
 
 	// Load basic config early so we can bind the HTTP port immediately.
 	appConfig := loadConfig()

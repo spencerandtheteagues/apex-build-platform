@@ -4,6 +4,7 @@ package agents
 
 import (
 	apihandlers "apex-build/internal/handlers"
+	"apex-build/internal/applog"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -161,26 +162,26 @@ func (h *WSHub) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	log.Printf("WebSocket connection request for build %s", buildID)
+	applog.Info("ws_request", "event", "ws_request", "build_id", buildID, "client_ip", c.ClientIP())
 
 	// Verify build exists
 	build, err := h.manager.GetBuild(buildID)
 	if err != nil {
-		log.Printf("WebSocket connection rejected: build %s not found", buildID)
+		applog.WSRejected(buildID, "build_not_found")
 		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
 		return
 	}
 
 	uid, err := apihandlers.WebSocketUserID(c)
 	if err != nil {
-		log.Printf("WebSocket connection rejected: auth failed for build %s: %v", buildID, err)
+		applog.WSRejected(buildID, "auth_failed: "+err.Error())
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
 
 	// Verify user has access to this build
 	if uid != build.UserID && !isUserAdminDB(h.manager, uid) {
-		log.Printf("WebSocket connection rejected: user %d not authorized for build %s (owner: %d)", uid, buildID, build.UserID)
+		applog.WSRejected(buildID, "forbidden")
 		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized for this build"})
 		return
 	}
@@ -188,11 +189,11 @@ func (h *WSHub) HandleWebSocket(c *gin.Context) {
 	// Upgrade to WebSocket (after auth check)
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		log.Printf("WebSocket upgrade failed for build %s: %v", buildID, err)
+		applog.WSRejected(buildID, "upgrade_failed: "+err.Error())
 		return
 	}
 
-	log.Printf("WebSocket connection established for build %s", buildID)
+	applog.WSConnected(buildID, uid)
 
 	wsConn := &WSConnection{
 		hub:     h,
@@ -309,7 +310,9 @@ func (c *WSConnection) readPump(updateChan chan *WSMessage, forwardDone chan str
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket error: %v", err)
+				applog.WSDisconnected(c.buildID, c.userID, err.Error())
+			} else {
+				applog.WSDisconnected(c.buildID, c.userID, "clean_close")
 			}
 			break
 		}
