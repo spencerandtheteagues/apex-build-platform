@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { DollarSign, Download, TrendingUp, Clock, Cpu, BarChart3 } from 'lucide-react'
+import { DollarSign, Download, TrendingUp, Cpu, BarChart3 } from 'lucide-react'
 import apiService from '@/services/api'
 
 interface SpendSummary {
@@ -32,25 +32,56 @@ interface SpendEvent {
   target_file: string
 }
 
+const unwrapApiData = <T,>(payload: any): T => {
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    return payload.data as T
+  }
+  return payload as T
+}
+
+const summaryCardTone: Record<'red' | 'orange' | 'yellow' | 'purple', string> = {
+  red: 'text-red-400',
+  orange: 'text-orange-400',
+  yellow: 'text-yellow-400',
+  purple: 'text-purple-400',
+}
+
+type SummaryCard = {
+  label: string
+  value: number
+  icon: typeof DollarSign
+  color: keyof typeof summaryCardTone
+  isCurrency?: boolean
+}
+
 export const SpendDashboard: React.FC = () => {
   const [summary, setSummary] = useState<SpendSummary | null>(null)
   const [breakdown, setBreakdown] = useState<BreakdownItem[]>([])
   const [history, setHistory] = useState<SpendEvent[]>([])
   const [groupBy, setGroupBy] = useState('provider')
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const loadData = useCallback(async () => {
+    setLoading(true)
+    setError(null)
     try {
       const [summaryRes, breakdownRes, historyRes] = await Promise.all([
         apiService.get('/spend/summary'),
         apiService.get(`/spend/breakdown?group_by=${groupBy}`),
         apiService.get('/spend/history?limit=50'),
       ])
-      setSummary(summaryRes.data)
-      setBreakdown(breakdownRes.data?.items || [])
-      setHistory(historyRes.data?.events || [])
+
+      const summaryData = unwrapApiData<SpendSummary>(summaryRes.data)
+      const breakdownData = unwrapApiData<BreakdownItem[] | { items?: BreakdownItem[] }>(breakdownRes.data)
+      const historyData = unwrapApiData<SpendEvent[] | { events?: SpendEvent[] }>(historyRes.data)
+
+      setSummary(summaryData || null)
+      setBreakdown(Array.isArray(breakdownData) ? breakdownData : (breakdownData?.items || []))
+      setHistory(Array.isArray(historyData) ? historyData : (historyData?.events || []))
     } catch (err) {
       console.error('Failed to load spend data:', err)
+      setError('Failed to load spend data.')
     } finally {
       setLoading(false)
     }
@@ -80,6 +111,13 @@ export const SpendDashboard: React.FC = () => {
     )
   }
 
+  const summaryCards: SummaryCard[] = [
+    { label: "Today's Spend", value: summary?.daily_spend ?? 0, icon: DollarSign, color: 'red' },
+    { label: "Monthly Spend", value: summary?.monthly_spend ?? 0, icon: TrendingUp, color: 'orange' },
+    { label: "Today's Requests", value: summary?.daily_count ?? 0, icon: Cpu, color: 'yellow', isCurrency: false },
+    { label: "Monthly Requests", value: summary?.monthly_count ?? 0, icon: BarChart3, color: 'purple', isCurrency: false },
+  ]
+
   return (
     <div className="min-h-full bg-black p-6 pb-16 md:pb-6">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -100,17 +138,18 @@ export const SpendDashboard: React.FC = () => {
           </button>
         </div>
 
+        {error && (
+          <div className="rounded-xl border border-red-900/50 bg-red-950/20 px-4 py-3 text-sm text-red-300">
+            {error}
+          </div>
+        )}
+
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {[
-            { label: "Today's Spend", value: summary?.daily_spend ?? 0, icon: DollarSign, color: 'red' },
-            { label: "Monthly Spend", value: summary?.monthly_spend ?? 0, icon: TrendingUp, color: 'orange' },
-            { label: "Today's Requests", value: summary?.daily_count ?? 0, icon: Cpu, color: 'yellow', isCurrency: false },
-            { label: "Monthly Requests", value: summary?.monthly_count ?? 0, icon: BarChart3, color: 'purple', isCurrency: false },
-          ].map((card) => (
+          {summaryCards.map((card) => (
             <div key={card.label} className="bg-gray-900/50 border border-gray-800 rounded-xl p-4">
               <div className="flex items-center gap-2 text-gray-400 text-sm mb-2">
-                <card.icon size={16} className={`text-${card.color}-400`} />
+                <card.icon size={16} className={summaryCardTone[card.color]} />
                 {card.label}
               </div>
               <div className="text-2xl font-bold text-white">

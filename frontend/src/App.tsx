@@ -88,9 +88,14 @@ const getInitialRouteState = (): {
   const wantsBilling = pathname === '/billing' || pathname === '/settings' || pathname === '/settings/billing' || params.has('success') || params.has('canceled') || params.has('credits') || params.has('billing')
   const wantsSpending = pathname === '/spending'
   const wantsExplore = pathname === '/explore'
+  const wantsAdmin = pathname === '/admin'
+  const wantsIDE = pathname === '/ide'
 
   if (projectId) {
     return { projectId, currentView: 'ide', showLanding: false }
+  }
+  if (wantsIDE) {
+    return { projectId: null, currentView: 'ide', showLanding: false }
   }
   if (wantsBilling) {
     return { projectId: null, currentView: 'settings', showLanding: false }
@@ -101,8 +106,39 @@ const getInitialRouteState = (): {
   if (wantsExplore) {
     return { projectId: null, currentView: 'explore', showLanding: false }
   }
+  if (wantsAdmin) {
+    return { projectId: null, currentView: 'admin', showLanding: false }
+  }
 
   return { projectId: null, currentView: 'builder', showLanding: true }
+}
+
+const addVisitedView = (views: Set<AppView>, view: AppView): Set<AppView> => {
+  if (views.has(view)) return views
+  const next = new Set(views)
+  next.add(view)
+  return next
+}
+
+const getPathForView = (view: AppView, projectId?: number | null): string => {
+  if (view === 'ide' && projectId && projectId > 0) {
+    return `/project/${projectId}`
+  }
+
+  switch (view) {
+    case 'ide':
+      return '/ide'
+    case 'admin':
+      return '/admin'
+    case 'explore':
+      return '/explore'
+    case 'settings':
+      return '/settings'
+    case 'spending':
+      return '/spending'
+    default:
+      return '/'
+  }
 }
 
 const LAST_PROJECT_STORAGE_KEY = 'apex_last_project_id'
@@ -207,13 +243,22 @@ function App() {
     updateProfile,
   } = useStore()
 
-  const navigateToView = useCallback((view: AppView) => {
+  const navigateToView = useCallback((view: AppView, options?: { replace?: boolean; projectId?: number | null }) => {
     setCurrentView(view)
+    setVisitedViews((prev) => addVisitedView(prev, view))
     setShowSettingsDropdown(false)
     if (view === 'builder') {
       setShowLanding(false)
     }
-  }, [])
+    if (typeof window !== 'undefined') {
+      const targetPath = getPathForView(view, options?.projectId ?? (view === 'ide' ? currentProject?.id ?? null : null))
+      const currentPath = `${window.location.pathname}${window.location.search}`
+      if (currentPath !== targetPath) {
+        const method = options?.replace ? 'replaceState' : 'pushState'
+        window.history[method]({}, '', targetPath)
+      }
+    }
+  }, [currentProject?.id])
 
   const handleStartNewBuild = useCallback(() => {
     navigateToView('builder')
@@ -391,11 +436,10 @@ function App() {
   // After auth, redirect to Settings/Billing if user clicked a paid plan CTA
   useEffect(() => {
     if (isAuthenticated && pendingPlanType && pendingPlanType !== 'free') {
-      setCurrentView('settings')
-      setVisitedViews(prev => new Set([...prev, 'settings']))
+      navigateToView('settings', { replace: true })
       setPendingPlanType(null)
     }
-  }, [isAuthenticated, pendingPlanType])
+  }, [isAuthenticated, navigateToView, pendingPlanType])
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -404,10 +448,9 @@ function App() {
     if (!projectId) return
 
     pendingProjectIdRef.current = null
-    setCurrentView('ide')
-    setVisitedViews(prev => new Set([...prev, 'ide']))
+    navigateToView('ide', { replace: true, projectId })
     void selectProject(projectId)
-  }, [isAuthenticated, selectProject])
+  }, [isAuthenticated, navigateToView, selectProject])
 
   const restoreLastProject = useCallback(async (options?: { navigate?: boolean }) => {
     if (!user?.id) return false
@@ -563,12 +606,41 @@ function App() {
   // Lazy-load heavy views on first visit while preserving view state after they mount.
   useEffect(() => {
     setVisitedViews((prev) => {
-      if (prev.has(currentView)) return prev
-      const next = new Set(prev)
-      next.add(currentView)
-      return next
+      return addVisitedView(prev, currentView)
     })
   }, [currentView])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const handlePopState = () => {
+      const routeState = getInitialRouteState()
+      pendingProjectIdRef.current = routeState.projectId
+      setShowLanding(routeState.showLanding)
+      setCurrentView(routeState.currentView)
+      setVisitedViews((prev) => addVisitedView(prev, routeState.currentView))
+      setShowSettingsDropdown(false)
+
+      if (routeState.projectId && isAuthenticated) {
+        void selectProject(routeState.projectId)
+      }
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => {
+      window.removeEventListener('popstate', handlePopState)
+    }
+  }, [isAuthenticated, selectProject])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || currentView !== 'ide') return
+
+    const targetPath = getPathForView('ide', currentProject?.id ?? null)
+    const currentPath = `${window.location.pathname}${window.location.search}`
+    if (currentPath !== targetPath) {
+      window.history.replaceState({}, '', targetPath)
+    }
+  }, [currentProject?.id, currentView])
 
   // Persist UI color scheme and apply to the whole app.
   useEffect(() => {

@@ -79,8 +79,13 @@ export default defineConfig(({ mode }) => {
       // Target modern browsers for smaller bundles
       target: 'es2020',
 
-      // Increase chunk warning limit slightly
-      chunkSizeWarningLimit: 600,
+      // Monaco is intentionally split into a large lazy chunk.
+      chunkSizeWarningLimit: 5000,
+
+      // Disable the modulepreload polyfill to keep CSP simpler.
+      modulePreload: {
+        polyfill: false,
+      },
 
       // Minification settings
       minify: 'terser',
@@ -96,10 +101,16 @@ export default defineConfig(({ mode }) => {
       },
 
       rollupOptions: {
+        onwarn(warning, warn) {
+          if (
+            warning.code === 'MODULE_LEVEL_DIRECTIVE' &&
+            warning.id?.includes('react-resizable-panels')
+          ) {
+            return
+          }
+          warn(warning)
+        },
         output: {
-          // Disable inline modulepreload polyfill so CSP needs no sha256 hash
-          modulePreload: false,
-
           // Optimize chunk naming for better caching
           chunkFileNames: 'assets/js/[name]-[hash].js',
           entryFileNames: 'assets/js/[name]-[hash].js',

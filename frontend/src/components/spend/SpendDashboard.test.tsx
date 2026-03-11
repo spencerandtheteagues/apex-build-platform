@@ -93,6 +93,51 @@ describe('SpendDashboard', () => {
     })
   })
 
+  it('supports wrapped backend responses', async () => {
+    mockApiResponses({
+      summary: {
+        data: {
+          daily_spend: 2.5,
+          monthly_spend: 10.25,
+          daily_count: 4,
+          monthly_count: 12,
+        },
+      },
+      breakdown: {
+        data: [
+          { key: 'claude', billed_cost: 3.0, raw_cost: 2.0, input_tokens: 1000, output_tokens: 500, count: 2 },
+        ],
+      },
+      history: {
+        data: {
+          events: [
+            {
+              id: 7,
+              created_at: '2026-02-26T11:00:00Z',
+              provider: 'gpt4',
+              model: 'gpt-4.1',
+              agent_role: 'frontend',
+              build_id: 'b-456',
+              input_tokens: 2000,
+              output_tokens: 1000,
+              billed_cost: 0.021,
+              is_byok: true,
+              target_file: 'App.tsx',
+            },
+          ],
+        },
+      },
+    })
+
+    render(<SpendDashboard />)
+
+    await waitFor(() => {
+      expect(screen.getByText('$2.5000')).toBeTruthy()
+      expect(screen.getByText('$10.2500')).toBeTruthy()
+      expect(screen.getByText('gpt-4.1')).toBeTruthy()
+    })
+  })
+
   it('renders breakdown items', async () => {
     mockApiResponses()
 
