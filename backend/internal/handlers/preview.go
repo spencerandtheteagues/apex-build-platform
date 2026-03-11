@@ -86,7 +86,8 @@ func (h *PreviewHandler) FeatureStatus() map[string]interface{} {
 		status["docker"] = h.factory.GetDockerStatus()
 	}
 	status["sandbox_required"] = h.requireSandbox
-	status["sandbox_ready"] = !h.requireSandbox || (h.factory != nil && h.factory.IsDockerAvailable())
+	status["sandbox_degraded"] = h.sandboxFallbackActive()
+	status["sandbox_ready"] = !h.requireSandbox || (h.factory != nil && h.factory.IsDockerAvailable()) || h.sandboxFallbackActive()
 
 	return status
 }
@@ -181,6 +182,7 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 		"preview": status,
 		"message": "Preview started successfully",
 		"sandbox": req.Sandbox,
+		"sandbox_degraded": h.sandboxFallbackActive() && !req.Sandbox,
 	}
 
 	// Include Docker availability info
@@ -356,6 +358,7 @@ response:
 		"diagnostics": diagnostics,
 		"message":     "Full-stack preview started",
 		"sandbox":     req.Sandbox,
+		"sandbox_degraded": h.sandboxFallbackActive() && !req.Sandbox,
 	}
 	if h.factory != nil {
 		resp["docker_available"] = h.factory.IsDockerAvailable()
@@ -478,6 +481,7 @@ func (h *PreviewHandler) GetPreviewStatus(c *gin.Context) {
 		"success": true,
 		"preview": status,
 		"sandbox": activeSandbox,
+		"sandbox_degraded": h.sandboxFallbackActive() && !activeSandbox,
 		"server":  serverStatus,
 	})
 }
@@ -1132,6 +1136,7 @@ func (h *PreviewHandler) GetDockerStatus(c *gin.Context) {
 			"available":                 false,
 			"message":                   "Docker container previews not configured",
 			"sandbox_required":          h.requireSandbox,
+			"sandbox_degraded":          h.sandboxFallbackActive(),
 			"backend_preview_available": h.backendPreviewAvailable(),
 			"backend_preview_reason":    h.backendPreviewDisabledReason(),
 		})
@@ -1150,6 +1155,7 @@ func (h *PreviewHandler) GetDockerStatus(c *gin.Context) {
 		"total_build_ms":            status.TotalBuildTime,
 		"total_runtime_ms":          status.TotalRuntime,
 		"sandbox_required":          h.requireSandbox,
+		"sandbox_degraded":          h.sandboxFallbackActive(),
 		"backend_preview_available": h.backendPreviewAvailable(),
 		"backend_preview_reason":    h.backendPreviewDisabledReason(),
 	})
@@ -1160,28 +1166,36 @@ func previewSandboxRequired() bool {
 		strings.EqualFold(strings.TrimSpace(os.Getenv("PREVIEW_FORCE_CONTAINER")), "true")
 }
 
+func (h *PreviewHandler) sandboxFallbackActive() bool {
+	return h.requireSandbox && (h.factory == nil || !h.factory.IsDockerAvailable())
+}
+
 func (h *PreviewHandler) resolveRequestedPreviewSandbox(requested bool) (bool, error) {
-	if requested || h.requireSandbox {
+	if requested {
 		if h.factory == nil || !h.factory.IsDockerAvailable() {
 			return false, fmt.Errorf("secure preview mode requires Docker container previews, but Docker preview is not available")
 		}
+		return true, nil
 	}
 	if h.requireSandbox {
-		return true, nil
-	}
-	if requested {
-		return true, nil
+		if h.factory != nil && h.factory.IsDockerAvailable() {
+			return true, nil
+		}
+		return false, nil
 	}
 	return false, nil
 }
 
 func (h *PreviewHandler) backendPreviewAvailable() bool {
-	return h.serverRunner != nil && !h.requireSandbox
+	return h.serverRunner != nil && (!h.requireSandbox || h.sandboxFallbackActive())
 }
 
 func (h *PreviewHandler) backendPreviewDisabledReason() string {
-	if h.requireSandbox {
+	if h.requireSandbox && !h.sandboxFallbackActive() {
 		return "Backend runtime preview is disabled while secure sandbox preview is enforced"
+	}
+	if h.sandboxFallbackActive() {
+		return "Server Docker is unavailable, so preview is using process fallback mode"
 	}
 	if h.serverRunner == nil {
 		return "Backend runtime preview is not configured"

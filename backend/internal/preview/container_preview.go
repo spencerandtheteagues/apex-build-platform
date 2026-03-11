@@ -202,10 +202,34 @@ func (s *ContainerPreviewServer) IsDockerAvailable() bool {
 	return s.dockerAvailable
 }
 
+func (s *ContainerPreviewServer) dockerEnv() []string {
+	env := append([]string(nil), os.Environ()...)
+	host := strings.TrimSpace(s.config.DockerSocket)
+	if host == "" {
+		return env
+	}
+	if !strings.Contains(host, "://") {
+		host = "unix://" + host
+	}
+	env = append(env, "DOCKER_HOST="+host)
+	return env
+}
+
+func (s *ContainerPreviewServer) dockerCommand(args ...string) *osexec.Cmd {
+	cmd := osexec.Command("docker", args...)
+	cmd.Env = s.dockerEnv()
+	return cmd
+}
+
+func (s *ContainerPreviewServer) dockerCommandContext(ctx context.Context, args ...string) *osexec.Cmd {
+	cmd := osexec.CommandContext(ctx, "docker", args...)
+	cmd.Env = s.dockerEnv()
+	return cmd
+}
+
 // checkDockerAvailable verifies Docker daemon is accessible
 func (s *ContainerPreviewServer) checkDockerAvailable() bool {
-	cmd := osexec.Command("docker", "info")
-	cmd.Env = append(os.Environ(), "DOCKER_HOST=unix://"+s.config.DockerSocket)
+	cmd := s.dockerCommand("info")
 	err := cmd.Run()
 	return err == nil
 }
@@ -316,7 +340,7 @@ func (s *ContainerPreviewServer) StartContainerPreview(ctx context.Context, conf
 		s.releaseContainerPort(config.ProjectID)
 		atomic.AddInt64(&s.stats.FailedContainers, 1)
 		// Clean up image
-		osexec.Command("docker", "rmi", "-f", imageName).Run()
+		s.dockerCommand("rmi", "-f", imageName).Run()
 		return nil, fmt.Errorf("failed to start container: %w", err)
 	}
 
@@ -380,14 +404,14 @@ func (s *ContainerPreviewServer) StopContainerPreview(ctx context.Context, proje
 	stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := osexec.CommandContext(stopCtx, "docker", "stop", "-t", "5", session.ContainerID)
+	cmd := s.dockerCommandContext(stopCtx, "stop", "-t", "5", session.ContainerID)
 	cmd.Run() // Ignore errors - container might already be stopped
 
 	// Remove container
-	osexec.Command("docker", "rm", "-f", session.ContainerID).Run()
+	s.dockerCommand("rm", "-f", session.ContainerID).Run()
 
 	// Remove image
-	osexec.Command("docker", "rmi", "-f", session.ImageName).Run()
+	s.dockerCommand("rmi", "-f", session.ImageName).Run()
 
 	// Clean up temp directory
 	if session.TempDir != "" && strings.HasPrefix(session.TempDir, s.baseTempDir) {
@@ -418,7 +442,7 @@ func (s *ContainerPreviewServer) GetContainerPreviewStatus(projectID uint) *Prev
 
 // buildDockerImage builds a Docker image from the project files
 func (s *ContainerPreviewServer) buildDockerImage(ctx context.Context, contextDir, imageName string) error {
-	cmd := osexec.CommandContext(ctx, "docker", "build",
+	cmd := s.dockerCommandContext(ctx, "build",
 		"-t", imageName,
 		"-f", filepath.Join(contextDir, "Dockerfile"),
 		"--no-cache",
@@ -492,7 +516,7 @@ func (s *ContainerPreviewServer) runContainer(ctx context.Context, imageName, co
 	// Add image name
 	args = append(args, imageName)
 
-	cmd := osexec.CommandContext(ctx, "docker", args...)
+	cmd := s.dockerCommandContext(ctx, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("docker run failed: %s\nOutput: %s", err, string(output))
@@ -874,7 +898,7 @@ func (s *ContainerPreviewServer) startCleanupLoop() {
 
 // cleanupOrphanedContainers removes containers that are no longer tracked
 func (s *ContainerPreviewServer) cleanupOrphanedContainers() {
-	cmd := osexec.Command("docker", "ps", "-a", "--filter", "label=apex.preview=true", "--format", "{{.Names}}")
+	cmd := s.dockerCommand("ps", "-a", "--filter", "label=apex.preview=true", "--format", "{{.Names}}")
 	output, err := cmd.Output()
 	if err != nil {
 		return
@@ -894,7 +918,7 @@ func (s *ContainerPreviewServer) cleanupOrphanedContainers() {
 		}
 		if !trackedContainers[containerName] {
 			// Orphaned container - remove it
-			osexec.Command("docker", "rm", "-f", containerName).Run()
+			s.dockerCommand("rm", "-f", containerName).Run()
 		}
 	}
 }
@@ -924,12 +948,12 @@ func (s *ContainerPreviewServer) cleanupOldContainers() {
 		delete(s.containerSessions, projectID)
 		atomic.AddInt32(&s.stats.ActiveContainers, -1)
 
-		go func(s *ContainerSession) {
+		go func(session *ContainerSession) {
 			// Stop and remove container
-			osexec.Command("docker", "stop", "-t", "5", s.ContainerID).Run()
-			osexec.Command("docker", "rm", "-f", s.ContainerID).Run()
-			osexec.Command("docker", "rmi", "-f", s.ImageName).Run()
-			os.RemoveAll(s.TempDir)
+			s.dockerCommand("stop", "-t", "5", session.ContainerID).Run()
+			s.dockerCommand("rm", "-f", session.ContainerID).Run()
+			s.dockerCommand("rmi", "-f", session.ImageName).Run()
+			os.RemoveAll(session.TempDir)
 		}(session)
 
 		// Release port
@@ -958,9 +982,9 @@ func (s *ContainerPreviewServer) Cleanup() error {
 	// Stop all containers
 	s.containerMu.Lock()
 	for _, session := range s.containerSessions {
-		osexec.Command("docker", "stop", "-t", "2", session.ContainerID).Run()
-		osexec.Command("docker", "rm", "-f", session.ContainerID).Run()
-		osexec.Command("docker", "rmi", "-f", session.ImageName).Run()
+		s.dockerCommand("stop", "-t", "2", session.ContainerID).Run()
+		s.dockerCommand("rm", "-f", session.ContainerID).Run()
+		s.dockerCommand("rmi", "-f", session.ImageName).Run()
 		os.RemoveAll(session.TempDir)
 	}
 	s.containerSessions = make(map[uint]*ContainerSession)

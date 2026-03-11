@@ -1058,36 +1058,9 @@ function App() {
         {visitedViews.has('ide') && (
           <div className={`absolute inset-0 ${currentView === 'ide' ? 'block' : 'hidden'}`}>
             <ErrorBoundary>
-              {currentProject ? (
-                <Suspense fallback={<ViewLoadingFallback label="Loading IDE..." />}>
-                  <IDELayout key={currentProject.id} />
-                </Suspense>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center bg-black text-gray-400">
-                  <AlertTriangle className="w-16 h-16 text-yellow-500 mb-4" />
-                  <h2 className="text-xl font-bold text-white mb-2">No Project Selected</h2>
-                  <p className="max-w-md text-center mb-6">
-                    Reopen your latest project or use <span className="text-red-400 font-bold">Build App</span> to recover a saved workflow and keep building.
-                  </p>
-                  <div className="flex flex-wrap items-center justify-center gap-3">
-                    {recoverableProjectId && (
-                      <Button
-                        onClick={() => { void restoreLastProject({ navigate: true }) }}
-                        variant="primary"
-                        disabled={isRestoringProject}
-                      >
-                        {isRestoringProject ? 'Restoring Project...' : 'Open Last Project'}
-                      </Button>
-                    )}
-                    <Button onClick={() => navigateToView('builder')} variant={recoverableProjectId ? 'secondary' : 'primary'}>
-                      Go to Builder
-                    </Button>
-                    <Button onClick={handleStartNewBuild} variant="ghost">
-                      Fresh Build Prompt
-                    </Button>
-                  </div>
-                </div>
-              )}
+              <Suspense fallback={<ViewLoadingFallback label="Loading IDE..." />}>
+                <IDELayout key={currentProject?.id ?? 'no-project'} />
+              </Suspense>
             </ErrorBoundary>
           </div>
         )}

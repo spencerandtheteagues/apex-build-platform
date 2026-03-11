@@ -156,11 +156,14 @@ const (
 
 // TaskOutput contains the results of a completed task
 type TaskOutput struct {
-	Files          []GeneratedFile `json:"files,omitempty"`
-	Messages       []string        `json:"messages,omitempty"`
-	Suggestions    []string        `json:"suggestions,omitempty"`
-	Metrics        map[string]any  `json:"metrics,omitempty"`
-	TruncatedFiles []string        `json:"truncated_files,omitempty"` // file paths whose content was cut off mid-generation
+	Files          []GeneratedFile       `json:"files,omitempty"`
+	Messages       []string              `json:"messages,omitempty"`
+	Suggestions    []string              `json:"suggestions,omitempty"`
+	Metrics        map[string]any        `json:"metrics,omitempty"`
+	TruncatedFiles []string              `json:"truncated_files,omitempty"` // file paths whose content was cut off mid-generation
+	Plan           *BuildPlan            `json:"plan,omitempty"`
+	StartAck       *TaskStartAck         `json:"start_ack,omitempty"`
+	Completion     *TaskCompletionReport `json:"completion,omitempty"`
 }
 
 // GeneratedFile represents a file created by an agent
@@ -358,17 +361,89 @@ func (pm PowerMode) CreditMultiplier() float64 {
 
 // BuildPlan contains the structured plan for building an app
 type BuildPlan struct {
-	ID            string        `json:"id"`
-	BuildID       string        `json:"build_id"`
-	AppType       string        `json:"app_type"` // web, api, fullstack, etc.
-	TechStack     TechStack     `json:"tech_stack"`
-	Features      []Feature     `json:"features"`
-	DataModels    []DataModel   `json:"data_models"`
-	APIEndpoints  []APIEndpoint `json:"api_endpoints"`
-	Components    []UIComponent `json:"components"`
-	Files         []PlannedFile `json:"files"`
-	EstimatedTime time.Duration `json:"estimated_time"`
-	CreatedAt     time.Time     `json:"created_at"`
+	ID            string                 `json:"id"`
+	BuildID       string                 `json:"build_id"`
+	AppType       string                 `json:"app_type"` // web, api, fullstack, etc.
+	TechStack     TechStack              `json:"tech_stack"`
+	Features      []Feature              `json:"features"`
+	DataModels    []DataModel            `json:"data_models"`
+	APIEndpoints  []APIEndpoint          `json:"api_endpoints"`
+	Components    []UIComponent          `json:"components"`
+	Files         []PlannedFile          `json:"files"`
+	ScaffoldFiles []GeneratedFile        `json:"scaffold_files,omitempty"`
+	SpecHash      string                 `json:"spec_hash,omitempty"`
+	ScaffoldID    string                 `json:"scaffold_id,omitempty"`
+	Source        string                 `json:"source,omitempty"`
+	Ownership     []BuildOwnership       `json:"ownership,omitempty"`
+	EnvVars       []BuildEnvVar          `json:"env_vars,omitempty"`
+	Acceptance    []BuildAcceptanceCheck `json:"acceptance,omitempty"`
+	WorkOrders    []BuildWorkOrder       `json:"work_orders,omitempty"`
+	APIContract   *BuildAPIContract      `json:"api_contract,omitempty"`
+	Preflight     []BuildPreflightCheck  `json:"preflight,omitempty"`
+	EstimatedTime time.Duration          `json:"estimated_time"`
+	CreatedAt     time.Time              `json:"created_at"`
+}
+
+type BuildOwnership struct {
+	Path    string    `json:"path"`
+	Role    AgentRole `json:"role"`
+	Purpose string    `json:"purpose,omitempty"`
+}
+
+type BuildEnvVar struct {
+	Name     string `json:"name"`
+	Example  string `json:"example,omitempty"`
+	Purpose  string `json:"purpose,omitempty"`
+	Required bool   `json:"required"`
+}
+
+type BuildAcceptanceCheck struct {
+	ID          string    `json:"id"`
+	Description string    `json:"description"`
+	Owner       AgentRole `json:"owner"`
+	Required    bool      `json:"required"`
+}
+
+type BuildPreflightCheck struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Command     string `json:"command,omitempty"`
+	Required    bool   `json:"required"`
+}
+
+type BuildAPIContract struct {
+	FrontendPort int           `json:"frontend_port,omitempty"`
+	BackendPort  int           `json:"backend_port,omitempty"`
+	APIBaseURL   string        `json:"api_base_url,omitempty"`
+	CORSOrigins  []string      `json:"cors_origins,omitempty"`
+	Endpoints    []APIEndpoint `json:"endpoints,omitempty"`
+}
+
+type BuildWorkOrder struct {
+	Role             AgentRole `json:"role"`
+	Summary          string    `json:"summary"`
+	OwnedFiles       []string  `json:"owned_files,omitempty"`
+	RequiredFiles    []string  `json:"required_files,omitempty"`
+	ForbiddenFiles   []string  `json:"forbidden_files,omitempty"`
+	AcceptanceChecks []string  `json:"acceptance_checks,omitempty"`
+	RequiredOutputs  []string  `json:"required_outputs,omitempty"`
+}
+
+type TaskStartAck struct {
+	Summary          string   `json:"summary"`
+	OwnedFiles       []string `json:"owned_files,omitempty"`
+	Dependencies     []string `json:"dependencies,omitempty"`
+	AcceptanceChecks []string `json:"acceptance_checks,omitempty"`
+	Blockers         []string `json:"blockers,omitempty"`
+}
+
+type TaskCompletionReport struct {
+	Summary         string   `json:"summary"`
+	CreatedFiles    []string `json:"created_files,omitempty"`
+	ModifiedFiles   []string `json:"modified_files,omitempty"`
+	CompletedChecks []string `json:"completed_checks,omitempty"`
+	RemainingRisks  []string `json:"remaining_risks,omitempty"`
+	Blockers        []string `json:"blockers,omitempty"`
 }
 
 // TechStack defines the technologies to use

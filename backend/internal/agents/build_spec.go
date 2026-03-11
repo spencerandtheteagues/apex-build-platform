@@ -1,0 +1,1533 @@
+package agents
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"apex-build/internal/agents/autonomous"
+	"apex-build/internal/ai"
+
+	"github.com/google/uuid"
+)
+
+type buildScaffold struct {
+	ID          string
+	AppType     string
+	Description string
+	Required    []PlannedFile
+	Ownership   map[AgentRole][]string
+	EnvVars     []BuildEnvVar
+	Acceptance  []BuildAcceptanceCheck
+	APIContract *BuildAPIContract
+}
+
+type plannerRouterAdapter struct {
+	router          AIRouter
+	provider        ai.AIProvider
+	userID          uint
+	powerMode       PowerMode
+	usePlatformKeys bool
+}
+
+func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts autonomous.AIOptions) (string, error) {
+	resp, err := a.router.Generate(ctx, a.provider, prompt, GenerateOptions{
+		UserID:          a.userID,
+		MaxTokens:       opts.MaxTokens,
+		Temperature:     opts.Temperature,
+		SystemPrompt:    opts.SystemPrompt,
+		PowerMode:       a.powerMode,
+		UsePlatformKeys: a.usePlatformKeys,
+	})
+	if err != nil {
+		return "", err
+	}
+	if resp == nil {
+		return "", fmt.Errorf("empty response from planning provider")
+	}
+	return resp.Content, nil
+}
+
+func (a *plannerRouterAdapter) Analyze(ctx context.Context, content string, instruction string, opts autonomous.AIOptions) (string, error) {
+	prompt := fmt.Sprintf("Content to analyze:\n%s\n\nInstruction: %s", content, instruction)
+	return a.Generate(ctx, prompt, opts)
+}
+
+func createBuildPlanFromPlanningBundle(buildID string, description string, requested *TechStack, bundle *autonomous.PlanningBundle) *BuildPlan {
+	stack := resolveBuildTechStack(requested, bundle)
+	appType := resolveBuildAppType(bundle)
+	scaffold := selectBuildScaffold(appType, stack)
+
+	features := convertPlannedFeatures(bundle)
+	models := convertPlannedModels(bundle)
+	files := mergePlannedFiles(scaffold.Required, planDerivedFiles(scaffold, bundle)...)
+	contract := cloneAPIContract(scaffold.APIContract)
+	envVars := append([]BuildEnvVar(nil), scaffold.EnvVars...)
+	preflight := convertPreflightChecks(bundle)
+	acceptance := append([]BuildAcceptanceCheck(nil), scaffold.Acceptance...)
+	acceptance = append(acceptance, deriveAcceptanceChecks(appType, stack)...)
+	ownership := buildOwnershipMap(scaffold)
+	workOrders := buildWorkOrders(appType, stack, scaffold, ownership, acceptance)
+	scaffoldFiles := scaffoldBootstrapFiles(scaffold, description, stack)
+	estimatedTime := 45 * time.Minute
+	createdAt := time.Now()
+	if bundle != nil && bundle.Plan != nil {
+		estimatedTime = bundle.Plan.EstimatedTime
+		if !bundle.Plan.CreatedAt.IsZero() {
+			createdAt = bundle.Plan.CreatedAt
+		}
+	}
+	plan := &BuildPlan{
+		ID:            uuid.New().String(),
+		BuildID:       buildID,
+		AppType:       appType,
+		TechStack:     stack,
+		Features:      features,
+		DataModels:    models,
+		APIEndpoints:  apiEndpointsFromContract(contract),
+		Files:         files,
+		ScaffoldFiles: scaffoldFiles,
+		ScaffoldID:    scaffold.ID,
+		Source:        "autonomous_planner_v1",
+		Ownership:     ownership,
+		EnvVars:       envVars,
+		Acceptance:    dedupeAcceptanceChecks(acceptance),
+		WorkOrders:    workOrders,
+		APIContract:   contract,
+		Preflight:     preflight,
+		EstimatedTime: estimatedTime,
+		CreatedAt:     createdAt,
+	}
+	plan.SpecHash = hashBuildPlan(plan)
+	return plan
+}
+
+func summarizeBuildPlan(plan *BuildPlan) string {
+	if plan == nil {
+		return ""
+	}
+	parts := []string{
+		fmt.Sprintf("Frozen build spec %s using scaffold %s for a %s app.", plan.SpecHash, plan.ScaffoldID, plan.AppType),
+	}
+	if len(plan.Files) > 0 {
+		parts = append(parts, fmt.Sprintf("Required manifest includes %d files.", len(plan.Files)))
+	}
+	if len(plan.ScaffoldFiles) > 0 {
+		parts = append(parts, fmt.Sprintf("%d deterministic scaffold files were preloaded.", len(plan.ScaffoldFiles)))
+	}
+	if len(plan.WorkOrders) > 0 {
+		parts = append(parts, fmt.Sprintf("%d role work orders were generated.", len(plan.WorkOrders)))
+	}
+	if len(plan.Acceptance) > 0 {
+		parts = append(parts, fmt.Sprintf("%d acceptance checks are active.", len(plan.Acceptance)))
+	}
+	return strings.Join(parts, " ")
+}
+
+func getBuildWorkOrder(plan *BuildPlan, role AgentRole) *BuildWorkOrder {
+	if plan == nil {
+		return nil
+	}
+	for i := range plan.WorkOrders {
+		if plan.WorkOrders[i].Role == role {
+			order := plan.WorkOrders[i]
+			return &order
+		}
+	}
+	return nil
+}
+
+func buildSpecPromptContext(plan *BuildPlan, workOrder *BuildWorkOrder) string {
+	if plan == nil {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("\n<build_spec>\n")
+	b.WriteString(fmt.Sprintf("spec_hash: %s\n", plan.SpecHash))
+	b.WriteString(fmt.Sprintf("scaffold_id: %s\n", plan.ScaffoldID))
+	b.WriteString(fmt.Sprintf("app_type: %s\n", plan.AppType))
+	b.WriteString(fmt.Sprintf("tech_stack: frontend=%s backend=%s database=%s styling=%s\n",
+		valueOrNone(plan.TechStack.Frontend),
+		valueOrNone(plan.TechStack.Backend),
+		valueOrNone(plan.TechStack.Database),
+		valueOrNone(plan.TechStack.Styling),
+	))
+	if plan.APIContract != nil {
+		b.WriteString("<api_contract>\n")
+		if plan.APIContract.FrontendPort > 0 {
+			b.WriteString(fmt.Sprintf("frontend_port: %d\n", plan.APIContract.FrontendPort))
+		}
+		if plan.APIContract.BackendPort > 0 {
+			b.WriteString(fmt.Sprintf("backend_port: %d\n", plan.APIContract.BackendPort))
+		}
+		if plan.APIContract.APIBaseURL != "" {
+			b.WriteString(fmt.Sprintf("api_base_url: %s\n", plan.APIContract.APIBaseURL))
+		}
+		if len(plan.APIContract.CORSOrigins) > 0 {
+			b.WriteString(fmt.Sprintf("cors_origins: %s\n", strings.Join(plan.APIContract.CORSOrigins, ", ")))
+		}
+		if len(plan.APIContract.Endpoints) > 0 {
+			b.WriteString("endpoints:\n")
+			for _, endpoint := range plan.APIContract.Endpoints {
+				b.WriteString(fmt.Sprintf("- %s %s — %s\n", endpoint.Method, endpoint.Path, endpoint.Description))
+			}
+		}
+		b.WriteString("</api_contract>\n")
+	}
+	if len(plan.Files) > 0 {
+		b.WriteString("required_file_manifest:\n")
+		for _, file := range plan.Files {
+			b.WriteString(fmt.Sprintf("- %s (%s) — %s\n", file.Path, file.Type, file.Description))
+		}
+	}
+	if len(plan.ScaffoldFiles) > 0 {
+		b.WriteString(fmt.Sprintf("preloaded_scaffold_files: %d deterministic starter files are already available in the repo state\n", len(plan.ScaffoldFiles)))
+	}
+	if len(plan.EnvVars) > 0 {
+		b.WriteString("env_vars:\n")
+		for _, env := range plan.EnvVars {
+			b.WriteString(fmt.Sprintf("- %s (required=%t) — %s\n", env.Name, env.Required, strings.TrimSpace(env.Purpose)))
+		}
+	}
+	if len(plan.Acceptance) > 0 {
+		b.WriteString("acceptance_checks:\n")
+		for _, check := range plan.Acceptance {
+			b.WriteString(fmt.Sprintf("- [%s] %s\n", check.Owner, check.Description))
+		}
+	}
+	b.WriteString("</build_spec>\n")
+
+	if workOrder != nil {
+		b.WriteString("\n<work_order>\n")
+		b.WriteString(fmt.Sprintf("role: %s\n", workOrder.Role))
+		b.WriteString(fmt.Sprintf("summary: %s\n", workOrder.Summary))
+		if len(workOrder.OwnedFiles) > 0 {
+			b.WriteString("owned_files:\n")
+			for _, path := range workOrder.OwnedFiles {
+				b.WriteString(fmt.Sprintf("- %s\n", path))
+			}
+		}
+		if len(workOrder.RequiredFiles) > 0 {
+			b.WriteString("required_scaffold_files:\n")
+			for _, path := range workOrder.RequiredFiles {
+				b.WriteString(fmt.Sprintf("- %s\n", path))
+			}
+		}
+		if len(workOrder.ForbiddenFiles) > 0 {
+			b.WriteString("forbidden_files:\n")
+			for _, path := range workOrder.ForbiddenFiles {
+				b.WriteString(fmt.Sprintf("- %s\n", path))
+			}
+		}
+		if len(workOrder.AcceptanceChecks) > 0 {
+			b.WriteString("role_acceptance_checks:\n")
+			for _, check := range workOrder.AcceptanceChecks {
+				b.WriteString(fmt.Sprintf("- %s\n", check))
+			}
+		}
+		if len(workOrder.RequiredOutputs) > 0 {
+			b.WriteString("required_outputs:\n")
+			for _, out := range workOrder.RequiredOutputs {
+				b.WriteString(fmt.Sprintf("- %s\n", out))
+			}
+		}
+		b.WriteString("</work_order>\n")
+	}
+
+	return b.String()
+}
+
+func coordinationProtocolPrompt(workOrder *BuildWorkOrder) string {
+	if workOrder == nil {
+		return ""
+	}
+	return `
+<coordination_protocol>
+- You are operating under a frozen BuildSpec and WorkOrder. Do not improvise a new project layout.
+- Before any code or prose, emit a <task_start_ack> tag whose body is VALID JSON with keys:
+  {"summary":"...","owned_files":["..."],"dependencies":["..."],"acceptance_checks":["..."],"blockers":["..."]}
+- After all code/prose, emit a <task_completion_report> tag whose body is VALID JSON with keys:
+  {"summary":"...","created_files":["..."],"modified_files":["..."],"completed_checks":["..."],"remaining_risks":["..."],"blockers":["..."]}
+- Treat preloaded scaffold files as the baseline. Modify them in place instead of inventing a different repo layout.
+- Only create or modify files inside your owned file patterns unless the WorkOrder explicitly lists shared root files.
+- If a needed change belongs to another role, record it in blockers or remaining_risks instead of silently taking over their area.
+- Fast and balanced builds must adhere to the scaffold exactly. Missing mandatory scaffold files is a task failure.
+</coordination_protocol>
+`
+}
+
+func resolveBuildTechStack(requested *TechStack, bundle *autonomous.PlanningBundle) TechStack {
+	var recommended *autonomous.TechStack
+	if bundle != nil && bundle.Analysis != nil {
+		recommended = bundle.Analysis.TechStack
+	}
+
+	stack := TechStack{}
+	if recommended != nil {
+		stack.Frontend = canonicalFrontendName(recommended.Frontend)
+		stack.Backend = canonicalBackendName(recommended.Backend)
+		stack.Database = canonicalDatabaseName(recommended.Database)
+		stack.Styling = canonicalStylingName(recommended.Styling)
+		stack.Extras = dedupeStrings(recommended.Extras)
+	}
+
+	if requested != nil {
+		if strings.TrimSpace(requested.Frontend) != "" {
+			stack.Frontend = canonicalFrontendName(requested.Frontend)
+		}
+		if strings.TrimSpace(requested.Backend) != "" {
+			stack.Backend = canonicalBackendName(requested.Backend)
+		}
+		if strings.TrimSpace(requested.Database) != "" {
+			stack.Database = canonicalDatabaseName(requested.Database)
+		}
+		if strings.TrimSpace(requested.Styling) != "" {
+			stack.Styling = canonicalStylingName(requested.Styling)
+		}
+		stack.Extras = dedupeStrings(append(stack.Extras, requested.Extras...))
+	}
+
+	if stack.Frontend == "" && stack.Backend == "" {
+		stack.Frontend = "React"
+	}
+	if stack.Backend == "" && stack.Frontend != "" {
+		stack.Backend = "Express"
+	}
+	if stack.Database == "" && stack.Backend != "" {
+		stack.Database = "PostgreSQL"
+	}
+	if stack.Styling == "" && stack.Frontend != "" {
+		stack.Styling = "Tailwind"
+	}
+	return stack
+}
+
+func resolveBuildAppType(bundle *autonomous.PlanningBundle) string {
+	if bundle != nil && bundle.Analysis != nil {
+		appType := strings.TrimSpace(strings.ToLower(bundle.Analysis.AppType))
+		switch appType {
+		case "web", "api", "cli", "fullstack":
+			return appType
+		}
+	}
+	return "fullstack"
+}
+
+func convertPlannedFeatures(bundle *autonomous.PlanningBundle) []Feature {
+	if bundle == nil || bundle.Analysis == nil {
+		return nil
+	}
+	out := make([]Feature, 0, len(bundle.Analysis.Features))
+	for _, feature := range bundle.Analysis.Features {
+		out = append(out, Feature{
+			ID:           uuid.New().String(),
+			Name:         strings.TrimSpace(feature.Name),
+			Description:  strings.TrimSpace(feature.Description),
+			Priority:     priorityStringToInt(feature.Priority),
+			Dependencies: dedupeStrings(feature.Dependencies),
+		})
+	}
+	return out
+}
+
+func convertPlannedModels(bundle *autonomous.PlanningBundle) []DataModel {
+	if bundle == nil || bundle.Analysis == nil {
+		return nil
+	}
+	out := make([]DataModel, 0, len(bundle.Analysis.DataModels))
+	for _, model := range bundle.Analysis.DataModels {
+		fieldNames := make([]string, 0, len(model.Fields))
+		for name := range model.Fields {
+			fieldNames = append(fieldNames, name)
+		}
+		sort.Strings(fieldNames)
+		fields := make([]ModelField, 0, len(fieldNames))
+		for _, name := range fieldNames {
+			fields = append(fields, ModelField{
+				Name:     name,
+				Type:     strings.TrimSpace(model.Fields[name]),
+				Required: true,
+			})
+		}
+		out = append(out, DataModel{
+			Name:        strings.TrimSpace(model.Name),
+			Description: "",
+			Fields:      fields,
+		})
+	}
+	return out
+}
+
+func convertPreflightChecks(bundle *autonomous.PlanningBundle) []BuildPreflightCheck {
+	if bundle == nil || bundle.Analysis == nil {
+		return nil
+	}
+	out := make([]BuildPreflightCheck, 0, len(bundle.Analysis.PreflightChecks))
+	for _, check := range bundle.Analysis.PreflightChecks {
+		out = append(out, BuildPreflightCheck{
+			Name:        strings.TrimSpace(check.Name),
+			Description: strings.TrimSpace(check.Description),
+			Command:     strings.TrimSpace(check.Command),
+			Required:    check.Required,
+		})
+	}
+	return out
+}
+
+func planDerivedFiles(scaffold buildScaffold, bundle *autonomous.PlanningBundle) []PlannedFile {
+	files := make([]PlannedFile, 0, 4)
+	seen := make(map[string]bool)
+	for _, file := range scaffold.Required {
+		seen[file.Path] = true
+	}
+
+	if bundle == nil || bundle.Plan == nil {
+		return files
+	}
+
+	for _, step := range bundle.Plan.Steps {
+		if step == nil {
+			continue
+		}
+		switch step.ActionType {
+		case autonomous.ActionAIGenerate:
+			if kind, _ := step.Input["type"].(string); kind != "" {
+				switch kind {
+				case "backend":
+					if !seen["server/src/routes/index.ts"] {
+						files = append(files, PlannedFile{Path: "server/src/routes/index.ts", Type: "backend", Description: "API routes generated from build spec"})
+						seen["server/src/routes/index.ts"] = true
+					}
+				case "frontend":
+					if !seen["src/components/AppShell.tsx"] {
+						files = append(files, PlannedFile{Path: "src/components/AppShell.tsx", Type: "frontend", Description: "Application shell for primary user flows"})
+						seen["src/components/AppShell.tsx"] = true
+					}
+				case "data_models":
+					if !seen["migrations/001_initial.sql"] {
+						files = append(files, PlannedFile{Path: "migrations/001_initial.sql", Type: "database", Description: "Initial schema derived from planned data models"})
+						seen["migrations/001_initial.sql"] = true
+					}
+				}
+			}
+		}
+	}
+
+	return files
+}
+
+func mergePlannedFiles(base []PlannedFile, extras ...PlannedFile) []PlannedFile {
+	out := make([]PlannedFile, 0, len(base)+len(extras))
+	seen := make(map[string]bool)
+	add := func(file PlannedFile) {
+		path := strings.TrimSpace(file.Path)
+		if path == "" || seen[path] {
+			return
+		}
+		file.Path = path
+		out = append(out, file)
+		seen[path] = true
+	}
+	for _, file := range base {
+		add(file)
+	}
+	for _, file := range extras {
+		add(file)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Path < out[j].Path
+	})
+	return out
+}
+
+func buildOwnershipMap(scaffold buildScaffold) []BuildOwnership {
+	out := make([]BuildOwnership, 0)
+	for role, paths := range scaffold.Ownership {
+		for _, path := range paths {
+			out = append(out, BuildOwnership{
+				Path:    path,
+				Role:    role,
+				Purpose: fmt.Sprintf("%s owns %s within scaffold %s", role, path, scaffold.ID),
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Role == out[j].Role {
+			return out[i].Path < out[j].Path
+		}
+		return out[i].Role < out[j].Role
+	})
+	return out
+}
+
+func buildWorkOrders(appType string, stack TechStack, scaffold buildScaffold, ownership []BuildOwnership, acceptance []BuildAcceptanceCheck) []BuildWorkOrder {
+	roles := []AgentRole{RoleArchitect, RoleDatabase, RoleBackend, RoleFrontend, RoleTesting, RoleReviewer, RoleSolver}
+	out := make([]BuildWorkOrder, 0, len(roles))
+
+	for _, role := range roles {
+		owned := make([]string, 0)
+		ownedSet := make(map[string]bool)
+		forbidden := make([]string, 0)
+		checks := make([]string, 0)
+		for _, item := range ownership {
+			if item.Role == role {
+				owned = append(owned, item.Path)
+				ownedSet[item.Path] = true
+			}
+		}
+		for _, item := range ownership {
+			if item.Role != role {
+				if item.Path == "**" {
+					continue
+				}
+				if ownedSet[item.Path] {
+					continue
+				}
+				forbidden = append(forbidden, item.Path)
+			}
+		}
+		for _, check := range acceptance {
+			if check.Owner == role {
+				checks = append(checks, check.Description)
+			}
+		}
+		order := BuildWorkOrder{
+			Role:             role,
+			Summary:          summarizeWorkOrder(role, appType, stack),
+			OwnedFiles:       dedupeStrings(owned),
+			RequiredFiles:    requiredScaffoldFilesForRole(role, scaffold.Required),
+			ForbiddenFiles:   dedupeStrings(forbidden),
+			AcceptanceChecks: dedupeStrings(checks),
+			RequiredOutputs:  requiredOutputsForRole(role),
+		}
+		if role == RoleArchitect && len(order.OwnedFiles) == 0 {
+			order.OwnedFiles = []string{"docs/**", "ARCHITECTURE.md"}
+		}
+		out = append(out, order)
+	}
+
+	return out
+}
+
+func requiredScaffoldFilesForRole(role AgentRole, required []PlannedFile) []string {
+	if len(required) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(required))
+	for _, file := range required {
+		switch role {
+		case RoleArchitect:
+			if file.Path == "README.md" || file.Path == "ARCHITECTURE.md" || strings.HasPrefix(file.Path, "docs/") {
+				out = append(out, file.Path)
+			}
+		case RoleFrontend:
+			if file.Type == "frontend" || file.Path == "package.json" || file.Path == "tsconfig.json" || file.Path == "vite.config.ts" || file.Path == "tailwind.config.js" || file.Path == "postcss.config.js" {
+				out = append(out, file.Path)
+			}
+		case RoleBackend:
+			if file.Type == "backend" || file.Path == ".env.example" || file.Path == "package.json" || file.Path == "tsconfig.json" || file.Path == "go.mod" {
+				out = append(out, file.Path)
+			}
+		case RoleDatabase:
+			if file.Type == "database" || strings.Contains(file.Path, "schema") || strings.HasPrefix(file.Path, "migrations/") {
+				out = append(out, file.Path)
+			}
+		case RoleTesting:
+			if strings.Contains(file.Path, "test") || strings.Contains(file.Path, "spec") {
+				out = append(out, file.Path)
+			}
+		}
+	}
+	return dedupeStrings(out)
+}
+
+func deriveAcceptanceChecks(appType string, stack TechStack) []BuildAcceptanceCheck {
+	checks := []BuildAcceptanceCheck{
+		{
+			ID:          "review-no-placeholders",
+			Description: "Reviewer must reject placeholder text, TODOs, or demo-only responses",
+			Owner:       RoleReviewer,
+			Required:    true,
+		},
+		{
+			ID:          "solver-fixes-verification",
+			Description: "Solver must keep fixes within the frozen scaffold and restore build verification",
+			Owner:       RoleSolver,
+			Required:    true,
+		},
+	}
+
+	if stack.Frontend != "" {
+		checks = append(checks, BuildAcceptanceCheck{
+			ID:          "frontend-entry",
+			Description: "Frontend must deliver the mandatory scaffold entry files and connect to the agreed API base URL",
+			Owner:       RoleFrontend,
+			Required:    true,
+		})
+	}
+	if stack.Backend != "" {
+		checks = append(checks, BuildAcceptanceCheck{
+			ID:          "backend-health",
+			Description: "Backend must expose a health route and respect the agreed port and CORS contract",
+			Owner:       RoleBackend,
+			Required:    true,
+		})
+	}
+	if stack.Database != "" {
+		checks = append(checks, BuildAcceptanceCheck{
+			ID:          "database-schema",
+			Description: "Database schema and seed/migration outputs must match the planned data models",
+			Owner:       RoleDatabase,
+			Required:    true,
+		})
+	}
+	if appType == "fullstack" {
+		checks = append(checks, BuildAcceptanceCheck{
+			ID:          "testing-vertical-slice",
+			Description: "Testing must verify the main vertical slice across frontend and backend boundaries",
+			Owner:       RoleTesting,
+			Required:    true,
+		})
+	}
+	return checks
+}
+
+func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
+	frontend := strings.ToLower(stack.Frontend)
+	backend := strings.ToLower(stack.Backend)
+
+	switch {
+	case frontend == "react" && (backend == "express" || backend == "node"):
+		return buildScaffold{
+			ID:          "fullstack/react-vite-express-ts",
+			AppType:     "fullstack",
+			Description: "Single-repo React + Vite frontend with Express TypeScript backend",
+			Required: []PlannedFile{
+				{Path: ".env.example", Type: "config", Description: "Environment variable template"},
+				{Path: "README.md", Type: "docs", Description: "Run instructions and project overview"},
+				{Path: "index.html", Type: "frontend", Description: "Vite HTML entry point"},
+				{Path: "package.json", Type: "config", Description: "Single-repo dependency manifest and scripts"},
+				{Path: "postcss.config.js", Type: "config", Description: "PostCSS config for Tailwind"},
+				{Path: "server/index.ts", Type: "backend", Description: "Express entry point"},
+				{Path: "server/routes/api.ts", Type: "backend", Description: "Primary API routes"},
+				{Path: "src/App.tsx", Type: "frontend", Description: "Root React application"},
+				{Path: "src/index.css", Type: "frontend", Description: "Global styles"},
+				{Path: "src/main.tsx", Type: "frontend", Description: "React entry point"},
+				{Path: "tailwind.config.js", Type: "config", Description: "Tailwind configuration"},
+				{Path: "tsconfig.json", Type: "config", Description: "Shared TypeScript config"},
+				{Path: "vite.config.ts", Type: "frontend", Description: "Vite config with proxy/API wiring"},
+			},
+			Ownership: map[AgentRole][]string{
+				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
+				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "index.html", "src/**", "public/**"},
+				RoleBackend:   {"package.json", "tsconfig.json", ".env.example", "server/**"},
+				RoleDatabase:  {"migrations/**", "db/**", "prisma/**", "schema.sql", "server/db/**"},
+				RoleTesting:   {"tests/**", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"},
+				RoleReviewer:  {"**"},
+				RoleSolver:    {"**"},
+			},
+			EnvVars: []BuildEnvVar{
+				{Name: "PORT", Example: "3001", Purpose: "Backend listen port", Required: true},
+				{Name: "VITE_API_BASE_URL", Example: "http://localhost:3001", Purpose: "Frontend API base URL", Required: false},
+				{Name: "DATABASE_URL", Example: "postgresql://postgres:postgres@localhost:5432/app", Purpose: "Backend database connection", Required: backend != ""},
+			},
+			Acceptance: []BuildAcceptanceCheck{
+				{ID: "fullstack-root-manifest", Description: "Scaffold root manifest must include runnable dev/build scripts for frontend and backend", Owner: RoleBackend, Required: true},
+				{ID: "fullstack-ui-shell", Description: "Frontend must render a usable shell from src/main.tsx and src/App.tsx", Owner: RoleFrontend, Required: true},
+			},
+			APIContract: &BuildAPIContract{
+				FrontendPort: 5173,
+				BackendPort:  3001,
+				APIBaseURL:   "http://localhost:3001",
+				CORSOrigins:  []string{"http://localhost:5173", "http://localhost:3000"},
+				Endpoints: []APIEndpoint{
+					{Method: "GET", Path: "/api/health", Description: "Health check", Output: "{ status: \"ok\" }"},
+				},
+			},
+		}
+	case frontend == "react":
+		return buildScaffold{
+			ID:          "frontend/react-vite-spa",
+			AppType:     "web",
+			Description: "React + Vite single-page app scaffold",
+			Required: []PlannedFile{
+				{Path: "index.html", Type: "frontend", Description: "Vite HTML entry point"},
+				{Path: "package.json", Type: "config", Description: "Frontend dependency manifest"},
+				{Path: "postcss.config.js", Type: "config", Description: "PostCSS config for Tailwind"},
+				{Path: "README.md", Type: "docs", Description: "Run instructions and project overview"},
+				{Path: "src/App.tsx", Type: "frontend", Description: "Root React application"},
+				{Path: "src/index.css", Type: "frontend", Description: "Global styles"},
+				{Path: "src/main.tsx", Type: "frontend", Description: "React entry point"},
+				{Path: "tailwind.config.js", Type: "config", Description: "Tailwind configuration"},
+				{Path: "tsconfig.json", Type: "config", Description: "TypeScript config"},
+				{Path: "vite.config.ts", Type: "frontend", Description: "Vite config"},
+			},
+			Ownership: map[AgentRole][]string{
+				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
+				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "index.html", "src/**", "public/**"},
+				RoleTesting:   {"tests/**", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"},
+				RoleReviewer:  {"**"},
+				RoleSolver:    {"**"},
+			},
+			Acceptance: []BuildAcceptanceCheck{
+				{ID: "spa-entry", Description: "Frontend must include Vite entry files and a complete app shell", Owner: RoleFrontend, Required: true},
+			},
+		}
+	case backend == "go":
+		return buildScaffold{
+			ID:          "api/go-http",
+			AppType:     "api",
+			Description: "Go HTTP API scaffold",
+			Required: []PlannedFile{
+				{Path: "go.mod", Type: "config", Description: "Go module definition"},
+				{Path: "main.go", Type: "backend", Description: "Go HTTP entry point"},
+				{Path: ".env.example", Type: "config", Description: "Environment variable template"},
+				{Path: "README.md", Type: "docs", Description: "Run instructions and project overview"},
+			},
+			Ownership: map[AgentRole][]string{
+				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
+				RoleBackend:   {"go.mod", "main.go", "cmd/**", "internal/**", "pkg/**", ".env.example"},
+				RoleDatabase:  {"migrations/**", "db/**", "internal/db/**", "schema.sql"},
+				RoleTesting:   {"**/*_test.go"},
+				RoleReviewer:  {"**"},
+				RoleSolver:    {"**"},
+			},
+			EnvVars: []BuildEnvVar{
+				{Name: "PORT", Example: "8080", Purpose: "API listen port", Required: true},
+				{Name: "DATABASE_URL", Example: "postgresql://postgres:postgres@localhost:5432/app", Purpose: "Database connection", Required: stack.Database != ""},
+			},
+			Acceptance: []BuildAcceptanceCheck{
+				{ID: "go-entry", Description: "Backend must compile with go build ./... and expose a health route", Owner: RoleBackend, Required: true},
+			},
+			APIContract: &BuildAPIContract{
+				BackendPort: 8080,
+				APIBaseURL:  "http://localhost:8080",
+				Endpoints: []APIEndpoint{
+					{Method: "GET", Path: "/health", Description: "Health check", Output: "{ status: \"ok\" }"},
+				},
+			},
+		}
+	default:
+		return buildScaffold{
+			ID:          "api/express-typescript",
+			AppType:     "api",
+			Description: "Express + TypeScript API scaffold",
+			Required: []PlannedFile{
+				{Path: ".env.example", Type: "config", Description: "Environment variable template"},
+				{Path: "package.json", Type: "config", Description: "API dependency manifest"},
+				{Path: "README.md", Type: "docs", Description: "Run instructions and project overview"},
+				{Path: "src/server.ts", Type: "backend", Description: "Express entry point"},
+				{Path: "src/routes/index.ts", Type: "backend", Description: "Primary API routes"},
+				{Path: "tsconfig.json", Type: "config", Description: "TypeScript config"},
+			},
+			Ownership: map[AgentRole][]string{
+				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
+				RoleBackend:   {"package.json", "tsconfig.json", ".env.example", "src/**"},
+				RoleDatabase:  {"migrations/**", "db/**", "src/db/**", "schema.sql"},
+				RoleTesting:   {"tests/**", "**/*.test.ts", "**/*.spec.ts"},
+				RoleReviewer:  {"**"},
+				RoleSolver:    {"**"},
+			},
+			EnvVars: []BuildEnvVar{
+				{Name: "PORT", Example: "3001", Purpose: "API listen port", Required: true},
+				{Name: "DATABASE_URL", Example: "postgresql://postgres:postgres@localhost:5432/app", Purpose: "Database connection", Required: stack.Database != ""},
+			},
+			Acceptance: []BuildAcceptanceCheck{
+				{ID: "express-entry", Description: "Backend must include package.json, tsconfig.json, and a runnable Express entrypoint", Owner: RoleBackend, Required: true},
+			},
+			APIContract: &BuildAPIContract{
+				BackendPort: 3001,
+				APIBaseURL:  "http://localhost:3001",
+				Endpoints: []APIEndpoint{
+					{Method: "GET", Path: "/api/health", Description: "Health check", Output: "{ status: \"ok\" }"},
+				},
+			},
+		}
+	}
+}
+
+func scaffoldBootstrapFiles(scaffold buildScaffold, description string, stack TechStack) []GeneratedFile {
+	displayName, packageName := deriveScaffoldNames(description, scaffold.AppType)
+	filesByPath := make(map[string]GeneratedFile)
+	add := func(path string, content string) {
+		path = strings.TrimSpace(path)
+		content = strings.TrimSpace(content)
+		if path == "" || content == "" {
+			return
+		}
+		filesByPath[path] = GeneratedFile{
+			Path:     path,
+			Content:  content + "\n",
+			Language: scaffoldFileLanguage(path),
+			Size:     int64(len(content) + 1),
+			IsNew:    true,
+		}
+	}
+
+	switch scaffold.ID {
+	case "fullstack/react-vite-express-ts":
+		add(".env.example", "PORT=3001\nVITE_API_BASE_URL=http://localhost:3001\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
+		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this project with a deterministic React + Vite + Express scaffold.\n\n## Run\n\n1. Install dependencies with `npm install`\n2. Start the frontend and backend with `npm run dev`\n3. Open `http://localhost:5173`\n\n## Environment\n\nCopy `.env.example` and provide real values before production use.\n", displayName))
+		add("package.json", fmt.Sprintf(`{
+  "name": "%s",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
+    "dev:client": "vite",
+    "dev:server": "tsx watch server/index.ts",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "vite build",
+    "build:server": "tsc -p tsconfig.json",
+    "start": "node dist/server/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.13.10",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.2",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.1"
+  }
+}`, packageName))
+		add("tsconfig.json", `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": false,
+    "jsx": "react-jsx",
+    "outDir": "dist"
+  },
+  "include": ["src", "server"]
+}`)
+		add("vite.config.ts", `import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: "0.0.0.0",
+    port: 5173,
+    proxy: {
+      "/api": {
+        target: process.env.VITE_API_BASE_URL || "http://localhost:3001",
+        changeOrigin: true
+      }
+    }
+  }
+});`)
+		add("tailwind.config.js", `/** @type {import('tailwindcss').Config} */
+export default {
+  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  theme: {
+    extend: {}
+  },
+  plugins: []
+};`)
+		add("postcss.config.js", `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {}
+  }
+};`)
+		add("index.html", fmt.Sprintf(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>%s</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>`, displayName))
+		add("src/main.tsx", `import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import "./index.css";
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);`)
+		add("src/App.tsx", fmt.Sprintf(`import { useEffect, useState } from "react";
+
+type HealthState = {
+  status: string;
+  app?: string;
+};
+
+export default function App() {
+  const [health, setHealth] = useState<HealthState | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/health", { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Health check failed");
+        }
+        return response.json();
+      })
+      .then((data: HealthState) => setHealth(data))
+      .catch((err: Error) => setError(err.message));
+    return () => controller.abort();
+  }, []);
+
+  return (
+    <main className="app-shell">
+      <section className="hero">
+        <p className="eyebrow">Bootstrapped by APEX.BUILD</p>
+        <h1>%s</h1>
+        <p className="lede">
+          The deterministic scaffold is live. Replace this shell with the product-specific experience.
+        </p>
+      </section>
+
+      <section className="status-card">
+        <h2>Runtime Check</h2>
+        {health ? (
+          <p>Backend status: {health.status}</p>
+        ) : error ? (
+          <p>Backend status: {error}</p>
+        ) : (
+          <p>Checking backend connection...</p>
+        )}
+      </section>
+    </main>
+  );
+}`, displayName))
+		add("src/index.css", `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #f3f4f6;
+  background: radial-gradient(circle at top, #1f2937, #020617 60%);
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 4rem 1.5rem;
+  display: grid;
+  gap: 1.5rem;
+  align-content: center;
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+.hero, .status-card {
+  background: rgba(15, 23, 42, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 1.25rem;
+  padding: 1.5rem;
+  backdrop-filter: blur(12px);
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.75rem;
+  color: #93c5fd;
+  margin: 0 0 0.75rem;
+}
+
+.hero h1 {
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  margin: 0;
+}
+
+.lede {
+  color: #cbd5e1;
+  max-width: 48rem;
+}`)
+		add("server/index.ts", fmt.Sprintf(`import cors from "cors";
+import express from "express";
+import apiRouter from "./routes/api";
+
+const app = express();
+const port = Number(process.env.PORT || 3001);
+
+app.use(
+  cors({
+    origin: ["http://localhost:5173", "http://localhost:3000"],
+    credentials: true
+  })
+);
+app.use(express.json());
+app.use("/api", apiRouter);
+
+app.listen(port, "0.0.0.0", () => {
+  console.log("%s backend listening on port " + port);
+});`, packageName))
+		add("server/routes/api.ts", fmt.Sprintf(`import { Router } from "express";
+
+const router = Router();
+
+router.get("/health", (_req, res) => {
+  res.json({ status: "ok", app: "%s" });
+});
+
+export default router;`, displayName))
+	case "frontend/react-vite-spa":
+		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this project with a deterministic React + Vite scaffold.\n\n## Run\n\n1. Install dependencies with `npm install`\n2. Start the app with `npm run dev`\n3. Open `http://localhost:5173`\n", displayName))
+		add("package.json", fmt.Sprintf(`{
+  "name": "%s",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.1"
+  }
+}`, packageName))
+		add("tsconfig.json", `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": ["src"]
+}`)
+		add("vite.config.ts", `import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: "0.0.0.0",
+    port: 5173
+  }
+});`)
+		add("tailwind.config.js", `/** @type {import('tailwindcss').Config} */
+export default {
+  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  theme: { extend: {} },
+  plugins: []
+};`)
+		add("postcss.config.js", `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {}
+  }
+};`)
+		add("index.html", fmt.Sprintf(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>%s</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>`, displayName))
+		add("src/main.tsx", `import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import "./index.css";
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);`)
+		add("src/App.tsx", fmt.Sprintf(`export default function App() {
+  return (
+    <main className="app-shell">
+      <p className="eyebrow">Bootstrapped by APEX.BUILD</p>
+      <h1>%s</h1>
+      <p className="lede">
+        The deterministic scaffold is live. Replace this shell with the real experience.
+      </p>
+    </main>
+  );
+}`, displayName))
+		add("src/index.css", `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: linear-gradient(180deg, #0f172a, #020617);
+  color: #f8fafc;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 3rem 1.5rem;
+  text-align: center;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: #38bdf8;
+}
+
+.lede {
+  max-width: 40rem;
+  color: #cbd5e1;
+}`)
+	case "api/go-http":
+		add(".env.example", "PORT=8080\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
+		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this Go API scaffold.\n\n## Run\n\n1. Copy `.env.example`\n2. Run `go run .`\n3. Open `http://localhost:8080/health`\n", displayName))
+		add("go.mod", fmt.Sprintf("module %s\n\ngo 1.23.0\n", strings.ReplaceAll(packageName, "-", "")))
+		add("main.go", fmt.Sprintf(`package main
+
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status": "ok",
+			"app":    "%s",
+		})
+	})
+
+	log.Printf("%s API listening on :%%s", port)
+	if err := http.ListenAndServe(":"+port, mux); err != nil {
+		log.Fatal(err)
+	}
+}`, displayName, displayName))
+	case "api/express-typescript":
+		add(".env.example", "PORT=3001\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
+		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this Express + TypeScript API scaffold.\n\n## Run\n\n1. Install dependencies with `npm install`\n2. Start the API with `npm run dev`\n3. Open `http://localhost:3001/api/health`\n", displayName))
+		add("package.json", fmt.Sprintf(`{
+  "name": "%s",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}`, packageName))
+		add("tsconfig.json", `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "esModuleInterop": true,
+    "strict": true,
+    "outDir": "dist",
+    "resolveJsonModule": true,
+    "noEmit": false
+  },
+  "include": ["src"]
+}`)
+		add("src/server.ts", fmt.Sprintf(`import cors from "cors";
+import express from "express";
+import routes from "./routes/index";
+
+const app = express();
+const port = Number(process.env.PORT || 3001);
+
+app.use(cors());
+app.use(express.json());
+app.use("/api", routes);
+
+app.listen(port, "0.0.0.0", () => {
+  console.log("%s API listening on port " + port);
+});`, displayName))
+		add("src/routes/index.ts", fmt.Sprintf(`import { Router } from "express";
+
+const router = Router();
+
+router.get("/health", (_req, res) => {
+  res.json({ status: "ok", app: "%s" });
+});
+
+export default router;`, displayName))
+	}
+
+	out := make([]GeneratedFile, 0, len(filesByPath))
+	for _, planned := range scaffold.Required {
+		if file, ok := filesByPath[planned.Path]; ok {
+			out = append(out, file)
+		}
+	}
+	return out
+}
+
+func deriveScaffoldNames(description string, appType string) (string, string) {
+	tokens := strings.Fields(description)
+	words := make([]string, 0, 4)
+	for _, token := range tokens {
+		token = strings.Trim(token, " \t\r\n.,:;!?'\"`()[]{}")
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+		words = append(words, token)
+		if len(words) == 4 {
+			break
+		}
+	}
+
+	displayName := strings.Join(words, " ")
+	if displayName == "" {
+		switch appType {
+		case "api":
+			displayName = "Apex API"
+		case "web":
+			displayName = "Apex App"
+		default:
+			displayName = "Apex Build App"
+		}
+	}
+
+	packageParts := make([]string, 0, len(words))
+	for _, word := range words {
+		word = strings.ToLower(word)
+		word = strings.Trim(word, "-_")
+		word = strings.Map(func(r rune) rune {
+			switch {
+			case r >= 'a' && r <= 'z':
+				return r
+			case r >= '0' && r <= '9':
+				return r
+			default:
+				return '-'
+			}
+		}, word)
+		word = strings.Trim(word, "-")
+		if word == "" {
+			continue
+		}
+		packageParts = append(packageParts, word)
+	}
+
+	packageName := strings.Join(packageParts, "-")
+	if packageName == "" {
+		packageName = "apex-build-app"
+	}
+	return displayName, packageName
+}
+
+func scaffoldFileLanguage(path string) string {
+	switch {
+	case strings.HasSuffix(path, ".ts"), strings.HasSuffix(path, ".tsx"):
+		return "typescript"
+	case strings.HasSuffix(path, ".js"), strings.HasSuffix(path, ".cjs"), strings.HasSuffix(path, ".mjs"):
+		return "javascript"
+	case strings.HasSuffix(path, ".json"):
+		return "json"
+	case strings.HasSuffix(path, ".css"):
+		return "css"
+	case strings.HasSuffix(path, ".html"):
+		return "html"
+	case strings.HasSuffix(path, ".go"):
+		return "go"
+	case strings.HasSuffix(path, ".md"):
+		return "markdown"
+	default:
+		return "text"
+	}
+}
+
+func currentOwnedFilesPrompt(files []GeneratedFile, workOrder *BuildWorkOrder, maxChars int) string {
+	if workOrder == nil || len(files) == 0 || maxChars <= 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	remaining := maxChars
+	count := 0
+	for _, file := range files {
+		if !pathAllowedByWorkOrder(file.Path, workOrder) {
+			continue
+		}
+		block := fmt.Sprintf("// File: %s\n```%s\n%s\n```\n\n", file.Path, file.Language, strings.TrimSpace(file.Content))
+		if len(block) > remaining {
+			break
+		}
+		b.WriteString(block)
+		remaining -= len(block)
+		count++
+	}
+	if count == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\n<current_owned_files>\nThese files already exist in the repo for your WorkOrder. Modify them in place unless a required scaffold file is still missing.\n%s</current_owned_files>\n", b.String())
+}
+
+func priorityStringToInt(priority string) int {
+	switch strings.ToLower(strings.TrimSpace(priority)) {
+	case "high":
+		return 100
+	case "medium":
+		return 60
+	case "low":
+		return 20
+	default:
+		return 50
+	}
+}
+
+func hashBuildPlan(plan *BuildPlan) string {
+	if plan == nil {
+		return ""
+	}
+	payload := map[string]any{
+		"app_type":       plan.AppType,
+		"tech_stack":     plan.TechStack,
+		"features":       plan.Features,
+		"data_models":    plan.DataModels,
+		"files":          plan.Files,
+		"scaffold_files": plan.ScaffoldFiles,
+		"scaffold_id":    plan.ScaffoldID,
+		"env_vars":       plan.EnvVars,
+		"acceptance":     plan.Acceptance,
+		"api":            plan.APIContract,
+	}
+	raw, _ := json.Marshal(payload)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:8])
+}
+
+func apiEndpointsFromContract(contract *BuildAPIContract) []APIEndpoint {
+	if contract == nil {
+		return nil
+	}
+	return append([]APIEndpoint(nil), contract.Endpoints...)
+}
+
+func dedupeAcceptanceChecks(in []BuildAcceptanceCheck) []BuildAcceptanceCheck {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]BuildAcceptanceCheck, 0, len(in))
+	seen := make(map[string]bool)
+	for _, item := range in {
+		key := string(item.Owner) + ":" + item.Description
+		if seen[key] || strings.TrimSpace(item.Description) == "" {
+			continue
+		}
+		seen[key] = true
+		if item.ID == "" {
+			item.ID = uuid.New().String()
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func dedupeStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]bool)
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func valueOrNone(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "none"
+	}
+	return value
+}
+
+func requiredOutputsForRole(role AgentRole) []string {
+	switch role {
+	case RoleArchitect:
+		return []string{"Architecture blueprint aligned to the scaffold", "Ownership clarifications for specialists"}
+	case RoleFrontend:
+		return []string{"Complete frontend files within owned paths", "No backend logic in UI files"}
+	case RoleBackend:
+		return []string{"Runnable backend entrypoint and routes", "No frontend JSX/UI ownership drift"}
+	case RoleDatabase:
+		return []string{"Schema or migration files matching planned models"}
+	case RoleTesting:
+		return []string{"Executable test or verification artifacts for the main slice"}
+	case RoleReviewer:
+		return []string{"Concrete findings or explicit no-findings review"}
+	case RoleSolver:
+		return []string{"Minimal repair patch that restores verification"}
+	default:
+		return nil
+	}
+}
+
+func summarizeWorkOrder(role AgentRole, appType string, stack TechStack) string {
+	switch role {
+	case RoleArchitect:
+		return fmt.Sprintf("Lock the %s scaffold and document architecture decisions without rewriting specialist-owned runtime files.", appType)
+	case RoleFrontend:
+		return fmt.Sprintf("Implement the %s frontend on the frozen scaffold without touching backend-owned files.", valueOrNone(stack.Frontend))
+	case RoleBackend:
+		return fmt.Sprintf("Implement the %s backend and shared runtime contract without drifting from the scaffold.", valueOrNone(stack.Backend))
+	case RoleDatabase:
+		return fmt.Sprintf("Produce schema, migrations, and persistence wiring for %s.", valueOrNone(stack.Database))
+	case RoleTesting:
+		return "Verify the main vertical slice and catch build/runtime regressions before review."
+	case RoleReviewer:
+		return "Review the generated app against the frozen scaffold, ownership map, and acceptance checklist."
+	case RoleSolver:
+		return "Repair verification failures without broad rewrites or provider/model churn."
+	default:
+		return "Work within the frozen build contract."
+	}
+}
+
+func canonicalFrontendName(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "react":
+		return "React"
+	case "vue":
+		return "Vue"
+	case "next.js", "next":
+		return "Next.js"
+	default:
+		return strings.TrimSpace(value)
+	}
+}
+
+func canonicalBackendName(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "node", "node.js", "express", "express.js":
+		return "Express"
+	case "go", "golang":
+		return "Go"
+	case "python", "fastapi":
+		return "Python"
+	default:
+		return strings.TrimSpace(value)
+	}
+}
+
+func canonicalDatabaseName(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "postgres", "postgresql":
+		return "PostgreSQL"
+	case "mongo", "mongodb":
+		return "MongoDB"
+	case "sqlite":
+		return "SQLite"
+	default:
+		return strings.TrimSpace(value)
+	}
+}
+
+func canonicalStylingName(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "tailwind", "tailwindcss":
+		return "Tailwind"
+	case "css modules":
+		return "CSS Modules"
+	default:
+		return strings.TrimSpace(value)
+	}
+}
+
+func cloneAPIContract(in *BuildAPIContract) *BuildAPIContract {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.CORSOrigins = append([]string(nil), in.CORSOrigins...)
+	out.Endpoints = append([]APIEndpoint(nil), in.Endpoints...)
+	return &out
+}

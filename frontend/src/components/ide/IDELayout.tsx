@@ -107,6 +107,17 @@ type ViewMode = 'projects' | 'dashboard' | 'editor'
 type PanelState = 'collapsed' | 'normal' | 'expanded'
 type MobilePanel = 'explorer' | 'editor' | 'terminal' | 'ai' | 'settings'
 
+const ideChromeButtonClass = 'touch-target !h-9 rounded-xl !border !border-gray-700/80 !bg-gray-900/75 !px-3 !text-gray-200 !shadow-none hover:!border-gray-600 hover:!bg-gray-800 hover:!text-white'
+const ideChromeButtonActiveClass = 'touch-target !h-9 rounded-xl !border !border-red-500/50 !bg-red-500/12 !px-3 !text-white !shadow-none hover:!bg-red-500/18'
+const ideIconButtonClass = 'touch-target !h-8 !w-8 rounded-lg !border !border-gray-700/70 !bg-gray-900/75 !p-0 !text-gray-300 !shadow-none hover:!border-gray-600 hover:!bg-gray-800 hover:!text-white'
+
+const idePanelTabClass = (active: boolean) => cn(
+  'touch-target !h-10 rounded-none !border-0 !px-3 !text-[13px] !font-medium !shadow-none',
+  active
+    ? '!bg-red-500/15 !text-white'
+    : '!bg-transparent !text-gray-400 hover:!bg-gray-800/85 hover:!text-white'
+)
+
 export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAgent }) => {
   // Responsive hooks
   const isMobile = useIsMobile()
@@ -197,11 +208,17 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   const initializedProjectViewRef = useRef(false)
 
   useEffect(() => {
-    if (initializedProjectViewRef.current) return
-    if (!currentProject) return
+    if (!currentProject) {
+      initializedProjectViewRef.current = false
+      setViewMode('projects')
+      setShowPreview(false)
+      return
+    }
 
-    setViewMode('dashboard')
-    initializedProjectViewRef.current = true
+    if (!initializedProjectViewRef.current) {
+      setViewMode('dashboard')
+      initializedProjectViewRef.current = true
+    }
   }, [currentProject])
 
   // Update panel states when responsive breakpoints change
@@ -340,13 +357,15 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
 
   // Handle project creation
   const handleProjectCreate = useCallback((project: any) => {
+    setCurrentProject(project)
     setViewMode('dashboard')
-  }, [])
+  }, [setCurrentProject])
 
   // Handle project selection
   const handleProjectSelect = useCallback((project: any) => {
+    setCurrentProject(project)
     setViewMode('dashboard')
-  }, [])
+  }, [setCurrentProject])
 
   const handleProjectRun = useCallback((project: any) => {
     setCurrentProject(project)
@@ -910,12 +929,12 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
 
   // Desktop/Tablet layout
   return (
-    <div className={cn('h-full flex flex-col bg-gray-950 min-h-0', className)}>
+    <div className={cn('h-full flex flex-col bg-[radial-gradient(circle_at_top,#141b27_0%,#0b0f16_38%,#05070b_100%)] min-h-0', className)}>
       {/* Loading overlay */}
       <LoadingOverlay isVisible={isLoading} text="Loading APEX-BUILD..." />
 
       {/* Top bar */}
-      <div className="h-12 bg-gray-900/95 backdrop-blur-md border-b border-gray-800 flex items-center justify-between px-4">
+      <div className="h-14 bg-[#0b0f16]/92 backdrop-blur-md border-b border-white/5 shadow-[0_1px_0_rgba(255,255,255,0.03)] flex items-center justify-between px-4">
         {/* Left side */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
@@ -927,10 +946,10 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
           <div className="flex items-center gap-1">
             <Button
               size="sm"
-              variant={viewMode === 'projects' ? 'primary' : 'ghost'}
+              variant="ghost"
               onClick={() => setViewMode('projects')}
               icon={<Folder size={14} />}
-              className="touch-target"
+              className={viewMode === 'projects' ? ideChromeButtonActiveClass : ideChromeButtonClass}
             >
               <span className="hidden sm:inline">Projects</span>
             </Button>
@@ -938,29 +957,29 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
               <>
                 <Button
                   size="sm"
-                  variant={viewMode === 'dashboard' ? 'primary' : 'ghost'}
+                  variant="ghost"
                   onClick={() => setViewMode('dashboard')}
                   icon={<FileText size={14} />}
-                  className="touch-target"
+                  className={viewMode === 'dashboard' ? ideChromeButtonActiveClass : ideChromeButtonClass}
                 >
                   <span className="hidden sm:inline">Dashboard</span>
                 </Button>
                 <Button
                   size="sm"
-                  variant={viewMode === 'editor' ? 'primary' : 'ghost'}
+                  variant="ghost"
                   onClick={() => setViewMode('editor')}
                   icon={<Code size={14} />}
-                  className="touch-target"
+                  className={viewMode === 'editor' ? ideChromeButtonActiveClass : ideChromeButtonClass}
                 >
                   <span className="hidden sm:inline">Editor</span>
                 </Button>
                 {viewMode === 'editor' && (
                   <Button
                     size="sm"
-                    variant={showPreview ? 'primary' : 'ghost'}
+                    variant="ghost"
                     onClick={() => setShowPreview(!showPreview)}
                     icon={<Monitor size={14} />}
-                    className="touch-target"
+                    className={showPreview ? ideChromeButtonActiveClass : ideChromeButtonClass}
                   >
                     <span className="hidden sm:inline">Preview</span>
                   </Button>
@@ -974,8 +993,8 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
         <div className="flex items-center gap-2">
           {/* Project info */}
           {currentProject && (
-            <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-gray-800 rounded">
-              <span className="text-sm text-gray-300 truncate max-w-[150px]">{currentProject.name}</span>
+            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-gray-900/75 border border-gray-700/80 rounded-xl">
+              <span className="text-sm font-medium text-gray-100 truncate max-w-[150px]">{currentProject.name}</span>
               <Badge variant="outline" size="xs">
                 {currentProject.language}
               </Badge>
@@ -989,7 +1008,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
                 size="sm"
                 variant="ghost"
                 icon={<Download size={14} />}
-                className="touch-target"
+                className={ideChromeButtonClass}
                 title="Download ZIP"
                 onClick={async () => {
                   try {
@@ -1003,9 +1022,9 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
               </Button>
               <Button
                 size="sm"
-                variant={showPreview ? 'primary' : 'ghost'}
+                variant="ghost"
                 icon={<Play size={14} />}
-                className="touch-target"
+                className={showPreview ? ideChromeButtonActiveClass : ideChromeButtonClass}
                 title={showPreview ? 'Stop Preview' : 'Run Project'}
                 onClick={() => {
                   if (!showPreview) {
@@ -1020,7 +1039,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
                 size="sm"
                 variant="ghost"
                 icon={<Share2 size={14} />}
-                className="touch-target"
+                className={ideChromeButtonClass}
                 title="Copy project URL"
                 onClick={() => {
                   const url = `${window.location.origin}/project/${currentProject.id}`
@@ -1044,7 +1063,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
                   size="sm"
                   variant="ghost"
                   icon={<Bell size={14} />}
-                  className="touch-target"
+                  className={ideIconButtonClass}
                   onClick={() => setShowNotifications(!showNotifications)}
                   title="Notifications"
                 />
@@ -1086,48 +1105,48 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
             <div className="h-10 bg-gray-800/50 border-b border-gray-700/50 flex items-center justify-between">
               <div className="flex">
                 <Button
-                  size="xs"
+                  size="sm"
                   variant={activeLeftTab === 'explorer' ? 'primary' : 'ghost'}
                   onClick={() => setActiveLeftTab('explorer')}
                   icon={<Folder size={14} />}
-                  className="rounded-none border-0 touch-target"
+                  className={idePanelTabClass(activeLeftTab === 'explorer')}
                 >
                   {leftPanelState !== 'collapsed' && 'Explorer'}
                 </Button>
                 <Button
-                  size="xs"
+                  size="sm"
                   variant={activeLeftTab === 'search' ? 'primary' : 'ghost'}
                   onClick={() => setActiveLeftTab('search')}
                   icon={<Search size={14} />}
-                  className="rounded-none border-0 touch-target"
+                  className={idePanelTabClass(activeLeftTab === 'search')}
                 >
                   {leftPanelState !== 'collapsed' && 'Search'}
                 </Button>
                 <Button
-                  size="xs"
+                  size="sm"
                   variant={activeLeftTab === 'git' ? 'primary' : 'ghost'}
                   onClick={() => setActiveLeftTab('git')}
                   icon={<GitBranch size={14} />}
-                  className="rounded-none border-0 touch-target"
+                  className={idePanelTabClass(activeLeftTab === 'git')}
                 >
                   {leftPanelState !== 'collapsed' && 'Git'}
                 </Button>
                 <Button
-                  size="xs"
+                  size="sm"
                   variant={activeLeftTab === 'history' ? 'primary' : 'ghost'}
                   onClick={() => setActiveLeftTab('history')}
                   icon={<RotateCcw size={14} />}
-                  className="rounded-none border-0 touch-target"
+                  className={idePanelTabClass(activeLeftTab === 'history')}
                 >
                   {leftPanelState !== 'collapsed' && 'History'}
                 </Button>
               </div>
               <Button
-                size="xs"
+                size="sm"
                 variant="ghost"
                 onClick={() => setLeftPanelState(leftPanelState === 'collapsed' ? 'normal' : 'collapsed')}
                 icon={<PanelLeftClose size={14} />}
-                className="mr-1 touch-target"
+                className={cn(ideIconButtonClass, 'mr-1')}
               />
             </div>
 
@@ -1156,40 +1175,40 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
               <div className="h-10 bg-gray-800/50 border-b border-gray-700/50 flex items-center justify-between">
                 <div className="flex">
                   <Button
-                    size="xs"
+                    size="sm"
                     variant={activeBottomTab === 'terminal' ? 'primary' : 'ghost'}
                     onClick={() => setActiveBottomTab('terminal')}
                     icon={<Terminal size={14} />}
-                    className="rounded-none border-0 touch-target"
+                    className={idePanelTabClass(activeBottomTab === 'terminal')}
                   >
                     Terminal
                   </Button>
                   <Button
-                    size="xs"
+                    size="sm"
                     variant={activeBottomTab === 'output' ? 'primary' : 'ghost'}
                     onClick={() => setActiveBottomTab('output')}
                     icon={<FileText size={14} />}
-                    className="rounded-none border-0 touch-target"
+                    className={idePanelTabClass(activeBottomTab === 'output')}
                   >
                     Output
                   </Button>
                   <Button
-                    size="xs"
+                    size="sm"
                     variant={activeBottomTab === 'problems' ? 'primary' : 'ghost'}
                     onClick={() => setActiveBottomTab('problems')}
                     icon={<Zap size={14} />}
-                    className="rounded-none border-0 touch-target"
+                    className={idePanelTabClass(activeBottomTab === 'problems')}
                   >
                     Problems
                   </Button>
                 </div>
 
                 <Button
-                  size="xs"
+                  size="sm"
                   variant="ghost"
                   onClick={() => setBottomPanelState('collapsed')}
                   icon={<X size={14} />}
-                  className="touch-target"
+                  className={ideIconButtonClass}
                 />
               </div>
 
@@ -1213,55 +1232,55 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
             {/* Sidebar tabs */}
             <div className="h-10 bg-gray-800/50 border-b border-gray-700/50 flex items-center justify-between">
               <Button
-                size="xs"
+                size="sm"
                 variant="ghost"
                 onClick={() => setRightPanelState(rightPanelState === 'collapsed' ? 'normal' : 'collapsed')}
                 icon={<PanelRightClose size={14} />}
-                className="ml-1 touch-target"
+                className={cn(ideIconButtonClass, 'ml-1')}
               />
               <div className="flex">
                 <Button
-                  size="xs"
+                  size="sm"
                   variant={activeRightTab === 'ai' ? 'primary' : 'ghost'}
                   onClick={() => setActiveRightTab('ai')}
                   icon={<Brain size={14} />}
-                  className="rounded-none border-0 touch-target"
+                  className={idePanelTabClass(activeRightTab === 'ai')}
                 >
                   {rightPanelState !== 'collapsed' && 'AI'}
                 </Button>
                 <Button
-                  size="xs"
+                  size="sm"
                   variant={activeRightTab === 'comments' ? 'primary' : 'ghost'}
                   onClick={() => setActiveRightTab('comments')}
                   icon={<MessageSquare size={14} />}
-                  className="rounded-none border-0 touch-target"
+                  className={idePanelTabClass(activeRightTab === 'comments')}
                 >
                   {rightPanelState !== 'collapsed' && 'Comments'}
                 </Button>
                 <Button
-                  size="xs"
+                  size="sm"
                   variant={activeRightTab === 'collab' ? 'primary' : 'ghost'}
                   onClick={() => setActiveRightTab('collab')}
                   icon={<Users size={14} />}
-                  className="rounded-none border-0 touch-target"
+                  className={idePanelTabClass(activeRightTab === 'collab')}
                 >
                   {rightPanelState !== 'collapsed' && 'Collab'}
                 </Button>
                 <Button
-                  size="xs"
+                  size="sm"
                   variant={activeRightTab === 'database' ? 'primary' : 'ghost'}
                   onClick={() => setActiveRightTab('database')}
                   icon={<Database size={14} />}
-                  className="rounded-none border-0 touch-target"
+                  className={idePanelTabClass(activeRightTab === 'database')}
                 >
                   {rightPanelState !== 'collapsed' && 'Database'}
                 </Button>
                 <Button
-                  size="xs"
+                  size="sm"
                   variant={activeRightTab === 'settings' ? 'primary' : 'ghost'}
                   onClick={() => setActiveRightTab('settings')}
                   icon={<Settings size={14} />}
-                  className="rounded-none border-0 touch-target"
+                  className={idePanelTabClass(activeRightTab === 'settings')}
                 >
                   {rightPanelState !== 'collapsed' && 'Settings'}
                 </Button>
@@ -1280,12 +1299,12 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
       <div className="h-6 bg-gray-900/95 border-t border-gray-800 flex items-center justify-center">
         <div className="flex items-center gap-1">
           <Button
-            size="xs"
+            size="sm"
             variant="ghost"
             onClick={() => setBottomPanelState(bottomPanelState === 'collapsed' ? 'normal' : 'collapsed')}
             icon={<Terminal size={12} />}
             title="Toggle Terminal"
-            className="touch-target"
+            className={ideIconButtonClass}
           />
         </div>
       </div>

@@ -168,6 +168,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
         is_public: false
       })
 
+      setCurrentProject(project)
       onProjectCreate?.(project)
     } catch (error) {
       console.error('Failed to create project:', error)

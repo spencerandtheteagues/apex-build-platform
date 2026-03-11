@@ -3211,7 +3211,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
 
     if (files.length === 0) {
-      addSystemMessage('No files found for that build')
+      addSystemMessage('No files found for that build yet. Opening the IDE project browser instead.')
+      onNavigateToIDE?.()
       return
     }
 
@@ -3578,7 +3579,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     } catch (error: unknown) {
       console.error('Failed to create project:', error)
       const message = error instanceof Error ? error.message : 'Unknown error'
-      addSystemMessage(`Failed to create project: ${message}`)
+      addSystemMessage(`Failed to create project: ${message}. Opening IDE without a project instead.`)
+      onNavigateToIDE?.()
     }
   }
 

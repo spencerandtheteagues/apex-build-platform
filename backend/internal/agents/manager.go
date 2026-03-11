@@ -1611,6 +1611,30 @@ func (am *AgentManager) executeTask(task *Task) {
 		},
 	})
 
+	if task.Type == TaskPlan {
+		ctx, cancel := context.WithTimeout(am.ctx, 2*time.Minute)
+		defer cancel()
+
+		output, err := am.executeStructuredPlanningTask(ctx, task, build, agent)
+		if err != nil {
+			am.resultQueue <- &TaskResult{
+				TaskID:  task.ID,
+				AgentID: agent.ID,
+				Success: false,
+				Error:   err,
+			}
+			return
+		}
+
+		am.resultQueue <- &TaskResult{
+			TaskID:  task.ID,
+			AgentID: agent.ID,
+			Success: true,
+			Output:  output,
+		}
+		return
+	}
+
 	// Build the prompt based on task type
 	prompt := am.buildTaskPrompt(task, build, agent)
 	systemPrompt := am.getSystemPrompt(agent.Role, build)
@@ -1953,8 +1977,52 @@ func (am *AgentManager) processResult(result *TaskResult) {
 			return
 		}
 
+		if task != nil {
+			coordinationErrors := am.validateTaskCoordinationOutput(task, result.Output)
+			if len(coordinationErrors) > 0 {
+				log.Printf("Coordination contract failed for task %s: %v", task.ID, coordinationErrors)
+
+				task.ErrorHistory = append(task.ErrorHistory, ErrorAttempt{
+					AttemptNumber: task.RetryCount + 1,
+					Error:         fmt.Sprintf("coordination contract failed: %v", coordinationErrors),
+					Timestamp:     time.Now(),
+					Context:       "coordination_contract",
+				})
+
+				if task.RetryCount < task.MaxRetries {
+					task.RetryCount++
+					task.Status = TaskPending
+					task.Input["coordination_errors"] = coordinationErrors
+					task.Input["retry_guidance"] = "Previous output violated the frozen scaffold or check-in protocol. Fix the coordination issues first."
+
+					agent.Status = StatusWorking
+					agent.mu.Unlock()
+
+					am.broadcast(agent.BuildID, &WSMessage{
+						Type:      "agent:coordination_failed",
+						BuildID:   agent.BuildID,
+						AgentID:   agent.ID,
+						Timestamp: time.Now(),
+						Data: map[string]any{
+							"task_id":     result.TaskID,
+							"errors":      coordinationErrors,
+							"retry_count": task.RetryCount,
+							"max_retries": task.MaxRetries,
+							"message":     "Task output violated the frozen scaffold/work-order contract. Retrying...",
+						},
+					})
+
+					am.taskQueue <- task
+					return
+				}
+
+				result.Success = false
+				result.Error = fmt.Errorf("coordination contract failed after %d attempts: %v", task.RetryCount, coordinationErrors)
+			}
+		}
+
 		// NEW: Verify generated code before marking complete (for code generation tasks)
-		if task != nil && am.isCodeGenerationTask(task.Type) && result.Output != nil {
+		if result.Success && task != nil && am.isCodeGenerationTask(task.Type) && result.Output != nil {
 			agent.mu.Unlock() // Release lock during verification
 
 			// Run quick build verification on generated code
@@ -2269,15 +2337,26 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 		},
 	})
 
-	// Store plan messages as the build plan
-	if output != nil && len(output.Messages) > 0 {
+	// Freeze the structured planning output into the build state before any
+	// downstream agents are spawned. This becomes the contract for later phases.
+	if output != nil && output.Plan != nil {
 		build.mu.Lock()
-		build.Plan = &BuildPlan{
-			ID:        uuid.New().String(),
-			BuildID:   build.ID,
-			CreatedAt: time.Now(),
-		}
+		build.Plan = output.Plan
+		build.TechStack = &output.Plan.TechStack
 		build.mu.Unlock()
+		if count := am.bootstrapBuildScaffold(build); count > 0 {
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSBuildProgress,
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"phase":          "scaffold_bootstrapped",
+					"message":        fmt.Sprintf("Deterministic scaffold preloaded with %d starter files", count),
+					"scaffold_files": count,
+					"progress":       15,
+				},
+			})
+		}
 	}
 
 	build.mu.Lock()
@@ -2326,6 +2405,54 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 	am.queuePlanTasks(build)
 
 	log.Printf("Build %s transitioned to in_progress with full agent team", build.ID)
+}
+
+func (am *AgentManager) bootstrapBuildScaffold(build *Build) int {
+	if build == nil || build.Plan == nil || len(build.Plan.ScaffoldFiles) == 0 {
+		return 0
+	}
+
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	for _, task := range build.Tasks {
+		if task == nil || task.Output == nil || task.Description != "Bootstrap deterministic scaffold" {
+			continue
+		}
+		if len(task.Output.Files) > 0 {
+			return len(task.Output.Files)
+		}
+	}
+
+	files := make([]GeneratedFile, 0, len(build.Plan.ScaffoldFiles))
+	for _, file := range build.Plan.ScaffoldFiles {
+		file.Content = normalizeGeneratedFileContent(file.Path, file.Content)
+		file.Size = int64(len(file.Content))
+		file.IsNew = true
+		files = append(files, file)
+	}
+	if len(files) == 0 {
+		return 0
+	}
+
+	now := time.Now()
+	task := &Task{
+		ID:          fmt.Sprintf("scaffold-bootstrap-%d", now.UnixMilli()),
+		Type:        TaskGenerateFile,
+		Description: "Bootstrap deterministic scaffold",
+		Status:      TaskCompleted,
+		Output: &TaskOutput{
+			Files:    files,
+			Messages: []string{fmt.Sprintf("Preloaded %d scaffold files for %s", len(files), build.Plan.ScaffoldID)},
+		},
+		CreatedAt:   now,
+		StartedAt:   &now,
+		CompletedAt: &now,
+	}
+	build.Tasks = append(build.Tasks, task)
+	build.UpdatedAt = now
+	go am.handleFileGeneration(build, task.Output)
+	return len(files)
 }
 
 // handleFileGeneration processes a generated file
@@ -5547,19 +5674,38 @@ func (am *AgentManager) assignPhaseAgents(build *Build, agents []agentPriority, 
 	taskIDs := make([]string, 0, len(agents))
 	for _, ap := range agents {
 		agent := ap.agent
+		workOrder := getBuildWorkOrder(build.Plan, agent.Role)
+		taskDescription := am.getTaskDescriptionForRole(agent.Role, description)
+		if workOrder != nil && strings.TrimSpace(workOrder.Summary) != "" {
+			taskDescription = workOrder.Summary
+		}
 
 		task := &Task{
 			ID:          uuid.New().String(),
 			Type:        am.getTaskTypeForRole(agent.Role),
-			Description: am.getTaskDescriptionForRole(agent.Role, description),
+			Description: taskDescription,
 			Priority:    ap.priority,
 			Status:      TaskPending,
 			MaxRetries:  build.MaxRetries,
 			Input: map[string]any{
-				"app_description": description,
-				"agent_role":      string(agent.Role),
+				"app_description":  description,
+				"agent_role":       string(agent.Role),
+				"require_checkins": true,
 			},
 			CreatedAt: time.Now(),
+		}
+		if build.Plan != nil {
+			task.Input["build_spec_hash"] = build.Plan.SpecHash
+			task.Input["scaffold_id"] = build.Plan.ScaffoldID
+			task.Input["build_plan"] = build.Plan
+			task.Input["api_contract"] = build.Plan.APIContract
+		}
+		if workOrder != nil {
+			task.Input["work_order"] = workOrder
+			task.Input["owned_files"] = append([]string(nil), workOrder.OwnedFiles...)
+			task.Input["required_files"] = append([]string(nil), workOrder.RequiredFiles...)
+			task.Input["acceptance_checks"] = append([]string(nil), workOrder.AcceptanceChecks...)
+			task.Input["forbidden_files"] = append([]string(nil), workOrder.ForbiddenFiles...)
 		}
 
 		build.mu.Lock()
@@ -6744,10 +6890,49 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 		}
 	}
 
+	coordinationErrorContext := ""
+	if task != nil && task.Input != nil {
+		if errs, ok := task.Input["coordination_errors"]; ok {
+			switch v := errs.(type) {
+			case []string:
+				if len(v) > 0 {
+					coordinationErrorContext = fmt.Sprintf("\n<coordination_errors>\n- %s\n</coordination_errors>\n", strings.Join(v, "\n- "))
+				}
+			case []any:
+				items := make([]string, 0, len(v))
+				for _, item := range v {
+					if s := strings.TrimSpace(fmt.Sprintf("%v", item)); s != "" {
+						items = append(items, s)
+					}
+				}
+				if len(items) > 0 {
+					coordinationErrorContext = fmt.Sprintf("\n<coordination_errors>\n- %s\n</coordination_errors>\n", strings.Join(items, "\n- "))
+				}
+			}
+		}
+	}
+
 	techStackContext := ""
 	if build != nil && build.TechStack != nil {
 		techStackContext = buildTechStackDirective(build.TechStack, agent)
 	}
+	workOrder := taskWorkOrderFromInput(task)
+	buildSpecContext := ""
+	if build != nil && build.Plan != nil {
+		buildSpecContext = buildSpecPromptContext(build.Plan, workOrder)
+	}
+	currentOwnedFilesContext := ""
+	if build != nil && workOrder != nil {
+		existingFiles := am.collectGeneratedFiles(build)
+		contextBudget := 18000
+		if build.PowerMode == PowerFast || build.Mode == ModeFast {
+			contextBudget = 12000
+		} else if build.PowerMode == PowerMax {
+			contextBudget = 26000
+		}
+		currentOwnedFilesContext = currentOwnedFilesPrompt(existingFiles, workOrder, contextBudget)
+	}
+	coordinationProtocolContext := coordinationProtocolPrompt(workOrder)
 
 	// Inter-agent context sharing: inject upstream outputs for downstream agents
 	agentContext := ""
@@ -6891,6 +7076,10 @@ App being built: %s
 %s
 %s
 %s
+%s
+%s
+%s
+%s
 OUTPUT FORMAT - CRITICAL:
 For EVERY file you create, use this EXACT format:
 
@@ -6937,7 +7126,21 @@ FORBIDDEN OUTPUTS:
 - Mixing frontend and backend code in the same file: NEVER put Express/server imports in a .tsx/.jsx React component file; NEVER put React JSX in a backend Go/Python/Express file
 
 Build the REAL, COMPLETE implementation now.`,
-		task.Type, task.Description, appDescription, techStackContext, errorContext, repairHintsContext, agentContext, assetsContext, teamCoordinationContext, interactionContext, deliveryConstraintsContext)
+		task.Type,
+		task.Description,
+		appDescription,
+		techStackContext,
+		errorContext,
+		repairHintsContext,
+		coordinationErrorContext,
+		buildSpecContext,
+		currentOwnedFilesContext,
+		coordinationProtocolContext,
+		agentContext,
+		assetsContext,
+		teamCoordinationContext,
+		interactionContext,
+		deliveryConstraintsContext)
 }
 
 func formatTechStackSummary(stack *TechStack) string {
@@ -7175,13 +7378,7 @@ func (am *AgentManager) getTeamCoordinationBrief(build *Build, task *Task, agent
 			role = string(assigned.Role)
 		}
 
-		summary := ""
-		if len(t.Output.Messages) > 0 {
-			summary = strings.TrimSpace(t.Output.Messages[0])
-		}
-		if summary == "" {
-			summary = strings.TrimSpace(t.Description)
-		}
+		summary := summarizeTaskOutputForCoordination(t.Output, strings.TrimSpace(t.Description))
 		if summary == "" {
 			continue
 		}
@@ -7660,13 +7857,16 @@ func (am *AgentManager) getPriorityForRole(role AgentRole) int {
 }
 
 func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *TaskOutput {
+	cleanResponse, startAck, completion := extractTaskCheckins(response)
 	output := &TaskOutput{
-		Messages: []string{},
-		Files:    make([]GeneratedFile, 0),
+		Messages:   []string{},
+		Files:      make([]GeneratedFile, 0),
+		StartAck:   startAck,
+		Completion: completion,
 	}
 
 	if !am.isCodeGenerationTask(taskType) {
-		trimmed := strings.TrimSpace(response)
+		trimmed := strings.TrimSpace(cleanResponse)
 		if trimmed != "" {
 			output.Messages = append(output.Messages, trimmed)
 		}
@@ -7675,11 +7875,11 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 
 	// Parse the AI response to extract code blocks and files
 	// Look for patterns like ```language\n...code...\n``` or file markers
-	lines := strings.Split(response, "\n")
-	hasExplicitFileMarkers := strings.Contains(response, "// File:") ||
-		strings.Contains(response, "# File:") ||
-		strings.Contains(response, "/* File:") ||
-		strings.Contains(response, "<!-- File:")
+	lines := strings.Split(cleanResponse, "\n")
+	hasExplicitFileMarkers := strings.Contains(cleanResponse, "// File:") ||
+		strings.Contains(cleanResponse, "# File:") ||
+		strings.Contains(cleanResponse, "/* File:") ||
+		strings.Contains(cleanResponse, "<!-- File:")
 	var currentFile *GeneratedFile
 	var codeBuffer strings.Builder
 	inCodeBlock := false
@@ -7799,19 +7999,19 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 	}
 
 	// If no files were extracted but we have response content, treat the whole response as a single file
-	if len(output.Files) == 0 && len(response) > 100 {
+	if len(output.Files) == 0 && len(cleanResponse) > 100 {
 		// Try to detect if it's code and create a file
-		if am.looksLikeCode(response) {
-			lang := am.detectLanguageFromContent(response)
+		if am.looksLikeCode(cleanResponse) {
+			lang := am.detectLanguageFromContent(cleanResponse)
 			output.Files = append(output.Files, GeneratedFile{
 				Path:     fmt.Sprintf("generated_1.%s", am.languageToExtension(lang)),
-				Content:  response,
+				Content:  cleanResponse,
 				Language: lang,
-				Size:     int64(len(response)),
+				Size:     int64(len(cleanResponse)),
 				IsNew:    true,
 			})
 		} else {
-			output.Messages = []string{response}
+			output.Messages = []string{cleanResponse}
 		}
 	}
 	output.Messages = append(output.Messages, parserWarnings...)

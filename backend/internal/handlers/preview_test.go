@@ -58,7 +58,7 @@ func TestPreviewHandlerRejectsExplicitSandboxWithoutDocker(t *testing.T) {
 	require.False(t, useSandbox)
 }
 
-func TestPreviewHandlerStartPreviewFailsClosedWhenSandboxRequired(t *testing.T) {
+func TestPreviewHandlerStartPreviewFallsBackWhenSandboxRequiredButDockerUnavailable(t *testing.T) {
 	handler, projectID := newPreviewHandlerTestFixture(t, true)
 
 	body, err := json.Marshal(map[string]any{
@@ -74,11 +74,12 @@ func TestPreviewHandlerStartPreviewFailsClosedWhenSandboxRequired(t *testing.T) 
 
 	handler.StartPreview(context)
 
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "secure preview mode requires Docker container previews")
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"sandbox_degraded":true`)
+	require.Contains(t, recorder.Body.String(), `"sandbox":false`)
 }
 
-func TestPreviewHandlerStartServerBlockedInSecureMode(t *testing.T) {
+func TestPreviewHandlerStartServerNotBlockedBySecureModeFallback(t *testing.T) {
 	handler, projectID := newPreviewHandlerTestFixture(t, true)
 
 	body, err := json.Marshal(map[string]any{
@@ -94,11 +95,11 @@ func TestPreviewHandlerStartServerBlockedInSecureMode(t *testing.T) {
 
 	handler.StartServer(context)
 
-	require.Equal(t, http.StatusConflict, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "secure sandbox preview is enforced")
+	require.NotEqual(t, http.StatusConflict, recorder.Code)
+	require.NotContains(t, recorder.Body.String(), "secure sandbox preview is enforced")
 }
 
-func TestPreviewHandlerGetServerStatusReportsUnavailableInSecureMode(t *testing.T) {
+func TestPreviewHandlerGetServerStatusUsesFallbackModeWhenDockerUnavailable(t *testing.T) {
 	handler, projectID := newPreviewHandlerTestFixture(t, true)
 
 	recorder := httptest.NewRecorder()
@@ -113,8 +114,9 @@ func TestPreviewHandlerGetServerStatusReportsUnavailableInSecureMode(t *testing.
 	handler.GetServerStatus(context)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
-	require.Contains(t, recorder.Body.String(), `"available":false`)
-	require.Contains(t, recorder.Body.String(), "secure sandbox preview is enforced")
+	require.NotContains(t, recorder.Body.String(), `"available":false`)
+	require.NotContains(t, recorder.Body.String(), "secure sandbox preview is enforced")
+	require.Contains(t, recorder.Body.String(), `"success":true`)
 }
 
 func TestPreviewHandlerGetDockerStatusIncludesSecureModeFlags(t *testing.T) {
@@ -128,5 +130,6 @@ func TestPreviewHandlerGetDockerStatusIncludesSecureModeFlags(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Contains(t, recorder.Body.String(), `"sandbox_required":true`)
-	require.Contains(t, recorder.Body.String(), `"backend_preview_available":false`)
+	require.Contains(t, recorder.Body.String(), `"sandbox_degraded":true`)
+	require.Contains(t, recorder.Body.String(), `"backend_preview_available":true`)
 }

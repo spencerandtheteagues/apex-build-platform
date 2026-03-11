@@ -18,6 +18,14 @@ type Planner struct {
 	ai AIProvider
 }
 
+// PlanningBundle is the normalized structured planning output used by the
+// main multi-agent builder. It keeps the requirement analysis and execution
+// plan together so downstream orchestrators can freeze a real build contract.
+type PlanningBundle struct {
+	Analysis *RequirementAnalysis `json:"analysis"`
+	Plan     *ExecutionPlan       `json:"plan"`
+}
+
 // NewPlanner creates a new planner
 func NewPlanner(ai AIProvider) *Planner {
 	return &Planner{ai: ai}
@@ -25,6 +33,15 @@ func NewPlanner(ai AIProvider) *Planner {
 
 // CreatePlan generates an execution plan from a natural language description
 func (p *Planner) CreatePlan(ctx context.Context, description string) (*ExecutionPlan, error) {
+	bundle, err := p.CreatePlanningBundle(ctx, description)
+	if err != nil {
+		return nil, err
+	}
+	return bundle.Plan, nil
+}
+
+// CreatePlanningBundle generates the normalized planning analysis plus plan.
+func (p *Planner) CreatePlanningBundle(ctx context.Context, description string) (*PlanningBundle, error) {
 	log.Printf("Planner: Creating plan for: %s", truncate(description, 100))
 
 	// First, analyze the requirements
@@ -57,7 +74,10 @@ func (p *Planner) CreatePlan(ctx context.Context, description string) (*Executio
 	}
 
 	log.Printf("Planner: Created plan with %d steps (risk score: %d)", len(plan.Steps), analysis.RiskScore)
-	return plan, nil
+	return &PlanningBundle{
+		Analysis: analysis,
+		Plan:     plan,
+	}, nil
 }
 
 // assessRisks evaluates potential risks in the build

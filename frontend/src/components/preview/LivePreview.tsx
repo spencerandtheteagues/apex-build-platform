@@ -119,6 +119,7 @@ export default function LivePreview({
   const [activeSandbox, setActiveSandbox] = useState(false)
   const [dockerAvailable, setDockerAvailable] = useState(false)
   const [sandboxRequired, setSandboxRequired] = useState(false)
+  const [sandboxDegraded, setSandboxDegraded] = useState(false)
   const [backendPreviewAvailable, setBackendPreviewAvailable] = useState(true)
   const [backendPreviewReason, setBackendPreviewReason] = useState('')
 
@@ -193,8 +194,10 @@ export default function LivePreview({
         const response = await apiService.client.get('/preview/docker/status')
         const previewDockerAvailable = response.data.available === true
         const previewSandboxRequired = response.data.sandbox_required === true
+        const previewSandboxDegraded = response.data.sandbox_degraded === true
         setDockerAvailable(previewDockerAvailable)
         setSandboxRequired(previewSandboxRequired)
+        setSandboxDegraded(previewSandboxDegraded)
         setBackendPreviewAvailable(response.data.backend_preview_available !== false)
         setBackendPreviewReason(response.data.backend_preview_reason || '')
         if (previewSandboxRequired) {
@@ -316,6 +319,7 @@ export default function LivePreview({
         params: { sandbox: statusRequestSandbox ? '1' : '0' }
       })
       if (activeProjectIdRef.current !== requestProjectId) return
+      setSandboxDegraded(response.data.sandbox_degraded === true)
       setStatus(response.data.preview)
       if (response.data.preview?.active) {
         if (typeof response.data.sandbox === 'boolean') {
@@ -400,6 +404,7 @@ export default function LivePreview({
         setConnected(true)
         setActiveSandbox(actualSandbox)
         setUseSandbox(actualSandbox)
+        setSandboxDegraded(data.sandbox_degraded === true)
         if (data.server) {
           setServerStatus(data.server)
         } else {
@@ -629,6 +634,13 @@ export default function LivePreview({
       ref={containerRef}
       className={`min-h-0 flex flex-col bg-gray-900 border border-gray-700 rounded-lg overflow-hidden ${className}`}
     >
+      {sandboxDegraded && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-200 text-xs">
+          <AlertCircle className="w-3.5 h-3.5 text-amber-300" />
+          <span>Platform Docker is unavailable. Preview is using process fallback mode.</span>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex items-center justify-between px-3 py-2 bg-gray-800/50 border-b border-gray-700">
         <div className="flex items-center gap-2">
@@ -919,7 +931,11 @@ export default function LivePreview({
                         className="rounded bg-gray-700 border-gray-600 text-cyan-500 disabled:opacity-40"
                       />
                     </label>
-                    {sandboxRequired ? (
+                    {sandboxRequired && sandboxDegraded ? (
+                      <p className="text-[10px] text-amber-300 -mt-1">
+                        Secure sandbox is unavailable, so preview will fall back to process mode
+                      </p>
+                    ) : sandboxRequired ? (
                       <p className="text-[10px] text-cyan-500 -mt-1">
                         Secure preview is enforced by the server
                       </p>
