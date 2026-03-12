@@ -1612,7 +1612,13 @@ func (am *AgentManager) executeTask(task *Task) {
 	})
 
 	if task.Type == TaskPlan {
-		ctx, cancel := context.WithTimeout(am.ctx, 2*time.Minute)
+		// Planning timeout: 2 min for cloud providers, 8 min for Ollama
+		// (Ollama planning routinely takes 3-7 min with two sequential AI calls)
+		planTimeout := 2 * time.Minute
+		if agent.Provider == ai.ProviderOllama {
+			planTimeout = 8 * time.Minute
+		}
+		ctx, cancel := context.WithTimeout(am.ctx, planTimeout)
 		defer cancel()
 
 		output, err := am.executeStructuredPlanningTask(ctx, task, build, agent)
@@ -4511,7 +4517,14 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 				goto completion_finalize
 			}
 
-			canAttemptDeterministicRepair := build.ReadinessRecoveryAttempts < 1
+			// Allow more deterministic repair rounds for higher power modes
+			maxRepairAttempts := 1
+			if build.PowerMode == PowerMax {
+				maxRepairAttempts = 3
+			} else if build.PowerMode == PowerBalanced {
+				maxRepairAttempts = 2
+			}
+			canAttemptDeterministicRepair := build.ReadinessRecoveryAttempts < maxRepairAttempts
 			build.mu.Unlock()
 			if canAttemptDeterministicRepair {
 				if repaired, summary := am.applyDeterministicManifestDependencyRepair(build, readinessErrors); repaired {
@@ -4703,7 +4716,13 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 			}
 			build.mu.Lock()
 
-			if build.ReadinessRecoveryAttempts < 1 {
+			maxSolverAttempts := 1
+			if build.PowerMode == PowerMax {
+				maxSolverAttempts = 3
+			} else if build.PowerMode == PowerBalanced {
+				maxSolverAttempts = 2
+			}
+			if build.ReadinessRecoveryAttempts < maxSolverAttempts {
 				build.ReadinessRecoveryAttempts++
 				build.Status = BuildReviewing
 				build.CompletedAt = nil
@@ -5747,10 +5766,15 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	// Allow more time when running with local Ollama (large models are slow).
+	// Scale phase timeout by provider profile and power mode.
+	// Ollama needs enough time for task + potential retry (15min task * 2 = 30min).
 	phaseTimeout := 5 * time.Minute
 	if am.isLocalDevSingleOllamaProfile() {
-		phaseTimeout = 25 * time.Minute
+		phaseTimeout = 35 * time.Minute
+	} else if build.PowerMode == PowerMax {
+		phaseTimeout = 10 * time.Minute // Max mode: frontier models can be slower but produce better output
+	} else if build.PowerMode == PowerBalanced {
+		phaseTimeout = 7 * time.Minute
 	}
 	timeout := time.After(phaseTimeout)
 
@@ -7055,6 +7079,49 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 		}
 	}
 
+	// Power-mode-specific quality directives
+	powerModeContext := ""
+	if build != nil {
+		switch build.PowerMode {
+		case PowerMax:
+			powerModeContext = `
+<quality_tier>POWER MODE: MAXIMUM — You are using a frontier-tier model. Output must be enterprise-grade.
+- Write comprehensive error handling with user-friendly error messages
+- Include input validation on all API endpoints and form inputs
+- Add loading states, error states, and empty states for ALL UI components
+- Implement proper TypeScript types — no 'any', no type assertions unless unavoidable
+- Use semantic HTML with ARIA attributes for accessibility
+- Add responsive design breakpoints (mobile, tablet, desktop)
+- Include meaningful comments ONLY for complex business logic
+- Structure code for maintainability: separate concerns, consistent naming, DRY
+- For full-stack: ensure frontend/backend error contracts match (error codes, shapes)
+- Every component must handle edge cases: empty lists, long text, missing data
+- Use modern patterns: React hooks, async/await, proper cleanup in useEffect
+</quality_tier>
+`
+		case PowerBalanced:
+			powerModeContext = `
+<quality_tier>BALANCED MODE — Produce clean, working code with good structure.
+- Include error handling on API calls and form submissions
+- Add loading states for async operations
+- Use proper TypeScript types (minimize 'any')
+- Ensure responsive layout basics
+- Follow the scaffold structure exactly — do not invent new layouts
+</quality_tier>
+`
+		case PowerFast:
+			powerModeContext = `
+<quality_tier>FAST MODE — Focus on working code that follows the scaffold exactly.
+- Stick strictly to the scaffold file layout — do not create extra files
+- Keep implementations simple and functional
+- Include basic error handling (try/catch, error responses)
+- Follow the tech stack requirements precisely
+- Prioritize a working vertical slice over breadth of features
+</quality_tier>
+`
+		}
+	}
+
 	// Prune app description if total prompt would be too long
 	appDescription := build.Description
 	if len(appDescription)+len(errorContext)+len(agentContext)+len(teamCoordinationContext)+len(deliveryConstraintsContext) > 30000 {
@@ -7068,6 +7135,7 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 Description: %s
 
 App being built: %s
+%s
 %s
 %s
 %s
@@ -7140,7 +7208,8 @@ Build the REAL, COMPLETE implementation now.`,
 		assetsContext,
 		teamCoordinationContext,
 		interactionContext,
-		deliveryConstraintsContext)
+		deliveryConstraintsContext,
+		powerModeContext)
 }
 
 func formatTechStackSummary(stack *TechStack) string {
@@ -10209,9 +10278,10 @@ func (am *AgentManager) getCompletedTaskOutput(build *Build, taskType TaskType) 
 				summary.WriteString("\n")
 			}
 			result := summary.String()
-			// Truncate to 3000 chars
-			if len(result) > 3000 {
-				result = result[:3000] + "\n... (truncated)"
+			// Truncate to 12000 chars — downstream agents need API contracts,
+			// port info, and data models to generate coherent code.
+			if len(result) > 12000 {
+				result = result[:12000] + "\n... (truncated)"
 			}
 			return result
 		}

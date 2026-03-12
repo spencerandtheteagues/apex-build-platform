@@ -124,13 +124,29 @@ func (a *AIRouterAdapter) Generate(ctx context.Context, provider ai.AIProvider, 
 	capability := a.mapProviderToCapability(provider, opts)
 	log.Printf("Mapped to capability: %s", capability)
 
-	// Build the full prompt with system prompt - format optimized for code generation
+	// Build the full prompt with system prompt - format optimized for code generation.
+	// For Ollama, do NOT embed system prompt in the user message since ollama.go
+	// already creates a dedicated system role message — embedding it twice wastes tokens.
 	var fullPrompt string
-	if opts.SystemPrompt != "" {
-		// Use a clear structure that AI models understand well
+	if opts.SystemPrompt != "" && provider != ai.ProviderOllama {
 		fullPrompt = fmt.Sprintf(`<system>
 %s
 </system>
+
+<task>
+%s
+</task>
+
+<output_format>
+For code files, use this exact format:
+// File: path/to/filename.ext
+`+"```"+`language
+[complete code here]
+`+"```"+`
+</output_format>`, opts.SystemPrompt, prompt)
+	} else if opts.SystemPrompt != "" {
+		// Ollama: system prompt handled by ollama.go buildMessages; just send task + format
+		fullPrompt = fmt.Sprintf(`%s
 
 <task>
 %s
@@ -183,21 +199,21 @@ For code files, use this exact format:
 	if maxTokens > 24000 {
 		maxTokens = 24000
 	}
-	// Local Ollama inference slows dramatically with large token budgets in the
-	// multi-agent pipeline. Cap aggressively so local/dev builds remain usable.
+	// Local Ollama: cap tokens to keep builds responsive while still allowing
+	// enough output for complete code generation (a React app needs ~4-8K tokens).
 	if aiProvider == ai.ProviderOllama {
 		switch opts.PowerMode {
 		case PowerMax:
-			if maxTokens > 3072 {
-				maxTokens = 3072
+			if maxTokens > 12000 {
+				maxTokens = 12000
 			}
 		case PowerBalanced:
-			if maxTokens > 2048 {
-				maxTokens = 2048
+			if maxTokens > 8000 {
+				maxTokens = 8000
 			}
 		default: // PowerFast / unset
-			if maxTokens > 1536 {
-				maxTokens = 1536
+			if maxTokens > 6000 {
+				maxTokens = 6000
 			}
 		}
 	}

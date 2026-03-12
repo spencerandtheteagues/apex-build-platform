@@ -293,18 +293,20 @@ func resolveBuildTechStack(requested *TechStack, bundle *autonomous.PlanningBund
 		stack.Extras = dedupeStrings(append(stack.Extras, requested.Extras...))
 	}
 
+	// Only apply cascade defaults when BOTH frontend and backend are empty —
+	// meaning the planner gave us nothing and the user requested nothing.
+	// Do NOT force a backend on a frontend-only project or vice versa.
 	if stack.Frontend == "" && stack.Backend == "" {
 		stack.Frontend = "React"
-	}
-	if stack.Backend == "" && stack.Frontend != "" {
 		stack.Backend = "Express"
-	}
-	if stack.Database == "" && stack.Backend != "" {
 		stack.Database = "PostgreSQL"
 	}
+	// Only default styling when there IS a frontend
 	if stack.Styling == "" && stack.Frontend != "" {
 		stack.Styling = "Tailwind"
 	}
+	// Only default database when there IS a backend AND user/planner didn't explicitly leave it blank
+	// (the planner recommending a backend without a database is intentional for simple APIs)
 	return stack
 }
 
@@ -314,6 +316,12 @@ func resolveBuildAppType(bundle *autonomous.PlanningBundle) string {
 		switch appType {
 		case "web", "api", "cli", "fullstack":
 			return appType
+		case "frontend", "spa", "landing", "static", "dashboard":
+			return "web"
+		case "backend", "server", "microservice", "service", "rest", "graphql":
+			return "api"
+		case "full-stack", "full_stack", "webapp", "web-app", "saas":
+			return "fullstack"
 		}
 	}
 	return "fullstack"
@@ -400,9 +408,10 @@ func planDerivedFiles(scaffold buildScaffold, bundle *autonomous.PlanningBundle)
 			if kind, _ := step.Input["type"].(string); kind != "" {
 				switch kind {
 				case "backend":
-					if !seen["server/src/routes/index.ts"] {
-						files = append(files, PlannedFile{Path: "server/src/routes/index.ts", Type: "backend", Description: "API routes generated from build spec"})
-						seen["server/src/routes/index.ts"] = true
+					// Use server/routes/api.ts to align with the fullstack scaffold
+					if !seen["server/routes/api.ts"] {
+						files = append(files, PlannedFile{Path: "server/routes/api.ts", Type: "backend", Description: "API routes generated from build spec"})
+						seen["server/routes/api.ts"] = true
 					}
 				case "frontend":
 					if !seen["src/components/AppShell.tsx"] {
@@ -651,6 +660,145 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 				},
 			},
 		}
+	case frontend == "react" && backend == "go":
+		return buildScaffold{
+			ID:          "fullstack/react-vite-go",
+			AppType:     "fullstack",
+			Description: "Single-repo React + Vite frontend with Go net/http backend",
+			Required: []PlannedFile{
+				{Path: ".env.example", Type: "config", Description: "Environment variable template"},
+				{Path: "README.md", Type: "docs", Description: "Run instructions and project overview"},
+				{Path: "go.mod", Type: "config", Description: "Go module definition"},
+				{Path: "index.html", Type: "frontend", Description: "Vite HTML entry point"},
+				{Path: "main.go", Type: "backend", Description: "Go HTTP entry point"},
+				{Path: "package.json", Type: "config", Description: "Frontend dependency manifest"},
+				{Path: "postcss.config.js", Type: "config", Description: "PostCSS config for Tailwind"},
+				{Path: "src/App.tsx", Type: "frontend", Description: "Root React application"},
+				{Path: "src/index.css", Type: "frontend", Description: "Global styles"},
+				{Path: "src/main.tsx", Type: "frontend", Description: "React entry point"},
+				{Path: "tailwind.config.js", Type: "config", Description: "Tailwind configuration"},
+				{Path: "tsconfig.json", Type: "config", Description: "TypeScript config"},
+				{Path: "vite.config.ts", Type: "frontend", Description: "Vite config with API proxy"},
+			},
+			Ownership: map[AgentRole][]string{
+				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
+				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "index.html", "src/**", "public/**"},
+				RoleBackend:   {"go.mod", "main.go", "cmd/**", "internal/**", "pkg/**", "handlers/**", "middleware/**", ".env.example"},
+				RoleDatabase:  {"migrations/**", "db/**", "internal/db/**", "schema.sql"},
+				RoleTesting:   {"tests/**", "**/*.test.ts", "**/*.test.tsx", "**/*_test.go"},
+				RoleReviewer:  {"**"},
+				RoleSolver:    {"**"},
+			},
+			EnvVars: []BuildEnvVar{
+				{Name: "PORT", Example: "8080", Purpose: "Backend listen port", Required: true},
+				{Name: "VITE_API_BASE_URL", Example: "http://localhost:8080", Purpose: "Frontend API base URL", Required: false},
+				{Name: "DATABASE_URL", Example: "postgresql://postgres:postgres@localhost:5432/app", Purpose: "Backend database connection", Required: stack.Database != ""},
+			},
+			Acceptance: []BuildAcceptanceCheck{
+				{ID: "fullstack-go-backend", Description: "Go backend must compile and expose a health route on PORT", Owner: RoleBackend, Required: true},
+				{ID: "fullstack-react-frontend", Description: "Frontend must render a usable shell from src/main.tsx and src/App.tsx", Owner: RoleFrontend, Required: true},
+			},
+			APIContract: &BuildAPIContract{
+				FrontendPort: 5173,
+				BackendPort:  8080,
+				APIBaseURL:   "http://localhost:8080",
+				CORSOrigins:  []string{"http://localhost:5173", "http://localhost:3000"},
+				Endpoints: []APIEndpoint{
+					{Method: "GET", Path: "/health", Description: "Health check", Output: "{ status: \"ok\" }"},
+				},
+			},
+		}
+	case frontend == "react" && (backend == "python" || backend == "fastapi"):
+		return buildScaffold{
+			ID:          "fullstack/react-vite-fastapi",
+			AppType:     "fullstack",
+			Description: "Single-repo React + Vite frontend with Python FastAPI backend",
+			Required: []PlannedFile{
+				{Path: ".env.example", Type: "config", Description: "Environment variable template"},
+				{Path: "README.md", Type: "docs", Description: "Run instructions and project overview"},
+				{Path: "index.html", Type: "frontend", Description: "Vite HTML entry point"},
+				{Path: "main.py", Type: "backend", Description: "FastAPI entry point"},
+				{Path: "package.json", Type: "config", Description: "Frontend dependency manifest"},
+				{Path: "postcss.config.js", Type: "config", Description: "PostCSS config for Tailwind"},
+				{Path: "requirements.txt", Type: "config", Description: "Python dependencies"},
+				{Path: "src/App.tsx", Type: "frontend", Description: "Root React application"},
+				{Path: "src/index.css", Type: "frontend", Description: "Global styles"},
+				{Path: "src/main.tsx", Type: "frontend", Description: "React entry point"},
+				{Path: "tailwind.config.js", Type: "config", Description: "Tailwind configuration"},
+				{Path: "tsconfig.json", Type: "config", Description: "TypeScript config"},
+				{Path: "vite.config.ts", Type: "frontend", Description: "Vite config with API proxy"},
+			},
+			Ownership: map[AgentRole][]string{
+				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
+				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "index.html", "src/**", "public/**"},
+				RoleBackend:   {"requirements.txt", "main.py", "routers/**", "models/**", "services/**", "middleware/**", ".env.example"},
+				RoleDatabase:  {"migrations/**", "db/**", "alembic/**", "schema.sql"},
+				RoleTesting:   {"tests/**", "**/*.test.ts", "**/*.test.tsx", "**/*_test.py", "**/*.spec.ts"},
+				RoleReviewer:  {"**"},
+				RoleSolver:    {"**"},
+			},
+			EnvVars: []BuildEnvVar{
+				{Name: "PORT", Example: "8000", Purpose: "Backend listen port", Required: true},
+				{Name: "VITE_API_BASE_URL", Example: "http://localhost:8000", Purpose: "Frontend API base URL", Required: false},
+				{Name: "DATABASE_URL", Example: "postgresql://postgres:postgres@localhost:5432/app", Purpose: "Backend database connection", Required: stack.Database != ""},
+			},
+			Acceptance: []BuildAcceptanceCheck{
+				{ID: "fullstack-fastapi-backend", Description: "FastAPI backend must start and expose a health route on PORT", Owner: RoleBackend, Required: true},
+				{ID: "fullstack-react-frontend", Description: "Frontend must render a usable shell from src/main.tsx and src/App.tsx", Owner: RoleFrontend, Required: true},
+			},
+			APIContract: &BuildAPIContract{
+				FrontendPort: 5173,
+				BackendPort:  8000,
+				APIBaseURL:   "http://localhost:8000",
+				CORSOrigins:  []string{"http://localhost:5173", "http://localhost:3000"},
+				Endpoints: []APIEndpoint{
+					{Method: "GET", Path: "/health", Description: "Health check", Output: "{ status: \"ok\" }"},
+				},
+			},
+		}
+	case frontend == "next" || frontend == "next.js" || frontend == "nextjs":
+		nextBackend := backend
+		nextScaffoldID := "frontend/nextjs-app"
+		nextAppType := "web"
+		if nextBackend != "" {
+			nextScaffoldID = "fullstack/nextjs-api"
+			nextAppType = "fullstack"
+		}
+		required := []PlannedFile{
+			{Path: "README.md", Type: "docs", Description: "Run instructions and project overview"},
+			{Path: "app/layout.tsx", Type: "frontend", Description: "Root layout component"},
+			{Path: "app/page.tsx", Type: "frontend", Description: "Home page"},
+			{Path: "next.config.js", Type: "config", Description: "Next.js configuration"},
+			{Path: "package.json", Type: "config", Description: "Dependency manifest"},
+			{Path: "tailwind.config.js", Type: "config", Description: "Tailwind configuration"},
+			{Path: "tsconfig.json", Type: "config", Description: "TypeScript config"},
+		}
+		if nextBackend != "" {
+			required = append(required,
+				PlannedFile{Path: "app/api/health/route.ts", Type: "backend", Description: "Health check API route"},
+			)
+		}
+		return buildScaffold{
+			ID:          nextScaffoldID,
+			AppType:     nextAppType,
+			Description: "Next.js App Router scaffold",
+			Required:    required,
+			Ownership: map[AgentRole][]string{
+				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
+				RoleFrontend:  {"package.json", "tsconfig.json", "next.config.js", "tailwind.config.js", "postcss.config.js", "app/**", "components/**", "lib/**", "public/**", "styles/**"},
+				RoleBackend:   {"package.json", "app/api/**", "lib/db/**", ".env.example"},
+				RoleDatabase:  {"migrations/**", "db/**", "prisma/**", "lib/db/**", "schema.sql"},
+				RoleTesting:   {"tests/**", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts"},
+				RoleReviewer:  {"**"},
+				RoleSolver:    {"**"},
+			},
+			EnvVars: []BuildEnvVar{
+				{Name: "DATABASE_URL", Example: "postgresql://postgres:postgres@localhost:5432/app", Purpose: "Database connection", Required: stack.Database != ""},
+			},
+			Acceptance: []BuildAcceptanceCheck{
+				{ID: "nextjs-app-shell", Description: "Next.js app must have a working layout.tsx and page.tsx", Owner: RoleFrontend, Required: true},
+			},
+		}
 	case frontend == "react":
 		return buildScaffold{
 			ID:          "frontend/react-vite-spa",
@@ -677,6 +825,40 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			},
 			Acceptance: []BuildAcceptanceCheck{
 				{ID: "spa-entry", Description: "Frontend must include Vite entry files and a complete app shell", Owner: RoleFrontend, Required: true},
+			},
+		}
+	case backend == "python" || backend == "fastapi":
+		return buildScaffold{
+			ID:          "api/python-fastapi",
+			AppType:     "api",
+			Description: "Python FastAPI API scaffold",
+			Required: []PlannedFile{
+				{Path: ".env.example", Type: "config", Description: "Environment variable template"},
+				{Path: "main.py", Type: "backend", Description: "FastAPI entry point"},
+				{Path: "README.md", Type: "docs", Description: "Run instructions and project overview"},
+				{Path: "requirements.txt", Type: "config", Description: "Python dependencies"},
+			},
+			Ownership: map[AgentRole][]string{
+				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
+				RoleBackend:   {"requirements.txt", "main.py", "routers/**", "models/**", "services/**", "middleware/**", ".env.example"},
+				RoleDatabase:  {"migrations/**", "db/**", "alembic/**", "schema.sql"},
+				RoleTesting:   {"tests/**", "**/*_test.py", "**/*.test.py"},
+				RoleReviewer:  {"**"},
+				RoleSolver:    {"**"},
+			},
+			EnvVars: []BuildEnvVar{
+				{Name: "PORT", Example: "8000", Purpose: "API listen port", Required: true},
+				{Name: "DATABASE_URL", Example: "postgresql://postgres:postgres@localhost:5432/app", Purpose: "Database connection", Required: stack.Database != ""},
+			},
+			Acceptance: []BuildAcceptanceCheck{
+				{ID: "fastapi-entry", Description: "FastAPI must start and expose a health route", Owner: RoleBackend, Required: true},
+			},
+			APIContract: &BuildAPIContract{
+				BackendPort: 8000,
+				APIBaseURL:  "http://localhost:8000",
+				Endpoints: []APIEndpoint{
+					{Method: "GET", Path: "/health", Description: "Health check", Output: "{ status: \"ok\" }"},
+				},
 			},
 		}
 	case backend == "go":
@@ -1172,6 +1354,393 @@ func main() {
 		log.Fatal(err)
 	}
 }`, displayName, displayName))
+	case "fullstack/react-vite-go":
+		add(".env.example", "PORT=8080\nVITE_API_BASE_URL=http://localhost:8080\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
+		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this React + Vite + Go scaffold.\n\n## Run\n\n1. Install frontend deps: `npm install`\n2. Start Go backend: `go run .`\n3. Start frontend: `npm run dev`\n4. Open `http://localhost:5173`\n", displayName))
+		add("go.mod", fmt.Sprintf("module %s\n\ngo 1.23.0\n", strings.ReplaceAll(packageName, "-", "")))
+		add("main.go", fmt.Sprintf(`package main
+
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+	"os"
+)
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "app": "%s"})
+	})
+
+	log.Printf("%s API listening on :%%s", port)
+	if err := http.ListenAndServe(":"+port, corsMiddleware(mux)); err != nil {
+		log.Fatal(err)
+	}
+}`, displayName, displayName))
+		add("package.json", fmt.Sprintf(`{
+  "name": "%s",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.2",
+    "vite": "^6.3.2"
+  }
+}`, packageName))
+		add("tsconfig.json", `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true
+  },
+  "include": ["src"]
+}`)
+		add("vite.config.ts", `import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      "/api": { target: "http://localhost:8080", changeOrigin: true },
+      "/health": { target: "http://localhost:8080", changeOrigin: true },
+    },
+  },
+});`)
+		add("tailwind.config.js", `/** @type {import('tailwindcss').Config} */
+export default {
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
+  theme: { extend: {} },
+  plugins: [],
+};`)
+		add("postcss.config.js", `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};`)
+		add("index.html", fmt.Sprintf(`<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>%s</title></head>
+  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
+</html>`, displayName))
+		add("src/main.tsx", `import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import "./index.css";
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode><App /></React.StrictMode>
+);`)
+		add("src/App.tsx", fmt.Sprintf(`import { useEffect, useState } from "react";
+
+export default function App() {
+  const [status, setStatus] = useState<string>("loading...");
+
+  useEffect(() => {
+    fetch("/health")
+      .then((r) => r.json())
+      .then((d) => setStatus(d.status))
+      .catch(() => setStatus("offline"));
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center">
+      <div className="text-center space-y-4">
+        <h1 className="text-4xl font-bold">%s</h1>
+        <p className="text-slate-400">Go API status: <span className="text-sky-400 font-mono">{status}</span></p>
+      </div>
+    </div>
+  );
+}`, displayName))
+		add("src/index.css", `@tailwind base;
+@tailwind components;
+@tailwind utilities;`)
+
+	case "fullstack/react-vite-fastapi":
+		add(".env.example", "PORT=8000\nVITE_API_BASE_URL=http://localhost:8000\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
+		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this React + Vite + FastAPI scaffold.\n\n## Run\n\n1. Install frontend deps: `npm install`\n2. Install Python deps: `pip install -r requirements.txt`\n3. Start backend: `uvicorn main:app --port 8000 --reload`\n4. Start frontend: `npm run dev`\n5. Open `http://localhost:5173`\n", displayName))
+		add("requirements.txt", "fastapi>=0.115.0\nuvicorn[standard]>=0.34.0\npython-dotenv>=1.1.0\n")
+		add("main.py", fmt.Sprintf(`import os
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="%s")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "app": "%s"}
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+`, displayName, displayName))
+		add("package.json", fmt.Sprintf(`{
+  "name": "%s",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.2",
+    "vite": "^6.3.2"
+  }
+}`, packageName))
+		add("tsconfig.json", `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true
+  },
+  "include": ["src"]
+}`)
+		add("vite.config.ts", `import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      "/api": { target: "http://localhost:8000", changeOrigin: true },
+      "/health": { target: "http://localhost:8000", changeOrigin: true },
+    },
+  },
+});`)
+		add("tailwind.config.js", `/** @type {import('tailwindcss').Config} */
+export default {
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
+  theme: { extend: {} },
+  plugins: [],
+};`)
+		add("postcss.config.js", `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};`)
+		add("index.html", fmt.Sprintf(`<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>%s</title></head>
+  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
+</html>`, displayName))
+		add("src/main.tsx", `import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import "./index.css";
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode><App /></React.StrictMode>
+);`)
+		add("src/App.tsx", fmt.Sprintf(`import { useEffect, useState } from "react";
+
+export default function App() {
+  const [status, setStatus] = useState<string>("loading...");
+
+  useEffect(() => {
+    fetch("/health")
+      .then((r) => r.json())
+      .then((d) => setStatus(d.status))
+      .catch(() => setStatus("offline"));
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center">
+      <div className="text-center space-y-4">
+        <h1 className="text-4xl font-bold">%s</h1>
+        <p className="text-slate-400">FastAPI status: <span className="text-sky-400 font-mono">{status}</span></p>
+      </div>
+    </div>
+  );
+}`, displayName))
+		add("src/index.css", `@tailwind base;
+@tailwind components;
+@tailwind utilities;`)
+
+	case "api/python-fastapi":
+		add(".env.example", "PORT=8000\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
+		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this Python FastAPI scaffold.\n\n## Run\n\n1. `pip install -r requirements.txt`\n2. `uvicorn main:app --port 8000 --reload`\n3. Open `http://localhost:8000/health`\n", displayName))
+		add("requirements.txt", "fastapi>=0.115.0\nuvicorn[standard]>=0.34.0\npython-dotenv>=1.1.0\n")
+		add("main.py", fmt.Sprintf(`import os
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="%s")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "app": "%s"}
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+`, displayName, displayName))
+
+	case "frontend/nextjs-app", "fullstack/nextjs-api":
+		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this Next.js App Router scaffold.\n\n## Run\n\n1. `npm install`\n2. `npm run dev`\n3. Open `http://localhost:3000`\n", displayName))
+		add("package.json", fmt.Sprintf(`{
+  "name": "%s",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "^15.3.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.2"
+  }
+}`, packageName))
+		add("tsconfig.json", `{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "jsx": "preserve",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "paths": { "@/*": ["./*"] }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}`)
+		add("next.config.js", `/** @type {import('next').NextConfig} */
+const nextConfig = {};
+module.exports = nextConfig;`)
+		add("tailwind.config.js", `/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: ["./app/**/*.{js,ts,jsx,tsx}", "./components/**/*.{js,ts,jsx,tsx}"],
+  theme: { extend: {} },
+  plugins: [],
+};`)
+		add("app/layout.tsx", fmt.Sprintf(`import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "%s",
+  description: "Built with APEX.BUILD",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}`, displayName))
+		add("app/page.tsx", fmt.Sprintf(`export default function Home() {
+  return (
+    <main className="min-h-screen bg-slate-900 text-white flex items-center justify-center">
+      <div className="text-center space-y-4">
+        <h1 className="text-4xl font-bold">%s</h1>
+        <p className="text-slate-400">Next.js App Router scaffold — ready to build.</p>
+      </div>
+    </main>
+  );
+}`, displayName))
+		add("app/globals.css", `@tailwind base;
+@tailwind components;
+@tailwind utilities;`)
+		if scaffold.ID == "fullstack/nextjs-api" {
+			add("app/api/health/route.ts", fmt.Sprintf(`import { NextResponse } from "next/server";
+
+export async function GET() {
+  return NextResponse.json({ status: "ok", app: "%s" });
+}`, displayName))
+		}
+
 	case "api/express-typescript":
 		add(".env.example", "PORT=3001\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
 		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this Express + TypeScript API scaffold.\n\n## Run\n\n1. Install dependencies with `npm install`\n2. Start the API with `npm run dev`\n3. Open `http://localhost:3001/api/health`\n", displayName))
@@ -1478,7 +2047,7 @@ func canonicalFrontendName(value string) string {
 		return "React"
 	case "vue":
 		return "Vue"
-	case "next.js", "next":
+	case "next.js", "next", "nextjs":
 		return "Next.js"
 	default:
 		return strings.TrimSpace(value)
@@ -1491,7 +2060,9 @@ func canonicalBackendName(value string) string {
 		return "Express"
 	case "go", "golang":
 		return "Go"
-	case "python", "fastapi":
+	case "fastapi", "fast-api":
+		return "FastAPI"
+	case "python", "django", "flask":
 		return "Python"
 	default:
 		return strings.TrimSpace(value)

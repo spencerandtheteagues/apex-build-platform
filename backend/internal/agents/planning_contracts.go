@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 
@@ -108,17 +109,23 @@ func (am *AgentManager) validateTaskCoordinationOutput(task *Task, output *TaskO
 	}
 
 	errs := make([]string, 0, 4)
+
+	// Missing check-in XML blocks are logged as warnings but NOT treated as
+	// retry-worthy errors. Most models (especially smaller ones like deepseek)
+	// rarely emit the <task_start_ack>/<task_completion_report> blocks.
+	// Burning retries on this was the #1 cause of build failures.
 	if output.StartAck == nil {
-		errs = append(errs, "missing <task_start_ack> coordination block")
+		log.Printf("Info: task %s missing <task_start_ack> (non-fatal)", task.ID)
 	} else if strings.TrimSpace(output.StartAck.Summary) == "" {
-		errs = append(errs, "task_start_ack must include a non-empty summary")
+		log.Printf("Info: task %s has empty task_start_ack summary (non-fatal)", task.ID)
 	}
 	if output.Completion == nil {
-		errs = append(errs, "missing <task_completion_report> coordination block")
+		log.Printf("Info: task %s missing <task_completion_report> (non-fatal)", task.ID)
 	} else if strings.TrimSpace(output.Completion.Summary) == "" {
-		errs = append(errs, "task_completion_report must include a non-empty summary")
+		log.Printf("Info: task %s has empty task_completion_report summary (non-fatal)", task.ID)
 	}
 
+	// File ownership violations ARE hard errors — these protect build coherence.
 	workOrder := taskWorkOrderFromInput(task)
 	if workOrder == nil {
 		return errs
@@ -188,12 +195,46 @@ func pathMatchesOwnedPattern(path string, pattern string) bool {
 	if pattern == "**" {
 		return true
 	}
+	// Handle **/*.ext (e.g., **/*.test.ts) — suffix after **/*
 	if strings.HasPrefix(pattern, "**/*.") {
 		return strings.HasSuffix(path, strings.TrimPrefix(pattern, "**/*"))
 	}
+	// Handle **/*<suffix> (e.g., **/*_test.go) — suffix after **/*
+	if strings.HasPrefix(pattern, "**/*") {
+		suffix := strings.TrimPrefix(pattern, "**/*")
+		if suffix != "" {
+			return strings.HasSuffix(path, suffix)
+		}
+	}
+	// Handle dir/** (e.g., src/**)
 	if strings.HasSuffix(pattern, "/**") {
 		prefix := strings.TrimSuffix(pattern, "/**")
 		return path == prefix || strings.HasPrefix(path, prefix+"/")
+	}
+	// Handle dir/**/*.ext (e.g., src/**/*.ts)
+	if idx := strings.Index(pattern, "/**/"); idx >= 0 {
+		prefix := pattern[:idx]
+		suffix := pattern[idx+4:] // after "/**/"
+		if !strings.HasPrefix(path, prefix+"/") {
+			return false
+		}
+		rest := strings.TrimPrefix(path, prefix+"/")
+		// suffix may itself be a glob like *.ts
+		if strings.HasPrefix(suffix, "*.") {
+			ext := strings.TrimPrefix(suffix, "*")
+			return strings.HasSuffix(rest, ext)
+		}
+		if strings.HasPrefix(suffix, "*") {
+			sfx := strings.TrimPrefix(suffix, "*")
+			return strings.HasSuffix(rest, sfx)
+		}
+		// plain filename suffix
+		return strings.HasSuffix(rest, suffix) || rest == suffix
+	}
+	// Handle *.ext at top level (e.g., *.ts)
+	if strings.HasPrefix(pattern, "*.") {
+		ext := strings.TrimPrefix(pattern, "*")
+		return strings.HasSuffix(path, ext) && !strings.Contains(path, "/")
 	}
 	return path == pattern
 }

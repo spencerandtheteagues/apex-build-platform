@@ -300,3 +300,133 @@ func TestCurrentOwnedFilesPromptIncludesSharedOwnedFile(t *testing.T) {
 		t.Fatalf("did not expect backend file in frontend owned context: %s", context)
 	}
 }
+
+func TestPathMatchesOwnedPattern(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		path    string
+		pattern string
+		want    bool
+	}{
+		// Wildcard all
+		{"anything.go", "**", true},
+		// Extension match: **/*.ext
+		{"src/App.test.ts", "**/*.test.ts", true},
+		{"tests/deep/nested/thing.test.ts", "**/*.test.ts", true},
+		{"src/App.tsx", "**/*.test.ts", false},
+		// Suffix match: **/*_test.go (the bug that was fixed)
+		{"handlers/user_test.go", "**/*_test.go", true},
+		{"internal/db/db_test.go", "**/*_test.go", true},
+		{"main.go", "**/*_test.go", false},
+		// Directory prefix: dir/**
+		{"src/App.tsx", "src/**", true},
+		{"src/components/Layout.tsx", "src/**", true},
+		{"server/index.ts", "src/**", false},
+		{"src", "src/**", true},
+		// Nested glob: dir/**/*.ext
+		{"src/components/App.tsx", "src/**/*.tsx", true},
+		{"src/App.tsx", "src/**/*.tsx", true},
+		{"server/index.ts", "src/**/*.tsx", false},
+		// Exact match
+		{"package.json", "package.json", true},
+		{"tsconfig.json", "package.json", false},
+		// Top-level extension: *.ts
+		{"index.ts", "*.ts", true},
+		{"src/index.ts", "*.ts", false},
+		// Empty/edge cases
+		{"file.go", "", false},
+	}
+
+	for _, tt := range tests {
+		got := pathMatchesOwnedPattern(tt.path, tt.pattern)
+		if got != tt.want {
+			t.Errorf("pathMatchesOwnedPattern(%q, %q) = %v, want %v", tt.path, tt.pattern, got, tt.want)
+		}
+	}
+}
+
+func TestResolveBuildAppType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"web", "web"},
+		{"api", "api"},
+		{"cli", "cli"},
+		{"fullstack", "fullstack"},
+		{"frontend", "web"},
+		{"spa", "web"},
+		{"dashboard", "web"},
+		{"backend", "api"},
+		{"server", "api"},
+		{"microservice", "api"},
+		{"webapp", "fullstack"},
+		{"saas", "fullstack"},
+		{"unknown_thing", "fullstack"}, // default
+	}
+
+	for _, tt := range tests {
+		bundle := &autonomous.PlanningBundle{
+			Analysis: &autonomous.RequirementAnalysis{AppType: tt.input},
+		}
+		got := resolveBuildAppType(bundle)
+		if got != tt.want {
+			t.Errorf("resolveBuildAppType(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestSelectBuildScaffoldNewStacks(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		stack      TechStack
+		wantID     string
+	}{
+		{"react+express", TechStack{Frontend: "React", Backend: "Express"}, "fullstack/react-vite-express-ts"},
+		{"react+go", TechStack{Frontend: "React", Backend: "Go"}, "fullstack/react-vite-go"},
+		{"react+python", TechStack{Frontend: "React", Backend: "Python"}, "fullstack/react-vite-fastapi"},
+		{"react+fastapi", TechStack{Frontend: "React", Backend: "FastAPI"}, "fullstack/react-vite-fastapi"},
+		{"nextjs standalone", TechStack{Frontend: "Next.js"}, "frontend/nextjs-app"},
+		{"nextjs+api", TechStack{Frontend: "Next.js", Backend: "Express"}, "fullstack/nextjs-api"},
+		{"python api", TechStack{Backend: "Python"}, "api/python-fastapi"},
+		{"fastapi api", TechStack{Backend: "FastAPI"}, "api/python-fastapi"},
+		{"go api", TechStack{Backend: "Go"}, "api/go-http"},
+		{"react spa", TechStack{Frontend: "React"}, "frontend/react-vite-spa"},
+		{"default fallback", TechStack{Backend: "Express"}, "api/express-typescript"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scaffold := selectBuildScaffold("fullstack", tt.stack)
+			if scaffold.ID != tt.wantID {
+				t.Errorf("selectBuildScaffold(%q) = %q, want %q", tt.name, scaffold.ID, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestResolveBuildTechStackDoesNotForceBackend(t *testing.T) {
+	t.Parallel()
+
+	// When planner says frontend=React with no backend, the system should
+	// NOT force Backend=Express (old behavior)
+	bundle := &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			TechStack: &autonomous.TechStack{
+				Frontend: "React",
+			},
+		},
+	}
+	stack := resolveBuildTechStack(nil, bundle)
+	if stack.Backend != "" {
+		t.Errorf("expected empty backend for frontend-only project, got %q", stack.Backend)
+	}
+	if stack.Database != "" {
+		t.Errorf("expected empty database for frontend-only project, got %q", stack.Database)
+	}
+}

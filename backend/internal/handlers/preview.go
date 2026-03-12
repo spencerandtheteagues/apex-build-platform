@@ -564,7 +564,9 @@ func (h *PreviewHandler) HotReload(c *gin.Context) {
 		return
 	}
 
-	if h.requireSandbox {
+	// Block hot reload only when sandbox is actively enforced AND Docker is available.
+	// When Docker is unavailable (fallback mode), allow hot reload through the process preview path.
+	if h.requireSandbox && !h.sandboxFallbackActive() {
 		c.JSON(http.StatusConflict, gin.H{"error": "hot reload is unavailable while secure sandbox preview is enforced; use refresh instead"})
 		return
 	}
