@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"apex-build/internal/agents/autonomous"
+	"apex-build/internal/ai"
 )
 
 func TestCreateBuildPlanFromPlanningBundle(t *testing.T) {
@@ -128,13 +129,22 @@ func TestAssignPhaseAgentsUsesFrozenWorkOrder(t *testing.T) {
 	})
 
 	build := &Build{
-		ID:          "build-1",
-		Description: "Build TranscriptVault",
-		Status:      BuildInProgress,
-		MaxRetries:  2,
-		Plan:        plan,
-		Tasks:       []*Task{},
-		Agents:      map[string]*Agent{},
+		ID:           "build-1",
+		Description:  "Build TranscriptVault",
+		Status:       BuildInProgress,
+		MaxRetries:   2,
+		Plan:         plan,
+		ProviderMode: "platform",
+		Tasks:        []*Task{},
+		Agents:       map[string]*Agent{},
+	}
+	intent := &IntentBrief{AppType: plan.AppType}
+	contract := compileBuildContractFromPlan(build.ID, intent, plan)
+	build.SnapshotState.Orchestration = &BuildOrchestrationState{
+		Flags:              defaultBuildOrchestrationFlags(),
+		BuildContract:      contract,
+		WorkOrders:         compileWorkOrdersFromPlan(build.ID, contract, plan, defaultProviderScorecards(build.ProviderMode)),
+		ProviderScorecards: defaultProviderScorecards(build.ProviderMode),
 	}
 	agent := &Agent{ID: "front-1", BuildID: build.ID, Role: RoleFrontend}
 	build.Agents[agent.ID] = agent
@@ -167,6 +177,89 @@ func TestAssignPhaseAgentsUsesFrozenWorkOrder(t *testing.T) {
 	}
 	if workOrder := taskWorkOrderFromInput(task); workOrder == nil || workOrder.Role != RoleFrontend {
 		t.Fatalf("expected frontend work order, got %+v", workOrder)
+	}
+	if artifact := taskArtifactWorkOrderFromInput(task); artifact == nil || artifact.Role != RoleFrontend {
+		t.Fatalf("expected frontend work order artifact, got %+v", artifact)
+	} else if artifact.MaxContextBudget == 0 || artifact.Summary == "" {
+		t.Fatalf("expected hydrated artifact metadata, got %+v", artifact)
+	}
+	if readable, ok := task.Input["readable_files"].([]string); !ok || len(readable) == 0 {
+		t.Fatalf("expected readable_files to be hydrated from artifact, got %+v", task.Input["readable_files"])
+	}
+}
+
+func TestAssignTaskHydratesArtifactWorkOrderForAdHocTask(t *testing.T) {
+	t.Parallel()
+
+	plan := createBuildPlanFromPlanningBundle("build-1", "Build TranscriptVault", nil, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "fullstack",
+			TechStack: &autonomous.TechStack{
+				Frontend: "React",
+				Backend:  "Node",
+				Database: "PostgreSQL",
+				Styling:  "Tailwind",
+			},
+		},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-1",
+			EstimatedTime: time.Hour,
+			CreatedAt:     time.Now(),
+		},
+	})
+
+	build := &Build{
+		ID:           "build-1",
+		Description:  "Build TranscriptVault",
+		Status:       BuildInProgress,
+		Plan:         plan,
+		ProviderMode: "platform",
+		Tasks:        []*Task{},
+		Agents:       map[string]*Agent{},
+	}
+	intent := &IntentBrief{AppType: plan.AppType}
+	contract := compileBuildContractFromPlan(build.ID, intent, plan)
+	build.SnapshotState.Orchestration = &BuildOrchestrationState{
+		Flags:              defaultBuildOrchestrationFlags(),
+		BuildContract:      contract,
+		WorkOrders:         compileWorkOrdersFromPlan(build.ID, contract, plan, defaultProviderScorecards(build.ProviderMode)),
+		ProviderScorecards: defaultProviderScorecards(build.ProviderMode),
+	}
+	agent := &Agent{ID: "review-1", BuildID: build.ID, Role: RoleReviewer}
+	build.Agents[agent.ID] = agent
+
+	am := &AgentManager{
+		agents:      map[string]*Agent{agent.ID: agent},
+		builds:      map[string]*Build{build.ID: build},
+		taskQueue:   make(chan *Task, 1),
+		subscribers: map[string][]chan *WSMessage{},
+		ctx:         context.Background(),
+	}
+
+	task := &Task{
+		ID:          "review-task-1",
+		Type:        TaskReview,
+		Description: "Review targeted patch",
+		Status:      TaskPending,
+		Input: map[string]any{
+			"action": "post_fix_review",
+		},
+		CreatedAt: time.Now(),
+	}
+
+	if err := am.AssignTask(agent.ID, task); err != nil {
+		t.Fatalf("AssignTask returned error: %v", err)
+	}
+
+	artifact := taskArtifactWorkOrderFromInput(task)
+	if artifact == nil || artifact.Role != RoleReviewer {
+		t.Fatalf("expected reviewer artifact work order, got %+v", artifact)
+	}
+	if task.Input["routing_mode"] == "" || task.Input["risk_level"] == "" {
+		t.Fatalf("expected task contract metadata to be hydrated, got %+v", task.Input)
+	}
+	if task.Input["contract_slice"] == nil {
+		t.Fatalf("expected contract_slice to be hydrated, got %+v", task.Input)
 	}
 }
 
@@ -301,6 +394,82 @@ func TestCurrentOwnedFilesPromptIncludesSharedOwnedFile(t *testing.T) {
 	}
 }
 
+func TestTaskWorkOrderFromInputUsesArtifactFallback(t *testing.T) {
+	t.Parallel()
+
+	task := &Task{
+		ID: "task-1",
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{
+				ID:                 "wo-1",
+				BuildID:            "build-1",
+				Role:               RoleBackend,
+				Summary:            "Implement backend API",
+				OwnedFiles:         []string{"server/**"},
+				RequiredFiles:      []string{"server/index.ts"},
+				ForbiddenFiles:     []string{"src/**"},
+				SurfaceLocalChecks: []string{"server compiles"},
+				RequiredOutputs:    []string{"health endpoint"},
+			},
+		},
+	}
+
+	workOrder := taskWorkOrderFromInput(task)
+	if workOrder == nil {
+		t.Fatal("expected legacy work order derived from artifact")
+	}
+	if workOrder.Role != RoleBackend || workOrder.Summary != "Implement backend API" {
+		t.Fatalf("unexpected derived work order: %+v", workOrder)
+	}
+	if len(workOrder.RequiredFiles) != 1 || workOrder.RequiredFiles[0] != "server/index.ts" {
+		t.Fatalf("expected required files to be preserved, got %+v", workOrder.RequiredFiles)
+	}
+}
+
+func TestWorkOrderArtifactPromptContextIncludesContractSlice(t *testing.T) {
+	t.Parallel()
+
+	context := workOrderArtifactPromptContext(&WorkOrder{
+		ID:                 "wo-1",
+		BuildID:            "build-1",
+		Role:               RoleFrontend,
+		Category:           WorkOrderFrontend,
+		TaskShape:          TaskShapeFrontendPatch,
+		Summary:            "Implement dashboard shell",
+		OwnedFiles:         []string{"src/**"},
+		RequiredFiles:      []string{"src/main.tsx"},
+		ReadableFiles:      []string{"package.json", "src/main.tsx"},
+		ForbiddenFiles:     []string{"server/**"},
+		RequiredOutputs:    []string{"DashboardPage"},
+		RequiredSymbols:    []string{"DashboardPage"},
+		SurfaceLocalChecks: []string{"dashboard route renders"},
+		MaxContextBudget:   8000,
+		RiskLevel:          RiskMedium,
+		RoutingMode:        RoutingModeSingleProvider,
+		PreferredProvider:  ai.ProviderGPT4,
+		ContractSlice: WorkOrderContractSlice{
+			Surface:         SurfaceFrontend,
+			OwnedChecks:     []string{"dashboard route renders"},
+			RelevantRoutes:  []string{"GET /api/dashboard"},
+			RelevantEnvVars: []string{"VITE_API_URL"},
+			RelevantModels:  []string{"DashboardCard"},
+			TruthTags:       []TruthTag{TruthScaffolded},
+		},
+	})
+
+	for _, want := range []string{
+		"<work_order_artifact>",
+		"summary: Implement dashboard shell",
+		"readable_files:",
+		"contract_relevant_routes:",
+		"contract_truth_tags:",
+	} {
+		if !strings.Contains(context, want) {
+			t.Fatalf("expected %q in artifact context, got %s", want, context)
+		}
+	}
+}
+
 func TestPathMatchesOwnedPattern(t *testing.T) {
 	t.Parallel()
 
@@ -383,9 +552,9 @@ func TestSelectBuildScaffoldNewStacks(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		stack      TechStack
-		wantID     string
+		name   string
+		stack  TechStack
+		wantID string
 	}{
 		{"react+express", TechStack{Frontend: "React", Backend: "Express"}, "fullstack/react-vite-express-ts"},
 		{"react+go", TechStack{Frontend: "React", Backend: "Go"}, "fullstack/react-vite-go"},

@@ -202,6 +202,9 @@ func (am *AgentManager) CreateBuild(userID uint, req *BuildRequest) (*Build, err
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
+	if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil && orchestration.Flags.EnableIntentBrief {
+		orchestration.IntentBrief = compileIntentBriefFromRequest(req, providerMode)
+	}
 
 	// Apply guardrails for cost control
 	maxAgents, maxRetries, maxRequests, maxTokens := am.defaultBuildLimitsForBuild(build)
@@ -598,14 +601,14 @@ func (am *AgentManager) getAvailableProvidersWithGracePeriodForBuild(build *Buil
 		}
 		return providers
 	}
-	return am.getAvailableProvidersWithGracePeriod()
+	return hostedPlatformProviders(am.getAvailableProvidersWithGracePeriod())
 }
 
 func (am *AgentManager) getCurrentlyAvailableProvidersForBuild(build *Build) []ai.AIProvider {
 	if build != nil && !am.buildUsesPlatformKeys(build) {
 		return am.aiRouter.GetAvailableProvidersForUser(build.UserID)
 	}
-	return am.aiRouter.GetAvailableProviders()
+	return hostedPlatformProviders(am.aiRouter.GetAvailableProviders())
 }
 
 // inactivityMonitor checks for build inactivity and broadcasts errors if AI isn't responding
@@ -1115,6 +1118,7 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 // assignProvidersToRoles distributes providers to agent roles based on availability
 func (am *AgentManager) assignProvidersToRoles(providers []ai.AIProvider, roles []AgentRole) map[AgentRole]ai.AIProvider {
 	assignments := make(map[AgentRole]ai.AIProvider)
+	scorecards := defaultProviderScorecards(providerModeHintForProviders(providers))
 
 	// Build a quick lookup for availability
 	available := make(map[ai.AIProvider]bool)
@@ -1128,7 +1132,10 @@ func (am *AgentManager) assignProvidersToRoles(providers []ai.AIProvider, roles 
 	log.Printf("Assigning providers to roles: %d providers available (lead=%s)", len(providers), leadProvider)
 
 	// Helper to pick the first available provider in preference order
-	pick := func(preferences ...ai.AIProvider) ai.AIProvider {
+	pick := func(role AgentRole, preferences ...ai.AIProvider) ai.AIProvider {
+		if preferred := preferredProviderForTaskShape(taskShapeForRole(role), scorecards); preferred != "" && available[preferred] {
+			return preferred
+		}
 		for _, p := range preferences {
 			if available[p] {
 				return p
@@ -1141,11 +1148,11 @@ func (am *AgentManager) assignProvidersToRoles(providers []ai.AIProvider, roles 
 	for _, role := range roles {
 		switch role {
 		case RolePlanner, RoleArchitect, RoleReviewer:
-			assignments[role] = pick(ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama)
+			assignments[role] = pick(role, ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama)
 		case RoleFrontend, RoleBackend, RoleDatabase, RoleSolver:
-			assignments[role] = pick(ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama)
+			assignments[role] = pick(role, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama)
 		case RoleTesting:
-			assignments[role] = pick(ai.ProviderGemini, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGrok, ai.ProviderOllama)
+			assignments[role] = pick(role, ai.ProviderGemini, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGrok, ai.ProviderOllama)
 		default:
 			assignments[role] = leadProvider
 		}
@@ -1394,6 +1401,8 @@ func (am *AgentManager) AssignTask(agentID string, task *Task) error {
 		return errBuildNotActive
 	}
 
+	am.hydrateTaskContractInputs(build, agent, task)
+
 	agent.mu.Lock()
 	agent.CurrentTask = task
 	agent.Status = StatusWorking
@@ -1423,6 +1432,76 @@ func (am *AgentManager) AssignTask(agentID string, task *Task) error {
 
 	am.taskQueue <- task
 	return nil
+}
+
+func (am *AgentManager) hydrateTaskContractInputs(build *Build, agent *Agent, task *Task) {
+	if build == nil || agent == nil || task == nil {
+		return
+	}
+	if task.Input == nil {
+		task.Input = map[string]any{}
+	}
+
+	artifact := taskArtifactWorkOrderFromInput(task)
+	if artifact == nil {
+		artifact = findOrchestrationWorkOrder(build, agent.Role)
+	}
+	if artifact != nil {
+		artifact = cloneWorkOrderArtifact(artifact)
+	}
+
+	legacy := taskWorkOrderFromInput(task)
+	if legacy == nil && artifact != nil {
+		legacy = legacyBuildWorkOrderFromArtifact(artifact)
+	}
+	if legacy == nil && build.Plan != nil {
+		legacy = getBuildWorkOrder(build.Plan, agent.Role)
+		if legacy != nil {
+			order := *legacy
+			legacy = &order
+		}
+	}
+
+	if artifact != nil {
+		task.Input["work_order_artifact"] = artifact
+		task.Input["work_order_summary"] = strings.TrimSpace(artifact.Summary)
+		task.Input["owned_files"] = append([]string(nil), artifact.OwnedFiles...)
+		task.Input["required_files"] = append([]string(nil), artifact.RequiredFiles...)
+		task.Input["readable_files"] = append([]string(nil), artifact.ReadableFiles...)
+		task.Input["forbidden_files"] = append([]string(nil), artifact.ForbiddenFiles...)
+		task.Input["acceptance_checks"] = append([]string(nil), artifact.SurfaceLocalChecks...)
+		task.Input["required_outputs"] = append([]string(nil), artifact.RequiredOutputs...)
+		task.Input["required_exports"] = append([]string(nil), artifact.RequiredSymbols...)
+		task.Input["contract_slice"] = artifact.ContractSlice
+		task.Input["routing_mode"] = string(artifact.RoutingMode)
+		task.Input["risk_level"] = string(artifact.RiskLevel)
+		task.Input["max_context_budget"] = artifact.MaxContextBudget
+		if artifact.PreferredProvider != "" {
+			task.Input["preferred_provider"] = string(artifact.PreferredProvider)
+		}
+	}
+
+	if legacy != nil {
+		task.Input["work_order"] = legacy
+		if _, exists := task.Input["work_order_summary"]; !exists || strings.TrimSpace(fmt.Sprintf("%v", task.Input["work_order_summary"])) == "" {
+			task.Input["work_order_summary"] = strings.TrimSpace(legacy.Summary)
+		}
+		if _, exists := task.Input["owned_files"]; !exists {
+			task.Input["owned_files"] = append([]string(nil), legacy.OwnedFiles...)
+		}
+		if _, exists := task.Input["required_files"]; !exists {
+			task.Input["required_files"] = append([]string(nil), legacy.RequiredFiles...)
+		}
+		if _, exists := task.Input["acceptance_checks"]; !exists {
+			task.Input["acceptance_checks"] = append([]string(nil), legacy.AcceptanceChecks...)
+		}
+		if _, exists := task.Input["forbidden_files"]; !exists {
+			task.Input["forbidden_files"] = append([]string(nil), legacy.ForbiddenFiles...)
+		}
+		if _, exists := task.Input["required_outputs"]; !exists {
+			task.Input["required_outputs"] = append([]string(nil), legacy.RequiredOutputs...)
+		}
+	}
 }
 
 // taskDispatcher processes tasks from the queue
@@ -2330,6 +2409,8 @@ func (am *AgentManager) handleTaskCompletion(buildID string, task *Task, output 
 // handlePlanCompletion processes the build plan and spawns the agent team
 func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 	log.Printf("handlePlanCompletion called for build %s", build.ID)
+	contractBlocked := false
+	contractBlocker := ""
 
 	// Broadcast planning phase completion
 	am.broadcast(build.ID, &WSMessage{
@@ -2349,6 +2430,23 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 		build.mu.Lock()
 		build.Plan = output.Plan
 		build.TechStack = &output.Plan.TechStack
+		if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil {
+			if orchestration.Flags.EnableBuildContract {
+				orchestration.BuildContract = compileBuildContractFromPlan(build.ID, orchestration.IntentBrief, output.Plan)
+			}
+			if orchestration.Flags.EnableContractVerification && orchestration.BuildContract != nil {
+				verifiedContract, report := verifyAndNormalizeBuildContract(orchestration.IntentBrief, orchestration.BuildContract)
+				orchestration.BuildContract = verifiedContract
+				orchestration.VerificationReports = append(orchestration.VerificationReports, report)
+				if report.Status == VerificationBlocked {
+					contractBlocked = true
+					contractBlocker = strings.Join(report.Blockers, "; ")
+				}
+			}
+			if orchestration.BuildContract != nil {
+				orchestration.WorkOrders = compileWorkOrdersFromPlan(build.ID, orchestration.BuildContract, output.Plan, orchestration.ProviderScorecards)
+			}
+		}
 		build.mu.Unlock()
 		if count := am.bootstrapBuildScaffold(build); count > 0 {
 			am.broadcast(build.ID, &WSMessage{
@@ -2363,6 +2461,39 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 				},
 			})
 		}
+	}
+	if contractBlocked {
+		now := time.Now()
+		build.mu.Lock()
+		build.Status = BuildFailed
+		build.Error = fmt.Sprintf("Build contract blocked before generation: %s", contractBlocker)
+		build.UpdatedAt = now
+		build.CompletedAt = &now
+		build.mu.Unlock()
+		appendFailureFingerprint(build, FailureFingerprint{
+			ID:               uuid.New().String(),
+			BuildID:          build.ID,
+			StackCombination: stackCombinationFromBuild(build),
+			TaskShape:        TaskShapeContract,
+			FailureClass:     "contract_verification_blocked",
+			RepairPathChosen: []string{"contract_verification"},
+			RepairSucceeded:  false,
+			CreatedAt:        now,
+		})
+		setPromotionDecision(build, compilePromotionDecision(build, []string{contractBlocker}))
+		am.persistBuildSnapshot(build, nil)
+		am.broadcast(build.ID, &WSMessage{
+			Type:      WSBuildError,
+			BuildID:   build.ID,
+			Timestamp: now,
+			Data: map[string]any{
+				"phase":    "contract_verification",
+				"error":    "Build contract blocked",
+				"details":  contractBlocker,
+				"progress": 10,
+			},
+		})
+		return
 	}
 
 	build.mu.Lock()
@@ -3368,6 +3499,106 @@ func patchManifestDependenciesJSON(content string, pkgs []string) (string, []str
 	return string(updated), added
 }
 
+type generatedFilePatchPlan struct {
+	filesByPath  map[string]GeneratedFile
+	orderedPaths []string
+}
+
+func newGeneratedFilePatchPlan(files []GeneratedFile) *generatedFilePatchPlan {
+	plan := &generatedFilePatchPlan{
+		filesByPath:  make(map[string]GeneratedFile, len(files)),
+		orderedPaths: make([]string, 0, len(files)),
+	}
+	for _, file := range files {
+		path := sanitizeFilePath(file.Path)
+		if path == "" || strings.TrimSpace(file.Content) == "" {
+			continue
+		}
+		file.Path = path
+		file.Content = normalizeGeneratedFileContent(path, file.Content)
+		if _, exists := plan.filesByPath[path]; !exists {
+			plan.orderedPaths = append(plan.orderedPaths, path)
+		}
+		plan.filesByPath[path] = file
+	}
+	return plan
+}
+
+func (p *generatedFilePatchPlan) content(path string) string {
+	if p == nil {
+		return ""
+	}
+	file, ok := p.filesByPath[sanitizeFilePath(path)]
+	if !ok {
+		return ""
+	}
+	return file.Content
+}
+
+func (p *generatedFilePatchPlan) patchFile(path, newContent, language string) bool {
+	if p == nil {
+		return false
+	}
+	sanitized := sanitizeFilePath(path)
+	if sanitized == "" || strings.TrimSpace(newContent) == "" {
+		return false
+	}
+	existing, ok := p.filesByPath[sanitized]
+	if !ok {
+		return false
+	}
+	normalized := normalizeGeneratedFileContent(sanitized, newContent)
+	if strings.TrimSpace(existing.Content) == strings.TrimSpace(normalized) {
+		return false
+	}
+	existing.Path = sanitized
+	existing.Content = normalized
+	existing.Size = int64(len(normalized))
+	if existing.Language == "" {
+		existing.Language = language
+	}
+	p.filesByPath[sanitized] = existing
+	return true
+}
+
+func (p *generatedFilePatchPlan) createFile(path, content, language string) bool {
+	if p == nil {
+		return false
+	}
+	sanitized := sanitizeFilePath(path)
+	if sanitized == "" || strings.TrimSpace(content) == "" {
+		return false
+	}
+	if _, exists := p.filesByPath[sanitized]; exists {
+		return false
+	}
+	normalized := normalizeGeneratedFileContent(sanitized, content)
+	p.filesByPath[sanitized] = GeneratedFile{
+		Path:     sanitized,
+		Content:  normalized,
+		Language: language,
+		Size:     int64(len(normalized)),
+		IsNew:    true,
+	}
+	p.orderedPaths = append(p.orderedPaths, sanitized)
+	return true
+}
+
+func (p *generatedFilePatchPlan) files() []GeneratedFile {
+	if p == nil || len(p.orderedPaths) == 0 {
+		return nil
+	}
+	out := make([]GeneratedFile, 0, len(p.orderedPaths))
+	for _, path := range p.orderedPaths {
+		file, ok := p.filesByPath[path]
+		if !ok {
+			continue
+		}
+		out = append(out, file)
+	}
+	return out
+}
+
 func (am *AgentManager) patchGeneratedFileContent(build *Build, targetPath, newContent string) bool {
 	if build == nil {
 		return false
@@ -3403,6 +3634,24 @@ func (am *AgentManager) patchGeneratedFileContent(build *Build, targetPath, newC
 			return true
 		}
 	}
+
+	for i := range build.SnapshotFiles {
+		f := &build.SnapshotFiles[i]
+		if sanitizeFilePath(f.Path) != targetPath {
+			continue
+		}
+		if strings.TrimSpace(f.Content) == strings.TrimSpace(newContent) {
+			return false
+		}
+		f.Path = targetPath
+		f.Content = newContent
+		f.Size = int64(len(newContent))
+		if f.Language == "" {
+			f.Language = am.detectLanguage(targetPath)
+		}
+		build.UpdatedAt = time.Now()
+		return true
+	}
 	return false
 }
 
@@ -3419,6 +3668,12 @@ func (am *AgentManager) createGeneratedFile(build *Build, path, content string) 
 
 	build.mu.Lock()
 	defer build.mu.Unlock()
+
+	for _, f := range build.SnapshotFiles {
+		if sanitizeFilePath(f.Path) == sanitized {
+			return false
+		}
+	}
 
 	for i := len(build.Tasks) - 1; i >= 0; i-- {
 		task := build.Tasks[i]
@@ -3441,21 +3696,69 @@ func (am *AgentManager) createGeneratedFile(build *Build, path, content string) 
 		build.UpdatedAt = time.Now()
 		return true
 	}
-	return false
+
+	build.SnapshotFiles = append(build.SnapshotFiles, GeneratedFile{
+		Path:     sanitized,
+		Content:  normalizeGeneratedFileContent(sanitized, content),
+		Language: am.detectLanguage(sanitized),
+		Size:     int64(len(normalizeGeneratedFileContent(sanitized, content))),
+		IsNew:    true,
+	})
+	build.UpdatedAt = time.Now()
+	return true
 }
 
-func (am *AgentManager) applyDeterministicManifestDependencyRepair(build *Build, readinessErrors []string) (bool, string) {
+func (am *AgentManager) applyPatchBundleToBuild(build *Build, bundle *PatchBundle) bool {
+	if build == nil || bundle == nil || len(bundle.Operations) == 0 {
+		return false
+	}
+
+	applied := false
+	for _, op := range bundle.Operations {
+		switch op.Type {
+		case PatchCreateFile:
+			if am.createGeneratedFile(build, op.Path, op.Content) {
+				applied = true
+			}
+		case PatchReplaceSymbol, PatchReplaceFunction, PatchInsertAfterSymbol,
+			PatchPatchJSONKey, PatchPatchEnvVar, PatchPatchRouteRegistration,
+			PatchPatchDependency, PatchPatchSchemaEntity, PatchDeleteBlock,
+			PatchRenameSymbol:
+			if strings.TrimSpace(op.Path) == "" || strings.TrimSpace(op.Content) == "" {
+				continue
+			}
+			if am.patchGeneratedFileContent(build, op.Path, op.Content) {
+				applied = true
+			}
+		}
+	}
+	return applied
+}
+
+func (am *AgentManager) bundleFromPatchPlan(buildID string, before []GeneratedFile, plan *generatedFilePatchPlan, justification string) *PatchBundle {
+	if plan == nil {
+		return nil
+	}
+	return buildPatchBundleFromFileDiff(buildID, justification, before, plan.files())
+}
+
+func (am *AgentManager) buildGeneratedFilePatchPlan(build *Build) ([]GeneratedFile, *generatedFilePatchPlan) {
+	files := am.collectGeneratedFiles(build)
+	return files, newGeneratedFilePatchPlan(files)
+}
+
+func (am *AgentManager) applyDeterministicManifestDependencyRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
 	if build == nil || len(readinessErrors) == 0 {
-		return false, ""
+		return nil, ""
 	}
 	frontendPkgs, backendPkgs := parseMissingDependenciesByVerificationScope(readinessErrors)
 	if len(frontendPkgs) == 0 && len(backendPkgs) == 0 {
-		return false, ""
+		return nil, ""
 	}
 
-	files := am.collectGeneratedFiles(build)
+	files, plan := am.buildGeneratedFilePatchPlan(build)
 	if len(files) == 0 {
-		return false, ""
+		return nil, ""
 	}
 
 	frontendCandidates := []string{
@@ -3507,18 +3810,13 @@ func (am *AgentManager) applyDeterministicManifestDependencyRepair(build *Build,
 		}
 	}
 	if len(reqs) == 0 {
-		return false, ""
-	}
-
-	contentByPath := map[string]string{}
-	for _, f := range files {
-		contentByPath[sanitizeFilePath(f.Path)] = f.Content
+		return nil, ""
 	}
 
 	applied := false
 	summaries := make([]string, 0, len(reqs))
 	for _, r := range reqs {
-		content := contentByPath[sanitizeFilePath(r.path)]
+		content := plan.content(r.path)
 		if strings.TrimSpace(content) == "" {
 			continue
 		}
@@ -3526,16 +3824,17 @@ func (am *AgentManager) applyDeterministicManifestDependencyRepair(build *Build,
 		if len(added) == 0 {
 			continue
 		}
-		if !am.patchGeneratedFileContent(build, r.path, updated) {
+		if !plan.patchFile(r.path, updated, "json") {
 			continue
 		}
 		applied = true
 		summaries = append(summaries, fmt.Sprintf("%s %s (%s)", r.role, r.path, strings.Join(added, ", ")))
 	}
 	if !applied {
-		return false, ""
+		return nil, ""
 	}
-	return true, strings.Join(summaries, "; ")
+	summary := strings.Join(summaries, "; ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "manifest_repair: "+summary), summary
 }
 
 func parsePreviewSyntaxErrorTargetFiles(errors []string) []string {
@@ -3587,27 +3886,23 @@ func repairDoubleSingleQuoteCorruption(path, content string) (string, bool) {
 	return repaired, true
 }
 
-func (am *AgentManager) applyDeterministicQuoteSyntaxRepair(build *Build, readinessErrors []string) (bool, string) {
+func (am *AgentManager) applyDeterministicQuoteSyntaxRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
 	if build == nil || len(readinessErrors) == 0 {
-		return false, ""
+		return nil, ""
 	}
 	targets := parsePreviewSyntaxErrorTargetFiles(readinessErrors)
 	if len(targets) == 0 {
-		return false, ""
+		return nil, ""
 	}
-	files := am.collectGeneratedFiles(build)
+	files, plan := am.buildGeneratedFilePatchPlan(build)
 	if len(files) == 0 {
-		return false, ""
-	}
-	contentByPath := map[string]string{}
-	for _, f := range files {
-		contentByPath[sanitizeFilePath(f.Path)] = f.Content
+		return nil, ""
 	}
 
 	applied := false
 	summaries := make([]string, 0, len(targets))
 	for _, target := range targets {
-		content := contentByPath[target]
+		content := plan.content(target)
 		if strings.TrimSpace(content) == "" {
 			continue
 		}
@@ -3615,16 +3910,17 @@ func (am *AgentManager) applyDeterministicQuoteSyntaxRepair(build *Build, readin
 		if !changed {
 			continue
 		}
-		if !am.patchGeneratedFileContent(build, target, repaired) {
+		if !plan.patchFile(target, repaired, am.detectLanguage(target)) {
 			continue
 		}
 		applied = true
 		summaries = append(summaries, target)
 	}
 	if !applied {
-		return false, ""
+		return nil, ""
 	}
-	return true, fmt.Sprintf("quote-correction on %s", strings.Join(summaries, ", "))
+	summary := fmt.Sprintf("quote-correction on %s", strings.Join(summaries, ", "))
+	return am.bundleFromPatchPlan(build.ID, files, plan, "syntax_repair: "+summary), summary
 }
 
 func parseMissingTypePackagesFromBuildErrors(errors []string) []string {
@@ -3729,45 +4025,41 @@ interface ImportMeta {
 `
 }
 
-func (am *AgentManager) ensureGeneratedViteEnvDeclaration(build *Build, files []GeneratedFile, manifestPath string) (bool, string) {
+func (am *AgentManager) ensureGeneratedViteEnvDeclaration(plan *generatedFilePatchPlan, manifestPath string) (bool, string) {
 	targetPath := viteEnvDeclarationPathFromManifest(manifestPath)
 	if targetPath == "" {
 		return false, ""
 	}
 
 	content := viteEnvDeclarationContent()
-	targetSanitized := sanitizeFilePath(targetPath)
-	for _, file := range files {
-		if sanitizeFilePath(file.Path) != targetSanitized {
-			continue
-		}
-		if strings.TrimSpace(file.Content) == strings.TrimSpace(content) {
+	if strings.TrimSpace(plan.content(targetPath)) != "" {
+		if strings.TrimSpace(plan.content(targetPath)) == strings.TrimSpace(content) {
 			return false, ""
 		}
-		if am.patchGeneratedFileContent(build, targetPath, content) {
+		if plan.patchFile(targetPath, content, "typescript") {
 			return true, targetPath
 		}
 		return false, ""
 	}
 
-	if am.createGeneratedFile(build, targetPath, content) {
+	if plan.createFile(targetPath, content, "typescript") {
 		return true, targetPath
 	}
 	return false, ""
 }
 
-func (am *AgentManager) applyDeterministicTypeDeclarationRepair(build *Build, readinessErrors []string) (bool, string) {
+func (am *AgentManager) applyDeterministicTypeDeclarationRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
 	if build == nil || len(readinessErrors) == 0 {
-		return false, ""
+		return nil, ""
 	}
 	typePkgs := parseMissingTypePackagesFromBuildErrors(readinessErrors)
-	files := am.collectGeneratedFiles(build)
+	files, plan := am.buildGeneratedFilePatchPlan(build)
 	if len(files) == 0 {
-		return false, ""
+		return nil, ""
 	}
 	needsViteEnvDeclaration := requiresViteEnvTypeDeclarationRepair(files, readinessErrors)
 	if len(typePkgs) == 0 && !needsViteEnvDeclaration {
-		return false, ""
+		return nil, ""
 	}
 
 	candidates := []string{
@@ -3787,42 +4079,37 @@ func (am *AgentManager) applyDeterministicTypeDeclarationRepair(build *Build, re
 	}
 	manifestPath := findGeneratedManifestPath(files, candidates)
 	if manifestPath == "" {
-		return false, ""
+		return nil, ""
 	}
 
 	applied := make([]string, 0, 2)
 	if len(typePkgs) > 0 {
-		var current string
-		for _, f := range files {
-			if strings.EqualFold(sanitizeFilePath(f.Path), sanitizeFilePath(manifestPath)) {
-				current = f.Content
-				break
-			}
-		}
+		current := plan.content(manifestPath)
 		if strings.TrimSpace(current) != "" {
 			updated, added := patchManifestDependenciesJSON(current, typePkgs)
-			if len(added) > 0 && am.patchGeneratedFileContent(build, manifestPath, updated) {
+			if len(added) > 0 && plan.patchFile(manifestPath, updated, "json") {
 				applied = append(applied, fmt.Sprintf("%s (%s)", manifestPath, strings.Join(added, ", ")))
 			}
 		}
 	}
 	if needsViteEnvDeclaration {
-		if repaired, summary := am.ensureGeneratedViteEnvDeclaration(build, files, manifestPath); repaired {
+		if repaired, summary := am.ensureGeneratedViteEnvDeclaration(plan, manifestPath); repaired {
 			applied = append(applied, summary)
 		}
 	}
 
 	if len(applied) == 0 {
-		return false, ""
+		return nil, ""
 	}
-	return true, strings.Join(applied, "; ")
+	summary := strings.Join(applied, "; ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "type_package_repair: "+summary), summary
 }
 
 // applyDeterministicMixedCodeRepair strips server-framework imports (Express, etc.) from
 // frontend React component files (.tsx/.jsx). These lines are always wrong in a React file.
-func (am *AgentManager) applyDeterministicMixedCodeRepair(build *Build, readinessErrors []string) (bool, string) {
+func (am *AgentManager) applyDeterministicMixedCodeRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
 	if build == nil || len(readinessErrors) == 0 {
-		return false, ""
+		return nil, ""
 	}
 	hasMixed := false
 	for _, e := range readinessErrors {
@@ -3832,12 +4119,12 @@ func (am *AgentManager) applyDeterministicMixedCodeRepair(build *Build, readines
 		}
 	}
 	if !hasMixed {
-		return false, ""
+		return nil, ""
 	}
 
-	files := am.collectGeneratedFiles(build)
+	files, plan := am.buildGeneratedFilePatchPlan(build)
 	if len(files) == 0 {
-		return false, ""
+		return nil, ""
 	}
 
 	// Patterns that are never valid in a React .tsx/.jsx file
@@ -3901,23 +4188,24 @@ func (am *AgentManager) applyDeterministicMixedCodeRepair(build *Build, readines
 		if removed == 0 {
 			continue
 		}
-		if !am.patchGeneratedFileContent(build, f.Path, strings.Join(cleaned, "\n")) {
+		if !plan.patchFile(f.Path, strings.Join(cleaned, "\n"), am.detectLanguage(f.Path)) {
 			continue
 		}
 		applied = true
 		summaries = append(summaries, fmt.Sprintf("%s (removed %d backend import line(s))", f.Path, removed))
 	}
 	if !applied {
-		return false, ""
+		return nil, ""
 	}
-	return true, strings.Join(summaries, "; ")
+	summary := strings.Join(summaries, "; ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "mixed_code_repair: "+summary), summary
 }
 
 // applyDeterministicMissingManifestRepair creates missing project manifest files
 // (package.json, go.mod, requirements.txt) by scanning the generated source files.
-func (am *AgentManager) applyDeterministicMissingManifestRepair(build *Build, readinessErrors []string) (bool, string) {
+func (am *AgentManager) applyDeterministicMissingManifestRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
 	if build == nil || len(readinessErrors) == 0 {
-		return false, ""
+		return nil, ""
 	}
 
 	// Check if any error is about a missing manifest.
@@ -3929,12 +4217,12 @@ func (am *AgentManager) applyDeterministicMissingManifestRepair(build *Build, re
 		}
 	}
 	if !hasMissingManifest {
-		return false, ""
+		return nil, ""
 	}
 
-	files := am.collectGeneratedFiles(build)
+	files, plan := am.buildGeneratedFilePatchPlan(build)
 	if len(files) == 0 {
-		return false, ""
+		return nil, ""
 	}
 
 	// Known package versions for package.json generation.
@@ -4053,7 +4341,7 @@ func (am *AgentManager) applyDeterministicMissingManifestRepair(build *Build, re
 		}
 		content, err := json.MarshalIndent(manifest, "", "  ")
 		if err == nil {
-			if am.createGeneratedFile(build, "package.json", string(content)) {
+			if plan.createFile("package.json", string(content), "json") {
 				repairSummaries = append(repairSummaries, "Created missing package.json by scanning TypeScript imports")
 			}
 		}
@@ -4092,7 +4380,7 @@ func (am *AgentManager) applyDeterministicMissingManifestRepair(build *Build, re
 			}
 			sb.WriteString(")\n")
 		}
-		if am.createGeneratedFile(build, "go.mod", sb.String()) {
+		if plan.createFile("go.mod", sb.String(), "go") {
 			repairSummaries = append(repairSummaries, "Created missing go.mod by scanning Go imports")
 		}
 	}
@@ -4159,23 +4447,24 @@ func (am *AgentManager) applyDeterministicMissingManifestRepair(build *Build, re
 		}
 		sort.Strings(lines)
 		if len(lines) > 0 {
-			if am.createGeneratedFile(build, "requirements.txt", strings.Join(lines, "\n")+"\n") {
+			if plan.createFile("requirements.txt", strings.Join(lines, "\n")+"\n", "text") {
 				repairSummaries = append(repairSummaries, "Created missing requirements.txt by scanning Python imports")
 			}
 		}
 	}
 
 	if len(repairSummaries) == 0 {
-		return false, ""
+		return nil, ""
 	}
-	return true, strings.Join(repairSummaries, "; ")
+	summary := strings.Join(repairSummaries, "; ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "missing_manifest_repair: "+summary), summary
 }
 
 // applyDeterministicMissingDeliverableRepair generates README.md and .env.example
 // when they are missing. These files are critical for users to run the generated app.
-func (am *AgentManager) applyDeterministicMissingDeliverableRepair(build *Build, readinessErrors []string) (bool, string) {
+func (am *AgentManager) applyDeterministicMissingDeliverableRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
 	if build == nil {
-		return false, ""
+		return nil, ""
 	}
 	needsReadme := false
 	needsEnvExample := false
@@ -4188,14 +4477,14 @@ func (am *AgentManager) applyDeterministicMissingDeliverableRepair(build *Build,
 		}
 	}
 	if !needsReadme && !needsEnvExample {
-		return false, ""
+		return nil, ""
 	}
 
 	build.mu.RLock()
 	stack := build.TechStack
 	desc := build.Description
 	build.mu.RUnlock()
-	existingFiles := am.collectGeneratedFiles(build)
+	existingFiles, plan := am.buildGeneratedFilePatchPlan(build)
 
 	var repairSummaries []string
 
@@ -4296,8 +4585,9 @@ func (am *AgentManager) applyDeterministicMissingDeliverableRepair(build *Build,
 			sb.WriteString(fmt.Sprintf("Open http://localhost:%d\n", fePort))
 		}
 
-		am.createGeneratedFile(build, "README.md", sb.String())
-		repairSummaries = append(repairSummaries, "generated README.md")
+		if plan.createFile("README.md", sb.String(), "markdown") {
+			repairSummaries = append(repairSummaries, "generated README.md")
+		}
 	}
 
 	// --- Generate .env.example ---
@@ -4370,15 +4660,17 @@ func (am *AgentManager) applyDeterministicMissingDeliverableRepair(build *Build,
 				envLines = append(envLines, fmt.Sprintf("%s=%s", k, v))
 			}
 
-			am.createGeneratedFile(build, ".env.example", strings.Join(envLines, "\n")+"\n")
-			repairSummaries = append(repairSummaries, "generated .env.example")
+			if plan.createFile(".env.example", strings.Join(envLines, "\n")+"\n", "dotenv") {
+				repairSummaries = append(repairSummaries, "generated .env.example")
+			}
 		}
 	}
 
 	if len(repairSummaries) == 0 {
-		return false, ""
+		return nil, ""
 	}
-	return true, strings.Join(repairSummaries, "; ")
+	summary := strings.Join(repairSummaries, "; ")
+	return am.bundleFromPatchPlan(build.ID, existingFiles, plan, "deliverable_repair: "+summary), summary
 }
 
 func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
@@ -4539,7 +4831,7 @@ func (am *AgentManager) buildCompletionSnapshot(build *Build) buildCompletionSna
 }
 
 type validationRepairSpec struct {
-	apply       func(*Build, []string) (bool, string)
+	apply       func(*Build, []string) (*PatchBundle, string)
 	errorFormat string
 	message     string
 	summaryKey  string
@@ -4607,9 +4899,11 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 	errorSummary string,
 	now time.Time,
 ) bool {
-	build.mu.RLock()
+	build.mu.Lock()
 	canAttempt := build.ReadinessRecoveryAttempts < maxAutomatedRecoveryAttempts(build.PowerMode)
-	build.mu.RUnlock()
+	orchestration := ensureBuildOrchestrationStateLocked(build)
+	recordPatchBundles := orchestration != nil && orchestration.Flags.EnablePatchBundles
+	build.mu.Unlock()
 	if !canAttempt {
 		return false
 	}
@@ -4654,9 +4948,19 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 	}
 
 	for _, repair := range repairs {
-		repaired, summary := repair.apply(build, readinessErrors)
-		if !repaired {
+		bundle, summary := repair.apply(build, readinessErrors)
+		if bundle == nil {
 			continue
+		}
+		bundle.BuildID = build.ID
+		if strings.TrimSpace(bundle.Justification) == "" && strings.TrimSpace(summary) != "" {
+			bundle.Justification = repair.summaryKey + ": " + summary
+		}
+		if !am.applyPatchBundleToBuild(build, bundle) {
+			continue
+		}
+		if recordPatchBundles {
+			appendPatchBundle(build, *bundle)
 		}
 
 		progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf(repair.errorFormat, errorSummary, summary))
@@ -4802,10 +5106,12 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 	build.mu.Unlock()
 
 	allFiles := am.collectGeneratedFiles(build)
+	var promotionReadinessErrors []string
 
 	if status != BuildFailed && status != BuildCancelled {
 		readinessErrors := am.validateFinalBuildReadiness(build, allFiles)
 		if len(readinessErrors) > 0 {
+			promotionReadinessErrors = append([]string(nil), readinessErrors...)
 			errorSummary := strings.Join(readinessErrors, "; ")
 			currentErrorClass := summarizeReadinessErrorClass(readinessErrors)
 			now = time.Now()
@@ -4868,6 +5174,32 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 	}
 
 completion_finalize:
+	decision := compilePromotionDecision(build, promotionReadinessErrors)
+	if decision != nil {
+		setPromotionDecision(build, decision)
+		reportStatus := VerificationPassed
+		reportErrors := []string{}
+		if status != BuildCompleted {
+			reportStatus = VerificationFailed
+			reportErrors = append(reportErrors, promotionReadinessErrors...)
+			if strings.TrimSpace(buildError) != "" {
+				reportErrors = append(reportErrors, buildError)
+			}
+		}
+		appendVerificationReport(build, VerificationReport{
+			ID:              uuid.New().String(),
+			BuildID:         build.ID,
+			Phase:           "final_readiness_promotion",
+			Surface:         SurfaceGlobal,
+			Status:          reportStatus,
+			Deterministic:   true,
+			ChecksRun:       []string{"final_readiness_validation", "promotion_decision"},
+			Errors:          dedupeStrings(reportErrors),
+			Blockers:        append([]string(nil), promotionReadinessErrors...),
+			ConfidenceScore: decision.ConfidenceScore,
+			GeneratedAt:     time.Now().UTC(),
+		})
+	}
 
 	if status == BuildCompleted {
 		// Persist completion first so a completed_build row exists before auto-linking a project.
@@ -4937,6 +5269,19 @@ completion_finalize:
 			},
 		})
 		log.Printf("Build %s finished with status %s (%d files)", build.ID, status, len(allFiles))
+	}
+	if status != BuildCompleted && snapshot.completedAtWasNil {
+		appendFailureFingerprint(build, FailureFingerprint{
+			ID:               uuid.New().String(),
+			BuildID:          build.ID,
+			StackCombination: stackCombinationFromBuild(build),
+			TaskShape:        TaskShapePromotion,
+			FailureClass:     normalizeFailureClass(buildError),
+			FilesInvolved:    fingerprintFiles(allFiles),
+			RepairPathChosen: repairPathForBuild(build),
+			RepairSucceeded:  false,
+			CreatedAt:        time.Now().UTC(),
+		})
 	}
 	if snapshot.completedAtWasNil {
 		reason := "terminal"
@@ -5964,6 +6309,21 @@ func (am *AgentManager) SendMessage(buildID string, message string) error {
 	return am.SendMessageWithClientToken(buildID, message, "")
 }
 
+type agentMessageBroadcast struct {
+	RecipientID     string
+	RecipientRole   string
+	Provider        ai.AIProvider
+	Model           string
+	SourceRole      BuildConversationRole
+	SourceAgentID   string
+	SourceAgentRole string
+	TargetMode      BuildMessageTargetMode
+	TargetAgentID   string
+	TargetAgentRole string
+	Content         string
+	Timestamp       time.Time
+}
+
 func normalizeRestoredBuildStatus(snapshot *models.CompletedBuild) BuildStatus {
 	if snapshot == nil {
 		return BuildCompleted
@@ -6191,9 +6551,122 @@ func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.Complet
 	return build, true, nil
 }
 
-// SendMessageWithClientToken sends a user message to the build's lead agent and preserves
-// a caller-provided client token so the frontend can reconcile optimistic sends.
-func (am *AgentManager) SendMessageWithClientToken(buildID string, message string, clientToken string) error {
+func findLeadAgentLocked(build *Build) *Agent {
+	if build == nil {
+		return nil
+	}
+	for _, agent := range build.Agents {
+		if agent != nil && agent.Role == RoleLead {
+			return agent
+		}
+	}
+	return nil
+}
+
+func buildAgentsForMessageTargetLocked(build *Build, target buildMessageTarget) []*Agent {
+	if build == nil {
+		return nil
+	}
+
+	switch target.Mode {
+	case BuildMessageTargetLead:
+		if lead := findLeadAgentLocked(build); lead != nil {
+			return []*Agent{lead}
+		}
+		return nil
+	case BuildMessageTargetAgent:
+		if agent := build.Agents[target.AgentID]; agent != nil {
+			return []*Agent{agent}
+		}
+		return nil
+	case BuildMessageTargetRole:
+		matched := make([]*Agent, 0, 1)
+		for _, agent := range build.Agents {
+			if agent == nil || !strings.EqualFold(string(agent.Role), target.AgentRole) {
+				continue
+			}
+			matched = append(matched, agent)
+		}
+		return matched
+	case BuildMessageTargetAllAgents:
+		matched := make([]*Agent, 0, len(build.Agents))
+		for _, agent := range orderedBuildAgents(build.Agents) {
+			if agent != nil {
+				matched = append(matched, agent)
+			}
+		}
+		return matched
+	default:
+		return nil
+	}
+}
+
+func buildAgentMessageBroadcastsLocked(
+	build *Build,
+	target buildMessageTarget,
+	content string,
+	timestamp time.Time,
+	sourceRole BuildConversationRole,
+	sourceAgent *Agent,
+) []agentMessageBroadcast {
+	recipients := buildAgentsForMessageTargetLocked(build, target)
+	if len(recipients) == 0 {
+		return nil
+	}
+
+	out := make([]agentMessageBroadcast, 0, len(recipients))
+	for _, recipient := range recipients {
+		if recipient == nil {
+			continue
+		}
+		item := agentMessageBroadcast{
+			RecipientID:     recipient.ID,
+			RecipientRole:   string(recipient.Role),
+			Provider:        recipient.Provider,
+			Model:           recipient.Model,
+			SourceRole:      sourceRole,
+			TargetMode:      target.Mode,
+			TargetAgentID:   target.AgentID,
+			TargetAgentRole: target.AgentRole,
+			Content:         strings.TrimSpace(content),
+			Timestamp:       timestamp,
+		}
+		if sourceAgent != nil {
+			item.SourceAgentID = sourceAgent.ID
+			item.SourceAgentRole = string(sourceAgent.Role)
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func (am *AgentManager) broadcastAgentMessage(buildID string, msg agentMessageBroadcast) {
+	am.broadcast(buildID, &WSMessage{
+		Type:      WSAgentMessage,
+		BuildID:   buildID,
+		AgentID:   msg.RecipientID,
+		Timestamp: msg.Timestamp,
+		Data: map[string]any{
+			"content":           msg.Content,
+			"provider":          msg.Provider,
+			"model":             msg.Model,
+			"agent_role":        msg.RecipientRole,
+			"source_role":       msg.SourceRole,
+			"source_agent_id":   msg.SourceAgentID,
+			"source_agent_role": msg.SourceAgentRole,
+			"target_mode":       msg.TargetMode,
+			"target_agent_id":   msg.TargetAgentID,
+			"target_agent_role": msg.TargetAgentRole,
+		},
+	})
+}
+
+func (am *AgentManager) sendTargetedMessageWithClientToken(
+	buildID string,
+	message string,
+	clientToken string,
+	target buildMessageTarget,
+) error {
 	am.mu.RLock()
 	build, exists := am.builds[buildID]
 	am.mu.RUnlock()
@@ -6207,41 +6680,63 @@ func (am *AgentManager) SendMessageWithClientToken(buildID string, message strin
 		return fmt.Errorf("message cannot be empty")
 	}
 
-	// Find the lead agent
+	now := time.Now().UTC()
 	var leadAgent *Agent
-	build.mu.RLock()
-	for _, agent := range build.Agents {
-		if agent.Role == RoleLead {
-			leadAgent = agent
-			break
-		}
-	}
-	build.mu.RUnlock()
+	var userMessage BuildConversationMessage
+	var interaction BuildInteractionState
+	var broadcasts []agentMessageBroadcast
 
+	build.mu.Lock()
+	leadAgent = findLeadAgentLocked(build)
 	if leadAgent == nil {
+		build.mu.Unlock()
 		return fmt.Errorf("no lead agent found for build %s", buildID)
 	}
 
-	now := time.Now().UTC()
-	build.mu.Lock()
-	userMessage := appendBuildConversationMessageLocked(build, BuildConversationMessage{
-		Role:        ConversationRoleUser,
-		Kind:        ConversationKindMessage,
-		Content:     trimmedMessage,
-		ClientToken: strings.TrimSpace(clientToken),
-		Timestamp:   now,
+	if target.Mode != BuildMessageTargetLead {
+		switch build.Status {
+		case BuildCompleted, BuildFailed, BuildCancelled:
+			build.mu.Unlock()
+			return fmt.Errorf("direct agent messages require an active build")
+		}
+		if len(buildAgentsForMessageTargetLocked(build, target)) == 0 {
+			build.mu.Unlock()
+			return fmt.Errorf("no agents matched the selected target")
+		}
+	}
+
+	kind := ConversationKindDirective
+	if target.Mode == BuildMessageTargetLead {
+		kind = ConversationKindMessage
+	}
+	userMessage = appendBuildConversationMessageLocked(build, BuildConversationMessage{
+		Role:            ConversationRoleUser,
+		Kind:            kind,
+		Content:         trimmedMessage,
+		ClientToken:     strings.TrimSpace(clientToken),
+		TargetMode:      target.Mode,
+		TargetAgentID:   target.AgentID,
+		TargetAgentRole: target.AgentRole,
+		Timestamp:       now,
 	})
-	waitingForLeadResponse := build.Interaction.WaitingForUser
-	if build.Interaction.WaitingForUser {
-		build.Interaction.PendingQuestion = ""
+
+	if target.Mode == BuildMessageTargetLead {
+		waitingForLeadResponse := build.Interaction.WaitingForUser
+		if build.Interaction.WaitingForUser {
+			build.Interaction.PendingQuestion = ""
+		}
+		build.UpdatedAt = now
+		resolveWaitingStateLocked(build)
+		if waitingForLeadResponse {
+			build.Interaction.WaitingForUser = true
+			refreshInteractionAttentionLocked(build)
+		}
+	} else {
+		build.UpdatedAt = now
+		broadcasts = buildAgentMessageBroadcastsLocked(build, target, trimmedMessage, now, ConversationRoleUser, nil)
 	}
-	build.UpdatedAt = now
-	resolveWaitingStateLocked(build)
-	if waitingForLeadResponse {
-		build.Interaction.WaitingForUser = true
-		refreshInteractionAttentionLocked(build)
-	}
-	interaction := copyBuildInteractionStateLocked(build)
+
+	interaction = copyBuildInteractionStateLocked(build)
 	build.mu.Unlock()
 
 	am.persistBuildSnapshot(build, nil)
@@ -6255,12 +6750,106 @@ func (am *AgentManager) SendMessageWithClientToken(buildID string, message strin
 			"interaction": interaction,
 		},
 	})
+	for _, item := range broadcasts {
+		am.broadcastAgentMessage(buildID, item)
+	}
 	am.broadcastInteractionUpdate(buildID, interaction)
 
-	// Process message with lead agent
-	go am.processUserMessage(leadAgent, trimmedMessage)
+	if target.Mode == BuildMessageTargetLead {
+		go am.processUserMessage(leadAgent, trimmedMessage)
+	}
 
 	return nil
+}
+
+// SendMessageWithClientToken sends a user message to the build's lead agent and preserves
+// a caller-provided client token so the frontend can reconcile optimistic sends.
+func (am *AgentManager) SendMessageWithClientToken(buildID string, message string, clientToken string) error {
+	return am.sendTargetedMessageWithClientToken(buildID, message, clientToken, buildMessageTarget{Mode: BuildMessageTargetLead})
+}
+
+func (am *AgentManager) RestartFailedBuildWithClientToken(buildID string, message string, clientToken string) error {
+	am.mu.RLock()
+	build, exists := am.builds[buildID]
+	am.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("build %s not found", buildID)
+	}
+
+	restartMessage := strings.TrimSpace(message)
+	if restartMessage == "" {
+		restartMessage = "Restart the failed build from the last workable state, keep the valid work, fix the failure, and continue until the app is runnable."
+	}
+
+	now := time.Now().UTC()
+	var interaction BuildInteractionState
+	var userMessage BuildConversationMessage
+	var leadMessage BuildConversationMessage
+	var leadAgent *Agent
+
+	build.mu.Lock()
+	if build.Status != BuildFailed {
+		build.mu.Unlock()
+		return fmt.Errorf("restart is only available for failed builds")
+	}
+	leadAgent = findLeadAgentLocked(build)
+	if leadAgent == nil {
+		build.mu.Unlock()
+		return fmt.Errorf("no lead agent found for build %s", buildID)
+	}
+
+	userMessage = appendBuildConversationMessageLocked(build, BuildConversationMessage{
+		Role:            ConversationRoleUser,
+		Kind:            ConversationKindDirective,
+		Content:         restartMessage,
+		ClientToken:     strings.TrimSpace(clientToken),
+		TargetMode:      BuildMessageTargetLead,
+		TargetAgentID:   leadAgent.ID,
+		TargetAgentRole: string(leadAgent.Role),
+		Timestamp:       now,
+	})
+	leadMessage = appendBuildConversationMessageLocked(build, BuildConversationMessage{
+		Role:             ConversationRoleLead,
+		Kind:             ConversationKindMessage,
+		Content:          "Restarting the failed build from the last workable state.",
+		AgentID:          leadAgent.ID,
+		AgentRole:        string(leadAgent.Role),
+		RequiresResponse: false,
+		Blocking:         false,
+		Timestamp:        now,
+	})
+	build.UpdatedAt = now
+	interaction = copyBuildInteractionStateLocked(build)
+	build.mu.Unlock()
+
+	am.persistBuildSnapshot(build, nil)
+	am.broadcast(buildID, &WSMessage{
+		Type:      WSUserMessage,
+		BuildID:   buildID,
+		Timestamp: now,
+		Data: map[string]any{
+			"content":     restartMessage,
+			"message":     userMessage,
+			"interaction": interaction,
+		},
+	})
+	am.broadcast(buildID, &WSMessage{
+		Type:      WSLeadResponse,
+		BuildID:   buildID,
+		AgentID:   leadAgent.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"content":     leadMessage.Content,
+			"message":     leadMessage,
+			"provider":    leadAgent.Provider,
+			"model":       leadAgent.Model,
+			"interaction": interaction,
+		},
+	})
+	am.broadcastInteractionUpdate(buildID, interaction)
+
+	return am.enqueueUserRevisionTask(build, restartMessage)
 }
 
 // processUserMessage handles a user message with the lead agent
@@ -6299,7 +6888,7 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 	case BuildFailed:
 		currentPhase = "failed"
 	}
-	interactionContext := buildInteractionPromptContext(build)
+	interactionContext := buildInteractionPromptContext(build, agent)
 	build.mu.RUnlock()
 
 	prompt := fmt.Sprintf(`You are processing a live user intervention for build %s.
@@ -6322,6 +6911,14 @@ Return JSON only with this schema:
   "pause_build": false,
   "resume_build": false,
   "steering_updates": ["short directive for the build team"],
+  "agent_directives": [
+    {
+      "target_mode": "role|agent|all_agents",
+      "target_agent_role": "frontend",
+      "target_agent_id": "",
+      "message": "specific operational instruction for that target"
+    }
+  ],
   "permission_requests": [
     {
       "scope": "program|filesystem|network|service",
@@ -6336,6 +6933,7 @@ Return JSON only with this schema:
 Rules:
 - Set apply_changes=true when the user is asking for a product/code change and enough information exists.
 - If you need clarification or the user must complete an action, set requires_user_response=true and fill question.
+- Use agent_directives when the planner should fan work out to a specific role, a specific agent, or the entire team.
 - Only request permissions for local machine tools/services when genuinely needed.
 - Be concise and operational.`, build.ID, currentStatus, currentPhase, currentProgress, message, interactionContext)
 
@@ -6455,6 +7053,7 @@ Rules:
 	var enqueueRevision bool
 	var enqueueRevisionRequest string
 	var queueRevision bool
+	var agentDirectiveBroadcasts []agentMessageBroadcast
 
 	build.mu.Lock()
 	if plan.ResumeBuild {
@@ -6482,6 +7081,28 @@ Rules:
 		if created, ok := recordPermissionRequestLocked(build, req, agent); ok {
 			permissionRequests = append(permissionRequests, created)
 		}
+	}
+	for _, directive := range plan.AgentDirectives {
+		target := normalizeBuildMessageTarget(directive.TargetMode, directive.TargetAgentID, directive.TargetAgentRole)
+		if target.Mode == BuildMessageTargetLead {
+			continue
+		}
+		trimmedDirective := strings.TrimSpace(directive.Message)
+		if trimmedDirective == "" || len(buildAgentsForMessageTargetLocked(build, target)) == 0 {
+			continue
+		}
+		appendBuildConversationMessageLocked(build, BuildConversationMessage{
+			Role:            ConversationRoleLead,
+			Kind:            ConversationKindDirective,
+			Content:         trimmedDirective,
+			AgentID:         agent.ID,
+			AgentRole:       string(agent.Role),
+			TargetMode:      target.Mode,
+			TargetAgentID:   target.AgentID,
+			TargetAgentRole: target.AgentRole,
+			Timestamp:       now,
+		})
+		agentDirectiveBroadcasts = append(agentDirectiveBroadcasts, buildAgentMessageBroadcastsLocked(build, target, trimmedDirective, now, ConversationRoleLead, agent)...)
 	}
 
 	leadMessage := appendBuildConversationMessageLocked(build, BuildConversationMessage{
@@ -6571,6 +7192,9 @@ Rules:
 				"interaction": interaction,
 			},
 		})
+	}
+	for _, directive := range agentDirectiveBroadcasts {
+		am.broadcastAgentMessage(agent.BuildID, directive)
 	}
 	am.broadcastInteractionUpdate(agent.BuildID, interaction)
 	if !interaction.WaitingForUser {
@@ -7172,6 +7796,24 @@ func buildActivityEntryForMessageLocked(build *Build, msg *WSMessage) (BuildActi
 			buildActivityString(data["message"]),
 			"Generation failed",
 		)
+	case WSAgentMessage:
+		sourceRole := firstBuildActivityString(
+			buildActivityString(data["source_agent_role"]),
+			buildActivityString(data["source_role"]),
+			"user",
+		)
+		targetRole := firstBuildActivityString(
+			buildActivityString(data["agent_role"]),
+			agentRole,
+			"agent",
+		)
+		entry.Type = "action"
+		messageContent := strings.TrimSpace(buildActivityString(data["content"]))
+		if messageContent != "" {
+			entry.Content = fmt.Sprintf("From %s: %s", sourceRole, messageContent)
+		} else {
+			entry.Content = fmt.Sprintf("%s messaged %s", sourceRole, targetRole)
+		}
 	case WSAgentCompleted:
 		entry.Type = "output"
 		entry.Content = firstBuildActivityString(
@@ -7641,16 +8283,20 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 	if build != nil && build.TechStack != nil {
 		techStackContext = buildTechStackDirective(build.TechStack, agent)
 	}
+	workOrderArtifact := taskArtifactWorkOrderFromInput(task)
 	workOrder := taskWorkOrderFromInput(task)
 	buildSpecContext := ""
 	if build != nil && build.Plan != nil {
 		buildSpecContext = buildSpecPromptContext(build.Plan, workOrder)
 	}
+	workOrderArtifactContext := workOrderArtifactPromptContext(workOrderArtifact)
 	currentOwnedFilesContext := ""
 	if build != nil && workOrder != nil {
 		existingFiles := am.collectGeneratedFiles(build)
 		contextBudget := 18000
-		if build.PowerMode == PowerFast || build.Mode == ModeFast {
+		if workOrderArtifact != nil && workOrderArtifact.MaxContextBudget > 0 {
+			contextBudget = workOrderArtifact.MaxContextBudget
+		} else if build.PowerMode == PowerFast || build.Mode == ModeFast {
 			contextBudget = 12000
 		} else if build.PowerMode == PowerMax {
 			contextBudget = 26000
@@ -7756,7 +8402,7 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 
 	interactionContext := ""
 	if build != nil {
-		if ctx := buildInteractionPromptContext(build); ctx != "" {
+		if ctx := buildInteractionPromptContext(build, agent); ctx != "" {
 			interactionContext = "\n" + ctx + "\n"
 		}
 	}
@@ -7849,6 +8495,7 @@ App being built: %s
 %s
 %s
 %s
+%s
 OUTPUT FORMAT - CRITICAL:
 For EVERY file you create, use this EXACT format:
 
@@ -7903,6 +8550,7 @@ Build the REAL, COMPLETE implementation now.`,
 		repairHintsContext,
 		coordinationErrorContext,
 		buildSpecContext,
+		workOrderArtifactContext,
 		currentOwnedFilesContext,
 		coordinationProtocolContext,
 		agentContext,
@@ -8947,13 +9595,11 @@ func (am *AgentManager) checkIntegrationCoherence(build *Build, files []Generate
 
 	var issues []string
 
-	// Regex patterns for frontend API calls.
-	fetchPathRe := regexp.MustCompile(`fetch\s*\(\s*[` + "`" + `'"]((/api/[^` + "`" + `'"?\s]+))`)
-	axiosPathRe := regexp.MustCompile(`axios\s*\.\s*(?:get|post|put|delete|patch|request)\s*\(\s*[` + "`" + `'"]((/api/[^` + "`" + `'"?\s]+))`)
-	apiBaseCallRe := regexp.MustCompile(`API_BASE[^+\n]*\+\s*[` + "`" + `'"](/[^` + "`" + `'"?\s]+)`)
+	frontendAPICallRe := regexp.MustCompile(`(?:fetch|axios\s*\.\s*(?:get|post|put|delete|patch|request)|(?:new\s+(?:window\.)?)?EventSource)\s*\(\s*[` + "`" + `'"]([^` + "`" + `'"]+)`)
+	apiBaseCallRe := regexp.MustCompile(`API_BASE[^+\n]*\+\s*[` + "`" + `'"]([^` + "`" + `'"?\s]+)`)
 
 	// Regex patterns for backend route registrations.
-	expressRouteRe := regexp.MustCompile(`(?:app|router)\s*\.\s*(?:get|post|put|delete|patch|use)\s*\(\s*['"]([^'"]+)['"]`)
+	expressRouteRe := regexp.MustCompile(`(?:app|router)\s*\.\s*(get|post|put|delete|patch|use)\s*\(\s*['"]([^'"]+)['"]`)
 	goRouteRe := regexp.MustCompile(`(?:HandleFunc|Handle)\s*\(\s*"([^"]+)"`)
 	fastAPIRouteRe := regexp.MustCompile(`@app\s*\.\s*(?:get|post|put|delete|patch)\s*\(\s*['"]([^'"]+)['"]`)
 
@@ -8965,9 +9611,33 @@ func (am *AgentManager) checkIntegrationCoherence(build *Build, files []Generate
 	beNorm := strings.ToLower(strings.TrimSpace(be))
 	canonicalPort := canonicalBackendPort(be)
 
-	// Collect frontend API call paths and backend routes.
+	extractFrontendPath := func(raw string) string {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return ""
+		}
+		if strings.Contains(raw, "/api/") {
+			return normalizeIntegrationRoutePath(raw[strings.Index(raw, "/api/"):])
+		}
+		if idx := strings.Index(raw, "/health"); idx >= 0 {
+			return normalizeIntegrationRoutePath(raw[idx:])
+		}
+		if idx := strings.Index(raw, "/status"); idx >= 0 {
+			return normalizeIntegrationRoutePath(raw[idx:])
+		}
+		if idx := strings.Index(raw, "/ready"); idx >= 0 {
+			return normalizeIntegrationRoutePath(raw[idx:])
+		}
+		if strings.HasPrefix(raw, "/") {
+			return normalizeIntegrationRoutePath(raw)
+		}
+		return ""
+	}
+
 	frontendPaths := map[string]bool{}
-	backendRoutes := map[string]bool{}
+	backendTerminalRoutes := map[string]bool{}
+	backendMountRoutes := map[string]bool{}
+	resolvedBackendRoutes := map[string]bool{}
 	hasCORS := false
 	portOK := true
 
@@ -8983,19 +9653,18 @@ func (am *AgentManager) checkIntegrationCoherence(build *Build, files []Generate
 
 		// Frontend files: scan for API calls.
 		if ext == ".ts" || ext == ".tsx" || ext == ".js" || ext == ".jsx" {
-			for _, m := range fetchPathRe.FindAllStringSubmatch(content, -1) {
+			for _, m := range frontendAPICallRe.FindAllStringSubmatch(content, -1) {
 				if len(m) >= 2 {
-					frontendPaths[m[1]] = true
-				}
-			}
-			for _, m := range axiosPathRe.FindAllStringSubmatch(content, -1) {
-				if len(m) >= 2 {
-					frontendPaths[m[1]] = true
+					if apiPath := extractFrontendPath(m[1]); apiPath != "" {
+						frontendPaths[apiPath] = true
+					}
 				}
 			}
 			for _, m := range apiBaseCallRe.FindAllStringSubmatch(content, -1) {
 				if len(m) >= 2 {
-					frontendPaths[m[1]] = true
+					if apiPath := extractFrontendPath(m[1]); apiPath != "" {
+						frontendPaths[apiPath] = true
+					}
 				}
 			}
 		}
@@ -9005,8 +9674,17 @@ func (am *AgentManager) checkIntegrationCoherence(build *Build, files []Generate
 		case "express", "express.js", "node.js", "node":
 			if ext == ".ts" || ext == ".js" {
 				for _, m := range expressRouteRe.FindAllStringSubmatch(content, -1) {
-					if len(m) >= 2 {
-						backendRoutes[m[1]] = true
+					if len(m) >= 3 {
+						routePath := normalizeIntegrationRoutePath(m[2])
+						if routePath == "" {
+							continue
+						}
+						if strings.EqualFold(m[1], "use") {
+							backendMountRoutes[routePath] = true
+						} else {
+							backendTerminalRoutes[routePath] = true
+							resolvedBackendRoutes[routePath] = true
+						}
 					}
 				}
 				if expressCORSRe.MatchString(content) {
@@ -9026,7 +9704,10 @@ func (am *AgentManager) checkIntegrationCoherence(build *Build, files []Generate
 			if ext == ".go" {
 				for _, m := range goRouteRe.FindAllStringSubmatch(content, -1) {
 					if len(m) >= 2 {
-						backendRoutes[m[1]] = true
+						if routePath := normalizeIntegrationRoutePath(m[1]); routePath != "" {
+							backendTerminalRoutes[routePath] = true
+							resolvedBackendRoutes[routePath] = true
+						}
 					}
 				}
 				if goCORSRe.MatchString(content) {
@@ -9037,7 +9718,10 @@ func (am *AgentManager) checkIntegrationCoherence(build *Build, files []Generate
 			if ext == ".py" {
 				for _, m := range fastAPIRouteRe.FindAllStringSubmatch(content, -1) {
 					if len(m) >= 2 {
-						backendRoutes[m[1]] = true
+						if routePath := normalizeIntegrationRoutePath(m[1]); routePath != "" {
+							backendTerminalRoutes[routePath] = true
+							resolvedBackendRoutes[routePath] = true
+						}
 					}
 				}
 				if fastapiCORSRe.MatchString(content) {
@@ -9047,15 +9731,44 @@ func (am *AgentManager) checkIntegrationCoherence(build *Build, files []Generate
 		}
 	}
 
-	// Check: any frontend /api/... call must have a matching backend route.
-	// We do a prefix-match to handle routes with path params (e.g. /api/todos/:id).
-	if len(frontendPaths) > 0 && len(backendRoutes) > 0 {
+	for mountPath := range backendMountRoutes {
+		for terminalPath := range backendTerminalRoutes {
+			joinedPath := joinIntegrationRoutePath(mountPath, terminalPath)
+			if joinedPath == "" {
+				continue
+			}
+			if backendMountRoutes[joinedPath] && normalizeIntegrationRoutePath(terminalPath) != "/" {
+				continue
+			}
+			resolvedBackendRoutes[joinedPath] = true
+		}
+	}
+
+	if build.Plan != nil && build.Plan.APIContract != nil {
+		for _, endpoint := range build.Plan.APIContract.Endpoints {
+			expectedPath := normalizeIntegrationRoutePath(endpoint.Path)
+			if expectedPath == "" {
+				continue
+			}
+			matched := false
+			for routePath := range resolvedBackendRoutes {
+				if integrationRoutePathsMatch(expectedPath, routePath) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				issues = append(issues, fmt.Sprintf("integration: backend does not expose required contract endpoint %s", expectedPath))
+			}
+		}
+	}
+
+	// Check: any frontend /api/... or health call must have a matching backend route.
+	if len(frontendPaths) > 0 && len(resolvedBackendRoutes) > 0 {
 		for fePath := range frontendPaths {
 			matched := false
-			for bePath := range backendRoutes {
-				// Normalize: strip trailing path-param segments for matching.
-				beBase := regexp.MustCompile(`[/:][{:].*`).ReplaceAllString(bePath, "")
-				if fePath == bePath || fePath == beBase || strings.HasPrefix(fePath, beBase+"/") || strings.HasPrefix(bePath, fePath) {
+			for bePath := range resolvedBackendRoutes {
+				if integrationRoutePathsMatch(fePath, bePath) {
 					matched = true
 					break
 				}
@@ -9079,21 +9792,100 @@ func (am *AgentManager) checkIntegrationCoherence(build *Build, files []Generate
 	return issues
 }
 
+type readinessVerificationBucket struct {
+	surface    ContractSurface
+	phase      string
+	checks     []string
+	errors     []string
+	applicable bool
+}
+
+func (am *AgentManager) emitReadinessVerificationReports(build *Build, buckets ...readinessVerificationBucket) {
+	if build == nil {
+		return
+	}
+
+	build.mu.Lock()
+	orchestration := ensureBuildOrchestrationStateLocked(build)
+	buildID := build.ID
+	build.mu.Unlock()
+	if orchestration == nil || !orchestration.Flags.EnableSurfaceLocalVerification {
+		return
+	}
+
+	for _, bucket := range buckets {
+		if !bucket.applicable {
+			continue
+		}
+		status := VerificationPassed
+		if len(bucket.errors) > 0 {
+			status = VerificationFailed
+		}
+		report := VerificationReport{
+			ID:              uuid.New().String(),
+			BuildID:         buildID,
+			Phase:           bucket.phase,
+			Surface:         bucket.surface,
+			Status:          status,
+			Deterministic:   true,
+			ChecksRun:       dedupeStrings(bucket.checks),
+			Errors:          dedupeStrings(bucket.errors),
+			TruthTags:       verificationTruthTags(bucket.surface, status),
+			ConfidenceScore: 0.86,
+			GeneratedAt:     time.Now().UTC(),
+		}
+		if status != VerificationPassed {
+			report.ConfidenceScore = 0.4
+		}
+		appendVerificationReport(build, report)
+	}
+}
+
+func verificationTruthTags(surface ContractSurface, status VerificationStatus) []TruthTag {
+	if status == VerificationPassed {
+		switch surface {
+		case SurfaceIntegration:
+			return []TruthTag{TruthLiveLogicConnected, TruthVerified}
+		default:
+			return []TruthTag{TruthVerified}
+		}
+	}
+	return []TruthTag{TruthBlocked}
+}
+
 // validateFinalBuildReadiness checks whether final artifacts are likely runnable.
 // It catches incomplete frontend outputs that otherwise appear "successful" but cannot preview.
 func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []GeneratedFile) []string {
 	if len(files) == 0 {
-		return []string{"No files were generated by the build"}
+		errs := []string{"No files were generated by the build"}
+		am.emitReadinessVerificationReports(build,
+			readinessVerificationBucket{
+				surface:    SurfaceGlobal,
+				phase:      "structural_readiness",
+				checks:     []string{"generated_files_present"},
+				errors:     errs,
+				applicable: true,
+			},
+		)
+		return errs
 	}
 
 	errors := make([]string, 0)
-	addError := func(msg string) {
+	globalErrors := make([]string, 0)
+	deploymentErrors := make([]string, 0)
+	frontendErrors := make([]string, 0)
+	backendErrors := make([]string, 0)
+	integrationErrors := make([]string, 0)
+	addError := func(msg string, bucket *[]string) {
 		for _, existing := range errors {
 			if existing == msg {
 				return
 			}
 		}
 		errors = append(errors, msg)
+		if bucket != nil {
+			*bucket = append(*bucket, msg)
+		}
 	}
 
 	hasPackageJSON := false
@@ -9139,7 +9931,7 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 		}
 
 		if hasUnresolvedPatchOrMergeMarkers(file.Content) {
-			addError(fmt.Sprintf("%s contains unresolved patch/merge markers", file.Path))
+			addError(fmt.Sprintf("%s contains unresolved patch/merge markers", file.Path), &globalErrors)
 		}
 
 		ext := strings.ToLower(filepath.Ext(path))
@@ -9147,7 +9939,7 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 		case ".js", ".jsx", ".ts", ".tsx", ".go", ".py", ".rs", ".java", ".kt", ".swift", ".php", ".rb", ".c", ".cc", ".cpp", ".cs":
 			sourceFiles++
 			for _, msg := range detectSourceArtifactAnomalies(file.Path, file.Content, ext) {
-				addError(msg)
+				addError(msg, &globalErrors)
 			}
 			for _, stack := range detectBackendPersistenceStacks(file.Path, file.Content) {
 				backendStacks[stack] = true
@@ -9226,31 +10018,31 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	}
 
 	if sourceFiles == 0 {
-		addError("No source files were generated")
+		addError("No source files were generated", &globalErrors)
 	}
 	if mixed := summarizeMixedPersistenceStacks(backendStacks); mixed != "" {
-		addError(mixed)
+		addError(mixed, &globalErrors)
 	}
 
 	// Manifest existence checks: ensure project manifests are present for the detected language(s).
 	if hasNodeFiles && !(hasPackageJSON || hasBackendPackageJSON) {
-		addError("missing_manifest: package.json (TypeScript/Node.js project has no package.json)")
+		addError("missing_manifest: package.json (TypeScript/Node.js project has no package.json)", &deploymentErrors)
 	}
 	if hasGoFiles && !hasGoMod {
-		addError("missing_manifest: go.mod (Go project has no go.mod module manifest)")
+		addError("missing_manifest: go.mod (Go project has no go.mod module manifest)", &deploymentErrors)
 	}
 	if hasPyFiles && !hasPyManifest {
-		addError("missing_manifest: requirements.txt (Python project has no requirements.txt)")
+		addError("missing_manifest: requirements.txt (Python project has no requirements.txt)", &deploymentErrors)
 	}
 
 	// README.md and .env.example are mandatory for full builds.
 	// They ensure users can actually run the app. Fast/frontend-only builds skip the .env check.
 	isFastBuild := build != nil && build.Mode == "fast"
 	if !hasReadme && !isFastBuild {
-		addError("missing_deliverable: README.md (every build must include setup and run instructions)")
+		addError("missing_deliverable: README.md (every build must include setup and run instructions)", &deploymentErrors)
 	}
 	if !hasEnvExample && hasNodeFiles && !isFastBuild {
-		addError("missing_deliverable: .env.example (list all environment variables with example values)")
+		addError("missing_deliverable: .env.example (list all environment variables with example values)", &deploymentErrors)
 	}
 
 	// A package.json alone does not signal a frontend app — Node/Express backends also have one.
@@ -9272,13 +10064,13 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 			hasReact, hasReactDOM, pkgIsNext, hasScripts, missingScripts, pkgErr = analyzeFrontendPackageJSON(packageJSON)
 			isNext = isNext || pkgIsNext
 			if pkgErr != nil {
-				addError(fmt.Sprintf("package.json is invalid: %v", pkgErr))
+				addError(fmt.Sprintf("package.json is invalid: %v", pkgErr), &frontendErrors)
 			}
 			if hasReact && !hasReactDOM && !isNext {
-				addError("package.json includes react but is missing react-dom")
+				addError("package.json includes react but is missing react-dom", &frontendErrors)
 			}
 			if hasScripts == false && (hasReact || isNext) {
-				addError(fmt.Sprintf("package.json is missing runnable scripts (%s)", strings.Join(missingScripts, "/")))
+				addError(fmt.Sprintf("package.json is missing runnable scripts (%s)", strings.Join(missingScripts, "/")), &frontendErrors)
 			}
 		}
 
@@ -9288,7 +10080,7 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 		// Full-stack builds: the backend serves HTML — don't require index.html in source.
 		isFullStack := techStackFrontend != "" && techStackBackend != ""
 		if !isNext && !hasIndexHTML && !hasBundlerConfig && !isFullStack {
-			addError("Frontend app is missing an HTML entry point (index.html or public/index.html)")
+			addError("Frontend app is missing an HTML entry point (index.html or public/index.html)", &frontendErrors)
 		}
 		// For Next.js: any TSX component under app/, pages/, or src/app/, src/pages/ counts as entry.
 		// For full-stack React apps: any TSX/JSX file counts as a valid frontend entry because
@@ -9298,18 +10090,18 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 			effectiveHasFrontendEntry = true
 		}
 		if !effectiveHasFrontendEntry && !hasIndexHTML {
-			addError("Frontend app is missing an entry source file")
+			addError("Frontend app is missing an entry source file", &frontendErrors)
 		}
 
 		if am.shouldRunPreviewReadinessVerification(build) {
 			for _, msg := range am.verifyGeneratedFrontendPreviewReadiness(files, build != nil && build.RequirePreviewReady) {
-				addError(msg)
+				addError(msg, &frontendErrors)
 			}
 		}
 	}
 	if am.shouldRunPreviewReadinessVerification(build) {
 		for _, msg := range am.verifyGeneratedBackendBuildReadiness(files) {
-			addError(msg)
+			addError(msg, &backendErrors)
 		}
 	}
 
@@ -9318,9 +10110,49 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	// to avoid noisy errors on fundamentally broken output.
 	if build != nil && build.TechStack != nil && build.TechStack.Frontend != "" && build.TechStack.Backend != "" {
 		for _, msg := range am.checkIntegrationCoherence(build, files) {
-			addError(msg)
+			addError(msg, &integrationErrors)
 		}
 	}
+
+	backendApplicable := hasGoFiles || hasPyFiles || hasBackendPackageJSON || techStackBackend != ""
+	deploymentApplicable := hasNodeFiles || hasGoFiles || hasPyFiles || hasReadme || hasEnvExample
+	am.emitReadinessVerificationReports(build,
+		readinessVerificationBucket{
+			surface:    SurfaceGlobal,
+			phase:      "structural_readiness",
+			checks:     []string{"generated_files_present", "source_artifact_integrity", "mixed_stack_integrity"},
+			errors:     globalErrors,
+			applicable: true,
+		},
+		readinessVerificationBucket{
+			surface:    SurfaceDeployment,
+			phase:      "surface_local_verification",
+			checks:     []string{"manifest_presence", "deliverable_presence"},
+			errors:     deploymentErrors,
+			applicable: deploymentApplicable,
+		},
+		readinessVerificationBucket{
+			surface:    SurfaceFrontend,
+			phase:      "surface_local_verification",
+			checks:     []string{"frontend_entry_integrity", "frontend_runtime_scripts", "frontend_preview_build"},
+			errors:     frontendErrors,
+			applicable: isFrontendApp,
+		},
+		readinessVerificationBucket{
+			surface:    SurfaceBackend,
+			phase:      "surface_local_verification",
+			checks:     []string{"backend_compile_pass", "backend_runtime_probe", "backend_dependency_integrity"},
+			errors:     backendErrors,
+			applicable: backendApplicable,
+		},
+		readinessVerificationBucket{
+			surface:    SurfaceIntegration,
+			phase:      "surface_local_verification",
+			checks:     []string{"frontend_backend_contract_coherence", "route_alignment", "cors_alignment"},
+			errors:     integrationErrors,
+			applicable: build != nil && build.TechStack != nil && build.TechStack.Frontend != "" && build.TechStack.Backend != "",
+		},
+	)
 
 	return errors
 }
@@ -9350,10 +10182,221 @@ type previewManifest struct {
 	Scripts         map[string]string `json:"scripts"`
 	Dependencies    map[string]string `json:"dependencies"`
 	DevDependencies map[string]string `json:"devDependencies"`
+	Jest            map[string]any    `json:"jest"`
 }
 
 var npmPackageNamePattern = regexp.MustCompile(`^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`)
 var generatedImportPathPattern = regexp.MustCompile(`(?m)(?:^|\s)(?:import\s+(?:type\s+)?(?:[^'"]+\s+from\s+)?|export\s+[^'"]+\s+from\s+|import\s*\(|require\()\s*['"]([^'"]+)['"]`)
+var integrationTemplateParamPattern = regexp.MustCompile(`\$\{[^}]+\}`)
+var integrationNamedParamPattern = regexp.MustCompile(`:[A-Za-z_][A-Za-z0-9_]*`)
+var integrationBraceParamPattern = regexp.MustCompile(`\{[^}]+\}`)
+var integrationSlashPattern = regexp.MustCompile(`/+`)
+
+func manifestDeclaresDependency(manifest previewManifest, pkg string) bool {
+	pkg = strings.TrimSpace(pkg)
+	if pkg == "" {
+		return false
+	}
+	if _, ok := manifest.Dependencies[pkg]; ok {
+		return true
+	}
+	if _, ok := manifest.DevDependencies[pkg]; ok {
+		return true
+	}
+	return false
+}
+
+func validatePreviewManifestToolingDependencies(manifest previewManifest) []string {
+	issues := make([]string, 0, 4)
+	addMissing := func(reason string, pkg string) {
+		if manifestDeclaresDependency(manifest, pkg) {
+			return
+		}
+		issues = append(issues, fmt.Sprintf("%s but package.json does not declare dependency %q", reason, pkg))
+	}
+
+	scriptCommandChecks := []struct {
+		Token string
+		Pkg   string
+	}{
+		{Token: "vite", Pkg: "vite"},
+		{Token: "tsx", Pkg: "tsx"},
+		{Token: "tsc", Pkg: "typescript"},
+		{Token: "jest", Pkg: "jest"},
+		{Token: "vitest", Pkg: "vitest"},
+		{Token: "concurrently", Pkg: "concurrently"},
+	}
+	for scriptName, scriptValue := range manifest.Scripts {
+		lower := strings.ToLower(scriptValue)
+		for _, check := range scriptCommandChecks {
+			if strings.Contains(lower, check.Token) {
+				addMissing(fmt.Sprintf("package.json script %q references %q", scriptName, check.Token), check.Pkg)
+			}
+		}
+	}
+
+	if len(manifest.Jest) == 0 {
+		return dedupePreviewIssues(issues)
+	}
+	if preset, _ := manifest.Jest["preset"].(string); strings.Contains(strings.ToLower(strings.TrimSpace(preset)), "ts-jest") {
+		addMissing(fmt.Sprintf("package.json jest preset %q requires %q", strings.TrimSpace(preset), "ts-jest"), "ts-jest")
+	}
+	if env, _ := manifest.Jest["testEnvironment"].(string); strings.EqualFold(strings.TrimSpace(env), "jsdom") {
+		addMissing(`package.json jest.testEnvironment "jsdom" requires "jest-environment-jsdom"`, "jest-environment-jsdom")
+	}
+	if mapper, _ := manifest.Jest["moduleNameMapper"].(map[string]any); mapper != nil {
+		for _, value := range mapper {
+			if mapped, ok := value.(string); ok && strings.Contains(mapped, "identity-obj-proxy") {
+				addMissing(`package.json jest.moduleNameMapper references "identity-obj-proxy"`, "identity-obj-proxy")
+				break
+			}
+		}
+	}
+
+	return dedupePreviewIssues(issues)
+}
+
+func shouldRunGeneratedNodeTests(files []GeneratedFile, prefix string, manifest previewManifest) bool {
+	testScript := strings.TrimSpace(manifest.Scripts["test"])
+	if testScript == "" {
+		return false
+	}
+	lowerScript := strings.ToLower(testScript)
+	if strings.Contains(lowerScript, "no test specified") || strings.Contains(lowerScript, "exit 1") {
+		return false
+	}
+
+	prefixLower := strings.ToLower(prefix)
+	for _, f := range files {
+		path := strings.ToLower(filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(f.Path), "./")))
+		if path == "" {
+			continue
+		}
+		if prefixLower != "" {
+			if !strings.HasPrefix(path, prefixLower) {
+				continue
+			}
+			path = strings.TrimPrefix(path, prefixLower)
+			path = strings.TrimPrefix(path, "/")
+		}
+		if path == "" {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		switch ext {
+		case ".js", ".jsx", ".ts", ".tsx":
+		default:
+			continue
+		}
+		if strings.Contains(path, "/__tests__/") ||
+			strings.Contains(path, "/tests/") ||
+			strings.Contains(path, ".test.") ||
+			strings.Contains(path, ".spec.") {
+			return true
+		}
+	}
+	return false
+}
+
+func nodeTestCommandForManifest(manifest previewManifest) (string, []string) {
+	testScript := strings.ToLower(strings.TrimSpace(manifest.Scripts["test"]))
+	switch {
+	case strings.Contains(testScript, "vitest"):
+		return "npm", []string{"test", "--", "--run"}
+	case strings.Contains(testScript, "jest"):
+		return "npm", []string{"test", "--", "--runInBand"}
+	default:
+		return "npm", []string{"test"}
+	}
+}
+
+func classifyNodeTestFailure(output string, err error) (bool, string) {
+	summary := summarizePreviewBuildFailure(output)
+	if err == nil {
+		return false, summary
+	}
+
+	lower := strings.ToLower(strings.Join([]string{output, summary, err.Error()}, "\n"))
+	if verificationCommandTimedOut(err) && !previewBuildOutputHasActionableFailure(output) {
+		return true, summary
+	}
+	hostIndicators := []string{
+		"address already in use",
+		"eaddrnotavail",
+		"listen eacces",
+		"operation not permitted",
+		"resource temporarily unavailable",
+		"cannot open display",
+		"failed to launch browser",
+		"browser executable not found",
+		"playwright",
+	}
+	for _, indicator := range hostIndicators {
+		if strings.Contains(lower, indicator) {
+			return true, summary
+		}
+	}
+	return false, summary
+}
+
+func normalizeIntegrationRoutePath(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.Contains(trimmed, "/api/") {
+		trimmed = trimmed[strings.Index(trimmed, "/api/"):]
+	}
+	trimmed = integrationTemplateParamPattern.ReplaceAllString(trimmed, ":param")
+	trimmed = integrationNamedParamPattern.ReplaceAllString(trimmed, ":param")
+	trimmed = integrationBraceParamPattern.ReplaceAllString(trimmed, ":param")
+	if !strings.HasPrefix(trimmed, "/") {
+		trimmed = "/" + strings.TrimLeft(trimmed, "/")
+	}
+	trimmed = strings.TrimRight(trimmed, "/")
+	if trimmed == "" {
+		return "/"
+	}
+	return integrationSlashPattern.ReplaceAllString(trimmed, "/")
+}
+
+func joinIntegrationRoutePath(base, route string) string {
+	base = normalizeIntegrationRoutePath(base)
+	route = normalizeIntegrationRoutePath(route)
+	if base == "" {
+		return route
+	}
+	if route == "" || route == "/" {
+		return base
+	}
+	if base == "/" {
+		return route
+	}
+	return normalizeIntegrationRoutePath(strings.TrimRight(base, "/") + "/" + strings.TrimLeft(route, "/"))
+}
+
+func integrationRoutePathsMatch(frontendPath, backendPath string) bool {
+	frontNorm := normalizeIntegrationRoutePath(frontendPath)
+	backNorm := normalizeIntegrationRoutePath(backendPath)
+	if frontNorm == "" || backNorm == "" {
+		return false
+	}
+	if frontNorm == backNorm {
+		return true
+	}
+	frontSegments := strings.Split(strings.Trim(frontNorm, "/"), "/")
+	backSegments := strings.Split(strings.Trim(backNorm, "/"), "/")
+	if len(frontSegments) != len(backSegments) {
+		return false
+	}
+	for i := range frontSegments {
+		if frontSegments[i] == backSegments[i] || frontSegments[i] == ":param" || backSegments[i] == ":param" {
+			continue
+		}
+		return false
+	}
+	return true
+}
 
 func packageNameFromImportPath(spec string) string {
 	spec = strings.TrimSpace(spec)
@@ -9627,6 +10670,12 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 		}
 		return issues
 	}
+	if toolingIssues := validatePreviewManifestToolingDependencies(manifest); len(toolingIssues) > 0 {
+		for _, issue := range toolingIssues {
+			issues = append(issues, "Preview verification dependency check failed: "+issue)
+		}
+		return issues
+	}
 	if importIssues := validateGeneratedImportDependencies(files, prefix, manifest); len(importIssues) > 0 {
 		for _, issue := range importIssues {
 			issues = append(issues, "Preview verification dependency check failed: "+issue)
@@ -9657,6 +10706,18 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 		}
 		issues = append(issues, fmt.Sprintf("Preview verification build failed: %s", summary))
 		return issues
+	}
+	if shouldRunGeneratedNodeTests(files, prefix, manifest) {
+		testName, testArgs := nodeTestCommandForManifest(manifest)
+		if out, err := runPreviewCheckCommand(tmpDir, 90*time.Second, testName, testArgs...); err != nil {
+			skip, summary := classifyNodeTestFailure(out, err)
+			if skip {
+				log.Printf("Preview verification skipped: verifier host could not run generated tests (%s)", summary)
+			} else {
+				issues = append(issues, fmt.Sprintf("Preview verification tests failed: %s", summary))
+				return issues
+			}
+		}
 	}
 
 	if buildUsesPreviewHTTPProbe(manifest.Scripts, forceHTTPProbe) {
@@ -9890,6 +10951,12 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 		}
 		return issues
 	}
+	if toolingIssues := validatePreviewManifestToolingDependencies(manifest); len(toolingIssues) > 0 {
+		for _, issue := range toolingIssues {
+			issues = append(issues, "Backend verification dependency check failed: "+issue)
+		}
+		return issues
+	}
 	if importIssues := validateGeneratedImportDependencies(files, prefix, manifest); len(importIssues) > 0 {
 		for _, issue := range importIssues {
 			issues = append(issues, "Backend verification dependency check failed: "+issue)
@@ -9921,6 +10988,18 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 		}
 		issues = append(issues, fmt.Sprintf("Backend verification build failed: %s", summary))
 		return issues
+	}
+	if shouldRunGeneratedNodeTests(files, prefix, manifest) {
+		testName, testArgs := nodeTestCommandForManifest(manifest)
+		if out, err := runPreviewCheckCommand(tmpDir, 90*time.Second, testName, testArgs...); err != nil {
+			skip, summary := classifyNodeTestFailure(out, err)
+			if skip {
+				log.Printf("Backend verification skipped: verifier host could not run generated tests (%s)", summary)
+			} else {
+				issues = append(issues, fmt.Sprintf("Backend verification tests failed: %s", summary))
+				return issues
+			}
+		}
 	}
 
 	if runtimeScript := detectBackendRuntimeScript(manifest.Scripts); runtimeScript != "" {
@@ -10551,6 +11630,7 @@ func runPreviewCheckCommand(workDir string, timeout time.Duration, name string, 
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "CI=1")
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf

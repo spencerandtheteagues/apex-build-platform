@@ -489,14 +489,24 @@ export class ApiService {
     return response.data
   }
 
-  async sendBuildMessage(buildId: string, message: string, clientToken?: string): Promise<{
+  async sendBuildMessage(buildId: string, message: string, options: {
+    clientToken?: string
+    command?: 'restart_failed'
+    targetMode?: BuildMessageTargetMode
+    targetAgentId?: string
+    targetAgentRole?: string
+  } = {}): Promise<{
     interaction?: BuildInteractionState
     live?: boolean
     restored_session?: boolean
   }> {
     const response = await this.client.post(`/build/${buildId}/message`, {
       content: message,
-      client_token: clientToken,
+      client_token: options.clientToken,
+      command: options.command,
+      target_mode: options.targetMode,
+      target_agent_id: options.targetAgentId,
+      target_agent_role: options.targetAgentRole,
     })
     return response.data
   }
@@ -3120,6 +3130,8 @@ export interface CompletedBuildSummary {
   resumable?: boolean
 }
 
+export type BuildMessageTargetMode = 'lead' | 'agent' | 'role' | 'all_agents'
+
 export interface BuildConversationMessage {
   id: string
   role: 'user' | 'lead' | 'system'
@@ -3127,6 +3139,9 @@ export interface BuildConversationMessage {
   content: string
   agent_id?: string
   agent_role?: string
+  target_mode?: BuildMessageTargetMode
+  target_agent_id?: string
+  target_agent_role?: string
   client_token?: string
   requires_response?: boolean
   blocking?: boolean

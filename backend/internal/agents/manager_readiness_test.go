@@ -291,6 +291,83 @@ func TestValidateFinalBuildReadiness(t *testing.T) {
 	})
 }
 
+func TestValidateFinalBuildReadinessEmitsSurfaceVerificationReports(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-surface-reports",
+		Mode:      ModeFull,
+		TechStack: &TechStack{Frontend: "React"},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				BuildContract: &BuildContract{
+					TruthBySurface: map[string][]TruthTag{
+						string(SurfaceFrontend):   {TruthScaffolded},
+						string(SurfaceDeployment): {TruthScaffolded},
+					},
+				},
+			},
+		},
+	}
+
+	files := []GeneratedFile{
+		{
+			Path: "package.json",
+			Content: `{
+  "name": "moneyflow",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  }
+}`,
+		},
+		{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+		{Path: "src/main.tsx", Content: "import React from 'react';"},
+		{Path: "src/App.tsx", Content: "export default function App(){ return <div>ok</div> }"},
+		{Path: "README.md", Content: "# MoneyFlow\n\n## Setup\n```bash\nnpm install && npm run dev\n```\n"},
+		{Path: ".env.example", Content: "VITE_API_URL=http://localhost:3001\n"},
+	}
+
+	if errs := am.validateFinalBuildReadiness(build, files); len(errs) != 0 {
+		t.Fatalf("expected no readiness errors, got %v", errs)
+	}
+
+	state := build.SnapshotState.Orchestration
+	if state == nil {
+		t.Fatal("expected orchestration state")
+	}
+	if len(state.VerificationReports) < 3 {
+		t.Fatalf("expected verification reports, got %+v", state.VerificationReports)
+	}
+
+	var frontendReport *VerificationReport
+	for i := range state.VerificationReports {
+		report := &state.VerificationReports[i]
+		if report.Surface == SurfaceFrontend {
+			frontendReport = report
+			break
+		}
+	}
+	if frontendReport == nil {
+		t.Fatalf("expected frontend verification report, got %+v", state.VerificationReports)
+	}
+	if frontendReport.Status != VerificationPassed {
+		t.Fatalf("frontend verification status = %s, want %s", frontendReport.Status, VerificationPassed)
+	}
+	if containsTruthTag(state.BuildContract.TruthBySurface[string(SurfaceFrontend)], TruthScaffolded) {
+		t.Fatalf("expected scaffolded tag to be cleared after verification, got %+v", state.BuildContract.TruthBySurface[string(SurfaceFrontend)])
+	}
+	if !containsTruthTag(state.BuildContract.TruthBySurface[string(SurfaceFrontend)], TruthVerified) {
+		t.Fatalf("expected verified tag after verification, got %+v", state.BuildContract.TruthBySurface[string(SurfaceFrontend)])
+	}
+}
+
 func containsError(errors []string, want string) bool {
 	for _, err := range errors {
 		if strings.Contains(err, want) {
@@ -1486,6 +1563,93 @@ func TestParseMissingDependenciesByVerificationScope(t *testing.T) {
 	}
 }
 
+func TestValidatePreviewManifestToolingDependencies(t *testing.T) {
+	t.Parallel()
+
+	manifest := previewManifest{
+		Scripts: map[string]string{
+			"dev":  "concurrently \"vite\" \"tsx watch server/index.ts\"",
+			"test": "jest",
+		},
+		Dependencies: map[string]string{
+			"react": "^18.2.0",
+		},
+		DevDependencies: map[string]string{
+			"vite": "^5.0.0",
+		},
+		Jest: map[string]any{
+			"preset":          "ts-jest/presets/default-esm",
+			"testEnvironment": "jsdom",
+			"moduleNameMapper": map[string]any{
+				"\\.(css|less|scss|sass)$": "identity-obj-proxy",
+			},
+		},
+	}
+
+	errs := validatePreviewManifestToolingDependencies(manifest)
+	joined := strings.Join(errs, "\n")
+	for _, needle := range []string{"concurrently", "tsx", "jest", "ts-jest", "jest-environment-jsdom", "identity-obj-proxy"} {
+		if !strings.Contains(joined, needle) {
+			t.Fatalf("expected tooling dependency error for %q, got %v", needle, errs)
+		}
+	}
+}
+
+func TestCheckIntegrationCoherenceCatchesRouteDrift(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		TechStack: &TechStack{Frontend: "React", Backend: "Node"},
+		Plan: &BuildPlan{
+			APIContract: &BuildAPIContract{
+				Endpoints: []APIEndpoint{
+					{Method: "GET", Path: "/api/health"},
+				},
+			},
+		},
+	}
+
+	files := []GeneratedFile{
+		{
+			Path: "src/App.tsx",
+			Content: "const jobId = \"123\";\n" +
+				"fetch(`${API_BASE}/api/health`);\n" +
+				"const events = new EventSource(`${API_BASE}/api/transcribe/${jobId}/progress`);\n" +
+				"console.log(events);",
+		},
+		{
+			Path: "server/index.ts",
+			Content: `import cors from "cors";
+app.use(cors());
+app.use("/api/health", healthRouter);
+app.use("/api", apiRouter);
+app.listen(process.env.PORT || 3001);`,
+		},
+		{
+			Path:    "server/src/routes/index.ts",
+			Content: `router.get("/health", (_req, res) => res.json({ status: "ok" }));`,
+		},
+		{
+			Path: "server/routes/api.ts",
+			Content: `router.post("/transcribe", async (req, res) => {
+  const { url } = req.body;
+  res.setHeader("Content-Type", "text/event-stream");
+  res.write(JSON.stringify({ ok: true, url }));
+});`,
+		},
+	}
+
+	errs := am.checkIntegrationCoherence(build, files)
+	joined := strings.Join(errs, "\n")
+	if !strings.Contains(joined, "backend does not expose required contract endpoint /api/health") {
+		t.Fatalf("expected missing contract health route, got %v", errs)
+	}
+	if !strings.Contains(joined, "frontend calls /api/transcribe/:param/progress but backend has no matching route") {
+		t.Fatalf("expected missing progress route integration error, got %v", errs)
+	}
+}
+
 func TestPatchManifestDependenciesJSON(t *testing.T) {
 	t.Parallel()
 
@@ -1513,6 +1677,176 @@ func TestPatchManifestDependenciesJSON(t *testing.T) {
 	}
 	if !strings.Contains(updated, `"@vitejs/plugin-react": "^4.3.4"`) {
 		t.Fatalf("expected vite plugin version hint, got %s", updated)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsCapturesPatchBundle(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-patch-bundle",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		Tasks: []*Task{
+			{
+				ID:     "task-gen",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path:    "src/App.tsx",
+							Content: "import React from 'react';\nexport default function App(){ return <div>ok</div> }\n",
+							IsNew:   true,
+						},
+					},
+				},
+			},
+			{
+				ID:     "task-pending",
+				Type:   TaskReview,
+				Status: TaskPending,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{"missing_manifest: package.json (TypeScript/Node.js project has no package.json)"},
+		"missing manifest",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected deterministic repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	hasManifest := false
+	for _, file := range files {
+		if file.Path == "package.json" {
+			hasManifest = true
+			break
+		}
+	}
+	if !hasManifest {
+		t.Fatalf("expected package.json to be created, got %+v", files)
+	}
+
+	state := build.SnapshotState.Orchestration
+	if state == nil || len(state.PatchBundles) == 0 {
+		t.Fatalf("expected captured patch bundle, got %+v", state)
+	}
+	bundle := state.PatchBundles[len(state.PatchBundles)-1]
+	foundCreate := false
+	for _, op := range bundle.Operations {
+		if op.Type == PatchCreateFile && op.Path == "package.json" {
+			foundCreate = true
+			break
+		}
+	}
+	if !foundCreate {
+		t.Fatalf("expected create_file operation for package.json, got %+v", bundle.Operations)
+	}
+}
+
+func TestApplyPatchBundleToBuildUsesSnapshotFileFallback(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-snapshot-patch",
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:     "src/App.tsx",
+				Content:  "export default function App(){ return <div>old</div> }\n",
+				Language: "typescript",
+			},
+		},
+	}
+
+	applied := am.applyPatchBundleToBuild(build, &PatchBundle{
+		ID:      "bundle-1",
+		BuildID: build.ID,
+		Operations: []PatchOperation{
+			{Type: PatchReplaceFunction, Path: "src/App.tsx", Content: "export default function App(){ return <div>new</div> }\n"},
+			{Type: PatchCreateFile, Path: "package.json", Content: "{\"name\":\"demo\"}\n"},
+		},
+	})
+	if !applied {
+		t.Fatal("expected patch bundle to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = strings.TrimSpace(file.Content)
+	}
+	if got := byPath["src/App.tsx"]; !strings.Contains(got, "new") {
+		t.Fatalf("expected snapshot-backed file to be patched, got %q", got)
+	}
+	if got := byPath["package.json"]; !strings.Contains(got, "\"demo\"") {
+		t.Fatalf("expected create_file operation to materialize package.json, got %q", got)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsAppliesBundleToSnapshotFiles(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-snapshot-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "src/App.tsx",
+				Content: "import React from 'react';\nexport default function App(){ return <div>ok</div> }\n",
+				IsNew:   true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{"missing_manifest: package.json (TypeScript/Node.js project has no package.json)"},
+		"missing manifest",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected deterministic repair to apply through patch bundle")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	hasManifest := false
+	for _, file := range files {
+		if file.Path == "package.json" {
+			hasManifest = true
+			break
+		}
+	}
+	if !hasManifest {
+		t.Fatalf("expected package.json to exist after snapshot-backed repair, got %+v", files)
+	}
+
+	if len(build.SnapshotFiles) == 0 {
+		t.Fatalf("expected snapshot files to be updated, got %+v", build.SnapshotFiles)
+	}
+	state := build.SnapshotState.Orchestration
+	if state == nil || len(state.PatchBundles) == 0 {
+		t.Fatalf("expected recorded patch bundle, got %+v", state)
 	}
 }
 
@@ -1609,11 +1943,14 @@ func TestApplyDeterministicTypeDeclarationRepairAddsViteEnvDeclaration(t *testin
 		},
 	}
 
-	repaired, summary := am.applyDeterministicTypeDeclarationRepair(build, []string{
+	bundle, summary := am.applyDeterministicTypeDeclarationRepair(build, []string{
 		"Preview verification build failed: src/main.tsx(1,25): error TS2339: Property 'env' does not exist on type 'ImportMeta'.",
 	})
-	if !repaired {
+	if bundle == nil {
 		t.Fatalf("expected vite env declaration repair to trigger")
+	}
+	if !am.applyPatchBundleToBuild(build, bundle) {
+		t.Fatalf("expected patch bundle to apply")
 	}
 	if !strings.Contains(summary, "src/vite-env.d.ts") {
 		t.Fatalf("expected vite env declaration path in summary, got %q", summary)

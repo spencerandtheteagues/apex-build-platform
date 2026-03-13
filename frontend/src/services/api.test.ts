@@ -95,3 +95,55 @@ describe('getDeploymentLogsWebSocketUrl', () => {
     expect(service.getTerminalWebSocketUrl('term-123')).toBe('wss://runtime.example/ws/terminal/term-123?token=test-token')
   })
 })
+
+describe('sendBuildMessage', () => {
+  it('posts targeted routing metadata for planner and agent controls', async () => {
+    const service = new ApiService('/api/v1')
+    const post = vi.spyOn(service.client, 'post').mockResolvedValue({
+      data: {
+        interaction: {},
+        live: false,
+      },
+    } as any)
+
+    await service.sendBuildMessage('build-123', 'Refine the layout', {
+      clientToken: 'token-123',
+      targetMode: 'agent',
+      targetAgentId: 'frontend-1',
+      targetAgentRole: 'frontend',
+    })
+
+    expect(post).toHaveBeenCalledWith('/build/build-123/message', {
+      content: 'Refine the layout',
+      client_token: 'token-123',
+      command: undefined,
+      target_mode: 'agent',
+      target_agent_id: 'frontend-1',
+      target_agent_role: 'frontend',
+    })
+  })
+
+  it('posts restart commands for failed builds', async () => {
+    const service = new ApiService('/api/v1')
+    const post = vi.spyOn(service.client, 'post').mockResolvedValue({
+      data: {
+        interaction: {},
+        live: false,
+      },
+    } as any)
+
+    await service.sendBuildMessage('build-123', 'Restart the failed build', {
+      command: 'restart_failed',
+      targetMode: 'lead',
+    })
+
+    expect(post).toHaveBeenCalledWith('/build/build-123/message', {
+      content: 'Restart the failed build',
+      client_token: undefined,
+      command: 'restart_failed',
+      target_mode: 'lead',
+      target_agent_id: undefined,
+      target_agent_role: undefined,
+    })
+  })
+})

@@ -25,6 +25,13 @@ type leadMessagePermissionRequest struct {
 	Blocking       bool   `json:"blocking"`
 }
 
+type leadMessageAgentDirective struct {
+	TargetMode      string `json:"target_mode"`
+	TargetAgentID   string `json:"target_agent_id"`
+	TargetAgentRole string `json:"target_agent_role"`
+	Message         string `json:"message"`
+}
+
 type leadMessagePlan struct {
 	Reply                string                         `json:"reply"`
 	ApplyChanges         bool                           `json:"apply_changes"`
@@ -33,7 +40,14 @@ type leadMessagePlan struct {
 	PauseBuild           bool                           `json:"pause_build"`
 	ResumeBuild          bool                           `json:"resume_build"`
 	SteeringUpdates      []string                       `json:"steering_updates"`
+	AgentDirectives      []leadMessageAgentDirective    `json:"agent_directives"`
 	PermissionRequests   []leadMessagePermissionRequest `json:"permission_requests"`
+}
+
+type buildMessageTarget struct {
+	Mode      BuildMessageTargetMode
+	AgentID   string
+	AgentRole string
 }
 
 func normalizePermissionScope(raw string) BuildPermissionScope {
@@ -67,6 +81,47 @@ func normalizePermissionDecision(raw string) BuildPermissionDecision {
 	default:
 		return PermissionDecisionAsk
 	}
+}
+
+func normalizeBuildMessageTargetMode(raw string) BuildMessageTargetMode {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(BuildMessageTargetAgent):
+		return BuildMessageTargetAgent
+	case string(BuildMessageTargetRole):
+		return BuildMessageTargetRole
+	case string(BuildMessageTargetAllAgents), "all", "broadcast":
+		return BuildMessageTargetAllAgents
+	default:
+		return BuildMessageTargetLead
+	}
+}
+
+func normalizeBuildMessageTarget(mode string, agentID string, agentRole string) buildMessageTarget {
+	target := buildMessageTarget{
+		Mode:      normalizeBuildMessageTargetMode(mode),
+		AgentID:   strings.TrimSpace(agentID),
+		AgentRole: strings.TrimSpace(strings.ToLower(agentRole)),
+	}
+
+	switch target.Mode {
+	case BuildMessageTargetAgent:
+		if target.AgentID == "" {
+			target.Mode = BuildMessageTargetLead
+		}
+	case BuildMessageTargetRole:
+		if target.AgentRole == "" {
+			target.Mode = BuildMessageTargetLead
+		}
+	case BuildMessageTargetAllAgents:
+		target.AgentID = ""
+		target.AgentRole = ""
+	default:
+		target.Mode = BuildMessageTargetLead
+		target.AgentID = ""
+		target.AgentRole = ""
+	}
+
+	return target
 }
 
 func copyBuildInteractionStateLocked(build *Build) BuildInteractionState {
@@ -334,7 +389,119 @@ func parseLeadMessagePlan(raw string) leadMessagePlan {
 	return parsed
 }
 
-func buildInteractionPromptContext(build *Build) string {
+func buildMessageTargetMatchesAgent(targetMode BuildMessageTargetMode, targetAgentID string, targetAgentRole string, viewer *Agent) bool {
+	if viewer == nil {
+		return targetMode == BuildMessageTargetLead || targetMode == ""
+	}
+
+	switch targetMode {
+	case BuildMessageTargetLead:
+		return viewer.Role == RoleLead
+	case BuildMessageTargetAgent:
+		return strings.TrimSpace(targetAgentID) != "" && strings.EqualFold(strings.TrimSpace(targetAgentID), strings.TrimSpace(viewer.ID))
+	case BuildMessageTargetRole:
+		return strings.TrimSpace(targetAgentRole) != "" && strings.EqualFold(strings.TrimSpace(targetAgentRole), strings.TrimSpace(string(viewer.Role)))
+	case BuildMessageTargetAllAgents:
+		return true
+	default:
+		return true
+	}
+}
+
+func buildConversationMessageVisibleToAgent(msg BuildConversationMessage, viewer *Agent) bool {
+	if strings.TrimSpace(string(msg.TargetMode)) == "" {
+		return true
+	}
+	if viewer != nil && viewer.Role == RoleLead {
+		return true
+	}
+	targetMode := normalizeBuildMessageTargetMode(string(msg.TargetMode))
+	return buildMessageTargetMatchesAgent(targetMode, msg.TargetAgentID, msg.TargetAgentRole, viewer)
+}
+
+func buildConversationSourceLabel(msg BuildConversationMessage) string {
+	switch msg.Role {
+	case ConversationRoleLead:
+		return "lead"
+	case ConversationRoleSystem:
+		return "system"
+	default:
+		return "user"
+	}
+}
+
+func buildConversationTargetLabelLocked(build *Build, msg BuildConversationMessage) string {
+	if strings.TrimSpace(string(msg.TargetMode)) == "" {
+		return ""
+	}
+	targetMode := normalizeBuildMessageTargetMode(string(msg.TargetMode))
+	switch targetMode {
+	case BuildMessageTargetLead:
+		return "lead"
+	case BuildMessageTargetAgent:
+		targetID := strings.TrimSpace(msg.TargetAgentID)
+		if targetID == "" {
+			return "agent"
+		}
+		if build != nil {
+			if agent := build.Agents[targetID]; agent != nil {
+				if agent.Model != "" {
+					return fmt.Sprintf("%s (%s)", agent.Role, agent.Model)
+				}
+				return string(agent.Role)
+			}
+		}
+		return targetID
+	case BuildMessageTargetRole:
+		if role := strings.TrimSpace(msg.TargetAgentRole); role != "" {
+			return role
+		}
+		return "role"
+	case BuildMessageTargetAllAgents:
+		return "all_agents"
+	default:
+		return ""
+	}
+}
+
+func buildConversationPromptLineLocked(build *Build, msg BuildConversationMessage) string {
+	source := buildConversationSourceLabel(msg)
+	target := buildConversationTargetLabelLocked(build, msg)
+	content := strings.TrimSpace(msg.Content)
+	if target != "" {
+		return fmt.Sprintf("[%s -> %s] %s", source, target, content)
+	}
+	return fmt.Sprintf("[%s] %s", source, content)
+}
+
+func buildVisibleConversationMessagesLocked(build *Build, viewer *Agent, limit int) []BuildConversationMessage {
+	if build == nil || len(build.Interaction.Messages) == 0 {
+		return nil
+	}
+
+	if limit <= 0 {
+		limit = 6
+	}
+
+	visible := make([]BuildConversationMessage, 0, limit)
+	for idx := len(build.Interaction.Messages) - 1; idx >= 0; idx-- {
+		msg := build.Interaction.Messages[idx]
+		if !buildConversationMessageVisibleToAgent(msg, viewer) {
+			continue
+		}
+		visible = append(visible, msg)
+		if len(visible) == limit {
+			break
+		}
+	}
+
+	for left, right := 0, len(visible)-1; left < right; left, right = left+1, right-1 {
+		visible[left], visible[right] = visible[right], visible[left]
+	}
+	return visible
+}
+
+func buildInteractionPromptContext(build *Build, viewer *Agent) string {
 	if build == nil {
 		return ""
 	}
@@ -390,15 +557,12 @@ func buildInteractionPromptContext(build *Build) string {
 		sections = append(sections, fmt.Sprintf("<restricted_permissions>\n%s\n</restricted_permissions>", strings.Join(denied, "\n")))
 	}
 
-	if len(build.Interaction.Messages) > 0 {
-		start := len(build.Interaction.Messages) - 6
-		if start < 0 {
-			start = 0
-		}
+	if visibleMessages := buildVisibleConversationMessagesLocked(build, viewer, 8); len(visibleMessages) > 0 {
 		var convo strings.Builder
 		convo.WriteString("<recent_user_conversation>\n")
-		for _, msg := range build.Interaction.Messages[start:] {
-			convo.WriteString(fmt.Sprintf("[%s] %s\n", msg.Role, strings.TrimSpace(msg.Content)))
+		for _, msg := range visibleMessages {
+			convo.WriteString(buildConversationPromptLineLocked(build, msg))
+			convo.WriteString("\n")
 		}
 		convo.WriteString("</recent_user_conversation>")
 		sections = append(sections, convo.String())

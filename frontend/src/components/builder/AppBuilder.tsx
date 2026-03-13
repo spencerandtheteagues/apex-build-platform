@@ -8,6 +8,7 @@ import { getConfiguredApiUrl, getConfiguredWsUrl } from '@/config/runtime'
 import ModelRoleConfig from './ModelRoleConfig'
 import { useThemeLogo } from '@/hooks/useThemeLogo'
 import apiService, {
+  BuildMessageTargetMode,
   BuildConversationMessage as ApiBuildConversationMessage,
   BuildInteractionState as ApiBuildInteractionState,
   BuildPermissionRequest as ApiBuildPermissionRequest,
@@ -122,6 +123,10 @@ interface ChatMessage {
   content: string
   timestamp: Date
   kind?: string
+  agentRole?: string
+  targetMode?: BuildMessageTargetMode
+  targetAgentId?: string
+  targetAgentRole?: string
   clientToken?: string
   status?: 'pending' | 'sent' | 'failed'
 }
@@ -198,6 +203,7 @@ interface AppBuilderProps {
 const ACTIVE_BUILD_STORAGE_KEY = 'apex_active_build_id'
 const LAST_WORKFLOW_BUILD_STORAGE_KEY = 'apex_last_workflow_build_id'
 const BUILD_TELEMETRY_STORAGE_KEY = 'apex_build_telemetry_cache'
+const DEFAULT_RESTART_FAILED_MESSAGE = 'Restart the failed build from the last workable state, keep the valid work, fix the failure, and continue until the app is runnable.'
 
 const isActiveBuildStatus = (status?: string) =>
   status === 'pending' ||
@@ -368,6 +374,8 @@ const getThoughtEventLabel = (thought: AIThought) => {
       return 'Retrying'
     case 'agent:provider_switched':
       return 'Provider Switch'
+    case 'agent:message':
+      return 'Directed Message'
     case 'agent:completed':
       return 'Task Complete'
     case 'agent:error':
@@ -380,6 +388,31 @@ const getThoughtEventLabel = (thought: AIThought) => {
     default:
       return humanizeIdentifier(thought.type)
   }
+}
+
+const getConversationTargetLabel = (message: Pick<ChatMessage, 'targetMode' | 'targetAgentRole' | 'targetAgentId'>) => {
+  switch (message.targetMode) {
+    case 'lead':
+      return 'Planner'
+    case 'agent':
+      return humanizeIdentifier(message.targetAgentRole || message.targetAgentId || 'agent')
+    case 'role':
+      return humanizeIdentifier(message.targetAgentRole || 'role')
+    case 'all_agents':
+      return 'All Agents'
+    default:
+      return ''
+  }
+}
+
+const getConversationRouteLabel = (message: ChatMessage) => {
+  const source = message.role === 'user'
+    ? 'You'
+    : message.role === 'lead'
+      ? 'Planner'
+      : 'System'
+  const target = getConversationTargetLabel(message)
+  return target ? `${source} -> ${target}` : source
 }
 
 const ThinkingDots: React.FC<{ className?: string }> = ({ className }) => {
@@ -828,11 +861,28 @@ const EpicBuildButton: React.FC<EpicBuildButtonProps> = ({ onClick, disabled, is
 interface AgentCardProps {
   agent: Agent
   index: number
+  canDirectMessage: boolean
   getAgentEmoji: (role: string) => string
   getStatusIcon: (status: string) => React.ReactNode
+  messageDraft: string
+  onMessageDraftChange: (agentId: string, value: string) => void
+  onSendMessage: (agent: Agent) => void
+  recentThoughts: AIThought[]
+  sendPending: boolean
 }
 
-const AgentCard: React.FC<AgentCardProps> = ({ agent, index, getAgentEmoji, getStatusIcon }) => {
+const AgentCard: React.FC<AgentCardProps> = ({
+  agent,
+  index,
+  canDirectMessage,
+  getAgentEmoji,
+  getStatusIcon,
+  messageDraft,
+  onMessageDraftChange,
+  onSendMessage,
+  recentThoughts,
+  sendPending,
+}) => {
   return (
     <div
       className={cn(
@@ -851,7 +901,7 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index, getAgentEmoji, getS
         opacity: 0,
       }}
     >
-      <div className="flex items-center gap-4">
+      <div className="flex items-start gap-4">
         {/* Agent Avatar */}
         <div className={cn(
           "relative w-14 h-14 rounded-xl flex items-center justify-center text-2xl transition-all duration-300",
@@ -910,6 +960,83 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index, getAgentEmoji, getS
         >
           {agent.provider}
         </Badge>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        <div className="rounded-xl border border-gray-800 bg-black/35 px-3 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-gray-500">
+              <MessageSquare className="w-3.5 h-3.5" />
+              Direct Control
+            </div>
+            <Badge
+              variant="outline"
+              className={cn(
+                'text-[10px]',
+                canDirectMessage
+                  ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-200'
+                  : 'border-gray-700 bg-gray-900/70 text-gray-500'
+              )}
+            >
+              {canDirectMessage ? 'Live' : 'Read Only'}
+            </Badge>
+          </div>
+          <div className="mt-2 text-xs text-gray-400">
+            {canDirectMessage
+              ? 'Send an instruction straight to this agent. It stays visible in the planner timeline and this agent’s telemetry.'
+              : 'Direct agent messaging is only enabled while the build is actively running.'}
+          </div>
+          <div className="mt-3 flex gap-2">
+            <input
+              type="text"
+              value={messageDraft}
+              onChange={(event) => onMessageDraftChange(agent.id, event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  onSendMessage(agent)
+                }
+              }}
+              placeholder={`Message ${humanizeIdentifier(agent.role)} directly...`}
+              disabled={!canDirectMessage || sendPending}
+              className="flex-1 rounded-lg border border-gray-700 bg-black px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-900/30 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+            <Button
+              size="sm"
+              onClick={() => onSendMessage(agent)}
+              disabled={!canDirectMessage || !messageDraft.trim() || sendPending}
+              className="bg-cyan-600 hover:bg-cyan-500"
+            >
+              <Send className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-gray-800 bg-black/35 px-3 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Recent Visible Activity</div>
+          {recentThoughts.length === 0 ? (
+            <div className="mt-2 text-xs text-gray-500">
+              No visible telemetry from this agent yet.
+            </div>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {recentThoughts.map((thought) => (
+                <div key={thought.id} className="rounded-lg border border-gray-800 bg-black/40 px-3 py-2">
+                  <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                    <span className="font-mono">
+                      {thought.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                    <Badge variant="outline" className="border-white/10 bg-white/5 text-[10px] text-gray-300">
+                      {getThoughtEventLabel(thought)}
+                    </Badge>
+                  </div>
+                  <div className="mt-1 text-xs leading-relaxed text-gray-200">
+                    {thought.content}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -1087,6 +1214,14 @@ const TerminalOutput: React.FC<{ messages: ChatMessage[]; isBuilding: boolean }>
         >
           <span className="text-red-500 select-none font-bold">{'>'}</span>
           <span className="flex-1 break-words">
+            <span className="mr-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500">
+              [{getConversationRouteLabel(msg)}]
+            </span>
+            {msg.kind === 'directive' && (
+              <span className="mr-2 text-[10px] uppercase tracking-[0.18em] text-cyan-400">
+                directive
+              </span>
+            )}
             {msg.content}
             {msg.status === 'pending' && <span className="ml-2 text-[10px] text-yellow-400">sending</span>}
             {msg.status === 'failed' && <span className="ml-2 text-[10px] text-red-400">failed</span>}
@@ -1135,8 +1270,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
+  const [plannerSendMode, setPlannerSendMode] = useState<BuildMessageTargetMode>('lead')
+  const [agentMessageDrafts, setAgentMessageDrafts] = useState<Record<string, string>>({})
+  const [agentMessagePendingId, setAgentMessagePendingId] = useState<string | null>(null)
+  const [plannerMessagePending, setPlannerMessagePending] = useState(false)
   const [permissionActionId, setPermissionActionId] = useState<string | null>(null)
-  const [buildActionPending, setBuildActionPending] = useState<'pause' | 'resume' | null>(null)
+  const [buildActionPending, setBuildActionPending] = useState<'pause' | 'resume' | 'restart' | null>(null)
   const [proposedEdits, setProposedEdits] = useState<ProposedEdit[]>([])
   const [showDiffReview, setShowDiffReview] = useState(true)
 
@@ -1181,6 +1320,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   useEffect(() => {
     buildStateRef.current = buildState
   }, [buildState])
+
+  useEffect(() => {
+    setAgentMessageDrafts({})
+    setAgentMessagePendingId(null)
+    setPlannerMessagePending(false)
+    setPlannerSendMode('lead')
+  }, [buildState?.id])
 
   // Fetch provider statuses for model role config
   useEffect(() => {
@@ -1311,6 +1457,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     []
   )
   const isBuildActive = buildState ? activeBuildStatuses.has(buildState.status) : false
+  useEffect(() => {
+    if (!isBuildActive && plannerSendMode === 'all_agents') {
+      setPlannerSendMode('lead')
+    }
+  }, [isBuildActive, plannerSendMode])
   const humanizePhase = useCallback((phase: string) => {
     const normalized = phase.replace(/_/g, ' ').trim()
     if (!normalized) return 'Planning'
@@ -1525,6 +1676,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     providerPanels,
     telemetryNow,
   ])
+  const recentThoughtsByAgent = useMemo(() => {
+    const next = new Map<string, AIThought[]>()
+    for (const thought of aiThoughts) {
+      if (!thought.agentId) continue
+      const existing = next.get(thought.agentId) || []
+      existing.push(thought)
+      next.set(thought.agentId, existing.slice(-3))
+    }
+    return next
+  }, [aiThoughts])
   const hasBuilderSession = Boolean(
     buildState ||
     isBuilding ||
@@ -2207,6 +2368,36 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         syncInteractionState(data.interaction, data.message ? [data.message] : undefined)
         break
 
+      case 'agent:message': {
+        const sourceLabel = humanizeIdentifier(data.source_agent_role || data.source_role || 'planner')
+        const content = typeof data.content === 'string' && data.content.trim()
+          ? `From ${sourceLabel}: ${data.content.trim()}`
+          : `From ${sourceLabel}`
+        setBuildState(prev => {
+          if (!prev) return null
+          return {
+            ...prev,
+            agents: prev.agents.map(a =>
+              a.id === message.agent_id
+                ? { ...a, provider: data.provider ?? a.provider, model: data.model ?? a.model }
+                : a
+            ),
+          }
+        })
+        addAiThought(
+          message.agent_id,
+          data.agent_role,
+          data.provider,
+          data.model,
+          'action',
+          content,
+          {
+            eventType: 'agent:message',
+          }
+        )
+        break
+      }
+
       case 'build:interaction':
         syncInteractionState(data.interaction, data.messages)
         break
@@ -2778,6 +2969,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         content: String(message.content || ''),
         timestamp: message.timestamp ? new Date(message.timestamp) : new Date(),
         kind: message.kind,
+        agentRole: message.agent_role,
+        targetMode: message.target_mode,
+        targetAgentId: message.target_agent_id,
+        targetAgentRole: message.target_agent_role,
         clientToken: message.client_token,
         status: (message.status === 'failed' ? 'failed' : 'sent') as ChatMessage['status'],
       }))
@@ -3614,37 +3809,122 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
   }
 
-  // Send chat message
-  const sendChatMessage = async () => {
-    const content = chatInput.trim()
-    if (!content || !buildState?.id) return
+  const setPendingConversationMessageStatus = useCallback((clientToken: string, status: ChatMessage['status']) => {
+    setChatMessages(prev => prev.map(message =>
+      message.clientToken === clientToken ? { ...message, status } : message
+    ))
+  }, [])
+
+  const sendBuildConversationMessage = useCallback(async (options: {
+    content?: string
+    optimisticContent?: string
+    command?: 'restart_failed'
+    targetMode?: BuildMessageTargetMode
+    targetAgentId?: string
+    targetAgentRole?: string
+  }) => {
+    if (!buildStateRef.current?.id) return false
+
+    const content = (options.content || '').trim()
+    const optimisticContent = (options.optimisticContent || content).trim()
+    if (!content && !options.command) return false
 
     const clientToken = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    setChatMessages(prev => [...prev, {
-      id: clientToken,
-      role: 'user',
-      content,
-      timestamp: new Date(),
-      clientToken,
-      status: 'pending',
-    }])
-    setChatInput('')
+    if (optimisticContent) {
+      setChatMessages(prev => [...prev, {
+        id: clientToken,
+        role: 'user',
+        content: optimisticContent,
+        timestamp: new Date(),
+        kind: options.targetMode && options.targetMode !== 'lead' ? 'directive' : 'message',
+        targetMode: options.targetMode || 'lead',
+        targetAgentId: options.targetAgentId,
+        targetAgentRole: options.targetAgentRole,
+        clientToken,
+        status: 'pending',
+      }])
+    }
 
     try {
-      const response = await apiService.sendBuildMessage(buildState.id, content, clientToken)
-      setChatMessages(prev => prev.map(message =>
-        message.clientToken === clientToken ? { ...message, status: 'sent' } : message
-      ))
+      const response = await apiService.sendBuildMessage(buildStateRef.current.id, content, {
+        clientToken,
+        command: options.command,
+        targetMode: options.targetMode || 'lead',
+        targetAgentId: options.targetAgentId,
+        targetAgentRole: options.targetAgentRole,
+      })
+      if (optimisticContent) {
+        setPendingConversationMessageStatus(clientToken, 'sent')
+      }
       syncInteractionState(response.interaction)
       if (response.live && !buildStateRef.current?.liveSession) {
-        setBuildState(prev => prev && prev.id === buildState.id ? { ...prev, liveSession: true } : prev)
-        connectWebSocket(buildState.id, buildStateRef.current?.websocketUrl)
+        const buildId = buildStateRef.current.id
+        setBuildState(prev => prev && prev.id === buildId ? { ...prev, liveSession: true } : prev)
+        connectWebSocket(buildId, buildStateRef.current?.websocketUrl)
       }
+      return true
     } catch (error) {
-      setChatMessages(prev => prev.map(message =>
-        message.clientToken === clientToken ? { ...message, status: 'failed' } : message
-      ))
+      if (optimisticContent) {
+        setPendingConversationMessageStatus(clientToken, 'failed')
+      }
       addSystemMessage('Message failed to send. Please try again.')
+      return false
+    }
+  }, [connectWebSocket, setPendingConversationMessageStatus, syncInteractionState])
+
+  const sendChatMessage = async () => {
+    const content = chatInput.trim()
+    if (!content) return
+
+    setPlannerMessagePending(true)
+    setChatInput('')
+    const targetMode = plannerSendMode === 'all_agents' && isBuildActive ? 'all_agents' : 'lead'
+    try {
+      await sendBuildConversationMessage({
+        content,
+        targetMode,
+      })
+    } finally {
+      setPlannerMessagePending(false)
+    }
+  }
+
+  const sendDirectAgentMessage = async (agent: Agent) => {
+    const content = agentMessageDrafts[agent.id]?.trim()
+    if (!content || !isBuildActive) return
+
+    setAgentMessagePendingId(agent.id)
+    try {
+      const sent = await sendBuildConversationMessage({
+        content,
+        targetMode: 'agent',
+        targetAgentId: agent.id,
+        targetAgentRole: agent.role,
+      })
+      if (sent) {
+        setAgentMessageDrafts(prev => ({ ...prev, [agent.id]: '' }))
+      }
+    } finally {
+      setAgentMessagePendingId((current) => current === agent.id ? null : current)
+    }
+  }
+
+  const handleRestartFailedBuild = async () => {
+    if (!buildState?.id || buildState.status !== 'failed' || buildActionPending !== null) return
+    setBuildActionPending('restart')
+    try {
+      const sent = await sendBuildConversationMessage({
+        command: 'restart_failed',
+        content: DEFAULT_RESTART_FAILED_MESSAGE,
+        optimisticContent: DEFAULT_RESTART_FAILED_MESSAGE,
+        targetMode: 'lead',
+      })
+      if (sent) {
+        setIsBuilding(true)
+        persistActiveBuildId(buildState.id)
+      }
+    } finally {
+      setBuildActionPending(null)
     }
   }
 
@@ -4436,6 +4716,17 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   )}
 
                   <div className="mt-4 flex flex-wrap gap-3">
+                    {buildState.status === 'failed' && (
+                      <Button
+                        size="sm"
+                        onClick={handleRestartFailedBuild}
+                        disabled={buildActionPending !== null}
+                        className="bg-cyan-600 hover:bg-cyan-500"
+                      >
+                        <RotateCcw className={cn("w-4 h-4 mr-2", buildActionPending === 'restart' && "animate-spin")} />
+                        {buildActionPending === 'restart' ? 'Restarting...' : 'Restart Failed Build'}
+                      </Button>
+                    )}
                     {buildPaused ? (
                       <Button
                         size="sm"
@@ -4616,8 +4907,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                         key={agent.id}
                         agent={agent}
                         index={index}
+                        canDirectMessage={isBuildActive}
                         getAgentEmoji={getAgentEmoji}
                         getStatusIcon={getStatusIcon}
+                        messageDraft={agentMessageDrafts[agent.id] || ''}
+                        onMessageDraftChange={(agentId, value) => {
+                          setAgentMessageDrafts(prev => ({ ...prev, [agentId]: value }))
+                        }}
+                        onSendMessage={sendDirectAgentMessage}
+                        recentThoughts={recentThoughtsByAgent.get(agent.id) || []}
+                        sendPending={agentMessagePendingId === agent.id}
                       />
                     ))}
 
@@ -4889,7 +5188,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-xl flex items-center gap-3">
                       <Terminal className="w-7 h-7 text-red-400" />
-                      Build Activity
+                      Planner Console
                     </CardTitle>
                     <Button
                       size="sm"
@@ -4913,21 +5212,61 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   {/* Chat Input */}
                   {showChat && (
                     <div className="pt-4 mt-4 border-t border-gray-800 shrink-0">
+                      <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
+                        <div className="text-xs text-gray-500">
+                          Route this message to the planner or broadcast it to every active agent. Each agent card also accepts direct instructions.
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant={plannerSendMode === 'lead' ? 'default' : 'outline'}
+                            onClick={() => setPlannerSendMode('lead')}
+                            className={cn(
+                              plannerSendMode === 'lead'
+                                ? 'bg-red-600 hover:bg-red-500'
+                                : 'border-gray-700 bg-gray-900/50 text-gray-200 hover:bg-gray-800'
+                            )}
+                          >
+                            Planner
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={plannerSendMode === 'all_agents' ? 'default' : 'outline'}
+                            onClick={() => setPlannerSendMode('all_agents')}
+                            disabled={!isBuildActive}
+                            className={cn(
+                              plannerSendMode === 'all_agents'
+                                ? 'bg-cyan-600 hover:bg-cyan-500'
+                                : 'border-gray-700 bg-gray-900/50 text-gray-200 hover:bg-gray-800'
+                            )}
+                          >
+                            All Agents
+                          </Button>
+                        </div>
+                      </div>
                       <div className="flex gap-3">
                         <input
                           type="text"
                           value={chatInput}
                           onChange={(e) => setChatInput(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && sendChatMessage()}
-                          placeholder={pendingQuestion || (buildPaused ? 'Build is paused. Tell the AI what to change or resume it.' : 'Message the lead agent...')}
+                          placeholder={
+                            pendingQuestion ||
+                            (buildPaused
+                              ? 'Build is paused. Tell the planner what to change or resume.'
+                              : plannerSendMode === 'all_agents' && isBuildActive
+                                ? 'Broadcast a directive to every active agent...'
+                                : 'Message the planner...'
+                            )
+                          }
                           className="flex-1 bg-black border-2 border-gray-700 rounded-xl px-5 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-red-600 focus:ring-2 focus:ring-red-900/30 transition-all"
                         />
                         <Button
                           onClick={sendChatMessage}
-                          disabled={!chatInput.trim() || !buildState?.id}
+                          disabled={!chatInput.trim() || !buildState?.id || plannerMessagePending}
                           className="px-6 bg-red-600 hover:bg-red-500 font-semibold"
                         >
-                          <Send className="w-5 h-5" />
+                          {plannerMessagePending ? <ThinkingDots className="text-white" /> : <Send className="w-5 h-5" />}
                         </Button>
                       </div>
                     </div>

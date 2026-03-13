@@ -32,6 +32,25 @@ type BuildHandler struct {
 	db      *gorm.DB
 }
 
+func classifyBuildMessageError(err error) int {
+	if err == nil {
+		return http.StatusOK
+	}
+
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(message, "message cannot be empty"),
+		strings.Contains(message, "no agents matched the selected target"),
+		strings.Contains(message, "unknown command"):
+		return http.StatusBadRequest
+	case strings.Contains(message, "direct agent messages require an active build"),
+		strings.Contains(message, "restart is only available for failed builds"):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
 // NewBuildHandler creates a new build handler
 func NewBuildHandler(manager *AgentManager, hub *WSHub) *BuildHandler {
 	return &BuildHandler{
@@ -500,6 +519,34 @@ func buildSnapshotStateResponseFields(state BuildSnapshotState, fallbackStatus s
 	if len(state.AvailableProviders) > 0 {
 		fields["available_providers"] = append([]string(nil), state.AvailableProviders...)
 	}
+	if orchestration := cloneBuildOrchestrationState(state.Orchestration); orchestration != nil {
+		fields["orchestration"] = orchestration
+		if orchestration.IntentBrief != nil {
+			fields["intent_brief"] = orchestration.IntentBrief
+		}
+		if orchestration.BuildContract != nil {
+			fields["build_contract"] = orchestration.BuildContract
+		}
+		if len(orchestration.WorkOrders) > 0 {
+			fields["work_orders"] = orchestration.WorkOrders
+		}
+		if len(orchestration.PatchBundles) > 0 {
+			fields["patch_bundles"] = orchestration.PatchBundles
+		}
+		if len(orchestration.VerificationReports) > 0 {
+			fields["verification_reports"] = orchestration.VerificationReports
+		}
+		if orchestration.PromotionDecision != nil {
+			fields["promotion_decision"] = orchestration.PromotionDecision
+			fields["truth_by_surface"] = orchestration.PromotionDecision.TruthBySurface
+		}
+		if len(orchestration.ProviderScorecards) > 0 {
+			fields["provider_scorecards"] = orchestration.ProviderScorecards
+		}
+		if len(orchestration.FailureFingerprints) > 0 {
+			fields["failure_fingerprints"] = orchestration.FailureFingerprints
+		}
+	}
 
 	switch normalizeQualityGateStatus(state.QualityGateStatus) {
 	case "running":
@@ -663,8 +710,12 @@ func (h *BuildHandler) SendMessage(c *gin.Context) {
 
 	// Parse message
 	var req struct {
-		Content     string `json:"content" binding:"required"`
-		ClientToken string `json:"client_token"`
+		Content         string `json:"content"`
+		ClientToken     string `json:"client_token"`
+		Command         string `json:"command"`
+		TargetMode      string `json:"target_mode"`
+		TargetAgentID   string `json:"target_agent_id"`
+		TargetAgentRole string `json:"target_agent_role"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -674,11 +725,43 @@ func (h *BuildHandler) SendMessage(c *gin.Context) {
 		return
 	}
 
-	// Send message to lead agent
-	if err := h.manager.SendMessageWithClientToken(buildID, req.Content, req.ClientToken); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
+	command := strings.TrimSpace(strings.ToLower(req.Command))
+	if command == "" && strings.TrimSpace(req.Content) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid request",
+			"details": "content is required unless a command is provided",
+		})
+		return
+	}
+
+	target := normalizeBuildMessageTarget(req.TargetMode, req.TargetAgentID, req.TargetAgentRole)
+	responseMessage := "Message sent to lead agent"
+	var sendErr error
+	switch command {
+	case "":
+		sendErr = h.manager.sendTargetedMessageWithClientToken(buildID, req.Content, req.ClientToken, target)
+		switch target.Mode {
+		case BuildMessageTargetAgent:
+			responseMessage = "Message sent to selected agent"
+		case BuildMessageTargetRole:
+			responseMessage = "Message sent to selected role"
+		case BuildMessageTargetAllAgents:
+			responseMessage = "Message broadcast to all agents"
+		}
+	case "restart_failed":
+		sendErr = h.manager.RestartFailedBuildWithClientToken(buildID, req.Content, req.ClientToken)
+		responseMessage = "Failed build restart requested"
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid request",
+			"details": fmt.Sprintf("unknown command %q", req.Command),
+		})
+		return
+	}
+	if sendErr != nil {
+		c.JSON(classifyBuildMessageError(sendErr), gin.H{
 			"error":   "failed to send message",
-			"details": err.Error(),
+			"details": sendErr.Error(),
 		})
 		return
 	}
@@ -690,7 +773,7 @@ func (h *BuildHandler) SendMessage(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":           "sent",
-		"message":          "Message sent to lead agent",
+		"message":          responseMessage,
 		"interaction":      interaction,
 		"live":             true,
 		"restored_session": restoredSession,

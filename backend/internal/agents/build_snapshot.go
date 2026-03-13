@@ -69,7 +69,15 @@ func copyBuildSnapshotStateLocked(build *Build) BuildSnapshotState {
 		required := *state.QualityGateRequired
 		state.QualityGateRequired = &required
 	}
+	state.Orchestration = cloneBuildOrchestrationState(state.Orchestration)
 	return state
+}
+
+func copyBuildOrchestrationStateLocked(build *Build) *BuildOrchestrationState {
+	if build == nil {
+		return nil
+	}
+	return cloneBuildOrchestrationState(build.SnapshotState.Orchestration)
 }
 
 func orderedBuildAgents(agents map[string]*Agent) []*Agent {
@@ -328,5 +336,25 @@ func parseBuildSnapshotState(raw string) BuildSnapshotState {
 	if state.AvailableProviders != nil {
 		state.AvailableProviders = append([]string(nil), state.AvailableProviders...)
 	}
+	state.Orchestration = cloneBuildOrchestrationState(state.Orchestration)
 	return state
+}
+
+func cloneBuildOrchestrationState(state *BuildOrchestrationState) *BuildOrchestrationState {
+	if state == nil {
+		return nil
+	}
+
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		clone := *state
+		return &clone
+	}
+
+	var decoded BuildOrchestrationState
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		clone := *state
+		return &clone
+	}
+	return &decoded
 }

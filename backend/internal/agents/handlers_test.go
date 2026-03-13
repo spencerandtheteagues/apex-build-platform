@@ -315,6 +315,88 @@ func TestSendMessageRestoresSnapshotBackedBuildSession(t *testing.T) {
 	}
 }
 
+func TestSendMessageTargetsSpecificAgentWithoutPlannerRoundTrip(t *testing.T) {
+	routerStub := &stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+		generateResult: &ai.AIResponse{
+			Content: `{"reply":"planner reply should not be used for direct agent messaging","apply_changes":false}`,
+		},
+	}
+
+	am := &AgentManager{
+		ctx:         context.Background(),
+		cancel:      func() {},
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		aiRouter:    routerStub,
+	}
+
+	build := &Build{
+		ID:          "live-build",
+		UserID:      1,
+		Status:      BuildInProgress,
+		Description: "Live build with direct agent control",
+		Agents: map[string]*Agent{
+			"lead-1": {
+				ID:       "lead-1",
+				BuildID:  "live-build",
+				Role:     RoleLead,
+				Provider: ai.ProviderClaude,
+				Model:    "claude-sonnet-4-6",
+			},
+			"frontend-1": {
+				ID:       "frontend-1",
+				BuildID:  "live-build",
+				Role:     RoleFrontend,
+				Provider: ai.ProviderClaude,
+				Model:    "claude-sonnet-4-6",
+			},
+		},
+	}
+	am.builds[build.ID] = build
+
+	body, _ := json.Marshal(map[string]string{
+		"content":         "Tighten the header spacing and keep the controls visible.",
+		"target_mode":     "agent",
+		"target_agent_id": "frontend-1",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/live-build/message", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response["message"] != "Message sent to selected agent" {
+		t.Fatalf("expected selected-agent response, got %v", response["message"])
+	}
+	if got := routerStub.generateCalls.Load(); got != 0 {
+		t.Fatalf("expected planner AI not to run for direct agent message, got %d calls", got)
+	}
+
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	if len(build.Interaction.Messages) != 1 {
+		t.Fatalf("expected one interaction message, got %d", len(build.Interaction.Messages))
+	}
+	msg := build.Interaction.Messages[0]
+	if msg.Kind != ConversationKindDirective {
+		t.Fatalf("expected direct message to be stored as directive, got %s", msg.Kind)
+	}
+	if msg.TargetMode != BuildMessageTargetAgent || msg.TargetAgentID != "frontend-1" {
+		t.Fatalf("expected agent target metadata, got %+v", msg)
+	}
+}
+
 func TestGetBuildDetailsIncludesSnapshotState(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.CompletedBuild{
@@ -779,6 +861,139 @@ func TestCancelRestoresActiveSnapshotAndPersistsTerminalState(t *testing.T) {
 	}
 	if snapshot.Error != "cancelled by user" {
 		t.Fatalf("expected persisted cancel error, got %s", snapshot.Error)
+	}
+}
+
+func TestRestartFailedBuildRestoresSnapshotAndQueuesRevision(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "failed-restart-build",
+		UserID:      1,
+		Description: "Failed build that should restart cleanly",
+		Status:      "failed",
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    92,
+		FilesJSON:   "[]",
+		Error:       "Preview validation failed",
+	}).Error; err != nil {
+		t.Fatalf("create failed snapshot: %v", err)
+	}
+
+	routerStub := &stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	}
+
+	am := &AgentManager{
+		ctx:         context.Background(),
+		cancel:      func() {},
+		db:          db,
+		aiRouter:    routerStub,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		editStore:   NewProposedEditStoreWithDB(db),
+		taskQueue:   make(chan *Task, 2),
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"command": "restart_failed",
+		"content": "Retry the failed build, keep the working files, and fix preview validation.",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/failed-restart-build/message", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal restart response: %v", err)
+	}
+	if response["restored_session"] != true {
+		t.Fatalf("expected restored_session=true, got %v", response["restored_session"])
+	}
+	if response["message"] != "Failed build restart requested" {
+		t.Fatalf("expected restart response message, got %v", response["message"])
+	}
+	if got := routerStub.generateCalls.Load(); got != 0 {
+		t.Fatalf("expected restart path to avoid planner AI, got %d calls", got)
+	}
+
+	build, err := am.GetBuild("failed-restart-build")
+	if err != nil {
+		t.Fatalf("expected restored build: %v", err)
+	}
+
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	if build.Status != BuildInProgress {
+		t.Fatalf("expected restarted build to move to in_progress, got %s", build.Status)
+	}
+	if build.Error != "" {
+		t.Fatalf("expected restart to clear build error, got %q", build.Error)
+	}
+	if len(build.Tasks) == 0 {
+		t.Fatalf("expected restart to enqueue a follow-up task")
+	}
+	lastTask := build.Tasks[len(build.Tasks)-1]
+	if lastTask.Type != TaskFix {
+		t.Fatalf("expected restart task type %s, got %s", TaskFix, lastTask.Type)
+	}
+	if !strings.Contains(lastTask.Description, "Retry the failed build") {
+		t.Fatalf("expected restart task description to include user request, got %q", lastTask.Description)
+	}
+}
+
+func TestSendMessageReturnsConflictForDirectMessageToTerminalBuild(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "completed-direct-message-build",
+		UserID:      1,
+		Description: "Completed build should reject direct agent messaging",
+		Status:      "completed",
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    100,
+		FilesJSON:   "[]",
+	}).Error; err != nil {
+		t.Fatalf("create completed snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		ctx:         context.Background(),
+		cancel:      func() {},
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"content":         "Tighten the layout",
+		"target_mode":     "agent",
+		"target_agent_id": "frontend-1",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/completed-direct-message-build/message", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "direct agent messages require an active build") {
+		t.Fatalf("expected direct-message conflict details, got %s", w.Body.String())
 	}
 }
 

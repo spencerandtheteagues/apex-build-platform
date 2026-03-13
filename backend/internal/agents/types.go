@@ -193,6 +193,15 @@ const (
 	ConversationKindPermissionUpdate  BuildConversationKind = "permission_update"
 )
 
+type BuildMessageTargetMode string
+
+const (
+	BuildMessageTargetLead      BuildMessageTargetMode = "lead"
+	BuildMessageTargetAgent     BuildMessageTargetMode = "agent"
+	BuildMessageTargetRole      BuildMessageTargetMode = "role"
+	BuildMessageTargetAllAgents BuildMessageTargetMode = "all_agents"
+)
+
 type BuildPermissionScope string
 
 const (
@@ -226,17 +235,20 @@ const (
 )
 
 type BuildConversationMessage struct {
-	ID               string                `json:"id"`
-	Role             BuildConversationRole `json:"role"`
-	Kind             BuildConversationKind `json:"kind"`
-	Content          string                `json:"content"`
-	AgentID          string                `json:"agent_id,omitempty"`
-	AgentRole        string                `json:"agent_role,omitempty"`
-	ClientToken      string                `json:"client_token,omitempty"`
-	RequiresResponse bool                  `json:"requires_response,omitempty"`
-	Blocking         bool                  `json:"blocking,omitempty"`
-	Timestamp        time.Time             `json:"timestamp"`
-	Status           string                `json:"status,omitempty"`
+	ID               string                 `json:"id"`
+	Role             BuildConversationRole  `json:"role"`
+	Kind             BuildConversationKind  `json:"kind"`
+	Content          string                 `json:"content"`
+	AgentID          string                 `json:"agent_id,omitempty"`
+	AgentRole        string                 `json:"agent_role,omitempty"`
+	TargetMode       BuildMessageTargetMode `json:"target_mode,omitempty"`
+	TargetAgentID    string                 `json:"target_agent_id,omitempty"`
+	TargetAgentRole  string                 `json:"target_agent_role,omitempty"`
+	ClientToken      string                 `json:"client_token,omitempty"`
+	RequiresResponse bool                   `json:"requires_response,omitempty"`
+	Blocking         bool                   `json:"blocking,omitempty"`
+	Timestamp        time.Time              `json:"timestamp"`
+	Status           string                 `json:"status,omitempty"`
 }
 
 type BuildPermissionRule struct {
@@ -299,11 +311,12 @@ type BuildActivityEntry struct {
 }
 
 type BuildSnapshotState struct {
-	CurrentPhase        string   `json:"current_phase,omitempty"`
-	QualityGateRequired *bool    `json:"quality_gate_required,omitempty"`
-	QualityGateStatus   string   `json:"quality_gate_status,omitempty"`
-	QualityGateStage    string   `json:"quality_gate_stage,omitempty"`
-	AvailableProviders  []string `json:"available_providers,omitempty"`
+	CurrentPhase        string                   `json:"current_phase,omitempty"`
+	QualityGateRequired *bool                    `json:"quality_gate_required,omitempty"`
+	QualityGateStatus   string                   `json:"quality_gate_status,omitempty"`
+	QualityGateStage    string                   `json:"quality_gate_stage,omitempty"`
+	AvailableProviders  []string                 `json:"available_providers,omitempty"`
+	Orchestration       *BuildOrchestrationState `json:"orchestration,omitempty"`
 }
 
 // Build represents an entire app-building session

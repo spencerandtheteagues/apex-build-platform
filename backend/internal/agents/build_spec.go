@@ -243,6 +243,105 @@ func buildSpecPromptContext(plan *BuildPlan, workOrder *BuildWorkOrder) string {
 	return b.String()
 }
 
+func workOrderArtifactPromptContext(workOrder *WorkOrder) string {
+	if workOrder == nil {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("\n<work_order_artifact>\n")
+	b.WriteString(fmt.Sprintf("id: %s\n", workOrder.ID))
+	b.WriteString(fmt.Sprintf("role: %s\n", workOrder.Role))
+	b.WriteString(fmt.Sprintf("category: %s\n", workOrder.Category))
+	b.WriteString(fmt.Sprintf("task_shape: %s\n", workOrder.TaskShape))
+	if summary := strings.TrimSpace(workOrder.Summary); summary != "" {
+		b.WriteString(fmt.Sprintf("summary: %s\n", summary))
+	}
+	b.WriteString(fmt.Sprintf("risk_level: %s\n", workOrder.RiskLevel))
+	b.WriteString(fmt.Sprintf("routing_mode: %s\n", workOrder.RoutingMode))
+	if workOrder.PreferredProvider != "" {
+		b.WriteString(fmt.Sprintf("preferred_provider: %s\n", workOrder.PreferredProvider))
+	}
+	if workOrder.MaxContextBudget > 0 {
+		b.WriteString(fmt.Sprintf("max_context_budget: %d\n", workOrder.MaxContextBudget))
+	}
+	if len(workOrder.OwnedFiles) > 0 {
+		b.WriteString("owned_files:\n")
+		for _, path := range workOrder.OwnedFiles {
+			b.WriteString(fmt.Sprintf("- %s\n", path))
+		}
+	}
+	if len(workOrder.RequiredFiles) > 0 {
+		b.WriteString("required_files:\n")
+		for _, path := range workOrder.RequiredFiles {
+			b.WriteString(fmt.Sprintf("- %s\n", path))
+		}
+	}
+	if len(workOrder.ReadableFiles) > 0 {
+		b.WriteString("readable_files:\n")
+		for _, path := range workOrder.ReadableFiles {
+			b.WriteString(fmt.Sprintf("- %s\n", path))
+		}
+	}
+	if len(workOrder.ForbiddenFiles) > 0 {
+		b.WriteString("forbidden_files:\n")
+		for _, path := range workOrder.ForbiddenFiles {
+			b.WriteString(fmt.Sprintf("- %s\n", path))
+		}
+	}
+	if len(workOrder.RequiredOutputs) > 0 {
+		b.WriteString("required_outputs:\n")
+		for _, output := range workOrder.RequiredOutputs {
+			b.WriteString(fmt.Sprintf("- %s\n", output))
+		}
+	}
+	if len(workOrder.RequiredSymbols) > 0 {
+		b.WriteString("required_exports:\n")
+		for _, symbol := range workOrder.RequiredSymbols {
+			b.WriteString(fmt.Sprintf("- %s\n", symbol))
+		}
+	}
+	if len(workOrder.SurfaceLocalChecks) > 0 {
+		b.WriteString("surface_local_acceptance_checks:\n")
+		for _, check := range workOrder.SurfaceLocalChecks {
+			b.WriteString(fmt.Sprintf("- %s\n", check))
+		}
+	}
+	b.WriteString(fmt.Sprintf("contract_surface: %s\n", workOrder.ContractSlice.Surface))
+	if len(workOrder.ContractSlice.OwnedChecks) > 0 {
+		b.WriteString("contract_owned_checks:\n")
+		for _, check := range workOrder.ContractSlice.OwnedChecks {
+			b.WriteString(fmt.Sprintf("- %s\n", check))
+		}
+	}
+	if len(workOrder.ContractSlice.RelevantRoutes) > 0 {
+		b.WriteString("contract_relevant_routes:\n")
+		for _, route := range workOrder.ContractSlice.RelevantRoutes {
+			b.WriteString(fmt.Sprintf("- %s\n", route))
+		}
+	}
+	if len(workOrder.ContractSlice.RelevantEnvVars) > 0 {
+		b.WriteString("contract_relevant_env_vars:\n")
+		for _, env := range workOrder.ContractSlice.RelevantEnvVars {
+			b.WriteString(fmt.Sprintf("- %s\n", env))
+		}
+	}
+	if len(workOrder.ContractSlice.RelevantModels) > 0 {
+		b.WriteString("contract_relevant_models:\n")
+		for _, model := range workOrder.ContractSlice.RelevantModels {
+			b.WriteString(fmt.Sprintf("- %s\n", model))
+		}
+	}
+	if len(workOrder.ContractSlice.TruthTags) > 0 {
+		b.WriteString("contract_truth_tags:\n")
+		for _, tag := range workOrder.ContractSlice.TruthTags {
+			b.WriteString(fmt.Sprintf("- %s\n", tag))
+		}
+	}
+	b.WriteString("</work_order_artifact>\n")
+	return b.String()
+}
+
 func coordinationProtocolPrompt(workOrder *BuildWorkOrder) string {
 	if workOrder == nil {
 		return ""

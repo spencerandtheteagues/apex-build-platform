@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	taskStartAckPattern        = regexp.MustCompile(`(?s)<task_start_ack>\s*(\{.*?\})\s*</task_start_ack>`)
+	taskStartAckPattern         = regexp.MustCompile(`(?s)<task_start_ack>\s*(\{.*?\})\s*</task_start_ack>`)
 	taskCompletionReportPattern = regexp.MustCompile(`(?s)<task_completion_report>\s*(\{.*?\})\s*</task_completion_report>`)
 )
 
@@ -47,9 +47,9 @@ func (am *AgentManager) executeStructuredPlanningTask(ctx context.Context, task 
 	return &TaskOutput{
 		Messages: []string{summarizeBuildPlan(plan)},
 		Metrics: map[string]any{
-			"spec_hash":    plan.SpecHash,
-			"scaffold_id":  plan.ScaffoldID,
-			"work_orders":  len(plan.WorkOrders),
+			"spec_hash":     plan.SpecHash,
+			"scaffold_id":   plan.ScaffoldID,
+			"work_orders":   len(plan.WorkOrders),
 			"planned_files": len(plan.Files),
 		},
 		Plan: plan,
@@ -88,17 +88,61 @@ func taskRequiresCoordinationCheckins(task *Task) bool {
 	return required
 }
 
+func taskArtifactWorkOrderFromInput(task *Task) *WorkOrder {
+	if task == nil || task.Input == nil {
+		return nil
+	}
+	switch raw := task.Input["work_order_artifact"].(type) {
+	case *WorkOrder:
+		if raw == nil {
+			return nil
+		}
+		return cloneWorkOrderArtifact(raw)
+	case WorkOrder:
+		return cloneWorkOrderArtifact(&raw)
+	default:
+		if raw == nil {
+			return nil
+		}
+		payload, err := json.Marshal(raw)
+		if err != nil {
+			return nil
+		}
+		var order WorkOrder
+		if err := json.Unmarshal(payload, &order); err != nil {
+			return nil
+		}
+		return cloneWorkOrderArtifact(&order)
+	}
+}
+
 func taskWorkOrderFromInput(task *Task) *BuildWorkOrder {
 	if task == nil || task.Input == nil {
 		return nil
 	}
 	switch raw := task.Input["work_order"].(type) {
 	case *BuildWorkOrder:
-		return raw
+		if raw == nil {
+			return nil
+		}
+		order := *raw
+		return &order
 	case BuildWorkOrder:
 		order := raw
 		return &order
 	default:
+		if raw != nil {
+			payload, err := json.Marshal(raw)
+			if err == nil {
+				var order BuildWorkOrder
+				if err := json.Unmarshal(payload, &order); err == nil {
+					return &order
+				}
+			}
+		}
+		if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil {
+			return legacyBuildWorkOrderFromArtifact(artifact)
+		}
 		return nil
 	}
 }

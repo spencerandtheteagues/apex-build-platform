@@ -3,8 +3,8 @@
 package agents
 
 import (
-	apihandlers "apex-build/internal/handlers"
 	"apex-build/internal/applog"
+	apihandlers "apex-build/internal/handlers"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -324,12 +324,16 @@ func (c *WSConnection) readPump(updateChan chan *WSMessage, forwardDone chan str
 // handleMessage processes incoming WebSocket messages
 func (c *WSConnection) handleMessage(message []byte) {
 	var msg struct {
-		Type         string         `json:"type"`
-		Content      string         `json:"content"`
-		Message      string         `json:"message"`
-		ClientToken  string         `json:"client_token"`
-		CheckpointID string         `json:"checkpoint_id"`
-		Data         map[string]any `json:"data"`
+		Type            string         `json:"type"`
+		Content         string         `json:"content"`
+		Message         string         `json:"message"`
+		ClientToken     string         `json:"client_token"`
+		CheckpointID    string         `json:"checkpoint_id"`
+		Command         string         `json:"command"`
+		TargetMode      string         `json:"target_mode"`
+		TargetAgentID   string         `json:"target_agent_id"`
+		TargetAgentRole string         `json:"target_agent_role"`
+		Data            map[string]any `json:"data"`
 	}
 
 	if err := json.Unmarshal(message, &msg); err != nil {
@@ -338,13 +342,23 @@ func (c *WSConnection) handleMessage(message []byte) {
 	}
 
 	msgType := strings.ToLower(strings.TrimSpace(msg.Type))
-	command := strings.ToLower(strings.TrimSpace(stringValue(msg.Data["command"])))
+	command := strings.ToLower(strings.TrimSpace(firstNonEmpty(msg.Command, stringValue(msg.Data["command"]))))
 	content := firstNonEmpty(msg.Content, msg.Message, stringValue(msg.Data["content"]), stringValue(msg.Data["message"]))
 	clientToken := firstNonEmpty(msg.ClientToken, stringValue(msg.Data["client_token"]))
+	targetMode := firstNonEmpty(msg.TargetMode, stringValue(msg.Data["target_mode"]))
+	targetAgentID := firstNonEmpty(msg.TargetAgentID, stringValue(msg.Data["target_agent_id"]))
+	targetAgentRole := firstNonEmpty(msg.TargetAgentRole, stringValue(msg.Data["target_agent_role"]))
 
 	switch msgType {
 	case "user:message", "user_message":
-		if err := c.hub.manager.SendMessageWithClientToken(c.buildID, content, clientToken); err != nil {
+		if command == "restart_failed" {
+			if err := c.hub.manager.RestartFailedBuildWithClientToken(c.buildID, content, clientToken); err != nil {
+				log.Printf("Failed to restart failed build: %v", err)
+			}
+			return
+		}
+		target := normalizeBuildMessageTarget(targetMode, targetAgentID, targetAgentRole)
+		if err := c.hub.manager.sendTargetedMessageWithClientToken(c.buildID, content, clientToken, target); err != nil {
 			log.Printf("Failed to send message to lead agent: %v", err)
 		}
 
