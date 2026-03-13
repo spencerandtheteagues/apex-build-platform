@@ -125,6 +125,33 @@ Relevant files:
 - `frontend/src/components/builder/AppBuilder.tsx`
 - `frontend/src/services/api.ts`
 
+### 2.7 Use The Project Gemini Agents
+
+Project subagents now live in `.gemini/agents/`. Use them deliberately instead of relying on vague implicit routing.
+
+For the current remaining work:
+- section `3.1`:
+  - primary `apex-repair-ladder-marshal`
+  - support `apex-provider-economics-analyst`
+  - support `apex-regression-sentinel`
+- section `3.2`:
+  - primary `apex-patch-promotion-foreman`
+  - support `apex-surface-verification-judge`
+  - support `apex-regression-sentinel`
+- section `3.3`:
+  - primary `apex-surface-verification-judge`
+  - support `apex-repair-ladder-marshal`
+  - support `apex-regression-sentinel`
+- section `3.4`:
+  - primary `apex-surface-verification-judge`
+  - support `apex-orchestration-architect`
+
+Rules:
+1. Use one primary owner and at most two support agents.
+2. Keep write scope narrow and explicit.
+3. Do not send broad "fix everything" prompts to the generalist path.
+4. Read `GEMINI.md` before starting.
+
 ## 3. Remaining Work Only
 
 Do not repeat finished slices. Start here.
