@@ -33,7 +33,20 @@ func testRouter(am *AgentManager) *gin.Engine {
 	build.POST("/preflight", h.PreflightCheck)
 	build.POST("/start", h.StartBuild)
 	build.POST("/:id/message", h.SendMessage)
+	build.POST("/:id/pause", h.PauseBuild)
+	build.POST("/:id/resume", h.ResumeBuild)
+	build.POST("/:id/cancel", h.CancelBuild)
+	build.GET("/:id/checkpoints", h.GetCheckpoints)
+	build.GET("/:id/agents", h.GetAgents)
+	build.GET("/:id/tasks", h.GetTasks)
+	build.GET("/:id/proposed-edits", h.GetProposedEdits)
+	build.POST("/:id/approve-edits", h.ApproveEdits)
+	build.POST("/:id/reject-edits", h.RejectEdits)
+	build.POST("/:id/approve-all", h.ApproveAllEdits)
+	build.POST("/:id/reject-all", h.RejectAllEdits)
+	build.GET("/:id", h.GetBuildDetails)
 	rg := r.Group("/api/v1", auth)
+	rg.GET("/builds/:buildId", h.GetCompletedBuild)
 	rg.GET("/builds/:buildId/download", h.DownloadCompletedBuild)
 	return r
 }
@@ -45,7 +58,7 @@ func openBuildTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&models.User{}, &models.UserAPIKey{}, &models.CompletedBuild{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.UserAPIKey{}, &models.CompletedBuild{}, &proposedEditRow{}); err != nil {
 		t.Fatalf("migrate sqlite: %v", err)
 	}
 	return db
@@ -299,6 +312,514 @@ func TestSendMessageRestoresSnapshotBackedBuildSession(t *testing.T) {
 	}
 	if len(restored.Interaction.Messages) == 0 {
 		t.Fatalf("expected restored build interaction to contain the user message")
+	}
+}
+
+func TestGetBuildDetailsIncludesSnapshotState(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "activity-build",
+		UserID:      1,
+		Description: "Build a preview-first dashboard",
+		Status:      "completed",
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    100,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"agent-1",
+			"role":"architect",
+			"provider":"claude",
+			"status":"completed",
+			"progress":100,
+			"current_task":{"id":"task-1","type":"plan","description":"Plan the preview handoff"}
+		}]`,
+		TasksJSON: `[{
+			"id":"task-1",
+			"type":"plan",
+			"description":"Plan the preview handoff",
+			"assigned_to":"agent-1",
+			"status":"completed"
+		}]`,
+		CheckpointsJSON: `[{
+			"id":"checkpoint-1",
+			"build_id":"activity-build",
+			"number":1,
+			"name":"Plan Ready",
+			"description":"Initial plan completed",
+			"progress":35,
+			"restorable":false,
+			"created_at":"2026-03-12T11:58:00Z"
+		}]`,
+		ActivityJSON: `[{
+			"id":"activity-1",
+			"agent_id":"agent-1",
+			"agent_role":"architect",
+			"provider":"claude",
+			"type":"thinking",
+			"event_type":"agent:thinking",
+			"content":"Planning preview handoff",
+			"timestamp":"2026-03-12T12:00:00Z"
+		}]`,
+		StateJSON: `{
+			"current_phase":"completed",
+			"quality_gate_required":true,
+			"quality_gate_status":"passed",
+			"quality_gate_stage":"validation",
+			"available_providers":["claude","gpt4"]
+		}`,
+	}).Error; err != nil {
+		t.Fatalf("create completed build: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/activity-build", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	timeline, ok := body["activity_timeline"].([]any)
+	if !ok || len(timeline) != 1 {
+		t.Fatalf("expected 1 activity timeline entry, got %v", body["activity_timeline"])
+	}
+	entry, ok := timeline[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected activity entry object, got %T", timeline[0])
+	}
+	if entry["agent_role"] != "architect" {
+		t.Fatalf("expected architect role, got %v", entry["agent_role"])
+	}
+	if entry["content"] != "Planning preview handoff" {
+		t.Fatalf("expected persisted activity content, got %v", entry["content"])
+	}
+	agents, ok := body["agents"].([]any)
+	if !ok || len(agents) != 1 {
+		t.Fatalf("expected 1 persisted agent, got %v", body["agents"])
+	}
+	tasks, ok := body["tasks"].([]any)
+	if !ok || len(tasks) != 1 {
+		t.Fatalf("expected 1 persisted task, got %v", body["tasks"])
+	}
+	checkpoints, ok := body["checkpoints"].([]any)
+	if !ok || len(checkpoints) != 1 {
+		t.Fatalf("expected 1 persisted checkpoint, got %v", body["checkpoints"])
+	}
+	checkpoint, ok := checkpoints[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected checkpoint object, got %T", checkpoints[0])
+	}
+	if checkpoint["restorable"] != false {
+		t.Fatalf("expected historical checkpoint restorable=false, got %v", checkpoint["restorable"])
+	}
+	if body["current_phase"] != "completed" {
+		t.Fatalf("expected persisted current_phase=completed, got %v", body["current_phase"])
+	}
+	if body["quality_gate_required"] != true {
+		t.Fatalf("expected persisted quality_gate_required=true, got %v", body["quality_gate_required"])
+	}
+	if body["quality_gate_passed"] != true {
+		t.Fatalf("expected persisted quality_gate_passed=true, got %v", body["quality_gate_passed"])
+	}
+	if body["quality_gate_stage"] != "validation" {
+		t.Fatalf("expected persisted quality_gate_stage=validation, got %v", body["quality_gate_stage"])
+	}
+	providers, ok := body["available_providers"].([]any)
+	if !ok || len(providers) != 2 {
+		t.Fatalf("expected persisted available providers, got %v", body["available_providers"])
+	}
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/v1/builds/activity-build", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected completed build 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	body = map[string]any{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal completed build response: %v", err)
+	}
+	if body["current_phase"] != "completed" {
+		t.Fatalf("expected completed build current_phase=completed, got %v", body["current_phase"])
+	}
+	if body["quality_gate_passed"] != true {
+		t.Fatalf("expected completed build quality_gate_passed=true, got %v", body["quality_gate_passed"])
+	}
+}
+
+func TestSnapshotReadEndpointsFallbackToPersistedState(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "snapshot-read-build",
+		UserID:      1,
+		Description: "Build a snapshot-readable dashboard",
+		Status:      "completed",
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    100,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"agent-1",
+			"role":"architect",
+			"provider":"claude",
+			"status":"completed",
+			"progress":100
+		}]`,
+		TasksJSON: `[{
+			"id":"task-1",
+			"type":"plan",
+			"description":"Plan the restore flow",
+			"status":"completed"
+		}]`,
+		CheckpointsJSON: `[{
+			"id":"checkpoint-1",
+			"build_id":"snapshot-read-build",
+			"number":1,
+			"name":"Plan Ready",
+			"description":"Initial plan completed",
+			"progress":35,
+			"restorable":false,
+			"created_at":"2026-03-12T11:58:00Z"
+		}]`,
+	}).Error; err != nil {
+		t.Fatalf("create completed build: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+
+	tests := []struct {
+		path      string
+		countKey  string
+		wantCount float64
+	}{
+		{path: "/api/v1/build/snapshot-read-build/checkpoints", countKey: "count", wantCount: 1},
+		{path: "/api/v1/build/snapshot-read-build/agents", countKey: "count", wantCount: 1},
+		{path: "/api/v1/build/snapshot-read-build/tasks", countKey: "total", wantCount: 1},
+	}
+
+	for _, tc := range tests {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", tc.path, nil)
+		testRouter(am).ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d: %s", tc.path, w.Code, w.Body.String())
+		}
+
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s: unmarshal response: %v", tc.path, err)
+		}
+		if body["live"] != false {
+			t.Fatalf("%s: expected live=false, got %v", tc.path, body["live"])
+		}
+		if body[tc.countKey] != tc.wantCount {
+			t.Fatalf("%s: expected %s=%v, got %v", tc.path, tc.countKey, tc.wantCount, body[tc.countKey])
+		}
+	}
+}
+
+func TestApproveAllEditsRestoresAwaitingReviewSnapshot(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "review-build",
+		UserID:      1,
+		Description: "Review and approve the generated homepage",
+		Status:      "awaiting_review",
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    82,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"lead-1",
+			"role":"lead",
+			"provider":"claude",
+			"status":"working",
+			"build_id":"review-build",
+			"progress":82
+		}]`,
+	}).Error; err != nil {
+		t.Fatalf("create review snapshot: %v", err)
+	}
+
+	editStore := NewProposedEditStoreWithDB(db)
+	editStore.AddProposedEdits("review-build", []*ProposedEdit{
+		{
+			AgentID:         "lead-1",
+			AgentRole:       string(RoleLead),
+			TaskID:          "task-1",
+			FilePath:        "src/App.tsx",
+			OriginalContent: "",
+			ProposedContent: "export default function App(){return <main>Approved</main>}\n",
+			Language:        "typescript",
+		},
+	})
+
+	am := &AgentManager{
+		db: db,
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		editStore:   editStore,
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/review-build/proposed-edits", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected proposed edits 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal proposed edits response: %v", err)
+	}
+	if body["count"] != float64(1) {
+		t.Fatalf("expected one proposed edit, got %v", body["count"])
+	}
+	if body["live"] != false {
+		t.Fatalf("expected proposed edits response to come from snapshot, got %v", body["live"])
+	}
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/v1/build/review-build/approve-all", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected approve-all 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	body = map[string]any{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal approve-all response: %v", err)
+	}
+	if body["restored_session"] != true {
+		t.Fatalf("expected restored_session=true, got %v", body["restored_session"])
+	}
+
+	build, err := am.GetBuild("review-build")
+	if err != nil {
+		t.Fatalf("expected restored live build session: %v", err)
+	}
+	if build.Status != BuildInProgress {
+		t.Fatalf("expected restored build to resume in_progress, got %s", build.Status)
+	}
+	files := am.collectGeneratedFiles(build)
+	if len(files) != 1 || files[0].Path != "src/App.tsx" {
+		t.Fatalf("expected approved edits to become generated files, got %+v", files)
+	}
+	if pending := am.editStore.GetPendingEdits("review-build"); len(pending) != 0 {
+		t.Fatalf("expected pending edits to be cleared, got %d", len(pending))
+	}
+}
+
+func TestPauseAndResumeRestoreActiveSnapshot(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "paused-build",
+		UserID:      1,
+		Description: "Pause and resume a restored snapshot",
+		Status:      "in_progress",
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    58,
+		FilesJSON:   "[]",
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db: db,
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		editStore:   NewProposedEditStoreWithDB(db),
+	}
+
+	body, _ := json.Marshal(map[string]string{"reason": "Need to inspect the current output"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/paused-build/pause", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected pause 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal pause response: %v", err)
+	}
+	if response["restored_session"] != true {
+		t.Fatalf("expected restored_session=true, got %v", response["restored_session"])
+	}
+	interaction, ok := response["interaction"].(map[string]any)
+	if !ok || interaction["paused"] != true {
+		t.Fatalf("expected paused interaction response, got %v", response["interaction"])
+	}
+
+	build, err := am.GetBuild("paused-build")
+	if err != nil {
+		t.Fatalf("expected restored build: %v", err)
+	}
+	if !build.Interaction.Paused {
+		t.Fatalf("expected restored build to be paused")
+	}
+
+	body, _ = json.Marshal(map[string]string{"reason": "Continue building"})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/v1/build/paused-build/resume", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected resume 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	response = map[string]any{}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal resume response: %v", err)
+	}
+	if response["restored_session"] != false {
+		t.Fatalf("expected resume to use existing live session, got %v", response["restored_session"])
+	}
+	if build.Interaction.Paused {
+		t.Fatalf("expected resumed build to clear paused state")
+	}
+}
+
+func TestCancelRestoresActiveSnapshotAndPersistsTerminalState(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "cancel-build",
+		UserID:      1,
+		Description: "Cancel a restored snapshot",
+		Status:      "reviewing",
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    91,
+		FilesJSON:   "[]",
+	}).Error; err != nil {
+		t.Fatalf("create review snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db: db,
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		editStore:   NewProposedEditStoreWithDB(db),
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/cancel-build/cancel", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected cancel 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal cancel response: %v", err)
+	}
+	if response["restored_session"] != true {
+		t.Fatalf("expected restored_session=true, got %v", response["restored_session"])
+	}
+
+	build, err := am.GetBuild("cancel-build")
+	if err != nil {
+		t.Fatalf("expected restored build after cancel: %v", err)
+	}
+	if build.Status != BuildCancelled {
+		t.Fatalf("expected cancelled build status, got %s", build.Status)
+	}
+
+	var snapshot models.CompletedBuild
+	if err := db.Where("build_id = ?", "cancel-build").First(&snapshot).Error; err != nil {
+		t.Fatalf("fetch cancelled snapshot: %v", err)
+	}
+	if snapshot.Status != string(BuildCancelled) {
+		t.Fatalf("expected persisted snapshot status cancelled, got %s", snapshot.Status)
+	}
+	if snapshot.Error != "cancelled by user" {
+		t.Fatalf("expected persisted cancel error, got %s", snapshot.Error)
+	}
+}
+
+func TestPauseBuildRejectsTerminalSnapshotWithoutRestoringSession(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "completed-build",
+		UserID:      1,
+		Description: "Completed build should stay terminal",
+		Status:      "completed",
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    100,
+		FilesJSON:   "[]",
+	}).Error; err != nil {
+		t.Fatalf("create completed snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db: db,
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		editStore:   NewProposedEditStoreWithDB(db),
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/completed-build/pause", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected pause 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if _, err := am.GetBuild("completed-build"); err == nil {
+		t.Fatalf("expected terminal snapshot not to restore into a live build session")
 	}
 }
 

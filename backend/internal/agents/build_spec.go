@@ -643,7 +643,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			},
 			EnvVars: []BuildEnvVar{
 				{Name: "PORT", Example: "3001", Purpose: "Backend listen port", Required: true},
-				{Name: "VITE_API_BASE_URL", Example: "http://localhost:3001", Purpose: "Frontend API base URL", Required: false},
+				{Name: "VITE_API_URL", Example: "http://localhost:3001", Purpose: "Frontend API base URL", Required: false},
 				{Name: "DATABASE_URL", Example: "postgresql://postgres:postgres@localhost:5432/app", Purpose: "Backend database connection", Required: backend != ""},
 			},
 			Acceptance: []BuildAcceptanceCheck{
@@ -691,7 +691,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			},
 			EnvVars: []BuildEnvVar{
 				{Name: "PORT", Example: "8080", Purpose: "Backend listen port", Required: true},
-				{Name: "VITE_API_BASE_URL", Example: "http://localhost:8080", Purpose: "Frontend API base URL", Required: false},
+				{Name: "VITE_API_URL", Example: "http://localhost:8080", Purpose: "Frontend API base URL", Required: false},
 				{Name: "DATABASE_URL", Example: "postgresql://postgres:postgres@localhost:5432/app", Purpose: "Backend database connection", Required: stack.Database != ""},
 			},
 			Acceptance: []BuildAcceptanceCheck{
@@ -739,7 +739,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			},
 			EnvVars: []BuildEnvVar{
 				{Name: "PORT", Example: "8000", Purpose: "Backend listen port", Required: true},
-				{Name: "VITE_API_BASE_URL", Example: "http://localhost:8000", Purpose: "Frontend API base URL", Required: false},
+				{Name: "VITE_API_URL", Example: "http://localhost:8000", Purpose: "Frontend API base URL", Required: false},
 				{Name: "DATABASE_URL", Example: "postgresql://postgres:postgres@localhost:5432/app", Purpose: "Backend database connection", Required: stack.Database != ""},
 			},
 			Acceptance: []BuildAcceptanceCheck{
@@ -954,7 +954,7 @@ func scaffoldBootstrapFiles(scaffold buildScaffold, description string, stack Te
 
 	switch scaffold.ID {
 	case "fullstack/react-vite-express-ts":
-		add(".env.example", "PORT=3001\nVITE_API_BASE_URL=http://localhost:3001\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
+		add(".env.example", "PORT=3001\nVITE_API_URL=http://localhost:3001\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
 		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this project with a deterministic React + Vite + Express scaffold.\n\n## Run\n\n1. Install dependencies with `npm install`\n2. Start the frontend and backend with `npm run dev`\n3. Open `http://localhost:5173`\n\n## Environment\n\nCopy `.env.example` and provide real values before production use.\n", displayName))
 		add("package.json", fmt.Sprintf(`{
   "name": "%s",
@@ -1023,7 +1023,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: process.env.VITE_API_BASE_URL || "http://localhost:3001",
+        target: process.env.VITE_API_URL || process.env.VITE_API_BASE_URL || "http://localhost:3001",
         changeOrigin: true
       }
     }
@@ -1065,6 +1065,18 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <App />
   </React.StrictMode>
 );`)
+		add("src/vite-env.d.ts", `/// <reference types="vite/client" />
+
+interface ImportMetaEnv {
+  readonly [key: string]: string | boolean | undefined
+  readonly VITE_API_URL?: string
+  readonly VITE_API_BASE_URL?: string
+  readonly VITE_WS_URL?: string
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}`)
 		add("src/App.tsx", fmt.Sprintf(`import { useEffect, useState } from "react";
 
 type HealthState = {
@@ -1280,6 +1292,18 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <App />
   </React.StrictMode>
 );`)
+		add("src/vite-env.d.ts", `/// <reference types="vite/client" />
+
+interface ImportMetaEnv {
+  readonly [key: string]: string | boolean | undefined
+  readonly VITE_API_URL?: string
+  readonly VITE_API_BASE_URL?: string
+  readonly VITE_WS_URL?: string
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}`)
 		add("src/App.tsx", fmt.Sprintf(`export default function App() {
   return (
     <main className="app-shell">
@@ -1355,7 +1379,7 @@ func main() {
 	}
 }`, displayName, displayName))
 	case "fullstack/react-vite-go":
-		add(".env.example", "PORT=8080\nVITE_API_BASE_URL=http://localhost:8080\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
+		add(".env.example", "PORT=8080\nVITE_API_URL=http://localhost:8080\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
 		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this React + Vite + Go scaffold.\n\n## Run\n\n1. Install frontend deps: `npm install`\n2. Start Go backend: `go run .`\n3. Start frontend: `npm run dev`\n4. Open `http://localhost:5173`\n", displayName))
 		add("go.mod", fmt.Sprintf("module %s\n\ngo 1.23.0\n", strings.ReplaceAll(packageName, "-", "")))
 		add("main.go", fmt.Sprintf(`package main
@@ -1472,6 +1496,18 @@ import "./index.css";
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode><App /></React.StrictMode>
 );`)
+		add("src/vite-env.d.ts", `/// <reference types="vite/client" />
+
+interface ImportMetaEnv {
+  readonly [key: string]: string | boolean | undefined
+  readonly VITE_API_URL?: string
+  readonly VITE_API_BASE_URL?: string
+  readonly VITE_WS_URL?: string
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}`)
 		add("src/App.tsx", fmt.Sprintf(`import { useEffect, useState } from "react";
 
 export default function App() {
@@ -1498,7 +1534,7 @@ export default function App() {
 @tailwind utilities;`)
 
 	case "fullstack/react-vite-fastapi":
-		add(".env.example", "PORT=8000\nVITE_API_BASE_URL=http://localhost:8000\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
+		add(".env.example", "PORT=8000\nVITE_API_URL=http://localhost:8000\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
 		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this React + Vite + FastAPI scaffold.\n\n## Run\n\n1. Install frontend deps: `npm install`\n2. Install Python deps: `pip install -r requirements.txt`\n3. Start backend: `uvicorn main:app --port 8000 --reload`\n4. Start frontend: `npm run dev`\n5. Open `http://localhost:5173`\n", displayName))
 		add("requirements.txt", "fastapi>=0.115.0\nuvicorn[standard]>=0.34.0\npython-dotenv>=1.1.0\n")
 		add("main.py", fmt.Sprintf(`import os
@@ -1599,6 +1635,18 @@ import "./index.css";
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode><App /></React.StrictMode>
 );`)
+		add("src/vite-env.d.ts", `/// <reference types="vite/client" />
+
+interface ImportMetaEnv {
+  readonly [key: string]: string | boolean | undefined
+  readonly VITE_API_URL?: string
+  readonly VITE_API_BASE_URL?: string
+  readonly VITE_WS_URL?: string
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}`)
 		add("src/App.tsx", fmt.Sprintf(`import { useEffect, useState } from "react";
 
 export default function App() {

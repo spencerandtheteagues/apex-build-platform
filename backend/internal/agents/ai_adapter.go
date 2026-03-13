@@ -267,7 +267,7 @@ For code files, use this exact format:
 	genCtx := ctx
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var genCancel context.CancelFunc
-		genCtx, genCancel = context.WithTimeout(ctx, 90*time.Second)
+		genCtx, genCancel = context.WithTimeout(ctx, defaultGenerateTimeout(aiProvider, opts.PowerMode))
 		defer genCancel()
 	}
 

@@ -66,6 +66,9 @@ func TestCompleteOrchestrationUsesManagerReadinessGate(t *testing.T) {
 	build.mu.RLock()
 	defer build.mu.RUnlock()
 
+	if !build.PhasedPipelineComplete {
+		t.Fatalf("expected completeOrchestration to mark phased pipeline complete")
+	}
 	if build.Status == BuildCompleted {
 		t.Fatalf("expected orchestrator completion to respect readiness validation and avoid completed status")
 	}

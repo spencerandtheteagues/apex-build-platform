@@ -449,7 +449,7 @@ export default function LivePreview({
   }, [autoStart, projectId])
 
   // Stop preview
-  const stopPreview = async () => {
+  const stopPreview = useCallback(async (options?: { silent?: boolean }) => {
     setLoading(true)
     try {
       await apiService.client.post('/preview/stop', {
@@ -463,12 +463,26 @@ export default function LivePreview({
       setConnected(false)
       setActiveSandbox(false)
       setServerStatus(null)
+      return true
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to stop preview')
+      if (!options?.silent) {
+        setError(err.response?.data?.error || 'Failed to stop preview')
+      }
+      return false
     } finally {
       setLoading(false)
     }
-  }
+  }, [activeSandbox, projectId])
+
+  const restartPreview = useCallback(async () => {
+    if (loading) return
+    setError(null)
+    setIframeError(null)
+    if (status?.active) {
+      await stopPreview({ silent: true })
+    }
+    await startPreview()
+  }, [loading, startPreview, status?.active, stopPreview])
 
   // Refresh preview
   const refreshPreview = async () => {
@@ -575,13 +589,21 @@ export default function LivePreview({
   }, [projectId])
 
   // Fetch logs when showing server logs panel
-  useEffect(() => {
-    if (showServerLogs && serverStatus?.running) {
-      fetchServerLogs()
-      const interval = setInterval(fetchServerLogs, 2000)
-      return () => clearInterval(interval)
+  const toggleServerLogs = useCallback(async () => {
+    const next = !showServerLogs
+    setShowServerLogs(next)
+    if (next) {
+      await fetchServerLogs()
     }
-  }, [showServerLogs, serverStatus?.running, fetchServerLogs])
+  }, [fetchServerLogs, showServerLogs])
+
+  useEffect(() => {
+    if (!showServerLogs || !serverDetection?.has_backend) return
+    fetchServerLogs()
+    if (!serverStatus?.running) return
+    const interval = setInterval(fetchServerLogs, 2000)
+    return () => clearInterval(interval)
+  }, [fetchServerLogs, serverDetection?.has_backend, serverStatus?.running, showServerLogs])
 
   // Toggle fullscreen
   const toggleFullscreen = () => {
@@ -691,7 +713,7 @@ export default function LivePreview({
           {/* Play/Stop button */}
           {status?.active ? (
             <button
-              onClick={stopPreview}
+              onClick={() => { void stopPreview() }}
               disabled={loading}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-md text-sm transition-colors disabled:opacity-50"
             >
@@ -709,12 +731,24 @@ export default function LivePreview({
             </button>
           )}
 
+          {status?.active && (
+            <button
+              onClick={() => { void restartPreview() }}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 rounded-md text-sm transition-colors disabled:opacity-50"
+              title="Restart preview runtime"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              Restart
+            </button>
+          )}
+
           {/* Refresh button */}
           <button
             onClick={refreshPreview}
             disabled={!status?.active || loading}
             className="p-1.5 hover:bg-gray-700 rounded-md text-gray-400 hover:text-white transition-colors disabled:opacity-50"
-            title="Refresh"
+            title="Reload frame"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -763,10 +797,10 @@ export default function LivePreview({
               )}
 
               {/* Server logs button */}
-              {serverStatus?.running && (
+              {(serverStatus?.running || serverDetection?.entry_file || serverStatus?.last_error || serverStatus?.exit_code !== undefined) && (
                 <button
-                  onClick={() => setShowServerLogs(!showServerLogs)}
-                  className={`p-1.5 rounded-md transition-colors ${
+                  onClick={() => { void toggleServerLogs() }}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
                     showServerLogs
                       ? 'bg-purple-600 text-white'
                       : 'hover:bg-gray-700 text-gray-400 hover:text-white'
@@ -774,6 +808,7 @@ export default function LivePreview({
                   title="Server Logs"
                 >
                   <FileText className="w-3.5 h-3.5" />
+                  <span>{showServerLogs ? 'Hide Logs' : 'Logs'}</span>
                 </button>
               )}
             </div>
@@ -991,6 +1026,53 @@ export default function LivePreview({
         </div>
       )}
 
+      {activeTab === 'preview' && (
+        <div className="grid grid-cols-1 gap-2 border-b border-gray-800 bg-gray-950/70 px-3 py-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-3">
+            <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Preview Runtime</div>
+            <div className="mt-2 text-sm font-semibold text-white">
+              {status?.active ? `Port ${status.port}` : 'Stopped'}
+            </div>
+            <div className="mt-1 text-xs text-gray-400">
+              {activeSandbox ? 'Docker sandbox' : sandboxRequired && sandboxDegraded ? 'Process fallback mode' : 'Process mode'}
+            </div>
+          </div>
+          <div className="rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-3">
+            <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Backend API</div>
+            <div className="mt-2 text-sm font-semibold text-white">
+              {!serverDetection?.has_backend
+                ? 'Not detected'
+                : !backendPreviewAvailable
+                  ? 'Preview disabled'
+                  : serverStatus?.running
+                    ? `Running on :${serverStatus.port}`
+                    : 'Detected, stopped'}
+            </div>
+            <div className="mt-1 text-xs text-gray-400">
+              {serverDetection?.framework || serverDetection?.server_type || backendPreviewReason || 'No backend runtime'}
+            </div>
+          </div>
+          <div className="rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-3">
+            <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Environment</div>
+            <div className="mt-2 text-sm font-semibold text-white">
+              {bundlerAvailable ? 'Bundler ready' : 'Bundler unavailable'}
+            </div>
+            <div className="mt-1 text-xs text-gray-400">
+              Auto-refresh {autoRefreshEnabled ? 'on' : 'off'} · DevTools {showDevTools ? 'on' : 'off'}
+            </div>
+          </div>
+          <div className="rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-3">
+            <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Route</div>
+            <div className="mt-2 truncate text-sm font-semibold text-white">
+              {customPath.trim() || '/'}
+            </div>
+            <div className="mt-1 truncate text-xs text-gray-400">
+              {status?.started_at ? `Started ${new Date(status.started_at).toLocaleTimeString()}` : 'Not started yet'}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tab Content */}
       <div className="flex-1 overflow-hidden">
         {/* Preview Tab */}
@@ -1092,14 +1174,14 @@ export default function LivePreview({
       </div>
 
       {/* Server Logs Panel - slides up from bottom */}
-      {showServerLogs && serverStatus?.running && (
+      {showServerLogs && serverDetection?.has_backend && (
         <div className="border-t border-gray-700 bg-gray-900 max-h-64 overflow-hidden flex flex-col">
           <div className="flex items-center justify-between px-3 py-2 bg-gray-800/50 border-b border-gray-700">
             <div className="flex items-center gap-2">
               <Server className="w-4 h-4 text-purple-400" />
               <span className="text-sm font-medium text-white">Backend Server Logs</span>
               <span className="text-xs text-gray-500">
-                {serverDetection?.framework || serverDetection?.server_type} | Port {serverStatus.port}
+                {serverDetection?.framework || serverDetection?.server_type || 'runtime'} | Port {serverStatus?.port ?? 'n/a'}
               </span>
             </div>
             <div className="flex items-center gap-2">

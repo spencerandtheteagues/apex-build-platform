@@ -3676,17 +3676,97 @@ func typePackageForModule(module string) string {
 	return ""
 }
 
+func requiresViteEnvTypeDeclarationRepair(files []GeneratedFile, errors []string) bool {
+	if len(files) == 0 || len(errors) == 0 {
+		return false
+	}
+
+	hasImportMetaTypeError := false
+	for _, msg := range errors {
+		lower := strings.ToLower(strings.TrimSpace(msg))
+		if strings.Contains(lower, "property 'env' does not exist on type 'importmeta'") ||
+			strings.Contains(lower, "cannot find name 'importmetaenv'") ||
+			(strings.Contains(lower, "importmetaenv") && strings.Contains(msg, "VITE_")) {
+			hasImportMetaTypeError = true
+			break
+		}
+	}
+	if !hasImportMetaTypeError {
+		return false
+	}
+
+	for _, file := range files {
+		lowerPath := strings.ToLower(strings.TrimSpace(file.Path))
+		if strings.Contains(lowerPath, "vite.config") || strings.Contains(file.Content, "import.meta.env") {
+			return true
+		}
+	}
+	return false
+}
+
+func viteEnvDeclarationPathFromManifest(manifestPath string) string {
+	sanitized := sanitizeFilePath(manifestPath)
+	if sanitized == "" {
+		return ""
+	}
+	prefix := strings.TrimSuffix(filepath.ToSlash(sanitized), "package.json")
+	return filepath.ToSlash(filepath.Join(prefix, "src", "vite-env.d.ts"))
+}
+
+func viteEnvDeclarationContent() string {
+	return `/// <reference types="vite/client" />
+
+interface ImportMetaEnv {
+  readonly [key: string]: string | boolean | undefined
+  readonly VITE_API_URL?: string
+  readonly VITE_API_BASE_URL?: string
+  readonly VITE_WS_URL?: string
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}
+`
+}
+
+func (am *AgentManager) ensureGeneratedViteEnvDeclaration(build *Build, files []GeneratedFile, manifestPath string) (bool, string) {
+	targetPath := viteEnvDeclarationPathFromManifest(manifestPath)
+	if targetPath == "" {
+		return false, ""
+	}
+
+	content := viteEnvDeclarationContent()
+	targetSanitized := sanitizeFilePath(targetPath)
+	for _, file := range files {
+		if sanitizeFilePath(file.Path) != targetSanitized {
+			continue
+		}
+		if strings.TrimSpace(file.Content) == strings.TrimSpace(content) {
+			return false, ""
+		}
+		if am.patchGeneratedFileContent(build, targetPath, content) {
+			return true, targetPath
+		}
+		return false, ""
+	}
+
+	if am.createGeneratedFile(build, targetPath, content) {
+		return true, targetPath
+	}
+	return false, ""
+}
+
 func (am *AgentManager) applyDeterministicTypeDeclarationRepair(build *Build, readinessErrors []string) (bool, string) {
 	if build == nil || len(readinessErrors) == 0 {
 		return false, ""
 	}
 	typePkgs := parseMissingTypePackagesFromBuildErrors(readinessErrors)
-	if len(typePkgs) == 0 {
-		return false, ""
-	}
-
 	files := am.collectGeneratedFiles(build)
 	if len(files) == 0 {
+		return false, ""
+	}
+	needsViteEnvDeclaration := requiresViteEnvTypeDeclarationRepair(files, readinessErrors)
+	if len(typePkgs) == 0 && !needsViteEnvDeclaration {
 		return false, ""
 	}
 
@@ -3710,25 +3790,32 @@ func (am *AgentManager) applyDeterministicTypeDeclarationRepair(build *Build, re
 		return false, ""
 	}
 
-	var current string
-	for _, f := range files {
-		if strings.EqualFold(sanitizeFilePath(f.Path), sanitizeFilePath(manifestPath)) {
-			current = f.Content
-			break
+	applied := make([]string, 0, 2)
+	if len(typePkgs) > 0 {
+		var current string
+		for _, f := range files {
+			if strings.EqualFold(sanitizeFilePath(f.Path), sanitizeFilePath(manifestPath)) {
+				current = f.Content
+				break
+			}
+		}
+		if strings.TrimSpace(current) != "" {
+			updated, added := patchManifestDependenciesJSON(current, typePkgs)
+			if len(added) > 0 && am.patchGeneratedFileContent(build, manifestPath, updated) {
+				applied = append(applied, fmt.Sprintf("%s (%s)", manifestPath, strings.Join(added, ", ")))
+			}
 		}
 	}
-	if strings.TrimSpace(current) == "" {
-		return false, ""
+	if needsViteEnvDeclaration {
+		if repaired, summary := am.ensureGeneratedViteEnvDeclaration(build, files, manifestPath); repaired {
+			applied = append(applied, summary)
+		}
 	}
 
-	updated, added := patchManifestDependenciesJSON(current, typePkgs)
-	if len(added) == 0 {
+	if len(applied) == 0 {
 		return false, ""
 	}
-	if !am.patchGeneratedFileContent(build, manifestPath, updated) {
-		return false, ""
-	}
-	return true, fmt.Sprintf("%s (%s)", manifestPath, strings.Join(added, ", "))
+	return true, strings.Join(applied, "; ")
 }
 
 // applyDeterministicMixedCodeRepair strips server-framework imports (Express, etc.) from
@@ -4408,56 +4495,299 @@ func (am *AgentManager) updateBuildProgress(build *Build) {
 	am.persistBuildSnapshot(build, nil)
 }
 
-// checkBuildCompletion determines if the build is finished
-func (am *AgentManager) checkBuildCompletion(build *Build) {
-	build.mu.RLock()
-	if build.Interaction.Paused || build.Interaction.WaitingForUser {
-		build.mu.RUnlock()
-		return
+type buildCompletionSnapshot struct {
+	blockedByInteraction      bool
+	allComplete               bool
+	anyFailed                 bool
+	phasedPipelineComplete    bool
+	readinessRecoveryAttempts int
+	currentStatus             BuildStatus
+	hasPendingRevisions       bool
+	completedAtWasNil         bool
+	buildMode                 string
+}
+
+func (am *AgentManager) buildCompletionSnapshot(build *Build) buildCompletionSnapshot {
+	snapshot := buildCompletionSnapshot{
+		allComplete: true,
 	}
-	allComplete := true
-	anyFailed := false
+	if build == nil {
+		snapshot.allComplete = false
+		return snapshot
+	}
+
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+
+	snapshot.blockedByInteraction = build.Interaction.Paused || build.Interaction.WaitingForUser
+	snapshot.phasedPipelineComplete = build.PhasedPipelineComplete
+	snapshot.readinessRecoveryAttempts = build.ReadinessRecoveryAttempts
+	snapshot.currentStatus = build.Status
+	snapshot.hasPendingRevisions = len(build.Interaction.PendingRevisions) > 0
+	snapshot.completedAtWasNil = build.CompletedAt == nil
+	snapshot.buildMode = string(build.Mode)
+
 	for _, task := range build.Tasks {
 		if task.Status != TaskCompleted && task.Status != TaskFailed && task.Status != TaskCancelled {
-			allComplete = false
+			snapshot.allComplete = false
 		}
 		if task.Status == TaskFailed {
-			anyFailed = true
+			snapshot.anyFailed = true
 		}
 	}
-	build.mu.RUnlock()
+	return snapshot
+}
 
-	if !allComplete {
-		return
+type validationRepairSpec struct {
+	apply       func(*Build, []string) (bool, string)
+	errorFormat string
+	message     string
+	summaryKey  string
+}
+
+func maxAutomatedRecoveryAttempts(mode PowerMode) int {
+	switch mode {
+	case PowerMax:
+		return 3
+	case PowerBalanced:
+		return 2
+	default:
+		return 1
+	}
+}
+
+func (am *AgentManager) markBuildForValidationRepair(build *Build, now time.Time, buildError string) int {
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	build.UpdatedAt = now
+	build.Status = BuildReviewing
+	build.CompletedAt = nil
+	if build.Progress < 90 {
+		build.Progress = 90
+	}
+	build.Error = buildError
+	return build.Progress
+}
+
+func (am *AgentManager) broadcastValidationRepair(
+	buildID string,
+	now time.Time,
+	progress int,
+	readinessErrors []string,
+	message string,
+	summaryKey string,
+	summary string,
+) {
+	data := map[string]any{
+		"phase":                 "validation",
+		"status":                string(BuildReviewing),
+		"progress":              progress,
+		"message":               message,
+		"quality_gate_required": true,
+		"quality_gate_active":   true,
+		"quality_gate_stage":    "validation",
+		"validation_errors":     readinessErrors,
+	}
+	if summaryKey != "" && summary != "" {
+		data[summaryKey] = summary
 	}
 
+	am.broadcast(buildID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   buildID,
+		Timestamp: now,
+		Data:      data,
+	})
+}
+
+func (am *AgentManager) applyDeterministicValidationRepairs(
+	build *Build,
+	readinessErrors []string,
+	errorSummary string,
+	now time.Time,
+) bool {
 	build.mu.RLock()
-	phasedPipelineComplete := build.PhasedPipelineComplete
-	readinessRecoveryAttempts := build.ReadinessRecoveryAttempts
-	currentStatus := build.Status
-	hasPendingRevisions := len(build.Interaction.PendingRevisions) > 0
-	completedAtWasNil := build.CompletedAt == nil
-	buildMode := string(build.Mode)
+	canAttempt := build.ReadinessRecoveryAttempts < maxAutomatedRecoveryAttempts(build.PowerMode)
 	build.mu.RUnlock()
-	if !anyFailed && !phasedPipelineComplete && readinessRecoveryAttempts == 0 &&
-		currentStatus != BuildTesting && currentStatus != BuildReviewing {
+	if !canAttempt {
+		return false
+	}
+
+	repairs := []validationRepairSpec{
+		{
+			apply:       am.applyDeterministicManifestDependencyRepair,
+			errorFormat: "Final output validation failed: %s (applied deterministic manifest repair: %s)",
+			message:     "Applied deterministic package.json dependency repair. Re-running final validation before solver recovery.",
+			summaryKey:  "manifest_repair",
+		},
+		{
+			apply:       am.applyDeterministicQuoteSyntaxRepair,
+			errorFormat: "Final output validation failed: %s (applied deterministic syntax repair: %s)",
+			message:     "Applied deterministic syntax repair for generated source files. Re-running final validation before solver recovery.",
+			summaryKey:  "syntax_repair",
+		},
+		{
+			apply:       am.applyDeterministicTypeDeclarationRepair,
+			errorFormat: "Final output validation failed: %s (applied deterministic type-package repair: %s)",
+			message:     "Applied deterministic TypeScript type-package repair. Re-running final validation before solver recovery.",
+			summaryKey:  "type_package_repair",
+		},
+		{
+			apply:       am.applyDeterministicMixedCodeRepair,
+			errorFormat: "Final output validation failed: %s (applied deterministic mixed-code repair: %s)",
+			message:     "Applied deterministic mixed-code repair (stripped backend imports from frontend files). Re-running final validation.",
+			summaryKey:  "mixed_code_repair",
+		},
+		{
+			apply:       am.applyDeterministicMissingManifestRepair,
+			errorFormat: "Final output validation failed: %s (applied missing manifest repair: %s)",
+			message:     "Auto-repair: %s. Re-running final validation.",
+			summaryKey:  "missing_manifest_repair",
+		},
+		{
+			apply:       am.applyDeterministicMissingDeliverableRepair,
+			errorFormat: "Final output validation failed: %s (applied deliverable repair: %s)",
+			message:     "Auto-repair: %s. Re-running final validation.",
+			summaryKey:  "deliverable_repair",
+		},
+	}
+
+	for _, repair := range repairs {
+		repaired, summary := repair.apply(build, readinessErrors)
+		if !repaired {
+			continue
+		}
+
+		progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf(repair.errorFormat, errorSummary, summary))
+		message := repair.message
+		if strings.Contains(message, "%s") {
+			message = fmt.Sprintf(message, summary)
+		}
+		am.broadcastValidationRepair(build.ID, now, progress, readinessErrors, message, repair.summaryKey, summary)
+		am.checkBuildCompletion(build)
+		return true
+	}
+
+	return false
+}
+
+func (am *AgentManager) finalValidationRepairHints(
+	readinessErrors []string,
+	allFiles []GeneratedFile,
+	userID uint,
+) []string {
+	heuristicHints := extractDependencyRepairHintsFromReadinessErrors(readinessErrors)
+	if am.ctxSelector == nil || am.errorAnalyzer == nil {
+		return heuristicHints
+	}
+
+	contentByPath := make(map[string]string, len(allFiles))
+	for _, file := range allFiles {
+		sanitizedPath := sanitizeFilePath(file.Path)
+		if sanitizedPath == "" || strings.TrimSpace(file.Content) == "" {
+			continue
+		}
+		contentByPath[sanitizedPath] = file.Content
+	}
+
+	relevantFiles := am.ctxSelector.Select(contentByPath, readinessErrors, nil)
+	plan, analyzeErr := am.errorAnalyzer.Analyze(am.ctx, readinessErrors, relevantFiles, userID)
+	if analyzeErr != nil || plan == nil {
+		return heuristicHints
+	}
+	if aiHints := plan.RepairHints(); len(aiHints) > 0 {
+		return aiHints
+	}
+	return heuristicHints
+}
+
+func (am *AgentManager) launchFinalValidationSolverRecovery(
+	build *Build,
+	allFiles []GeneratedFile,
+	readinessErrors []string,
+	errorSummary string,
+	now time.Time,
+) bool {
+	build.mu.Lock()
+	if build.ReadinessRecoveryAttempts >= maxAutomatedRecoveryAttempts(build.PowerMode) {
+		build.mu.Unlock()
+		return false
+	}
+
+	build.ReadinessRecoveryAttempts++
+	build.Status = BuildReviewing
+	build.CompletedAt = nil
+	build.UpdatedAt = now
+	build.Progress = 95
+	build.Error = fmt.Sprintf("Final output validation failed: %s", errorSummary)
+	progress := build.Progress
+	build.mu.Unlock()
+
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"phase":                 "validation",
+			"status":                string(BuildReviewing),
+			"progress":              progress,
+			"message":               "Final validation detected non-runnable output. Launching solver recovery pass.",
+			"quality_gate_required": true,
+			"quality_gate_active":   true,
+			"quality_gate_stage":    "validation",
+			"validation_errors":     readinessErrors,
+		},
+	})
+
+	failedTask := &Task{
+		ID:          "final_output_validation",
+		Type:        TaskReview,
+		Description: "Final output validation",
+		Status:      TaskFailed,
+		Input: map[string]any{
+			"validation_errors": readinessErrors,
+		},
+	}
+	if hints := am.finalValidationRepairHints(readinessErrors, allFiles, build.UserID); len(hints) > 0 {
+		failedTask.Input["repair_hints"] = hints
+	}
+
+	am.enqueueRecoveryTask(build.ID, failedTask, fmt.Errorf("final output validation failed: %s", errorSummary))
+	return true
+}
+
+// checkBuildCompletion determines if the build is finished
+func (am *AgentManager) checkBuildCompletion(build *Build) {
+	snapshot := am.buildCompletionSnapshot(build)
+	if snapshot.blockedByInteraction || !snapshot.allComplete {
+		return
+	}
+	if !snapshot.anyFailed && !snapshot.phasedPipelineComplete && snapshot.readinessRecoveryAttempts == 0 &&
+		snapshot.currentStatus != BuildTesting && snapshot.currentStatus != BuildReviewing {
 		// Avoid transient "all tasks complete" windows between phased task batches
 		// (e.g. phase N finished, phase N+1 not yet queued) from triggering final validation.
 		return
 	}
-	if hasPendingRevisions && currentStatus != BuildCancelled {
+	if snapshot.hasPendingRevisions && snapshot.currentStatus != BuildCancelled {
 		if am.dispatchPendingRevision(build) {
 			return
 		}
 	}
 
+	am.runBuildFinalization(build, snapshot)
+}
+
+// runBuildFinalization is the manager-owned terminal pipeline for readiness
+// checks, deterministic repairs, solver recovery, and final persistence.
+func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildCompletionSnapshot) {
 	build.mu.Lock()
 	now := time.Now()
 	build.UpdatedAt = now
 
 	status := build.Status
 	if status != BuildFailed && status != BuildCancelled {
-		if anyFailed {
+		if snapshot.anyFailed {
 			status = BuildFailed
 			build.Status = status
 			build.CompletedAt = &now
@@ -4466,26 +4796,8 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 	progress := build.Progress
 	buildError := strings.TrimSpace(build.Error)
 	lastTaskError := ""
-	if buildError == "" && anyFailed {
-		for i := len(build.Tasks) - 1; i >= 0; i-- {
-			task := build.Tasks[i]
-			if task == nil || task.Status != TaskFailed {
-				continue
-			}
-			if msg := strings.TrimSpace(task.Error); msg != "" {
-				lastTaskError = msg
-				break
-			}
-			for j := len(task.ErrorHistory) - 1; j >= 0; j-- {
-				if msg := strings.TrimSpace(task.ErrorHistory[j].Error); msg != "" {
-					lastTaskError = msg
-					break
-				}
-			}
-			if lastTaskError != "" {
-				break
-			}
-		}
+	if buildError == "" && snapshot.anyFailed {
+		lastTaskError = latestFailedTaskErrorLocked(build)
 	}
 	build.mu.Unlock()
 
@@ -4516,274 +4828,15 @@ func (am *AgentManager) checkBuildCompletion(build *Build) {
 				am.cancelAutomatedRecoveryTasksForLoopCap(build)
 				goto completion_finalize
 			}
-
-			// Allow more deterministic repair rounds for higher power modes
-			maxRepairAttempts := 1
-			if build.PowerMode == PowerMax {
-				maxRepairAttempts = 3
-			} else if build.PowerMode == PowerBalanced {
-				maxRepairAttempts = 2
-			}
-			canAttemptDeterministicRepair := build.ReadinessRecoveryAttempts < maxRepairAttempts
 			build.mu.Unlock()
-			if canAttemptDeterministicRepair {
-				if repaired, summary := am.applyDeterministicManifestDependencyRepair(build, readinessErrors); repaired {
-					build.mu.Lock()
-					build.UpdatedAt = now
-					build.Status = BuildReviewing
-					build.CompletedAt = nil
-					if build.Progress < 90 {
-						build.Progress = 90
-					}
-					build.Error = fmt.Sprintf("Final output validation failed: %s (applied deterministic manifest repair: %s)", errorSummary, summary)
-					progress = build.Progress
-					build.mu.Unlock()
-
-					am.broadcast(build.ID, &WSMessage{
-						Type:      WSBuildProgress,
-						BuildID:   build.ID,
-						Timestamp: now,
-						Data: map[string]any{
-							"phase":                 "validation",
-							"status":                string(BuildReviewing),
-							"progress":              progress,
-							"message":               "Applied deterministic package.json dependency repair. Re-running final validation before solver recovery.",
-							"quality_gate_required": true,
-							"quality_gate_active":   true,
-							"quality_gate_stage":    "validation",
-							"validation_errors":     readinessErrors,
-							"manifest_repair":       summary,
-						},
-					})
-					am.checkBuildCompletion(build)
-					return
-				}
-				if repaired, summary := am.applyDeterministicQuoteSyntaxRepair(build, readinessErrors); repaired {
-					build.mu.Lock()
-					build.UpdatedAt = now
-					build.Status = BuildReviewing
-					build.CompletedAt = nil
-					if build.Progress < 90 {
-						build.Progress = 90
-					}
-					build.Error = fmt.Sprintf("Final output validation failed: %s (applied deterministic syntax repair: %s)", errorSummary, summary)
-					progress = build.Progress
-					build.mu.Unlock()
-
-					am.broadcast(build.ID, &WSMessage{
-						Type:      WSBuildProgress,
-						BuildID:   build.ID,
-						Timestamp: now,
-						Data: map[string]any{
-							"phase":                 "validation",
-							"status":                string(BuildReviewing),
-							"progress":              progress,
-							"message":               "Applied deterministic syntax repair for generated source files. Re-running final validation before solver recovery.",
-							"quality_gate_required": true,
-							"quality_gate_active":   true,
-							"quality_gate_stage":    "validation",
-							"validation_errors":     readinessErrors,
-							"syntax_repair":         summary,
-						},
-					})
-					am.checkBuildCompletion(build)
-					return
-				}
-				if repaired, summary := am.applyDeterministicTypeDeclarationRepair(build, readinessErrors); repaired {
-					build.mu.Lock()
-					build.UpdatedAt = now
-					build.Status = BuildReviewing
-					build.CompletedAt = nil
-					if build.Progress < 90 {
-						build.Progress = 90
-					}
-					build.Error = fmt.Sprintf("Final output validation failed: %s (applied deterministic type-package repair: %s)", errorSummary, summary)
-					progress = build.Progress
-					build.mu.Unlock()
-
-					am.broadcast(build.ID, &WSMessage{
-						Type:      WSBuildProgress,
-						BuildID:   build.ID,
-						Timestamp: now,
-						Data: map[string]any{
-							"phase":                 "validation",
-							"status":                string(BuildReviewing),
-							"progress":              progress,
-							"message":               "Applied deterministic TypeScript type-package repair. Re-running final validation before solver recovery.",
-							"quality_gate_required": true,
-							"quality_gate_active":   true,
-							"quality_gate_stage":    "validation",
-							"validation_errors":     readinessErrors,
-							"type_package_repair":   summary,
-						},
-					})
-					am.checkBuildCompletion(build)
-					return
-				}
-				if repaired, summary := am.applyDeterministicMixedCodeRepair(build, readinessErrors); repaired {
-					build.mu.Lock()
-					build.UpdatedAt = now
-					build.Status = BuildReviewing
-					build.CompletedAt = nil
-					if build.Progress < 90 {
-						build.Progress = 90
-					}
-					build.Error = fmt.Sprintf("Final output validation failed: %s (applied deterministic mixed-code repair: %s)", errorSummary, summary)
-					progress = build.Progress
-					build.mu.Unlock()
-
-					am.broadcast(build.ID, &WSMessage{
-						Type:      WSBuildProgress,
-						BuildID:   build.ID,
-						Timestamp: now,
-						Data: map[string]any{
-							"phase":                 "validation",
-							"status":                string(BuildReviewing),
-							"progress":              progress,
-							"message":               "Applied deterministic mixed-code repair (stripped backend imports from frontend files). Re-running final validation.",
-							"quality_gate_required": true,
-							"quality_gate_active":   true,
-							"quality_gate_stage":    "validation",
-							"validation_errors":     readinessErrors,
-							"mixed_code_repair":     summary,
-						},
-					})
-					am.checkBuildCompletion(build)
-					return
-				}
-				if repaired, summary := am.applyDeterministicMissingManifestRepair(build, readinessErrors); repaired {
-					build.mu.Lock()
-					build.UpdatedAt = now
-					build.Status = BuildReviewing
-					build.CompletedAt = nil
-					if build.Progress < 90 {
-						build.Progress = 90
-					}
-					build.Error = fmt.Sprintf("Final output validation failed: %s (applied missing manifest repair: %s)", errorSummary, summary)
-					progress = build.Progress
-					build.mu.Unlock()
-
-					am.broadcast(build.ID, &WSMessage{
-						Type:      WSBuildProgress,
-						BuildID:   build.ID,
-						Timestamp: now,
-						Data: map[string]any{
-							"phase":                   "validation",
-							"status":                  string(BuildReviewing),
-							"progress":                progress,
-							"message":                 fmt.Sprintf("Auto-repair: %s. Re-running final validation.", summary),
-							"quality_gate_required":   true,
-							"quality_gate_active":     true,
-							"quality_gate_stage":      "validation",
-							"validation_errors":       readinessErrors,
-							"missing_manifest_repair": summary,
-						},
-					})
-					am.checkBuildCompletion(build)
-					return
-				}
-				if repaired, summary := am.applyDeterministicMissingDeliverableRepair(build, readinessErrors); repaired {
-					build.mu.Lock()
-					build.UpdatedAt = now
-					build.Status = BuildReviewing
-					build.CompletedAt = nil
-					if build.Progress < 90 {
-						build.Progress = 90
-					}
-					build.Error = fmt.Sprintf("Final output validation failed: %s (applied deliverable repair: %s)", errorSummary, summary)
-					progress = build.Progress
-					build.mu.Unlock()
-
-					am.broadcast(build.ID, &WSMessage{
-						Type:      WSBuildProgress,
-						BuildID:   build.ID,
-						Timestamp: now,
-						Data: map[string]any{
-							"phase":                 "validation",
-							"status":                string(BuildReviewing),
-							"progress":              progress,
-							"message":               fmt.Sprintf("Auto-repair: %s. Re-running final validation.", summary),
-							"quality_gate_required": true,
-							"quality_gate_active":   true,
-							"quality_gate_stage":    "validation",
-							"validation_errors":     readinessErrors,
-							"deliverable_repair":    summary,
-						},
-					})
-					am.checkBuildCompletion(build)
-					return
-				}
-			}
-			build.mu.Lock()
-
-			maxSolverAttempts := 1
-			if build.PowerMode == PowerMax {
-				maxSolverAttempts = 3
-			} else if build.PowerMode == PowerBalanced {
-				maxSolverAttempts = 2
-			}
-			if build.ReadinessRecoveryAttempts < maxSolverAttempts {
-				build.ReadinessRecoveryAttempts++
-				build.Status = BuildReviewing
-				build.CompletedAt = nil
-				build.UpdatedAt = now
-				build.Progress = 95
-				build.Error = fmt.Sprintf("Final output validation failed: %s", errorSummary)
-				progress = build.Progress
-				build.mu.Unlock()
-
-				am.broadcast(build.ID, &WSMessage{
-					Type:      WSBuildProgress,
-					BuildID:   build.ID,
-					Timestamp: now,
-					Data: map[string]any{
-						"phase":                 "validation",
-						"status":                string(BuildReviewing),
-						"progress":              progress,
-						"message":               "Final validation detected non-runnable output. Launching solver recovery pass.",
-						"quality_gate_required": true,
-						"quality_gate_active":   true,
-						"quality_gate_stage":    "validation",
-						"validation_errors":     readinessErrors,
-					},
-				})
-
-				failedTask := &Task{
-					ID:          "final_output_validation",
-					Type:        TaskReview,
-					Description: "Final output validation",
-					Status:      TaskFailed,
-					Input: map[string]any{
-						"validation_errors": readinessErrors,
-					},
-				}
-				// Augment heuristic hints with AI-powered repair analysis.
-				// ErrorAnalyzer is non-blocking: LLM failure falls back to heuristics.
-				{
-					heuristicHints := extractDependencyRepairHintsFromReadinessErrors(readinessErrors)
-					contentByPath := make(map[string]string, len(allFiles))
-					for _, file := range allFiles {
-						sanitizedPath := sanitizeFilePath(file.Path)
-						if sanitizedPath == "" || strings.TrimSpace(file.Content) == "" {
-							continue
-						}
-						contentByPath[sanitizedPath] = file.Content
-					}
-					relevantFiles := am.ctxSelector.Select(contentByPath, readinessErrors, nil)
-					if plan, analyzeErr := am.errorAnalyzer.Analyze(am.ctx, readinessErrors, relevantFiles, build.UserID); analyzeErr == nil {
-						aiHints := plan.RepairHints()
-						if len(aiHints) > 0 {
-							failedTask.Input["repair_hints"] = aiHints
-						} else if len(heuristicHints) > 0 {
-							failedTask.Input["repair_hints"] = heuristicHints
-						}
-					} else if len(heuristicHints) > 0 {
-						failedTask.Input["repair_hints"] = heuristicHints
-					}
-				}
-				am.enqueueRecoveryTask(build.ID, failedTask, fmt.Errorf("final output validation failed: %s", errorSummary))
+			if am.applyDeterministicValidationRepairs(build, readinessErrors, errorSummary, now) {
 				return
 			}
+			if am.launchFinalValidationSolverRecovery(build, allFiles, readinessErrors, errorSummary, now) {
+				return
+			}
+
+			build.mu.Lock()
 
 			build.Status = BuildFailed
 			build.CompletedAt = &now
@@ -4885,7 +4938,7 @@ completion_finalize:
 		})
 		log.Printf("Build %s finished with status %s (%d files)", build.ID, status, len(allFiles))
 	}
-	if completedAtWasNil {
+	if snapshot.completedAtWasNil {
 		reason := "terminal"
 		switch status {
 		case BuildCompleted:
@@ -4901,7 +4954,7 @@ completion_finalize:
 				reason = "timeout"
 			}
 		}
-		metrics.RecordBuildFinalization(string(status), buildMode, reason)
+		metrics.RecordBuildFinalization(string(status), snapshot.buildMode, reason)
 	}
 
 	// Persist to database
@@ -4928,6 +4981,26 @@ func (am *AgentManager) persistBuildSnapshot(build *Build, files []GeneratedFile
 	interactionJSON := ""
 	if b, err := json.Marshal(copyBuildInteractionStateLocked(build)); err == nil {
 		interactionJSON = string(b)
+	}
+	agentsJSON := "[]"
+	if b, err := json.Marshal(copyBuildAgentSnapshotsLocked(build)); err == nil {
+		agentsJSON = string(b)
+	}
+	tasksJSON := "[]"
+	if b, err := json.Marshal(copyBuildTaskSnapshotsLocked(build)); err == nil {
+		tasksJSON = string(b)
+	}
+	checkpointsJSON := "[]"
+	if b, err := json.Marshal(copyBuildCheckpointSnapshotsLocked(build)); err == nil {
+		checkpointsJSON = string(b)
+	}
+	stateJSON := "{}"
+	if b, err := json.Marshal(copyBuildSnapshotStateLocked(build)); err == nil {
+		stateJSON = string(b)
+	}
+	activityJSON := "[]"
+	if b, err := json.Marshal(copyBuildActivityTimelineLocked(build)); err == nil {
+		activityJSON = string(b)
 	}
 
 	if files == nil {
@@ -4962,6 +5035,11 @@ func (am *AgentManager) persistBuildSnapshot(build *Build, files []GeneratedFile
 		PowerMode:       string(build.PowerMode),
 		TechStack:       techStackJSON,
 		FilesJSON:       filesJSON,
+		AgentsJSON:      agentsJSON,
+		TasksJSON:       tasksJSON,
+		CheckpointsJSON: checkpointsJSON,
+		StateJSON:       stateJSON,
+		ActivityJSON:    activityJSON,
 		InteractionJSON: interactionJSON,
 		FilesCount:      len(files),
 		Progress:        build.Progress,
@@ -4989,6 +5067,11 @@ func (am *AgentManager) persistBuildSnapshot(build *Build, files []GeneratedFile
 			"power_mode":       snapshot.PowerMode,
 			"tech_stack":       snapshot.TechStack,
 			"files_json":       snapshot.FilesJSON,
+			"agents_json":      snapshot.AgentsJSON,
+			"tasks_json":       snapshot.TasksJSON,
+			"checkpoints_json": snapshot.CheckpointsJSON,
+			"state_json":       snapshot.StateJSON,
+			"activity_json":    snapshot.ActivityJSON,
 			"interaction_json": snapshot.InteractionJSON,
 			"files_count":      snapshot.FilesCount,
 			"total_cost":       snapshot.TotalCost,
@@ -5003,6 +5086,25 @@ func (am *AgentManager) persistBuildSnapshot(build *Build, files []GeneratedFile
 	if err != nil {
 		log.Printf("Failed to persist build snapshot %s: %v", build.ID, err)
 	}
+}
+
+// finalizePhasedPipeline marks a phased execution pipeline as complete and hands
+// final readiness/completion over to the manager's single completion path.
+func (am *AgentManager) finalizePhasedPipeline(build *Build) {
+	if build == nil {
+		return
+	}
+
+	build.mu.Lock()
+	build.PhasedPipelineComplete = true
+	if build.Status != BuildFailed && build.Status != BuildCancelled && build.Progress < 95 {
+		build.Progress = 95
+	}
+	build.UpdatedAt = time.Now()
+	build.mu.Unlock()
+
+	am.updateBuildProgress(build)
+	am.checkBuildCompletion(build)
 }
 
 // persistCompletedBuild remains as a compatibility alias used by orchestrator paths.
@@ -5228,6 +5330,7 @@ func (am *AgentManager) createCheckpoint(build *Build, name, description string)
 		Description: description,
 		Files:       am.collectGeneratedFiles(build),
 		Progress:    build.Progress,
+		Restorable:  true,
 		CreatedAt:   time.Now(),
 	}
 
@@ -5254,34 +5357,52 @@ func (am *AgentManager) createCheckpoint(build *Build, name, description string)
 // collectGeneratedFiles gathers all generated files from completed tasks
 func (am *AgentManager) collectGeneratedFiles(build *Build) []GeneratedFile {
 	filesByPath := make(map[string]GeneratedFile)
+	sourceByPath := make(map[string]string)
 	orderedPaths := make([]string, 0)
 
+	appendFile := func(file GeneratedFile, source string) {
+		if strings.TrimSpace(file.Path) == "" || strings.TrimSpace(file.Content) == "" {
+			return
+		}
+		sanitized := sanitizeFilePath(file.Path)
+		if sanitized == "" {
+			return
+		}
+		file.Path = sanitized
+		file.Content = normalizeGeneratedFileContent(file.Path, file.Content)
+
+		existing, exists := filesByPath[sanitized]
+		if !exists {
+			filesByPath[sanitized] = file
+			sourceByPath[sanitized] = source
+			orderedPaths = append(orderedPaths, sanitized)
+			return
+		}
+
+		// Live task output should supersede snapshot baseline files even if shorter.
+		if source == "task" && sourceByPath[sanitized] == "snapshot" {
+			filesByPath[sanitized] = file
+			sourceByPath[sanitized] = source
+			return
+		}
+
+		// Between files from the same class, prefer fuller content to avoid preserving truncated output.
+		if len(strings.TrimSpace(file.Content)) > len(strings.TrimSpace(existing.Content)) {
+			filesByPath[sanitized] = file
+			sourceByPath[sanitized] = source
+		}
+	}
+
+	for _, file := range build.SnapshotFiles {
+		appendFile(file, "snapshot")
+	}
+
 	for _, task := range build.Tasks {
-		if task.Output == nil || !am.isCodeGenerationTask(task.Type) {
+		if task == nil || task.Output == nil || !am.isCodeGenerationTask(task.Type) {
 			continue
 		}
 		for _, file := range task.Output.Files {
-			if strings.TrimSpace(file.Path) == "" || strings.TrimSpace(file.Content) == "" {
-				continue
-			}
-			sanitized := sanitizeFilePath(file.Path)
-			if sanitized == "" {
-				continue
-			}
-			file.Path = sanitized
-			file.Content = normalizeGeneratedFileContent(file.Path, file.Content)
-
-			existing, exists := filesByPath[sanitized]
-			if !exists {
-				filesByPath[sanitized] = file
-				orderedPaths = append(orderedPaths, sanitized)
-				continue
-			}
-
-			// Prefer fuller file content when the same path appears multiple times.
-			if len(strings.TrimSpace(file.Content)) > len(strings.TrimSpace(existing.Content)) {
-				filesByPath[sanitized] = file
-			}
+			appendFile(file, "task")
 		}
 	}
 
@@ -5680,12 +5801,7 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string,
 		log.Printf("Build %s: Phase %s complete", build.ID, phase.name)
 	}
 
-	build.mu.Lock()
-	build.PhasedPipelineComplete = true
-	build.UpdatedAt = time.Now()
-	build.mu.Unlock()
-	am.updateBuildProgress(build)
-	am.checkBuildCompletion(build)
+	am.finalizePhasedPipeline(build)
 }
 
 // assignPhaseAgents creates tasks for a group of agents and assigns them.
@@ -5924,6 +6040,41 @@ func preferredLeadProviderOrder(availableProviders []ai.AIProvider) []ai.AIProvi
 	return order
 }
 
+func (am *AgentManager) activateRestoredLeadAgent(build *Build, availableProviders []ai.AIProvider) *Agent {
+	if build == nil || len(availableProviders) == 0 {
+		return nil
+	}
+
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	now := time.Now().UTC()
+	for _, provider := range preferredLeadProviderOrder(availableProviders) {
+		for _, agent := range build.Agents {
+			if agent == nil || agent.Role != RoleLead || agent.Provider != provider {
+				continue
+			}
+			if agent.BuildID == "" {
+				agent.BuildID = build.ID
+			}
+			if agent.Model == "" {
+				agent.Model = selectModelForPowerMode(agent.Provider, build.PowerMode)
+			}
+			agent.Status = StatusWorking
+			agent.UpdatedAt = now
+			return agent
+		}
+	}
+
+	for id, agent := range build.Agents {
+		if agent != nil && agent.Role == RoleLead {
+			delete(build.Agents, id)
+		}
+	}
+
+	return nil
+}
+
 func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.CompletedBuild) (*Build, bool, error) {
 	if snapshot == nil {
 		return nil, false, fmt.Errorf("build snapshot is required")
@@ -5944,6 +6095,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.Complet
 		providerMode = "byok"
 	}
 
+	restoredFiles, _ := parseBuildFiles(snapshot.FilesJSON)
 	build := &Build{
 		ID:                  snapshot.BuildID,
 		UserID:              snapshot.UserID,
@@ -5953,37 +6105,31 @@ func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.Complet
 		PowerMode:           powerMode,
 		ProviderMode:        providerMode,
 		Description:         snapshot.Description,
-		Agents:              make(map[string]*Agent),
-		Tasks:               make([]*Task, 0),
-		Checkpoints:         make([]*Checkpoint, 0),
+		Agents:              parseBuildAgents(snapshot.AgentsJSON),
+		Tasks:               parseBuildTasks(snapshot.TasksJSON),
+		Checkpoints:         parseBuildCheckpoints(snapshot.CheckpointsJSON),
 		Progress:            snapshot.Progress,
 		MaxAgents:           maxAgents,
 		MaxRetries:          maxRetries,
 		MaxRequests:         maxRequests,
 		MaxTokensPerRequest: maxTokens,
 		Interaction:         parseBuildInteraction(snapshot.InteractionJSON),
+		ActivityTimeline:    parseBuildActivityTimeline(snapshot.ActivityJSON),
+		SnapshotState:       parseBuildSnapshotState(snapshot.StateJSON),
+		SnapshotFiles:       restoredFiles,
 		CreatedAt:           snapshot.CreatedAt,
 		UpdatedAt:           snapshot.UpdatedAt,
 		CompletedAt:         snapshot.CompletedAt,
 		Error:               snapshot.Error,
 	}
-
-	if restoredFiles, err := parseBuildFiles(snapshot.FilesJSON); err == nil && len(restoredFiles) > 0 {
-		completedAt := snapshot.UpdatedAt
-		if snapshot.CompletedAt != nil && !snapshot.CompletedAt.IsZero() {
-			completedAt = *snapshot.CompletedAt
-		}
-		build.Tasks = append(build.Tasks, &Task{
-			ID:          fmt.Sprintf("snapshot-files-%s", snapshot.BuildID),
-			Type:        TaskGenerateFile,
-			Description: "Restored generated files from saved build snapshot",
-			Status:      TaskCompleted,
-			Output: &TaskOutput{
-				Files: restoredFiles,
-			},
-			CreatedAt:   snapshot.CreatedAt,
-			CompletedAt: &completedAt,
-		})
+	if build.Agents == nil {
+		build.Agents = make(map[string]*Agent)
+	}
+	if build.Tasks == nil {
+		build.Tasks = make([]*Task, 0)
+	}
+	if build.Checkpoints == nil {
+		build.Checkpoints = make([]*Checkpoint, 0)
 	}
 
 	if build.Status == BuildCompleted && build.Progress < 100 {
@@ -6009,25 +6155,32 @@ func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.Complet
 		return nil, false, fmt.Errorf("no BYOK providers available to restore build session")
 	}
 
-	var leadAgent *Agent
-	var err error
-	for _, provider := range preferredLeadProviderOrder(availableProviders) {
-		leadAgent, err = am.spawnAgent(build.ID, RoleLead, provider)
-		if err == nil {
-			break
-		}
-	}
-	if err != nil {
+	leadAgent := am.activateRestoredLeadAgent(build, availableProviders)
+	if leadAgent != nil {
 		am.mu.Lock()
-		delete(am.builds, build.ID)
+		am.agents[leadAgent.ID] = leadAgent
 		am.mu.Unlock()
-		return nil, false, fmt.Errorf("failed to restore lead agent: %w", err)
 	}
+	if leadAgent == nil {
+		var err error
+		for _, provider := range preferredLeadProviderOrder(availableProviders) {
+			leadAgent, err = am.spawnAgent(build.ID, RoleLead, provider)
+			if err == nil {
+				break
+			}
+		}
+		if err != nil {
+			am.mu.Lock()
+			delete(am.builds, build.ID)
+			am.mu.Unlock()
+			return nil, false, fmt.Errorf("failed to restore lead agent: %w", err)
+		}
 
-	leadAgent.mu.Lock()
-	leadAgent.Status = StatusWorking
-	leadAgent.UpdatedAt = time.Now().UTC()
-	leadAgent.mu.Unlock()
+		leadAgent.mu.Lock()
+		leadAgent.Status = StatusWorking
+		leadAgent.UpdatedAt = time.Now().UTC()
+		leadAgent.mu.Unlock()
+	}
 
 	build.mu.Lock()
 	resolveWaitingStateLocked(build)
@@ -6112,9 +6265,6 @@ func (am *AgentManager) SendMessageWithClientToken(buildID string, message strin
 
 // processUserMessage handles a user message with the lead agent
 func (am *AgentManager) processUserMessage(agent *Agent, message string) {
-	ctx, cancel := context.WithTimeout(am.ctx, 2*time.Minute)
-	defer cancel()
-
 	am.mu.RLock()
 	build, exists := am.builds[agent.BuildID]
 	am.mu.RUnlock()
@@ -6123,6 +6273,13 @@ func (am *AgentManager) processUserMessage(agent *Agent, message string) {
 		log.Printf("Build %s not found for agent %s during message processing", agent.BuildID, agent.ID)
 		return
 	}
+
+	build.mu.RLock()
+	interventionTimeout := defaultGenerateTimeout(agent.Provider, build.PowerMode)
+	build.mu.RUnlock()
+
+	ctx, cancel := context.WithTimeout(am.ctx, interventionTimeout)
+	defer cancel()
 
 	build.mu.RLock()
 	currentStatus := build.Status
@@ -6576,6 +6733,518 @@ func (am *AgentManager) getPowerModeTokenCap(mode PowerMode) int {
 	}
 }
 
+func buildActivityDataMap(raw any) map[string]any {
+	if raw == nil {
+		return nil
+	}
+
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		return nil
+	}
+	return decoded
+}
+
+func buildActivityString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	default:
+		return ""
+	}
+}
+
+func buildActivityInt(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int32:
+		return int(typed), true
+	case int64:
+		return int(typed), true
+	case float32:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	case json.Number:
+		if n, err := typed.Int64(); err == nil {
+			return int(n), true
+		}
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return 0, false
+		}
+		if n, err := strconv.Atoi(trimmed); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+func buildActivityFloat(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int32:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case json.Number:
+		if n, err := typed.Float64(); err == nil {
+			return n
+		}
+	case string:
+		if n, err := strconv.ParseFloat(strings.TrimSpace(typed), 64); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+func firstBuildActivityString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func normalizeQualityGateStatus(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "pending", "running", "passed", "failed":
+		return strings.TrimSpace(strings.ToLower(raw))
+	default:
+		return ""
+	}
+}
+
+func buildActivityStringSlice(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		filtered := make([]string, 0, len(typed))
+		for _, entry := range typed {
+			if trimmed := strings.TrimSpace(entry); trimmed != "" {
+				filtered = append(filtered, trimmed)
+			}
+		}
+		return filtered
+	case []any:
+		filtered := make([]string, 0, len(typed))
+		for _, entry := range typed {
+			if trimmed := buildActivityString(entry); trimmed != "" {
+				filtered = append(filtered, trimmed)
+			}
+		}
+		return filtered
+	default:
+		return nil
+	}
+}
+
+func buildActivityBool(value any) (bool, bool) {
+	switch typed := value.(type) {
+	case bool:
+		return typed, true
+	case string:
+		trimmed := strings.TrimSpace(strings.ToLower(typed))
+		switch trimmed {
+		case "true":
+			return true, true
+		case "false":
+			return false, true
+		}
+	}
+	return false, false
+}
+
+func updateBuildSnapshotStateLocked(build *Build, msg *WSMessage) bool {
+	if build == nil || msg == nil {
+		return false
+	}
+
+	data := buildActivityDataMap(msg.Data)
+	next := copyBuildSnapshotStateLocked(build)
+	changed := false
+
+	setCurrentPhase := func(value string) {
+		if trimmed := strings.TrimSpace(value); trimmed != "" && next.CurrentPhase != trimmed {
+			next.CurrentPhase = trimmed
+			changed = true
+		}
+	}
+	setQualityGateRequired := func(value bool) {
+		if next.QualityGateRequired == nil || *next.QualityGateRequired != value {
+			required := value
+			next.QualityGateRequired = &required
+			changed = true
+		}
+	}
+	setQualityGateStatus := func(value string) {
+		if normalized := normalizeQualityGateStatus(value); normalized != "" && next.QualityGateStatus != normalized {
+			next.QualityGateStatus = normalized
+			changed = true
+		}
+	}
+	setQualityGateStage := func(value string) {
+		if trimmed := strings.TrimSpace(value); trimmed != "" && next.QualityGateStage != trimmed {
+			next.QualityGateStage = trimmed
+			changed = true
+		}
+	}
+	setAvailableProviders := func(values []string) {
+		if values == nil {
+			return
+		}
+		if len(values) != len(next.AvailableProviders) {
+			next.AvailableProviders = append([]string(nil), values...)
+			changed = true
+			return
+		}
+		for i := range values {
+			if next.AvailableProviders[i] != values[i] {
+				next.AvailableProviders = append([]string(nil), values...)
+				changed = true
+				return
+			}
+		}
+	}
+
+	if phaseKey := buildActivityString(data["phase_key"]); phaseKey != "" {
+		setCurrentPhase(phaseKey)
+	} else {
+		setCurrentPhase(buildActivityString(data["phase"]))
+	}
+	if availableProviders := buildActivityStringSlice(data["available_providers"]); availableProviders != nil {
+		setAvailableProviders(availableProviders)
+	}
+	if required, ok := buildActivityBool(data["quality_gate_required"]); ok {
+		setQualityGateRequired(required)
+	}
+	if stage := buildActivityString(data["quality_gate_stage"]); stage != "" {
+		setQualityGateStage(stage)
+	}
+	if passed, ok := buildActivityBool(data["quality_gate_passed"]); ok {
+		if required, hasRequired := buildActivityBool(data["quality_gate_required"]); hasRequired {
+			setQualityGateRequired(required)
+		} else {
+			setQualityGateRequired(true)
+		}
+		if passed {
+			setQualityGateStatus("passed")
+		} else {
+			setQualityGateStatus("failed")
+		}
+	} else if active, ok := buildActivityBool(data["quality_gate_active"]); ok && active {
+		setQualityGateStatus("running")
+	} else if next.QualityGateStatus == "" {
+		if required, ok := buildActivityBool(data["quality_gate_required"]); ok && required {
+			setQualityGateStatus("pending")
+		}
+	}
+
+	switch msg.Type {
+	case WSBuildCompleted:
+		setCurrentPhase("completed")
+		setQualityGateRequired(true)
+		setQualityGateStage(firstBuildActivityString(buildActivityString(data["quality_gate_stage"]), "complete"))
+		setQualityGateStatus("passed")
+	case WSBuildError:
+		if recoverable, ok := buildActivityBool(data["recoverable"]); !ok || !recoverable {
+			setCurrentPhase(firstBuildActivityString(buildActivityString(data["phase"]), next.CurrentPhase, "validation"))
+			setQualityGateRequired(true)
+			setQualityGateStage(firstBuildActivityString(buildActivityString(data["quality_gate_stage"]), "validation"))
+			setQualityGateStatus("failed")
+		}
+	case WSBuildFSMStarted, WSBuildFSMInitialized:
+		setCurrentPhase("planning")
+	case WSBuildFSMPlanReady:
+		setCurrentPhase("in_progress")
+	case WSBuildFSMAllSteps:
+		setCurrentPhase("validation")
+		setQualityGateRequired(true)
+		setQualityGateStage("validation")
+		setQualityGateStatus("running")
+	case WSBuildFSMValidationPass:
+		setCurrentPhase("completed")
+		setQualityGateRequired(true)
+		setQualityGateStage(firstBuildActivityString(buildActivityString(data["quality_gate_stage"]), "validation"))
+		setQualityGateStatus("passed")
+	case WSBuildFSMValidationFail, WSBuildFSMRetryExhausted:
+		setCurrentPhase("validation")
+		setQualityGateRequired(true)
+		setQualityGateStage(firstBuildActivityString(buildActivityString(data["quality_gate_stage"]), "validation"))
+		setQualityGateStatus("failed")
+	case WSBuildFSMRollbackDone, WSBuildFSMRollbackFail, WSBuildFSMFatalError, WSBuildFSMCancelled:
+		setCurrentPhase("failed")
+		setQualityGateRequired(true)
+		setQualityGateStage(firstBuildActivityString(buildActivityString(data["quality_gate_stage"]), next.QualityGateStage, "validation"))
+		setQualityGateStatus("failed")
+	}
+
+	if changed {
+		build.SnapshotState = next
+	}
+	return changed
+}
+
+func summarizeBuildActivityFiles(paths []string, count int) string {
+	switch {
+	case len(paths) > 0:
+		preview := paths
+		if len(preview) > 5 {
+			preview = preview[:5]
+		}
+		summary := fmt.Sprintf("Generated %d file(s): %s", len(paths), strings.Join(preview, ", "))
+		if len(paths) > len(preview) {
+			summary = fmt.Sprintf("%s (+%d more)", summary, len(paths)-len(preview))
+		}
+		return summary
+	case count > 0:
+		return fmt.Sprintf("Generated %d file(s)", count)
+	default:
+		return ""
+	}
+}
+
+func extractBuildActivityFiles(data map[string]any) ([]string, int) {
+	if data == nil {
+		return nil, 0
+	}
+
+	filePaths := make([]string, 0)
+	appendPaths := func(items []any) {
+		for _, item := range items {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if path := buildActivityString(entry["path"]); path != "" {
+				filePaths = append(filePaths, path)
+			}
+		}
+	}
+
+	if items, ok := data["files"].([]any); ok {
+		appendPaths(items)
+	}
+	if output, ok := data["output"].(map[string]any); ok {
+		if items, ok := output["files"].([]any); ok {
+			appendPaths(items)
+		}
+	}
+
+	filesCount, ok := buildActivityInt(data["files_count"])
+	if !ok && len(filePaths) > 0 {
+		filesCount = len(filePaths)
+	}
+	if !ok {
+		if output, ok := data["output"].(map[string]any); ok {
+			if count, ok := buildActivityInt(output["files_count"]); ok {
+				filesCount = count
+			} else if items, ok := output["files"].([]any); ok {
+				filesCount = len(items)
+			}
+		}
+	}
+
+	if len(filePaths) == 0 {
+		return nil, filesCount
+	}
+	return filePaths, filesCount
+}
+
+func lookupBuildTaskTypeLocked(build *Build, taskID string) string {
+	if build == nil || strings.TrimSpace(taskID) == "" {
+		return ""
+	}
+	for _, task := range build.Tasks {
+		if task == nil || task.ID != taskID {
+			continue
+		}
+		return string(task.Type)
+	}
+	return ""
+}
+
+func buildActivityEntryForMessageLocked(build *Build, msg *WSMessage) (BuildActivityEntry, bool) {
+	if build == nil || msg == nil {
+		return BuildActivityEntry{}, false
+	}
+
+	data := buildActivityDataMap(msg.Data)
+	agentRole := firstBuildActivityString(buildActivityString(data["agent_role"]))
+	provider := firstBuildActivityString(buildActivityString(data["provider"]))
+	model := firstBuildActivityString(buildActivityString(data["model"]))
+	if agent := build.Agents[msg.AgentID]; agent != nil {
+		if agentRole == "" {
+			agentRole = string(agent.Role)
+		}
+		if provider == "" {
+			provider = string(agent.Provider)
+		}
+		if model == "" {
+			model = agent.Model
+		}
+	}
+
+	taskID := firstBuildActivityString(buildActivityString(data["task_id"]))
+	taskType := firstBuildActivityString(buildActivityString(data["task_type"]), lookupBuildTaskTypeLocked(build, taskID))
+	files, filesCount := extractBuildActivityFiles(data)
+	retryCount, _ := buildActivityInt(data["retry_count"])
+	if retryCount == 0 {
+		retryCount, _ = buildActivityInt(data["attempt"])
+	}
+	maxRetries, _ := buildActivityInt(data["max_retries"])
+
+	entry := BuildActivityEntry{
+		ID:         uuid.New().String(),
+		AgentID:    msg.AgentID,
+		AgentRole:  agentRole,
+		Provider:   provider,
+		Model:      model,
+		EventType:  string(msg.Type),
+		TaskID:     taskID,
+		TaskType:   taskType,
+		Files:      files,
+		FilesCount: filesCount,
+		RetryCount: retryCount,
+		MaxRetries: maxRetries,
+		Timestamp:  msg.Timestamp.UTC(),
+	}
+	if entry.Timestamp.IsZero() {
+		entry.Timestamp = time.Now().UTC()
+	}
+
+	switch msg.Type {
+	case "agent:thinking":
+		entry.Type = "thinking"
+		entry.IsInternal = true
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			fmt.Sprintf("%s is analyzing the next step", firstBuildActivityString(agentRole, "agent")),
+		)
+	case WSAgentWorking:
+		entry.Type = "action"
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["description"]),
+			buildActivityString(data["content"]),
+			fmt.Sprintf("Working on %s", firstBuildActivityString(taskType, "current task")),
+		)
+	case "agent:generating":
+		entry.Type = "action"
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			fmt.Sprintf("Generating with %s", firstBuildActivityString(provider, "configured provider")),
+		)
+	case "agent:retrying":
+		entry.Type = "action"
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["message"]),
+			buildActivityString(data["error"]),
+			fmt.Sprintf("Retrying %s", firstBuildActivityString(taskType, "current task")),
+		)
+	case "agent:provider_switched":
+		oldProvider := firstBuildActivityString(buildActivityString(data["old_provider"]))
+		newProvider := firstBuildActivityString(buildActivityString(data["new_provider"]), provider)
+		entry.Provider = newProvider
+		entry.Type = "action"
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["message"]),
+			fmt.Sprintf("%s switched provider from %s to %s", firstBuildActivityString(agentRole, "Agent"), firstBuildActivityString(oldProvider, "unknown"), firstBuildActivityString(newProvider, "unknown")),
+		)
+	case "agent:generation_failed":
+		entry.Type = "error"
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["error"]),
+			buildActivityString(data["message"]),
+			"Generation failed",
+		)
+	case WSAgentCompleted:
+		entry.Type = "output"
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			summarizeBuildActivityFiles(files, filesCount),
+			fmt.Sprintf("%s completed the current task", firstBuildActivityString(agentRole, "Agent")),
+		)
+	case WSAgentError:
+		entry.Type = "error"
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["error"]),
+			buildActivityString(data["message"]),
+			"Agent error",
+		)
+	case WSCodeGenerated:
+		entry.Type = "output"
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			summarizeBuildActivityFiles(files, filesCount),
+			"Generated project files",
+		)
+	case WSSpendUpdate:
+		entry.Type = "output"
+		if billedCost, ok := data["billed_cost"]; ok {
+			entry.Content = firstBuildActivityString(
+				buildActivityString(data["content"]),
+				fmt.Sprintf("Spend recorded: $%.4f billed", buildActivityFloat(billedCost)),
+			)
+		} else {
+			entry.Content = firstBuildActivityString(buildActivityString(data["content"]), "Spend recorded")
+		}
+	default:
+		return BuildActivityEntry{}, false
+	}
+
+	return entry, strings.TrimSpace(entry.Content) != ""
+}
+
+func (am *AgentManager) appendBuildActivity(buildID string, msg *WSMessage) {
+	if msg == nil || strings.TrimSpace(buildID) == "" {
+		return
+	}
+
+	am.mu.RLock()
+	build := am.builds[buildID]
+	am.mu.RUnlock()
+	if build == nil {
+		return
+	}
+
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	entry, ok := buildActivityEntryForMessageLocked(build, msg)
+	if !ok {
+		return
+	}
+	appendBuildActivityEntryLocked(build, entry)
+}
+
+func shouldPersistBuildSnapshotMessage(msgType WSMessageType) bool {
+	switch msgType {
+	case WSBuildProgress, WSBuildCompleted, WSBuildError, "build:phase",
+		WSBuildFSMStarted, WSBuildFSMInitialized, WSBuildFSMPlanReady,
+		WSBuildFSMAllSteps, WSBuildFSMValidationPass, WSBuildFSMValidationFail,
+		WSBuildFSMRetryExhausted, WSBuildFSMRollbackDone, WSBuildFSMRollbackFail,
+		WSBuildFSMFatalError, WSBuildFSMCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Subscribe adds a channel to receive build updates
 func (am *AgentManager) Subscribe(buildID string, ch chan *WSMessage) {
 	am.mu.Lock()
@@ -6603,6 +7272,23 @@ func (am *AgentManager) Unsubscribe(buildID string, ch chan *WSMessage) {
 
 // broadcast sends a message to all subscribers of a build
 func (am *AgentManager) broadcast(buildID string, msg *WSMessage) {
+	var build *Build
+	var shouldPersist bool
+	am.mu.RLock()
+	build = am.builds[buildID]
+	am.mu.RUnlock()
+	if build != nil {
+		build.mu.Lock()
+		if updateBuildSnapshotStateLocked(build, msg) {
+			shouldPersist = shouldPersistBuildSnapshotMessage(msg.Type)
+		}
+		entry, ok := buildActivityEntryForMessageLocked(build, msg)
+		if ok {
+			appendBuildActivityEntryLocked(build, entry)
+		}
+		build.mu.Unlock()
+	}
+
 	am.mu.RLock()
 	subs := make([]chan *WSMessage, len(am.subscribers[buildID]))
 	copy(subs, am.subscribers[buildID])
@@ -6614,6 +7300,10 @@ func (am *AgentManager) broadcast(buildID string, msg *WSMessage) {
 		default:
 			// Channel full, skip
 		}
+	}
+
+	if shouldPersist && build != nil {
+		am.persistBuildSnapshot(build, nil)
 	}
 }
 
@@ -6662,6 +7352,9 @@ func (am *AgentManager) RollbackToCheckpoint(buildID, checkpointID string) error
 
 	if targetCheckpoint == nil {
 		return fmt.Errorf("checkpoint %s not found", checkpointID)
+	}
+	if !targetCheckpoint.Restorable {
+		return fmt.Errorf("checkpoint %s is historical only and cannot be rolled back", checkpointID)
 	}
 
 	// Remove checkpoints after the target
@@ -6723,33 +7416,41 @@ func (am *AgentManager) RollbackToCheckpoint(buildID, checkpointID string) error
 
 // CancelBuild cancels a running build and updates its status
 func (am *AgentManager) CancelBuild(buildID string) error {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-
+	am.mu.RLock()
 	build, exists := am.builds[buildID]
+	am.mu.RUnlock()
 	if !exists {
 		return fmt.Errorf("build %s not found", buildID)
 	}
 
+	build.mu.Lock()
 	if build.Status == BuildCompleted || build.Status == BuildCancelled || build.Status == BuildFailed {
+		build.mu.Unlock()
 		return fmt.Errorf("build %s already in terminal state: %s", buildID, build.Status)
 	}
 
 	build.Status = BuildCancelled
-	now := time.Now()
+	now := time.Now().UTC()
 	build.CompletedAt = &now
 	build.UpdatedAt = now
 	build.Error = "cancelled by user"
+	build.Interaction.Paused = false
+	build.Interaction.PauseReason = ""
+	refreshInteractionAttentionLocked(build)
+	build.mu.Unlock()
+
+	am.persistBuildSnapshot(build, nil)
 
 	log.Printf("Build %s cancelled by user", buildID)
 
 	// Broadcast cancellation to subscribers
 	go am.broadcast(buildID, &WSMessage{
-		Type:      "build:cancelled",
+		Type:      WSBuildFSMCancelled,
 		BuildID:   buildID,
-		Timestamp: time.Now(),
+		Timestamp: now,
 		Data: map[string]interface{}{
 			"message": "Build cancelled by user",
+			"status":  string(BuildCancelled),
 		},
 	})
 
@@ -8880,7 +9581,8 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 	}
 
 	if _, err := exec.LookPath("npm"); err != nil {
-		return []string{"Preview verification failed: npm is not available on the build host"}
+		log.Printf("Preview verification skipped: npm is not available on the build host")
+		return nil
 	}
 
 	tmpDir, err := os.MkdirTemp("", "apex-preview-verify-*")
@@ -8937,19 +9639,33 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 	depCount := len(manifest.Dependencies) + len(manifest.DevDependencies)
 	if depCount > 0 {
 		if out, err := runPreviewCheckCommand(tmpDir, 2*time.Minute, "npm", "install", "--legacy-peer-deps", "--include=dev", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
-			issues = append(issues, fmt.Sprintf("Preview verification install failed: %s", summarizePreviewInstallFailure(out)))
+			skip, summary := classifyNodeInstallFailure(out, err)
+			if skip {
+				log.Printf("Preview verification skipped: verifier host could not install dependencies (%s)", summary)
+				return nil
+			}
+			issues = append(issues, fmt.Sprintf("Preview verification install failed: %s", summary))
 			return issues
 		}
 	}
 
 	if out, err := runPreviewCheckCommand(tmpDir, 90*time.Second, "npm", "run", "build"); err != nil {
-		issues = append(issues, fmt.Sprintf("Preview verification build failed: %s", summarizePreviewBuildFailure(out)))
+		skip, summary := classifyNodeBuildFailure(out, err)
+		if skip {
+			log.Printf("Preview verification skipped: verifier host could not run build toolchain (%s)", summary)
+			return nil
+		}
+		issues = append(issues, fmt.Sprintf("Preview verification build failed: %s", summary))
 		return issues
 	}
 
 	if buildUsesPreviewHTTPProbe(manifest.Scripts, forceHTTPProbe) {
-		if msg := runPreviewHTTPProbe(tmpDir); msg != "" {
-			issues = append(issues, msg)
+		if summary, skip := runPreviewHTTPProbe(tmpDir); summary != "" {
+			if skip {
+				log.Printf("Preview verification skipped: preview HTTP probe was inconclusive (%s)", summary)
+			} else {
+				issues = append(issues, "Preview verification preview probe failed: "+summary)
+			}
 		}
 	}
 
@@ -8960,6 +9676,8 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 	if len(files) == 0 {
 		return nil
 	}
+
+	healthPaths := detectBackendHealthProbePaths(files)
 
 	// --- Go backend: run `go build ./...` ---
 	hasGoFiles := false
@@ -8998,6 +9716,17 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 					}
 					return []string{fmt.Sprintf("Go backend build failed: %s", trimmed)}
 				}
+				if target := detectGoRuntimeTarget(files); target != "" {
+					if summary, skip := runBackendHTTPProbe(goTmpDir, healthPaths, "go", []string{"run", target}); summary != "" {
+						if skip {
+							log.Printf("Go backend runtime verification skipped: %s", summary)
+						} else {
+							return []string{fmt.Sprintf("Go backend runtime probe failed: %s", summary)}
+						}
+					}
+				} else {
+					log.Printf("Go backend runtime verification skipped: could not detect runnable entrypoint")
+				}
 			}
 		}
 		return nil // Go backend compiled successfully
@@ -9018,7 +9747,7 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 				defer os.RemoveAll(pyTmpDir)
 				var pyIssues []string
 				for _, f := range files {
-					if !strings.HasSuffix(strings.ToLower(strings.TrimSpace(f.Path)), ".py") || strings.TrimSpace(f.Content) == "" {
+					if strings.TrimSpace(f.Path) == "" || f.Content == "" {
 						continue
 					}
 					rel := filepath.FromSlash(strings.TrimPrefix(strings.TrimSpace(f.Path), "./"))
@@ -9026,20 +9755,39 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 						continue
 					}
 					full := filepath.Join(pyTmpDir, rel)
-					if mkErr := os.MkdirAll(filepath.Dir(full), 0755); mkErr == nil {
-						if writeErr := os.WriteFile(full, []byte(f.Content), 0644); writeErr == nil {
-							if out, compileErr := runPreviewCheckCommand(pyTmpDir, 15*time.Second, "python3", "-m", "py_compile", rel); compileErr != nil {
-								trimmed := strings.TrimSpace(out)
-								if len(trimmed) > 300 {
-									trimmed = trimmed[:300] + "..."
-								}
-								pyIssues = append(pyIssues, fmt.Sprintf("Python syntax error in %s: %s", f.Path, trimmed))
-							}
+					if mkErr := os.MkdirAll(filepath.Dir(full), 0755); mkErr != nil {
+						continue
+					}
+					if writeErr := os.WriteFile(full, []byte(f.Content), 0644); writeErr != nil {
+						continue
+					}
+					if !strings.HasSuffix(strings.ToLower(strings.TrimSpace(f.Path)), ".py") {
+						continue
+					}
+					if out, compileErr := runPreviewCheckCommand(pyTmpDir, 15*time.Second, "python3", "-m", "py_compile", rel); compileErr != nil {
+						trimmed := strings.TrimSpace(out)
+						if len(trimmed) > 300 {
+							trimmed = trimmed[:300] + "..."
 						}
+						pyIssues = append(pyIssues, fmt.Sprintf("Python syntax error in %s: %s", f.Path, trimmed))
 					}
 				}
 				if len(pyIssues) > 0 {
 					return pyIssues
+				}
+				if entry := detectPythonRuntimeEntry(files); entry != "" {
+					if summary, skip := runBackendHTTPProbe(pyTmpDir, healthPaths, "python3", []string{entry}); summary != "" {
+						if !skip {
+							skip, summary = classifyPythonRuntimeProbeFailure(files, summary)
+						}
+						if skip {
+							log.Printf("Python backend runtime verification skipped: %s", summary)
+						} else {
+							return []string{fmt.Sprintf("Python backend runtime probe failed: %s", summary)}
+						}
+					}
+				} else {
+					log.Printf("Python backend runtime verification skipped: could not detect runnable entrypoint")
 				}
 			}
 		}
@@ -9096,7 +9844,8 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 	}
 
 	if _, err := exec.LookPath("npm"); err != nil {
-		return []string{"Backend verification failed: npm is not available on the build host"}
+		log.Printf("Backend verification skipped: npm is not available on the build host")
+		return nil
 	}
 
 	tmpDir, err := os.MkdirTemp("", "apex-backend-verify-*")
@@ -9154,17 +9903,538 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 	depCount := len(manifest.Dependencies) + len(manifest.DevDependencies)
 	if depCount > 0 {
 		if out, err := runPreviewCheckCommand(tmpDir, 2*time.Minute, "npm", "install", "--legacy-peer-deps", "--include=dev", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
-			issues = append(issues, fmt.Sprintf("Backend verification install failed: %s", summarizePreviewInstallFailure(out)))
+			skip, summary := classifyNodeInstallFailure(out, err)
+			if skip {
+				log.Printf("Backend verification skipped: verifier host could not install dependencies (%s)", summary)
+				return nil
+			}
+			issues = append(issues, fmt.Sprintf("Backend verification install failed: %s", summary))
 			return issues
 		}
 	}
 
 	if out, err := runPreviewCheckCommand(tmpDir, 90*time.Second, "npm", "run", "build"); err != nil {
-		issues = append(issues, fmt.Sprintf("Backend verification build failed: %s", summarizePreviewBuildFailure(out)))
+		skip, summary := classifyNodeBuildFailure(out, err)
+		if skip {
+			log.Printf("Backend verification skipped: verifier host could not run build toolchain (%s)", summary)
+			return nil
+		}
+		issues = append(issues, fmt.Sprintf("Backend verification build failed: %s", summary))
 		return issues
 	}
 
+	if runtimeScript := detectBackendRuntimeScript(manifest.Scripts); runtimeScript != "" {
+		if summary, skip := runBackendHTTPProbe(tmpDir, healthPaths, "npm", []string{"run", runtimeScript}); summary != "" {
+			if skip {
+				log.Printf("Backend runtime verification skipped: %s", summary)
+			} else {
+				issues = append(issues, fmt.Sprintf("Backend runtime probe failed: %s", summary))
+				return issues
+			}
+		}
+	}
+
 	return nil
+}
+
+func detectBackendHealthProbePaths(files []GeneratedFile) []string {
+	discoveredCandidates := []string{
+		"/api/health",
+		"/healthz",
+		"/health",
+		"/api/status",
+		"/status",
+		"/api/ready",
+		"/ready",
+	}
+	fallbackCandidates := []string{
+		"/health",
+		"/api/health",
+		"/healthz",
+		"/status",
+		"/api/status",
+		"/ready",
+		"/api/ready",
+	}
+
+	var combined strings.Builder
+	for _, file := range files {
+		if strings.TrimSpace(file.Content) == "" {
+			continue
+		}
+		combined.WriteString(strings.ToLower(file.Content))
+		combined.WriteByte('\n')
+	}
+
+	content := combined.String()
+	seen := make(map[string]struct{}, len(fallbackCandidates)+1)
+	paths := make([]string, 0, len(fallbackCandidates)+1)
+	addPath := func(path string) {
+		if path == "" {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+
+	for _, candidate := range discoveredCandidates {
+		if strings.Contains(content, strings.ToLower(candidate)) {
+			addPath(candidate)
+		}
+	}
+	for _, candidate := range fallbackCandidates {
+		addPath(candidate)
+	}
+	addPath("/")
+	return paths
+}
+
+func detectGoRuntimeTarget(files []GeneratedFile) string {
+	candidates := []string{
+		".",
+		"./cmd/server",
+		"./cmd/api",
+		"./cmd/app",
+		"./server",
+		"./app",
+	}
+
+	dirHasMain := make(map[string]struct{})
+	for _, file := range files {
+		sanitized := sanitizeFilePath(file.Path)
+		if sanitized == "" || !strings.HasSuffix(strings.ToLower(sanitized), ".go") || strings.HasSuffix(strings.ToLower(sanitized), "_test.go") || strings.TrimSpace(file.Content) == "" {
+			continue
+		}
+		if !strings.Contains(file.Content, "package main") || !strings.Contains(file.Content, "func main(") {
+			continue
+		}
+		dir := filepath.ToSlash(filepath.Dir(sanitized))
+		if dir == "." || dir == "" {
+			dir = "."
+		} else {
+			dir = "./" + strings.TrimPrefix(dir, "./")
+		}
+		dirHasMain[dir] = struct{}{}
+	}
+
+	for _, candidate := range candidates {
+		if _, ok := dirHasMain[candidate]; ok {
+			return candidate
+		}
+	}
+
+	if len(dirHasMain) == 0 {
+		return ""
+	}
+
+	fallbacks := make([]string, 0, len(dirHasMain))
+	for target := range dirHasMain {
+		fallbacks = append(fallbacks, target)
+	}
+	sort.Slice(fallbacks, func(i, j int) bool {
+		left := strings.TrimPrefix(fallbacks[i], "./")
+		right := strings.TrimPrefix(fallbacks[j], "./")
+		leftDepth := 0
+		rightDepth := 0
+		if left != "." && left != "" {
+			leftDepth = strings.Count(left, "/") + 1
+		}
+		if right != "." && right != "" {
+			rightDepth = strings.Count(right, "/") + 1
+		}
+		if leftDepth != rightDepth {
+			return leftDepth < rightDepth
+		}
+		return fallbacks[i] < fallbacks[j]
+	})
+	return fallbacks[0]
+}
+
+func detectPythonRuntimeEntry(files []GeneratedFile) string {
+	candidates := []string{
+		"main.py",
+		"app.py",
+		"server.py",
+		"api.py",
+		"backend/main.py",
+		"backend/app.py",
+		"server/main.py",
+		"app/main.py",
+	}
+
+	contentByPath := make(map[string]string, len(files))
+	for _, file := range files {
+		sanitized := sanitizeFilePath(file.Path)
+		if sanitized == "" || !strings.HasSuffix(strings.ToLower(sanitized), ".py") || strings.TrimSpace(file.Content) == "" {
+			continue
+		}
+		contentByPath[sanitized] = file.Content
+	}
+
+	for _, candidate := range candidates {
+		if content, ok := contentByPath[candidate]; ok && pythonFileLooksRunnableServer(content) {
+			return candidate
+		}
+	}
+
+	fallbacks := make([]string, 0, len(contentByPath))
+	for path, content := range contentByPath {
+		if pythonFileLooksRunnableServer(content) {
+			fallbacks = append(fallbacks, path)
+		}
+	}
+	sort.Slice(fallbacks, func(i, j int) bool {
+		leftDepth := strings.Count(strings.TrimPrefix(fallbacks[i], "./"), "/")
+		rightDepth := strings.Count(strings.TrimPrefix(fallbacks[j], "./"), "/")
+		if leftDepth != rightDepth {
+			return leftDepth < rightDepth
+		}
+		return fallbacks[i] < fallbacks[j]
+	})
+	if len(fallbacks) == 0 {
+		return ""
+	}
+	return fallbacks[0]
+}
+
+func pythonFileLooksRunnableServer(content string) bool {
+	lower := strings.ToLower(content)
+	hasMainBlock := strings.Contains(content, `if __name__ == "__main__":`) || strings.Contains(content, "if __name__ == '__main__':")
+	serverIndicators := []string{
+		"uvicorn.run(",
+		"app.run(",
+		"httpserver(",
+		"serve_forever(",
+		"socketserver.",
+		"run_app(",
+	}
+	for _, indicator := range serverIndicators {
+		if strings.Contains(lower, indicator) {
+			return hasMainBlock || strings.Contains(lower, "serve_forever(") || strings.Contains(lower, "httpserver(") || strings.Contains(lower, "socketserver.")
+		}
+	}
+	return false
+}
+
+func classifyPythonRuntimeProbeFailure(files []GeneratedFile, summary string) (bool, string) {
+	module := extractMissingPythonModule(summary)
+	if module == "" {
+		return false, summary
+	}
+	moduleRoot := module
+	if dot := strings.Index(moduleRoot, "."); dot >= 0 {
+		moduleRoot = moduleRoot[:dot]
+	}
+
+	localModules := collectLocalPythonModules(files)
+	if _, ok := localModules[module]; ok {
+		return false, summary
+	}
+	if _, ok := localModules[moduleRoot]; ok {
+		return false, summary
+	}
+
+	declaredModules := collectDeclaredPythonRequirementModules(files)
+	if _, ok := declaredModules[module]; ok {
+		return true, summary
+	}
+	if _, ok := declaredModules[moduleRoot]; ok {
+		return true, summary
+	}
+	return false, summary
+}
+
+func extractMissingPythonModule(summary string) string {
+	lines := strings.Split(summary, "\n")
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		lower := strings.ToLower(line)
+		if !strings.Contains(lower, "no module named") {
+			continue
+		}
+		quotePairs := [][2]string{{"'", "'"}, {"\"", "\""}}
+		for _, pair := range quotePairs {
+			start := strings.Index(line, pair[0])
+			if start < 0 {
+				continue
+			}
+			rest := line[start+len(pair[0]):]
+			end := strings.Index(rest, pair[1])
+			if end < 0 {
+				continue
+			}
+			module := strings.TrimSpace(rest[:end])
+			if module != "" {
+				return module
+			}
+		}
+	}
+	return ""
+}
+
+func collectLocalPythonModules(files []GeneratedFile) map[string]struct{} {
+	modules := make(map[string]struct{})
+	for _, file := range files {
+		sanitized := sanitizeFilePath(file.Path)
+		if sanitized == "" || !strings.HasSuffix(strings.ToLower(sanitized), ".py") {
+			continue
+		}
+
+		path := strings.TrimSuffix(sanitized, ".py")
+		parts := strings.Split(path, "/")
+		if len(parts) == 0 {
+			continue
+		}
+		if parts[len(parts)-1] == "__init__" {
+			parts = parts[:len(parts)-1]
+		}
+		for i := 1; i <= len(parts); i++ {
+			module := strings.Join(parts[:i], ".")
+			if module != "" {
+				modules[module] = struct{}{}
+			}
+		}
+	}
+	return modules
+}
+
+func collectDeclaredPythonRequirementModules(files []GeneratedFile) map[string]struct{} {
+	modules := make(map[string]struct{})
+	addModule := func(name string) {
+		name = strings.TrimSpace(strings.ToLower(name))
+		if name == "" {
+			return
+		}
+		modules[name] = struct{}{}
+		modules[strings.ReplaceAll(name, "-", "_")] = struct{}{}
+	}
+
+	aliases := map[string][]string{
+		"python-dotenv": {"dotenv"},
+		"pillow":        {"pil"},
+	}
+
+	for _, file := range files {
+		if !strings.EqualFold(filepath.Base(strings.TrimSpace(file.Path)), "requirements.txt") {
+			continue
+		}
+		for _, raw := range strings.Split(file.Content, "\n") {
+			line := strings.TrimSpace(raw)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if idx := strings.Index(line, "#"); idx >= 0 {
+				line = strings.TrimSpace(line[:idx])
+			}
+			if line == "" {
+				continue
+			}
+			for _, sep := range []string{"==", ">=", "<=", "~=", "!=", ">", "<"} {
+				if idx := strings.Index(line, sep); idx >= 0 {
+					line = strings.TrimSpace(line[:idx])
+					break
+				}
+			}
+			if idx := strings.Index(line, "["); idx >= 0 {
+				line = strings.TrimSpace(line[:idx])
+			}
+			if line == "" {
+				continue
+			}
+			addModule(line)
+			for _, alias := range aliases[strings.ToLower(line)] {
+				addModule(alias)
+			}
+		}
+	}
+	return modules
+}
+
+func detectBackendRuntimeScript(scripts map[string]string) string {
+	if len(scripts) == 0 {
+		return ""
+	}
+
+	preferred := []string{
+		"start",
+		"start:server",
+		"start:api",
+		"start:prod",
+		"serve",
+		"serve:server",
+		"serve:api",
+		"dev",
+		"dev:server",
+		"dev:api",
+	}
+	for _, name := range preferred {
+		if backendRuntimeScriptUsable(name, scripts[name]) {
+			return name
+		}
+	}
+
+	fallbacks := make([]string, 0, len(scripts))
+	for name, command := range scripts {
+		if backendRuntimeScriptUsable(name, command) {
+			fallbacks = append(fallbacks, name)
+		}
+	}
+	sort.Strings(fallbacks)
+	if len(fallbacks) == 0 {
+		return ""
+	}
+	return fallbacks[0]
+}
+
+func backendRuntimeScriptUsable(name, command string) bool {
+	lowerName := strings.ToLower(strings.TrimSpace(name))
+	lowerCommand := strings.ToLower(strings.TrimSpace(command))
+	if lowerName == "" || lowerCommand == "" {
+		return false
+	}
+
+	excludedNameTokens := []string{
+		"build",
+		"test",
+		"lint",
+		"typecheck",
+		"check",
+		"format",
+		"clean",
+		"migrate",
+		"seed",
+	}
+	for _, token := range excludedNameTokens {
+		if strings.Contains(lowerName, token) {
+			return false
+		}
+	}
+
+	serverIndicators := []string{
+		"node ",
+		"tsx",
+		"ts-node",
+		"ts-node-dev",
+		"nodemon",
+		"bun ",
+		"bunx ",
+		"deno ",
+		"nest start",
+		"next start",
+		"remix-serve",
+		"vite-node",
+	}
+	for _, indicator := range serverIndicators {
+		if strings.Contains(lowerCommand, indicator) {
+			return true
+		}
+	}
+
+	return strings.Contains(lowerName, "start") || strings.Contains(lowerName, "serve") || strings.Contains(lowerName, "dev")
+}
+
+func runBackendHTTPProbe(workDir string, healthPaths []string, cmdName string, args []string) (string, bool) {
+	normalizedPaths := make([]string, 0, len(healthPaths))
+	seen := make(map[string]struct{}, len(healthPaths))
+	for _, path := range healthPaths {
+		path = "/" + strings.TrimPrefix(strings.TrimSpace(path), "/")
+		if path == "/" && strings.TrimSpace(path) == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		normalizedPaths = append(normalizedPaths, path)
+	}
+	if len(normalizedPaths) == 0 {
+		normalizedPaths = []string{"/health", "/"}
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Sprintf("unable to allocate local port (%v)", err), true
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, cmdName, args...)
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("PORT=%d", port),
+		"HOST=127.0.0.1",
+		"NODE_ENV=development",
+		"PYTHONUNBUFFERED=1",
+	)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Start(); err != nil {
+		return fmt.Sprintf("backend start failed: %v", err), true
+	}
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		select {
+		case <-waitCh:
+		default:
+		}
+	}()
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	deadline := time.Now().Add(35 * time.Second)
+	firstHTTPFailure := ""
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-waitCh:
+			if firstHTTPFailure != "" {
+				return firstHTTPFailure, false
+			}
+			serverReportedReady := previewProbeOutputShowsServerReady(out.String())
+			skip, summary := classifyPreviewHTTPProbeFailure(out.String(), err, serverReportedReady)
+			return summary, skip
+		default:
+		}
+
+		for _, healthPath := range normalizedPaths {
+			url := fmt.Sprintf("http://127.0.0.1:%d%s", port, healthPath)
+			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			resp, err := client.Do(req)
+			if err != nil {
+				continue
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+				return "", false
+			}
+			if resp.StatusCode >= 500 {
+				continue
+			}
+			if firstHTTPFailure == "" {
+				firstHTTPFailure = fmt.Sprintf("%s returned HTTP %d", healthPath, resp.StatusCode)
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	if firstHTTPFailure != "" {
+		return firstHTTPFailure, false
+	}
+	serverReportedReady := previewProbeOutputShowsServerReady(out.String())
+	skip, summary := classifyPreviewHTTPProbeFailure(out.String(), ctx.Err(), serverReportedReady)
+	return summary, skip
 }
 
 func buildUsesPreviewHTTPProbe(scripts map[string]string, force bool) bool {
@@ -9179,6 +10449,100 @@ func buildUsesPreviewHTTPProbe(scripts map[string]string, force bool) bool {
 	}
 	val := strings.TrimSpace(strings.ToLower(os.Getenv("BUILD_PREVIEW_HTTP_SMOKE")))
 	return val == "1" || val == "true" || val == "yes"
+}
+
+func verificationCommandTimedOut(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "timed out after")
+}
+
+func previewBuildOutputHasActionableFailure(output string) bool {
+	for _, raw := range strings.Split(strings.TrimSpace(output), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "warning") || strings.Contains(lower, "deprecated") {
+			continue
+		}
+		if strings.Contains(lower, "error") ||
+			strings.Contains(line, "TS") ||
+			strings.Contains(line, "ERR!") ||
+			strings.Contains(lower, "cannot find module") ||
+			strings.Contains(lower, "failed to resolve") ||
+			strings.Contains(lower, "rolluperror") {
+			return true
+		}
+	}
+	return false
+}
+
+func classifyNodeInstallFailure(output string, err error) (bool, string) {
+	summary := summarizePreviewInstallFailure(output)
+	if err == nil {
+		return false, summary
+	}
+	if strings.HasPrefix(summary, "package not found on npm registry:") {
+		return false, summary
+	}
+
+	lower := strings.ToLower(strings.Join([]string{output, summary, err.Error()}, "\n"))
+	hostIndicators := []string{
+		"timed out after",
+		"npm err! network",
+		"getaddrinfo enotfound",
+		"getaddrinfo eai_again",
+		"econnreset",
+		"econnrefused",
+		"etimedout",
+		"network request to",
+		"socket hang up",
+		"fetch failed",
+		"unable to get local issuer certificate",
+		"self signed certificate",
+		"certificate has expired",
+		"tunneling socket could not be established",
+		"node-gyp",
+		"gyp err!",
+		"could not find any python installation",
+		"python is not set from command line or npm configuration",
+		"make: not found",
+		"g++: not found",
+		"gcc: not found",
+		"cl.exe",
+		"msbuild",
+	}
+	for _, indicator := range hostIndicators {
+		if strings.Contains(lower, indicator) {
+			return true, summary
+		}
+	}
+	return false, summary
+}
+
+func classifyNodeBuildFailure(output string, err error) (bool, string) {
+	summary := summarizePreviewBuildFailure(output)
+	if err == nil {
+		return false, summary
+	}
+
+	lower := strings.ToLower(strings.Join([]string{output, summary, err.Error()}, "\n"))
+	if verificationCommandTimedOut(err) && !previewBuildOutputHasActionableFailure(output) {
+		return true, summary
+	}
+	hostIndicators := []string{
+		"cannot find module '@esbuild/",
+		"cannot find module '@rollup/rollup-",
+	}
+	for _, indicator := range hostIndicators {
+		if strings.Contains(lower, indicator) {
+			return true, summary
+		}
+	}
+	return false, summary
 }
 
 func runPreviewCheckCommand(workDir string, timeout time.Duration, name string, args ...string) (string, error) {
@@ -9197,15 +10561,62 @@ func runPreviewCheckCommand(workDir string, timeout time.Duration, name string, 
 	return buf.String(), err
 }
 
-func runPreviewHTTPProbe(workDir string) string {
+func previewProbeOutputShowsServerReady(output string) bool {
+	lower := strings.ToLower(output)
+	indicators := []string{
+		"local:",
+		"network:",
+		"ready in",
+		"http://127.0.0.1:",
+		"http://localhost:",
+		"server running at",
+		"listening on",
+	}
+	for _, indicator := range indicators {
+		if strings.Contains(lower, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+func classifyPreviewHTTPProbeFailure(output string, err error, serverReportedReady bool) (bool, string) {
+	summary := truncatePreviewCommandOutput(output)
+	if err == nil {
+		return false, summary
+	}
+	if serverReportedReady {
+		return true, summary
+	}
+
+	lower := strings.ToLower(strings.Join([]string{output, summary, err.Error()}, "\n"))
+	hostIndicators := []string{
+		"address already in use",
+		"eaddrnotavail",
+		"listen eacces",
+		"operation not permitted",
+		"resource temporarily unavailable",
+		"fork/exec",
+		"executable file not found",
+		"no such file or directory",
+	}
+	for _, indicator := range hostIndicators {
+		if strings.Contains(lower, indicator) {
+			return true, summary
+		}
+	}
+	return false, summary
+}
+
+func runPreviewHTTPProbe(workDir string) (string, bool) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return fmt.Sprintf("Preview verification preview probe failed: unable to allocate local port (%v)", err)
+		return fmt.Sprintf("unable to allocate local port (%v)", err), true
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	ln.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "npm", "run", "preview", "--", "--host", "127.0.0.1", "--port", strconv.Itoa(port))
@@ -9214,31 +10625,48 @@ func runPreviewHTTPProbe(workDir string) string {
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	if err := cmd.Start(); err != nil {
-		return fmt.Sprintf("Preview verification preview start failed: %v", err)
+		return fmt.Sprintf("preview start failed: %v", err), true
 	}
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
 	defer func() {
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
-		_ = cmd.Wait()
+		select {
+		case <-waitCh:
+		default:
+		}
 	}()
 
 	client := &http.Client{Timeout: 3 * time.Second}
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(35 * time.Second)
 	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
 	for time.Now().Before(deadline) {
+		select {
+		case err := <-waitCh:
+			serverReportedReady := previewProbeOutputShowsServerReady(out.String())
+			skip, summary := classifyPreviewHTTPProbeFailure(out.String(), err, serverReportedReady)
+			return summary, skip
+		default:
+		}
+
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		resp, err := client.Do(req)
 		if err == nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			if resp.StatusCode >= 200 && resp.StatusCode < 500 {
-				return ""
+				return "", false
 			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return fmt.Sprintf("Preview verification preview probe failed: %s", truncatePreviewCommandOutput(out.String()))
+	serverReportedReady := previewProbeOutputShowsServerReady(out.String())
+	skip, summary := classifyPreviewHTTPProbeFailure(out.String(), ctx.Err(), serverReportedReady)
+	return summary, skip
 }
 
 func truncatePreviewCommandOutput(output string) string {
@@ -9350,16 +10778,7 @@ func summarizePreviewBuildFailure(output string) string {
 		if line == "" {
 			continue
 		}
-		lower := strings.ToLower(line)
-		if strings.Contains(lower, "warning") || strings.Contains(lower, "deprecated") {
-			continue
-		}
-		if strings.Contains(lower, "error") ||
-			strings.Contains(line, "TS") ||
-			strings.Contains(line, "ERR!") ||
-			strings.Contains(lower, "cannot find module") ||
-			strings.Contains(lower, "failed to resolve") ||
-			strings.Contains(lower, "rolluperror") {
+		if previewBuildOutputHasActionableFailure(line) {
 			matches = append(matches, line)
 		}
 	}

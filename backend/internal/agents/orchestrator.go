@@ -23,18 +23,37 @@ import (
 
 // orchestratorAIAdapter bridges the agents.AIRouter to autonomous.AIProvider interface
 type orchestratorAIAdapter struct {
-	router AIRouter
-	userID uint
+	router  AIRouter
+	manager *AgentManager
+	build   *Build
 }
 
 func (a *orchestratorAIAdapter) Generate(ctx context.Context, prompt string, opts autonomous.AIOptions) (string, error) {
-	resp, err := a.router.Generate(ctx, ai.ProviderClaude, prompt, GenerateOptions{
-		UserID:          a.userID,
+	provider := ai.ProviderClaude
+	powerMode := PowerFast
+	usePlatformKeys := true
+	userID := uint(0)
+
+	if a.build != nil {
+		userID = a.build.UserID
+		if a.build.PowerMode != "" {
+			powerMode = a.build.PowerMode
+		}
+	}
+	if a.manager != nil {
+		usePlatformKeys = a.manager.buildUsesPlatformKeys(a.build)
+		if available := a.manager.getCurrentlyAvailableProvidersForBuild(a.build); len(available) > 0 {
+			provider = a.manager.selectLeadProvider(available)
+		}
+	}
+
+	resp, err := a.router.Generate(ctx, provider, prompt, GenerateOptions{
+		UserID:          userID,
 		MaxTokens:       opts.MaxTokens,
 		Temperature:     opts.Temperature,
 		SystemPrompt:    opts.SystemPrompt,
-		PowerMode:       PowerFast, // Use fast model for verification to save cost
-		UsePlatformKeys: true,
+		PowerMode:       powerMode,
+		UsePlatformKeys: usePlatformKeys,
 	})
 	if err != nil {
 		return "", err
@@ -61,27 +80,27 @@ type BuildOrchestrator struct {
 
 // OrchestrationState tracks the orchestration state for a build
 type OrchestrationState struct {
-	BuildID         string
-	Phase           BuildPhase
-	StartTime       time.Time
-	PhaseStarted    time.Time
-	TotalAgents     int
-	ActiveAgents    int
-	CompletedTasks  int
-	TotalTasks      int
-	Errors          []string
-	ctx             context.Context
-	cancel          context.CancelFunc
+	BuildID        string
+	Phase          BuildPhase
+	StartTime      time.Time
+	PhaseStarted   time.Time
+	TotalAgents    int
+	ActiveAgents   int
+	CompletedTasks int
+	TotalTasks     int
+	Errors         []string
+	ctx            context.Context
+	cancel         context.CancelFunc
 
 	// Enhanced tracking
-	ParallelTasks   int              // Number of tasks running in parallel
+	ParallelTasks   int                 // Number of tasks running in parallel
 	DependencyGraph map[string][]string // Task ID -> dependent task IDs
 	TaskStatus      map[string]TaskStatus
-	VerifyGates     []VerifyGate     // Build verification checkpoints
-	ResourceUsage   ResourceMetrics  // Track resource consumption
+	VerifyGates     []VerifyGate    // Build verification checkpoints
+	ResourceUsage   ResourceMetrics // Track resource consumption
 
 	// FSM + Guarantee Engine context (nil-safe — orchestrator checks before use)
-	FSMContext      *BuildFSMContext
+	FSMContext *BuildFSMContext
 }
 
 // VerifyGate represents a build verification checkpoint
@@ -110,15 +129,15 @@ type ResourceMetrics struct {
 type BuildPhase string
 
 const (
-	PhaseInitializing   BuildPhase = "initializing"
-	PhasePlanning       BuildPhase = "planning"
-	PhaseArchitecting   BuildPhase = "architecting"
-	PhaseGenerating     BuildPhase = "generating"
-	PhaseTesting        BuildPhase = "testing"
-	PhaseReviewing      BuildPhase = "reviewing"
-	PhaseCompleting     BuildPhase = "completing"
-	PhaseComplete       BuildPhase = "complete"
-	PhaseFailed         BuildPhase = "failed"
+	PhaseInitializing BuildPhase = "initializing"
+	PhasePlanning     BuildPhase = "planning"
+	PhaseArchitecting BuildPhase = "architecting"
+	PhaseGenerating   BuildPhase = "generating"
+	PhaseTesting      BuildPhase = "testing"
+	PhaseReviewing    BuildPhase = "reviewing"
+	PhaseCompleting   BuildPhase = "completing"
+	PhaseComplete     BuildPhase = "complete"
+	PhaseFailed       BuildPhase = "failed"
 )
 
 // NewBuildOrchestrator creates a new build orchestrator
@@ -207,7 +226,7 @@ func (o *BuildOrchestrator) runPipeline(build *Build, state *OrchestrationState)
 
 	// Start FSM lifecycle
 	o.fsmTransition(state, core.EventStart)       // idle → initializing
-	o.fsmTransition(state, core.EventInitialized)  // initializing → planning
+	o.fsmTransition(state, core.EventInitialized) // initializing → planning
 
 	// Phase 1: Planning
 	if err := o.executePlanningPhase(build, state); err != nil {
@@ -528,8 +547,9 @@ func (o *BuildOrchestrator) runBuildVerifier(build *Build, files []GeneratedFile
 
 	// Create AI adapter for the verifier
 	aiAdapter := &orchestratorAIAdapter{
-		router: o.manager.aiRouter,
-		userID: build.UserID,
+		router:  o.manager.aiRouter,
+		manager: o.manager,
+		build:   build,
 	}
 
 	// Run verification with a 60-second timeout
@@ -537,7 +557,10 @@ func (o *BuildOrchestrator) runBuildVerifier(build *Build, files []GeneratedFile
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	result, err := verifier.Verify(ctx, 1) // 1 retry to keep it fast
+	// Keep orchestration verification diagnostic-only. Real recovery happens
+	// through deterministic repairs and solver/reviewer tasks against the
+	// build's actual artifacts, not temp-dir edits inside verification.
+	result, err := verifier.Verify(ctx, 0)
 	if err != nil {
 		log.Printf("Orchestrator: BuildVerifier failed: %v", err)
 		return 0, false
@@ -906,17 +929,7 @@ func (o *BuildOrchestrator) waitForTasksOfType(build *Build, state *Orchestratio
 func (o *BuildOrchestrator) completeOrchestration(build *Build, state *OrchestrationState) {
 	state.Phase = PhaseComplete
 	o.broadcastPhase(build.ID, state.Phase, "Generation complete — running final validation...")
-
-	build.mu.Lock()
-	if build.Status != BuildFailed && build.Status != BuildCancelled {
-		if build.Progress < 95 {
-			build.Progress = 95
-		}
-		build.UpdatedAt = time.Now()
-	}
-	build.mu.Unlock()
-
-	o.manager.checkBuildCompletion(build)
+	o.manager.finalizePhasedPipeline(build)
 }
 
 // fsmTransition safely transitions the FSM if it exists. Logs warnings on error.
@@ -1111,23 +1124,23 @@ func (o *BuildOrchestrator) GetBuildProgress(buildID string) (map[string]any, er
 	}
 
 	progress := map[string]any{
-		"build_id":        buildID,
-		"status":          string(build.Status),
-		"progress":        build.Progress,
-		"tasks_pending":   taskCounts[TaskPending],
-		"tasks_running":   taskCounts[TaskInProgress],
-		"tasks_completed": taskCounts[TaskCompleted],
-		"tasks_failed":    taskCounts[TaskFailed],
-		"tasks_total":     len(build.Tasks),
-		"agents_idle":     agentCounts[StatusIdle],
-		"agents_working":  agentCounts[StatusWorking],
+		"build_id":         buildID,
+		"status":           string(build.Status),
+		"progress":         build.Progress,
+		"tasks_pending":    taskCounts[TaskPending],
+		"tasks_running":    taskCounts[TaskInProgress],
+		"tasks_completed":  taskCounts[TaskCompleted],
+		"tasks_failed":     taskCounts[TaskFailed],
+		"tasks_total":      len(build.Tasks),
+		"agents_idle":      agentCounts[StatusIdle],
+		"agents_working":   agentCounts[StatusWorking],
 		"agents_completed": agentCounts[StatusCompleted],
-		"agents_error":    agentCounts[StatusError],
-		"agents_total":    len(build.Agents),
-		"files_generated": fileCount,
-		"total_size":      totalSize,
-		"created_at":      build.CreatedAt,
-		"updated_at":      build.UpdatedAt,
+		"agents_error":     agentCounts[StatusError],
+		"agents_total":     len(build.Agents),
+		"files_generated":  fileCount,
+		"total_size":       totalSize,
+		"created_at":       build.CreatedAt,
+		"updated_at":       build.UpdatedAt,
 	}
 
 	if state != nil {

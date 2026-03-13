@@ -526,23 +526,28 @@ type CompletedBuild struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
-	BuildID     string     `json:"build_id" gorm:"uniqueIndex;not null;size:64"` // UUID from agent system
-	UserID      uint       `json:"user_id" gorm:"not null;index"`
-	ProjectID   *uint      `json:"project_id,omitempty" gorm:"index"`
-	ProjectName string     `json:"project_name" gorm:"size:255"`
-	Description string     `json:"description" gorm:"type:text"`
-	Status      string     `json:"status" gorm:"size:20;index"`          // completed, failed, cancelled
-	Mode        string     `json:"mode" gorm:"size:10"`                  // fast, full
-	PowerMode   string     `json:"power_mode" gorm:"size:10"`            // fast, balanced, max
-	TechStack   string     `json:"tech_stack" gorm:"type:text"`          // JSON blob of tech stack
-	FilesJSON   string     `json:"-" gorm:"column:files_json;type:text"` // JSON array of generated files
-	InteractionJSON string `json:"-" gorm:"column:interaction_json;type:text"`
-	FilesCount  int        `json:"files_count" gorm:"default:0"`
-	TotalCost   float64    `json:"total_cost" gorm:"default:0.0"` // Total AI cost in USD
-	Progress    int        `json:"progress" gorm:"default:100"`
-	DurationMs  int64      `json:"duration_ms" gorm:"default:0"` // Build duration in milliseconds
-	Error       string     `json:"error,omitempty" gorm:"type:text"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	BuildID         string     `json:"build_id" gorm:"uniqueIndex;not null;size:64"` // UUID from agent system
+	UserID          uint       `json:"user_id" gorm:"not null;index"`
+	ProjectID       *uint      `json:"project_id,omitempty" gorm:"index"`
+	ProjectName     string     `json:"project_name" gorm:"size:255"`
+	Description     string     `json:"description" gorm:"type:text"`
+	Status          string     `json:"status" gorm:"size:20;index"`          // completed, failed, cancelled
+	Mode            string     `json:"mode" gorm:"size:10"`                  // fast, full
+	PowerMode       string     `json:"power_mode" gorm:"size:10"`            // fast, balanced, max
+	TechStack       string     `json:"tech_stack" gorm:"type:text"`          // JSON blob of tech stack
+	FilesJSON       string     `json:"-" gorm:"column:files_json;type:text"` // JSON array of generated files
+	AgentsJSON      string     `json:"-" gorm:"column:agents_json;type:text"`
+	TasksJSON       string     `json:"-" gorm:"column:tasks_json;type:text"`
+	CheckpointsJSON string     `json:"-" gorm:"column:checkpoints_json;type:text"`
+	StateJSON       string     `json:"-" gorm:"column:state_json;type:text"`
+	ActivityJSON    string     `json:"-" gorm:"column:activity_json;type:text"`
+	InteractionJSON string     `json:"-" gorm:"column:interaction_json;type:text"`
+	FilesCount      int        `json:"files_count" gorm:"default:0"`
+	TotalCost       float64    `json:"total_cost" gorm:"default:0.0"` // Total AI cost in USD
+	Progress        int        `json:"progress" gorm:"default:100"`
+	DurationMs      int64      `json:"duration_ms" gorm:"default:0"` // Build duration in milliseconds
+	Error           string     `json:"error,omitempty" gorm:"type:text"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 }
 
 // ProcessedStripeEvent tracks Stripe webhook events that have already been handled.
@@ -564,14 +569,14 @@ type CreditLedgerEntry struct {
 	ID              uint      `json:"id" gorm:"primarykey"`
 	CreatedAt       time.Time `json:"created_at"`
 	UserID          uint      `json:"user_id" gorm:"not null;index"`
-	AmountUSD       float64   `json:"amount_usd" gorm:"not null"`    // positive = credit, negative = debit
+	AmountUSD       float64   `json:"amount_usd" gorm:"not null"` // positive = credit, negative = debit
 	BalanceAfterUSD float64   `json:"balance_after_usd" gorm:"not null"`
 	// Entry type: monthly_allocation | credit_purchase | admin_grant | spend_deduction | refund
-	EntryType       string `json:"entry_type" gorm:"not null;size:32;index"`
-	Description     string `json:"description" gorm:"size:255"`
+	EntryType   string `json:"entry_type" gorm:"not null;size:32;index"`
+	Description string `json:"description" gorm:"size:255"`
 	// Stripe references (for reconciliation)
 	StripeEventID   string `json:"stripe_event_id,omitempty" gorm:"size:64;index"`
 	StripeInvoiceID string `json:"stripe_invoice_id,omitempty" gorm:"size:64;index"`
 	// Plan context (for monthly allocations)
-	PlanType        string `json:"plan_type,omitempty" gorm:"size:20"`
+	PlanType string `json:"plan_type,omitempty" gorm:"size:20"`
 }

@@ -62,13 +62,17 @@ export const normalizeConfiguredWsUrl = (value?: string): string => {
   }
 }
 
+const getImportedApiUrl = (): string | undefined => {
+  return import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL
+}
+
 export const getConfiguredApiUrl = (): string => {
   const runtimeValue = normalizeConfiguredApiUrl(readRuntimeConfig().API_URL)
   if (runtimeValue) {
     return runtimeValue
   }
 
-  return normalizeConfiguredApiUrl(import.meta.env.VITE_API_URL)
+  return normalizeConfiguredApiUrl(getImportedApiUrl())
 }
 
 export const getConfiguredWsUrl = (): string => {

@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"errors"
+	"net"
 	"os/exec"
 	"strings"
 	"testing"
@@ -570,6 +571,178 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 		}
 	})
 
+	t.Run("start_script_runtime_probe_succeeds", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := exec.LookPath("npm"); err != nil {
+			t.Skip("npm not available")
+		}
+		if !canBindLocalhostPort() {
+			t.Skip("localhost bind unavailable in this environment")
+		}
+
+		files := []GeneratedFile{
+			{
+				Path: "backend/package.json",
+				Content: `{
+  "name": "api",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"console.log('ok')\"",
+    "start": "node -e \"require('http').createServer((req,res)=>{res.statusCode=req.url==='/health'?200:404;res.end('ok')}).listen(process.env.PORT,'127.0.0.1')\""
+  }
+}`,
+			},
+			{Path: "backend/src/server.js", Content: "console.log('ok')"},
+		}
+
+		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		if len(errs) != 0 {
+			t.Fatalf("expected backend runtime probe success, got %v", errs)
+		}
+	})
+
+	t.Run("start_script_runtime_probe_404_fails", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := exec.LookPath("npm"); err != nil {
+			t.Skip("npm not available")
+		}
+		if !canBindLocalhostPort() {
+			t.Skip("localhost bind unavailable in this environment")
+		}
+
+		files := []GeneratedFile{
+			{
+				Path: "backend/package.json",
+				Content: `{
+  "name": "api",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"console.log('ok')\"",
+    "start": "node -e \"require('http').createServer((req,res)=>{res.statusCode=404;res.end('missing')}).listen(process.env.PORT,'127.0.0.1')\""
+  }
+}`,
+			},
+			{Path: "backend/src/server.js", Content: "console.log('ok')"},
+		}
+
+		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		if !containsError(errs, "Backend runtime probe failed: /health returned HTTP 404") {
+			t.Fatalf("expected backend runtime 404 failure, got %v", errs)
+		}
+	})
+
+	t.Run("dev_script_runtime_probe_succeeds_without_start", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := exec.LookPath("npm"); err != nil {
+			t.Skip("npm not available")
+		}
+		if !canBindLocalhostPort() {
+			t.Skip("localhost bind unavailable in this environment")
+		}
+
+		files := []GeneratedFile{
+			{
+				Path: "backend/package.json",
+				Content: `{
+  "name": "api",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"console.log('ok')\"",
+    "dev": "node -e \"require('http').createServer((req,res)=>{res.statusCode=req.url==='/ready'?200:404;res.end('ok')}).listen(process.env.PORT,'127.0.0.1')\""
+  }
+}`,
+			},
+			{Path: "backend/src/server.js", Content: "console.log('ok')"},
+		}
+
+		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		if len(errs) != 0 {
+			t.Fatalf("expected backend dev runtime probe success, got %v", errs)
+		}
+	})
+
+	t.Run("python_runtime_probe_succeeds", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := exec.LookPath("python3"); err != nil {
+			t.Skip("python3 not available")
+		}
+		if !canBindLocalhostPort() {
+			t.Skip("localhost bind unavailable in this environment")
+		}
+
+		files := []GeneratedFile{
+			{
+				Path: "main.py",
+				Content: `import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/ready":
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        return
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "8000"))
+    HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+`,
+			},
+		}
+
+		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		if len(errs) != 0 {
+			t.Fatalf("expected python runtime probe success, got %v", errs)
+		}
+	})
+
+	t.Run("python_runtime_probe_404_fails", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := exec.LookPath("python3"); err != nil {
+			t.Skip("python3 not available")
+		}
+		if !canBindLocalhostPort() {
+			t.Skip("localhost bind unavailable in this environment")
+		}
+
+		files := []GeneratedFile{
+			{
+				Path: "main.py",
+				Content: `import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(404)
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        return
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "8000"))
+    HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+`,
+			},
+		}
+
+		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		if !containsError(errs, "Python backend runtime probe failed: /health returned HTTP 404") {
+			t.Fatalf("expected python runtime 404 failure, got %v", errs)
+		}
+	})
+
 	t.Run("tsc_root_mismatch_fails_preflight", func(t *testing.T) {
 		t.Parallel()
 
@@ -590,6 +763,166 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 		errs := am.verifyGeneratedBackendBuildReadiness(files)
 		if !containsError(errs, "backend/tsconfig.json is missing") {
 			t.Fatalf("expected backend tsconfig root mismatch error, got %v", errs)
+		}
+	})
+}
+
+func TestDetectBackendHealthProbePaths(t *testing.T) {
+	t.Parallel()
+
+	t.Run("defaults_to_health", func(t *testing.T) {
+		t.Parallel()
+
+		got := detectBackendHealthProbePaths([]GeneratedFile{
+			{Path: "backend/src/server.ts", Content: `app.get("/ready", (_req, res) => res.send("ok"))`},
+		})
+		want := []string{"/ready", "/health", "/api/health", "/healthz", "/status", "/api/status", "/api/ready", "/"}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("unexpected default probe paths: got %v want %v", got, want)
+		}
+	})
+
+	t.Run("prefers_api_health_when_present", func(t *testing.T) {
+		t.Parallel()
+
+		got := detectBackendHealthProbePaths([]GeneratedFile{
+			{Path: "backend/src/server.ts", Content: `app.get("/api/health", (_req, res) => res.send("ok"))`},
+		})
+		if len(got) == 0 || got[0] != "/api/health" {
+			t.Fatalf("expected /api/health to be probed first, got %v", got)
+		}
+		if got[len(got)-1] != "/" {
+			t.Fatalf("expected root fallback last, got %v", got)
+		}
+	})
+}
+
+func TestDetectGoRuntimeTarget(t *testing.T) {
+	t.Parallel()
+
+	t.Run("prefers_known_candidate_order", func(t *testing.T) {
+		t.Parallel()
+
+		got := detectGoRuntimeTarget([]GeneratedFile{
+			{Path: "cmd/api/main.go", Content: "package main\n\nfunc main() {}\n"},
+			{Path: "main.go", Content: "package main\n\nfunc main() {}\n"},
+			{Path: "helpers.go", Content: "package main\n\nfunc helper() {}\n"},
+		})
+		if got != "." {
+			t.Fatalf("expected top-level package target to win, got %q", got)
+		}
+	})
+
+	t.Run("falls_back_to_nested_main_package", func(t *testing.T) {
+		t.Parallel()
+
+		got := detectGoRuntimeTarget([]GeneratedFile{
+			{Path: "internal/app/main.go", Content: "package main\n\nfunc main() {}\n"},
+			{Path: "internal/app/server.go", Content: "package main\n\nfunc helper() {}\n"},
+		})
+		if got != "./internal/app" {
+			t.Fatalf("expected fallback package target, got %q", got)
+		}
+	})
+}
+
+func TestDetectBackendRuntimeScript(t *testing.T) {
+	t.Parallel()
+
+	t.Run("prefers_start_over_dev", func(t *testing.T) {
+		t.Parallel()
+
+		got := detectBackendRuntimeScript(map[string]string{
+			"dev":   "tsx watch src/server.ts",
+			"start": "node dist/server.js",
+		})
+		if got != "start" {
+			t.Fatalf("expected start to win, got %q", got)
+		}
+	})
+
+	t.Run("falls_back_to_dev_server", func(t *testing.T) {
+		t.Parallel()
+
+		got := detectBackendRuntimeScript(map[string]string{
+			"build":      "tsc",
+			"dev:server": "tsx watch src/server.ts",
+		})
+		if got != "dev:server" {
+			t.Fatalf("expected dev:server fallback, got %q", got)
+		}
+	})
+
+	t.Run("ignores_non_runtime_scripts", func(t *testing.T) {
+		t.Parallel()
+
+		got := detectBackendRuntimeScript(map[string]string{
+			"build": "tsc",
+			"test":  "vitest run",
+			"lint":  "eslint .",
+		})
+		if got != "" {
+			t.Fatalf("expected no runtime script, got %q", got)
+		}
+	})
+}
+
+func TestDetectPythonRuntimeEntry(t *testing.T) {
+	t.Parallel()
+
+	t.Run("prefers_main_py", func(t *testing.T) {
+		t.Parallel()
+
+		got := detectPythonRuntimeEntry([]GeneratedFile{
+			{Path: "server.py", Content: "if __name__ == \"__main__\":\n    app.run()\n"},
+			{Path: "main.py", Content: "if __name__ == \"__main__\":\n    app.run()\n"},
+		})
+		if got != "main.py" {
+			t.Fatalf("expected main.py to win, got %q", got)
+		}
+	})
+
+	t.Run("falls_back_to_nested_server", func(t *testing.T) {
+		t.Parallel()
+
+		got := detectPythonRuntimeEntry([]GeneratedFile{
+			{Path: "services/api.py", Content: "if __name__ == \"__main__\":\n    app.run()\n"},
+		})
+		if got != "services/api.py" {
+			t.Fatalf("expected nested api.py fallback, got %q", got)
+		}
+	})
+}
+
+func TestClassifyPythonRuntimeProbeFailure(t *testing.T) {
+	t.Parallel()
+
+	t.Run("declared_dependency_missing_on_host_skips", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{Path: "main.py", Content: "import fastapi\n"},
+			{Path: "requirements.txt", Content: "fastapi>=0.115.0\nuvicorn[standard]>=0.34.0\n"},
+		}
+		skip, summary := classifyPythonRuntimeProbeFailure(files, "Traceback...\nModuleNotFoundError: No module named 'fastapi'")
+		if !skip {
+			t.Fatalf("expected declared dependency to skip verifier")
+		}
+		if !strings.Contains(summary, "fastapi") {
+			t.Fatalf("expected summary to preserve missing module, got %q", summary)
+		}
+	})
+
+	t.Run("local_module_missing_remains_failure", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{Path: "app/__init__.py", Content: ""},
+			{Path: "main.py", Content: "import app.routes\n"},
+		}
+		skip, _ := classifyPythonRuntimeProbeFailure(files, "Traceback...\nModuleNotFoundError: No module named 'app.routes'")
+		if skip {
+			t.Fatalf("expected missing local module to remain a real failure")
 		}
 	})
 }
@@ -675,6 +1008,15 @@ export async function query<T extends QueryResultRow>(text: string, params?: any
 			t.Fatalf("expected frontend moduleResolution normalization, got %s", got)
 		}
 	})
+}
+
+func canBindLocalhostPort() bool {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	return true
 }
 
 func TestCanCreateAutomatedFixTask_DedupesActiveAndRecent(t *testing.T) {
@@ -956,6 +1298,146 @@ RollupError: Could not resolve "./components/dashboard/Dashboard"`
 	}
 }
 
+func TestClassifyNodeInstallFailure(t *testing.T) {
+	t.Parallel()
+
+	t.Run("registry_404_remains_artifact_failure", func(t *testing.T) {
+		t.Parallel()
+
+		out := `npm ERR! code E404
+npm ERR! 404 Not Found - GET https://registry.npmjs.org/@hooked%2fui - Not found`
+
+		skip, summary := classifyNodeInstallFailure(out, errors.New("exit status 1"))
+		if skip {
+			t.Fatalf("expected npm 404 to remain a real artifact failure")
+		}
+		if !strings.Contains(summary, "package not found on npm registry") {
+			t.Fatalf("expected package-not-found summary, got %q", summary)
+		}
+	})
+
+	t.Run("network_failure_skips_verifier", func(t *testing.T) {
+		t.Parallel()
+
+		out := `npm ERR! code ENOTFOUND
+npm ERR! network request to https://registry.npmjs.org/react failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org`
+
+		skip, _ := classifyNodeInstallFailure(out, errors.New("exit status 1"))
+		if !skip {
+			t.Fatalf("expected network install failure to skip verifier")
+		}
+	})
+
+	t.Run("native_toolchain_failure_skips_verifier", func(t *testing.T) {
+		t.Parallel()
+
+		out := `npm ERR! code 1
+npm ERR! command sh -c node-gyp rebuild
+npm ERR! gyp ERR! find Python
+npm ERR! gyp ERR! stack Error: Could not find any Python installation to use`
+
+		skip, _ := classifyNodeInstallFailure(out, errors.New("exit status 1"))
+		if !skip {
+			t.Fatalf("expected node-gyp toolchain failure to skip verifier")
+		}
+	})
+}
+
+func TestClassifyNodeBuildFailure(t *testing.T) {
+	t.Parallel()
+
+	t.Run("timeout_without_actionable_errors_skips_verifier", func(t *testing.T) {
+		t.Parallel()
+
+		out := `> app@1.0.0 build
+> vite build
+
+building for production...`
+
+		skip, _ := classifyNodeBuildFailure(out, errors.New("npm timed out after 90s"))
+		if !skip {
+			t.Fatalf("expected non-actionable build timeout to skip verifier")
+		}
+	})
+
+	t.Run("timeout_with_typescript_errors_remains_failure", func(t *testing.T) {
+		t.Parallel()
+
+		out := `src/App.tsx(3,27): error TS2307: Cannot find module './missing'`
+
+		skip, summary := classifyNodeBuildFailure(out, errors.New("npm timed out after 90s"))
+		if skip {
+			t.Fatalf("expected actionable build errors to remain failures")
+		}
+		if !strings.Contains(summary, "TS2307") {
+			t.Fatalf("expected TypeScript failure summary, got %q", summary)
+		}
+	})
+}
+
+func TestPreviewProbeOutputShowsServerReady(t *testing.T) {
+	t.Parallel()
+
+	if !previewProbeOutputShowsServerReady(`  Local:   http://127.0.0.1:4173/`) {
+		t.Fatalf("expected vite-style local banner to count as ready")
+	}
+	if previewProbeOutputShowsServerReady(`preview script finished`) {
+		t.Fatalf("expected plain output without server banner to be treated as not ready")
+	}
+}
+
+func TestClassifyPreviewHTTPProbeFailure(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reported_ready_but_probe_timed_out_skips", func(t *testing.T) {
+		t.Parallel()
+
+		skip, summary := classifyPreviewHTTPProbeFailure(
+			`Local:   http://127.0.0.1:4173/`,
+			context.DeadlineExceeded,
+			true,
+		)
+		if !skip {
+			t.Fatalf("expected ready-but-unreachable preview server to skip verifier")
+		}
+		if !strings.Contains(summary, "127.0.0.1:4173") {
+			t.Fatalf("expected probe summary to preserve preview output, got %q", summary)
+		}
+	})
+
+	t.Run("bind_failure_skips", func(t *testing.T) {
+		t.Parallel()
+
+		skip, _ := classifyPreviewHTTPProbeFailure(
+			`Error: listen EADDRNOTAVAIL: address not available 127.0.0.1:4173`,
+			errors.New("exit status 1"),
+			false,
+		)
+		if !skip {
+			t.Fatalf("expected bind failure to skip verifier")
+		}
+	})
+
+	t.Run("script_exit_without_server_is_real_failure", func(t *testing.T) {
+		t.Parallel()
+
+		skip, summary := classifyPreviewHTTPProbeFailure(
+			`> app@1.0.0 preview
+> echo nope
+
+nope`,
+			errors.New("exit status 1"),
+			false,
+		)
+		if skip {
+			t.Fatalf("expected misconfigured preview script to remain a real failure")
+		}
+		if !strings.Contains(summary, "nope") {
+			t.Fatalf("expected preview output in summary, got %q", summary)
+		}
+	})
+}
+
 func TestExtractDependencyRepairHintsFromReadinessErrors(t *testing.T) {
 	t.Parallel()
 
@@ -1082,5 +1564,115 @@ func TestParseMissingTypePackagesFromBuildErrors(t *testing.T) {
 	want := "@types/cors,@types/express,@types/react,@types/react-dom"
 	if got != want {
 		t.Fatalf("unexpected parsed type packages: got %q want %q", got, want)
+	}
+}
+
+func TestApplyDeterministicTypeDeclarationRepairAddsViteEnvDeclaration(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-vite-env-repair",
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-ui",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "preview-test",
+  "private": true,
+  "scripts": {
+    "build": "tsc && vite build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0"
+  }
+}`,
+						},
+						{Path: "vite.config.ts", Content: `import { defineConfig } from "vite"; export default defineConfig({});`},
+						{Path: "src/main.tsx", Content: `console.log(import.meta.env.VITE_API_URL);`},
+					},
+				},
+			},
+		},
+	}
+
+	repaired, summary := am.applyDeterministicTypeDeclarationRepair(build, []string{
+		"Preview verification build failed: src/main.tsx(1,25): error TS2339: Property 'env' does not exist on type 'ImportMeta'.",
+	})
+	if !repaired {
+		t.Fatalf("expected vite env declaration repair to trigger")
+	}
+	if !strings.Contains(summary, "src/vite-env.d.ts") {
+		t.Fatalf("expected vite env declaration path in summary, got %q", summary)
+	}
+
+	var viteEnv string
+	for _, file := range am.collectGeneratedFiles(build) {
+		if file.Path == "src/vite-env.d.ts" {
+			viteEnv = file.Content
+			break
+		}
+	}
+	if viteEnv == "" {
+		t.Fatalf("expected src/vite-env.d.ts to be created")
+	}
+	if !strings.Contains(viteEnv, `/// <reference types="vite/client" />`) {
+		t.Fatalf("expected vite client type reference, got %q", viteEnv)
+	}
+	if !strings.Contains(viteEnv, `readonly env: ImportMetaEnv`) {
+		t.Fatalf("expected ImportMeta env declaration, got %q", viteEnv)
+	}
+}
+
+func TestNodeVerificationSkipsWhenNPMUnavailable(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	am := &AgentManager{}
+
+	frontendFiles := []GeneratedFile{
+		{
+			Path: "package.json",
+			Content: `{
+  "name": "preview-test",
+  "private": true,
+  "scripts": { "build": "vite build" },
+  "dependencies": { "react": "^18.2.0", "react-dom": "^18.2.0" },
+  "devDependencies": { "vite": "^5.0.0" }
+}`,
+		},
+		{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+		{Path: "src/main.tsx", Content: "console.log('ok')"},
+	}
+	if errs := am.verifyGeneratedFrontendPreviewReadiness(frontendFiles, false); len(errs) != 0 {
+		t.Fatalf("expected frontend verifier to skip cleanly when npm is unavailable, got %v", errs)
+	}
+
+	backendFiles := []GeneratedFile{
+		{
+			Path: "backend/package.json",
+			Content: `{
+  "name": "api",
+  "private": true,
+  "scripts": { "build": "tsc" },
+  "devDependencies": { "typescript": "^5.0.0" }
+}`,
+		},
+		{Path: "backend/src/server.ts", Content: "console.log('ok')"},
+	}
+	if errs := am.verifyGeneratedBackendBuildReadiness(backendFiles); len(errs) != 0 {
+		t.Fatalf("expected backend verifier to skip cleanly when npm is unavailable, got %v", errs)
 	}
 }

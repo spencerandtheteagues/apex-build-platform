@@ -178,10 +178,10 @@ func (h *PreviewHandler) StartPreview(c *gin.Context) {
 	h.setPreviewAccessCookie(c, req.ProjectID)
 
 	response := gin.H{
-		"success": true,
-		"preview": status,
-		"message": "Preview started successfully",
-		"sandbox": req.Sandbox,
+		"success":          true,
+		"preview":          status,
+		"message":          "Preview started successfully",
+		"sandbox":          req.Sandbox,
 		"sandbox_degraded": h.sandboxFallbackActive() && !req.Sandbox,
 	}
 
@@ -350,14 +350,14 @@ func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
 
 response:
 	resp := gin.H{
-		"success":     true,
-		"preview":     previewStatus,
-		"server":      serverStatus,
-		"proxy_url":   previewStatus.URL,
-		"degraded":    degraded,
-		"diagnostics": diagnostics,
-		"message":     "Full-stack preview started",
-		"sandbox":     req.Sandbox,
+		"success":          true,
+		"preview":          previewStatus,
+		"server":           serverStatus,
+		"proxy_url":        previewStatus.URL,
+		"degraded":         degraded,
+		"diagnostics":      diagnostics,
+		"message":          "Full-stack preview started",
+		"sandbox":          req.Sandbox,
 		"sandbox_degraded": h.sandboxFallbackActive() && !req.Sandbox,
 	}
 	if h.factory != nil {
@@ -478,11 +478,11 @@ func (h *PreviewHandler) GetPreviewStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"preview": status,
-		"sandbox": activeSandbox,
+		"success":          true,
+		"preview":          status,
+		"sandbox":          activeSandbox,
 		"sandbox_degraded": h.sandboxFallbackActive() && !activeSandbox,
-		"server":  serverStatus,
+		"server":           serverStatus,
 	})
 }
 
@@ -1104,7 +1104,7 @@ func (h *PreviewHandler) rewritePreviewHTMLForProxyWithBackend(html string, proj
   };
   window.__APEX_BACKEND_URL__=_bp;
   if(!window.import)window.import={meta:{env:{}}};
-  window.import.meta={env:{VITE_API_URL:_bp,REACT_APP_API_URL:_bp}};
+  window.import.meta={env:{VITE_API_URL:_bp,VITE_API_BASE_URL:_bp,REACT_APP_API_URL:_bp}};
   try{
     if(window.location.search.indexOf('preview_token=')!==-1){
       window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);

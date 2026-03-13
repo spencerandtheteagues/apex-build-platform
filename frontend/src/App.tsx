@@ -27,6 +27,7 @@ const AuthParticle: React.FC<{ delay: number; startX: number; startY: number }> 
 
 type AppView = 'builder' | 'ide' | 'admin' | 'explore' | 'settings' | 'spending'
 type UIColorScheme = 'red-dark' | 'blue-light'
+type IDELaunchTarget = 'dashboard' | 'editor' | 'preview'
 
 const AppBuilder = lazy(() =>
   import('./components/builder/AppBuilder').then((m) => ({ default: m.AppBuilder }))
@@ -199,6 +200,7 @@ function App() {
   const [sessionBootstrapComplete, setSessionBootstrapComplete] = useState(false)
   const [recoverableProjectId, setRecoverableProjectId] = useState<number | null>(null)
   const [isRestoringProject, setIsRestoringProject] = useState(false)
+  const [ideLaunchTarget, setIdeLaunchTarget] = useState<IDELaunchTarget>('dashboard')
   const [isAuthMode, setIsAuthMode] = useState<'login' | 'register'>('login')
   const [pendingPlanType, setPendingPlanType] = useState<string | null>(null)
   const [builderStartOverSignal, setBuilderStartOverSignal] = useState(0)
@@ -259,6 +261,26 @@ function App() {
       }
     }
   }, [currentProject?.id])
+
+  const navigateToIDEWorkspace = useCallback((options?: {
+    target?: IDELaunchTarget
+    replace?: boolean
+    projectId?: number | null
+  }) => {
+    setIdeLaunchTarget(options?.target ?? 'dashboard')
+    navigateToView('ide', {
+      replace: options?.replace,
+      projectId: options?.projectId,
+    })
+  }, [navigateToView])
+
+  const handleWorkspaceNavigation = useCallback((view: AppView) => {
+    if (view === 'ide') {
+      navigateToIDEWorkspace({ target: 'dashboard' })
+      return
+    }
+    navigateToView(view)
+  }, [navigateToIDEWorkspace, navigateToView])
 
   const handleStartNewBuild = useCallback(() => {
     navigateToView('builder')
@@ -448,9 +470,9 @@ function App() {
     if (!projectId) return
 
     pendingProjectIdRef.current = null
-    navigateToView('ide', { replace: true, projectId })
+    navigateToIDEWorkspace({ target: 'dashboard', replace: true, projectId })
     void selectProject(projectId)
-  }, [isAuthenticated, navigateToView, selectProject])
+  }, [isAuthenticated, navigateToIDEWorkspace, selectProject])
 
   const restoreLastProject = useCallback(async (options?: { navigate?: boolean }) => {
     if (!user?.id) return false
@@ -467,7 +489,7 @@ function App() {
       const project = await apiService.getProject(storedProjectId)
       setCurrentProject(project)
       if (options?.navigate) {
-        navigateToView('ide')
+        navigateToIDEWorkspace({ target: 'dashboard' })
       }
       return true
     } catch (error) {
@@ -480,7 +502,7 @@ function App() {
     } finally {
       setIsRestoringProject(false)
     }
-  }, [navigateToView, setCurrentProject, user?.id])
+  }, [navigateToIDEWorkspace, setCurrentProject, user?.id])
 
   useEffect(() => {
     if (!user?.id) {
@@ -618,6 +640,9 @@ function App() {
       pendingProjectIdRef.current = routeState.projectId
       setShowLanding(routeState.showLanding)
       setCurrentView(routeState.currentView)
+      if (routeState.currentView === 'ide') {
+        setIdeLaunchTarget('dashboard')
+      }
       setVisitedViews((prev) => addVisitedView(prev, routeState.currentView))
       setShowSettingsDropdown(false)
 
@@ -944,7 +969,7 @@ function App() {
             {navigationItems.map((item) => (
               <button
                 key={item.view}
-                onClick={() => navigateToView(item.view)}
+                onClick={() => handleWorkspaceNavigation(item.view)}
                 className={`flex items-center gap-2 px-4 py-1.5 rounded-md border font-bold text-sm tracking-wide transition-all duration-200 ${
                   currentView === item.view
                     ? item.activeClassName
@@ -980,7 +1005,7 @@ function App() {
                   <button
                     key={item.view}
                     type="button"
-                    onClick={() => navigateToView(item.view)}
+                    onClick={() => handleWorkspaceNavigation(item.view)}
                     className={`w-full flex items-start gap-3 rounded-lg border px-3 py-3 text-left transition-all ${
                       currentView === item.view
                         ? item.activeClassName
@@ -1047,7 +1072,12 @@ function App() {
             <ErrorBoundary>
               <Suspense fallback={<ViewLoadingFallback label="Loading Builder..." />}>
                 <AppBuilder
-                  onNavigateToIDE={() => navigateToView('ide')}
+                  onNavigateToIDE={(options) => {
+                    navigateToIDEWorkspace({
+                      target: options?.target ?? 'dashboard',
+                      projectId: options?.projectId ?? null,
+                    })
+                  }}
                   startOverSignal={builderStartOverSignal}
                 />
               </Suspense>
@@ -1059,7 +1089,10 @@ function App() {
           <div className={`absolute inset-0 ${currentView === 'ide' ? 'block' : 'hidden'}`}>
             <ErrorBoundary>
               <Suspense fallback={<ViewLoadingFallback label="Loading IDE..." />}>
-                <IDELayout key={currentProject?.id ?? 'no-project'} />
+                <IDELayout
+                  key={currentProject?.id ?? 'no-project'}
+                  launchTarget={ideLaunchTarget}
+                />
               </Suspense>
             </ErrorBoundary>
           </div>
@@ -1079,7 +1112,7 @@ function App() {
           <div className={`${shellScrollViewClass} ${currentView === 'explore' ? 'block' : 'hidden'}`}>
             <ErrorBoundary>
               <Suspense fallback={<ViewLoadingFallback label="Loading Explore..." />}>
-                <ExplorePage onOpenProject={() => navigateToView('ide')} />
+                <ExplorePage onOpenProject={() => navigateToIDEWorkspace({ target: 'dashboard' })} />
               </Suspense>
             </ErrorBoundary>
           </div>

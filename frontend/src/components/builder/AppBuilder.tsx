@@ -67,10 +67,13 @@ import {
   isTerminalBuildStatus,
   mergeBuildStatusWithTerminalPrecedence,
   normalizeBuildStatus,
+  parseBuildTelemetryThoughts,
+  PersistedAIThought,
+  readBuildTelemetrySnapshot,
   reconcileBuildPayloadWithCompletedDetail,
   resolveBuildCompletedEventStatus,
+  upsertBuildTelemetrySnapshot,
 } from './buildRestore'
-import LivePreview from '@/components/preview/LivePreview'
 import { AssetUploader } from '@/components/project/AssetUploader'
 import DiffReviewPanel from '@/components/diff/DiffReviewPanel'
 
@@ -95,7 +98,7 @@ interface Task {
   id: string
   type: string
   description: string
-  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled'
   assignedTo?: string
   output?: {
     files?: Array<{ path: string; language: string }>
@@ -109,6 +112,7 @@ interface Checkpoint {
   name: string
   description: string
   progress: number
+  restorable?: boolean
   createdAt: string
 }
 
@@ -187,12 +191,13 @@ interface BuildTechStack {
 }
 
 interface AppBuilderProps {
-  onNavigateToIDE?: () => void
+  onNavigateToIDE?: (options?: { target?: 'dashboard' | 'editor' | 'preview'; projectId?: number | null }) => void
   startOverSignal?: number
 }
 
 const ACTIVE_BUILD_STORAGE_KEY = 'apex_active_build_id'
 const LAST_WORKFLOW_BUILD_STORAGE_KEY = 'apex_last_workflow_build_id'
+const BUILD_TELEMETRY_STORAGE_KEY = 'apex_build_telemetry_cache'
 
 const isActiveBuildStatus = (status?: string) =>
   status === 'pending' ||
@@ -916,26 +921,24 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index, getAgentEmoji, getS
 
 const BuildCompleteCard: React.FC<{
   filesCount: number
-  onPreview: () => void
+  onPreviewWorkspace: () => void
   onOpenIDE: () => void
   onDownload: () => void
   onStartOver: () => void
   isCreating: boolean
-  isAutoOpeningIDE: boolean
   isPreparingPreview: boolean
   isResetting: boolean
-  showPreview: boolean
+  isPreviewReady: boolean
 }> = ({
   filesCount,
-  onPreview,
+  onPreviewWorkspace,
   onOpenIDE,
   onDownload,
   onStartOver,
   isCreating,
-  isAutoOpeningIDE,
   isPreparingPreview,
   isResetting,
-  showPreview
+  isPreviewReady
 }) => {
   return (
     <Card variant="cyberpunk" className="relative overflow-hidden border-2 border-green-500/60 bg-gradient-to-br from-green-950/40 via-black to-emerald-950/30">
@@ -961,11 +964,11 @@ const BuildCompleteCard: React.FC<{
             <div className="flex items-center gap-2 text-green-200">
               <Sparkles className="w-4 h-4 text-green-300" />
               <span className="text-sm font-semibold">
-                {isAutoOpeningIDE ? 'Opening your build in the IDE now...' : 'Next step: open in IDE to run and edit your app'}
+                Preview, ZIP export, and editor handoff are ready.
               </span>
             </div>
-            {isAutoOpeningIDE && (
-              <span className="text-xs font-mono text-green-300/90">auto-open enabled</span>
+            {isPreviewReady && (
+              <span className="text-xs font-mono text-green-300/90">preview primed</span>
             )}
           </div>
 
@@ -988,20 +991,20 @@ const BuildCompleteCard: React.FC<{
                 className={cn(
                   "bg-gradient-to-r from-green-500 via-emerald-500 to-lime-500 text-black font-black shadow-xl shadow-green-900/60 border border-green-300/40 px-6",
                   "hover:from-green-400 hover:via-emerald-400 hover:to-lime-400",
-                  !isCreating && "animate-pulse"
+                  !isPreparingPreview && "animate-pulse"
                 )}
-                onClick={onOpenIDE}
-                disabled={isCreating}
+                onClick={onPreviewWorkspace}
+                disabled={isPreparingPreview}
               >
-                {isCreating ? (
+                {isPreparingPreview ? (
                   <>
                     <Clock className="w-5 h-5 mr-2 animate-spin" />
-                    {isAutoOpeningIDE ? 'Opening IDE...' : 'Creating Project...'}
+                    {isPreviewReady ? 'Launching Preview...' : 'Preparing Preview...'}
                   </>
                 ) : (
                   <>
-                    <ExternalLink className="w-5 h-5 mr-2" />
-                    Open in IDE
+                    <Eye className="w-5 h-5 mr-2" />
+                    Launch Preview Workspace
                   </>
                 )}
               </Button>
@@ -1009,24 +1012,23 @@ const BuildCompleteCard: React.FC<{
                 variant="outline"
                 size="lg"
                 className={cn(
-                  "border-2 border-red-600 text-red-400 hover:bg-red-950/50 transition-all font-semibold",
-                  showPreview && "bg-red-950/50 shadow-lg shadow-red-900/30"
+                  "border-2 border-red-600 text-red-400 hover:bg-red-950/50 transition-all font-semibold"
                 )}
-                onClick={onPreview}
-                disabled={isPreparingPreview}
-              >
-                <Eye className="w-5 h-5 mr-2" />
-                {isPreparingPreview ? 'Preparing...' : showPreview ? 'Hide Preview' : 'Preview'}
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                className="border-2 border-gray-700 text-gray-300 hover:bg-gray-800/60 transition-all font-semibold"
                 onClick={onDownload}
                 disabled={filesCount === 0}
               >
                 <Download className="w-5 h-5 mr-2" />
                 Download ZIP
+              </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                className="border-2 border-gray-700 text-gray-300 hover:bg-gray-800/60 transition-all font-semibold"
+                onClick={onOpenIDE}
+                disabled={isCreating}
+              >
+                <ExternalLink className="w-5 h-5 mr-2" />
+                {isCreating ? 'Creating Project...' : 'Open Editor'}
               </Button>
               <Button
                 variant="outline"
@@ -1115,11 +1117,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [buildState, setBuildState] = useState<BuildState | null>(null)
   const [isBuilding, setIsBuilding] = useState(false)
   const [showChat, setShowChat] = useState(true)
-  const [showPreview, setShowPreview] = useState(false)
   const [isPreparingPreview, setIsPreparingPreview] = useState(false)
   const [generatedFiles, setGeneratedFiles] = useState<Array<{ path: string; content: string; language: string }>>([])
   const [createdProjectId, setCreatedProjectId] = useState<number | null>(null)
   const [isCreatingProject, setIsCreatingProject] = useState(false)
+  const [telemetryNow, setTelemetryNow] = useState(() => Date.now())
   const AUTO_STACK_ID = 'auto'
   const [selectedStack, setSelectedStack] = useState<Set<string>>(new Set([AUTO_STACK_ID]))
   const [powerMode, setPowerMode] = useState<'fast' | 'balanced' | 'max'>('fast')
@@ -1147,8 +1149,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     grok: null,
   })
   const previewPreparedRef = useRef(false)
-  const autoOpenedIDEBuildRef = useRef<string | null>(null)
-  const [isAutoOpeningIDE, setIsAutoOpeningIDE] = useState(false)
   const [showBuyCredits, setShowBuyCredits] = useState(false)
   const [buyCreditsReason, setBuyCreditsReason] = useState<string | undefined>(undefined)
   const [showImportModal, setShowImportModal] = useState(false)
@@ -1260,6 +1260,51 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const clearLastWorkflowBuildId = useCallback(() => {
     clearStoredValue(LAST_WORKFLOW_BUILD_STORAGE_KEY)
   }, [clearStoredValue])
+  const serializeTelemetryThought = useCallback((thought: AIThought): PersistedAIThought => ({
+    id: thought.id,
+    agentId: thought.agentId,
+    agentRole: thought.agentRole,
+    provider: thought.provider,
+    model: thought.model,
+    type: thought.type,
+    eventType: thought.eventType,
+    taskId: thought.taskId,
+    taskType: thought.taskType,
+    files: thought.files,
+    filesCount: thought.filesCount,
+    retryCount: thought.retryCount,
+    maxRetries: thought.maxRetries,
+    isInternal: thought.isInternal,
+    content: thought.content,
+    timestamp: thought.timestamp.toISOString(),
+  }), [])
+  const restorePersistedTelemetry = useCallback((buildId: string): AIThought[] => {
+    const snapshot = readBuildTelemetrySnapshot(readStoredValue(BUILD_TELEMETRY_STORAGE_KEY), buildId)
+    if (!snapshot) return []
+
+    return snapshot.thoughts
+      .map((thought) => {
+        const timestamp = new Date(thought.timestamp)
+        if (Number.isNaN(timestamp.getTime())) return null
+        return {
+          ...thought,
+          timestamp,
+        }
+      })
+      .filter((thought): thought is AIThought => thought !== null)
+  }, [readStoredValue])
+  const restoreServerTelemetry = useCallback((timeline: unknown): AIThought[] => {
+    return parseBuildTelemetryThoughts(timeline)
+      .map((thought) => {
+        const timestamp = new Date(thought.timestamp)
+        if (Number.isNaN(timestamp.getTime())) return null
+        return {
+          ...thought,
+          timestamp,
+        }
+      })
+      .filter((thought): thought is AIThought => thought !== null)
+  }, [])
   const activePowerMode = buildState?.powerMode || powerMode
   const activeBuildStatuses = useMemo(
     () => new Set<BuildState['status']>(['planning', 'in_progress', 'testing', 'reviewing', 'awaiting_review']),
@@ -1407,6 +1452,30 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       })
     }
   }, [aiThoughts.length])
+
+  useEffect(() => {
+    if (!isBuildActive) return
+    const interval = window.setInterval(() => {
+      setTelemetryNow(Date.now())
+    }, 15000)
+    return () => window.clearInterval(interval)
+  }, [isBuildActive])
+
+  useEffect(() => {
+    if (!buildState?.id || aiThoughts.length === 0) return
+
+    const latestThought = aiThoughts[aiThoughts.length - 1]
+    const nextCache = upsertBuildTelemetrySnapshot(
+      readStoredValue(BUILD_TELEMETRY_STORAGE_KEY),
+      {
+        buildId: buildState.id,
+        updatedAt: latestThought?.timestamp.toISOString() || new Date().toISOString(),
+        thoughts: aiThoughts.map(serializeTelemetryThought),
+      }
+    )
+    writeStoredValue(BUILD_TELEMETRY_STORAGE_KEY, nextCache)
+  }, [aiThoughts, buildState?.id, readStoredValue, serializeTelemetryThought, writeStoredValue])
+
   const interactionState = buildState?.interaction
   const pendingQuestion = interactionState?.pending_question
   const buildPaused = Boolean(interactionState?.paused)
@@ -1419,6 +1488,43 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     () => (interactionState?.permission_rules || []).filter((rule) => rule.decision === 'allow'),
     [interactionState?.permission_rules]
   )
+  const telemetrySummary = useMemo(() => {
+    const lastThought = aiThoughts[aiThoughts.length - 1]
+    const lastThoughtTime = lastThought?.timestamp instanceof Date ? lastThought.timestamp.getTime() : null
+    const secondsSinceLastThought = lastThoughtTime ? Math.max(0, Math.floor((telemetryNow - lastThoughtTime) / 1000)) : null
+    const activeProviders = providerPanels.filter((panel) => panel.status === 'working' || panel.status === 'thinking').length
+    const activeAgents = buildState?.agents.filter((agent) => agent.status === 'working').length ?? 0
+    const blockerCount =
+      (buildPaused ? 1 : 0) +
+      (pendingQuestion ? 1 : 0) +
+      pendingPermissionRequests.length +
+      (pendingRevisionRequests.length > 0 ? 1 : 0)
+
+    return {
+      activeProviders,
+      activeAgents,
+      totalUpdates: aiThoughts.length,
+      blockerCount,
+      checkpointCount: buildState?.checkpoints.length ?? 0,
+      lastThoughtLabel: lastThought == null
+        ? 'No AI activity yet'
+        : secondsSinceLastThought == null
+          ? 'Live now'
+          : secondsSinceLastThought < 10
+            ? 'Live now'
+            : `${secondsSinceLastThought}s ago`,
+    }
+  }, [
+    aiThoughts,
+    buildPaused,
+    buildState?.agents,
+    buildState?.checkpoints.length,
+    pendingPermissionRequests.length,
+    pendingQuestion,
+    pendingRevisionRequests.length,
+    providerPanels,
+    telemetryNow,
+  ])
   const hasBuilderSession = Boolean(
     buildState ||
     isBuilding ||
@@ -1441,11 +1547,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
     clearActiveBuildId()
     previewPreparedRef.current = false
-    autoOpenedIDEBuildRef.current = null
     setBuildState(null)
     setIsBuilding(false)
     setShowChat(true)
-    setShowPreview(false)
     setIsPreparingPreview(false)
     setGeneratedFiles([])
     setCreatedProjectId(null)
@@ -1464,7 +1568,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     setRollbackCheckpointId(null)
     setShowBuyCredits(false)
     setBuyCreditsReason(undefined)
-    setIsAutoOpeningIDE(false)
     if (options?.clearPrompt) {
       setAppDescription('')
     }
@@ -2007,6 +2110,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             name: data.name,
             description: data.description,
             progress: typeof data.progress === 'number' ? clampPercent(data.progress) : prev.progress,
+            restorable: data.restorable !== false,
             createdAt: new Date().toISOString(),
           }
           return { ...prev, checkpoints: [...prev.checkpoints, checkpoint] }
@@ -2055,12 +2159,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           }
         }
         const completedBuildId = String(message.build_id || buildState?.id || '')
-        const shouldAutoOpenIDE =
-          finalStatus === 'completed' &&
-          completedBuildId &&
-          autoOpenedIDEBuildRef.current !== completedBuildId &&
-          typeof document !== 'undefined' &&
-          document.visibilityState === 'visible'
 
         // Auto-apply artifacts server-side for atomic project creation
         if (finalStatus === 'completed' && completedBuildId) {
@@ -2076,25 +2174,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           })()
         }
 
-        if (finalStatus === 'completed' && !previewPreparedRef.current && !shouldAutoOpenIDE) {
+        if (finalStatus === 'completed' && !previewPreparedRef.current) {
           previewPreparedRef.current = true
           void preparePreview(true)
-        }
-
-        if (
-          shouldAutoOpenIDE
-        ) {
-          autoOpenedIDEBuildRef.current = completedBuildId
-          setIsAutoOpeningIDE(true)
-          void (async () => {
-            try {
-              await openBuildFilesInIDE(completedBuildId)
-            } catch (error) {
-              console.error('Auto-open IDE after build completion failed:', error)
-            } finally {
-              setIsAutoOpeningIDE(false)
-            }
-          })()
         }
         break
       }
@@ -2631,7 +2713,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           addSystemMessage(`Checkpoint saved`)
           setBuildState(prev => {
             if (!prev) return null
-            const checkpoint = { id: data.checkpoint_id, number: (prev.checkpoints?.length ?? 0) + 1, name: `Checkpoint ${(prev.checkpoints?.length ?? 0) + 1}`, description: data.step_id || '', progress: prev.progress, createdAt: data.timestamp || new Date().toISOString() }
+            const checkpoint = { id: data.checkpoint_id, number: (prev.checkpoints?.length ?? 0) + 1, name: `Checkpoint ${(prev.checkpoints?.length ?? 0) + 1}`, description: data.step_id || '', progress: prev.progress, restorable: true, createdAt: data.timestamp || new Date().toISOString() }
             return { ...prev, checkpoints: [...(prev.checkpoints ?? []), checkpoint] }
           })
         }
@@ -2972,29 +3054,25 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const preparePreview = useCallback(async (auto: boolean) => {
     setIsPreparingPreview(true)
     try {
-      await ensureProjectCreated()
-      setShowPreview(true)
+      const project = await ensureProjectCreated()
       if (auto) {
-        addSystemMessage('Preview ready — launching live preview.')
+        addSystemMessage('Preview workspace is ready.')
       }
+      return project
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to prepare preview'
       addSystemMessage(`Preview error: ${message}`)
-      if (auto) {
-        setShowPreview(false)
-      }
+      return null
     } finally {
       setIsPreparingPreview(false)
     }
   }, [ensureProjectCreated])
 
-  const handlePreviewToggle = async () => {
-    if (showPreview) {
-      setShowPreview(false)
-      return
-    }
-    await preparePreview(false)
-  }
+  const openPreviewWorkspace = useCallback(async () => {
+    const project = await preparePreview(false)
+    if (!project) return
+    onNavigateToIDE?.({ target: 'preview', projectId: project.id })
+  }, [onNavigateToIDE, preparePreview])
 
   const handleDownloadBuild = async () => {
     try {
@@ -3057,6 +3135,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     const status = (normalizeBuildStatus(payload.status) || 'pending') as BuildState['status']
     const files = normalizeGeneratedFiles(payload.files || [])
     const interaction = normalizeInteraction(payload.interaction, payload.messages)
+    const serverThoughts = restoreServerTelemetry(payload.activity_timeline)
 
     const agents: Agent[] = Array.isArray(payload.agents)
       ? payload.agents.map((agent: any, index: number) => ({
@@ -3080,7 +3159,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         id: String(task.id || `${buildId}-task-${index}`),
         type: String(task.type || 'task'),
         description: String(task.description || ''),
-        status: (task.status === 'pending' || task.status === 'in_progress' || task.status === 'completed' || task.status === 'failed')
+        status: (task.status === 'pending' || task.status === 'in_progress' || task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled')
           ? task.status
           : 'pending',
         assignedTo: task.assigned_to || task.assignedTo,
@@ -3095,6 +3174,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         name: String(checkpoint.name || `Checkpoint ${index + 1}`),
         description: String(checkpoint.description || ''),
         progress: typeof checkpoint.progress === 'number' ? clampPercent(checkpoint.progress) : 0,
+        restorable: checkpoint.restorable !== false,
         createdAt: String(checkpoint.created_at || checkpoint.createdAt || new Date().toISOString()),
       }))
       : []
@@ -3102,15 +3182,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     setAppDescription(String(payload.description || appDescription || ''))
     setGeneratedFiles(files)
     setChatMessages(normalizeConversationMessages(interaction?.messages || payload.messages))
-    setAiThoughts([])
+    setAiThoughts(serverThoughts.length > 0 ? serverThoughts : restorePersistedTelemetry(buildId))
     setProposedEdits([])
     setShowDiffReview(true)
     setCreatedProjectId(typeof payload.project_id === 'number' ? payload.project_id : null)
-    setShowPreview(false)
     setIsPreparingPreview(false)
     previewPreparedRef.current = false
-    autoOpenedIDEBuildRef.current = null
-    setIsAutoOpeningIDE(false)
     wsReconnectAttempts.current = 0
 
     setBuildState({
@@ -3124,8 +3201,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       powerMode: payload.power_mode || payload.powerMode || powerMode,
       currentPhase: payload.phase || payload.current_phase || payload.currentPhase || undefined,
       qualityGateRequired: typeof payload.quality_gate_required === 'boolean' ? payload.quality_gate_required : true,
-      qualityGateStatus: typeof payload.quality_gate_passed === 'boolean'
-        ? (payload.quality_gate_passed ? 'passed' : 'failed')
+      qualityGateStatus: typeof payload.quality_gate_status === 'string'
+        ? payload.quality_gate_status
+        : typeof payload.quality_gate_passed === 'boolean'
+          ? (payload.quality_gate_passed ? 'passed' : 'failed')
+          : payload.quality_gate_active === true
+            ? 'running'
         : status === 'completed'
           ? 'passed'
           : status === 'failed' || status === 'cancelled'
@@ -3185,6 +3266,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     persistActiveBuildId,
     persistLastWorkflowBuildId,
     powerMode,
+    restorePersistedTelemetry,
+    restoreServerTelemetry,
     resolveGeneratedFiles,
   ])
 
@@ -3198,7 +3281,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         setCreatedProjectId(existingProject.id)
         setCurrentProject(existingProject)
         addSystemMessage(`Opened project "${existingProject.name}" from recent build`)
-        onNavigateToIDE?.()
+        onNavigateToIDE?.({ target: 'editor', projectId: existingProject.id })
         return
       } catch {
         addSystemMessage('Stored project not found, restoring from build artifacts...')
@@ -3212,19 +3295,19 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
     if (files.length === 0) {
       addSystemMessage('No files found for that build yet. Opening the IDE project browser instead.')
-      onNavigateToIDE?.()
+      onNavigateToIDE?.({ target: 'editor' })
       return
     }
 
     setGeneratedFiles(files)
-    await ensureProjectCreated({
+    const project = await ensureProjectCreated({
       files,
       buildId,
       projectName: completed.project_name || deriveProjectName(completed.description || 'Completed Build'),
       description: completed.description || '',
       forceNew: true,
     })
-    onNavigateToIDE?.()
+    onNavigateToIDE?.({ target: 'editor', projectId: project.id })
   }, [
     deriveProjectName,
     ensureProjectCreated,
@@ -3327,13 +3410,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     setChatMessages([])
     setProposedEdits([])
     setShowDiffReview(true)
-    setShowPreview(false)
     setIsPreparingPreview(false)
     setCreatedProjectId(null)
     wsReconnectAttempts.current = 0
     previewPreparedRef.current = false
-    autoOpenedIDEBuildRef.current = null
-    setIsAutoOpeningIDE(false)
 
     addSystemMessage(`Starting ${buildMode} build for: "${appDescription}"`)
     addSystemMessage(`Tech stack: ${buildTechStackSummary()}`)
@@ -3571,16 +3651,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   // Create project and open in IDE
   const openInIDE = async () => {
     try {
-      setIsAutoOpeningIDE(false)
-      await ensureProjectCreated()
+      const project = await ensureProjectCreated()
       if (onNavigateToIDE) {
-        onNavigateToIDE()
+        onNavigateToIDE({ target: 'editor', projectId: project.id })
       }
     } catch (error: unknown) {
       console.error('Failed to create project:', error)
       const message = error instanceof Error ? error.message : 'Unknown error'
       addSystemMessage(`Failed to create project: ${message}. Opening IDE without a project instead.`)
-      onNavigateToIDE?.()
+      onNavigateToIDE?.({ target: 'editor' })
     }
   }
 
@@ -3634,7 +3713,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       setCurrentProject(project)
       setCreatedProjectId(project.id)
       addSystemMessage(`Imported "${project.name}" from GitHub`)
-      onNavigateToIDE?.()
+      onNavigateToIDE?.({ target: 'dashboard', projectId: project.id })
     } catch (error) {
       addSystemMessage('Import completed, but opening the project failed. Please open it from Projects.')
     } finally {
@@ -3644,6 +3723,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
   const handleRollbackCheckpoint = async (checkpointId: string) => {
     if (!buildState?.id) return
+    const checkpoint = buildState.checkpoints.find((entry) => entry.id === checkpointId)
+    if (checkpoint?.restorable === false) {
+      addSystemMessage('Historical checkpoints from a restored snapshot are view-only and cannot be rolled back.')
+      return
+    }
     if (!isActiveBuildStatus(buildState.status)) {
       addSystemMessage('Rollback is only available while a live build is still active.')
       return
@@ -4415,6 +4499,50 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     </div>
                   </div>
 
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    {[
+                      {
+                        label: 'Providers Live',
+                        value: `${telemetrySummary.activeProviders}/${providerPanels.length}`,
+                        hint: telemetrySummary.lastThoughtLabel,
+                      },
+                      {
+                        label: 'Agents Working',
+                        value: telemetrySummary.activeAgents,
+                        hint: `${buildState.agents.length} total`,
+                      },
+                      {
+                        label: 'Timeline Updates',
+                        value: telemetrySummary.totalUpdates,
+                        hint: 'AI activity events',
+                      },
+                      {
+                        label: 'Blockers',
+                        value: telemetrySummary.blockerCount,
+                        hint: telemetrySummary.blockerCount > 0 ? 'Needs input or approval' : 'Clear',
+                      },
+                      {
+                        label: 'Checkpoints',
+                        value: telemetrySummary.checkpointCount,
+                        hint: 'Recovery snapshots',
+                      },
+                      {
+                        label: 'Artifacts',
+                        value: generatedFiles.length,
+                        hint: buildState.status === 'completed' ? 'Ready to hand off' : 'Streaming in',
+                      },
+                    ].map((metric) => (
+                      <div
+                        key={metric.label}
+                        className="rounded-xl border border-gray-800 bg-gray-950/70 px-3 py-3"
+                      >
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">{metric.label}</div>
+                        <div className="mt-2 text-xl font-semibold text-white">{metric.value}</div>
+                        <div className="mt-1 text-xs text-gray-400">{metric.hint}</div>
+                      </div>
+                    ))}
+                  </div>
+
                   {/* Power Mode Highlight */}
                   <div className="mt-6 pt-6 border-t border-gray-800">
                     <div className="text-xs text-gray-500 mb-3">Power Mode</div>
@@ -4532,8 +4660,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                             variant="ghost"
                             className="shrink-0 hover:bg-gray-800"
                             onClick={() => handleRollbackCheckpoint(cp.id)}
-                            disabled={rollbackCheckpointId === cp.id}
-                            title="Rollback to this checkpoint"
+                            disabled={rollbackCheckpointId === cp.id || cp.restorable === false}
+                            title={cp.restorable === false ? 'Historical checkpoint only' : 'Rollback to this checkpoint'}
                           >
                             <RotateCcw className={cn("w-4 h-4", rollbackCheckpointId === cp.id && "animate-spin")} />
                           </Button>
@@ -4728,6 +4856,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                                 task.status === 'completed' && 'border-green-500/40 bg-green-500/10 text-green-300',
                                 task.status === 'failed' && 'border-red-500/40 bg-red-500/10 text-red-300',
                                 task.status === 'in_progress' && 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300',
+                                task.status === 'cancelled' && 'border-amber-500/40 bg-amber-500/10 text-amber-300',
                                 task.status === 'pending' && 'border-gray-600 bg-gray-500/10 text-gray-300'
                               )}
                             >
@@ -4811,49 +4940,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 <>
                   <BuildCompleteCard
                     filesCount={generatedFiles.length}
-                    onPreview={handlePreviewToggle}
+                    onPreviewWorkspace={openPreviewWorkspace}
                     onOpenIDE={openInIDE}
                     onDownload={handleDownloadBuild}
                     onStartOver={() => { void handleStartOver() }}
                     isCreating={isCreatingProject}
-                    isAutoOpeningIDE={isAutoOpeningIDE}
                     isPreparingPreview={isPreparingPreview}
                     isResetting={isStartingOver}
-                    showPreview={showPreview}
+                    isPreviewReady={createdProjectId !== null}
                   />
-
-                  {/* Live Preview Panel */}
-                  {showPreview && (
-                    <Card variant="cyberpunk" className="border-2 border-red-600/40 bg-black/60 backdrop-blur-sm overflow-hidden">
-                      <CardHeader className="pb-4 border-b border-gray-800">
-                        <div className="flex items-center justify-between">
-                          <CardTitle className="text-xl flex items-center gap-3">
-                            <Eye className="w-7 h-7 text-red-400" />
-                            Live Preview
-                          </CardTitle>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="p-0">
-                        {createdProjectId ? (
-                          <LivePreview
-                            projectId={createdProjectId}
-                            autoStart={true}
-                            className="h-[520px]"
-                          />
-                        ) : (
-                          <div className="h-[520px] flex flex-col items-center justify-center bg-gray-900/60 rounded-b-lg">
-                            <FileCode className="w-20 h-20 text-gray-600 mb-6 animate-pulse" />
-                            <p className="text-gray-400 text-center mb-3 text-xl font-semibold">
-                              Preview not ready yet
-                            </p>
-                            <p className="text-gray-500 text-sm text-center max-w-md leading-relaxed">
-                              Click Preview to create a project and launch the live preview.
-                            </p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  )}
                 </>
               )}
             </div>

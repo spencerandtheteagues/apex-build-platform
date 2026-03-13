@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"reflect"
 	"sync/atomic"
 	"testing"
 
@@ -122,5 +123,20 @@ func TestBuildErrorNotOverwrittenWhenAlreadySet(t *testing.T) {
 
 	if build.Error != "Validation failed: missing entry point" {
 		t.Fatalf("expected original error preserved, got: %s", build.Error)
+	}
+}
+
+func TestFinalValidationRepairHintsFallsBackToHeuristicsWithoutAnalyzer(t *testing.T) {
+	am := &AgentManager{}
+	readinessErrors := []string{
+		`missing_manifest: package.json`,
+		`source imports "zod"`,
+	}
+
+	got := am.finalValidationRepairHints(readinessErrors, nil, 42)
+	want := extractDependencyRepairHintsFromReadinessErrors(readinessErrors)
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("finalValidationRepairHints() = %#v, want %#v", got, want)
 	}
 }

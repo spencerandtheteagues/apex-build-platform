@@ -7,6 +7,7 @@ set -e
 
 echo "🚀 APEX.BUILD Frontend starting..."
 PORT="${PORT:-3000}"
+API_URL="${VITE_API_URL:-${VITE_API_BASE_URL:-}}"
 
 # Render sets PORT dynamically for Docker web services. Patch nginx config at runtime.
 sed -i "s/__PORT__/${PORT}/g" /etc/nginx/nginx.conf
@@ -18,13 +19,13 @@ if [ "$(id -u)" != "0" ]; then
 fi
 
 # Runtime environment variable substitution
-if [ -n "$VITE_API_URL" ] || [ -n "$VITE_WS_URL" ]; then
+if [ -n "$API_URL" ] || [ -n "$VITE_WS_URL" ]; then
     echo "📝 Updating runtime configuration..."
 
     # Create a config file that can be loaded by the app
     cat > /usr/share/nginx/html/config.js << EOF
 window.__APEX_CONFIG__ = {
-  API_URL: "${VITE_API_URL:-}",
+  API_URL: "${API_URL}",
   WS_URL: "${VITE_WS_URL:-}",
   VERSION: "${APP_VERSION:-1.0.0}",
   ENVIRONMENT: "${NODE_ENV:-production}",
@@ -49,7 +50,7 @@ echo "🔧 Testing nginx configuration..."
 nginx -t
 
 echo "🌐 Starting APEX.BUILD Frontend on port ${PORT}..."
-echo "📡 API URL: ${VITE_API_URL:-<auto>}"
+echo "📡 API URL: ${API_URL:-<auto>}"
 echo "🔌 WebSocket URL: ${VITE_WS_URL:-<auto>}"
 
 # Execute the command passed to the container

@@ -101,9 +101,10 @@ const TerminalLoadingFallback = () => (
 export interface IDELayoutProps {
   className?: string
   onNavigateToAgent?: () => void
+  launchTarget?: 'dashboard' | 'editor' | 'preview'
 }
 
-type ViewMode = 'projects' | 'dashboard' | 'editor'
+type ViewMode = 'projects' | 'dashboard' | 'editor' | 'preview'
 type PanelState = 'collapsed' | 'normal' | 'expanded'
 type MobilePanel = 'explorer' | 'editor' | 'terminal' | 'ai' | 'settings'
 
@@ -118,7 +119,7 @@ const idePanelTabClass = (active: boolean) => cn(
     : '!bg-transparent !text-gray-400 hover:!bg-gray-800/85 hover:!text-white'
 )
 
-export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAgent }) => {
+export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAgent, launchTarget = 'dashboard' }) => {
   // Responsive hooks
   const isMobile = useIsMobile()
   const isTablet = useIsTablet()
@@ -206,20 +207,65 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     logout
   } = useStore()
   const initializedProjectViewRef = useRef(false)
+  const lastLaunchTargetRef = useRef<'dashboard' | 'editor' | 'preview' | null>(null)
+
+  const openProjectsView = useCallback(() => {
+    setShowPreview(false)
+    setViewMode('projects')
+  }, [])
+
+  const openDashboardView = useCallback(() => {
+    if (!currentProject) {
+      openProjectsView()
+      return
+    }
+    setShowPreview(false)
+    setViewMode('dashboard')
+  }, [currentProject, openProjectsView])
+
+  const openEditorWorkspace = useCallback((options?: { keepPreview?: boolean }) => {
+    setViewMode('editor')
+    setShowPreview(options?.keepPreview ?? false)
+    if (isMobile) {
+      setMobilePanel('editor')
+      setMobileOverlayPanel(null)
+    }
+  }, [isMobile])
+
+  const openPreviewWorkspace = useCallback(() => {
+    if (!currentProject) return
+    setShowPreview(true)
+    setViewMode('preview')
+    if (bottomPanelState === 'collapsed') {
+      setBottomPanelState('normal')
+    }
+    if (isMobile) {
+      setMobilePanel('editor')
+      setMobileOverlayPanel(null)
+    }
+  }, [bottomPanelState, currentProject, isMobile])
 
   useEffect(() => {
     if (!currentProject) {
       initializedProjectViewRef.current = false
-      setViewMode('projects')
-      setShowPreview(false)
+      lastLaunchTargetRef.current = null
+      openProjectsView()
       return
     }
 
-    if (!initializedProjectViewRef.current) {
-      setViewMode('dashboard')
+    const nextLaunchTarget = launchTarget || 'dashboard'
+    if (!initializedProjectViewRef.current || lastLaunchTargetRef.current !== nextLaunchTarget) {
+      if (nextLaunchTarget === 'preview') {
+        openPreviewWorkspace()
+      } else if (nextLaunchTarget === 'editor') {
+        openEditorWorkspace()
+      } else {
+        openDashboardView()
+      }
       initializedProjectViewRef.current = true
+      lastLaunchTargetRef.current = nextLaunchTarget
     }
-  }, [currentProject])
+  }, [currentProject, launchTarget, openDashboardView, openEditorWorkspace, openPreviewWorkspace, openProjectsView])
 
   // Update panel states when responsive breakpoints change
   useEffect(() => {
@@ -282,7 +328,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     paneOpenFile(selectedFile)
 
     if (viewMode !== 'editor') {
-      setViewMode('editor')
+      openEditorWorkspace({ keepPreview: false })
     }
 
     // On mobile, switch to editor panel
@@ -290,7 +336,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
       setMobilePanel('editor')
       setMobileOverlayPanel(null)
     }
-  }, [paneOpenFile, viewMode, isMobile, hydrateFile])
+  }, [paneOpenFile, viewMode, isMobile, hydrateFile, openEditorWorkspace])
 
   // Handle file content change
   const handleFileChange = useCallback((fileId: number, content: string, paneId: string) => {
@@ -358,20 +404,37 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   // Handle project creation
   const handleProjectCreate = useCallback((project: any) => {
     setCurrentProject(project)
+    setShowPreview(false)
     setViewMode('dashboard')
-  }, [setCurrentProject])
+    if (isMobile) {
+      setMobilePanel('editor')
+      setMobileOverlayPanel(null)
+    }
+  }, [isMobile, setCurrentProject])
 
   // Handle project selection
   const handleProjectSelect = useCallback((project: any) => {
     setCurrentProject(project)
+    setShowPreview(false)
     setViewMode('dashboard')
-  }, [setCurrentProject])
+    if (isMobile) {
+      setMobilePanel('editor')
+      setMobileOverlayPanel(null)
+    }
+  }, [isMobile, setCurrentProject])
 
   const handleProjectRun = useCallback((project: any) => {
     setCurrentProject(project)
-    setViewMode('editor')
     setShowPreview(true)
-  }, [setCurrentProject, setShowPreview])
+    setViewMode('preview')
+    if (bottomPanelState === 'collapsed') {
+      setBottomPanelState('normal')
+    }
+    if (isMobile) {
+      setMobilePanel('editor')
+      setMobileOverlayPanel(null)
+    }
+  }, [bottomPanelState, isMobile, setCurrentProject])
 
   const handleDashboardShare = useCallback(() => {
     if (!currentProject) return
@@ -396,9 +459,8 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
 
   const handleDashboardRun = useCallback(() => {
     if (!currentProject) return
-    setViewMode('editor')
-    setShowPreview(true)
-  }, [currentProject])
+    openPreviewWorkspace()
+  }, [currentProject, openPreviewWorkspace])
 
   const handleDashboardSettings = useCallback(() => {
     setRightPanelState('normal')
@@ -517,9 +579,8 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
         if (currentProject) {
           const language = (currentProject.language || '').toLowerCase()
           if (language === 'javascript' || language === 'typescript') {
-            setViewMode('editor')
-            setShowPreview(true)
-            setTerminalOutput(prev => [...prev, 'Preview started in the right pane.'])
+            openPreviewWorkspace()
+            setTerminalOutput(prev => [...prev, 'Preview workspace opened.'])
             return
           }
           setTerminalOutput(prev => [...prev, 'Executing project...'])
@@ -540,7 +601,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     } catch (error) {
       setTerminalOutput(prev => [...prev, `Error: ${error}`])
     }
-  }, [currentProject])
+  }, [currentProject, openPreviewWorkspace])
 
   // Handle mobile tab change
   const handleMobileTabChange = useCallback((tab: MobilePanel) => {
@@ -856,6 +917,77 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
             )}
           </div>
         )
+      case 'preview':
+        return currentProject ? (
+          <div className="h-full flex flex-col bg-[radial-gradient(circle_at_top,#141b27_0%,#0b0f16_45%,#05070b_100%)]">
+            <div className="border-b border-gray-800/80 px-4 py-4 md:px-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="min-w-0">
+                  <div className="text-[11px] uppercase tracking-[0.24em] text-red-300/80">Preview Workspace</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-3">
+                    <h2 className="text-xl font-semibold text-white">{currentProject.name}</h2>
+                    <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-200">
+                      Live Runtime
+                    </Badge>
+                    <Badge variant="outline" className="border-gray-700 bg-gray-900/70 text-gray-300">
+                      Auto-refresh {previewAutoRefresh ? 'on' : 'off'}
+                    </Badge>
+                  </div>
+                  <p className="mt-2 max-w-2xl text-sm text-gray-400">
+                    Run the generated app in a dedicated workspace, then jump back into the editor only when you need to patch code.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPreviewAutoRefresh((prev) => !prev)}
+                    className="border-gray-700 bg-gray-900/70 text-gray-200 hover:bg-gray-800"
+                  >
+                    {previewAutoRefresh ? 'Pause Auto-refresh' : 'Enable Auto-refresh'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openEditorWorkspace({ keepPreview: true })}
+                    className="border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"
+                  >
+                    Split With Editor
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openEditorWorkspace()}
+                    className="border-gray-700 bg-gray-900/70 text-gray-200 hover:bg-gray-800"
+                  >
+                    Open Editor Only
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={openDashboardView}
+                    className={ideChromeButtonClass}
+                  >
+                    Back to Dashboard
+                  </Button>
+                </div>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 p-4 md:p-6">
+              <div className="h-full overflow-hidden rounded-2xl border border-red-500/20 bg-black/60 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+                <Suspense fallback={<EditorLoadingFallback />}>
+                  <LivePreview
+                    projectId={currentProject.id}
+                    autoStart={true}
+                    autoRefreshOnSave={previewAutoRefresh}
+                    onAutoRefreshChange={setPreviewAutoRefresh}
+                    className="h-full"
+                  />
+                </Suspense>
+              </div>
+            </div>
+          </div>
+        ) : null
       default:
         return null
     }
@@ -944,13 +1076,13 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
 
           {/* Navigation */}
           <div className="flex items-center gap-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setViewMode('projects')}
-              icon={<Folder size={14} />}
-              className={viewMode === 'projects' ? ideChromeButtonActiveClass : ideChromeButtonClass}
-            >
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={openProjectsView}
+                icon={<Folder size={14} />}
+                className={viewMode === 'projects' ? ideChromeButtonActiveClass : ideChromeButtonClass}
+              >
               <span className="hidden sm:inline">Projects</span>
             </Button>
             {currentProject && (
@@ -958,7 +1090,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => setViewMode('dashboard')}
+                  onClick={openDashboardView}
                   icon={<FileText size={14} />}
                   className={viewMode === 'dashboard' ? ideChromeButtonActiveClass : ideChromeButtonClass}
                 >
@@ -967,11 +1099,20 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => setViewMode('editor')}
+                  onClick={() => openEditorWorkspace({ keepPreview: false })}
                   icon={<Code size={14} />}
                   className={viewMode === 'editor' ? ideChromeButtonActiveClass : ideChromeButtonClass}
                 >
                   <span className="hidden sm:inline">Editor</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={openPreviewWorkspace}
+                  icon={<Monitor size={14} />}
+                  className={viewMode === 'preview' ? ideChromeButtonActiveClass : ideChromeButtonClass}
+                >
+                  <span className="hidden sm:inline">Preview</span>
                 </Button>
                 {viewMode === 'editor' && (
                   <Button
@@ -981,7 +1122,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
                     icon={<Monitor size={14} />}
                     className={showPreview ? ideChromeButtonActiveClass : ideChromeButtonClass}
                   >
-                    <span className="hidden sm:inline">Preview</span>
+                    <span className="hidden sm:inline">Split Preview</span>
                   </Button>
                 )}
               </>
@@ -1024,16 +1165,17 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
                 size="sm"
                 variant="ghost"
                 icon={<Play size={14} />}
-                className={showPreview ? ideChromeButtonActiveClass : ideChromeButtonClass}
-                title={showPreview ? 'Stop Preview' : 'Run Project'}
+                className={viewMode === 'preview' ? ideChromeButtonActiveClass : ideChromeButtonClass}
+                title={viewMode === 'preview' ? 'Close Preview Workspace' : 'Open Preview Workspace'}
                 onClick={() => {
-                  if (!showPreview) {
-                    setViewMode('editor')
+                  if (viewMode === 'preview') {
+                    openEditorWorkspace()
+                    return
                   }
-                  setShowPreview(!showPreview)
+                  openPreviewWorkspace()
                 }}
               >
-                <span className="hidden lg:inline">{showPreview ? 'Stop' : 'Run'}</span>
+                <span className="hidden lg:inline">{viewMode === 'preview' ? 'Close Preview' : 'Preview'}</span>
               </Button>
               <Button
                 size="sm"

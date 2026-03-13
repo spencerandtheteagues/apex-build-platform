@@ -26,16 +26,16 @@ func NewBuildVerifier(ai AIProvider, workDir string) *BuildVerifier {
 
 // VerificationResult contains the outcome of the full verification pipeline
 type VerificationResult struct {
-	Passed        bool               `json:"passed"`
-	Score         int                `json:"score"`       // 0-100 quality score
-	Steps         []VerifyStep       `json:"steps"`
-	Summary       string             `json:"summary"`
-	Duration      int64              `json:"duration_ms"`
-	Retries       int                `json:"retries"`
-	FixesApplied  []AppliedFix       `json:"fixes_applied,omitempty"`
-	SecurityIssues []SecurityFinding `json:"security_issues,omitempty"`
-	DependencyAudit *DependencyAudit `json:"dependency_audit,omitempty"`
-	CoverageReport *CoverageReport  `json:"coverage_report,omitempty"`
+	Passed          bool              `json:"passed"`
+	Score           int               `json:"score"` // 0-100 quality score
+	Steps           []VerifyStep      `json:"steps"`
+	Summary         string            `json:"summary"`
+	Duration        int64             `json:"duration_ms"`
+	Retries         int               `json:"retries"`
+	FixesApplied    []AppliedFix      `json:"fixes_applied,omitempty"`
+	SecurityIssues  []SecurityFinding `json:"security_issues,omitempty"`
+	DependencyAudit *DependencyAudit  `json:"dependency_audit,omitempty"`
+	CoverageReport  *CoverageReport   `json:"coverage_report,omitempty"`
 }
 
 // SecurityFinding represents a security vulnerability found
@@ -59,10 +59,10 @@ type DependencyAudit struct {
 
 // CoverageReport contains test coverage information
 type CoverageReport struct {
-	LineCoverage   float64 `json:"line_coverage"`
-	BranchCoverage float64 `json:"branch_coverage,omitempty"`
-	FunctionsCovered int   `json:"functions_covered"`
-	FunctionsTotal   int   `json:"functions_total"`
+	LineCoverage     float64 `json:"line_coverage"`
+	BranchCoverage   float64 `json:"branch_coverage,omitempty"`
+	FunctionsCovered int     `json:"functions_covered"`
+	FunctionsTotal   int     `json:"functions_total"`
 }
 
 // VerifyStep represents one step in the verification pipeline
@@ -85,7 +85,9 @@ type AppliedFix struct {
 func (bv *BuildVerifier) Verify(ctx context.Context, maxRetries int) (*VerificationResult, error) {
 	startTime := time.Now()
 
-	if maxRetries <= 0 {
+	// Negative values request the legacy default retry budget. Zero means
+	// diagnostic-only verification with no AI fix loop.
+	if maxRetries < 0 {
 		maxRetries = 3
 	}
 

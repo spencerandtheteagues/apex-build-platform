@@ -103,6 +103,26 @@ describe('LivePreview', () => {
     })
   })
 
+  it('restarts an active preview runtime from the workspace controls', async () => {
+    const mockPost = apiService.client.post as any
+    const mockStartFullStack = (apiService as any).startFullStackPreview as any
+    const view = render(<LivePreview projectId={606} autoStart className="h-96" />)
+
+    await waitFor(() => {
+      expect(mockStartFullStack).toHaveBeenCalledWith(expect.objectContaining({ project_id: 606 }))
+    })
+
+    fireEvent.click(within(view.container).getByRole('button', { name: /restart/i }))
+
+    await waitFor(() => {
+      expect(mockPost).toHaveBeenCalledWith('/preview/stop', {
+        project_id: 606,
+        sandbox: false,
+      })
+      expect(mockStartFullStack).toHaveBeenCalledTimes(2)
+    })
+  })
+
   it('keeps active preview visible when a status poll fails transiently', async () => {
     const mockGet = apiService.client.get as any
     const mockStartFullStack = (apiService as any).startFullStackPreview as any

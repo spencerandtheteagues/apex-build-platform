@@ -14,6 +14,7 @@ const (
 	maxBuildConversationMessages = 120
 	maxBuildSteeringNotes        = 16
 	maxPendingRevisions          = 8
+	maxBuildActivityEntries      = 160
 )
 
 type leadMessagePermissionRequest struct {
@@ -99,6 +100,33 @@ func copyBuildInteractionStateLocked(build *Build) BuildInteractionState {
 		PermissionRules:    copyRules,
 		PermissionRequests: copyRequests,
 		AttentionRequired:  build.Interaction.AttentionRequired,
+	}
+}
+
+func copyBuildActivityTimelineLocked(build *Build) []BuildActivityEntry {
+	if build == nil || len(build.ActivityTimeline) == 0 {
+		return []BuildActivityEntry{}
+	}
+
+	timeline := make([]BuildActivityEntry, len(build.ActivityTimeline))
+	copy(timeline, build.ActivityTimeline)
+	return timeline
+}
+
+func appendBuildActivityEntryLocked(build *Build, entry BuildActivityEntry) {
+	if build == nil {
+		return
+	}
+	if entry.ID == "" {
+		entry.ID = uuid.New().String()
+	}
+	if entry.Timestamp.IsZero() {
+		entry.Timestamp = time.Now().UTC()
+	}
+
+	build.ActivityTimeline = append(build.ActivityTimeline, entry)
+	if len(build.ActivityTimeline) > maxBuildActivityEntries {
+		build.ActivityTimeline = append([]BuildActivityEntry(nil), build.ActivityTimeline[len(build.ActivityTimeline)-maxBuildActivityEntries:]...)
 	}
 }
 
@@ -417,6 +445,15 @@ func (am *AgentManager) PauseBuild(buildID string, reason string) (BuildInteract
 
 	now := time.Now().UTC()
 	build.mu.Lock()
+	if build.Status == BuildCompleted || build.Status == BuildFailed || build.Status == BuildCancelled {
+		build.mu.Unlock()
+		return BuildInteractionState{}, fmt.Errorf("build %s already in terminal state: %s", buildID, build.Status)
+	}
+	if build.Interaction.Paused {
+		interaction := copyBuildInteractionStateLocked(build)
+		build.mu.Unlock()
+		return interaction, nil
+	}
 	build.Interaction.Paused = true
 	build.Interaction.PauseReason = strings.TrimSpace(reason)
 	build.UpdatedAt = now
@@ -452,6 +489,15 @@ func (am *AgentManager) ResumeBuild(buildID string, reason string) (BuildInterac
 
 	now := time.Now().UTC()
 	build.mu.Lock()
+	if build.Status == BuildCompleted || build.Status == BuildFailed || build.Status == BuildCancelled {
+		build.mu.Unlock()
+		return BuildInteractionState{}, fmt.Errorf("build %s already in terminal state: %s", buildID, build.Status)
+	}
+	if !build.Interaction.Paused {
+		interaction := copyBuildInteractionStateLocked(build)
+		build.mu.Unlock()
+		return interaction, nil
+	}
 	build.Interaction.Paused = false
 	build.Interaction.PauseReason = ""
 	build.UpdatedAt = now

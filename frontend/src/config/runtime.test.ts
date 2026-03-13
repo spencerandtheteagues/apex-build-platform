@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { normalizeConfiguredApiUrl, normalizeConfiguredWsUrl } from './runtime'
+import { getConfiguredApiUrl, normalizeConfiguredApiUrl, normalizeConfiguredWsUrl } from './runtime'
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+  window.__APEX_CONFIG__ = undefined
+})
 
 describe('normalizeConfiguredApiUrl', () => {
   it('rewrites the broken production API custom domain to the live Render backend', () => {
@@ -26,5 +31,20 @@ describe('normalizeConfiguredWsUrl', () => {
 
   it('appends /ws when a bare websocket origin is provided', () => {
     expect(normalizeConfiguredWsUrl('wss://example.com')).toBe('wss://example.com/ws')
+  })
+})
+
+describe('getConfiguredApiUrl', () => {
+  it('falls back to VITE_API_BASE_URL when VITE_API_URL is unset', () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://legacy.example.com')
+
+    expect(getConfiguredApiUrl()).toBe('https://legacy.example.com/api/v1')
+  })
+
+  it('prefers VITE_API_URL over the legacy alias when both are set', () => {
+    vi.stubEnv('VITE_API_URL', 'https://primary.example.com')
+    vi.stubEnv('VITE_API_BASE_URL', 'https://legacy.example.com')
+
+    expect(getConfiguredApiUrl()).toBe('https://primary.example.com/api/v1')
   })
 })

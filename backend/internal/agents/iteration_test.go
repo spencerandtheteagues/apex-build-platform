@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,8 +60,289 @@ func TestRestoreBuildSessionFromSnapshotRehydratesFiles(t *testing.T) {
 	if files[0].Path != "src/App.tsx" {
 		t.Fatalf("expected restored file path src/App.tsx, got %s", files[0].Path)
 	}
-	if len(build.Tasks) == 0 || build.Tasks[0].Output == nil || len(build.Tasks[0].Output.Files) != 1 {
-		t.Fatalf("expected restored snapshot files to be rehydrated into task output")
+	if len(build.SnapshotFiles) != 1 {
+		t.Fatalf("expected restored snapshot files to live on the build, got %d", len(build.SnapshotFiles))
+	}
+	if len(build.Tasks) != 0 {
+		t.Fatalf("expected no synthetic snapshot file tasks, got %d", len(build.Tasks))
+	}
+}
+
+func TestPersistBuildSnapshotRestoresActivityTimeline(t *testing.T) {
+	db := openBuildTestDB(t)
+	persistManager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	})
+	persistManager.db = db
+	completedAt := time.Now().UTC()
+
+	build := &Build{
+		ID:          "restore-activity-build",
+		UserID:      1,
+		Status:      BuildCompleted,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Description: "Build a telemetry-aware preview flow",
+		Agents: map[string]*Agent{
+			"agent-1": {
+				ID:       "agent-1",
+				Role:     RoleArchitect,
+				Provider: ai.ProviderClaude,
+				Model:    "claude-sonnet",
+				Status:   StatusCompleted,
+				CurrentTask: &Task{
+					ID:          "task-1",
+					Type:        TaskPlan,
+					Description: "Plan the preview workspace",
+				},
+			},
+		},
+		Tasks: []*Task{
+			{
+				ID:            "task-1",
+				Type:          TaskPlan,
+				Description:   "Plan the preview workspace",
+				AssignedTo:    "agent-1",
+				Status:        TaskCompleted,
+				MaxRetries:    2,
+				RetryCount:    1,
+				CreatedAt:     time.Now().Add(-90 * time.Second).UTC(),
+				CompletedAt:   &completedAt,
+				RetryStrategy: RetryWithFix,
+			},
+		},
+		Checkpoints: []*Checkpoint{
+			{
+				ID:          "checkpoint-1",
+				BuildID:     "restore-activity-build",
+				Number:      1,
+				Name:        "Plan Ready",
+				Description: "Initial plan completed",
+				Progress:    35,
+				Restorable:  true,
+				CreatedAt:   time.Now().Add(-45 * time.Second).UTC(),
+			},
+		},
+		ActivityTimeline: []BuildActivityEntry{
+			{
+				ID:        "activity-1",
+				AgentID:   "agent-1",
+				AgentRole: string(RoleArchitect),
+				Provider:  string(ai.ProviderClaude),
+				Model:     "claude-sonnet",
+				Type:      "thinking",
+				EventType: "agent:thinking",
+				TaskID:    "task-1",
+				TaskType:  string(TaskPlan),
+				Content:   "Planning preview handoff",
+				Timestamp: time.Now().Add(-30 * time.Second).UTC(),
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			CurrentPhase:       "completed",
+			QualityGateStatus:  "passed",
+			QualityGateStage:   "validation",
+			AvailableProviders: []string{string(ai.ProviderClaude), string(ai.ProviderGPT4)},
+		},
+		Progress:    100,
+		CreatedAt:   time.Now().Add(-2 * time.Minute).UTC(),
+		UpdatedAt:   time.Now().Add(-time.Minute).UTC(),
+		CompletedAt: &completedAt,
+	}
+	required := true
+	build.SnapshotState.QualityGateRequired = &required
+
+	persistManager.persistBuildSnapshot(build, []GeneratedFile{})
+
+	var snapshot models.CompletedBuild
+	if err := db.Where("build_id = ?", build.ID).First(&snapshot).Error; err != nil {
+		t.Fatalf("fetch snapshot: %v", err)
+	}
+	if snapshot.ActivityJSON == "" {
+		t.Fatalf("expected activity_json to be persisted")
+	}
+	if snapshot.StateJSON == "" {
+		t.Fatalf("expected state_json to be persisted")
+	}
+	if snapshot.AgentsJSON == "" || snapshot.TasksJSON == "" || snapshot.CheckpointsJSON == "" {
+		t.Fatalf("expected compact snapshot state to be persisted")
+	}
+
+	restoreManager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	})
+	restoreManager.db = db
+
+	restoredBuild, restored, err := restoreManager.restoreBuildSessionFromSnapshot(&snapshot)
+	if err != nil {
+		t.Fatalf("restoreBuildSessionFromSnapshot returned error: %v", err)
+	}
+	if !restored {
+		t.Fatalf("expected restored=true")
+	}
+	if len(restoredBuild.ActivityTimeline) != 1 {
+		t.Fatalf("expected 1 activity entry, got %d", len(restoredBuild.ActivityTimeline))
+	}
+	if restoredBuild.SnapshotState.CurrentPhase != "completed" {
+		t.Fatalf("expected restored snapshot phase completed, got %s", restoredBuild.SnapshotState.CurrentPhase)
+	}
+	if restoredBuild.SnapshotState.QualityGateRequired == nil || !*restoredBuild.SnapshotState.QualityGateRequired {
+		t.Fatalf("expected restored quality gate requirement to be true, got %+v", restoredBuild.SnapshotState.QualityGateRequired)
+	}
+	if restoredBuild.SnapshotState.QualityGateStatus != "passed" {
+		t.Fatalf("expected restored quality gate status passed, got %s", restoredBuild.SnapshotState.QualityGateStatus)
+	}
+	if len(restoredBuild.SnapshotState.AvailableProviders) != 2 {
+		t.Fatalf("expected restored available providers, got %+v", restoredBuild.SnapshotState.AvailableProviders)
+	}
+	if restoredBuild.ActivityTimeline[0].EventType != "agent:thinking" {
+		t.Fatalf("expected persisted event type, got %s", restoredBuild.ActivityTimeline[0].EventType)
+	}
+	if restoredBuild.ActivityTimeline[0].Content != "Planning preview handoff" {
+		t.Fatalf("expected persisted content, got %s", restoredBuild.ActivityTimeline[0].Content)
+	}
+	if len(restoredBuild.Tasks) != 1 || restoredBuild.Tasks[0].Description != "Plan the preview workspace" {
+		t.Fatalf("expected restored task metadata, got %+v", restoredBuild.Tasks)
+	}
+	if len(restoredBuild.Checkpoints) != 1 || restoredBuild.Checkpoints[0].Restorable {
+		t.Fatalf("expected historical checkpoint metadata with restorable=false, got %+v", restoredBuild.Checkpoints)
+	}
+	restoredAgent := restoredBuild.Agents["agent-1"]
+	if restoredAgent == nil {
+		t.Fatalf("expected restored architect agent")
+	}
+	if restoredAgent.CurrentTask == nil || restoredAgent.CurrentTask.Description != "Plan the preview workspace" {
+		t.Fatalf("expected restored agent current task, got %+v", restoredAgent.CurrentTask)
+	}
+}
+
+func TestBroadcastCapturesBuildActivityTimeline(t *testing.T) {
+	manager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	})
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:          "capture-activity-build",
+		UserID:      1,
+		Status:      BuildInProgress,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Description: "Build a restore-safe timeline",
+		Agents: map[string]*Agent{
+			"agent-1": {
+				ID:       "agent-1",
+				Role:     RoleFrontend,
+				Provider: ai.ProviderGPT4,
+				Model:    "gpt-4.1",
+			},
+		},
+		Tasks: []*Task{
+			{
+				ID:     "task-1",
+				Type:   TaskGenerateUI,
+				Status: TaskInProgress,
+			},
+		},
+		CreatedAt: now.Add(-time.Minute),
+		UpdatedAt: now.Add(-30 * time.Second),
+	}
+	manager.builds[build.ID] = build
+
+	manager.broadcast(build.ID, &WSMessage{
+		Type:      "agent:generating",
+		BuildID:   build.ID,
+		AgentID:   "agent-1",
+		Timestamp: now,
+		Data: map[string]any{
+			"task_id":    "task-1",
+			"agent_role": string(RoleFrontend),
+			"provider":   string(ai.ProviderGPT4),
+			"model":      "gpt-4.1",
+			"content":    "Frontend agent is generating code with gpt4...",
+		},
+	})
+	manager.broadcast(build.ID, &WSMessage{
+		Type:      "build:phase",
+		BuildID:   build.ID,
+		Timestamp: now.Add(time.Second),
+		Data: map[string]any{
+			"phase_key":             "provider_check",
+			"available_providers":   []string{string(ai.ProviderClaude), string(ai.ProviderGPT4)},
+			"quality_gate_required": true,
+		},
+	})
+
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	if len(build.ActivityTimeline) != 1 {
+		t.Fatalf("expected 1 captured activity entry, got %d", len(build.ActivityTimeline))
+	}
+	entry := build.ActivityTimeline[0]
+	if entry.Type != "action" {
+		t.Fatalf("expected action activity type, got %s", entry.Type)
+	}
+	if entry.TaskID != "task-1" {
+		t.Fatalf("expected captured task id, got %s", entry.TaskID)
+	}
+	if entry.TaskType != string(TaskGenerateUI) {
+		t.Fatalf("expected inferred task type %s, got %s", TaskGenerateUI, entry.TaskType)
+	}
+	if entry.Provider != string(ai.ProviderGPT4) {
+		t.Fatalf("expected provider gpt4, got %s", entry.Provider)
+	}
+	if build.SnapshotState.CurrentPhase != "provider_check" {
+		t.Fatalf("expected captured current phase provider_check, got %s", build.SnapshotState.CurrentPhase)
+	}
+	if build.SnapshotState.QualityGateRequired == nil || !*build.SnapshotState.QualityGateRequired {
+		t.Fatalf("expected captured quality gate requirement, got %+v", build.SnapshotState.QualityGateRequired)
+	}
+	if len(build.SnapshotState.AvailableProviders) != 2 {
+		t.Fatalf("expected captured available providers, got %+v", build.SnapshotState.AvailableProviders)
+	}
+}
+
+func TestRollbackToCheckpointRejectsHistoricalCheckpoint(t *testing.T) {
+	manager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	})
+
+	build := &Build{
+		ID:        "historical-checkpoint-build",
+		UserID:    1,
+		Status:    BuildCompleted,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		Agents:    make(map[string]*Agent),
+		Tasks:     make([]*Task, 0),
+		Checkpoints: []*Checkpoint{
+			{
+				ID:          "checkpoint-1",
+				BuildID:     "historical-checkpoint-build",
+				Number:      1,
+				Name:        "Plan Ready",
+				Description: "Imported from snapshot",
+				Progress:    35,
+				Restorable:  false,
+				CreatedAt:   time.Now().Add(-time.Minute).UTC(),
+			},
+		},
+		CreatedAt: time.Now().Add(-2 * time.Minute).UTC(),
+		UpdatedAt: time.Now().Add(-time.Minute).UTC(),
+	}
+	manager.builds[build.ID] = build
+
+	err := manager.RollbackToCheckpoint(build.ID, "checkpoint-1")
+	if err == nil || !strings.Contains(err.Error(), "historical only") {
+		t.Fatalf("expected historical checkpoint rollback to be rejected, got %v", err)
 	}
 }
 

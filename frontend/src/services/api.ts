@@ -3174,6 +3174,63 @@ export interface BuildInteractionState {
   attention_required?: boolean
 }
 
+export interface BuildActivityTimelineEntry {
+  id: string
+  agent_id: string
+  agent_role: string
+  provider: string
+  model?: string
+  type: 'thinking' | 'action' | 'output' | 'error'
+  event_type?: string
+  task_id?: string
+  task_type?: string
+  files?: string[]
+  files_count?: number
+  retry_count?: number
+  max_retries?: number
+  is_internal?: boolean
+  content: string
+  timestamp: string
+}
+
+export interface BuildAgentState {
+  id: string
+  role: string
+  provider: string
+  model?: string
+  status: string
+  progress: number
+  current_task?: {
+    id?: string
+    type?: string
+    description?: string
+  }
+}
+
+export interface BuildTaskState {
+  id: string
+  type: string
+  description: string
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled'
+  assigned_to?: string
+  created_at?: string
+  started_at?: string
+  completed_at?: string
+  retry_count?: number
+  max_retries?: number
+  error?: string
+}
+
+export interface BuildCheckpointState {
+  id: string
+  number: number
+  name: string
+  description: string
+  progress: number
+  restorable?: boolean
+  created_at: string
+}
+
 export interface ProposedBuildEdit {
   id: string
   build_id: string
@@ -3189,8 +3246,19 @@ export interface ProposedBuildEdit {
 export interface CompletedBuildDetail extends CompletedBuildSummary {
   files: { path: string; content: string; language: string; size: number; is_new: boolean }[]
   error?: string
+  agents?: BuildAgentState[]
+  tasks?: BuildTaskState[]
+  checkpoints?: BuildCheckpointState[]
   messages?: BuildConversationMessage[]
   interaction?: BuildInteractionState
+  activity_timeline?: BuildActivityTimelineEntry[]
+  current_phase?: string
+  quality_gate_required?: boolean
+  quality_gate_status?: 'pending' | 'running' | 'passed' | 'failed'
+  quality_gate_stage?: string
+  quality_gate_active?: boolean
+  quality_gate_passed?: boolean
+  available_providers?: string[]
 }
 
 // Create singleton instance

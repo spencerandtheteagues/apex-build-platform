@@ -5,6 +5,7 @@ package agents
 import (
 	"archive/zip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -17,6 +18,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+)
+
+var (
+	errBuildActionNotFound = errors.New("build not found")
+	errBuildAccessDenied   = errors.New("access denied")
 )
 
 // BuildHandler handles build-related HTTP requests
@@ -324,7 +330,7 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		}
 		interaction := copyBuildInteractionStateLocked(build)
 
-		c.JSON(http.StatusOK, gin.H{
+		response := gin.H{
 			"id":                    build.ID,
 			"status":                string(build.Status),
 			"mode":                  string(build.Mode),
@@ -342,7 +348,11 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 			"error":                 errorMessage,
 			"interaction":           interaction,
 			"live":                  true,
-		})
+		}
+		for key, value := range buildSnapshotStateResponseFields(copyBuildSnapshotStateLocked(build), string(build.Status)) {
+			response[key] = value
+		}
+		c.JSON(http.StatusOK, response)
 		return
 	}
 
@@ -365,16 +375,20 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 	if snapshotStatus == "completed" {
 		snapshotProgress = 100
 	}
+	agents := parseBuildAgents(snapshot.AgentsJSON)
+	tasks := parseBuildTasks(snapshot.TasksJSON)
+	checkpoints := parseBuildCheckpoints(snapshot.CheckpointsJSON)
 
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"id":                     snapshot.BuildID,
 		"status":                 snapshotStatus,
 		"mode":                   snapshot.Mode,
+		"power_mode":             snapshot.PowerMode,
 		"description":            snapshot.Description,
 		"progress":               snapshotProgress,
-		"agents_count":           0,
-		"tasks_count":            0,
-		"checkpoints":            0,
+		"agents_count":           len(agents),
+		"tasks_count":            len(tasks),
+		"checkpoints":            len(checkpoints),
 		"created_at":             snapshot.CreatedAt,
 		"updated_at":             snapshot.UpdatedAt,
 		"completed_at":           snapshot.CompletedAt,
@@ -383,7 +397,11 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		"interaction":            parseBuildInteraction(snapshot.InteractionJSON),
 		"live":                   false,
 		"restored_from_snapshot": true,
-	})
+	}
+	for key, value := range buildSnapshotStateResponseFields(parseBuildSnapshotState(snapshot.StateJSON), snapshotStatus) {
+		response[key] = value
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // latestFailedTaskErrorLocked extracts the latest actionable task failure from a live build.
@@ -409,6 +427,97 @@ func latestFailedTaskErrorLocked(build *Build) string {
 	return ""
 }
 
+func (h *BuildHandler) getBuildActionSession(userID uint, buildID string) (*Build, bool, error) {
+	build, err := h.manager.GetBuild(buildID)
+	if err == nil {
+		if build.UserID != userID {
+			return nil, false, errBuildAccessDenied
+		}
+		if !isActiveBuildStatus(string(build.Status)) {
+			return nil, false, errBuildNotActive
+		}
+		return build, false, nil
+	}
+
+	snapshot, snapErr := h.getBuildSnapshot(userID, buildID)
+	if snapErr != nil {
+		if errors.Is(snapErr, gorm.ErrRecordNotFound) {
+			return nil, false, errBuildActionNotFound
+		}
+		return nil, false, snapErr
+	}
+	if !isActiveBuildStatus(string(normalizeRestoredBuildStatus(snapshot))) {
+		return nil, false, errBuildNotActive
+	}
+
+	build, restored, restoreErr := h.manager.restoreBuildSessionFromSnapshot(snapshot)
+	if restoreErr != nil {
+		return nil, false, restoreErr
+	}
+	if build.UserID != userID {
+		return nil, false, errBuildAccessDenied
+	}
+	return build, restored, nil
+}
+
+func writeBuildActionSessionError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, errBuildAccessDenied):
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+	case errors.Is(err, errBuildActionNotFound), errors.Is(err, gorm.ErrRecordNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+	case errors.Is(err, errBuildNotActive):
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "build not active",
+			"details": "Only active builds can be controlled or reviewed",
+		})
+	default:
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "build session unavailable",
+			"details": err.Error(),
+		})
+	}
+}
+
+func buildSnapshotStateResponseFields(state BuildSnapshotState, fallbackStatus string) gin.H {
+	fields := gin.H{}
+
+	currentPhase := strings.TrimSpace(state.CurrentPhase)
+	if currentPhase == "" {
+		currentPhase = strings.TrimSpace(strings.ToLower(fallbackStatus))
+	}
+	if currentPhase != "" {
+		fields["phase"] = currentPhase
+		fields["current_phase"] = currentPhase
+	}
+
+	if state.QualityGateRequired != nil {
+		fields["quality_gate_required"] = *state.QualityGateRequired
+	}
+	if stage := strings.TrimSpace(state.QualityGateStage); stage != "" {
+		fields["quality_gate_stage"] = stage
+	}
+	if len(state.AvailableProviders) > 0 {
+		fields["available_providers"] = append([]string(nil), state.AvailableProviders...)
+	}
+
+	switch normalizeQualityGateStatus(state.QualityGateStatus) {
+	case "running":
+		fields["quality_gate_status"] = "running"
+		fields["quality_gate_active"] = true
+	case "passed":
+		fields["quality_gate_status"] = "passed"
+		fields["quality_gate_passed"] = true
+	case "failed":
+		fields["quality_gate_status"] = "failed"
+		fields["quality_gate_passed"] = false
+	case "pending":
+		fields["quality_gate_status"] = "pending"
+	}
+
+	return fields
+}
+
 // GetBuildDetails returns full details of a build including agents and tasks
 // GET /api/v1/build/:id
 func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
@@ -431,14 +540,10 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 		build.mu.RLock()
 		defer build.mu.RUnlock()
 
-		// Convert agents map to slice for JSON
-		agents := make([]*Agent, 0, len(build.Agents))
-		for _, agent := range build.Agents {
-			agents = append(agents, agent)
-		}
+		agents := orderedBuildAgents(build.Agents)
 		interaction := copyBuildInteractionStateLocked(build)
 
-		c.JSON(http.StatusOK, gin.H{
+		response := gin.H{
 			"id":                    build.ID,
 			"user_id":               build.UserID,
 			"project_id":            build.ProjectID,
@@ -460,8 +565,13 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 			"files":                 h.manager.collectGeneratedFiles(build),
 			"messages":              interaction.Messages,
 			"interaction":           interaction,
+			"activity_timeline":     copyBuildActivityTimelineLocked(build),
 			"live":                  true,
-		})
+		}
+		for key, value := range buildSnapshotStateResponseFields(copyBuildSnapshotStateLocked(build), string(build.Status)) {
+			response[key] = value
+		}
+		c.JSON(http.StatusOK, response)
 		return
 	}
 
@@ -475,19 +585,25 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 	}
 
 	files, _ := parseBuildFiles(snapshot.FilesJSON)
+	agents := orderedBuildAgents(parseBuildAgents(snapshot.AgentsJSON))
+	tasks := parseBuildTasks(snapshot.TasksJSON)
+	checkpoints := parseBuildCheckpoints(snapshot.CheckpointsJSON)
 	interaction := parseBuildInteraction(snapshot.InteractionJSON)
+	activityTimeline := parseBuildActivityTimeline(snapshot.ActivityJSON)
+	snapshotState := parseBuildSnapshotState(snapshot.StateJSON)
 
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"id":                     snapshot.BuildID,
 		"user_id":                snapshot.UserID,
 		"project_id":             snapshot.ProjectID,
 		"status":                 snapshot.Status,
 		"mode":                   snapshot.Mode,
+		"power_mode":             snapshot.PowerMode,
 		"description":            snapshot.Description,
 		"plan":                   nil,
-		"agents":                 []any{},
-		"tasks":                  []any{},
-		"checkpoints":            []any{},
+		"agents":                 agents,
+		"tasks":                  tasks,
+		"checkpoints":            checkpoints,
 		"progress":               snapshot.Progress,
 		"created_at":             snapshot.CreatedAt,
 		"updated_at":             snapshot.UpdatedAt,
@@ -496,9 +612,14 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 		"files":                  files,
 		"messages":               interaction.Messages,
 		"interaction":            interaction,
+		"activity_timeline":      activityTimeline,
 		"live":                   false,
 		"restored_from_snapshot": true,
-	})
+	}
+	for key, value := range buildSnapshotStateResponseFields(snapshotState, snapshot.Status) {
+		response[key] = value
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // SendMessage sends a message to the build's lead agent
@@ -777,13 +898,9 @@ func (h *BuildHandler) PauseBuild(c *gin.Context) {
 	}
 	uid := userID.(uint)
 
-	build, err := h.manager.GetBuild(buildID)
+	_, restoredSession, err := h.getBuildActionSession(uid, buildID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
-		return
-	}
-	if uid != build.UserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		writeBuildActionSessionError(c, err)
 		return
 	}
 
@@ -799,8 +916,10 @@ func (h *BuildHandler) PauseBuild(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"status":      "paused",
-		"interaction": interaction,
+		"status":           "paused",
+		"interaction":      interaction,
+		"live":             true,
+		"restored_session": restoredSession,
 	})
 }
 
@@ -815,13 +934,9 @@ func (h *BuildHandler) ResumeBuild(c *gin.Context) {
 	}
 	uid := userID.(uint)
 
-	build, err := h.manager.GetBuild(buildID)
+	_, restoredSession, err := h.getBuildActionSession(uid, buildID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
-		return
-	}
-	if uid != build.UserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		writeBuildActionSessionError(c, err)
 		return
 	}
 
@@ -837,8 +952,10 @@ func (h *BuildHandler) ResumeBuild(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"status":      "resumed",
-		"interaction": interaction,
+		"status":           "resumed",
+		"interaction":      interaction,
+		"live":             true,
+		"restored_session": restoredSession,
 	})
 }
 
@@ -846,9 +963,34 @@ func (h *BuildHandler) ResumeBuild(c *gin.Context) {
 // GET /api/v1/build/:id/checkpoints
 func (h *BuildHandler) GetCheckpoints(c *gin.Context) {
 	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
 
 	build, err := h.manager.GetBuild(buildID)
-	if err != nil {
+	if err == nil {
+		if uid != build.UserID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+
+		build.mu.RLock()
+		defer build.mu.RUnlock()
+
+		c.JSON(http.StatusOK, gin.H{
+			"build_id":    buildID,
+			"checkpoints": build.Checkpoints,
+			"count":       len(build.Checkpoints),
+			"live":        true,
+		})
+		return
+	}
+
+	snapshot, snapErr := h.getBuildSnapshot(uid, buildID)
+	if snapErr != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error":   "build not found",
 			"details": err.Error(),
@@ -856,20 +998,12 @@ func (h *BuildHandler) GetCheckpoints(c *gin.Context) {
 		return
 	}
 
-	// Verify ownership
-	userID, _ := c.Get("user_id")
-	if userID.(uint) != build.UserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
-		return
-	}
-
-	build.mu.RLock()
-	defer build.mu.RUnlock()
-
+	checkpoints := parseBuildCheckpoints(snapshot.CheckpointsJSON)
 	c.JSON(http.StatusOK, gin.H{
 		"build_id":    buildID,
-		"checkpoints": build.Checkpoints,
-		"count":       len(build.Checkpoints),
+		"checkpoints": checkpoints,
+		"count":       len(checkpoints),
+		"live":        false,
 	})
 }
 
@@ -927,9 +1061,39 @@ func (h *BuildHandler) RollbackCheckpoint(c *gin.Context) {
 // GET /api/v1/build/:id/agents
 func (h *BuildHandler) GetAgents(c *gin.Context) {
 	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
 
 	build, err := h.manager.GetBuild(buildID)
-	if err != nil {
+	if err == nil {
+		if uid != build.UserID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+
+		build.mu.RLock()
+		defer build.mu.RUnlock()
+
+		agents := make([]*Agent, 0, len(build.Agents))
+		for _, agent := range build.Agents {
+			agents = append(agents, agent)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"build_id": buildID,
+			"agents":   agents,
+			"count":    len(agents),
+			"live":     true,
+		})
+		return
+	}
+
+	snapshot, snapErr := h.getBuildSnapshot(uid, buildID)
+	if snapErr != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error":   "build not found",
 			"details": err.Error(),
@@ -937,25 +1101,12 @@ func (h *BuildHandler) GetAgents(c *gin.Context) {
 		return
 	}
 
-	// Verify ownership
-	userID, _ := c.Get("user_id")
-	if userID.(uint) != build.UserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
-		return
-	}
-
-	build.mu.RLock()
-	defer build.mu.RUnlock()
-
-	agents := make([]*Agent, 0, len(build.Agents))
-	for _, agent := range build.Agents {
-		agents = append(agents, agent)
-	}
-
+	agents := orderedBuildAgents(parseBuildAgents(snapshot.AgentsJSON))
 	c.JSON(http.StatusOK, gin.H{
 		"build_id": buildID,
 		"agents":   agents,
 		"count":    len(agents),
+		"live":     false,
 	})
 }
 
@@ -963,9 +1114,41 @@ func (h *BuildHandler) GetAgents(c *gin.Context) {
 // GET /api/v1/build/:id/tasks
 func (h *BuildHandler) GetTasks(c *gin.Context) {
 	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
 
 	build, err := h.manager.GetBuild(buildID)
-	if err != nil {
+	if err == nil {
+		if uid != build.UserID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+
+		build.mu.RLock()
+		defer build.mu.RUnlock()
+
+		tasksByStatus := make(map[string][]*Task)
+		for _, task := range build.Tasks {
+			status := string(task.Status)
+			tasksByStatus[status] = append(tasksByStatus[status], task)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"build_id":        buildID,
+			"tasks":           build.Tasks,
+			"tasks_by_status": tasksByStatus,
+			"total":           len(build.Tasks),
+			"live":            true,
+		})
+		return
+	}
+
+	snapshot, snapErr := h.getBuildSnapshot(uid, buildID)
+	if snapErr != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error":   "build not found",
 			"details": err.Error(),
@@ -973,28 +1156,19 @@ func (h *BuildHandler) GetTasks(c *gin.Context) {
 		return
 	}
 
-	// Verify ownership
-	userID, _ := c.Get("user_id")
-	if userID.(uint) != build.UserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
-		return
-	}
-
-	build.mu.RLock()
-	defer build.mu.RUnlock()
-
-	// Group tasks by status
+	tasks := parseBuildTasks(snapshot.TasksJSON)
 	tasksByStatus := make(map[string][]*Task)
-	for _, task := range build.Tasks {
+	for _, task := range tasks {
 		status := string(task.Status)
 		tasksByStatus[status] = append(tasksByStatus[status], task)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"build_id":        buildID,
-		"tasks":           build.Tasks,
+		"tasks":           tasks,
 		"tasks_by_status": tasksByStatus,
-		"total":           len(build.Tasks),
+		"total":           len(tasks),
+		"live":            false,
 	})
 }
 
@@ -1240,45 +1414,36 @@ func (h *BuildHandler) ApplyBuildArtifacts(c *gin.Context) {
 // POST /api/v1/build/:id/cancel
 func (h *BuildHandler) CancelBuild(c *gin.Context) {
 	buildID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	uid := userID.(uint)
 
-	build, err := h.manager.GetBuild(buildID)
+	_, restoredSession, err := h.getBuildActionSession(uid, buildID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":   "build not found",
+		writeBuildActionSessionError(c, err)
+		return
+	}
+
+	if err := h.manager.CancelBuild(buildID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "build cannot be cancelled",
 			"details": err.Error(),
 		})
 		return
 	}
 
-	// Verify ownership
-	userID, _ := c.Get("user_id")
-	if userID.(uint) != build.UserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
-		return
+	if h.hub != nil {
+		h.hub.CloseAllConnections(buildID)
 	}
-
-	// Check if build can be cancelled
-	build.mu.Lock()
-	if build.Status == BuildCompleted || build.Status == BuildFailed || build.Status == BuildCancelled {
-		build.mu.Unlock()
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "build cannot be cancelled",
-			"details": "Build is already " + string(build.Status),
-		})
-		return
-	}
-
-	build.Status = BuildCancelled
-	build.UpdatedAt = time.Now()
-	build.mu.Unlock()
-	h.manager.persistBuildSnapshot(build, nil)
-
-	// Close all WebSocket connections
-	h.hub.CloseAllConnections(buildID)
 
 	c.JSON(http.StatusOK, gin.H{
-		"status":  "cancelled",
-		"message": "Build has been cancelled",
+		"status":           "cancelled",
+		"message":          "Build has been cancelled",
+		"live":             true,
+		"restored_session": restoredSession,
 	})
 }
 
@@ -1400,7 +1565,12 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 
 	// Parse stored files JSON
 	files, _ := parseBuildFiles(build.FilesJSON)
+	agents := orderedBuildAgents(parseBuildAgents(build.AgentsJSON))
+	tasks := parseBuildTasks(build.TasksJSON)
+	checkpoints := parseBuildCheckpoints(build.CheckpointsJSON)
 	interaction := parseBuildInteraction(build.InteractionJSON)
+	activityTimeline := parseBuildActivityTimeline(build.ActivityJSON)
+	snapshotState := parseBuildSnapshotState(build.StateJSON)
 
 	var techStack any
 	if build.TechStack != "" {
@@ -1411,29 +1581,37 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 		live = true
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"id":           build.ID,
-		"build_id":     build.BuildID,
-		"project_id":   build.ProjectID,
-		"project_name": build.ProjectName,
-		"description":  build.Description,
-		"status":       build.Status,
-		"mode":         build.Mode,
-		"power_mode":   build.PowerMode,
-		"tech_stack":   techStack,
-		"files":        files,
-		"messages":     interaction.Messages,
-		"interaction":  interaction,
-		"files_count":  build.FilesCount,
-		"total_cost":   build.TotalCost,
-		"progress":     build.Progress,
-		"duration_ms":  build.DurationMs,
-		"error":        build.Error,
-		"created_at":   build.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		"completed_at": build.CompletedAt,
-		"live":         live,
-		"resumable":    isActiveBuildStatus(build.Status),
-	})
+	response := gin.H{
+		"id":                build.ID,
+		"build_id":          build.BuildID,
+		"project_id":        build.ProjectID,
+		"project_name":      build.ProjectName,
+		"description":       build.Description,
+		"status":            build.Status,
+		"mode":              build.Mode,
+		"power_mode":        build.PowerMode,
+		"tech_stack":        techStack,
+		"agents":            agents,
+		"tasks":             tasks,
+		"checkpoints":       checkpoints,
+		"files":             files,
+		"messages":          interaction.Messages,
+		"interaction":       interaction,
+		"activity_timeline": activityTimeline,
+		"files_count":       build.FilesCount,
+		"total_cost":        build.TotalCost,
+		"progress":          build.Progress,
+		"duration_ms":       build.DurationMs,
+		"error":             build.Error,
+		"created_at":        build.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		"completed_at":      build.CompletedAt,
+		"live":              live,
+		"resumable":         isActiveBuildStatus(build.Status),
+	}
+	for key, value := range buildSnapshotStateResponseFields(snapshotState, build.Status) {
+		response[key] = value
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // DownloadCompletedBuild streams a completed build as a ZIP archive
@@ -1576,6 +1754,17 @@ func parseBuildInteraction(raw string) BuildInteractionState {
 	return interaction
 }
 
+func parseBuildActivityTimeline(raw string) []BuildActivityEntry {
+	if strings.TrimSpace(raw) == "" {
+		return []BuildActivityEntry{}
+	}
+	var timeline []BuildActivityEntry
+	if err := json.Unmarshal([]byte(raw), &timeline); err != nil {
+		return []BuildActivityEntry{}
+	}
+	return timeline
+}
+
 func (h *BuildHandler) loadArtifactManifestForUser(userID uint, buildID string) (BuildArtifactManifest, bool, error) {
 	if build, err := h.manager.GetBuild(buildID); err == nil {
 		if userID != build.UserID {
@@ -1655,12 +1844,14 @@ func (h *BuildHandler) GetProposedEdits(c *gin.Context) {
 	uid := userID.(uint)
 
 	build, err := h.manager.GetBuild(buildID)
-	if err != nil {
+	live := err == nil
+	if err == nil {
+		if uid != build.UserID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+	} else if _, snapErr := h.getBuildSnapshot(uid, buildID); snapErr != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
-		return
-	}
-	if uid != build.UserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
 		return
 	}
 
@@ -1669,6 +1860,7 @@ func (h *BuildHandler) GetProposedEdits(c *gin.Context) {
 		"build_id": buildID,
 		"edits":    edits,
 		"count":    len(edits),
+		"live":     live,
 	})
 }
 
@@ -1683,13 +1875,9 @@ func (h *BuildHandler) ApproveEdits(c *gin.Context) {
 	}
 	uid := userID.(uint)
 
-	build, err := h.manager.GetBuild(buildID)
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
-		return
-	}
-	if uid != build.UserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		writeBuildActionSessionError(c, err)
 		return
 	}
 
@@ -1711,8 +1899,10 @@ func (h *BuildHandler) ApproveEdits(c *gin.Context) {
 	h.manager.applyApprovedEdits(build, approved)
 
 	c.JSON(http.StatusOK, gin.H{
-		"approved": len(approved),
-		"message":  "Edits approved and applied",
+		"approved":         len(approved),
+		"message":          "Edits approved and applied",
+		"live":             true,
+		"restored_session": restoredSession,
 	})
 }
 
@@ -1727,13 +1917,9 @@ func (h *BuildHandler) RejectEdits(c *gin.Context) {
 	}
 	uid := userID.(uint)
 
-	build, err := h.manager.GetBuild(buildID)
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
-		return
-	}
-	if uid != build.UserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		writeBuildActionSessionError(c, err)
 		return
 	}
 
@@ -1756,7 +1942,11 @@ func (h *BuildHandler) RejectEdits(c *gin.Context) {
 		h.manager.resumeBuildAfterReview(build)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"rejected": len(req.EditIDs)})
+	c.JSON(http.StatusOK, gin.H{
+		"rejected":         len(req.EditIDs),
+		"live":             true,
+		"restored_session": restoredSession,
+	})
 }
 
 // ApproveAllEdits approves all pending proposed edits
@@ -1770,13 +1960,9 @@ func (h *BuildHandler) ApproveAllEdits(c *gin.Context) {
 	}
 	uid := userID.(uint)
 
-	build, err := h.manager.GetBuild(buildID)
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
-		return
-	}
-	if uid != build.UserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		writeBuildActionSessionError(c, err)
 		return
 	}
 
@@ -1784,8 +1970,10 @@ func (h *BuildHandler) ApproveAllEdits(c *gin.Context) {
 	h.manager.applyApprovedEdits(build, approved)
 
 	c.JSON(http.StatusOK, gin.H{
-		"approved": len(approved),
-		"message":  "All edits approved and applied",
+		"approved":         len(approved),
+		"message":          "All edits approved and applied",
+		"live":             true,
+		"restored_session": restoredSession,
 	})
 }
 
@@ -1800,13 +1988,9 @@ func (h *BuildHandler) RejectAllEdits(c *gin.Context) {
 	}
 	uid := userID.(uint)
 
-	build, err := h.manager.GetBuild(buildID)
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
-		return
-	}
-	if uid != build.UserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		writeBuildActionSessionError(c, err)
 		return
 	}
 
@@ -1814,7 +1998,9 @@ func (h *BuildHandler) RejectAllEdits(c *gin.Context) {
 	h.manager.resumeBuildAfterReview(build)
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "All edits rejected, build resuming",
+		"message":          "All edits rejected, build resuming",
+		"live":             true,
+		"restored_session": restoredSession,
 	})
 }
 

@@ -279,6 +279,33 @@ type BuildInteractionState struct {
 	AttentionRequired  bool                       `json:"attention_required,omitempty"`
 }
 
+type BuildActivityEntry struct {
+	ID         string    `json:"id"`
+	AgentID    string    `json:"agent_id"`
+	AgentRole  string    `json:"agent_role"`
+	Provider   string    `json:"provider"`
+	Model      string    `json:"model,omitempty"`
+	Type       string    `json:"type"`
+	EventType  string    `json:"event_type,omitempty"`
+	TaskID     string    `json:"task_id,omitempty"`
+	TaskType   string    `json:"task_type,omitempty"`
+	Files      []string  `json:"files,omitempty"`
+	FilesCount int       `json:"files_count,omitempty"`
+	RetryCount int       `json:"retry_count,omitempty"`
+	MaxRetries int       `json:"max_retries,omitempty"`
+	IsInternal bool      `json:"is_internal,omitempty"`
+	Content    string    `json:"content"`
+	Timestamp  time.Time `json:"timestamp"`
+}
+
+type BuildSnapshotState struct {
+	CurrentPhase        string   `json:"current_phase,omitempty"`
+	QualityGateRequired *bool    `json:"quality_gate_required,omitempty"`
+	QualityGateStatus   string   `json:"quality_gate_status,omitempty"`
+	QualityGateStage    string   `json:"quality_gate_stage,omitempty"`
+	AvailableProviders  []string `json:"available_providers,omitempty"`
+}
+
 // Build represents an entire app-building session
 type Build struct {
 	ID                  string            `json:"id"`
@@ -307,6 +334,9 @@ type Build struct {
 	DiffMode                  bool                  `json:"diff_mode,omitempty"`        // When true, changes require user review before applying
 	RoleAssignments           map[string]string     `json:"role_assignments,omitempty"` // User-specified provider per role category
 	Interaction               BuildInteractionState `json:"interaction,omitempty"`
+	ActivityTimeline          []BuildActivityEntry  `json:"activity_timeline,omitempty"`
+	SnapshotState             BuildSnapshotState    `json:"snapshot_state,omitempty"`
+	SnapshotFiles             []GeneratedFile       `json:"-"`
 	CreatedAt                 time.Time             `json:"created_at"`
 	UpdatedAt                 time.Time             `json:"updated_at"`
 	CompletedAt               *time.Time            `json:"completed_at,omitempty"`
@@ -525,6 +555,7 @@ type Checkpoint struct {
 	Description string          `json:"description"`
 	Files       []GeneratedFile `json:"files"`
 	Progress    int             `json:"progress"`
+	Restorable  bool            `json:"restorable"`
 	CreatedAt   time.Time       `json:"created_at"`
 }
 
