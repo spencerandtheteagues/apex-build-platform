@@ -2,6 +2,8 @@ package agents
 
 import (
 	"testing"
+
+	"apex-build/internal/ai"
 )
 
 // TestNonRetriableErrorMatrix exhaustively tests every provider-specific error
@@ -167,6 +169,7 @@ func TestStrategyToDecisionFullMatrix(t *testing.T) {
 		expected consensusDecision
 	}{
 		{"switch_provider", decisionSwitchProvider},
+		{"spawn_solver", decisionSpawnSolver},
 		{"fix_and_retry", decisionRetrySame},
 		{"standard_retry", decisionRetrySame},
 		{"backoff", decisionRetrySame},
@@ -239,6 +242,131 @@ func TestEndToEndErrorToDecision(t *testing.T) {
 					errMsg, strategy)
 			}
 		})
+	}
+}
+
+func TestDetermineRetryStrategyWithHistory_EscalatesRepeatedVerificationFailuresToSwitchProvider(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers: []ai.AIProvider{ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderClaude},
+		},
+	}
+
+	build := &Build{
+		ID:           "build-history-switch",
+		ProviderMode: "platform",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				FailureFingerprints: []FailureFingerprint{
+					{
+						Provider:            ai.ProviderGPT4,
+						TaskShape:           TaskShapeFrontendPatch,
+						FailureClass:        "verification_failure",
+						RepairPathChosen:    []string{"task_execution", "fix_and_retry"},
+						RepairSucceeded:     false,
+						TokenCostToRecovery: 1200,
+					},
+					{
+						Provider:            ai.ProviderGPT4,
+						TaskShape:           TaskShapeFrontendPatch,
+						FailureClass:        "verification_failure",
+						RepairPathChosen:    []string{"task_execution", "fix_and_retry"},
+						RepairSucceeded:     false,
+						TokenCostToRecovery: 1180,
+					},
+				},
+			},
+		},
+	}
+
+	agent := &Agent{Provider: ai.ProviderGPT4, Role: RoleFrontend}
+	task := &Task{
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{
+				TaskShape: TaskShapeFrontendPatch,
+			},
+		},
+	}
+
+	got := am.determineRetryStrategyWithHistory(build, agent, "verification failed: missing export", task)
+	if got != "switch_provider" {
+		t.Fatalf("determineRetryStrategyWithHistory() = %q, want switch_provider", got)
+	}
+}
+
+func TestDetermineRetryStrategyWithHistory_EscalatesRepeatedCrossProviderFailuresToSpawnSolver(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers: []ai.AIProvider{ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderClaude},
+		},
+	}
+
+	build := &Build{
+		ID:           "build-history-solver",
+		ProviderMode: "platform",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				FailureFingerprints: []FailureFingerprint{
+					{
+						Provider:            ai.ProviderGPT4,
+						TaskShape:           TaskShapeFrontendPatch,
+						FailureClass:        "verification_failure",
+						RepairPathChosen:    []string{"task_execution", "switch_provider"},
+						RepairSucceeded:     false,
+						TokenCostToRecovery: 1400,
+					},
+					{
+						Provider:            ai.ProviderGemini,
+						TaskShape:           TaskShapeFrontendPatch,
+						FailureClass:        "verification_failure",
+						RepairPathChosen:    []string{"task_execution", "switch_provider"},
+						RepairSucceeded:     false,
+						TokenCostToRecovery: 1375,
+					},
+				},
+			},
+		},
+	}
+
+	agent := &Agent{Provider: ai.ProviderGPT4, Role: RoleFrontend}
+	task := &Task{
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{
+				TaskShape: TaskShapeFrontendPatch,
+			},
+		},
+	}
+
+	got := am.determineRetryStrategyWithHistory(build, agent, "verification failed: missing export", task)
+	if got != "spawn_solver" {
+		t.Fatalf("determineRetryStrategyWithHistory() = %q, want spawn_solver", got)
+	}
+}
+
+func TestDetermineRetryStrategyWithHistory_BiasesTruncationToReduceContext(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers: []ai.AIProvider{ai.ProviderGPT4, ai.ProviderGemini},
+		},
+	}
+
+	build := &Build{
+		ID:           "build-history-truncation",
+		ProviderMode: "platform",
+	}
+
+	agent := &Agent{Provider: ai.ProviderGPT4, Role: RoleFrontend}
+	task := &Task{
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{
+				TaskShape: TaskShapeFrontendPatch,
+			},
+		},
+	}
+
+	got := am.determineRetryStrategyWithHistory(build, agent, "Likely truncated source file (abrupt EOF in component)", task)
+	if got != "reduce_context" {
+		t.Fatalf("determineRetryStrategyWithHistory() = %q, want reduce_context", got)
 	}
 }
 

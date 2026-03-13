@@ -2,6 +2,7 @@ package agents
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -364,6 +365,19 @@ type ProviderScorecard struct {
 	FailureClassRecurrence    float64       `json:"failure_class_recurrence"`
 	PromotionRate             float64       `json:"promotion_rate"`
 	HostedEligible            bool          `json:"hosted_eligible"`
+	SampleCount               int           `json:"sample_count,omitempty"`
+	SuccessCount              int           `json:"success_count,omitempty"`
+	FirstPassSampleCount      int           `json:"first_pass_sample_count,omitempty"`
+	FirstPassSuccessCount     int           `json:"first_pass_success_count,omitempty"`
+	RepairAttemptCount        int           `json:"repair_attempt_count,omitempty"`
+	RepairSuccessCount        int           `json:"repair_success_count,omitempty"`
+	TruncationEventCount      int           `json:"truncation_event_count,omitempty"`
+	FailureEventCount         int           `json:"failure_event_count,omitempty"`
+	PromotionAttemptCount     int           `json:"promotion_attempt_count,omitempty"`
+	PromotionSuccessCount     int           `json:"promotion_success_count,omitempty"`
+	TokenSampleCount          int           `json:"token_sample_count,omitempty"`
+	CostSampleCount           int           `json:"cost_sample_count,omitempty"`
+	LatencySampleCount        int           `json:"latency_sample_count,omitempty"`
 }
 
 type BuildOrchestrationState struct {
@@ -775,23 +789,48 @@ func defaultProviderScorecards(providerMode string) []ProviderScorecard {
 }
 
 func preferredProviderForTaskShape(shape TaskShape, scorecards []ProviderScorecard) ai.AIProvider {
+	ranked := rankedProvidersForTaskShape(shape, scorecards)
+	if len(ranked) == 0 {
+		return ""
+	}
+	return ranked[0]
+}
+
+func rankedProvidersForTaskShape(shape TaskShape, scorecards []ProviderScorecard) []ai.AIProvider {
 	type providerScore struct {
 		provider ai.AIProvider
 		score    float64
 	}
-	best := providerScore{}
+	ranked := make([]providerScore, 0, len(scorecards))
 	for _, scorecard := range scorecards {
 		if scorecard.TaskShape != shape {
 			continue
 		}
-		score := scorecard.CompilePassRate + scorecard.FirstPassVerificationRate + scorecard.RepairSuccessRate + scorecard.PromotionRate
-		score -= scorecard.TruncationRate + scorecard.FailureClassRecurrence
-		score -= scorecard.AverageCostPerSuccess * 0.5
-		if score > best.score || best.provider == "" {
-			best = providerScore{provider: scorecard.Provider, score: score}
-		}
+		ranked = append(ranked, providerScore{provider: scorecard.Provider, score: scoreProviderScorecard(scorecard)})
 	}
-	return best.provider
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].score == ranked[j].score {
+			return ranked[i].provider < ranked[j].provider
+		}
+		return ranked[i].score > ranked[j].score
+	})
+	out := make([]ai.AIProvider, 0, len(ranked))
+	seen := map[ai.AIProvider]bool{}
+	for _, item := range ranked {
+		if item.provider == "" || seen[item.provider] {
+			continue
+		}
+		seen[item.provider] = true
+		out = append(out, item.provider)
+	}
+	return out
+}
+
+func scoreProviderScorecard(scorecard ProviderScorecard) float64 {
+	score := scorecard.CompilePassRate + scorecard.FirstPassVerificationRate + scorecard.RepairSuccessRate + scorecard.PromotionRate
+	score -= scorecard.TruncationRate + scorecard.FailureClassRecurrence
+	score -= scorecard.AverageCostPerSuccess * 0.5
+	return score
 }
 
 func hostedProviderMode(providerMode string) bool {
@@ -1558,6 +1597,168 @@ func appendFailureFingerprint(build *Build, fingerprint FailureFingerprint) {
 	}
 }
 
+type providerTaskOutcome struct {
+	Provider             ai.AIProvider
+	TaskShape            TaskShape
+	Success              bool
+	FirstPass            bool
+	VerificationObserved bool
+	VerificationPassed   bool
+	RepairAttempted      bool
+	PromotionObserved    bool
+	PromotionSucceeded   bool
+	Truncated            bool
+	TotalTokens          int
+	Cost                 float64
+	LatencySeconds       float64
+	FailureClass         string
+}
+
+func recordProviderTaskOutcome(build *Build, outcome providerTaskOutcome) {
+	if build == nil || outcome.Provider == "" || outcome.TaskShape == "" {
+		return
+	}
+
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	state := ensureBuildOrchestrationStateLocked(build)
+	if state == nil || !state.Flags.EnableProviderScorecards {
+		return
+	}
+
+	scorecard := ensureProviderScorecardLocked(state, build.ProviderMode, outcome.Provider, outcome.TaskShape)
+	seedProviderScorecardCounts(scorecard)
+
+	scorecard.SampleCount++
+	if outcome.Success {
+		scorecard.SuccessCount++
+	}
+	if outcome.FirstPass && outcome.VerificationObserved {
+		scorecard.FirstPassSampleCount++
+		if outcome.VerificationPassed {
+			scorecard.FirstPassSuccessCount++
+		}
+	}
+	if outcome.RepairAttempted {
+		scorecard.RepairAttemptCount++
+		if outcome.Success {
+			scorecard.RepairSuccessCount++
+		}
+	}
+	if outcome.Truncated {
+		scorecard.TruncationEventCount++
+	}
+	if strings.TrimSpace(outcome.FailureClass) != "" {
+		scorecard.FailureEventCount++
+	}
+	if outcome.PromotionObserved {
+		scorecard.PromotionAttemptCount++
+		if outcome.PromotionSucceeded {
+			scorecard.PromotionSuccessCount++
+		}
+	}
+	if outcome.Success && outcome.TotalTokens > 0 {
+		scorecard.AverageAcceptedTokens = nextAveragedMetric(scorecard.AverageAcceptedTokens, scorecard.TokenSampleCount, float64(outcome.TotalTokens))
+		scorecard.TokenSampleCount++
+	}
+	if outcome.Success && outcome.Cost > 0 {
+		scorecard.AverageCostPerSuccess = nextAveragedMetric(scorecard.AverageCostPerSuccess, scorecard.CostSampleCount, outcome.Cost)
+		scorecard.CostSampleCount++
+	}
+	if outcome.Success && outcome.LatencySeconds > 0 {
+		scorecard.AverageLatencySeconds = nextAveragedMetric(scorecard.AverageLatencySeconds, scorecard.LatencySampleCount, outcome.LatencySeconds)
+		scorecard.LatencySampleCount++
+	}
+
+	scorecard.CompilePassRate = safeRatio(scorecard.SuccessCount, scorecard.SampleCount, scorecard.CompilePassRate)
+	scorecard.FirstPassVerificationRate = safeRatio(scorecard.FirstPassSuccessCount, scorecard.FirstPassSampleCount, scorecard.FirstPassVerificationRate)
+	scorecard.RepairSuccessRate = safeRatio(scorecard.RepairSuccessCount, scorecard.RepairAttemptCount, scorecard.RepairSuccessRate)
+	scorecard.TruncationRate = safeRatio(scorecard.TruncationEventCount, scorecard.SampleCount, scorecard.TruncationRate)
+	scorecard.FailureClassRecurrence = safeRatio(scorecard.FailureEventCount, scorecard.SampleCount, scorecard.FailureClassRecurrence)
+	scorecard.PromotionRate = safeRatio(scorecard.PromotionSuccessCount, scorecard.PromotionAttemptCount, scorecard.PromotionRate)
+}
+
+func ensureProviderScorecardLocked(state *BuildOrchestrationState, providerMode string, provider ai.AIProvider, shape TaskShape) *ProviderScorecard {
+	for i := range state.ProviderScorecards {
+		if state.ProviderScorecards[i].Provider == provider && state.ProviderScorecards[i].TaskShape == shape {
+			return &state.ProviderScorecards[i]
+		}
+	}
+
+	scorecard := ProviderScorecard{
+		Provider:       provider,
+		TaskShape:      shape,
+		HostedEligible: !hostedProviderMode(providerMode) || provider != ai.ProviderOllama,
+	}
+	state.ProviderScorecards = append(state.ProviderScorecards, scorecard)
+	return &state.ProviderScorecards[len(state.ProviderScorecards)-1]
+}
+
+func seedProviderScorecardCounts(scorecard *ProviderScorecard) {
+	if scorecard == nil || scorecard.SampleCount > 0 || scorecard.SuccessCount > 0 || scorecard.FirstPassSampleCount > 0 ||
+		scorecard.RepairAttemptCount > 0 || scorecard.PromotionAttemptCount > 0 || scorecard.TokenSampleCount > 0 ||
+		scorecard.CostSampleCount > 0 || scorecard.LatencySampleCount > 0 {
+		return
+	}
+
+	if scorecard.CompilePassRate <= 0 && scorecard.FirstPassVerificationRate <= 0 && scorecard.RepairSuccessRate <= 0 &&
+		scorecard.TruncationRate <= 0 && scorecard.PromotionRate <= 0 && scorecard.FailureClassRecurrence <= 0 {
+		return
+	}
+
+	scorecard.SampleCount = 12
+	scorecard.SuccessCount = weightedCount(scorecard.CompilePassRate, scorecard.SampleCount)
+	scorecard.FirstPassSampleCount = 10
+	scorecard.FirstPassSuccessCount = weightedCount(scorecard.FirstPassVerificationRate, scorecard.FirstPassSampleCount)
+	scorecard.RepairAttemptCount = 8
+	scorecard.RepairSuccessCount = weightedCount(scorecard.RepairSuccessRate, scorecard.RepairAttemptCount)
+	scorecard.TruncationEventCount = weightedCount(scorecard.TruncationRate, scorecard.SampleCount)
+	scorecard.FailureEventCount = weightedCount(scorecard.FailureClassRecurrence, scorecard.SampleCount)
+	scorecard.PromotionAttemptCount = 10
+	scorecard.PromotionSuccessCount = weightedCount(scorecard.PromotionRate, scorecard.PromotionAttemptCount)
+	if scorecard.AverageAcceptedTokens > 0 {
+		scorecard.TokenSampleCount = 6
+	}
+	if scorecard.AverageCostPerSuccess > 0 {
+		scorecard.CostSampleCount = 6
+	}
+	if scorecard.AverageLatencySeconds > 0 {
+		scorecard.LatencySampleCount = 6
+	}
+}
+
+func weightedCount(rate float64, total int) int {
+	if total <= 0 || rate <= 0 {
+		return 0
+	}
+	if rate >= 1 {
+		return total
+	}
+	count := int(math.Round(rate * float64(total)))
+	if count < 0 {
+		return 0
+	}
+	if count > total {
+		return total
+	}
+	return count
+}
+
+func nextAveragedMetric(current float64, sampleCount int, sample float64) float64 {
+	if sampleCount <= 0 {
+		return sample
+	}
+	return ((current * float64(sampleCount)) + sample) / float64(sampleCount+1)
+}
+
+func safeRatio(successes int, total int, fallback float64) float64 {
+	if total <= 0 {
+		return fallback
+	}
+	return float64(successes) / float64(total)
+}
+
 func buildPatchBundleFromFileDiff(buildID string, justification string, before, after []GeneratedFile) *PatchBundle {
 	beforeByPath := generatedFileMap(before)
 	afterByPath := generatedFileMap(after)
@@ -1874,6 +2075,12 @@ func normalizeFailureClass(message string) string {
 	switch {
 	case strings.Contains(lower, "contract"):
 		return "contract_violation"
+	case strings.Contains(lower, "coordination"):
+		return "coordination_violation"
+	case strings.Contains(lower, "verification"):
+		return "verification_failure"
+	case strings.Contains(lower, "truncat") || strings.Contains(lower, "unterminated code block") || strings.Contains(lower, "abrupt eof"):
+		return "truncation"
 	case strings.Contains(lower, "validation"):
 		return "final_validation_failure"
 	case strings.Contains(lower, "timeout"):

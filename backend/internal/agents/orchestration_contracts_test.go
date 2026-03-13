@@ -152,6 +152,67 @@ func TestGetAvailableProvidersWithGracePeriodForBuildFiltersOllamaForPlatform(t 
 	}
 }
 
+func TestRecordProviderTaskOutcomeUpdatesLiveScorecard(t *testing.T) {
+	build := &Build{
+		ID:           "build-scorecard-1",
+		ProviderMode: "platform",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags:              defaultBuildOrchestrationFlags(),
+				ProviderScorecards: defaultProviderScorecards("platform"),
+			},
+		},
+	}
+
+	recordProviderTaskOutcome(build, providerTaskOutcome{
+		Provider:             ai.ProviderGPT4,
+		TaskShape:            TaskShapeFrontendPatch,
+		Success:              true,
+		FirstPass:            true,
+		VerificationObserved: true,
+		VerificationPassed:   true,
+		PromotionObserved:    true,
+		PromotionSucceeded:   true,
+		Truncated:            true,
+		TotalTokens:          9000,
+		Cost:                 0.18,
+		LatencySeconds:       9.5,
+	})
+
+	state := build.SnapshotState.Orchestration
+	if state == nil {
+		t.Fatal("expected orchestration state")
+	}
+	var scorecard *ProviderScorecard
+	for i := range state.ProviderScorecards {
+		if state.ProviderScorecards[i].Provider == ai.ProviderGPT4 && state.ProviderScorecards[i].TaskShape == TaskShapeFrontendPatch {
+			scorecard = &state.ProviderScorecards[i]
+			break
+		}
+	}
+	if scorecard == nil {
+		t.Fatal("expected updated GPT4 frontend patch scorecard")
+	}
+	if scorecard.SampleCount == 0 || scorecard.SuccessCount == 0 {
+		t.Fatalf("expected live scorecard counts, got %+v", scorecard)
+	}
+	if scorecard.FirstPassSampleCount == 0 || scorecard.FirstPassSuccessCount == 0 {
+		t.Fatalf("expected first-pass verification counts, got %+v", scorecard)
+	}
+	if scorecard.TruncationEventCount == 0 || scorecard.TruncationRate <= 0 {
+		t.Fatalf("expected truncation tracking, got %+v", scorecard)
+	}
+	if scorecard.TokenSampleCount == 0 || scorecard.AverageAcceptedTokens <= 7600 {
+		t.Fatalf("expected accepted token average to move from prior, got %+v", scorecard)
+	}
+	if scorecard.CostSampleCount == 0 || scorecard.AverageCostPerSuccess <= 0.12 {
+		t.Fatalf("expected cost average to move from prior, got %+v", scorecard)
+	}
+	if scorecard.LatencySampleCount == 0 || scorecard.AverageLatencySeconds <= 7.2 {
+		t.Fatalf("expected latency average to move from prior, got %+v", scorecard)
+	}
+}
+
 func containsTruthTag(tags []TruthTag, want TruthTag) bool {
 	for _, tag := range tags {
 		if tag == want {

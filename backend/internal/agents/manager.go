@@ -1048,7 +1048,7 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 	}
 
 	// Determine provider assignments — respects user overrides if provided
-	providerAssignments := am.assignProvidersToRolesWithOverrides(availableProviders, roles, build.RoleAssignments)
+	providerAssignments := am.assignProvidersToRolesWithOverrides(build, availableProviders, roles, build.RoleAssignments)
 
 	// Broadcast provider availability status
 	providerNames := make([]string, len(availableProviders))
@@ -1117,8 +1117,47 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 
 // assignProvidersToRoles distributes providers to agent roles based on availability
 func (am *AgentManager) assignProvidersToRoles(providers []ai.AIProvider, roles []AgentRole) map[AgentRole]ai.AIProvider {
-	assignments := make(map[AgentRole]ai.AIProvider)
+	return am.assignProvidersToRolesForBuild(nil, providers, roles)
+}
+
+func (am *AgentManager) providerScorecardsForBuild(build *Build, providers []ai.AIProvider) []ProviderScorecard {
 	scorecards := defaultProviderScorecards(providerModeHintForProviders(providers))
+	if build == nil {
+		return scorecards
+	}
+	build.mu.RLock()
+	if orchestration := cloneBuildOrchestrationState(build.SnapshotState.Orchestration); orchestration != nil && len(orchestration.ProviderScorecards) > 0 {
+		scorecards = orchestration.ProviderScorecards
+	}
+	build.mu.RUnlock()
+	if len(providers) == 0 {
+		return scorecards
+	}
+	available := make(map[ai.AIProvider]bool, len(providers))
+	for _, provider := range providers {
+		available[provider] = true
+	}
+	filtered := make([]ProviderScorecard, 0, len(scorecards))
+	for _, scorecard := range scorecards {
+		if available[scorecard.Provider] {
+			filtered = append(filtered, scorecard)
+		}
+	}
+	if len(filtered) > 0 {
+		return filtered
+	}
+	return scorecards
+}
+
+func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers []ai.AIProvider, roles []AgentRole) map[AgentRole]ai.AIProvider {
+	assignments := make(map[AgentRole]ai.AIProvider)
+	scorecards := am.providerScorecardsForBuild(build, providers)
+	hasLiveScorecards := false
+	if build != nil {
+		build.mu.RLock()
+		hasLiveScorecards = build.SnapshotState.Orchestration != nil && len(build.SnapshotState.Orchestration.ProviderScorecards) > 0
+		build.mu.RUnlock()
+	}
 
 	// Build a quick lookup for availability
 	available := make(map[ai.AIProvider]bool)
@@ -1163,19 +1202,21 @@ func (am *AgentManager) assignProvidersToRoles(providers []ai.AIProvider, roles 
 	// - GPT owns coding/build roles
 	// - Gemini owns testing
 	// This only applies when each preferred provider is actually available.
-	for _, role := range roles {
-		switch role {
-		case RolePlanner, RoleArchitect, RoleReviewer:
-			if available[ai.ProviderClaude] {
-				assignments[role] = ai.ProviderClaude
-			}
-		case RoleFrontend, RoleBackend, RoleDatabase, RoleSolver:
-			if available[ai.ProviderGPT4] {
-				assignments[role] = ai.ProviderGPT4
-			}
-		case RoleTesting:
-			if available[ai.ProviderGemini] {
-				assignments[role] = ai.ProviderGemini
+	if !hasLiveScorecards {
+		for _, role := range roles {
+			switch role {
+			case RolePlanner, RoleArchitect, RoleReviewer:
+				if available[ai.ProviderClaude] {
+					assignments[role] = ai.ProviderClaude
+				}
+			case RoleFrontend, RoleBackend, RoleDatabase, RoleSolver:
+				if available[ai.ProviderGPT4] {
+					assignments[role] = ai.ProviderGPT4
+				}
+			case RoleTesting:
+				if available[ai.ProviderGemini] {
+					assignments[role] = ai.ProviderGemini
+				}
 			}
 		}
 	}
@@ -1202,12 +1243,13 @@ func (am *AgentManager) assignProvidersToRoles(providers []ai.AIProvider, roles 
 // on top of the default auto-assignment policy. If userAssignments is nil/empty,
 // this falls through to the standard assignProvidersToRoles.
 func (am *AgentManager) assignProvidersToRolesWithOverrides(
+	build *Build,
 	providers []ai.AIProvider,
 	roles []AgentRole,
 	userAssignments map[string]string,
 ) map[AgentRole]ai.AIProvider {
 	if len(userAssignments) == 0 {
-		return am.assignProvidersToRoles(providers, roles)
+		return am.assignProvidersToRolesForBuild(build, providers, roles)
 	}
 
 	// Build availability lookup
@@ -1217,7 +1259,7 @@ func (am *AgentManager) assignProvidersToRolesWithOverrides(
 	}
 
 	// Start with auto-assignments as baseline
-	assignments := am.assignProvidersToRoles(providers, roles)
+	assignments := am.assignProvidersToRolesForBuild(build, providers, roles)
 
 	// Override with user preferences where the provider is actually available
 	for catStr, provStr := range userAssignments {
@@ -1502,6 +1544,657 @@ func (am *AgentManager) hydrateTaskContractInputs(build *Build, agent *Agent, ta
 			task.Input["required_outputs"] = append([]string(nil), legacy.RequiredOutputs...)
 		}
 	}
+
+	if am.isCodeGenerationTask(task.Type) {
+		task.Input["patch_baseline_files"] = am.captureTaskPatchBaseline(build, task)
+	}
+}
+
+func taskPatchBaselineFromInput(task *Task) []GeneratedFile {
+	if task == nil || task.Input == nil {
+		return nil
+	}
+	raw, exists := task.Input["patch_baseline_files"]
+	if !exists || raw == nil {
+		return nil
+	}
+	switch typed := raw.(type) {
+	case []GeneratedFile:
+		return cloneGeneratedFiles(typed)
+	case []*GeneratedFile:
+		files := make([]GeneratedFile, 0, len(typed))
+		for _, file := range typed {
+			if file == nil {
+				continue
+			}
+			files = append(files, *file)
+		}
+		return cloneGeneratedFiles(files)
+	default:
+		payload, err := json.Marshal(raw)
+		if err != nil {
+			return nil
+		}
+		var files []GeneratedFile
+		if err := json.Unmarshal(payload, &files); err != nil {
+			return nil
+		}
+		return cloneGeneratedFiles(files)
+	}
+}
+
+func cloneGeneratedFiles(files []GeneratedFile) []GeneratedFile {
+	if len(files) == 0 {
+		return nil
+	}
+	cloned := make([]GeneratedFile, 0, len(files))
+	for _, file := range files {
+		path := sanitizeFilePath(file.Path)
+		if path == "" {
+			continue
+		}
+		file.Path = path
+		file.Content = normalizeGeneratedFileContent(path, file.Content)
+		file.Size = int64(len(file.Content))
+		cloned = append(cloned, file)
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	sort.SliceStable(cloned, func(i, j int) bool {
+		return cloned[i].Path < cloned[j].Path
+	})
+	return cloned
+}
+
+func taskInputStringList(raw any) []string {
+	switch typed := raw.(type) {
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if value := strings.TrimSpace(item); value != "" {
+				out = append(out, value)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if value := strings.TrimSpace(fmt.Sprintf("%v", item)); value != "" {
+				out = append(out, value)
+			}
+		}
+		return out
+	default:
+		if typed == nil {
+			return nil
+		}
+		value := strings.TrimSpace(fmt.Sprintf("%v", typed))
+		if value == "" || value == "<nil>" {
+			return nil
+		}
+		return []string{value}
+	}
+}
+
+func taskPatchBaselinePatterns(task *Task) []string {
+	if task == nil || task.Input == nil {
+		return nil
+	}
+	patterns := make([]string, 0, 8)
+	patterns = append(patterns, taskInputStringList(task.Input["owned_files"])...)
+	patterns = append(patterns, taskInputStringList(task.Input["required_files"])...)
+	for _, key := range []string{"file_path", "target_file", "path"} {
+		patterns = append(patterns, taskInputStringList(task.Input[key])...)
+	}
+	if len(patterns) == 0 {
+		if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil {
+			patterns = append(patterns, artifact.OwnedFiles...)
+			patterns = append(patterns, artifact.RequiredFiles...)
+		}
+		if legacy := taskWorkOrderFromInput(task); legacy != nil {
+			patterns = append(patterns, legacy.OwnedFiles...)
+			patterns = append(patterns, legacy.RequiredFiles...)
+		}
+	}
+	if len(patterns) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(patterns))
+	for _, pattern := range patterns {
+		normalized := normalizeOwnedPath(pattern)
+		if normalized == "" || seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		out = append(out, normalized)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func taskPathMatchesPatchBaseline(path string, patterns []string) bool {
+	if len(patterns) == 0 {
+		return false
+	}
+	cleanPath := normalizeOwnedPath(path)
+	if cleanPath == "" {
+		return false
+	}
+	for _, pattern := range patterns {
+		if pathMatchesOwnedPattern(cleanPath, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func (am *AgentManager) captureTaskPatchBaseline(build *Build, task *Task) []GeneratedFile {
+	if build == nil || task == nil {
+		return nil
+	}
+	patterns := taskPatchBaselinePatterns(task)
+	if len(patterns) == 0 {
+		return nil
+	}
+	allFiles := am.collectGeneratedFiles(build)
+	baseline := make([]GeneratedFile, 0, len(allFiles))
+	for _, file := range allFiles {
+		if !taskPathMatchesPatchBaseline(file.Path, patterns) {
+			continue
+		}
+		baseline = append(baseline, file)
+	}
+	return cloneGeneratedFiles(baseline)
+}
+
+func mergeGeneratedFiles(base []GeneratedFile, overlay []GeneratedFile) []GeneratedFile {
+	merged := generatedFileMap(base)
+	for _, file := range overlay {
+		path := sanitizeFilePath(file.Path)
+		if path == "" {
+			continue
+		}
+		file.Path = path
+		file.Content = normalizeGeneratedFileContent(path, file.Content)
+		file.Size = int64(len(file.Content))
+		merged[path] = file
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(merged))
+	for path := range merged {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	files := make([]GeneratedFile, 0, len(paths))
+	for _, path := range paths {
+		files = append(files, merged[path])
+	}
+	return files
+}
+
+func (am *AgentManager) buildTaskPatchBundle(build *Build, agent *Agent, task *Task, output *TaskOutput) *PatchBundle {
+	if build == nil || task == nil || output == nil || !am.isCodeGenerationTask(task.Type) {
+		return nil
+	}
+	before := taskPatchBaselineFromInput(task)
+	if before == nil {
+		before = am.captureTaskPatchBaseline(build, task)
+	}
+	after := mergeGeneratedFiles(before, output.Files)
+	bundle := buildPatchBundleFromFileDiff(build.ID, fmt.Sprintf("Task %s (%s): %s", task.ID, task.Type, strings.TrimSpace(task.Description)), before, after)
+	if bundle == nil {
+		return nil
+	}
+	if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil {
+		bundle.WorkOrderID = artifact.ID
+	}
+	if agent != nil {
+		bundle.Provider = agent.Provider
+	}
+	return bundle
+}
+
+func (am *AgentManager) buildTaskVerificationReport(build *Build, agent *Agent, task *Task, output *TaskOutput, passed bool, verifyErrors []string) *VerificationReport {
+	if build == nil || task == nil || !am.isCodeGenerationTask(task.Type) {
+		return nil
+	}
+	surface := SurfaceGlobal
+	workOrderID := ""
+	truthTags := []TruthTag{}
+	if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil {
+		workOrderID = artifact.ID
+		if artifact.ContractSlice.Surface != "" {
+			surface = artifact.ContractSlice.Surface
+		}
+		truthTags = append(truthTags, artifact.ContractSlice.TruthTags...)
+	} else if agent != nil {
+		surface = contractSurfaceForRole(agent.Role)
+	}
+	checksRun := []string{"quick_syntax_check", "placeholder_scan", "empty_function_scan"}
+	if output != nil && len(output.Messages) > 0 {
+		checksRun = append(checksRun, "parser_warning_scan")
+	}
+	if output != nil && len(output.TruncatedFiles) > 0 {
+		checksRun = append(checksRun, "truncation_scan")
+	}
+	status := VerificationPassed
+	confidence := 0.85
+	if passed {
+		truthTags = append(truthTags, TruthVerified)
+	} else {
+		status = VerificationFailed
+		confidence = 0.3
+		truthTags = append(truthTags, TruthBlocked)
+	}
+	report := &VerificationReport{
+		ID:              uuid.New().String(),
+		BuildID:         build.ID,
+		WorkOrderID:     workOrderID,
+		Phase:           "task_local_verification",
+		Surface:         surface,
+		Status:          status,
+		Deterministic:   true,
+		ChecksRun:       checksRun,
+		Errors:          append([]string(nil), verifyErrors...),
+		ConfidenceScore: confidence,
+		TruthTags:       normalizeTruthTags(truthTags),
+		GeneratedAt:     time.Now().UTC(),
+	}
+	if !passed {
+		report.Blockers = append([]string(nil), verifyErrors...)
+	}
+	if agent != nil {
+		report.Provider = agent.Provider
+	}
+	return report
+}
+
+func attachAIResponseMetrics(output *TaskOutput, provider ai.AIProvider, model string, response *ai.AIResponse) {
+	if output == nil {
+		return
+	}
+	if output.Metrics == nil {
+		output.Metrics = map[string]any{}
+	}
+	if provider != "" {
+		output.Metrics["provider"] = string(provider)
+	}
+	if model = strings.TrimSpace(model); model != "" {
+		output.Metrics["model"] = model
+	}
+	output.Metrics["truncated_file_count"] = len(output.TruncatedFiles)
+	if response == nil {
+		return
+	}
+	if response.Usage != nil {
+		output.Metrics["prompt_tokens"] = response.Usage.PromptTokens
+		output.Metrics["completion_tokens"] = response.Usage.CompletionTokens
+		output.Metrics["total_tokens"] = response.Usage.TotalTokens
+		output.Metrics["billed_cost"] = response.Usage.Cost
+	}
+	duration := response.GenerationTime
+	if duration <= 0 {
+		duration = response.Duration
+	}
+	if duration > 0 {
+		output.Metrics["latency_seconds"] = duration.Seconds()
+	}
+}
+
+func taskOutputMetricInt(output *TaskOutput, key string) int {
+	if output == nil || output.Metrics == nil {
+		return 0
+	}
+	value, exists := output.Metrics[key]
+	if !exists || value == nil {
+		return 0
+	}
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int32:
+		return int(typed)
+	case int64:
+		return int(typed)
+	case float32:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		if n, err := typed.Int64(); err == nil {
+			return int(n)
+		}
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(typed)); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+func taskOutputMetricFloat(output *TaskOutput, key string) float64 {
+	if output == nil || output.Metrics == nil {
+		return 0
+	}
+	value, exists := output.Metrics[key]
+	if !exists || value == nil {
+		return 0
+	}
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int32:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case json.Number:
+		if n, err := typed.Float64(); err == nil {
+			return n
+		}
+	case string:
+		if n, err := strconv.ParseFloat(strings.TrimSpace(typed), 64); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+func taskOutputMetricString(output *TaskOutput, key string) string {
+	if output == nil || output.Metrics == nil {
+		return ""
+	}
+	value, exists := output.Metrics[key]
+	if !exists || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", value))
+}
+
+func taskExecutionShape(task *Task, agent *Agent) TaskShape {
+	if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil && artifact.TaskShape != "" {
+		return artifact.TaskShape
+	}
+	if agent != nil {
+		return taskShapeForRole(agent.Role)
+	}
+	return ""
+}
+
+func taskFingerprintFiles(task *Task, output *TaskOutput) []string {
+	if output != nil && len(output.Files) > 0 {
+		return fingerprintFiles(output.Files)
+	}
+	if baseline := taskPatchBaselineFromInput(task); len(baseline) > 0 {
+		return fingerprintFiles(baseline)
+	}
+	patterns := taskPatchBaselinePatterns(task)
+	if len(patterns) > 8 {
+		patterns = patterns[:8]
+	}
+	return patterns
+}
+
+func taskRepairPath(task *Task, verificationObserved bool) []string {
+	if task == nil {
+		return nil
+	}
+	path := []string{"task_execution"}
+	if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil {
+		if artifact.Category == WorkOrderRepair {
+			path = append(path, "repair_work_order")
+		}
+		if artifact.RoutingMode != "" {
+			path = append(path, string(artifact.RoutingMode))
+		}
+	}
+	if action, _ := task.Input["action"].(string); strings.TrimSpace(action) != "" {
+		path = append(path, strings.TrimSpace(action))
+	}
+	if strategy := strings.TrimSpace(string(task.RetryStrategy)); strategy != "" {
+		path = append(path, strategy)
+	} else if task.RetryCount > 0 {
+		path = append(path, "retry")
+	}
+	if verificationObserved {
+		path = append(path, "task_local_verification")
+	}
+	return dedupeStrings(path)
+}
+
+type failureFingerprintInsight struct {
+	TaskShape             TaskShape
+	FailureClass          string
+	SameFailureCount      int
+	SameProviderFailures  int
+	CrossProviderFailures int
+	SuccessfulRecoveries  int
+	SwitchPathFailures    int
+	FixPathFailures       int
+	SolverPathAttempts    int
+	ReduceContextFailures int
+}
+
+func (am *AgentManager) recentFailureFingerprintInsight(build *Build, agent *Agent, task *Task, failureClass string) failureFingerprintInsight {
+	insight := failureFingerprintInsight{
+		TaskShape:    taskExecutionShape(task, agent),
+		FailureClass: strings.TrimSpace(failureClass),
+	}
+	if build == nil || insight.TaskShape == "" || insight.FailureClass == "" {
+		return insight
+	}
+
+	build.mu.RLock()
+	orchestration := cloneBuildOrchestrationState(build.SnapshotState.Orchestration)
+	build.mu.RUnlock()
+	if orchestration == nil || len(orchestration.FailureFingerprints) == 0 {
+		return insight
+	}
+
+	seenProviders := map[ai.AIProvider]bool{}
+	for i := len(orchestration.FailureFingerprints) - 1; i >= 0; i-- {
+		fp := orchestration.FailureFingerprints[i]
+		if fp.TaskShape != insight.TaskShape || strings.TrimSpace(fp.FailureClass) != insight.FailureClass {
+			continue
+		}
+		insight.SameFailureCount++
+		if !fp.RepairSucceeded {
+			if fp.Provider == agent.Provider {
+				insight.SameProviderFailures++
+			}
+			if fp.Provider != "" {
+				seenProviders[fp.Provider] = true
+			}
+			if containsString(fp.RepairPathChosen, "switch_provider") {
+				insight.SwitchPathFailures++
+			}
+			if containsString(fp.RepairPathChosen, "fix_and_retry") || containsString(fp.RepairPathChosen, "retry") {
+				insight.FixPathFailures++
+			}
+			if containsString(fp.RepairPathChosen, "reduce_context") {
+				insight.ReduceContextFailures++
+			}
+		} else {
+			insight.SuccessfulRecoveries++
+		}
+		if containsString(fp.RepairPathChosen, "repair_work_order") || containsString(fp.RepairPathChosen, string(RoutingModeDiagnosisRepair)) {
+			insight.SolverPathAttempts++
+		}
+	}
+	insight.CrossProviderFailures = len(seenProviders)
+	return insight
+}
+
+func containsString(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (am *AgentManager) determineRetryStrategyWithHistory(build *Build, agent *Agent, errorMsg string, task *Task) string {
+	base := am.determineRetryStrategy(errorMsg, task)
+	if build == nil || task == nil || agent == nil {
+		return base
+	}
+
+	failureClass := normalizeFailureClass(errorMsg)
+	insight := am.recentFailureFingerprintInsight(build, agent, task, failureClass)
+	if insight.TaskShape == "" || insight.FailureClass == "" {
+		return base
+	}
+
+	hasAltProvider := false
+	for _, provider := range am.getCurrentlyAvailableProvidersForBuild(build) {
+		if provider != agent.Provider {
+			hasAltProvider = true
+			break
+		}
+	}
+
+	switch failureClass {
+	case "truncation":
+		if insight.ReduceContextFailures >= 1 && insight.SameProviderFailures >= 2 && hasAltProvider {
+			return "switch_provider"
+		}
+		if base == "standard_retry" || base == "fix_and_retry" {
+			return "reduce_context"
+		}
+	case "verification_failure", "coordination_violation":
+		if insight.SwitchPathFailures >= 1 && insight.CrossProviderFailures >= 2 {
+			return "spawn_solver"
+		}
+		if insight.FixPathFailures >= 2 && insight.SameFailureCount >= 3 {
+			return "spawn_solver"
+		}
+		if base == "fix_and_retry" && insight.SameProviderFailures >= 2 && hasAltProvider {
+			return "switch_provider"
+		}
+		if base == "standard_retry" {
+			return "fix_and_retry"
+		}
+	case "build_failure":
+		if insight.SameProviderFailures >= 2 && hasAltProvider {
+			return "switch_provider"
+		}
+	}
+
+	if base == "standard_retry" && insight.SameProviderFailures >= 2 && hasAltProvider {
+		return "switch_provider"
+	}
+
+	return base
+}
+
+func summarizeFailureFingerprintInsight(insight failureFingerprintInsight) string {
+	parts := []string{}
+	if insight.FailureClass != "" {
+		parts = append(parts, "failure_class="+insight.FailureClass)
+	}
+	if insight.SameFailureCount > 0 {
+		parts = append(parts, fmt.Sprintf("same_failures=%d", insight.SameFailureCount))
+	}
+	if insight.SameProviderFailures > 0 {
+		parts = append(parts, fmt.Sprintf("same_provider_failures=%d", insight.SameProviderFailures))
+	}
+	if insight.CrossProviderFailures > 0 {
+		parts = append(parts, fmt.Sprintf("cross_provider_failures=%d", insight.CrossProviderFailures))
+	}
+	if insight.SwitchPathFailures > 0 {
+		parts = append(parts, fmt.Sprintf("switch_failures=%d", insight.SwitchPathFailures))
+	}
+	if insight.FixPathFailures > 0 {
+		parts = append(parts, fmt.Sprintf("fix_failures=%d", insight.FixPathFailures))
+	}
+	if insight.ReduceContextFailures > 0 {
+		parts = append(parts, fmt.Sprintf("reduce_context_failures=%d", insight.ReduceContextFailures))
+	}
+	if insight.SuccessfulRecoveries > 0 {
+		parts = append(parts, fmt.Sprintf("recoveries=%d", insight.SuccessfulRecoveries))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func (am *AgentManager) recordTaskExecutionOutcome(build *Build, agent *Agent, task *Task, output *TaskOutput, success bool, verificationObserved bool, verificationPassed bool, failureClass string) {
+	if build == nil || agent == nil || task == nil {
+		return
+	}
+	shape := taskExecutionShape(task, agent)
+	if shape == "" {
+		return
+	}
+
+	totalTokens := taskOutputMetricInt(output, "total_tokens")
+	cost := taskOutputMetricFloat(output, "billed_cost")
+	latency := taskOutputMetricFloat(output, "latency_seconds")
+	recordProviderTaskOutcome(build, providerTaskOutcome{
+		Provider:             agent.Provider,
+		TaskShape:            shape,
+		Success:              success,
+		FirstPass:            task.RetryCount == 0,
+		VerificationObserved: verificationObserved,
+		VerificationPassed:   verificationPassed,
+		RepairAttempted:      shape == TaskShapeRepair || task.Type == TaskFix,
+		PromotionObserved:    am.isCodeGenerationTask(task.Type),
+		PromotionSucceeded:   success && am.isCodeGenerationTask(task.Type),
+		Truncated:            output != nil && len(output.TruncatedFiles) > 0,
+		TotalTokens:          totalTokens,
+		Cost:                 cost,
+		LatencySeconds:       latency,
+		FailureClass:         strings.TrimSpace(failureClass),
+	})
+
+	normalizedFailure := strings.TrimSpace(failureClass)
+	if normalizedFailure == "" && !success && task.Error != "" {
+		normalizedFailure = normalizeFailureClass(task.Error)
+	}
+	if normalizedFailure == "" && task.RetryCount > 0 && len(task.ErrorHistory) > 0 {
+		normalizedFailure = normalizeFailureClass(task.ErrorHistory[len(task.ErrorHistory)-1].Error)
+	}
+	if normalizedFailure == "" && !success {
+		normalizedFailure = "build_failure"
+	}
+
+	// Store fingerprints for actual failures and successful recoveries only.
+	if normalizedFailure == "" && (task.RetryCount == 0 || !success) {
+		return
+	}
+	appendFailureFingerprint(build, FailureFingerprint{
+		ID:                  uuid.New().String(),
+		BuildID:             build.ID,
+		StackCombination:    stackCombinationFromBuild(build),
+		TaskShape:           shape,
+		Provider:            agent.Provider,
+		Model:               firstNonEmptyString(taskOutputMetricString(output, "model"), agent.Model),
+		FailureClass:        normalizedFailure,
+		FilesInvolved:       taskFingerprintFiles(task, output),
+		RepairPathChosen:    taskRepairPath(task, verificationObserved),
+		RepairSucceeded:     success,
+		TokenCostToRecovery: totalTokens,
+		CreatedAt:           time.Now().UTC(),
+	})
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // taskDispatcher processes tasks from the queue
@@ -1577,7 +2270,7 @@ func (am *AgentManager) executeTask(task *Task) {
 			log.Printf("Backoff strategy: waiting %v before retry (attempt %d)", delay, task.RetryCount)
 			time.Sleep(delay)
 		case "switch_provider":
-			newProvider := am.getNextFallbackProvider(agent.Provider)
+			newProvider := am.getNextFallbackProviderForTask(build, task, agent.Role, agent.Provider)
 			if newProvider != agent.Provider {
 				oldProvider := agent.Provider
 				agent.mu.Lock()
@@ -1896,6 +2589,7 @@ func (am *AgentManager) executeTask(task *Task) {
 
 	// Parse the response into task output
 	output := am.parseTaskOutput(task.Type, response.Content)
+	attachAIResponseMetrics(output, agent.Provider, modelUsed, response)
 
 	// ── Chunked-edit pass 1: continuation for truncated files ──────────────
 	// When the AI hits its output-token limit mid-file, request the remainder
@@ -2062,6 +2756,7 @@ func (am *AgentManager) processResult(result *TaskResult) {
 			return
 		}
 
+		var taskVerificationReport *VerificationReport
 		if task != nil {
 			coordinationErrors := am.validateTaskCoordinationOutput(task, result.Output)
 			if len(coordinationErrors) > 0 {
@@ -2075,6 +2770,9 @@ func (am *AgentManager) processResult(result *TaskResult) {
 				})
 
 				if task.RetryCount < task.MaxRetries {
+					if buildErr == nil {
+						am.recordTaskExecutionOutcome(build, agent, task, result.Output, false, false, false, normalizeFailureClass("coordination contract failed"))
+					}
 					task.RetryCount++
 					task.Status = TaskPending
 					task.Input["coordination_errors"] = coordinationErrors
@@ -2114,6 +2812,12 @@ func (am *AgentManager) processResult(result *TaskResult) {
 			verificationPassed, verifyErrors := am.verifyGeneratedCode(agent.BuildID, result.Output)
 
 			agent.mu.Lock()
+			if buildErr == nil {
+				taskVerificationReport = am.buildTaskVerificationReport(build, agent, task, result.Output, verificationPassed, verifyErrors)
+				if taskVerificationReport != nil {
+					appendVerificationReport(build, *taskVerificationReport)
+				}
+			}
 			if !verificationPassed {
 				log.Printf("Build verification failed for task %s: %v", task.ID, verifyErrors)
 
@@ -2127,6 +2831,9 @@ func (am *AgentManager) processResult(result *TaskResult) {
 
 				// If we can retry, add verification errors to context and retry
 				if task.RetryCount < task.MaxRetries {
+					if buildErr == nil {
+						am.recordTaskExecutionOutcome(build, agent, task, result.Output, false, true, false, normalizeFailureClass("verification failed: "+strings.Join(verifyErrors, "; ")))
+					}
 					task.RetryCount++
 					task.Status = TaskPending
 					task.Input["verification_errors"] = verifyErrors
@@ -2162,6 +2869,17 @@ func (am *AgentManager) processResult(result *TaskResult) {
 
 		// If still successful after verification
 		if result.Success {
+			var taskPatchBundle *PatchBundle
+			if buildErr == nil && task != nil && am.isCodeGenerationTask(task.Type) {
+				taskPatchBundle = am.buildTaskPatchBundle(build, agent, task, result.Output)
+				if taskPatchBundle != nil {
+					appendPatchBundle(build, *taskPatchBundle)
+				}
+			}
+			if buildErr == nil && task != nil {
+				am.recordTaskExecutionOutcome(build, agent, task, result.Output, true, am.isCodeGenerationTask(task.Type), true, "")
+			}
+
 			agent.Status = StatusCompleted
 			if task != nil {
 				task.Status = TaskCompleted
@@ -2216,6 +2934,9 @@ func (am *AgentManager) processResult(result *TaskResult) {
 
 		// Track the error for learning
 		errorMsg := result.Error.Error()
+		if buildErr == nil {
+			am.recordTaskExecutionOutcome(build, agent, task, result.Output, false, false, false, normalizeFailureClass(errorMsg))
+		}
 		errorAttempt := ErrorAttempt{
 			AttemptNumber: task.RetryCount + 1,
 			Error:         errorMsg,
@@ -2226,7 +2947,7 @@ func (am *AgentManager) processResult(result *TaskResult) {
 		task.RetryCount++
 		insufficientCredits := isInsufficientCreditsErrorMessage(errorMsg)
 		nonRetriable := am.isNonRetriableAIError(result.Error)
-		retryStrategy := am.determineRetryStrategy(errorMsg, task)
+		retryStrategy := am.determineRetryStrategyWithHistory(build, agent, errorMsg, task)
 		if nonRetriable {
 			retryStrategy = "non_retriable"
 		}
@@ -2660,7 +3381,7 @@ func (am *AgentManager) ensureProblemSolverAgent(buildID string) *Agent {
 		return nil
 	}
 
-	provider := am.assignProvidersToRoles(availableProviders, []AgentRole{RoleSolver})[RoleSolver]
+	provider := am.assignProvidersToRolesForBuild(build, availableProviders, []AgentRole{RoleSolver})[RoleSolver]
 	solver, err := am.spawnAgent(buildID, RoleSolver, provider)
 	if err != nil {
 		log.Printf("Build %s: failed to spawn solver agent: %v", buildID, err)
@@ -4766,6 +5487,7 @@ func (am *AgentManager) updateBuildProgress(build *Build) {
 		qualityStage = "review"
 		qualityActive = true
 	}
+	build.mu.Unlock()
 
 	am.broadcast(build.ID, &WSMessage{
 		Type:      WSBuildProgress,
@@ -4781,7 +5503,6 @@ func (am *AgentManager) updateBuildProgress(build *Build) {
 			"quality_gate_stage":    qualityStage,
 		},
 	})
-	build.mu.Unlock()
 
 	// Persist rolling progress so recent builds can be resumed after restart/login.
 	am.persistBuildSnapshot(build, nil)
@@ -12252,7 +12973,8 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 
 	// Analyze error for smart retry strategy
 	errorMsg := result.Error.Error()
-	retryStrategy := am.determineRetryStrategy(errorMsg, task)
+	build, _ := am.GetBuild(agent.BuildID)
+	retryStrategy := am.determineRetryStrategyWithHistory(build, agent, errorMsg, task)
 	insufficientCredits := isInsufficientCreditsErrorMessage(errorMsg)
 	nonRetriable := am.isNonRetriableAIError(result.Error)
 	if nonRetriable {
@@ -12267,6 +12989,9 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 		Context:       retryStrategy,
 	})
 	task.RetryCount++
+	if retryStrategy == "spawn_solver" {
+		task.MaxRetries = task.RetryCount
+	}
 
 	// Check if we should retry
 	if task.RetryCount < task.MaxRetries && !nonRetriable {
@@ -12495,36 +13220,43 @@ func (am *AgentManager) runFailureConsensus(
 	build.mu.RLock()
 	description := build.Description
 	build.mu.RUnlock()
+	historySummary := ""
+	if agent != nil {
+		historySummary = summarizeFailureFingerprintInsight(
+			am.recentFailureFingerprintInsight(build, agent, task, normalizeFailureClass(taskErr.Error())),
+		)
+	}
 
 	votes := make([]providerVote, 0, len(selected))
 	for _, provider := range selected {
 		ctx, cancel := context.WithTimeout(am.ctx, 45*time.Second)
-		prompt := fmt.Sprintf(`You are participating in a build recovery incident vote.
-
-Build context:
-- App description: %s
-- Failed task type: %s
-- Failed task description: %s
-- Agent role: %s
-- Error: %s
-- Default strategy: %s
-
-Choose exactly ONE recovery action:
-1) retry_same
-2) switch_provider
-3) spawn_solver
-4) abort
-
-Respond in this exact format:
-VOTE: <retry_same|switch_provider|spawn_solver|abort>
-RATIONALE: <single short sentence>`,
-			description,
-			task.Type,
-			task.Description,
-			agent.Role,
-			taskErr.Error(),
-			defaultStrategy,
+		promptLines := []string{
+			"You are participating in a build recovery incident vote.",
+			"",
+			"Build context:",
+			fmt.Sprintf("- App description: %s", description),
+			fmt.Sprintf("- Failed task type: %s", task.Type),
+			fmt.Sprintf("- Failed task description: %s", task.Description),
+			fmt.Sprintf("- Agent role: %s", agent.Role),
+			fmt.Sprintf("- Error: %s", taskErr.Error()),
+			fmt.Sprintf("- Default strategy: %s", defaultStrategy),
+		}
+		if historySummary != "" {
+			promptLines = append(promptLines, fmt.Sprintf("- Recent failure fingerprint summary: %s", historySummary))
+		}
+		promptLines = append(promptLines,
+			"",
+			"Choose exactly ONE recovery action:",
+			"1) retry_same",
+			"2) switch_provider",
+			"3) spawn_solver",
+			"4) abort",
+			"",
+			"Respond in this exact format:",
+			"VOTE: <retry_same|switch_provider|spawn_solver|abort>",
+			"RATIONALE: <single short sentence>",
 		)
+		prompt := strings.Join(promptLines, "\n")
 
 		// Pre-authorize spend before calling AI — catches about-to-exceed budgets
 		// using a conservative per-request estimate rather than 0.
@@ -12630,6 +13362,8 @@ func (am *AgentManager) strategyToDecision(strategy string) consensusDecision {
 	switch strings.ToLower(strings.TrimSpace(strategy)) {
 	case "switch_provider":
 		return decisionSwitchProvider
+	case "spawn_solver":
+		return decisionSpawnSolver
 	case "fix_and_retry", "standard_retry", "backoff", "reduce_context":
 		return decisionRetrySame
 	case "non_retriable":
@@ -12730,33 +13464,47 @@ func (am *AgentManager) getMaxTokensForRole(role AgentRole, powerMode ...PowerMo
 	return base
 }
 
-// getNextFallbackProvider returns the next provider in the fallback chain that
-// is actually available in the router.  If no alternative is available (e.g.
-// Ollama-only mode) it returns the current provider so callers can detect a
-// no-op switch and apply backoff instead of spinning into an instant failure.
-func (am *AgentManager) getNextFallbackProvider(current ai.AIProvider) ai.AIProvider {
-	chains := map[ai.AIProvider][]ai.AIProvider{
-		ai.ProviderClaude: {ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderOllama},
-		ai.ProviderGPT4:   {ai.ProviderClaude, ai.ProviderGemini, ai.ProviderOllama},
-		ai.ProviderGemini: {ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderOllama},
-		ai.ProviderOllama: {ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini},
+// getNextFallbackProviderForTask chooses the best alternative provider for the
+// task shape using live build scorecards when available, then falls back to the
+// static provider chain if no ranked alternative exists.
+func (am *AgentManager) getNextFallbackProviderForTask(build *Build, task *Task, role AgentRole, current ai.AIProvider) ai.AIProvider {
+	availableProviders := []ai.AIProvider{}
+	if build != nil {
+		availableProviders = am.getCurrentlyAvailableProvidersForBuild(build)
+	} else if am.aiRouter != nil {
+		availableProviders = am.aiRouter.GetAvailableProviders()
 	}
-	// Build a set of actually-available providers so we don't switch to a
-	// provider that will immediately fail with "client not available".
-	available := make(map[ai.AIProvider]bool)
-	if am.aiRouter != nil {
-		for _, p := range am.aiRouter.GetAvailableProviders() {
-			available[p] = true
-		}
+	available := make(map[ai.AIProvider]bool, len(availableProviders))
+	for _, provider := range availableProviders {
+		available[provider] = true
 	}
-	if chain, ok := chains[current]; ok {
-		for _, candidate := range chain {
-			if available[candidate] {
+
+	shape := taskExecutionShape(task, &Agent{Role: role})
+	if shape == "" {
+		shape = taskShapeForRole(role)
+	}
+	if shape != "" {
+		for _, candidate := range rankedProvidersForTaskShape(shape, am.providerScorecardsForBuild(build, availableProviders)) {
+			if candidate != current && available[candidate] {
 				return candidate
 			}
 		}
 	}
-	// No alternative available — return current so caller falls back to backoff.
+
+	chains := map[ai.AIProvider][]ai.AIProvider{
+		ai.ProviderClaude: {ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama},
+		ai.ProviderGPT4:   {ai.ProviderClaude, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama},
+		ai.ProviderGemini: {ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGrok, ai.ProviderOllama},
+		ai.ProviderGrok:   {ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini, ai.ProviderOllama},
+		ai.ProviderOllama: {ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok},
+	}
+	if chain, ok := chains[current]; ok {
+		for _, candidate := range chain {
+			if candidate != current && available[candidate] {
+				return candidate
+			}
+		}
+	}
 	return current
 }
 

@@ -263,6 +263,100 @@ func TestAssignTaskHydratesArtifactWorkOrderForAdHocTask(t *testing.T) {
 	}
 }
 
+func TestAssignTaskCapturesPatchBaselineWithinWorkOrderScope(t *testing.T) {
+	t.Parallel()
+
+	plan := createBuildPlanFromPlanningBundle("build-1", "Build TranscriptVault", nil, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "fullstack",
+			TechStack: &autonomous.TechStack{
+				Frontend: "React",
+				Backend:  "Node",
+				Database: "PostgreSQL",
+				Styling:  "Tailwind",
+			},
+		},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-1",
+			EstimatedTime: time.Hour,
+			CreatedAt:     time.Now(),
+		},
+	})
+
+	build := &Build{
+		ID:           "build-1",
+		Description:  "Build TranscriptVault",
+		Status:       BuildInProgress,
+		Plan:         plan,
+		ProviderMode: "platform",
+		Tasks: []*Task{
+			{
+				ID:     "seed-files",
+				Type:   TaskGenerateFile,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{Path: "src/App.tsx", Content: "export default function App(){ return <div>seed</div> }\n", Language: "typescript"},
+						{Path: "package.json", Content: "{\"name\":\"seed-app\"}\n", Language: "json"},
+						{Path: "server/index.ts", Content: "export const server = true;\n", Language: "typescript"},
+					},
+				},
+			},
+		},
+		Agents: map[string]*Agent{},
+	}
+	intent := &IntentBrief{AppType: plan.AppType}
+	contract := compileBuildContractFromPlan(build.ID, intent, plan)
+	build.SnapshotState.Orchestration = &BuildOrchestrationState{
+		Flags:              defaultBuildOrchestrationFlags(),
+		BuildContract:      contract,
+		WorkOrders:         compileWorkOrdersFromPlan(build.ID, contract, plan, defaultProviderScorecards(build.ProviderMode)),
+		ProviderScorecards: defaultProviderScorecards(build.ProviderMode),
+	}
+	agent := &Agent{ID: "front-1", BuildID: build.ID, Role: RoleFrontend}
+	build.Agents[agent.ID] = agent
+
+	am := &AgentManager{
+		agents:      map[string]*Agent{agent.ID: agent},
+		builds:      map[string]*Build{build.ID: build},
+		taskQueue:   make(chan *Task, 1),
+		subscribers: map[string][]chan *WSMessage{},
+		ctx:         context.Background(),
+	}
+
+	task := &Task{
+		ID:          "frontend-task-1",
+		Type:        TaskGenerateUI,
+		Description: "Update frontend shell",
+		Status:      TaskPending,
+		Input:       map[string]any{},
+		CreatedAt:   time.Now(),
+	}
+
+	if err := am.AssignTask(agent.ID, task); err != nil {
+		t.Fatalf("AssignTask returned error: %v", err)
+	}
+
+	baseline := taskPatchBaselineFromInput(task)
+	if len(baseline) == 0 {
+		t.Fatalf("expected patch baseline files, got %+v", task.Input["patch_baseline_files"])
+	}
+	paths := make([]string, 0, len(baseline))
+	for _, file := range baseline {
+		paths = append(paths, file.Path)
+	}
+	joined := strings.Join(paths, ",")
+	if !strings.Contains(joined, "src/App.tsx") {
+		t.Fatalf("expected frontend baseline to include src/App.tsx, got %s", joined)
+	}
+	if !strings.Contains(joined, "package.json") {
+		t.Fatalf("expected frontend baseline to include package.json, got %s", joined)
+	}
+	if strings.Contains(joined, "server/index.ts") {
+		t.Fatalf("expected frontend baseline to exclude backend-owned files, got %s", joined)
+	}
+}
+
 func TestParseTaskOutputExtractsCoordinationBlocks(t *testing.T) {
 	t.Parallel()
 

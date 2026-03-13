@@ -2013,3 +2013,291 @@ func TestNodeVerificationSkipsWhenNPMUnavailable(t *testing.T) {
 		t.Fatalf("expected backend verifier to skip cleanly when npm is unavailable, got %v", errs)
 	}
 }
+
+func TestProcessResultSuccessfulCodeTaskCapturesPatchBundleAndVerificationReport(t *testing.T) {
+	t.Parallel()
+
+	task := &Task{
+		ID:          "task-front-1",
+		Type:        TaskGenerateUI,
+		Description: "Refresh frontend shell",
+		Status:      TaskPending,
+		MaxRetries:  2,
+		Input:       map[string]any{},
+		CreatedAt:   time.Now(),
+	}
+	build := &Build{
+		ID:     "build-front-1",
+		Status: BuildInProgress,
+		Tasks: []*Task{
+			task,
+			&Task{ID: "review-pending", Type: TaskReview, Status: TaskPending},
+		},
+		Agents:    map[string]*Agent{},
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:     "src/App.tsx",
+				Content:  "export default function App(){ return <div>old</div> }\n",
+				Language: "typescript",
+			},
+			{
+				Path:     "package.json",
+				Content:  "{\"name\":\"demo\"}\n",
+				Language: "json",
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				BuildContract: &BuildContract{
+					ID:      "contract-1",
+					BuildID: "build-front-1",
+					TruthBySurface: map[string][]TruthTag{
+						string(SurfaceFrontend): {TruthScaffolded},
+					},
+				},
+				WorkOrders: []WorkOrder{
+					{
+						ID:            "wo-front",
+						BuildID:       "build-front-1",
+						Role:          RoleFrontend,
+						Category:      WorkOrderFrontend,
+						TaskShape:     TaskShapeFrontendPatch,
+						OwnedFiles:    []string{"src/**"},
+						RequiredFiles: []string{"package.json"},
+						ContractSlice: WorkOrderContractSlice{
+							Surface:   SurfaceFrontend,
+							TruthTags: []TruthTag{TruthScaffolded},
+						},
+					},
+				},
+			},
+		},
+	}
+	agent := &Agent{
+		ID:       "agent-front-1",
+		Role:     RoleFrontend,
+		Provider: ai.ProviderGPT4,
+		BuildID:  build.ID,
+		Status:   StatusIdle,
+	}
+	build.Agents[agent.ID] = agent
+
+	am := &AgentManager{
+		agents:      map[string]*Agent{agent.ID: agent},
+		builds:      map[string]*Build{build.ID: build},
+		taskQueue:   make(chan *Task, 2),
+		resultQueue: make(chan *TaskResult, 1),
+		subscribers: map[string][]chan *WSMessage{},
+		ctx:         context.Background(),
+	}
+
+	if err := am.AssignTask(agent.ID, task); err != nil {
+		t.Fatalf("AssignTask returned error: %v", err)
+	}
+	select {
+	case <-am.taskQueue:
+	default:
+	}
+
+	am.processResult(&TaskResult{
+		TaskID:  task.ID,
+		AgentID: agent.ID,
+		Success: true,
+		Output: &TaskOutput{
+			Files: []GeneratedFile{
+				{
+					Path:     "src/App.tsx",
+					Content:  "export default function App(){ return <main>new</main> }\n",
+					Language: "typescript",
+				},
+			},
+		},
+	})
+
+	state := build.SnapshotState.Orchestration
+	if state == nil {
+		t.Fatalf("expected orchestration state")
+	}
+	if len(state.PatchBundles) == 0 {
+		t.Fatalf("expected captured patch bundle, got %+v", state)
+	}
+	bundle := state.PatchBundles[len(state.PatchBundles)-1]
+	if bundle.WorkOrderID != "wo-front" {
+		t.Fatalf("expected work order id wo-front, got %+v", bundle)
+	}
+	if bundle.Provider != ai.ProviderGPT4 {
+		t.Fatalf("expected provider %s, got %+v", ai.ProviderGPT4, bundle)
+	}
+	foundPath := false
+	for _, op := range bundle.Operations {
+		if op.Path == "src/App.tsx" {
+			foundPath = true
+			break
+		}
+	}
+	if !foundPath {
+		t.Fatalf("expected patch operation for src/App.tsx, got %+v", bundle.Operations)
+	}
+
+	if len(state.VerificationReports) == 0 {
+		t.Fatalf("expected task-local verification report, got %+v", state)
+	}
+	report := state.VerificationReports[len(state.VerificationReports)-1]
+	if report.Phase != "task_local_verification" || report.Status != VerificationPassed {
+		t.Fatalf("expected passed task-local verification report, got %+v", report)
+	}
+	if report.Surface != SurfaceFrontend || report.WorkOrderID != "wo-front" {
+		t.Fatalf("expected frontend work-order verification report, got %+v", report)
+	}
+	if !containsTruthTagLocal(state.BuildContract.TruthBySurface[string(SurfaceFrontend)], TruthVerified) {
+		t.Fatalf("expected frontend surface truth to include verified, got %+v", state.BuildContract.TruthBySurface)
+	}
+	if !hasProviderScorecardSample(state.ProviderScorecards, ai.ProviderGPT4, TaskShapeFrontendPatch) {
+		t.Fatalf("expected GPT4 frontend patch scorecard to receive a live sample, got %+v", state.ProviderScorecards)
+	}
+}
+
+func TestProcessResultVerificationFailureRecordsFailureFingerprintAndScorecard(t *testing.T) {
+	t.Parallel()
+
+	task := &Task{
+		ID:          "task-front-fail",
+		Type:        TaskGenerateUI,
+		Description: "Generate broken frontend shell",
+		Status:      TaskPending,
+		MaxRetries:  2,
+		Input:       map[string]any{},
+		CreatedAt:   time.Now(),
+	}
+	build := &Build{
+		ID:         "build-front-fail",
+		Status:     BuildInProgress,
+		Tasks:      []*Task{task},
+		Agents:     map[string]*Agent{},
+		Mode:       ModeFull,
+		PowerMode:  PowerBalanced,
+		MaxRetries: 2,
+		SnapshotFiles: []GeneratedFile{
+			{Path: "src/App.tsx", Content: "export default function App(){ return <div>old</div> }\n", Language: "typescript"},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags:              defaultBuildOrchestrationFlags(),
+				ProviderScorecards: defaultProviderScorecards("platform"),
+				BuildContract: &BuildContract{
+					ID:      "contract-fail",
+					BuildID: "build-front-fail",
+					TruthBySurface: map[string][]TruthTag{
+						string(SurfaceFrontend): {TruthScaffolded},
+					},
+				},
+				WorkOrders: []WorkOrder{
+					{
+						ID:            "wo-front-fail",
+						BuildID:       "build-front-fail",
+						Role:          RoleFrontend,
+						Category:      WorkOrderFrontend,
+						TaskShape:     TaskShapeFrontendPatch,
+						OwnedFiles:    []string{"src/**"},
+						ContractSlice: WorkOrderContractSlice{Surface: SurfaceFrontend},
+					},
+				},
+			},
+		},
+	}
+	agent := &Agent{
+		ID:       "agent-front-fail",
+		Role:     RoleFrontend,
+		Provider: ai.ProviderGPT4,
+		BuildID:  build.ID,
+		Status:   StatusIdle,
+	}
+	build.Agents[agent.ID] = agent
+
+	am := &AgentManager{
+		agents:      map[string]*Agent{agent.ID: agent},
+		builds:      map[string]*Build{build.ID: build},
+		taskQueue:   make(chan *Task, 2),
+		resultQueue: make(chan *TaskResult, 1),
+		subscribers: map[string][]chan *WSMessage{},
+		ctx:         context.Background(),
+	}
+
+	if err := am.AssignTask(agent.ID, task); err != nil {
+		t.Fatalf("AssignTask returned error: %v", err)
+	}
+	select {
+	case <-am.taskQueue:
+	default:
+	}
+
+	am.processResult(&TaskResult{
+		TaskID:  task.ID,
+		AgentID: agent.ID,
+		Success: true,
+		Output: &TaskOutput{
+			Files: []GeneratedFile{
+				{
+					Path:     "src/App.tsx",
+					Content:  "export default function App(){\n  // TODO: finish UI\n  return <main>broken</main>\n}\n",
+					Language: "typescript",
+				},
+			},
+		},
+	})
+
+	if task.Status != TaskPending || task.RetryCount != 1 {
+		t.Fatalf("expected task to be requeued after verification failure, got status=%s retries=%d", task.Status, task.RetryCount)
+	}
+	if len(am.taskQueue) != 1 {
+		t.Fatalf("expected retried task to be requeued, queue len=%d", len(am.taskQueue))
+	}
+
+	state := build.SnapshotState.Orchestration
+	if state == nil || len(state.FailureFingerprints) == 0 {
+		t.Fatalf("expected failure fingerprint to be recorded, got %+v", state)
+	}
+	fp := state.FailureFingerprints[len(state.FailureFingerprints)-1]
+	if fp.FailureClass != "verification_failure" || fp.RepairSucceeded {
+		t.Fatalf("expected verification failure fingerprint, got %+v", fp)
+	}
+	if fp.Provider != ai.ProviderGPT4 || fp.TaskShape != TaskShapeFrontendPatch {
+		t.Fatalf("expected GPT4/frontend failure fingerprint, got %+v", fp)
+	}
+	if len(state.VerificationReports) == 0 || state.VerificationReports[len(state.VerificationReports)-1].Status != VerificationFailed {
+		t.Fatalf("expected failed verification report, got %+v", state.VerificationReports)
+	}
+	if !hasProviderScorecardFailure(state.ProviderScorecards, ai.ProviderGPT4, TaskShapeFrontendPatch) {
+		t.Fatalf("expected GPT4 frontend patch scorecard failure sample, got %+v", state.ProviderScorecards)
+	}
+}
+
+func containsTruthTagLocal(tags []TruthTag, target TruthTag) bool {
+	for _, tag := range tags {
+		if tag == target {
+			return true
+		}
+	}
+	return false
+}
+
+func hasProviderScorecardSample(scorecards []ProviderScorecard, provider ai.AIProvider, shape TaskShape) bool {
+	for _, scorecard := range scorecards {
+		if scorecard.Provider == provider && scorecard.TaskShape == shape && scorecard.SampleCount > 0 && scorecard.SuccessCount > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func hasProviderScorecardFailure(scorecards []ProviderScorecard, provider ai.AIProvider, shape TaskShape) bool {
+	for _, scorecard := range scorecards {
+		if scorecard.Provider == provider && scorecard.TaskShape == shape && scorecard.FailureEventCount > 0 {
+			return true
+		}
+	}
+	return false
+}
