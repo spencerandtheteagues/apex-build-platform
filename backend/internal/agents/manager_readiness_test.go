@@ -742,8 +742,8 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 	})
 
 	t.Run("python_runtime_probe_succeeds", func(t *testing.T) {
-		t.Parallel()
-
+		// No t.Parallel() — spawns a real Python process and binds a port;
+		// running concurrently with other probe tests causes port/timing conflicts.
 		if _, err := exec.LookPath("python3"); err != nil {
 			t.Skip("python3 not available")
 		}
@@ -784,8 +784,7 @@ if __name__ == "__main__":
 	})
 
 	t.Run("python_runtime_probe_404_fails", func(t *testing.T) {
-		t.Parallel()
-
+		// No t.Parallel() — spawns a real Python process; must not run concurrently with other probe tests.
 		if _, err := exec.LookPath("python3"); err != nil {
 			t.Skip("python3 not available")
 		}
