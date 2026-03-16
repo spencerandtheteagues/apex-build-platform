@@ -507,10 +507,13 @@ func planDerivedFiles(scaffold buildScaffold, bundle *autonomous.PlanningBundle)
 			if kind, _ := step.Input["type"].(string); kind != "" {
 				switch kind {
 				case "backend":
-					// Use server/routes/api.ts to align with the fullstack scaffold
-					if !seen["server/routes/api.ts"] {
-						files = append(files, PlannedFile{Path: "server/routes/api.ts", Type: "backend", Description: "API routes generated from build spec"})
-						seen["server/routes/api.ts"] = true
+					routesPath := "src/routes/index.ts"
+					if scaffold.ID == "fullstack/react-vite-express-ts" {
+						routesPath = "server/routes/api.ts"
+					}
+					if !seen[routesPath] {
+						files = append(files, PlannedFile{Path: routesPath, Type: "backend", Description: "API routes generated from build spec"})
+						seen[routesPath] = true
 					}
 				case "frontend":
 					if !seen["src/components/AppShell.tsx"] {

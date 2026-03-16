@@ -1070,8 +1070,21 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
         {/* Left side */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-gradient-to-br from-red-500 to-red-900 rounded" />
-            <span className="text-lg font-bold text-white hidden sm:inline">APEX-BUILD</span>
+            <div className="w-6 h-6 rounded overflow-hidden flex items-center justify-center">
+              <img
+                src="/logo.svg"
+                alt="APEX"
+                className="w-6 h-6 object-contain"
+                onError={(e) => {
+                  const img = e.currentTarget
+                  img.style.display = 'none'
+                  const fallback = document.createElement('div')
+                  fallback.className = 'w-6 h-6 bg-gradient-to-br from-red-500 to-red-900 rounded'
+                  img.parentElement?.appendChild(fallback)
+                }}
+              />
+            </div>
+            <span className="text-lg font-bold text-white hidden sm:inline tracking-tight">APEX-BUILD</span>
           </div>
 
           {/* Navigation */}
@@ -1205,19 +1218,28 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
                   size="sm"
                   variant="ghost"
                   icon={<Bell size={14} />}
-                  className={ideIconButtonClass}
+                  className={cn(ideIconButtonClass, showNotifications && '!border-gray-600 !bg-gray-800 !text-white')}
                   onClick={() => setShowNotifications(!showNotifications)}
+                  aria-label="Notifications"
                   title="Notifications"
                 />
                 {showNotifications && (
-                  <div className="absolute right-0 mt-2 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50">
-                    <div className="p-3 border-b border-gray-800 text-sm font-medium text-white">
-                      Notifications
+                  <>
+                    {/* Backdrop to close on outside click */}
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setShowNotifications(false)}
+                    />
+                    <div className="absolute right-0 mt-2 w-64 bg-gray-900/95 backdrop-blur-md border border-gray-700/80 rounded-xl shadow-2xl shadow-black/60 z-50">
+                      <div className="px-4 py-3 border-b border-gray-800 text-sm font-semibold text-white">
+                        Notifications
+                      </div>
+                      <div className="px-4 py-6 text-center">
+                        <Bell className="w-8 h-8 text-gray-700 mx-auto mb-2" />
+                        <p className="text-xs text-gray-500">No notifications yet</p>
+                      </div>
                     </div>
-                    <div className="p-4 text-xs text-gray-400">
-                      No notifications yet.
-                    </div>
-                  </div>
+                  </>
                 )}
               </div>
               <Avatar
@@ -1244,52 +1266,76 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
             leftPanelState === 'expanded' && 'w-80 lg:w-96'
           )}>
             {/* Sidebar tabs */}
-            <div className="h-10 bg-gray-800/50 border-b border-gray-700/50 flex items-center justify-between">
-              <div className="flex">
-                <Button
-                  size="sm"
-                  variant={activeLeftTab === 'explorer' ? 'primary' : 'ghost'}
-                  onClick={() => setActiveLeftTab('explorer')}
-                  icon={<Folder size={14} />}
-                  className={idePanelTabClass(activeLeftTab === 'explorer')}
-                >
-                  {leftPanelState !== 'collapsed' && 'Explorer'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant={activeLeftTab === 'search' ? 'primary' : 'ghost'}
-                  onClick={() => setActiveLeftTab('search')}
-                  icon={<Search size={14} />}
-                  className={idePanelTabClass(activeLeftTab === 'search')}
-                >
-                  {leftPanelState !== 'collapsed' && 'Search'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant={activeLeftTab === 'git' ? 'primary' : 'ghost'}
-                  onClick={() => setActiveLeftTab('git')}
-                  icon={<GitBranch size={14} />}
-                  className={idePanelTabClass(activeLeftTab === 'git')}
-                >
-                  {leftPanelState !== 'collapsed' && 'Git'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant={activeLeftTab === 'history' ? 'primary' : 'ghost'}
-                  onClick={() => setActiveLeftTab('history')}
-                  icon={<RotateCcw size={14} />}
-                  className={idePanelTabClass(activeLeftTab === 'history')}
-                >
-                  {leftPanelState !== 'collapsed' && 'History'}
-                </Button>
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setLeftPanelState(leftPanelState === 'collapsed' ? 'normal' : 'collapsed')}
-                icon={<PanelLeftClose size={14} />}
-                className={cn(ideIconButtonClass, 'mr-1')}
-              />
+            <div className="h-10 bg-gray-800/50 border-b border-gray-700/50 flex items-center justify-between shrink-0">
+              {leftPanelState === 'collapsed' ? (
+                /* Collapsed: show only expand button, centered */
+                <div className="flex-1 flex items-center justify-center">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setLeftPanelState('normal')}
+                    icon={<ChevronRight size={14} />}
+                    className={ideIconButtonClass}
+                    aria-label="Expand sidebar"
+                    title="Expand sidebar"
+                  />
+                </div>
+              ) : (
+                /* Expanded: show tabs and collapse button */
+                <>
+                  <div className="flex overflow-hidden">
+                    <Button
+                      size="sm"
+                      variant={activeLeftTab === 'explorer' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveLeftTab('explorer')}
+                      icon={<Folder size={14} />}
+                      className={idePanelTabClass(activeLeftTab === 'explorer')}
+                      title="Explorer"
+                    >
+                      Explorer
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={activeLeftTab === 'search' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveLeftTab('search')}
+                      icon={<Search size={14} />}
+                      className={idePanelTabClass(activeLeftTab === 'search')}
+                      title="Search"
+                    >
+                      Search
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={activeLeftTab === 'git' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveLeftTab('git')}
+                      icon={<GitBranch size={14} />}
+                      className={idePanelTabClass(activeLeftTab === 'git')}
+                      title="Git"
+                    >
+                      Git
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={activeLeftTab === 'history' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveLeftTab('history')}
+                      icon={<RotateCcw size={14} />}
+                      className={idePanelTabClass(activeLeftTab === 'history')}
+                      title="Version History"
+                    >
+                      History
+                    </Button>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setLeftPanelState('collapsed')}
+                    icon={<PanelLeftClose size={14} />}
+                    className={cn(ideIconButtonClass, 'mr-1 shrink-0')}
+                    aria-label="Collapse sidebar"
+                    title="Collapse sidebar"
+                  />
+                </>
+              )}
             </div>
 
             {/* Sidebar content */}
@@ -1355,7 +1401,10 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
               </div>
 
               {/* Bottom content */}
-              <div className="flex-1 min-h-0 overflow-hidden">
+              <div className={cn(
+                'overflow-hidden',
+                bottomPanelState === 'normal' ? 'h-[calc(100%-40px)]' : 'h-[calc(100%-40px)]'
+              )}>
                 {renderBottomPanel()}
               </div>
             </div>
@@ -1372,61 +1421,86 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
             rightPanelState === 'expanded' && 'w-80 lg:w-96'
           )}>
             {/* Sidebar tabs */}
-            <div className="h-10 bg-gray-800/50 border-b border-gray-700/50 flex items-center justify-between">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setRightPanelState(rightPanelState === 'collapsed' ? 'normal' : 'collapsed')}
-                icon={<PanelRightClose size={14} />}
-                className={cn(ideIconButtonClass, 'ml-1')}
-              />
-              <div className="flex">
-                <Button
-                  size="sm"
-                  variant={activeRightTab === 'ai' ? 'primary' : 'ghost'}
-                  onClick={() => setActiveRightTab('ai')}
-                  icon={<Brain size={14} />}
-                  className={idePanelTabClass(activeRightTab === 'ai')}
-                >
-                  {rightPanelState !== 'collapsed' && 'AI'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant={activeRightTab === 'comments' ? 'primary' : 'ghost'}
-                  onClick={() => setActiveRightTab('comments')}
-                  icon={<MessageSquare size={14} />}
-                  className={idePanelTabClass(activeRightTab === 'comments')}
-                >
-                  {rightPanelState !== 'collapsed' && 'Comments'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant={activeRightTab === 'collab' ? 'primary' : 'ghost'}
-                  onClick={() => setActiveRightTab('collab')}
-                  icon={<Users size={14} />}
-                  className={idePanelTabClass(activeRightTab === 'collab')}
-                >
-                  {rightPanelState !== 'collapsed' && 'Collab'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant={activeRightTab === 'database' ? 'primary' : 'ghost'}
-                  onClick={() => setActiveRightTab('database')}
-                  icon={<Database size={14} />}
-                  className={idePanelTabClass(activeRightTab === 'database')}
-                >
-                  {rightPanelState !== 'collapsed' && 'Database'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant={activeRightTab === 'settings' ? 'primary' : 'ghost'}
-                  onClick={() => setActiveRightTab('settings')}
-                  icon={<Settings size={14} />}
-                  className={idePanelTabClass(activeRightTab === 'settings')}
-                >
-                  {rightPanelState !== 'collapsed' && 'Settings'}
-                </Button>
-              </div>
+            <div className="h-10 bg-gray-800/50 border-b border-gray-700/50 flex items-center justify-between shrink-0">
+              {rightPanelState === 'collapsed' ? (
+                /* Collapsed: show only expand button, centered */
+                <div className="flex-1 flex items-center justify-center">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setRightPanelState('normal')}
+                    icon={<ChevronLeft size={14} />}
+                    className={ideIconButtonClass}
+                    aria-label="Expand right panel"
+                    title="Expand right panel"
+                  />
+                </div>
+              ) : (
+                /* Expanded: show collapse button and tabs */
+                <>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setRightPanelState('collapsed')}
+                    icon={<PanelRightClose size={14} />}
+                    className={cn(ideIconButtonClass, 'ml-1 shrink-0')}
+                    aria-label="Collapse right panel"
+                    title="Collapse right panel"
+                  />
+                  <div className="flex overflow-hidden">
+                    <Button
+                      size="sm"
+                      variant={activeRightTab === 'ai' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveRightTab('ai')}
+                      icon={<Brain size={14} />}
+                      className={idePanelTabClass(activeRightTab === 'ai')}
+                      title="AI Assistant"
+                    >
+                      AI
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={activeRightTab === 'comments' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveRightTab('comments')}
+                      icon={<MessageSquare size={14} />}
+                      className={idePanelTabClass(activeRightTab === 'comments')}
+                      title="Code Comments"
+                    >
+                      Comments
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={activeRightTab === 'collab' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveRightTab('collab')}
+                      icon={<Users size={14} />}
+                      className={idePanelTabClass(activeRightTab === 'collab')}
+                      title="Collaboration"
+                    >
+                      Collab
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={activeRightTab === 'database' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveRightTab('database')}
+                      icon={<Database size={14} />}
+                      className={idePanelTabClass(activeRightTab === 'database')}
+                      title="Database"
+                    >
+                      Database
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={activeRightTab === 'settings' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveRightTab('settings')}
+                      icon={<Settings size={14} />}
+                      className={idePanelTabClass(activeRightTab === 'settings')}
+                      title="Settings"
+                    >
+                      Settings
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Sidebar content */}
@@ -1438,17 +1512,24 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
       </div>
 
       {/* Footer for panels toggle */}
-      <div className="h-6 bg-gray-900/95 border-t border-gray-800 flex items-center justify-center">
+      <div className="h-7 bg-gray-900/95 border-t border-gray-800/60 flex items-center justify-between px-3 shrink-0">
         <div className="flex items-center gap-1">
-          <Button
-            size="sm"
-            variant="ghost"
+          <button
             onClick={() => setBottomPanelState(bottomPanelState === 'collapsed' ? 'normal' : 'collapsed')}
-            icon={<Terminal size={12} />}
-            title="Toggle Terminal"
-            className={ideIconButtonClass}
-          />
+            title={bottomPanelState === 'collapsed' ? 'Open Terminal' : 'Close Terminal'}
+            aria-label={bottomPanelState === 'collapsed' ? 'Open Terminal' : 'Close Terminal'}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium transition-colors duration-150',
+              bottomPanelState !== 'collapsed'
+                ? 'text-white bg-red-500/15 hover:bg-red-500/20'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/70'
+            )}
+          >
+            <Terminal size={11} />
+            <span>Terminal</span>
+          </button>
         </div>
+        <div className="text-[10px] text-gray-600 font-mono select-none">APEX-BUILD</div>
       </div>
 
       {/* Floating AI Agent Button */}

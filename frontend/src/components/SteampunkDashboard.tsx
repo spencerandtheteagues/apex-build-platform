@@ -127,7 +127,7 @@ export const SteampunkDashboard: React.FC<SteampunkDashboardProps> = ({ onNaviga
   useEffect(() => {
     const checkBackend = async () => {
       try {
-        const response = await fetch('http://localhost:8080/health');
+        const response = await fetch('/health');
         setBackendStatus(response.ok ? 'online' : 'offline');
       } catch {
         setBackendStatus('offline');

@@ -929,7 +929,9 @@ export default function LivePreview({
             </button>
 
             {showSettings && (
-              <div className="absolute right-0 top-full mt-1 w-64 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50">
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowSettings(false)} />
+              <div className="absolute right-0 top-full mt-1 w-64 bg-gray-800/95 backdrop-blur-md border border-gray-700/80 rounded-xl shadow-2xl shadow-black/60 z-50">
                 <div className="p-3">
                   <h4 className="text-sm font-medium text-white mb-3">Preview Settings</h4>
                   <div className="space-y-3">
@@ -1004,6 +1006,7 @@ export default function LivePreview({
                   </div>
                 </div>
               </div>
+              </>
             )}
           </div>
         </div>
@@ -1011,16 +1014,19 @@ export default function LivePreview({
 
       {/* URL Bar - only show on preview tab */}
       {status?.active && activeTab === 'preview' && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-800/30 border-b border-gray-700">
-          <div className="flex-1 flex items-center bg-gray-900 rounded-md px-3 py-1">
-            <span className="text-xs text-gray-500 mr-2">
-              {connected ? <CheckCircle className="w-3 h-3 text-green-400" /> : <AlertCircle className="w-3 h-3 text-yellow-400" />}
-            </span>
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-900/50 border-b border-gray-700/60">
+          <div className="flex-1 flex items-center gap-2 bg-gray-800/60 rounded-lg px-3 py-1.5 border border-gray-700/40">
+            {connected ? (
+              <CheckCircle className="w-3 h-3 text-green-400 shrink-0" />
+            ) : (
+              <AlertCircle className="w-3 h-3 text-yellow-400 shrink-0" />
+            )}
             <input
               type="text"
               value={displayUrl}
               readOnly
-              className="flex-1 bg-transparent text-sm text-gray-300 outline-none"
+              aria-label="Preview URL"
+              className="flex-1 bg-transparent text-xs text-gray-400 outline-none font-mono truncate cursor-default select-all"
             />
           </div>
         </div>
@@ -1092,16 +1098,20 @@ export default function LivePreview({
             )}
 
             {!status?.active && !error && (
-              <div className="flex flex-col items-center justify-center text-gray-500">
-                <Monitor className="w-16 h-16 mb-4 opacity-30" />
-                <p className="text-lg mb-2">Preview not running</p>
-                <p className="text-sm text-gray-600 mb-4">Click "Start Preview" to see your app</p>
+              <div className="flex flex-col items-center justify-center text-gray-500 gap-4">
+                <div className="w-16 h-16 rounded-2xl bg-gray-800/60 border border-gray-700/50 flex items-center justify-center">
+                  <Monitor className="w-8 h-8 text-gray-600" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-medium text-gray-300 mb-1">Preview not running</p>
+                  <p className="text-xs text-gray-600">Start the preview server to see your app</p>
+                </div>
                 <button
                   onClick={startPreview}
                   disabled={loading}
-                  className="flex items-center gap-2 px-6 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition-colors disabled:opacity-50"
+                  className="flex items-center gap-2 px-5 py-2.5 bg-green-600/20 hover:bg-green-600/30 border border-green-600/30 hover:border-green-500/40 text-green-400 rounded-xl text-sm font-medium transition-all duration-150 disabled:opacity-50"
                 >
-                  {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
                   Start Preview
                 </button>
               </div>

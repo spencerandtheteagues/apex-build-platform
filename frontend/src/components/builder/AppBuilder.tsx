@@ -778,7 +778,7 @@ const EpicBuildButton: React.FC<EpicBuildButtonProps> = ({ onClick, disabled, is
       disabled={disabled}
       className={cn(
         "launch-build-btn",
-        "relative w-full h-18 py-5 rounded-2xl font-black text-xl overflow-hidden",
+        "relative w-full py-5 rounded-2xl font-black text-xl overflow-hidden",
         "transition-all duration-300 transform",
         disabled
           ? "opacity-50 cursor-not-allowed"
@@ -839,7 +839,7 @@ const EpicBuildButton: React.FC<EpicBuildButtonProps> = ({ onClick, disabled, is
       <span className="relative z-10 flex items-center justify-center gap-4 text-white drop-shadow-lg">
         {isLoading ? (
           <>
-            <div className="w-7 h-7 border-3 border-white/30 border-t-white rounded-full animate-spin" />
+            <div className="w-7 h-7 border-[3px] border-white/30 border-t-white rounded-full animate-spin" />
             <span className="tracking-wide">INITIALIZING SYSTEMS...</span>
           </>
         ) : (
@@ -1101,17 +1101,17 @@ const BuildCompleteCard: React.FC<{
 
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center gap-4">
-            <div className="relative">
-              <CheckCircle2 className="w-14 h-14 text-green-400" style={{ animation: 'bounce-slow 2s ease-in-out infinite' }} />
-              <div className="absolute inset-0 bg-green-400/40 rounded-full blur-xl animate-pulse" />
+              <div className="relative shrink-0">
+                <CheckCircle2 className="w-12 h-12 text-green-400" style={{ animation: 'bounce-slow 2s ease-in-out infinite' }} />
+                <div className="absolute inset-0 bg-green-400/40 rounded-full blur-xl animate-pulse" />
+              </div>
+              <div>
+                <h3 className="font-black text-2xl text-white mb-0.5">Build Complete!</h3>
+                <p className="text-green-400 font-mono text-base">
+                  {filesCount} files generated
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="font-black text-2xl text-white mb-1">Build Complete!</h3>
-              <p className="text-green-400 font-mono text-lg">
-                {filesCount} files generated successfully
-              </p>
-            </div>
-          </div>
             <div className="flex gap-3 flex-wrap items-center">
               <Button
                 size="lg"

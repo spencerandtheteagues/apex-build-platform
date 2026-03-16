@@ -21,6 +21,7 @@ import {
   File as FileIcon,
   Plus,
   Search,
+  X,
   MoreVertical,
   Edit3,
   Trash2,
@@ -218,11 +219,10 @@ export const FileTree: React.FC<FileTreeProps> = ({
         {/* Node row */}
         <div
           className={cn(
-            'flex items-center gap-1 px-2 py-1 text-sm hover:bg-gray-800/50 cursor-pointer group transition-colors',
-            isSelected && 'bg-cyan-900/30 border-l-2 border-cyan-400',
-            level > 0 && 'ml-4'
+            'flex items-center gap-1 py-[3px] text-sm hover:bg-white/5 cursor-pointer group transition-colors duration-100 relative',
+            isSelected && 'bg-red-500/10',
           )}
-          style={{ paddingLeft: `${level * 16 + 8}px` }}
+          style={{ paddingLeft: `${level * 12 + 8}px`, paddingRight: '8px' }}
           onClick={() => {
             if (isDirectory) {
               toggleNode(node.path)
@@ -232,38 +232,46 @@ export const FileTree: React.FC<FileTreeProps> = ({
           }}
           onContextMenu={file ? (e) => handleContextMenu(e, file) : undefined}
         >
+          {/* Selected accent bar */}
+          {isSelected && (
+            <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-red-400 rounded-r" />
+          )}
+
           {/* Expand/collapse icon for directories */}
-          {isDirectory && (
+          {isDirectory ? (
             <button
-              className="flex items-center justify-center w-4 h-4 hover:bg-gray-700 rounded transition-colors"
+              className="flex items-center justify-center w-4 h-4 shrink-0 hover:bg-white/10 rounded transition-colors"
               onClick={(e) => {
                 e.stopPropagation()
                 toggleNode(node.path)
               }}
+              aria-label={isExpanded ? 'Collapse folder' : 'Expand folder'}
             >
               {isExpanded ? (
-                <ChevronDown size={12} className="text-gray-400" />
+                <ChevronDown size={11} className="text-gray-500" />
               ) : (
-                <ChevronRight size={12} className="text-gray-400" />
+                <ChevronRight size={11} className="text-gray-500" />
               )}
             </button>
+          ) : (
+            <div className="w-4 shrink-0" />
           )}
 
           {/* File/directory icon */}
-          <div className="flex items-center justify-center w-4 h-4 text-gray-400">
+          <div className="flex items-center justify-center w-4 h-4 shrink-0">
             {isDirectory ? (
               isExpanded ? (
-                <FolderOpen size={14} className="text-cyan-400" />
+                <FolderOpen size={13} className="text-sky-400/80" />
               ) : (
-                <Folder size={14} className="text-cyan-400" />
+                <Folder size={13} className="text-sky-400/70" />
               )
             ) : (
-              <span className="text-xs">{getFileIcon(node.name)}</span>
+              <span className="text-[12px] leading-none">{getFileIcon(node.name)}</span>
             )}
           </div>
 
           {/* File name */}
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 ml-1">
             {isEditing ? (
               <Input
                 value={newFileName}
@@ -282,8 +290,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
               />
             ) : (
               <span className={cn(
-                'truncate text-gray-300',
-                isSelected && 'text-white font-medium'
+                'truncate block text-[13px]',
+                isSelected ? 'text-white font-medium' : 'text-gray-300 group-hover:text-gray-100'
               )}>
                 {node.name}
               </span>
@@ -377,151 +385,168 @@ export const FileTree: React.FC<FileTreeProps> = ({
   return (
     <Card variant="cyberpunk" padding="none" className={cn('h-full flex flex-col', className)}>
       {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-cyan-500/30">
-        <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-          <Folder size={16} className="text-cyan-400" />
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700/60">
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+          <Folder size={13} className="text-gray-500" />
           Explorer
         </h3>
 
         {showActions && (
-          <div className="flex items-center gap-1">
-            <Button
-              size="xs"
-              variant="ghost"
+          <div className="flex items-center gap-0.5">
+            <button
               onClick={() => startCreate('/', 'file')}
-              icon={<Plus size={12} />}
               title="New File"
-            />
-            <Button
-              size="xs"
-              variant="ghost"
+              aria-label="New File"
+              className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              <Plus size={13} />
+            </button>
+            <button
               onClick={() => startCreate('/', 'directory')}
-              icon={<Folder size={12} />}
               title="New Folder"
-            />
-            <Button
-              size="xs"
-              variant="ghost"
+              aria-label="New Folder"
+              className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              <Folder size={13} />
+            </button>
+            <button
               onClick={() => currentProject && refreshFiles(currentProject.id)}
-              icon={<RefreshCw size={12} />}
               title="Refresh"
-            />
+              aria-label="Refresh files"
+              className="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              <RefreshCw size={13} />
+            </button>
           </div>
         )}
       </div>
 
       {/* Search */}
       {showSearch && (
-        <div className="p-3 border-b border-gray-700/50">
-          <Input
-            placeholder="Search files..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            leftIcon={<Search size={14} />}
-            size="sm"
-            variant="cyberpunk"
-          />
+        <div className="px-2 py-2 border-b border-gray-700/50">
+          <div className="relative">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search files..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-gray-800/60 border border-gray-700/50 rounded-md pl-7 pr-3 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600 focus:bg-gray-800 transition-colors"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+                aria-label="Clear search"
+              >
+                <X size={11} />
+              </button>
+            )}
+          </div>
         </div>
       )}
 
       {/* File tree */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto py-1">
         {isLoading ? (
           <div className="flex items-center justify-center p-8">
             <Loading variant="dots" color="cyberpunk" text="Loading files..." />
           </div>
         ) : filteredTree.length > 0 ? (
-          <div className="p-2">
+          <div>
             {filteredTree.map(node => renderNode(node))}
           </div>
         ) : searchQuery ? (
           <div className="flex flex-col items-center justify-center p-8 text-center">
-            <Search className="w-8 h-8 text-gray-600 mb-2" />
-            <p className="text-sm text-gray-400">No files found for "{searchQuery}"</p>
+            <Search className="w-7 h-7 text-gray-700 mb-2" />
+            <p className="text-xs text-gray-500">No files matching<br /><span className="text-gray-400">"{searchQuery}"</span></p>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center p-8 text-center">
-            <FileIcon className="w-8 h-8 text-gray-600 mb-2" />
-            <p className="text-sm text-gray-400 mb-2">No files in this project</p>
-            <Button
-              size="sm"
+            <FileIcon className="w-7 h-7 text-gray-700 mb-2" />
+            <p className="text-xs text-gray-500 mb-4">No files in this project</p>
+            <button
               onClick={() => startCreate('/', 'file')}
-              icon={<Plus size={14} />}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-300 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors border border-gray-700"
             >
+              <Plus size={12} />
               Create first file
-            </Button>
+            </button>
           </div>
         )}
       </div>
 
       {/* Context menu */}
       {contextMenu && (
-        <div
-          className="fixed bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 py-1 min-w-32"
-          style={{
-            left: contextMenu.x,
-            top: contextMenu.y,
-          }}
-        >
-          <button
-            className="flex items-center gap-2 w-full px-3 py-1 text-sm text-gray-300 hover:bg-gray-800 transition-colors"
-            onClick={() => startRename(contextMenu.file)}
-          >
-            <Edit3 size={12} />
-            Rename
-          </button>
-
-          <button
-            className="flex items-center gap-2 w-full px-3 py-1 text-sm text-gray-300 hover:bg-gray-800 transition-colors"
-            onClick={() => {
-              // Copy path to clipboard
-              navigator.clipboard.writeText(contextMenu.file.path)
-              closeContextMenu()
+        <>
+          <div className="fixed inset-0 z-40" onClick={closeContextMenu} />
+          <div
+            className="fixed bg-gray-900/95 backdrop-blur-sm border border-gray-700/80 rounded-xl shadow-2xl shadow-black/60 z-50 py-1.5 min-w-[160px] overflow-hidden"
+            style={{
+              left: Math.min(contextMenu.x, window.innerWidth - 176),
+              top: Math.min(contextMenu.y, window.innerHeight - 200),
             }}
           >
-            <Copy size={12} />
-            Copy Path
-          </button>
+            <button
+              className="flex items-center gap-2.5 w-full px-3 py-2 text-xs text-gray-300 hover:bg-white/5 transition-colors"
+              onClick={() => startRename(contextMenu.file)}
+            >
+              <Edit3 size={12} className="text-gray-500" />
+              Rename
+            </button>
 
-          {contextMenu.file.type === 'directory' && (
-            <>
-              <button
-                className="flex items-center gap-2 w-full px-3 py-1 text-sm text-gray-300 hover:bg-gray-800 transition-colors"
-                onClick={() => {
-                  startCreate(contextMenu.file.path, 'file')
-                  closeContextMenu()
-                }}
-              >
-                <Plus size={12} />
-                New File
-              </button>
+            <button
+              className="flex items-center gap-2.5 w-full px-3 py-2 text-xs text-gray-300 hover:bg-white/5 transition-colors"
+              onClick={() => {
+                navigator.clipboard.writeText(contextMenu.file.path)
+                closeContextMenu()
+              }}
+            >
+              <Copy size={12} className="text-gray-500" />
+              Copy Path
+            </button>
 
-              <button
-                className="flex items-center gap-2 w-full px-3 py-1 text-sm text-gray-300 hover:bg-gray-800 transition-colors"
-                onClick={() => {
-                  startCreate(contextMenu.file.path, 'directory')
-                  closeContextMenu()
-                }}
-              >
-                <Folder size={12} />
-                New Folder
-              </button>
-            </>
-          )}
+            {contextMenu.file.type === 'directory' && (
+              <>
+                <div className="border-t border-gray-800 my-1" />
+                <button
+                  className="flex items-center gap-2.5 w-full px-3 py-2 text-xs text-gray-300 hover:bg-white/5 transition-colors"
+                  onClick={() => {
+                    startCreate(contextMenu.file.path, 'file')
+                    closeContextMenu()
+                  }}
+                >
+                  <Plus size={12} className="text-gray-500" />
+                  New File
+                </button>
 
-          <div className="border-t border-gray-700 my-1" />
+                <button
+                  className="flex items-center gap-2.5 w-full px-3 py-2 text-xs text-gray-300 hover:bg-white/5 transition-colors"
+                  onClick={() => {
+                    startCreate(contextMenu.file.path, 'directory')
+                    closeContextMenu()
+                  }}
+                >
+                  <Folder size={12} className="text-gray-500" />
+                  New Folder
+                </button>
+              </>
+            )}
 
-          <button
-            className="flex items-center gap-2 w-full px-3 py-1 text-sm text-red-400 hover:bg-gray-800 transition-colors"
-            onClick={() => {
-              onFileDelete?.(contextMenu.file)
-              closeContextMenu()
-            }}
-          >
-            <Trash2 size={12} />
-            Delete
-          </button>
-        </div>
+            <div className="border-t border-gray-800 my-1" />
+
+            <button
+              className="flex items-center gap-2.5 w-full px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
+              onClick={() => {
+                onFileDelete?.(contextMenu.file)
+                closeContextMenu()
+              }}
+            >
+              <Trash2 size={12} />
+              Delete
+            </button>
+          </div>
+        </>
       )}
     </Card>
   )

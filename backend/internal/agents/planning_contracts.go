@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -243,11 +244,15 @@ func pathMatchesOwnedPattern(path string, pattern string) bool {
 	if strings.HasPrefix(pattern, "**/*.") {
 		return strings.HasSuffix(path, strings.TrimPrefix(pattern, "**/*"))
 	}
-	// Handle **/*<suffix> (e.g., **/*_test.go) — suffix after **/*
-	if strings.HasPrefix(pattern, "**/*") {
-		suffix := strings.TrimPrefix(pattern, "**/*")
-		if suffix != "" {
-			return strings.HasSuffix(path, suffix)
+	// Handle **/*<suffix> (e.g., **/*_test.go) — use filepath.Match against basename
+	if strings.HasPrefix(pattern, "**/") {
+		suffix := strings.TrimPrefix(pattern, "**/")
+		if !strings.Contains(suffix, "*") {
+			return strings.HasSuffix(filepath.Base(path), suffix) || path == suffix
+		}
+		// suffix still contains a wildcard (e.g. *_test.go) — match against basename
+		if matched, err := filepath.Match(suffix, filepath.Base(path)); err == nil && matched {
+			return true
 		}
 	}
 	// Handle dir/** (e.g., src/**)
