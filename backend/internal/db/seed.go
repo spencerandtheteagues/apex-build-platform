@@ -13,6 +13,11 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const (
+	defaultAdminSeedPassword   = "TheStarsh1pKEY!"
+	defaultSpencerSeedPassword = "spencer-dev-password"
+)
+
 // HasExplicitSeedPasswords reports whether runtime seed credentials were
 // explicitly supplied via environment variables. Unlike built-in development
 // defaults, these are safe to honor in production because the operator opted in
@@ -35,12 +40,13 @@ func getSeedPassword(envVar, defaultDev string) string {
 		return ""
 	case config.GetEnvironment() == config.EnvTest:
 		return defaultDev
-	case strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_DEFAULT_SEED_PASSWORDS")), "true"):
-		log.Printf("WARNING: Using built-in development seed password for %s because ALLOW_DEFAULT_SEED_PASSWORDS=true", envVar)
-		return defaultDev
 	default:
-		log.Printf("INFO: %s not set and ALLOW_DEFAULT_SEED_PASSWORDS is false - skipping seed user creation", envVar)
-		return ""
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_DEFAULT_SEED_PASSWORDS")), "true") {
+			log.Printf("WARNING: Using built-in development seed password for %s because ALLOW_DEFAULT_SEED_PASSWORDS=true", envVar)
+		} else {
+			log.Printf("WARNING: Using built-in development seed password for %s", envVar)
+		}
+		return defaultDev
 	}
 }
 
@@ -51,7 +57,7 @@ func (d *Database) SeedAdminUser() error {
 	result := d.DB.Where("username = ?", "admin").First(&existingAdmin)
 
 	// SECURITY: Get password from environment variable
-	password := getSeedPassword("ADMIN_SEED_PASSWORD", "admin-dev-password")
+	password := getSeedPassword("ADMIN_SEED_PASSWORD", defaultAdminSeedPassword)
 	if password == "" {
 		log.Println("⚠️  Skipping admin user creation - ADMIN_SEED_PASSWORD not set")
 		return nil
@@ -115,7 +121,7 @@ func (d *Database) SeedSpencerUser() error {
 	result := d.DB.Where("username = ?", "spencer").First(&existingUser)
 
 	// SECURITY: Get password from environment variable
-	password := getSeedPassword("SPENCER_SEED_PASSWORD", "spencer-dev-password")
+	password := getSeedPassword("SPENCER_SEED_PASSWORD", defaultSpencerSeedPassword)
 	if password == "" {
 		log.Println("⚠️  Skipping spencer user creation - SPENCER_SEED_PASSWORD not set")
 		return nil

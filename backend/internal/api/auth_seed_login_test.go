@@ -19,7 +19,7 @@ import (
 
 func TestLoginWithSeededAdminCredentials(t *testing.T) {
 	t.Setenv("GO_ENV", "production")
-	t.Setenv("ADMIN_SEED_PASSWORD", "TheStarsh1pKey!")
+	t.Setenv("ADMIN_SEED_PASSWORD", "TheStarsh1pKEY!")
 	t.Setenv("SPENCER_SEED_PASSWORD", "")
 	t.Setenv("ALLOW_DEFAULT_SEED_PASSWORDS", "false")
 
@@ -37,7 +37,7 @@ func TestLoginWithSeededAdminCredentials(t *testing.T) {
 
 	server := NewServer(database, authService, nil, nil)
 
-	body := bytes.NewBufferString(`{"username":"admin","password":"TheStarsh1pKey!"}`)
+	body := bytes.NewBufferString(`{"username":"admin","password":"TheStarsh1pKEY!"}`)
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
 	context.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
@@ -66,4 +66,35 @@ func TestLoginWithSeededAdminCredentials(t *testing.T) {
 	require.True(t, response.User.IsSuperAdmin)
 	require.NotEmpty(t, response.Tokens.AccessToken)
 	require.NotEmpty(t, response.Tokens.RefreshToken)
+}
+
+func TestLoginWithDefaultDevelopmentAdminCredentials(t *testing.T) {
+	t.Setenv("GO_ENV", "development")
+	t.Setenv("ADMIN_SEED_PASSWORD", "")
+	t.Setenv("SPENCER_SEED_PASSWORD", "")
+	t.Setenv("ALLOW_DEFAULT_SEED_PASSWORDS", "false")
+
+	gin.SetMode(gin.TestMode)
+
+	gormDB, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, gormDB.AutoMigrate(&models.User{}, &models.RefreshToken{}))
+
+	database := &db.Database{DB: gormDB}
+	require.NoError(t, database.RunSeeds())
+
+	authService := auth.NewAuthService("test-jwt-secret-with-sufficient-length-1234567890")
+	authService.SetDB(gormDB)
+
+	server := NewServer(database, authService, nil, nil)
+
+	body := bytes.NewBufferString(`{"username":"admin","password":"TheStarsh1pKEY!"}`)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
+	context.Request.Header.Set("Content-Type", "application/json")
+
+	server.Login(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
 }

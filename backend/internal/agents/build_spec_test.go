@@ -380,6 +380,39 @@ func TestParseTaskOutputExtractsCoordinationBlocks(t *testing.T) {
 	}
 }
 
+func TestBuildTaskPromptUsesPatchFirstFormatForRepairTasks(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	prompt := am.buildTaskPrompt(
+		&Task{
+			Type:        TaskFix,
+			Description: "Repair frontend build failure",
+			Input: map[string]any{
+				"work_order_artifact": WorkOrder{
+					ID:          "wo-repair-prompt",
+					Role:        RoleSolver,
+					Category:    WorkOrderRepair,
+					TaskShape:   TaskShapeRepair,
+					RoutingMode: RoutingModeDiagnosisRepair,
+				},
+			},
+		},
+		&Build{
+			Description: "Fix the failing preview build",
+			PowerMode:   PowerBalanced,
+		},
+		&Agent{Role: RoleSolver},
+	)
+
+	if !strings.Contains(prompt, "PATCH-FIRST OUTPUT FORMAT - CRITICAL") {
+		t.Fatalf("expected repair prompt to advertise patch-first output, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "\"patch_bundle\"") {
+		t.Fatalf("expected repair prompt to include patch bundle schema, got %q", prompt)
+	}
+}
+
 func TestValidateTaskCoordinationOutputRejectsOutOfScopeFiles(t *testing.T) {
 	t.Parallel()
 
@@ -670,6 +703,35 @@ func TestSelectBuildScaffoldNewStacks(t *testing.T) {
 				t.Errorf("selectBuildScaffold(%q) = %q, want %q", tt.name, scaffold.ID, tt.wantID)
 			}
 		})
+	}
+}
+
+func TestSelectBuildScaffoldNextFullstackSeedsAPIContractAndAcceptance(t *testing.T) {
+	t.Parallel()
+
+	scaffold := selectBuildScaffold("fullstack", TechStack{Frontend: "Next.js", Backend: "Express"})
+	if scaffold.ID != "fullstack/nextjs-api" {
+		t.Fatalf("unexpected scaffold id: %s", scaffold.ID)
+	}
+	if scaffold.APIContract == nil {
+		t.Fatal("expected next fullstack scaffold to include an API contract")
+	}
+	if scaffold.APIContract.BackendPort != 3000 {
+		t.Fatalf("expected next fullstack backend port 3000, got %+v", scaffold.APIContract)
+	}
+	if len(scaffold.APIContract.Endpoints) == 0 || scaffold.APIContract.Endpoints[0].Path != "/api/health" {
+		t.Fatalf("expected next fullstack health endpoint, got %+v", scaffold.APIContract)
+	}
+	joined := make([]string, 0, len(scaffold.Acceptance))
+	for _, check := range scaffold.Acceptance {
+		joined = append(joined, string(check.Owner)+":"+check.Description)
+	}
+	acceptance := strings.Join(joined, " | ")
+	if !strings.Contains(acceptance, string(RoleBackend)) {
+		t.Fatalf("expected backend acceptance coverage, got %s", acceptance)
+	}
+	if !strings.Contains(acceptance, string(RoleTesting)) {
+		t.Fatalf("expected integration acceptance coverage, got %s", acceptance)
 	}
 }
 

@@ -880,6 +880,25 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 				PlannedFile{Path: "app/api/health/route.ts", Type: "backend", Description: "Health check API route"},
 			)
 		}
+		acceptance := []BuildAcceptanceCheck{
+			{ID: "nextjs-app-shell", Description: "Next.js app must have a working layout.tsx and page.tsx", Owner: RoleFrontend, Required: true},
+		}
+		var apiContract *BuildAPIContract
+		if nextBackend != "" {
+			acceptance = append(acceptance,
+				BuildAcceptanceCheck{ID: "nextjs-api-health", Description: "Next.js API routes must expose a working health endpoint from app/api/health/route.ts", Owner: RoleBackend, Required: true},
+				BuildAcceptanceCheck{ID: "nextjs-fullstack-integration", Description: "Testing must verify Next.js pages and app/api routes agree on the shared /api contract", Owner: RoleTesting, Required: true},
+			)
+			apiContract = &BuildAPIContract{
+				FrontendPort: 3000,
+				BackendPort:  3000,
+				APIBaseURL:   "/api",
+				CORSOrigins:  []string{"http://localhost:3000"},
+				Endpoints: []APIEndpoint{
+					{Method: "GET", Path: "/api/health", Description: "Health check", Output: "{ status: \"ok\" }"},
+				},
+			}
+		}
 		return buildScaffold{
 			ID:          nextScaffoldID,
 			AppType:     nextAppType,
@@ -897,9 +916,8 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			EnvVars: []BuildEnvVar{
 				{Name: "DATABASE_URL", Example: "postgresql://postgres:postgres@localhost:5432/app", Purpose: "Database connection", Required: stack.Database != ""},
 			},
-			Acceptance: []BuildAcceptanceCheck{
-				{ID: "nextjs-app-shell", Description: "Next.js app must have a working layout.tsx and page.tsx", Owner: RoleFrontend, Required: true},
-			},
+			Acceptance:  acceptance,
+			APIContract: apiContract,
 		}
 	case frontend == "react":
 		return buildScaffold{

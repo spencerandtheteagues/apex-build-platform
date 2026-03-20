@@ -1294,18 +1294,32 @@ func deriveRuntimeContractFromAppType(appType string) RuntimeCommandContract {
 }
 
 func deriveAcceptanceBySurface(plan *BuildPlan) []SurfaceAcceptanceContract {
+	if plan == nil {
+		return nil
+	}
 	grouped := map[ContractSurface][]string{}
 	for _, check := range plan.Acceptance {
 		surface := contractSurfaceForRole(check.Owner)
 		grouped[surface] = append(grouped[surface], check.Description)
 	}
-	out := make([]SurfaceAcceptanceContract, 0, len(grouped))
+	out := make([]SurfaceAcceptanceContract, 0, len(grouped)+4)
+	indexBySurface := map[ContractSurface]int{}
 	for surface, checks := range grouped {
+		indexBySurface[surface] = len(out)
 		out = append(out, SurfaceAcceptanceContract{
 			Surface:  surface,
 			Checks:   dedupeStrings(checks),
 			Required: true,
 		})
+	}
+	for _, fallback := range deriveAcceptanceBySurfaceFromAppType(plan.AppType) {
+		if idx, exists := indexBySurface[fallback.Surface]; exists {
+			out[idx].Checks = dedupeStrings(append(out[idx].Checks, fallback.Checks...))
+			out[idx].Required = out[idx].Required || fallback.Required
+			continue
+		}
+		indexBySurface[fallback.Surface] = len(out)
+		out = append(out, fallback)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Surface < out[j].Surface })
 	return out
@@ -1562,6 +1576,7 @@ func appendPatchBundle(build *Build, bundle PatchBundle) {
 	if state == nil {
 		return
 	}
+	applyPatchBundleTruth(state, bundle)
 	state.PatchBundles = append(state.PatchBundles, bundle)
 	if len(state.PatchBundles) > 32 {
 		state.PatchBundles = append([]PatchBundle(nil), state.PatchBundles[len(state.PatchBundles)-32:]...)
@@ -2018,6 +2033,114 @@ func applyVerificationReportTruth(state *BuildOrchestrationState, report Verific
 		tags = append(tags, TruthBlocked)
 	}
 	state.BuildContract.TruthBySurface[key] = normalizeTruthTags(tags)
+}
+
+func inferContractSurfaceFromPath(path string) ContractSurface {
+	path = strings.ToLower(sanitizeFilePath(path))
+	if path == "" {
+		return SurfaceGlobal
+	}
+
+	switch {
+	case strings.HasPrefix(path, ".env"), path == "render.yaml", path == "docker-compose.yml",
+		path == "dockerfile", strings.HasPrefix(path, "dockerfile"), strings.HasSuffix(path, ".dockerfile"),
+		path == "vercel.json", path == "netlify.toml":
+		return SurfaceDeployment
+	case strings.HasPrefix(path, "migrations/"), strings.HasPrefix(path, "prisma/"),
+		strings.HasPrefix(path, "alembic/"), path == "schema.sql",
+		strings.Contains(path, "/schema."), strings.Contains(path, "migration"):
+		return SurfaceData
+	case strings.HasPrefix(path, "app/api/"), strings.HasPrefix(path, "server/"),
+		strings.HasPrefix(path, "backend/"), strings.HasPrefix(path, "routers/"),
+		strings.HasPrefix(path, "handlers/"), strings.HasPrefix(path, "middleware/"),
+		strings.HasPrefix(path, "cmd/"), strings.HasPrefix(path, "internal/"),
+		strings.HasPrefix(path, "pkg/"), path == "main.go", path == "main.py",
+		strings.HasSuffix(path, ".go"), strings.HasSuffix(path, ".py"):
+		return SurfaceBackend
+	case strings.HasPrefix(path, "src/"), strings.HasPrefix(path, "public/"),
+		strings.HasPrefix(path, "components/"), strings.HasPrefix(path, "styles/"),
+		strings.HasPrefix(path, "app/"), path == "index.html",
+		strings.HasPrefix(path, "vite.config"), strings.HasPrefix(path, "tailwind.config"),
+		strings.HasPrefix(path, "postcss.config"), strings.HasPrefix(path, "next.config"),
+		strings.HasSuffix(path, ".tsx"), strings.HasSuffix(path, ".jsx"),
+		strings.HasSuffix(path, ".css"), strings.HasSuffix(path, ".scss"):
+		return SurfaceFrontend
+	case path == "package.json", path == "tsconfig.json", path == "go.mod",
+		path == "requirements.txt", path == "pyproject.toml", path == "readme.md":
+		return SurfaceIntegration
+	default:
+		return SurfaceGlobal
+	}
+}
+
+func applyScaffoldBootstrapTruth(state *BuildOrchestrationState, files []GeneratedFile) {
+	if state == nil || state.BuildContract == nil || len(files) == 0 {
+		return
+	}
+
+	surfaces := map[ContractSurface]bool{}
+	for _, file := range files {
+		surface := inferContractSurfaceFromPath(file.Path)
+		if surface == SurfaceGlobal {
+			continue
+		}
+		surfaces[surface] = true
+	}
+	if surfaces[SurfaceFrontend] && surfaces[SurfaceBackend] {
+		surfaces[SurfaceIntegration] = true
+	}
+	surfaces[SurfaceDeployment] = true
+
+	for surface := range surfaces {
+		key := string(surface)
+		tags := append([]TruthTag(nil), state.BuildContract.TruthBySurface[key]...)
+		tags = removeTruthTags(tags, TruthBlocked)
+		if surface == SurfaceIntegration {
+			tags = append(tags, TruthPartiallyWired)
+		} else {
+			tags = append(tags, TruthScaffolded)
+		}
+		state.BuildContract.TruthBySurface[key] = normalizeTruthTags(tags)
+	}
+}
+
+func applyPatchBundleTruth(state *BuildOrchestrationState, bundle PatchBundle) {
+	if state == nil || state.BuildContract == nil {
+		return
+	}
+
+	surfaces := map[ContractSurface]bool{}
+	if bundle.WorkOrderID != "" {
+		for _, workOrder := range state.WorkOrders {
+			if workOrder.ID == bundle.WorkOrderID && workOrder.ContractSlice.Surface != "" {
+				surfaces[workOrder.ContractSlice.Surface] = true
+				break
+			}
+		}
+	}
+	for _, op := range bundle.Operations {
+		surface := inferContractSurfaceFromPath(op.Path)
+		if surface == SurfaceGlobal {
+			continue
+		}
+		surfaces[surface] = true
+	}
+	if surfaces[SurfaceFrontend] && surfaces[SurfaceBackend] {
+		surfaces[SurfaceIntegration] = true
+	}
+
+	for surface := range surfaces {
+		key := string(surface)
+		tags := append([]TruthTag(nil), state.BuildContract.TruthBySurface[key]...)
+		tags = removeTruthTags(tags, TruthBlocked, TruthScaffolded)
+		switch surface {
+		case SurfaceFrontend, SurfaceBackend, SurfaceData, SurfaceIntegration:
+			tags = append(tags, TruthPartiallyWired)
+		case SurfaceDeployment:
+			tags = append(tags, TruthScaffolded)
+		}
+		state.BuildContract.TruthBySurface[key] = normalizeTruthTags(tags)
+	}
 }
 
 func dedupeCapabilities(values []CapabilityRequirement) []CapabilityRequirement {

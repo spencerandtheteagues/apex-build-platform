@@ -128,6 +128,44 @@ func TestVerifyAndNormalizeBuildContractBlocksMissingAuthAndSchema(t *testing.T)
 	}
 }
 
+func TestVerifyAndNormalizeBuildContractAcceptsNextFullstackScaffoldContract(t *testing.T) {
+	t.Parallel()
+
+	scaffold := selectBuildScaffold("fullstack", TechStack{Frontend: "Next.js", Backend: "Express"})
+	plan := &BuildPlan{
+		ID:          "plan-next-fullstack",
+		BuildID:     "build-next-fullstack",
+		AppType:     scaffold.AppType,
+		TechStack:   TechStack{Frontend: "Next.js", Backend: "Express"},
+		Files:       append([]PlannedFile(nil), scaffold.Required...),
+		Acceptance:  append([]BuildAcceptanceCheck(nil), scaffold.Acceptance...),
+		APIContract: cloneAPIContract(scaffold.APIContract),
+	}
+	intent := &IntentBrief{
+		AppType:              "fullstack",
+		RequiredCapabilities: []CapabilityRequirement{CapabilityAPI},
+	}
+
+	contract := compileBuildContractFromPlan("build-next-fullstack", intent, plan)
+	if contract == nil {
+		t.Fatal("expected next fullstack contract")
+	}
+
+	verified, report := verifyAndNormalizeBuildContract(intent, contract)
+	if verified == nil {
+		t.Fatal("expected corrected next fullstack contract")
+	}
+	if report.Status == VerificationBlocked {
+		t.Fatalf("expected next fullstack scaffold contract to verify, got blockers %v", report.Blockers)
+	}
+	if verified.APIContract == nil || len(verified.APIContract.Endpoints) == 0 {
+		t.Fatalf("expected verified API contract, got %+v", verified.APIContract)
+	}
+	if !hasSurface(verified.AcceptanceBySurface, SurfaceDeployment) {
+		t.Fatalf("expected deployment acceptance surface, got %+v", verified.AcceptanceBySurface)
+	}
+}
+
 func TestGetAvailableProvidersWithGracePeriodForBuildFiltersOllamaForPlatform(t *testing.T) {
 	am := &AgentManager{
 		aiRouter: &stubAIRouter{
@@ -210,6 +248,44 @@ func TestRecordProviderTaskOutcomeUpdatesLiveScorecard(t *testing.T) {
 	}
 	if scorecard.LatencySampleCount == 0 || scorecard.AverageLatencySeconds <= 7.2 {
 		t.Fatalf("expected latency average to move from prior, got %+v", scorecard)
+	}
+}
+
+func TestAppendPatchBundleUpdatesTruthBySurface(t *testing.T) {
+	build := &Build{
+		ID: "build-truth-patch",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				BuildContract: &BuildContract{
+					ID:      "contract-truth",
+					BuildID: "build-truth-patch",
+					TruthBySurface: map[string][]TruthTag{
+						string(SurfaceFrontend): {TruthScaffolded, TruthBlocked},
+					},
+				},
+			},
+		},
+	}
+
+	appendPatchBundle(build, PatchBundle{
+		ID:      "bundle-truth",
+		BuildID: build.ID,
+		Operations: []PatchOperation{
+			{Type: PatchReplaceFunction, Path: "src/App.tsx", Content: "export default function App(){ return <main>ok</main> }\n"},
+		},
+	})
+
+	state := build.SnapshotState.Orchestration
+	if state == nil || state.BuildContract == nil {
+		t.Fatal("expected orchestration build contract")
+	}
+	tags := state.BuildContract.TruthBySurface[string(SurfaceFrontend)]
+	if containsTruthTag(tags, TruthScaffolded) || containsTruthTag(tags, TruthBlocked) {
+		t.Fatalf("expected patch promotion to clear scaffolded/blocked tags, got %+v", tags)
+	}
+	if !containsTruthTag(tags, TruthPartiallyWired) {
+		t.Fatalf("expected patch promotion to mark frontend partially wired, got %+v", tags)
 	}
 }
 

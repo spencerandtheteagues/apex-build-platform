@@ -2,6 +2,7 @@ package agents
 
 import (
 	"testing"
+	"time"
 
 	"apex-build/internal/ai"
 )
@@ -142,5 +143,92 @@ func TestGetNextFallbackProviderForTask_UsesLiveScorecards(t *testing.T) {
 	got := am.getNextFallbackProviderForTask(build, task, RoleFrontend, ai.ProviderGPT4)
 	if got != ai.ProviderGemini {
 		t.Fatalf("fallback provider = %s, want live-scorecard provider %s", got, ai.ProviderGemini)
+	}
+}
+
+func TestGetNextFallbackProviderForTask_PrefersTaskPreferredProvider(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini},
+			hasConfiguredProvider: true,
+		},
+	}
+	build := &Build{
+		ID:           "build-fallback-preferred",
+		ProviderMode: "platform",
+	}
+	task := &Task{
+		ID:   "task-fallback-preferred",
+		Type: TaskGenerateUI,
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{
+				ID:                "wo-front-preferred",
+				Role:              RoleFrontend,
+				TaskShape:         TaskShapeFrontendPatch,
+				PreferredProvider: ai.ProviderClaude,
+			},
+		},
+	}
+
+	got := am.getNextFallbackProviderForTask(build, task, RoleFrontend, ai.ProviderGPT4)
+	if got != ai.ProviderClaude {
+		t.Fatalf("fallback provider = %s, want task preferred provider %s", got, ai.ProviderClaude)
+	}
+}
+
+func TestAssignTaskSwitchesAgentProviderToTaskPreferredProvider(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini},
+			hasConfiguredProvider: true,
+		},
+		agents:      map[string]*Agent{},
+		builds:      map[string]*Build{},
+		taskQueue:   make(chan *Task, 1),
+		resultQueue: make(chan *TaskResult, 1),
+		subscribers: map[string][]chan *WSMessage{},
+	}
+
+	build := &Build{
+		ID:           "build-assign-preferred",
+		Status:       BuildInProgress,
+		ProviderMode: "platform",
+		Agents:       map[string]*Agent{},
+	}
+	agent := &Agent{
+		ID:       "agent-front-preferred",
+		Role:     RoleFrontend,
+		Provider: ai.ProviderGPT4,
+		Model:    selectModelForPowerMode(ai.ProviderGPT4, PowerBalanced),
+		BuildID:  build.ID,
+		Status:   StatusIdle,
+	}
+	task := &Task{
+		ID:         "task-front-preferred",
+		Type:       TaskGenerateUI,
+		Status:     TaskPending,
+		MaxRetries: 2,
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{
+				ID:                "wo-front-preferred",
+				Role:              RoleFrontend,
+				TaskShape:         TaskShapeFrontendPatch,
+				PreferredProvider: ai.ProviderClaude,
+			},
+		},
+		CreatedAt: time.Now(),
+	}
+	build.Agents[agent.ID] = agent
+	am.agents[agent.ID] = agent
+	am.builds[build.ID] = build
+
+	if err := am.AssignTask(agent.ID, task); err != nil {
+		t.Fatalf("AssignTask returned error: %v", err)
+	}
+	if agent.Provider != ai.ProviderClaude {
+		t.Fatalf("agent provider = %s, want %s", agent.Provider, ai.ProviderClaude)
+	}
+	if agent.Model == "" {
+		t.Fatalf("expected provider switch to update model")
 	}
 }

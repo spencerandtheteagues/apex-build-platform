@@ -943,126 +943,130 @@ function App() {
   return (
     <div className="h-screen flex flex-col bg-black">
       {/* Top Navigation */}
-      <div className="min-h-14 shrink-0 bg-black/90 border-b border-red-900/30 px-4 py-2 z-50 relative flex flex-wrap items-center gap-3">
-        {/* Logo */}
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="w-16 h-16 flex items-center justify-center">
-            <img
-              src={logoSrc}
-              alt="APEX Logo"
-              className="desktop-header-logo w-full h-full object-contain drop-shadow-[0_0_12px_rgba(239,68,68,0.5)]"
-            />
-          </div>
-          <div className="min-w-0">
-            <span className="desktop-header-wordmark hidden sm:inline text-xl font-bold bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
-              APEX-BUILD
-            </span>
-            <div className="sm:hidden text-[11px] uppercase tracking-[0.2em] text-gray-500">
-              {currentViewMeta.label}
+      <div className="shrink-0 bg-black/90 border-b border-red-900/30 px-4 py-3 z-50 relative">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+          {/* Logo */}
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="w-16 h-16 flex items-center justify-center">
+              <img
+                src={logoSrc}
+                alt="APEX Logo"
+                className="desktop-header-logo w-full h-full object-contain drop-shadow-[0_0_12px_rgba(239,68,68,0.5)]"
+              />
             </div>
-          </div>
-        </div>
-
-        {/* View Toggle */}
-        <div className="hidden md:block order-3 w-full md:order-none md:flex-1 md:min-w-0">
-          <div className="flex items-center gap-2">
-            {navigationItems.map((item) => (
-              <button
-                key={item.view}
-                onClick={() => handleWorkspaceNavigation(item.view)}
-                className={`flex items-center gap-2 px-4 py-1.5 rounded-md border font-bold text-sm tracking-wide transition-all duration-200 ${
-                  currentView === item.view
-                    ? item.activeClassName
-                    : item.inactiveClassName
-                }`}
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="md:hidden flex-1 min-w-0" ref={workspaceMenuRef}>
-          <button
-            type="button"
-            onClick={() => setShowSettingsDropdown((prev) => !prev)}
-            className="w-full flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/60 px-3 py-2 text-left"
-            aria-haspopup="menu"
-            aria-expanded={showSettingsDropdown}
-          >
             <div className="min-w-0">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">Workspace</div>
-              <div className="truncate text-sm font-medium text-white">{currentViewMeta.label}</div>
+              <span className="desktop-header-wordmark hidden sm:inline text-xl font-bold bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
+                APEX-BUILD
+              </span>
+              <div className="sm:hidden text-[11px] uppercase tracking-[0.2em] text-gray-500">
+                {currentViewMeta.label}
+              </div>
             </div>
-            <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showSettingsDropdown ? 'rotate-180' : ''}`} />
-          </button>
+          </div>
 
-          {showSettingsDropdown && (
-            <div className="absolute left-4 right-4 top-full mt-2 rounded-xl border border-gray-800 bg-black/95 p-2 shadow-2xl shadow-black/60 backdrop-blur-xl">
-              <div className="max-h-[calc(100vh-9rem)] overflow-y-auto space-y-1 pr-1">
-                {workspaceMenuItems.map((item) => (
+          {/* View Toggle */}
+          <div className="hidden md:flex md:min-w-0 md:flex-1 md:items-center md:gap-4">
+            <div className="min-w-0 flex-1 overflow-x-auto pb-1 -mb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <div className="flex min-w-max items-center gap-2 pr-1">
+                {navigationItems.map((item) => (
                   <button
                     key={item.view}
-                    type="button"
                     onClick={() => handleWorkspaceNavigation(item.view)}
-                    className={`w-full flex items-start gap-3 rounded-lg border px-3 py-3 text-left transition-all ${
+                    className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md border px-4 py-1.5 text-sm font-bold tracking-wide transition-all duration-200 ${
                       currentView === item.view
                         ? item.activeClassName
-                        : 'border-transparent text-gray-300 hover:border-gray-800 hover:bg-gray-900/70'
+                        : item.inactiveClassName
                     }`}
-                    role="menuitem"
                   >
-                    <span className="mt-0.5 shrink-0">{item.icon}</span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-semibold">{item.label}</span>
-                      <span className="block text-xs text-gray-500 leading-relaxed">{item.description}</span>
-                    </span>
+                    {item.icon}
+                    <span>{item.label}</span>
                   </button>
                 ))}
               </div>
             </div>
-          )}
-        </div>
 
-        <div className="hidden lg:flex items-center gap-2 text-xs text-gray-500 min-w-0">
-          <span className="rounded-full border border-gray-800 bg-gray-900/60 px-2 py-1 uppercase tracking-[0.18em] text-gray-400">
-            {currentViewMeta.label}
-          </span>
-          <span className="truncate">{currentViewMeta.description}</span>
-        </div>
-
-        {/* User Info */}
-        {user && (
-          <div className="ml-auto flex items-center gap-2 shrink-0">
-            <button
-              onClick={handleStartNewBuild}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-red-900/50 bg-red-950/30 text-red-300 transition-all duration-200 hover:bg-red-900/30 hover:text-white"
-              title="Start a new build"
-            >
-              <Rocket className="w-4 h-4" />
-              <span className="hidden sm:inline text-sm font-medium">New Build</span>
-            </button>
-            <div className="hidden xl:block">
-              <CostTicker />
-            </div>
-            <button
-              onClick={() => navigateToView('settings')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all duration-200 ${
-                currentView === 'settings'
-                  ? 'bg-red-900/20 text-red-400 border border-red-900/50'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
-              }`}
-              title="Settings & API Keys"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-            <span className="hidden md:inline text-sm text-gray-400">{user.username}</span>
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-red-900/30">
-              {user.username?.charAt(0).toUpperCase()}
+            <div className="hidden 2xl:flex shrink-0 items-center gap-2 min-w-0 max-w-[24rem] text-xs text-gray-500">
+              <span className="shrink-0 rounded-full border border-gray-800 bg-gray-900/70 px-2.5 py-1 uppercase tracking-[0.18em] text-gray-400">
+                {currentViewMeta.label}
+              </span>
+              <span className="truncate text-gray-500">{currentViewMeta.description}</span>
             </div>
           </div>
-        )}
+
+          <div className="md:hidden flex-1 min-w-0" ref={workspaceMenuRef}>
+            <button
+              type="button"
+              onClick={() => setShowSettingsDropdown((prev) => !prev)}
+              className="w-full flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/60 px-3 py-2 text-left"
+              aria-haspopup="menu"
+              aria-expanded={showSettingsDropdown}
+            >
+              <div className="min-w-0">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">Workspace</div>
+                <div className="truncate text-sm font-medium text-white">{currentViewMeta.label}</div>
+              </div>
+              <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showSettingsDropdown ? 'rotate-180' : ''}`} />
+            </button>
+
+            {showSettingsDropdown && (
+              <div className="absolute left-4 right-4 top-full mt-2 rounded-xl border border-gray-800 bg-black/95 p-2 shadow-2xl shadow-black/60 backdrop-blur-xl">
+                <div className="max-h-[calc(100vh-9rem)] overflow-y-auto space-y-1 pr-1">
+                  {workspaceMenuItems.map((item) => (
+                    <button
+                      key={item.view}
+                      type="button"
+                      onClick={() => handleWorkspaceNavigation(item.view)}
+                      className={`w-full flex items-start gap-3 rounded-lg border px-3 py-3 text-left transition-all ${
+                        currentView === item.view
+                          ? item.activeClassName
+                          : 'border-transparent text-gray-300 hover:border-gray-800 hover:bg-gray-900/70'
+                      }`}
+                      role="menuitem"
+                    >
+                      <span className="mt-0.5 shrink-0">{item.icon}</span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold">{item.label}</span>
+                        <span className="block text-xs text-gray-500 leading-relaxed">{item.description}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* User Info */}
+          {user && (
+            <div className="ml-auto flex items-center gap-2 shrink-0 rounded-2xl border border-gray-900/80 bg-black/40 px-2 py-1 backdrop-blur-sm">
+              <button
+                onClick={handleStartNewBuild}
+                className="flex items-center gap-2 whitespace-nowrap rounded-md border border-red-900/50 bg-red-950/30 px-3 py-1.5 text-red-300 transition-all duration-200 hover:bg-red-900/30 hover:text-white"
+                title="Start a new build"
+              >
+                <Rocket className="w-4 h-4" />
+                <span className="hidden sm:inline text-sm font-medium">New Build</span>
+              </button>
+              <div className="hidden xl:block">
+                <CostTicker />
+              </div>
+              <button
+                onClick={() => navigateToView('settings')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all duration-200 ${
+                  currentView === 'settings'
+                    ? 'bg-red-900/20 text-red-400 border border-red-900/50'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                }`}
+                title="Settings & API Keys"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+              <span className="hidden lg:inline max-w-[10rem] truncate text-sm text-gray-400">{user.username}</span>
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-red-900/30">
+                {user.username?.charAt(0).toUpperCase()}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Main Content - Wrapped in ErrorBoundary and safely rendered */}

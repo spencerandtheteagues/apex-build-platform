@@ -156,14 +156,17 @@ const (
 
 // TaskOutput contains the results of a completed task
 type TaskOutput struct {
-	Files          []GeneratedFile       `json:"files,omitempty"`
-	Messages       []string              `json:"messages,omitempty"`
-	Suggestions    []string              `json:"suggestions,omitempty"`
-	Metrics        map[string]any        `json:"metrics,omitempty"`
-	TruncatedFiles []string              `json:"truncated_files,omitempty"` // file paths whose content was cut off mid-generation
-	Plan           *BuildPlan            `json:"plan,omitempty"`
-	StartAck       *TaskStartAck         `json:"start_ack,omitempty"`
-	Completion     *TaskCompletionReport `json:"completion,omitempty"`
+	Files                      []GeneratedFile       `json:"files,omitempty"`
+	DeletedFiles               []string              `json:"deleted_files,omitempty"`
+	Messages                   []string              `json:"messages,omitempty"`
+	Suggestions                []string              `json:"suggestions,omitempty"`
+	Metrics                    map[string]any        `json:"metrics,omitempty"`
+	TruncatedFiles             []string              `json:"truncated_files,omitempty"` // file paths whose content was cut off mid-generation
+	StructuredPatchBundle      *PatchBundle          `json:"structured_patch_bundle,omitempty"`
+	ProviderVerificationReport *VerificationReport   `json:"provider_verification_report,omitempty"`
+	Plan                       *BuildPlan            `json:"plan,omitempty"`
+	StartAck                   *TaskStartAck         `json:"start_ack,omitempty"`
+	Completion                 *TaskCompletionReport `json:"completion,omitempty"`
 }
 
 // GeneratedFile represents a file created by an agent

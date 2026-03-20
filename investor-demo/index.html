@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>APEX-BUILD Investor Deck</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="backdrop backdrop-a"></div>
+    <div class="backdrop backdrop-b"></div>
+    <div class="noise"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <img src="../frontend/public/apex-build-logo-transparent.png" alt="APEX-BUILD logo" class="brand-logo" />
+        <div>
+          <p class="eyebrow">Investor Presentation</p>
+          <h1>APEX-BUILD</h1>
+        </div>
+      </div>
+      <nav class="deck-nav">
+        <a href="#overview">Overview</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#advantage">Advantage</a>
+        <a href="#economics">Economics</a>
+        <a href="#deal">Deal</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero section" id="overview">
+        <div class="hero-copy reveal">
+          <p class="kicker">AI Cloud IDE + Multi-Agent Build Platform</p>
+          <h2>
+            Raise <span>$10,000</span> to launch a platform designed to win the
+            users current AI coding tools frustrate.
+          </h2>
+          <p class="hero-text">
+            APEX-BUILD combines prompt-to-product generation, a real browser IDE,
+            multi-provider AI routing, cost transparency, deployment, collaboration,
+            and export ownership in one product. The wedge is simple: make switching
+            from Replit, Bolt, and v0 easier than staying.
+          </p>
+
+          <div class="hero-actions">
+            <div class="deal-card glow-red">
+              <span class="deal-label">Current Offer</span>
+              <strong>$10,000 for 5%</strong>
+              <p>Implied post-money valuation: <span>$200,000</span></p>
+            </div>
+            <div class="deal-card glow-cyan">
+              <span class="deal-label">Target Outcome</span>
+              <strong>1,000 paying customers</strong>
+              <p>Potential re-rating to <span>$4.7M-$7.1M</span></p>
+            </div>
+          </div>
+
+          <div class="stat-strip">
+            <article class="stat-card reveal">
+              <span class="stat-value" data-count="10">10</span>
+              <span class="stat-label">specialized agents</span>
+            </article>
+            <article class="stat-card reveal">
+              <span class="stat-value" data-count="6">6</span>
+              <span class="stat-label">AI provider lanes</span>
+            </article>
+            <article class="stat-card reveal">
+              <span class="stat-value" data-count="3">3</span>
+              <span class="stat-label">power modes</span>
+            </article>
+            <article class="stat-card reveal">
+              <span class="stat-value" data-count="1">1</span>
+              <span class="stat-label">cloud IDE with cost visibility</span>
+            </article>
+          </div>
+        </div>
+
+        <div class="hero-visual reveal">
+          <div class="shot-card master-shot">
+            <img src="./screens/build_hero.png" alt="APEX-BUILD hero interface" />
+            <div class="bubble bubble-top-right">Prompt to product from one workspace</div>
+            <div class="bubble bubble-bottom-left">Real-time orchestration visible to the user</div>
+            <div class="shot-tag">Platform UI screenshot</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="proof section">
+        <div class="section-heading reveal">
+          <p class="kicker">Why This Exists</p>
+          <h3>The product is built around the biggest user complaints in AI coding platforms.</h3>
+          <p>
+            APEX-BUILD is not just another wrapper around one model. It was designed
+            to solve the most common reasons developers churn: opaque pricing, weak
+            export, vendor lock-in, limited model choice, shallow Git support, and
+            poor recovery when AI output breaks.
+          </p>
+        </div>
+
+        <div class="pain-grid">
+          <article class="pain-card reveal">
+            <span>Complaint 01</span>
+            <h4>“I do not know what I am paying for.”</h4>
+            <p>APEX-BUILD exposes provider, tokens, and spend in real time with hard budget controls.</p>
+          </article>
+          <article class="pain-card reveal">
+            <span>Complaint 02</span>
+            <h4>“I am locked into one model.”</h4>
+            <p>Users can route across Claude, OpenAI, Gemini, Grok, Ollama, and BYOK in one build.</p>
+          </article>
+          <article class="pain-card reveal">
+            <span>Complaint 03</span>
+            <h4>“The app breaks and the AI cannot recover.”</h4>
+            <p>Dedicated reviewer and solver roles create a real recovery ladder instead of blind retries.</p>
+          </article>
+          <article class="pain-card reveal">
+            <span>Complaint 04</span>
+            <h4>“I cannot leave without losing work.”</h4>
+            <p>Git export, deployment ownership, and migration flows reduce switching friction to near zero.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="workflow section" id="workflow">
+        <div class="section-heading reveal">
+          <p class="kicker">Workflow Story</p>
+          <h3>Show the investor the whole journey from prompt to live product.</h3>
+          <p>
+            The screens below are built from current platform screenshots with guided
+            overlays for presentation clarity. They show the exact workflow an investor
+            needs to understand: describe, orchestrate, review, launch, and expand.
+          </p>
+        </div>
+
+        <div class="workflow-grid">
+          <figure class="shot-card reveal">
+            <img src="./screens/build_prompt_typed.png" alt="Prompting APEX-BUILD to create an app" />
+            <div class="bubble bubble-upper-left">Describe the product in plain English</div>
+            <div class="bubble bubble-lower-right">Choose model power mode and launch the build</div>
+            <figcaption>
+              <strong>1. Prompt the build</strong>
+              A non-technical user can specify a full product in everyday language.
+            </figcaption>
+          </figure>
+
+          <figure class="shot-card reveal">
+            <img src="./screens/build_orchestration.png" alt="Multi-agent build orchestration view" />
+            <div class="bubble bubble-upper-right">Planner, architect, frontend, backend, database, testing, reviewer</div>
+            <div class="bubble bubble-lower-left">Parallel work instead of one AI doing everything badly</div>
+            <figcaption>
+              <strong>2. Orchestrate specialists</strong>
+              Users see the build plan and agent work instead of waiting in a black box.
+            </figcaption>
+          </figure>
+
+          <figure class="shot-card reveal">
+            <img src="./screens/build_activity_streaming.png" alt="Streaming build activity and system feedback" />
+            <div class="bubble bubble-upper-left">Continuous progress, logs, and system decisions</div>
+            <div class="bubble bubble-lower-right">Trust improves when the system explains itself live</div>
+            <figcaption>
+              <strong>3. Stream progress in real time</strong>
+              APEX-BUILD turns “wait and hope” into visible progress and user confidence.
+            </figcaption>
+          </figure>
+
+          <figure class="shot-card reveal">
+            <img src="./screens/ide_with_preview.png" alt="IDE with code and live app preview" />
+            <div class="bubble bubble-upper-right">Real IDE, real files, real preview</div>
+            <div class="bubble bubble-lower-left">This is where retention happens after the first wow moment</div>
+            <figcaption>
+              <strong>4. Keep users in the workspace</strong>
+              Editing, preview, debug, package changes, and deployment all stay inside one environment.
+            </figcaption>
+          </figure>
+        </div>
+
+        <div class="workflow-bottom">
+          <figure class="shot-card wide reveal">
+            <img src="./screens/projects_dashboard.png" alt="Projects dashboard inside APEX-BUILD" />
+            <div class="bubble bubble-upper-left">Every build becomes a reusable asset, not a throwaway prompt</div>
+            <div class="bubble bubble-upper-right">A migration wedge makes competitor switching deliberate</div>
+            <div class="shot-tag">Presentation note: guided overlays added for investor readability</div>
+          </figure>
+
+          <div class="agent-panel reveal">
+            <p class="kicker">Agent Stack</p>
+            <h4>The platform already has the depth that most “AI builders” fake.</h4>
+            <div class="agent-chips">
+              <span>Lead</span>
+              <span>Planner</span>
+              <span>Architect</span>
+              <span>Frontend</span>
+              <span>Backend</span>
+              <span>Database</span>
+              <span>Testing</span>
+              <span>DevOps</span>
+              <span>Reviewer</span>
+              <span>Solver</span>
+            </div>
+            <ul class="feature-list">
+              <li>Monaco IDE with preview, terminal, Git, package management, comments, and checkpoints.</li>
+              <li>Model routing across major AI providers with fallback and cost-aware control.</li>
+              <li>Ownership-first export story: deploy on the user’s account, push to the user’s repo.</li>
+              <li>“Migrate from Replit” built as a direct acquisition channel, not a side feature.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="advantage section" id="advantage">
+        <div class="section-heading reveal">
+          <p class="kicker">Why We Can Win</p>
+          <h3>APEX-BUILD attacks the exact category weaknesses that created the opening.</h3>
+          <p>
+            Replit, Bolt, and v0 proved the market wants AI-assisted app creation.
+            The next winner will be the platform that combines ownership, flexibility,
+            cost clarity, and better execution quality.
+          </p>
+        </div>
+
+        <div class="comparison-card reveal">
+          <div class="comparison-row comparison-head">
+            <span>Key Decision Point</span>
+            <span>Typical frustration elsewhere</span>
+            <span>APEX-BUILD advantage</span>
+          </div>
+          <div class="comparison-row">
+            <span>Model choice</span>
+            <span>One-model lock-in</span>
+            <span>Multi-provider routing plus BYOK</span>
+          </div>
+          <div class="comparison-row">
+            <span>Pricing transparency</span>
+            <span>Credits disappear with no detail</span>
+            <span>Live spend ticker, budget caps, ledger history</span>
+          </div>
+          <div class="comparison-row">
+            <span>Recovery quality</span>
+            <span>Single AI retries blindly</span>
+            <span>Reviewer + solver + repair loops</span>
+          </div>
+          <div class="comparison-row">
+            <span>Code ownership</span>
+            <span>Export friction and hosting dependence</span>
+            <span>Git export and deployment on the customer’s account</span>
+          </div>
+          <div class="comparison-row">
+            <span>Switching incentive</span>
+            <span>No easy migration path</span>
+            <span>Deliberate Replit migration wedge</span>
+          </div>
+        </div>
+
+        <div class="advantage-grid">
+          <article class="advantage-card reveal">
+            <span class="mini-kicker">Market signal</span>
+            <h4>AI coding is proven venture territory.</h4>
+            <p>
+              Competitors already proved there is real demand for AI-native development.
+              APEX-BUILD’s bet is that the long-term winner looks more like a serious
+              workspace than a glorified prompt box.
+            </p>
+          </article>
+          <article class="advantage-card reveal">
+            <span class="mini-kicker">Founder wedge</span>
+            <h4>Built from direct product frustration, not trend chasing.</h4>
+            <p>
+              The platform was designed from real-world complaints: weak Git, hidden
+              spend, missing ownership, shallow debugging, and poor migration options.
+            </p>
+          </article>
+          <article class="advantage-card reveal">
+            <span class="mini-kicker">Retention thesis</span>
+            <h4>The IDE is the moat, not just the first prompt.</h4>
+            <p>
+              Once users build, preview, edit, deploy, collaborate, and track spend in
+              one place, churn falls because the whole workflow is embedded.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="economics section" id="economics">
+        <div class="section-heading reveal">
+          <p class="kicker">Use Of Funds + 90-Day Plan</p>
+          <h3>The $10,000 round is not for research. It is for launch execution.</h3>
+          <p>
+            The product already exists. This capital is meant to harden launch, keep
+            the AI rails funded, formalize the business, and acquire the first wave of
+            users with a clear migration-first story.
+          </p>
+        </div>
+
+        <div class="economics-grid">
+          <article class="allocation-card reveal">
+            <h4>Use of funds</h4>
+            <div class="allocation-list">
+              <div class="allocation-row">
+                <span>AI API credits and launch inference runway</span>
+                <strong>$3,500</strong>
+              </div>
+              <div class="allocation-row">
+                <span>Claude, ChatGPT, Gemini, and Grok subscriptions</span>
+                <strong>$1,200</strong>
+              </div>
+              <div class="allocation-row">
+                <span>LLC registration, accounting, launch admin</span>
+                <strong>$1,400</strong>
+              </div>
+              <div class="allocation-row">
+                <span>Domain, hosting, email, monitoring, launch ops</span>
+                <strong>$900</strong>
+              </div>
+              <div class="allocation-row">
+                <span>Launch content, paid ads, creator outreach</span>
+                <strong>$2,200</strong>
+              </div>
+              <div class="allocation-row">
+                <span>Buffer for unexpected launch costs</span>
+                <strong>$800</strong>
+              </div>
+            </div>
+            <div class="allocation-total">
+              <span>Total raise</span>
+              <strong>$10,000</strong>
+            </div>
+          </article>
+
+          <article class="timeline-card reveal">
+            <h4>Launch timeline</h4>
+            <div class="timeline-step">
+              <span>Days 0-30</span>
+              <div>
+                <strong>Polish + readiness</strong>
+                <p>Finalize launch messaging, stabilize provider credits, tighten onboarding, finish investor demo, register the LLC.</p>
+              </div>
+            </div>
+            <div class="timeline-step">
+              <span>Days 31-60</span>
+              <div>
+                <strong>Acquire the first users</strong>
+                <p>Push migration messaging, publish demos, run targeted creator outreach, capture early case studies.</p>
+              </div>
+            </div>
+            <div class="timeline-step">
+              <span>Days 61-90</span>
+              <div>
+                <strong>Paid launch + conversion loop</strong>
+                <p>Drive trial-to-paid conversion, expand templates, collect retention signals, and prepare the follow-on round.</p>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div class="projection-panel reveal">
+          <div class="projection-copy">
+            <span class="mini-kicker">Optimistic but grounded model</span>
+            <h4>Blended ARPU assumption: <span>$49/month</span></h4>
+            <p>
+              The model below assumes APEX-BUILD converts a mix of solo builders,
+              power users, and small teams into a blended $49 monthly revenue user.
+              This is intentionally optimistic, but still within the range of premium
+              developer SaaS pricing.
+            </p>
+          </div>
+
+          <div class="projection-table">
+            <div class="projection-head">
+              <span>Customer count</span>
+              <span>MRR</span>
+              <span>ARR</span>
+              <span>8x-12x ARR value</span>
+              <span>What 5% is worth</span>
+            </div>
+            <div class="projection-row">
+              <span>100</span>
+              <span>$4,900</span>
+              <span>$58,800</span>
+              <span>$470K-$706K</span>
+              <span>$23.5K-$35.3K</span>
+            </div>
+            <div class="projection-row">
+              <span>500</span>
+              <span>$24,500</span>
+              <span>$294,000</span>
+              <span>$2.35M-$3.53M</span>
+              <span>$117.5K-$176.5K</span>
+            </div>
+            <div class="projection-row highlight">
+              <span>1,000</span>
+              <span>$49,000</span>
+              <span>$588,000</span>
+              <span>$4.70M-$7.06M</span>
+              <span>$235K-$353K</span>
+            </div>
+            <div class="projection-row">
+              <span>2,500</span>
+              <span>$122,500</span>
+              <span>$1.47M</span>
+              <span>$11.76M-$17.64M</span>
+              <span>$588K-$882K</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bar-board reveal">
+          <div class="bar-item">
+            <div class="bar-meta">
+              <span>Month 3 target</span>
+              <strong>100 paying users</strong>
+            </div>
+            <div class="bar-track"><span style="width: 18%"></span></div>
+          </div>
+          <div class="bar-item">
+            <div class="bar-meta">
+              <span>Month 9 target</span>
+              <strong>500 paying users</strong>
+            </div>
+            <div class="bar-track"><span style="width: 52%"></span></div>
+          </div>
+          <div class="bar-item">
+            <div class="bar-meta">
+              <span>Month 12 target</span>
+              <strong>1,000 paying users</strong>
+            </div>
+            <div class="bar-track"><span style="width: 100%"></span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="deal section" id="deal">
+        <div class="section-heading reveal">
+          <p class="kicker">Why This Deal Can Matter</p>
+          <h3>If launch works, the investor’s 5% moves from symbolic to meaningful very quickly.</h3>
+          <p>
+            At today’s implied $200,000 valuation, the check is simply the fuel to
+            launch. If APEX-BUILD reaches 1,000 paying customers, that same 5% could
+            plausibly be worth hundreds of thousands of dollars on a software multiple.
+          </p>
+        </div>
+
+        <div class="deal-grid">
+          <article class="deal-panel glow-red reveal">
+            <span class="mini-kicker">Today</span>
+            <h4>$10,000 buys 5%</h4>
+            <p>Entry valuation implied by the current offer: <strong>$200,000 post-money</strong>.</p>
+          </article>
+          <article class="deal-panel glow-cyan reveal">
+            <span class="mini-kicker">If launch succeeds</span>
+            <h4>1,000 paying customers materially changes the story.</h4>
+            <p>At $588K ARR and a typical SaaS revenue multiple, 5% could be worth <strong>$235K-$353K</strong>.</p>
+          </article>
+          <article class="deal-panel reveal">
+            <span class="mini-kicker">Reserved follow-on</span>
+            <h4>$75,000 expansion option</h4>
+            <p>If launch KPIs are hit, the lead investor gets first access to a proposed <strong>$75,000 follow-on opportunity</strong> for a larger stake before it is offered elsewhere.</p>
+          </article>
+        </div>
+
+        <div class="final-board reveal">
+          <div>
+            <p class="kicker">What investors want to know</p>
+            <h4>Why back this now?</h4>
+            <ul class="feature-list">
+              <li>The product is already visibly real, not a pitch deck mockup with no software behind it.</li>
+              <li>The category has already proven demand, but users still complain about cost opacity and lock-in.</li>
+              <li>APEX-BUILD has a direct acquisition wedge: ownership, migration, and better AI flexibility.</li>
+              <li>The $10,000 ask is small enough to be efficient and large enough to create launch momentum.</li>
+            </ul>
+          </div>
+          <div class="closing-card">
+            <span class="mini-kicker">Closing message</span>
+            <h4>Back the launch, not the dream phase.</h4>
+            <p>
+              APEX-BUILD is built. The task now is to register the business, fund the
+              AI rails, acquire users, and prove retention. This round is about
+              turning a working platform into a live business.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>
+        Presentation note: visuals are based on current APEX-BUILD screenshots with
+        investor-focused overlays for readability. Revenue and valuation scenarios
+        are forward-looking assumptions, not guarantees.
+      </p>
+    </footer>
+
+    <script src="./presentation.js"></script>
+  </body>
+</html>

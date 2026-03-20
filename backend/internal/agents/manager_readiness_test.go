@@ -598,6 +598,68 @@ func TestVerifyGeneratedFrontendPreviewReadiness(t *testing.T) {
 	})
 }
 
+func TestVerificationNeedsNodeInstall(t *testing.T) {
+	t.Parallel()
+
+	t.Run("skips_install_for_node_eval_build", func(t *testing.T) {
+		t.Parallel()
+
+		manifest := previewManifest{
+			Scripts: map[string]string{
+				"build": `node -e "console.log('ok')"`,
+			},
+			Dependencies: map[string]string{
+				"react": "^18.2.0",
+			},
+		}
+
+		if verificationNeedsNodeInstall(manifest, false, false) {
+			t.Fatalf("expected node -e build to skip dependency install")
+		}
+	})
+
+	t.Run("installs_for_toolchain_builds", func(t *testing.T) {
+		t.Parallel()
+
+		manifest := previewManifest{
+			Scripts: map[string]string{
+				"build": "vite build",
+			},
+			Dependencies: map[string]string{
+				"react": "^18.2.0",
+			},
+			DevDependencies: map[string]string{
+				"vite": "^5.0.0",
+			},
+		}
+
+		if !verificationNeedsNodeInstall(manifest, false, false) {
+			t.Fatalf("expected vite build to require dependency install")
+		}
+	})
+
+	t.Run("installs_for_preview_probe_commands", func(t *testing.T) {
+		t.Parallel()
+
+		manifest := previewManifest{
+			Scripts: map[string]string{
+				"build":   `node -e "console.log('ok')"`,
+				"preview": "vite preview",
+			},
+			Dependencies: map[string]string{
+				"react": "^18.2.0",
+			},
+			DevDependencies: map[string]string{
+				"vite": "^5.0.0",
+			},
+		}
+
+		if !verificationNeedsNodeInstall(manifest, false, true) {
+			t.Fatalf("expected preview probe to require dependency install")
+		}
+	})
+}
+
 func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 	t.Parallel()
 
@@ -1157,6 +1219,101 @@ func TestParseTaskOutputFlagsUnterminatedCodeBlock(t *testing.T) {
 	}
 	if !containsError(errs, "unterminated code block") {
 		t.Fatalf("expected parser warning surfaced in verification errors, got %v", errs)
+	}
+}
+
+func TestParseTaskOutputCapturesStructuredPatchBundle(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	resp := "```json\n" +
+		"{\"patch_bundle\":{\"justification\":\"repair frontend shell\",\"operations\":[" +
+		"{\"type\":\"replace_function\",\"path\":\"src/App.tsx\",\"content\":\"export default function App(){ return <main>ok</main> }\\n\"}," +
+		"{\"type\":\"delete_block\",\"path\":\"src/obsolete.ts\"}" +
+		"]}}\n" +
+		"```"
+
+	out := am.parseTaskOutput(TaskFix, resp)
+	if out.StructuredPatchBundle == nil {
+		t.Fatal("expected structured patch bundle to be parsed")
+	}
+	if got := len(out.StructuredPatchBundle.Operations); got != 2 {
+		t.Fatalf("expected 2 structured patch operations, got %d", got)
+	}
+	if len(out.Files) != 0 {
+		t.Fatalf("expected structured patch parse to avoid file fallback parsing, got %+v", out.Files)
+	}
+}
+
+func TestMaterializeStructuredPatchOutputUsesBaselineAndTracksDeletes(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	task := &Task{
+		ID:   "task-structured-materialize",
+		Type: TaskFix,
+		Input: map[string]any{
+			"patch_baseline_files": []GeneratedFile{
+				{
+					Path:     "src/App.tsx",
+					Content:  "export default function App(){ return <div>old</div> }\n",
+					Language: "typescript",
+				},
+				{
+					Path:     "src/obsolete.ts",
+					Content:  "export const obsolete = true\n",
+					Language: "typescript",
+				},
+			},
+		},
+	}
+	output := &TaskOutput{
+		StructuredPatchBundle: &PatchBundle{
+			Operations: []PatchOperation{
+				{
+					Type:    PatchReplaceFunction,
+					Path:    "src/App.tsx",
+					Content: "export default function App(){ return <main>new</main> }\n",
+				},
+				{
+					Type: PatchDeleteBlock,
+					Path: "src/obsolete.ts",
+				},
+			},
+		},
+	}
+
+	am.materializeStructuredPatchOutput(nil, task, output)
+
+	if len(output.Files) != 1 {
+		t.Fatalf("expected one materialized file, got %+v", output.Files)
+	}
+	if output.Files[0].Path != "src/App.tsx" {
+		t.Fatalf("expected materialized update for src/App.tsx, got %+v", output.Files)
+	}
+	if output.Files[0].IsNew {
+		t.Fatalf("expected baseline-backed replacement to stay non-new, got %+v", output.Files[0])
+	}
+	if len(output.DeletedFiles) != 1 || output.DeletedFiles[0] != "src/obsolete.ts" {
+		t.Fatalf("expected deleted file tracking, got %+v", output.DeletedFiles)
+	}
+	if taskOutputMetricInt(output, "structured_patch_op_count") != 2 {
+		t.Fatalf("expected structured patch op metric, got %+v", output.Metrics)
+	}
+	if taskOutputMetricInt(output, "deleted_file_count") != 1 {
+		t.Fatalf("expected deleted file metric, got %+v", output.Metrics)
+	}
+}
+
+func TestVerifyGeneratedCodeAllowsDeleteOnlyStructuredPatchOutput(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	ok, errs := am.verifyGeneratedCode("build-delete-only", &TaskOutput{
+		DeletedFiles: []string{"src/legacy.ts"},
+	})
+	if !ok {
+		t.Fatalf("expected delete-only structured patch output to verify cleanly, got %v", errs)
 	}
 }
 
@@ -2159,6 +2316,106 @@ func TestProcessResultSuccessfulCodeTaskCapturesPatchBundleAndVerificationReport
 	}
 }
 
+func TestBuildTaskPatchBundleUsesStructuredPatchBundleDirectly(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{ID: "build-structured-bundle"}
+	task := &Task{
+		ID:          "task-structured-bundle",
+		Type:        TaskFix,
+		Description: "Repair frontend shell",
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{
+				ID:       "wo-structured-bundle",
+				Role:     RoleSolver,
+				Category: WorkOrderRepair,
+			},
+		},
+	}
+	agent := &Agent{Provider: ai.ProviderClaude}
+	output := &TaskOutput{
+		StructuredPatchBundle: &PatchBundle{
+			Operations: []PatchOperation{
+				{
+					Type:    PatchPatchDependency,
+					Path:    "package.json",
+					Content: "{\n  \"dependencies\": {\n    \"react\": \"^18.0.0\"\n  }\n}\n",
+				},
+				{
+					Type: PatchDeleteBlock,
+					Path: "src/obsolete.ts",
+				},
+			},
+		},
+	}
+
+	bundle := am.buildTaskPatchBundle(build, agent, task, output)
+	if bundle == nil {
+		t.Fatal("expected structured patch bundle to be reused")
+	}
+	if bundle.WorkOrderID != "wo-structured-bundle" {
+		t.Fatalf("expected work order id to be preserved, got %+v", bundle)
+	}
+	if bundle.Provider != ai.ProviderClaude {
+		t.Fatalf("expected provider to be attached, got %+v", bundle)
+	}
+	if bundle.BuildID != build.ID {
+		t.Fatalf("expected build id %s, got %+v", build.ID, bundle)
+	}
+	if len(bundle.Operations) != 2 {
+		t.Fatalf("expected structured patch operations to be preserved, got %+v", bundle.Operations)
+	}
+	if bundle.Operations[0].Type != PatchPatchDependency || bundle.Operations[1].Type != PatchDeleteBlock {
+		t.Fatalf("expected structured patch operation types to survive intact, got %+v", bundle.Operations)
+	}
+}
+
+func TestCollectGeneratedFilesHonorsDeletedFilesFromTaskOutput(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:     "src/App.tsx",
+				Content:  "export default function App(){ return <div>old</div> }\n",
+				Language: "typescript",
+			},
+			{
+				Path:     "src/obsolete.ts",
+				Content:  "export const obsolete = true\n",
+				Language: "typescript",
+			},
+		},
+		Tasks: []*Task{
+			{
+				ID:     "task-delete-1",
+				Type:   TaskFix,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path:     "src/App.tsx",
+							Content:  "export default function App(){ return <main>new</main> }\n",
+							Language: "typescript",
+						},
+					},
+					DeletedFiles: []string{"src/obsolete.ts"},
+				},
+			},
+		},
+	}
+
+	files := am.collectGeneratedFiles(build)
+	if len(files) != 1 {
+		t.Fatalf("expected deleted file to be removed from generated set, got %+v", files)
+	}
+	if files[0].Path != "src/App.tsx" {
+		t.Fatalf("expected surviving generated file to be src/App.tsx, got %+v", files)
+	}
+}
+
 func TestProcessResultVerificationFailureRecordsFailureFingerprintAndScorecard(t *testing.T) {
 	t.Parallel()
 
@@ -2271,6 +2528,173 @@ func TestProcessResultVerificationFailureRecordsFailureFingerprintAndScorecard(t
 	}
 	if !hasProviderScorecardFailure(state.ProviderScorecards, ai.ProviderGPT4, TaskShapeFrontendPatch) {
 		t.Fatalf("expected GPT4 frontend patch scorecard failure sample, got %+v", state.ProviderScorecards)
+	}
+}
+
+func TestAssignTaskBuildsRepairWorkOrderArtifactForFixTasks(t *testing.T) {
+	t.Parallel()
+
+	failedWorkOrder := WorkOrder{
+		ID:            "wo-front-failed",
+		BuildID:       "build-fix-1",
+		Role:          RoleFrontend,
+		Category:      WorkOrderFrontend,
+		TaskShape:     TaskShapeFrontendPatch,
+		Summary:       "Implement the dashboard shell",
+		OwnedFiles:    []string{"src/**"},
+		RequiredFiles: []string{"src/App.tsx"},
+		ReadableFiles: []string{"package.json"},
+		ContractSlice: WorkOrderContractSlice{Surface: SurfaceFrontend},
+		SurfaceLocalChecks: []string{
+			"render dashboard shell",
+		},
+	}
+	failedTask := &Task{
+		ID:          "task-failed-ui",
+		Type:        TaskGenerateUI,
+		Description: "Generate dashboard shell",
+		Status:      TaskFailed,
+		Input: map[string]any{
+			"work_order_artifact": failedWorkOrder,
+		},
+		Output: &TaskOutput{
+			Files: []GeneratedFile{
+				{Path: "src/App.tsx", Content: "export default function App(){ return <div>broken</div> }\n", Language: "typescript"},
+			},
+		},
+		CreatedAt: time.Now(),
+	}
+	fixTask := &Task{
+		ID:          "task-fix-ui",
+		Type:        TaskFix,
+		Description: "Repair frontend integration failure",
+		Status:      TaskPending,
+		MaxRetries:  2,
+		Input: map[string]any{
+			"action":          "solve_build_failure",
+			"failed_task_id":  failedTask.ID,
+			"failure_error":   "integration: frontend calls /api/data but backend has no matching route",
+			"previous_errors": []string{"integration: frontend calls /api/data but backend has no matching route"},
+		},
+		CreatedAt: time.Now(),
+	}
+	build := &Build{
+		ID:         "build-fix-1",
+		Status:     BuildInProgress,
+		Tasks:      []*Task{failedTask, fixTask},
+		Agents:     map[string]*Agent{},
+		MaxRetries: 2,
+		SnapshotFiles: []GeneratedFile{
+			{Path: "src/App.tsx", Content: "export default function App(){ return <div>broken</div> }\n", Language: "typescript"},
+			{Path: "package.json", Content: "{\"name\":\"demo\"}\n", Language: "json"},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				BuildContract: &BuildContract{
+					ID:      "contract-fix-1",
+					BuildID: "build-fix-1",
+					TruthBySurface: map[string][]TruthTag{
+						string(SurfaceFrontend): {TruthScaffolded},
+					},
+				},
+			},
+		},
+	}
+	agent := &Agent{
+		ID:       "agent-solver-1",
+		Role:     RoleSolver,
+		Provider: ai.ProviderGPT4,
+		BuildID:  build.ID,
+		Status:   StatusIdle,
+	}
+	build.Agents[agent.ID] = agent
+
+	am := &AgentManager{
+		agents:      map[string]*Agent{agent.ID: agent},
+		builds:      map[string]*Build{build.ID: build},
+		taskQueue:   make(chan *Task, 1),
+		resultQueue: make(chan *TaskResult, 1),
+		subscribers: map[string][]chan *WSMessage{},
+		ctx:         context.Background(),
+	}
+
+	if err := am.AssignTask(agent.ID, fixTask); err != nil {
+		t.Fatalf("AssignTask returned error: %v", err)
+	}
+
+	artifact := taskArtifactWorkOrderFromInput(fixTask)
+	if artifact == nil {
+		t.Fatal("expected repair work order artifact to be attached")
+	}
+	if artifact.Category != WorkOrderRepair || artifact.TaskShape != TaskShapeRepair {
+		t.Fatalf("expected repair work order/task shape, got %+v", artifact)
+	}
+	if artifact.ContractSlice.Surface != SurfaceFrontend {
+		t.Fatalf("expected frontend repair surface from failed task, got %+v", artifact.ContractSlice)
+	}
+	if artifact.RoutingMode != RoutingModeDiagnosisRepair {
+		t.Fatalf("expected diagnosis-repair routing mode, got %+v", artifact)
+	}
+	if !containsString(artifact.OwnedFiles, "src/**") || !containsString(artifact.OwnedFiles, "src/App.tsx") {
+		t.Fatalf("expected repair ownership to include failed scope and concrete file, got %+v", artifact.OwnedFiles)
+	}
+	hints := repairErrorStringsFromValue(fixTask.Input["repair_hints"])
+	if len(hints) == 0 {
+		t.Fatalf("expected repair hints to be attached, got %+v", fixTask.Input["repair_hints"])
+	}
+	if !strings.Contains(strings.Join(hints, "\n"), "INTEGRATION ERROR") {
+		t.Fatalf("expected integration repair hint, got %+v", hints)
+	}
+}
+
+func TestRecordTaskExecutionOutcomeAccumulatesTokenCostToRecovery(t *testing.T) {
+	t.Parallel()
+
+	task := &Task{
+		ID:          "task-recovery-metrics",
+		Type:        TaskGenerateUI,
+		Description: "Generate frontend shell",
+		Status:      TaskPending,
+		MaxRetries:  2,
+		Input:       map[string]any{},
+		CreatedAt:   time.Now(),
+	}
+	build := &Build{
+		ID: "build-recovery-metrics",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+	agent := &Agent{
+		ID:       "agent-front-metrics",
+		Role:     RoleFrontend,
+		Provider: ai.ProviderGPT4,
+		BuildID:  build.ID,
+	}
+	am := &AgentManager{}
+
+	am.recordTaskExecutionOutcome(build, agent, task, &TaskOutput{
+		Metrics: map[string]any{"total_tokens": 120, "model": "gpt-5"},
+	}, false, true, false, "verification_failure")
+
+	task.RetryCount = 1
+	am.recordTaskExecutionOutcome(build, agent, task, &TaskOutput{
+		Metrics: map[string]any{"total_tokens": 80, "model": "gpt-5"},
+	}, true, true, true, "")
+
+	state := build.SnapshotState.Orchestration
+	if state == nil || len(state.FailureFingerprints) < 2 {
+		t.Fatalf("expected recovery fingerprints to be stored, got %+v", state)
+	}
+	latest := state.FailureFingerprints[len(state.FailureFingerprints)-1]
+	if !latest.RepairSucceeded {
+		t.Fatalf("expected latest fingerprint to represent successful recovery, got %+v", latest)
+	}
+	if latest.TokenCostToRecovery != 200 {
+		t.Fatalf("expected cumulative token cost to recovery, got %+v", latest)
 	}
 }
 

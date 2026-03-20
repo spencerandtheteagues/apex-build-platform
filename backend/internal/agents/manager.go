@@ -1444,6 +1444,7 @@ func (am *AgentManager) AssignTask(agentID string, task *Task) error {
 	}
 
 	am.hydrateTaskContractInputs(build, agent, task)
+	am.alignAgentProviderToTaskPreference(build, agent, task)
 
 	agent.mu.Lock()
 	agent.CurrentTask = task
@@ -1476,6 +1477,57 @@ func (am *AgentManager) AssignTask(agentID string, task *Task) error {
 	return nil
 }
 
+func taskPreferredProvider(task *Task) ai.AIProvider {
+	if task == nil || task.Input == nil {
+		return ""
+	}
+	if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil && artifact.PreferredProvider != "" {
+		return artifact.PreferredProvider
+	}
+	if raw, ok := task.Input["preferred_provider"]; ok {
+		if provider := ai.AIProvider(strings.TrimSpace(fmt.Sprintf("%v", raw))); provider != "" {
+			return provider
+		}
+	}
+	return ""
+}
+
+func (am *AgentManager) alignAgentProviderToTaskPreference(build *Build, agent *Agent, task *Task) {
+	if build == nil || agent == nil || task == nil || am.aiRouter == nil {
+		return
+	}
+	preferred := taskPreferredProvider(task)
+	if preferred == "" || preferred == agent.Provider {
+		return
+	}
+
+	availableProviders := am.getCurrentlyAvailableProvidersForBuild(build)
+	available := make(map[ai.AIProvider]bool, len(availableProviders))
+	for _, provider := range availableProviders {
+		available[provider] = true
+	}
+	if !available[preferred] {
+		return
+	}
+
+	oldProvider := agent.Provider
+	agent.Provider = preferred
+	agent.Model = selectModelForPowerMode(preferred, build.PowerMode)
+
+	am.broadcast(agent.BuildID, &WSMessage{
+		Type:      "agent:provider_switched",
+		BuildID:   agent.BuildID,
+		AgentID:   agent.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"old_provider": string(oldProvider),
+			"new_provider": string(preferred),
+			"model":        agent.Model,
+			"reason":       "task_preference",
+		},
+	})
+}
+
 func (am *AgentManager) hydrateTaskContractInputs(build *Build, agent *Agent, task *Task) {
 	if build == nil || agent == nil || task == nil {
 		return
@@ -1485,6 +1537,17 @@ func (am *AgentManager) hydrateTaskContractInputs(build *Build, agent *Agent, ta
 	}
 
 	artifact := taskArtifactWorkOrderFromInput(task)
+	if artifact == nil && task.Type == TaskFix {
+		artifact = am.buildRepairWorkOrderArtifact(build, agent, task)
+		if artifact != nil {
+			task.Input["work_order_artifact"] = artifact
+			if _, exists := task.Input["repair_hints"]; !exists {
+				if hints := am.repairHintsForTask(build, task); len(hints) > 0 {
+					task.Input["repair_hints"] = hints
+				}
+			}
+		}
+	}
 	if artifact == nil {
 		artifact = findOrchestrationWorkOrder(build, agent.Role)
 	}
@@ -1548,6 +1611,543 @@ func (am *AgentManager) hydrateTaskContractInputs(build *Build, agent *Agent, ta
 	if am.isCodeGenerationTask(task.Type) {
 		task.Input["patch_baseline_files"] = am.captureTaskPatchBaseline(build, task)
 	}
+}
+
+func markScaffoldBootstrapTruth(build *Build, files []GeneratedFile) {
+	if build == nil || len(files) == 0 {
+		return
+	}
+	build.mu.Lock()
+	defer build.mu.Unlock()
+	state := ensureBuildOrchestrationStateLocked(build)
+	if state == nil {
+		return
+	}
+	applyScaffoldBootstrapTruth(state, files)
+}
+
+func findBuildTaskByID(build *Build, taskID string) *Task {
+	if build == nil || strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	for _, task := range build.Tasks {
+		if task != nil && task.ID == taskID {
+			return task
+		}
+	}
+	return nil
+}
+
+func repairErrorStringsFromValue(raw any) []string {
+	switch value := raw.(type) {
+	case string:
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return []string{trimmed}
+		}
+	case []string:
+		return dedupeStrings(value)
+	case []any:
+		out := make([]string, 0, len(value))
+		for _, item := range value {
+			if trimmed := strings.TrimSpace(fmt.Sprintf("%v", item)); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return dedupeStrings(out)
+	case []ErrorAttempt:
+		out := make([]string, 0, len(value))
+		for _, attempt := range value {
+			if trimmed := strings.TrimSpace(attempt.Error); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return dedupeStrings(out)
+	case []*ErrorAttempt:
+		out := make([]string, 0, len(value))
+		for _, attempt := range value {
+			if attempt == nil {
+				continue
+			}
+			if trimmed := strings.TrimSpace(attempt.Error); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return dedupeStrings(out)
+	}
+	if raw == nil {
+		return nil
+	}
+	if trimmed := strings.TrimSpace(fmt.Sprintf("%v", raw)); trimmed != "" && trimmed != "<nil>" {
+		return []string{trimmed}
+	}
+	return nil
+}
+
+func repairTaskErrors(task *Task) []string {
+	if task == nil || task.Input == nil {
+		return nil
+	}
+	keys := []string{
+		"failure_error",
+		"previous_errors",
+		"test_output",
+		"review_findings",
+		"verification_errors",
+		"coordination_errors",
+	}
+	out := make([]string, 0, len(keys)+len(task.ErrorHistory))
+	for _, key := range keys {
+		out = append(out, repairErrorStringsFromValue(task.Input[key])...)
+	}
+	out = append(out, repairErrorStringsFromValue(task.ErrorHistory)...)
+	if trimmed := strings.TrimSpace(task.Error); trimmed != "" {
+		out = append(out, trimmed)
+	}
+	return dedupeStrings(out)
+}
+
+func repairRecentlyModifiedPaths(task *Task, failedTask *Task) []string {
+	paths := []string{}
+	for _, candidate := range []*Task{failedTask, task} {
+		if candidate == nil || candidate.Output == nil {
+			continue
+		}
+		for _, file := range candidate.Output.Files {
+			if path := sanitizeFilePath(file.Path); path != "" {
+				paths = append(paths, path)
+			}
+		}
+	}
+	return dedupeStrings(paths)
+}
+
+func (am *AgentManager) repairRelevantFiles(build *Build, task *Task, failedTask *Task, rawErrors []string) map[string]string {
+	files := am.collectGeneratedFiles(build)
+	if len(files) == 0 {
+		return nil
+	}
+
+	contentByPath := make(map[string]string, len(files))
+	for _, file := range files {
+		if path := sanitizeFilePath(file.Path); path != "" && strings.TrimSpace(file.Content) != "" {
+			contentByPath[path] = file.Content
+		}
+	}
+	if len(contentByPath) == 0 {
+		return nil
+	}
+
+	if am.ctxSelector != nil && len(rawErrors) > 0 {
+		selected := am.ctxSelector.Select(contentByPath, rawErrors, repairRecentlyModifiedPaths(task, failedTask))
+		if len(selected) > 0 {
+			return selected
+		}
+	}
+
+	errorPaths := extractPathsFromErrors(rawErrors)
+	selected := map[string]string{}
+	for path, content := range contentByPath {
+		if errorPaths[path] || errorPaths[filepath.Base(path)] {
+			selected[path] = content
+		}
+	}
+	if len(selected) > 0 {
+		return selected
+	}
+
+	for _, path := range repairRecentlyModifiedPaths(task, failedTask) {
+		if content := contentByPath[path]; content != "" {
+			selected[path] = content
+		}
+	}
+	if len(selected) > 0 {
+		return selected
+	}
+	return contentByPath
+}
+
+func deriveRepairSurface(paths []string, failedArtifact *WorkOrder, role AgentRole) ContractSurface {
+	if failedArtifact != nil && failedArtifact.ContractSlice.Surface != "" {
+		return failedArtifact.ContractSlice.Surface
+	}
+	surfaces := map[ContractSurface]bool{}
+	for _, path := range paths {
+		surface := inferContractSurfaceFromPath(path)
+		if surface != SurfaceGlobal {
+			surfaces[surface] = true
+		}
+	}
+	if surfaces[SurfaceFrontend] && surfaces[SurfaceBackend] {
+		return SurfaceIntegration
+	}
+	if surfaces[SurfaceFrontend] {
+		return SurfaceFrontend
+	}
+	if surfaces[SurfaceBackend] {
+		return SurfaceBackend
+	}
+	if surfaces[SurfaceData] {
+		return SurfaceData
+	}
+	if surfaces[SurfaceDeployment] {
+		return SurfaceDeployment
+	}
+	switch role {
+	case RoleSolver:
+		return SurfaceIntegration
+	default:
+		return contractSurfaceForRole(role)
+	}
+}
+
+func repairAcceptanceChecks(contract *BuildContract, surface ContractSurface, fallback []string) []string {
+	checks := append([]string(nil), fallback...)
+	if contract == nil {
+		return dedupeStrings(checks)
+	}
+	for _, acceptance := range contract.AcceptanceBySurface {
+		if acceptance.Surface == surface {
+			checks = append(checks, acceptance.Checks...)
+		}
+	}
+	return dedupeStrings(checks)
+}
+
+func (am *AgentManager) repairHintsForTask(build *Build, task *Task) []string {
+	if build == nil || task == nil {
+		return nil
+	}
+	rawErrors := repairTaskErrors(task)
+	if len(rawErrors) == 0 {
+		return nil
+	}
+
+	heuristicHints := extractDependencyRepairHintsFromReadinessErrors(rawErrors)
+	if am.ctxSelector == nil || am.errorAnalyzer == nil {
+		return heuristicHints
+	}
+
+	failedTaskID, _ := task.Input["failed_task_id"].(string)
+	relevantFiles := am.repairRelevantFiles(build, task, findBuildTaskByID(build, failedTaskID), rawErrors)
+	if len(relevantFiles) == 0 {
+		return heuristicHints
+	}
+
+	plan, err := am.errorAnalyzer.Analyze(am.ctx, rawErrors, relevantFiles, build.UserID)
+	if err != nil || plan == nil {
+		return heuristicHints
+	}
+	aiHints := plan.RepairHints()
+	if len(aiHints) == 0 {
+		return heuristicHints
+	}
+	return dedupeStrings(append(aiHints, heuristicHints...))
+}
+
+func (am *AgentManager) buildRepairWorkOrderArtifact(build *Build, agent *Agent, task *Task) *WorkOrder {
+	if build == nil || agent == nil || task == nil || task.Type != TaskFix {
+		return nil
+	}
+
+	var failedTask *Task
+	failedTaskID, _ := task.Input["failed_task_id"].(string)
+	if failedTaskID != "" {
+		failedTask = findBuildTaskByID(build, failedTaskID)
+	}
+
+	failedArtifact := taskArtifactWorkOrderFromInput(failedTask)
+	failedLegacy := taskWorkOrderFromInput(failedTask)
+	rawErrors := repairTaskErrors(task)
+	relevantFiles := am.repairRelevantFiles(build, task, failedTask, rawErrors)
+
+	relevantPaths := make([]string, 0, len(relevantFiles))
+	for path := range relevantFiles {
+		relevantPaths = append(relevantPaths, normalizeOwnedPath(path))
+	}
+	sort.Strings(relevantPaths)
+
+	ownedFiles := append([]string(nil), relevantPaths...)
+	requiredFiles := []string{}
+	readableFiles := append([]string(nil), relevantPaths...)
+	forbiddenFiles := []string{}
+	acceptanceChecks := []string{}
+	requiredOutputs := []string{}
+	summarySource := strings.TrimSpace(task.Description)
+
+	if failedArtifact != nil {
+		ownedFiles = append(ownedFiles, failedArtifact.OwnedFiles...)
+		requiredFiles = append(requiredFiles, failedArtifact.RequiredFiles...)
+		readableFiles = append(readableFiles, failedArtifact.ReadableFiles...)
+		forbiddenFiles = append(forbiddenFiles, failedArtifact.ForbiddenFiles...)
+		acceptanceChecks = append(acceptanceChecks, failedArtifact.SurfaceLocalChecks...)
+		requiredOutputs = append(requiredOutputs, failedArtifact.RequiredOutputs...)
+		if strings.TrimSpace(failedArtifact.Summary) != "" {
+			summarySource = failedArtifact.Summary
+		}
+	} else if failedLegacy != nil {
+		ownedFiles = append(ownedFiles, failedLegacy.OwnedFiles...)
+		requiredFiles = append(requiredFiles, failedLegacy.RequiredFiles...)
+		forbiddenFiles = append(forbiddenFiles, failedLegacy.ForbiddenFiles...)
+		acceptanceChecks = append(acceptanceChecks, failedLegacy.AcceptanceChecks...)
+		requiredOutputs = append(requiredOutputs, failedLegacy.RequiredOutputs...)
+		if strings.TrimSpace(failedLegacy.Summary) != "" {
+			summarySource = failedLegacy.Summary
+		}
+	}
+
+	ownedFiles = dedupeStrings(ownedFiles)
+	requiredFiles = dedupeStrings(requiredFiles)
+	readableFiles = dedupeStrings(append(readableFiles, requiredFiles...))
+	forbiddenFiles = dedupeStrings(forbiddenFiles)
+
+	if len(ownedFiles) == 0 {
+		ownedFiles = []string{"**"}
+	}
+	if len(readableFiles) == 0 {
+		readableFiles = append([]string(nil), ownedFiles...)
+	}
+
+	build.mu.RLock()
+	orchestration := cloneBuildOrchestrationState(build.SnapshotState.Orchestration)
+	plan := build.Plan
+	build.mu.RUnlock()
+
+	contract := (*BuildContract)(nil)
+	scorecards := defaultProviderScorecards(build.ProviderMode)
+	if orchestration != nil {
+		contract = orchestration.BuildContract
+		if len(orchestration.ProviderScorecards) > 0 {
+			scorecards = orchestration.ProviderScorecards
+		}
+	}
+
+	surface := deriveRepairSurface(ownedFiles, failedArtifact, agent.Role)
+	acceptanceChecks = repairAcceptanceChecks(contract, surface, acceptanceChecks)
+	action, _ := task.Input["action"].(string)
+	if action == "" {
+		action = "repair"
+	}
+	if summarySource == "" {
+		summarySource = "targeted scoped fix"
+	}
+	requiredOutputs = dedupeStrings(append(requiredOutputs,
+		"Apply the minimal code changes needed to resolve the reported failure",
+		"Preserve the frozen build contract and ownership boundaries",
+	))
+
+	legacy := BuildWorkOrder{
+		Role:             agent.Role,
+		Summary:          fmt.Sprintf("Repair %s for %s without broad regeneration.", action, summarySource),
+		OwnedFiles:       ownedFiles,
+		RequiredFiles:    requiredFiles,
+		ForbiddenFiles:   forbiddenFiles,
+		AcceptanceChecks: acceptanceChecks,
+		RequiredOutputs:  requiredOutputs,
+	}
+
+	return &WorkOrder{
+		ID:                 uuid.New().String(),
+		BuildID:            build.ID,
+		Role:               agent.Role,
+		Category:           WorkOrderRepair,
+		TaskShape:          TaskShapeRepair,
+		Summary:            legacy.Summary,
+		OwnedFiles:         ownedFiles,
+		RequiredFiles:      requiredFiles,
+		ReadableFiles:      readableFiles,
+		ForbiddenFiles:     forbiddenFiles,
+		ContractSlice:      buildWorkOrderContractSlice(surface, legacy, contract, plan),
+		RequiredOutputs:    requiredOutputs,
+		RequiredSymbols:    deriveRequiredSymbols(legacy, contract),
+		SurfaceLocalChecks: acceptanceChecks,
+		MaxContextBudget:   16000,
+		RiskLevel:          RiskHigh,
+		RoutingMode:        RoutingModeDiagnosisRepair,
+		PreferredProvider:  preferredProviderForTaskShape(TaskShapeRepair, scorecards),
+	}
+}
+
+type contractCritiquePayload struct {
+	Summary    string   `json:"summary"`
+	Warnings   []string `json:"warnings"`
+	Blockers   []string `json:"blockers"`
+	Confidence float64  `json:"confidence"`
+}
+
+func extractJSONObjectBlock(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "```") {
+		raw = strings.TrimPrefix(raw, "```json")
+		raw = strings.TrimPrefix(raw, "```")
+		raw = strings.TrimSuffix(raw, "```")
+		raw = strings.TrimSpace(raw)
+	}
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start < 0 || end <= start {
+		return ""
+	}
+	return strings.TrimSpace(raw[start : end+1])
+}
+
+func normalizeStructuredPatchBundle(bundle *PatchBundle) *PatchBundle {
+	if bundle == nil {
+		return nil
+	}
+	normalized := *bundle
+	normalized.Operations = make([]PatchOperation, 0, len(bundle.Operations))
+	for _, op := range bundle.Operations {
+		op.Path = sanitizeFilePath(op.Path)
+		if op.Path == "" {
+			continue
+		}
+		if op.Type == "" {
+			if strings.TrimSpace(op.Content) == "" {
+				continue
+			}
+			op.Type = PatchReplaceFunction
+		}
+		if op.Type != PatchDeleteBlock {
+			if strings.TrimSpace(op.Content) == "" {
+				continue
+			}
+			op.Content = normalizeGeneratedFileContent(op.Path, op.Content)
+		}
+		normalized.Operations = append(normalized.Operations, op)
+	}
+	if len(normalized.Operations) == 0 {
+		return nil
+	}
+	return &normalized
+}
+
+func parseStructuredPatchBundleResponse(response string) *PatchBundle {
+	payload := extractJSONObjectBlock(response)
+	if payload == "" {
+		return nil
+	}
+	var envelope struct {
+		PatchBundle           *PatchBundle     `json:"patch_bundle"`
+		StructuredPatchBundle *PatchBundle     `json:"structured_patch_bundle"`
+		Operations            []PatchOperation `json:"operations"`
+		Justification         string           `json:"justification"`
+		WholeFileRewrite      bool             `json:"whole_file_rewrite"`
+	}
+	if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
+		return nil
+	}
+	switch {
+	case envelope.PatchBundle != nil:
+		return normalizeStructuredPatchBundle(envelope.PatchBundle)
+	case envelope.StructuredPatchBundle != nil:
+		return normalizeStructuredPatchBundle(envelope.StructuredPatchBundle)
+	case len(envelope.Operations) > 0:
+		return normalizeStructuredPatchBundle(&PatchBundle{
+			Justification:    strings.TrimSpace(envelope.Justification),
+			WholeFileRewrite: envelope.WholeFileRewrite,
+			Operations:       envelope.Operations,
+		})
+	default:
+		return nil
+	}
+}
+
+func (am *AgentManager) providerAssistedContractCritique(build *Build, contract *BuildContract) *VerificationReport {
+	if am == nil || am.aiRouter == nil || build == nil || contract == nil {
+		return nil
+	}
+
+	availableProviders := am.getCurrentlyAvailableProvidersForBuild(build)
+	if len(availableProviders) == 0 {
+		return nil
+	}
+	scorecards := am.providerScorecardsForBuild(build, availableProviders)
+	provider := preferredProviderForTaskShape(TaskShapeAdversarialCritique, scorecards)
+	if provider == "" {
+		provider = availableProviders[0]
+	}
+
+	payload, err := json.MarshalIndent(contract, "", "  ")
+	if err != nil {
+		return nil
+	}
+	prompt := fmt.Sprintf(`Review this build contract and find ONLY concrete, machine-checkable gaps.
+
+Return JSON only:
+{
+  "summary": "short sentence",
+  "warnings": ["..."],
+  "blockers": ["..."],
+  "confidence": 0.0
+}
+
+Rules:
+- Use blockers only for concrete contradictions or missing required contract coverage.
+- Do not restate things already present in the contract.
+- Keep warnings and blockers short and specific.
+- If the contract is coherent, return empty arrays.
+
+Contract:
+%s
+`, string(payload))
+
+	resp, err := am.aiRouter.Generate(am.ctx, provider, prompt, GenerateOptions{
+		UserID:          build.UserID,
+		MaxTokens:       600,
+		Temperature:     0.1,
+		SystemPrompt:    "You are a strict contract verifier. Output JSON only.",
+		PowerMode:       PowerFast,
+		UsePlatformKeys: am.buildUsesPlatformKeys(build),
+	})
+	if err != nil || resp == nil || strings.TrimSpace(resp.Content) == "" {
+		return nil
+	}
+
+	var critique contractCritiquePayload
+	if err := json.Unmarshal([]byte(extractJSONObjectBlock(resp.Content)), &critique); err != nil {
+		return nil
+	}
+	critique.Warnings = dedupeStrings(critique.Warnings)
+	critique.Blockers = dedupeStrings(critique.Blockers)
+	if len(critique.Warnings) == 0 && len(critique.Blockers) == 0 {
+		return nil
+	}
+
+	status := VerificationPassed
+	confidence := critique.Confidence
+	if confidence <= 0 {
+		confidence = 0.72
+	}
+	if len(critique.Blockers) > 0 {
+		status = VerificationBlocked
+		if confidence > 0.55 {
+			confidence = 0.55
+		}
+	}
+
+	report := &VerificationReport{
+		ID:              uuid.New().String(),
+		BuildID:         build.ID,
+		Phase:           "contract_provider_critique",
+		Surface:         SurfaceGlobal,
+		Status:          status,
+		Deterministic:   false,
+		Provider:        provider,
+		ChecksRun:       []string{"provider_contract_critique"},
+		Warnings:        critique.Warnings,
+		Blockers:        critique.Blockers,
+		ConfidenceScore: confidence,
+		GeneratedAt:     time.Now().UTC(),
+	}
+	if len(critique.Blockers) > 0 {
+		report.Errors = append([]string(nil), critique.Blockers...)
+	}
+	return report
 }
 
 func taskPatchBaselineFromInput(task *Task) []GeneratedFile {
@@ -1736,9 +2336,128 @@ func mergeGeneratedFiles(base []GeneratedFile, overlay []GeneratedFile) []Genera
 	return files
 }
 
+func clonePatchBundle(bundle *PatchBundle) *PatchBundle {
+	if bundle == nil {
+		return nil
+	}
+	clone := *bundle
+	clone.Operations = append([]PatchOperation(nil), bundle.Operations...)
+	return &clone
+}
+
+func dedupeSanitizedPaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		sanitized := sanitizeFilePath(path)
+		if sanitized == "" || seen[sanitized] {
+			continue
+		}
+		seen[sanitized] = true
+		out = append(out, sanitized)
+	}
+	sort.Strings(out)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (am *AgentManager) materializeStructuredPatchOutput(build *Build, task *Task, output *TaskOutput) {
+	if am == nil || output == nil || output.StructuredPatchBundle == nil {
+		return
+	}
+	before := taskPatchBaselineFromInput(task)
+	if before == nil {
+		before = am.captureTaskPatchBaseline(build, task)
+	}
+	beforeByPath := generatedFileMap(before)
+	filesByPath := make(map[string]GeneratedFile, len(output.StructuredPatchBundle.Operations))
+	deleted := make([]string, 0, len(output.StructuredPatchBundle.Operations))
+	parserWarnings := make([]string, 0, 2)
+
+	for _, op := range output.StructuredPatchBundle.Operations {
+		path := sanitizeFilePath(op.Path)
+		if path == "" {
+			parserWarnings = append(parserWarnings, "structured patch bundle contained an operation with no valid path")
+			continue
+		}
+		switch op.Type {
+		case PatchCreateFile, PatchReplaceSymbol, PatchReplaceFunction, PatchInsertAfterSymbol,
+			PatchPatchJSONKey, PatchPatchEnvVar, PatchPatchRouteRegistration,
+			PatchPatchDependency, PatchPatchSchemaEntity, PatchRenameSymbol:
+			if strings.TrimSpace(op.Content) == "" {
+				parserWarnings = append(parserWarnings, fmt.Sprintf("structured patch bundle operation for %s was missing full file content", path))
+				continue
+			}
+			content := normalizeGeneratedFileContent(path, op.Content)
+			_, existed := beforeByPath[path]
+			filesByPath[path] = GeneratedFile{
+				Path:     path,
+				Content:  content,
+				Language: am.detectLanguage(path),
+				Size:     int64(len(content)),
+				IsNew:    !existed || op.Type == PatchCreateFile,
+			}
+		case PatchDeleteBlock:
+			deleted = append(deleted, path)
+			delete(filesByPath, path)
+		default:
+			parserWarnings = append(parserWarnings, fmt.Sprintf("structured patch bundle operation %q for %s is not supported", op.Type, path))
+		}
+	}
+
+	paths := make([]string, 0, len(filesByPath))
+	for path := range filesByPath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	files := make([]GeneratedFile, 0, len(paths))
+	for _, path := range paths {
+		files = append(files, filesByPath[path])
+	}
+
+	output.Files = files
+	output.DeletedFiles = dedupeSanitizedPaths(deleted)
+	output.Messages = append(output.Messages, parserWarnings...)
+	if output.Metrics == nil {
+		output.Metrics = map[string]any{}
+	}
+	output.Metrics["structured_patch_op_count"] = len(output.StructuredPatchBundle.Operations)
+	output.Metrics["deleted_file_count"] = len(output.DeletedFiles)
+}
+
 func (am *AgentManager) buildTaskPatchBundle(build *Build, agent *Agent, task *Task, output *TaskOutput) *PatchBundle {
 	if build == nil || task == nil || output == nil || !am.isCodeGenerationTask(task.Type) {
 		return nil
+	}
+	if output.StructuredPatchBundle != nil && len(output.StructuredPatchBundle.Operations) > 0 {
+		bundle := clonePatchBundle(output.StructuredPatchBundle)
+		if bundle == nil {
+			return nil
+		}
+		if bundle.ID == "" {
+			bundle.ID = uuid.New().String()
+		}
+		if bundle.BuildID == "" {
+			bundle.BuildID = build.ID
+		}
+		if bundle.CreatedAt.IsZero() {
+			bundle.CreatedAt = time.Now().UTC()
+		}
+		if strings.TrimSpace(bundle.Justification) == "" {
+			bundle.Justification = fmt.Sprintf("Task %s (%s): %s", task.ID, task.Type, strings.TrimSpace(task.Description))
+		}
+		if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil {
+			bundle.WorkOrderID = artifact.ID
+		}
+		if agent != nil {
+			bundle.Provider = agent.Provider
+		}
+		return bundle
 	}
 	before := taskPatchBaselineFromInput(task)
 	if before == nil {
@@ -1931,6 +2650,9 @@ func taskExecutionShape(task *Task, agent *Agent) TaskShape {
 func taskFingerprintFiles(task *Task, output *TaskOutput) []string {
 	if output != nil && len(output.Files) > 0 {
 		return fingerprintFiles(output.Files)
+	}
+	if output != nil && len(output.DeletedFiles) > 0 {
+		return append([]string(nil), output.DeletedFiles...)
 	}
 	if baseline := taskPatchBaselineFromInput(task); len(baseline) > 0 {
 		return fingerprintFiles(baseline)
@@ -2128,6 +2850,30 @@ func summarizeFailureFingerprintInsight(insight failureFingerprintInsight) strin
 	return strings.Join(parts, ", ")
 }
 
+func updateTaskRecoveryTokenCost(task *Task, attemptTokens int) int {
+	if task == nil {
+		return attemptTokens
+	}
+	if task.Input == nil {
+		task.Input = map[string]any{}
+	}
+	total := attemptTokens
+	switch raw := task.Input["token_cost_to_recovery"].(type) {
+	case int:
+		total += raw
+	case int64:
+		total += int(raw)
+	case float64:
+		total += int(raw)
+	case string:
+		if parsed, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+			total += parsed
+		}
+	}
+	task.Input["token_cost_to_recovery"] = total
+	return total
+}
+
 func (am *AgentManager) recordTaskExecutionOutcome(build *Build, agent *Agent, task *Task, output *TaskOutput, success bool, verificationObserved bool, verificationPassed bool, failureClass string) {
 	if build == nil || agent == nil || task == nil {
 		return
@@ -2138,6 +2884,7 @@ func (am *AgentManager) recordTaskExecutionOutcome(build *Build, agent *Agent, t
 	}
 
 	totalTokens := taskOutputMetricInt(output, "total_tokens")
+	recoveryTokens := updateTaskRecoveryTokenCost(task, totalTokens)
 	cost := taskOutputMetricFloat(output, "billed_cost")
 	latency := taskOutputMetricFloat(output, "latency_seconds")
 	recordProviderTaskOutcome(build, providerTaskOutcome{
@@ -2183,7 +2930,7 @@ func (am *AgentManager) recordTaskExecutionOutcome(build *Build, agent *Agent, t
 		FilesInvolved:       taskFingerprintFiles(task, output),
 		RepairPathChosen:    taskRepairPath(task, verificationObserved),
 		RepairSucceeded:     success,
-		TokenCostToRecovery: totalTokens,
+		TokenCostToRecovery: recoveryTokens,
 		CreatedAt:           time.Now().UTC(),
 	})
 }
@@ -2423,23 +3170,7 @@ func (am *AgentManager) executeTask(task *Task) {
 	ctx, cancel := context.WithTimeout(am.ctx, 15*time.Minute)
 	defer cancel()
 
-	// Broadcast that the agent is generating
-	am.broadcast(agent.BuildID, &WSMessage{
-		Type:      "agent:generating",
-		BuildID:   agent.BuildID,
-		AgentID:   agent.ID,
-		Timestamp: time.Now(),
-		Data: map[string]any{
-			"agent_role": agent.Role,
-			"provider":   agent.Provider,
-			"model":      agent.Model,
-			"task_id":    task.ID,
-			"task_type":  string(task.Type),
-			"content":    fmt.Sprintf("%s agent is generating code with %s...", agent.Role, agent.Provider),
-		},
-	})
-
-	log.Printf("Calling AI router for task %s with provider %s", task.ID, agent.Provider)
+	log.Printf("Preparing generation for task %s with provider %s", task.ID, agent.Provider)
 
 	// Role-aware token limits scaled by power mode
 	maxTokens := am.getMaxTokensForRole(agent.Role, build.PowerMode)
@@ -2471,48 +3202,59 @@ func (am *AgentManager) executeTask(task *Task) {
 
 	// Role-aware temperature
 	temperature := am.getTemperatureForRole(agent.Role)
-
-	// Pre-authorize spend before calling AI — catches about-to-exceed budgets
-	// using a conservative per-request estimate rather than 0.
-	if am.budgetEnforcer != nil {
-		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, agent.BuildID, estimatedRequestCostUSD)
-		if preAuthErr == nil && !preAuth.Allowed {
-			am.broadcast(agent.BuildID, &WSMessage{
-				Type:      "budget:exceeded",
-				BuildID:   agent.BuildID,
-				Timestamp: time.Now(),
-				Data: map[string]any{
-					"reason":      preAuth.Reason,
-					"cap_type":    preAuth.CapType,
-					"limit_usd":   preAuth.LimitUSD,
-					"current_usd": preAuth.CurrentUSD,
-				},
-			})
-			am.resultQueue <- &TaskResult{
-				TaskID:  task.ID,
-				AgentID: agent.ID,
-				Success: false,
-				Error:   fmt.Errorf("budget cap exceeded: %s", preAuth.Reason),
-			}
-			return
+	routingMode := taskRoutingMode(task)
+	candidateProviders := []ai.AIProvider{agent.Provider}
+	if routingMode == RoutingModeDualCandidate {
+		if alternate := am.getNextFallbackProviderForTask(build, task, agent.Role, agent.Provider); alternate != "" && alternate != agent.Provider {
+			candidateProviders = append(candidateProviders, alternate)
 		}
 	}
-
-	response, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
-		UserID:          build.UserID,
-		MaxTokens:       maxTokens,
-		Temperature:     temperature,
-		SystemPrompt:    systemPrompt,
-		PowerMode:       build.PowerMode,
-		UsePlatformKeys: am.buildUsesPlatformKeys(build),
+	generationMessage := fmt.Sprintf("%s agent is generating code with %s...", agent.Role, agent.Provider)
+	if len(candidateProviders) > 1 {
+		names := make([]string, 0, len(candidateProviders))
+		for _, provider := range candidateProviders {
+			names = append(names, string(provider))
+		}
+		generationMessage = fmt.Sprintf("%s agent is generating %d candidates with %s...", agent.Role, len(candidateProviders), strings.Join(names, " and "))
+	}
+	am.broadcast(agent.BuildID, &WSMessage{
+		Type:      "agent:generating",
+		BuildID:   agent.BuildID,
+		AgentID:   agent.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"agent_role":    agent.Role,
+			"provider":      agent.Provider,
+			"model":         agent.Model,
+			"task_id":       task.ID,
+			"task_type":     string(task.Type),
+			"routing_mode":  string(routingMode),
+			"candidate_set": candidateProviders,
+			"content":       generationMessage,
+		},
 	})
 
-	if err != nil {
-		log.Printf("AI generation failed for task %s: %v", task.ID, err)
+	candidates := make([]*taskGenerationCandidate, 0, len(candidateProviders))
+	var generationErr error
+	for _, provider := range candidateProviders {
+		candidate, candidateErr := am.generateTaskOutputWithProvider(ctx, build, agent, task, prompt, systemPrompt, provider, maxTokens, temperature)
+		if candidateErr != nil {
+			if generationErr == nil {
+				generationErr = candidateErr
+			}
+			log.Printf("AI generation failed for task %s with provider %s: %v", task.ID, provider, candidateErr)
+			continue
+		}
+		log.Printf("AI generation succeeded for task %s with provider %s", task.ID, provider)
+		candidates = append(candidates, candidate)
+	}
+	if len(candidates) == 0 {
+		finalErr := generationErr
+		if finalErr == nil {
+			finalErr = fmt.Errorf("AI generation returned no viable candidates")
+		}
 		nextRetryCount := task.RetryCount + 1
-		willRetry := nextRetryCount < task.MaxRetries && !am.isNonRetriableAIError(err)
-
-		// Broadcast the error
+		willRetry := nextRetryCount < task.MaxRetries && !am.isNonRetriableAIError(finalErr)
 		am.broadcast(agent.BuildID, &WSMessage{
 			Type:      "agent:generation_failed",
 			BuildID:   agent.BuildID,
@@ -2523,92 +3265,99 @@ func (am *AgentManager) executeTask(task *Task) {
 				"provider":    agent.Provider,
 				"model":       agent.Model,
 				"task_id":     task.ID,
-				"error":       err.Error(),
+				"error":       finalErr.Error(),
 				"retry_count": task.RetryCount,
 				"max_retries": task.MaxRetries,
 				"will_retry":  willRetry,
 			},
 		})
-
 		am.resultQueue <- &TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
 			Success: false,
-			Error:   err,
+			Error:   finalErr,
 		}
 		return
 	}
 
-	if response == nil || response.Content == "" {
-		log.Printf("AI generation returned empty response for task %s", task.ID)
-		am.resultQueue <- &TaskResult{
-			TaskID:  task.ID,
-			AgentID: agent.ID,
-			Success: false,
-			Error:   fmt.Errorf("AI generation returned empty response"),
+	selectedCandidate := candidates[0]
+	judgeProvider := ai.AIProvider("")
+	judgeRationale := ""
+	if len(candidates) > 1 {
+		sort.SliceStable(candidates, func(i, j int) bool {
+			if candidates[i].DeterministicScore == candidates[j].DeterministicScore {
+				return candidates[i].Provider < candidates[j].Provider
+			}
+			return candidates[i].DeterministicScore > candidates[j].DeterministicScore
+		})
+		selectedCandidate = candidates[0]
+		if len(candidates) >= 2 && absInt(candidates[0].DeterministicScore-candidates[1].DeterministicScore) <= 8 {
+			if winnerIdx, judge, rationale := am.judgeTaskCandidates(build, task, candidates); winnerIdx >= 0 {
+				selectedCandidate = candidates[winnerIdx]
+				judgeProvider = judge
+				judgeRationale = rationale
+			}
 		}
-		return
 	}
 
-	modelUsed := ai.GetModelUsed(response, nil)
-	if modelUsed != "" && modelUsed != "unknown" {
+	if routingMode == RoutingModeSingleWithVerifier && selectedCandidate != nil {
+		report := am.providerAssistedTaskVerification(build, task, selectedCandidate)
+		if report != nil {
+			selectedCandidate.Output.ProviderVerificationReport = report
+			if len(report.Warnings) > 0 {
+				selectedCandidate.Output.Messages = append(selectedCandidate.Output.Messages, report.Warnings...)
+			}
+			if report.Status == VerificationBlocked && len(report.Blockers) > 0 {
+				err := fmt.Errorf("provider verification blocked task output: %s", strings.Join(report.Blockers, "; "))
+				am.resultQueue <- &TaskResult{
+					TaskID:  task.ID,
+					AgentID: agent.ID,
+					Success: false,
+					Error:   err,
+				}
+				return
+			}
+		}
+	}
+
+	output := selectedCandidate.Output
+	if output.Metrics == nil {
+		output.Metrics = map[string]any{}
+	}
+	output.Metrics["routing_mode"] = string(routingMode)
+	output.Metrics["candidate_count"] = len(candidates)
+	output.Metrics["selected_provider"] = string(selectedCandidate.Provider)
+	output.Metrics["selected_model"] = selectedCandidate.Model
+	output.Metrics["deterministic_candidate_score"] = selectedCandidate.DeterministicScore
+	output.Metrics["deterministic_verify_passed"] = selectedCandidate.VerifyPassed
+	if judgeProvider != "" {
+		output.Metrics["candidate_judge_provider"] = string(judgeProvider)
+	}
+	if judgeRationale != "" {
+		output.Metrics["candidate_judge_rationale"] = judgeRationale
+	}
+	if selectedCandidate.Provider != agent.Provider || firstNonEmptyString(selectedCandidate.Model) != firstNonEmptyString(agent.Model) {
+		oldProvider := agent.Provider
+		oldModel := agent.Model
 		agent.mu.Lock()
-		agent.Model = modelUsed
+		agent.Provider = selectedCandidate.Provider
+		agent.Model = selectedCandidate.Model
 		agent.mu.Unlock()
+		am.broadcast(agent.BuildID, &WSMessage{
+			Type:      "agent:provider_switched",
+			BuildID:   agent.BuildID,
+			AgentID:   agent.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"old_provider": string(oldProvider),
+				"new_provider": string(selectedCandidate.Provider),
+				"old_model":    oldModel,
+				"model":        selectedCandidate.Model,
+				"reason":       "candidate_selection",
+			},
+		})
 	}
-
-	log.Printf("AI generation succeeded for task %s (response_length: %d)", task.ID, len(response.Content))
-
-	// Record spend for this agent AI call
-	if am.spendTracker != nil && response.Usage != nil {
-		build.mu.RLock()
-		projectID := build.ProjectID
-		powerMode := string(build.PowerMode)
-		usesPlatformKeys := am.buildUsesPlatformKeys(build)
-		build.mu.RUnlock()
-
-		si := spend.RecordSpendInput{
-			UserID:       build.UserID,
-			ProjectID:    projectID,
-			BuildID:      agent.BuildID,
-			AgentID:      agent.ID,
-			AgentRole:    string(agent.Role),
-			Provider:     string(agent.Provider),
-			Model:        modelUsed,
-			Capability:   string(task.Type),
-			IsBYOK:       !usesPlatformKeys,
-			InputTokens:  response.Usage.PromptTokens,
-			OutputTokens: response.Usage.CompletionTokens,
-			PowerMode:    powerMode,
-			Status:       "success",
-		}
-		if _, err := am.spendTracker.RecordSpend(si); err != nil {
-			log.Printf("spend: failed to record agent spend for build %s agent %s: %v", agent.BuildID, agent.ID, err)
-		}
-	}
-
-	// Parse the response into task output
-	output := am.parseTaskOutput(task.Type, response.Content)
-	attachAIResponseMetrics(output, agent.Provider, modelUsed, response)
-
-	// ── Chunked-edit pass 1: continuation for truncated files ──────────────
-	// When the AI hits its output-token limit mid-file, request the remainder
-	// so callers always receive complete files.
-	if len(output.TruncatedFiles) > 0 {
-		log.Printf("[chunked] %d truncated file(s) in task %s — requesting continuations",
-			len(output.TruncatedFiles), task.ID)
-		am.completeTruncatedFiles(ctx, task, build, agent, output)
-	}
-
-	// ── Chunked-edit pass 2: large-file repair for solver tasks ────────────
-	// When the solver must fix a file that is >ChunkThreshold lines the model
-	// can't return the entire replacement in one shot.  Process it in
-	// overlapping chunks so every line is covered.
-	if am.isCodeGenerationTask(task.Type) {
-		if rawHints := task.Input["repair_hints"]; rawHints != nil {
-			am.applyChunkedRepairToLargeFiles(ctx, task, build, agent, output)
-		}
-	}
+	modelUsed := selectedCandidate.Model
 
 	// Broadcast completion thought with actual model and file details
 	fileNames := make([]string, 0, len(output.Files))
@@ -2813,6 +3562,9 @@ func (am *AgentManager) processResult(result *TaskResult) {
 
 			agent.mu.Lock()
 			if buildErr == nil {
+				if result.Output.ProviderVerificationReport != nil {
+					appendVerificationReport(build, *result.Output.ProviderVerificationReport)
+				}
 				taskVerificationReport = am.buildTaskVerificationReport(build, agent, task, result.Output, verificationPassed, verifyErrors)
 				if taskVerificationReport != nil {
 					appendVerificationReport(build, *taskVerificationReport)
@@ -3148,6 +3900,8 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 	// Freeze the structured planning output into the build state before any
 	// downstream agents are spawned. This becomes the contract for later phases.
 	if output != nil && output.Plan != nil {
+		runProviderCritique := false
+		var critiqueContract *BuildContract
 		build.mu.Lock()
 		build.Plan = output.Plan
 		build.TechStack = &output.Plan.TechStack
@@ -3164,12 +3918,33 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 					contractBlocker = strings.Join(report.Blockers, "; ")
 				}
 			}
+			if !contractBlocked && orchestration.Flags.EnableSelectiveEscalation && orchestration.BuildContract != nil {
+				runProviderCritique = true
+				contractCopy := *orchestration.BuildContract
+				critiqueContract = &contractCopy
+			}
 			if orchestration.BuildContract != nil {
 				orchestration.WorkOrders = compileWorkOrdersFromPlan(build.ID, orchestration.BuildContract, output.Plan, orchestration.ProviderScorecards)
 			}
 		}
 		build.mu.Unlock()
+		if runProviderCritique && critiqueContract != nil {
+			if critiqueReport := am.providerAssistedContractCritique(build, critiqueContract); critiqueReport != nil {
+				build.mu.Lock()
+				if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil && orchestration.BuildContract != nil {
+					orchestration.VerificationReports = append(orchestration.VerificationReports, *critiqueReport)
+					orchestration.BuildContract.VerificationWarnings = dedupeStrings(append(orchestration.BuildContract.VerificationWarnings, critiqueReport.Warnings...))
+					if len(critiqueReport.Blockers) > 0 {
+						orchestration.BuildContract.VerificationBlockers = dedupeStrings(append(orchestration.BuildContract.VerificationBlockers, critiqueReport.Blockers...))
+						contractBlocked = true
+						contractBlocker = strings.Join(critiqueReport.Blockers, "; ")
+					}
+				}
+				build.mu.Unlock()
+			}
+		}
 		if count := am.bootstrapBuildScaffold(build); count > 0 {
+			markScaffoldBootstrapTruth(build, output.Plan.ScaffoldFiles)
 			am.broadcast(build.ID, &WSMessage{
 				Type:      WSBuildProgress,
 				BuildID:   build.ID,
@@ -6470,6 +7245,14 @@ func (am *AgentManager) collectGeneratedFiles(build *Build) []GeneratedFile {
 		for _, file := range task.Output.Files {
 			appendFile(file, "task")
 		}
+		for _, path := range task.Output.DeletedFiles {
+			sanitized := sanitizeFilePath(path)
+			if sanitized == "" {
+				continue
+			}
+			delete(filesByPath, sanitized)
+			delete(sourceByPath, sanitized)
+		}
 	}
 
 	if len(orderedPaths) == 0 {
@@ -6485,12 +7268,18 @@ func (am *AgentManager) collectGeneratedFiles(build *Build) []GeneratedFile {
 	}
 
 	result := make([]GeneratedFile, 0, len(orderedPaths))
+	emitted := make(map[string]bool, len(orderedPaths))
 	for _, path := range orderedPaths {
 		// Drop parser fallback artifacts when real project files exist.
-		if hasRealFiles && isGeneratedArtifactPath(path) {
+		if emitted[path] || (hasRealFiles && isGeneratedArtifactPath(path)) {
 			continue
 		}
-		result = append(result, filesByPath[path])
+		file, exists := filesByPath[path]
+		if !exists {
+			continue
+		}
+		emitted[path] = true
+		result = append(result, file)
 	}
 	return result
 }
@@ -8928,6 +9717,110 @@ func (am *AgentManager) Shutdown() {
 
 // Helper functions
 
+func taskSupportsStructuredPatchOutput(task *Task, agent *Agent) bool {
+	if task != nil {
+		if task.Type == TaskFix {
+			return true
+		}
+		if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil {
+			if artifact.Category == WorkOrderRepair || artifact.RoutingMode == RoutingModeDiagnosisRepair {
+				return true
+			}
+			switch artifact.TaskShape {
+			case TaskShapeFrontendPatch, TaskShapeBackendPatch, TaskShapeRepair:
+				return true
+			}
+		}
+	}
+	return agent != nil && agent.Role == RoleSolver
+}
+
+func defaultTaskOutputFormatPrompt() string {
+	return `OUTPUT FORMAT - CRITICAL:
+For EVERY file you create, use this EXACT format:
+
+// File: path/to/filename.ext
+` + "```" + `language
+[complete file content here]
+` + "```" + `
+
+Example:
+// File: src/components/App.tsx
+` + "```" + `typescript
+import React from 'react';
+export const App: React.FC = () => {
+  return <div>Hello World</div>;
+};
+` + "```" + `
+
+// File: src/api/server.ts
+` + "```" + `typescript
+import express from 'express';
+const app = express();
+// complete implementation...
+` + "```" + `
+
+MANDATORY REQUIREMENTS:
+1. Output COMPLETE, PRODUCTION-READY code only
+2. Mark EVERY file with "// File: path/filename" comment before its code block
+3. NEVER use placeholder data, mock responses, TODO comments, or demo content
+4. If external API keys or credentials are needed:
+   - Use environment variable patterns (e.g., process.env.API_KEY)
+   - Add ONE clear comment indicating what the user must provide
+   - Build ALL other functionality completely without waiting
+5. Include all imports, error handling, and edge cases
+6. Every function must be fully implemented and working
+
+FORBIDDEN OUTPUTS:
+- "// TODO: implement this"
+- Mock or fake data
+- Placeholder functions
+- Demo or example code
+- Incomplete implementations
+- Git merge conflict markers (<<<<<<< / ======= / >>>>>>>)
+- SEARCH/REPLACE diff blocks — output COMPLETE files only, never diffs
+- Mixing frontend and backend code in the same file: NEVER put Express/server imports in a .tsx/.jsx React component file; NEVER put React JSX in a backend Go/Python/Express file
+
+Build the REAL, COMPLETE implementation now.`
+}
+
+func patchFirstTaskOutputFormatPrompt() string {
+	return `PATCH-FIRST OUTPUT FORMAT - CRITICAL:
+You are working in a patch-oriented repair flow. Preferred output is a SINGLE JSON object with a patch bundle and NO extra prose.
+
+Preferred JSON shape:
+{
+  "patch_bundle": {
+    "justification": "one sentence summary of the repair",
+    "operations": [
+      {
+        "type": "replace_function",
+        "path": "src/App.tsx",
+        "content": "FULL FINAL FILE CONTENT AFTER THE REPAIR"
+      },
+      {
+        "type": "create_file",
+        "path": "src/lib/api.ts",
+        "content": "FULL FILE CONTENT"
+      },
+      {
+        "type": "delete_block",
+        "path": "src/obsolete.ts"
+      }
+    ]
+  }
+}
+
+PATCH RULES:
+1. Return JSON only when using the patch bundle format
+2. For every non-delete operation, "content" must be the FULL FINAL FILE CONTENT after your change
+3. Allowed operation types: "create_file", "replace_function", "replace_symbol", "patch_json_key", "patch_env_var", "patch_route_registration", "patch_dependency", "patch_schema_entity", "delete_block"
+4. Never emit git/unified/search-replace diffs
+5. If the repair is clearer as complete files, you may fall back to the standard file format below
+
+` + defaultTaskOutputFormatPrompt()
+}
+
 func (am *AgentManager) buildTaskPrompt(task *Task, build *Build, agent *Agent) string {
 	// Check if there are previous errors to learn from (pruned to last 2 attempts)
 	errorContext := ""
@@ -9198,6 +10091,11 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 		}
 	}
 
+	outputFormatPrompt := defaultTaskOutputFormatPrompt()
+	if taskSupportsStructuredPatchOutput(task, agent) {
+		outputFormatPrompt = patchFirstTaskOutputFormatPrompt()
+	}
+
 	return fmt.Sprintf(`Task: %s
 
 Description: %s
@@ -9217,52 +10115,7 @@ App being built: %s
 %s
 %s
 %s
-OUTPUT FORMAT - CRITICAL:
-For EVERY file you create, use this EXACT format:
-
-// File: path/to/filename.ext
-`+"```"+`language
-[complete file content here]
-`+"```"+`
-
-Example:
-// File: src/components/App.tsx
-`+"```"+`typescript
-import React from 'react';
-export const App: React.FC = () => {
-  return <div>Hello World</div>;
-};
-`+"```"+`
-
-// File: src/api/server.ts
-`+"```"+`typescript
-import express from 'express';
-const app = express();
-// complete implementation...
-`+"```"+`
-
-MANDATORY REQUIREMENTS:
-1. Output COMPLETE, PRODUCTION-READY code only
-2. Mark EVERY file with "// File: path/filename" comment before its code block
-3. NEVER use placeholder data, mock responses, TODO comments, or demo content
-4. If external API keys or credentials are needed:
-   - Use environment variable patterns (e.g., process.env.API_KEY)
-   - Add ONE clear comment indicating what the user must provide
-   - Build ALL other functionality completely without waiting
-5. Include all imports, error handling, and edge cases
-6. Every function must be fully implemented and working
-
-FORBIDDEN OUTPUTS:
-- "// TODO: implement this"
-- Mock or fake data
-- Placeholder functions
-- Demo or example code
-- Incomplete implementations
-- Git merge conflict markers (<<<<<<< / ======= / >>>>>>>)
-- SEARCH/REPLACE diff blocks — output COMPLETE files only, never diffs
-- Mixing frontend and backend code in the same file: NEVER put Express/server imports in a .tsx/.jsx React component file; NEVER put React JSX in a backend Go/Python/Express file
-
-Build the REAL, COMPLETE implementation now.`,
+%s`,
 		task.Type,
 		task.Description,
 		appDescription,
@@ -9279,7 +10132,8 @@ Build the REAL, COMPLETE implementation now.`,
 		teamCoordinationContext,
 		interactionContext,
 		deliveryConstraintsContext,
-		powerModeContext)
+		powerModeContext,
+		outputFormatPrompt)
 }
 
 func formatTechStackSummary(stack *TechStack) string {
@@ -10009,6 +10863,11 @@ func (am *AgentManager) parseTaskOutput(taskType TaskType, response string) *Tas
 		if trimmed != "" {
 			output.Messages = append(output.Messages, trimmed)
 		}
+		return output
+	}
+
+	if bundle := parseStructuredPatchBundleResponse(cleanResponse); bundle != nil {
+		output.StructuredPatchBundle = bundle
 		return output
 	}
 
@@ -11031,6 +11890,51 @@ func nodeTestCommandForManifest(manifest previewManifest) (string, []string) {
 	}
 }
 
+func scriptLikelyNeedsInstalledPackages(script string) bool {
+	lower := strings.ToLower(strings.TrimSpace(script))
+	if lower == "" {
+		return false
+	}
+
+	if strings.HasPrefix(lower, "node -e ") ||
+		strings.HasPrefix(lower, "node -e\"") ||
+		strings.HasPrefix(lower, "node --eval ") ||
+		strings.HasPrefix(lower, "node --eval\"") {
+		return false
+	}
+
+	toolIndicators := []string{
+		"npm ", "npx ", "pnpm ", "yarn ",
+		"vite", "next ", "nextjs", "react-scripts", "tsc", "tsx",
+		"jest", "vitest", "webpack", "rollup", "parcel", "astro",
+		"nuxt", "svelte-kit", "playwright", "cypress",
+	}
+	for _, indicator := range toolIndicators {
+		if strings.Contains(lower, indicator) {
+			return true
+		}
+	}
+
+	if strings.HasPrefix(lower, "node ") {
+		return false
+	}
+
+	return true
+}
+
+func verificationNeedsNodeInstall(manifest previewManifest, runTests bool, runPreviewProbe bool) bool {
+	if scriptLikelyNeedsInstalledPackages(manifest.Scripts["build"]) {
+		return true
+	}
+	if runTests && scriptLikelyNeedsInstalledPackages(manifest.Scripts["test"]) {
+		return true
+	}
+	if runPreviewProbe && scriptLikelyNeedsInstalledPackages(manifest.Scripts["preview"]) {
+		return true
+	}
+	return false
+}
+
 func classifyNodeTestFailure(output string, err error) (bool, string) {
 	summary := summarizePreviewBuildFailure(output)
 	if err == nil {
@@ -11406,8 +12310,10 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 	if rootMismatch := detectFrontendTypeScriptBuildRootMismatch(files, prefix, manifest); rootMismatch != "" {
 		return []string{"Preview verification failed: " + rootMismatch}
 	}
+	runTests := shouldRunGeneratedNodeTests(files, prefix, manifest)
+	runPreviewProbe := buildUsesPreviewHTTPProbe(manifest.Scripts, forceHTTPProbe)
 	depCount := len(manifest.Dependencies) + len(manifest.DevDependencies)
-	if depCount > 0 {
+	if depCount > 0 && verificationNeedsNodeInstall(manifest, runTests, runPreviewProbe) {
 		if out, err := runPreviewCheckCommand(tmpDir, 2*time.Minute, "npm", "install", "--legacy-peer-deps", "--include=dev", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
 			skip, summary := classifyNodeInstallFailure(out, err)
 			if skip {
@@ -11428,7 +12334,7 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 		issues = append(issues, fmt.Sprintf("Preview verification build failed: %s", summary))
 		return issues
 	}
-	if shouldRunGeneratedNodeTests(files, prefix, manifest) {
+	if runTests {
 		testName, testArgs := nodeTestCommandForManifest(manifest)
 		if out, err := runPreviewCheckCommand(tmpDir, 90*time.Second, testName, testArgs...); err != nil {
 			skip, summary := classifyNodeTestFailure(out, err)
@@ -11441,7 +12347,7 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 		}
 	}
 
-	if buildUsesPreviewHTTPProbe(manifest.Scripts, forceHTTPProbe) {
+	if runPreviewProbe {
 		if summary, skip := runPreviewHTTPProbe(tmpDir); summary != "" {
 			if skip {
 				log.Printf("Preview verification skipped: preview HTTP probe was inconclusive (%s)", summary)
@@ -11688,8 +12594,9 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 		return []string{"Backend verification failed: " + rootMismatch}
 	}
 
+	runTests := shouldRunGeneratedNodeTests(files, prefix, manifest)
 	depCount := len(manifest.Dependencies) + len(manifest.DevDependencies)
-	if depCount > 0 {
+	if depCount > 0 && verificationNeedsNodeInstall(manifest, runTests, false) {
 		if out, err := runPreviewCheckCommand(tmpDir, 2*time.Minute, "npm", "install", "--legacy-peer-deps", "--include=dev", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
 			skip, summary := classifyNodeInstallFailure(out, err)
 			if skip {
@@ -11710,7 +12617,7 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 		issues = append(issues, fmt.Sprintf("Backend verification build failed: %s", summary))
 		return issues
 	}
-	if shouldRunGeneratedNodeTests(files, prefix, manifest) {
+	if runTests {
 		testName, testArgs := nodeTestCommandForManifest(manifest)
 		if out, err := runPreviewCheckCommand(tmpDir, 90*time.Second, testName, testArgs...); err != nil {
 			skip, summary := classifyNodeTestFailure(out, err)
@@ -12769,7 +13676,7 @@ func (am *AgentManager) verifyGeneratedCode(buildID string, output *TaskOutput) 
 	}
 
 	errors := make([]string, 0)
-	parserWarningIsFatal := len(output.TruncatedFiles) > 0 || len(output.Files) == 0
+	parserWarningIsFatal := len(output.TruncatedFiles) > 0 || (len(output.Files) == 0 && len(output.DeletedFiles) == 0)
 	for _, msg := range output.Messages {
 		if strings.Contains(strings.ToLower(msg), "unterminated code block") && parserWarningIsFatal {
 			errors = append(errors, fmt.Sprintf("AI response parsing warning: %s", msg))
@@ -13477,6 +14384,9 @@ func (am *AgentManager) getNextFallbackProviderForTask(build *Build, task *Task,
 	available := make(map[ai.AIProvider]bool, len(availableProviders))
 	for _, provider := range availableProviders {
 		available[provider] = true
+	}
+	if preferred := taskPreferredProvider(task); preferred != "" && preferred != current && available[preferred] {
+		return preferred
 	}
 
 	shape := taskExecutionShape(task, &Agent{Role: role})
