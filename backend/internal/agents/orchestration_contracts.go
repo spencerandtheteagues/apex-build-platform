@@ -479,7 +479,7 @@ func compileBuildContractFromPlan(buildID string, intent *IntentBrief, plan *Bui
 		RoutePageMap:        deriveContractRoutes(plan),
 		BackendResourceMap:  deriveBackendResources(plan),
 		APIContract:         cloneAPIContract(plan.APIContract),
-		DBSchemaContract:    append([]DataModel(nil), plan.DataModels...),
+		DBSchemaContract:    normalizeDataModels(plan.DataModels),
 		AuthContract:        deriveAuthContract(plan, intent),
 		EnvVarContract:      append([]BuildEnvVar(nil), plan.EnvVars...),
 		DependencySkeleton:  deriveDependencySkeleton(plan),

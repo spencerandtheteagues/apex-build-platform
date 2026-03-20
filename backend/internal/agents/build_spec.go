@@ -465,10 +465,63 @@ func convertPlannedModels(bundle *autonomous.PlanningBundle) []DataModel {
 		out = append(out, DataModel{
 			Name:        strings.TrimSpace(model.Name),
 			Description: "",
-			Fields:      fields,
+			Fields:      normalizeModelFields(fields),
 		})
 	}
 	return out
+}
+
+func normalizeDataModels(models []DataModel) []DataModel {
+	if len(models) == 0 {
+		return nil
+	}
+
+	out := make([]DataModel, 0, len(models))
+	for _, model := range models {
+		name := strings.TrimSpace(model.Name)
+		if name == "" {
+			continue
+		}
+
+		out = append(out, DataModel{
+			Name:        name,
+			Description: strings.TrimSpace(model.Description),
+			Fields:      normalizeModelFields(model.Fields),
+			Relations:   append([]Relation(nil), model.Relations...),
+		})
+	}
+
+	return out
+}
+
+func normalizeModelFields(fields []ModelField) []ModelField {
+	if len(fields) == 0 {
+		return nil
+	}
+
+	out := make([]ModelField, 0, len(fields))
+	for _, field := range fields {
+		name := strings.TrimSpace(field.Name)
+		fieldType := strings.TrimSpace(field.Type)
+		if name == "" || fieldType == "" {
+			continue
+		}
+
+		normalized := field
+		normalized.Name = name
+		normalized.Type = fieldType
+		if isCanonicalPrimaryKeyField(name) {
+			normalized.Required = true
+			normalized.Unique = true
+		}
+		out = append(out, normalized)
+	}
+
+	return out
+}
+
+func isCanonicalPrimaryKeyField(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), "id")
 }
 
 func convertPreflightChecks(bundle *autonomous.PlanningBundle) []BuildPreflightCheck {

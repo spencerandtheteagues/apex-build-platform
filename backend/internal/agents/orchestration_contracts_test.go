@@ -70,6 +70,15 @@ func TestCompileBuildContractFromPlanSeedsTruthAndVerification(t *testing.T) {
 				{Method: "GET", Path: "/api/health", Description: "health"},
 			},
 		},
+		DataModels: []DataModel{
+			{
+				Name: "Project",
+				Fields: []ModelField{
+					{Name: "id", Type: "uuid", Required: true, Unique: false},
+					{Name: "name", Type: "string", Required: true},
+				},
+			},
+		},
 	}
 
 	intent := &IntentBrief{
@@ -92,6 +101,9 @@ func TestCompileBuildContractFromPlanSeedsTruthAndVerification(t *testing.T) {
 	}
 	if !containsTruthTag(contract.TruthBySurface[string(SurfaceIntegration)], TruthNeedsExternalAPI) {
 		t.Fatalf("expected integration truth tags to include needs_external_api, got %+v", contract.TruthBySurface[string(SurfaceIntegration)])
+	}
+	if len(contract.DBSchemaContract) != 1 || len(contract.DBSchemaContract[0].Fields) == 0 || !contract.DBSchemaContract[0].Fields[0].Unique {
+		t.Fatalf("expected compileBuildContractFromPlan to normalize canonical id field uniqueness, got %+v", contract.DBSchemaContract)
 	}
 }
 

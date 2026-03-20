@@ -76,6 +76,12 @@ func TestCreateBuildPlanFromPlanningBundle(t *testing.T) {
 	if len(plan.WorkOrders) == 0 {
 		t.Fatal("expected work orders")
 	}
+	if len(plan.DataModels) != 1 {
+		t.Fatalf("expected one normalized data model, got %+v", plan.DataModels)
+	}
+	if len(plan.DataModels[0].Fields) == 0 || !plan.DataModels[0].Fields[0].Unique {
+		t.Fatalf("expected canonical id field to be marked unique, got %+v", plan.DataModels[0].Fields)
+	}
 	if wo := getBuildWorkOrder(plan, RoleFrontend); wo == nil || len(wo.OwnedFiles) == 0 {
 		t.Fatalf("expected frontend work order, got %+v", wo)
 	} else if !pathAllowedByWorkOrder("package.json", wo) {
