@@ -43,6 +43,63 @@ const COST_LABELS: Record<string, { label: string; color: string }> = {
   high: { label: '$$$', color: 'text-red-400' },
 }
 
+const FALLBACK_MODELS: Record<string, ModelInfo[]> = {
+  claude: [
+    { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', speed: 'slow', cost_tier: 'high', description: 'Most powerful — reasoning & coding' },
+    { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', speed: 'medium', cost_tier: 'medium', description: 'Balanced quality and speed' },
+    { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
+  ],
+  gpt4: [
+    { id: 'gpt-5.4', name: 'GPT-5.4', speed: 'slow', cost_tier: 'high', description: 'Max tier — latest frontier OpenAI model' },
+    { id: 'gpt-4.1', name: 'GPT-4.1', speed: 'medium', cost_tier: 'medium', description: 'Balanced tier — best current mid-tier coder' },
+    { id: 'gpt-4o-mini', name: 'GPT-4o Mini', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
+  ],
+  gemini: [
+    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview', speed: 'slow', cost_tier: 'high', description: 'Max tier — latest Gemini frontier model' },
+    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview', speed: 'medium', cost_tier: 'medium', description: 'Balanced tier — fast reasoning' },
+    { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
+  ],
+  grok: [
+    { id: 'grok-code-fast-1', name: 'Grok Code Fast 1', speed: 'medium', cost_tier: 'high', description: 'Max tier — latest Grok coding model' },
+    { id: 'grok-3', name: 'Grok 3', speed: 'medium', cost_tier: 'medium', description: 'Balanced tier — stronger reasoning' },
+    { id: 'grok-3-mini', name: 'Grok 3 Mini', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
+  ],
+  ollama: [
+    { id: 'deepseek-r1:18b', name: 'DeepSeek-R1 (18b)', speed: 'variable', cost_tier: 'free', description: 'Reasoning model (local)' },
+    { id: 'deepseek-r1:8b', name: 'DeepSeek-R1 (8b)', speed: 'variable', cost_tier: 'free', description: 'Reasoning model (local)' },
+    { id: 'llama3.3-70b', name: 'Llama 3.3 70B', speed: 'variable', cost_tier: 'free', description: '405B performance (local)' },
+  ],
+}
+
+const isModelInfo = (value: unknown): value is ModelInfo => {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.name === 'string' &&
+    typeof candidate.speed === 'string' &&
+    typeof candidate.cost_tier === 'string' &&
+    typeof candidate.description === 'string'
+  )
+}
+
+const normalizeModelsPayload = (value: unknown): Record<string, ModelInfo[]> => {
+  if (!value || typeof value !== 'object') {
+    return FALLBACK_MODELS
+  }
+
+  const normalized: Record<string, ModelInfo[]> = {}
+  for (const [provider, providerModels] of Object.entries(value as Record<string, unknown>)) {
+    if (!Array.isArray(providerModels)) continue
+    const safeModels = providerModels.filter(isModelInfo)
+    if (safeModels.length > 0) {
+      normalized[provider] = safeModels
+    }
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : FALLBACK_MODELS
+}
+
 export default function ModelSelector({ value, onChange, compact = false, className }: ModelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [models, setModels] = useState<Record<string, ModelInfo[]>>({})
@@ -55,37 +112,12 @@ export default function ModelSelector({ value, onChange, compact = false, classN
       try {
         const response = await apiService.getAvailableModels()
         if (response.success) {
-          setModels(response.data)
+          setModels(normalizeModelsPayload(response.data))
+        } else {
+          setModels(FALLBACK_MODELS)
         }
       } catch {
-        // Fallback models if API is unavailable - Updated January 2026
-        setModels({
-          claude: [
-            { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', speed: 'slow', cost_tier: 'high', description: 'Most powerful — reasoning & coding' },
-            { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', speed: 'medium', cost_tier: 'medium', description: 'Balanced quality and speed' },
-            { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
-          ],
-          gpt4: [
-            { id: 'gpt-5.4', name: 'GPT-5.4', speed: 'slow', cost_tier: 'high', description: 'Max tier — latest frontier OpenAI model' },
-            { id: 'gpt-4.1', name: 'GPT-4.1', speed: 'medium', cost_tier: 'medium', description: 'Balanced tier — best current mid-tier coder' },
-            { id: 'gpt-4o-mini', name: 'GPT-4o Mini', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
-          ],
-          gemini: [
-            { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview', speed: 'slow', cost_tier: 'high', description: 'Max tier — latest Gemini frontier model' },
-            { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview', speed: 'medium', cost_tier: 'medium', description: 'Balanced tier — fast reasoning' },
-            { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
-          ],
-          grok: [
-            { id: 'grok-code-fast-1', name: 'Grok Code Fast 1', speed: 'medium', cost_tier: 'high', description: 'Max tier — latest Grok coding model' },
-            { id: 'grok-3', name: 'Grok 3', speed: 'medium', cost_tier: 'medium', description: 'Balanced tier — stronger reasoning' },
-            { id: 'grok-3-mini', name: 'Grok 3 Mini', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
-          ],
-          ollama: [
-            { id: 'deepseek-r1:18b', name: 'DeepSeek-R1 (18b)', speed: 'variable', cost_tier: 'free', description: 'Reasoning model (local)' },
-            { id: 'deepseek-r1:8b', name: 'DeepSeek-R1 (8b)', speed: 'variable', cost_tier: 'free', description: 'Reasoning model (local)' },
-            { id: 'llama3.3-70b', name: 'Llama 3.3 70B', speed: 'variable', cost_tier: 'free', description: '405B performance (local)' },
-          ],
-        })
+        setModels(FALLBACK_MODELS)
       }
     }
     fetchModels()

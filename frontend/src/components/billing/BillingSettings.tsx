@@ -35,6 +35,73 @@ interface Invoice {
   description: string
 }
 
+const asNumber = (value: unknown): number => {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+const asString = (value: unknown): string => {
+  return typeof value === 'string' ? value : ''
+}
+
+const normalizePlans = (value: unknown): Plan[] => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .filter((candidate): candidate is Record<string, unknown> => Boolean(candidate) && typeof candidate === 'object')
+    .map((candidate) => ({
+      type: asString(candidate.type),
+      name: asString(candidate.name) || 'Plan',
+      monthly_price_cents: asNumber(candidate.monthly_price_cents),
+      monthly_price_id: asString(candidate.monthly_price_id),
+      monthly_credits_usd: asNumber(candidate.monthly_credits_usd),
+      is_popular: Boolean(candidate.is_popular),
+      features: Array.isArray(candidate.features) ? candidate.features.filter((feature): feature is string => typeof feature === 'string') : [],
+    }))
+    .filter((plan) => Boolean(plan.type))
+}
+
+const normalizeSubscription = (value: unknown): Subscription | null => {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const candidate = value as Record<string, unknown>
+  const planType = asString(candidate.plan_type)
+  const planName = asString(candidate.plan_name)
+  if (!planType && !planName) {
+    return null
+  }
+
+  return {
+    plan_type: planType || 'free',
+    plan_name: planName || 'Free',
+    status: asString(candidate.status),
+    current_period_end: asString(candidate.current_period_end),
+    cancel_at_period_end: typeof candidate.cancel_at_period_end === 'boolean' ? candidate.cancel_at_period_end : undefined,
+  }
+}
+
+const normalizeInvoices = (value: unknown): Invoice[] => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .filter((candidate): candidate is Record<string, unknown> => Boolean(candidate) && typeof candidate === 'object')
+    .map((candidate) => ({
+      id: asString(candidate.id),
+      amount_paid: asNumber(candidate.amount_paid),
+      currency: asString(candidate.currency),
+      status: asString(candidate.status),
+      created: asNumber(candidate.created),
+      hosted_invoice_url: asString(candidate.hosted_invoice_url),
+      description: asString(candidate.description),
+    }))
+    .filter((invoice) => Boolean(invoice.id))
+}
+
 const isPlaceholderPriceID = (priceID: string): boolean => {
   const normalized = priceID.trim()
   if (!normalized) {
@@ -79,26 +146,41 @@ export function BillingSettings() {
       ])
 
       if (plansRes.status === 'fulfilled' && plansRes.value.success && plansRes.value.data) {
-        // Filter to just the paid plans shown on the landing page
         const featured = ['free', 'builder', 'pro', 'team']
-        setPlans(plansRes.value.data.plans.filter(p => featured.includes(p.type)))
+        setPlans(normalizePlans(plansRes.value.data.plans).filter((plan) => featured.includes(plan.type)))
+      } else {
+        setPlans([])
       }
 
       if (subRes.status === 'fulfilled' && subRes.value.success && subRes.value.data) {
-        setSubscription(subRes.value.data)
+        setSubscription(normalizeSubscription(subRes.value.data))
+      } else {
+        setSubscription(null)
       }
 
       if (balRes.status === 'fulfilled' && balRes.value.success && balRes.value.data) {
-        setCreditBalance(balRes.value.data.balance)
-        setHasUnlimited(balRes.value.data.has_unlimited)
-        setBypassBilling(balRes.value.data.bypass_billing)
+        setCreditBalance(asNumber(balRes.value.data.balance))
+        setHasUnlimited(Boolean(balRes.value.data.has_unlimited))
+        setBypassBilling(Boolean(balRes.value.data.bypass_billing))
+      } else {
+        setCreditBalance(null)
+        setHasUnlimited(false)
+        setBypassBilling(false)
       }
 
       if (invRes.status === 'fulfilled' && invRes.value.success && invRes.value.data) {
-        setInvoices(invRes.value.data.invoices)
+        setInvoices(normalizeInvoices(invRes.value.data.invoices))
+      } else {
+        setInvoices([])
       }
     } catch {
       setError('Failed to load billing information.')
+      setPlans([])
+      setSubscription(null)
+      setCreditBalance(null)
+      setHasUnlimited(false)
+      setBypassBilling(false)
+      setInvoices([])
     } finally {
       setLoading(false)
     }

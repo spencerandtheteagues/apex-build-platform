@@ -124,6 +124,41 @@ interface KeyState {
   selectedModel: string
 }
 
+const asNumber = (value: unknown): number => {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+const normalizeKeyStates = (value: unknown): Record<string, KeyState> => {
+  if (!Array.isArray(value)) {
+    return {}
+  }
+
+  const next: Record<string, KeyState> = {}
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object') continue
+
+    const record = candidate as Record<string, unknown>
+    const provider = typeof record.provider === 'string' ? record.provider : ''
+    if (!provider) continue
+
+    const defaultModel = PROVIDERS.find((entry) => entry.id === provider)?.models[0]?.id || ''
+    next[provider] = {
+      provider,
+      isConfigured: true,
+      isValid: Boolean(record.is_valid),
+      isActive: typeof record.is_active === 'boolean' ? record.is_active : true,
+      lastUsed: typeof record.last_used === 'string' ? record.last_used : undefined,
+      usageCount: asNumber(record.usage_count),
+      totalCost: asNumber(record.total_cost),
+      selectedModel: typeof record.model_preference === 'string' && record.model_preference
+        ? record.model_preference
+        : defaultModel,
+    }
+  }
+
+  return next
+}
+
 const SPEED_ICONS = {
   fast: <Zap className="w-3 h-3 text-yellow-400" />,
   medium: <Brain className="w-3 h-3 text-blue-400" />,
@@ -166,24 +201,9 @@ export default function APIKeySettings() {
   const fetchKeys = useCallback(async () => {
     try {
       const response = await apiService.getAPIKeys()
-      if (response.success) {
-        const keyMap: Record<string, KeyState> = {}
-        for (const k of response.data) {
-          keyMap[k.provider] = {
-            provider: k.provider,
-            isConfigured: true,
-            isValid: k.is_valid,
-            isActive: k.is_active ?? true,
-            lastUsed: k.last_used,
-            usageCount: k.usage_count,
-            totalCost: k.total_cost,
-            selectedModel: k.model_preference || PROVIDERS.find(p => p.id === k.provider)?.models[0]?.id || '',
-          }
-        }
-        setKeys(keyMap)
-      }
+      setKeys(response.success ? normalizeKeyStates(response.data) : {})
     } catch {
-      // No keys configured yet
+      setKeys({})
     } finally {
       setLoading(false)
     }

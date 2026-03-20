@@ -399,6 +399,12 @@ function App() {
   )
 
   const shellScrollViewClass = 'absolute inset-0 min-h-0 overflow-y-auto overscroll-contain'
+  const renderSettingsSectionFallback = (title: string, description: string) => (
+    <div className="rounded-xl border border-red-900/40 bg-red-950/10 p-6">
+      <h2 className="mb-2 text-lg font-bold text-red-300">{title} is temporarily unavailable</h2>
+      <p className="text-sm text-gray-400">{description}</p>
+    </div>
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -1146,101 +1152,119 @@ function App() {
                     </div>
 
                     {/* UI Color Scheme Section */}
-                    <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
-                      <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                        <Palette className="w-5 h-5 text-red-400" />
-                        UI Color Scheme
-                      </h2>
-                      <p className="text-gray-400 text-sm mb-4">
-                        Choose between the default red/black cyberpunk mode and a friendlier blue/white mode.
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setUIColorScheme('red-dark')}
-                          aria-pressed={uiColorScheme === 'red-dark'}
-                          className={`rounded-lg border p-4 text-left transition-all duration-200 ${
-                            uiColorScheme === 'red-dark'
-                              ? 'bg-red-900/20 border-red-700 text-red-300 shadow-sm shadow-red-900/30'
-                              : 'bg-black/40 border-gray-700 text-gray-300 hover:border-red-600/60'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-semibold">Red & Black</span>
-                            {uiColorScheme === 'red-dark' && <Check className="w-4 h-4" />}
-                          </div>
-                          <p className="text-xs mt-2 opacity-80">Default cyberpunk look</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setUIColorScheme('blue-light')}
-                          aria-pressed={uiColorScheme === 'blue-light'}
-                          className={`rounded-lg border p-4 text-left transition-all duration-200 ${
-                            uiColorScheme === 'blue-light'
-                              ? 'bg-blue-100 border-blue-400 text-blue-800 shadow-sm shadow-blue-200'
-                              : 'bg-black/40 border-gray-700 text-gray-300 hover:border-blue-500/70'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-semibold">Blue & White</span>
-                            {uiColorScheme === 'blue-light' && <Check className="w-4 h-4" />}
-                          </div>
-                          <p className="text-xs mt-2 opacity-80">Friendly light interface</p>
-                        </button>
+                    <ErrorBoundary fallback={renderSettingsSectionFallback('UI Color Scheme', 'Theme controls hit an unexpected error. The rest of Settings is still available.')}>
+                      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                          <Palette className="w-5 h-5 text-red-400" />
+                          UI Color Scheme
+                        </h2>
+                        <p className="text-gray-400 text-sm mb-4">
+                          Choose between the default red/black cyberpunk mode and a friendlier blue/white mode.
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setUIColorScheme('red-dark')}
+                            aria-pressed={uiColorScheme === 'red-dark'}
+                            className={`rounded-lg border p-4 text-left transition-all duration-200 ${
+                              uiColorScheme === 'red-dark'
+                                ? 'bg-red-900/20 border-red-700 text-red-300 shadow-sm shadow-red-900/30'
+                                : 'bg-black/40 border-gray-700 text-gray-300 hover:border-red-600/60'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold">Red & Black</span>
+                              {uiColorScheme === 'red-dark' && <Check className="w-4 h-4" />}
+                            </div>
+                            <p className="text-xs mt-2 opacity-80">Default cyberpunk look</p>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setUIColorScheme('blue-light')}
+                            aria-pressed={uiColorScheme === 'blue-light'}
+                            className={`rounded-lg border p-4 text-left transition-all duration-200 ${
+                              uiColorScheme === 'blue-light'
+                                ? 'bg-blue-100 border-blue-400 text-blue-800 shadow-sm shadow-blue-200'
+                                : 'bg-black/40 border-gray-700 text-gray-300 hover:border-blue-500/70'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold">Blue & White</span>
+                              {uiColorScheme === 'blue-light' && <Check className="w-4 h-4" />}
+                            </div>
+                            <p className="text-xs mt-2 opacity-80">Friendly light interface</p>
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    </ErrorBoundary>
 
                     {/* Model Selector Section */}
-                    <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
-                      <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                        <Sparkles className="w-5 h-5 text-red-400" />
-                        Default AI Model
-                      </h2>
-                      <p className="text-gray-400 text-sm mb-4">
-                        Select the default AI model for your builds. You can override this per-project.
-                      </p>
-                      <ModelSelector
-                        value={defaultModel}
-                        onChange={handleDefaultModelChange}
-                        className="w-full max-w-md"
-                      />
-                    </div>
+                    <ErrorBoundary fallback={renderSettingsSectionFallback('Default AI Model', 'Model selection failed to load. BYOK and billing controls are still available below.')}>
+                      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                          <Sparkles className="w-5 h-5 text-red-400" />
+                          Default AI Model
+                        </h2>
+                        <p className="text-gray-400 text-sm mb-4">
+                          Select the default AI model for your builds. You can override this per-project.
+                        </p>
+                        <Suspense fallback={<div className="text-sm text-gray-500">Loading model controls…</div>}>
+                          <ModelSelector
+                            value={defaultModel}
+                            onChange={handleDefaultModelChange}
+                            className="w-full max-w-md"
+                          />
+                        </Suspense>
+                      </div>
+                    </ErrorBoundary>
 
                     {/* API Keys Section */}
-                    <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
-                      <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                        <Key className="w-5 h-5 text-red-400" />
-                        API Keys (BYOK)
-                      </h2>
-                      <p className="text-gray-400 text-sm mb-6">
-                        Bring Your Own Keys - Add your own API keys to use your personal quotas and get better rates.
-                      </p>
-                      <APIKeySettings />
-                    </div>
+                    <ErrorBoundary fallback={renderSettingsSectionFallback('API Keys (BYOK)', 'Your key management panel failed to render. Budget and billing settings are still available.')}>
+                      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                          <Key className="w-5 h-5 text-red-400" />
+                          API Keys (BYOK)
+                        </h2>
+                        <p className="text-gray-400 text-sm mb-6">
+                          Bring Your Own Keys - Add your own API keys to use your personal quotas and get better rates.
+                        </p>
+                        <Suspense fallback={<div className="text-sm text-gray-500">Loading BYOK controls…</div>}>
+                          <APIKeySettings />
+                        </Suspense>
+                      </div>
+                    </ErrorBoundary>
 
                     {/* Budget Caps Section */}
-                    <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
-                      <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                        <Shield className="w-5 h-5 text-red-400" />
-                        Budget Caps
-                      </h2>
-                      <p className="text-gray-400 text-sm mb-6">
-                        Set spending limits to control costs. Builds will stop or warn when caps are reached.
-                      </p>
-                      <BudgetSettings />
-                    </div>
+                    <ErrorBoundary fallback={renderSettingsSectionFallback('Budget Caps', 'Budget controls failed to render. You can still manage themes, keys, and billing.')}>
+                      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                          <Shield className="w-5 h-5 text-red-400" />
+                          Budget Caps
+                        </h2>
+                        <p className="text-gray-400 text-sm mb-6">
+                          Set spending limits to control costs. Builds will stop or warn when caps are reached.
+                        </p>
+                        <Suspense fallback={<div className="text-sm text-gray-500">Loading budget controls…</div>}>
+                          <BudgetSettings />
+                        </Suspense>
+                      </div>
+                    </ErrorBoundary>
 
                     {/* Billing & Credits Section */}
-                    <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
-                      <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                        <CreditCard className="w-5 h-5 text-red-400" />
-                        Billing & Credits
-                      </h2>
-                      <p className="text-gray-400 text-sm mb-6">
-                        Manage your subscription, buy AI credits, and view invoice history.
-                      </p>
-                      <BillingSettings />
-                    </div>
+                    <ErrorBoundary fallback={renderSettingsSectionFallback('Billing & Credits', 'Billing controls failed to render. The rest of the settings page is still usable.')}>
+                      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                          <CreditCard className="w-5 h-5 text-red-400" />
+                          Billing & Credits
+                        </h2>
+                        <p className="text-gray-400 text-sm mb-6">
+                          Manage your subscription, buy AI credits, and view invoice history.
+                        </p>
+                        <Suspense fallback={<div className="text-sm text-gray-500">Loading billing controls…</div>}>
+                          <BillingSettings />
+                        </Suspense>
+                      </div>
+                    </ErrorBoundary>
                   </div>
                 </div>
               </Suspense>
