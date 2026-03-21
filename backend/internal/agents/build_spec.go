@@ -510,6 +510,9 @@ func normalizeModelFields(fields []ModelField) []ModelField {
 		normalized := field
 		normalized.Name = name
 		normalized.Type = fieldType
+		if isNullableModelFieldType(fieldType) {
+			normalized.Required = false
+		}
 		if isCanonicalPrimaryKeyField(name) {
 			normalized.Required = true
 			normalized.Unique = true
@@ -522,6 +525,14 @@ func normalizeModelFields(fields []ModelField) []ModelField {
 
 func isCanonicalPrimaryKeyField(name string) bool {
 	return strings.EqualFold(strings.TrimSpace(name), "id")
+}
+
+func isNullableModelFieldType(fieldType string) bool {
+	lower := strings.ToLower(strings.TrimSpace(fieldType))
+	return strings.Contains(lower, "?") ||
+		strings.Contains(lower, "null") ||
+		strings.Contains(lower, "nullable") ||
+		strings.Contains(lower, "*")
 }
 
 func convertPreflightChecks(bundle *autonomous.PlanningBundle) []BuildPreflightCheck {
@@ -611,15 +622,31 @@ func mergePlannedFiles(base []PlannedFile, extras ...PlannedFile) []PlannedFile 
 }
 
 func buildOwnershipMap(scaffold buildScaffold) []BuildOwnership {
-	out := make([]BuildOwnership, 0)
+	pathRoles := make(map[string][]AgentRole)
 	for role, paths := range scaffold.Ownership {
 		for _, path := range paths {
-			out = append(out, BuildOwnership{
-				Path:    path,
-				Role:    role,
-				Purpose: fmt.Sprintf("%s owns %s within scaffold %s", role, path, scaffold.ID),
-			})
+			path = strings.TrimSpace(path)
+			if path == "" {
+				continue
+			}
+			pathRoles[path] = append(pathRoles[path], role)
 		}
+	}
+
+	paths := make([]string, 0, len(pathRoles))
+	for path := range pathRoles {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	out := make([]BuildOwnership, 0, len(paths))
+	for _, path := range paths {
+		role := selectOwnershipRoleForPath(path, pathRoles[path])
+		out = append(out, BuildOwnership{
+			Path:    path,
+			Role:    role,
+			Purpose: fmt.Sprintf("%s owns %s within scaffold %s", role, path, scaffold.ID),
+		})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Role == out[j].Role {
@@ -628,6 +655,65 @@ func buildOwnershipMap(scaffold buildScaffold) []BuildOwnership {
 		return out[i].Role < out[j].Role
 	})
 	return out
+}
+
+func selectOwnershipRoleForPath(path string, roles []AgentRole) AgentRole {
+	if len(roles) == 0 {
+		return ""
+	}
+	if len(roles) == 1 {
+		return roles[0]
+	}
+
+	seen := make(map[AgentRole]bool)
+	uniqueRoles := make([]AgentRole, 0, len(roles))
+	for _, role := range roles {
+		if !seen[role] {
+			seen[role] = true
+			uniqueRoles = append(uniqueRoles, role)
+		}
+	}
+	if len(uniqueRoles) == 1 {
+		return uniqueRoles[0]
+	}
+
+	switch path {
+	case "package.json", "tsconfig.json", ".env.example", "go.mod", "requirements.txt":
+		if containsAgentRole(uniqueRoles, RoleBackend) {
+			return RoleBackend
+		}
+	case "vite.config.ts", "tailwind.config.js", "postcss.config.js", "next.config.js", "index.html":
+		if containsAgentRole(uniqueRoles, RoleFrontend) {
+			return RoleFrontend
+		}
+	}
+
+	preferredOrder := []AgentRole{
+		RoleArchitect,
+		RoleDatabase,
+		RoleBackend,
+		RoleFrontend,
+		RoleTesting,
+		RoleReviewer,
+		RoleSolver,
+	}
+	for _, preferred := range preferredOrder {
+		if containsAgentRole(uniqueRoles, preferred) {
+			return preferred
+		}
+	}
+
+	sort.Slice(uniqueRoles, func(i, j int) bool { return uniqueRoles[i] < uniqueRoles[j] })
+	return uniqueRoles[0]
+}
+
+func containsAgentRole(roles []AgentRole, target AgentRole) bool {
+	for _, role := range roles {
+		if role == target {
+			return true
+		}
+	}
+	return false
 }
 
 func buildWorkOrders(appType string, stack TechStack, scaffold buildScaffold, ownership []BuildOwnership, acceptance []BuildAcceptanceCheck) []BuildWorkOrder {
@@ -639,10 +725,17 @@ func buildWorkOrders(appType string, stack TechStack, scaffold buildScaffold, ow
 		ownedSet := make(map[string]bool)
 		forbidden := make([]string, 0)
 		checks := make([]string, 0)
+		requiredFiles := requiredScaffoldFilesForRole(role, scaffold.Required)
 		for _, item := range ownership {
 			if item.Role == role {
 				owned = append(owned, item.Path)
 				ownedSet[item.Path] = true
+			}
+		}
+		for _, path := range requiredFiles {
+			if sharedScaffoldFileAllowedForRole(path, role) && !ownedSet[path] {
+				owned = append(owned, path)
+				ownedSet[path] = true
 			}
 		}
 		for _, item := range ownership {
@@ -665,7 +758,7 @@ func buildWorkOrders(appType string, stack TechStack, scaffold buildScaffold, ow
 			Role:             role,
 			Summary:          summarizeWorkOrder(role, appType, stack),
 			OwnedFiles:       dedupeStrings(owned),
-			RequiredFiles:    requiredScaffoldFilesForRole(role, scaffold.Required),
+			RequiredFiles:    requiredFiles,
 			ForbiddenFiles:   dedupeStrings(forbidden),
 			AcceptanceChecks: dedupeStrings(checks),
 			RequiredOutputs:  requiredOutputsForRole(role),
@@ -677,6 +770,15 @@ func buildWorkOrders(appType string, stack TechStack, scaffold buildScaffold, ow
 	}
 
 	return out
+}
+
+func sharedScaffoldFileAllowedForRole(path string, role AgentRole) bool {
+	switch path {
+	case "package.json", "tsconfig.json":
+		return role == RoleFrontend || role == RoleBackend
+	default:
+		return false
+	}
 }
 
 func requiredScaffoldFilesForRole(role AgentRole, required []PlannedFile) []string {

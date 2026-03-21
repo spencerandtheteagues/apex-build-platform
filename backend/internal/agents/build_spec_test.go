@@ -21,7 +21,7 @@ func TestCreateBuildPlanFromPlanningBundle(t *testing.T) {
 				{Name: "Transcript import", Description: "Ingest and process transcripts", Priority: "high"},
 			},
 			DataModels: []autonomous.DataModel{
-				{Name: "Transcript", Fields: map[string]string{"id": "uuid", "title": "string"}},
+				{Name: "Transcript", Fields: map[string]string{"id": "uuid", "title": "string", "completedAt": "datetime | null"}},
 			},
 			TechStack: &autonomous.TechStack{
 				Frontend: "React",
@@ -79,8 +79,21 @@ func TestCreateBuildPlanFromPlanningBundle(t *testing.T) {
 	if len(plan.DataModels) != 1 {
 		t.Fatalf("expected one normalized data model, got %+v", plan.DataModels)
 	}
-	if len(plan.DataModels[0].Fields) == 0 || !plan.DataModels[0].Fields[0].Unique {
+	var idField *ModelField
+	var nullableField *ModelField
+	for i := range plan.DataModels[0].Fields {
+		switch plan.DataModels[0].Fields[i].Name {
+		case "id":
+			idField = &plan.DataModels[0].Fields[i]
+		case "completedAt":
+			nullableField = &plan.DataModels[0].Fields[i]
+		}
+	}
+	if idField == nil || !idField.Unique {
 		t.Fatalf("expected canonical id field to be marked unique, got %+v", plan.DataModels[0].Fields)
+	}
+	if nullableField == nil || nullableField.Required {
+		t.Fatalf("expected nullable completedAt field to be non-required, got %+v", plan.DataModels[0].Fields)
 	}
 	if wo := getBuildWorkOrder(plan, RoleFrontend); wo == nil || len(wo.OwnedFiles) == 0 {
 		t.Fatalf("expected frontend work order, got %+v", wo)
@@ -111,6 +124,16 @@ func TestCreateBuildPlanFromPlanningBundle(t *testing.T) {
 		if !strings.Contains(scaffoldJoined, required) {
 			t.Fatalf("expected scaffold files to include %s; got %s", required, scaffoldJoined)
 		}
+	}
+
+	var packageOwners []AgentRole
+	for _, ownership := range plan.Ownership {
+		if ownership.Path == "package.json" {
+			packageOwners = append(packageOwners, ownership.Role)
+		}
+	}
+	if len(packageOwners) != 1 || packageOwners[0] != RoleBackend {
+		t.Fatalf("expected package.json to have a single backend owner, got %+v", packageOwners)
 	}
 }
 
