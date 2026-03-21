@@ -13,7 +13,7 @@
 
     <header class="topbar">
       <div class="brand-lockup">
-        <img src="../frontend/public/apex-build-logo-transparent.png" alt="APEX-BUILD logo" class="brand-logo" />
+        <img src="./apex-build-logo-transparent.png" alt="APEX-BUILD logo" class="brand-logo" />
         <div>
           <p class="eyebrow">Investor Demo</p>
           <h1>APEX-BUILD</h1>
@@ -22,10 +22,9 @@
 
       <nav class="deck-nav">
         <a href="#overview">Overview</a>
-        <a href="#product">Product</a>
-        <a href="#workflow">Workflow</a>
-        <a href="#orchestration">Orchestration</a>
+        <a href="#walkthrough">Walkthrough</a>
         <a href="#platform">Platform</a>
+        <a href="#orchestration">Orchestration</a>
         <a href="#economics">Economics</a>
         <a href="#deal">Deal</a>
       </nav>
@@ -34,433 +33,799 @@
     <main class="page-shell">
       <section class="hero section" id="overview">
         <div class="hero-copy reveal">
-          <p class="kicker">AI Cloud IDE + Multi-Agent Software Factory</p>
-          <h2>APEX-BUILD is the product built to take share from the AI coding platforms users already complain about.</h2>
+          <p class="kicker">Prepared For Matt Drake | Spencer Teague</p>
+          <h2>APEX-BUILD is a multi-agent AI cloud IDE built to win on cost discipline, product depth, and customer control.</h2>
           <p class="lede">
-            This demo shows the actual product surfaces: the landing page, build flow, state-of-the-art orchestration, browser IDE,
-            BYOK settings, spending ledger, and admin controls. The raise is <strong>$10,000 for 5%</strong> to formalize the company,
-            keep the AI rails funded, launch publicly, and start converting users away from Replit, Bolt, and v0.
+            APEX-BUILD is positioned against incumbent AI coding platforms by addressing the complaints that push customers to look elsewhere:
+            black-box orchestration, weak recovery, shallow editing, hidden spend, and platform lock-in. This raise is structured as
+            <strong>$10,000 for 5%</strong> to complete launch preparation, formalize the business, keep the AI rails funded, and push customer acquisition.
           </p>
+
+            <div class="callout-banner">
+              <strong>Credit burn reduction is the migration lever.</strong>
+              <p>
+                Credit burn means how quickly paid credits or AI budget are consumed during a build. APEX-BUILD has already reduced that burn
+                by about <strong>30%</strong> so far, and the goal is to push toward <strong>50% lower burn than Replit</strong>. Lower burn means more
+                usable product output for the same spend, which is one of the clearest reasons to migrate.
+              </p>
+              <p>
+                <strong>BYOK</strong> means <strong>Bring Your Own Keys</strong>: customers can plug in their own Anthropic, OpenAI, Gemini, Grok,
+                or Ollama-backed setup and use APEX-BUILD as the orchestration layer instead of paying only through platform-managed credits.
+              </p>
+            </div>
 
           <div class="deal-strip">
             <article class="deal-card deal-card-accent">
-              <span class="micro-label">Offer</span>
+              <span class="micro-label">Raise</span>
               <strong>$10,000 for 5%</strong>
               <p>Implied post-money valuation: <span>$200,000</span></p>
             </article>
             <article class="deal-card">
-              <span class="micro-label">Category Proof</span>
-              <strong>Replit reportedly reached a $9B valuation in March 2026.</strong>
-              <p>We are entering a category that already supports very large outcomes.</p>
+              <span class="micro-label">Market Proof</span>
+              <strong>Replit reportedly reached a $9B valuation.</strong>
+              <p>The market already supports very large outcomes. APEX-BUILD is entering a proven category with a sharper product thesis.</p>
             </article>
           </div>
 
           <div class="metrics-row">
             <article class="metric-card reveal">
-              <span class="metric-value" data-count="10">10</span>
-              <span class="metric-label">specialized agent roles</span>
-            </article>
-            <article class="metric-card reveal">
               <span class="metric-value" data-count="6">6</span>
-              <span class="metric-label">provider lanes and BYOK paths</span>
+              <span class="metric-label">AI provider paths plus BYOK routing</span>
             </article>
             <article class="metric-card reveal">
-              <span class="metric-value" data-count="4">4</span>
-              <span class="metric-label">retention surfaces beyond prompting</span>
+              <span class="metric-value" data-count="5">5</span>
+              <span class="metric-label">major retention surfaces beyond prompting</span>
             </article>
             <article class="metric-card reveal">
               <span class="metric-value" data-count="1000">1000</span>
-              <span class="metric-label">target paying customers in the first serious scale milestone</span>
+              <span class="metric-label">target paying customers for the first serious value inflection</span>
+            </article>
+            <article class="metric-card reveal">
+              <span class="metric-value" data-count="49">49</span>
+              <span class="metric-label">projected blended monthly ARPU in dollars</span>
             </article>
           </div>
-
-          <div class="proof-band reveal">
-            <div>
-              <span class="proof-title">Why now</span>
-              <p>Users want AI-native development. They do not want hidden costs, weak recovery, shallow IDEs, or platform lock-in.</p>
-            </div>
-            <div>
-              <span class="proof-title">Why APEX-BUILD</span>
-              <p>The product was designed around those exact pain points and makes “Migrate from Replit” an explicit wedge.</p>
-            </div>
-          </div>
         </div>
 
-        <div class="hero-visual reveal">
-          <figure class="screen-card spotlight">
-            <div class="screen-frame ratio-wide">
-              <img class="screen-image crop-top-sm" src="./screens/build_prompt_typed_deck2.jpg" alt="APEX-BUILD build view" />
-              <div class="pin pin-top-right">One workspace for prompting, orchestration, IDE, admin, spend, and deployment.</div>
-              <div class="pin pin-bottom-left">The very first screen already shows prompt input, stack direction, power mode, and the rest of the platform shell.</div>
-            </div>
-            <figcaption>
-              <strong>This is the core product view.</strong>
-              Users do not leave after the first prompt because the rest of the workflow stays in the same system.
-            </figcaption>
-          </figure>
-        </div>
-      </section>
-
-      <section class="section" id="product">
-        <div class="section-head reveal">
-          <p class="kicker">The Product</p>
-          <h3>This is the demo: the product surfaces users see before they ever buy, upgrade, or churn.</h3>
-          <p>
-            The landing experience is not filler. It explains the exact value proposition clearly: multi-agent execution, visible spend,
-            a real browser IDE, BYOK, integrations, ownership, and transparent pricing.
-          </p>
-        </div>
-
-        <div class="screen-grid screen-grid-three">
-          <figure class="screen-card reveal">
-            <div class="screen-frame ratio-landscape">
-              <img class="screen-image crop-top-lg" src="./screens/landing_hero_deck.jpg" alt="APEX-BUILD landing hero" />
-              <div class="pin pin-top-left">The landing page leads with agents, spend visibility, model choice, BYOK, and ownership.</div>
-            </div>
-            <figcaption>
-              <strong>Category positioning in one screen.</strong>
-              The promise is explicit: build in a cloud IDE, watch cost in real time, and keep control.
-            </figcaption>
-          </figure>
-
-          <figure class="screen-card reveal">
-            <div class="screen-frame ratio-landscape">
-              <img class="screen-image crop-top-lg" src="./screens/landing_cost_deck.jpg" alt="APEX-BUILD cost visibility section" />
-              <div class="pin pin-bottom-right">This addresses one of the most common complaints with AI products: “I do not know what I am paying for.”</div>
-            </div>
-            <figcaption>
-              <strong>Spend visibility is a trust feature.</strong>
-              APEX-BUILD sells clarity as much as speed.
-            </figcaption>
-          </figure>
-
-          <figure class="screen-card reveal">
-            <div class="screen-frame ratio-landscape">
-              <img class="screen-image crop-top-lg" src="./screens/landing_ide_deck.jpg" alt="APEX-BUILD IDE section" />
-              <div class="pin pin-top-right">The product is positioned as a true browser IDE, not just a prompt box.</div>
-            </div>
-            <figcaption>
-              <strong>The IDE is the retention layer.</strong>
-              Users can stay in APEX-BUILD after generation, which is where recurring revenue lives.
-            </figcaption>
-          </figure>
-
-          <figure class="screen-card reveal">
-            <div class="screen-frame ratio-landscape">
-              <img class="screen-image crop-top-lg" src="./screens/landing_connect_deck.jpg" alt="APEX-BUILD integrations section" />
-              <div class="pin pin-top-left">MCP and external-tool connectivity turn agents into operators, not just code writers.</div>
-            </div>
-            <figcaption>
-              <strong>Integration depth matters.</strong>
-              This product is designed to plug into real tools, APIs, and company workflows.
-            </figcaption>
-          </figure>
-
-          <figure class="screen-card reveal">
-            <div class="screen-frame ratio-landscape">
-              <img class="screen-image crop-top-lg" src="./screens/landing_pay_deck.jpg" alt="APEX-BUILD ownership section" />
-              <div class="pin pin-bottom-left">Own what you build is not marketing filler. It reduces lock-in and lowers adoption anxiety.</div>
-            </div>
-            <figcaption>
-              <strong>Ownership is part of the acquisition story.</strong>
-              Users can export, deploy, and host on their own infrastructure instead of being trapped.
-            </figcaption>
-          </figure>
-
-          <figure class="screen-card reveal">
-            <div class="screen-frame ratio-landscape screen-frame-clean">
-              <img class="screen-image contain" src="./screens/landing_pricing_local.png" alt="APEX-BUILD pricing section" />
-              <div class="pin pin-top-right">Pricing already frames Builder, Pro, Team, plus one-time credits and BYOK savings.</div>
-            </div>
-            <figcaption>
-              <strong>Pricing is simple enough to convert.</strong>
-              Builder at $19, Pro at $49, Team at $99, plus BYOK and credit packs for flexibility.
-            </figcaption>
-          </figure>
-        </div>
-      </section>
-
-      <section class="section" id="workflow">
-        <div class="section-head reveal">
-          <p class="kicker">Build Workflow</p>
-          <h3>The first conversion moment is simple: describe the app, select the stack, and let the system coordinate the work.</h3>
-          <p>
-            The workflow matters because it is how non-technical users enter the product while still giving technical users control over stack,
-            power mode, and execution style.
-          </p>
-        </div>
-
-        <div class="workflow-shell">
-          <figure class="screen-card reveal">
-            <div class="screen-frame ratio-wide">
-              <img class="screen-image crop-top-sm" src="./screens/build_app_hero_deck.jpg" alt="APEX-BUILD build page" />
-              <div class="pin pin-top-left">The build surface looks like a product control room, not a generic prompt box.</div>
-            </div>
-            <figcaption>
-              <strong>Build App is the front door.</strong>
-              Prompting, model power, stack direction, and orchestration state all live here.
-            </figcaption>
-          </figure>
-
-          <div class="workflow-grid">
-            <figure class="screen-card reveal">
-              <div class="screen-frame ratio-landscape">
-                <img class="screen-image crop-top-md" src="./screens/build_stack_deck.jpg" alt="Technology stack options in APEX-BUILD" />
-                <div class="pin pin-bottom-right">Stack choice is visible and editable instead of hidden behind “trust the AI.”</div>
-              </div>
-              <figcaption>
-                <strong>Stack control.</strong>
-                Users see the technology direction immediately.
-              </figcaption>
-            </figure>
-
-            <figure class="screen-card reveal">
-              <div class="screen-frame ratio-landscape">
-                <img class="screen-image crop-top-md" src="./screens/build_prompt_deck.jpg" alt="Build prompt field in APEX-BUILD" />
-                <div class="pin pin-top-left">The system accepts natural-language intent, which expands the TAM beyond expert developers.</div>
-              </div>
-              <figcaption>
-                <strong>Prompt input.</strong>
-                Plain-English product requests become structured work.
-              </figcaption>
-            </figure>
-
-            <figure class="screen-card reveal">
-              <div class="screen-frame ratio-landscape">
-                <img class="screen-image crop-top-md" src="./screens/build_prompt_filled_deck.jpg" alt="Filled build prompt in APEX-BUILD" />
-                <div class="pin pin-top-right">This is the moment where the product translates intent into execution.</div>
-              </div>
-              <figcaption>
-                <strong>Execution-ready brief.</strong>
-                The user does not need to think like an engineer to get a project moving.
-              </figcaption>
-            </figure>
-          </div>
-        </div>
-      </section>
-
-      <section class="section" id="orchestration">
-        <div class="section-head reveal">
-          <p class="kicker">AI Orchestration</p>
-          <h3>The redesigned orchestration system is the product’s technical edge.</h3>
-          <p>
-            The goal is not “one model writes everything.” The goal is contract-first planning, scoped work orders, model/provider routing,
-            transparent live execution, and recovery that looks like a software pipeline instead of blind retries.
-          </p>
-        </div>
-
-        <div class="orchestration-layout">
-          <figure class="screen-card reveal">
-            <div class="screen-frame ratio-wide">
-              <img class="screen-image crop-top-md" src="./screens/orchestration_timeline_deck.jpg" alt="Live orchestration provider lanes" />
-              <div class="pin pin-top-left">Provider lanes show which model is actually active, expected, completed, or waiting.</div>
-              <div class="pin pin-bottom-right">This turns orchestration into a visible product feature rather than invisible backend magic.</div>
-            </div>
-            <figcaption>
-              <strong>Live provider routing.</strong>
-              Users can see specialized agents running across provider lanes instead of waiting in a black box.
-            </figcaption>
-          </figure>
-
-          <div class="orchestration-copy reveal">
-            <div class="step-card">
-              <span>01</span>
-              <div>
-                <strong>Contract-first planning</strong>
-                <p>Before execution, the system freezes a build contract so the app has explicit surfaces, acceptance criteria, and runtime expectations.</p>
-              </div>
-            </div>
-            <div class="step-card">
-              <span>02</span>
-              <div>
-                <strong>Work orders by surface</strong>
-                <p>Frontend, backend, data, verification, and repair tasks are scoped independently instead of asking one agent to improvise everything.</p>
-              </div>
-            </div>
-            <div class="step-card">
-              <span>03</span>
-              <div>
-                <strong>Provider-aware routing</strong>
-                <p>Power modes and provider preferences decide whether Claude, OpenAI, Gemini, Grok, or BYOK routes handle the task.</p>
-              </div>
-            </div>
-            <div class="step-card">
-              <span>04</span>
-              <div>
-                <strong>Verifier and repair ladder</strong>
-                <p>Bad output can be critiqued, blocked, repaired, and revalidated instead of simply rerun until the user gives up.</p>
-              </div>
-            </div>
-            <div class="step-card">
-              <span>05</span>
-              <div>
-                <strong>Patch-first recovery</strong>
-                <p>The platform preserves patch bundles and repair artifacts, which makes recovery cheaper, more explainable, and easier to audit.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <figure class="screen-card screen-card-wide reveal">
-          <div class="screen-frame ratio-wide">
-            <img class="screen-image crop-top-md" src="./screens/orchestration_contract_gate_deck.jpg" alt="Build contract gate and task timeline" />
-            <div class="pin pin-top-left">This is what quality control looks like before burning more tokens.</div>
-            <div class="pin pin-bottom-left">The system blocks impossible builds early instead of pretending everything is fine and failing expensively later.</div>
+        <figure class="hero-visual screen-card reveal">
+          <div class="screen-frame">
+            <img class="screen-image" src="./screens/story/build-hero.png" alt="APEX-BUILD build hero view" />
           </div>
           <figcaption>
-            <strong>Quality gate before execution waste.</strong>
-            Contract validation and planner feedback are product features because they prevent bad builds from consuming user trust and budget.
+            <strong>APEX-BUILD already presents like a real category contender.</strong>
+            The product is designed to become the build, spend, IDE, and orchestration workspace rather than just another prompt surface.
           </figcaption>
         </figure>
+      </section>
+
+      <section class="section" id="walkthrough">
+        <div class="section-head reveal">
+          <p class="kicker">Product Walkthrough</p>
+          <h3>A direct view of the product, the workflow, and the business case.</h3>
+          <p>
+            The screenshots below show the platform the way a buyer would encounter it: landing-page positioning, build execution,
+            orchestration, spend visibility, settings, IDE depth, and operator controls.
+          </p>
+        </div>
+
+        <article class="storyboard reveal">
+          <div class="story-copy">
+            <span class="story-number">01</span>
+            <p class="story-kicker">Failure Visibility</p>
+            <h3>Failed builds are visible, structured, and restartable from a real control surface.</h3>
+            <p class="story-summary">
+              This is the opposite of a black box. APEX-BUILD shows the build status, current phase, timeline, blockers, and planner state so the
+              failure can be understood instead of disappearing into a spinner.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Recovery is part of the product</strong>
+                <p>Build status, quality gate, provider count, and checkpoints are shown in one place.</p>
+              </article>
+              <article class="note-card">
+                <strong>Why it matters</strong>
+                <p>Transparent recovery lowers support overhead and makes paid usage much easier to justify.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/build-status-failed.png" alt="Failed build status view in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard is-reversed reveal">
+          <div class="story-copy">
+            <span class="story-number">02</span>
+            <p class="story-kicker">Model Routing</p>
+            <h3>Model assignment is explicit by role instead of hidden behind one vague “AI mode.”</h3>
+            <p class="story-summary">
+              Architect, coder, tester, and devops responsibilities can route to different providers. This is one of the clearest product
+              differentiators in the entire deck because it makes orchestration a visible, understandable feature.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Auto or manual</strong>
+                <p>Automatic routing works by default, but provider choice can still be overridden when price, speed, or output quality matter.</p>
+              </article>
+              <article class="note-card">
+                <strong>Why it matters</strong>
+                <p>Most products flatten everything into one model abstraction. APEX-BUILD makes specialization visible and understandable.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/model-configuration.png" alt="Model configuration screen in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard reveal">
+          <div class="story-copy">
+            <span class="story-number">03</span>
+            <p class="story-kicker">Power Modes</p>
+            <h3>The launch flow ties pricing, provider selection, and migration messaging into one conversion surface.</h3>
+            <p class="story-summary">
+              Fast and Cheap, Balanced, and Max Power communicate the product in a way buyers immediately understand. The “Migrate from Replit”
+              button is not decoration; it is the acquisition thesis made visible in the UI.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Clear buyer choices</strong>
+                <p>The cost and quality tradeoff is visible before the first build is launched.</p>
+              </article>
+              <article class="note-card">
+                <strong>Competitive framing</strong>
+                <p>The product is designed for customers who already know the current category leaders are leaving value on the table.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/ai-power-mode.png" alt="AI power mode screen in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard is-reversed reveal">
+          <div class="story-copy">
+            <span class="story-number">04</span>
+            <p class="story-kicker">Prompt To Plan</p>
+            <h3>A plain-language request still leads to explicit architecture and stack direction.</h3>
+            <p class="story-summary">
+              This matters for both sides of the market. Non-technical customers can start with intent, while technical customers still get stack
+              visibility and control instead of surrendering the whole build to vague prompting.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Plain-English entry point</strong>
+                <p>The TAM is larger when the product accepts plain-language requests without feeling amateurish.</p>
+              </article>
+              <article class="note-card">
+                <strong>Stack control remains visible</strong>
+                <p>Next.js, React, Node, Go, Python, databases, and deployment paths are still visible before execution begins.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/build-form-stack.png" alt="Build prompt and technology stack screen in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="landing-proof reveal">
+          <div class="story-copy">
+            <span class="story-number">05</span>
+            <p class="story-kicker">Landing Page</p>
+            <h3>The landing page explains the full product wedge before anyone signs up.</h3>
+            <p class="story-summary">
+              This is the real landing page. As it scrolls, it walks through the reasons customers migrate: lower credit burn, transparent pricing,
+              BYOK economics, no platform lock-in, code ownership, IDE depth, collaboration, MCP connectivity, secrets handling, Git from the browser,
+              and visible multi-agent execution.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Main message</strong>
+                <p>APEX-BUILD is the AI cloud IDE that shows the bill in real time and keeps control in the customer’s hands.</p>
+              </article>
+              <article class="note-card">
+                <strong>Migration point</strong>
+                <p>Migration happens faster when the value difference is obvious before the first build ever starts.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media story-media-hero">
+            <img src="./screens/landing_clean/landing-hero-clean.png" alt="Main APEX-BUILD landing page hero" />
+          </figure>
+        </article>
+
+        <div class="landing-gallery reveal">
+          <figure class="mini-screen">
+            <img src="./screens/landing_clean/landing-agents-clean.png" alt="Landing page AI agents section" />
+            <figcaption>The landing page shows the five-agent orchestration system as a first-class product capability, not a hidden implementation detail.</figcaption>
+          </figure>
+          <figure class="mini-screen">
+            <img src="./screens/landing_clean/landing-cost-clean.png" alt="Landing page cost transparency section" />
+            <figcaption>“No Surprises. Ever.” is shown with the full title visible. Live cost visibility and lower credit burn are part of the landing-page pitch itself.</figcaption>
+          </figure>
+          <figure class="mini-screen">
+            <img src="./screens/landing_clean/landing-ide-clean.png" alt="Landing page IDE section" />
+            <figcaption>The IDE section makes it clear this is a real browser development environment, not a prompt toy with a code export button.</figcaption>
+          </figure>
+          <figure class="mini-screen">
+            <img src="./screens/landing_clean/landing-models-clean.png" alt="Landing page multi-model section" />
+            <figcaption>Claude, OpenAI, Gemini, Grok, and Ollama are all visible on the landing page because model choice is part of the product story.</figcaption>
+          </figure>
+          <figure class="mini-screen">
+            <img src="./screens/landing_clean/landing-git-clean.png" alt="Landing page Git section" />
+            <figcaption>Git is presented as built-in workflow infrastructure: branches, commits, pull requests, and rollback from the browser IDE.</figcaption>
+          </figure>
+          <figure class="mini-screen">
+            <img src="./screens/landing_clean/landing-byok-clean.png" alt="Landing page BYOK section" />
+            <figcaption>BYOK means Bring Your Own Keys. Teams can use their own provider accounts and keep APEX-BUILD as the orchestration layer. Replit does not offer this as a true first-class workflow.</figcaption>
+          </figure>
+          <figure class="mini-screen">
+            <img src="./screens/landing_clean/landing-secrets-clean.png" alt="Landing page secrets vault section" />
+            <figcaption>The secrets-vault section shows encrypted storage, scoped access, audit logs, and rotation as core product infrastructure.</figcaption>
+          </figure>
+          <figure class="mini-screen">
+            <img src="./screens/landing_clean/landing-collab-clean.png" alt="Landing page collaboration section" />
+            <figcaption>Real-time collaboration is part of the front-door promise: multiple developers, shared AI sessions, and role-based access in one workspace.</figcaption>
+          </figure>
+          <figure class="mini-screen">
+            <img src="./screens/landing_clean/landing-mcp-clean.png" alt="Landing page MCP support section" />
+            <figcaption>MCP support is shown directly on the landing page because external tools, APIs, and data connectivity make the product much more useful.</figcaption>
+          </figure>
+          <figure class="mini-screen">
+            <img src="./screens/landing_clean/landing-templates-clean.png" alt="Landing page templates section" />
+            <figcaption>Templates are positioned as a speed and cost advantage: less setup, less wasted AI work, and faster time to value.</figcaption>
+          </figure>
+          <figure class="mini-screen">
+            <img src="./screens/landing_clean/landing-billing-clean.png" alt="Landing page flexible billing section" />
+            <figcaption>Billing is flexible by design: subscriptions, top-ups, and BYOK are all available so different customer types can optimize spend.</figcaption>
+          </figure>
+          <figure class="mini-screen">
+            <img src="./screens/landing_clean/landing-export-clean.png" alt="Landing page export and ownership section" />
+            <figcaption>Ownership is a front-door message. Export, deploy, and host anywhere directly counters the lock-in that pushes builders away from incumbents.</figcaption>
+          </figure>
+          <figure class="mini-screen">
+            <img src="./screens/landing_clean/landing-pricing-clean.png" alt="Landing page public pricing cards" />
+            <figcaption>The pricing cards are public, readable, and complete. Builder, Pro, Team, and credit-pack logic are explained before signup.</figcaption>
+          </figure>
+        </div>
+
+        <div class="landing-feature-grid reveal">
+          <article class="feature-proof">
+            <strong>5 AI Specialists</strong>
+            <p>The landing page explains that the system is a coordinated team, not one chatbot improvising everything.</p>
+          </article>
+          <article class="feature-proof">
+            <strong>No Surprises. Ever.</strong>
+            <p>Live cost counters, per-agent usage, ledgers, and budget controls are part of the public product story.</p>
+          </article>
+          <article class="feature-proof">
+            <strong>Every Major AI Model. One Platform.</strong>
+            <p>Claude, OpenAI, Gemini, Grok, and Ollama routing are framed as a feature, not hidden implementation detail.</p>
+          </article>
+          <article class="feature-proof">
+            <strong>Your Keys. Your Cost. Our Platform.</strong>
+            <p>BYOK, short for Bring Your Own Keys, lowers spend and makes migration easier for teams already paying model vendors directly.</p>
+          </article>
+          <article class="feature-proof">
+            <strong>A Real IDE In Your Browser.</strong>
+            <p>The landing page sells Monaco, live preview, sandboxed execution, and file-level work as part of the core offer.</p>
+          </article>
+          <article class="feature-proof">
+            <strong>Git Without Leaving The Browser.</strong>
+            <p>Branching, pull requests, commit history, and rollback are framed as part of the APEX-BUILD workflow.</p>
+          </article>
+          <article class="feature-proof">
+            <strong>Your Secrets Are Actually Secret.</strong>
+            <p>Encrypted vaults, scoped secrets, audit logs, and rotation make the platform feel enterprise-conscious instead of reckless.</p>
+          </article>
+          <article class="feature-proof">
+            <strong>Build Together, Live.</strong>
+            <p>Real-time collaboration, inline review, and multi-user sessions are already part of the story as the page scrolls.</p>
+          </article>
+          <article class="feature-proof">
+            <strong>Connect Anything. Build With Everything.</strong>
+            <p>MCP support turns external tools, APIs, and data sources into live context for agents.</p>
+          </article>
+          <article class="feature-proof">
+            <strong>Skip The Setup.</strong>
+            <p>Project templates reduce time-to-value and lower the amount of expensive AI work required to get started.</p>
+          </article>
+          <article class="feature-proof">
+            <strong>Pay How You Build.</strong>
+            <p>Subscriptions, credits, and BYOK let each account optimize for frequency, team size, and cost sensitivity.</p>
+          </article>
+          <article class="feature-proof">
+            <strong>Own What You Build. Forever.</strong>
+            <p>Export, deploy, host, and keep the code. That promise directly attacks the incumbent lock-in problem.</p>
+          </article>
+          <article class="feature-proof">
+            <strong>No Platform Lock-In</strong>
+            <p>Users are not trapped behind proprietary formats, closed hosting, or platform-only workflows. They can leave with their code and infrastructure choices intact.</p>
+          </article>
+          <article class="feature-proof">
+            <strong>BYOK + Local Ollama</strong>
+            <p>APEX-BUILD supports multi-provider BYOK and local Ollama on the customer’s own hardware, giving advanced builders a lower-cost and more flexible operating model.</p>
+          </article>
+        </div>
       </section>
 
       <section class="section" id="platform">
         <div class="section-head reveal">
           <p class="kicker">Platform Depth</p>
-          <h3>APEX-BUILD has enough surface area to become a daily workspace, not a novelty tool.</h3>
+          <h3>Settings, BYOK, billing, spend, and admin controls make APEX-BUILD a real operating system for AI app building.</h3>
           <p>
-            This is where the moat forms: a real IDE, real BYOK controls, real spend visibility, and real operator/admin capabilities.
-            These are the reasons users stay after the first successful build.
+            This is where the retention story becomes much stronger than a one-shot generator. The same workspace handles providers, pricing,
+            limits, operations, and account-level decisions.
           </p>
         </div>
 
-        <div class="screen-grid screen-grid-two">
-          <figure class="screen-card reveal">
-            <div class="screen-frame ratio-wide">
-              <img class="screen-image crop-top-sm" src="./screens/ide_code_deck.jpg" alt="APEX-BUILD IDE with code visible" />
-              <div class="pin pin-top-left">File tree, code editor, preview tools, and AI assistant are all visible at once.</div>
+        <article class="storyboard is-reversed reveal">
+          <div class="story-copy">
+            <span class="story-number">06</span>
+            <p class="story-kicker">Billing</p>
+            <h3>Monetization is already visible as a clean subscription product, not an afterthought.</h3>
+            <p class="story-summary">
+              Builder, Pro, and Team are easy to understand, and unlimited balance / included credits make the plan structure feel tangible instead
+              of abstract. This matters because conversion improves when pricing feels coherent and fair.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Multiple monetization lanes</strong>
+                <p>Subscriptions, credits, orchestration value, and BYOK can all coexist without confusing the buyer.</p>
+              </article>
+              <article class="note-card">
+                <strong>Investor takeaway</strong>
+                <p>The pricing architecture is already visible enough to test real willingness to pay at launch.</p>
+              </article>
             </div>
-            <figcaption>
-              <strong>Browser IDE with actual code visible.</strong>
-              This is where retention, debugging, and serious work happen.
-            </figcaption>
-          </figure>
-
-          <figure class="screen-card reveal">
-            <div class="screen-frame ratio-portrait screen-frame-clean">
-              <img class="screen-image contain" src="./screens/settings_byok_deck.jpg" alt="APEX-BUILD settings page with BYOK controls" />
-              <div class="pin pin-top-right">BYOK is a conversion unlock for power users and teams already paying model vendors directly.</div>
-            </div>
-            <figcaption>
-              <strong>Settings and BYOK.</strong>
-              Users can bring their own Anthropic, OpenAI, Gemini, Grok, or Ollama path while keeping APEX-BUILD as the orchestration layer.
-            </figcaption>
-          </figure>
-
-          <figure class="screen-card reveal">
-            <div class="screen-frame ratio-wide">
-              <img class="screen-image crop-top-xl" src="./screens/spending_activity_deck.jpg" alt="APEX-BUILD spend dashboard" />
-              <div class="pin pin-bottom-left">Every provider, model, agent, token, and cost event becomes legible.</div>
-            </div>
-            <figcaption>
-              <strong>Spending page.</strong>
-              Competitors obscure cost; APEX-BUILD makes cost transparency part of the product promise.
-            </figcaption>
-          </figure>
-
-          <figure class="screen-card reveal">
-            <div class="screen-frame ratio-wide">
-              <img class="screen-image crop-top-xl" src="./screens/admin_controls_deck.jpg" alt="APEX-BUILD admin controls" />
-              <div class="pin pin-top-right">Credits, user status, visibility, and operator actions are already present.</div>
-            </div>
-            <figcaption>
-              <strong>Admin panel.</strong>
-              The product is already thinking like a hosted platform with company and team use cases, not just solo experimentation.
-            </figcaption>
-          </figure>
-        </div>
-
-        <div class="advantage-banner reveal">
-          <div>
-            <p class="micro-label">Acquisition Wedge</p>
-            <h4>“Migrate from Replit” is not decoration. It is the competitive thesis.</h4>
           </div>
-          <p>
-            Replit proved the market, but the complaints are now the opportunity: hidden spend, limited model flexibility, shallow recovery,
-            lock-in, and weak ownership. APEX-BUILD is built specifically to remove those objections and give users a reason to switch.
-          </p>
-        </div>
+          <figure class="story-media">
+            <img src="./screens/story/billing-credits.png" alt="Billing and credits screen in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard reveal">
+          <div class="story-copy">
+            <span class="story-number">07</span>
+            <p class="story-kicker">Spend Governance</p>
+            <h3>Budget caps convert price anxiety into an explicit product setting.</h3>
+            <p class="story-summary">
+              This is one of the biggest pain points in AI products: buyers are afraid of runaway cost. APEX-BUILD turns that fear into a control
+              surface with daily limits and hard-stop behavior.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Hard limits matter</strong>
+                <p>Trust rises when the product can protect customers from overspending.</p>
+              </article>
+              <article class="note-card">
+                <strong>Enterprise path</strong>
+                <p>Spend governance is the kind of feature teams expect before they scale usage.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/budget-caps.png" alt="Budget caps settings in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard is-reversed reveal">
+          <div class="story-copy">
+            <span class="story-number">08</span>
+            <p class="story-kicker">BYOK Depth</p>
+            <h3>BYOK is not a checkbox. It is a multi-provider operating layer with real model controls.</h3>
+            <p class="story-summary">
+              Gemini, Grok, and Ollama can all be configured in one place, with platform fallback behavior and clear model options. This is a
+              major differentiator for sophisticated customers who already pay vendors directly and do not want to be trapped behind one platform account.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>High-intent buyer unlock</strong>
+                <p>Bring Your Own Keys lets teams use their own provider accounts while preserving APEX-BUILD as the orchestration layer.</p>
+              </article>
+              <article class="note-card">
+                <strong>Local model path</strong>
+                <p>Ollama support adds a lower-cost and privacy-aware option on the customer’s own machine, which Replit does not allow.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/byok-bottom.png" alt="Lower BYOK settings with Gemini, Grok, and Ollama in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard reveal">
+          <div class="story-copy">
+            <span class="story-number">09</span>
+            <p class="story-kicker">Multi-Provider Build Stack</p>
+            <h3>APEX-BUILD was designed around multiple AI providers working together, not one provider pretending to do everything.</h3>
+            <p class="story-summary">
+              Claude, OpenAI, Gemini, Grok, and fallback behavior live inside the same settings architecture. That gives the platform a strong
+              answer to one of the category’s biggest weaknesses: provider lock-in. Replit does not offer a real BYOK path here, while APEX-BUILD treats multi-provider BYOK as a core workflow.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Architecture, code, docs, testing</strong>
+                <p>Different models can be used for different strengths without forcing customers to assemble the workflow by hand.</p>
+              </article>
+              <article class="note-card">
+                <strong>Built for serious teams</strong>
+                <p>Teams already spending on model vendors get a reason to adopt APEX-BUILD without throwing out their current contracts.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/byok-top.png" alt="Top BYOK screen with multi-provider configuration in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard is-reversed reveal">
+          <div class="story-copy">
+            <span class="story-number">10</span>
+            <p class="story-kicker">Settings Surface</p>
+            <h3>The settings page is broad enough to feel like a platform control room, not a single preferences form.</h3>
+            <p class="story-summary">
+              Theme control, default AI model behavior, and BYOK all live together in a way that makes the platform feel configurable and durable.
+              That durability matters because it turns APEX-BUILD into something a team can adopt instead of only testing.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>User-facing polish</strong>
+                <p>Even the settings architecture signals a platform designed for ongoing use, not a one-time experiment.</p>
+              </article>
+              <article class="note-card">
+                <strong>Operational flexibility</strong>
+                <p>Defaults can be set globally and then overridden as projects become more specialized.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/settings-overview.png" alt="Settings overview in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard reveal">
+          <div class="story-copy">
+            <span class="story-number">11</span>
+            <p class="story-kicker">Admin Surface</p>
+            <h3>APEX-BUILD already thinks like a hosted platform with operator controls, not just a solo builder tool.</h3>
+            <p class="story-summary">
+              Admin functionality is critical for teams, credits, moderation, and subscription control. This is where the company starts to look
+              like a multi-user business rather than a one-person AI utility.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Operational credibility</strong>
+                <p>Admin surfaces make it much easier to believe the platform can support real usage, real accounts, and real revenue.</p>
+              </article>
+              <article class="note-card">
+                <strong>Not just a builder</strong>
+                <p>The product already contains hosted-platform instincts that matter for long-term value.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/user-management.png" alt="Admin controls in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard is-reversed reveal">
+          <div class="story-copy">
+            <span class="story-number">12</span>
+            <p class="story-kicker">User Management</p>
+            <h3>User status, credits, privileges, and actions are all exposed in one operational screen.</h3>
+            <p class="story-summary">
+              This is the practical side of platform operations: operators can see who is active, who has credits, and which accounts require admin
+              intervention. It signals a product that can actually be managed as it grows.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Direct controls</strong>
+                <p>Edit, credit, suspend, inspect, and delete actions are visible and consistent.</p>
+              </article>
+              <article class="note-card">
+                <strong>Team readiness</strong>
+                <p>Operational tooling is already present before the serious go-to-market push begins.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/user-management.png" alt="User management table in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard reveal">
+          <div class="story-copy">
+            <span class="story-number">13</span>
+            <p class="story-kicker">Spend Ledger</p>
+            <h3>Every provider, model, agent, token count, and cost event can be inspected.</h3>
+            <p class="story-summary">
+              This is another direct answer to a core category complaint. Mystery cost is one of the fastest ways to lose confidence. APEX-BUILD turns spend into a readable,
+              auditable table instead of a vague invoice.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Transparency is retention</strong>
+                <p>Confidence holds longer when the billing logic is visible and consistent.</p>
+              </article>
+              <article class="note-card">
+                <strong>This helps support too</strong>
+                <p>When costs are legible, billing disputes and confusion drop.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/recent-activity.png" alt="Recent AI activity table in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard is-reversed reveal">
+          <div class="story-copy">
+            <span class="story-number">14</span>
+            <p class="story-kicker">Spend Dashboard</p>
+            <h3>The spending page makes model-level cost concentration obvious at a glance.</h3>
+            <p class="story-summary">
+              The screen shows where money is actually going, which models dominate spend, and whether the current routing strategy makes sense. That
+              level of clarity becomes a major selling point once projects and team usage start scaling.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Charts with meaning</strong>
+                <p>Real provider and model spend distribution is much more useful than a generic usage graph.</p>
+              </article>
+              <article class="note-card">
+                <strong>Margin management</strong>
+                <p>This also gives the company a cleaner internal path to tuning routing and protecting gross margin.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/spending-dashboard.png" alt="Spend dashboard in APEX-BUILD" />
+          </figure>
+        </article>
       </section>
 
-      <section class="section" id="advantage">
+      <section class="section" id="orchestration">
         <div class="section-head reveal">
-          <p class="kicker">Why We Win</p>
-          <h3>The product is designed around the exact user complaints that create churn in incumbent tools.</h3>
+          <p class="kicker">IDE + Orchestration</p>
+          <h3>The real moat is the workspace: IDE, preview, AI assistant, and visible orchestration in one product shell.</h3>
           <p>
-            This is the competitive argument. The category is proven. The weakness is product quality and trust. APEX-BUILD is positioned to win on both.
+            This is why the platform is more valuable than a prompt box. Teams can stay in the browser IDE, interact with the generated code,
+            preview the result, inspect the planner, and watch provider lanes update live.
           </p>
         </div>
 
-        <div class="comparison-card reveal">
-          <div class="comparison-row comparison-head">
-            <span>Decision point</span>
-            <span>What frustrates users elsewhere</span>
-            <span>How APEX-BUILD answers it</span>
+        <article class="storyboard reveal">
+          <div class="story-copy">
+            <span class="story-number">15</span>
+            <p class="story-kicker">Project Workspace</p>
+            <h3>The workspace keeps the project, editor, sharing controls, and run state together.</h3>
+            <p class="story-summary">
+              Even outside the core build view, the product stays inside one environment. This is strategically important because the more work that
+              happens in-browser, the stronger the retention loop becomes.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Sticky workflow</strong>
+                <p>The project lives in the same shell as the build flow, settings, and operational controls.</p>
+              </article>
+              <article class="note-card">
+                <strong>Retention advantage</strong>
+                <p>Projects can be managed, shared, downloaded, and extended instead of being abandoned after generation.</p>
+              </article>
+            </div>
           </div>
-          <div class="comparison-row">
-            <span>Model choice</span>
-            <span>Single-provider lock-in or weak override controls</span>
-            <span>Multi-provider routing, power modes, manual choice, and BYOK</span>
-          </div>
-          <div class="comparison-row">
-            <span>IDE depth</span>
-            <span>Shallow editing after generation</span>
-            <span>Real browser IDE with code, preview, assistant, and project structure</span>
-          </div>
-          <div class="comparison-row">
-            <span>Cost clarity</span>
-            <span>Opaque credits and surprise bills</span>
-            <span>Live spend dashboard, budget caps, billing controls, and ledger visibility</span>
-          </div>
-          <div class="comparison-row">
-            <span>Recovery</span>
-            <span>One AI retries blindly and hides the failure process</span>
-            <span>Contract gating, verifier lanes, repair flows, and visible planner feedback</span>
-          </div>
-          <div class="comparison-row">
-            <span>Ownership</span>
-            <span>Export friction and platform dependence</span>
-            <span>Own what you build, Git export, deploy on the user account, no hostage model</span>
-          </div>
-          <div class="comparison-row">
-            <span>Migration</span>
-            <span>No deliberate switch path away from the incumbent</span>
-            <span>Direct “Migrate from Replit” wedge built into the product narrative</span>
-          </div>
-        </div>
+          <figure class="story-media">
+            <img src="./screens/story/project-dashboard.png" alt="Project workspace in APEX-BUILD" />
+          </figure>
+        </article>
 
-        <div class="advantage-grid">
-          <article class="text-card reveal">
-            <span class="micro-label">Retention thesis</span>
-            <h4>The moat is not the first prompt. The moat is the workspace.</h4>
-            <p>
-              A user who builds, edits, previews, collaborates, exports, deploys, manages keys, and tracks spend in one place becomes materially harder to lose.
+        <article class="storyboard is-reversed reveal">
+          <div class="story-copy">
+            <span class="story-number">16</span>
+            <p class="story-kicker">IDE Export</p>
+            <h3>The browser IDE is not decorative. It already handles real files, preview, and project export.</h3>
+            <p class="story-summary">
+              This screen matters because it proves the platform has somewhere to go after generation. The browser IDE is what turns
+              a cool demo into a daily workspace.
             </p>
-          </article>
-          <article class="text-card reveal">
-            <span class="micro-label">Pricing thesis</span>
-            <h4>BYOK plus transparent plans reduce pricing objections without sacrificing margin.</h4>
-            <p>
-              APEX-BUILD can monetize subscriptions, credits, and orchestration fees while letting power users bring their own vendor contracts.
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Code is visible</strong>
+                <p>File tree, code, preview status, and save/export actions are all live in the same interface.</p>
+              </article>
+              <article class="note-card">
+                <strong>Ownership angle</strong>
+                <p>Download and export reinforce the promise that customers own what they build.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/ide-save-dialog.png" alt="IDE save and export flow in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard reveal">
+          <div class="story-copy">
+            <span class="story-number">17</span>
+            <p class="story-kicker">IDE + Runtime</p>
+            <h3>The IDE shows code, preview runtime state, and database context in one glance.</h3>
+            <p class="story-summary">
+              This is what serious product depth looks like. Code, preview/runtime status, and project data all stay accessible without
+              leaving the browser workspace.
             </p>
-          </article>
-          <article class="text-card reveal">
-            <span class="micro-label">Go-to-market thesis</span>
-            <h4>The message is simple: leave the black box, keep control, ship faster.</h4>
-            <p>
-              The product story is strong enough to spread via demos, creator content, migration offers, and founder-led sales without needing a massive sales org first.
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Real editing surface</strong>
+                <p>Code is not hidden behind generated snippets. The workspace is meant for actual iteration.</p>
+              </article>
+              <article class="note-card">
+                <strong>Databases and preview</strong>
+                <p>The product is already pushing beyond “generate files” toward “operate the app.”</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/ide-database.png" alt="IDE with database panel in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard is-reversed reveal">
+          <div class="story-copy">
+            <span class="story-number">18</span>
+            <p class="story-kicker">AI Assistant</p>
+            <h3>The AI assistant lives beside the code instead of replacing the code.</h3>
+            <p class="story-summary">
+              This is a subtle but important product decision. The workspace allows AI collaboration inside the IDE while still keeping the project,
+              files, and preview visible. That creates a much stronger workflow than simple chat-based generation.
             </p>
-          </article>
-        </div>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Assistant inside the editor</strong>
+                <p>Debugging, explanation, refactoring, and iteration all happen without breaking context.</p>
+              </article>
+              <article class="note-card">
+                <strong>Built for staying power</strong>
+                <p>A product that keeps customers in context longer has more room to grow lifetime value.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/ide-ai-assistant.png" alt="IDE with AI assistant in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard reveal">
+          <div class="story-copy">
+            <span class="story-number">19</span>
+            <p class="story-kicker">Planner Control</p>
+            <h3>The planner console and agent panel make orchestration inspectable while the build is live.</h3>
+            <p class="story-summary">
+              This is one of the strongest proof points in the whole deck. The lead agent, visible activity, planner channel, and
+              direct-control surfaces remain visible instead of collapsing into a silent spinner.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Agent identity is visible</strong>
+                <p>Lead, provider, recent activity, and planner message routing are all surfaced clearly.</p>
+              </article>
+              <article class="note-card">
+                <strong>State-of-the-art feel</strong>
+                <p>The product feels more like an operating center than a generic chat assistant.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/agents-console.png" alt="Planner console and AI agents in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard is-reversed reveal">
+          <div class="story-copy">
+            <span class="story-number">20</span>
+            <p class="story-kicker">Contract Verification</p>
+            <h3>The orchestration layer can stop bad builds before more money and confidence are wasted.</h3>
+            <p class="story-summary">
+              APEX-BUILD freezes work into a structured path, validates the contract, and shows the result in the interface. That is materially
+              better than pretending everything is fine and hoping the model figures it out later.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Visible quality gate</strong>
+                <p>Contract verification, validation, and completed tasks all stay visible in the build timeline.</p>
+              </article>
+              <article class="note-card">
+                <strong>Why it matters</strong>
+                <p>Less wasted execution means stronger confidence, lower credit burn, and better premium-product positioning.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/build-status-contract.png" alt="Build contract verification in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard reveal">
+          <div class="story-copy">
+            <span class="story-number">21</span>
+            <p class="story-kicker">Provider Lanes</p>
+            <h3>Provider-specific lanes show waiting state, expected model, live model, and telemetry.</h3>
+            <p class="story-summary">
+              This is what makes the orchestration system feel state-of-the-art. Gemini and Grok are not hidden behind a generic “working” badge;
+              their state, expected model, and live telemetry are broken out as first-class product surfaces.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Live routing visibility</strong>
+                <p>Expected model and live model can diverge, and that difference stays visible.</p>
+              </article>
+              <article class="note-card">
+                <strong>Operational confidence</strong>
+                <p>Visible lanes make it easier to believe the system is really orchestrating specialized providers.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/provider-lanes-waiting.png" alt="Waiting Gemini and Grok provider lanes in APEX-BUILD" />
+          </figure>
+        </article>
+
+        <article class="storyboard is-reversed reveal">
+          <div class="story-copy">
+            <span class="story-number">22</span>
+            <p class="story-kicker">Provider Completion</p>
+            <h3>Completed and waiting lanes can sit side by side, which turns orchestration into a visible competitive edge.</h3>
+            <p class="story-summary">
+              Claude and OpenAI are shown with role, expected model, live model, internal-thought tags, and task completion context. This is a
+              much more sophisticated presentation than the “one spinner and hope” approach common elsewhere.
+            </p>
+            <div class="note-stack">
+              <article class="note-card">
+                <strong>Specialization is visible</strong>
+                <p>Each provider’s role and state stay visible throughout the run.</p>
+              </article>
+              <article class="note-card">
+                <strong>Better than the competition</strong>
+                <p>Ambiguity is replaced with explicit orchestration, readable state, and a workflow that feels dependable.</p>
+              </article>
+            </div>
+          </div>
+          <figure class="story-media">
+            <img src="./screens/story/provider-lanes-active.png" alt="Claude and OpenAI provider lanes in APEX-BUILD" />
+          </figure>
+        </article>
       </section>
 
       <section class="section" id="economics">
         <div class="section-head reveal">
-          <p class="kicker">Economics + Use Of Funds</p>
-          <h3>The raise is for launch execution, not exploration.</h3>
+          <p class="kicker">Why APEX-BUILD Wins</p>
+          <h3>The category is proven. The opportunity is to build the product the market has been missing.</h3>
           <p>
-            The product already exists. The capital unlocks company formation, AI runway, subscriptions, domain and launch ops, and customer acquisition.
+            The thesis is straightforward: reduce credit burn, expose orchestration, provide a real IDE, support BYOK, and remove
+            the lock-in that makes customers hesitant to commit to incumbent platforms. The more complete the workspace becomes, the more valuable the business becomes.
           </p>
+        </div>
+
+        <div class="advantage-grid">
+          <article class="panel reveal">
+            <h4>What the market is missing today</h4>
+            <div class="line-item"><span>Black-box generation with shallow recovery</span><strong>Visible orchestration</strong></div>
+            <div class="line-item"><span>Weak editor after generation</span><strong>Full browser IDE</strong></div>
+            <div class="line-item"><span>Opaque pricing and spend anxiety</span><strong>Live cost visibility</strong></div>
+            <div class="line-item"><span>Platform lock-in and proprietary dependence</span><strong>Exportable, host-anywhere workflow</strong></div>
+            <div class="line-item"><span>Weak admin and account controls</span><strong>Operator surfaces already present</strong></div>
+            <div class="line-item"><span>High credit burn for too little output</span><strong>Burn reduced 30% so far</strong></div>
+          </article>
+
+          <article class="panel reveal">
+            <h4>Why the business case is attractive</h4>
+            <div class="line-item"><span>Subscription revenue</span><strong>Builder / Pro / Team</strong></div>
+            <div class="line-item"><span>Credit top-ups</span><strong>Higher usage monetization</strong></div>
+            <div class="line-item"><span>BYOK orchestration value</span><strong>Lower objection sales</strong></div>
+            <div class="line-item"><span>Team and admin surfaces</span><strong>Higher ACV path</strong></div>
+            <div class="line-item"><span>Migration narrative</span><strong>Clear go-to-market wedge</strong></div>
+            <div class="line-item"><span>Credit burn reduction target</span><strong>50% lower than Replit</strong></div>
+          </article>
         </div>
 
         <div class="economics-grid">
@@ -468,151 +833,86 @@
             <h4>Use of funds</h4>
             <div class="line-item"><span>AI API runway for launch</span><strong>$3,500</strong></div>
             <div class="line-item"><span>Claude, ChatGPT, Gemini, Grok subscriptions</span><strong>$1,200</strong></div>
-            <div class="line-item"><span>LLC registration, accounting, legal setup</span><strong>$1,400</strong></div>
+            <div class="line-item"><span>LLC registration, legal, accounting</span><strong>$1,400</strong></div>
             <div class="line-item"><span>Domain, hosting, monitoring, launch ops</span><strong>$900</strong></div>
-            <div class="line-item"><span>Advertising, creator outreach, launch content</span><strong>$2,200</strong></div>
-            <div class="line-item"><span>Unexpected launch expenses buffer</span><strong>$800</strong></div>
+            <div class="line-item"><span>Advertising and creator outreach</span><strong>$2,200</strong></div>
+            <div class="line-item"><span>Unexpected launch costs</span><strong>$800</strong></div>
             <div class="line-total"><span>Total</span><strong>$10,000</strong></div>
           </article>
 
+          <article class="panel reveal">
+            <h4>Revenue and valuation scenarios</h4>
+            <div class="line-item"><span>250 paying users at $49 blended ARPU</span><strong>$147,000 ARR</strong></div>
+            <div class="line-item"><span>500 paying users at $49 blended ARPU</span><strong>$294,000 ARR</strong></div>
+            <div class="line-item"><span>1000 paying users at $49 blended ARPU</span><strong>$588,000 ARR</strong></div>
+            <div class="line-item"><span>10x ARR scenario at 1000 users</span><strong>$5.88M value</strong></div>
+            <div class="line-item"><span>Investor 5% at that scenario</span><strong>$294,000</strong></div>
+            <div class="line-item"><span>Return on the initial $10,000 check</span><strong>29.4x</strong></div>
+          </article>
+        </div>
+
+        <div class="economics-grid">
           <article class="panel reveal">
             <h4>90-day launch plan</h4>
             <div class="timeline-step">
               <span>Days 0-30</span>
               <div>
-                <strong>Finish launch readiness</strong>
-                <p>Finalize entity formation, fund provider rails, tighten onboarding, polish the product narrative, and push live.</p>
+                <strong>Launch readiness</strong>
+                <p>Finalize the LLC, fund the provider rails, keep tightening onboarding, and push public launch polish.</p>
               </div>
             </div>
             <div class="timeline-step">
               <span>Days 31-60</span>
               <div>
-                <strong>Drive inbound attention</strong>
-                <p>Run founder-led demos, creator outreach, migration messaging, and targeted ads around switching from incumbent tools.</p>
+                <strong>Acquire users</strong>
+                <p>Run migration messaging, founder-led demos, creator outreach, and targeted ads built around switching intent.</p>
               </div>
             </div>
             <div class="timeline-step">
               <span>Days 61-90</span>
               <div>
-                <strong>Convert and iterate</strong>
-                <p>Push free-to-paid conversion, learn from spend behavior, deepen templates, and prepare the larger follow-on round.</p>
+                <strong>Convert and compound</strong>
+                <p>Turn free usage into paid plans, deepen templates and workflows, and prepare the larger follow-on round.</p>
               </div>
             </div>
           </article>
-        </div>
 
-        <div class="economics-bottom">
           <figure class="screen-card reveal">
-            <div class="screen-frame ratio-landscape screen-frame-clean">
-              <img class="screen-image contain" src="./screens/landing_pricing_local.png" alt="APEX-BUILD pricing plans" />
+            <div class="screen-frame">
+              <img class="screen-image" src="./screens/story/pricing.png" alt="APEX-BUILD pricing table" />
             </div>
             <figcaption>
-              <strong>Monetization already has multiple lanes.</strong>
-              Builder, Pro, Team, one-time credit packs, and BYOK economics give the product room to monetize different buyer types.
+              <strong>Pricing is already understandable.</strong>
+              Builder, Pro, Team, and BYOK together give APEX-BUILD room to sell into different buyer types without confusing the offer.
             </figcaption>
           </figure>
-
-          <article class="panel reveal">
-            <h4>Blended revenue model</h4>
-            <p>
-              The projection model assumes a blended <strong>$49/month ARPU</strong> driven by subscriptions, credit top-ups, and high-intent users
-              who value orchestration, the IDE, visibility, and BYOK flexibility.
-            </p>
-            <div class="revenue-stack">
-              <span>Subscriptions</span>
-              <span>Credit top-ups</span>
-              <span>BYOK routing margin</span>
-              <span>Team upgrades</span>
-              <span>Future enterprise features</span>
-            </div>
-          </article>
         </div>
       </section>
 
       <section class="section" id="deal">
-        <div class="section-head reveal">
-          <p class="kicker">Return Profile</p>
-          <h3>If APEX-BUILD reaches 1,000 paying customers, the value of 5% changes very quickly.</h3>
-          <p>
-            These projections are intentionally optimistic, but still anchored in a reasonable premium developer-SaaS revenue multiple range.
-          </p>
-        </div>
-
-        <div class="projection-panel reveal">
-          <div class="projection-head">
-            <span>Paying customers</span>
-            <span>MRR</span>
-            <span>ARR</span>
-            <span>8x-12x ARR value</span>
-            <span>Value of 5%</span>
-          </div>
-          <div class="projection-row">
-            <span>100</span>
-            <span>$4,900</span>
-            <span>$58,800</span>
-            <span>$470K-$706K</span>
-            <span>$23.5K-$35.3K</span>
-          </div>
-          <div class="projection-row">
-            <span>500</span>
-            <span>$24,500</span>
-            <span>$294,000</span>
-            <span>$2.35M-$3.53M</span>
-            <span>$117.5K-$176.5K</span>
-          </div>
-          <div class="projection-row highlight">
-            <span>1,000</span>
-            <span>$49,000</span>
-            <span>$588,000</span>
-            <span>$4.70M-$7.06M</span>
-            <span>$235K-$353K</span>
-          </div>
-          <div class="projection-row">
-            <span>2,500</span>
-            <span>$122,500</span>
-            <span>$1.47M</span>
-            <span>$11.76M-$17.64M</span>
-            <span>$588K-$882K</span>
-          </div>
-        </div>
-
-        <div class="closing-grid">
-          <article class="closing-card reveal">
-            <span class="micro-label">What success means</span>
-            <h4>At 1,000 paying customers, the company steps into a very different valuation bracket.</h4>
-            <p>
-              If launch lands and APEX-BUILD proves it can attract and retain 1,000 paying users, the implied value of the current 5% position can move
-              from a $10,000 entry to a multiple-hundred-thousand-dollar outcome.
-            </p>
-          </article>
-
-          <article class="closing-card reveal">
-            <span class="micro-label">Exclusive follow-on option</span>
-            <h4>An additional $75,000 investment opportunity can be reserved exclusively for this investor.</h4>
-            <p>
-              If launch succeeds and the company decides to build more aggressively, the next larger allocation can be offered solely to this investor first,
-              allowing a materially larger ownership position before a broader raise.
-            </p>
-          </article>
-        </div>
-
         <div class="final-banner reveal">
           <div>
-            <p class="micro-label">Summary</p>
-            <h4>APEX-BUILD already looks like a platform. This round is to launch it, fund it, and start taking customers from the incumbents.</h4>
+            <p class="micro-label">Investor Offer</p>
+            <h3>$10,000 now for 5%, with clear valuation and ROI upside if launch traction lands.</h3>
           </div>
-          <p>
-            The ask is small relative to the upside. The market is proven. The product is differentiated. The next step is execution.
-          </p>
+          <div>
+            <p>
+              The current round implies a <strong>$200,000 post-money valuation</strong>. If APEX-BUILD reaches <strong>1000 paying customers</strong>
+              at the modeled <strong>$588,000 ARR</strong> and earns a <strong>10x ARR valuation</strong>, the company would be worth about
+              <strong>$5.88M</strong>. That puts the current <strong>5% stake at roughly $294,000</strong>.
+            </p>
+            <p>
+              That is roughly a <strong>29.4x return</strong> on the original $10,000 check in the 1000-customer scenario. If launch lands and the
+              business begins compounding, an additional <strong>$75,000 follow-on opportunity</strong> for a larger stake can be reserved before a broader raise.
+            </p>
+          </div>
         </div>
       </section>
     </main>
 
     <footer class="footer">
-      <p>
-        APEX-BUILD investor demo. Category proof note: Replit valuation reference reflects March 2026 reporting.
-        Revenue and valuation scenarios are directional planning assumptions, not guarantees.
-      </p>
+      <p>APEX-BUILD Investor Demo</p>
+      <p>Built around customer control, transparent spend, a real browser IDE, and visible multi-agent orchestration.</p>
     </footer>
 
     <script src="./presentation.js"></script>
