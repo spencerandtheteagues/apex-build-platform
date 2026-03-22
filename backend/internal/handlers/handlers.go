@@ -145,6 +145,11 @@ func (h *Handler) Register(c *gin.Context) {
 	c.JSON(http.StatusCreated, StandardResponse{
 		Success: true,
 		Data: map[string]interface{}{
+			"access_token":             tokens.AccessToken,
+			"refresh_token":            tokens.RefreshToken,
+			"access_token_expires_at":  tokens.AccessTokenExpiresAt,
+			"refresh_token_expires_at": tokens.RefreshTokenExpiresAt,
+			"token_type":               tokens.TokenType,
 			"user": map[string]interface{}{
 				"id":                user.ID,
 				"username":          user.Username,
@@ -229,6 +234,11 @@ func (h *Handler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, StandardResponse{
 		Success: true,
 		Data: map[string]interface{}{
+			"access_token":             tokens.AccessToken,
+			"refresh_token":            tokens.RefreshToken,
+			"access_token_expires_at":  tokens.AccessTokenExpiresAt,
+			"refresh_token_expires_at": tokens.RefreshTokenExpiresAt,
+			"token_type":               tokens.TokenType,
 			"user": map[string]interface{}{
 				"id":                user.ID,
 				"username":          user.Username,
@@ -289,6 +299,13 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 
 	c.JSON(http.StatusOK, StandardResponse{
 		Success: true,
+		Data: map[string]interface{}{
+			"access_token":             tokens.AccessToken,
+			"refresh_token":            tokens.RefreshToken,
+			"access_token_expires_at":  tokens.AccessTokenExpiresAt,
+			"refresh_token_expires_at": tokens.RefreshTokenExpiresAt,
+			"token_type":               tokens.TokenType,
+		},
 		Message: "Tokens refreshed successfully",
 	})
 }

@@ -62,8 +62,9 @@ func TestLoginSetsHttpOnlyAuthCookies(t *testing.T) {
 
 	var response map[string]any
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	_, hasTokens := response["tokens"]
-	require.False(t, hasTokens)
+	require.NotEmpty(t, response["access_token"])
+	require.NotEmpty(t, response["refresh_token"])
+	require.Equal(t, "Bearer", response["token_type"])
 }
 
 func TestRefreshTokenAcceptsRefreshCookie(t *testing.T) {
@@ -83,6 +84,12 @@ func TestRefreshTokenAcceptsRefreshCookie(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	requireAuthCookiePresent(t, recorder, auth.AccessTokenCookieName)
 	requireAuthCookiePresent(t, recorder, auth.RefreshTokenCookieName)
+
+	var response map[string]any
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.NotEmpty(t, response["access_token"])
+	require.NotEmpty(t, response["refresh_token"])
+	require.Equal(t, "Bearer", response["token_type"])
 }
 
 func TestLogoutRevokesRefreshToken(t *testing.T) {

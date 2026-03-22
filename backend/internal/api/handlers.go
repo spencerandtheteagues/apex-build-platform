@@ -230,7 +230,12 @@ func (s *Server) Register(c *gin.Context) {
 	auth.SetRefreshTokenCookie(c, tokens.RefreshToken)
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "User created successfully",
+		"message":                  "User created successfully",
+		"access_token":             tokens.AccessToken,
+		"refresh_token":            tokens.RefreshToken,
+		"access_token_expires_at":  tokens.AccessTokenExpiresAt,
+		"refresh_token_expires_at": tokens.RefreshTokenExpiresAt,
+		"token_type":               tokens.TokenType,
 		"user": gin.H{
 			"id":                    user.ID,
 			"username":              user.Username,
@@ -299,7 +304,12 @@ func (s *Server) Login(c *gin.Context) {
 	auth.SetRefreshTokenCookie(c, tokens.RefreshToken)
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Login successful",
+		"message":                  "Login successful",
+		"access_token":             tokens.AccessToken,
+		"refresh_token":            tokens.RefreshToken,
+		"access_token_expires_at":  tokens.AccessTokenExpiresAt,
+		"refresh_token_expires_at": tokens.RefreshTokenExpiresAt,
+		"token_type":               tokens.TokenType,
 		"user": gin.H{
 			"id":                    user.ID,
 			"username":              user.Username,
@@ -351,7 +361,12 @@ func (s *Server) RefreshToken(c *gin.Context) {
 	auth.SetRefreshTokenCookie(c, tokens.RefreshToken)
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Tokens refreshed successfully",
+		"message":                  "Tokens refreshed successfully",
+		"access_token":             tokens.AccessToken,
+		"refresh_token":            tokens.RefreshToken,
+		"access_token_expires_at":  tokens.AccessTokenExpiresAt,
+		"refresh_token_expires_at": tokens.RefreshTokenExpiresAt,
+		"token_type":               tokens.TokenType,
 	})
 }
 
