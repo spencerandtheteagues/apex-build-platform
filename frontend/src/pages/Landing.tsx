@@ -2032,6 +2032,303 @@ const Footer: React.FC = () => (
   </footer>
 )
 
+// ─── Screenshot showcase section ──────────────────────────────────────────────
+
+const SCREENSHOTS = [
+  {
+    id: 'workspace',
+    eyebrow: 'Build with real power',
+    title: 'Real Full-Stack Workspace',
+    description:
+      'A true development environment — editor, live backend, database visibility, and app preview all working together in one interface.',
+    image: '/screenshot-ide.png',
+    icon: Terminal,
+    iconColor: '#60a5fa',
+    bullets: [
+      'Live preview and backend status side by side',
+      'Database visibility built in',
+      'Real project structure, not a toy editor',
+    ],
+    accentColor: '#60a5fa',
+    glowColor: 'rgba(96,165,250,0.18)',
+    borderGlow: 'rgba(96,165,250,0.22)',
+  },
+  {
+    id: 'build',
+    eyebrow: 'From prompt to product',
+    title: 'Describe It. Build It.',
+    description:
+      'Start with a plain-English idea, choose your stack, and move from concept to a real app without wrestling setup and boilerplate.',
+    image: '/screenshot-build.png',
+    icon: Sparkles,
+    iconColor: C.accent,
+    bullets: [
+      'Prompt-driven app creation',
+      'Fast, Balanced, and Max power modes',
+      'Stack selection without friction',
+    ],
+    accentColor: C.accent,
+    glowColor: 'rgba(255,0,51,0.18)',
+    borderGlow: 'rgba(255,0,51,0.28)',
+  },
+  {
+    id: 'spend',
+    eyebrow: 'Transparent spend control',
+    title: 'No Surprise Bills. Ever.',
+    description:
+      'Track usage in real time with a clear model-by-model cost breakdown — so you always know exactly where your money is going.',
+    image: '/screenshot-spend.png',
+    icon: DollarSign,
+    iconColor: C.green,
+    bullets: [
+      'Real-time spending overview per model',
+      'Per-agent cost attribution',
+      'Built-in budget controls and hard caps',
+    ],
+    accentColor: C.green,
+    glowColor: 'rgba(52,211,153,0.15)',
+    borderGlow: 'rgba(52,211,153,0.25)',
+  },
+]
+
+const ScreenshotSection: React.FC<LandingProps> = ({ onGetStarted }) => (
+  <section style={{
+    background: C.bg,
+    borderTop: `1px solid ${C.borderDim}`,
+    padding: 'clamp(56px, 7vw, 88px) clamp(20px, 5vw, 64px)',
+    position: 'relative',
+    overflow: 'hidden',
+  }}>
+    {/* Subtle background radials */}
+    <div style={{
+      position: 'absolute', inset: 0, pointerEvents: 'none',
+      background: 'radial-gradient(ellipse 60% 40% at 50% 0%, rgba(255,0,51,0.06) 0%, transparent 70%)',
+    }} />
+
+    <div style={{ maxWidth: 1200, margin: '0 auto', position: 'relative' }}>
+      {/* Section header */}
+      <motion.div
+        initial={{ opacity: 0, y: 24 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: '-60px' }}
+        transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+        style={{ textAlign: 'center', marginBottom: 52 }}
+      >
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: 7,
+          background: C.accentDim, border: `1px solid ${C.border}`,
+          color: C.accent, borderRadius: 100, padding: '4px 14px',
+          fontFamily: fBody, fontSize: '0.7rem', fontWeight: 700,
+          letterSpacing: '0.09em', textTransform: 'uppercase' as const, marginBottom: 18,
+        }}>
+          <Zap size={11} /> One platform. Idea to production.
+        </div>
+
+        <h2 style={{
+          fontFamily: fHero, fontWeight: 900,
+          fontSize: 'clamp(1.75rem, 3.2vw, 2.6rem)',
+          color: C.white, margin: '0 0 14px', lineHeight: 1.1,
+        }}>
+          Everything You Need to{' '}
+          <span style={{ color: C.accent }}>Build, Launch, and Scale</span>
+        </h2>
+
+        <p style={{
+          fontFamily: fBody, fontSize: 'clamp(0.92rem, 1.4vw, 1.06rem)',
+          color: C.textSub, margin: '0 auto', maxWidth: 580, lineHeight: 1.7,
+        }}>
+          Real development power, instant app creation, and brutally transparent spending — all in one place.
+        </p>
+      </motion.div>
+
+      {/* 3-column screenshot grid */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: 20,
+      }}>
+        {SCREENSHOTS.map((item, i) => {
+          const Icon = item.icon
+          return (
+            <motion.div
+              key={item.id}
+              initial={{ opacity: 0, y: 32 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-40px' }}
+              transition={{ duration: 0.55, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] }}
+              style={{
+                background: 'rgba(255,255,255,0.028)',
+                border: `1px solid ${C.borderDim}`,
+                borderRadius: 20,
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                transition: 'border-color 0.25s, box-shadow 0.25s, transform 0.25s',
+              }}
+              onMouseEnter={e => {
+                const el = e.currentTarget as HTMLElement
+                el.style.borderColor = item.borderGlow
+                el.style.boxShadow = `0 0 40px ${item.glowColor}, 0 16px 48px rgba(0,0,0,0.4)`
+                el.style.transform = 'translateY(-3px)'
+              }}
+              onMouseLeave={e => {
+                const el = e.currentTarget as HTMLElement
+                el.style.borderColor = C.borderDim
+                el.style.boxShadow = 'none'
+                el.style.transform = 'translateY(0)'
+              }}
+            >
+              {/* Screenshot */}
+              <div style={{
+                position: 'relative',
+                overflow: 'hidden',
+                background: '#050816',
+                borderBottom: `1px solid ${C.borderDim}`,
+              }}>
+                {/* Glow behind image */}
+                <div style={{
+                  position: 'absolute', inset: 0, pointerEvents: 'none',
+                  background: `radial-gradient(ellipse 80% 60% at 50% 100%, ${item.glowColor} 0%, transparent 70%)`,
+                  zIndex: 1,
+                }} />
+                <img
+                  src={item.image}
+                  alt={item.title}
+                  style={{
+                    width: '100%',
+                    height: 220,
+                    objectFit: 'cover',
+                    objectPosition: 'top',
+                    display: 'block',
+                    position: 'relative',
+                    zIndex: 0,
+                  }}
+                />
+                {/* Gradient fade at bottom of image */}
+                <div style={{
+                  position: 'absolute', bottom: 0, left: 0, right: 0, height: 48,
+                  background: 'linear-gradient(to top, rgba(10,10,20,0.85), transparent)',
+                  zIndex: 2,
+                  pointerEvents: 'none',
+                }} />
+              </div>
+
+              {/* Text content */}
+              <div style={{ padding: '20px 22px 24px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                {/* Eyebrow */}
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 7,
+                  background: `${item.accentColor}14`, border: `1px solid ${item.accentColor}28`,
+                  borderRadius: 100, padding: '3px 11px', marginBottom: 12,
+                  alignSelf: 'flex-start',
+                }}>
+                  <Icon size={12} color={item.iconColor} />
+                  <span style={{
+                    fontFamily: fBody, fontSize: '0.68rem', fontWeight: 700,
+                    color: item.accentColor, letterSpacing: '0.07em',
+                    textTransform: 'uppercase' as const,
+                  }}>{item.eyebrow}</span>
+                </div>
+
+                {/* Title */}
+                <h3 style={{
+                  fontFamily: fHero, fontWeight: 800,
+                  fontSize: 'clamp(1.1rem, 1.6vw, 1.35rem)',
+                  color: C.white, margin: '0 0 10px', lineHeight: 1.2,
+                }}>
+                  {item.title}
+                </h3>
+
+                {/* Description */}
+                <p style={{
+                  fontFamily: fBody, fontSize: '0.86rem',
+                  color: C.textSub, margin: '0 0 16px', lineHeight: 1.65,
+                }}>
+                  {item.description}
+                </p>
+
+                {/* Bullets */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
+                  {item.bullets.map(bullet => (
+                    <div key={bullet} style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
+                      <div style={{
+                        width: 16, height: 16, borderRadius: '50%',
+                        background: C.greenDim, border: `1px solid ${C.greenBorder}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0, marginTop: 1,
+                      }}>
+                        <Check size={9} color={C.green} strokeWidth={3} />
+                      </div>
+                      <span style={{ fontFamily: fBody, fontSize: '0.84rem', color: C.text, lineHeight: 1.5 }}>
+                        {bullet}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )
+        })}
+      </div>
+
+      {/* Bottom CTA strip */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: '-40px' }}
+        transition={{ duration: 0.5, delay: 0.3 }}
+        style={{
+          marginTop: 36,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: 'rgba(255,255,255,0.025)',
+          border: `1px solid ${C.borderDim}`,
+          borderRadius: 18, padding: '18px 28px',
+          flexWrap: 'wrap', gap: 16,
+        }}
+      >
+        <div>
+          <p style={{
+            fontFamily: fBody, fontWeight: 700,
+            fontSize: '1.05rem', color: C.white, margin: '0 0 4px',
+          }}>
+            Show the product. Kill the doubt.
+          </p>
+          <p style={{
+            fontFamily: fBody, fontSize: '0.86rem',
+            color: C.textSub, margin: 0, maxWidth: 540,
+          }}>
+            Real full-stack apps, instant creation, and transparent pricing — the three questions every builder asks, answered.
+          </p>
+        </div>
+        <button
+          onClick={() => onGetStarted()}
+          style={{
+            background: `linear-gradient(135deg, ${C.accent} 0%, #cc0029 100%)`,
+            color: '#fff', border: 'none', borderRadius: 10,
+            padding: '11px 26px', fontFamily: fBody,
+            fontWeight: 700, fontSize: '0.92rem',
+            cursor: 'pointer', letterSpacing: '0.02em',
+            boxShadow: `0 0 28px ${C.accentGlow}`,
+            display: 'flex', alignItems: 'center', gap: 8,
+            transition: 'box-shadow 0.2s, transform 0.2s',
+            flexShrink: 0,
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.boxShadow = `0 0 48px rgba(255,0,51,0.4)`
+            e.currentTarget.style.transform = 'translateY(-1px)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.boxShadow = `0 0 28px ${C.accentGlow}`
+            e.currentTarget.style.transform = 'translateY(0)'
+          }}
+        >
+          Start Building Free <ArrowRight size={15} />
+        </button>
+      </motion.div>
+    </div>
+  </section>
+)
+
 // ─── Landing page ─────────────────────────────────────────────────────────────
 
 const Landing: React.FC<LandingProps> = ({ onGetStarted }) => (
@@ -2039,6 +2336,7 @@ const Landing: React.FC<LandingProps> = ({ onGetStarted }) => (
     <Nav onGetStarted={onGetStarted} />
     <SideNav />
     <AboveFold onGetStarted={onGetStarted} />
+    <ScreenshotSection onGetStarted={onGetStarted} />
     {FEATURES.map((feature, i) => (
       <FeatureSection key={feature.id} feature={feature} index={i} onGetStarted={onGetStarted} />
     ))}
