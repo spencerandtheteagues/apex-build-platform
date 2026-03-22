@@ -1270,6 +1270,7 @@ function App() {
                           <ModelSelector
                             value={defaultModel}
                             onChange={handleDefaultModelChange}
+                            canUseBYOK={user != null && ['builder', 'pro', 'team', 'enterprise', 'owner'].includes(user.subscription_type)}
                             className="w-full max-w-md"
                           />
                         </Suspense>

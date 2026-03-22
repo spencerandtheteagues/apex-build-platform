@@ -1,7 +1,7 @@
 // APEX-BUILD Model Selector
 // Dropdown for selecting AI provider and model with speed/cost indicators
 
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { ChevronDown, Zap, DollarSign, Brain, Sparkles, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import apiService from '@/services/api'
@@ -19,6 +19,7 @@ interface ModelSelectorProps {
   onChange?: (provider: string, model: string) => void
   compact?: boolean
   className?: string
+  canUseBYOK?: boolean
 }
 
 const PROVIDER_META: Record<string, { label: string; color: string; icon: string }> = {
@@ -100,7 +101,7 @@ const normalizeModelsPayload = (value: unknown): Record<string, ModelInfo[]> => 
   return Object.keys(normalized).length > 0 ? normalized : FALLBACK_MODELS
 }
 
-export default function ModelSelector({ value, onChange, compact = false, className }: ModelSelectorProps) {
+export default function ModelSelector({ value, onChange, compact = false, className, canUseBYOK = false }: ModelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [models, setModels] = useState<Record<string, ModelInfo[]>>({})
   const [selectedProvider, setSelectedProvider] = useState<string>('')
@@ -122,6 +123,16 @@ export default function ModelSelector({ value, onChange, compact = false, classN
     }
     fetchModels()
   }, [])
+
+  const visibleModels = useMemo(() => {
+    if (canUseBYOK) {
+      return models
+    }
+
+    return Object.fromEntries(
+      Object.entries(models).filter(([provider]) => provider !== 'ollama')
+    )
+  }, [canUseBYOK, models])
 
   // Close on outside click
   useEffect(() => {
@@ -149,7 +160,7 @@ export default function ModelSelector({ value, onChange, compact = false, classN
     if (!selectedModel || selectedModel === 'auto') {
       return { label: 'Auto', sublabel: 'Intelligent routing', provider: '' }
     }
-    for (const [provider, providerModels] of Object.entries(models)) {
+    for (const [provider, providerModels] of Object.entries(visibleModels)) {
       const model = providerModels.find((m) => m.id === selectedModel)
       if (model) {
         return {
@@ -231,7 +242,7 @@ export default function ModelSelector({ value, onChange, compact = false, classN
 
           {/* Provider groups */}
           <div className="max-h-[400px] overflow-y-auto">
-            {Object.entries(models).map(([provider, providerModels]) => {
+            {Object.entries(visibleModels).map(([provider, providerModels]) => {
               const meta = PROVIDER_META[provider]
               if (!meta) return null
 

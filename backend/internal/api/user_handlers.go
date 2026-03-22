@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"apex-build/pkg/models"
 
@@ -79,24 +80,37 @@ func (s *Server) UpdateUserProfile(c *gin.Context) {
 		return
 	}
 
-	// Validate AI preference
-	validAI := map[string]bool{
-		"auto":   true,
-		"claude": true,
-		"gpt4":   true,
-		"gemini": true,
-	}
-
-	if req.PreferredAI != "" && !validAI[req.PreferredAI] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid AI preference"})
-		return
-	}
-
 	// Find and update user
 	var user models.User
 	if err := s.db.DB.Where("id = ?", userID).First(&user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
+	}
+
+	if req.PreferredAI != "" {
+		preferredAI := strings.ToLower(strings.TrimSpace(req.PreferredAI))
+		validAI := map[string]bool{
+			"auto":   true,
+			"claude": true,
+			"gpt4":   true,
+			"gemini": true,
+			"grok":   true,
+		}
+		isPaidPlan := false
+		switch strings.ToLower(strings.TrimSpace(user.SubscriptionType)) {
+		case "builder", "pro", "team", "enterprise", "owner":
+			isPaidPlan = true
+		}
+
+		if preferredAI == "ollama" && !isPaidPlan {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Ollama preference requires a paid plan because BYOK is unavailable on free"})
+			return
+		}
+		if preferredAI != "ollama" && !validAI[preferredAI] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid AI preference"})
+			return
+		}
+		req.PreferredAI = preferredAI
 	}
 
 	// Update fields if provided
