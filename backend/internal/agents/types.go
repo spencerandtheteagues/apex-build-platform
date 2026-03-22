@@ -281,6 +281,26 @@ type BuildPermissionRequest struct {
 	ResolvedAt      *time.Time                   `json:"resolved_at,omitempty"`
 }
 
+type BuildApprovalEventStatus string
+
+const (
+	ApprovalEventPending   BuildApprovalEventStatus = "pending"
+	ApprovalEventSatisfied BuildApprovalEventStatus = "satisfied"
+	ApprovalEventDenied    BuildApprovalEventStatus = "denied"
+)
+
+type BuildApprovalEvent struct {
+	ID         string                   `json:"id"`
+	Kind       string                   `json:"kind"`
+	Title      string                   `json:"title"`
+	Status     BuildApprovalEventStatus `json:"status"`
+	Summary    string                   `json:"summary,omitempty"`
+	SourceType string                   `json:"source_type,omitempty"`
+	SourceID   string                   `json:"source_id,omitempty"`
+	Actor      string                   `json:"actor,omitempty"`
+	Timestamp  time.Time                `json:"timestamp"`
+}
+
 type BuildInteractionState struct {
 	Messages           []BuildConversationMessage `json:"messages,omitempty"`
 	SteeringNotes      []string                   `json:"steering_notes,omitempty"`
@@ -291,6 +311,7 @@ type BuildInteractionState struct {
 	PauseReason        string                     `json:"pause_reason,omitempty"`
 	PermissionRules    []BuildPermissionRule      `json:"permission_rules,omitempty"`
 	PermissionRequests []BuildPermissionRequest   `json:"permission_requests,omitempty"`
+	ApprovalEvents     []BuildApprovalEvent       `json:"approval_events,omitempty"`
 	AttentionRequired  bool                       `json:"attention_required,omitempty"`
 }
 
@@ -393,23 +414,23 @@ const (
 )
 
 type BuildApproval struct {
-	ID                     string              `json:"id"`
-	Kind                   string              `json:"kind"`
-	Title                  string              `json:"title"`
-	Status                 BuildApprovalStatus `json:"status"`
-	Required               bool                `json:"required"`
-	Summary                string              `json:"summary,omitempty"`
-	Reason                 string              `json:"reason,omitempty"`
-	SourceType             string              `json:"source_type,omitempty"`
-	SourceID               string              `json:"source_id,omitempty"`
-	Actor                  string              `json:"actor,omitempty"`
-	PartialProgressAllowed bool                `json:"partial_progress_allowed,omitempty"`
-	AcknowledgementRequired bool               `json:"acknowledgement_required,omitempty"`
-	PlanTierRelated        bool                `json:"plan_tier_related,omitempty"`
-	MismatchDetected       bool                `json:"mismatch_detected,omitempty"`
-	MismatchReason         string              `json:"mismatch_reason,omitempty"`
-	RequestedAt            time.Time           `json:"requested_at"`
-	ResolvedAt             *time.Time          `json:"resolved_at,omitempty"`
+	ID                      string              `json:"id"`
+	Kind                    string              `json:"kind"`
+	Title                   string              `json:"title"`
+	Status                  BuildApprovalStatus `json:"status"`
+	Required                bool                `json:"required"`
+	Summary                 string              `json:"summary,omitempty"`
+	Reason                  string              `json:"reason,omitempty"`
+	SourceType              string              `json:"source_type,omitempty"`
+	SourceID                string              `json:"source_id,omitempty"`
+	Actor                   string              `json:"actor,omitempty"`
+	PartialProgressAllowed  bool                `json:"partial_progress_allowed,omitempty"`
+	AcknowledgementRequired bool                `json:"acknowledgement_required,omitempty"`
+	PlanTierRelated         bool                `json:"plan_tier_related,omitempty"`
+	MismatchDetected        bool                `json:"mismatch_detected,omitempty"`
+	MismatchReason          string              `json:"mismatch_reason,omitempty"`
+	RequestedAt             time.Time           `json:"requested_at"`
+	ResolvedAt              *time.Time          `json:"resolved_at,omitempty"`
 }
 
 type BuildSnapshotState struct {

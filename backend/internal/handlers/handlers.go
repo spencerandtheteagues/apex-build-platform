@@ -427,24 +427,33 @@ func (h *Handler) UpdateProfile(c *gin.Context) {
 		updates["preferred_theme"] = *req.PreferredTheme
 	}
 	if req.PreferredAI != nil {
-		// Validate AI preference
-		validAIs := []string{"auto", "claude", "gpt4", "gemini"}
-		valid := false
-		for _, ai := range validAIs {
-			if *req.PreferredAI == ai {
-				valid = true
-				break
-			}
+		preferredAI := strings.ToLower(strings.TrimSpace(*req.PreferredAI))
+		validAIs := map[string]bool{
+			"auto":   true,
+			"claude": true,
+			"gpt4":   true,
+			"gemini": true,
+			"grok":   true,
 		}
-		if !valid {
+
+		if preferredAI == "ollama" && !hasPaidBackendPlan(c, h.DB, userID) {
 			c.JSON(http.StatusBadRequest, StandardResponse{
 				Success: false,
-				Error:   "Invalid AI preference. Must be one of: auto, claude, gpt4, gemini",
+				Error:   "Ollama preference requires a paid plan because BYOK is unavailable on free",
 				Code:    "INVALID_AI_PREFERENCE",
 			})
 			return
 		}
-		updates["preferred_ai"] = *req.PreferredAI
+
+		if preferredAI != "ollama" && !validAIs[preferredAI] {
+			c.JSON(http.StatusBadRequest, StandardResponse{
+				Success: false,
+				Error:   "Invalid AI preference. Must be one of: auto, claude, gpt4, gemini, grok, or ollama on paid plans",
+				Code:    "INVALID_AI_PREFERENCE",
+			})
+			return
+		}
+		updates["preferred_ai"] = preferredAI
 	}
 
 	// Update user

@@ -3176,6 +3176,7 @@ export interface BuildInteractionState {
   pause_reason?: string
   permission_rules?: BuildPermissionRule[]
   permission_requests?: BuildPermissionRequest[]
+  approval_events?: BuildApprovalEvent[]
   attention_required?: boolean
 }
 
@@ -3295,6 +3296,18 @@ export interface BuildApproval {
   mismatch_reason?: string
   requested_at: string
   resolved_at?: string
+}
+
+export interface BuildApprovalEvent {
+  id: string
+  kind: string
+  title: string
+  status: 'pending' | 'satisfied' | 'denied'
+  summary?: string
+  source_type?: string
+  source_id?: string
+  actor?: string
+  timestamp: string
 }
 
 export interface BuildIntentBrief {

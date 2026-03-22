@@ -37,6 +37,79 @@ func TestRecordPermissionRequestLockedConsumesAllowOnceRule(t *testing.T) {
 	}
 }
 
+func TestRecordPermissionRequestLockedAppendsApprovalEvent(t *testing.T) {
+	build := &Build{}
+
+	request, created := recordPermissionRequestLocked(build, leadMessagePermissionRequest{
+		Scope:  "program",
+		Target: "docker",
+		Reason: "Need Docker to run the preview image",
+	}, &Agent{ID: "agent-1", Role: RoleDevOps})
+
+	if !created {
+		t.Fatalf("expected permission request to be created")
+	}
+	if len(build.Interaction.ApprovalEvents) != 1 {
+		t.Fatalf("expected one approval event, got %d", len(build.Interaction.ApprovalEvents))
+	}
+
+	event := build.Interaction.ApprovalEvents[0]
+	if event.SourceID != request.ID {
+		t.Fatalf("expected approval event to reference request %s, got %s", request.ID, event.SourceID)
+	}
+	if event.Status != ApprovalEventPending {
+		t.Fatalf("expected pending approval event, got %s", event.Status)
+	}
+	if event.Actor != string(RoleDevOps) {
+		t.Fatalf("expected actor %s, got %s", RoleDevOps, event.Actor)
+	}
+}
+
+func TestResolvePermissionRequestAppendsApprovalResolutionEvent(t *testing.T) {
+	build := &Build{
+		ID: "build-1",
+		Interaction: BuildInteractionState{
+			PermissionRequests: []BuildPermissionRequest{
+				{
+					ID:          "perm-1",
+					Scope:       PermissionScopeProgram,
+					Target:      "docker",
+					Reason:      "Need Docker to run the preview image",
+					Status:      PermissionRequestPending,
+					RequestedAt: time.Now().UTC().Add(-time.Minute),
+				},
+			},
+		},
+	}
+	manager := &AgentManager{
+		builds: map[string]*Build{
+			build.ID: build,
+		},
+	}
+
+	interaction, resolved, err := manager.ResolvePermissionRequest(build.ID, "perm-1", PermissionDecisionAllow, PermissionModeBuild, "Approved for this build")
+	if err != nil {
+		t.Fatalf("expected permission resolution to succeed: %v", err)
+	}
+	if resolved == nil || resolved.Status != PermissionRequestAllowed {
+		t.Fatalf("expected resolved request to be allowed, got %+v", resolved)
+	}
+	if len(interaction.ApprovalEvents) != 1 {
+		t.Fatalf("expected one approval event after resolution, got %d", len(interaction.ApprovalEvents))
+	}
+
+	event := interaction.ApprovalEvents[0]
+	if event.SourceID != "perm-1" {
+		t.Fatalf("expected event to reference perm-1, got %s", event.SourceID)
+	}
+	if event.Status != ApprovalEventSatisfied {
+		t.Fatalf("expected satisfied event, got %s", event.Status)
+	}
+	if event.Actor != "user" {
+		t.Fatalf("expected user actor, got %s", event.Actor)
+	}
+}
+
 func TestBuildInteractionPromptContextIncludesDeniedPermissions(t *testing.T) {
 	build := &Build{
 		Agents: map[string]*Agent{

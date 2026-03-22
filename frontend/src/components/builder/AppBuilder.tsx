@@ -3101,6 +3101,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       pending_revisions: Array.isArray(interaction.pending_revisions) ? interaction.pending_revisions : [],
       permission_rules: Array.isArray(interaction.permission_rules) ? interaction.permission_rules : [],
       permission_requests: Array.isArray(interaction.permission_requests) ? interaction.permission_requests : [],
+      approval_events: Array.isArray(interaction.approval_events) ? interaction.approval_events : [],
     }
   }, [])
 

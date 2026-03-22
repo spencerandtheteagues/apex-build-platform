@@ -15,6 +15,7 @@ const (
 	maxBuildSteeringNotes        = 16
 	maxPendingRevisions          = 8
 	maxBuildActivityEntries      = 160
+	maxBuildApprovalEvents       = 80
 )
 
 type leadMessagePermissionRequest struct {
@@ -144,6 +145,9 @@ func copyBuildInteractionStateLocked(build *Build) BuildInteractionState {
 	copyRequests := make([]BuildPermissionRequest, len(build.Interaction.PermissionRequests))
 	copy(copyRequests, build.Interaction.PermissionRequests)
 
+	copyApprovalEvents := make([]BuildApprovalEvent, len(build.Interaction.ApprovalEvents))
+	copy(copyApprovalEvents, build.Interaction.ApprovalEvents)
+
 	return BuildInteractionState{
 		Messages:           copyMessages,
 		SteeringNotes:      copyNotes,
@@ -154,6 +158,7 @@ func copyBuildInteractionStateLocked(build *Build) BuildInteractionState {
 		PauseReason:        build.Interaction.PauseReason,
 		PermissionRules:    copyRules,
 		PermissionRequests: copyRequests,
+		ApprovalEvents:     copyApprovalEvents,
 		AttentionRequired:  build.Interaction.AttentionRequired,
 	}
 }
@@ -243,6 +248,24 @@ func appendPendingRevisionLocked(build *Build, request string) {
 	if len(build.Interaction.PendingRevisions) > maxPendingRevisions {
 		build.Interaction.PendingRevisions = append([]string(nil), build.Interaction.PendingRevisions[len(build.Interaction.PendingRevisions)-maxPendingRevisions:]...)
 	}
+}
+
+func appendBuildApprovalEventLocked(build *Build, event BuildApprovalEvent) BuildApprovalEvent {
+	if build == nil {
+		return event
+	}
+	if event.ID == "" {
+		event.ID = uuid.New().String()
+	}
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now().UTC()
+	}
+
+	build.Interaction.ApprovalEvents = append(build.Interaction.ApprovalEvents, event)
+	if len(build.Interaction.ApprovalEvents) > maxBuildApprovalEvents {
+		build.Interaction.ApprovalEvents = append([]BuildApprovalEvent(nil), build.Interaction.ApprovalEvents[len(build.Interaction.ApprovalEvents)-maxBuildApprovalEvents:]...)
+	}
+	return event
 }
 
 func refreshInteractionAttentionLocked(build *Build) {
@@ -358,6 +381,16 @@ func recordPermissionRequestLocked(build *Build, req leadMessagePermissionReques
 	}
 
 	build.Interaction.PermissionRequests = append(build.Interaction.PermissionRequests, request)
+	appendBuildApprovalEventLocked(build, BuildApprovalEvent{
+		Kind:       fmt.Sprintf("permission_%s", scope),
+		Title:      fmt.Sprintf("Permission request for %s", target),
+		Status:     ApprovalEventPending,
+		Summary:    reason,
+		SourceType: "permission_request",
+		SourceID:   request.ID,
+		Actor:      strings.TrimSpace(request.RequestedByRole),
+		Timestamp:  request.RequestedAt,
+	})
 	if request.Blocking {
 		build.Interaction.WaitingForUser = true
 	}
@@ -814,6 +847,20 @@ func (am *AgentManager) ResolvePermissionRequest(buildID string, requestID strin
 			Kind:      ConversationKindPermissionUpdate,
 			Content:   fmt.Sprintf("Permission request for %s:%s %s", req.Scope, req.Target, req.Status),
 			Timestamp: now,
+		})
+		eventStatus := ApprovalEventDenied
+		if req.Status == PermissionRequestAllowed {
+			eventStatus = ApprovalEventSatisfied
+		}
+		appendBuildApprovalEventLocked(build, BuildApprovalEvent{
+			Kind:       fmt.Sprintf("permission_%s", req.Scope),
+			Title:      fmt.Sprintf("Permission request for %s", req.Target),
+			Status:     eventStatus,
+			Summary:    strings.TrimSpace(req.ResolutionNote),
+			SourceType: "permission_request",
+			SourceID:   req.ID,
+			Actor:      "user",
+			Timestamp:  now,
 		})
 		break
 	}

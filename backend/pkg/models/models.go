@@ -46,7 +46,7 @@ type User struct {
 
 	// Preferences
 	PreferredTheme string `json:"preferred_theme" gorm:"default:'cyberpunk'"` // cyberpunk, matrix, synthwave, neonCity
-	PreferredAI    string `json:"preferred_ai" gorm:"default:'auto'"`         // auto, claude, gpt4, gemini
+	PreferredAI    string `json:"preferred_ai" gorm:"default:'auto'"`         // auto, claude, gpt4, gemini, grok, ollama (paid/BYOK only)
 
 	// Legal acceptance
 	LegalAcceptedAt      *time.Time `json:"legal_accepted_at,omitempty"`

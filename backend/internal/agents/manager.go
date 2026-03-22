@@ -8344,11 +8344,24 @@ func (am *AgentManager) sendTargetedMessageWithClientToken(
 
 	if target.Mode == BuildMessageTargetLead {
 		waitingForLeadResponse := build.Interaction.WaitingForUser
+		pendingQuestion := strings.TrimSpace(build.Interaction.PendingQuestion)
 		if build.Interaction.WaitingForUser {
 			build.Interaction.PendingQuestion = ""
 		}
 		build.UpdatedAt = now
 		resolveWaitingStateLocked(build)
+		if waitingForLeadResponse && pendingQuestion != "" {
+			appendBuildApprovalEventLocked(build, BuildApprovalEvent{
+				Kind:       "user_acknowledgement",
+				Title:      "User acknowledgement received",
+				Status:     ApprovalEventSatisfied,
+				Summary:    pendingQuestion,
+				SourceType: "pending_question",
+				SourceID:   "pending_question",
+				Actor:      "user",
+				Timestamp:  now,
+			})
+		}
 		if waitingForLeadResponse {
 			build.Interaction.WaitingForUser = true
 			refreshInteractionAttentionLocked(build)
@@ -8695,8 +8708,21 @@ Rules:
 	}
 
 	if plan.RequiresUserResponse {
-		build.Interaction.PendingQuestion = strings.TrimSpace(plan.Question)
-		build.Interaction.WaitingForUser = strings.TrimSpace(plan.Question) != ""
+		question := strings.TrimSpace(plan.Question)
+		build.Interaction.PendingQuestion = question
+		build.Interaction.WaitingForUser = question != ""
+		if question != "" {
+			appendBuildApprovalEventLocked(build, BuildApprovalEvent{
+				Kind:       "user_acknowledgement",
+				Title:      "User acknowledgement requested",
+				Status:     ApprovalEventPending,
+				Summary:    question,
+				SourceType: "pending_question",
+				SourceID:   "pending_question",
+				Actor:      string(agent.Role),
+				Timestamp:  now,
+			})
+		}
 	}
 
 	for _, req := range plan.PermissionRequests {

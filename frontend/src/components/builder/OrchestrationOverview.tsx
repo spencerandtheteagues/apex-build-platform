@@ -113,6 +113,17 @@ const blockerTone = (severity?: string) => {
   }
 }
 
+const approvalEventTone = (status?: string) => {
+  switch (status) {
+    case 'satisfied':
+      return 'border-green-500/40 bg-green-500/10 text-green-300'
+    case 'denied':
+      return 'border-red-500/40 bg-red-500/10 text-red-300'
+    default:
+      return 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+  }
+}
+
 const includesPhase = (currentPhase: string | undefined, ...values: string[]) => {
   const normalized = String(currentPhase || '').trim().toLowerCase()
   return values.some((value) => normalized.includes(value))
@@ -424,6 +435,9 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
   const pendingApprovals = requiredApprovals.filter((approval) => approval.status === 'pending').length
   const deniedApprovals = requiredApprovals.filter((approval) => approval.status === 'denied').length
   const mismatchedApprovals = requiredApprovals.filter((approval) => approval.mismatch_detected)
+  const approvalHistory = [...(props.interaction?.approval_events || [])]
+    .sort((left, right) => String(right.timestamp || '').localeCompare(String(left.timestamp || '')))
+    .slice(0, 8)
   const topProviderScorecards = (props.providerScorecards || []).slice(0, 4)
   const recentFingerprints = (props.failureFingerprints || []).slice(0, 4)
 
@@ -701,7 +715,7 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
             </div>
           </div>
 
-          <div className="mt-5 grid gap-3 md:grid-cols-2">
+          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
               <div className="text-xs uppercase tracking-wide text-gray-500">Approval Audit</div>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -739,6 +753,44 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
                 <Badge variant="outline" className="text-[11px] border-gray-700 bg-black/40 text-gray-300">
                   Waiting: {props.interaction?.waiting_for_user ? 'yes' : 'no'}
                 </Badge>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4 md:col-span-2 xl:col-span-1">
+              <div className="text-xs uppercase tracking-wide text-gray-500">Approval History</div>
+              <div className="mt-3 space-y-3">
+                {approvalHistory.length === 0 ? (
+                  <div className="text-sm text-gray-500">No durable approval events recorded yet.</div>
+                ) : (
+                  approvalHistory.map((event) => (
+                    <div key={event.id} className="rounded-lg border border-gray-800 bg-black/30 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-white">{event.title}</div>
+                          <div className="mt-1 text-xs text-gray-400">{event.summary || humanize(event.kind)}</div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {event.source_type && (
+                              <Badge variant="outline" className="text-[11px] border-gray-700 bg-black/40 text-gray-300">
+                                Source: {humanize(event.source_type)}
+                              </Badge>
+                            )}
+                            {event.actor && (
+                              <Badge variant="outline" className="text-[11px] border-gray-700 bg-black/40 text-gray-300">
+                                Actor: {humanize(event.actor)}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <Badge variant="outline" className={cn('text-[11px]', approvalEventTone(event.status))}>
+                            {humanize(event.status)}
+                          </Badge>
+                          <div className="text-[11px] text-gray-500">{formatTimestamp(event.timestamp) || 'Current'}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>

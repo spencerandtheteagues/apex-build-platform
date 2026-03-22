@@ -83,6 +83,28 @@ describe('OrchestrationOverview', () => {
         interaction={{
           waiting_for_user: true,
           pause_reason: 'Waiting for permission acknowledgement.',
+          approval_events: [
+            {
+              id: 'event-1',
+              kind: 'user_acknowledgement',
+              title: 'User acknowledgement requested',
+              status: 'pending',
+              summary: 'Confirm the billing provider before continuing.',
+              source_type: 'pending_question',
+              actor: 'lead',
+              timestamp: '2026-03-21T20:02:00Z',
+            },
+            {
+              id: 'event-2',
+              kind: 'permission_program',
+              title: 'Permission request for docker',
+              status: 'satisfied',
+              summary: 'Approved for this build.',
+              source_type: 'permission_request',
+              actor: 'user',
+              timestamp: '2026-03-21T20:04:00Z',
+            },
+          ],
           permission_requests: [],
           permission_rules: [],
         }}
@@ -198,6 +220,8 @@ describe('OrchestrationOverview', () => {
     expect(screen.getAllByText('Frontend').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Deployment').length).toBeGreaterThan(0)
     expect(screen.getByText('Checkpoint Continuity')).toBeTruthy()
+    expect(screen.getByText('Approval History')).toBeTruthy()
+    expect(screen.getByText('User acknowledgement requested')).toBeTruthy()
     expect(screen.getByText('Ack required')).toBeTruthy()
     expect(screen.getByText('Provider Scorecards')).toBeTruthy()
     expect(screen.getByText('Repair Signals')).toBeTruthy()
