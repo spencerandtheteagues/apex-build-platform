@@ -123,7 +123,7 @@ export class WebSocketService {
   }
 
   // Connect to WebSocket server
-  async connect(token: string): Promise<void> {
+  async connect(): Promise<void> {
     if (this.isConnecting) {
       return
     }
@@ -144,10 +144,8 @@ export class WebSocketService {
     try {
       this.socket = io(url, {
         path,
-        auth: {
-          token,
-        },
         transports: ['websocket', 'polling'],
+        withCredentials: true,
         timeout: 10000,
         reconnection: false,
         reconnectionAttempts: this.maxReconnectAttempts,

@@ -165,6 +165,8 @@ func (s *Server) Register(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	req.AcceptanceIP = c.ClientIP()
+	req.AcceptanceAgent = c.Request.UserAgent()
 
 	// Create user object (validates input)
 	user, err := s.auth.CreateUser(&req)
@@ -209,6 +211,9 @@ func (s *Server) Register(c *gin.Context) {
 		return
 	}
 
+	auth.SetAccessTokenCookie(c, tokens.AccessToken)
+	auth.SetRefreshTokenCookie(c, tokens.RefreshToken)
+
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "User created successfully",
 		"user": gin.H{
@@ -222,7 +227,6 @@ func (s *Server) Register(c *gin.Context) {
 			"subscription_type":     user.SubscriptionType,
 			"credit_balance":        user.CreditBalance,
 		},
-		"tokens": tokens,
 	})
 }
 
@@ -276,6 +280,9 @@ func (s *Server) Login(c *gin.Context) {
 		return
 	}
 
+	auth.SetAccessTokenCookie(c, tokens.AccessToken)
+	auth.SetRefreshTokenCookie(c, tokens.RefreshToken)
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Login successful",
 		"user": gin.H{
@@ -292,21 +299,31 @@ func (s *Server) Login(c *gin.Context) {
 			"subscription_type":     user.SubscriptionType,
 			"credit_balance":        user.CreditBalance,
 		},
-		"tokens": tokens,
 	})
 }
 
 // RefreshToken issues a new access/refresh token pair from a valid refresh token.
 func (s *Server) RefreshToken(c *gin.Context) {
 	var req struct {
-		RefreshToken string `json:"refresh_token" binding:"required"`
+		RefreshToken string `json:"refresh_token"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "refresh_token is required"})
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid refresh request"})
 		return
 	}
 
-	tokens, err := s.auth.RefreshTokens(req.RefreshToken, nil)
+	refreshToken := strings.TrimSpace(req.RefreshToken)
+	if refreshToken == "" {
+		if cookieToken, err := auth.GetRefreshTokenFromCookie(c); err == nil {
+			refreshToken = strings.TrimSpace(cookieToken)
+		}
+	}
+	if refreshToken == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh token required"})
+		return
+	}
+
+	tokens, err := s.auth.RefreshTokens(refreshToken, nil)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error":   "invalid refresh token",
@@ -315,11 +332,11 @@ func (s *Server) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	// Return both wrapped and direct token payload shapes for client compatibility.
+	auth.SetAccessTokenCookie(c, tokens.AccessToken)
+	auth.SetRefreshTokenCookie(c, tokens.RefreshToken)
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Tokens refreshed successfully",
-		"data":    tokens,
-		"tokens":  tokens,
 	})
 }
 
@@ -332,16 +349,19 @@ func (s *Server) Logout(c *gin.Context) {
 		req.RefreshToken = ""
 	}
 
-	authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
-	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-		token := strings.TrimSpace(authHeader[7:])
-		if token != "" {
-			_ = s.auth.BlacklistToken(token)
+	if token, err := auth.AccessTokenFromRequest(c); err == nil && token != "" {
+		_ = s.auth.BlacklistToken(token)
+	}
+	refreshToken := strings.TrimSpace(req.RefreshToken)
+	if refreshToken == "" {
+		if cookieToken, err := auth.GetRefreshTokenFromCookie(c); err == nil {
+			refreshToken = strings.TrimSpace(cookieToken)
 		}
 	}
-	if refreshToken := strings.TrimSpace(req.RefreshToken); refreshToken != "" {
+	if refreshToken != "" {
 		_ = s.auth.RevokeRefreshToken(refreshToken)
 	}
+	auth.ClearAuthCookies(c)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Logged out successfully",
@@ -1018,16 +1038,9 @@ func (s *Server) DeleteFile(c *gin.Context) {
 // AuthMiddleware validates JWT tokens
 func (s *Server) AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
-			c.Abort()
-			return
-		}
-
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenString == authHeader {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authorization format"})
+		tokenString, err := auth.AccessTokenFromRequest(c)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 			c.Abort()
 			return
 		}

@@ -472,8 +472,8 @@ func (h *CollabHub) HandleWebSocket(c *gin.Context) {
 			}
 		}
 	} else {
-		token := c.Query("token")
-		if token == "" {
+		token, err := auth.WebSocketAccessTokenFromRequest(c)
+		if err != nil || token == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 			return
 		}

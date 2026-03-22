@@ -39,6 +39,7 @@ func TestRequireAuth(t *testing.T) {
 	tests := []struct {
 		name           string
 		authHeader     string
+		cookieToken    string
 		expectedStatus int
 		expectedCode   string
 		checkContext   bool
@@ -50,28 +51,34 @@ func TestRequireAuth(t *testing.T) {
 			checkContext:   true,
 		},
 		{
+			name:           "valid cookie token",
+			cookieToken:    validToken,
+			expectedStatus: http.StatusOK,
+			checkContext:   true,
+		},
+		{
 			name:           "missing auth header",
 			authHeader:     "",
 			expectedStatus: http.StatusUnauthorized,
-			expectedCode:   "AUTH_HEADER_MISSING",
+			expectedCode:   "AUTH_REQUIRED",
 		},
 		{
 			name:           "invalid auth header format - no bearer",
 			authHeader:     validToken,
 			expectedStatus: http.StatusUnauthorized,
-			expectedCode:   "INVALID_AUTH_HEADER",
+			expectedCode:   "AUTH_REQUIRED",
 		},
 		{
 			name:           "invalid auth header format - wrong prefix",
 			authHeader:     "Token " + validToken,
 			expectedStatus: http.StatusUnauthorized,
-			expectedCode:   "INVALID_AUTH_HEADER",
+			expectedCode:   "AUTH_REQUIRED",
 		},
 		{
 			name:           "empty token after bearer",
 			authHeader:     "Bearer ",
 			expectedStatus: http.StatusUnauthorized,
-			expectedCode:   "INVALID_AUTH_HEADER",
+			expectedCode:   "AUTH_REQUIRED",
 		},
 		{
 			name:           "invalid token",
@@ -105,6 +112,9 @@ func TestRequireAuth(t *testing.T) {
 			req, _ := http.NewRequest("GET", "/protected", nil)
 			if tt.authHeader != "" {
 				req.Header.Set("Authorization", tt.authHeader)
+			}
+			if tt.cookieToken != "" {
+				req.AddCookie(&http.Cookie{Name: auth.AccessTokenCookieName, Value: tt.cookieToken})
 			}
 			router.ServeHTTP(w, req)
 

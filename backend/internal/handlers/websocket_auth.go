@@ -20,9 +20,10 @@ func WebSocketUserID(c *gin.Context) (uint, error) {
 
 	token := strings.TrimSpace(c.Query("token"))
 	if token == "" {
-		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
-		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-			token = strings.TrimSpace(authHeader[7:])
+		var err error
+		token, err = auth.WebSocketAccessTokenFromRequest(c)
+		if err != nil {
+			return 0, errors.New("authentication required")
 		}
 	}
 	if token == "" {

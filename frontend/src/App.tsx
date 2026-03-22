@@ -5,10 +5,12 @@ import React, { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspens
 import { useStore } from './hooks/useStore'
 import apiService from './services/api'
 import CostTicker from './components/ide/CostTicker'
+import LegalDocuments, { LegalDocumentLinks } from './components/settings/LegalDocuments'
+import { LEGAL_POLICY_VERSION, type LegalDocumentId } from './components/settings/legalDocumentsData'
 // Import ErrorBoundary directly to be safe
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input, AnimatedBackground } from './components/ui'
-import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown, Key, Palette, CreditCard } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown, Key, Palette, CreditCard, FileText, X } from 'lucide-react'
 import './styles/globals.css'
 import './styles/auth-animations.css'
 
@@ -209,10 +211,12 @@ function App() {
     email: '',
     password: '',
     confirmPassword: '',
+    acceptLegalTerms: false,
   })
   const [authErrors, setAuthErrors] = useState<Record<string, string>>({})
   const [showPassword, setShowPassword] = useState(false)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
+  const [activeLegalDocument, setActiveLegalDocument] = useState<LegalDocumentId | null>(null)
   const [uiColorScheme, setUIColorScheme] = useState<UIColorScheme>(() => {
     if (typeof window === 'undefined') return 'red-dark'
     try {
@@ -410,7 +414,7 @@ function App() {
     let cancelled = false
 
     const bootstrapSession = async () => {
-      if (isAuthenticated || !apiService.hasRefreshToken()) {
+      if (isAuthenticated) {
         if (!cancelled) {
           setSessionBootstrapComplete(true)
         }
@@ -568,6 +572,10 @@ function App() {
           errors.confirmPassword = 'Passwords do not match'
         }
 
+        if (!authData.acceptLegalTerms) {
+          errors.acceptLegalTerms = 'You must accept the legal terms to create an account'
+        }
+
         if (Object.keys(errors).length > 0) {
           setAuthErrors(errors)
           return
@@ -577,6 +585,7 @@ function App() {
           username: authData.username,
           email: authData.email,
           password: authData.password,
+          accept_legal_terms: authData.acceptLegalTerms,
         })
       }
 
@@ -586,6 +595,7 @@ function App() {
         email: '',
         password: '',
         confirmPassword: '',
+        acceptLegalTerms: false,
       })
     } catch (error: unknown) {
       console.error('Authentication error:', error)
@@ -628,6 +638,7 @@ function App() {
       email: '',
       password: '',
       confirmPassword: '',
+      acceptLegalTerms: false,
     })
   }
 
@@ -875,6 +886,26 @@ function App() {
                 </div>
               )}
 
+              {isAuthMode === 'register' && (
+                <div className="rounded-xl border border-red-900/40 bg-red-950/20 p-4">
+                  <label className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={authData.acceptLegalTerms}
+                      onChange={(e) => setAuthData(prev => ({ ...prev, acceptLegalTerms: e.target.checked }))}
+                      className="mt-1 h-4 w-4 rounded border border-red-500/40 bg-black text-red-500 focus:ring-red-500"
+                    />
+                    <span className="text-sm leading-6 text-gray-300">
+                      I agree to the Terms of Service, Privacy Policy, Acceptable Use Policy, Billing and Refund Policy, and AI and Content Policy version {LEGAL_POLICY_VERSION}.
+                    </span>
+                  </label>
+                  <LegalDocumentLinks onSelect={setActiveLegalDocument} className="mt-3" />
+                  {authErrors.acceptLegalTerms && (
+                    <p className="mt-2 text-xs text-red-400">{authErrors.acceptLegalTerms}</p>
+                  )}
+                </div>
+              )}
+
               {/* General error message */}
               {authErrors.general && (
                 <div className="auth-error p-4 bg-red-900/20 border border-red-500/30 rounded-xl backdrop-blur-sm">
@@ -926,6 +957,10 @@ function App() {
                     {isAuthMode === 'login' ? 'Sign up' : 'Sign in'}
                   </button>
                 </p>
+                <p className="mt-3 text-xs leading-6 text-gray-500">
+                  By signing in or continuing to use APEX-BUILD, you acknowledge the current platform policies and legal terms.
+                </p>
+                <LegalDocumentLinks onSelect={setActiveLegalDocument} className="mt-3 justify-center" />
               </div>
             </form>
           </div>
@@ -941,6 +976,25 @@ function App() {
             </p>
           </div>
         </div>
+
+        {activeLegalDocument && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+            <div className="absolute inset-0" onClick={() => setActiveLegalDocument(null)} />
+            <div className="relative z-10 max-h-[90vh] w-full max-w-5xl overflow-y-auto">
+              <div className="mb-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setActiveLegalDocument(null)}
+                  className="inline-flex items-center gap-2 rounded-full border border-gray-700 bg-black/70 px-3 py-2 text-sm text-gray-200 hover:border-red-500/50 hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                  Close
+                </button>
+              </div>
+              <LegalDocuments key={activeLegalDocument} initialDocumentId={activeLegalDocument} compact />
+            </div>
+          </div>
+        )}
       </>
     )
   }
@@ -1226,7 +1280,7 @@ function App() {
                           API Keys (BYOK)
                         </h2>
                         <p className="text-gray-400 text-sm mb-6">
-                          Bring Your Own Keys - Add your own API keys to use your personal quotas and get better rates.
+                          Bring Your Own Keys - Available on Builder and higher for users who want to route requests through their own provider accounts.
                         </p>
                         <Suspense fallback={<div className="text-sm text-gray-500">Loading BYOK controls…</div>}>
                           <APIKeySettings />
@@ -1263,6 +1317,19 @@ function App() {
                         <Suspense fallback={<div className="text-sm text-gray-500">Loading billing controls…</div>}>
                           <BillingSettings />
                         </Suspense>
+                      </div>
+                    </ErrorBoundary>
+
+                    <ErrorBoundary fallback={renderSettingsSectionFallback('Legal & Policies', 'The legal documentation center failed to render. Billing and platform settings are still available.')}>
+                      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                          <FileText className="w-5 h-5 text-red-400" />
+                          Legal & Policies
+                        </h2>
+                        <p className="text-gray-400 text-sm mb-6">
+                          Review the current Terms of Service, Privacy Policy, Acceptable Use Policy, Billing and Refund Policy, and AI and Content Policy. These documents are versioned for account registration and continued platform use.
+                        </p>
+                        <LegalDocuments />
                       </div>
                     </ErrorBoundary>
                   </div>

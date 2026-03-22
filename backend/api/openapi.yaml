@@ -2005,7 +2005,7 @@ components:
     # ==================== Auth ====================
     RegisterRequest:
       type: object
-      required: [username, email, password]
+      required: [username, email, password, accept_legal_terms]
       properties:
         username:
           type: string
@@ -2019,6 +2019,9 @@ components:
           minLength: 8
         full_name:
           type: string
+        accept_legal_terms:
+          type: boolean
+          description: Must be true to accept the current Terms, Privacy Policy, and platform policies
 
     LoginRequest:
       type: object

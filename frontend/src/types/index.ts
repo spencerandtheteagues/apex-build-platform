@@ -217,6 +217,7 @@ export interface RegisterRequest {
   email: string
   password: string
   full_name?: string
+  accept_legal_terms: boolean
 }
 
 export interface TokenResponse {
@@ -230,7 +231,7 @@ export interface TokenResponse {
 export interface AuthResponse {
   message: string
   user: Partial<User>
-  tokens: TokenResponse
+  tokens?: TokenResponse
 }
 
 // API Response types

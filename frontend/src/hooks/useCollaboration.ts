@@ -60,12 +60,6 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
   useEffect(() => {
     if (!user || !roomId) return
 
-    const token = localStorage.getItem('apex_access_token')
-    if (!token) {
-      setIsConnected(false)
-      return
-    }
-
     collaborationService.setUser(user.id, user.username)
 
     if (collaborationService.isConnected()) {
@@ -73,7 +67,7 @@ export function useCollaboration(options: UseCollaborationOptions = {}) {
       return
     }
 
-    collaborationService.connect(token).catch((error) => {
+    collaborationService.connect().catch((error) => {
       console.error('[useCollaboration] Failed to connect:', error)
       setIsConnected(false)
     })

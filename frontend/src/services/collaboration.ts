@@ -2,6 +2,7 @@
 // Yjs-inspired CRDT with OT fallback for concurrent editing
 
 import { getConfiguredWsUrl } from '@/config/runtime'
+import { appendStoredAccessTokenToWebSocketUrl } from './authSession'
 
 // Browser-compatible EventEmitter implementation
 class EventEmitter {
@@ -123,7 +124,7 @@ export interface ActivityFeedItem {
   timestamp: Date
 }
 
-export const getCollaborationWebSocketUrl = (token: string): string => {
+export const getCollaborationWebSocketUrl = (): string => {
   const fallbackBaseUrl = typeof window !== 'undefined'
     ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
     : 'ws://localhost:8080'
@@ -133,7 +134,7 @@ export const getCollaborationWebSocketUrl = (token: string): string => {
     .replace(/\/+$/, '')
     .replace(/\/ws$/, '')
 
-  return `${baseUrl}/ws/collab?token=${encodeURIComponent(token)}`
+  return appendStoredAccessTokenToWebSocketUrl(`${baseUrl}/ws/collab`)
 }
 
 export interface RTCPeerState {
@@ -240,7 +241,7 @@ export class CollaborationService extends EventEmitter {
   }
 
   // Connection management
-  async connect(token: string): Promise<void> {
+  async connect(): Promise<void> {
     if (this.ws?.readyState === WebSocket.OPEN || this.isConnecting) {
       return
     }
@@ -248,7 +249,7 @@ export class CollaborationService extends EventEmitter {
     this.isConnecting = true
 
     return new Promise((resolve, reject) => {
-      const wsUrl = getCollaborationWebSocketUrl(token)
+      const wsUrl = getCollaborationWebSocketUrl()
 
       this.ws = new WebSocket(wsUrl)
 
@@ -338,10 +339,7 @@ export class CollaborationService extends EventEmitter {
     setTimeout(() => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         console.log(`[Collab] Reconnecting (${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
-        const token = localStorage.getItem('apex_access_token')
-        if (token) {
-          this.connect(token).catch(console.error)
-        }
+        this.connect().catch(console.error)
       }
     }, delay)
   }

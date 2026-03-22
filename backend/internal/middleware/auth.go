@@ -16,23 +16,11 @@ import (
 // RequireAuth middleware validates JWT tokens
 func RequireAuth(authService *auth.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Get authorization header
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Authorization header is required",
-				"code":  "AUTH_HEADER_MISSING",
-			})
-			c.Abort()
-			return
-		}
-
-		// Extract Bearer token
-		token, err := extractBearerToken(authHeader)
+		token, err := auth.AccessTokenFromRequest(c)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": err.Error(),
-				"code":  "INVALID_AUTH_HEADER",
+				"error": "Authentication required",
+				"code":  "AUTH_REQUIRED",
 			})
 			c.Abort()
 			return
@@ -104,10 +92,10 @@ func RequireRole(role string) gin.HandlerFunc {
 
 		if userRoleStr != role {
 			c.JSON(http.StatusForbidden, gin.H{
-				"error": "Insufficient permissions",
-				"code":  "INSUFFICIENT_PERMISSIONS",
+				"error":         "Insufficient permissions",
+				"code":          "INSUFFICIENT_PERMISSIONS",
 				"required_role": role,
-				"user_role": userRole,
+				"user_role":     userRole,
 			})
 			c.Abort()
 			return
@@ -160,16 +148,9 @@ func RequireAnyRole(roles ...string) gin.HandlerFunc {
 // OptionalAuth middleware validates token if present, but doesn't require it
 func OptionalAuth(authService *auth.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			// No token provided, continue without authentication
-			c.Next()
-			return
-		}
-
-		token, err := extractBearerToken(authHeader)
+		token, err := auth.AccessTokenFromRequest(c)
 		if err != nil {
-			// Invalid auth header format, continue without authentication
+			// No token provided, continue without authentication
 			c.Next()
 			return
 		}

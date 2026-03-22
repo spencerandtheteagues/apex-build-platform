@@ -564,7 +564,11 @@ func terminalWebSocketUserID(c *gin.Context) (uint, error) {
 
 	token := strings.TrimSpace(c.Query("token"))
 	if token == "" {
-		return 0, errors.New("authentication required")
+		var err error
+		token, err = auth.WebSocketAccessTokenFromRequest(c)
+		if err != nil {
+			return 0, errors.New("authentication required")
+		}
 	}
 
 	claims, err := validateTerminalWebSocketToken(token)

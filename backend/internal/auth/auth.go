@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -158,15 +160,23 @@ type LoginRequest struct {
 
 // RegisterRequest represents a registration request
 type RegisterRequest struct {
-	Username string `json:"username" binding:"required,min=3,max=50"`
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=8"`
-	FullName string `json:"full_name" binding:"max=100"`
+	Username         string `json:"username" binding:"required,min=3,max=50"`
+	Email            string `json:"email" binding:"required,email"`
+	Password         string `json:"password" binding:"required,min=8"`
+	FullName         string `json:"full_name" binding:"max=100"`
+	AcceptLegalTerms bool   `json:"accept_legal_terms"`
+	AcceptanceIP     string `json:"-"`
+	AcceptanceAgent  string `json:"-"`
 }
+
+const CurrentLegalPolicyVersion = "2026-03-21"
 
 // NewAuthService creates a new authentication service with enhanced security
 func NewAuthService(jwtSecret string) *AuthService {
-	refreshSecret := jwtSecret + "_refresh" // Separate secret for refresh tokens
+	refreshSecret := strings.TrimSpace(os.Getenv("JWT_REFRESH_SECRET"))
+	if refreshSecret == "" {
+		refreshSecret = jwtSecret + "_refresh" // Backward-compatible fallback for local/test setups
+	}
 
 	// Initialize the global token blacklist
 	initTokenBlacklist()
@@ -743,6 +753,10 @@ func (a *AuthService) ValidateRegistration(req *RegisterRequest) error {
 		return errors.New("full name must be less than 100 characters")
 	}
 
+	if !req.AcceptLegalTerms {
+		return errors.New("you must accept the terms, privacy policy, and platform policies")
+	}
+
 	return nil
 }
 
@@ -758,16 +772,20 @@ func (a *AuthService) CreateUser(req *RegisterRequest) (*models.User, error) {
 	}
 
 	user := &models.User{
-		Username:            req.Username,
-		Email:               req.Email,
-		PasswordHash:        hashedPassword,
-		FullName:            req.FullName,
-		IsActive:            true,
-		IsVerified:          false,
-		SubscriptionType:    "free",
-		HasUnlimitedCredits: false,
-		PreferredTheme:      "cyberpunk",
-		PreferredAI:         "auto",
+		Username:             req.Username,
+		Email:                req.Email,
+		PasswordHash:         hashedPassword,
+		FullName:             req.FullName,
+		IsActive:             true,
+		IsVerified:           false,
+		SubscriptionType:     "free",
+		HasUnlimitedCredits:  false,
+		PreferredTheme:       "cyberpunk",
+		PreferredAI:          "auto",
+		LegalAcceptedAt:      func() *time.Time { now := time.Now().UTC(); return &now }(),
+		LegalPolicyVersion:   CurrentLegalPolicyVersion,
+		LegalAcceptanceIP:    req.AcceptanceIP,
+		LegalAcceptanceAgent: req.AcceptanceAgent,
 	}
 
 	return user, nil

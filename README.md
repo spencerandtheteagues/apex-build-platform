@@ -221,10 +221,11 @@ Every transaction is written to an append-only ledger with timestamps and source
 - Global monthly hard cap — builds pause automatically when hit
 - Per-build cost estimation with confirmation dialog above your threshold
 - Spend alerts at 50%, 80%, and 100% of monthly budget
-- BYOK bypasses the credit system entirely — direct provider billing, zero APEX markup
+- BYOK lowers managed-credit burn with direct provider billing plus the platform routing fee
 
 ### One-Time Top-Ups
-Buy additional credits via Stripe Checkout: $10, $25, $50, or $100. Added to balance instantly.
+Buy additional credits via Stripe Checkout: $25, $50, $100, or $250. Added to balance instantly.
+Credit packs extend managed usage; they do not unlock backend/full-stack capabilities without a paid plan.
 
 ---
 
@@ -247,14 +248,15 @@ Buy additional credits via Stripe Checkout: $10, $25, $50, or $100. Added to bal
 
 | | Free | Builder | Pro | Team | Enterprise |
 |---|---|---|---|---|---|
-| **Price** | $0/mo | $19/mo | $49/mo | $99/mo | Contact |
-| **Annual** | — | $182/yr | $470/yr | $950/yr | Negotiated |
-| **AI credits/mo** | BYOK only | $10 | $35 | $80 | Unlimited |
+| **Price** | $0/mo | $24/mo | $59/mo | $149/mo | Contact |
+| **Annual** | — | $230/yr | $566/yr | $1430/yr | Negotiated |
+| **AI credits/mo** | 0 | $12 | $40 | $110 | Negotiated |
 | **Projects** | 3 | Unlimited | Unlimited | Unlimited | Unlimited |
 | **Storage** | 1 GB | 5 GB | 20 GB | 50 GB | Custom |
 | **Executions/day** | 50 | 200 | 1,000 | 5,000 | Unlimited |
 | **Collaborators** | 1 | 1 | 3 | Unlimited | Unlimited |
-| **All 6 AI providers** | BYOK | Yes | Yes | Yes | Yes |
+| **Backend / full-stack builds** | No | Yes | Yes | Yes | Yes |
+| **All 6 AI providers** | BYOK / limited | Yes | Yes | Yes | Yes |
 | **GitHub export** | No | Yes | Yes | Yes | Yes |
 | **Priority queue** | No | No | Yes | Yes | Yes |
 | **SSO / Audit logs** | No | No | No | No | Yes |

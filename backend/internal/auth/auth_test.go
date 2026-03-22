@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -22,6 +23,28 @@ func TestNewAuthService(t *testing.T) {
 	assert.Equal(t, 15*time.Minute, authService.tokenExpiry)
 	assert.Equal(t, 7*24*time.Hour, authService.refreshExpiry)
 	assert.Equal(t, 12, authService.bcryptCost)
+}
+
+func TestNewAuthServiceUsesExplicitRefreshSecret(t *testing.T) {
+	t.Setenv("JWT_REFRESH_SECRET", "separate-refresh-secret")
+
+	authService := NewAuthService("test-secret-key")
+
+	assert.Equal(t, []byte("separate-refresh-secret"), authService.refreshSecret)
+}
+
+func TestNewAuthServiceFallsBackWhenRefreshSecretUnset(t *testing.T) {
+	original, hadOriginal := os.LookupEnv("JWT_REFRESH_SECRET")
+	if hadOriginal {
+		defer os.Setenv("JWT_REFRESH_SECRET", original)
+	} else {
+		defer os.Unsetenv("JWT_REFRESH_SECRET")
+	}
+	_ = os.Unsetenv("JWT_REFRESH_SECRET")
+
+	authService := NewAuthService("test-secret-key")
+
+	assert.Equal(t, []byte("test-secret-key_refresh"), authService.refreshSecret)
 }
 
 func TestHashPassword(t *testing.T) {
@@ -429,19 +452,21 @@ func TestValidateRegistration(t *testing.T) {
 		{
 			name: "valid registration",
 			req: &RegisterRequest{
-				Username: "testuser",
-				Email:    "test@example.com",
-				Password: "SecurePass123!",
-				FullName: "Test User",
+				Username:         "testuser",
+				Email:            "test@example.com",
+				Password:         "SecurePass123!",
+				FullName:         "Test User",
+				AcceptLegalTerms: true,
 			},
 			wantErr: false,
 		},
 		{
 			name: "username too short",
 			req: &RegisterRequest{
-				Username: "ab",
-				Email:    "test@example.com",
-				Password: "SecurePass123!",
+				Username:         "ab",
+				Email:            "test@example.com",
+				Password:         "SecurePass123!",
+				AcceptLegalTerms: true,
 			},
 			wantErr: true,
 			errMsg:  "username must be between 3 and 50 characters",
@@ -449,9 +474,10 @@ func TestValidateRegistration(t *testing.T) {
 		{
 			name: "username too long",
 			req: &RegisterRequest{
-				Username: "a" + string(make([]byte, 50)),
-				Email:    "test@example.com",
-				Password: "SecurePass123!",
+				Username:         "a" + string(make([]byte, 50)),
+				Email:            "test@example.com",
+				Password:         "SecurePass123!",
+				AcceptLegalTerms: true,
 			},
 			wantErr: true,
 			errMsg:  "username must be between 3 and 50 characters",
@@ -459,9 +485,10 @@ func TestValidateRegistration(t *testing.T) {
 		{
 			name: "password too short",
 			req: &RegisterRequest{
-				Username: "testuser",
-				Email:    "test@example.com",
-				Password: "short",
+				Username:         "testuser",
+				Email:            "test@example.com",
+				Password:         "short",
+				AcceptLegalTerms: true,
 			},
 			wantErr: true,
 			errMsg:  "password must be at least 8 characters",
@@ -469,13 +496,24 @@ func TestValidateRegistration(t *testing.T) {
 		{
 			name: "full name too long",
 			req: &RegisterRequest{
-				Username: "testuser",
-				Email:    "test@example.com",
-				Password: "SecurePass123!",
-				FullName: string(make([]byte, 101)),
+				Username:         "testuser",
+				Email:            "test@example.com",
+				Password:         "SecurePass123!",
+				FullName:         string(make([]byte, 101)),
+				AcceptLegalTerms: true,
 			},
 			wantErr: true,
 			errMsg:  "full name must be less than 100 characters",
+		},
+		{
+			name: "legal terms required",
+			req: &RegisterRequest{
+				Username: "testuser",
+				Email:    "test@example.com",
+				Password: "SecurePass123!",
+			},
+			wantErr: true,
+			errMsg:  "you must accept the terms, privacy policy, and platform policies",
 		},
 	}
 
@@ -504,28 +542,31 @@ func TestCreateUser(t *testing.T) {
 		{
 			name: "valid user creation",
 			req: &RegisterRequest{
-				Username: "newuser",
-				Email:    "new@example.com",
-				Password: "SecurePassword123!",
-				FullName: "New User",
+				Username:         "newuser",
+				Email:            "new@example.com",
+				Password:         "SecurePassword123!",
+				FullName:         "New User",
+				AcceptLegalTerms: true,
 			},
 			wantErr: false,
 		},
 		{
 			name: "user creation with minimal fields",
 			req: &RegisterRequest{
-				Username: "minuser",
-				Email:    "min@example.com",
-				Password: "password123",
+				Username:         "minuser",
+				Email:            "min@example.com",
+				Password:         "password123",
+				AcceptLegalTerms: true,
 			},
 			wantErr: false,
 		},
 		{
 			name: "invalid registration - short password",
 			req: &RegisterRequest{
-				Username: "baduser",
-				Email:    "bad@example.com",
-				Password: "short",
+				Username:         "baduser",
+				Email:            "bad@example.com",
+				Password:         "short",
+				AcceptLegalTerms: true,
 			},
 			wantErr: true,
 		},

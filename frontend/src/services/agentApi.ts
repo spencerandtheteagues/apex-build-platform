@@ -21,6 +21,7 @@ import {
 } from '@/types/agent'
 import { getConfiguredWsUrl } from '@/config/runtime'
 import { apiService } from './api'
+import { appendStoredAccessTokenToWebSocketUrl } from './authSession'
 import { generateId } from '@/lib/utils'
 
 // Event handler types
@@ -81,7 +82,6 @@ export class AgentApiService {
     this.isConnecting = true
 
     return new Promise((resolve, reject) => {
-      const token = localStorage.getItem('apex_access_token')
       const configuredWsUrl = getConfiguredWsUrl().replace(/\/+$/, '')
       const fallbackWsRoot = configuredWsUrl
         ? (configuredWsUrl.endsWith('/ws') ? configuredWsUrl : `${configuredWsUrl}/ws`)
@@ -90,12 +90,9 @@ export class AgentApiService {
       const baseUrl = (this.websocketUrl && this.websocketUrl.trim() && isAbsoluteWsUrl(this.websocketUrl.trim()))
         ? this.websocketUrl.trim()
         : `${fallbackWsRoot}/build/${buildId}`
-      const wsUrl = token && !/[?&]token=/.test(baseUrl)
-        ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
-        : baseUrl
 
       try {
-        this.ws = new WebSocket(wsUrl)
+        this.ws = new WebSocket(appendStoredAccessTokenToWebSocketUrl(baseUrl))
       } catch (error) {
         this.isConnecting = false
         reject(error)

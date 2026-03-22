@@ -54,18 +54,14 @@ func TestLoginWithSeededAdminCredentials(t *testing.T) {
 			IsAdmin      bool   `json:"is_admin"`
 			IsSuperAdmin bool   `json:"is_super_admin"`
 		} `json:"user"`
-		Tokens struct {
-			AccessToken  string `json:"access_token"`
-			RefreshToken string `json:"refresh_token"`
-		} `json:"tokens"`
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	require.Equal(t, "admin", response.User.Username)
 	require.Equal(t, "admin@apex.build", response.User.Email)
 	require.True(t, response.User.IsAdmin)
 	require.True(t, response.User.IsSuperAdmin)
-	require.NotEmpty(t, response.Tokens.AccessToken)
-	require.NotEmpty(t, response.Tokens.RefreshToken)
+	requireCookiePresent(t, recorder, auth.AccessTokenCookieName)
+	requireCookiePresent(t, recorder, auth.RefreshTokenCookieName)
 }
 
 func TestLoginWithDefaultDevelopmentAdminCredentials(t *testing.T) {
@@ -97,4 +93,19 @@ func TestLoginWithDefaultDevelopmentAdminCredentials(t *testing.T) {
 	server.Login(context)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
+	requireCookiePresent(t, recorder, auth.AccessTokenCookieName)
+	requireCookiePresent(t, recorder, auth.RefreshTokenCookieName)
+}
+
+func requireCookiePresent(t *testing.T, recorder *httptest.ResponseRecorder, name string) {
+	t.Helper()
+
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == name {
+			require.NotEmpty(t, cookie.Value)
+			return
+		}
+	}
+
+	t.Fatalf("expected cookie %s", name)
 }

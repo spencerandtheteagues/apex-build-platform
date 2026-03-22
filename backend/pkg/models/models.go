@@ -48,6 +48,12 @@ type User struct {
 	PreferredTheme string `json:"preferred_theme" gorm:"default:'cyberpunk'"` // cyberpunk, matrix, synthwave, neonCity
 	PreferredAI    string `json:"preferred_ai" gorm:"default:'auto'"`         // auto, claude, gpt4, gemini
 
+	// Legal acceptance
+	LegalAcceptedAt      *time.Time `json:"legal_accepted_at,omitempty"`
+	LegalPolicyVersion   string     `json:"legal_policy_version"`
+	LegalAcceptanceIP    string     `json:"-"`
+	LegalAcceptanceAgent string     `json:"-"`
+
 	// Relationships
 	Projects    []Project    `json:"projects" gorm:"foreignKey:OwnerID"`
 	Sessions    []Session    `json:"sessions" gorm:"foreignKey:UserID"`
