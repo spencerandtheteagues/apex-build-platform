@@ -12,9 +12,11 @@ type contractCritiqueRouter struct {
 	stubAIRouter
 	content string
 	err     error
+	calls   int
 }
 
 func (r *contractCritiqueRouter) Generate(_ context.Context, _ ai.AIProvider, _ string, _ GenerateOptions) (*ai.AIResponse, error) {
+	r.calls++
 	if r.err != nil {
 		return nil, r.err
 	}
@@ -130,6 +132,96 @@ func TestHandlePlanCompletionBlocksOnProviderAssistedContractCritique(t *testing
 	}
 	if !foundCritique {
 		t.Fatalf("expected provider critique report, got %+v", state.VerificationReports)
+	}
+}
+
+func TestShouldRunProviderAssistedContractCritiqueSkipsFastLowRiskContracts(t *testing.T) {
+	build := &Build{PowerMode: PowerFast}
+	contract := &BuildContract{
+		ID:      "contract-fast-low-risk",
+		BuildID: "build-fast-low-risk",
+		AppType: "frontend",
+	}
+
+	if shouldRunProviderAssistedContractCritique(build, contract) {
+		t.Fatalf("expected fast low-risk contract critique to be skipped")
+	}
+}
+
+func TestShouldRunProviderAssistedContractCritiqueKeepsFastAuthContracts(t *testing.T) {
+	build := &Build{PowerMode: PowerFast}
+	contract := &BuildContract{
+		ID:      "contract-fast-auth",
+		BuildID: "build-fast-auth",
+		AppType: "fullstack",
+		AuthContract: &ContractAuthStrategy{
+			Required: true,
+		},
+	}
+
+	if !shouldRunProviderAssistedContractCritique(build, contract) {
+		t.Fatalf("expected fast auth contract critique to remain enabled")
+	}
+}
+
+func TestEffectiveTaskRoutingModeDowngradesFastMediumRiskVerifier(t *testing.T) {
+	build := &Build{PowerMode: PowerFast}
+	task := &Task{
+		ID: "task-fast-medium-verifier",
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{
+				ID:          "wo-fast-medium",
+				RoutingMode: RoutingModeSingleWithVerifier,
+				RiskLevel:   RiskMedium,
+			},
+		},
+	}
+
+	if got := effectiveTaskRoutingMode(build, task); got != RoutingModeSingleProvider {
+		t.Fatalf("expected fast medium-risk verifier route to downgrade, got %s", got)
+	}
+}
+
+func TestEffectiveTaskRoutingModeKeepsFastHighRiskVerifier(t *testing.T) {
+	build := &Build{PowerMode: PowerFast}
+	task := &Task{
+		ID: "task-fast-high-verifier",
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{
+				ID:          "wo-fast-high",
+				RoutingMode: RoutingModeSingleWithVerifier,
+				RiskLevel:   RiskHigh,
+			},
+		},
+	}
+
+	if got := effectiveTaskRoutingMode(build, task); got != RoutingModeSingleWithVerifier {
+		t.Fatalf("expected fast high-risk verifier route to remain, got %s", got)
+	}
+}
+
+func TestShouldRunFailureConsensusDefersFirstFastRetryForMediumRisk(t *testing.T) {
+	am := &AgentManager{}
+	build := &Build{PowerMode: PowerFast}
+	task := &Task{RetryCount: 1, Input: map[string]any{"risk_level": string(RiskMedium)}}
+
+	if am.shouldRunFailureConsensus(build, task, "verification failed") {
+		t.Fatalf("expected first fast retry consensus to be skipped for medium-risk task")
+	}
+}
+
+func TestShouldRunFailureConsensusKeepsFastCriticalFailuresEscalated(t *testing.T) {
+	am := &AgentManager{}
+	build := &Build{PowerMode: PowerFast}
+	task := &Task{
+		RetryCount: 1,
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{RiskLevel: RiskCritical},
+		},
+	}
+
+	if !am.shouldRunFailureConsensus(build, task, "verification failed") {
+		t.Fatalf("expected fast critical task to retain first-retry consensus")
 	}
 }
 

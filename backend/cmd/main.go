@@ -359,8 +359,20 @@ func main() {
 			"required": []string{"language", "description"},
 		},
 	}, func(ctx context.Context, args map[string]interface{}) (*mcp.ToolCallResult, error) {
-		lang := args["language"].(string)
-		desc := args["description"].(string)
+		lang, ok := args["language"].(string)
+		if !ok || strings.TrimSpace(lang) == "" {
+			return &mcp.ToolCallResult{
+				Content: []mcp.ContentBlock{{Type: "text", Text: "language parameter required"}},
+				IsError: true,
+			}, nil
+		}
+		desc, ok := args["description"].(string)
+		if !ok || strings.TrimSpace(desc) == "" {
+			return &mcp.ToolCallResult{
+				Content: []mcp.ContentBlock{{Type: "text", Text: "description parameter required"}},
+				IsError: true,
+			}, nil
+		}
 
 		// Use AI router for generation
 		response, err := aiRouter.Generate(ctx, &ai.AIRequest{

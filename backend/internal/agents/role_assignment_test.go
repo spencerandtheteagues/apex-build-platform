@@ -364,9 +364,38 @@ func validationOnlyManager() *AgentManager {
 		cancel:      cancel,
 		aiRouter: &stubPreflight{
 			configured:    true,
-			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			allProviders:  []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama},
+			userProviders: []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama},
+		},
+	}
+}
+
+func TestStartBuild_RejectsUnavailableProviderAssignment(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4},
 			userProviders: []ai.AIProvider{ai.ProviderClaude},
 		},
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"description":      "Build me a fully functional e-commerce platform with payments",
+		"role_assignments": map[string]string{"coder": "gpt4"},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/start", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for unavailable provider assignment, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var respBody map[string]any
+	json.Unmarshal(w.Body.Bytes(), &respBody)
+	if respBody["error"] != "requested provider unavailable" {
+		t.Fatalf("expected requested provider unavailable error, got %v", respBody["error"])
 	}
 }
 

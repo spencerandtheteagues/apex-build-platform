@@ -38,20 +38,20 @@ type ComprehensiveTestSuite struct {
 
 // TestResults tracks comprehensive test execution results
 type TestResults struct {
-	TotalTests      int                    `json:"total_tests"`
-	PassedTests     int                    `json:"passed_tests"`
-	FailedTests     int                    `json:"failed_tests"`
-	SkippedTests    int                    `json:"skipped_tests"`
-	Coverage        float64                `json:"coverage"`
-	Duration        time.Duration          `json:"duration"`
-	Categories      map[string]*TestCategory `json:"categories"`
-	PerformanceTests *PerformanceResults   `json:"performance_tests"`
-	SecurityTests   *SecurityTestResults   `json:"security_tests"`
-	IntegrationTests *IntegrationResults   `json:"integration_tests"`
-	LoadTests       *LoadTestResults       `json:"load_tests"`
-	Errors          []TestError            `json:"errors"`
-	Warnings        []TestWarning          `json:"warnings"`
-	Timestamp       time.Time              `json:"timestamp"`
+	TotalTests       int                      `json:"total_tests"`
+	PassedTests      int                      `json:"passed_tests"`
+	FailedTests      int                      `json:"failed_tests"`
+	SkippedTests     int                      `json:"skipped_tests"`
+	Coverage         float64                  `json:"coverage"`
+	Duration         time.Duration            `json:"duration"`
+	Categories       map[string]*TestCategory `json:"categories"`
+	PerformanceTests *PerformanceResults      `json:"performance_tests"`
+	SecurityTests    *SecurityTestResults     `json:"security_tests"`
+	IntegrationTests *IntegrationResults      `json:"integration_tests"`
+	LoadTests        *LoadTestResults         `json:"load_tests"`
+	Errors           []TestError              `json:"errors"`
+	Warnings         []TestWarning            `json:"warnings"`
+	Timestamp        time.Time                `json:"timestamp"`
 }
 
 // TestCategory represents a category of tests
@@ -83,10 +83,10 @@ type SecurityTestResults struct {
 	AuthorizationTests   int                    `json:"authorization_tests"`
 	InputValidationTests int                    `json:"input_validation_tests"`
 	SQLInjectionTests    int                    `json:"sql_injection_tests"`
-	XSSTests            int                    `json:"xss_tests"`
-	CSRFTests           int                    `json:"csrf_tests"`
-	SecurityScore       float64                `json:"security_score"`
-	Findings            []*SecurityTestFinding `json:"findings"`
+	XSSTests             int                    `json:"xss_tests"`
+	CSRFTests            int                    `json:"csrf_tests"`
+	SecurityScore        float64                `json:"security_score"`
+	Findings             []*SecurityTestFinding `json:"findings"`
 }
 
 // SetupSuite initializes the comprehensive test suite
@@ -132,12 +132,12 @@ func (suite *ComprehensiveTestSuite) setupTestRouter() {
 	// Health check
 	suite.router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"status":     "ok",
-			"service":    "apex-build",
-			"version":    "2.0.0",
-			"timestamp":  time.Now(),
-			"test_mode":  true,
-			"enhanced":   true,
+			"status":    "ok",
+			"service":   "apex-build",
+			"version":   "2.0.0",
+			"timestamp": time.Now(),
+			"test_mode": true,
+			"enhanced":  true,
 		})
 	})
 
@@ -198,11 +198,11 @@ func (suite *ComprehensiveTestSuite) createTestData() {
 	adminPassword, _ := suite.authService.HashPassword("AdminPassword123!")
 	adminUser := &models.User{
 		Username:         "admin",
-		Email:           "admin@apex.build",
-		PasswordHash:    adminPassword,
-		FullName:        "Admin User",
-		IsActive:        true,
-		IsVerified:      true,
+		Email:            "admin@apex.build",
+		PasswordHash:     adminPassword,
+		FullName:         "Admin User",
+		IsActive:         true,
+		IsVerified:       true,
 		SubscriptionType: "enterprise",
 	}
 	suite.db.Create(adminUser)
@@ -212,11 +212,11 @@ func (suite *ComprehensiveTestSuite) createTestData() {
 		password, _ := suite.authService.HashPassword(fmt.Sprintf("TestPassword%d!", i))
 		user := &models.User{
 			Username:         fmt.Sprintf("testuser%d", i),
-			Email:           fmt.Sprintf("test%d@apex.build", i),
-			PasswordHash:    password,
-			FullName:        fmt.Sprintf("Test User %d", i),
-			IsActive:        true,
-			IsVerified:      true,
+			Email:            fmt.Sprintf("test%d@apex.build", i),
+			PasswordHash:     password,
+			FullName:         fmt.Sprintf("Test User %d", i),
+			IsActive:         true,
+			IsVerified:       true,
 			SubscriptionType: "pro",
 		}
 		suite.db.Create(user)
@@ -275,10 +275,11 @@ func (suite *ComprehensiveTestSuite) TestHealthEndpoint() {
 func (suite *ComprehensiveTestSuite) TestAuthenticationWorkflow() {
 	// Test user registration
 	regData := map[string]interface{}{
-		"username":  "newtestuser",
-		"email":     "newtest@apex.build",
-		"password":  "SecurePassword123!",
-		"full_name": "New Test User",
+		"username":           "newtestuser",
+		"email":              "newtest@apex.build",
+		"password":           "SecurePassword123!",
+		"full_name":          "New Test User",
+		"accept_legal_terms": true,
 	}
 
 	regBody, _ := json.Marshal(regData)
@@ -448,10 +449,11 @@ func (suite *ComprehensiveTestSuite) TestSecurityVulnerabilities() {
 
 	for _, payload := range xssPayloads {
 		regData := map[string]interface{}{
-			"username":  payload,
-			"email":     "xsstest@apex.build",
-			"password":  "SecurePassword123!",
-			"full_name": "XSS Test",
+			"username":           payload,
+			"email":              "xsstest@apex.build",
+			"password":           "SecurePassword123!",
+			"full_name":          "XSS Test",
+			"accept_legal_terms": true,
 		}
 
 		regBody, _ := json.Marshal(regData)
@@ -547,9 +549,10 @@ func (suite *ComprehensiveTestSuite) TestInputValidation() {
 		{
 			name: "long_username",
 			data: map[string]interface{}{
-				"username": strings.Repeat("a", 256),
-				"email":    "test@apex.build",
-				"password": "ValidPassword123!",
+				"username":           strings.Repeat("a", 256),
+				"email":              "test@apex.build",
+				"password":           "ValidPassword123!",
+				"accept_legal_terms": true,
 			},
 		},
 	}
@@ -719,18 +722,18 @@ func (suite *ComprehensiveTestSuite) mockAIGenerateHandler(c *gin.Context) {
 
 func (suite *ComprehensiveTestSuite) mockAIUsageHandler(c *gin.Context) {
 	c.JSON(200, gin.H{
-		"success":     true,
-		"requests":    45,
-		"limit":       2000,
-		"remaining":   1955,
+		"success":   true,
+		"requests":  45,
+		"limit":     2000,
+		"remaining": 1955,
 	})
 }
 
 func (suite *ComprehensiveTestSuite) mockAIAnalyzeHandler(c *gin.Context) {
 	c.JSON(200, gin.H{
-		"success":      true,
-		"analysis":     "Code analysis results",
-		"suggestions":  []string{"Improve error handling", "Add tests"},
+		"success":     true,
+		"analysis":    "Code analysis results",
+		"suggestions": []string{"Improve error handling", "Add tests"},
 	})
 }
 
@@ -746,8 +749,8 @@ func (suite *ComprehensiveTestSuite) mockGetPlansHandler(c *gin.Context) {
 
 func (suite *ComprehensiveTestSuite) mockGetUsageHandler(c *gin.Context) {
 	c.JSON(200, gin.H{
-		"success":    true,
-		"usage":      gin.H{"ai_requests": 45, "storage_gb": 2.5},
+		"success": true,
+		"usage":   gin.H{"ai_requests": 45, "storage_gb": 2.5},
 	})
 }
 
@@ -762,10 +765,10 @@ func (suite *ComprehensiveTestSuite) mockCancelHandler(c *gin.Context) {
 // Stub types for comprehensive testing
 type (
 	TestError struct {
-		Test    string `json:"test"`
-		Error   string `json:"error"`
-		File    string `json:"file"`
-		Line    int    `json:"line"`
+		Test  string `json:"test"`
+		Error string `json:"error"`
+		File  string `json:"file"`
+		Line  int    `json:"line"`
 	}
 
 	TestWarning struct {
@@ -787,10 +790,10 @@ type (
 	}
 
 	BenchmarkResult struct {
-		Name     string        `json:"name"`
-		Duration time.Duration `json:"duration"`
-		Ops      int64         `json:"ops"`
-		OpsPerSec float64      `json:"ops_per_sec"`
+		Name      string        `json:"name"`
+		Duration  time.Duration `json:"duration"`
+		Ops       int64         `json:"ops"`
+		OpsPerSec float64       `json:"ops_per_sec"`
 	}
 
 	SecurityTestFinding struct {

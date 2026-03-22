@@ -29,6 +29,58 @@ func taskRoutingMode(task *Task) ProviderRoutingMode {
 	return RoutingModeSingleProvider
 }
 
+func taskRiskLevel(task *Task) TaskRiskLevel {
+	if task == nil {
+		return RiskMedium
+	}
+	if artifact := taskArtifactWorkOrderFromInput(task); artifact != nil && artifact.RiskLevel != "" {
+		return artifact.RiskLevel
+	}
+	if task.Input != nil {
+		if raw, ok := task.Input["risk_level"]; ok {
+			if risk := TaskRiskLevel(strings.TrimSpace(fmt.Sprintf("%v", raw))); risk != "" {
+				return risk
+			}
+		}
+	}
+	return RiskMedium
+}
+
+func effectiveTaskRoutingMode(build *Build, task *Task) ProviderRoutingMode {
+	mode := taskRoutingMode(task)
+	if build == nil {
+		return mode
+	}
+	if build.PowerMode != PowerFast && build.Mode != ModeFast {
+		return mode
+	}
+
+	risk := taskRiskLevel(task)
+	switch mode {
+	case RoutingModeDualCandidate, RoutingModeSingleWithVerifier:
+		if risk != RiskHigh && risk != RiskCritical {
+			return RoutingModeSingleProvider
+		}
+	}
+	return mode
+}
+
+func shouldRunProviderAssistedContractCritique(build *Build, contract *BuildContract) bool {
+	if build == nil || contract == nil {
+		return false
+	}
+	if build.PowerMode != PowerFast && build.Mode != ModeFast {
+		return true
+	}
+	if contract.AuthContract != nil && contract.AuthContract.Required {
+		return true
+	}
+	if contract.APIContract != nil && len(contract.APIContract.Endpoints) > 0 && len(contract.DBSchemaContract) > 0 {
+		return true
+	}
+	return false
+}
+
 type taskGenerationCandidate struct {
 	Provider           ai.AIProvider
 	Model              string
@@ -140,7 +192,7 @@ Return JSON only:
   "warnings": ["optional warning"],
   "blockers": ["only concrete correctness/build blockers"],
   "confidence": 0.0
-}`, task.Type, task.Description, taskRoutingMode(task), candidate.Provider, candidate.VerifyPassed, strings.Join(candidate.VerifyErrors, "\n"), summarizeTaskOutputForJudge(candidate.Output, 12000))
+}`, task.Type, task.Description, effectiveTaskRoutingMode(build, task), candidate.Provider, candidate.VerifyPassed, strings.Join(candidate.VerifyErrors, "\n"), summarizeTaskOutputForJudge(candidate.Output, 12000))
 
 	ctx, cancel := context.WithTimeout(am.ctx, 45*time.Second)
 	defer cancel()
@@ -229,7 +281,7 @@ Return JSON only:
 {
   "winner_index": 0,
   "rationale": "one short sentence"
-}`, task.Type, task.Description, taskRoutingMode(task), string(payload))
+}`, task.Type, task.Description, effectiveTaskRoutingMode(build, task), string(payload))
 
 	ctx, cancel := context.WithTimeout(am.ctx, 45*time.Second)
 	defer cancel()
@@ -323,7 +375,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	}
 
 	if am.budgetEnforcer != nil {
-		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, agent.BuildID, estimatedRequestCostUSD)
+		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, agent.BuildID, estimatedRequestCostUSDForBuild(build))
 		if preAuthErr == nil && !preAuth.Allowed {
 			am.broadcast(agent.BuildID, &WSMessage{
 				Type:      "budget:exceeded",

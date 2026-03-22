@@ -93,7 +93,7 @@ for (const file of manifestFiles) {
     const password = ${JSON.stringify(password)};
 
     ${register ? `const registerRes = await request.post(apiBase + '/api/v1/auth/register', {
-      data: { username, email, password, full_name: 'Playwright E2E' }
+      data: { username, email, password, full_name: 'Playwright E2E', accept_legal_terms: true }
     });
     expect([200, 201, 409]).toContain(registerRes.status());` : ''}
 
@@ -200,7 +200,7 @@ for (const file of manifestFiles) {
     const password = ${JSON.stringify((scenario.auth && scenario.auth.password) || 'Password123!')};
 
     const registerRes = await request.post(apiBase + '/api/v1/auth/register', {
-      data: { username, email, password, full_name: 'Playwright Preview' }
+      data: { username, email, password, full_name: 'Playwright Preview', accept_legal_terms: true }
     });
     expect([200, 201]).toContain(registerRes.status());
     const registerBody = await registerRes.json();
@@ -280,7 +280,7 @@ for (const file of manifestFiles) {
     const email = username + '@example.com';
 
     const registerRes = await request.post(apiBase + '/api/v1/auth/register', {
-      data: { username, email, password: 'Preflight123!', full_name: 'Playwright Preflight' }
+      data: { username, email, password: 'Preflight123!', full_name: 'Playwright Preflight', accept_legal_terms: true }
     });
     expect([200, 201]).toContain(registerRes.status());
     const registerBody = await registerRes.json();
@@ -326,7 +326,7 @@ for (const file of manifestFiles) {
     const email = username + '@example.com';
 
     const registerRes = await request.post(apiBase + '/api/v1/auth/register', {
-      data: { username, email, password: 'BuildErr123!', full_name: 'Playwright BuildErr' }
+      data: { username, email, password: 'BuildErr123!', full_name: 'Playwright BuildErr', accept_legal_terms: true }
     });
     expect([200, 201]).toContain(registerRes.status());
     const registerBody = await registerRes.json();
@@ -382,7 +382,7 @@ function readJsonPath(obj, dottedPath) {
     const password = ${JSON.stringify(sharedAuthPassword)};
 
     const registerRes = await request.post(apiBase + '/api/v1/auth/register', {
-      data: { username, email, password, full_name: ${JSON.stringify(sharedAuthFullName)} }
+      data: { username, email, password, full_name: ${JSON.stringify(sharedAuthFullName)}, accept_legal_terms: true }
     });
     expect([200, 201, 409]).toContain(registerRes.status());
 

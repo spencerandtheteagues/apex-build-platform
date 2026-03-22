@@ -1,9 +1,9 @@
 import { useSyncExternalStore } from 'react'
 
 function getLogoSrc(): string {
-  if (typeof document === 'undefined') return '/logo.png'
+  if (typeof document === 'undefined') return '/apex-build-logo-transparent.png'
   const theme = document.documentElement.getAttribute('data-ui-theme')
-  return theme === 'blue' ? '/logo-blue.png' : '/logo.png'
+  return theme === 'blue' ? '/logo-blue.png' : '/apex-build-logo-transparent.png'
 }
 
 function subscribe(callback: () => void): () => void {
@@ -17,5 +17,5 @@ function subscribe(callback: () => void): () => void {
 
 /** Returns the correct logo path for the current UI color scheme. */
 export function useThemeLogo(): string {
-  return useSyncExternalStore(subscribe, getLogoSrc, () => '/logo.png')
+  return useSyncExternalStore(subscribe, getLogoSrc, () => '/apex-build-logo-transparent.png')
 }

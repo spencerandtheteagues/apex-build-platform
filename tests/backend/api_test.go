@@ -100,10 +100,11 @@ func TestUserRegistration(t *testing.T) {
 
 	// Test valid registration
 	registrationData := map[string]interface{}{
-		"username":  "testuser",
-		"email":     "test@apex.build",
-		"password":  "SecurePassword123!",
-		"full_name": "Test User",
+		"username":           "testuser",
+		"email":              "test@apex.build",
+		"password":           "SecurePassword123!",
+		"full_name":          "Test User",
+		"accept_legal_terms": true,
 	}
 
 	jsonData, _ := json.Marshal(registrationData)
@@ -134,10 +135,11 @@ func TestUserLogin(t *testing.T) {
 
 	// First register a user
 	registrationData := map[string]interface{}{
-		"username":  "loginuser",
-		"email":     "login@apex.build",
-		"password":  "SecurePassword123!",
-		"full_name": "Login User",
+		"username":           "loginuser",
+		"email":              "login@apex.build",
+		"password":           "SecurePassword123!",
+		"full_name":          "Login User",
+		"accept_legal_terms": true,
 	}
 
 	jsonData, _ := json.Marshal(registrationData)
@@ -218,8 +220,8 @@ func TestAIGenerationEndpoint(t *testing.T) {
 	router, _ := TestSetup(t)
 
 	aiRequest := map[string]interface{}{
-		"prompt":    "Create a simple Hello World function in JavaScript",
-		"language":  "javascript",
+		"prompt":     "Create a simple Hello World function in JavaScript",
+		"language":   "javascript",
 		"capability": "code_generation",
 	}
 
@@ -261,8 +263,8 @@ func TestInputValidation(t *testing.T) {
 
 	// Test registration with invalid data
 	testCases := []struct {
-		name string
-		data map[string]interface{}
+		name         string
+		data         map[string]interface{}
 		expectedCode int
 	}{
 		{
@@ -285,18 +287,20 @@ func TestInputValidation(t *testing.T) {
 		{
 			name: "Weak password",
 			data: map[string]interface{}{
-				"username": "testuser",
-				"email":    "test@apex.build",
-				"password": "123",
+				"username":           "testuser",
+				"email":              "test@apex.build",
+				"password":           "123",
+				"accept_legal_terms": true,
 			},
 			expectedCode: 400,
 		},
 		{
 			name: "SQL injection attempt",
 			data: map[string]interface{}{
-				"username": "'; DROP TABLE users; --",
-				"email":    "test@apex.build",
-				"password": "SecurePassword123!",
+				"username":           "'; DROP TABLE users; --",
+				"email":              "test@apex.build",
+				"password":           "SecurePassword123!",
+				"accept_legal_terms": true,
 			},
 			expectedCode: 400,
 		},
