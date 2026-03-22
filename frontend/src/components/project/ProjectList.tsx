@@ -100,7 +100,8 @@ export const ProjectList: React.FC<ProjectListProps> = ({
   } | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
 
-  const { apiService, setCurrentProject, currentProject } = useStore()
+  const { apiService, setCurrentProject, currentProject, user } = useStore()
+  const canPublishProjects = user != null && ['builder', 'pro', 'team', 'enterprise', 'owner'].includes(user.subscription_type)
 
   // Load projects
   useEffect(() => {
@@ -151,7 +152,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
         description: newProject.description.trim() || undefined,
         language: newProject.language,
         framework: newProject.framework || undefined,
-        is_public: newProject.is_public,
+        is_public: canPublishProjects && newProject.is_public,
         environment: {
           language: newProject.language,
           framework: newProject.framework
@@ -215,7 +216,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
         description: editProject.description.trim() || undefined,
         language: editProject.language,
         framework: editProject.framework || undefined,
-        is_public: editProject.is_public,
+        is_public: editProject.is_public && canPublishProjects,
         environment: {
           language: editProject.language,
           framework: editProject.framework
@@ -636,9 +637,13 @@ export const ProjectList: React.FC<ProjectListProps> = ({
                   checked={newProject.is_public}
                   onChange={(e) => setNewProject(prev => ({ ...prev, is_public: e.target.checked }))}
                   className="w-4 h-4 bg-gray-800 border border-gray-600 rounded focus:ring-cyan-400"
+                  disabled={!canPublishProjects}
                 />
                 <span className="text-sm text-gray-300">Make project public</span>
               </label>
+              {!canPublishProjects && (
+                <p className="text-xs text-amber-400">Publishing projects requires Builder or higher.</p>
+              )}
             </CardContent>
 
             <CardFooter>
@@ -745,9 +750,13 @@ export const ProjectList: React.FC<ProjectListProps> = ({
                   checked={editProject.is_public}
                   onChange={(e) => setEditProject(prev => prev ? ({ ...prev, is_public: e.target.checked }) : prev)}
                   className="w-4 h-4 bg-gray-800 border border-gray-600 rounded focus:ring-cyan-400"
+                  disabled={!canPublishProjects && !editProject.is_public}
                 />
                 <span className="text-sm text-gray-300">Make project public</span>
               </label>
+              {!canPublishProjects && !editProject.is_public && (
+                <p className="text-xs text-amber-400">Publishing projects requires Builder or higher.</p>
+              )}
             </CardContent>
 
             <CardFooter>

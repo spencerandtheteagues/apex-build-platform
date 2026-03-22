@@ -84,6 +84,7 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({ onOpenProject }) => {
   const [expandedCategoryProjects, setExpandedCategoryProjects] = useState<Set<number>>(new Set())
 
   const { user, setCurrentProject, addNotification } = useStore()
+  const canPublishProjects = user != null && ['builder', 'pro', 'team', 'enterprise', 'owner'].includes(user.subscription_type)
 
   const handleLike = async (projectId: string) => {
     const numericId = Number(projectId)
@@ -267,6 +268,10 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({ onOpenProject }) => {
   }
 
   const handleTogglePublish = async (project: Project) => {
+    if (!project.is_public && !canPublishProjects) {
+      setPublishError('Publishing projects requires Builder or higher.')
+      return
+    }
     setPublishError(null)
     setPublishSuccess(null)
     setPublishLoading(true)
@@ -384,10 +389,10 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({ onOpenProject }) => {
           </div>
 
           <div className="flex gap-2">
-            <Button variant="outline" className="border-gray-700 hover:bg-gray-800" onClick={handlePublish}>
-              <img src={logoSrc} alt="APEX" className="w-5 h-5 mr-2 object-contain" />
-              Publish Project
-            </Button>
+              <Button variant="outline" className="border-gray-700 hover:bg-gray-800" onClick={handlePublish}>
+                <img src={logoSrc} alt="APEX" className="w-5 h-5 mr-2 object-contain" />
+                Publish Project
+              </Button>
           </div>
         </div>
 
@@ -631,6 +636,11 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({ onOpenProject }) => {
             </CardHeader>
 
             <CardContent className="space-y-4">
+              {!canPublishProjects && (
+                <div className="text-sm text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                  Builder or higher is required to publish projects. You can still review and unpublish any project that is already public.
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <Search className="w-4 h-4 text-gray-500" />
                 <input
@@ -691,7 +701,7 @@ export const ExplorePage: React.FC<ExplorePageProps> = ({ onOpenProject }) => {
                             size="xs"
                             variant={project.is_public ? 'ghost' : 'primary'}
                             onClick={() => handleTogglePublish(project)}
-                            disabled={publishLoading}
+                            disabled={publishLoading || (!canPublishProjects && !project.is_public)}
                           >
                             {project.is_public ? 'Unpublish' : 'Publish'}
                           </Button>

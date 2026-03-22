@@ -106,6 +106,12 @@ func (h *Handler) CreateProject(c *gin.Context) {
 		req.Language = "typescript"
 	}
 
+	if req.IsPublic != nil && *req.IsPublic {
+		if !requirePaidBackendPlan(c, h.DB, userID, "Publishing projects") {
+			return
+		}
+	}
+
 	// Validate language
 	validLanguages := []string{"javascript", "typescript", "python", "go", "rust", "java", "cpp", "html", "css"}
 	languageValid := false
@@ -362,6 +368,11 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 		updates["framework"] = *req.Framework
 	}
 	if req.IsPublic != nil {
+		if *req.IsPublic && !project.IsPublic {
+			if !requirePaidBackendPlan(c, h.DB, userID, "Publishing projects") {
+				return
+			}
+		}
 		updates["is_public"] = *req.IsPublic
 	}
 	if req.IsArchived != nil {

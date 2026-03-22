@@ -4,6 +4,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import apiService from '@/services/api';
+import { useStore } from '@/hooks/useStore';
 
 // Types
 interface DetectedStack {
@@ -90,6 +91,8 @@ interface GitHubImportWizardProps {
 }
 
 export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose, onImported }) => {
+  const { user } = useStore();
+  const canPublishProjects = user != null && ['builder', 'pro', 'team', 'enterprise', 'owner'].includes(user.subscription_type);
   // State
   const [step, setStep] = useState<ImportStep>('url');
   const [url, setUrl] = useState('');
@@ -178,7 +181,7 @@ export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose,
         url,
         project_name: projectName,
         description,
-        is_public: isPublic,
+        is_public: canPublishProjects && isPublic,
         token,
       });
       clearInterval(progressInterval);
@@ -424,9 +427,10 @@ export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose,
                 </div>
                 <button
                   onClick={() => setIsPublic(!isPublic)}
+                  disabled={!canPublishProjects}
                   className={`relative w-12 h-6 rounded-full transition-colors ${
                     isPublic ? 'bg-cyan-500' : 'bg-gray-600'
-                  }`}
+                  } ${!canPublishProjects ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <span
                     className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
@@ -435,6 +439,9 @@ export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose,
                   />
                 </button>
               </div>
+              {!canPublishProjects && (
+                <p className="text-xs text-amber-400">Publishing imported projects requires Builder or higher.</p>
+              )}
 
               {/* Detected stack info */}
               {validation.detected_stack && (
