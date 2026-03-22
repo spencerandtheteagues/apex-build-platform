@@ -334,6 +334,12 @@ export function BillingSettings() {
           )}
         </div>
 
+        {currentPlanType === 'free' && (
+          <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-xs text-amber-100/80">
+            Free accounts can build static frontend websites and UI mockups. Upgrade to Builder or higher to unlock backend, database, auth, billing, realtime, and deployment workflows. Credit packs extend managed usage but do not unlock those paid capabilities on their own.
+          </div>
+        )}
+
         {subscription && subscription.plan_name && (
           <div className="mt-4 pt-4 border-t border-gray-800 flex items-center justify-between">
             <div>

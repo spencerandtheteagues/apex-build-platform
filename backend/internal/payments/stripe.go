@@ -33,9 +33,9 @@ var (
 
 // StripeService handles all Stripe payment operations
 type StripeService struct {
-	secretKey      string
-	webhookSecret  string
-	planConfig     *PlanConfig
+	secretKey     string
+	webhookSecret string
+	planConfig    *PlanConfig
 }
 
 // WebhookEvent represents a processed webhook event
@@ -91,40 +91,40 @@ type SubscriptionInfo struct {
 
 // CustomerInfo represents Stripe customer information
 type CustomerInfo struct {
-	ID           string            `json:"id"`
-	Email        string            `json:"email"`
-	Name         string            `json:"name"`
-	Phone        string            `json:"phone,omitempty"`
-	Created      time.Time         `json:"created"`
-	Metadata     map[string]string `json:"metadata,omitempty"`
-	DefaultSource string           `json:"default_source,omitempty"`
+	ID            string            `json:"id"`
+	Email         string            `json:"email"`
+	Name          string            `json:"name"`
+	Phone         string            `json:"phone,omitempty"`
+	Created       time.Time         `json:"created"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
+	DefaultSource string            `json:"default_source,omitempty"`
 }
 
 // InvoiceInfo represents invoice information
 type InvoiceInfo struct {
-	ID             string    `json:"id"`
-	CustomerID     string    `json:"customer_id"`
-	SubscriptionID string    `json:"subscription_id,omitempty"`
-	Status         string    `json:"status"`
-	AmountDue      int64     `json:"amount_due"`
-	AmountPaid     int64     `json:"amount_paid"`
-	Currency       string    `json:"currency"`
-	DueDate        *time.Time `json:"due_date,omitempty"`
-	Created        time.Time `json:"created"`
-	PaidAt         *time.Time `json:"paid_at,omitempty"`
-	HostedInvoiceURL string  `json:"hosted_invoice_url,omitempty"`
-	InvoicePDF     string    `json:"invoice_pdf,omitempty"`
+	ID               string     `json:"id"`
+	CustomerID       string     `json:"customer_id"`
+	SubscriptionID   string     `json:"subscription_id,omitempty"`
+	Status           string     `json:"status"`
+	AmountDue        int64      `json:"amount_due"`
+	AmountPaid       int64      `json:"amount_paid"`
+	Currency         string     `json:"currency"`
+	DueDate          *time.Time `json:"due_date,omitempty"`
+	Created          time.Time  `json:"created"`
+	PaidAt           *time.Time `json:"paid_at,omitempty"`
+	HostedInvoiceURL string     `json:"hosted_invoice_url,omitempty"`
+	InvoicePDF       string     `json:"invoice_pdf,omitempty"`
 }
 
 // PaymentMethodInfo represents payment method information
 type PaymentMethodInfo struct {
-	ID        string `json:"id"`
-	Type      string `json:"type"`
-	CardBrand string `json:"card_brand,omitempty"`
-	CardLast4 string `json:"card_last4,omitempty"`
-	CardExpMonth int64 `json:"card_exp_month,omitempty"`
-	CardExpYear int64 `json:"card_exp_year,omitempty"`
-	IsDefault bool   `json:"is_default"`
+	ID           string `json:"id"`
+	Type         string `json:"type"`
+	CardBrand    string `json:"card_brand,omitempty"`
+	CardLast4    string `json:"card_last4,omitempty"`
+	CardExpMonth int64  `json:"card_exp_month,omitempty"`
+	CardExpYear  int64  `json:"card_exp_year,omitempty"`
+	IsDefault    bool   `json:"is_default"`
 }
 
 // NewStripeService creates a new Stripe service instance
@@ -310,15 +310,15 @@ type CreditPack struct {
 // CreditPacks returns the available credit purchase options.
 func CreditPacks() []CreditPack {
 	return []CreditPack{
-		{10, 10.00, "$10 Credits"},
 		{25, 25.00, "$25 Credits"},
 		{50, 50.00, "$50 Credits"},
 		{100, 100.00, "$100 Credits"},
+		{250, 250.00, "$250 Credits"},
 	}
 }
 
 // CreateCreditPurchaseSession creates a Stripe Checkout session for a one-time credit top-up.
-// amountUSD must be one of the valid pack sizes (10, 25, 50, 100).
+// amountUSD must be one of the valid pack sizes (25, 50, 100, 250).
 func (s *StripeService) CreateCreditPurchaseSession(ctx context.Context, customerID string, amountUSD int64, successURL, cancelURL string, metadata map[string]string) (*CheckoutSessionResult, error) {
 	if !s.IsConfigured() {
 		return nil, errors.New("stripe is not configured")

@@ -216,6 +216,14 @@ func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
 		return
 	}
 
+	startBackend := true
+	if req.StartBackend != nil {
+		startBackend = *req.StartBackend
+	}
+	if (startBackend || req.RequireBackend) && !requirePaidBackendPlan(c, h.db, userID, "backend preview") {
+		return
+	}
+
 	// Verify project ownership
 	var project models.Project
 	if err := h.db.First(&project, req.ProjectID).Error; err != nil {
@@ -274,11 +282,6 @@ func (h *PreviewHandler) StartFullStackPreview(c *gin.Context) {
 	}
 	previewStatus.URL = h.buildProxyURL(c, req.ProjectID)
 	h.setPreviewAccessCookie(c, req.ProjectID)
-
-	startBackend := true
-	if req.StartBackend != nil {
-		startBackend = *req.StartBackend
-	}
 
 	var serverStatus *preview.ServerStatus
 	diagnostics := gin.H{
@@ -375,6 +378,9 @@ response:
 // POST /api/v1/preview/stop
 func (h *PreviewHandler) StopPreview(c *gin.Context) {
 	userID := c.GetUint("user_id")
+	if !requirePaidBackendPlan(c, h.db, userID, "backend preview") {
+		return
+	}
 
 	var req struct {
 		ProjectID uint `json:"project_id" binding:"required"`

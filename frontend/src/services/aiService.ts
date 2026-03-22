@@ -81,10 +81,6 @@ class AIService {
     this.baseURL = baseURL
   }
 
-  private getAuthToken(): string | null {
-    return localStorage.getItem('apex_access_token')
-  }
-
   // Generate AI completion with optional streaming
   async generate(
     options: AIGenerationOptions,
@@ -132,13 +128,11 @@ class AIService {
     onStream: StreamCallback,
     signal: AbortSignal
   ): Promise<string> {
-    const token = this.getAuthToken()
-
     const response = await fetch(`${this.baseURL}/ai/stream`, {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
         'Accept': 'text/event-stream',
       },
       body: JSON.stringify({
@@ -211,13 +205,11 @@ class AIService {
     options: Omit<AIGenerationOptions, 'stream'>,
     signal: AbortSignal
   ): Promise<string> {
-    const token = this.getAuthToken()
-
     const response = await fetch(`${this.baseURL}/ai/generate`, {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
       },
       body: JSON.stringify({
         capability: options.capability,
@@ -246,14 +238,12 @@ class AIService {
     request: AICompletionRequest,
     abortSignal?: AbortSignal
   ): Promise<AICompletionSuggestion | null> {
-    const token = this.getAuthToken()
-
     try {
       const response = await fetch(`${this.baseURL}/ai/complete`, {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': token ? `Bearer ${token}` : '',
         },
         body: JSON.stringify({
           capability: 'code_completion',

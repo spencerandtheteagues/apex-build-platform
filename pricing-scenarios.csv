@@ -1,0 +1,6 @@
+scenario,monthly_subscription,included_credits,credit_pack_price,credit_pack_units,free_tier_rules,estimated_arpu,estimated_variable_cost,contribution_margin,clarity_score,conversion_friction_score,abuse_risk_score,runway_impact,notes
+current_codebase,19/49/99,10/35/80,10/25/50/100,1:1 face value,"free marked as BYOK but reserve path still charges credits",43,27,0.37,4,6,7,weak,"Operationally inconsistent even before pricing optimization"
+low_sub_high_usage,15/39/79,10/30/70,10/25/50/100,1:1 face value,"generous free plus cheap paid",32,24,0.25,6,8,9,poor,"High conversion, weak runway protection"
+recommended_high_trust,24/59/149,12/40/110,25/50/100/250,1:1 face value,"$5 one-time managed trial, then BYOK-fast only, strict caps",57,30,0.47,9,7,3,strong,"Best balance of clarity, premium fit, and operational safety"
+premium_bundle,29/79/199,18/55/150,25/50/100/250,1:1 face value,"tiny free trial and stricter caps",73,38,0.48,8,5,2,strong,"Better margins, higher conversion friction"
+metered_overage_heavy,19/49/99,6/20/60,25/50/100/250,1:1 face value,"minimal free, aggressive top-ups",46,22,0.52,5,4,3,medium,"Safe mathematically but likely hurts trust and perceived value"

@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -33,6 +34,18 @@ func NewPaymentHandlers(db *gorm.DB, stripeSecretKey string) *PaymentHandlers {
 		db:            db,
 		stripeService: payments.NewStripeService(stripeSecretKey),
 	}
+}
+
+func isDuplicateInsertError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "duplicate") || strings.Contains(message, "unique")
 }
 
 // CreateCheckoutSession creates a Stripe checkout session for subscription
@@ -212,9 +225,7 @@ func (h *PaymentHandlers) applyCredit(
 		result := tx.Create(&dedup)
 		if result.Error != nil {
 			// Unique constraint violation means we already processed this event.
-			if strings.Contains(result.Error.Error(), "unique") ||
-				strings.Contains(result.Error.Error(), "duplicate") ||
-				strings.Contains(result.Error.Error(), "UNIQUE") {
+			if isDuplicateInsertError(result.Error) {
 				log.Printf("Stripe event %s already processed — skipping duplicate", stripeEventID)
 				return nil
 			}
@@ -667,7 +678,7 @@ func (h *PaymentHandlers) GetUsage(c *gin.Context) {
 
 	// AI Requests this month
 	var aiRequestsCount int64
-	startOfMonth := time.Now().UTC().Truncate(24 * time.Hour).AddDate(0, 0, -time.Now().Day()+1)
+	startOfMonth := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -time.Now().Day()+1)
 	h.db.WithContext(ctx).Model(&models.AIRequest{}).
 		Where("user_id = ? AND created_at >= ?", userID, startOfMonth).
 		Count(&aiRequestsCount)
@@ -696,8 +707,8 @@ func (h *PaymentHandlers) GetUsage(c *gin.Context) {
 
 	usage := gin.H{
 		"ai_requests": gin.H{
-			"used":  aiRequestsCount,
-			"limit": limits.AIRequestsPerMonth,
+			"used":   aiRequestsCount,
+			"limit":  limits.AIRequestsPerMonth,
 			"period": "month",
 		},
 		"projects": gin.H{
@@ -793,7 +804,7 @@ func (h *PaymentHandlers) CancelSubscription(c *gin.Context) {
 		"success": true,
 		"message": "Subscription will be canceled at the end of the current billing period",
 		"data": gin.H{
-			"cancel_at":        subInfo.CancelAt,
+			"cancel_at":          subInfo.CancelAt,
 			"current_period_end": subInfo.CurrentPeriodEnd,
 		},
 	})
@@ -1063,7 +1074,7 @@ func (h *PaymentHandlers) CheckUsageLimit(c *gin.Context) {
 	var withinLimit bool
 
 	ctx := context.Background()
-	startOfMonth := time.Now().UTC().Truncate(24 * time.Hour).AddDate(0, 0, -time.Now().Day()+1)
+	startOfMonth := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -time.Now().Day()+1)
 	startOfDay := time.Now().UTC().Truncate(24 * time.Hour)
 
 	switch limitType {
@@ -1237,10 +1248,10 @@ func (h *PaymentHandlers) GetCreditBalance(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"balance":           user.CreditBalance,
-			"has_unlimited":     user.HasUnlimitedCredits,
-			"bypass_billing":    user.BypassBilling,
-			"available_packs":   payments.CreditPacks(),
+			"balance":         user.CreditBalance,
+			"has_unlimited":   user.HasUnlimitedCredits,
+			"bypass_billing":  user.BypassBilling,
+			"available_packs": payments.CreditPacks(),
 		},
 	})
 }

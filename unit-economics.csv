@@ -1,0 +1,8 @@
+scenario,user_segment,mode,provider,model,build_type,avg_input_tokens,avg_output_tokens,retries,other_variable_cost,revenue_per_build,total_variable_cost,contribution_margin,notes
+free_trial_frontend,new_trial,fast,gpt4,gpt-4o-mini,static_frontend,12000,4000,0.2,0.03,0.00,0.04,negative,"Trial only; should be tightly capped and non-renewing"
+free_byok_fast,free_byok,fast,claude,claude-haiku-4-5-20251001,manual_assist,14000,4000,0.1,0.02,0.00,0.04,negative,"Recommend truly free low-cost BYOK path or remove free-BYOK promise"
+builder_balanced_small,builder,balanced,claude,claude-sonnet-4-6,frontend_plus_light_backend,25000,8000,0.5,0.18,0.55,0.31,0.44,"Estimated billed credits consumed per successful build"
+builder_balanced_medium,builder,balanced,gpt4,gpt-4.1,fullstack_small,40000,12000,0.8,0.22,0.95,0.53,0.44,"Good default paid path"
+pro_max_autonomous,pro,max,claude,claude-opus-4-6,autonomous_fullstack,80000,24000,1.2,0.55,2.90,1.72,0.41,"Premium path; needs hard credit reserve and retry controls"
+team_balanced_collab,team,balanced,gpt4,gpt-4.1,collaborative_fullstack,140000,42000,1.0,0.90,4.80,2.78,0.42,"Shared-team flow with execution/runtime overhead"
+byok_power_routed,paid_byok,max,claude,claude-sonnet-4-6,autonomous_byok,80000,24000,1.0,0.20,0.18,0.11,0.39,"Only works if BYOK routing / orchestration charges are explicit"

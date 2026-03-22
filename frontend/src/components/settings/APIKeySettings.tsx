@@ -6,6 +6,7 @@ import { Key, Shield, CheckCircle, XCircle, Trash2, Loader2, Eye, EyeOff, Refres
 import { cn } from '@/lib/utils'
 import apiService from '@/services/api'
 import type { AIProvider } from '@/types'
+import { useUser } from '@/hooks/useStore'
 
 interface ProviderConfig {
   id: AIProvider
@@ -187,6 +188,7 @@ function isLocalOllamaUrl(value: string): boolean {
 }
 
 export default function APIKeySettings() {
+  const user = useUser()
   const [keys, setKeys] = useState<Record<string, KeyState>>({})
   const [inputValues, setInputValues] = useState<Record<string, string>>({})
   const [showKey, setShowKey] = useState<Record<string, boolean>>({})
@@ -197,8 +199,15 @@ export default function APIKeySettings() {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [successes, setSuccesses] = useState<Record<string, string>>({})
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
+  const canUseBYOK = user != null && ['builder', 'pro', 'team', 'enterprise', 'owner'].includes(user.subscription_type)
 
   const fetchKeys = useCallback(async () => {
+    if (!canUseBYOK) {
+      setKeys({})
+      setLoading(false)
+      return
+    }
+
     try {
       const response = await apiService.getAPIKeys()
       setKeys(response.success ? normalizeKeyStates(response.data) : {})
@@ -207,11 +216,33 @@ export default function APIKeySettings() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [canUseBYOK])
 
   useEffect(() => {
     fetchKeys()
   }, [fetchKeys])
+
+  if (!canUseBYOK) {
+    return (
+      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5">
+        <div className="flex items-start gap-3">
+          <Shield className="mt-0.5 h-5 w-5 text-amber-300" />
+          <div>
+            <h3 className="text-sm font-semibold text-white">BYOK is a paid-plan feature</h3>
+            <p className="mt-1 text-sm text-gray-300">
+              Bring Your Own Key is available on Builder and higher. Free accounts can build static frontend websites, but connecting personal provider keys requires an active subscription.
+            </p>
+            <a
+              href="/settings/billing"
+              className="mt-3 inline-flex items-center rounded-lg border border-amber-400/30 px-3 py-1.5 text-sm font-medium text-amber-200 transition-colors hover:border-amber-300/50 hover:text-white"
+            >
+              Upgrade to unlock BYOK
+            </a>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const handleToggleActive = async (provider: string) => {
     const current = keys[provider]

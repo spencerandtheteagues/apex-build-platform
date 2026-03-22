@@ -22,6 +22,7 @@ import {
   Notification,
   AIConversation,
   TerminalSession,
+  RegisterRequest,
 } from '@/types'
 import { themes, getTheme } from '@/styles/themes'
 import apiService from '@/services/api'
@@ -119,6 +120,25 @@ const collaborationChatToMessage = (message: CollaborationChatMessage): ChatMess
 
 let collaborationListenersBound = false
 
+const clearAuthenticatedWorkspaceStorage = (userId?: number | null) => {
+  try {
+    const baseKeys = [
+      'apex_active_build_id',
+      'apex_last_workflow_build_id',
+      'apex_build_telemetry_cache',
+    ]
+
+    for (const key of baseKeys) {
+      localStorage.removeItem(key)
+      if (userId) {
+        localStorage.removeItem(`${key}:${userId}`)
+      }
+    }
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
 type SessionResettableState = {
   user: User | null
   isAuthenticated: boolean
@@ -166,12 +186,7 @@ interface AuthState {
 
 interface AuthActions {
   login: (usernameOrEmail: string, password: string) => Promise<void>
-  register: (data: {
-    username: string
-    email: string
-    password: string
-    full_name?: string
-  }) => Promise<void>
+  register: (data: RegisterRequest) => Promise<void>
   logout: () => Promise<void>
   refreshUser: () => Promise<void>
   updateProfile: (data: Partial<User>) => Promise<void>
@@ -578,12 +593,14 @@ export const useStore = create<StoreState & StoreActions>()(
         },
 
         logout: async () => {
+          const userId = get().user?.id ?? null
           try {
             await apiService.logout()
           } catch (error: unknown) {
             console.error('Logout error:', error)
           } finally {
             collaborationService.disconnect()
+            clearAuthenticatedWorkspaceStorage(userId)
 
             set((state) => {
               resetAuthenticatedWorkspaceState(state)
@@ -1022,10 +1039,9 @@ export const useStore = create<StoreState & StoreActions>()(
 
           try {
             const roomData = await apiService.joinCollabRoom(projectId)
-            const token = localStorage.getItem('apex_access_token')
             const currentUser = get().user
 
-            if (!token || !currentUser) {
+            if (!currentUser) {
               throw new Error('Authentication is required for collaboration')
             }
 
@@ -1097,7 +1113,7 @@ export const useStore = create<StoreState & StoreActions>()(
             collaborationService.setUser(currentUser.id, currentUser.username)
 
             if (!collaborationService.isConnected()) {
-              await collaborationService.connect(token)
+              await collaborationService.connect()
             }
 
             collaborationService.joinRoom(roomData.room_id, projectId)

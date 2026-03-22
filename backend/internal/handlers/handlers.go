@@ -123,6 +123,9 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
+	auth.SetAccessTokenCookie(c, tokens.AccessToken)
+	auth.SetRefreshTokenCookie(c, tokens.RefreshToken)
+
 	c.JSON(http.StatusCreated, StandardResponse{
 		Success: true,
 		Data: map[string]interface{}{
@@ -133,7 +136,6 @@ func (h *Handler) Register(c *gin.Context) {
 				"full_name":         user.FullName,
 				"subscription_type": user.SubscriptionType,
 			},
-			"tokens": tokens,
 		},
 		Message: "User registered successfully",
 	})
@@ -202,6 +204,9 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
+	auth.SetAccessTokenCookie(c, tokens.AccessToken)
+	auth.SetRefreshTokenCookie(c, tokens.RefreshToken)
+
 	// Update last login
 	h.DB.Model(&user).Update("updated_at", time.Now())
 
@@ -217,7 +222,6 @@ func (h *Handler) Login(c *gin.Context) {
 				"preferred_theme":   user.PreferredTheme,
 				"preferred_ai":      user.PreferredAI,
 			},
-			"tokens": tokens,
 		},
 		Message: "Login successful",
 	})
@@ -226,42 +230,35 @@ func (h *Handler) Login(c *gin.Context) {
 // RefreshToken handles token refresh
 func (h *Handler) RefreshToken(c *gin.Context) {
 	var req struct {
-		RefreshToken string `json:"refresh_token" binding:"required"`
+		RefreshToken string `json:"refresh_token"`
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
 		c.JSON(http.StatusBadRequest, StandardResponse{
 			Success: false,
-			Error:   "Refresh token is required",
+			Error:   "Invalid refresh request",
 			Code:    "INVALID_REQUEST",
 		})
 		return
 	}
 
-	// Validate refresh token
-	claims, err := h.AuthService.ValidateToken(req.RefreshToken)
-	if err != nil {
+	refreshToken := strings.TrimSpace(req.RefreshToken)
+	if refreshToken == "" {
+		if cookieToken, err := auth.GetRefreshTokenFromCookie(c); err == nil {
+			refreshToken = strings.TrimSpace(cookieToken)
+		}
+	}
+	if refreshToken == "" {
 		c.JSON(http.StatusUnauthorized, StandardResponse{
 			Success: false,
-			Error:   "Invalid refresh token",
+			Error:   "Refresh token is required",
 			Code:    "INVALID_REFRESH_TOKEN",
 		})
 		return
 	}
 
-	// Get user from database
-	var user models.User
-	if err := h.DB.First(&user, claims.UserID).Error; err != nil {
-		c.JSON(http.StatusUnauthorized, StandardResponse{
-			Success: false,
-			Error:   "User not found",
-			Code:    "USER_NOT_FOUND",
-		})
-		return
-	}
-
 	// Generate new tokens
-	tokens, err := h.AuthService.RefreshTokens(req.RefreshToken, &user)
+	tokens, err := h.AuthService.RefreshTokens(refreshToken, nil)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, StandardResponse{
 			Success: false,
@@ -271,9 +268,11 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 		return
 	}
 
+	auth.SetAccessTokenCookie(c, tokens.AccessToken)
+	auth.SetRefreshTokenCookie(c, tokens.RefreshToken)
+
 	c.JSON(http.StatusOK, StandardResponse{
 		Success: true,
-		Data:    tokens,
 		Message: "Tokens refreshed successfully",
 	})
 }
@@ -300,9 +299,16 @@ func (h *Handler) Logout(c *gin.Context) {
 			return
 		}
 	}
-	if refreshToken := strings.TrimSpace(req.RefreshToken); refreshToken != "" {
+	refreshToken := strings.TrimSpace(req.RefreshToken)
+	if refreshToken == "" {
+		if cookieToken, err := auth.GetRefreshTokenFromCookie(c); err == nil {
+			refreshToken = strings.TrimSpace(cookieToken)
+		}
+	}
+	if refreshToken != "" {
 		_ = h.AuthService.RevokeRefreshToken(refreshToken)
 	}
+	auth.ClearAuthCookies(c)
 
 	c.JSON(http.StatusOK, StandardResponse{
 		Success: true,

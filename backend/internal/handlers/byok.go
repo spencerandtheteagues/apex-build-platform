@@ -29,6 +29,9 @@ func (h *BYOKHandlers) SaveKey(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
 		return
 	}
+	if !requirePaidBYOKPlan(c, h.byokManager.DB(), userID) {
+		return
+	}
 
 	var req struct {
 		Provider        string `json:"provider" binding:"required"`
@@ -69,6 +72,9 @@ func (h *BYOKHandlers) GetKeys(c *gin.Context) {
 	userID := c.GetUint("user_id")
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+	if !requirePaidBYOKPlan(c, h.byokManager.DB(), userID) {
 		return
 	}
 
@@ -136,6 +142,9 @@ func (h *BYOKHandlers) DeleteKey(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
 		return
 	}
+	if !requirePaidBYOKPlan(c, h.byokManager.DB(), userID) {
+		return
+	}
 
 	provider := c.Param("provider")
 	if provider == "" {
@@ -160,6 +169,9 @@ func (h *BYOKHandlers) ValidateKey(c *gin.Context) {
 	userID := c.GetUint("user_id")
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+	if !requirePaidBYOKPlan(c, h.byokManager.DB(), userID) {
 		return
 	}
 
@@ -188,6 +200,9 @@ func (h *BYOKHandlers) UpdateKeySettings(c *gin.Context) {
 	userID := c.GetUint("user_id")
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+	if !requirePaidBYOKPlan(c, h.byokManager.DB(), userID) {
 		return
 	}
 
@@ -225,6 +240,9 @@ func (h *BYOKHandlers) GetUsage(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
 		return
 	}
+	if !requirePaidBYOKPlan(c, h.byokManager.DB(), userID) {
+		return
+	}
 
 	monthKey := c.DefaultQuery("month", time.Now().Format("2006-01"))
 
@@ -254,6 +272,15 @@ func (h *BYOKHandlers) GetUsage(c *gin.Context) {
 
 // GetModels returns available models per provider
 func (h *BYOKHandlers) GetModels(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+	if !requirePaidBYOKPlan(c, h.byokManager.DB(), userID) {
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    ai.GetAvailableModels(),

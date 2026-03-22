@@ -61,6 +61,7 @@ const tourSteps: TourStep[] = [
       'Auto (Best Fit) — AI selects optimal technologies for your app',
       'Mix and match — pick React frontend with Go backend and PostgreSQL',
       'Popular stacks: Next.js + Node.js, React + Python FastAPI, Vue + Go',
+      'Free plan supports static frontend sites; Builder+ unlocks backend and full-stack builds',
     ],
     tip: 'Auto mode analyzes your description and picks the most suitable stack. Great for when you\'re unsure.',
   },

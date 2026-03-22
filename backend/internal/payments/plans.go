@@ -31,37 +31,37 @@ const (
 
 // Plan represents a subscription plan with full details
 type Plan struct {
-	Type               PlanType          `json:"type"`
-	Name               string            `json:"name"`
-	Description        string            `json:"description"`
-	MonthlyPriceCents  int64             `json:"monthly_price_cents"`
-	MonthlyPriceID     string            `json:"monthly_price_id"`
-	AnnualPriceCents   int64             `json:"annual_price_cents"`
-	AnnualPriceID      string            `json:"annual_price_id"`
-	MonthlyCreditsUSD  float64           `json:"monthly_credits_usd"` // Credits added to balance each billing cycle
-	Limits             PlanLimits        `json:"limits"`
-	Features           []string          `json:"features"`
-	IsPopular          bool              `json:"is_popular"`
-	IsEnterprise       bool              `json:"is_enterprise"`
-	TrialDays          int               `json:"trial_days"`
-	Metadata           map[string]string `json:"metadata,omitempty"`
+	Type              PlanType          `json:"type"`
+	Name              string            `json:"name"`
+	Description       string            `json:"description"`
+	MonthlyPriceCents int64             `json:"monthly_price_cents"`
+	MonthlyPriceID    string            `json:"monthly_price_id"`
+	AnnualPriceCents  int64             `json:"annual_price_cents"`
+	AnnualPriceID     string            `json:"annual_price_id"`
+	MonthlyCreditsUSD float64           `json:"monthly_credits_usd"` // Credits added to balance each billing cycle
+	Limits            PlanLimits        `json:"limits"`
+	Features          []string          `json:"features"`
+	IsPopular         bool              `json:"is_popular"`
+	IsEnterprise      bool              `json:"is_enterprise"`
+	TrialDays         int               `json:"trial_days"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
 }
 
 // PlanLimits defines the resource limits for each plan
 type PlanLimits struct {
-	AIRequestsPerMonth     int   `json:"ai_requests_per_month"`     // Platform-key requests; -1 for unlimited
-	BYOKEnabled            bool  `json:"byok_enabled"`              // Can use Bring Your Own Key
-	BYOKUnlimited          bool  `json:"byok_unlimited"`            // Unlimited requests via BYOK
-	ProjectsLimit          int   `json:"projects_limit"`            // -1 for unlimited
-	StorageGB              int   `json:"storage_gb"`
+	AIRequestsPerMonth      int  `json:"ai_requests_per_month"` // Platform-key requests; -1 for unlimited
+	BYOKEnabled             bool `json:"byok_enabled"`          // Can use Bring Your Own Key
+	BYOKUnlimited           bool `json:"byok_unlimited"`        // Unlimited requests via BYOK
+	ProjectsLimit           int  `json:"projects_limit"`        // -1 for unlimited
+	StorageGB               int  `json:"storage_gb"`
 	CollaboratorsPerProject int  `json:"collaborators_per_project"` // -1 for unlimited
-	CodeExecutionsPerDay   int   `json:"code_executions_per_day"`
-	GitHubExport           bool  `json:"github_export"`
-	PriorityAI             bool  `json:"priority_ai"`
-	TeamFeatures           bool  `json:"team_features"`
-	DedicatedSupport       bool  `json:"dedicated_support"`
-	SLA                    bool  `json:"sla"`
-	CustomIntegrations     bool  `json:"custom_integrations"`
+	CodeExecutionsPerDay    int  `json:"code_executions_per_day"`
+	GitHubExport            bool `json:"github_export"`
+	PriorityAI              bool `json:"priority_ai"`
+	TeamFeatures            bool `json:"team_features"`
+	DedicatedSupport        bool `json:"dedicated_support"`
+	SLA                     bool `json:"sla"`
+	CustomIntegrations      bool `json:"custom_integrations"`
 }
 
 // PlanConfig holds the environment-based configuration for plans
@@ -102,20 +102,20 @@ func GetAllPlans() []Plan {
 	config := LoadPlanConfig()
 
 	return []Plan{
-		// Free Plan - $0/month — BYOK-only, transparent cost
+		// Free Plan - static frontend only
 		{
 			Type:              PlanFree,
 			Name:              "Free",
-			Description:       "Evaluate the platform with your own API keys",
+			Description:       "Static frontend websites and UI mockups",
 			MonthlyPriceCents: 0,
 			MonthlyPriceID:    "",
 			AnnualPriceCents:  0,
 			AnnualPriceID:     "",
 			MonthlyCreditsUSD: 0,
 			Limits: PlanLimits{
-				AIRequestsPerMonth:      0, // BYOK only
-				BYOKEnabled:             true,
-				BYOKUnlimited:           true,
+				AIRequestsPerMonth:      0,
+				BYOKEnabled:             false,
+				BYOKUnlimited:           false,
 				ProjectsLimit:           3,
 				StorageGB:               1,
 				CollaboratorsPerProject: 1,
@@ -128,26 +128,26 @@ func GetAllPlans() []Plan {
 				CustomIntegrations:      false,
 			},
 			Features: []string{
-				"Bring your own API keys",
-				"All 5 AI agents",
-				"All tech stacks",
-				"Full cost transparency dashboard",
+				"Static frontend websites only",
+				"Landing pages and UI mockups",
+				"Fast mode",
+				"Upgrade to unlock backend and full-stack builds",
 			},
 			IsPopular:    false,
 			IsEnterprise: false,
 			TrialDays:    0,
 		},
 
-		// Builder Plan - $19/month — entry managed AI tier
+		// Builder Plan - $24/month — unlocks backend and full-stack
 		{
 			Type:              PlanBuilder,
 			Name:              "Builder",
-			Description:       "For solo developers who want managed AI credits",
-			MonthlyPriceCents: 1900, // $19.00
+			Description:       "Unlock backend and full-stack app generation",
+			MonthlyPriceCents: 2400, // $24.00
 			MonthlyPriceID:    config.StripePriceIDBuilderMonthly,
-			AnnualPriceCents:  18240, // $182.40/year ($15.20/month — 20% off)
+			AnnualPriceCents:  23040, // $230.40/year ($19.20/month — 20% off)
 			AnnualPriceID:     config.StripePriceIDBuilderAnnual,
-			MonthlyCreditsUSD: 10.00, // $10 in AI credits per billing cycle
+			MonthlyCreditsUSD: 12.00, // $12 in AI credits per billing cycle
 			Limits: PlanLimits{
 				AIRequestsPerMonth:      -1, // Unlimited via credits
 				BYOKEnabled:             true,
@@ -164,10 +164,11 @@ func GetAllPlans() []Plan {
 				CustomIntegrations:      false,
 			},
 			Features: []string{
-				"$10 in managed AI credits / mo",
+				"$12 in managed AI credits / mo",
+				"Backend and full-stack builds",
 				"All 5 AI agents",
 				"All 6 AI providers",
-				"All tech stacks",
+				"Deployable app architecture",
 				"Full cost transparency dashboard",
 				"Live per-token cost tracking",
 			},
@@ -176,16 +177,16 @@ func GetAllPlans() []Plan {
 			TrialDays:    0,
 		},
 
-		// Pro Plan - $49/month — best value
+		// Pro Plan - $59/month — best value
 		{
 			Type:              PlanPro,
 			Name:              "Pro",
-			Description:       "Best value — for developers who ship constantly",
-			MonthlyPriceCents: 4900, // $49.00
+			Description:       "For active builders shipping production apps regularly",
+			MonthlyPriceCents: 5900, // $59.00
 			MonthlyPriceID:    config.StripePriceIDProMonthly,
-			AnnualPriceCents:  47040, // $470.40/year ($39.20/month — 20% off)
+			AnnualPriceCents:  56640, // $566.40/year ($47.20/month — 20% off)
 			AnnualPriceID:     config.StripePriceIDProAnnual,
-			MonthlyCreditsUSD: 35.00, // $35 in AI credits per billing cycle
+			MonthlyCreditsUSD: 40.00, // $40 in AI credits per billing cycle
 			Limits: PlanLimits{
 				AIRequestsPerMonth:      -1, // Unlimited via credits
 				BYOKEnabled:             true,
@@ -202,29 +203,28 @@ func GetAllPlans() []Plan {
 				CustomIntegrations:      false,
 			},
 			Features: []string{
-				"$35 in managed AI credits / mo",
-				"All 5 AI agents",
-				"All 6 AI providers",
-				"All tech stacks",
-				"Full cost transparency dashboard",
-				"Live per-token cost tracking",
+				"$40 in managed AI credits / mo",
+				"Everything in Builder",
+				"Longer autonomous runs",
 				"Priority build queue",
+				"Advanced usage analytics",
+				"Realtime collaboration",
 			},
 			IsPopular:    true,
 			IsEnterprise: false,
 			TrialDays:    0,
 		},
 
-		// Team Plan - $99/month — for small teams
+		// Team Plan - $149/month — for small teams
 		{
 			Type:              PlanTeam,
 			Name:              "Team",
-			Description:       "For teams — shared workspace, up to 5 seats",
-			MonthlyPriceCents: 9900, // $99.00
+			Description:       "For teams shipping multiple production apps",
+			MonthlyPriceCents: 14900, // $149.00
 			MonthlyPriceID:    config.StripePriceIDTeamMonthly,
-			AnnualPriceCents:  95040, // $950.40/year ($79.20/month — 20% off)
+			AnnualPriceCents:  143040, // $1,430.40/year ($119.20/month — 20% off)
 			AnnualPriceID:     config.StripePriceIDTeamAnnual,
-			MonthlyCreditsUSD: 80.00, // $80 in AI credits per billing cycle
+			MonthlyCreditsUSD: 110.00, // $110 in AI credits per billing cycle
 			Limits: PlanLimits{
 				AIRequestsPerMonth:      -1, // Unlimited via credits
 				BYOKEnabled:             true,
@@ -241,15 +241,12 @@ func GetAllPlans() []Plan {
 				CustomIntegrations:      true,
 			},
 			Features: []string{
-				"$80 in managed AI credits / mo",
-				"All 5 AI agents",
-				"All 6 AI providers",
-				"All tech stacks",
-				"Full cost transparency dashboard",
-				"Live per-token cost tracking",
-				"Priority build queue",
+				"$110 in managed AI credits / mo",
+				"Everything in Pro",
 				"Shared team workspace",
 				"Up to 5 seats",
+				"Priority build queue",
+				"Custom integrations",
 			},
 			IsPopular:    false,
 			IsEnterprise: false,
@@ -388,11 +385,11 @@ func IsWithinLimit(limit, current int) bool {
 
 // PricingInfo returns a formatted pricing structure for the frontend
 type PricingInfo struct {
-	Plans         []Plan `json:"plans"`
-	Currency      string `json:"currency"`
-	CurrencySymbol string `json:"currency_symbol"`
-	BillingCycles []string `json:"billing_cycles"`
-	TrialAvailable bool   `json:"trial_available"`
+	Plans          []Plan   `json:"plans"`
+	Currency       string   `json:"currency"`
+	CurrencySymbol string   `json:"currency_symbol"`
+	BillingCycles  []string `json:"billing_cycles"`
+	TrialAvailable bool     `json:"trial_available"`
 }
 
 // GetPricingInfo returns complete pricing information for display

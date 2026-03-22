@@ -6,6 +6,7 @@ import { DollarSign, TrendingUp, ChevronUp, Activity, Zap, Plus } from 'lucide-r
 import { cn } from '@/lib/utils'
 import apiService from '@/services/api'
 import { BuyCreditsModal } from '@/components/billing/BuyCreditsModal'
+import { useUser } from '@/hooks/useStore'
 
 interface UsageData {
   totalCost: number
@@ -33,15 +34,27 @@ interface CostTickerProps {
 }
 
 export default function CostTicker({ className }: CostTickerProps) {
+  const user = useUser()
   const [isExpanded, setIsExpanded] = useState(false)
   const [usage, setUsage] = useState<UsageData | null>(null)
   const [billing, setBilling] = useState<BillingData | null>(null)
   const [loading, setLoading] = useState(true)
   const [showBuyCredits, setShowBuyCredits] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const canUseBYOK = user != null && ['builder', 'pro', 'team', 'enterprise', 'owner'].includes(user.subscription_type)
 
   const fetchUsage = useCallback(async () => {
     try {
+      if (!canUseBYOK) {
+        setUsage(null)
+        setBilling({
+          creditBalance: user?.credit_balance ?? 0,
+          hasUnlimitedCredits: Boolean(user?.has_unlimited_credits),
+          bypassBilling: Boolean(user?.bypass_billing),
+        })
+        return
+      }
+
       const response = await apiService.getBYOKUsage()
       if (response.success) {
         setUsage({
@@ -65,7 +78,7 @@ export default function CostTicker({ className }: CostTickerProps) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [canUseBYOK, user?.bypass_billing, user?.credit_balance, user?.has_unlimited_credits])
 
   useEffect(() => {
     fetchUsage()
@@ -203,7 +216,7 @@ export default function CostTicker({ className }: CostTickerProps) {
             </div>
           </div>
 
-          {(usage?.platformCost !== undefined || usage?.byokCost !== undefined) && (
+          {canUseBYOK && (usage?.platformCost !== undefined || usage?.byokCost !== undefined) && (
             <div className="px-4 py-2 text-[10px] text-gray-500 border-b border-gray-800/50">
               Platform: ${(usage?.platformCost ?? 0).toFixed(2)} · BYOK: ${(usage?.byokCost ?? 0).toFixed(2)}
             </div>

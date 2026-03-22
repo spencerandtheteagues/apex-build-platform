@@ -62,6 +62,9 @@ type StartDeploymentRequest struct {
 // POST /api/v1/projects/:id/deploy
 func (h *HostingHandler) StartDeployment(c *gin.Context) {
 	userID := c.GetUint("user_id")
+	if !requirePaidBackendPlan(c, h.db, userID, "deployments") {
+		return
+	}
 	projectIDStr := c.Param("id")
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {
@@ -1040,6 +1043,9 @@ func (h *HostingHandler) GetHostingStatus(c *gin.Context) {
 // POST /api/v1/hosting/:projectId/deploy
 func (h *HostingHandler) QuickDeploy(c *gin.Context) {
 	userID := c.GetUint("user_id")
+	if !requirePaidBackendPlan(c, h.db, userID, "deployments") {
+		return
+	}
 	projectIDStr := c.Param("projectId")
 	projectID, err := strconv.ParseUint(projectIDStr, 10, 32)
 	if err != nil {

@@ -30,6 +30,9 @@ func NewDeployHandler(db *gorm.DB, service *deploy.DeploymentService) *DeployHan
 // POST /api/v1/deploy
 func (h *DeployHandler) StartDeployment(c *gin.Context) {
 	userID := c.GetUint("user_id")
+	if !requirePaidBackendPlan(c, h.db, userID, "deployments") {
+		return
+	}
 
 	var req struct {
 		ProjectID    uint              `json:"project_id" binding:"required"`

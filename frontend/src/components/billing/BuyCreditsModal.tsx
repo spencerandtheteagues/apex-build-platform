@@ -1,8 +1,8 @@
 // APEX-BUILD — Buy Credits Modal
 // One-time credit top-up via Stripe Checkout
 
-import React, { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import React, { useEffect, useState } from 'react'
+import { motion } from 'framer-motion'
 import { X, CreditCard, Zap, Check, AlertCircle, Loader2 } from 'lucide-react'
 import apiService from '@/services/api'
 
@@ -13,11 +13,11 @@ interface CreditPack {
   popular?: boolean
 }
 
-const PACKS: CreditPack[] = [
-  { amountUsd: 10,  creditUsd: 10,  label: '$10'  },
-  { amountUsd: 25,  creditUsd: 25,  label: '$25'  },
-  { amountUsd: 50,  creditUsd: 50,  label: '$50',  popular: true },
+const DEFAULT_PACKS: CreditPack[] = [
+  { amountUsd: 25, creditUsd: 25, label: '$25' },
+  { amountUsd: 50, creditUsd: 50, label: '$50', popular: true },
   { amountUsd: 100, creditUsd: 100, label: '$100' },
+  { amountUsd: 250, creditUsd: 250, label: '$250' },
 ]
 
 interface Props {
@@ -27,9 +27,51 @@ interface Props {
 }
 
 export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason }) => {
+  const [packs, setPacks] = useState<CreditPack[]>(DEFAULT_PACKS)
   const [selected, setSelected] = useState<number>(50)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadPacks = async () => {
+      try {
+        const result = await apiService.getCreditBalance()
+        const rawPacks = result.data?.available_packs
+        if (!Array.isArray(rawPacks) || rawPacks.length === 0 || cancelled) {
+          return
+        }
+
+        const normalized = rawPacks
+          .map((pack) => ({
+            amountUsd: pack.amount_usd,
+            creditUsd: pack.credit_usd,
+            label: `$${pack.amount_usd}`,
+          }))
+          .filter((pack) => Number.isFinite(pack.amountUsd) && Number.isFinite(pack.creditUsd))
+          .sort((a, b) => a.amountUsd - b.amountUsd)
+          .map((pack, index, list) => ({
+            ...pack,
+            popular: index === Math.min(1, list.length - 1),
+          }))
+
+        if (normalized.length === 0) {
+          return
+        }
+
+        setPacks(normalized)
+        setSelected((current) => normalized.some((pack) => pack.amountUsd === current) ? current : normalized[Math.min(1, normalized.length - 1)].amountUsd)
+      } catch {
+        // Fall back to the baked-in pack list if billing metadata is unavailable.
+      }
+    }
+
+    void loadPacks()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const handlePurchase = async () => {
     setLoading(true)
@@ -53,7 +95,7 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason }) => {
     }
   }
 
-  const pack = PACKS.find(p => p.amountUsd === selected)!
+  const pack = packs.find(p => p.amountUsd === selected) ?? packs[0]
 
   return (
     <div
@@ -128,7 +170,7 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason }) => {
 
           {/* Pack selector */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
-            {PACKS.map(p => {
+            {packs.map(p => {
               const isSelected = p.amountUsd === selected
               return (
                 <button
@@ -238,7 +280,7 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason }) => {
             marginTop: 12, textAlign: 'center',
             fontSize: '0.7rem', color: 'rgba(255,255,255,0.25)', lineHeight: 1.55,
           }}>
-            Credits are added instantly after payment. Non-refundable. No subscription created.
+            Credits are added instantly after payment. Non-refundable. Credit packs extend usage but do not unlock backend or full-stack generation without a paid plan.
           </p>
         </div>
       </motion.div>

@@ -32,7 +32,7 @@ func NewDatabaseHandler(db *gorm.DB, manager *database.DatabaseManager, secretsM
 
 // CreateDatabaseRequest represents a request to create a new database
 type CreateDatabaseRequest struct {
-	Name string              `json:"name" binding:"required,min=1,max=64"`
+	Name string                `json:"name" binding:"required,min=1,max=64"`
 	Type database.DatabaseType `json:"type" binding:"required"`
 }
 
@@ -56,6 +56,9 @@ func (h *DatabaseHandler) CreateDatabase(c *gin.Context) {
 			Error:   "User not authenticated",
 			Code:    "NOT_AUTHENTICATED",
 		})
+		return
+	}
+	if !requirePaidBackendPlan(c, h.DB, userID, "managed databases") {
 		return
 	}
 
@@ -740,8 +743,8 @@ func (h *DatabaseHandler) GetMetrics(c *gin.Context) {
 		Data: gin.H{
 			"metrics": metrics,
 			"limits": gin.H{
-				"max_storage_mb":   managedDB.MaxStorageMB,
-				"max_connections":  managedDB.MaxConnections,
+				"max_storage_mb":  managedDB.MaxStorageMB,
+				"max_connections": managedDB.MaxConnections,
 			},
 		},
 	})

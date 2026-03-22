@@ -15,6 +15,7 @@ import apiService, {
   UsageWarning,
   PlanType
 } from '@/services/api'
+import { useUser } from '@/hooks/useStore'
 
 interface UsageData {
   totalCost: number
@@ -50,6 +51,7 @@ const PROVIDER_COLORS: Record<string, { bg: string; bar: string; text: string; l
 
 const PLAN_COLORS: Record<PlanType, { bg: string; border: string; text: string; badge: string }> = {
   free: { bg: 'bg-gray-500/10', border: 'border-gray-500/30', text: 'text-gray-400', badge: 'bg-gray-500/20' },
+  builder: { bg: 'bg-indigo-500/10', border: 'border-indigo-500/30', text: 'text-indigo-300', badge: 'bg-indigo-500/20' },
   pro: { bg: 'bg-blue-500/10', border: 'border-blue-500/30', text: 'text-blue-400', badge: 'bg-blue-500/20' },
   team: { bg: 'bg-purple-500/10', border: 'border-purple-500/30', text: 'text-purple-400', badge: 'bg-purple-500/20' },
   enterprise: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', badge: 'bg-amber-500/20' },
@@ -58,6 +60,7 @@ const PLAN_COLORS: Record<PlanType, { bg: string; border: string; text: string; 
 
 const PLAN_NAMES: Record<PlanType, string> = {
   free: 'Free',
+  builder: 'Builder',
   pro: 'Pro',
   team: 'Team',
   enterprise: 'Enterprise',
@@ -353,6 +356,7 @@ function PlanComparison({
 }
 
 export default function UsageDashboard() {
+  const user = useUser()
   const [usage, setUsage] = useState<UsageData | null>(null)
   const [billing, setBilling] = useState<BillingData | null>(null)
   const [planUsage, setPlanUsage] = useState<CurrentUsageData | null>(null)
@@ -364,6 +368,7 @@ export default function UsageDashboard() {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   })
+  const canUseBYOK = user != null && ['builder', 'pro', 'team', 'enterprise', 'owner'].includes(user.subscription_type)
 
   const fetchUsage = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true)
@@ -372,13 +377,15 @@ export default function UsageDashboard() {
     try {
       // Fetch all usage data in parallel
       const [byokResponse, currentUsageResponse, limitsResponse] = await Promise.allSettled([
-        apiService.getBYOKUsage(monthKey),
+        canUseBYOK
+          ? apiService.getBYOKUsage(monthKey)
+          : Promise.resolve(null),
         apiService.getCurrentUsage(),
         apiService.getUsageLimits(),
       ])
 
       // Handle BYOK usage (AI costs)
-      if (byokResponse.status === 'fulfilled' && byokResponse.value.success) {
+      if (byokResponse.status === 'fulfilled' && byokResponse.value?.success) {
         setUsage({
           totalCost: byokResponse.value.data.total_cost,
           totalTokens: byokResponse.value.data.total_tokens,
@@ -398,6 +405,15 @@ export default function UsageDashboard() {
             bypassBilling: byokResponse.value.billing.bypass_billing,
           })
         }
+      } else {
+        setUsage(null)
+        if (user) {
+          setBilling({
+            creditBalance: user.credit_balance ?? 0,
+            hasUnlimitedCredits: Boolean(user.has_unlimited_credits),
+            bypassBilling: Boolean(user.bypass_billing),
+          })
+        }
       }
 
       // Handle plan usage quotas
@@ -415,7 +431,7 @@ export default function UsageDashboard() {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [monthKey])
+  }, [canUseBYOK, monthKey, user])
 
   useEffect(() => {
     fetchUsage()
@@ -471,7 +487,7 @@ export default function UsageDashboard() {
                 </span>
               )}
             </div>
-            <p className="text-sm text-gray-400">Track your plan quotas and AI spending</p>
+            <p className="text-sm text-gray-400">Track your plan quotas and managed AI spending</p>
           </div>
         </div>
         <button
@@ -591,39 +607,39 @@ export default function UsageDashboard() {
                     <tr className="border-b border-gray-700">
                       <th className="text-left py-2 px-3 text-gray-400 font-medium">Feature</th>
                       <th className="text-center py-2 px-3 text-gray-400 font-medium">Free</th>
-                      <th className="text-center py-2 px-3 text-blue-400 font-medium">Pro $12/mo</th>
-                      <th className="text-center py-2 px-3 text-purple-400 font-medium">Team $29/mo</th>
-                      <th className="text-center py-2 px-3 text-amber-400 font-medium">Enterprise $79/mo</th>
+                      <th className="text-center py-2 px-3 text-blue-400 font-medium">Builder $24/mo</th>
+                      <th className="text-center py-2 px-3 text-purple-400 font-medium">Pro $59/mo</th>
+                      <th className="text-center py-2 px-3 text-amber-400 font-medium">Team $149/mo</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800">
                     <tr>
                       <td className="py-2 px-3 text-gray-300">Projects</td>
                       <td className="py-2 px-3 text-center text-gray-400">{limits.all_plans.free?.projects || 3}</td>
-                      <td className="py-2 px-3 text-center text-white">{limits.all_plans.pro?.projects || 25}</td>
-                      <td className="py-2 px-3 text-center text-white">{limits.all_plans.team?.projects || 100}</td>
+                      <td className="py-2 px-3 text-center text-white">Unlimited</td>
+                      <td className="py-2 px-3 text-center text-white">Unlimited</td>
                       <td className="py-2 px-3 text-center text-emerald-400">Unlimited</td>
                     </tr>
                     <tr>
                       <td className="py-2 px-3 text-gray-300">Storage</td>
                       <td className="py-2 px-3 text-center text-gray-400">100 MB</td>
                       <td className="py-2 px-3 text-center text-white">5 GB</td>
-                      <td className="py-2 px-3 text-center text-white">25 GB</td>
-                      <td className="py-2 px-3 text-center text-emerald-400">Unlimited</td>
+                      <td className="py-2 px-3 text-center text-white">20 GB</td>
+                      <td className="py-2 px-3 text-center text-emerald-400">100 GB</td>
                     </tr>
                     <tr>
-                      <td className="py-2 px-3 text-gray-300">AI Requests/month</td>
+                      <td className="py-2 px-3 text-gray-300">AI usage</td>
                       <td className="py-2 px-3 text-center text-gray-400">1,000</td>
-                      <td className="py-2 px-3 text-center text-white">10,000</td>
-                      <td className="py-2 px-3 text-center text-white">50,000</td>
-                      <td className="py-2 px-3 text-center text-emerald-400">Unlimited</td>
+                      <td className="py-2 px-3 text-center text-white">Credit-based</td>
+                      <td className="py-2 px-3 text-center text-white">Credit-based</td>
+                      <td className="py-2 px-3 text-center text-emerald-400">Credit-based</td>
                     </tr>
                     <tr>
                       <td className="py-2 px-3 text-gray-300">Execution Time/day</td>
                       <td className="py-2 px-3 text-center text-gray-400">10 min</td>
-                      <td className="py-2 px-3 text-center text-white">2 hours</td>
-                      <td className="py-2 px-3 text-center text-white">8 hours</td>
-                      <td className="py-2 px-3 text-center text-emerald-400">Unlimited</td>
+                      <td className="py-2 px-3 text-center text-white">4 hours</td>
+                      <td className="py-2 px-3 text-center text-white">12 hours</td>
+                      <td className="py-2 px-3 text-center text-emerald-400">24 hours</td>
                     </tr>
                   </tbody>
                 </table>
@@ -769,9 +785,9 @@ export default function UsageDashboard() {
           <div className="rounded-xl bg-red-500/5 border border-red-500/20 p-4 flex items-start gap-3">
             <DollarSign className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
             <div className="text-sm text-gray-300">
-              <strong className="text-red-400">Cost tip:</strong> BYOK uses your own provider keys and adds a small
+              <strong className="text-red-400">Cost tip:</strong> BYOK is available on Builder and higher. It uses your own provider keys and adds a small
               routing fee ($0.25 per 1M tokens). Configure your keys in <span className="text-white">Settings &gt; API Keys</span>{' '}
-              to keep costs low while staying fully in control.
+              to lower managed-credit burn on paid plans.
             </div>
           </div>
         </>
