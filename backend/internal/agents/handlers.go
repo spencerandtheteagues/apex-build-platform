@@ -532,7 +532,7 @@ func latestFailedTaskErrorLocked(build *Build) string {
 	return ""
 }
 
-func (h *BuildHandler) getBuildActionSession(userID uint, buildID string) (*Build, bool, error) {
+func (h *BuildHandler) getBuildActionSession(userID uint, buildID string, resumeExecutionOnRestore bool) (*Build, bool, error) {
 	build, err := h.manager.GetBuild(buildID)
 	if err == nil {
 		if build.UserID != userID {
@@ -555,7 +555,9 @@ func (h *BuildHandler) getBuildActionSession(userID uint, buildID string) (*Buil
 		return nil, false, errBuildNotActive
 	}
 
-	build, restored, restoreErr := h.manager.restoreBuildSessionFromSnapshot(snapshot)
+	build, restored, restoreErr := h.manager.restoreBuildSessionFromSnapshotWithOptions(snapshot, restoreBuildSessionOptions{
+		resumeExecution: resumeExecutionOnRestore,
+	})
 	if restoreErr != nil {
 		return nil, false, restoreErr
 	}
@@ -1108,7 +1110,7 @@ func (h *BuildHandler) PauseBuild(c *gin.Context) {
 		return
 	}
 
-	_, restoredSession, err := h.getBuildActionSession(uid, buildID)
+	_, restoredSession, err := h.getBuildActionSession(uid, buildID, false)
 	if err != nil {
 		writeBuildActionSessionError(c, err)
 		return
@@ -1147,7 +1149,7 @@ func (h *BuildHandler) ResumeBuild(c *gin.Context) {
 		return
 	}
 
-	_, restoredSession, err := h.getBuildActionSession(uid, buildID)
+	_, restoredSession, err := h.getBuildActionSession(uid, buildID, false)
 	if err != nil {
 		writeBuildActionSessionError(c, err)
 		return
@@ -1658,7 +1660,7 @@ func (h *BuildHandler) CancelBuild(c *gin.Context) {
 		return
 	}
 
-	_, restoredSession, err := h.getBuildActionSession(uid, buildID)
+	_, restoredSession, err := h.getBuildActionSession(uid, buildID, false)
 	if err != nil {
 		writeBuildActionSessionError(c, err)
 		return
@@ -2143,7 +2145,7 @@ func (h *BuildHandler) ApproveEdits(c *gin.Context) {
 		return
 	}
 
-	build, restoredSession, err := h.getBuildActionSession(uid, buildID)
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID, true)
 	if err != nil {
 		writeBuildActionSessionError(c, err)
 		return
@@ -2188,7 +2190,7 @@ func (h *BuildHandler) RejectEdits(c *gin.Context) {
 		return
 	}
 
-	build, restoredSession, err := h.getBuildActionSession(uid, buildID)
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID, true)
 	if err != nil {
 		writeBuildActionSessionError(c, err)
 		return
@@ -2234,7 +2236,7 @@ func (h *BuildHandler) ApproveAllEdits(c *gin.Context) {
 		return
 	}
 
-	build, restoredSession, err := h.getBuildActionSession(uid, buildID)
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID, true)
 	if err != nil {
 		writeBuildActionSessionError(c, err)
 		return
@@ -2265,7 +2267,7 @@ func (h *BuildHandler) RejectAllEdits(c *gin.Context) {
 		return
 	}
 
-	build, restoredSession, err := h.getBuildActionSession(uid, buildID)
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID, true)
 	if err != nil {
 		writeBuildActionSessionError(c, err)
 		return

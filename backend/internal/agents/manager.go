@@ -87,6 +87,7 @@ type AgentManager struct {
 	taskQueue      chan *Task
 	resultQueue    chan *TaskResult
 	subscribers    map[string][]chan *WSMessage
+	buildMonitors  map[string]struct{}
 	aiRouter       AIRouter
 	db             *gorm.DB // Database connection for persisting completed builds
 	editStore      *ProposedEditStore
@@ -146,6 +147,7 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 		taskQueue:     make(chan *Task, 100),
 		resultQueue:   make(chan *TaskResult, 100),
 		subscribers:   make(map[string][]chan *WSMessage),
+		buildMonitors: make(map[string]struct{}),
 		aiRouter:      aiRouter,
 		editStore:     NewProposedEditStore(),
 		pathGuard:     NewPathGuard(),
@@ -458,10 +460,27 @@ func (am *AgentManager) startBuildMonitors(buildID string) {
 	if am == nil || am.ctx == nil || strings.TrimSpace(buildID) == "" {
 		return
 	}
+	am.mu.Lock()
+	if am.buildMonitors == nil {
+		am.buildMonitors = make(map[string]struct{})
+	}
+	if _, exists := am.buildMonitors[buildID]; exists {
+		am.mu.Unlock()
+		return
+	}
+	am.buildMonitors[buildID] = struct{}{}
+	am.mu.Unlock()
 	// Build timeout goroutine - fail cleanly if build exceeds SLA.
 	go am.buildTimeoutHandler(buildID)
 	// Inactivity monitor - fail builds that stall in active states.
 	go am.inactivityMonitor(buildID)
+}
+
+func buildInteractionBlocksExecution(build *Build) bool {
+	if build == nil {
+		return false
+	}
+	return build.Interaction.Paused || build.Interaction.WaitingForUser
 }
 
 // buildTimeoutHandler fails builds that run past timeout instead of marking them as completed.
@@ -475,10 +494,9 @@ func (am *AgentManager) buildTimeoutHandler(buildID string) {
 	}
 
 	timeout := am.buildTimeoutForBuild(build)
-	timer := time.NewTimer(timeout)
 	probe := time.NewTicker(15 * time.Second)
-	defer timer.Stop()
 	defer probe.Stop()
+	deadline := time.Now().Add(timeout)
 
 	for {
 		select {
@@ -494,21 +512,18 @@ func (am *AgentManager) buildTimeoutHandler(buildID string) {
 
 			build.mu.RLock()
 			status := build.Status
+			blockedByInteraction := buildInteractionBlocksExecution(build)
 			build.mu.RUnlock()
 			if status == BuildCompleted || status == BuildFailed || status == BuildCancelled {
 				return
 			}
-		case <-timer.C:
-			am.mu.RLock()
-			build, exists = am.builds[buildID]
-			am.mu.RUnlock()
-			if !exists {
-				return
+			if blockedByInteraction {
+				deadline = deadline.Add(15 * time.Second)
+				continue
 			}
-
-			build.mu.RLock()
-			status := build.Status
-			build.mu.RUnlock()
+			if time.Now().Before(deadline) {
+				continue
+			}
 
 			// If build is still in progress, fail it as timeout.
 			if status == BuildPlanning || status == BuildInProgress || status == BuildTesting || status == BuildReviewing {
@@ -688,6 +703,7 @@ func (am *AgentManager) inactivityMonitor(buildID string) {
 		build.mu.RLock()
 		status := build.Status
 		lastUpdate := build.UpdatedAt
+		blockedByInteraction := buildInteractionBlocksExecution(build)
 		pendingTasks := 0
 		inProgressTasks := 0
 		activeRecoveryTasks := 0
@@ -722,6 +738,10 @@ func (am *AgentManager) inactivityMonitor(buildID string) {
 		// Stop monitoring if build is complete or failed
 		if status == BuildCompleted || status == BuildFailed || status == BuildCancelled {
 			return
+		}
+		if blockedByInteraction {
+			warningCount = 0
+			continue
 		}
 
 		// Check if there's been any activity
@@ -6891,7 +6911,7 @@ func (am *AgentManager) persistBuildSnapshot(build *Build, files []GeneratedFile
 		checkpointsJSON = string(b)
 	}
 	stateJSON := "{}"
-	if b, err := json.Marshal(copyBuildSnapshotStateLocked(build)); err == nil {
+	if b, err := json.Marshal(snapshotStateForPersistenceLocked(build)); err == nil {
 		stateJSON = string(b)
 	}
 	activityJSON := "[]"
@@ -7985,6 +8005,9 @@ func normalizeRestoredBuildStatus(snapshot *models.CompletedBuild) BuildStatus {
 	case BuildPending, BuildPlanning, BuildInProgress, BuildTesting, BuildReviewing, BuildCompleted, BuildFailed, BuildCancelled, BuildAwaitingReview:
 		return status
 	}
+	if strings.EqualFold(strings.TrimSpace(snapshot.Status), "building") {
+		return BuildInProgress
+	}
 
 	if snapshot.CompletedAt != nil && strings.TrimSpace(snapshot.Error) == "" {
 		return BuildCompleted
@@ -8154,7 +8177,15 @@ func (am *AgentManager) activateRestoredLeadAgent(build *Build, availableProvide
 	return nil
 }
 
+type restoreBuildSessionOptions struct {
+	resumeExecution bool
+}
+
 func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.CompletedBuild) (*Build, bool, error) {
+	return am.restoreBuildSessionFromSnapshotWithOptions(snapshot, restoreBuildSessionOptions{resumeExecution: true})
+}
+
+func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *models.CompletedBuild, options restoreBuildSessionOptions) (*Build, bool, error) {
 	if snapshot == nil {
 		return nil, false, fmt.Errorf("build snapshot is required")
 	}
@@ -8169,38 +8200,90 @@ func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.Complet
 	mode := normalizeRestoredBuildMode(snapshot.Mode)
 	powerMode := normalizeRestoredPowerMode(snapshot.PowerMode)
 	maxAgents, maxRetries, maxRequests, maxTokens := am.defaultBuildLimits(mode)
+	snapshotState := parseBuildSnapshotState(snapshot.StateJSON)
+	restoreContext := snapshotState.RestoreContext
 	providerMode := "platform"
-	if am.userHasActiveBYOKKey(snapshot.UserID) {
+	if restoreContext != nil && strings.TrimSpace(restoreContext.ProviderMode) != "" {
+		providerMode = strings.TrimSpace(strings.ToLower(restoreContext.ProviderMode))
+	} else if am.userHasActiveBYOKKey(snapshot.UserID) {
 		providerMode = "byok"
+	}
+	subscriptionPlan := ""
+	requirePreviewReady := false
+	requestsUsed := 0
+	readinessRecoveryAttempts := 0
+	roleAssignments := map[string]string(nil)
+	phasedPipelineComplete := false
+	diffMode := false
+	var techStack *TechStack
+	var plan *BuildPlan
+	if restoreContext != nil {
+		if planType := strings.TrimSpace(strings.ToLower(restoreContext.SubscriptionPlan)); planType != "" {
+			subscriptionPlan = planType
+		}
+		requirePreviewReady = restoreContext.RequirePreviewReady
+		requestsUsed = restoreContext.RequestsUsed
+		readinessRecoveryAttempts = restoreContext.ReadinessRecoveryAttempts
+		if restoreContext.MaxAgents > 0 {
+			maxAgents = restoreContext.MaxAgents
+		}
+		if restoreContext.MaxRetries > 0 {
+			maxRetries = restoreContext.MaxRetries
+		}
+		if restoreContext.MaxRequests > 0 {
+			maxRequests = restoreContext.MaxRequests
+		}
+		if restoreContext.MaxTokensPerRequest > 0 {
+			maxTokens = restoreContext.MaxTokensPerRequest
+		}
+		roleAssignments = cloneStringMap(restoreContext.RoleAssignments)
+		phasedPipelineComplete = restoreContext.PhasedPipelineComplete
+		diffMode = restoreContext.DiffMode
+		techStack = cloneTechStack(restoreContext.TechStack)
+		plan = cloneBuildPlan(restoreContext.Plan)
+	}
+	if techStack == nil && strings.TrimSpace(snapshot.TechStack) != "" {
+		var restoredStack TechStack
+		if err := json.Unmarshal([]byte(snapshot.TechStack), &restoredStack); err == nil {
+			techStack = &restoredStack
+		}
 	}
 
 	restoredFiles, _ := parseBuildFiles(snapshot.FilesJSON)
 	build := &Build{
-		ID:                  snapshot.BuildID,
-		UserID:              snapshot.UserID,
-		ProjectID:           snapshot.ProjectID,
-		Status:              normalizeRestoredBuildStatus(snapshot),
-		Mode:                mode,
-		PowerMode:           powerMode,
-		SubscriptionPlan:    "",
-		ProviderMode:        providerMode,
-		Description:         snapshot.Description,
-		Agents:              parseBuildAgents(snapshot.AgentsJSON),
-		Tasks:               parseBuildTasks(snapshot.TasksJSON),
-		Checkpoints:         parseBuildCheckpoints(snapshot.CheckpointsJSON),
-		Progress:            snapshot.Progress,
-		MaxAgents:           maxAgents,
-		MaxRetries:          maxRetries,
-		MaxRequests:         maxRequests,
-		MaxTokensPerRequest: maxTokens,
-		Interaction:         parseBuildInteraction(snapshot.InteractionJSON),
-		ActivityTimeline:    parseBuildActivityTimeline(snapshot.ActivityJSON),
-		SnapshotState:       parseBuildSnapshotState(snapshot.StateJSON),
-		SnapshotFiles:       restoredFiles,
-		CreatedAt:           snapshot.CreatedAt,
-		UpdatedAt:           snapshot.UpdatedAt,
-		CompletedAt:         snapshot.CompletedAt,
-		Error:               snapshot.Error,
+		ID:                        snapshot.BuildID,
+		UserID:                    snapshot.UserID,
+		ProjectID:                 snapshot.ProjectID,
+		Status:                    normalizeRestoredBuildStatus(snapshot),
+		Mode:                      mode,
+		PowerMode:                 powerMode,
+		SubscriptionPlan:          subscriptionPlan,
+		ProviderMode:              providerMode,
+		RequirePreviewReady:       requirePreviewReady,
+		Description:               snapshot.Description,
+		TechStack:                 techStack,
+		Plan:                      plan,
+		Agents:                    parseBuildAgents(snapshot.AgentsJSON),
+		Tasks:                     parseBuildTasks(snapshot.TasksJSON),
+		Checkpoints:               parseBuildCheckpoints(snapshot.CheckpointsJSON),
+		Progress:                  snapshot.Progress,
+		MaxAgents:                 maxAgents,
+		MaxRetries:                maxRetries,
+		MaxRequests:               maxRequests,
+		MaxTokensPerRequest:       maxTokens,
+		RequestsUsed:              requestsUsed,
+		ReadinessRecoveryAttempts: readinessRecoveryAttempts,
+		PhasedPipelineComplete:    phasedPipelineComplete,
+		DiffMode:                  diffMode,
+		RoleAssignments:           roleAssignments,
+		Interaction:               parseBuildInteraction(snapshot.InteractionJSON),
+		ActivityTimeline:          parseBuildActivityTimeline(snapshot.ActivityJSON),
+		SnapshotState:             snapshotState,
+		SnapshotFiles:             restoredFiles,
+		CreatedAt:                 snapshot.CreatedAt,
+		UpdatedAt:                 snapshot.UpdatedAt,
+		CompletedAt:               snapshot.CompletedAt,
+		Error:                     snapshot.Error,
 	}
 	if build.Agents == nil {
 		build.Agents = make(map[string]*Agent)
@@ -8213,6 +8296,12 @@ func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.Complet
 	}
 	if build.SnapshotState.PolicyState != nil {
 		build.SubscriptionPlan = strings.TrimSpace(strings.ToLower(build.SnapshotState.PolicyState.PlanType))
+	}
+	if build.Plan == nil && build.SnapshotState.RestoreContext != nil {
+		build.Plan = cloneBuildPlan(build.SnapshotState.RestoreContext.Plan)
+	}
+	if build.TechStack == nil && build.SnapshotState.RestoreContext != nil {
+		build.TechStack = cloneTechStack(build.SnapshotState.RestoreContext.TechStack)
 	}
 	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
 
@@ -8280,7 +8369,9 @@ func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.Complet
 	build.UpdatedAt = time.Now().UTC()
 	build.mu.Unlock()
 
-	am.resumeRestoredBuildExecution(build)
+	if options.resumeExecution {
+		am.resumeRestoredBuildExecution(build)
+	}
 	am.persistBuildSnapshot(build, nil)
 	return build, true, nil
 }
@@ -8347,6 +8438,10 @@ func restoredTaskAgentID(build *Build, task *Task) string {
 }
 
 func (am *AgentManager) resumeRestoredBuildExecution(build *Build) {
+	am.resumeBuildExecution(build, true)
+}
+
+func (am *AgentManager) resumeBuildExecution(build *Build, startMonitors bool) {
 	if build == nil || am == nil || am.taskQueue == nil {
 		return
 	}
@@ -8363,7 +8458,9 @@ func (am *AgentManager) resumeRestoredBuildExecution(build *Build) {
 		return
 	}
 
-	am.startBuildMonitors(build.ID)
+	if startMonitors {
+		am.startBuildMonitors(build.ID)
+	}
 
 	if paused || waitingForUser || status == BuildAwaitingReview {
 		return

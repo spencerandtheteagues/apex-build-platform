@@ -443,7 +443,25 @@ type BuildSnapshotState struct {
 	PolicyState         *BuildPolicyState        `json:"policy_state,omitempty"`
 	Blockers            []BuildBlocker           `json:"blockers,omitempty"`
 	Approvals           []BuildApproval          `json:"approvals,omitempty"`
+	RestoreContext      *BuildRestoreContext     `json:"restore_context,omitempty"`
 	Orchestration       *BuildOrchestrationState `json:"orchestration,omitempty"`
+}
+
+type BuildRestoreContext struct {
+	SubscriptionPlan          string            `json:"subscription_plan,omitempty"`
+	ProviderMode              string            `json:"provider_mode,omitempty"`
+	RequirePreviewReady       bool              `json:"require_preview_ready,omitempty"`
+	RequestsUsed              int               `json:"requests_used,omitempty"`
+	ReadinessRecoveryAttempts int               `json:"readiness_recovery_attempts,omitempty"`
+	MaxAgents                 int               `json:"max_agents,omitempty"`
+	MaxRetries                int               `json:"max_retries,omitempty"`
+	MaxRequests               int               `json:"max_requests,omitempty"`
+	MaxTokensPerRequest       int               `json:"max_tokens_per_request,omitempty"`
+	PhasedPipelineComplete    bool              `json:"phased_pipeline_complete,omitempty"`
+	DiffMode                  bool              `json:"diff_mode,omitempty"`
+	RoleAssignments           map[string]string `json:"role_assignments,omitempty"`
+	TechStack                 *TechStack        `json:"tech_stack,omitempty"`
+	Plan                      *BuildPlan        `json:"plan,omitempty"`
 }
 
 // Build represents an entire app-building session

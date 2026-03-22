@@ -12,15 +12,20 @@ import (
 
 func newTestIterationManager(router AIRouter) *AgentManager {
 	return &AgentManager{
-		agents:      make(map[string]*Agent),
-		builds:      make(map[string]*Build),
-		taskQueue:   make(chan *Task, 8),
-		resultQueue: make(chan *TaskResult, 8),
-		subscribers: make(map[string][]chan *WSMessage),
-		aiRouter:    router,
-		ctx:         context.Background(),
-		cancel:      func() {},
+		agents:        make(map[string]*Agent),
+		builds:        make(map[string]*Build),
+		taskQueue:     make(chan *Task, 8),
+		resultQueue:   make(chan *TaskResult, 8),
+		subscribers:   make(map[string][]chan *WSMessage),
+		buildMonitors: make(map[string]struct{}),
+		aiRouter:      router,
+		ctx:           context.Background(),
+		cancel:        func() {},
 	}
+}
+
+func ptrTime(value time.Time) *time.Time {
+	return &value
 }
 
 func TestRestoreBuildSessionFromSnapshotRehydratesFiles(t *testing.T) {
@@ -126,6 +131,17 @@ func TestNormalizeRestoredBuildStatusTreatsInterruptedFailuresAsResumable(t *tes
 	}
 }
 
+func TestNormalizeRestoredBuildStatusTreatsLegacyBuildingAsResumable(t *testing.T) {
+	snapshot := &models.CompletedBuild{
+		BuildID: "legacy-building-build",
+		Status:  "building",
+	}
+
+	if got := normalizeRestoredBuildStatus(snapshot); got != BuildInProgress {
+		t.Fatalf("normalizeRestoredBuildStatus = %s, want %s", got, BuildInProgress)
+	}
+}
+
 func TestRestoreBuildSessionFromSnapshotRequeuesInterruptedTasks(t *testing.T) {
 	db := openBuildTestDB(t)
 	manager := newTestIterationManager(&stubPreflight{
@@ -211,6 +227,203 @@ func TestRestoreBuildSessionFromSnapshotRequeuesInterruptedTasks(t *testing.T) {
 		}
 	default:
 		t.Fatalf("expected restored task to be requeued")
+	}
+}
+
+func TestRestoreBuildSessionFromSnapshotPreservesRuntimeAndTaskState(t *testing.T) {
+	db := openBuildTestDB(t)
+	persistManager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4},
+		userProviders: []ai.AIProvider{ai.ProviderGPT4},
+	})
+	persistManager.db = db
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:                        "restore-runtime-build",
+		UserID:                    42,
+		Status:                    BuildReviewing,
+		Mode:                      ModeFull,
+		PowerMode:                 PowerMax,
+		SubscriptionPlan:          "team",
+		ProviderMode:              "byok",
+		RequirePreviewReady:       true,
+		Description:               "Resume the orchestration state faithfully",
+		TechStack:                 &TechStack{Frontend: "React", Backend: "Go", Database: "PostgreSQL", Extras: []string{"Redis"}},
+		Plan:                      &BuildPlan{ID: "plan-1", BuildID: "restore-runtime-build", AppType: "fullstack", TechStack: TechStack{Frontend: "React", Backend: "Go"}},
+		Progress:                  88,
+		MaxAgents:                 6,
+		MaxRetries:                4,
+		MaxRequests:               17,
+		MaxTokensPerRequest:       4096,
+		RequestsUsed:              5,
+		ReadinessRecoveryAttempts: 2,
+		PhasedPipelineComplete:    true,
+		DiffMode:                  true,
+		RoleAssignments:           map[string]string{"architect": "claude", "frontend": "gpt4"},
+		Tasks: []*Task{
+			{
+				ID:            "task-fix",
+				Type:          TaskFix,
+				Description:   "Patch the failing preview verification",
+				Priority:      90,
+				AssignedTo:    "solver-1",
+				Status:        TaskInProgress,
+				Input:         map[string]any{"action": "fix_tests", "path": "src/App.tsx"},
+				Output:        &TaskOutput{Messages: []string{"retrying preview"}, Suggestions: []string{"install missing package"}},
+				CreatedAt:     now.Add(-2 * time.Minute),
+				StartedAt:     ptrTime(now.Add(-90 * time.Second)),
+				Error:         "preview failed",
+				RetryCount:    2,
+				MaxRetries:    5,
+				ErrorHistory:  []ErrorAttempt{{AttemptNumber: 1, Error: "missing dependency", Timestamp: now.Add(-80 * time.Second), Analysis: "add test dependency"}},
+				RetryStrategy: RetryWithFix,
+			},
+		},
+		CreatedAt: now.Add(-4 * time.Minute),
+		UpdatedAt: now.Add(-30 * time.Second),
+	}
+
+	persistManager.persistBuildSnapshot(build, []GeneratedFile{{Path: "src/App.tsx", Content: "export default function App(){return null}", Language: "typescript", Size: 42, IsNew: true}})
+
+	var snapshot models.CompletedBuild
+	if err := db.Where("build_id = ?", build.ID).First(&snapshot).Error; err != nil {
+		t.Fatalf("fetch snapshot: %v", err)
+	}
+
+	restoreManager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4},
+		userProviders: []ai.AIProvider{ai.ProviderGPT4},
+	})
+	restoreManager.db = db
+
+	restoredBuild, restored, err := restoreManager.restoreBuildSessionFromSnapshot(&snapshot)
+	if err != nil {
+		t.Fatalf("restoreBuildSessionFromSnapshot returned error: %v", err)
+	}
+	if !restored {
+		t.Fatalf("expected restored=true")
+	}
+	if restoredBuild.ProviderMode != "byok" {
+		t.Fatalf("expected provider mode byok, got %s", restoredBuild.ProviderMode)
+	}
+	if restoredBuild.SubscriptionPlan != "team" {
+		t.Fatalf("expected subscription plan team, got %s", restoredBuild.SubscriptionPlan)
+	}
+	if !restoredBuild.RequirePreviewReady {
+		t.Fatalf("expected require_preview_ready to persist")
+	}
+	if restoredBuild.RequestsUsed != 5 {
+		t.Fatalf("expected RequestsUsed=5, got %d", restoredBuild.RequestsUsed)
+	}
+	if restoredBuild.ReadinessRecoveryAttempts != 2 {
+		t.Fatalf("expected ReadinessRecoveryAttempts=2, got %d", restoredBuild.ReadinessRecoveryAttempts)
+	}
+	if restoredBuild.MaxRequests != 17 || restoredBuild.MaxTokensPerRequest != 4096 {
+		t.Fatalf("expected restored max request limits, got max_requests=%d max_tokens=%d", restoredBuild.MaxRequests, restoredBuild.MaxTokensPerRequest)
+	}
+	if !restoredBuild.DiffMode || !restoredBuild.PhasedPipelineComplete {
+		t.Fatalf("expected diff/phased flags to persist, got diff=%v phased=%v", restoredBuild.DiffMode, restoredBuild.PhasedPipelineComplete)
+	}
+	if restoredBuild.TechStack == nil || restoredBuild.TechStack.Backend != "Go" {
+		t.Fatalf("expected tech stack to restore, got %+v", restoredBuild.TechStack)
+	}
+	if restoredBuild.Plan == nil || restoredBuild.Plan.AppType != "fullstack" {
+		t.Fatalf("expected plan to restore, got %+v", restoredBuild.Plan)
+	}
+	if restoredBuild.RoleAssignments["frontend"] != "gpt4" {
+		t.Fatalf("expected role assignments to restore, got %+v", restoredBuild.RoleAssignments)
+	}
+	if len(restoredBuild.Tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(restoredBuild.Tasks))
+	}
+	restoredTask := restoredBuild.Tasks[0]
+	if restoredTask.Input["action"] != "fix_tests" {
+		t.Fatalf("expected task input to restore, got %+v", restoredTask.Input)
+	}
+	if restoredTask.Output == nil || len(restoredTask.Output.Messages) != 1 || restoredTask.Output.Messages[0] != "retrying preview" {
+		t.Fatalf("expected task output to restore, got %+v", restoredTask.Output)
+	}
+	if len(restoredTask.ErrorHistory) != 1 || restoredTask.ErrorHistory[0].Error != "missing dependency" {
+		t.Fatalf("expected error history to restore, got %+v", restoredTask.ErrorHistory)
+	}
+}
+
+func TestResumeBuildRequeuesPausedRestoredTasks(t *testing.T) {
+	manager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	})
+
+	snapshot := &models.CompletedBuild{
+		BuildID:     "restore-paused-build",
+		UserID:      1,
+		Description: "Resume a paused restored build",
+		Status:      "in_progress",
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    71,
+		InteractionJSON: `{
+			"paused": true,
+			"pause_reason": "Waiting for user"
+		}`,
+		AgentsJSON: `[{
+			"id":"solver-1",
+			"role":"solver",
+			"provider":"claude",
+			"model":"claude-sonnet-4-6",
+			"status":"working",
+			"build_id":"restore-paused-build",
+			"current_task":{"id":"task-fix","type":"fix","description":"Repair the preview build"},
+			"progress":71,
+			"created_at":"2026-03-22T00:00:00Z",
+			"updated_at":"2026-03-22T00:00:00Z"
+		}]`,
+		TasksJSON: `[{
+			"id":"task-fix",
+			"type":"fix",
+			"description":"Repair the preview build",
+			"priority":70,
+			"assigned_to":"solver-1",
+			"status":"pending",
+			"created_at":"2026-03-22T00:00:00Z",
+			"max_retries":3
+		}]`,
+		CreatedAt: time.Now().Add(-2 * time.Minute).UTC(),
+		UpdatedAt: time.Now().Add(-time.Minute).UTC(),
+	}
+
+	build, restored, err := manager.restoreBuildSessionFromSnapshotWithOptions(snapshot, restoreBuildSessionOptions{resumeExecution: false})
+	if err != nil {
+		t.Fatalf("restoreBuildSessionFromSnapshotWithOptions returned error: %v", err)
+	}
+	if !restored {
+		t.Fatalf("expected restored=true")
+	}
+	select {
+	case task := <-manager.taskQueue:
+		t.Fatalf("expected paused restore not to queue tasks, got %+v", task)
+	default:
+	}
+
+	interaction, err := manager.ResumeBuild(build.ID, "continue")
+	if err != nil {
+		t.Fatalf("ResumeBuild returned error: %v", err)
+	}
+	if interaction.Paused {
+		t.Fatalf("expected paused flag to clear on resume")
+	}
+
+	select {
+	case resumed := <-manager.taskQueue:
+		if resumed == nil || resumed.ID != "task-fix" {
+			t.Fatalf("expected task-fix to be requeued, got %+v", resumed)
+		}
+	default:
+		t.Fatalf("expected resumed task to be queued")
 	}
 }
 

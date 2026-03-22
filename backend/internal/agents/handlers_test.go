@@ -1247,6 +1247,78 @@ func TestPauseBuildRejectsTerminalSnapshotWithoutRestoringSession(t *testing.T) 
 	}
 }
 
+func TestPauseBuildRestoredSnapshotDoesNotAutoResumeWork(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "restored-active-build",
+		UserID:      1,
+		Description: "Pause should not resume restored work first",
+		Status:      "in_progress",
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    72,
+		AgentsJSON: `[{
+			"id":"solver-1",
+			"role":"solver",
+			"provider":"claude",
+			"model":"claude-sonnet-4-6",
+			"status":"working",
+			"build_id":"restored-active-build",
+			"current_task":{"id":"task-fix","type":"fix","description":"Repair the preview build"},
+			"progress":72,
+			"created_at":"2026-03-22T00:00:00Z",
+			"updated_at":"2026-03-22T00:00:00Z"
+		}]`,
+		TasksJSON: `[{
+			"id":"task-fix",
+			"type":"fix",
+			"description":"Repair the preview build",
+			"priority":70,
+			"assigned_to":"solver-1",
+			"status":"pending",
+			"created_at":"2026-03-22T00:00:00Z",
+			"max_retries":3
+		}]`,
+		FilesJSON: "[]",
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	})
+	am.db = db
+	am.editStore = NewProposedEditStoreWithDB(db)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/restored-active-build/pause", bytes.NewReader([]byte(`{"reason":"hold"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected pause 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"restored_session":true`) {
+		t.Fatalf("expected restored_session=true, got %s", w.Body.String())
+	}
+
+	select {
+	case task := <-am.taskQueue:
+		t.Fatalf("expected pause route not to auto-resume restored work, got queued task %+v", task)
+	default:
+	}
+
+	build, err := am.GetBuild("restored-active-build")
+	if err != nil {
+		t.Fatalf("expected restored live build after pause: %v", err)
+	}
+	if !build.Interaction.Paused {
+		t.Fatalf("expected build to be paused after control route")
+	}
+}
+
 func TestDownloadCompletedBuildRejectsFailedSnapshot(t *testing.T) {
 	db := openBuildTestDB(t)
 	filesJSON, err := json.Marshal([]GeneratedFile{

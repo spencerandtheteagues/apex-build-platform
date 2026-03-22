@@ -30,20 +30,23 @@ type buildAgentSnapshot struct {
 }
 
 type buildTaskSnapshot struct {
-	ID            string        `json:"id"`
-	Type          TaskType      `json:"type"`
-	Description   string        `json:"description"`
-	Priority      int           `json:"priority"`
-	Dependencies  []string      `json:"dependencies,omitempty"`
-	AssignedTo    string        `json:"assigned_to,omitempty"`
-	Status        TaskStatus    `json:"status"`
-	CreatedAt     time.Time     `json:"created_at"`
-	StartedAt     *time.Time    `json:"started_at,omitempty"`
-	CompletedAt   *time.Time    `json:"completed_at,omitempty"`
-	Error         string        `json:"error,omitempty"`
-	RetryCount    int           `json:"retry_count,omitempty"`
-	MaxRetries    int           `json:"max_retries,omitempty"`
-	RetryStrategy RetryStrategy `json:"retry_strategy,omitempty"`
+	ID            string         `json:"id"`
+	Type          TaskType       `json:"type"`
+	Description   string         `json:"description"`
+	Priority      int            `json:"priority"`
+	Dependencies  []string       `json:"dependencies,omitempty"`
+	AssignedTo    string         `json:"assigned_to,omitempty"`
+	Status        TaskStatus     `json:"status"`
+	Input         map[string]any `json:"input,omitempty"`
+	Output        *TaskOutput    `json:"output,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	StartedAt     *time.Time     `json:"started_at,omitempty"`
+	CompletedAt   *time.Time     `json:"completed_at,omitempty"`
+	Error         string         `json:"error,omitempty"`
+	RetryCount    int            `json:"retry_count,omitempty"`
+	MaxRetries    int            `json:"max_retries,omitempty"`
+	ErrorHistory  []ErrorAttempt `json:"error_history,omitempty"`
+	RetryStrategy RetryStrategy  `json:"retry_strategy,omitempty"`
 }
 
 type buildCheckpointSnapshot struct {
@@ -62,6 +65,30 @@ func copyBuildSnapshotStateLocked(build *Build) BuildSnapshotState {
 		return BuildSnapshotState{}
 	}
 	return cloneBuildSnapshotState(build.SnapshotState)
+}
+
+func snapshotStateForPersistenceLocked(build *Build) BuildSnapshotState {
+	state := copyBuildSnapshotStateLocked(build)
+	if build == nil {
+		return state
+	}
+	state.RestoreContext = &BuildRestoreContext{
+		SubscriptionPlan:          build.SubscriptionPlan,
+		ProviderMode:              build.ProviderMode,
+		RequirePreviewReady:       build.RequirePreviewReady,
+		RequestsUsed:              build.RequestsUsed,
+		ReadinessRecoveryAttempts: build.ReadinessRecoveryAttempts,
+		MaxAgents:                 build.MaxAgents,
+		MaxRetries:                build.MaxRetries,
+		MaxRequests:               build.MaxRequests,
+		MaxTokensPerRequest:       build.MaxTokensPerRequest,
+		PhasedPipelineComplete:    build.PhasedPipelineComplete,
+		DiffMode:                  build.DiffMode,
+		RoleAssignments:           cloneStringMap(build.RoleAssignments),
+		TechStack:                 cloneTechStack(build.TechStack),
+		Plan:                      cloneBuildPlan(build.Plan),
+	}
+	return state
 }
 
 func copyBuildOrchestrationStateLocked(build *Build) *BuildOrchestrationState {
@@ -169,12 +196,15 @@ func copyBuildTaskSnapshotsLocked(build *Build) []buildTaskSnapshot {
 			Dependencies:  dependencies,
 			AssignedTo:    task.AssignedTo,
 			Status:        task.Status,
+			Input:         cloneTaskInput(task.Input),
+			Output:        cloneTaskOutput(task.Output),
 			CreatedAt:     task.CreatedAt,
 			StartedAt:     task.StartedAt,
 			CompletedAt:   task.CompletedAt,
 			Error:         task.Error,
 			RetryCount:    task.RetryCount,
 			MaxRetries:    task.MaxRetries,
+			ErrorHistory:  cloneErrorAttempts(task.ErrorHistory),
 			RetryStrategy: task.RetryStrategy,
 		})
 	}
@@ -271,12 +301,15 @@ func parseBuildTasks(raw string) []*Task {
 			Dependencies:  dependencies,
 			AssignedTo:    snapshot.AssignedTo,
 			Status:        snapshot.Status,
+			Input:         cloneTaskInput(snapshot.Input),
+			Output:        cloneTaskOutput(snapshot.Output),
 			CreatedAt:     snapshot.CreatedAt,
 			StartedAt:     snapshot.StartedAt,
 			CompletedAt:   snapshot.CompletedAt,
 			Error:         snapshot.Error,
 			RetryCount:    snapshot.RetryCount,
 			MaxRetries:    snapshot.MaxRetries,
+			ErrorHistory:  cloneErrorAttempts(snapshot.ErrorHistory),
 			RetryStrategy: snapshot.RetryStrategy,
 		})
 	}
@@ -367,4 +400,92 @@ func cloneBuildOrchestrationState(state *BuildOrchestrationState) *BuildOrchestr
 		return &clone
 	}
 	return &decoded
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func cloneTechStack(stack *TechStack) *TechStack {
+	if stack == nil {
+		return nil
+	}
+	cloned := *stack
+	if stack.Extras != nil {
+		cloned.Extras = append([]string(nil), stack.Extras...)
+	}
+	return &cloned
+}
+
+func cloneBuildPlan(plan *BuildPlan) *BuildPlan {
+	if plan == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(plan)
+	if err != nil {
+		cloned := *plan
+		return &cloned
+	}
+	var decoded BuildPlan
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		cloned := *plan
+		return &cloned
+	}
+	return &decoded
+}
+
+func cloneTaskInput(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		cloned := make(map[string]any, len(input))
+		for key, value := range input {
+			cloned[key] = value
+		}
+		return cloned
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		cloned := make(map[string]any, len(input))
+		for key, value := range input {
+			cloned[key] = value
+		}
+		return cloned
+	}
+	return decoded
+}
+
+func cloneTaskOutput(output *TaskOutput) *TaskOutput {
+	if output == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(output)
+	if err != nil {
+		cloned := *output
+		return &cloned
+	}
+	var decoded TaskOutput
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		cloned := *output
+		return &cloned
+	}
+	return &decoded
+}
+
+func cloneErrorAttempts(history []ErrorAttempt) []ErrorAttempt {
+	if len(history) == 0 {
+		return nil
+	}
+	cloned := make([]ErrorAttempt, len(history))
+	copy(cloned, history)
+	return cloned
 }

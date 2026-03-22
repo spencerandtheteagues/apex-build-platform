@@ -708,6 +708,7 @@ func (am *AgentManager) ResumeBuild(buildID string, reason string) (BuildInterac
 	interaction := copyBuildInteractionStateLocked(build)
 	build.mu.Unlock()
 
+	am.resumeBuildExecution(build, true)
 	am.persistBuildSnapshot(build, nil)
 	am.broadcast(buildID, &WSMessage{
 		Type:      WSBuildFSMResumed,
