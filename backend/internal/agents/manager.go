@@ -7320,13 +7320,16 @@ completion_finalize:
 // persistBuildSnapshot upserts the latest build state to the database.
 // This runs for both in-progress and completed builds so users can recover state after restarts.
 func (am *AgentManager) persistBuildSnapshot(build *Build, files []GeneratedFile) {
-	if err := am.persistBuildSnapshotWithRetry(build, files, 1); err != nil {
+	if err := am.persistBuildSnapshotWithRetry(build, files, 3); err != nil {
 		log.Printf("Failed to persist build snapshot %s: %v", build.ID, err)
 	}
 }
 
 func (am *AgentManager) persistBuildSnapshotCritical(build *Build, files []GeneratedFile) error {
-	return am.persistBuildSnapshotWithRetry(build, files, 3)
+	if err := am.persistBuildSnapshotWithRetry(build, files, 5); err != nil {
+		return err
+	}
+	return am.verifyPersistedBuildSnapshot(build, 5)
 }
 
 func (am *AgentManager) persistBuildSnapshotWithRetry(build *Build, files []GeneratedFile, attempts int) error {
@@ -7463,6 +7466,38 @@ func (am *AgentManager) persistBuildSnapshotWithRetry(build *Build, files []Gene
 		}
 	}
 	return lastErr
+}
+
+func (am *AgentManager) verifyPersistedBuildSnapshot(build *Build, attempts int) error {
+	if am.db == nil || build == nil {
+		return nil
+	}
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	buildID := strings.TrimSpace(build.ID)
+	userID := build.UserID
+	if buildID == "" || userID == 0 {
+		return fmt.Errorf("build snapshot verification requires build ID and user ID")
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		var snapshot models.CompletedBuild
+		lastErr = am.db.Where("build_id = ? AND user_id = ?", buildID, userID).
+			Order("updated_at DESC").
+			Order("id DESC").
+			First(&snapshot).Error
+		if lastErr == nil {
+			return nil
+		}
+		if attempt < attempts {
+			time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
+		}
+	}
+
+	return fmt.Errorf("verify persisted build snapshot %s: %w", buildID, lastErr)
 }
 
 // finalizePhasedPipeline marks a phased execution pipeline as complete and hands

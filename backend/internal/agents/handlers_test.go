@@ -49,6 +49,7 @@ func testRouter(am *AgentManager) *gin.Engine {
 	build.POST("/:id/approve-all", h.ApproveAllEdits)
 	build.POST("/:id/reject-all", h.RejectAllEdits)
 	build.GET("/:id", h.GetBuildDetails)
+	build.GET("/:id/status", h.GetBuildStatus)
 	rg := r.Group("/api/v1", auth)
 	rg.GET("/builds/:buildId", h.GetCompletedBuild)
 	rg.GET("/builds/:buildId/download", h.DownloadCompletedBuild)
@@ -134,6 +135,110 @@ func TestGetBuildSnapshotFallsBackToBuildIDLookupAndEnforcesOwnership(t *testing
 
 	if _, err := handler.getBuildSnapshot(8, snapshot.BuildID); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("expected foreign-user lookup to return not found, got %v", err)
+	}
+}
+
+func TestGetBuildSnapshotFallsBackToUnscopedLookup(t *testing.T) {
+	db := openBuildTestDB(t)
+	snapshot := &models.CompletedBuild{
+		BuildID:     "snapshot-unscoped-fallback",
+		UserID:      7,
+		Status:      string(BuildPlanning),
+		Description: "Snapshot unscoped ownership fallback",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	if err := db.Create(snapshot).Error; err != nil {
+		t.Fatalf("create snapshot: %v", err)
+	}
+	if err := db.Delete(snapshot).Error; err != nil {
+		t.Fatalf("soft delete snapshot: %v", err)
+	}
+
+	handler := NewBuildHandler(&AgentManager{db: db}, nil)
+
+	found, err := handler.getBuildSnapshot(7, snapshot.BuildID)
+	if err != nil {
+		t.Fatalf("expected unscoped fallback lookup to succeed: %v", err)
+	}
+	if found == nil || found.BuildID != snapshot.BuildID {
+		t.Fatalf("expected snapshot %s, got %+v", snapshot.BuildID, found)
+	}
+}
+
+func TestGetBuildStatusRestoresActiveSnapshotOnRead(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-status-restore",
+		UserID:      1,
+		Description: "Continue building a static marketing site",
+		Status:      string(BuildReviewing),
+		Mode:        string(ModeFast),
+		PowerMode:   string(PowerFast),
+		Progress:    92,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"lead-1",
+			"role":"lead",
+			"provider":"claude",
+			"status":"working",
+			"progress":80
+		}]`,
+		TasksJSON: `[{
+			"id":"task-review",
+			"type":"review",
+			"description":"Review the generated frontend",
+			"assigned_to":"lead-1",
+			"status":"in_progress"
+		}]`,
+		StateJSON: `{
+			"current_phase":"review",
+			"quality_gate_required":true
+		}`,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+		taskQueue:   make(chan *Task, 8),
+		resultQueue: make(chan *TaskResult, 8),
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/active-status-restore/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body["live"] != true {
+		t.Fatalf("expected restored active session to be live, got %v", body["live"])
+	}
+	if body["restored_from_snapshot"] != true {
+		t.Fatalf("expected restored_from_snapshot=true, got %v", body["restored_from_snapshot"])
+	}
+	if body["status"] != string(BuildReviewing) {
+		t.Fatalf("expected reviewing status, got %v", body["status"])
+	}
+	if _, err := am.GetBuild("active-status-restore"); err != nil {
+		t.Fatalf("expected active build session to be restored into manager: %v", err)
 	}
 }
 
