@@ -223,7 +223,7 @@ const FEATURES = [
     heading: 'Pay According to What You Build.',
     sub: 'Free accounts can build static frontend websites and UI mockups. Upgrade to a monthly plan to unlock backend, database, auth, billing, and realtime app generation. Credit packs handle overages without forcing a bigger subscription.',
     points: [
-      { icon: '🆓', label: 'Free', desc: 'Static frontend pages, landing sites, and UI mockups. Best for lightweight website builds and concept validation.' },
+      { icon: '🆓', label: 'Free', desc: 'Static frontend pages, landing sites, and UI mockups with a one-time $5 managed trial. Best for lightweight website builds and concept validation.' },
       { icon: '🔨', label: 'Builder — $24/mo', desc: 'Unlock backend and full-stack generation with $12 in monthly credits included.' },
       { icon: '⚡', label: 'Pro — $59/mo', desc: 'Higher monthly credits, longer autonomous runs, priority queues, and advanced analytics.' },
       { icon: '👥', label: 'Team — $149/mo', desc: 'Shared team workspace, collaboration workflows, custom integrations, and $110 in monthly credits.' },

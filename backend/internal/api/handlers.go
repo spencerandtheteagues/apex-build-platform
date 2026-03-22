@@ -13,6 +13,7 @@ import (
 	"apex-build/internal/ai"
 	"apex-build/internal/auth"
 	"apex-build/internal/db"
+	"apex-build/internal/payments"
 	"apex-build/internal/pricing"
 	"apex-build/internal/startup"
 	"apex-build/internal/usage"
@@ -191,6 +192,20 @@ func (s *Server) Register(c *gin.Context) {
 			}
 			return err
 		}
+
+		if err := payments.ApplyCreditGrant(
+			tx,
+			user.ID,
+			payments.FreeSignupTrialCreditsUSD,
+			payments.CreditEntryTypeSignupTrial,
+			"One-time free managed trial credits",
+			"",
+			"",
+			string(payments.PlanFree),
+		); err != nil {
+			return err
+		}
+		user.CreditBalance = payments.FreeSignupTrialCreditsUSD
 
 		return nil
 	})

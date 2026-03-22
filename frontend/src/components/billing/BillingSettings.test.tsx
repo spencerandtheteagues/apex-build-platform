@@ -84,8 +84,9 @@ describe('BillingSettings', () => {
 
     expect(await screen.findByText('Billing control plane')).toBeTruthy()
     expect(screen.getByText(/Free accounts can build static frontend websites and UI mockups\./)).toBeTruthy()
+    expect(screen.getAllByText(/one-time \$5 managed trial/i).length).toBeGreaterThan(0)
     expect(screen.getByText(/Credits pay for managed AI usage\. Subscription tier unlocks capability boundaries/)).toBeTruthy()
-    expect(screen.getByText('Static/frontend-only')).toBeTruthy()
+    expect(screen.getByText('One-time $5 trial')).toBeTruthy()
     expect(screen.getByText('Credits do not unlock paid capabilities')).toBeTruthy()
   })
 

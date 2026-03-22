@@ -14,6 +14,7 @@ import (
 	"apex-build/internal/ai"
 	"apex-build/internal/auth"
 	"apex-build/internal/middleware"
+	"apex-build/internal/payments"
 	"apex-build/internal/spend"
 	"apex-build/internal/websocket"
 	"apex-build/pkg/models"
@@ -102,8 +103,22 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	// Save user to database
-	if err := h.DB.Create(user).Error; err != nil {
+	// Save user and grant the one-time free managed trial inside one transaction
+	if err := h.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(user).Error; err != nil {
+			return err
+		}
+		return payments.ApplyCreditGrant(
+			tx,
+			user.ID,
+			payments.FreeSignupTrialCreditsUSD,
+			payments.CreditEntryTypeSignupTrial,
+			"One-time free managed trial credits",
+			"",
+			"",
+			string(payments.PlanFree),
+		)
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, StandardResponse{
 			Success: false,
 			Error:   "Failed to create user",
@@ -111,6 +126,7 @@ func (h *Handler) Register(c *gin.Context) {
 		})
 		return
 	}
+	user.CreditBalance = payments.FreeSignupTrialCreditsUSD
 
 	// Generate tokens
 	tokens, err := h.AuthService.GenerateTokens(user)

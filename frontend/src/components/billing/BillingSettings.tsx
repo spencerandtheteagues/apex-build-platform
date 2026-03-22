@@ -38,7 +38,7 @@ interface Invoice {
 const planNarrative = (planType: string) => {
   switch (planType) {
     case 'free':
-      return 'Static frontend websites, mockups, and honest prototype work.'
+      return 'Static frontend websites, mockups, and honest prototype work with a one-time $5 managed trial.'
     case 'builder':
       return 'Unlocks backend, auth, database, deploy, publish, and BYOK for serious app builds.'
     case 'pro':
@@ -53,7 +53,7 @@ const planNarrative = (planType: string) => {
 const planCallouts = (planType: string) => {
   switch (planType) {
     case 'free':
-      return ['Static/frontend-only', 'No backend or publish', 'Credits do not unlock paid capabilities']
+      return ['One-time $5 trial', 'Static/frontend-only', 'Credits do not unlock paid capabilities']
     case 'builder':
       return ['Full-stack unlocked', 'Publish unlocked', 'BYOK unlocked']
     case 'pro':

@@ -214,57 +214,16 @@ func (h *PaymentHandlers) applyCredit(
 	amount float64,
 	entryType, description, stripeEventID, stripeInvoiceID, planType string,
 ) error {
-	// Guard: only try dedup when a real Stripe event ID is present.
-	if stripeEventID != "" {
-		dedup := models.ProcessedStripeEvent{
-			StripeEventID: stripeEventID,
-			EventType:     entryType,
-			ProcessedAt:   time.Now(),
+	if err := payments.ApplyCreditGrant(tx, userID, amount, entryType, description, stripeEventID, stripeInvoiceID, planType); err != nil {
+		if stripeEventID != "" && isDuplicateInsertError(err) {
+			log.Printf("Stripe event %s already processed — skipping duplicate", stripeEventID)
+			return nil
 		}
-		dedup.UserID = &userID
-		result := tx.Create(&dedup)
-		if result.Error != nil {
-			// Unique constraint violation means we already processed this event.
-			if isDuplicateInsertError(result.Error) {
-				log.Printf("Stripe event %s already processed — skipping duplicate", stripeEventID)
-				return nil
-			}
-			return fmt.Errorf("dedup insert failed: %w", result.Error)
-		}
+		return err
 	}
 
-	// Read current balance inside the transaction to compute balance_after.
-	var user models.User
-	if err := tx.Select("id, credit_balance").First(&user, userID).Error; err != nil {
-		return fmt.Errorf("user lookup in credit tx: %w", err)
-	}
-
-	balanceAfter := user.CreditBalance + amount
-
-	// Write the immutable ledger entry.
-	entry := models.CreditLedgerEntry{
-		UserID:          userID,
-		AmountUSD:       amount,
-		BalanceAfterUSD: balanceAfter,
-		EntryType:       entryType,
-		Description:     description,
-		StripeEventID:   stripeEventID,
-		StripeInvoiceID: stripeInvoiceID,
-		PlanType:        planType,
-	}
-	if err := tx.Create(&entry).Error; err != nil {
-		return fmt.Errorf("ledger entry insert failed: %w", err)
-	}
-
-	// Update the cached credit_balance on the user row.
-	if err := tx.Model(&models.User{}).
-		Where("id = ?", userID).
-		Update("credit_balance", gorm.Expr("credit_balance + ?", amount)).Error; err != nil {
-		return fmt.Errorf("credit_balance update failed: %w", err)
-	}
-
-	log.Printf("Credit applied: user=%d type=%s amount=+$%.4f balance_after=$%.4f event=%s",
-		userID, entryType, amount, balanceAfter, stripeEventID)
+	log.Printf("Credit applied: user=%d type=%s amount=+$%.4f event=%s",
+		userID, entryType, amount, stripeEventID)
 	return nil
 }
 

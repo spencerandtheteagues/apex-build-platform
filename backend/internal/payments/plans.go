@@ -11,11 +11,12 @@ import (
 type PlanType string
 
 const (
-	PlanFree       PlanType = "free"
-	PlanBuilder    PlanType = "builder"
-	PlanPro        PlanType = "pro"
-	PlanTeam       PlanType = "team"
-	PlanEnterprise PlanType = "enterprise"
+	PlanFree                  PlanType = "free"
+	PlanBuilder               PlanType = "builder"
+	PlanPro                   PlanType = "pro"
+	PlanTeam                  PlanType = "team"
+	PlanEnterprise            PlanType = "enterprise"
+	FreeSignupTrialCreditsUSD          = 5.0
 )
 
 // SubscriptionStatus represents the current state of a subscription
@@ -128,6 +129,7 @@ func GetAllPlans() []Plan {
 				CustomIntegrations:      false,
 			},
 			Features: []string{
+				"One-time $5 managed trial credits",
 				"Static frontend websites only",
 				"Landing pages and UI mockups",
 				"Fast mode",
