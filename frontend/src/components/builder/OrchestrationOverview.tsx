@@ -217,26 +217,109 @@ type DiffRow = {
   gating: string
 }
 
+type TimelineItem = {
+  id: string
+  label: string
+  description: string
+  status: TimelineStatus
+  timestamp?: string | null
+  substeps: string[]
+}
+
 export function OrchestrationOverview(props: OrchestrationOverviewProps) {
   const truthBySurface = props.truthBySurface || props.promotionDecision?.truth_by_surface || props.buildContract?.truth_by_surface || {}
+  const requiredCapabilities = props.capabilityState?.required_capabilities || EMPTY_CAPABILITIES
+  const contract = props.buildContract
+  const intent = props.intentBrief
+  const checkpoints = props.checkpoints || EMPTY_CHECKPOINTS
+  const blockers = props.blockers || EMPTY_BLOCKERS
 
-  const timeline = useMemo(() => {
-    return PHASE_DEFS.map((phase) => ({
-      ...phase,
-      status: phaseStatus(phase.id, props),
-    }))
-  }, [props])
+  const timeline = useMemo<TimelineItem[]>(() => {
+    return PHASE_DEFS.map((phase) => {
+      const status = phaseStatus(phase.id, props)
+      let timestamp: string | null = null
+      let substeps: string[] = []
+
+      switch (phase.id) {
+        case 'intent':
+          timestamp = formatTimestamp(intent?.created_at)
+          if (intent?.normalized_request) {
+            substeps.push('Request normalized from the original prompt.')
+          }
+          if (props.policyState?.classification) {
+            substeps.push(`Classification: ${humanize(props.policyState.classification)}.`)
+          }
+          if (requiredCapabilities.length > 0) {
+            substeps.push(`Capabilities inferred: ${requiredCapabilities.slice(0, 3).map(humanize).join(', ')}.`)
+          }
+          break
+        case 'contract':
+          if (contract?.verified) {
+            substeps.push('Contract verification completed.')
+          }
+          if (contract?.auth_contract?.required) {
+            substeps.push(`Auth strategy: ${[contract.auth_contract.provider, contract.auth_contract.session_strategy || contract.auth_contract.token_strategy].filter(Boolean).join(' · ')}.`)
+          }
+          if ((contract?.env_var_contract || []).length > 0) {
+            substeps.push(`${contract?.env_var_contract?.length || 0} secret or env requirement${(contract?.env_var_contract?.length || 0) === 1 ? '' : 's'} identified.`)
+          }
+          break
+        case 'work':
+          substeps = (props.workOrders || []).slice(0, 3).map((order) => order.summary || `${humanize(order.role)} ${humanize(order.category)}`)
+          if (substeps.length === 0 && status !== 'pending') {
+            substeps.push('Work order slicing is in progress.')
+          }
+          break
+        case 'patch':
+          timestamp = formatTimestamp((props.patchBundles || []).slice().sort((left, right) => String(right.created_at || '').localeCompare(String(left.created_at || '')))[0]?.created_at)
+          substeps = (props.patchBundles || []).slice(0, 3).map((bundle) => bundle.justification || `Patch bundle recorded${bundle.provider ? ` via ${bundle.provider}` : ''}.`)
+          if (substeps.length === 0 && status !== 'pending') {
+            substeps.push('Patch generation or repair is active.')
+          }
+          break
+        case 'verify':
+          timestamp = formatTimestamp((props.verificationReports || []).slice().sort((left, right) => String(right.generated_at || '').localeCompare(String(left.generated_at || '')))[0]?.generated_at)
+          substeps = (props.verificationReports || []).slice(0, 3).map((report) => `${humanize(report.surface)} ${humanize(report.status)} during ${humanize(report.phase)}.`)
+          if (substeps.length === 0 && blockers.length > 0) {
+            substeps.push(blockers[0].summary || blockers[0].title)
+          }
+          break
+        case 'promote':
+          timestamp = formatTimestamp(props.promotionDecision?.generated_at)
+          if (props.promotionDecision?.readiness_state) {
+            substeps.push(`Readiness state: ${humanize(props.promotionDecision.readiness_state)}.`)
+          }
+          if (props.promotionDecision?.production_candidate) {
+            substeps.push('Promotion marked this build as a production candidate.')
+          } else if (props.promotionDecision) {
+            substeps.push('Promotion remains constrained by current verification truth.')
+          }
+          if (checkpoints.length > 0) {
+            substeps.push(`${checkpoints.length} checkpoint${checkpoints.length === 1 ? '' : 's'} available for recovery.`)
+          }
+          break
+        default:
+          break
+      }
+
+      if (substeps.length === 0) {
+        substeps = ['Waiting for orchestration state to populate this phase.']
+      }
+
+      return {
+        ...phase,
+        status,
+        timestamp,
+        substeps: substeps.slice(0, 3),
+      }
+    })
+  }, [blockers, checkpoints, contract, intent, props, requiredCapabilities])
 
   const surfaces = Object.entries(truthBySurface)
     .filter(([, tags]) => Array.isArray(tags) && tags.length > 0)
     .sort(([left], [right]) => left.localeCompare(right))
 
   const requiredApprovals = (props.approvals || EMPTY_APPROVALS).filter((approval) => approval.required)
-  const checkpoints = props.checkpoints || EMPTY_CHECKPOINTS
-  const blockers = props.blockers || EMPTY_BLOCKERS
-  const requiredCapabilities = props.capabilityState?.required_capabilities || EMPTY_CAPABILITIES
-  const contract = props.buildContract
-  const intent = props.intentBrief
   const frontendTags = truthBySurface.frontend || EMPTY_TAGS
   const backendTags = truthBySurface.backend || EMPTY_TAGS
   const dataTags = truthBySurface.data || EMPTY_TAGS
@@ -474,10 +557,20 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
                   <div>
                     <div className="text-sm font-semibold text-white">{phase.label}</div>
                     <div className="mt-1 text-xs text-gray-400">{phase.description}</div>
+                    <div className="mt-3 space-y-1">
+                      {phase.substeps.map((substep, index) => (
+                        <div key={`${phase.id}-${index}`} className="text-xs text-gray-300">
+                          {substep}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <Badge variant="outline" className={cn('text-[11px]', timelineStatusTone[phase.status])}>
-                    {humanize(phase.status)}
-                  </Badge>
+                  <div className="flex flex-col items-end gap-2">
+                    <Badge variant="outline" className={cn('text-[11px]', timelineStatusTone[phase.status])}>
+                      {humanize(phase.status)}
+                    </Badge>
+                    <div className="text-[11px] text-gray-500">{phase.timestamp || 'Awaiting timestamp'}</div>
+                  </div>
                 </div>
               </div>
             ))}
