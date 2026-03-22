@@ -335,10 +335,18 @@ func deriveBuildApprovals(build *Build, capabilityState *BuildCapabilityState, p
 	}
 
 	upgradeBlocked := policy != nil && policy.UpgradeRequired
+	appendApproval("plan_upgrade_acknowledgement", "Plan upgrade acknowledgement", upgradeBlocked, upgradeBlocked, "This request exceeds the current plan and needs explicit user acknowledgement or an upgrade before paid-only work can continue.")
+	if upgradeBlocked && len(approvals) > 0 {
+		approvals[len(approvals)-1].Actor = "user"
+		approvals[len(approvals)-1].AcknowledgementRequired = true
+		approvals[len(approvals)-1].PlanTierRelated = true
+	}
 	appendApproval("full_stack_upgrade", "Full-stack upgrade", policy != nil && policy.Classification != BuildClassificationStaticReady, upgradeBlocked, policy.UpgradeReason)
+	appendApproval("auth", "Authentication and session wiring", capabilityState.RequiresAuth, upgradeBlocked, "Authentication flows need runtime support, secret review, and truthful session semantics.")
 	appendApproval("database", "Database access", capabilityState.RequiresDatabase, upgradeBlocked, "Persistent data needs a paid full-stack plan.")
 	appendApproval("external_api", "External API access", capabilityState.RequiresExternalAPI, false, "External integrations need secrets and integration review.")
 	appendApproval("file_storage", "File storage", capabilityState.RequiresStorage, upgradeBlocked, "Uploads and storage need backend runtime support.")
+	appendApproval("realtime", "Realtime channels", capabilityState.RequiresRealtime, upgradeBlocked, "Realtime features need backend runtime, connection auth, and transport verification.")
 	appendApproval("background_jobs", "Background jobs", capabilityState.RequiresJobs, upgradeBlocked, "Queues and background processing need server-side execution.")
 	appendApproval("secrets_usage", "Secrets usage", capabilityState.RequiresExternalAPI || capabilityState.RequiresBilling || capabilityState.RequiresAuth, false, "Runtime secrets should be provided before live integrations are promoted.")
 	appendApproval("billing", "Billing-related steps", capabilityState.RequiresBilling, upgradeBlocked, "Billing flows require backend runtime, callbacks, and production review.")

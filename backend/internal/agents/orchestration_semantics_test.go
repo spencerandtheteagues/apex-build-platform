@@ -97,6 +97,85 @@ func TestRefreshDerivedSnapshotStateLockedFullStackPaidBuild(t *testing.T) {
 	if len(build.SnapshotState.Approvals) == 0 {
 		t.Fatalf("expected approvals to be derived")
 	}
+
+	requiredKinds := map[string]bool{
+		"full_stack_upgrade": false,
+		"auth":               false,
+		"database":           false,
+		"billing":            false,
+		"realtime":           false,
+		"public_deployment":  false,
+	}
+	for _, approval := range build.SnapshotState.Approvals {
+		if _, ok := requiredKinds[approval.Kind]; ok {
+			requiredKinds[approval.Kind] = true
+			if approval.Status != ApprovalStatusSatisfied {
+				t.Fatalf("expected paid-plan approval %s to be satisfied, got %s", approval.Kind, approval.Status)
+			}
+		}
+	}
+	for kind, seen := range requiredKinds {
+		if !seen {
+			t.Fatalf("expected approval kind %s in %+v", kind, build.SnapshotState.Approvals)
+		}
+	}
+}
+
+func TestRefreshDerivedSnapshotStateLockedUpgradeRequiredBuildIncludesPlanAcknowledgement(t *testing.T) {
+	build := &Build{
+		ID:               "upgrade-build",
+		UserID:           9,
+		Status:           BuildPlanning,
+		Mode:             ModeFull,
+		PowerMode:        PowerBalanced,
+		SubscriptionPlan: "free",
+		ProviderMode:     "byok",
+		Description:      "Build a full stack SaaS with auth, postgres database, stripe billing, websocket collaboration, BYOK support, and publish it publicly",
+		Agents:           map[string]*Agent{},
+		Tasks:            []*Task{},
+		Checkpoints:      []*Checkpoint{},
+		CreatedAt:        time.Now().Add(-time.Minute).UTC(),
+		UpdatedAt:        time.Now().UTC(),
+	}
+	if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil {
+		orchestration.IntentBrief = compileIntentBriefFromRequest(&BuildRequest{
+			Description: build.Description,
+			Mode:        build.Mode,
+			PowerMode:   build.PowerMode,
+		}, build.ProviderMode)
+	}
+
+	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
+
+	if build.SnapshotState.PolicyState == nil || build.SnapshotState.PolicyState.Classification != BuildClassificationUpgradeRequired {
+		t.Fatalf("expected upgrade_required policy state, got %+v", build.SnapshotState.PolicyState)
+	}
+
+	approvalsByKind := map[string]BuildApproval{}
+	for _, approval := range build.SnapshotState.Approvals {
+		approvalsByKind[approval.Kind] = approval
+	}
+
+	planAck, ok := approvalsByKind["plan_upgrade_acknowledgement"]
+	if !ok {
+		t.Fatalf("expected plan_upgrade_acknowledgement approval")
+	}
+	if planAck.Status != ApprovalStatusPending {
+		t.Fatalf("expected pending plan acknowledgement, got %s", planAck.Status)
+	}
+	if !planAck.AcknowledgementRequired || planAck.Actor != "user" || !planAck.PlanTierRelated {
+		t.Fatalf("expected user acknowledgement metadata on %+v", planAck)
+	}
+
+	for _, kind := range []string{"full_stack_upgrade", "auth", "database", "billing", "realtime", "public_deployment", "byok"} {
+		approval, ok := approvalsByKind[kind]
+		if !ok {
+			t.Fatalf("expected approval %s", kind)
+		}
+		if approval.Status != ApprovalStatusPending {
+			t.Fatalf("expected pending status for %s, got %s", kind, approval.Status)
+		}
+	}
 }
 
 func TestBroadcastBuildProgressIncludesDerivedSemanticState(t *testing.T) {
