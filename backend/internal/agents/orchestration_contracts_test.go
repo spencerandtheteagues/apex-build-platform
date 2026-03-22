@@ -42,6 +42,25 @@ func TestCompileIntentBriefFromRequestDetectsCapabilities(t *testing.T) {
 	}
 }
 
+func TestCompileIntentBriefFromRequestHonorsNegatedBackendRequirements(t *testing.T) {
+	req := &BuildRequest{
+		Description: "Build a simple static marketing website. Frontend only. No backend. No database. No auth. No billing. No realtime.",
+		Mode:        ModeFull,
+		PowerMode:   PowerFast,
+	}
+
+	brief := compileIntentBriefFromRequest(req, "platform")
+	if brief == nil {
+		t.Fatal("expected intent brief")
+	}
+	if brief.AppType != "web" {
+		t.Fatalf("app type = %q, want web", brief.AppType)
+	}
+	if capabilityRequired(brief, CapabilityAPI) || capabilityRequired(brief, CapabilityAuth) || capabilityRequired(brief, CapabilityDatabase) || capabilityRequired(brief, CapabilityBilling) || capabilityRequired(brief, CapabilityRealtime) {
+		t.Fatalf("expected no paid/backend capabilities, got %+v", brief.RequiredCapabilities)
+	}
+}
+
 func TestCompileBuildContractFromPlanSeedsTruthAndVerification(t *testing.T) {
 	plan := &BuildPlan{
 		ID:      "plan-1",

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"apex-build/internal/ai"
 
@@ -875,6 +876,76 @@ func normalizeCompactText(input string) string {
 	return strings.Join(strings.Fields(trimmed), " ")
 }
 
+func normalizeDetectionText(input string) string {
+	if strings.TrimSpace(input) == "" {
+		return ""
+	}
+	mapped := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return unicode.ToLower(r)
+		}
+		return ' '
+	}, input)
+	return " " + strings.Join(strings.Fields(mapped), " ") + " "
+}
+
+func containsAffirmedTerm(normalized string, term string) bool {
+	descriptionTokens := strings.Fields(normalized)
+	termTokens := strings.Fields(term)
+	if len(descriptionTokens) == 0 || len(termTokens) == 0 {
+		return false
+	}
+
+	for start := 0; start <= len(descriptionTokens)-len(termTokens); start++ {
+		if !matchesTokenSequence(descriptionTokens, termTokens, start) {
+			continue
+		}
+		if termSequenceNegated(descriptionTokens, start) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func containsAnyAffirmedTerm(normalized string, terms []string) bool {
+	for _, term := range terms {
+		if containsAffirmedTerm(normalized, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesTokenSequence(descriptionTokens []string, termTokens []string, start int) bool {
+	for offset, token := range termTokens {
+		if descriptionTokens[start+offset] != token {
+			return false
+		}
+	}
+	return true
+}
+
+func termSequenceNegated(descriptionTokens []string, start int) bool {
+	lookback := 3
+	if start < lookback {
+		lookback = start
+	}
+	for idx := start - 1; idx >= start-lookback; idx-- {
+		switch descriptionTokens[idx] {
+		case "no", "without", "avoid", "skip", "omit":
+			return true
+		case "not":
+			return true
+		}
+	}
+
+	if start >= 2 && descriptionTokens[start-2] == "do" && descriptionTokens[start-1] == "not" {
+		return true
+	}
+	return false
+}
+
 func inferIntentAppType(description string, stack *TechStack) string {
 	if stack != nil {
 		if strings.TrimSpace(stack.Frontend) != "" && strings.TrimSpace(stack.Backend) != "" {
@@ -887,11 +958,21 @@ func inferIntentAppType(description string, stack *TechStack) string {
 			return "web"
 		}
 	}
-	lower := strings.ToLower(description)
+	normalized := normalizeDetectionText(description)
 	switch {
-	case strings.Contains(lower, "full stack"), strings.Contains(lower, "fullstack"), strings.Contains(lower, "dashboard"), strings.Contains(lower, "app with api"):
+	case containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("full stack"),
+		normalizeDetectionText("fullstack"),
+		normalizeDetectionText("dashboard"),
+		normalizeDetectionText("app with api"),
+	}):
 		return "fullstack"
-	case strings.Contains(lower, "api"), strings.Contains(lower, "backend"), strings.Contains(lower, "service"):
+	case containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("api"),
+		normalizeDetectionText("backend"),
+		normalizeDetectionText("service"),
+		normalizeDetectionText("server"),
+	}):
 		return "api"
 	default:
 		return "web"
@@ -899,8 +980,19 @@ func inferIntentAppType(description string, stack *TechStack) string {
 }
 
 func detectRequiredCapabilities(description string, stack *TechStack) []CapabilityRequirement {
-	lower := strings.ToLower(description)
-	caps := []CapabilityRequirement{CapabilityAPI}
+	normalized := normalizeDetectionText(description)
+	caps := []CapabilityRequirement{}
+	if stack != nil && strings.TrimSpace(stack.Backend) != "" {
+		caps = append(caps, CapabilityAPI)
+	} else if containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("api"),
+		normalizeDetectionText("backend"),
+		normalizeDetectionText("server"),
+		normalizeDetectionText("webhook"),
+		normalizeDetectionText("endpoint"),
+	}) {
+		caps = append(caps, CapabilityAPI)
+	}
 	detect := []struct {
 		cap      CapabilityRequirement
 		keywords []string
@@ -917,7 +1009,8 @@ func detectRequiredCapabilities(description string, stack *TechStack) []Capabili
 	}
 	for _, item := range detect {
 		for _, keyword := range item.keywords {
-			if strings.Contains(lower, keyword) {
+			term := normalizeDetectionText(keyword)
+			if containsAffirmedTerm(normalized, term) {
 				caps = append(caps, item.cap)
 				break
 			}

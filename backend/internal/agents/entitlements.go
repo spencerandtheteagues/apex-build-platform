@@ -76,7 +76,13 @@ func buildSubscriptionRequirement(req *BuildRequest) (bool, string) {
 		return false, ""
 	}
 
-	normalized := " " + strings.ToLower(description) + " "
+	normalized := normalizeDetectionText(description)
+	for _, capability := range detectRequiredCapabilities(description, req.TechStack) {
+		if reason, ok := paidBuildCapabilityReasons[capability]; ok {
+			return true, reason
+		}
+	}
+
 	for _, phrase := range []struct {
 		term   string
 		reason string
@@ -93,14 +99,8 @@ func buildSubscriptionRequirement(req *BuildRequest) (bool, string) {
 		{" payment processing ", "payment flows"},
 		{" webhook ", "backend integrations"},
 	} {
-		if strings.Contains(normalized, phrase.term) {
+		if containsAffirmedTerm(normalized, normalizeDetectionText(phrase.term)) {
 			return true, phrase.reason
-		}
-	}
-
-	for _, capability := range detectRequiredCapabilities(description, req.TechStack) {
-		if reason, ok := paidBuildCapabilityReasons[capability]; ok {
-			return true, reason
 		}
 	}
 

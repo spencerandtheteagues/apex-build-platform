@@ -47,6 +47,13 @@ func TestBuildSubscriptionRequirement(t *testing.T) {
 			want:   true,
 			reason: "database-backed apps",
 		},
+		{
+			name: "negated backend requirements stay free eligible",
+			req: &BuildRequest{
+				Description: "Build a simple static marketing website. Frontend only. No backend. No database. No auth. No billing. No realtime.",
+			},
+			want: false,
+		},
 	}
 
 	for _, tc := range tests {
