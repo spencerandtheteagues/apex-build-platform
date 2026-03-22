@@ -59,8 +59,8 @@ func (a *plannerRouterAdapter) Analyze(ctx context.Context, content string, inst
 }
 
 func createBuildPlanFromPlanningBundle(buildID string, description string, requested *TechStack, bundle *autonomous.PlanningBundle) *BuildPlan {
-	stack := resolveBuildTechStack(requested, bundle)
-	appType := resolveBuildAppType(bundle)
+	appType := resolveBuildAppType(description, requested, bundle)
+	stack := resolveBuildTechStack(description, requested, appType, bundle)
 	scaffold := selectBuildScaffold(appType, stack)
 
 	features := convertPlannedFeatures(bundle)
@@ -361,7 +361,7 @@ func coordinationProtocolPrompt(workOrder *BuildWorkOrder) string {
 `
 }
 
-func resolveBuildTechStack(requested *TechStack, bundle *autonomous.PlanningBundle) TechStack {
+func resolveBuildTechStack(description string, requested *TechStack, appType string, bundle *autonomous.PlanningBundle) TechStack {
 	var recommended *autonomous.TechStack
 	if bundle != nil && bundle.Analysis != nil {
 		recommended = bundle.Analysis.TechStack
@@ -392,13 +392,20 @@ func resolveBuildTechStack(requested *TechStack, bundle *autonomous.PlanningBund
 		stack.Extras = dedupeStrings(append(stack.Extras, requested.Extras...))
 	}
 
-	// Only apply cascade defaults when BOTH frontend and backend are empty —
-	// meaning the planner gave us nothing and the user requested nothing.
-	// Do NOT force a backend on a frontend-only project or vice versa.
+	// Only apply cascade defaults when BOTH frontend and backend are empty.
+	// The fallback must respect explicit frontend-only/static intent instead of
+	// silently growing a backend contract.
 	if stack.Frontend == "" && stack.Backend == "" {
-		stack.Frontend = "React"
-		stack.Backend = "Express"
-		stack.Database = "PostgreSQL"
+		switch appType {
+		case "web":
+			stack.Frontend = "React"
+		case "api":
+			stack.Backend = "Express"
+		default:
+			stack.Frontend = "React"
+			stack.Backend = "Express"
+			stack.Database = "PostgreSQL"
+		}
 	}
 	// Only default styling when there IS a frontend
 	if stack.Styling == "" && stack.Frontend != "" {
@@ -409,7 +416,7 @@ func resolveBuildTechStack(requested *TechStack, bundle *autonomous.PlanningBund
 	return stack
 }
 
-func resolveBuildAppType(bundle *autonomous.PlanningBundle) string {
+func resolveBuildAppType(description string, requested *TechStack, bundle *autonomous.PlanningBundle) string {
 	if bundle != nil && bundle.Analysis != nil {
 		appType := strings.TrimSpace(strings.ToLower(bundle.Analysis.AppType))
 		switch appType {
@@ -423,7 +430,57 @@ func resolveBuildAppType(bundle *autonomous.PlanningBundle) string {
 			return "fullstack"
 		}
 	}
+
+	if requested != nil {
+		hasFrontend := strings.TrimSpace(requested.Frontend) != ""
+		hasBackend := strings.TrimSpace(requested.Backend) != ""
+		switch {
+		case hasFrontend && hasBackend:
+			return "fullstack"
+		case hasBackend:
+			return "api"
+		case hasFrontend:
+			return "web"
+		}
+	}
+
+	if explicitStaticWebIntent(description) {
+		return "web"
+	}
+
+	switch inferIntentAppType(description, requested) {
+	case "api":
+		return "api"
+	case "fullstack":
+		return "fullstack"
+	}
 	return "fullstack"
+}
+
+func explicitStaticWebIntent(description string) bool {
+	normalized := normalizeDetectionText(description)
+	if normalized == "" {
+		return false
+	}
+
+	if containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("frontend only"),
+		normalizeDetectionText("static"),
+		normalizeDetectionText("landing page"),
+		normalizeDetectionText("marketing site"),
+		normalizeDetectionText("marketing website"),
+		normalizeDetectionText("brochure site"),
+		normalizeDetectionText("single page"),
+	}) {
+		return true
+	}
+
+	for _, marker := range []string{" no backend ", " without backend ", " no database ", " without database "} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func convertPlannedFeatures(bundle *autonomous.PlanningBundle) []Feature {

@@ -137,6 +137,52 @@ func TestCreateBuildPlanFromPlanningBundle(t *testing.T) {
 	}
 }
 
+func TestCreateBuildPlanFromPlanningBundleHonorsStaticFrontendIntent(t *testing.T) {
+	t.Parallel()
+
+	description := "Build a polished static marketing site for an AI operations studio with a hero section, services grid, testimonials, FAQ, and pricing. Frontend only. No backend. No database. No auth. No billing. No realtime."
+	plan := createBuildPlanFromPlanningBundle("build-static-1", description, nil, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-static-1",
+			EstimatedTime: 20 * time.Minute,
+			CreatedAt:     time.Now().UTC(),
+		},
+	})
+
+	if plan == nil {
+		t.Fatal("expected build plan")
+	}
+	if plan.AppType != "web" {
+		t.Fatalf("expected web app type, got %q", plan.AppType)
+	}
+	if plan.TechStack.Frontend != "React" {
+		t.Fatalf("expected React frontend fallback, got %+v", plan.TechStack)
+	}
+	if plan.TechStack.Backend != "" || plan.TechStack.Database != "" {
+		t.Fatalf("expected frontend-only fallback stack, got %+v", plan.TechStack)
+	}
+	if plan.ScaffoldID != "frontend/react-vite-spa" {
+		t.Fatalf("expected frontend scaffold, got %q", plan.ScaffoldID)
+	}
+	if plan.APIContract != nil {
+		t.Fatalf("expected no api contract for static web plan, got %+v", plan.APIContract)
+	}
+
+	intent := &IntentBrief{AppType: "web"}
+	contract := compileBuildContractFromPlan(plan.BuildID, intent, plan)
+	if contract == nil {
+		t.Fatal("expected build contract")
+	}
+	verified, report := verifyAndNormalizeBuildContract(intent, contract)
+	if verified == nil {
+		t.Fatal("expected verified build contract")
+	}
+	if report.Status == VerificationBlocked {
+		t.Fatalf("expected static web contract to verify, got blockers %v", report.Blockers)
+	}
+}
+
 func TestAssignPhaseAgentsUsesFrozenWorkOrder(t *testing.T) {
 	t.Parallel()
 
@@ -697,7 +743,7 @@ func TestResolveBuildAppType(t *testing.T) {
 		bundle := &autonomous.PlanningBundle{
 			Analysis: &autonomous.RequirementAnalysis{AppType: tt.input},
 		}
-		got := resolveBuildAppType(bundle)
+		got := resolveBuildAppType("Build a product", nil, bundle)
 		if got != tt.want {
 			t.Errorf("resolveBuildAppType(%q) = %q, want %q", tt.input, got, tt.want)
 		}
@@ -776,7 +822,7 @@ func TestResolveBuildTechStackDoesNotForceBackend(t *testing.T) {
 			},
 		},
 	}
-	stack := resolveBuildTechStack(nil, bundle)
+	stack := resolveBuildTechStack("Build a marketing site", nil, "web", bundle)
 	if stack.Backend != "" {
 		t.Errorf("expected empty backend for frontend-only project, got %q", stack.Backend)
 	}
