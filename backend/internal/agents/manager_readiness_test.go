@@ -1081,6 +1081,45 @@ func TestNormalizeGeneratedFileContent(t *testing.T) {
 		}
 	})
 
+	t.Run("unwraps_file_label_and_markdown_fence_for_config_files", func(t *testing.T) {
+		t.Parallel()
+
+		in := "// File: postcss.config.js\n" +
+			"```javascript\n" +
+			"export default {\n" +
+			"  plugins: {\n" +
+			"    tailwindcss: {},\n" +
+			"    autoprefixer: {},\n" +
+			"  },\n" +
+			"};\n" +
+			"```\n"
+		got := normalizeGeneratedFileContent("postcss.config.js", in)
+		if strings.Contains(got, "```") || strings.Contains(got, "// File:") {
+			t.Fatalf("expected markdown wrapper to be removed, got %q", got)
+		}
+		if !strings.Contains(got, "export default") || !strings.Contains(got, "tailwindcss") {
+			t.Fatalf("expected executable postcss config, got %q", got)
+		}
+	})
+
+	t.Run("unwraps_leading_file_label_without_fence", func(t *testing.T) {
+		t.Parallel()
+
+		in := `// File: src/App.tsx
+import React from 'react';
+
+export default function App() {
+  return <h1>Preview Smoke Pass</h1>;
+}`
+		got := normalizeGeneratedFileContent("src/App.tsx", in)
+		if strings.Contains(got, "// File:") {
+			t.Fatalf("expected file label to be removed, got %q", got)
+		}
+		if !strings.Contains(got, "export default function App()") {
+			t.Fatalf("expected component body to remain intact, got %q", got)
+		}
+	})
+
 	t.Run("does_not_touch_non_code_without_strong_indicators", func(t *testing.T) {
 		t.Parallel()
 

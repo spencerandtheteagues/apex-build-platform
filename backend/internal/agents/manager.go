@@ -7422,6 +7422,7 @@ func normalizeGeneratedFileContent(path, content string) string {
 	// Strip patch/merge markers that deepseek and other models sometimes emit.
 	// Must run before other normalization so downstream checks see clean content.
 	content = stripPatchOrMergeMarkersFromContent(content)
+	content = unwrapGeneratedFilePresentation(path, content)
 
 	if strings.TrimSpace(content) == "" || !strings.Contains(content, "''") {
 		content = normalizeGeneratedTypeScriptInteropPatterns(path, content)
@@ -7456,6 +7457,69 @@ func normalizeGeneratedFileContent(path, content string) string {
 	content = strings.ReplaceAll(content, "''", "'")
 	content = normalizeGeneratedTypeScriptInteropPatterns(path, content)
 	return normalizeGeneratedTSConfigBuildExcludes(path, content)
+}
+
+func unwrapGeneratedFilePresentation(path, content string) string {
+	if strings.TrimSpace(content) == "" {
+		return content
+	}
+
+	normalizedPath := strings.TrimSpace(filepath.ToSlash(path))
+	trimmed := strings.TrimSpace(strings.ReplaceAll(content, "\r\n", "\n"))
+	if trimmed == "" {
+		return content
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	start := 0
+	for start < len(lines) && strings.TrimSpace(lines[start]) == "" {
+		start++
+	}
+	if start < len(lines) && generatedFileLabelLine(lines[start], normalizedPath) {
+		start++
+	}
+	for start < len(lines) && strings.TrimSpace(lines[start]) == "" {
+		start++
+	}
+	if start >= len(lines) {
+		return content
+	}
+
+	remaining := lines[start:]
+	if len(remaining) >= 2 && strings.HasPrefix(strings.TrimSpace(remaining[0]), "```") {
+		end := len(remaining) - 1
+		for end > 0 && strings.TrimSpace(remaining[end]) == "" {
+			end--
+		}
+		if end > 0 && strings.TrimSpace(remaining[end]) == "```" {
+			body := strings.Join(remaining[1:end], "\n")
+			if strings.TrimSpace(body) != "" {
+				return body
+			}
+		}
+	}
+
+	if start > 0 {
+		return strings.Join(remaining, "\n")
+	}
+	return content
+}
+
+func generatedFileLabelLine(line, path string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+	if strings.HasPrefix(trimmed, "// File:") || strings.HasPrefix(trimmed, "# File:") {
+		return true
+	}
+	if strings.HasPrefix(trimmed, "/* File:") || strings.HasPrefix(trimmed, "<!-- File:") {
+		return true
+	}
+	if path == "" {
+		return false
+	}
+	return strings.Contains(trimmed, path) && strings.Contains(strings.ToLower(trimmed), "file:")
 }
 
 func normalizeGeneratedTypeScriptInteropPatterns(path, content string) string {
