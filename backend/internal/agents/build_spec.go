@@ -2444,6 +2444,8 @@ func summarizeWorkOrder(role AgentRole, appType string, stack TechStack) string 
 
 func canonicalFrontendName(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "none", "no frontend", "frontend only":
+		return ""
 	case "react":
 		return "React"
 	case "vue":
@@ -2457,6 +2459,8 @@ func canonicalFrontendName(value string) string {
 
 func canonicalBackendName(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "none", "no backend", "frontend only":
+		return ""
 	case "node", "node.js", "express", "express.js":
 		return "Express"
 	case "go", "golang":
@@ -2472,6 +2476,8 @@ func canonicalBackendName(value string) string {
 
 func canonicalDatabaseName(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "none", "no database", "no db", "n/a", "na":
+		return ""
 	case "postgres", "postgresql":
 		return "PostgreSQL"
 	case "mongo", "mongodb":
@@ -2485,6 +2491,8 @@ func canonicalDatabaseName(value string) string {
 
 func canonicalStylingName(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "none", "unstyled":
+		return ""
 	case "tailwind", "tailwindcss":
 		return "Tailwind"
 	case "css modules":

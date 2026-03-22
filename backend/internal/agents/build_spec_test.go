@@ -911,3 +911,29 @@ func TestResolveBuildTechStackDoesNotForceBackend(t *testing.T) {
 		t.Errorf("expected empty database for frontend-only project, got %q", stack.Database)
 	}
 }
+
+func TestResolveBuildTechStackNormalizesPlannerNoneLiterals(t *testing.T) {
+	t.Parallel()
+
+	bundle := &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			TechStack: &autonomous.TechStack{
+				Frontend: "React",
+				Backend:  "none",
+				Database: "none",
+				Styling:  "Tailwind",
+			},
+		},
+	}
+
+	stack := resolveBuildTechStack("Build a polished static landing page. Frontend only. No backend. No database.", nil, "web", bundle)
+	if stack.Frontend != "React" {
+		t.Fatalf("expected frontend to remain React, got %q", stack.Frontend)
+	}
+	if stack.Backend != "" {
+		t.Fatalf("expected planner backend 'none' to normalize to empty, got %q", stack.Backend)
+	}
+	if stack.Database != "" {
+		t.Fatalf("expected planner database 'none' to normalize to empty, got %q", stack.Database)
+	}
+}
