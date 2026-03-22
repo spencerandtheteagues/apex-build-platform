@@ -648,6 +648,10 @@ func (s *Server) CreateProject(c *gin.Context) {
 		return
 	}
 
+	if req.IsPublic && !requirePaidBackendPlan(c, s.db.DB, userID.(uint), "Publishing projects") {
+		return
+	}
+
 	// Default language if not provided
 	if req.Language == "" {
 		req.Language = "javascript"

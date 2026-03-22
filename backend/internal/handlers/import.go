@@ -47,17 +47,17 @@ type GitHubImportRequest struct {
 
 // GitHubImportResponse represents the response from a GitHub import
 type GitHubImportResponse struct {
-	ProjectID       uint                   `json:"project_id"`
-	ProjectName     string                 `json:"project_name"`
-	Language        string                 `json:"language"`
-	Framework       string                 `json:"framework"`
-	DetectedStack   map[string]interface{} `json:"detected_stack"`
-	FileCount       int                    `json:"file_count"`
-	Status          string                 `json:"status"`
-	Message         string                 `json:"message"`
-	ImportDuration  int64                  `json:"import_duration_ms"`
-	RepositoryURL   string                 `json:"repository_url"`
-	DefaultBranch   string                 `json:"default_branch"`
+	ProjectID      uint                   `json:"project_id"`
+	ProjectName    string                 `json:"project_name"`
+	Language       string                 `json:"language"`
+	Framework      string                 `json:"framework"`
+	DetectedStack  map[string]interface{} `json:"detected_stack"`
+	FileCount      int                    `json:"file_count"`
+	Status         string                 `json:"status"`
+	Message        string                 `json:"message"`
+	ImportDuration int64                  `json:"import_duration_ms"`
+	RepositoryURL  string                 `json:"repository_url"`
+	DefaultBranch  string                 `json:"default_branch"`
 }
 
 // ImportStatus tracks the status of an import operation
@@ -66,7 +66,7 @@ type ImportStatus struct {
 	UserID    uint      `json:"user_id" gorm:"index"`
 	ProjectID uint      `json:"project_id"`
 	URL       string    `json:"url"`
-	Status    string    `json:"status"` // pending, cloning, analyzing, importing, completed, failed
+	Status    string    `json:"status"`   // pending, cloning, analyzing, importing, completed, failed
 	Progress  int       `json:"progress"` // 0-100
 	Message   string    `json:"message"`
 	Error     string    `json:"error,omitempty"`
@@ -112,6 +112,10 @@ func (h *ImportHandler) ImportGitHub(c *gin.Context) {
 	var req GitHubImportRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.IsPublic && !requirePaidBackendPlan(c, h.db, userID.(uint), "Publishing projects") {
 		return
 	}
 
@@ -236,10 +240,10 @@ func (h *ImportHandler) ImportGitHub(c *gin.Context) {
 	duration := time.Since(startTime).Milliseconds()
 
 	c.JSON(http.StatusCreated, GitHubImportResponse{
-		ProjectID:      project.ID,
-		ProjectName:    project.Name,
-		Language:       detection.PrimaryLanguage,
-		Framework:      detection.Framework,
+		ProjectID:   project.ID,
+		ProjectName: project.Name,
+		Language:    detection.PrimaryLanguage,
+		Framework:   detection.Framework,
 		DetectedStack: map[string]interface{}{
 			"language":        detection.PrimaryLanguage,
 			"framework":       detection.Framework,
@@ -342,7 +346,7 @@ func parseGitHubURL(url string) (owner, repo string, err error) {
 	// - git@github.com:owner/repo
 
 	patterns := []struct {
-		regex   string
+		regex    string
 		ownerIdx int
 		repoIdx  int
 	}{
@@ -778,54 +782,54 @@ func getFileMimeType(filename string) string {
 	ext := "." + parts[len(parts)-1]
 
 	mimeTypes := map[string]string{
-		".js":     "text/javascript",
-		".ts":     "text/typescript",
-		".tsx":    "text/typescript",
-		".jsx":    "text/javascript",
-		".json":   "application/json",
-		".html":   "text/html",
-		".htm":    "text/html",
-		".css":    "text/css",
-		".scss":   "text/scss",
-		".sass":   "text/sass",
-		".less":   "text/less",
-		".md":     "text/markdown",
+		".js":       "text/javascript",
+		".ts":       "text/typescript",
+		".tsx":      "text/typescript",
+		".jsx":      "text/javascript",
+		".json":     "application/json",
+		".html":     "text/html",
+		".htm":      "text/html",
+		".css":      "text/css",
+		".scss":     "text/scss",
+		".sass":     "text/sass",
+		".less":     "text/less",
+		".md":       "text/markdown",
 		".markdown": "text/markdown",
-		".py":     "text/x-python",
-		".go":     "text/x-go",
-		".rs":     "text/x-rust",
-		".rb":     "text/x-ruby",
-		".php":    "text/x-php",
-		".java":   "text/x-java",
-		".c":      "text/x-c",
-		".cpp":    "text/x-c++",
-		".cc":     "text/x-c++",
-		".h":      "text/x-c",
-		".hpp":    "text/x-c++",
-		".cs":     "text/x-csharp",
-		".swift":  "text/x-swift",
-		".kt":     "text/x-kotlin",
-		".yaml":   "text/yaml",
-		".yml":    "text/yaml",
-		".xml":    "application/xml",
-		".svg":    "image/svg+xml",
-		".png":    "image/png",
-		".jpg":    "image/jpeg",
-		".jpeg":   "image/jpeg",
-		".gif":    "image/gif",
-		".ico":    "image/x-icon",
-		".woff":   "font/woff",
-		".woff2":  "font/woff2",
-		".ttf":    "font/ttf",
-		".eot":    "application/vnd.ms-fontobject",
-		".sh":     "text/x-shellscript",
-		".bash":   "text/x-shellscript",
-		".zsh":    "text/x-shellscript",
-		".sql":    "text/x-sql",
-		".graphql": "text/x-graphql",
-		".gql":    "text/x-graphql",
-		".vue":    "text/x-vue",
-		".svelte": "text/x-svelte",
+		".py":       "text/x-python",
+		".go":       "text/x-go",
+		".rs":       "text/x-rust",
+		".rb":       "text/x-ruby",
+		".php":      "text/x-php",
+		".java":     "text/x-java",
+		".c":        "text/x-c",
+		".cpp":      "text/x-c++",
+		".cc":       "text/x-c++",
+		".h":        "text/x-c",
+		".hpp":      "text/x-c++",
+		".cs":       "text/x-csharp",
+		".swift":    "text/x-swift",
+		".kt":       "text/x-kotlin",
+		".yaml":     "text/yaml",
+		".yml":      "text/yaml",
+		".xml":      "application/xml",
+		".svg":      "image/svg+xml",
+		".png":      "image/png",
+		".jpg":      "image/jpeg",
+		".jpeg":     "image/jpeg",
+		".gif":      "image/gif",
+		".ico":      "image/x-icon",
+		".woff":     "font/woff",
+		".woff2":    "font/woff2",
+		".ttf":      "font/ttf",
+		".eot":      "application/vnd.ms-fontobject",
+		".sh":       "text/x-shellscript",
+		".bash":     "text/x-shellscript",
+		".zsh":      "text/x-shellscript",
+		".sql":      "text/x-sql",
+		".graphql":  "text/x-graphql",
+		".gql":      "text/x-graphql",
+		".vue":      "text/x-vue",
+		".svelte":   "text/x-svelte",
 	}
 
 	if mime, ok := mimeTypes[ext]; ok {
