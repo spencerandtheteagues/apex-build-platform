@@ -216,6 +216,9 @@ func TestCreateBuildPlanFromPlanningBundleIgnoresContradictoryPlannerBackendForS
 	if plan.APIContract != nil {
 		t.Fatalf("expected no api contract for contradictory static plan, got %+v", plan.APIContract)
 	}
+	if len(plan.DataModels) != 0 {
+		t.Fatalf("expected no planner data models for static intent without a database, got %+v", plan.DataModels)
+	}
 }
 
 func TestAssignPhaseAgentsUsesFrozenWorkOrder(t *testing.T) {

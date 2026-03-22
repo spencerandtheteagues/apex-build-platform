@@ -65,6 +65,9 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 
 	features := convertPlannedFeatures(bundle)
 	models := convertPlannedModels(bundle)
+	if appType == "web" && strings.TrimSpace(stack.Database) == "" {
+		models = nil
+	}
 	files := mergePlannedFiles(scaffold.Required, planDerivedFiles(scaffold, bundle)...)
 	contract := cloneAPIContract(scaffold.APIContract)
 	envVars := append([]BuildEnvVar(nil), scaffold.EnvVars...)
