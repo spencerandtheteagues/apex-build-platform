@@ -1,0 +1,32 @@
+DROP INDEX IF EXISTS idx_completed_builds_deleted_at;
+DROP INDEX IF EXISTS idx_completed_builds_created_at;
+DROP INDEX IF EXISTS idx_completed_builds_status;
+DROP INDEX IF EXISTS idx_completed_builds_project_id;
+DROP INDEX IF EXISTS idx_completed_builds_user_id;
+DROP INDEX IF EXISTS idx_completed_builds_build_id;
+
+ALTER TABLE IF EXISTS completed_builds
+    DROP COLUMN IF EXISTS completed_at,
+    DROP COLUMN IF EXISTS error,
+    DROP COLUMN IF EXISTS duration_ms,
+    DROP COLUMN IF EXISTS progress,
+    DROP COLUMN IF EXISTS total_cost,
+    DROP COLUMN IF EXISTS files_count,
+    DROP COLUMN IF EXISTS interaction_json,
+    DROP COLUMN IF EXISTS activity_json,
+    DROP COLUMN IF EXISTS state_json,
+    DROP COLUMN IF EXISTS checkpoints_json,
+    DROP COLUMN IF EXISTS tasks_json,
+    DROP COLUMN IF EXISTS agents_json,
+    DROP COLUMN IF EXISTS files_json,
+    DROP COLUMN IF EXISTS tech_stack,
+    DROP COLUMN IF EXISTS power_mode,
+    DROP COLUMN IF EXISTS mode,
+    DROP COLUMN IF EXISTS status,
+    DROP COLUMN IF EXISTS description,
+    DROP COLUMN IF EXISTS project_name,
+    DROP COLUMN IF EXISTS project_id,
+    DROP COLUMN IF EXISTS build_id,
+    DROP COLUMN IF EXISTS deleted_at,
+    DROP COLUMN IF EXISTS updated_at,
+    DROP COLUMN IF EXISTS created_at;
