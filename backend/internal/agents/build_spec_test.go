@@ -183,6 +183,41 @@ func TestCreateBuildPlanFromPlanningBundleHonorsStaticFrontendIntent(t *testing.
 	}
 }
 
+func TestCreateBuildPlanFromPlanningBundleIgnoresContradictoryPlannerBackendForStaticIntent(t *testing.T) {
+	t.Parallel()
+
+	description := "Build a polished static marketing site for an AI operations studio with a hero section, services grid, testimonials, FAQ, and pricing. Frontend only. No backend. No database. No auth. No billing. No realtime."
+	plan := createBuildPlanFromPlanningBundle("build-static-2", description, nil, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "web",
+			TechStack: &autonomous.TechStack{
+				Frontend: "React",
+				Backend:  "Node",
+				Database: "PostgreSQL",
+				Styling:  "Tailwind",
+			},
+		},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-static-2",
+			EstimatedTime: 20 * time.Minute,
+			CreatedAt:     time.Now().UTC(),
+		},
+	})
+
+	if plan == nil {
+		t.Fatal("expected build plan")
+	}
+	if plan.TechStack.Backend != "" || plan.TechStack.Database != "" {
+		t.Fatalf("expected static intent to strip contradictory planner backend/database, got %+v", plan.TechStack)
+	}
+	if plan.ScaffoldID != "frontend/react-vite-spa" {
+		t.Fatalf("expected frontend scaffold, got %q", plan.ScaffoldID)
+	}
+	if plan.APIContract != nil {
+		t.Fatalf("expected no api contract for contradictory static plan, got %+v", plan.APIContract)
+	}
+}
+
 func TestAssignPhaseAgentsUsesFrozenWorkOrder(t *testing.T) {
 	t.Parallel()
 

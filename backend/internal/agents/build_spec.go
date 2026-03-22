@@ -392,6 +392,15 @@ func resolveBuildTechStack(description string, requested *TechStack, appType str
 		stack.Extras = dedupeStrings(append(stack.Extras, requested.Extras...))
 	}
 
+	if appType == "web" && explicitStaticWebIntent(description) {
+		if requested == nil || strings.TrimSpace(requested.Backend) == "" {
+			stack.Backend = ""
+		}
+		if requested == nil || strings.TrimSpace(requested.Database) == "" {
+			stack.Database = ""
+		}
+	}
+
 	// Only apply cascade defaults when BOTH frontend and backend are empty.
 	// The fallback must respect explicit frontend-only/static intent instead of
 	// silently growing a backend contract.
