@@ -455,7 +455,7 @@ func (am *AgentManager) StartBuild(buildID string) error {
 }
 
 func (am *AgentManager) startBuildMonitors(buildID string) {
-	if strings.TrimSpace(buildID) == "" {
+	if am == nil || am.ctx == nil || strings.TrimSpace(buildID) == "" {
 		return
 	}
 	// Build timeout goroutine - fail cleanly if build exceeds SLA.
@@ -7973,6 +7973,13 @@ func normalizeRestoredBuildStatus(snapshot *models.CompletedBuild) BuildStatus {
 		return BuildCompleted
 	}
 
+	if isInterruptedBuildSnapshot(snapshot) {
+		if restored := restoreInterruptedBuildStatus(snapshot); restored != "" {
+			return restored
+		}
+		return BuildInProgress
+	}
+
 	status := BuildStatus(strings.TrimSpace(snapshot.Status))
 	switch status {
 	case BuildPending, BuildPlanning, BuildInProgress, BuildTesting, BuildReviewing, BuildCompleted, BuildFailed, BuildCancelled, BuildAwaitingReview:
@@ -7986,6 +7993,37 @@ func normalizeRestoredBuildStatus(snapshot *models.CompletedBuild) BuildStatus {
 		return BuildFailed
 	}
 	return BuildCompleted
+}
+
+const interruptedBuildRecoveryError = "Server restarted during build - please retry"
+
+func isInterruptedBuildSnapshot(snapshot *models.CompletedBuild) bool {
+	if snapshot == nil {
+		return false
+	}
+	status := BuildStatus(strings.TrimSpace(snapshot.Status))
+	if status != BuildFailed {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(snapshot.Error), interruptedBuildRecoveryError)
+}
+
+func restoreInterruptedBuildStatus(snapshot *models.CompletedBuild) BuildStatus {
+	if snapshot == nil {
+		return BuildInProgress
+	}
+
+	state := parseBuildSnapshotState(snapshot.StateJSON)
+	switch strings.TrimSpace(strings.ToLower(state.CurrentPhase)) {
+	case "planning", "request_intake", "intent_normalization", "contract_compilation", "contract_verification":
+		return BuildPlanning
+	case "testing", "validation", "verification":
+		return BuildTesting
+	case "review", "reviewing", "promotion", "readiness":
+		return BuildReviewing
+	default:
+		return BuildInProgress
+	}
 }
 
 func normalizeRestoredBuildMode(raw string) BuildMode {
@@ -8188,6 +8226,15 @@ func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.Complet
 		return existing, false, nil
 	}
 	am.builds[build.ID] = build
+	for id, agent := range build.Agents {
+		if agent == nil {
+			continue
+		}
+		if agent.BuildID == "" {
+			agent.BuildID = build.ID
+		}
+		am.agents[id] = agent
+	}
 	am.mu.Unlock()
 
 	availableProviders := am.getCurrentlyAvailableProvidersForBuild(build)
@@ -8233,8 +8280,120 @@ func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.Complet
 	build.UpdatedAt = time.Now().UTC()
 	build.mu.Unlock()
 
+	am.resumeRestoredBuildExecution(build)
 	am.persistBuildSnapshot(build, nil)
 	return build, true, nil
+}
+
+func restoredTaskRole(task *Task) AgentRole {
+	if task == nil {
+		return ""
+	}
+	switch task.Type {
+	case TaskPlan:
+		return RoleLead
+	case TaskGenerateUI:
+		return RoleFrontend
+	case TaskGenerateAPI:
+		return RoleBackend
+	case TaskGenerateSchema:
+		return RoleDatabase
+	case TaskTest:
+		return RoleTesting
+	case TaskReview:
+		return RoleReviewer
+	case TaskFix:
+		return RoleSolver
+	default:
+		return ""
+	}
+}
+
+func restoredTaskAgentID(build *Build, task *Task) string {
+	if build == nil || task == nil {
+		return ""
+	}
+	if assigned := strings.TrimSpace(task.AssignedTo); assigned != "" {
+		if agent := build.Agents[assigned]; agent != nil {
+			return assigned
+		}
+	}
+	for _, agent := range build.Agents {
+		if agent == nil || agent.CurrentTask == nil {
+			continue
+		}
+		if agent.CurrentTask.ID == task.ID {
+			return agent.ID
+		}
+	}
+
+	role := restoredTaskRole(task)
+	if role == "" {
+		return ""
+	}
+	for _, agent := range orderedBuildAgents(build.Agents) {
+		if agent != nil && agent.Role == role {
+			return agent.ID
+		}
+	}
+	if role != RoleLead {
+		for _, agent := range orderedBuildAgents(build.Agents) {
+			if agent != nil && agent.Role == RoleLead {
+				return agent.ID
+			}
+		}
+	}
+	return ""
+}
+
+func (am *AgentManager) resumeRestoredBuildExecution(build *Build) {
+	if build == nil || am == nil || am.taskQueue == nil {
+		return
+	}
+
+	build.mu.RLock()
+	status := build.Status
+	paused := build.Interaction.Paused
+	waitingForUser := build.Interaction.WaitingForUser
+	tasks := append([]*Task(nil), build.Tasks...)
+	build.mu.RUnlock()
+
+	switch status {
+	case BuildCompleted, BuildFailed, BuildCancelled:
+		return
+	}
+
+	am.startBuildMonitors(build.ID)
+
+	if paused || waitingForUser || status == BuildAwaitingReview {
+		return
+	}
+
+	requeued := false
+	nonTerminalTasks := false
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		if task.Status != TaskPending && task.Status != TaskInProgress {
+			continue
+		}
+		nonTerminalTasks = true
+		agentID := restoredTaskAgentID(build, task)
+		if agentID == "" {
+			log.Printf("Build %s: restored task %s has no resumable assignee", build.ID, task.ID)
+			continue
+		}
+		if err := am.AssignTask(agentID, task); err != nil {
+			log.Printf("Build %s: failed to resume restored task %s with agent %s: %v", build.ID, task.ID, agentID, err)
+			continue
+		}
+		requeued = true
+	}
+
+	if !nonTerminalTasks || !requeued {
+		am.checkBuildCompletion(build)
+	}
 }
 
 func findLeadAgentLocked(build *Build) *Agent {
@@ -9658,23 +9817,17 @@ func (am *AgentManager) broadcast(buildID string, msg *WSMessage) {
 	}
 }
 
-// RecoverStaleBuildsOnStartup marks interrupted builds from a previous process as failed.
+// RecoverStaleBuildsOnStartup counts interrupted active builds so they can be restored on demand.
 func (am *AgentManager) RecoverStaleBuildsOnStartup() (int64, error) {
 	if am.db == nil {
 		return 0, nil
 	}
 
-	now := time.Now()
-	result := am.db.Model(&models.CompletedBuild{}).
-		Where("status IN ?", []string{"in_progress", "planning", "building", "testing", "reviewing"}).
-		Updates(map[string]any{
-			"status":       "failed",
-			"error":        "Server restarted during build - please retry",
-			"updated_at":   now,
-			"completed_at": now,
-		})
-
-	return result.RowsAffected, result.Error
+	var count int64
+	err := am.db.Model(&models.CompletedBuild{}).
+		Where("status IN ?", []string{"in_progress", "planning", "building", "testing", "reviewing", "awaiting_review"}).
+		Count(&count).Error
+	return count, err
 }
 
 // RollbackToCheckpoint restores the build to a previous checkpoint

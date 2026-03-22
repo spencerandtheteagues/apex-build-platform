@@ -68,6 +68,152 @@ func TestRestoreBuildSessionFromSnapshotRehydratesFiles(t *testing.T) {
 	}
 }
 
+func TestRecoverStaleBuildsOnStartupPreservesActiveSnapshots(t *testing.T) {
+	db := openBuildTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "stale-active-build",
+		UserID:      1,
+		Description: "Interrupted build should stay resumable",
+		Status:      "in_progress",
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    92,
+		UpdatedAt:   now,
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	manager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	})
+	manager.db = db
+
+	recovered, err := manager.RecoverStaleBuildsOnStartup()
+	if err != nil {
+		t.Fatalf("RecoverStaleBuildsOnStartup returned error: %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("expected 1 resumable stale build, got %d", recovered)
+	}
+
+	var snapshot models.CompletedBuild
+	if err := db.Where("build_id = ?", "stale-active-build").First(&snapshot).Error; err != nil {
+		t.Fatalf("fetch snapshot: %v", err)
+	}
+	if snapshot.Status != "in_progress" {
+		t.Fatalf("expected snapshot status to remain in_progress, got %s", snapshot.Status)
+	}
+	if strings.TrimSpace(snapshot.Error) != "" {
+		t.Fatalf("expected snapshot error to remain empty, got %q", snapshot.Error)
+	}
+}
+
+func TestNormalizeRestoredBuildStatusTreatsInterruptedFailuresAsResumable(t *testing.T) {
+	snapshot := &models.CompletedBuild{
+		BuildID:     "interrupted-build",
+		UserID:      1,
+		Description: "Interrupted by restart",
+		Status:      "failed",
+		Error:       interruptedBuildRecoveryError,
+		StateJSON:   `{"current_phase":"review"}`,
+	}
+
+	if got := normalizeRestoredBuildStatus(snapshot); got != BuildReviewing {
+		t.Fatalf("normalizeRestoredBuildStatus = %s, want %s", got, BuildReviewing)
+	}
+}
+
+func TestRestoreBuildSessionFromSnapshotRequeuesInterruptedTasks(t *testing.T) {
+	db := openBuildTestDB(t)
+	manager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	})
+	manager.db = db
+
+	now := time.Now().Add(-2 * time.Minute).UTC()
+	snapshot := &models.CompletedBuild{
+		BuildID:     "restore-requeue-build",
+		UserID:      1,
+		Description: "Resume a build after restart",
+		Status:      "failed",
+		Error:       interruptedBuildRecoveryError,
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    92,
+		StateJSON:   `{"current_phase":"review"}`,
+		AgentsJSON: `[{
+			"id":"lead-1",
+			"role":"lead",
+			"provider":"claude",
+			"model":"claude-sonnet-4-6",
+			"status":"working",
+			"build_id":"restore-requeue-build",
+			"current_task":{"id":"task-review","type":"review","description":"Run the final review"},
+			"progress":92,
+			"created_at":"2026-03-22T00:00:00Z",
+			"updated_at":"2026-03-22T00:00:00Z"
+		},{
+			"id":"reviewer-1",
+			"role":"reviewer",
+			"provider":"claude",
+			"model":"claude-sonnet-4-6",
+			"status":"working",
+			"build_id":"restore-requeue-build",
+			"current_task":{"id":"task-review","type":"review","description":"Run the final review"},
+			"progress":92,
+			"created_at":"2026-03-22T00:00:00Z",
+			"updated_at":"2026-03-22T00:00:00Z"
+		}]`,
+		TasksJSON: `[{
+			"id":"task-review",
+			"type":"review",
+			"description":"Run the final review",
+			"priority":90,
+			"assigned_to":"reviewer-1",
+			"status":"in_progress",
+			"created_at":"2026-03-22T00:00:00Z",
+			"started_at":"2026-03-22T00:00:00Z",
+			"max_retries":2
+		}]`,
+		CreatedAt: now,
+		UpdatedAt: now.Add(time.Minute),
+	}
+
+	build, restored, err := manager.restoreBuildSessionFromSnapshot(snapshot)
+	if err != nil {
+		t.Fatalf("restoreBuildSessionFromSnapshot returned error: %v", err)
+	}
+	if !restored {
+		t.Fatalf("expected restored=true")
+	}
+	if build.Status != BuildReviewing {
+		t.Fatalf("expected interrupted failed build to restore into reviewing, got %s", build.Status)
+	}
+	if manager.agents["reviewer-1"] == nil {
+		t.Fatalf("expected restored reviewer agent to be registered")
+	}
+
+	select {
+	case resumed := <-manager.taskQueue:
+		if resumed == nil {
+			t.Fatalf("expected requeued task, got nil")
+		}
+		if resumed.ID != "task-review" {
+			t.Fatalf("expected task-review to be requeued, got %s", resumed.ID)
+		}
+		if resumed.AssignedTo != "reviewer-1" {
+			t.Fatalf("expected requeued task assigned to reviewer-1, got %s", resumed.AssignedTo)
+		}
+	default:
+		t.Fatalf("expected restored task to be requeued")
+	}
+}
+
 func TestPersistBuildSnapshotRestoresActivityTimeline(t *testing.T) {
 	db := openBuildTestDB(t)
 	persistManager := newTestIterationManager(&stubPreflight{
