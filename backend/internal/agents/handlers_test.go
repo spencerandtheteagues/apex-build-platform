@@ -135,6 +135,52 @@ func TestPreflightReturnsReadyWithProviders(t *testing.T) {
 	}
 }
 
+func TestPreflightReturnsSemanticStateForStaticRequest(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	body := bytes.NewBufferString(`{
+		"description":"Build a polished static marketing site for an AI operations studio. Frontend only. No backend. No database. No auth. No billing. No realtime.",
+		"provider_mode":"platform"
+	}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/preflight", body)
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var bodyJSON map[string]any
+	json.Unmarshal(w.Body.Bytes(), &bodyJSON)
+	if got := bodyJSON["classification"]; got != string(BuildClassificationStaticReady) {
+		t.Fatalf("expected static classification, got %v", got)
+	}
+	if got := bodyJSON["upgrade_required"]; got != false {
+		t.Fatalf("expected upgrade_required=false, got %v", got)
+	}
+	policy, ok := bodyJSON["policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected policy object, got %T", bodyJSON["policy"])
+	}
+	if got := policy["classification"]; got != string(BuildClassificationStaticReady) {
+		t.Fatalf("expected policy classification alias, got %v", got)
+	}
+	capabilityState, ok := bodyJSON["capability_detector"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected capability_detector object, got %T", bodyJSON["capability_detector"])
+	}
+	if got, exists := capabilityState["requires_backend_runtime"]; exists && got != false {
+		t.Fatalf("expected requires_backend_runtime to be false or omitted, got %v", got)
+	}
+}
+
 func TestPreflightReturnsNoRouterWhenNil(t *testing.T) {
 	am := &AgentManager{aiRouter: nil}
 
@@ -150,6 +196,31 @@ func TestPreflightReturnsNoRouterWhenNil(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &body)
 	if body["error_code"] != "NO_ROUTER" {
 		t.Fatalf("expected error_code=NO_ROUTER, got %v", body["error_code"])
+	}
+}
+
+func TestBuildSnapshotStateResponseFieldsIncludesSemanticAliases(t *testing.T) {
+	state := BuildSnapshotState{
+		CapabilityState: &BuildCapabilityState{
+			RequiresBackendRuntime: false,
+		},
+		PolicyState: &BuildPolicyState{
+			PlanType:           "free",
+			Classification:     BuildClassificationStaticReady,
+			UpgradeRequired:    false,
+			StaticFrontendOnly: true,
+		},
+	}
+
+	fields := buildSnapshotStateResponseFields(state, "completed")
+	if got := fields["classification"]; got != BuildClassificationStaticReady {
+		t.Fatalf("expected classification alias, got %v", got)
+	}
+	if _, ok := fields["policy"]; !ok {
+		t.Fatalf("expected policy alias in response fields")
+	}
+	if _, ok := fields["capability_detector"]; !ok {
+		t.Fatalf("expected capability_detector alias in response fields")
 	}
 }
 

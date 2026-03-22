@@ -85,15 +85,38 @@ func (h *BuildHandler) PreflightCheck(c *gin.Context) {
 	}
 
 	type preflightResult struct {
-		Ready            bool              `json:"ready"`
-		Providers        int               `json:"providers_available"`
-		Names            []string          `json:"provider_names"`
-		ProviderStatuses map[string]string `json:"provider_statuses,omitempty"`
-		HasBYOK          bool              `json:"has_byok"`
-		ErrorCode        string            `json:"error_code,omitempty"`
-		Error            string            `json:"error,omitempty"`
-		Suggestion       string            `json:"suggestion,omitempty"`
+		Ready            bool                     `json:"ready"`
+		Providers        int                      `json:"providers_available"`
+		Names            []string                 `json:"provider_names"`
+		ProviderStatuses map[string]string        `json:"provider_statuses,omitempty"`
+		HasBYOK          bool                     `json:"has_byok"`
+		CapabilityState  *BuildCapabilityState    `json:"capability_detector,omitempty"`
+		PolicyState      *BuildPolicyState        `json:"policy,omitempty"`
+		Classification   BuildClassificationState `json:"classification,omitempty"`
+		UpgradeRequired  bool                     `json:"upgrade_required"`
+		ErrorCode        string                   `json:"error_code,omitempty"`
+		Error            string                   `json:"error,omitempty"`
+		Suggestion       string                   `json:"suggestion,omitempty"`
 	}
+
+	var req BuildRequest
+	if c.Request.Body != nil {
+		if err := c.ShouldBindJSON(&req); err != nil && !strings.Contains(strings.ToLower(err.Error()), "eof") {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "invalid request",
+				"details": err.Error(),
+			})
+			return
+		}
+	}
+	if req.Description == "" && req.Prompt != "" {
+		req.Description = req.Prompt
+	}
+	if req.Prompt == "" && req.Description != "" {
+		req.Prompt = req.Description
+	}
+	req.Description = strings.TrimSpace(req.Description)
+	req.Prompt = strings.TrimSpace(req.Prompt)
 
 	router := h.manager.aiRouter
 	if router == nil {
@@ -165,6 +188,18 @@ func (h *BuildHandler) PreflightCheck(c *gin.Context) {
 	}
 
 	hasBYOK := h.manager.userHasActiveBYOKKey(uid)
+	planType := h.currentSubscriptionType(c, uid)
+	var capabilityState *BuildCapabilityState
+	var policyState *BuildPolicyState
+	if req.Description != "" || req.Prompt != "" || req.TechStack != nil {
+		capabilityState, policyState = buildPreflightSemanticState(&req, planType)
+	}
+	classification := BuildClassificationState("")
+	upgradeRequired := false
+	if policyState != nil {
+		classification = policyState.Classification
+		upgradeRequired = policyState.UpgradeRequired
+	}
 
 	c.JSON(http.StatusOK, preflightResult{
 		Ready:            true,
@@ -172,6 +207,10 @@ func (h *BuildHandler) PreflightCheck(c *gin.Context) {
 		Names:            names,
 		ProviderStatuses: statuses,
 		HasBYOK:          hasBYOK,
+		CapabilityState:  capabilityState,
+		PolicyState:      policyState,
+		Classification:   classification,
+		UpgradeRequired:  upgradeRequired,
 	})
 }
 
@@ -568,10 +607,13 @@ func buildSnapshotStateResponseFields(state BuildSnapshotState, fallbackStatus s
 	}
 	if state.CapabilityState != nil {
 		fields["capability_state"] = state.CapabilityState
+		fields["capability_detector"] = state.CapabilityState
 	}
 	if state.PolicyState != nil {
 		fields["policy_state"] = state.PolicyState
+		fields["policy"] = state.PolicyState
 		fields["build_classification"] = state.PolicyState.Classification
+		fields["classification"] = state.PolicyState.Classification
 		fields["upgrade_required"] = state.PolicyState.UpgradeRequired
 		if reason := strings.TrimSpace(state.PolicyState.UpgradeReason); reason != "" {
 			fields["upgrade_reason"] = reason

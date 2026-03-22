@@ -221,6 +221,46 @@ func TestCreateBuildPlanFromPlanningBundleIgnoresContradictoryPlannerBackendForS
 	}
 }
 
+func TestCreateBuildPlanFromPlanningBundleSkipsDatabaseLaneForStaticIntent(t *testing.T) {
+	t.Parallel()
+
+	description := "Build a polished static marketing site for an AI operations studio with a hero section, services grid, testimonials, FAQ, and pricing. Frontend only. No backend. No database. No auth. No billing. No realtime."
+	plan := createBuildPlanFromPlanningBundle("build-static-3", description, nil, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "web",
+			TechStack: &autonomous.TechStack{
+				Frontend: "React",
+				Styling:  "Tailwind",
+			},
+		},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-static-3",
+			EstimatedTime: 20 * time.Minute,
+			CreatedAt:     time.Now().UTC(),
+			Steps: []*autonomous.PlanStep{
+				{
+					ID:         "step-1",
+					Name:       "Create Data Models",
+					ActionType: autonomous.ActionAIGenerate,
+					Input:      map[string]interface{}{"type": "data_models"},
+				},
+			},
+		},
+	})
+
+	if plan == nil {
+		t.Fatal("expected build plan")
+	}
+	for _, file := range plan.Files {
+		if file.Path == "migrations/001_initial.sql" {
+			t.Fatalf("expected static plan to skip migration output, got %+v", plan.Files)
+		}
+	}
+	if wo := getBuildWorkOrder(plan, RoleDatabase); wo != nil {
+		t.Fatalf("expected static plan to omit database work order, got %+v", wo)
+	}
+}
+
 func TestAssignPhaseAgentsUsesFrozenWorkOrder(t *testing.T) {
 	t.Parallel()
 

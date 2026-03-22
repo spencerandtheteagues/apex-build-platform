@@ -21,6 +21,39 @@ func buildSubscriptionPlan(build *Build) string {
 	return "free"
 }
 
+func buildPreflightSemanticState(req *BuildRequest, planType string) (*BuildCapabilityState, *BuildPolicyState) {
+	if req == nil {
+		return nil, nil
+	}
+	description := strings.TrimSpace(req.Description)
+	if description == "" {
+		description = strings.TrimSpace(req.Prompt)
+	}
+	if description == "" && req.TechStack == nil {
+		return nil, nil
+	}
+
+	providerMode := strings.TrimSpace(strings.ToLower(req.ProviderMode))
+	if providerMode == "" {
+		providerMode = "platform"
+	}
+
+	build := &Build{
+		Description:         description,
+		TechStack:           req.TechStack,
+		ProviderMode:        providerMode,
+		RequirePreviewReady: req.RequirePreviewReady,
+		SubscriptionPlan:    strings.TrimSpace(strings.ToLower(planType)),
+	}
+	build.SnapshotState.Orchestration = &BuildOrchestrationState{
+		IntentBrief: compileIntentBriefFromRequest(req, providerMode),
+	}
+
+	capabilityState := buildCapabilityState(build)
+	policyState := buildPolicyState(build, capabilityState)
+	return capabilityState, policyState
+}
+
 func buildRequiresPaidFeatures(build *Build) (bool, string) {
 	if build == nil {
 		return false, ""

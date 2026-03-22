@@ -654,6 +654,9 @@ func planDerivedFiles(scaffold buildScaffold, bundle *autonomous.PlanningBundle)
 						seen["src/components/AppShell.tsx"] = true
 					}
 				case "data_models":
+					if scaffold.AppType == "web" {
+						continue
+					}
 					if !seen["migrations/001_initial.sql"] {
 						files = append(files, PlannedFile{Path: "migrations/001_initial.sql", Type: "database", Description: "Initial schema derived from planned data models"})
 						seen["migrations/001_initial.sql"] = true
@@ -834,6 +837,9 @@ func buildWorkOrders(appType string, stack TechStack, scaffold buildScaffold, ow
 		}
 		if role == RoleArchitect && len(order.OwnedFiles) == 0 {
 			order.OwnedFiles = []string{"docs/**", "ARCHITECTURE.md"}
+		}
+		if role == RoleDatabase && strings.TrimSpace(stack.Database) == "" && len(order.OwnedFiles) == 0 && len(order.RequiredFiles) == 0 && len(order.AcceptanceChecks) == 0 {
+			continue
 		}
 		out = append(out, order)
 	}
