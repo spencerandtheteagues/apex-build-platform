@@ -80,6 +80,49 @@ func estimatedRequestCostUSDForBuild(build *Build) float64 {
 	return defaultEstimatedRequestCostUSD
 }
 
+func initialAgentRolesForBuild(build *Build) []AgentRole {
+	legacyRoles := []AgentRole{
+		RoleArchitect,
+		RoleDatabase,
+		RoleBackend,
+		RoleFrontend,
+		RoleTesting,
+		RoleReviewer,
+	}
+	if build == nil || build.Plan == nil || len(build.Plan.WorkOrders) == 0 {
+		return append([]AgentRole(nil), legacyRoles...)
+	}
+
+	selected := make(map[AgentRole]bool, len(legacyRoles))
+	for _, order := range build.Plan.WorkOrders {
+		switch order.Role {
+		case RoleArchitect, RoleDatabase, RoleBackend, RoleFrontend, RoleTesting, RoleReviewer:
+			selected[order.Role] = true
+		}
+	}
+
+	roles := make([]AgentRole, 0, len(selected))
+	for _, role := range legacyRoles {
+		if selected[role] {
+			roles = append(roles, role)
+		}
+	}
+	if len(roles) == 0 {
+		return append([]AgentRole(nil), legacyRoles...)
+	}
+	return roles
+}
+
+func filterAgentRoles(roles []AgentRole, allowed map[AgentRole]bool) []AgentRole {
+	filtered := make([]AgentRole, 0, len(roles))
+	for _, role := range roles {
+		if allowed[role] {
+			filtered = append(filtered, role)
+		}
+	}
+	return filtered
+}
+
 // AgentManager handles the lifecycle and coordination of AI agents
 type AgentManager struct {
 	agents         map[string]*Agent
@@ -1058,14 +1101,7 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 
 	// Define mandatory and optional roles.
 	// Reviewer is mandatory so every build gets an explicit quality gate.
-	mandatoryRoles := []AgentRole{
-		RoleArchitect,
-		RoleDatabase,
-		RoleBackend,
-		RoleFrontend,
-		RoleTesting,
-		RoleReviewer,
-	}
+	mandatoryRoles := initialAgentRolesForBuild(build)
 	optionalRoles := []AgentRole{
 		RolePlanner,
 	}
@@ -1075,24 +1111,24 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 	// Local single-provider Ollama builds benefit from a smaller team to reduce latency and timeout risk.
 	// Keep architecture + code generation + review, and skip database/testing specialists by default.
 	if am.isLocalDevSingleOllamaProfile() {
-		mandatoryRoles = []AgentRole{
-			RoleArchitect,
-			RoleBackend,
-			RoleFrontend,
-			RoleReviewer,
-		}
+		mandatoryRoles = filterAgentRoles(mandatoryRoles, map[AgentRole]bool{
+			RoleArchitect: true,
+			RoleBackend:   true,
+			RoleFrontend:  true,
+			RoleReviewer:  true,
+		})
 		roles = append([]AgentRole{}, mandatoryRoles...)
 		log.Printf("Build %s using reduced local Ollama agent profile (%d roles)", buildID, len(mandatoryRoles))
 	} else if am.isLocalDevStrictPreviewBuild(build) {
 		// Local strict preview builds already run deterministic frontend/backend build verification.
 		// Skipping the testing specialist reduces token spend and avoids test-framework drift.
-		mandatoryRoles = []AgentRole{
-			RoleArchitect,
-			RoleDatabase,
-			RoleBackend,
-			RoleFrontend,
-			RoleReviewer,
-		}
+		mandatoryRoles = filterAgentRoles(mandatoryRoles, map[AgentRole]bool{
+			RoleArchitect: true,
+			RoleDatabase:  true,
+			RoleBackend:   true,
+			RoleFrontend:  true,
+			RoleReviewer:  true,
+		})
 		roles = append([]AgentRole{}, mandatoryRoles...)
 		log.Printf("Build %s using reduced local strict-preview agent profile (%d roles, testing agent disabled)", buildID, len(mandatoryRoles))
 	}
