@@ -51,7 +51,7 @@ type CheckpointLike = {
   createdAt?: string
 }
 
-type TimelineStatus = 'pending' | 'in_progress' | 'blocked' | 'completed'
+type TimelineStatus = 'pending' | 'in_progress' | 'paused' | 'blocked' | 'failed' | 'completed' | 'skipped'
 type MockRealStatus = 'real' | 'partial' | 'blocked' | 'missing'
 
 const EMPTY_TAGS: string[] = []
@@ -61,19 +61,23 @@ const EMPTY_CAPABILITIES: string[] = []
 const EMPTY_CHECKPOINTS: CheckpointLike[] = []
 
 const PHASE_DEFS = [
-  { id: 'intent', label: 'Intent Brief', description: 'Normalize the request and classify static vs full-stack intent.' },
-  { id: 'contract', label: 'Build Contract', description: 'Compile the contract and initial truth state.' },
-  { id: 'work', label: 'Work Orders', description: 'Slice the build into owned execution units.' },
-  { id: 'patch', label: 'Patch Bundles', description: 'Apply patch-oriented generation and repair outputs.' },
-  { id: 'verify', label: 'Verification', description: 'Run surface-local checks and readiness validation.' },
-  { id: 'promote', label: 'Promotion', description: 'Promote only when readiness is supported by verification.' },
+  { id: 'intent', label: 'Request Intake', description: 'Normalize the request and classify static-ready vs upgrade-required vs full-stack.' },
+  { id: 'contract', label: 'Contract Compilation', description: 'Compile the build contract and its initial truth constraints.' },
+  { id: 'work', label: 'Work Orders', description: 'Slice the contract into owned execution units.' },
+  { id: 'patch', label: 'Patch Generation', description: 'Apply scaffold, implementation, and repair patches.' },
+  { id: 'verify', label: 'Surface Verification', description: 'Run verification and record blockers instead of faking readiness.' },
+  { id: 'repair', label: 'Repair Ladder', description: 'Select recovery paths only when verification or fingerprints justify them.' },
+  { id: 'promote', label: 'Readiness Promotion', description: 'Promote only when verification truth supports the target readiness state.' },
 ] as const
 
 const timelineStatusTone: Record<TimelineStatus, string> = {
   pending: 'border-gray-700 bg-gray-950/60 text-gray-300',
   in_progress: 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300',
+  paused: 'border-violet-500/40 bg-violet-500/10 text-violet-300',
   blocked: 'border-red-500/40 bg-red-500/10 text-red-300',
+  failed: 'border-rose-500/40 bg-rose-500/10 text-rose-300',
   completed: 'border-green-500/40 bg-green-500/10 text-green-300',
+  skipped: 'border-gray-700 bg-black/40 text-gray-400',
 }
 
 const classificationTone = (classification?: string) => {
@@ -133,28 +137,49 @@ const phaseStatus = (
   phaseId: string,
   props: OrchestrationOverviewProps
 ): TimelineStatus => {
-  const { buildStatus, currentPhase, blockers, intentBrief, buildContract, workOrders, patchBundles, verificationReports, promotionDecision } = props
+  const { buildStatus, currentPhase, blockers, interaction, intentBrief, buildContract, workOrders, patchBundles, verificationReports, promotionDecision, failureFingerprints } = props
   const blocked = (blockers || []).some((item) => item.severity === 'blocking')
+  const paused = Boolean(interaction?.paused || interaction?.waiting_for_user || buildStatus === 'awaiting_review')
+  const failed = buildStatus === 'failed'
 
   switch (phaseId) {
     case 'intent':
       if (intentBrief) return 'completed'
+      if (paused && includesPhase(currentPhase, 'planning', 'intent')) return 'paused'
       return includesPhase(currentPhase, 'planning', 'intent') ? 'in_progress' : 'pending'
     case 'contract':
-      if (buildContract) return 'completed'
+      if (buildContract?.verified) return 'completed'
+      if (failed && (includesPhase(currentPhase, 'contract') || Boolean(buildContract))) return 'failed'
+      if (paused && (includesPhase(currentPhase, 'contract', 'planning') || Boolean(buildContract))) return 'paused'
+      if (buildContract) return 'in_progress'
       return includesPhase(currentPhase, 'contract', 'planning') ? 'in_progress' : 'pending'
     case 'work':
       if ((workOrders || []).length > 0) return 'completed'
+      if (failed && includesPhase(currentPhase, 'work', 'provider_check', 'in_progress')) return 'failed'
+      if (paused && includesPhase(currentPhase, 'work', 'provider_check', 'in_progress')) return 'paused'
       return includesPhase(currentPhase, 'work', 'provider_check', 'in_progress') ? 'in_progress' : 'pending'
     case 'patch':
       if ((patchBundles || []).length > 0) return 'completed'
+      if (failed && includesPhase(currentPhase, 'patch', 'implement', 'in_progress')) return 'failed'
+      if (paused && includesPhase(currentPhase, 'patch', 'implement', 'in_progress')) return 'paused'
       return includesPhase(currentPhase, 'patch', 'implement', 'in_progress') ? 'in_progress' : 'pending'
     case 'verify':
       if ((verificationReports || []).length > 0 && buildStatus === 'completed') return 'completed'
-      if (blocked && includesPhase(currentPhase, 'validation', 'testing', 'review')) return 'blocked'
+      if (failed && ((verificationReports || []).length > 0 || includesPhase(currentPhase, 'validation', 'testing', 'review'))) return 'failed'
+      if (paused && includesPhase(currentPhase, 'validation', 'testing', 'review')) return 'paused'
+      if (blocked && ((verificationReports || []).length > 0 || includesPhase(currentPhase, 'validation', 'testing', 'review'))) return 'blocked'
       return includesPhase(currentPhase, 'validation', 'testing', 'review') ? 'in_progress' : 'pending'
+    case 'repair':
+      if ((failureFingerprints || []).length === 0 && buildStatus === 'completed' && (verificationReports || []).length > 0) return 'skipped'
+      if ((failureFingerprints || []).some((item) => item.repair_success)) return 'completed'
+      if (failed && (((failureFingerprints || []).length > 0) || blocked)) return 'failed'
+      if (paused && ((failureFingerprints || []).length > 0 || blocked)) return 'paused'
+      if (blocked || (failureFingerprints || []).length > 0) return 'in_progress'
+      return 'pending'
     case 'promote':
       if (promotionDecision) return buildStatus === 'failed' ? 'blocked' : 'completed'
+      if (failed && includesPhase(currentPhase, 'promotion', 'completed')) return 'failed'
+      if (paused && includesPhase(currentPhase, 'promotion', 'completed')) return 'paused'
       if (blocked && includesPhase(currentPhase, 'promotion', 'completed')) return 'blocked'
       return includesPhase(currentPhase, 'promotion', 'completed') ? 'in_progress' : 'pending'
     default:
@@ -239,6 +264,8 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
       const status = phaseStatus(phase.id, props)
       let timestamp: string | null = null
       let substeps: string[] = []
+      const waitingOnUser = Boolean(props.interaction?.waiting_for_user || props.interaction?.paused)
+      const classification = props.policyState?.classification
 
       switch (phase.id) {
         case 'intent':
@@ -254,6 +281,9 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
           }
           break
         case 'contract':
+          if (contract && !contract.verified) {
+            substeps.push('Contract exists but final contract verification is still in progress.')
+          }
           if (contract?.verified) {
             substeps.push('Contract verification completed.')
           }
@@ -284,6 +314,20 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
             substeps.push(blockers[0].summary || blockers[0].title)
           }
           break
+        case 'repair':
+          timestamp = formatTimestamp((props.failureFingerprints || []).slice().sort((left, right) => String(right.created_at || '').localeCompare(String(left.created_at || '')))[0]?.created_at)
+          substeps = (props.failureFingerprints || []).slice(0, 3).map((fingerprint) => {
+            const repairPath = Array.isArray(fingerprint.repair_path_chosen) && fingerprint.repair_path_chosen.length > 0
+              ? fingerprint.repair_path_chosen.map(humanize).join(', ')
+              : 'repair path not recorded yet'
+            return `${humanize(fingerprint.failure_class || 'unknown failure')} via ${fingerprint.provider || 'unknown provider'}; repair path: ${repairPath}.`
+          })
+          if (substeps.length === 0 && status === 'skipped') {
+            substeps.push('No repair ladder was needed because verification completed without recurring failure fingerprints.')
+          } else if (substeps.length === 0 && (status === 'in_progress' || status === 'failed' || status === 'blocked')) {
+            substeps.push('Repair selection is active because verification truth still has unresolved failures.')
+          }
+          break
         case 'promote':
           timestamp = formatTimestamp(props.promotionDecision?.generated_at)
           if (props.promotionDecision?.readiness_state) {
@@ -300,6 +344,18 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
           break
         default:
           break
+      }
+
+      if (phase.id === 'work' || phase.id === 'patch' || phase.id === 'verify' || phase.id === 'repair' || phase.id === 'promote') {
+        if (classification === 'upgrade_required') {
+          substeps.push(`Plan gate: ${humanize(classification)}. Honest static-only work may continue, but paid-only steps will stop until Builder or higher is approved.`)
+        } else if (classification) {
+          substeps.push(`Plan gate: ${humanize(classification)} on the current ${props.policyState?.plan_type || 'active'} plan.`)
+        }
+      }
+
+      if (waitingOnUser && (status === 'paused' || status === 'blocked' || status === 'in_progress')) {
+        substeps.push(props.interaction?.pause_reason || props.interaction?.pending_question || 'Waiting on a user acknowledgement, reply, or permission decision.')
       }
 
       if (substeps.length === 0) {
@@ -638,6 +694,35 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
                     <div>
                       <div className="text-sm font-semibold text-white">{blocker.title}</div>
                       {blocker.summary && <div className="mt-1 text-sm text-gray-300">{blocker.summary}</div>}
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Badge variant="outline" className="text-[11px] border-gray-700 bg-black/40 text-gray-300">
+                          Category: {humanize(blocker.category)}
+                        </Badge>
+                        {blocker.who_must_act && (
+                          <Badge variant="outline" className="text-[11px] border-gray-700 bg-black/40 text-gray-300">
+                            Owner: {humanize(blocker.who_must_act)}
+                          </Badge>
+                        )}
+                        <Badge variant="outline" className="text-[11px] border-gray-700 bg-black/40 text-gray-300">
+                          Type: {humanize(blocker.type)}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'text-[11px]',
+                            blocker.partial_progress_allowed
+                              ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300'
+                              : 'border-gray-700 bg-black/40 text-gray-300',
+                          )}
+                        >
+                          {blocker.partial_progress_allowed ? 'Partial work can continue' : 'Stops forward progress'}
+                        </Badge>
+                        {blocker.plan_tier_related && (
+                          <Badge variant="outline" className="text-[11px] border-amber-500/40 bg-amber-500/10 text-amber-300">
+                            Plan-tier blocker
+                          </Badge>
+                        )}
+                      </div>
                       {blocker.unblocks_with && <div className="mt-2 text-xs text-gray-500">Unblock: {blocker.unblocks_with}</div>}
                     </div>
                     <Badge variant="outline" className={cn('text-[11px]', blockerTone(blocker.severity))}>

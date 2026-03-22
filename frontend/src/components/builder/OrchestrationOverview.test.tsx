@@ -43,6 +43,8 @@ describe('OrchestrationOverview', () => {
             category: 'runtime_failure',
             severity: 'blocking',
             summary: 'Response payload shape does not match the contract.',
+            who_must_act: 'system',
+            partial_progress_allowed: false,
           },
         ]}
         approvals={[
@@ -222,11 +224,114 @@ describe('OrchestrationOverview', () => {
     expect(screen.getByText('Mock-To-Real Diff')).toBeTruthy()
     expect(screen.getAllByText('Frontend').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Deployment').length).toBeGreaterThan(0)
+    expect(screen.getByText('Category: runtime failure')).toBeTruthy()
+    expect(screen.getAllByText('Owner: system').length).toBeGreaterThan(0)
+    expect(screen.getByText('Type: verification blocker')).toBeTruthy()
+    expect(screen.getByText('Stops forward progress')).toBeTruthy()
     expect(screen.getByText('Checkpoint Continuity')).toBeTruthy()
     expect(screen.getByText('Approval History')).toBeTruthy()
     expect(screen.getByText('User acknowledgement requested')).toBeTruthy()
     expect(screen.getByText('Ack required')).toBeTruthy()
     expect(screen.getByText('Provider Scorecards')).toBeTruthy()
     expect(screen.getByText('Repair Signals')).toBeTruthy()
+  })
+
+  it('renders paused orchestration phases truthfully', () => {
+    render(
+      <OrchestrationOverview
+        buildStatus="awaiting_review"
+        currentPhase="validation"
+        blockers={[
+          {
+            id: 'plan-gate',
+            title: 'Upgrade required for full-stack work',
+            type: 'plan_upgrade_required',
+            category: 'plan_tier',
+            severity: 'blocking',
+            summary: 'This request needs backend runtime, which is locked on the free plan.',
+            who_must_act: 'user',
+            partial_progress_allowed: true,
+            plan_tier_related: true,
+          },
+        ]}
+        policyState={{
+          plan_type: 'free',
+          classification: 'upgrade_required',
+          upgrade_required: true,
+          upgrade_reason: 'backend runtime',
+          required_plan: 'builder',
+        }}
+        interaction={{
+          waiting_for_user: true,
+          paused: true,
+          pause_reason: 'Waiting for plan acknowledgement before deeper backend work.',
+          permission_requests: [],
+          permission_rules: [],
+          approval_events: [],
+        }}
+        intentBrief={{
+          id: 'intent-2',
+          normalized_request: 'Build a SaaS dashboard with auth and billing',
+          app_type: 'fullstack',
+          required_capabilities: ['auth', 'database', 'billing'],
+          created_at: '2026-03-21T21:00:00Z',
+        }}
+        buildContract={{
+          id: 'contract-2',
+          build_id: 'build-2',
+          app_type: 'fullstack',
+          verified: false,
+        }}
+        verificationReports={[
+          {
+            id: 'vr-2',
+            build_id: 'build-2',
+            phase: 'validation',
+            surface: 'frontend',
+            status: 'blocked',
+            generated_at: '2026-03-21T21:10:00Z',
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getAllByText('paused').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Plan gate: upgrade required\./).length).toBeGreaterThan(0)
+    expect(screen.getByText('Plan-tier blocker')).toBeTruthy()
+    expect(screen.getByText('Partial work can continue')).toBeTruthy()
+    expect(screen.getAllByText('Waiting for plan acknowledgement before deeper backend work.').length).toBeGreaterThan(0)
+  })
+
+  it('renders skipped repair phases when no repair ladder was needed', () => {
+    render(
+      <OrchestrationOverview
+        buildStatus="completed"
+        currentPhase="completed"
+        intentBrief={{
+          id: 'intent-3',
+          normalized_request: 'Build a static marketing page',
+          app_type: 'web',
+          created_at: '2026-03-21T22:00:00Z',
+        }}
+        policyState={{
+          plan_type: 'free',
+          classification: 'static_ready',
+          static_frontend_only: true,
+        }}
+        verificationReports={[
+          {
+            id: 'vr-3',
+            build_id: 'build-3',
+            phase: 'validation',
+            surface: 'frontend',
+            status: 'passed',
+            generated_at: '2026-03-21T22:05:00Z',
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText('skipped')).toBeTruthy()
+    expect(screen.getByText('No repair ladder was needed because verification completed without recurring failure fingerprints.')).toBeTruthy()
   })
 })
