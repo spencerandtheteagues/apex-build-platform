@@ -1326,6 +1326,8 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
         </p>
       </motion.div>
 
+      <ScreenshotSection onGetStarted={onGetStarted} />
+
       {/* 2-column bullets */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -2036,24 +2038,6 @@ const Footer: React.FC = () => (
 
 const SCREENSHOTS = [
   {
-    id: 'workspace',
-    eyebrow: 'Build with real power',
-    title: 'Real Full-Stack Workspace',
-    description:
-      'A true development environment — editor, live backend, database visibility, and app preview all working together in one interface.',
-    image: '/screenshot-ide.png',
-    icon: Terminal,
-    iconColor: '#60a5fa',
-    bullets: [
-      'Live preview and backend status side by side',
-      'Database visibility built in',
-      'Real project structure, not a toy editor',
-    ],
-    accentColor: '#60a5fa',
-    glowColor: 'rgba(96,165,250,0.18)',
-    borderGlow: 'rgba(96,165,250,0.22)',
-  },
-  {
     id: 'build',
     eyebrow: 'From prompt to product',
     title: 'Describe It. Build It.',
@@ -2070,6 +2054,24 @@ const SCREENSHOTS = [
     accentColor: C.accent,
     glowColor: 'rgba(255,0,51,0.18)',
     borderGlow: 'rgba(255,0,51,0.28)',
+  },
+  {
+    id: 'workspace',
+    eyebrow: 'Build with real power',
+    title: 'Real Full-Stack Workspace',
+    description:
+      'A true development environment — editor, live backend, database visibility, and app preview all working together in one interface.',
+    image: '/screenshot-ide.png',
+    icon: Terminal,
+    iconColor: '#60a5fa',
+    bullets: [
+      'Live preview and backend status side by side',
+      'Database visibility built in',
+      'Real project structure, not a toy editor',
+    ],
+    accentColor: '#60a5fa',
+    glowColor: 'rgba(96,165,250,0.18)',
+    borderGlow: 'rgba(96,165,250,0.22)',
   },
   {
     id: 'spend',
@@ -2336,7 +2338,6 @@ const Landing: React.FC<LandingProps> = ({ onGetStarted }) => (
     <Nav onGetStarted={onGetStarted} />
     <SideNav />
     <AboveFold onGetStarted={onGetStarted} />
-    <ScreenshotSection onGetStarted={onGetStarted} />
     {FEATURES.map((feature, i) => (
       <FeatureSection key={feature.id} feature={feature} index={i} onGetStarted={onGetStarted} />
     ))}
