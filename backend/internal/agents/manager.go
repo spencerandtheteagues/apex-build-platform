@@ -4947,6 +4947,28 @@ func dependencyVersionHint(pkg string) string {
 		return "^5.4.10"
 	case "typescript":
 		return "^5.6.3"
+	case "vitest":
+		return "^2.1.5"
+	case "@testing-library/react":
+		return "^16.0.1"
+	case "@testing-library/jest-dom":
+		return "^6.6.3"
+	case "jsdom":
+		return "^25.0.1"
+	case "jest":
+		return "^29.7.0"
+	case "@types/jest":
+		return "^29.5.14"
+	case "jest-environment-jsdom":
+		return "^29.7.0"
+	case "ts-jest":
+		return "^29.2.5"
+	case "identity-obj-proxy":
+		return "^3.0.0"
+	case "tsx":
+		return "^4.19.2"
+	case "concurrently":
+		return "^9.0.1"
 	default:
 		return "*"
 	}
@@ -4961,7 +4983,11 @@ func dependencyShouldBeDev(pkg string) bool {
 		return true
 	case pkg == "typescript" || pkg == "vite" || strings.HasPrefix(pkg, "@vitejs/"):
 		return true
-	case pkg == "vitest" || pkg == "jest" || strings.HasPrefix(pkg, "@testing-library/"):
+	case pkg == "vitest" || pkg == "jest" || pkg == "jsdom" || pkg == "tsx" || pkg == "concurrently":
+		return true
+	case pkg == "ts-jest" || pkg == "jest-environment-jsdom" || pkg == "identity-obj-proxy":
+		return true
+	case strings.HasPrefix(pkg, "@testing-library/"):
 		return true
 	default:
 		return false
@@ -5674,6 +5700,363 @@ func (am *AgentManager) applyDeterministicTypeDeclarationRepair(build *Build, re
 	}
 	summary := strings.Join(applied, "; ")
 	return am.bundleFromPatchPlan(build.ID, files, plan, "type_package_repair: "+summary), summary
+}
+
+func parseMissingDependencyNamesFromIssues(issues []string) []string {
+	if len(issues) == 0 {
+		return nil
+	}
+	reMissing := regexp.MustCompile(`does not declare dependency "([^"]+)"`)
+	seen := map[string]bool{}
+	pkgs := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		matches := reMissing.FindAllStringSubmatch(strings.TrimSpace(issue), -1)
+		for _, match := range matches {
+			if len(match) != 2 {
+				continue
+			}
+			pkg := strings.TrimSpace(match[1])
+			if pkg == "" || seen[pkg] {
+				continue
+			}
+			seen[pkg] = true
+			pkgs = append(pkgs, pkg)
+		}
+	}
+	sort.Strings(pkgs)
+	return pkgs
+}
+
+func buildScriptUsesTypeScriptCompiler(manifest previewManifest) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(manifest.Scripts["build"])), "tsc")
+}
+
+func manifestUsesVite(manifest previewManifest) bool {
+	for _, name := range []string{"build", "dev", "preview"} {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(manifest.Scripts[name])), "vite") {
+			return true
+		}
+	}
+	return manifestDeclaresDependency(manifest, "vite")
+}
+
+func manifestUsesVitest(manifest previewManifest) bool {
+	script := strings.ToLower(strings.TrimSpace(manifest.Scripts["test"]))
+	return strings.Contains(script, "vitest") || manifestDeclaresDependency(manifest, "vitest")
+}
+
+func manifestUsesJest(manifest previewManifest) bool {
+	script := strings.ToLower(strings.TrimSpace(manifest.Scripts["test"]))
+	return strings.Contains(script, "jest") || manifestDeclaresDependency(manifest, "jest")
+}
+
+type generatedPackageSignals struct {
+	hasImportMetaEnv       bool
+	hasNodeTests           bool
+	usesTestingLibrary     bool
+	usesJestDOM            bool
+	usesVitestConfigImport bool
+}
+
+func inspectGeneratedPackageSignals(files []GeneratedFile, prefix string) generatedPackageSignals {
+	signals := generatedPackageSignals{}
+	prefixLower := strings.ToLower(prefix)
+	for _, file := range files {
+		path := strings.ToLower(filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(file.Path), "./")))
+		if path == "" {
+			continue
+		}
+		if prefixLower != "" {
+			if !strings.HasPrefix(path, prefixLower) {
+				continue
+			}
+			path = strings.TrimPrefix(path, prefixLower)
+			path = strings.TrimPrefix(path, "/")
+		}
+		if path == "" {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		switch ext {
+		case ".js", ".jsx", ".ts", ".tsx":
+		default:
+			continue
+		}
+		contentLower := strings.ToLower(file.Content)
+		if strings.Contains(file.Content, "import.meta.env") {
+			signals.hasImportMetaEnv = true
+		}
+		if strings.Contains(path, "/__tests__/") || strings.Contains(path, "/tests/") || strings.Contains(path, ".test.") || strings.Contains(path, ".spec.") {
+			signals.hasNodeTests = true
+		}
+		if strings.Contains(contentLower, "@testing-library/react") {
+			signals.usesTestingLibrary = true
+		}
+		if strings.Contains(contentLower, "@testing-library/jest-dom") {
+			signals.usesJestDOM = true
+		}
+		if strings.Contains(contentLower, "vitest/config") {
+			signals.usesVitestConfigImport = true
+		}
+	}
+	return signals
+}
+
+func patchManifestScriptsJSON(content string, additions map[string]string) (string, []string) {
+	if strings.TrimSpace(content) == "" || len(additions) == 0 {
+		return content, nil
+	}
+
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+		return content, nil
+	}
+	if manifest == nil {
+		return content, nil
+	}
+
+	scripts, _ := manifest["scripts"].(map[string]any)
+	if scripts == nil {
+		scripts = map[string]any{}
+		manifest["scripts"] = scripts
+	}
+
+	added := make([]string, 0, len(additions))
+	for name, value := range additions {
+		name = strings.TrimSpace(name)
+		value = strings.TrimSpace(value)
+		if name == "" || value == "" {
+			continue
+		}
+		if existing, ok := scripts[name].(string); ok && strings.TrimSpace(existing) != "" {
+			continue
+		}
+		scripts[name] = value
+		added = append(added, fmt.Sprintf("%s -> %s", name, value))
+	}
+	if len(added) == 0 {
+		return content, nil
+	}
+
+	updated, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return content, nil
+	}
+	sort.Strings(added)
+	return string(updated), added
+}
+
+func generatedTSConfigPathFromManifest(manifestPath string) string {
+	sanitized := sanitizeFilePath(manifestPath)
+	if sanitized == "" {
+		return ""
+	}
+	prefix := strings.TrimSuffix(filepath.ToSlash(sanitized), "package.json")
+	return filepath.ToSlash(filepath.Join(prefix, "tsconfig.json"))
+}
+
+func minimalTypeScriptConfigContent(manifest previewManifest, manifestPath string) string {
+	frontendLike := manifestUsesVite(manifest) ||
+		manifestDeclaresDependency(manifest, "react") ||
+		manifestDeclaresDependency(manifest, "react-dom") ||
+		manifestDeclaresDependency(manifest, "next") ||
+		strings.Contains(strings.ToLower(manifestPath), "frontend/")
+
+	if frontendLike {
+		return `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": ["src"]
+}
+`
+	}
+
+	return `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "rootDir": "src",
+    "outDir": "dist",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}
+`
+}
+
+func (am *AgentManager) ensureGeneratedTypeScriptConfig(plan *generatedFilePatchPlan, manifestPath string, manifest previewManifest) (bool, string) {
+	targetPath := generatedTSConfigPathFromManifest(manifestPath)
+	if targetPath == "" || !buildScriptUsesTypeScriptCompiler(manifest) {
+		return false, ""
+	}
+	if strings.TrimSpace(plan.content(targetPath)) != "" {
+		return false, ""
+	}
+	content := minimalTypeScriptConfigContent(manifest, manifestPath)
+	if !plan.createFile(targetPath, content, "json") {
+		return false, ""
+	}
+	return true, targetPath
+}
+
+func generatedManifestCandidates(files []GeneratedFile) []string {
+	if len(files) == 0 {
+		return nil
+	}
+	candidates := []string{
+		"frontend/package.json",
+		"client/package.json",
+		"web/package.json",
+		"apps/web/package.json",
+		"apps/frontend/package.json",
+		"packages/web/package.json",
+		"packages/frontend/package.json",
+		"backend/package.json",
+		"api/package.json",
+		"server/package.json",
+		"apps/api/package.json",
+		"apps/server/package.json",
+		"packages/backend/package.json",
+		"packages/api/package.json",
+		"package.json",
+	}
+	existing := map[string]bool{}
+	for _, file := range files {
+		existing[sanitizeFilePath(file.Path)] = true
+	}
+	out := make([]string, 0, len(candidates))
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		candidate = sanitizeFilePath(candidate)
+		if candidate == "" || seen[candidate] || !existing[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Build) bool {
+	if build == nil {
+		return false
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 {
+		return false
+	}
+
+	manifestPaths := generatedManifestCandidates(files)
+	if len(manifestPaths) == 0 {
+		return false
+	}
+
+	summaries := make([]string, 0, len(manifestPaths))
+	for _, manifestPath := range manifestPaths {
+		content := plan.content(manifestPath)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+
+		var manifest previewManifest
+		if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+			continue
+		}
+		if manifest.Scripts == nil {
+			manifest.Scripts = map[string]string{}
+		}
+
+		prefix := strings.TrimSuffix(filepath.ToSlash(manifestPath), "package.json")
+		signals := inspectGeneratedPackageSignals(files, prefix)
+		missingPkgs := parseMissingDependencyNamesFromIssues(append(
+			validatePreviewManifestToolingDependencies(manifest),
+			validateGeneratedImportDependencies(files, prefix, manifest)...,
+		))
+		if signals.hasNodeTests && manifestUsesVitest(manifest) && (signals.usesTestingLibrary || signals.usesJestDOM) && !manifestDeclaresDependency(manifest, "jsdom") {
+			missingPkgs = append(missingPkgs, "jsdom")
+		}
+		if signals.usesVitestConfigImport && !manifestDeclaresDependency(manifest, "vitest") {
+			missingPkgs = append(missingPkgs, "vitest")
+		}
+		if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/react") {
+			missingPkgs = append(missingPkgs, "@testing-library/react")
+		}
+		if signals.usesJestDOM && !manifestDeclaresDependency(manifest, "@testing-library/jest-dom") {
+			missingPkgs = append(missingPkgs, "@testing-library/jest-dom")
+		}
+		missingPkgs = dedupeStrings(missingPkgs)
+
+		manifestChanged := false
+		manifestChanges := make([]string, 0, 4)
+		updatedContent := content
+		if len(missingPkgs) > 0 {
+			if patched, added := patchManifestDependenciesJSON(updatedContent, missingPkgs); len(added) > 0 {
+				updatedContent = patched
+				manifestChanged = true
+				manifestChanges = append(manifestChanges, "deps: "+strings.Join(added, ", "))
+			}
+		}
+		if manifestUsesVite(manifest) {
+			if patched, added := patchManifestScriptsJSON(updatedContent, map[string]string{"preview": "vite preview"}); len(added) > 0 {
+				updatedContent = patched
+				manifestChanged = true
+				manifestChanges = append(manifestChanges, "scripts: "+strings.Join(added, ", "))
+			}
+		}
+		if manifestChanged {
+			if !plan.patchFile(manifestPath, updatedContent, "json") {
+				continue
+			}
+			summaries = append(summaries, fmt.Sprintf("%s (%s)", manifestPath, strings.Join(manifestChanges, "; ")))
+			if err := json.Unmarshal([]byte(updatedContent), &manifest); err == nil && manifest.Scripts == nil {
+				manifest.Scripts = map[string]string{}
+			}
+		}
+
+		if signals.hasImportMetaEnv && manifestUsesVite(manifest) {
+			if repaired, summary := am.ensureGeneratedViteEnvDeclaration(plan, manifestPath); repaired {
+				summaries = append(summaries, summary)
+			}
+		}
+		if repaired, summary := am.ensureGeneratedTypeScriptConfig(plan, manifestPath, manifest); repaired {
+			summaries = append(summaries, summary)
+		}
+	}
+
+	if len(summaries) == 0 {
+		return false
+	}
+
+	summary := strings.Join(dedupeStrings(summaries), "; ")
+	bundle := am.bundleFromPatchPlan(build.ID, files, plan, "pre_validation_normalization: "+summary)
+	if bundle == nil || !am.applyPatchBundleToBuild(build, bundle) {
+		return false
+	}
+
+	build.mu.Lock()
+	orchestration := ensureBuildOrchestrationStateLocked(build)
+	recordPatchBundles := orchestration != nil && orchestration.Flags.EnablePatchBundles
+	build.mu.Unlock()
+	if recordPatchBundles {
+		appendPatchBundle(build, *bundle)
+	}
+
+	log.Printf("Build %s: applied deterministic pre-validation normalization (%s)", build.ID, summary)
+	return true
 }
 
 // applyDeterministicMixedCodeRepair strips server-framework imports (Express, etc.) from
@@ -6680,6 +7063,9 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 	var promotionReadinessErrors []string
 
 	if status != BuildFailed && status != BuildCancelled {
+		if am.applyDeterministicPreValidationNormalization(build) {
+			allFiles = am.collectGeneratedFiles(build)
+		}
 		readinessErrors := am.validateFinalBuildReadiness(build, allFiles)
 		if len(readinessErrors) > 0 {
 			promotionReadinessErrors = append([]string(nil), readinessErrors...)

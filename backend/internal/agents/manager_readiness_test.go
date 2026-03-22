@@ -2169,6 +2169,143 @@ func TestApplyDeterministicTypeDeclarationRepairAddsViteEnvDeclaration(t *testin
 	}
 }
 
+func TestApplyDeterministicPreValidationNormalizationRepairsStaticReactViteBuild(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:   "build-prevalidation-react-vite",
+		Mode: ModeFast,
+		TechStack: &TechStack{
+			Frontend: "React",
+		},
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-ui",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "preview-test",
+  "private": true,
+  "scripts": {
+    "build": "tsc && vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0"
+  }
+}`,
+						},
+						{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+						{Path: "vite.config.ts", Content: `import { defineConfig } from "vite"; import react from "@vitejs/plugin-react"; export default defineConfig({ plugins: [react()] });`},
+						{Path: "src/main.tsx", Content: `console.log(import.meta.env.VITE_API_URL);`},
+						{Path: "src/App.tsx", Content: `export default function App(){ return <div>ok</div>; }`},
+						{Path: "src/App.test.tsx", Content: `import { describe, it, expect } from "vitest"; import { render } from "@testing-library/react"; import "@testing-library/jest-dom"; describe("App", () => { it("renders", () => { render(document.createElement("div")); expect(true).toBe(true); }); });`},
+					},
+				},
+			},
+		},
+	}
+
+	if !am.applyDeterministicPreValidationNormalization(build) {
+		t.Fatalf("expected pre-validation normalization to trigger")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+
+	manifest := byPath["package.json"]
+	if !strings.Contains(manifest, `"preview": "vite preview"`) {
+		t.Fatalf("expected preview script to be added, got %s", manifest)
+	}
+	for _, needle := range []string{`"vitest"`, `"@testing-library/react"`, `"@testing-library/jest-dom"`, `"jsdom"`} {
+		if !strings.Contains(manifest, needle) {
+			t.Fatalf("expected %s in normalized package.json, got %s", needle, manifest)
+		}
+	}
+	if _, ok := byPath["tsconfig.json"]; !ok {
+		t.Fatalf("expected tsconfig.json to be created")
+	}
+	if _, ok := byPath["src/vite-env.d.ts"]; !ok {
+		t.Fatalf("expected src/vite-env.d.ts to be created")
+	}
+
+	if errs := am.validateFinalBuildReadiness(build, files); containsError(errs, "dependency check failed") || containsError(errs, "tsconfig.json is missing") {
+		t.Fatalf("expected normalized build to avoid manifest/tsconfig readiness errors, got %v", errs)
+	}
+}
+
+func TestApplyDeterministicPreValidationNormalizationAddsBackendTSConfigAndTooling(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:   "build-prevalidation-backend-ts",
+		Mode: ModeFast,
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-api",
+				Type:   TaskGenerateAPI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "server/package.json",
+							Content: `{
+  "name": "server",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}`,
+						},
+						{Path: "server/src/index.ts", Content: `import express from "express"; const app = express(); app.listen(3001);`},
+					},
+				},
+			},
+		},
+	}
+
+	if !am.applyDeterministicPreValidationNormalization(build) {
+		t.Fatalf("expected backend pre-validation normalization to trigger")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+
+	manifest := byPath["server/package.json"]
+	if !strings.Contains(manifest, `"tsx"`) {
+		t.Fatalf("expected tsx dependency to be added, got %s", manifest)
+	}
+	if !strings.Contains(manifest, `"typescript"`) {
+		t.Fatalf("expected typescript dependency to be preserved or added, got %s", manifest)
+	}
+	if _, ok := byPath["server/tsconfig.json"]; !ok {
+		t.Fatalf("expected server/tsconfig.json to be created")
+	}
+}
+
 func TestNodeVerificationSkipsWhenNPMUnavailable(t *testing.T) {
 	t.Setenv("PATH", "")
 
