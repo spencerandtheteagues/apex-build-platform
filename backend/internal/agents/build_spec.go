@@ -838,6 +838,9 @@ func buildWorkOrders(appType string, stack TechStack, scaffold buildScaffold, ow
 		if role == RoleArchitect && len(order.OwnedFiles) == 0 {
 			order.OwnedFiles = []string{"docs/**", "ARCHITECTURE.md"}
 		}
+		if role == RoleBackend && strings.TrimSpace(stack.Backend) == "" && len(order.AcceptanceChecks) == 0 {
+			continue
+		}
 		if role == RoleDatabase && strings.TrimSpace(stack.Database) == "" && len(order.OwnedFiles) == 0 && len(order.RequiredFiles) == 0 && len(order.AcceptanceChecks) == 0 {
 			continue
 		}

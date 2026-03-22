@@ -259,6 +259,9 @@ func TestCreateBuildPlanFromPlanningBundleSkipsDatabaseLaneForStaticIntent(t *te
 	if wo := getBuildWorkOrder(plan, RoleDatabase); wo != nil {
 		t.Fatalf("expected static plan to omit database work order, got %+v", wo)
 	}
+	if wo := getBuildWorkOrder(plan, RoleBackend); wo != nil {
+		t.Fatalf("expected static plan to omit backend work order, got %+v", wo)
+	}
 }
 
 func TestAssignPhaseAgentsUsesFrozenWorkOrder(t *testing.T) {
