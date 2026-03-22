@@ -111,11 +111,13 @@ func buildPolicyState(build *Build, capabilityState *BuildCapabilityState) *Buil
 	requiresPaidFeatures, upgradeReason := buildRequiresPaidFeatures(build)
 
 	classification := BuildClassificationStaticReady
+	requiredPlan := ""
 	if requiresPaidFeatures {
 		if isPaidBuildPlan(planType) {
 			classification = BuildClassificationFullStackCandidate
 		} else {
 			classification = BuildClassificationUpgradeRequired
+			requiredPlan = "builder"
 		}
 	}
 
@@ -124,7 +126,7 @@ func buildPolicyState(build *Build, capabilityState *BuildCapabilityState) *Buil
 		Classification:     classification,
 		UpgradeRequired:    classification == BuildClassificationUpgradeRequired,
 		UpgradeReason:      upgradeReason,
-		RequiredPlan:       "builder",
+		RequiredPlan:       requiredPlan,
 		StaticFrontendOnly: classification == BuildClassificationStaticReady,
 		FullStackEligible:  isPaidBuildPlan(planType),
 		PublishEnabled:     isPaidBuildPlan(planType),

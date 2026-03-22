@@ -42,6 +42,9 @@ func TestRefreshDerivedSnapshotStateLockedStaticReadyBuild(t *testing.T) {
 	if build.SnapshotState.PolicyState.UpgradeRequired {
 		t.Fatalf("expected no upgrade requirement")
 	}
+	if build.SnapshotState.PolicyState.RequiredPlan != "" {
+		t.Fatalf("expected no required plan for static build, got %q", build.SnapshotState.PolicyState.RequiredPlan)
+	}
 	if build.SnapshotState.CapabilityState == nil {
 		t.Fatalf("expected capability state")
 	}
@@ -84,6 +87,9 @@ func TestRefreshDerivedSnapshotStateLockedFullStackPaidBuild(t *testing.T) {
 	}
 	if build.SnapshotState.PolicyState.Classification != BuildClassificationFullStackCandidate {
 		t.Fatalf("expected full_stack_candidate, got %s", build.SnapshotState.PolicyState.Classification)
+	}
+	if build.SnapshotState.PolicyState.RequiredPlan != "" {
+		t.Fatalf("expected no required plan once paid plan is active, got %q", build.SnapshotState.PolicyState.RequiredPlan)
 	}
 	if build.SnapshotState.CapabilityState == nil {
 		t.Fatalf("expected capability state")
