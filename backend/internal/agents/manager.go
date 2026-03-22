@@ -805,6 +805,13 @@ func (am *AgentManager) inactivityMonitor(buildID string) {
 		stallThreshold := am.buildStallTimeoutForBuild(build)
 		if timeSinceUpdate > stallThreshold &&
 			(status == BuildPlanning || status == BuildInProgress || status == BuildTesting || status == BuildReviewing) {
+			if pendingTasks > 0 && inProgressTasks == 0 {
+				log.Printf("Build %s: stalled in %s with %d pending task(s) and no active execution; attempting queue recovery before failing",
+					buildID, status, pendingTasks)
+				am.resumeBuildExecution(build, false)
+				warningCount = 0
+				continue
+			}
 			log.Printf("Build %s: stalled in %s for %v (pending=%d in_progress=%d recovery_active=%d); failing build",
 				buildID, status, timeSinceUpdate.Round(time.Second), pendingTasks, inProgressTasks, activeRecoveryTasks)
 			am.failBuildOnStall(buildID, status, timeSinceUpdate, pendingTasks, inProgressTasks, activeRecoveryTasks)
@@ -8912,7 +8919,12 @@ func (am *AgentManager) resumeBuildExecution(build *Build, startMonitors bool) {
 
 	if !nonTerminalTasks || !requeued {
 		am.checkBuildCompletion(build)
+		return
 	}
+
+	build.mu.Lock()
+	build.UpdatedAt = time.Now().UTC()
+	build.mu.Unlock()
 }
 
 func findLeadAgentLocked(build *Build) *Agent {
