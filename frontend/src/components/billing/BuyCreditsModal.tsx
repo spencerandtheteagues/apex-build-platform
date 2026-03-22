@@ -153,6 +153,38 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason }) => {
         </div>
 
         <div style={{ padding: '20px 24px 24px' }}>
+          <div style={{
+            marginBottom: 18,
+            padding: '14px 16px',
+            borderRadius: 10,
+            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))',
+          }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+              {['One-time purchase', 'Secure Stripe checkout', 'Adds usage runway only'].map((item) => (
+                <div
+                  key={item}
+                  style={{
+                    padding: '4px 9px',
+                    borderRadius: 999,
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    background: 'rgba(255,255,255,0.03)',
+                    fontSize: '0.66rem',
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    color: 'rgba(255,255,255,0.55)',
+                    fontWeight: 700,
+                  }}
+                >
+                  {item}
+                </div>
+              ))}
+            </div>
+            <p style={{ margin: 0, fontSize: '0.82rem', color: 'rgba(255,255,255,0.72)', lineHeight: 1.65 }}>
+              Credit packs extend managed AI usage on your account. They do not unlock backend, publish, or BYOK access without an active paid plan.
+            </p>
+          </div>
+
           {/* Reason banner */}
           {reason && (
             <div style={{
@@ -226,7 +258,7 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason }) => {
             padding: '12px 16px',
             background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)',
             borderRadius: 8, marginBottom: 16,
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            display: 'grid', gridTemplateColumns: '1fr auto 1fr auto', justifyContent: 'space-between', alignItems: 'center', gap: 12,
           }}>
             <span style={{ fontSize: '0.83rem', color: 'rgba(255,255,255,0.5)' }}>
               Total
@@ -240,6 +272,36 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason }) => {
             <span style={{ fontFamily: '"Orbitron", sans-serif', fontWeight: 800, fontSize: '1.3rem', color: '#34d399' }}>
               ${pack.creditUsd.toFixed(0)}
             </span>
+          </div>
+
+          <div style={{
+            marginBottom: 16,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gap: 10,
+          }}>
+            {[
+              { label: 'Unlocks plan features', value: 'No' },
+              { label: 'Renews automatically', value: 'No' },
+              { label: 'Best use', value: 'Overages' },
+            ].map((item) => (
+              <div
+                key={item.label}
+                style={{
+                  borderRadius: 8,
+                  border: '1px solid rgba(255,255,255,0.07)',
+                  background: 'rgba(255,255,255,0.025)',
+                  padding: '10px 12px',
+                }}
+              >
+                <div style={{ fontSize: '0.64rem', color: 'rgba(255,255,255,0.34)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  {item.label}
+                </div>
+                <div style={{ marginTop: 6, fontSize: '0.8rem', color: '#f0f0f0', fontWeight: 600 }}>
+                  {item.value}
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* Error */}

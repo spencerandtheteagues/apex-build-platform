@@ -35,6 +35,36 @@ interface Invoice {
   description: string
 }
 
+const planNarrative = (planType: string) => {
+  switch (planType) {
+    case 'free':
+      return 'Static frontend websites, mockups, and honest prototype work.'
+    case 'builder':
+      return 'Unlocks backend, auth, database, deploy, publish, and BYOK for serious app builds.'
+    case 'pro':
+      return 'Best default for weekly shipping, longer autonomous runs, and heavier managed usage.'
+    case 'team':
+      return 'Shared team workflow with the highest included credit runway.'
+    default:
+      return 'Plan details are still loading.'
+  }
+}
+
+const planCallouts = (planType: string) => {
+  switch (planType) {
+    case 'free':
+      return ['Static/frontend-only', 'No backend or publish', 'Credits do not unlock paid capabilities']
+    case 'builder':
+      return ['Full-stack unlocked', 'Publish unlocked', 'BYOK unlocked']
+    case 'pro':
+      return ['Longer runs', 'Higher included credits', 'Priority for heavier app workflows']
+    case 'team':
+      return ['Shared workspace', 'Largest included credits', 'Best for multi-seat delivery']
+    default:
+      return []
+  }
+}
+
 const asNumber = (value: unknown): number => {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
@@ -303,84 +333,108 @@ export function BillingSettings() {
       )}
 
       {/* Credit Balance Card */}
-      <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs text-gray-500 uppercase mb-1 flex items-center gap-1.5">
-              <Zap className="w-3 h-3" /> AI Credit Balance
-            </div>
-            <div className={cn(
-              'text-3xl font-mono font-black',
-              hasUnlimited || bypassBilling ? 'text-emerald-400' :
-              (creditBalance ?? 1) <= 0 ? 'text-red-400' :
-              (creditBalance ?? 99) < 2 ? 'text-yellow-400' : 'text-white'
-            )}>
-              {creditDisplay}
-            </div>
-            {!hasUnlimited && !bypassBilling && (
-              <div className="text-xs text-gray-500 mt-1">
-                Used to pay for AI model calls during builds
+      <div className="overflow-hidden rounded-2xl border border-gray-800 bg-black/70 shadow-[0_24px_70px_rgba(0,0,0,0.38)]">
+        <div className="bg-[radial-gradient(circle_at_top_left,rgba(255,0,51,0.18),transparent_38%),radial-gradient(circle_at_top_right,rgba(34,211,238,0.14),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent_60%)] p-5">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-3">
+              <div className="text-xs text-gray-500 uppercase flex items-center gap-1.5 tracking-[0.18em]">
+                <Zap className="w-3 h-3" /> Billing control plane
               </div>
-            )}
-          </div>
-          {!hasUnlimited && !bypassBilling && (
-            <button
-              onClick={() => setShowBuyCredits(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold rounded-lg transition-colors"
-            >
-              <CreditCard className="w-4 h-4" />
-              Buy Credits
-            </button>
-          )}
-        </div>
+              <div className={cn(
+                'text-4xl font-mono font-black',
+                hasUnlimited || bypassBilling ? 'text-emerald-400' :
+                (creditBalance ?? 1) <= 0 ? 'text-red-400' :
+                (creditBalance ?? 99) < 2 ? 'text-yellow-400' : 'text-white'
+              )}>
+                {creditDisplay}
+              </div>
+              <div className="max-w-2xl text-sm leading-6 text-gray-300">
+                {planNarrative(currentPlanType)} Credits pay for managed AI usage. Subscription tier unlocks capability boundaries like backend, publish, and BYOK.
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {planCallouts(currentPlanType).map((callout) => (
+                  <div key={callout} className="rounded-full border border-gray-700 bg-gray-950/70 px-3 py-1.5 text-[11px] uppercase tracking-[0.14em] text-gray-300">
+                    {callout}
+                  </div>
+                ))}
+              </div>
+            </div>
 
-        {currentPlanType === 'free' && (
-          <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-xs text-amber-100/80">
-            Free accounts can build static frontend websites and UI mockups. Upgrade to Builder or higher to unlock backend, database, auth, billing, realtime, and deployment workflows. Credit packs extend managed usage but do not unlock those paid capabilities on their own.
-          </div>
-        )}
+            <div className="grid min-w-[280px] gap-3">
+              <div className="rounded-xl border border-gray-800 bg-gray-950/70 p-4">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Current plan</div>
+                <div className="mt-2 text-lg font-semibold text-white">
+                  {subscription?.plan_name || 'Free'}
+                </div>
+                {subscription?.status && subscription.status !== 'inactive' && (
+                  <div className="mt-2">
+                    <span className={cn(
+                      'inline-flex rounded-full px-2 py-1 text-[10px] font-bold uppercase',
+                      subscription.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' :
+                      subscription.status === 'past_due' ? 'bg-yellow-500/20 text-yellow-400' :
+                      'bg-gray-700 text-gray-400'
+                    )}>
+                      {subscription.status}
+                    </span>
+                  </div>
+                )}
+                {subscription?.current_period_end && (
+                  <div className="mt-2 text-xs text-gray-400">
+                    Renews {new Date(subscription.current_period_end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </div>
+                )}
+              </div>
 
-        {subscription && subscription.plan_name && (
-          <div className="mt-4 pt-4 border-t border-gray-800 flex items-center justify-between">
-            <div>
-              <span className="text-xs text-gray-500 uppercase">Current Plan</span>
-              <div className="text-sm font-semibold text-white mt-0.5">
-                {subscription.plan_name}
-                {subscription.status && subscription.status !== 'inactive' && (
-                  <span className={cn(
-                    'ml-2 text-[10px] px-1.5 py-0.5 rounded-full uppercase font-bold',
-                    subscription.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' :
-                    subscription.status === 'past_due' ? 'bg-yellow-500/20 text-yellow-400' :
-                    'bg-gray-700 text-gray-400'
-                  )}>
-                    {subscription.status}
-                  </span>
+              <div className="flex flex-wrap gap-2">
+                {!hasUnlimited && !bypassBilling && (
+                  <button
+                    onClick={() => setShowBuyCredits(true)}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-500"
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    Buy credits
+                  </button>
+                )}
+                {subscription?.plan_type !== 'free' && (
+                  <button
+                    onClick={handleManageSubscription}
+                    disabled={portalLoading}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-gray-700 bg-gray-900/70 px-4 py-3 text-sm font-medium text-gray-200 transition hover:border-gray-600 hover:text-white"
+                  >
+                    {portalLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
+                    Manage subscription
+                  </button>
                 )}
               </div>
             </div>
-            {subscription.plan_type !== 'free' && (
-              <button
-                onClick={handleManageSubscription}
-                disabled={portalLoading}
-                className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
-              >
-                {portalLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ExternalLink className="w-3 h-3" />}
-                Manage subscription
-              </button>
-            )}
           </div>
-        )}
+        </div>
+
+        <div className="border-t border-gray-800 bg-gray-950/50 px-5 py-4">
+          {currentPlanType === 'free' ? (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-sm leading-6 text-amber-100/85">
+              Free accounts can build static frontend websites and UI mockups. Upgrade to Builder or higher to unlock backend, database, auth, billing, realtime, deployment, publish, and BYOK. Credit packs extend managed usage but do not unlock those paid capabilities on their own.
+            </div>
+          ) : (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm leading-6 text-emerald-100/85">
+              Your subscription unlocks app capability boundaries. Credits cover managed model usage inside that entitlement instead of acting as the entitlement itself.
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Plan Upgrade Grid */}
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-white">Plans</h3>
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-white">Plans</h3>
+            <div className="mt-1 text-xs text-gray-500">Free is for websites. Monthly plans unlock real apps. Credits handle usage above the included monthly runway.</div>
+          </div>
           <button onClick={load} className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 transition-colors">
             <RefreshCw className="w-3 h-3" /> Refresh
           </button>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-4">
           {plans.map(plan => {
             const isCurrent = plan.type === currentPlanType
             const isUpgrade = !isCurrent
@@ -392,12 +446,12 @@ export function BillingSettings() {
               <div
                 key={plan.type}
                 className={cn(
-                  'relative rounded-xl border p-4 flex flex-col gap-3 transition-all',
+                  'relative flex flex-col gap-4 rounded-2xl border p-5 transition-all shadow-[0_24px_60px_rgba(0,0,0,0.18)]',
                   isCurrent
-                    ? 'border-emerald-500/40 bg-emerald-500/5'
+                    ? 'border-emerald-500/40 bg-emerald-500/7'
                     : plan.is_popular
-                      ? 'border-green-500/30 bg-green-500/5'
-                      : 'border-gray-800 bg-gray-900/40'
+                      ? 'border-green-500/30 bg-green-500/7'
+                      : 'border-gray-800 bg-gray-900/50'
                 )}
               >
                 {plan.is_popular && !isCurrent && (
@@ -420,6 +474,9 @@ export function BillingSettings() {
                         + ${plan.monthly_credits_usd.toFixed(0)} credits / mo
                       </div>
                     )}
+                    <div className="mt-2 max-w-xs text-xs leading-5 text-gray-400">
+                      {planNarrative(plan.type)}
+                    </div>
                   </div>
 
                   {isUpgrade && plan.type !== 'free' && (
@@ -442,14 +499,24 @@ export function BillingSettings() {
                   )}
                 </div>
 
-                <ul className="space-y-1">
-                  {plan.features.slice(0, 4).map(f => (
-                    <li key={f} className="flex items-start gap-1.5 text-[11px] text-gray-400">
+                <ul className="space-y-1.5">
+                  {plan.features.slice(0, 5).map(f => (
+                    <li key={f} className="flex items-start gap-1.5 text-[11px] leading-5 text-gray-300">
                       <Check className="w-3 h-3 text-emerald-400 flex-shrink-0 mt-0.5" />
                       {f}
                     </li>
                   ))}
                 </ul>
+
+                <div className="mt-auto rounded-xl border border-gray-800 bg-black/25 px-3 py-3">
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-gray-500">Best for</div>
+                  <div className="mt-2 text-xs leading-5 text-gray-300">
+                    {plan.type === 'free' && 'Landing pages, UI mockups, and static marketing surfaces.'}
+                    {plan.type === 'builder' && 'Early-stage app teams that need backend, auth, and deployment without enterprise overhead.'}
+                    {plan.type === 'pro' && 'Founders and operators shipping production app changes every week.'}
+                    {plan.type === 'team' && 'Collaborative product teams that want shared credit runway and heavier workflows.'}
+                  </div>
+                </div>
               </div>
             )
           })}

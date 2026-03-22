@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react'
-import { AlertCircle, CheckCircle2, Clock3, FileDiff, Layers3, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
+import React, { startTransition, useDeferredValue, useMemo, useState } from 'react'
+import { AlertCircle, CheckCircle2, Clock3, FileDiff, Filter, Layers3, Search, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
 
 import type {
   BuildApproval,
@@ -251,7 +251,43 @@ type TimelineItem = {
   substeps: string[]
 }
 
+const journalToneBadge: Record<JournalEntry['tone'], string> = {
+  success: 'border-green-500/40 bg-green-500/10 text-green-300',
+  warning: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+  info: 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300',
+}
+
+const truthNarrative = (surface: string, tags: string[]) => {
+  const normalized = tags.map((tag) => String(tag).trim().toLowerCase())
+
+  if (normalized.includes('production_ready')) {
+    return `${humanize(surface)} is fully wired, verified, and safe to treat as production-ready.`
+  }
+  if (normalized.includes('production_candidate')) {
+    return `${humanize(surface)} is close to promotion, but a final deployment or validation step still stands between preview and production.`
+  }
+  if (normalized.includes('verified')) {
+    return `${humanize(surface)} has verification evidence behind it, even if some adjacent systems still need promotion or deployment checks.`
+  }
+  if (normalized.includes('upgrade_required')) {
+    return `${humanize(surface)} is blocked by plan policy. Honest prototype or static work can continue, but paid capability gates are stopping the real path.`
+  }
+  if (normalized.includes('needs_secrets') || normalized.includes('needs_external_api')) {
+    return `${humanize(surface)} is structurally mapped, but it still depends on secrets or external systems before it can be considered real.`
+  }
+  if (normalized.includes('partially_wired') || normalized.includes('scaffolded')) {
+    return `${humanize(surface)} has meaningful implementation work in place, but it is still somewhere between scaffold and live wiring.`
+  }
+  if (normalized.includes('prototype_ui_only') || normalized.includes('mocked')) {
+    return `${humanize(surface)} currently represents prototype output, not a live integrated capability.`
+  }
+  return `${humanize(surface)} is tracked by orchestration truth, but more verification and wiring detail still needs to accumulate.`
+}
+
 export function OrchestrationOverview(props: OrchestrationOverviewProps) {
+  const [journalQuery, setJournalQuery] = useState('')
+  const [journalToneFilter, setJournalToneFilter] = useState<'all' | JournalEntry['tone']>('all')
+  const deferredJournalQuery = useDeferredValue(journalQuery.trim().toLowerCase())
   const truthBySurface = props.truthBySurface || props.promotionDecision?.truth_by_surface || props.buildContract?.truth_by_surface || {}
   const requiredCapabilities = props.capabilityState?.required_capabilities || EMPTY_CAPABILITIES
   const contract = props.buildContract
@@ -526,6 +562,19 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
     return items
   }, [blockers, checkpoints, contract, intent, props.interaction, props.patchBundles, props.policyState, props.promotionDecision, props.verificationReports, props.workOrders, requiredCapabilities.length])
 
+  const filteredJournal = useMemo(() => {
+    return journal.filter((entry) => {
+      if (journalToneFilter !== 'all' && entry.tone !== journalToneFilter) {
+        return false
+      }
+      if (!deferredJournalQuery) {
+        return true
+      }
+      const haystack = `${entry.title} ${entry.detail}`.toLowerCase()
+      return haystack.includes(deferredJournalQuery)
+    })
+  }, [deferredJournalQuery, journal, journalToneFilter])
+
   const diffRows = useMemo<DiffRow[]>(() => {
     const verificationPassed = (surface: string) => (props.verificationReports || []).some((report) => report.surface === surface && report.status === 'passed')
     const planGate = props.policyState?.classification === 'upgrade_required'
@@ -579,9 +628,103 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
     .slice(0, 8)
   const topProviderScorecards = (props.providerScorecards || []).slice(0, 4)
   const recentFingerprints = (props.failureFingerprints || []).slice(0, 4)
+  const verifiedSurfaceCount = Object.values(truthBySurface).filter((tags) => truthHasAny(tags, ['verified', 'production_candidate', 'production_ready'])).length
+  const activeBlockerCount = blockers.length
+  const unresolvedVerificationCount = (props.verificationReports || []).filter((report) => report.status !== 'passed').length
+  const recoveredFailureCount = recentFingerprints.filter((fingerprint) => fingerprint.repair_success).length
+  const readinessLabel = humanize(props.promotionDecision?.readiness_state || props.qualityGateStatus || 'pending')
+  const classificationLabel = humanize(props.policyState?.classification || 'pending')
+  const planLabel = humanize(props.policyState?.plan_type || 'unknown')
+  const planSummary = props.policyState?.classification === 'upgrade_required'
+    ? `This request crossed into paid capability territory. The system should stay honest about what can continue in static mode and what must stop until Builder or higher is approved.`
+    : props.policyState?.classification === 'static_ready'
+      ? 'The current request fits the free static path. Backend, publish, and BYOK claims should stay off the table unless the user explicitly upgrades.'
+      : 'The current plan allows the full-stack path, so orchestration can keep verifying runtime, integration, and promotion work instead of falling back to a mock.'
+  const nextAction = blockers[0]?.unblocks_with
+    || blockers[0]?.summary
+    || props.interaction?.pending_question
+    || props.interaction?.pause_reason
+    || (props.promotionDecision?.production_candidate
+      ? 'Deployment, secrets, and final release checks are the remaining high-value actions.'
+      : 'Keep working through verification and repair evidence until promotion truth improves.')
+  const architectureRisks = [
+    props.capabilityState?.requires_external_api ? 'External APIs are part of the contract, so live readiness is sensitive to credentials, quotas, and third-party uptime.' : null,
+    props.capabilityState?.requires_database ? 'Persistent data is in scope, so schema drift and environment configuration matter more than a pure static build.' : null,
+    props.capabilityState?.requires_publish && !props.policyState?.publish_enabled ? 'Publish is requested but still gated by plan policy, so the build should stop short of implying a deployable release.' : null,
+    contract?.verification_warnings?.[0] || null,
+  ].filter(Boolean) as string[]
+  const architectureAlternatives = [
+    props.policyState?.classification === 'upgrade_required' ? 'Cheaper path: continue in static-only mode and defer backend/runtime scope until the app surface is validated.' : null,
+    props.capabilityState?.requires_database ? 'Faster path: keep the first iteration file-backed or mocked until schema and auth requirements settle.' : null,
+    props.capabilityState?.requires_backend_runtime ? 'Scalable path: preserve the current frontend contract while moving backend responsibilities behind a typed API boundary.' : null,
+  ].filter(Boolean) as string[]
 
   return (
     <div className="space-y-6">
+      <Card variant="cyberpunk" className="overflow-hidden border-2 border-gray-800 bg-black/70 backdrop-blur-md">
+        <CardContent className="relative p-0">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_35%),radial-gradient(circle_at_top_right,rgba(168,85,247,0.14),transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent_55%)]" />
+          <div className="relative grid gap-6 px-6 py-6 xl:grid-cols-[1.4fr,0.9fr]">
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className={cn('text-xs', classificationTone(props.policyState?.classification))}>
+                    {classificationLabel}
+                  </Badge>
+                  <Badge variant="outline" className="text-xs border-violet-500/30 bg-violet-500/10 text-violet-200">
+                    Readiness: {readinessLabel}
+                  </Badge>
+                  <Badge variant="outline" className="text-xs border-gray-700 bg-gray-950/70 text-gray-300">
+                    Plan: {planLabel}
+                  </Badge>
+                </div>
+                <div>
+                  <div className="text-2xl font-semibold tracking-tight text-white">Orchestration summary</div>
+                  <div className="mt-2 max-w-3xl text-sm leading-6 text-gray-300">
+                    {planSummary}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {[
+                  { label: 'Verified surfaces', value: verifiedSurfaceCount, tone: 'text-emerald-300 border-emerald-500/25 bg-emerald-500/8' },
+                  { label: 'Active blockers', value: activeBlockerCount, tone: activeBlockerCount > 0 ? 'text-amber-200 border-amber-500/25 bg-amber-500/8' : 'text-gray-200 border-gray-800 bg-gray-950/70' },
+                  { label: 'Verification gaps', value: unresolvedVerificationCount, tone: unresolvedVerificationCount > 0 ? 'text-rose-200 border-rose-500/25 bg-rose-500/8' : 'text-gray-200 border-gray-800 bg-gray-950/70' },
+                  { label: 'Recovered failures', value: recoveredFailureCount, tone: 'text-cyan-200 border-cyan-500/25 bg-cyan-500/8' },
+                ].map((item) => (
+                  <div key={item.label} className={cn('rounded-2xl border px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]', item.tone)}>
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">{item.label}</div>
+                    <div className="mt-2 text-3xl font-semibold text-white">{item.value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-3">
+              <div className="rounded-2xl border border-gray-800 bg-gray-950/70 p-4 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Next action</div>
+                <div className="mt-3 text-sm font-medium leading-6 text-white">{nextAction}</div>
+              </div>
+              <div className="rounded-2xl border border-gray-800 bg-gray-950/70 p-4 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Capability pressure</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {requiredCapabilities.length === 0 ? (
+                    <div className="text-sm text-gray-400">No capability detector output yet.</div>
+                  ) : (
+                    requiredCapabilities.map((capability) => (
+                      <Badge key={capability} variant="outline" className="text-[11px] border-gray-700 bg-black/40 text-gray-300">
+                        {humanize(capability)}
+                      </Badge>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
         <CardHeader className="pb-4 border-b border-gray-800">
           <CardTitle className="text-xl flex items-center gap-3">
@@ -662,6 +805,7 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
               surfaces.map(([surface, tags]) => (
                 <div key={surface} className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
                   <div className="text-xs uppercase tracking-wide text-gray-500">{surface}</div>
+                  <div className="mt-2 text-sm leading-6 text-gray-300">{truthNarrative(surface, tags)}</div>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {tags.map((tag) => (
                       <Badge key={`${surface}-${tag}`} variant="outline" className="text-xs border-cyan-500/30 bg-cyan-500/10 text-cyan-200">
@@ -745,10 +889,54 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-5 space-y-3">
+            <div className="rounded-2xl border border-gray-800 bg-gray-950/70 p-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <label className="relative block lg:max-w-sm lg:flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+                  <input
+                    value={journalQuery}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      startTransition(() => setJournalQuery(value))
+                    }}
+                    placeholder="Search request parsing, blockers, repairs, checkpoints..."
+                    className="h-11 w-full rounded-xl border border-gray-800 bg-black/40 pl-10 pr-4 text-sm text-white outline-none transition focus:border-cyan-500/40 focus:bg-black/60"
+                  />
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-gray-500">
+                    <Filter className="h-3.5 w-3.5" />
+                    Filter
+                  </div>
+                  {(['all', 'success', 'warning', 'info'] as const).map((tone) => (
+                    <button
+                      key={tone}
+                      type="button"
+                      onClick={() => setJournalToneFilter(tone)}
+                      className={cn(
+                        'rounded-full border px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.14em] transition',
+                        journalToneFilter === tone
+                          ? tone === 'all'
+                            ? 'border-white/20 bg-white/10 text-white'
+                            : journalToneBadge[tone]
+                          : 'border-gray-800 bg-black/30 text-gray-400 hover:border-gray-700 hover:text-gray-200',
+                      )}
+                    >
+                      {tone}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             {journal.length === 0 ? (
               <div className="text-sm text-gray-500">Journal entries will appear as orchestration state becomes available.</div>
+            ) : filteredJournal.length === 0 ? (
+              <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4 text-sm text-gray-400">
+                No journal entries match the current search or tone filter.
+              </div>
             ) : (
-              journal.map((entry) => (
+              filteredJournal.map((entry) => (
                 <div key={entry.id} className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -759,9 +947,7 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
                       variant="outline"
                       className={cn(
                         'text-[11px]',
-                        entry.tone === 'success' && 'border-green-500/40 bg-green-500/10 text-green-300',
-                        entry.tone === 'warning' && 'border-amber-500/40 bg-amber-500/10 text-amber-300',
-                        entry.tone === 'info' && 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300',
+                        journalToneBadge[entry.tone],
                       )}
                     >
                       {entry.timestamp || 'Current'}
@@ -982,14 +1168,46 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
             Architecture Explainer
           </CardTitle>
         </CardHeader>
-        <CardContent className="pt-5 space-y-4">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {architectureItems.map((item) => (
+          <CardContent className="pt-5 space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {architectureItems.map((item) => (
               <div key={item.label} className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
                 <div className="text-xs uppercase tracking-wide text-gray-500">{item.label}</div>
                 <div className="mt-2 text-sm font-semibold text-white">{item.value || 'Not specified'}</div>
               </div>
             ))}
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
+              <div className="text-xs uppercase tracking-wide text-gray-500">Primary risks</div>
+              <div className="mt-3 space-y-2">
+                {architectureRisks.length === 0 ? (
+                  <div className="text-sm text-gray-400">No major architecture risks have been inferred yet.</div>
+                ) : (
+                  architectureRisks.slice(0, 4).map((risk) => (
+                    <div key={risk} className="rounded-lg border border-amber-500/20 bg-amber-500/6 px-3 py-2 text-sm leading-6 text-amber-100">
+                      {risk}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
+              <div className="text-xs uppercase tracking-wide text-gray-500">Cheaper, faster, and scalable alternatives</div>
+              <div className="mt-3 space-y-2">
+                {architectureAlternatives.length === 0 ? (
+                  <div className="text-sm text-gray-400">No alternative path suggestions have been inferred yet.</div>
+                ) : (
+                  architectureAlternatives.slice(0, 4).map((option) => (
+                    <div key={option} className="rounded-lg border border-cyan-500/20 bg-cyan-500/6 px-3 py-2 text-sm leading-6 text-cyan-100">
+                      {option}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
 
           {(contract?.verification_warnings && contract.verification_warnings.length > 0) && (
