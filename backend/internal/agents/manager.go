@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -41,10 +42,7 @@ var (
 
 const (
 	insufficientCreditsBuildMessage = "Build paused: Your account has insufficient credits. Please add credits in Settings or contact support."
-	// estimatedRequestCostUSD is a conservative upper-bound estimate used for
-	// budget pre-authorization before each AI Generate call. It prevents
-	// about-to-exceed scenarios that a post-call check would miss.
-	estimatedRequestCostUSD = 0.01
+	defaultEstimatedRequestCostUSD  = 0.02
 )
 
 type consensusDecision string
@@ -60,6 +58,26 @@ type providerVote struct {
 	Provider  ai.AIProvider
 	Decision  consensusDecision
 	Rationale string
+}
+
+func estimatedRequestCostUSDForBuild(build *Build) float64 {
+	if build == nil {
+		return defaultEstimatedRequestCostUSD
+	}
+
+	switch build.PowerMode {
+	case PowerMax:
+		return 0.15
+	case PowerBalanced:
+		return 0.06
+	case PowerFast:
+		return 0.02
+	}
+
+	if build.Mode == ModeFull {
+		return 0.06
+	}
+	return defaultEstimatedRequestCostUSD
 }
 
 // AgentManager handles the lifecycle and coordination of AI agents
@@ -160,7 +178,7 @@ func (am *AgentManager) SetBudgetEnforcer(enforcer *budget.BudgetEnforcer) {
 }
 
 // CreateBuild starts a new build session
-func (am *AgentManager) CreateBuild(userID uint, req *BuildRequest) (*Build, error) {
+func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *BuildRequest) (*Build, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
@@ -190,6 +208,7 @@ func (am *AgentManager) CreateBuild(userID uint, req *BuildRequest) (*Build, err
 		Status:              BuildPending,
 		Mode:                mode,
 		PowerMode:           powerMode,
+		SubscriptionPlan:    strings.ToLower(strings.TrimSpace(subscriptionPlan)),
 		ProviderMode:        providerMode,
 		RequirePreviewReady: req.RequirePreviewReady,
 		Description:         req.Description,
@@ -205,6 +224,7 @@ func (am *AgentManager) CreateBuild(userID uint, req *BuildRequest) (*Build, err
 	if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil && orchestration.Flags.EnableIntentBrief {
 		orchestration.IntentBrief = compileIntentBriefFromRequest(req, providerMode)
 	}
+	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
 
 	// Apply guardrails for cost control
 	maxAgents, maxRetries, maxRequests, maxTokens := am.defaultBuildLimitsForBuild(build)
@@ -456,22 +476,47 @@ func (am *AgentManager) buildTimeoutHandler(buildID string) {
 
 	timeout := am.buildTimeoutForBuild(build)
 	timer := time.NewTimer(timeout)
+	probe := time.NewTicker(15 * time.Second)
 	defer timer.Stop()
+	defer probe.Stop()
 
-	select {
-	case <-timer.C:
-	case <-am.ctx.Done():
-		return
-	}
+	for {
+		select {
+		case <-am.ctx.Done():
+			return
+		case <-probe.C:
+			am.mu.RLock()
+			build, exists = am.builds[buildID]
+			am.mu.RUnlock()
+			if !exists {
+				return
+			}
 
-	build.mu.RLock()
-	status := build.Status
-	build.mu.RUnlock()
+			build.mu.RLock()
+			status := build.Status
+			build.mu.RUnlock()
+			if status == BuildCompleted || status == BuildFailed || status == BuildCancelled {
+				return
+			}
+		case <-timer.C:
+			am.mu.RLock()
+			build, exists = am.builds[buildID]
+			am.mu.RUnlock()
+			if !exists {
+				return
+			}
 
-	// If build is still in progress, fail it as timeout.
-	if status == BuildPlanning || status == BuildInProgress || status == BuildTesting || status == BuildReviewing {
-		log.Printf("Build %s timed out after %v, marking as failed", buildID, timeout)
-		am.failBuildOnTimeout(buildID, timeout)
+			build.mu.RLock()
+			status := build.Status
+			build.mu.RUnlock()
+
+			// If build is still in progress, fail it as timeout.
+			if status == BuildPlanning || status == BuildInProgress || status == BuildTesting || status == BuildReviewing {
+				log.Printf("Build %s timed out after %v, marking as failed", buildID, timeout)
+				am.failBuildOnTimeout(buildID, timeout)
+			}
+			return
+		}
 	}
 }
 
@@ -580,6 +625,15 @@ func (am *AgentManager) buildUsesPlatformKeys(build *Build) bool {
 
 func (am *AgentManager) userHasActiveBYOKKey(userID uint) bool {
 	if am == nil || am.db == nil || userID == 0 {
+		return false
+	}
+
+	var user models.User
+	if err := am.db.Select("subscription_type", "has_unlimited_credits", "bypass_billing").First(&user, userID).Error; err != nil {
+		log.Printf("Failed to check BYOK entitlement for user %d: %v", userID, err)
+		return false
+	}
+	if !(user.BypassBilling || user.HasUnlimitedCredits || isPaidBuildPlan(user.SubscriptionType)) {
 		return false
 	}
 
@@ -1187,11 +1241,11 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 	for _, role := range roles {
 		switch role {
 		case RolePlanner, RoleArchitect, RoleReviewer:
-			assignments[role] = pick(role, ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama)
+			assignments[role] = pick(role, ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok)
 		case RoleFrontend, RoleBackend, RoleDatabase, RoleSolver:
-			assignments[role] = pick(role, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama)
+			assignments[role] = pick(role, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini, ai.ProviderGrok)
 		case RoleTesting:
-			assignments[role] = pick(role, ai.ProviderGemini, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGrok, ai.ProviderOllama)
+			assignments[role] = pick(role, ai.ProviderGemini, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGrok)
 		default:
 			assignments[role] = leadProvider
 		}
@@ -3202,7 +3256,7 @@ func (am *AgentManager) executeTask(task *Task) {
 
 	// Role-aware temperature
 	temperature := am.getTemperatureForRole(agent.Role)
-	routingMode := taskRoutingMode(task)
+	routingMode := effectiveTaskRoutingMode(build, task)
 	candidateProviders := []ai.AIProvider{agent.Provider}
 	if routingMode == RoutingModeDualCandidate {
 		if alternate := am.getNextFallbackProviderForTask(build, task, agent.Role, agent.Provider); alternate != "" && alternate != agent.Provider {
@@ -3707,7 +3761,7 @@ func (am *AgentManager) processResult(result *TaskResult) {
 		// Collaborative incident mode: providers discuss and vote on recovery strategy.
 		// Skip consensus entirely for auth/billing/credit failures — these are deterministic
 		// and no amount of retrying, provider switching, or solver spawning will fix them.
-		if !insufficientCredits && !nonRetriable && buildErr == nil && (task.RetryCount >= 1 || strings.Contains(strings.ToLower(errorMsg), "all_providers_failed")) {
+		if !insufficientCredits && !nonRetriable && buildErr == nil && am.shouldRunFailureConsensus(build, task, errorMsg) {
 			decision, votes := am.runFailureConsensus(build, agent, task, result.Error, retryStrategy)
 			if task.Input == nil {
 				task.Input = map[string]any{}
@@ -3918,7 +3972,8 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 					contractBlocker = strings.Join(report.Blockers, "; ")
 				}
 			}
-			if !contractBlocked && orchestration.Flags.EnableSelectiveEscalation && orchestration.BuildContract != nil {
+			if !contractBlocked && orchestration.Flags.EnableSelectiveEscalation && orchestration.BuildContract != nil &&
+				shouldRunProviderAssistedContractCritique(build, orchestration.BuildContract) {
 				runProviderCritique = true
 				contractCopy := *orchestration.BuildContract
 				critiqueContract = &contractCopy
@@ -7734,6 +7789,17 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 		return true
 	}
 
+	taskSet := make(map[string]struct{}, len(taskIDs))
+	for _, id := range taskIDs {
+		if id == "" {
+			continue
+		}
+		taskSet[id] = struct{}{}
+	}
+	if len(taskSet) == 0 {
+		return true
+	}
+
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -7762,18 +7828,22 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 			build.mu.RLock()
 			buildFailed := build.Status == BuildFailed
 			buildBlocked := build.Interaction.Paused || build.Interaction.WaitingForUser
-			for _, id := range taskIDs {
-				for _, t := range build.Tasks {
-					if t.ID == id {
-						if t.Status != TaskCompleted && t.Status != TaskFailed && t.Status != TaskCancelled {
-							allDone = false
-						}
-						break
-					}
+			completed := 0
+			for _, t := range build.Tasks {
+				if t == nil {
+					continue
 				}
-				if !allDone {
+				if _, ok := taskSet[t.ID]; !ok {
+					continue
+				}
+				if t.Status != TaskCompleted && t.Status != TaskFailed && t.Status != TaskCancelled {
+					allDone = false
 					break
 				}
+				completed++
+			}
+			if completed != len(taskSet) {
+				allDone = false
 			}
 			build.mu.RUnlock()
 
@@ -7872,6 +7942,43 @@ func normalizeRestoredPowerMode(raw string) PowerMode {
 	default:
 		return PowerBalanced
 	}
+}
+
+func (am *AgentManager) getBuildSessionForUser(buildID string, userID uint, allowAdmin bool) (*Build, bool, error) {
+	if strings.TrimSpace(buildID) == "" {
+		return nil, false, gorm.ErrRecordNotFound
+	}
+
+	adminAccess := allowAdmin && isUserAdminDB(am, userID)
+	build, err := am.GetBuild(buildID)
+	if err == nil {
+		if build.UserID != userID && !adminAccess {
+			return nil, false, errBuildAccessDenied
+		}
+		return build, false, nil
+	}
+	if am.db == nil {
+		return nil, false, err
+	}
+
+	query := am.db.Where("build_id = ?", buildID)
+	if !adminAccess {
+		query = query.Where("user_id = ?", userID)
+	}
+
+	var snapshot models.CompletedBuild
+	if err := query.First(&snapshot).Error; err != nil {
+		return nil, false, err
+	}
+
+	build, restored, err := am.restoreBuildSessionFromSnapshot(&snapshot)
+	if err != nil {
+		return nil, false, err
+	}
+	if build.UserID != userID && !adminAccess {
+		return nil, false, errBuildAccessDenied
+	}
+	return build, restored, nil
 }
 
 func preferredLeadProviderOrder(availableProviders []ai.AIProvider) []ai.AIProvider {
@@ -7973,6 +8080,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.Complet
 		Status:              normalizeRestoredBuildStatus(snapshot),
 		Mode:                mode,
 		PowerMode:           powerMode,
+		SubscriptionPlan:    "",
 		ProviderMode:        providerMode,
 		Description:         snapshot.Description,
 		Agents:              parseBuildAgents(snapshot.AgentsJSON),
@@ -8001,6 +8109,10 @@ func (am *AgentManager) restoreBuildSessionFromSnapshot(snapshot *models.Complet
 	if build.Checkpoints == nil {
 		build.Checkpoints = make([]*Checkpoint, 0)
 	}
+	if build.SnapshotState.PolicyState != nil {
+		build.SubscriptionPlan = strings.TrimSpace(strings.ToLower(build.SnapshotState.PolicyState.PlanType))
+	}
+	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
 
 	if build.Status == BuildCompleted && build.Progress < 100 {
 		build.Progress = 100
@@ -8481,7 +8593,7 @@ Rules:
 	// Pre-authorize spend before calling AI — catches about-to-exceed budgets
 	// using a conservative per-request estimate rather than 0.
 	if am.budgetEnforcer != nil {
-		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, agent.BuildID, estimatedRequestCostUSD)
+		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, agent.BuildID, estimatedRequestCostUSDForBuild(build))
 		if preAuthErr == nil && !preAuth.Allowed {
 			am.broadcast(agent.BuildID, &WSMessage{
 				Type:      "budget:exceeded",
@@ -9011,31 +9123,26 @@ func updateBuildSnapshotStateLocked(build *Build, msg *WSMessage) bool {
 
 	data := buildActivityDataMap(msg.Data)
 	next := copyBuildSnapshotStateLocked(build)
-	changed := false
 
 	setCurrentPhase := func(value string) {
 		if trimmed := strings.TrimSpace(value); trimmed != "" && next.CurrentPhase != trimmed {
 			next.CurrentPhase = trimmed
-			changed = true
 		}
 	}
 	setQualityGateRequired := func(value bool) {
 		if next.QualityGateRequired == nil || *next.QualityGateRequired != value {
 			required := value
 			next.QualityGateRequired = &required
-			changed = true
 		}
 	}
 	setQualityGateStatus := func(value string) {
 		if normalized := normalizeQualityGateStatus(value); normalized != "" && next.QualityGateStatus != normalized {
 			next.QualityGateStatus = normalized
-			changed = true
 		}
 	}
 	setQualityGateStage := func(value string) {
 		if trimmed := strings.TrimSpace(value); trimmed != "" && next.QualityGateStage != trimmed {
 			next.QualityGateStage = trimmed
-			changed = true
 		}
 	}
 	setAvailableProviders := func(values []string) {
@@ -9044,13 +9151,11 @@ func updateBuildSnapshotStateLocked(build *Build, msg *WSMessage) bool {
 		}
 		if len(values) != len(next.AvailableProviders) {
 			next.AvailableProviders = append([]string(nil), values...)
-			changed = true
 			return
 		}
 		for i := range values {
 			if next.AvailableProviders[i] != values[i] {
 				next.AvailableProviders = append([]string(nil), values...)
-				changed = true
 				return
 			}
 		}
@@ -9128,10 +9233,13 @@ func updateBuildSnapshotStateLocked(build *Build, msg *WSMessage) bool {
 		setQualityGateStatus("failed")
 	}
 
-	if changed {
+	refreshDerivedSnapshotStateLocked(build, &next)
+
+	if !reflect.DeepEqual(build.SnapshotState, next) {
 		build.SnapshotState = next
+		return true
 	}
-	return changed
+	return false
 }
 
 func summarizeBuildActivityFiles(paths []string, count int) string {
@@ -9434,6 +9542,7 @@ func (am *AgentManager) broadcast(buildID string, msg *WSMessage) {
 		if updateBuildSnapshotStateLocked(build, msg) {
 			shouldPersist = shouldPersistBuildSnapshotMessage(msg.Type)
 		}
+		enrichBuildMessageSnapshotStateLocked(build, msg)
 		entry, ok := buildActivityEntryForMessageLocked(build, msg)
 		if ok {
 			appendBuildActivityEntryLocked(build, entry)
@@ -14168,7 +14277,7 @@ func (am *AgentManager) runFailureConsensus(
 		// Pre-authorize spend before calling AI — catches about-to-exceed budgets
 		// using a conservative per-request estimate rather than 0.
 		if am.budgetEnforcer != nil {
-			preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, build.ID, estimatedRequestCostUSD)
+			preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, build.ID, estimatedRequestCostUSDForBuild(build))
 			if preAuthErr == nil && !preAuth.Allowed {
 				cancel()
 				am.broadcast(build.ID, &WSMessage{
@@ -14263,6 +14372,23 @@ func (am *AgentManager) runFailureConsensus(
 	})
 
 	return winning, votes
+}
+
+func (am *AgentManager) shouldRunFailureConsensus(build *Build, task *Task, errorMsg string) bool {
+	if build == nil || task == nil {
+		return false
+	}
+	if strings.Contains(strings.ToLower(errorMsg), "all_providers_failed") {
+		return true
+	}
+	if build.PowerMode == PowerFast || build.Mode == ModeFast {
+		risk := taskRiskLevel(task)
+		if risk == RiskHigh || risk == RiskCritical {
+			return task.RetryCount >= 1
+		}
+		return task.RetryCount >= 2
+	}
+	return task.RetryCount >= 1
 }
 
 func (am *AgentManager) strategyToDecision(strategy string) consensusDecision {
@@ -14402,10 +14528,10 @@ func (am *AgentManager) getNextFallbackProviderForTask(build *Build, task *Task,
 	}
 
 	chains := map[ai.AIProvider][]ai.AIProvider{
-		ai.ProviderClaude: {ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama},
-		ai.ProviderGPT4:   {ai.ProviderClaude, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama},
-		ai.ProviderGemini: {ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGrok, ai.ProviderOllama},
-		ai.ProviderGrok:   {ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini, ai.ProviderOllama},
+		ai.ProviderClaude: {ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok},
+		ai.ProviderGPT4:   {ai.ProviderClaude, ai.ProviderGemini, ai.ProviderGrok},
+		ai.ProviderGemini: {ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGrok},
+		ai.ProviderGrok:   {ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini},
 		ai.ProviderOllama: {ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok},
 	}
 	if chain, ok := chains[current]; ok {

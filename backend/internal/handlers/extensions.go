@@ -27,8 +27,8 @@ func NewExtensionsHandler(service *extensions.Service) *ExtensionsHandler {
 // GET /api/v1/extensions
 func (h *ExtensionsHandler) SearchExtensions(c *gin.Context) {
 	params := extensions.SearchParams{
-		Query:    c.Query("q"),
-		SortBy:   c.DefaultQuery("sort", "downloads"),
+		Query:     c.Query("q"),
+		SortBy:    c.DefaultQuery("sort", "downloads"),
 		SortOrder: c.DefaultQuery("order", "desc"),
 	}
 
@@ -222,8 +222,8 @@ func (h *ExtensionsHandler) GetMyExtensions(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success":      true,
-		"extensions":   installations,
+		"success":    true,
+		"extensions": installations,
 	})
 }
 
@@ -233,6 +233,9 @@ func (h *ExtensionsHandler) PublishExtension(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requirePaidBackendPlan(c, h.service.DB(), userID, "Publishing extensions") {
 		return
 	}
 

@@ -4,6 +4,15 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 import { getConfiguredApiUrl, getConfiguredWsUrl } from '@/config/runtime'
 import {
+  appendStoredAccessTokenToWebSocketUrl,
+  clearStoredAuthTokens,
+  extractTokenResponse,
+  getStoredAccessToken,
+  getStoredRefreshToken,
+  markCookieSessionRefreshed,
+  storeAuthTokens,
+} from './authSession'
+import {
   User,
   Project,
   File,
@@ -113,6 +122,33 @@ const resolveWebSocketBaseUrl = (apiBaseURL: string, fallbackHost: string): stri
   return `${protocol}//${host}/ws`
 }
 
+const setHeaderValue = (headers: AxiosRequestConfig['headers'], key: string, value: string): AxiosRequestConfig['headers'] => {
+  const headerStore = (headers || {}) as any
+  if (typeof headerStore.set === 'function') {
+    headerStore.set(key, value)
+    return headerStore
+  }
+
+  headerStore[key] = value
+  return headerStore
+}
+
+const removeHeaderValue = (headers: AxiosRequestConfig['headers'], key: string): AxiosRequestConfig['headers'] => {
+  const headerStore = headers as any
+  if (!headerStore) {
+    return headers
+  }
+
+  if (typeof headerStore.delete === 'function') {
+    headerStore.delete(key)
+    return headerStore
+  }
+
+  delete headerStore[key]
+  delete headerStore[key.toLowerCase()]
+  return headerStore
+}
+
 export class ApiService {
   public client: AxiosInstance
   private baseURL: string
@@ -123,6 +159,7 @@ export class ApiService {
     this.client = axios.create({
       baseURL,
       timeout: 30000,
+      withCredentials: true,
       headers: {
         'Content-Type': 'application/json',
       },
@@ -132,17 +169,15 @@ export class ApiService {
   }
 
   private setupInterceptors() {
-    // Request interceptor - Add auth token
-    this.client.interceptors.request.use(
-      (config) => {
-        const token = this.getAuthToken()
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`
-        }
+    this.client.interceptors.request.use((config) => {
+      const accessToken = getStoredAccessToken()
+      if (!accessToken) {
         return config
-      },
-      (error) => Promise.reject(error)
-    )
+      }
+
+      config.headers = setHeaderValue(config.headers, 'Authorization', `Bearer ${accessToken}`) as any
+      return config
+    })
 
     // Response interceptor - Handle errors and token refresh
     this.client.interceptors.response.use(
@@ -156,10 +191,7 @@ export class ApiService {
 
           try {
             await this.refreshToken()
-            const token = this.getAuthToken()
-            if (token) {
-              originalRequest.headers.Authorization = `Bearer ${token}`
-            }
+            removeHeaderValue(originalRequest.headers, 'Authorization')
             return this.client(originalRequest)
           } catch (refreshError) {
             this.clearAuth()
@@ -174,33 +206,13 @@ export class ApiService {
   }
 
   // Auth token management
-  private getAuthToken(): string | null {
-    return localStorage.getItem('apex_access_token')
-  }
-
-  private getRefreshToken(): string | null {
-    return localStorage.getItem('apex_refresh_token')
-  }
-
-  private setTokens(tokens: TokenResponse): void {
-    localStorage.setItem('apex_access_token', tokens.access_token)
-    localStorage.setItem('apex_refresh_token', tokens.refresh_token)
-    localStorage.setItem('apex_token_expires', tokens.access_token_expires_at)
-  }
-
   private clearAuth(): void {
-    localStorage.removeItem('apex_access_token')
-    localStorage.removeItem('apex_refresh_token')
-    localStorage.removeItem('apex_token_expires')
+    clearStoredAuthTokens()
     localStorage.removeItem('apex_user')
   }
 
   clearStoredAuth(): void {
     this.clearAuth()
-  }
-
-  hasRefreshToken(): boolean {
-    return Boolean(this.getRefreshToken())
   }
 
   // Generic HTTP methods for components that need direct access
@@ -229,22 +241,28 @@ export class ApiService {
   // Authentication endpoints
   async register(data: RegisterRequest): Promise<AuthResponse> {
     const response = await this.client.post<AuthResponse>('/auth/register', data)
-    if (response.data.tokens) {
-      this.setTokens(response.data.tokens)
-      if (response.data.user) {
-        localStorage.setItem('apex_user', JSON.stringify(response.data.user))
-      }
+    const tokens = extractTokenResponse(response.data)
+    if (tokens) {
+      storeAuthTokens(tokens)
+    } else {
+      markCookieSessionRefreshed()
+    }
+    if (response.data.user) {
+      localStorage.setItem('apex_user', JSON.stringify(response.data.user))
     }
     return response.data
   }
 
   async login(data: LoginRequest): Promise<AuthResponse> {
     const response = await this.client.post<AuthResponse>('/auth/login', data)
-    if (response.data.tokens) {
-      this.setTokens(response.data.tokens)
-      if (response.data.user) {
-        localStorage.setItem('apex_user', JSON.stringify(response.data.user))
-      }
+    const tokens = extractTokenResponse(response.data)
+    if (tokens) {
+      storeAuthTokens(tokens)
+    } else {
+      markCookieSessionRefreshed()
+    }
+    if (response.data.user) {
+      localStorage.setItem('apex_user', JSON.stringify(response.data.user))
     }
     return response.data
   }
@@ -263,51 +281,33 @@ export class ApiService {
   }
 
   private async doRefreshToken(): Promise<TokenResponse> {
-    const refreshToken = this.getRefreshToken()
-    if (!refreshToken) {
-      throw new Error('No refresh token available')
-    }
-
     try {
-      const response = await this.client.post<ApiResponse<TokenResponse> & { tokens?: TokenResponse; access_token?: string }>(
-        '/auth/refresh',
-        { refresh_token: refreshToken }
-      )
-
-      const direct = response.data as any
-      const tokens: TokenResponse | undefined =
-        response.data.data ||
-        response.data.tokens ||
-        (direct?.access_token ? (direct as TokenResponse) : undefined)
-
-      if (tokens?.access_token && tokens?.refresh_token) {
-        this.setTokens(tokens)
+      const refreshToken = getStoredRefreshToken()
+      const response = await this.client.post('/auth/refresh', refreshToken ? { refresh_token: refreshToken } : {})
+      const tokens = extractTokenResponse(response.data)
+      if (tokens) {
+        storeAuthTokens(tokens)
         return tokens
       }
-    } catch (error: any) {
-      if (error?.response?.status !== 404) {
-        throw error
+
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
+      markCookieSessionRefreshed(expiresAt)
+      return {
+        access_token: '',
+        refresh_token: '',
+        access_token_expires_at: expiresAt,
+        refresh_token_expires_at: '',
+        token_type: 'Bearer',
       }
+    } catch (error: any) {
+      throw error
     }
-
-    // Fallback path for legacy deployments.
-    const fallbackResponse = await this.client.post<ApiResponse<TokenResponse> & { tokens?: TokenResponse }>(
-      '/auth/token/refresh',
-      { refresh_token: refreshToken }
-    )
-    const fallbackTokens = fallbackResponse.data.data || fallbackResponse.data.tokens
-    if (fallbackTokens?.access_token && fallbackTokens?.refresh_token) {
-      this.setTokens(fallbackTokens)
-      return fallbackTokens
-    }
-
-    throw new Error('Failed to refresh token')
   }
 
   async logout(): Promise<void> {
-    const refreshToken = this.getRefreshToken()
+    const refreshToken = getStoredRefreshToken()
     try {
-      await this.client.post('/auth/logout', refreshToken ? { refresh_token: refreshToken } : undefined)
+      await this.client.post('/auth/logout', refreshToken ? { refresh_token: refreshToken } : {})
     } finally {
       this.clearAuth()
     }
@@ -955,6 +955,10 @@ export class ApiService {
   }
 
   // Utility methods
+  private getAuthToken(): string | null {
+    return getStoredAccessToken()
+  }
+
   isAuthenticated(): boolean {
     const token = this.getAuthToken()
     const expires = localStorage.getItem('apex_token_expires')
@@ -1733,24 +1737,10 @@ export class ApiService {
    * Get WebSocket URL for terminal connection
    */
   getTerminalWebSocketUrl(sessionId: string): string {
-    const token = this.getAuthToken()
     const fallbackHost = typeof window !== 'undefined' ? window.location.host : 'localhost:8080'
-    const baseUrl = `${resolveWebSocketBaseUrl(this.baseURL, fallbackHost)}/terminal/${encodeURIComponent(sessionId)}`
-
-    const withToken = (rawUrl: string): string => {
-      if (!token) {
-        return rawUrl
-      }
-      try {
-        const url = new URL(rawUrl)
-        url.searchParams.set('token', token)
-        return url.toString()
-      } catch {
-        return `${rawUrl}?token=${encodeURIComponent(token)}`
-      }
-    }
-
-    return withToken(baseUrl)
+    return appendStoredAccessTokenToWebSocketUrl(
+      `${resolveWebSocketBaseUrl(this.baseURL, fallbackHost)}/terminal/${encodeURIComponent(sessionId)}`
+    )
   }
 
   // ========== AI CODE REVIEW ENDPOINTS ==========
@@ -2274,9 +2264,9 @@ export class ApiService {
 
   // Get WebSocket URL for debug events
   getDebugWebSocketUrl(sessionId: string): string {
-    const baseUrl = `${resolveWebSocketBaseUrl(this.baseURL, window.location.host)}/debug/${encodeURIComponent(sessionId)}`
-    const token = this.getAuthToken()
-    return token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl
+    return appendStoredAccessTokenToWebSocketUrl(
+      `${resolveWebSocketBaseUrl(this.baseURL, window.location.host)}/debug/${encodeURIComponent(sessionId)}`
+    )
   }
 
   // ========== HOSTING SYSTEM ENDPOINTS (*.apex.app) ==========
@@ -2427,9 +2417,9 @@ export class ApiService {
    * Get WebSocket URL for deployment logs streaming
    */
   getDeploymentLogsWebSocketUrl(deploymentId: string): string {
-    const baseUrl = `${resolveWebSocketBaseUrl(this.baseURL, window.location.host)}/deploy/${encodeURIComponent(deploymentId)}`
-    const token = this.getAuthToken()
-    return token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl
+    return appendStoredAccessTokenToWebSocketUrl(
+      `${resolveWebSocketBaseUrl(this.baseURL, window.location.host)}/deploy/${encodeURIComponent(deploymentId)}`
+    )
   }
 
   // ========== PLAN USAGE QUOTA ENDPOINTS ==========
@@ -2524,7 +2514,7 @@ export class ApiService {
       balance: number
       has_unlimited: boolean
       bypass_billing: boolean
-      available_packs: Array<{ AmountUSD: number; CreditUSD: number; Label: string }>
+      available_packs: Array<{ amount_usd: number; credit_usd: number; label: string }>
     }
   }> {
     const response = await this.client.get('/billing/credits/balance')
@@ -3023,7 +3013,7 @@ export interface DeploymentEvent {
 // Plan Usage Quota types (matching backend usage/tracker.go)
 // ---------------------------------------------------------------------------
 
-export type PlanType = 'free' | 'pro' | 'team' | 'enterprise' | 'owner'
+export type PlanType = 'free' | 'builder' | 'pro' | 'team' | 'enterprise' | 'owner'
 export type UsageType = 'projects' | 'storage_bytes' | 'ai_requests' | 'execution_minutes'
 
 export interface PlanLimits {
@@ -3246,6 +3236,202 @@ export interface BuildCheckpointState {
   created_at: string
 }
 
+export type BuildClassificationState = 'static_ready' | 'upgrade_required' | 'full_stack_candidate'
+
+export interface BuildCapabilityState {
+  required_capabilities?: string[]
+  requires_backend_runtime?: boolean
+  requires_database?: boolean
+  requires_storage?: boolean
+  requires_auth?: boolean
+  requires_external_api?: boolean
+  requires_billing?: boolean
+  requires_realtime?: boolean
+  requires_jobs?: boolean
+  requires_publish?: boolean
+  requires_byok?: boolean
+}
+
+export interface BuildPolicyState {
+  plan_type?: string
+  classification?: BuildClassificationState
+  upgrade_required?: boolean
+  upgrade_reason?: string
+  required_plan?: string
+  static_frontend_only?: boolean
+  full_stack_eligible?: boolean
+  publish_enabled?: boolean
+  byok_enabled?: boolean
+}
+
+export interface BuildBlocker {
+  id: string
+  title: string
+  type: string
+  category: string
+  severity: 'info' | 'warning' | 'blocking'
+  who_must_act?: string
+  summary?: string
+  unblocks_with?: string
+  partial_progress_allowed?: boolean
+  plan_tier_related?: boolean
+}
+
+export interface BuildApproval {
+  id: string
+  kind: string
+  title: string
+  status: 'not_required' | 'pending' | 'satisfied' | 'denied'
+  required: boolean
+  summary?: string
+  reason?: string
+  source_type?: string
+  source_id?: string
+  actor?: string
+  partial_progress_allowed?: boolean
+  acknowledgement_required?: boolean
+  plan_tier_related?: boolean
+  mismatch_detected?: boolean
+  mismatch_reason?: string
+  requested_at: string
+  resolved_at?: string
+}
+
+export interface BuildIntentBrief {
+  id: string
+  normalized_request: string
+  app_type: string
+  required_features?: string[]
+  non_goals?: string[]
+  complexity_class?: string
+  required_capabilities?: string[]
+  deployment_target?: string
+  risk_flags?: string[]
+  cost_sensitivity?: string
+  acceptance_summary_seed?: string[]
+  created_at?: string
+}
+
+export interface BuildContractSummary {
+  id: string
+  build_id: string
+  app_type?: string
+  verified?: boolean
+  auth_contract?: {
+    required?: boolean
+    provider?: string
+    session_strategy?: string
+    token_strategy?: string
+    callback_strategy?: string
+  }
+  backend_resource_map?: Array<{
+    name: string
+    kind: string
+    depends_on?: string[]
+  }>
+  db_schema_contract?: Array<{
+    name: string
+    description?: string
+    fields?: Array<{ name: string; type: string }>
+  }>
+  env_var_contract?: Array<{
+    name: string
+    required?: boolean
+    purpose?: string
+  }>
+  runtime_contract?: {
+    frontend_install?: string
+    frontend_build?: string
+    frontend_preview?: string
+    backend_install?: string
+    backend_build?: string
+    backend_start?: string
+    test_command?: string
+  }
+  truth_by_surface?: Record<string, string[]>
+  verification_warnings?: string[]
+  verification_blockers?: string[]
+}
+
+export interface BuildWorkOrderState {
+  id: string
+  build_id: string
+  role: string
+  category: string
+  task_shape: string
+  summary?: string
+  preferred_provider?: string
+  contract_slice?: {
+    surface?: string
+    truth_tags?: string[]
+  }
+}
+
+export interface BuildPatchBundleState {
+  id: string
+  build_id: string
+  work_order_id?: string
+  provider?: string
+  whole_file_rewrite?: boolean
+  justification?: string
+  created_at?: string
+}
+
+export interface BuildVerificationReportState {
+  id: string
+  build_id: string
+  work_order_id?: string
+  phase: string
+  surface: string
+  status: 'passed' | 'failed' | 'blocked'
+  warnings?: string[]
+  errors?: string[]
+  blockers?: string[]
+  truth_tags?: string[]
+  confidence_score?: number
+  generated_at?: string
+}
+
+export interface BuildPromotionDecisionState {
+  id: string
+  build_id: string
+  readiness_state?: string
+  unresolved_blockers?: string[]
+  confidence_score?: number
+  truth_by_surface?: Record<string, string[]>
+  preview_ready?: boolean
+  integration_ready?: boolean
+  production_candidate?: boolean
+  generated_at?: string
+}
+
+export interface BuildFailureFingerprintState {
+  id: string
+  build_id: string
+  task_shape?: string
+  provider?: string
+  failure_class?: string
+  files_involved?: string[]
+  repair_path_chosen?: string[]
+  repair_success?: boolean
+  created_at?: string
+}
+
+export interface BuildProviderScorecardState {
+  provider: string
+  task_shape: string
+  compile_pass_rate?: number
+  first_pass_verification_pass_rate?: number
+  repair_success_rate?: number
+  truncation_rate?: number
+  average_accepted_tokens_per_success?: number
+  average_cost_per_success?: number
+  average_latency_seconds?: number
+  failure_class_recurrence?: number
+  promotion_rate?: number
+  hosted_eligible?: boolean
+}
+
 export interface ProposedBuildEdit {
   id: string
   build_id: string
@@ -3274,6 +3460,22 @@ export interface CompletedBuildDetail extends CompletedBuildSummary {
   quality_gate_active?: boolean
   quality_gate_passed?: boolean
   available_providers?: string[]
+  capability_state?: BuildCapabilityState
+  policy_state?: BuildPolicyState
+  build_classification?: BuildClassificationState
+  upgrade_required?: boolean
+  upgrade_reason?: string
+  blockers?: BuildBlocker[]
+  approvals?: BuildApproval[]
+  intent_brief?: BuildIntentBrief
+  build_contract?: BuildContractSummary
+  work_orders?: BuildWorkOrderState[]
+  patch_bundles?: BuildPatchBundleState[]
+  verification_reports?: BuildVerificationReportState[]
+  promotion_decision?: BuildPromotionDecisionState
+  provider_scorecards?: BuildProviderScorecardState[]
+  failure_fingerprints?: BuildFailureFingerprintState[]
+  truth_by_surface?: Record<string, string[]>
 }
 
 // Create singleton instance

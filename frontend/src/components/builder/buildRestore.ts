@@ -323,6 +323,45 @@ export const reconcileBuildPayloadWithCompletedDetail = (
   if ((!Array.isArray(next.available_providers) || next.available_providers.length === 0) && Array.isArray(completed.available_providers) && completed.available_providers.length > 0) {
     next.available_providers = completed.available_providers
   }
+  if (!next.capability_state && completed.capability_state) {
+    next.capability_state = completed.capability_state
+  }
+  if (!next.policy_state && completed.policy_state) {
+    next.policy_state = completed.policy_state
+  }
+  if ((!Array.isArray(next.blockers) || next.blockers.length === 0) && Array.isArray(completed.blockers) && completed.blockers.length > 0) {
+    next.blockers = completed.blockers
+  }
+  if ((!Array.isArray(next.approvals) || next.approvals.length === 0) && Array.isArray(completed.approvals) && completed.approvals.length > 0) {
+    next.approvals = completed.approvals
+  }
+  if (!next.intent_brief && completed.intent_brief) {
+    next.intent_brief = completed.intent_brief
+  }
+  if (!next.build_contract && completed.build_contract) {
+    next.build_contract = completed.build_contract
+  }
+  if ((!Array.isArray(next.work_orders) || next.work_orders.length === 0) && Array.isArray(completed.work_orders) && completed.work_orders.length > 0) {
+    next.work_orders = completed.work_orders
+  }
+  if ((!Array.isArray(next.patch_bundles) || next.patch_bundles.length === 0) && Array.isArray(completed.patch_bundles) && completed.patch_bundles.length > 0) {
+    next.patch_bundles = completed.patch_bundles
+  }
+  if ((!Array.isArray(next.verification_reports) || next.verification_reports.length === 0) && Array.isArray(completed.verification_reports) && completed.verification_reports.length > 0) {
+    next.verification_reports = completed.verification_reports
+  }
+  if (!next.promotion_decision && completed.promotion_decision) {
+    next.promotion_decision = completed.promotion_decision
+  }
+  if ((!Array.isArray(next.provider_scorecards) || next.provider_scorecards.length === 0) && Array.isArray(completed.provider_scorecards) && completed.provider_scorecards.length > 0) {
+    next.provider_scorecards = completed.provider_scorecards
+  }
+  if ((!Array.isArray(next.failure_fingerprints) || next.failure_fingerprints.length === 0) && Array.isArray(completed.failure_fingerprints) && completed.failure_fingerprints.length > 0) {
+    next.failure_fingerprints = completed.failure_fingerprints
+  }
+  if (!next.truth_by_surface && completed.truth_by_surface) {
+    next.truth_by_surface = completed.truth_by_surface
+  }
 
   if (typeof completed.progress === 'number') {
     next.progress = completedStatus === 'completed'

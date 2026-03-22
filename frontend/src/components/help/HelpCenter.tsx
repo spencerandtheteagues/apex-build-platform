@@ -82,21 +82,22 @@ const helpSections: HelpSection[] = [
         id: 'what-is-apex',
         title: 'What is APEX-BUILD?',
         tags: ['intro', 'overview', 'about', 'what'],
-        content: `APEX-BUILD is an AI-powered cloud development platform that lets you build complete applications from a simple text description. Multiple AI agents work together to plan, code, test, and deploy your app — all from your browser.
+        content: `APEX-BUILD is a contract-first AI cloud development platform. It turns your request into an intent brief, build contract, work orders, patch bundles, verification reports, and a promotion decision so you can see what is real, what is blocked, and what still needs work.
 
 **What you can build:**
-- Full-stack web applications (frontend + backend + database)
-- REST APIs and backend services
-- Single-page applications (SPAs)
-- E-commerce stores, dashboards, chat apps, and more
+- Static frontend websites and UI mockups on the Free plan
+- Full-stack web applications, REST APIs, auth flows, billing, and realtime features on paid plans
+- Dashboards, internal tools, SaaS products, marketing sites, and prototypes
+- Production candidates only when verification and promotion state support that claim
 
 **How it works in a nutshell:**
 1. Describe what you want to build in plain English
-2. Choose your tech stack (or let the AI pick for you)
-3. Click "Launch Build" and watch AI agents build your app in real time
-4. Open the result in the IDE to view, edit, download, or deploy
+2. APEX-BUILD classifies the request as static-ready, upgrade-required, or full-stack-candidate
+3. Click "Launch Build" and watch the timeline, blockers, truth tags, and verification path update in real time
+4. Open the result in the IDE to inspect the code, review the architecture, and see what is mocked, wired, verified, or blocked
+5. Export or publish only when your plan and readiness state allow it
 
-No local setup required — everything runs in the cloud.`,
+No local setup required — everything runs in the cloud, but the product is explicit about when a backend runtime, secrets, publish access, or a paid plan is required.`,
       },
       {
         id: 'create-account',
@@ -130,22 +131,24 @@ In the large text box, describe what you want to build. Be as specific as you ca
 The more detail you include, the better the result. Describe specific features, data models, pages, tech stack preferences, and design goals.
 
 **Step 3: Choose your settings**
-- **Build Mode**: Pick "Fast Build" (~3-5 min) for quick prototypes, or "Full Build" (~10+ min) for production-quality code
+- **Build Mode**: Pick "Fast Build" (~3-5 min) for quick website or prototype work, or "Full Build" (~10+ min) for deeper contract compilation, verification, and repair
 - **Power Mode**: Pick "Fast & Cheap" (default) for budget models, or "Max Power" for the highest-quality AI models
 - **Tech Stack**: Leave on "Auto (Best Fit)" to let the AI choose, or pick specific technologies yourself
 
 **Step 4: Click "Launch Build"**
-The AI agents will start working. You'll see them appear on screen with real-time progress:
-- The Planner creates a build plan
-- The Architect designs the system
-- Frontend/Backend/Database agents write the actual code
-- The Tester and Reviewer check everything
+The AI agents will start working. You will see a real orchestration view instead of a fake “done” state:
+- The build is classified as static-ready, upgrade-required, or full-stack-candidate
+- The timeline shows each orchestration phase as it runs
+- Truth tags explain whether each surface is mocked, scaffolded, partially wired, verified, or blocked
+- Blockers and approvals stay visible until they are actually resolved
+- Verification and promotion decide whether the result is only previewable or closer to production-ready
 
 **Step 5: Get your app**
 When the build finishes:
 - Click "Open in IDE" to view and edit the code
 - Click "Download ZIP" to save everything to your computer
 - Use the preview to see your app running
+- If the request required backend, publish, or BYOK access that your current plan does not allow, the build will tell you directly instead of pretending that work happened
 
 **Quick tip:** Try one of the quick example buttons below the text box to get started fast.`,
       },
@@ -161,7 +164,7 @@ When the build finishes:
 
 **Explore** — Browse projects shared by the community. Star, fork, and download other people's work for inspiration.
 
-**Settings** (gear icon) — Configure your default AI model and add your own API keys (BYOK).
+**Settings** (gear icon) — Configure your default AI model, add your own API keys (BYOK), and review the legal documents that govern usage.
 
 **Admin** (shield icon) — Only visible to admins. Manage users, view system stats, and adjust credits.
 
@@ -207,14 +210,14 @@ The user avatar in the top-right shows your username. Your session persists acro
         tags: ['fast', 'full', 'mode', 'speed', 'quality'],
         content: `**Fast Build (~3-5 minutes)**
 - Fewer AI agents involved
-- Generates core functionality quickly
+- Generates core functionality quickly with lighter verification
 - Great for prototyping and testing ideas
 - Lower credit usage
 - Best for: Quick experiments, simple apps, proof-of-concepts
 
 **Full Build (~10-30 minutes)**
 - All AI agents participate (planner, architect, frontend, backend, database, tester, reviewer)
-- Comprehensive code with tests and code review
+- Deeper contract compilation, verification, repair, and readiness checks
 - Better architecture and error handling
 - Higher credit usage
 - Best for: Production apps, complex features, apps you plan to deploy
@@ -222,7 +225,12 @@ The user avatar in the top-right shows your username. Your session persists acro
 **When to use which:**
 - Start with Fast Build to test your idea
 - If you like the concept, rebuild with Full Build for production quality
-- Fast Build is fine for demos and internal tools`,
+- Fast Build is fine for demos and internal tools
+
+**Plan policy still applies in both modes:**
+- Free supports static frontend website work
+- Paid plans unlock backend, publish, and BYOK capabilities
+- Build mode changes orchestration depth; it does not override plan entitlements`,
       },
       {
         id: 'power-modes',
@@ -726,7 +734,7 @@ Choose which AI provider to use, or leave on "Auto" for intelligent routing.`,
 - Requires: A running Ollama server on your machine or network
 
 **Auto mode (default):**
-When set to "Auto," APEX-BUILD intelligently routes your request to the best available provider based on the task complexity, available models, and your configuration.`,
+When set to "Auto," APEX-BUILD routes hosted work across Claude, GPT, Gemini, and Grok based on task shape, verification history, and availability. Ollama is local/BYOK-only and is not used as a hosted fallback.`,
       },
     ],
   },
@@ -746,13 +754,16 @@ When set to "Auto," APEX-BUILD intelligently routes your request to the best ava
         tags: ['settings', 'configure', 'preferences'],
         content: `Access Settings by clicking the gear icon in the top navigation bar.
 
-**The Settings page has two sections:**
+**The Settings page has three sections:**
 
 **1. Default AI Model**
 Choose which AI model is used by default for builds and AI assistant requests. You can pick "Auto" (recommended) or select a specific provider and model. This preference is saved to your account and applies everywhere.
 
 **2. API Keys (BYOK)**
-This is where you add your own API keys for each AI provider. See the BYOK articles below for full details.`,
+This is where you add your own API keys for each AI provider. See the BYOK articles below for full details.
+
+**3. Legal**
+The Settings area also includes the legal center with the Terms of Service, Privacy Policy, Acceptable Use Policy, Billing / Credits / Refunds, and AI / Content Policy.`,
       },
       {
         id: 'byok-overview',
@@ -762,11 +773,11 @@ This is where you add your own API keys for each AI provider. See the BYOK artic
 
 **Why use BYOK?**
 - **Lower costs** — You pay the AI provider directly at their rates plus a small routing fee ($0.25 per 1M tokens).
-- **Unlimited usage** — BYOK requests don't count against your plan's monthly AI request limit
+- **Lower managed-credit burn** — BYOK reduces platform credit usage for supported flows
 - **Your preferred models** — Use any model available on the provider's API
 - **Full control** — Enable/disable providers, validate keys, track your own usage
 
-**BYOK is available on all plans**, including the Free tier. You just need your own API key from the provider.
+**BYOK is available on paid plans only**. Builder and higher can connect personal provider keys. Free remains limited to static frontend work and cannot connect BYOK keys.
 
 **Supported providers for BYOK:**
 - Claude (Anthropic) — Get your key at console.anthropic.com
@@ -1112,36 +1123,39 @@ Both are tracked separately in the history, so you can see every change regardle
         content: `APEX-BUILD offers five subscription tiers:
 
 **Free — $0/month**
-- BYOK only for managed AI access
+- Static frontend websites and UI mockups
 - 3 projects
 - 100 MB storage
 - 10 min/day code execution
 - 1 collaborator per project
 - No included managed AI credits
+- Upgrade required for backend, database, auth, billing, and realtime app generation
 
-**Builder — $19/month**
-- Entry paid plan for managed AI usage
+**Builder — $24/month**
+- Unlocks backend and full-stack app generation
 - Unlimited projects
 - 5 GB storage
 - 240 min/day execution
-- 3 collaborators per project
+- 1 collaborator per project
 - GitHub export
-- Managed AI credits included
+- $12 monthly managed AI credits included
 
-**Pro — $49/month**
+**Pro — $59/month**
 - Higher managed AI allowance with better throughput
 - Unlimited projects
 - 20 GB storage
 - 720 min/day execution
-- Unlimited collaborators
+- 3 collaborators per project
 - Priority AI routing
+- $40 monthly managed AI credits included
 
-**Team — $99/month**
+**Team — $149/month**
 - Shared team workspace limits with larger managed AI allowance
 - Unlimited projects
 - 100 GB storage
 - 1,440 min/day execution
 - Team collaboration features
+- $110 monthly managed AI credits included
 
 **Enterprise — Contact sales**
 - Custom commercial terms and controls
@@ -1152,7 +1166,7 @@ Both are tracked separately in the history, so you can see every change regardle
 - 99.9% SLA
 - Dedicated support
 
-**Important:** BYOK (Bring Your Own Key) is available on all plans. Free users rely on BYOK for AI generation, while paid plans add managed AI credits and higher platform limits.
+**Important:** BYOK (Bring Your Own Key) is available on Builder and higher. Free is meant for static sites and lightweight website work. Paid plans unlock backend/full-stack generation, BYOK, and managed AI credits.
 
 See the in-app billing page for the current live allowance numbers and credit balance.`,
       },
@@ -1162,7 +1176,7 @@ See the in-app billing page for the current live allowance numbers and credit ba
         tags: ['credits', 'usage', 'cost', 'tokens', 'limit', 'quota'],
         content: `**How credits work:**
 
-Each AI request uses a small amount of credits based on the model used and the number of tokens processed. Your plan includes a monthly allowance of platform-key AI requests.
+Managed AI usage consumes credits based on the model used and the number of tokens processed. Paid plans include monthly managed credits, and you can buy additional top-ups when needed.
 
 **Checking your usage:**
 Your credit balance and usage are visible in your profile and in the admin panel (for admins).
@@ -1178,9 +1192,12 @@ Your credit balance and usage are visible in your profile and in the admin panel
 - Browsing and navigation
 
 **Running low on credits:**
-- Upgrade your plan for more monthly requests
-- Add your own API keys via BYOK (lower cost + routing fee)
-- Wait for monthly reset (limits refresh each billing cycle)`,
+- Upgrade your plan for more included monthly credits
+- Buy a top-up pack to extend your balance
+- Add your own API keys via BYOK on a paid plan (lower cost + routing fee)
+- Wait for monthly reset (included credits refresh each billing cycle)
+
+**Important:** Credit packs do not unlock backend or full-stack generation on the Free plan. Subscription unlocks capabilities; credits cover managed AI usage inside those capabilities.`,
       },
     ],
   },

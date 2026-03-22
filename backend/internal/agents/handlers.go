@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -49,6 +50,15 @@ func classifyBuildMessageError(err error) int {
 	default:
 		return http.StatusInternalServerError
 	}
+}
+
+func userIDFromValue(c *gin.Context, value any) (uint, bool) {
+	uid, ok := value.(uint)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
+		return 0, false
+	}
+	return uid, true
 }
 
 // NewBuildHandler creates a new build handler
@@ -220,6 +230,19 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 		return
 	}
 
+	planType := h.currentSubscriptionType(c, uid)
+	if requiresUpgrade, reason := buildSubscriptionRequirement(&req); requiresUpgrade && !isPaidBuildPlan(planType) {
+		c.JSON(http.StatusPaymentRequired, gin.H{
+			"error":          "Backend and full-stack builds require a paid subscription",
+			"error_code":     backendSubscriptionRequiredCode,
+			"current_plan":   planType,
+			"required_plan":  "builder",
+			"blocked_reason": reason,
+			"suggestion":     "Free accounts can build static frontend websites. Upgrade to Builder or higher to unlock backend, database, auth, billing, and realtime app generation.",
+		})
+		return
+	}
+
 	// Validate role_assignments if provided
 	if req.RoleAssignments != nil {
 		validCats := map[string]bool{"architect": true, "coder": true, "tester": true, "devops": true}
@@ -236,6 +259,13 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"error":   "invalid provider",
 					"details": fmt.Sprintf("Unknown provider: %s. Valid: claude, gpt4, gemini, grok, ollama", prov),
+				})
+				return
+			}
+			if prov == "ollama" && strings.ToLower(strings.TrimSpace(req.ProviderMode)) != "byok" {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "invalid provider for hosted build",
+					"details": "Ollama is local/BYOK-only. Hosted platform builds may only assign Claude, GPT, Gemini, or Grok.",
 				})
 				return
 			}
@@ -259,6 +289,20 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 				"suggestion": "Add credits or configure a personal API key in Settings",
 			})
 			return
+		} else if req.RoleAssignments != nil {
+			available := make(map[string]bool, len(providers))
+			for _, provider := range providers {
+				available[strings.TrimSpace(strings.ToLower(string(provider)))] = true
+			}
+			for category, provider := range req.RoleAssignments {
+				if !available[strings.TrimSpace(strings.ToLower(provider))] {
+					c.JSON(http.StatusConflict, gin.H{
+						"error":   "requested provider unavailable",
+						"details": fmt.Sprintf("Role %s requested provider %s, but it is not currently available for this account", category, provider),
+					})
+					return
+				}
+			}
 		}
 	}
 
@@ -290,7 +334,7 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 	}
 
 	// Create the build
-	build, err := h.manager.CreateBuild(uid, &req)
+	build, err := h.manager.CreateBuild(uid, planType, &req)
 	if err != nil {
 		log.Printf("StartBuild: failed to create build: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -330,7 +374,10 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	build, err := h.manager.GetBuild(buildID)
 	if err == nil {
@@ -519,6 +566,23 @@ func buildSnapshotStateResponseFields(state BuildSnapshotState, fallbackStatus s
 	if len(state.AvailableProviders) > 0 {
 		fields["available_providers"] = append([]string(nil), state.AvailableProviders...)
 	}
+	if state.CapabilityState != nil {
+		fields["capability_state"] = state.CapabilityState
+	}
+	if state.PolicyState != nil {
+		fields["policy_state"] = state.PolicyState
+		fields["build_classification"] = state.PolicyState.Classification
+		fields["upgrade_required"] = state.PolicyState.UpgradeRequired
+		if reason := strings.TrimSpace(state.PolicyState.UpgradeReason); reason != "" {
+			fields["upgrade_reason"] = reason
+		}
+	}
+	if len(state.Blockers) > 0 {
+		fields["blockers"] = append([]BuildBlocker(nil), state.Blockers...)
+	}
+	if len(state.Approvals) > 0 {
+		fields["approvals"] = append([]BuildApproval(nil), state.Approvals...)
+	}
 	if orchestration := cloneBuildOrchestrationState(state.Orchestration); orchestration != nil {
 		fields["orchestration"] = orchestration
 		if orchestration.IntentBrief != nil {
@@ -574,7 +638,10 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	build, err := h.manager.GetBuild(buildID)
 	if err == nil {
@@ -678,7 +745,10 @@ func (h *BuildHandler) SendMessage(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	// Verify build exists and ownership
 	restoredSession := false
@@ -789,7 +859,10 @@ func (h *BuildHandler) GetMessages(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	if build, err := h.manager.GetBuild(buildID); err == nil {
 		if uid != build.UserID {
@@ -830,7 +903,10 @@ func (h *BuildHandler) GetPermissions(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	if build, err := h.manager.GetBuild(buildID); err == nil {
 		if uid != build.UserID {
@@ -877,7 +953,10 @@ func (h *BuildHandler) SetPermissionRule(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	build, err := h.manager.GetBuild(buildID)
 	if err != nil {
@@ -930,7 +1009,10 @@ func (h *BuildHandler) ResolvePermissionRequest(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	build, err := h.manager.GetBuild(buildID)
 	if err != nil {
@@ -979,7 +1061,10 @@ func (h *BuildHandler) PauseBuild(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	_, restoredSession, err := h.getBuildActionSession(uid, buildID)
 	if err != nil {
@@ -1015,7 +1100,10 @@ func (h *BuildHandler) ResumeBuild(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	_, restoredSession, err := h.getBuildActionSession(uid, buildID)
 	if err != nil {
@@ -1051,7 +1139,10 @@ func (h *BuildHandler) GetCheckpoints(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	build, err := h.manager.GetBuild(buildID)
 	if err == nil {
@@ -1100,7 +1191,10 @@ func (h *BuildHandler) RollbackCheckpoint(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	// Verify build exists and ownership
 	build, err := h.manager.GetBuild(buildID)
@@ -1149,7 +1243,10 @@ func (h *BuildHandler) GetAgents(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	build, err := h.manager.GetBuild(buildID)
 	if err == nil {
@@ -1202,7 +1299,10 @@ func (h *BuildHandler) GetTasks(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	build, err := h.manager.GetBuild(buildID)
 	if err == nil {
@@ -1264,7 +1364,10 @@ func (h *BuildHandler) GetGeneratedFiles(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	build, err := h.manager.GetBuild(buildID)
 	if err == nil {
@@ -1316,7 +1419,10 @@ func (h *BuildHandler) GetBuildArtifacts(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	manifest, live, err := h.loadArtifactManifestForUser(uid, buildID)
 	if err != nil {
@@ -1347,7 +1453,10 @@ func (h *BuildHandler) ApplyBuildArtifacts(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	var req struct {
 		ProjectID      *uint  `json:"project_id"`
@@ -1502,7 +1611,10 @@ func (h *BuildHandler) CancelBuild(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	_, restoredSession, err := h.getBuildActionSession(uid, buildID)
 	if err != nil {
@@ -1543,7 +1655,10 @@ func (h *BuildHandler) ListBuilds(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
@@ -1637,7 +1752,10 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 	buildID := c.Param("buildId")
 
 	var build models.CompletedBuild
@@ -1710,7 +1828,10 @@ func (h *BuildHandler) DownloadCompletedBuild(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 	buildID := c.Param("buildId")
 
 	var build models.CompletedBuild
@@ -1789,7 +1910,20 @@ func (h *BuildHandler) DownloadCompletedBuild(c *gin.Context) {
 		if file.Path == "" || file.Content == "" {
 			continue
 		}
-		path := strings.TrimPrefix(file.Path, "/")
+		cleanPath := filepath.Clean(strings.TrimSpace(file.Path))
+		if cleanPath == "." || cleanPath == "" {
+			continue
+		}
+		if filepath.IsAbs(cleanPath) || cleanPath == ".." || strings.HasPrefix(cleanPath, ".."+string(filepath.Separator)) {
+			log.Printf("Skipping suspicious build artifact path during download: %q", file.Path)
+			continue
+		}
+
+		path := strings.TrimPrefix(filepath.ToSlash(cleanPath), "/")
+		if path == "" || path == "." || strings.HasPrefix(path, "../") {
+			log.Printf("Skipping suspicious normalized build artifact path during download: %q", file.Path)
+			continue
+		}
 		w, err := zipWriter.Create(path)
 		if err != nil {
 			continue
@@ -1904,7 +2038,10 @@ func (h *BuildHandler) KillAllBuilds(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	killed := h.manager.KillAllBuilds(uid)
 
@@ -1924,7 +2061,10 @@ func (h *BuildHandler) GetProposedEdits(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	build, err := h.manager.GetBuild(buildID)
 	live := err == nil
@@ -1956,7 +2096,10 @@ func (h *BuildHandler) ApproveEdits(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	build, restoredSession, err := h.getBuildActionSession(uid, buildID)
 	if err != nil {
@@ -1998,7 +2141,10 @@ func (h *BuildHandler) RejectEdits(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	build, restoredSession, err := h.getBuildActionSession(uid, buildID)
 	if err != nil {
@@ -2041,7 +2187,10 @@ func (h *BuildHandler) ApproveAllEdits(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	build, restoredSession, err := h.getBuildActionSession(uid, buildID)
 	if err != nil {
@@ -2069,7 +2218,10 @@ func (h *BuildHandler) RejectAllEdits(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid, ok := userIDFromValue(c, userID)
+	if !ok {
+		return
+	}
 
 	build, restoredSession, err := h.getBuildActionSession(uid, buildID)
 	if err != nil {

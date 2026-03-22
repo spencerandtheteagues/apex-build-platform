@@ -10,6 +10,7 @@ vi.mock('@/services/api', () => ({
     getBuildStatus: vi.fn(),
     getBuildDetails: vi.fn(),
     getCompletedBuild: vi.fn(),
+    listBuilds: vi.fn(),
     sendBuildMessage: vi.fn(),
   },
 }))
@@ -147,9 +148,40 @@ const buildDetail = (overrides: Record<string, any> = {}) => ({
   ...overrides,
 })
 
+const installLocalStorageMock = () => {
+  const store = new Map<string, string>()
+  const storage = {
+    getItem: vi.fn((key: string) => store.get(String(key)) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      store.set(String(key), String(value))
+    }),
+    removeItem: vi.fn((key: string) => {
+      store.delete(String(key))
+    }),
+    clear: vi.fn(() => {
+      store.clear()
+    }),
+    key: vi.fn((index: number) => Array.from(store.keys())[index] ?? null),
+    get length() {
+      return store.size
+    },
+  }
+
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: storage,
+  })
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: storage,
+  })
+
+  return storage
+}
+
 describe('AppBuilder control surface', () => {
   beforeEach(() => {
-    localStorage.clear()
+    installLocalStorageMock()
     Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
       configurable: true,
       value: vi.fn(),
@@ -158,6 +190,7 @@ describe('AppBuilder control surface', () => {
     ;(apiService.getBuildStatus as any).mockReset()
     ;(apiService.getBuildDetails as any).mockReset()
     ;(apiService.getCompletedBuild as any).mockReset()
+    ;(apiService.listBuilds as any).mockReset()
     ;(apiService.sendBuildMessage as any).mockReset()
 
     ;(apiService.buildPreflight as any).mockResolvedValue({
@@ -169,6 +202,12 @@ describe('AppBuilder control surface', () => {
       },
       has_byok: false,
       ready: true,
+    })
+    ;(apiService.listBuilds as any).mockResolvedValue({
+      builds: [],
+      total: 0,
+      page: 1,
+      limit: 10,
     })
   })
 
@@ -249,5 +288,72 @@ describe('AppBuilder control surface', () => {
         })
       )
     })
+  })
+
+  it('restores a failed workflow from legacy unscoped storage after login', async () => {
+    localStorage.setItem('apex_active_build_id', 'legacy-failed-build')
+    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'failed' })
+    ;(apiService.getBuildDetails as any).mockRejectedValue(new Error('not live'))
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
+      id: 'legacy-failed-build',
+      build_id: 'legacy-failed-build',
+      status: 'failed',
+      progress: 88,
+      live: false,
+      error: 'Legacy snapshot restore',
+    }))
+
+    render(<AppBuilder />)
+
+    await screen.findByRole('button', { name: /restart failed build/i })
+
+    expect(apiService.getBuildStatus).toHaveBeenCalledWith('legacy-failed-build')
+    expect(localStorage.getItem('apex_last_workflow_build_id:7')).toBe('legacy-failed-build')
+    expect(localStorage.getItem('apex_active_build_id')).toBeNull()
+  })
+
+  it('falls back to the latest failed server build when no local workflow id survives login', async () => {
+    ;(apiService.listBuilds as any).mockResolvedValue({
+      builds: [
+        {
+          id: 17,
+          build_id: 'server-failed-build',
+          project_id: null,
+          project_name: '',
+          description: 'Recover a failed investor metrics build',
+          status: 'failed',
+          mode: 'full',
+          power_mode: 'balanced',
+          tech_stack: null,
+          files_count: 4,
+          total_cost: 0.12,
+          progress: 91,
+          duration_ms: 42000,
+          created_at: '2026-03-20T21:00:00Z',
+          live: false,
+          resumable: false,
+        },
+      ],
+      total: 1,
+      page: 1,
+      limit: 10,
+    })
+    ;(apiService.getBuildDetails as any).mockRejectedValue(new Error('not live'))
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
+      id: 'server-failed-build',
+      build_id: 'server-failed-build',
+      status: 'failed',
+      progress: 91,
+      live: false,
+      error: 'Recovered from server history',
+    }))
+
+    render(<AppBuilder />)
+
+    await screen.findByRole('button', { name: /restart failed build/i })
+
+    expect(apiService.listBuilds).toHaveBeenCalledWith(1, 10)
+    expect(apiService.getCompletedBuild).toHaveBeenCalledWith('server-failed-build')
+    expect(localStorage.getItem('apex_last_workflow_build_id:7')).toBe('server-failed-build')
   })
 })

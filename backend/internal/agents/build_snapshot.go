@@ -61,16 +61,7 @@ func copyBuildSnapshotStateLocked(build *Build) BuildSnapshotState {
 	if build == nil {
 		return BuildSnapshotState{}
 	}
-	state := build.SnapshotState
-	if state.AvailableProviders != nil {
-		state.AvailableProviders = append([]string(nil), state.AvailableProviders...)
-	}
-	if state.QualityGateRequired != nil {
-		required := *state.QualityGateRequired
-		state.QualityGateRequired = &required
-	}
-	state.Orchestration = cloneBuildOrchestrationState(state.Orchestration)
-	return state
+	return cloneBuildSnapshotState(build.SnapshotState)
 }
 
 func copyBuildOrchestrationStateLocked(build *Build) *BuildOrchestrationState {
@@ -333,11 +324,30 @@ func parseBuildSnapshotState(raw string) BuildSnapshotState {
 	if err := json.Unmarshal([]byte(raw), &state); err != nil {
 		return BuildSnapshotState{}
 	}
-	if state.AvailableProviders != nil {
-		state.AvailableProviders = append([]string(nil), state.AvailableProviders...)
+	return cloneBuildSnapshotState(state)
+}
+
+func cloneBuildSnapshotState(state BuildSnapshotState) BuildSnapshotState {
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		clone := state
+		if clone.AvailableProviders != nil {
+			clone.AvailableProviders = append([]string(nil), clone.AvailableProviders...)
+		}
+		clone.Orchestration = cloneBuildOrchestrationState(clone.Orchestration)
+		return clone
 	}
-	state.Orchestration = cloneBuildOrchestrationState(state.Orchestration)
-	return state
+
+	var decoded BuildSnapshotState
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		clone := state
+		if clone.AvailableProviders != nil {
+			clone.AvailableProviders = append([]string(nil), clone.AvailableProviders...)
+		}
+		clone.Orchestration = cloneBuildOrchestrationState(clone.Orchestration)
+		return clone
+	}
+	return decoded
 }
 
 func cloneBuildOrchestrationState(state *BuildOrchestrationState) *BuildOrchestrationState {

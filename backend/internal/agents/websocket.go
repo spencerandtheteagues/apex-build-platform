@@ -6,6 +6,7 @@ import (
 	"apex-build/internal/applog"
 	apihandlers "apex-build/internal/handlers"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -164,18 +165,23 @@ func (h *WSHub) HandleWebSocket(c *gin.Context) {
 
 	applog.Info("ws_request", "event", "ws_request", "build_id", buildID, "client_ip", c.ClientIP())
 
-	// Verify build exists
-	build, err := h.manager.GetBuild(buildID)
-	if err != nil {
-		applog.WSRejected(buildID, "build_not_found")
-		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
-		return
-	}
-
 	uid, err := apihandlers.WebSocketUserID(c)
 	if err != nil {
 		applog.WSRejected(buildID, "auth_failed: "+err.Error())
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	build, _, err := h.manager.getBuildSessionForUser(buildID, uid, true)
+	if err != nil {
+		switch {
+		case errors.Is(err, errBuildAccessDenied):
+			applog.WSRejected(buildID, "forbidden")
+			c.JSON(http.StatusForbidden, gin.H{"error": "not authorized for this build"})
+		default:
+			applog.WSRejected(buildID, "build_not_found")
+			c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		}
 		return
 	}
 
@@ -494,30 +500,35 @@ func (c *WSConnection) sendBuildState() {
 	}
 
 	// Send build info
+	dataFields := map[string]any{
+		"status":       string(build.Status),
+		"mode":         string(build.Mode),
+		"power_mode":   string(build.PowerMode),
+		"description":  build.Description,
+		"progress":     build.Progress,
+		"agents":       agentsList,
+		"agents_count": len(agentsList),
+		"tasks":        tasksList,
+		"tasks_count":  len(tasksList),
+		"files":        allFiles,
+		"files_count":  len(allFiles),
+		"checkpoints":  build.Checkpoints,
+		"created_at":   build.CreatedAt,
+		"updated_at":   build.UpdatedAt,
+		"completed_at": build.CompletedAt,
+		"error":        build.Error,
+		"messages":     interaction.Messages,
+		"interaction":  interaction,
+	}
+	for key, value := range buildSnapshotStateResponseFields(copyBuildSnapshotStateLocked(build), string(build.Status)) {
+		dataFields[key] = value
+	}
+
 	state := &WSMessage{
 		Type:      "build:state",
 		BuildID:   build.ID,
 		Timestamp: time.Now(),
-		Data: map[string]any{
-			"status":       string(build.Status),
-			"mode":         string(build.Mode),
-			"power_mode":   string(build.PowerMode),
-			"description":  build.Description,
-			"progress":     build.Progress,
-			"agents":       agentsList,
-			"agents_count": len(agentsList),
-			"tasks":        tasksList,
-			"tasks_count":  len(tasksList),
-			"files":        allFiles,
-			"files_count":  len(allFiles),
-			"checkpoints":  build.Checkpoints,
-			"created_at":   build.CreatedAt,
-			"updated_at":   build.UpdatedAt,
-			"completed_at": build.CompletedAt,
-			"error":        build.Error,
-			"messages":     interaction.Messages,
-			"interaction":  interaction,
-		},
+		Data:      dataFields,
 	}
 
 	data, err := json.Marshal(state)

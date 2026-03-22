@@ -127,6 +127,38 @@ describe('reconcileBuildPayloadWithCompletedDetail', () => {
       quality_gate_stage: 'preview',
       quality_gate_active: true,
       available_providers: ['claude', 'gpt4'],
+      capability_state: {
+        required_capabilities: ['auth', 'database'],
+        requires_backend_runtime: true,
+        requires_database: true,
+      },
+      policy_state: {
+        plan_type: 'builder',
+        classification: 'full_stack_candidate',
+        full_stack_eligible: true,
+      },
+      blockers: [
+        {
+          id: 'blocker-1',
+          title: 'Verification blocker',
+          type: 'verification_blocker',
+          category: 'runtime_failure',
+          severity: 'blocking',
+        },
+      ],
+      approvals: [
+        {
+          id: 'database',
+          kind: 'database',
+          title: 'Database access',
+          status: 'satisfied',
+          required: true,
+          requested_at: '2026-03-12T12:00:00.000Z',
+        },
+      ],
+      truth_by_surface: {
+        frontend: ['prototype_ui_only'],
+      },
     }
 
     const result = reconcileBuildPayloadWithCompletedDetail(payload, detail as any)
@@ -142,6 +174,11 @@ describe('reconcileBuildPayloadWithCompletedDetail', () => {
     expect(result.quality_gate_stage).toBe('preview')
     expect(result.quality_gate_active).toBe(true)
     expect(result.available_providers).toEqual(['claude', 'gpt4'])
+    expect(result.policy_state?.classification).toBe('full_stack_candidate')
+    expect(result.capability_state?.requires_database).toBe(true)
+    expect(result.blockers).toHaveLength(1)
+    expect(result.approvals).toHaveLength(1)
+    expect(result.truth_by_surface?.frontend).toEqual(['prototype_ui_only'])
   })
 })
 

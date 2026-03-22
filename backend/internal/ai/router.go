@@ -98,6 +98,14 @@ func NewAIRouter(claudeKey, openAIKey, geminiKey string, extraKeys ...string) *A
 		clients[ProviderOllama] = NewOllamaClient(ollamaURL)
 	}
 
+	for provider, emulation := range configuredOllamaEmulations() {
+		if _, exists := clients[provider]; exists {
+			continue
+		}
+		clients[provider] = newAliasedOllamaProviderClient(provider, emulation.URL, emulation.Model)
+		log.Printf("Local provider emulation enabled: slot=%s -> ollama(%s, model=%s)", provider, emulation.URL, emulation.Model)
+	}
+
 	config := DefaultRouterConfig()
 
 	// Initialize rate limiters
@@ -506,6 +514,10 @@ func classifyProviderError(err error) string {
 
 // performHealthChecks checks health of all providers
 func (r *AIRouter) performHealthChecks() {
+	if r == nil {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel() // Ensure cancel is called when function returns
 
@@ -531,6 +543,12 @@ func (r *AIRouter) performHealthChecks() {
 			}
 
 			r.mu.Lock()
+			if r.healthCheck == nil {
+				r.healthCheck = make(map[AIProvider]bool)
+			}
+			if r.healthStatus == nil {
+				r.healthStatus = make(map[AIProvider]string)
+			}
 			r.healthCheck[p] = healthy
 			r.healthStatus[p] = status
 			r.mu.Unlock()

@@ -313,12 +313,115 @@ type BuildActivityEntry struct {
 	Timestamp  time.Time `json:"timestamp"`
 }
 
+type BuildClassificationState string
+
+const (
+	BuildClassificationStaticReady        BuildClassificationState = "static_ready"
+	BuildClassificationUpgradeRequired    BuildClassificationState = "upgrade_required"
+	BuildClassificationFullStackCandidate BuildClassificationState = "full_stack_candidate"
+)
+
+type BuildCapabilityState struct {
+	RequiredCapabilities   []string `json:"required_capabilities,omitempty"`
+	RequiresBackendRuntime bool     `json:"requires_backend_runtime,omitempty"`
+	RequiresDatabase       bool     `json:"requires_database,omitempty"`
+	RequiresStorage        bool     `json:"requires_storage,omitempty"`
+	RequiresAuth           bool     `json:"requires_auth,omitempty"`
+	RequiresExternalAPI    bool     `json:"requires_external_api,omitempty"`
+	RequiresBilling        bool     `json:"requires_billing,omitempty"`
+	RequiresRealtime       bool     `json:"requires_realtime,omitempty"`
+	RequiresJobs           bool     `json:"requires_jobs,omitempty"`
+	RequiresPublish        bool     `json:"requires_publish,omitempty"`
+	RequiresBYOK           bool     `json:"requires_byok,omitempty"`
+}
+
+type BuildPolicyState struct {
+	PlanType           string                   `json:"plan_type,omitempty"`
+	Classification     BuildClassificationState `json:"classification,omitempty"`
+	UpgradeRequired    bool                     `json:"upgrade_required,omitempty"`
+	UpgradeReason      string                   `json:"upgrade_reason,omitempty"`
+	RequiredPlan       string                   `json:"required_plan,omitempty"`
+	StaticFrontendOnly bool                     `json:"static_frontend_only,omitempty"`
+	FullStackEligible  bool                     `json:"full_stack_eligible,omitempty"`
+	PublishEnabled     bool                     `json:"publish_enabled,omitempty"`
+	BYOKEnabled        bool                     `json:"byok_enabled,omitempty"`
+}
+
+type BuildBlockerCategory string
+
+const (
+	BlockerCategoryApprovals        BuildBlockerCategory = "approvals"
+	BlockerCategorySecrets          BuildBlockerCategory = "secrets"
+	BlockerCategoryAuth             BuildBlockerCategory = "auth"
+	BlockerCategoryBilling          BuildBlockerCategory = "billing"
+	BlockerCategoryEnvironment      BuildBlockerCategory = "environment"
+	BlockerCategoryExternalAccess   BuildBlockerCategory = "external_access"
+	BlockerCategoryDeployment       BuildBlockerCategory = "deployment"
+	BlockerCategoryPolicyLimitation BuildBlockerCategory = "policy_platform_limitations"
+	BlockerCategoryRuntimeFailure   BuildBlockerCategory = "runtime_failure"
+	BlockerCategoryPlanTier         BuildBlockerCategory = "plan_tier"
+)
+
+type BuildBlockerSeverity string
+
+const (
+	BlockerSeverityInfo     BuildBlockerSeverity = "info"
+	BlockerSeverityWarning  BuildBlockerSeverity = "warning"
+	BlockerSeverityBlocking BuildBlockerSeverity = "blocking"
+)
+
+type BuildBlocker struct {
+	ID                     string               `json:"id"`
+	Title                  string               `json:"title"`
+	Type                   string               `json:"type"`
+	Category               BuildBlockerCategory `json:"category"`
+	Severity               BuildBlockerSeverity `json:"severity"`
+	WhoMustAct             string               `json:"who_must_act,omitempty"`
+	Summary                string               `json:"summary,omitempty"`
+	UnblocksWith           string               `json:"unblocks_with,omitempty"`
+	PartialProgressAllowed bool                 `json:"partial_progress_allowed,omitempty"`
+	PlanTierRelated        bool                 `json:"plan_tier_related,omitempty"`
+}
+
+type BuildApprovalStatus string
+
+const (
+	ApprovalStatusNotRequired BuildApprovalStatus = "not_required"
+	ApprovalStatusPending     BuildApprovalStatus = "pending"
+	ApprovalStatusSatisfied   BuildApprovalStatus = "satisfied"
+	ApprovalStatusDenied      BuildApprovalStatus = "denied"
+)
+
+type BuildApproval struct {
+	ID                     string              `json:"id"`
+	Kind                   string              `json:"kind"`
+	Title                  string              `json:"title"`
+	Status                 BuildApprovalStatus `json:"status"`
+	Required               bool                `json:"required"`
+	Summary                string              `json:"summary,omitempty"`
+	Reason                 string              `json:"reason,omitempty"`
+	SourceType             string              `json:"source_type,omitempty"`
+	SourceID               string              `json:"source_id,omitempty"`
+	Actor                  string              `json:"actor,omitempty"`
+	PartialProgressAllowed bool                `json:"partial_progress_allowed,omitempty"`
+	AcknowledgementRequired bool               `json:"acknowledgement_required,omitempty"`
+	PlanTierRelated        bool                `json:"plan_tier_related,omitempty"`
+	MismatchDetected       bool                `json:"mismatch_detected,omitempty"`
+	MismatchReason         string              `json:"mismatch_reason,omitempty"`
+	RequestedAt            time.Time           `json:"requested_at"`
+	ResolvedAt             *time.Time          `json:"resolved_at,omitempty"`
+}
+
 type BuildSnapshotState struct {
 	CurrentPhase        string                   `json:"current_phase,omitempty"`
 	QualityGateRequired *bool                    `json:"quality_gate_required,omitempty"`
 	QualityGateStatus   string                   `json:"quality_gate_status,omitempty"`
 	QualityGateStage    string                   `json:"quality_gate_stage,omitempty"`
 	AvailableProviders  []string                 `json:"available_providers,omitempty"`
+	CapabilityState     *BuildCapabilityState    `json:"capability_state,omitempty"`
+	PolicyState         *BuildPolicyState        `json:"policy_state,omitempty"`
+	Blockers            []BuildBlocker           `json:"blockers,omitempty"`
+	Approvals           []BuildApproval          `json:"approvals,omitempty"`
 	Orchestration       *BuildOrchestrationState `json:"orchestration,omitempty"`
 }
 
@@ -330,6 +433,7 @@ type Build struct {
 	Status              BuildStatus       `json:"status"`
 	Mode                BuildMode         `json:"mode"`
 	PowerMode           PowerMode         `json:"power_mode"`
+	SubscriptionPlan    string            `json:"subscription_plan,omitempty"`
 	ProviderMode        string            `json:"provider_mode,omitempty"` // platform or byok
 	RequirePreviewReady bool              `json:"require_preview_ready,omitempty"`
 	Description         string            `json:"description"` // User's app description

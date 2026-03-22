@@ -1,13 +1,16 @@
 package agents
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"apex-build/internal/ai"
 	"apex-build/pkg/models"
@@ -54,7 +57,7 @@ func testRouter(am *AgentManager) *gin.Engine {
 func openBuildTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -62,6 +65,46 @@ func openBuildTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate sqlite: %v", err)
 	}
 	return db
+}
+
+func TestGetBuildSessionForUserRestoresSnapshotWhenLiveBuildIsGone(t *testing.T) {
+	db := openBuildTestDB(t)
+	snapshot := &models.CompletedBuild{
+		BuildID:     "snapshot-session-restore",
+		UserID:      1,
+		Status:      string(BuildFailed),
+		Description: "Restore a failed build session",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Error:       "contract blocked",
+	}
+	if err := db.Create(snapshot).Error; err != nil {
+		t.Fatalf("create snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+		db: db,
+	}
+
+	build, restored, err := am.getBuildSessionForUser(snapshot.BuildID, 1, false)
+	if err != nil {
+		t.Fatalf("getBuildSessionForUser returned error: %v", err)
+	}
+	if !restored {
+		t.Fatalf("expected snapshot-backed session to be restored")
+	}
+	if build == nil || build.ID != snapshot.BuildID {
+		t.Fatalf("expected restored build %s, got %+v", snapshot.BuildID, build)
+	}
 }
 
 func TestPreflightReturnsReadyWithProviders(t *testing.T) {
@@ -242,6 +285,101 @@ func TestStartBuildValidatesMalformedRequestBeforeCreditCheck(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 before credit check, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestStartBuildRequiresPaidSubscriptionForBackendApps(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.User{
+		ID:               1,
+		Username:         "free-user",
+		Email:            "free@example.com",
+		PasswordHash:     "hashed",
+		SubscriptionType: "free",
+	}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		db:          db,
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"description": "Build a SaaS app with login, Stripe billing, and a Postgres database.",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/start", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusPaymentRequired {
+		t.Fatalf("expected 402, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response["error_code"] != backendSubscriptionRequiredCode {
+		t.Fatalf("expected error_code=%s, got %v", backendSubscriptionRequiredCode, response["error_code"])
+	}
+	if response["required_plan"] != "builder" {
+		t.Fatalf("expected required_plan=builder, got %v", response["required_plan"])
+	}
+}
+
+func TestStartBuildRejectsHostedOllamaRoleAssignments(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.User{
+		ID:               1,
+		Username:         "builder-user",
+		Email:            "builder@example.com",
+		PasswordHash:     "hashed",
+		SubscriptionType: "builder",
+		CreditBalance:    25,
+	}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		db:          db,
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderOllama},
+			userProviders: []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderOllama},
+		},
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"description":   "Build a full stack analytics dashboard with auth and a database.",
+		"provider_mode": "platform",
+		"role_assignments": map[string]string{
+			"coder": "ollama",
+		},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/start", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "Ollama is local/BYOK-only") {
+		t.Fatalf("expected hosted ollama rejection, got %s", w.Body.String())
 	}
 }
 
@@ -1171,6 +1309,69 @@ func TestDownloadCompletedBuildStreamsValidSnapshot(t *testing.T) {
 	}
 }
 
+func TestDownloadCompletedBuildSkipsSuspiciousPaths(t *testing.T) {
+	db := openBuildTestDB(t)
+	filesJSON, err := json.Marshal([]GeneratedFile{
+		{
+			Path: "server/package.json",
+			Content: `{
+  "name": "api",
+  "private": true,
+  "scripts": { "build": "node -e \"console.log('ok')\"" }
+}`,
+		},
+		{Path: "server/src/index.js", Content: "console.log('ok')"},
+		{Path: "README.md", Content: "# Demo\n\nRun instructions."},
+		{Path: ".env.example", Content: "PORT=3001\n"},
+		{Path: "../secrets.txt", Content: "should-not-export"},
+		{Path: "/tmp/absolute.txt", Content: "also-should-not-export"},
+	})
+	if err != nil {
+		t.Fatalf("marshal files: %v", err)
+	}
+	techStackJSON, err := json.Marshal(TechStack{Backend: "Node.js"})
+	if err != nil {
+		t.Fatalf("marshal tech stack: %v", err)
+	}
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "suspicious-path-build",
+		UserID:      1,
+		Status:      "completed",
+		ProjectName: "demo",
+		TechStack:   string(techStackJSON),
+		FilesCount:  6,
+		FilesJSON:   string(filesJSON),
+	}).Error; err != nil {
+		t.Fatalf("create completed build snapshot: %v", err)
+	}
+
+	am := &AgentManager{db: db}
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/builds/suspicious-path-build/download", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	reader, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	if err != nil {
+		t.Fatalf("open zip response: %v", err)
+	}
+
+	names := make(map[string]bool, len(reader.File))
+	for _, file := range reader.File {
+		names[file.Name] = true
+	}
+
+	if !names["server/package.json"] || !names["server/src/index.js"] {
+		t.Fatalf("expected safe files to remain in archive, got %v", names)
+	}
+	if names["../secrets.txt"] || names["/tmp/absolute.txt"] || names["tmp/absolute.txt"] {
+		t.Fatalf("expected suspicious paths to be skipped, got %v", names)
+	}
+}
+
 func TestStartBuildRejectsWhenNoProviders(t *testing.T) {
 	am := &AgentManager{
 		aiRouter: &stubPreflight{
@@ -1181,7 +1382,7 @@ func TestStartBuildRejectsWhenNoProviders(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(map[string]string{
-		"description": "Build me a todo app with React and Express backend",
+		"description": "Build me a marketing website with React and a pricing page",
 	})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/v1/build/start", bytes.NewReader(body))
@@ -1207,7 +1408,7 @@ func TestStartBuildRejectsWhenNoProviderConfigured(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(map[string]string{
-		"description": "Build me a todo app with React and Express backend",
+		"description": "Build me a marketing website with React and a pricing page",
 	})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/v1/build/start", bytes.NewReader(body))

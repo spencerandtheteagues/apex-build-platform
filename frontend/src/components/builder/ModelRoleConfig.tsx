@@ -176,7 +176,7 @@ export default function ModelRoleConfig({
           /* Manual Mode: provider cards with role chips */
           <div>
             <p className="text-sm text-gray-500 mb-5 leading-relaxed">
-              Click a role chip to assign it to a model. Each role can only be assigned to one model.
+              Click a role chip to assign it to a model. Each role can only be assigned to one model. Ollama is only available for local/BYOK builds and is never used for hosted platform runs.
             </p>
 
             <div className="space-y-3">

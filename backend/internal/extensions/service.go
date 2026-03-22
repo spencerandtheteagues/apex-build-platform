@@ -43,27 +43,34 @@ func NewService(db *gorm.DB) *Service {
 	}
 }
 
+func (s *Service) DB() *gorm.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
+}
+
 // SearchParams defines parameters for searching extensions
 type SearchParams struct {
-	Query      string            `json:"query"`
-	Category   ExtensionCategory `json:"category"`
-	Tags       []string          `json:"tags"`
-	SortBy     string            `json:"sort_by"` // downloads, rating, recent, name
-	SortOrder  string            `json:"sort_order"` // asc, desc
-	Page       int               `json:"page"`
-	PageSize   int               `json:"page_size"`
-	Featured   *bool             `json:"featured"`
-	MinRating  float64           `json:"min_rating"`
-	AuthorID   *uint             `json:"author_id"`
+	Query     string            `json:"query"`
+	Category  ExtensionCategory `json:"category"`
+	Tags      []string          `json:"tags"`
+	SortBy    string            `json:"sort_by"`    // downloads, rating, recent, name
+	SortOrder string            `json:"sort_order"` // asc, desc
+	Page      int               `json:"page"`
+	PageSize  int               `json:"page_size"`
+	Featured  *bool             `json:"featured"`
+	MinRating float64           `json:"min_rating"`
+	AuthorID  *uint             `json:"author_id"`
 }
 
 // SearchResult represents search results with pagination
 type SearchResult struct {
-	Extensions  []Extension `json:"extensions"`
-	Total       int64       `json:"total"`
-	Page        int         `json:"page"`
-	PageSize    int         `json:"page_size"`
-	TotalPages  int         `json:"total_pages"`
+	Extensions []Extension `json:"extensions"`
+	Total      int64       `json:"total"`
+	Page       int         `json:"page"`
+	PageSize   int         `json:"page_size"`
+	TotalPages int         `json:"total_pages"`
 }
 
 // Search searches for extensions based on parameters
@@ -187,19 +194,19 @@ func (s *Service) GetByName(ctx context.Context, name string) (*Extension, error
 
 // PublishRequest contains the data needed to publish an extension
 type PublishRequest struct {
-	Name        string            `json:"name" binding:"required"`
-	DisplayName string            `json:"display_name" binding:"required"`
-	Description string            `json:"description"`
-	Category    ExtensionCategory `json:"category"`
-	Tags        []string          `json:"tags"`
+	Name        string             `json:"name" binding:"required"`
+	DisplayName string             `json:"display_name" binding:"required"`
+	Description string             `json:"description"`
+	Category    ExtensionCategory  `json:"category"`
+	Tags        []string           `json:"tags"`
 	Manifest    *ExtensionManifest `json:"manifest" binding:"required"`
-	SourceURL   string            `json:"source_url" binding:"required"`
-	IconURL     string            `json:"icon_url"`
-	Screenshots []string          `json:"screenshots"`
-	Repository  string            `json:"repository"`
-	Homepage    string            `json:"homepage"`
-	License     string            `json:"license"`
-	Readme      string            `json:"readme"`
+	SourceURL   string             `json:"source_url" binding:"required"`
+	IconURL     string             `json:"icon_url"`
+	Screenshots []string           `json:"screenshots"`
+	Repository  string             `json:"repository"`
+	Homepage    string             `json:"homepage"`
+	License     string             `json:"license"`
+	Readme      string             `json:"readme"`
 }
 
 // Publish publishes a new extension or a new version of an existing extension

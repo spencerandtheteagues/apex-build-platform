@@ -8,7 +8,19 @@ import { getConfiguredApiUrl, getConfiguredWsUrl } from '@/config/runtime'
 import ModelRoleConfig from './ModelRoleConfig'
 import { useThemeLogo } from '@/hooks/useThemeLogo'
 import apiService, {
+  BuildApproval,
+  BuildBlocker,
+  BuildCapabilityState,
   BuildMessageTargetMode,
+  BuildIntentBrief,
+  BuildContractSummary,
+  BuildPatchBundleState,
+  BuildPolicyState,
+  BuildPromotionDecisionState,
+  BuildProviderScorecardState,
+  BuildFailureFingerprintState,
+  BuildVerificationReportState,
+  BuildWorkOrderState,
   BuildConversationMessage as ApiBuildConversationMessage,
   BuildInteractionState as ApiBuildInteractionState,
   BuildPermissionRequest as ApiBuildPermissionRequest,
@@ -75,8 +87,10 @@ import {
   resolveBuildCompletedEventStatus,
   upsertBuildTelemetrySnapshot,
 } from './buildRestore'
+import { appendStoredAccessTokenToWebSocketUrl } from '@/services/authSession'
 import { AssetUploader } from '@/components/project/AssetUploader'
 import DiffReviewPanel from '@/components/diff/DiffReviewPanel'
+import OrchestrationOverview from './OrchestrationOverview'
 
 // ============================================================================
 // TYPES
@@ -169,6 +183,19 @@ interface BuildState {
   liveSession?: boolean
   artifactRevision?: string
   diffMode?: boolean
+  capabilityState?: BuildCapabilityState
+  policyState?: BuildPolicyState
+  blockers?: BuildBlocker[]
+  approvals?: BuildApproval[]
+  intentBrief?: BuildIntentBrief
+  buildContract?: BuildContractSummary
+  workOrders?: BuildWorkOrderState[]
+  patchBundles?: BuildPatchBundleState[]
+  verificationReports?: BuildVerificationReportState[]
+  promotionDecision?: BuildPromotionDecisionState
+  providerScorecards?: BuildProviderScorecardState[]
+  failureFingerprints?: BuildFailureFingerprintState[]
+  truthBySurface?: Record<string, string[]>
   interaction?: ApiBuildInteractionState
 }
 
@@ -1357,16 +1384,39 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
     return `${baseKey}:${user.id}`
   }, [user?.id])
+  const migrateLegacyStoredValue = useCallback((baseKey: string) => {
+    if (!user?.id) {
+      return null
+    }
+
+    try {
+      const legacyValue = localStorage.getItem(baseKey)
+      if (!legacyValue) {
+        return null
+      }
+
+      const scopedKey = getScopedStorageKey(baseKey)
+      localStorage.setItem(scopedKey, legacyValue)
+      localStorage.removeItem(baseKey)
+      return legacyValue
+    } catch {
+      return null
+    }
+  }, [getScopedStorageKey, user?.id])
   const readStoredValue = useCallback((baseKey: string) => {
     try {
       if (user?.id) {
-        return localStorage.getItem(getScopedStorageKey(baseKey))
+        const scopedValue = localStorage.getItem(getScopedStorageKey(baseKey))
+        if (scopedValue) {
+          return scopedValue
+        }
+        return migrateLegacyStoredValue(baseKey)
       }
       return localStorage.getItem(baseKey)
     } catch {
       return null
     }
-  }, [getScopedStorageKey, user?.id])
+  }, [getScopedStorageKey, migrateLegacyStoredValue, user?.id])
   const writeStoredValue = useCallback((baseKey: string, value: string) => {
     try {
       if (user?.id) {
@@ -1645,11 +1695,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     const secondsSinceLastThought = lastThoughtTime ? Math.max(0, Math.floor((telemetryNow - lastThoughtTime) / 1000)) : null
     const activeProviders = providerPanels.filter((panel) => panel.status === 'working' || panel.status === 'thinking').length
     const activeAgents = buildState?.agents.filter((agent) => agent.status === 'working').length ?? 0
-    const blockerCount =
+    const legacyBlockerCount =
       (buildPaused ? 1 : 0) +
       (pendingQuestion ? 1 : 0) +
       pendingPermissionRequests.length +
       (pendingRevisionRequests.length > 0 ? 1 : 0)
+    const blockerCount = Math.max(legacyBlockerCount, buildState?.blockers?.length ?? 0)
 
     return {
       activeProviders,
@@ -1675,6 +1726,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     pendingRevisionRequests.length,
     providerPanels,
     telemetryNow,
+    buildState?.blockers?.length,
   ])
   const recentThoughtsByAgent = useMemo(() => {
     const next = new Map<string, AIThought[]>()
@@ -1918,55 +1970,52 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
   // WebSocket URL builder
   const buildWebSocketUrl = useCallback((buildId: string, providedUrl?: string): string => {
-    const token = localStorage.getItem('apex_access_token')
-    const appendToken = (url: string) => {
-      if (!token) return url
-      if (/[?&]token=/.test(url)) return url
-      const separator = url.includes('?') ? '&' : '?'
-      return `${url}${separator}token=${encodeURIComponent(token)}`
-    }
+    let wsUrl: string
 
     if (providedUrl && providedUrl.trim()) {
       const raw = providedUrl.trim()
       if (/^wss?:\/\//i.test(raw)) {
-        return appendToken(raw)
+        wsUrl = raw
+      } else {
+        // Relative URL from server — resolve against the configured backend WS URL,
+        // NOT window.location.host (which is the frontend host, not the backend).
+        const configuredWsBase = getConfiguredWsUrl()
+        const configuredApiBase = getConfiguredApiUrl()
+        if (configuredWsBase) {
+          const backendRoot = configuredWsBase.replace(/\/ws\/?$/, '').replace(/\/$/, '')
+          const normalized = raw.startsWith('/') ? raw : `/${raw}`
+          wsUrl = `${backendRoot}${normalized}`
+        } else if (configuredApiBase) {
+          const apiRoot = configuredApiBase.replace('/api/v1', '').replace(/\/$/, '')
+          const wsProtocol = apiRoot.startsWith('https') ? 'wss' : 'ws'
+          const wsHost = apiRoot.replace(/^https?:\/\//, '')
+          const normalized = raw.startsWith('/') ? raw : `/${raw}`
+          wsUrl = `${wsProtocol}://${wsHost}${normalized}`
+        } else {
+          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+          const normalized = raw.startsWith('/') ? raw : `/${raw}`
+          wsUrl = `${protocol}//${window.location.host}${normalized}`
+        }
       }
-      // Relative URL from server — resolve against the configured backend WS URL,
-      // NOT window.location.host (which is the frontend host, not the backend).
-      const configuredWsBase = getConfiguredWsUrl()
-      const configuredApiBase = getConfiguredApiUrl()
-      if (configuredWsBase) {
-        const backendRoot = configuredWsBase.replace(/\/ws\/?$/, '').replace(/\/$/, '')
-        const normalized = raw.startsWith('/') ? raw : `/${raw}`
-        return appendToken(`${backendRoot}${normalized}`)
-      } else if (configuredApiBase) {
-        const apiRoot = configuredApiBase.replace('/api/v1', '').replace(/\/$/, '')
-        const wsProtocol = apiRoot.startsWith('https') ? 'wss' : 'ws'
-        const wsHost = apiRoot.replace(/^https?:\/\//, '')
-        const normalized = raw.startsWith('/') ? raw : `/${raw}`
-        return appendToken(`${wsProtocol}://${wsHost}${normalized}`)
+    } else {
+      const configuredWsUrl = getConfiguredWsUrl()
+      const configuredApiUrl = getConfiguredApiUrl()
+
+      if (configuredWsUrl) {
+        const baseWsUrl = configuredWsUrl.replace(/\/ws\/?$/, '').replace(/\/$/, '')
+        wsUrl = `${baseWsUrl}/ws/build/${buildId}`
+      } else if (configuredApiUrl) {
+        const apiUrl = configuredApiUrl.replace('/api/v1', '').replace(/\/$/, '')
+        const wsProtocol = apiUrl.startsWith('https') ? 'wss' : 'ws'
+        const wsHost = apiUrl.replace(/^https?:\/\//, '')
+        wsUrl = `${wsProtocol}://${wsHost}/ws/build/${buildId}`
       } else {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-        const normalized = raw.startsWith('/') ? raw : `/${raw}`
-        return appendToken(`${protocol}//${window.location.host}${normalized}`)
+        wsUrl = `${protocol}//${window.location.host}/ws/build/${buildId}`
       }
     }
 
-    const configuredWsUrl = getConfiguredWsUrl()
-    const configuredApiUrl = getConfiguredApiUrl()
-
-    if (configuredWsUrl) {
-      const baseWsUrl = configuredWsUrl.replace(/\/ws\/?$/, '').replace(/\/$/, '')
-      return appendToken(`${baseWsUrl}/ws/build/${buildId}`)
-    } else if (configuredApiUrl) {
-      const apiUrl = configuredApiUrl.replace('/api/v1', '').replace(/\/$/, '')
-      const wsProtocol = apiUrl.startsWith('https') ? 'wss' : 'ws'
-      const wsHost = apiUrl.replace(/^https?:\/\//, '')
-      return appendToken(`${wsProtocol}://${wsHost}/ws/build/${buildId}`)
-    } else {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      return appendToken(`${protocol}//${window.location.host}/ws/build/${buildId}`)
-    }
+    return appendStoredAccessTokenToWebSocketUrl(wsUrl)
   }, [])
 
   // WebSocket connection
@@ -2041,9 +2090,22 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
               : (typeof data.progress === 'number' ? clampPercent(data.progress) : prev?.progress ?? 0),
             agents: Object.values(data.agents || {}),
             powerMode: data.power_mode || data.powerMode || prev?.powerMode,
-            currentPhase: data.phase || prev?.currentPhase,
+            currentPhase: data.phase || data.current_phase || prev?.currentPhase,
             qualityGateRequired: typeof data.quality_gate_required === 'boolean' ? data.quality_gate_required : prev?.qualityGateRequired,
             qualityGateStage: data.quality_gate_stage || prev?.qualityGateStage,
+            capabilityState: data.capability_state || prev?.capabilityState,
+            policyState: data.policy_state || prev?.policyState,
+            blockers: Array.isArray(data.blockers) ? data.blockers : prev?.blockers,
+            approvals: Array.isArray(data.approvals) ? data.approvals : prev?.approvals,
+            intentBrief: data.intent_brief || prev?.intentBrief,
+            buildContract: data.build_contract || prev?.buildContract,
+            workOrders: Array.isArray(data.work_orders) ? data.work_orders : prev?.workOrders,
+            patchBundles: Array.isArray(data.patch_bundles) ? data.patch_bundles : prev?.patchBundles,
+            verificationReports: Array.isArray(data.verification_reports) ? data.verification_reports : prev?.verificationReports,
+            promotionDecision: data.promotion_decision || prev?.promotionDecision,
+            providerScorecards: Array.isArray(data.provider_scorecards) ? data.provider_scorecards : prev?.providerScorecards,
+            failureFingerprints: Array.isArray(data.failure_fingerprints) ? data.failure_fingerprints : prev?.failureFingerprints,
+            truthBySurface: data.truth_by_surface || prev?.truthBySurface,
             qualityGateStatus:
               typeof data.quality_gate_passed === 'boolean'
                 ? (data.quality_gate_passed ? 'passed' : 'failed')
@@ -2085,8 +2147,47 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             addSystemMessage(`AI Providers available: ${data.available_providers.join(', ')} (${data.provider_count} total)`)
           }
 
-          if (typeof data.phase === 'string' && data.phase.trim()) {
-            updates.currentPhase = data.phase
+          if (typeof (data.phase || data.current_phase) === 'string' && String(data.phase || data.current_phase).trim()) {
+            updates.currentPhase = data.phase || data.current_phase
+          }
+          if (data.capability_state) {
+            updates.capabilityState = data.capability_state
+          }
+          if (data.policy_state) {
+            updates.policyState = data.policy_state
+          }
+          if (Array.isArray(data.blockers)) {
+            updates.blockers = data.blockers
+          }
+          if (Array.isArray(data.approvals)) {
+            updates.approvals = data.approvals
+          }
+          if (data.intent_brief) {
+            updates.intentBrief = data.intent_brief
+          }
+          if (data.build_contract) {
+            updates.buildContract = data.build_contract
+          }
+          if (Array.isArray(data.work_orders)) {
+            updates.workOrders = data.work_orders
+          }
+          if (Array.isArray(data.patch_bundles)) {
+            updates.patchBundles = data.patch_bundles
+          }
+          if (Array.isArray(data.verification_reports)) {
+            updates.verificationReports = data.verification_reports
+          }
+          if (data.promotion_decision) {
+            updates.promotionDecision = data.promotion_decision
+          }
+          if (Array.isArray(data.provider_scorecards)) {
+            updates.providerScorecards = data.provider_scorecards
+          }
+          if (Array.isArray(data.failure_fingerprints)) {
+            updates.failureFingerprints = data.failure_fingerprints
+          }
+          if (data.truth_by_surface) {
+            updates.truthBySurface = data.truth_by_surface
           }
           if (typeof data.quality_gate_required === 'boolean') {
             updates.qualityGateRequired = data.quality_gate_required
@@ -3411,6 +3512,19 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
               : 'pending',
       qualityGateStage: payload.quality_gate_stage || undefined,
       availableProviders: Array.isArray(payload.available_providers) ? payload.available_providers : undefined,
+      capabilityState: payload.capability_state,
+      policyState: payload.policy_state,
+      blockers: Array.isArray(payload.blockers) ? payload.blockers : [],
+      approvals: Array.isArray(payload.approvals) ? payload.approvals : [],
+      intentBrief: payload.intent_brief,
+      buildContract: payload.build_contract,
+      workOrders: Array.isArray(payload.work_orders) ? payload.work_orders : [],
+      patchBundles: Array.isArray(payload.patch_bundles) ? payload.patch_bundles : [],
+      verificationReports: Array.isArray(payload.verification_reports) ? payload.verification_reports : [],
+      promotionDecision: payload.promotion_decision,
+      providerScorecards: Array.isArray(payload.provider_scorecards) ? payload.provider_scorecards : [],
+      failureFingerprints: Array.isArray(payload.failure_fingerprints) ? payload.failure_fingerprints : [],
+      truthBySurface: payload.truth_by_surface || payload.promotion_decision?.truth_by_surface || payload.build_contract?.truth_by_surface,
       errorMessage: extractBuildFailureReason(payload),
       websocketUrl: typeof payload.websocket_url === 'string' ? payload.websocket_url : undefined,
       liveSession: payload.live !== false,
@@ -3579,6 +3693,29 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           }
         }
       }
+
+      try {
+        const history = await apiService.listBuilds(1, 10)
+        if (cancelled) return
+
+        const fallbackBuild = (history.builds || []).find((build) => {
+          if (!build?.build_id) return false
+          if (candidateIds.includes(build.build_id)) return false
+          return build.status !== 'completed'
+        })
+
+        if (!fallbackBuild) {
+          return
+        }
+
+        persistLastWorkflowBuildId(fallbackBuild.build_id)
+        await hydrateBuildContext(fallbackBuild.build_id, {
+          reconnectLive: !isTerminalBuildStatus(String(fallbackBuild.status || '')) && fallbackBuild.live !== false,
+          notify: true,
+        })
+      } catch {
+        // Non-fatal: if history is unavailable we leave the builder at a blank prompt.
+      }
     }
 
     void restoreLatestWorkflow()
@@ -3592,6 +3729,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     getStoredActiveBuildId,
     getStoredLastWorkflowBuildId,
     hydrateBuildContext,
+    persistLastWorkflowBuildId,
     user?.id,
   ])
 
@@ -3707,7 +3845,21 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           errorMsg = error.message
         }
 
-        if (error.response?.status === 402 || (error.response?.data as any)?.error_code === 'INSUFFICIENT_CREDITS') {
+        const errorCode = (error.response?.data as any)?.error_code
+
+        if (errorCode === 'BACKEND_SUBSCRIPTION_REQUIRED') {
+          const suggestion = (error.response?.data as any)?.suggestion || 'Upgrade to Builder or higher to unlock backend and full-stack app generation.'
+          addSystemMessage(`Build blocked: ${suggestion}`)
+          addNotification({
+            type: 'warning',
+            title: 'Upgrade Required',
+            message: suggestion,
+          })
+          setIsBuilding(false)
+          return
+        }
+
+        if (error.response?.status === 402 || errorCode === 'INSUFFICIENT_CREDITS') {
           setBuyCreditsReason('Your credit balance has run out. Purchase credits to continue building.')
           setShowBuyCredits(true)
           setIsBuilding(false)
@@ -4336,6 +4488,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
                 {/* Epic Build Button */}
                 <div className="space-y-4">
+                  <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
+                    <div className="text-xs uppercase tracking-wide text-gray-500">Plan Policy</div>
+                    <div className="mt-2 text-sm text-gray-300">
+                      {['builder', 'pro', 'team', 'enterprise', 'owner'].includes(user?.subscription_type || '')
+                        ? 'Your plan can continue into backend, database, auth, billing, realtime, publish, and BYOK flows when the build contract requires them.'
+                        : 'Free is for static frontend websites and UI mockups. Requests that require backend, database, auth, billing, realtime, publish, or BYOK will stop in an honest upgrade-required state instead of pretending that work happened.'}
+                    </div>
+                  </div>
+
                   <EpicBuildButton
                     onClick={startBuild}
                     disabled={!appDescription.trim() || !isRoleAssignmentValid}
@@ -4368,6 +4529,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   <p className="builder-quick-examples-label text-sm text-gray-500 mb-4 font-medium">Quick examples:</p>
                   <div className="flex flex-wrap gap-3">
                     {[
+                      {
+                        label: '✨ Marketing Site',
+                        prompt: `Build a static marketing website for an AI product studio with:
+- Hero section with headline, product screenshot placeholder, and CTA buttons
+- Features section with three product pillars and visual cards
+- Pricing section with Free, Builder, Pro, and Team tiers
+- Customer logos, FAQ, contact form UI, and footer
+- Responsive React + TypeScript frontend with Tailwind CSS
+- No backend, no auth, no database, and no server runtime claims`
+                      },
                       {
                         label: '📋 Project Manager',
                         prompt: `Build a full-stack project management app with the following features:
@@ -4989,6 +5160,27 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   </div>
                 </CardContent>
               </Card>
+
+              <OrchestrationOverview
+                buildStatus={buildState.status}
+                currentPhase={buildState.currentPhase}
+                qualityGateStatus={buildState.qualityGateStatus}
+                capabilityState={buildState.capabilityState}
+                policyState={buildState.policyState}
+                blockers={buildState.blockers}
+                approvals={buildState.approvals}
+                checkpoints={buildState.checkpoints}
+                interaction={buildState.interaction}
+                intentBrief={buildState.intentBrief}
+                buildContract={buildState.buildContract}
+                workOrders={buildState.workOrders}
+                patchBundles={buildState.patchBundles}
+                verificationReports={buildState.verificationReports}
+                promotionDecision={buildState.promotionDecision}
+                providerScorecards={buildState.providerScorecards}
+                failureFingerprints={buildState.failureFingerprints}
+                truthBySurface={buildState.truthBySurface}
+              />
 
               {(pendingQuestion || pendingRevisionRequests.length > 0 || pendingPermissionRequests.length > 0 || grantedPermissionRules.length > 0 || buildState.status === 'awaiting_review') && (
                 <Card variant="cyberpunk" className="border-2 border-violet-900/50 bg-black/60 backdrop-blur-sm">

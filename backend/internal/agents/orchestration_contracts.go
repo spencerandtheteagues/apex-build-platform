@@ -114,15 +114,21 @@ type TruthTag string
 
 const (
 	TruthMocked              TruthTag = "mocked"
+	TruthPrototypeUIOnly     TruthTag = "prototype_ui_only"
 	TruthScaffolded          TruthTag = "scaffolded"
 	TruthPartiallyWired      TruthTag = "partially_wired"
 	TruthLiveLogicConnected  TruthTag = "live_logic_connected"
 	TruthVerified            TruthTag = "verified"
+	TruthTested              TruthTag = "tested"
 	TruthBlocked             TruthTag = "blocked"
 	TruthNeedsSecrets        TruthTag = "needs_secrets"
+	TruthNeedsApproval       TruthTag = "needs_approval"
 	TruthNeedsExternalAPI    TruthTag = "needs_external_api"
 	TruthNeedsBackendRuntime TruthTag = "needs_backend_runtime"
+	TruthExperimental        TruthTag = "experimental"
+	TruthUpgradeRequired     TruthTag = "upgrade_required"
 	TruthProductionCandidate TruthTag = "production_candidate"
+	TruthProductionReady     TruthTag = "production_ready"
 )
 
 type ContractSurface string

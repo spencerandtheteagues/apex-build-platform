@@ -9,34 +9,34 @@ import (
 type AIProvider string
 
 const (
-	ProviderClaude   AIProvider = "claude"
-	ProviderGPT4     AIProvider = "gpt4"
-	ProviderGemini   AIProvider = "gemini"
-	ProviderGrok     AIProvider = "grok"
-	ProviderOllama   AIProvider = "ollama"
+	ProviderClaude AIProvider = "claude"
+	ProviderGPT4   AIProvider = "gpt4"
+	ProviderGemini AIProvider = "gemini"
+	ProviderGrok   AIProvider = "grok"
+	ProviderOllama AIProvider = "ollama"
 )
 
 // AICapability represents different AI use cases
 type AICapability string
 
 const (
-	CapabilityCodeGeneration       AICapability = "code_generation"
+	CapabilityCodeGeneration        AICapability = "code_generation"
 	CapabilityNaturalLanguageToCode AICapability = "natural_language_to_code"
-	CapabilityCodeReview          AICapability = "code_review"
-	CapabilityCodeCompletion      AICapability = "code_completion"
-	CapabilityDebugging           AICapability = "debugging"
-	CapabilityExplanation         AICapability = "explanation"
-	CapabilityRefactoring         AICapability = "refactoring"
-	CapabilityTesting             AICapability = "testing"
-	CapabilityDocumentation       AICapability = "documentation"
-	CapabilityArchitecture        AICapability = "architecture"
+	CapabilityCodeReview            AICapability = "code_review"
+	CapabilityCodeCompletion        AICapability = "code_completion"
+	CapabilityDebugging             AICapability = "debugging"
+	CapabilityExplanation           AICapability = "explanation"
+	CapabilityRefactoring           AICapability = "refactoring"
+	CapabilityTesting               AICapability = "testing"
+	CapabilityDocumentation         AICapability = "documentation"
+	CapabilityArchitecture          AICapability = "architecture"
 )
 
 // AIRequest represents a request to an AI provider
 type AIRequest struct {
 	ID                 string                 `json:"id"`
 	Provider           AIProvider             `json:"provider"`
-	Model              string                 `json:"model,omitempty"`     // Explicit model override (e.g. "grok-3", "claude-sonnet-4-6")
+	Model              string                 `json:"model,omitempty"` // Explicit model override (e.g. "grok-3", "claude-sonnet-4-6")
 	Capability         AICapability           `json:"capability"`
 	Prompt             string                 `json:"prompt"`
 	Code               string                 `json:"code,omitempty"`
@@ -107,13 +107,13 @@ type AIClient interface {
 
 // ProviderUsage tracks usage statistics for a provider
 type ProviderUsage struct {
-	Provider      AIProvider `json:"provider"`
-	RequestCount  int64      `json:"request_count"`
-	TotalTokens   int64      `json:"total_tokens"`
-	TotalCost     float64    `json:"total_cost"`
-	AvgLatency    float64    `json:"avg_latency"`
-	ErrorCount    int64      `json:"error_count"`
-	LastUsed      time.Time  `json:"last_used"`
+	Provider     AIProvider `json:"provider"`
+	RequestCount int64      `json:"request_count"`
+	TotalTokens  int64      `json:"total_tokens"`
+	TotalCost    float64    `json:"total_cost"`
+	AvgLatency   float64    `json:"avg_latency"`
+	ErrorCount   int64      `json:"error_count"`
+	LastUsed     time.Time  `json:"last_used"`
 }
 
 // RouterConfig configures how requests are routed to providers
@@ -145,24 +145,24 @@ type RouterConfig struct {
 func DefaultRouterConfig() *RouterConfig {
 	return &RouterConfig{
 		DefaultProviders: map[AICapability]AIProvider{
-			CapabilityCodeGeneration:       ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityNaturalLanguageToCode: ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityCodeReview:           ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityCodeCompletion:       ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityDebugging:            ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityExplanation:          ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityRefactoring:          ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityTesting:              ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityDocumentation:        ProviderOllama,  // Default to Local/DeepSeek
-			CapabilityArchitecture:         ProviderOllama,  // Default to Local/DeepSeek
+			CapabilityCodeGeneration:        ProviderGPT4,
+			CapabilityNaturalLanguageToCode: ProviderGPT4,
+			CapabilityCodeReview:            ProviderClaude,
+			CapabilityCodeCompletion:        ProviderGPT4,
+			CapabilityDebugging:             ProviderGPT4,
+			CapabilityExplanation:           ProviderClaude,
+			CapabilityRefactoring:           ProviderGPT4,
+			CapabilityTesting:               ProviderGemini,
+			CapabilityDocumentation:         ProviderClaude,
+			CapabilityArchitecture:          ProviderClaude,
 		},
 		FallbackOrder: map[AIProvider][]AIProvider{
-			ProviderClaude: {ProviderGPT4, ProviderGrok, ProviderOllama, ProviderGemini},
-			ProviderGPT4:   {ProviderClaude, ProviderGrok, ProviderOllama, ProviderGemini},
-			ProviderGemini: {ProviderGrok, ProviderOllama, ProviderGPT4, ProviderClaude},
-			ProviderGrok:   {ProviderOllama, ProviderGPT4, ProviderClaude, ProviderGemini},
-			// ADAPTIVE FALLBACK: Ollama now has emergency cloud fallbacks for BYOK scenarios
-			// First retry Ollama (network/startup issues), then gracefully degrade to cloud
+			ProviderClaude: {ProviderGPT4, ProviderGemini, ProviderGrok},
+			ProviderGPT4:   {ProviderClaude, ProviderGemini, ProviderGrok},
+			ProviderGemini: {ProviderClaude, ProviderGPT4, ProviderGrok},
+			ProviderGrok:   {ProviderGPT4, ProviderClaude, ProviderGemini},
+			// Ollama remains local/BYOK-only. If it is chosen explicitly and fails, it may
+			// degrade to cloud providers as a last resort for continuity.
 			ProviderOllama: {ProviderGPT4, ProviderClaude, ProviderGemini, ProviderGrok},
 		},
 		LoadBalancing: map[AIProvider]float64{
@@ -180,21 +180,21 @@ func DefaultRouterConfig() *RouterConfig {
 			ProviderOllama: 1000, // Local — no real limit
 		},
 		CostThresholds: map[AIProvider]float64{
-			ProviderClaude: 0.10,  // max cost per request
-			ProviderGPT4:   0.15,  // max cost per request
-			ProviderGemini: 0.08,  // max cost per request
-			ProviderGrok:   0.05,  // max cost per request
-			ProviderOllama: 0.00,  // Free — runs locally
+			ProviderClaude: 0.10, // max cost per request
+			ProviderGPT4:   0.15, // max cost per request
+			ProviderGemini: 0.08, // max cost per request
+			ProviderGrok:   0.05, // max cost per request
+			ProviderOllama: 0.00, // Free — runs locally
 		},
 		// Enable emergency fallback for BYOK scenarios to prevent build failures
 		EnableBYOKEmergencyFallback: true,
 		// Retry local models multiple times before falling back to cloud
 		MaxRetryAttempts: map[AIProvider]int{
-			ProviderClaude: 2,     // Cloud providers get fewer retries
-			ProviderGPT4:   2,     // Cloud providers get fewer retries
-			ProviderGemini: 2,     // Cloud providers get fewer retries
-			ProviderGrok:   2,     // Cloud providers get fewer retries
-			ProviderOllama: 5,     // Local model gets more retries (network/startup issues)
+			ProviderClaude: 2, // Cloud providers get fewer retries
+			ProviderGPT4:   2, // Cloud providers get fewer retries
+			ProviderGemini: 2, // Cloud providers get fewer retries
+			ProviderGrok:   2, // Cloud providers get fewer retries
+			ProviderOllama: 5, // Local model gets more retries (network/startup issues)
 		},
 	}
 }

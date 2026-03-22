@@ -30,6 +30,28 @@ func (m *BYOKManager) DB() *gorm.DB {
 	return m.db
 }
 
+func (m *BYOKManager) UserCanUseBYOK(userID uint) bool {
+	if m == nil || m.db == nil || userID == 0 {
+		return false
+	}
+
+	var user models.User
+	if err := m.db.Select("subscription_type", "has_unlimited_credits", "bypass_billing").First(&user, userID).Error; err != nil {
+		return false
+	}
+
+	if user.BypassBilling || user.HasUnlimitedCredits {
+		return true
+	}
+
+	switch strings.ToLower(strings.TrimSpace(user.SubscriptionType)) {
+	case "builder", "pro", "team", "enterprise", "owner":
+		return true
+	default:
+		return false
+	}
+}
+
 // modelOverrideClient applies a default model when the request doesn't specify one.
 // This is used for BYOK model preferences.
 type modelOverrideClient struct {
@@ -286,6 +308,10 @@ func normalizeOllamaValidationError(baseURL string, err error) error {
 // GetRouterForUser creates an AI router that uses the user's keys where available,
 // falling back to platform keys for unconfigured providers
 func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
+	if !m.UserCanUseBYOK(userID) {
+		return m.platformRouter, false, nil
+	}
+
 	var keys []models.UserAPIKey
 	if err := m.db.Where("user_id = ? AND is_active = ? AND deleted_at IS NULL", userID, true).Find(&keys).Error; err != nil {
 		return m.platformRouter, false, nil
@@ -398,15 +424,17 @@ func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
 	}
 
 	router := &AIRouter{
-		clients:     clients,
-		config:      config,
-		rateLimits:  rateLimits,
-		healthCheck: make(map[AIProvider]bool),
+		clients:      clients,
+		config:       config,
+		rateLimits:   rateLimits,
+		healthCheck:  make(map[AIProvider]bool),
+		healthStatus: make(map[AIProvider]string),
 	}
 
 	// Mark configured providers as healthy by default for BYOK routers.
 	for provider := range clients {
 		router.healthCheck[provider] = true
+		router.healthStatus[provider] = "ok"
 	}
 
 	return router, hasActiveKey, nil

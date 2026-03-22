@@ -46,9 +46,9 @@ const FEATURES = [
     id: 'agents',
     icon: Bot,
     color: '#a78bfa',
-    bullet: '5 Specialized AI Agents build your app in parallel',
-    heading: 'Five AI Specialists. One Complete App.',
-    sub: 'APEX-BUILD isn\'t a chatbot that writes code snippets. It\'s a team of five dedicated AI agents that plan, build, review, and fix your entire full-stack application — working simultaneously, each owning their layer.',
+    bullet: 'Contract-first builds with specialized agents, patches, and verification',
+    heading: 'A Build System, Not A Black Box.',
+    sub: 'APEX-BUILD turns your request into an intent brief, build contract, owned work orders, patch bundles, verification reports, and a promotion decision. The agents still work in parallel, but the process stays visible, resumable, and honest about what is real versus prototype-only.',
     points: [
       { icon: '⬡', label: 'Architect', desc: 'Plans your database schema, API contracts, and folder structure before a single line of code is written. Catches design mistakes before they become tech debt.' },
       { icon: '⚙', label: 'Backend', desc: 'Generates production-grade REST APIs, JWT auth, and database layers in Go, Python, or Node.js. Real error handling, migrations, and middleware included.' },
@@ -56,7 +56,7 @@ const FEATURES = [
       { icon: '◉', label: 'Reviewer', desc: 'Validates code quality, enforces CORS config, checks integration points, and flags security issues before you see the output.' },
       { icon: '✦', label: 'Solver', desc: 'Automatically detects and repairs build errors, type failures, and dependency conflicts — without being told. Runs in a loop until the build is clean.' },
     ],
-    useCase: '"Build me a multi-tenant SaaS with Stripe billing and user auth." All five agents spin up — Architect designs the schema, Backend writes the API, Frontend builds the UI, Reviewer validates it, Solver fixes any issues. Deployable full-stack app in under 5 minutes.',
+    useCase: '"Build me a multi-tenant SaaS with Stripe billing and user auth." The system classifies it as full-stack, compiles the contract, splits the work by role, verifies each surface, and only promotes the result when the evidence supports it. On free, the same request is blocked honestly instead of pretending the backend exists.',
     visual: 'agents',
   },
   {
@@ -73,7 +73,7 @@ const FEATURES = [
       { icon: '📒', label: 'Immutable credit ledger', desc: 'Every credit deduction is logged with timestamp, agent, model, and token count. Full audit trail, always.' },
       { icon: '📈', label: 'Usage analytics', desc: 'See your spending patterns over time — by day, by project, by AI provider. Optimize where your credits go.' },
     ],
-    useCase: 'A typical full-stack app build costs $0.04–$0.12 in managed credits. You watch the number tick up in real time, agent by agent, model by model. No monthly surprise invoices. Ever.',
+    useCase: 'You can watch the build budget tick in real time, agent by agent and model by model, before the session turns into a surprise bill. Cost disclosure is part of the product, not hidden after the work is done.',
     visual: 'cost',
   },
   {
@@ -98,17 +98,17 @@ const FEATURES = [
     id: 'ai',
     icon: Cpu,
     color: '#D97757',
-    bullet: 'Claude · OpenAI · Gemini · Grok · Ollama — choose your AI',
+    bullet: 'Hosted: Claude · OpenAI · Gemini · Grok. BYOK/local: Ollama too.',
     heading: 'Every Major AI Model. One Platform.',
-    sub: 'Different tasks call for different models. APEX-BUILD routes each agent\'s work to the right provider automatically based on your power mode — or you override manually. Switch mid-build. Mix providers. The platform handles the rest.',
+    sub: 'Different tasks call for different models. APEX-BUILD routes hosted work across Claude, GPT, Gemini, and Grok based on your power mode and task shape. You can still bring your own provider keys, and Ollama remains available for local/BYOK flows.',
     points: [
       { icon: '🟠', label: 'Claude (Anthropic)', desc: 'Best-in-class for code review, documentation, and complex multi-step reasoning. Haiku (fast), Sonnet (balanced), and Opus (max) available.' },
       { icon: '🟢', label: 'OpenAI', desc: 'Strong code generation with fast iteration loops. GPT-4o Mini handles fast work, GPT-4.1 covers balanced builds, and GPT-5.4 is reserved for max power.' },
       { icon: '🔵', label: 'Gemini (Google)', desc: 'Best for long-context tasks and multi-modal inputs. Gemini 2.5 Flash Lite is the fast tier, Gemini 3 Flash Preview is balanced, and Gemini 3.1 Pro Preview is max.' },
       { icon: '⬜', label: 'Grok (xAI)', desc: 'Sharp reasoning with a coding-focused max tier. Grok 3 Mini is fast, Grok 3 is balanced, and Grok Code Fast 1 is the current max model.' },
-      { icon: '🟣', label: 'Ollama (Local / Free)', desc: 'Run Llama 3, Mistral, or any open-source model locally. Zero API cost. Complete privacy — your data never leaves your machine.' },
+      { icon: '🟣', label: 'Ollama (Local / BYOK only)', desc: 'Run Llama 3, Mistral, or other open-source models locally. Zero API cost. Complete privacy. Ollama is not used for hosted platform builds.' },
     ],
-    useCase: 'Power mode: Fast uses Haiku 4.5 + GPT-4o Mini + Gemini 2.5 Flash Lite + Grok 3 Mini. Balanced uses Sonnet 4.6 + GPT-4.1 + Gemini 3 Flash Preview + Grok 3. Max uses Opus 4.6 + GPT-5.4 + Gemini 3.1 Pro Preview + Grok Code Fast 1. Pick the tradeoff that fits your budget.',
+    useCase: 'Power mode: Fast uses Haiku 4.5 + GPT-4o Mini + Gemini 2.5 Flash Lite + Grok 3 Mini. Balanced uses Sonnet 4.6 + GPT-4.1 + Gemini 3 Flash Preview + Grok 3. Max uses Opus 4.6 + GPT-5.4 + Gemini 3.1 Pro Preview + Grok Code Fast 1. Hosted routing stays inside those providers; Ollama is available only when you explicitly connect it through BYOK/local settings.',
     visual: 'ai',
   },
   {
@@ -132,9 +132,9 @@ const FEATURES = [
     id: 'byok',
     icon: Key,
     color: '#f87171',
-    bullet: 'Bring Your Own API Keys — full platform at $0.25/1M routing fee',
+    bullet: 'Bring Your Own API Keys — lower managed cost with the same plan entitlements',
     heading: 'Your Keys. Your Cost. Our Platform.',
-    sub: 'Already have API contracts with Anthropic, OpenAI, Google, or xAI? Use them. Bring your own keys and pay only our flat $0.25/1M token routing fee. You get everything APEX-BUILD offers at raw provider cost — no markup.',
+    sub: 'Already have API contracts with Anthropic, OpenAI, Google, or xAI? Use them. Bring your own keys and pay only our flat $0.25/1M token routing fee. BYOK lowers model spend inside your plan entitlements; it does not unlock paid backend or full-stack capabilities by itself.',
     points: [
       { icon: '💰', label: 'Zero markup on API cost', desc: 'BYOK users pay exactly what the AI provider charges. Our fee is $0.25 per 1M tokens — covering infrastructure and orchestration.' },
       { icon: '🔐', label: 'AES-256 encrypted storage', desc: 'Your keys are encrypted at rest with a unique per-user master key. Plaintext never touches the database. Never transmitted in logs.' },
@@ -142,7 +142,7 @@ const FEATURES = [
       { icon: '✅', label: 'Instant validation', desc: 'Keys are validated on entry. APEX-BUILD alerts you if a key expires, hits rate limits, or runs out of credits — before a build fails mid-run.' },
       { icon: '📊', label: 'BYOK usage analytics', desc: 'See token usage per provider, per model, per project — even when using your own keys. Full visibility.' },
     ],
-    useCase: 'Enterprise teams with existing AI contracts typically save 60–70% vs. managed credits. Paste your key, hit validate, start building. Same full-stack AI IDE, a fraction of the cost.',
+    useCase: 'Enterprise teams with existing AI contracts typically save 60–70% vs. managed credits. Paste your key, hit validate, and use your own provider spend while keeping the same Builder, Pro, or Team capabilities.',
     visual: 'byok',
   },
 
@@ -209,7 +209,7 @@ const FEATURES = [
       { icon: '💳', label: 'SaaS starter', desc: 'Auth (JWT), billing (Stripe), user dashboard, subscription management, and REST API — all wired together and deployable.' },
       { icon: '⚡', label: 'REST API', desc: 'Go or Node.js API with JWT auth, PostgreSQL connection, middleware stack, and standard CRUD endpoints. Ready to extend.' },
       { icon: '⚛️', label: 'React app', desc: 'Vite + React + TypeScript + Tailwind + React Router — production-ready frontend scaffold with component patterns in place.' },
-      { icon: '🏗', label: 'Full-stack', desc: 'Backend + frontend in a monorepo, wired together with shared TypeScript types and a working local dev environment.' },
+      { icon: '🏗', label: 'Full-stack', desc: 'Backend + frontend in a monorepo, wired together with shared types and a working dev environment. Requires a paid plan to build and run as a full-stack app.' },
       { icon: '📝', label: 'Custom templates', desc: 'Save any project as a reusable template. Share across your team or use your own architectural patterns as a starting point.' },
     ],
     useCase: 'Spin up the SaaS starter template — you\'ve got auth, billing, and a dashboard in 30 seconds. Tell the Architect agent "add a referral system with credit rewards." It knows the existing structure and extends it correctly. Hours compressed to minutes.',
@@ -219,17 +219,17 @@ const FEATURES = [
     id: 'billing',
     icon: BarChart3,
     color: '#34d399',
-    bullet: 'Flexible billing — credits, subscriptions, or BYOK. No lock-in.',
-    heading: 'Pay How You Build.',
-    sub: 'Three subscription tiers for teams that build regularly. Credit packs for one-off projects. BYOK for power users who have their own AI contracts. No annual commitments. Credits never expire. Cancel anytime.',
+    bullet: 'Free for websites. Subscribe for apps. Add credits when you need more runway.',
+    heading: 'Pay According to What You Build.',
+    sub: 'Free accounts can build static frontend websites and UI mockups. Upgrade to a monthly plan to unlock backend, database, auth, billing, and realtime app generation. Credit packs handle overages without forcing a bigger subscription.',
     points: [
-      { icon: '🔨', label: 'Builder — $19/mo', desc: 'Solo developers and indie hackers. Managed credits, up to 5 active projects, all AI providers, full IDE.' },
-      { icon: '⚡', label: 'Pro — $49/mo', desc: 'Growing indie teams. More projects, higher credit limits, priority agent queues, advanced analytics.' },
-      { icon: '👥', label: 'Team — $99/mo', desc: 'Full development teams. Collaboration features, role management, shared project workspaces, priority support.' },
-      { icon: '💰', label: 'Credit top-ups', desc: 'Need more credits on any plan? Buy $10, $25, $50, or $100 packs. Credits never expire. Use them whenever.' },
-      { icon: '🔑', label: 'BYOK savings', desc: 'Bring your own API keys on any tier. Pay only the $0.25/1M routing fee. Typical savings: 60–70% vs. managed credits.' },
+      { icon: '🆓', label: 'Free', desc: 'Static frontend pages, landing sites, and UI mockups. Best for lightweight website builds and concept validation.' },
+      { icon: '🔨', label: 'Builder — $24/mo', desc: 'Unlock backend and full-stack generation with $12 in monthly credits included.' },
+      { icon: '⚡', label: 'Pro — $59/mo', desc: 'Higher monthly credits, longer autonomous runs, priority queues, and advanced analytics.' },
+      { icon: '👥', label: 'Team — $149/mo', desc: 'Shared team workspace, collaboration workflows, custom integrations, and $110 in monthly credits.' },
+      { icon: '💰', label: 'Credit top-ups', desc: 'Need more credits on any plan? Buy $25, $50, $100, or $250 packs. Credits never expire.' },
     ],
-    useCase: 'Building one app? Buy a $25 credit pack. No subscription. Building weekly? The Pro plan at $49/mo covers most active teams. Enterprise with existing AI contracts? BYOK on Team is cheaper than a single month of most alternatives.',
+    useCase: 'Need a landing page or mockup? Stay on Free. Need auth, APIs, a database, or subscriptions? Upgrade to Builder to unlock app generation. Shipping every week? Pro is the right default. Running a multi-seat workflow? Team gives you the shared workspace and credit pool.',
     visual: 'billing',
   },
   {
@@ -238,15 +238,15 @@ const FEATURES = [
     color: '#e879f9',
     bullet: 'Export, deploy, or host — own your code, always',
     heading: 'Own What You Build. Forever.',
-    sub: 'Every app built in APEX-BUILD is 100% yours. Export full source code at any time, deploy to your own infrastructure, or use built-in hosting. Standard files, no proprietary formats, no vendor lock-in — ever.',
+    sub: 'Every app built in APEX-BUILD is 100% yours. Export full source code at any time, deploy to your own infrastructure, or use built-in hosting when your plan and readiness state allow it. Standard files, no proprietary formats, no vendor lock-in — ever.',
     points: [
       { icon: '📦', label: 'Full source export', desc: 'Download a complete zip of your project — all source files, configs, dependencies, and assets. Open it anywhere.' },
-      { icon: '🚀', label: 'One-click deploy', desc: 'Deploy directly to Render, Railway, or Vercel from the IDE. Agents generate the platform-specific deploy config automatically.' },
+      { icon: '🚀', label: 'One-click deploy', desc: 'Deploy directly to Render, Railway, or Vercel from the IDE on paid plans. Agents generate the platform-specific deploy config automatically.' },
       { icon: '🌐', label: 'Custom domains', desc: 'Map any domain to a hosted project. HTTPS provisioned automatically. DNS propagation monitored in real time.' },
       { icon: '🐳', label: 'Docker + CI/CD', desc: 'Request a Dockerfile, GitHub Actions workflow, or Render Blueprint — agents generate complete, working configs.' },
       { icon: '⚙️', label: 'Environment configs', desc: 'Agents generate production `.env` templates, `.env.example` files, and deployment docs as part of every build.' },
     ],
-    useCase: 'Finish your app. Click Export. Get a zip. Hand it to your CTO, push it to your own AWS account, or deploy it to any platform. APEX-BUILD never holds your code hostage. It\'s yours from the first commit.',
+    useCase: 'Finish your app. Click Export. Get a zip. Hand it to your CTO, push it to your own AWS account, or deploy it when the build is actually ready and your plan allows publish. APEX-BUILD never holds your code hostage. It\'s yours from the first commit.',
     visual: 'export',
   },
 ]
@@ -1315,14 +1315,14 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
           color: C.textSub, margin: '0 auto 4px',
           letterSpacing: '0.01em',
         }}>
-          The AI Cloud IDE that shows you the bill — in real time.
+          The AI Cloud IDE for contract-first, verification-gated app building.
         </p>
         <p style={{
           fontFamily: fBody, fontSize: 'clamp(0.82rem, 1.3vw, 0.92rem)',
           color: C.textMuted, margin: '0 auto',
           maxWidth: 480, lineHeight: 1.55,
         }}>
-          5 specialized agents build your full-stack app in parallel. Every token tracked. Every dollar visible. No surprises.
+          Free builds static websites. Paid plans unlock full-stack apps, publish, and BYOK. Every build shows its blockers, truth state, verification path, and spend as it runs.
         </p>
       </motion.div>
 
@@ -1785,30 +1785,35 @@ const PricingSection: React.FC<LandingProps> = ({ onGetStarted }) => (
           color: C.textSub, margin: '0 auto',
           maxWidth: 520, lineHeight: 1.7,
         }}>
-          No credit card required. Start with included credits.
-          Bring your own API keys on any plan and save up to 70%.
+          No credit card required.
+          Free is for static websites. Subscribe to unlock backend and full-stack apps, publishing, and BYOK.
         </p>
       </motion.div>
 
       <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
         gap: 16, marginBottom: 32,
       }}>
         {[
           {
-            tier: 'Builder', price: '$19', period: '/mo', highlight: false,
-            tag: 'Solo developers',
-            features: ['All 5 AI agents', 'Claude · OpenAI · Gemini · Grok', '5 active projects', 'Managed credits included', 'BYOK support ($0.25/1M)', 'Full cloud IDE'],
+            tier: 'Free', price: '$0', period: '', highlight: false,
+            tag: 'Websites only',
+            features: ['Static frontend websites', 'Landing pages and mockups', 'Fast mode', '3 active projects', 'Upgrade for backend apps', 'No BYOK on free'],
           },
           {
-            tier: 'Pro', price: '$49', period: '/mo', highlight: true,
+            tier: 'Builder', price: '$24', period: '/mo', highlight: false,
+            tag: 'Unlock apps',
+            features: ['Backend + full-stack builds', '$12 monthly credits included', 'All 5 AI agents', 'Deployable app structure', 'BYOK support', 'Full cloud IDE'],
+          },
+          {
+            tier: 'Pro', price: '$59', period: '/mo', highlight: true,
             tag: 'Most popular',
-            features: ['Everything in Builder', 'Unlimited projects', 'Priority agent queues', 'Higher credit limits', 'Advanced usage analytics', 'Real-time collaboration'],
+            features: ['Everything in Builder', '$40 monthly credits included', 'Priority agent queues', 'Longer autonomous runs', 'Advanced usage analytics', 'Real-time collaboration'],
           },
           {
-            tier: 'Team', price: '$99', period: '/mo', highlight: false,
+            tier: 'Team', price: '$149', period: '/mo', highlight: false,
             tag: 'Growing teams',
-            features: ['Everything in Pro', 'Role-based access control', 'Shared project workspaces', 'Inline code comments', 'Priority support', 'Team analytics'],
+            features: ['Everything in Pro', '$110 monthly credits included', 'Shared project workspaces', 'Up to 5 seats', 'Priority support', 'Custom integrations'],
           },
         ].map((plan, i) => (
           <motion.div
@@ -1892,18 +1897,18 @@ const PricingSection: React.FC<LandingProps> = ({ onGetStarted }) => (
       >
         <div>
           <div style={{ fontFamily: fBody, fontWeight: 700, fontSize: '0.92rem', color: C.text, marginBottom: 4 }}>
-            Just need credits for one project?
+            Need extra managed AI credits?
           </div>
           <div style={{ fontFamily: fBody, fontSize: '0.82rem', color: C.textSub }}>
-            Buy a one-time credit pack — no subscription required. Credits never expire.
+            Credit packs extend managed usage on any plan. They do not unlock backend or full-stack builds by themselves.
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {[
-            { amount: '$10', credits: '1,000 credits' },
-            { amount: '$25', credits: '2,500 credits' },
-            { amount: '$50', credits: '5,000 credits' },
-            { amount: '$100', credits: '10,000 credits' },
+            { amount: '$25', credits: '$25 balance' },
+            { amount: '$50', credits: '$50 balance' },
+            { amount: '$100', credits: '$100 balance' },
+            { amount: '$250', credits: '$250 balance' },
           ].map(p => (
             <button key={p.amount} onClick={() => onGetStarted()} style={{
               background: C.surface, border: `1px solid ${C.borderBright}`,
