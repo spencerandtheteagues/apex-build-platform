@@ -754,15 +754,21 @@ When set to "Auto," APEX-BUILD routes hosted work across Claude, GPT, Gemini, an
         tags: ['settings', 'configure', 'preferences'],
         content: `Access Settings by clicking the gear icon in the top navigation bar.
 
-**The Settings page has three sections:**
+**The Settings page includes several sections:**
 
-**1. Default AI Model**
+**1. Theme and appearance**
+Control the interface look and feel.
+
+**2. Default AI Model**
 Choose which AI model is used by default for builds and AI assistant requests. You can pick "Auto" (recommended) or select a specific provider and model. This preference is saved to your account and applies everywhere.
 
-**2. API Keys (BYOK)**
-This is where you add your own API keys for each AI provider. See the BYOK articles below for full details.
+**3. API Keys (BYOK)**
+This is where you add your own API keys for each AI provider. Builder and higher can connect BYOK providers, including Ollama. See the BYOK articles below for full details.
 
-**3. Legal**
+**4. Budget and billing**
+Review spending controls, subscription state, and credits.
+
+**5. Legal**
 The Settings area also includes the legal center with the Terms of Service, Privacy Policy, Acceptable Use Policy, Billing / Credits / Refunds, and AI / Content Policy.`,
       },
       {
@@ -815,16 +821,17 @@ Click the "Delete" button on the provider card. This permanently removes the key
       },
       {
         id: 'byok-ollama',
-        title: 'Using Ollama (free local AI)',
+        title: 'Using Ollama (local BYOK)',
         tags: ['ollama', 'local', 'free', 'self-hosted', 'deepseek', 'llama'],
-        content: `Ollama lets you run AI models on your own computer for free. No API keys or payments needed.
+        content: `Ollama lets you run AI models on your own computer without paying a cloud model provider. The Ollama software itself is free, but connecting Ollama to APEX-BUILD still uses the BYOK integration, which is available on Builder and higher.
 
 **Setup:**
 1. Install Ollama from ollama.com
 2. Pull a model: ollama pull deepseek-r1:8b (or any model you want)
 3. Start Ollama: ollama serve (it runs on http://localhost:11434 by default)
-4. In APEX-BUILD Settings > BYOK > Ollama, enter your server URL
-5. Click "Save & Activate"
+4. Upgrade to Builder or higher if your account is still on Free
+5. In APEX-BUILD Settings > BYOK > Ollama, enter your server URL
+6. Click "Save & Activate"
 
 **Available local models:**
 - DeepSeek-R1 (18b / 8b) — Excellent for code generation
@@ -833,12 +840,13 @@ Click the "Delete" button on the provider card. This permanently removes the key
 - Llama 3.3 70B — Meta's largest open model (needs powerful hardware)
 
 **Requirements:**
+- Builder or higher plan, because Ollama is configured through BYOK
 - Ollama must be running and accessible from your browser
 - If running APEX-BUILD in the cloud, Ollama needs to be on a reachable URL (not localhost)
 - More powerful models need more RAM (8b models need ~8GB, 70B models need ~48GB)
 
-**Pros:** Completely free, unlimited usage, full privacy
-**Cons:** Requires local hardware, slower than cloud APIs, smaller models are less capable`,
+**Pros:** No cloud-model API bill, strong privacy, flexible local model choice
+**Cons:** Requires a paid APEX-BUILD plan for BYOK, requires local hardware, slower than cloud APIs, smaller models are less capable`,
       },
     ],
   },
