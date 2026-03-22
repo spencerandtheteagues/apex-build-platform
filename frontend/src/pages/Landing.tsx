@@ -543,7 +543,7 @@ const PROVIDERS = [
   { name: 'OpenAI',  sub: 'GPT family',   color: '#10A37F', models: ['GPT-4o Mini', 'GPT-4.1', 'GPT-5.4'],                    costRange: 'Live per-model pricing' },
   { name: 'Gemini',  sub: 'Google',       color: '#4285F4', models: ['2.5 Flash Lite', '3 Flash Preview', '3.1 Pro Preview'], costRange: 'Live per-model pricing' },
   { name: 'Grok',    sub: 'xAI',          color: '#e5e5e5', models: ['Grok 3 Mini', 'Grok 3', 'Grok Code Fast 1'],            costRange: 'Live per-model pricing' },
-  { name: 'Ollama',  sub: 'Local / Free', color: '#7C3AED', models: ['Llama 3', 'Mistral', 'Any model'],   costRange: 'Free' },
+  { name: 'Ollama',  sub: 'Local / BYOK', color: '#7C3AED', models: ['Llama 3', 'Mistral', 'Any model'],   costRange: 'No cloud-model API bill' },
 ]
 
 // ─── IDE demo mockup ──────────────────────────────────────────────────────────

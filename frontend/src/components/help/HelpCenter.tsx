@@ -729,9 +729,9 @@ Choose which AI provider to use, or leave on "Auto" for intelligent routing.`,
 
 **Ollama (Local)**
 - Models: DeepSeek-R1, Qwen 3 Coder, Llama 3.3, and more
-- Strengths: Free, runs on your own hardware, no API costs
+- Strengths: Runs on your own hardware, no cloud-model API bill, strong privacy
 - Best for: Privacy-sensitive work, unlimited usage
-- Requires: A running Ollama server on your machine or network
+- Requires: Builder or higher for BYOK access, plus a running Ollama server on your machine or network
 
 **Auto mode (default):**
 When set to "Auto," APEX-BUILD routes hosted work across Claude, GPT, Gemini, and Grok based on task shape, verification history, and availability. Ollama is local/BYOK-only and is not used as a hosted fallback.`,
