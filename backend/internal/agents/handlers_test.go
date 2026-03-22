@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -104,6 +105,35 @@ func TestGetBuildSessionForUserRestoresSnapshotWhenLiveBuildIsGone(t *testing.T)
 	}
 	if build == nil || build.ID != snapshot.BuildID {
 		t.Fatalf("expected restored build %s, got %+v", snapshot.BuildID, build)
+	}
+}
+
+func TestGetBuildSnapshotFallsBackToBuildIDLookupAndEnforcesOwnership(t *testing.T) {
+	db := openBuildTestDB(t)
+	snapshot := &models.CompletedBuild{
+		BuildID:     "snapshot-fallback-ownership",
+		UserID:      7,
+		Status:      string(BuildPlanning),
+		Description: "Snapshot ownership fallback",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	if err := db.Create(snapshot).Error; err != nil {
+		t.Fatalf("create snapshot: %v", err)
+	}
+
+	handler := NewBuildHandler(&AgentManager{db: db}, nil)
+
+	found, err := handler.getBuildSnapshot(7, snapshot.BuildID)
+	if err != nil {
+		t.Fatalf("expected owner lookup to succeed: %v", err)
+	}
+	if found == nil || found.BuildID != snapshot.BuildID {
+		t.Fatalf("expected snapshot %s, got %+v", snapshot.BuildID, found)
+	}
+
+	if _, err := handler.getBuildSnapshot(8, snapshot.BuildID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("expected foreign-user lookup to return not found, got %v", err)
 	}
 }
 

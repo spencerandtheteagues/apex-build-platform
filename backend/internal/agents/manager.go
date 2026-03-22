@@ -286,7 +286,10 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 	build.MaxTokensPerRequest = maxTokens
 
 	am.builds[buildID] = build
-	am.persistBuildSnapshot(build, nil)
+	if err := am.persistBuildSnapshotCritical(build, nil); err != nil {
+		delete(am.builds, buildID)
+		return nil, fmt.Errorf("persist initial build snapshot: %w", err)
+	}
 
 	log.Printf("Created build %s for user %d: %s", buildID, userID, truncate(req.Description, 50))
 	return build, nil
@@ -312,7 +315,15 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	build.Status = BuildPlanning
 	build.UpdatedAt = time.Now()
 	build.mu.Unlock()
-	am.persistBuildSnapshot(build, nil)
+	if err := am.persistBuildSnapshotCritical(build, nil); err != nil {
+		build.mu.Lock()
+		build.Status = BuildFailed
+		build.Error = fmt.Sprintf("Failed to persist initial build state: %v", err)
+		build.UpdatedAt = time.Now()
+		build.mu.Unlock()
+		am.persistBuildSnapshot(build, nil)
+		return fmt.Errorf("failed to persist initial build snapshot: %w", err)
+	}
 
 	log.Printf("Build %s status updated, broadcasting", buildID)
 
@@ -7309,11 +7320,24 @@ completion_finalize:
 // persistBuildSnapshot upserts the latest build state to the database.
 // This runs for both in-progress and completed builds so users can recover state after restarts.
 func (am *AgentManager) persistBuildSnapshot(build *Build, files []GeneratedFile) {
+	if err := am.persistBuildSnapshotWithRetry(build, files, 1); err != nil {
+		log.Printf("Failed to persist build snapshot %s: %v", build.ID, err)
+	}
+}
+
+func (am *AgentManager) persistBuildSnapshotCritical(build *Build, files []GeneratedFile) error {
+	return am.persistBuildSnapshotWithRetry(build, files, 3)
+}
+
+func (am *AgentManager) persistBuildSnapshotWithRetry(build *Build, files []GeneratedFile, attempts int) error {
 	if am.db == nil {
-		return
+		return nil
 	}
 	if build == nil {
-		return
+		return nil
+	}
+	if attempts < 1 {
+		attempts = 1
 	}
 
 	build.mu.RLock()
@@ -7400,37 +7424,45 @@ func (am *AgentManager) persistBuildSnapshot(build *Build, files []GeneratedFile
 		snapshot.CreatedAt = build.CreatedAt
 	}
 
-	err := am.db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "build_id"}},
-		DoUpdates: clause.Assignments(map[string]any{
-			"user_id":          snapshot.UserID,
-			"project_id":       snapshot.ProjectID,
-			"project_name":     snapshot.ProjectName,
-			"description":      snapshot.Description,
-			"status":           snapshot.Status,
-			"mode":             snapshot.Mode,
-			"power_mode":       snapshot.PowerMode,
-			"tech_stack":       snapshot.TechStack,
-			"files_json":       snapshot.FilesJSON,
-			"agents_json":      snapshot.AgentsJSON,
-			"tasks_json":       snapshot.TasksJSON,
-			"checkpoints_json": snapshot.CheckpointsJSON,
-			"state_json":       snapshot.StateJSON,
-			"activity_json":    snapshot.ActivityJSON,
-			"interaction_json": snapshot.InteractionJSON,
-			"files_count":      snapshot.FilesCount,
-			"total_cost":       snapshot.TotalCost,
-			"progress":         snapshot.Progress,
-			"duration_ms":      snapshot.DurationMs,
-			"error":            snapshot.Error,
-			"completed_at":     snapshot.CompletedAt,
-			"updated_at":       now,
-		}),
-	}).Create(snapshot).Error
-
-	if err != nil {
-		log.Printf("Failed to persist build snapshot %s: %v", build.ID, err)
+	assignments := map[string]any{
+		"user_id":          snapshot.UserID,
+		"project_id":       snapshot.ProjectID,
+		"project_name":     snapshot.ProjectName,
+		"description":      snapshot.Description,
+		"status":           snapshot.Status,
+		"mode":             snapshot.Mode,
+		"power_mode":       snapshot.PowerMode,
+		"tech_stack":       snapshot.TechStack,
+		"files_json":       snapshot.FilesJSON,
+		"agents_json":      snapshot.AgentsJSON,
+		"tasks_json":       snapshot.TasksJSON,
+		"checkpoints_json": snapshot.CheckpointsJSON,
+		"state_json":       snapshot.StateJSON,
+		"activity_json":    snapshot.ActivityJSON,
+		"interaction_json": snapshot.InteractionJSON,
+		"files_count":      snapshot.FilesCount,
+		"total_cost":       snapshot.TotalCost,
+		"progress":         snapshot.Progress,
+		"duration_ms":      snapshot.DurationMs,
+		"error":            snapshot.Error,
+		"completed_at":     snapshot.CompletedAt,
+		"updated_at":       now,
 	}
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		lastErr = am.db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "build_id"}},
+			DoUpdates: clause.Assignments(assignments),
+		}).Create(snapshot).Error
+		if lastErr == nil {
+			return nil
+		}
+		if attempt < attempts {
+			time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
+		}
+	}
+	return lastErr
 }
 
 // finalizePhasedPipeline marks a phased execution pipeline as complete and hands

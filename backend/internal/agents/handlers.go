@@ -1984,11 +1984,37 @@ func (h *BuildHandler) getBuildSnapshot(userID uint, buildID string) (*models.Co
 	}
 
 	var snapshot models.CompletedBuild
-	if err := h.db.Where("build_id = ? AND user_id = ?", buildID, userID).
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		lastErr = h.db.Where("build_id = ? AND user_id = ?", buildID, userID).
+			Order("updated_at DESC").
+			Order("id DESC").
+			First(&snapshot).Error
+		if lastErr == nil {
+			return &snapshot, nil
+		}
+		if !errors.Is(lastErr, gorm.ErrRecordNotFound) {
+			if attempt < 2 {
+				time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+				continue
+			}
+			return nil, lastErr
+		}
+		if attempt < 2 {
+			time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+		}
+	}
+
+	// Fallback to a build-id lookup in case the row was persisted but the user-scoped read
+	// briefly missed during a process boundary. Ownership is still enforced below.
+	if err := h.db.Where("build_id = ?", buildID).
 		Order("updated_at DESC").
 		Order("id DESC").
 		First(&snapshot).Error; err != nil {
 		return nil, err
+	}
+	if snapshot.UserID != userID {
+		return nil, gorm.ErrRecordNotFound
 	}
 	return &snapshot, nil
 }
