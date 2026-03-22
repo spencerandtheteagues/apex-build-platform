@@ -2040,16 +2040,16 @@ const SCREENSHOTS = [
   {
     id: 'build',
     eyebrow: 'From prompt to product',
-    title: 'Describe It. Build It.',
+    title: 'From Prompt to Working Plan',
     description:
-      'Start with a plain-English idea, choose your stack, and move from concept to a real app without wrestling setup and boilerplate.',
+      'Start with a plain-English request, lock the stack, and move into a contract-first build flow before code starts changing.',
     image: '/screenshot-build.png',
     icon: Sparkles,
     iconColor: C.accent,
     bullets: [
-      'Prompt-driven app creation',
-      'Fast, Balanced, and Max power modes',
-      'Stack selection without friction',
+      'Contract-first app creation',
+      'Fast, Balanced, and Max build modes',
+      'Static vs full-stack intent made explicit',
     ],
     accentColor: C.accent,
     glowColor: 'rgba(255,0,51,0.18)',
@@ -2058,16 +2058,16 @@ const SCREENSHOTS = [
   {
     id: 'workspace',
     eyebrow: 'Build with real power',
-    title: 'Real Full-Stack Workspace',
+    title: 'A Workspace That Shows The Truth',
     description:
-      'A true development environment — editor, live backend, database visibility, and app preview all working together in one interface.',
+      'Editor, preview, backend, database, and orchestration state live together so you can see what is wired, verified, blocked, or still in progress.',
     image: '/screenshot-ide.png',
     icon: Terminal,
     iconColor: '#60a5fa',
     bullets: [
-      'Live preview and backend status side by side',
-      'Database visibility built in',
-      'Real project structure, not a toy editor',
+      'Live preview with backend status side by side',
+      'Architecture, blockers, and approvals in view',
+      'Real project structure, not a toy canvas',
     ],
     accentColor: '#60a5fa',
     glowColor: 'rgba(96,165,250,0.18)',
@@ -2076,16 +2076,16 @@ const SCREENSHOTS = [
   {
     id: 'spend',
     eyebrow: 'Transparent spend control',
-    title: 'No Surprise Bills. Ever.',
+    title: 'Spend You Can Actually Control',
     description:
-      'Track usage in real time with a clear model-by-model cost breakdown — so you always know exactly where your money is going.',
+      'Track usage in real time with clear model-by-model cost breakdowns, per-agent attribution, and hard limits before spend drifts.',
     image: '/screenshot-spend.png',
     icon: DollarSign,
     iconColor: C.green,
     bullets: [
-      'Real-time spending overview per model',
-      'Per-agent cost attribution',
-      'Built-in budget controls and hard caps',
+      'Real-time spend by provider and model',
+      'Per-agent and per-build cost attribution',
+      'Credits, caps, and upgrade gates in view',
     ],
     accentColor: C.green,
     glowColor: 'rgba(52,211,153,0.15)',
@@ -2123,7 +2123,7 @@ const ScreenshotSection: React.FC<LandingProps> = ({ onGetStarted }) => (
           fontFamily: fBody, fontSize: '0.7rem', fontWeight: 700,
           letterSpacing: '0.09em', textTransform: 'uppercase' as const, marginBottom: 18,
         }}>
-          <Zap size={11} /> One platform. Idea to production.
+          <Zap size={11} /> Contract-first. Truth before hype.
         </div>
 
         <h2 style={{
@@ -2131,16 +2131,51 @@ const ScreenshotSection: React.FC<LandingProps> = ({ onGetStarted }) => (
           fontSize: 'clamp(1.75rem, 3.2vw, 2.6rem)',
           color: C.white, margin: '0 0 14px', lineHeight: 1.1,
         }}>
-          Everything You Need to{' '}
-          <span style={{ color: C.accent }}>Build, Launch, and Scale</span>
+          Build Real Apps With{' '}
+          <span style={{ color: C.accent }}>Real Visibility</span>
         </h2>
 
         <p style={{
           fontFamily: fBody, fontSize: 'clamp(0.92rem, 1.4vw, 1.06rem)',
-          color: C.textSub, margin: '0 auto', maxWidth: 580, lineHeight: 1.7,
+          color: C.textSub, margin: '0 auto', maxWidth: 680, lineHeight: 1.7,
         }}>
-          Real development power, instant app creation, and brutally transparent spending — all in one place.
+          Apex gives you a real workspace, explicit build contracts, honest upgrade gates, and model-level spend control instead of black-box app generation.
         </p>
+
+        <div style={{
+          marginTop: 18,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 10,
+          flexWrap: 'wrap',
+        }}>
+          {[
+            'Free: static frontend sites',
+            'Paid: full-stack apps and publish',
+            'Paid: BYOK and advanced provider access',
+          ].map(label => (
+            <div
+              key={label}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 7,
+                padding: '7px 12px',
+                borderRadius: 999,
+                border: `1px solid ${C.borderDim}`,
+                background: 'rgba(255,255,255,0.028)',
+                color: C.text,
+                fontFamily: fBody,
+                fontSize: '0.78rem',
+                fontWeight: 600,
+              }}
+            >
+              <Check size={12} color={C.green} />
+              {label}
+            </div>
+          ))}
+        </div>
       </motion.div>
 
       {/* 3-column screenshot grid */}
@@ -2293,13 +2328,13 @@ const ScreenshotSection: React.FC<LandingProps> = ({ onGetStarted }) => (
             fontFamily: fBody, fontWeight: 700,
             fontSize: '1.05rem', color: C.white, margin: '0 0 4px',
           }}>
-            Show the product. Kill the doubt.
+            Show the contract. Lower the doubt.
           </p>
           <p style={{
             fontFamily: fBody, fontSize: '0.86rem',
             color: C.textSub, margin: 0, maxWidth: 540,
           }}>
-            Real full-stack apps, instant creation, and transparent pricing — the three questions every builder asks, answered.
+            Free users can ship static sites. Paid plans unlock full-stack builds, publish, BYOK, and the deeper orchestration flow.
           </p>
         </div>
         <button
