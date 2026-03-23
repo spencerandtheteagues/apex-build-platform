@@ -8285,6 +8285,7 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string,
 		taskIDs := am.assignPhaseAgents(build, phase.agents, description)
 		if !am.waitForPhaseCompletion(build, taskIDs) {
 			log.Printf("Build %s: Phase %s aborted (build cancelled or timed out)", build.ID, phase.name)
+			am.failBuildOnPhaseAbort(build, phase.name, phase.status, taskIDs)
 			return
 		}
 
@@ -8292,6 +8293,96 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string,
 	}
 
 	am.finalizePhasedPipeline(build)
+}
+
+func (am *AgentManager) failBuildOnPhaseAbort(build *Build, phaseName string, phaseStatus BuildStatus, taskIDs []string) {
+	if build == nil {
+		return
+	}
+
+	taskSet := make(map[string]struct{}, len(taskIDs))
+	for _, id := range taskIDs {
+		if id != "" {
+			taskSet[id] = struct{}{}
+		}
+	}
+
+	build.mu.Lock()
+	if build.Status == BuildCompleted || build.Status == BuildFailed || build.Status == BuildCancelled {
+		build.mu.Unlock()
+		return
+	}
+
+	now := time.Now()
+	pendingTasks := 0
+	inProgressTasks := 0
+	for _, task := range build.Tasks {
+		if task == nil {
+			continue
+		}
+		if len(taskSet) > 0 {
+			if _, ok := taskSet[task.ID]; !ok {
+				continue
+			}
+		}
+		switch task.Status {
+		case TaskPending:
+			pendingTasks++
+			task.Status = TaskCancelled
+		case TaskInProgress:
+			inProgressTasks++
+			task.Status = TaskCancelled
+		}
+	}
+
+	build.Status = BuildFailed
+	build.CompletedAt = &now
+	build.UpdatedAt = now
+	if strings.TrimSpace(build.Error) == "" {
+		build.Error = fmt.Sprintf(
+			"Build phase %s aborted before task completion (pending=%d, in_progress=%d).",
+			phaseName, pendingTasks, inProgressTasks,
+		)
+	}
+	progress := build.Progress
+	buildError := build.Error
+	mode := string(build.Mode)
+	build.mu.Unlock()
+
+	allFiles := am.collectGeneratedFiles(build)
+	qualityStage := "validation"
+	switch phaseStatus {
+	case BuildTesting:
+		qualityStage = "testing"
+	case BuildReviewing:
+		qualityStage = "review"
+	}
+
+	am.createCheckpoint(build, "Build Phase Aborted", fmt.Sprintf("%s phase stopped before all tasks completed", phaseName))
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildError,
+		BuildID:   build.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"status":                string(BuildFailed),
+			"error":                 "Build phase aborted",
+			"details":               buildError,
+			"phase":                 strings.ToLower(strings.ReplaceAll(phaseName, " ", "_")),
+			"progress":              progress,
+			"pending_tasks":         pendingTasks,
+			"in_progress_tasks":     inProgressTasks,
+			"files_count":           len(allFiles),
+			"files":                 allFiles,
+			"recoverable":           false,
+			"quality_gate_required": true,
+			"quality_gate_passed":   false,
+			"quality_gate_stage":    qualityStage,
+		},
+	})
+
+	log.Printf("Build %s phase %s aborted: marked failed (pending=%d in_progress=%d)", build.ID, phaseName, pendingTasks, inProgressTasks)
+	metrics.RecordBuildFinalization(string(BuildFailed), mode, "phase_aborted")
+	am.persistCompletedBuild(build, allFiles)
 }
 
 // assignPhaseAgents creates tasks for a group of agents and assigns them.

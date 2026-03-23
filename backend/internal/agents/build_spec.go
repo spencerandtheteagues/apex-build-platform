@@ -838,6 +838,17 @@ func buildWorkOrders(appType string, stack TechStack, scaffold buildScaffold, ow
 		if role == RoleArchitect && len(order.OwnedFiles) == 0 {
 			order.OwnedFiles = []string{"docs/**", "ARCHITECTURE.md"}
 		}
+		if role == RoleTesting &&
+			appType == "web" &&
+			strings.TrimSpace(stack.Backend) == "" &&
+			strings.TrimSpace(stack.Database) == "" &&
+			len(order.AcceptanceChecks) == 0 &&
+			len(order.RequiredFiles) == 0 {
+			// Static frontend builds already go through deterministic readiness and
+			// preview validation. Spawning a dedicated testing specialist here adds
+			// cost and another failure surface without increasing contract truth.
+			continue
+		}
 		if role == RoleBackend && strings.TrimSpace(stack.Backend) == "" && len(order.AcceptanceChecks) == 0 {
 			continue
 		}

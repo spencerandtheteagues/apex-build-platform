@@ -121,3 +121,37 @@ func TestResumeBuildExecutionRequeuesPendingRecoveryTasksAndRefreshesTimestamp(t
 		t.Fatalf("expected task to be pushed back onto the queue")
 	}
 }
+
+func TestFailBuildOnPhaseAbortMarksBuildFailed(t *testing.T) {
+	build := &Build{
+		ID:        "build-phase-abort",
+		Status:    BuildTesting,
+		Mode:      ModeFull,
+		PowerMode: PowerFast,
+		Progress:  78,
+		Agents:    map[string]*Agent{},
+		Tasks: []*Task{
+			{ID: "task-testing", Type: TaskTest, Status: TaskInProgress},
+			{ID: "task-review", Type: TaskReview, Status: TaskPending},
+		},
+	}
+	am := &AgentManager{
+		builds:      map[string]*Build{build.ID: build},
+		subscribers: map[string][]chan *WSMessage{},
+	}
+
+	am.failBuildOnPhaseAbort(build, "Testing", BuildTesting, []string{"task-testing", "task-review"})
+
+	if build.Status != BuildFailed {
+		t.Fatalf("expected build to be failed, got %s", build.Status)
+	}
+	if build.CompletedAt == nil {
+		t.Fatal("expected completed_at to be set")
+	}
+	if build.Tasks[0].Status != TaskCancelled || build.Tasks[1].Status != TaskCancelled {
+		t.Fatalf("expected aborted phase tasks to be cancelled, got %+v", build.Tasks)
+	}
+	if build.Error == "" || build.Error == "cancelled by user" {
+		t.Fatalf("expected explicit phase-abort error, got %q", build.Error)
+	}
+}

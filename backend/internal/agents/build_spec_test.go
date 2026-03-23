@@ -370,6 +370,39 @@ func TestCreateBuildPlanFromPlanningBundleSkipsDatabaseLaneForStaticIntent(t *te
 	if wo := getBuildWorkOrder(plan, RoleBackend); wo != nil {
 		t.Fatalf("expected static plan to omit backend work order, got %+v", wo)
 	}
+	if wo := getBuildWorkOrder(plan, RoleTesting); wo != nil {
+		t.Fatalf("expected static plan to omit dedicated testing work order, got %+v", wo)
+	}
+}
+
+func TestCreateBuildPlanFromPlanningBundleStaticNextjsOmitsDedicatedTestingRole(t *testing.T) {
+	t.Parallel()
+
+	description := "Build a polished static marketing site for an AI operations studio using Next.js. Frontend only. No backend. No database. No auth. No billing. No realtime."
+	plan := createBuildPlanFromPlanningBundle("build-static-nextjs-testing", description, &TechStack{
+		Frontend: "Next.js",
+		Styling:  "Tailwind",
+	}, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "web",
+			TechStack: &autonomous.TechStack{
+				Frontend: "Next.js",
+				Styling:  "Tailwind",
+			},
+		},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-static-nextjs-testing",
+			EstimatedTime: 20 * time.Minute,
+			CreatedAt:     time.Now().UTC(),
+		},
+	})
+
+	if plan == nil {
+		t.Fatal("expected build plan")
+	}
+	if wo := getBuildWorkOrder(plan, RoleTesting); wo != nil {
+		t.Fatalf("expected static nextjs plan to omit dedicated testing work order, got %+v", wo)
+	}
 }
 
 func TestAssignPhaseAgentsUsesFrozenWorkOrder(t *testing.T) {
