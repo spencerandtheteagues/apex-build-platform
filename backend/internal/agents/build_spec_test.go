@@ -221,6 +221,41 @@ func TestCreateBuildPlanFromPlanningBundleIgnoresContradictoryPlannerBackendForS
 	}
 }
 
+func TestCreateBuildPlanFromPlanningBundlePrefersStaticIntentOverPlannerFullstackAppType(t *testing.T) {
+	t.Parallel()
+
+	description := "Build a polished static marketing site for an AI operations studio with a hero section, services grid, testimonials, FAQ, and pricing. Frontend only. No backend. No database. No auth. No billing. No realtime."
+	plan := createBuildPlanFromPlanningBundle("build-static-override", description, nil, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "fullstack",
+			TechStack: &autonomous.TechStack{
+				Frontend: "React",
+				Backend:  "none",
+				Database: "none",
+				Styling:  "Tailwind",
+			},
+		},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-static-override",
+			EstimatedTime: 20 * time.Minute,
+			CreatedAt:     time.Now().UTC(),
+		},
+	})
+
+	if plan == nil {
+		t.Fatal("expected build plan")
+	}
+	if plan.AppType != "web" {
+		t.Fatalf("expected explicit static intent to override planner fullstack app type, got %q", plan.AppType)
+	}
+	if plan.ScaffoldID != "frontend/react-vite-spa" {
+		t.Fatalf("expected frontend scaffold, got %q", plan.ScaffoldID)
+	}
+	if wo := getBuildWorkOrder(plan, RoleDatabase); wo != nil {
+		t.Fatalf("expected static override plan to omit database work order, got %+v", wo)
+	}
+}
+
 func TestCreateBuildPlanFromPlanningBundleSkipsDatabaseLaneForStaticIntent(t *testing.T) {
 	t.Parallel()
 

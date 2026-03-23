@@ -429,6 +429,10 @@ func resolveBuildTechStack(description string, requested *TechStack, appType str
 }
 
 func resolveBuildAppType(description string, requested *TechStack, bundle *autonomous.PlanningBundle) string {
+	if explicitStaticWebIntent(description) {
+		return "web"
+	}
+
 	if bundle != nil && bundle.Analysis != nil {
 		appType := strings.TrimSpace(strings.ToLower(bundle.Analysis.AppType))
 		switch appType {
@@ -454,10 +458,6 @@ func resolveBuildAppType(description string, requested *TechStack, bundle *auton
 		case hasFrontend:
 			return "web"
 		}
-	}
-
-	if explicitStaticWebIntent(description) {
-		return "web"
 	}
 
 	switch inferIntentAppType(description, requested) {
