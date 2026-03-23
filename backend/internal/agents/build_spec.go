@@ -396,12 +396,12 @@ func resolveBuildTechStack(description string, requested *TechStack, appType str
 	}
 
 	if appType == "web" && explicitStaticWebIntent(description) {
-		if requested == nil || strings.TrimSpace(requested.Backend) == "" {
-			stack.Backend = ""
-		}
-		if requested == nil || strings.TrimSpace(requested.Database) == "" {
-			stack.Database = ""
-		}
+		// Explicit static/frontend-only intent must win over remembered or UI-
+		// selected backend/database defaults. Otherwise the planner can leak
+		// server-side work orders into a free static build even when the user
+		// clearly said "no backend" / "no database".
+		stack.Backend = ""
+		stack.Database = ""
 	}
 
 	// Only apply cascade defaults when BOTH frontend and backend are empty.

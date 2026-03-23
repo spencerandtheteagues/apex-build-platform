@@ -256,6 +256,55 @@ func TestCreateBuildPlanFromPlanningBundlePrefersStaticIntentOverPlannerFullstac
 	}
 }
 
+func TestCreateBuildPlanFromPlanningBundleStaticIntentOverridesRequestedBackendAndDatabase(t *testing.T) {
+	t.Parallel()
+
+	description := "Build a polished static marketing site for an AI operations studio using Next.js. Frontend only. No backend. No database. No auth. No billing. No realtime."
+	plan := createBuildPlanFromPlanningBundle("build-static-requested-stack", description, &TechStack{
+		Frontend: "Next.js",
+		Backend:  "Node.js",
+		Database: "PostgreSQL",
+		Styling:  "Tailwind",
+	}, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "fullstack",
+			TechStack: &autonomous.TechStack{
+				Frontend: "Next.js",
+				Backend:  "Node.js",
+				Database: "PostgreSQL",
+				Styling:  "Tailwind",
+			},
+		},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-static-requested-stack",
+			EstimatedTime: 20 * time.Minute,
+			CreatedAt:     time.Now().UTC(),
+		},
+	})
+
+	if plan == nil {
+		t.Fatal("expected build plan")
+	}
+	if plan.AppType != "web" {
+		t.Fatalf("expected static intent to keep app type web, got %q", plan.AppType)
+	}
+	if plan.TechStack.Frontend != "Next.js" {
+		t.Fatalf("expected frontend selection to remain Next.js, got %+v", plan.TechStack)
+	}
+	if plan.TechStack.Backend != "" || plan.TechStack.Database != "" {
+		t.Fatalf("expected static intent to strip requested backend/database, got %+v", plan.TechStack)
+	}
+	if plan.ScaffoldID != "frontend/nextjs-app" {
+		t.Fatalf("expected frontend nextjs scaffold, got %q", plan.ScaffoldID)
+	}
+	if wo := getBuildWorkOrder(plan, RoleBackend); wo != nil {
+		t.Fatalf("expected static requested-stack plan to omit backend work order, got %+v", wo)
+	}
+	if wo := getBuildWorkOrder(plan, RoleDatabase); wo != nil {
+		t.Fatalf("expected static requested-stack plan to omit database work order, got %+v", wo)
+	}
+}
+
 func TestSelectBuildScaffoldNextjsWebOmitsBackendAndDatabaseRoles(t *testing.T) {
 	t.Parallel()
 
