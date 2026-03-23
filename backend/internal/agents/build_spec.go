@@ -1132,23 +1132,31 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 				},
 			}
 		}
+		ownership := map[AgentRole][]string{
+			RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
+			RoleFrontend:  {"package.json", "tsconfig.json", "next.config.js", "tailwind.config.js", "postcss.config.js", "app/**", "components/**", "lib/**", "public/**", "styles/**"},
+			RoleTesting:   {"tests/**", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts"},
+			RoleReviewer:  {"**"},
+			RoleSolver:    {"**"},
+		}
+		envVars := []BuildEnvVar(nil)
+		if nextBackend != "" {
+			ownership[RoleBackend] = []string{"package.json", "app/api/**", "lib/db/**", ".env.example"}
+			ownership[RoleDatabase] = []string{"migrations/**", "db/**", "prisma/**", "lib/db/**", "schema.sql"}
+			envVars = append(envVars, BuildEnvVar{
+				Name:     "DATABASE_URL",
+				Example:  "postgresql://postgres:postgres@localhost:5432/app",
+				Purpose:  "Database connection",
+				Required: stack.Database != "",
+			})
+		}
 		return buildScaffold{
 			ID:          nextScaffoldID,
 			AppType:     nextAppType,
 			Description: "Next.js App Router scaffold",
 			Required:    required,
-			Ownership: map[AgentRole][]string{
-				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
-				RoleFrontend:  {"package.json", "tsconfig.json", "next.config.js", "tailwind.config.js", "postcss.config.js", "app/**", "components/**", "lib/**", "public/**", "styles/**"},
-				RoleBackend:   {"package.json", "app/api/**", "lib/db/**", ".env.example"},
-				RoleDatabase:  {"migrations/**", "db/**", "prisma/**", "lib/db/**", "schema.sql"},
-				RoleTesting:   {"tests/**", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts"},
-				RoleReviewer:  {"**"},
-				RoleSolver:    {"**"},
-			},
-			EnvVars: []BuildEnvVar{
-				{Name: "DATABASE_URL", Example: "postgresql://postgres:postgres@localhost:5432/app", Purpose: "Database connection", Required: stack.Database != ""},
-			},
+			Ownership:   ownership,
+			EnvVars:     envVars,
 			Acceptance:  acceptance,
 			APIContract: apiContract,
 		}

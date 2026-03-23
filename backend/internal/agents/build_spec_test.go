@@ -256,6 +256,30 @@ func TestCreateBuildPlanFromPlanningBundlePrefersStaticIntentOverPlannerFullstac
 	}
 }
 
+func TestSelectBuildScaffoldNextjsWebOmitsBackendAndDatabaseRoles(t *testing.T) {
+	t.Parallel()
+
+	scaffold := selectBuildScaffold("web", TechStack{
+		Frontend: "Next.js",
+		Backend:  "",
+		Database: "",
+		Styling:  "Tailwind",
+	})
+
+	if scaffold.ID != "frontend/nextjs-app" {
+		t.Fatalf("expected frontend nextjs scaffold, got %q", scaffold.ID)
+	}
+	if _, exists := scaffold.Ownership[RoleBackend]; exists {
+		t.Fatalf("expected web-only nextjs scaffold to omit backend ownership, got %+v", scaffold.Ownership[RoleBackend])
+	}
+	if _, exists := scaffold.Ownership[RoleDatabase]; exists {
+		t.Fatalf("expected web-only nextjs scaffold to omit database ownership, got %+v", scaffold.Ownership[RoleDatabase])
+	}
+	if len(scaffold.EnvVars) != 0 {
+		t.Fatalf("expected web-only nextjs scaffold to omit backend env vars, got %+v", scaffold.EnvVars)
+	}
+}
+
 func TestCreateBuildPlanFromPlanningBundleSkipsDatabaseLaneForStaticIntent(t *testing.T) {
 	t.Parallel()
 
