@@ -80,6 +80,80 @@ func TestValidateFinalBuildReadiness(t *testing.T) {
 		}
 	})
 
+	t.Run("static_frontend_without_env_usage_does_not_require_env_example", func(t *testing.T) {
+		t.Parallel()
+
+		build := &Build{
+			Mode: "balanced",
+			TechStack: &TechStack{
+				Frontend: "Next.js",
+			},
+		}
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "marketing-site",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build"
+  },
+  "dependencies": {
+    "next": "^14.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  }
+}`,
+			},
+			{Path: "app/page.tsx", Content: "export default function Page(){ return <main>hello</main> }"},
+			{Path: "README.md", Content: "# Marketing Site\n\n## Run\nnpm install && npm run dev\n"},
+		}
+
+		errs := am.validateFinalBuildReadiness(build, files)
+		if containsError(errs, "missing_deliverable: .env.example") {
+			t.Fatalf("expected static frontend without env usage to skip .env.example requirement, got %v", errs)
+		}
+	})
+
+	t.Run("frontend_env_usage_still_requires_env_example", func(t *testing.T) {
+		t.Parallel()
+
+		build := &Build{
+			Mode: "balanced",
+			TechStack: &TechStack{
+				Frontend: "React",
+			},
+		}
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "dashboard",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}`,
+			},
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "src/main.tsx", Content: "console.log(import.meta.env.VITE_API_URL)"},
+			{Path: "src/App.tsx", Content: "export default function App(){ return <div>ok</div> }"},
+			{Path: "README.md", Content: "# Dashboard\n\n## Run\nnpm install && npm run dev\n"},
+		}
+
+		errs := am.validateFinalBuildReadiness(build, files)
+		if !containsError(errs, "missing_deliverable: .env.example") {
+			t.Fatalf("expected env-reading frontend to require .env.example, got %v", errs)
+		}
+	})
+
 	t.Run("incomplete_frontend_output", func(t *testing.T) {
 		t.Parallel()
 
@@ -2247,6 +2321,73 @@ func TestApplyDeterministicPreValidationNormalizationRepairsStaticReactViteBuild
 
 	if errs := am.validateFinalBuildReadiness(build, files); containsError(errs, "dependency check failed") || containsError(errs, "tsconfig.json is missing") {
 		t.Fatalf("expected normalized build to avoid manifest/tsconfig readiness errors, got %v", errs)
+	}
+}
+
+func TestApplyDeterministicPreValidationNormalizationCanonicalizesRadixPackageNames(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:   "build-prevalidation-radix",
+		Mode: ModeFast,
+		TechStack: &TechStack{
+			Frontend: "React",
+		},
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-ui",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "radix-test",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "radix-ui/react-accordion": "^1.1.2",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}`,
+						},
+						{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+						{Path: "src/main.tsx", Content: `import React from "react"; import ReactDOM from "react-dom/client"; import { Accordion } from "radix-ui/react-accordion"; console.log(Accordion); ReactDOM.createRoot(document.getElementById("root")!).render(<div />);`},
+						{Path: "src/App.tsx", Content: `export default function App(){ return <div>ok</div>; }`},
+					},
+				},
+			},
+		},
+	}
+
+	if !am.applyDeterministicPreValidationNormalization(build) {
+		t.Fatalf("expected pre-validation normalization to trigger for invalid Radix package name")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+
+	manifest := byPath["package.json"]
+	if strings.Contains(manifest, `"radix-ui/react-accordion"`) {
+		t.Fatalf("expected invalid Radix package alias to be removed, got %s", manifest)
+	}
+	if !strings.Contains(manifest, `"@radix-ui/react-accordion"`) {
+		t.Fatalf("expected canonical Radix package name to be present, got %s", manifest)
+	}
+
+	if errs := am.validateFinalBuildReadiness(build, files); containsError(errs, `invalid npm package name "radix-ui/react-accordion"`) || containsError(errs, `does not declare dependency "@radix-ui/react-accordion"`) {
+		t.Fatalf("expected canonicalized Radix manifest to pass dependency validation, got %v", errs)
 	}
 }
 

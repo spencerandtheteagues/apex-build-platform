@@ -5024,6 +5024,9 @@ func dependencyVersionHint(pkg string) string {
 	case "concurrently":
 		return "^9.0.1"
 	default:
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(pkg)), "@radix-ui/react-") {
+			return "^1.1.2"
+		}
 		return "*"
 	}
 }
@@ -5046,6 +5049,139 @@ func dependencyShouldBeDev(pkg string) bool {
 	default:
 		return false
 	}
+}
+
+func canonicalGeneratedDependencyName(pkg string) string {
+	trimmed := strings.TrimSpace(pkg)
+	if trimmed == "" {
+		return ""
+	}
+
+	lower := strings.ToLower(trimmed)
+	switch {
+	case strings.HasPrefix(lower, "radix-ui/"):
+		suffix := strings.TrimSpace(strings.TrimPrefix(lower, "radix-ui/"))
+		if suffix != "" {
+			return "@radix-ui/" + suffix
+		}
+	}
+
+	return trimmed
+}
+
+func normalizeManifestDependencyEntriesJSON(content string) (string, []string) {
+	if strings.TrimSpace(content) == "" {
+		return content, nil
+	}
+
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+		return content, nil
+	}
+	if manifest == nil {
+		return content, nil
+	}
+
+	changes := make([]string, 0, 4)
+	for _, sectionName := range []string{"dependencies", "devDependencies"} {
+		section, ok := manifest[sectionName].(map[string]any)
+		if !ok || section == nil {
+			continue
+		}
+
+		type rename struct {
+			from  string
+			to    string
+			value any
+		}
+		renames := make([]rename, 0, len(section))
+		for name, value := range section {
+			canonical := canonicalGeneratedDependencyName(name)
+			if canonical == "" || canonical == name {
+				continue
+			}
+			renames = append(renames, rename{from: name, to: canonical, value: value})
+		}
+		for _, item := range renames {
+			delete(section, item.from)
+			if _, exists := section[item.to]; !exists {
+				section[item.to] = item.value
+			}
+			changes = append(changes, fmt.Sprintf("%s: %s -> %s", sectionName, item.from, item.to))
+		}
+	}
+
+	if len(changes) == 0 {
+		return content, nil
+	}
+
+	updated, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return content, nil
+	}
+	sort.Strings(changes)
+	return string(updated), changes
+}
+
+func detectedGeneratedEnvVarNames(files []GeneratedFile) []string {
+	if len(files) == 0 {
+		return nil
+	}
+
+	processEnvRe := regexp.MustCompile(`process\.env\.([A-Z][A-Z0-9_]+)`)
+	osGetenvRe := regexp.MustCompile(`os\.Getenv\(\s*["']([A-Z][A-Z0-9_]+)["']`)
+	pythonEnvRe := regexp.MustCompile(`os\.environ\.get\(\s*["']([A-Z][A-Z0-9_]+)["']`)
+	viteEnvRe := regexp.MustCompile(`import\.meta\.env\.([A-Z][A-Z0-9_]+)`)
+
+	seen := map[string]bool{}
+	names := make([]string, 0, 4)
+	for _, file := range files {
+		content := file.Content
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		for _, match := range processEnvRe.FindAllStringSubmatch(content, -1) {
+			if len(match) != 2 || seen[match[1]] {
+				continue
+			}
+			seen[match[1]] = true
+			names = append(names, match[1])
+		}
+		for _, match := range osGetenvRe.FindAllStringSubmatch(content, -1) {
+			if len(match) != 2 || seen[match[1]] {
+				continue
+			}
+			seen[match[1]] = true
+			names = append(names, match[1])
+		}
+		for _, match := range pythonEnvRe.FindAllStringSubmatch(content, -1) {
+			if len(match) != 2 || seen[match[1]] {
+				continue
+			}
+			seen[match[1]] = true
+			names = append(names, match[1])
+		}
+		for _, match := range viteEnvRe.FindAllStringSubmatch(content, -1) {
+			if len(match) != 2 || seen[match[1]] {
+				continue
+			}
+			seen[match[1]] = true
+			names = append(names, match[1])
+		}
+	}
+
+	sort.Strings(names)
+	return names
+}
+
+func buildRequiresEnvExample(build *Build, files []GeneratedFile) bool {
+	if len(detectedGeneratedEnvVarNames(files)) > 0 {
+		return true
+	}
+	if build == nil || build.TechStack == nil {
+		return false
+	}
+	return strings.TrimSpace(build.TechStack.Backend) != "" || strings.TrimSpace(build.TechStack.Database) != ""
 }
 
 func parseMissingDependenciesByVerificationScope(errors []string) (frontendPkgs []string, backendPkgs []string) {
@@ -5120,7 +5256,7 @@ func patchManifestDependenciesJSON(content string, pkgs []string) (string, []str
 	devDeps := getSection("devDependencies")
 	added := make([]string, 0, len(pkgs))
 	for _, pkg := range pkgs {
-		pkg = strings.TrimSpace(pkg)
+		pkg = canonicalGeneratedDependencyName(pkg)
 		if pkg == "" {
 			continue
 		}
@@ -5769,7 +5905,7 @@ func parseMissingDependencyNamesFromIssues(issues []string) []string {
 			if len(match) != 2 {
 				continue
 			}
-			pkg := strings.TrimSpace(match[1])
+			pkg := canonicalGeneratedDependencyName(match[1])
 			if pkg == "" || seen[pkg] {
 				continue
 			}
@@ -6036,6 +6172,8 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 
 		prefix := strings.TrimSuffix(filepath.ToSlash(manifestPath), "package.json")
 		signals := inspectGeneratedPackageSignals(files, prefix)
+		manifestChanged := false
+		manifestChanges := make([]string, 0, 4)
 		missingPkgs := parseMissingDependencyNamesFromIssues(append(
 			validatePreviewManifestToolingDependencies(manifest),
 			validateGeneratedImportDependencies(files, prefix, manifest)...,
@@ -6054,9 +6192,33 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 		}
 		missingPkgs = dedupeStrings(missingPkgs)
 
-		manifestChanged := false
-		manifestChanges := make([]string, 0, 4)
 		updatedContent := content
+		if patched, renamed := normalizeManifestDependencyEntriesJSON(updatedContent); len(renamed) > 0 {
+			updatedContent = patched
+			manifestChanged = true
+			manifestChanges = append(manifestChanges, renamed...)
+			if err := json.Unmarshal([]byte(updatedContent), &manifest); err == nil && manifest.Scripts == nil {
+				manifest.Scripts = map[string]string{}
+			}
+			missingPkgs = parseMissingDependencyNamesFromIssues(append(
+				validatePreviewManifestToolingDependencies(manifest),
+				validateGeneratedImportDependencies(files, prefix, manifest)...,
+			))
+			if signals.hasNodeTests && manifestUsesVitest(manifest) && (signals.usesTestingLibrary || signals.usesJestDOM) && !manifestDeclaresDependency(manifest, "jsdom") {
+				missingPkgs = append(missingPkgs, "jsdom")
+			}
+			if signals.usesVitestConfigImport && !manifestDeclaresDependency(manifest, "vitest") {
+				missingPkgs = append(missingPkgs, "vitest")
+			}
+			if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/react") {
+				missingPkgs = append(missingPkgs, "@testing-library/react")
+			}
+			if signals.usesJestDOM && !manifestDeclaresDependency(manifest, "@testing-library/jest-dom") {
+				missingPkgs = append(missingPkgs, "@testing-library/jest-dom")
+			}
+			missingPkgs = dedupeStrings(missingPkgs)
+		}
+
 		if len(missingPkgs) > 0 {
 			if patched, added := patchManifestDependenciesJSON(updatedContent, missingPkgs); len(added) > 0 {
 				updatedContent = patched
@@ -12657,12 +12819,13 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	}
 
 	// README.md and .env.example are mandatory for full builds.
-	// They ensure users can actually run the app. Fast/frontend-only builds skip the .env check.
+	// They ensure users can actually run the app. Fast builds skip the requirement, and
+	// static frontend builds only require .env.example when generated code actually reads env vars.
 	isFastBuild := build != nil && build.Mode == "fast"
 	if !hasReadme && !isFastBuild {
 		addError("missing_deliverable: README.md (every build must include setup and run instructions)", &deploymentErrors)
 	}
-	if !hasEnvExample && hasNodeFiles && !isFastBuild {
+	if !hasEnvExample && !isFastBuild && buildRequiresEnvExample(build, files) {
 		addError("missing_deliverable: .env.example (list all environment variables with example values)", &deploymentErrors)
 	}
 
@@ -12814,15 +12977,19 @@ var integrationBraceParamPattern = regexp.MustCompile(`\{[^}]+\}`)
 var integrationSlashPattern = regexp.MustCompile(`/+`)
 
 func manifestDeclaresDependency(manifest previewManifest, pkg string) bool {
-	pkg = strings.TrimSpace(pkg)
+	pkg = canonicalGeneratedDependencyName(pkg)
 	if pkg == "" {
 		return false
 	}
-	if _, ok := manifest.Dependencies[pkg]; ok {
-		return true
+	for name := range manifest.Dependencies {
+		if canonicalGeneratedDependencyName(name) == pkg {
+			return true
+		}
 	}
-	if _, ok := manifest.DevDependencies[pkg]; ok {
-		return true
+	for name := range manifest.DevDependencies {
+		if canonicalGeneratedDependencyName(name) == pkg {
+			return true
+		}
 	}
 	return false
 }
@@ -13065,7 +13232,7 @@ func integrationRoutePathsMatch(frontendPath, backendPath string) bool {
 }
 
 func packageNameFromImportPath(spec string) string {
-	spec = strings.TrimSpace(spec)
+	spec = canonicalGeneratedDependencyName(spec)
 	if spec == "" {
 		return ""
 	}
@@ -13093,10 +13260,10 @@ func packageNameFromImportPath(spec string) string {
 func validateGeneratedImportDependencies(files []GeneratedFile, prefix string, manifest previewManifest) []string {
 	declared := map[string]bool{}
 	for name := range manifest.Dependencies {
-		declared[strings.TrimSpace(name)] = true
+		declared[canonicalGeneratedDependencyName(name)] = true
 	}
 	for name := range manifest.DevDependencies {
-		declared[strings.TrimSpace(name)] = true
+		declared[canonicalGeneratedDependencyName(name)] = true
 	}
 
 	nodeBuiltins := map[string]bool{
