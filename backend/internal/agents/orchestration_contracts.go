@@ -943,6 +943,57 @@ func termSequenceNegated(descriptionTokens []string, start int) bool {
 	if start >= 2 && descriptionTokens[start-2] == "do" && descriptionTokens[start-1] == "not" {
 		return true
 	}
+	if spansNegatedRequirementClause(descriptionTokens, start) {
+		return true
+	}
+	return false
+}
+
+func spansNegatedRequirementClause(descriptionTokens []string, start int) bool {
+	if start <= 0 {
+		return false
+	}
+
+	negationTokens := map[string]bool{
+		"no":      true,
+		"without": true,
+		"avoid":   true,
+		"skip":    true,
+		"omit":    true,
+	}
+	requirementVerbs := map[string]bool{
+		"require":    true,
+		"requires":   true,
+		"required":   true,
+		"requiring":  true,
+		"need":       true,
+		"needs":      true,
+		"needed":     true,
+		"needing":    true,
+		"handle":     true,
+		"handles":    true,
+		"handled":    true,
+		"handling":   true,
+		"support":    true,
+		"supports":   true,
+		"supported":  true,
+		"supporting": true,
+	}
+
+	windowStart := start - 6
+	if windowStart < 0 {
+		windowStart = 0
+	}
+	for negIdx := start - 1; negIdx >= windowStart; negIdx-- {
+		if !negationTokens[descriptionTokens[negIdx]] {
+			continue
+		}
+		for idx := negIdx + 1; idx < start; idx++ {
+			if requirementVerbs[descriptionTokens[idx]] {
+				return true
+			}
+		}
+	}
 	return false
 }
 

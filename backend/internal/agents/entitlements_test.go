@@ -54,6 +54,14 @@ func TestBuildSubscriptionRequirement(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "negated server handling clause stays free eligible",
+			req: &BuildRequest{
+				Description: "Build a premium static Next.js landing page for a boutique travel studio with a bold hero, service sections, testimonials, and a strong CTA. Frontend only. No backend. No database. No auth. No forms that require server handling.",
+				TechStack:   &TechStack{Frontend: "Next.js"},
+			},
+			want: false,
+		},
 	}
 
 	for _, tc := range tests {
