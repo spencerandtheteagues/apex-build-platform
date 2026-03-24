@@ -97,7 +97,7 @@ const BuildPieProgress: React.FC<BuildPieProgressProps> = ({
   phase,
   size = 172,
 }) => {
-  const isActive = status !== 'completed' && status !== 'failed' && status !== 'idle'
+  const isActive = status === 'pending' || status === 'planning' || status === 'in_progress' || status === 'testing'
   const clampedProgress = Math.min(100, Math.max(0, progress))
   const theme = getTheme(clampedProgress, status)
 
