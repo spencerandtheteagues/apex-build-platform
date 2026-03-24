@@ -448,9 +448,9 @@ export function BillingSettings() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
           {(plans.length > 0 ? plans : [
             { type: 'free', name: 'Free', monthly_price_cents: 0, monthly_price_id: '', monthly_credits_usd: 0, is_popular: false, features: [] },
-            { type: 'builder', name: 'Builder', monthly_price_cents: 1900, monthly_price_id: '', monthly_credits_usd: 10, is_popular: false, features: [] },
-            { type: 'pro', name: 'Pro', monthly_price_cents: 4900, monthly_price_id: '', monthly_credits_usd: 25, is_popular: true, features: [] },
-            { type: 'team', name: 'Team', monthly_price_cents: 9900, monthly_price_id: '', monthly_credits_usd: 60, is_popular: false, features: [] },
+            { type: 'builder', name: 'Builder', monthly_price_cents: 2400, monthly_price_id: '', monthly_credits_usd: 12, is_popular: false, features: [] },
+            { type: 'pro', name: 'Pro', monthly_price_cents: 5900, monthly_price_id: '', monthly_credits_usd: 40, is_popular: true, features: [] },
+            { type: 'team', name: 'Team', monthly_price_cents: 14900, monthly_price_id: '', monthly_credits_usd: 110, is_popular: false, features: [] },
           ]).map(plan => {
             const cfg = PLAN_CONFIG[plan.type] ?? PLAN_CONFIG.free
             const isCurrent = plan.type === currentPlanType
