@@ -14,7 +14,7 @@ services:
     region: oregon
     plan: starter
     branch: main
-    healthCheckPath: /ready
+    healthCheckPath: /health
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -31,9 +31,11 @@ services:
           name: apex-db
           property: connectionString
       - key: FRONTEND_URL
-        value: https://apex.build
+        value: https://apex-build.dev
+      - key: BASE_URL
+        value: https://apex-build.dev
       - key: CORS_ALLOWED_ORIGINS
-        value: https://apex.build,https://apex-frontend-gigq.onrender.com
+        value: https://apex-build.dev,https://www.apex-build.dev,https://apex.build,https://www.apex.build,https://apex-frontend-gigq.onrender.com
       - key: COOKIE_SAME_SITE
         value: None
       - key: COOKIE_SECURE
@@ -128,9 +130,9 @@ services:
     healthCheckPath: /health
     envVars:
       - key: VITE_API_URL
-        value: https://apex-backend-5ypy.onrender.com/api/v1
+        value: https://api.apex-build.dev/api/v1
       - key: VITE_WS_URL
-        value: wss://apex-backend-5ypy.onrender.com/ws
+        value: wss://api.apex-build.dev/ws
       - key: NODE_ENV
         value: production
     autoDeploy: true

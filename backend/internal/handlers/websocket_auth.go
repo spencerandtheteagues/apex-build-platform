@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"apex-build/internal/auth"
+	"apex-build/internal/origins"
 
 	"github.com/gin-gonic/gin"
 )
@@ -52,36 +53,7 @@ func AllowedWebSocketOrigin(r *http.Request) bool {
 	if origin == "" {
 		return os.Getenv("ENVIRONMENT") != "production"
 	}
-
-	var allowedOrigins []string
-	if envOrigins := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS")); envOrigins != "" || strings.TrimSpace(os.Getenv("CORS_ORIGINS")) != "" {
-		if envOrigins == "" {
-			envOrigins = strings.TrimSpace(os.Getenv("CORS_ORIGINS"))
-		}
-		for _, allowed := range strings.Split(envOrigins, ",") {
-			if trimmed := strings.TrimSpace(allowed); trimmed != "" {
-				allowedOrigins = append(allowedOrigins, trimmed)
-			}
-		}
-	} else {
-		allowedOrigins = []string{
-			"http://localhost:3000",
-			"http://localhost:5173",
-			"http://localhost:8080",
-			"http://127.0.0.1:3000",
-			"https://apex.build",
-			"https://www.apex.build",
-			"https://apex-frontend-gigq.onrender.com",
-		}
-	}
-
-	for _, allowed := range allowedOrigins {
-		if origin == allowed {
-			return true
-		}
-	}
-
-	return false
+	return origins.IsAllowedOrigin(origin)
 }
 
 func allowedWebSocketOrigin(r *http.Request) bool {

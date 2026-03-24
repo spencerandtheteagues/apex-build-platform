@@ -1,0 +1,94 @@
+package origins
+
+import (
+	"os"
+	"strings"
+)
+
+var defaultAllowedOrigins = []string{
+	"http://localhost:3000",
+	"http://localhost:3001",
+	"http://localhost:5173",
+	"http://localhost:8080",
+	"http://127.0.0.1:3000",
+	"http://127.0.0.1:5173",
+	"https://apex-build.dev",
+	"https://www.apex-build.dev",
+	"https://apex.build",
+	"https://www.apex.build",
+	"https://apex-frontend-gigq.onrender.com",
+}
+
+func AllowedOrigins() []string {
+	if raw := envOrigins(); raw != "" {
+		parsed := splitAndTrim(raw)
+		if len(parsed) > 0 {
+			return parsed
+		}
+	}
+
+	return append([]string(nil), defaultAllowedOrigins...)
+}
+
+func IsAllowedOrigin(origin string) bool {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return false
+	}
+
+	for _, allowed := range AllowedOrigins() {
+		if origin == allowed {
+			return true
+		}
+	}
+
+	return false
+}
+
+func PreviewFrameAncestors() string {
+	ancestors := []string{
+		"'self'",
+		"https://apex-build.dev",
+		"https://www.apex-build.dev",
+		"https://apex.build",
+		"https://www.apex.build",
+	}
+
+	if extra := strings.TrimSpace(os.Getenv("FRAME_ANCESTORS_EXTRA")); extra != "" {
+		ancestors = append(ancestors, splitAndTrim(extra)...)
+	} else if !IsProductionEnvironment() {
+		ancestors = append(ancestors, "https://apex-frontend-gigq.onrender.com")
+	}
+
+	return strings.Join(ancestors, " ")
+}
+
+func IsProductionEnvironment() bool {
+	for _, key := range []string{"GO_ENV", "APEX_ENV", "ENVIRONMENT", "ENV"} {
+		value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+		if value == "production" || value == "prod" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func envOrigins() string {
+	if value := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS")); value != "" {
+		return value
+	}
+
+	return strings.TrimSpace(os.Getenv("CORS_ORIGINS"))
+}
+
+func splitAndTrim(raw string) []string {
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+	return values
+}

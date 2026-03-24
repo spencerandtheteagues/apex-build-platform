@@ -19,6 +19,7 @@ import (
 	"apex-build/internal/auth"
 	appconfig "apex-build/internal/config"
 	appmiddleware "apex-build/internal/middleware"
+	"apex-build/internal/origins"
 	terminalmux "apex-build/internal/terminal"
 
 	"github.com/creack/pty"
@@ -101,18 +102,7 @@ func NewTerminalManager() *TerminalManager {
 			WriteBufferSize: 1024,
 			CheckOrigin: func(r *http.Request) bool {
 				origin := r.Header.Get("Origin")
-				allowedOrigins := []string{
-					"http://localhost:3000",
-					"http://localhost:5173",
-					"http://127.0.0.1:3000",
-					"https://apex.build",
-				}
-				for _, allowed := range allowedOrigins {
-					if origin == allowed {
-						return true
-					}
-				}
-				return origin == ""
+				return origin == "" || origins.IsAllowedOrigin(origin)
 			},
 		},
 	}

@@ -8,12 +8,12 @@ afterEach(() => {
 })
 
 describe('normalizeConfiguredApiUrl', () => {
-  it('rewrites the broken production API custom domain to the live Render backend', () => {
+  it('rewrites the broken production API custom domain to the active custom domain', () => {
     expect(normalizeConfiguredApiUrl('https://api.apex.build')).toBe(
-      'https://apex-backend-5ypy.onrender.com/api/v1'
+      'https://api.apex-build.dev/api/v1'
     )
     expect(normalizeConfiguredApiUrl('https://api.apex.build/api/v1')).toBe(
-      'https://apex-backend-5ypy.onrender.com/api/v1'
+      'https://api.apex-build.dev/api/v1'
     )
   })
 
@@ -23,9 +23,9 @@ describe('normalizeConfiguredApiUrl', () => {
 })
 
 describe('normalizeConfiguredWsUrl', () => {
-  it('rewrites the broken production websocket custom domain to the live Render backend', () => {
+  it('rewrites the broken production websocket custom domain to the active custom domain', () => {
     expect(normalizeConfiguredWsUrl('wss://api.apex.build')).toBe(
-      'wss://apex-backend-5ypy.onrender.com/ws'
+      'wss://api.apex-build.dev/ws'
     )
   })
 

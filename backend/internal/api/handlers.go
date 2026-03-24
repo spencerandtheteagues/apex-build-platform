@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 
@@ -14,6 +13,7 @@ import (
 	"apex-build/internal/auth"
 	"apex-build/internal/db"
 	appmiddleware "apex-build/internal/middleware"
+	"apex-build/internal/origins"
 	"apex-build/internal/payments"
 	"apex-build/internal/pricing"
 	"apex-build/internal/startup"
@@ -1101,26 +1101,7 @@ func (s *Server) AuthMiddleware() gin.HandlerFunc {
 // CORSMiddleware handles CORS with secure origin validation
 // SECURITY: No longer uses wildcard (*) - validates against allowed origins
 func (s *Server) CORSMiddleware() gin.HandlerFunc {
-	// Get allowed origins from environment or use defaults
-	allowedOriginsEnv := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
-	if allowedOriginsEnv == "" {
-		allowedOriginsEnv = strings.TrimSpace(os.Getenv("CORS_ORIGINS"))
-	}
-	var allowedOrigins []string
-	if allowedOriginsEnv != "" {
-		allowedOrigins = strings.Split(allowedOriginsEnv, ",")
-	} else {
-		// Default allowed origins for development and production
-		allowedOrigins = []string{
-			"http://localhost:3000",
-			"http://localhost:5173",
-			"http://127.0.0.1:3000",
-			"http://127.0.0.1:5173",
-			"https://apex.build",
-			"https://www.apex.build",
-			"https://apex-frontend-gigq.onrender.com",
-		}
-	}
+	allowedOrigins := origins.AllowedOrigins()
 
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")

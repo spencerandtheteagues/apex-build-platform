@@ -5,6 +5,7 @@ package autonomous
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -328,7 +329,7 @@ func (a *AutonomousAgent) runTask(task *AutonomousTask) {
 			return
 
 		case StateFailed:
-			a.completeTask(task, fmt.Errorf(task.Error))
+			a.completeTask(task, errors.New(task.Error))
 			return
 
 		case StateCancelled:

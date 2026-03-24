@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"apex-build/internal/hosting"
+	"apex-build/internal/origins"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -289,24 +290,10 @@ func (h *HostingHandler) StreamDeploymentLogs(c *gin.Context) {
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			origin := r.Header.Get("Origin")
-			// Allow requests with no origin (same-origin requests)
 			if origin == "" {
 				return true
 			}
-			// Allow known development and production origins
-			allowedOrigins := []string{
-				"http://localhost:3000",
-				"http://localhost:5173",
-				"http://localhost:8080",
-				"https://apex.build",
-				"https://www.apex.build",
-			}
-			for _, allowed := range allowedOrigins {
-				if origin == allowed {
-					return true
-				}
-			}
-			return false
+			return origins.IsAllowedOrigin(origin)
 		},
 	}
 

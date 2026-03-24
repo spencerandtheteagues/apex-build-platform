@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -75,70 +76,70 @@ const (
 
 // ManagedDatabase represents a user-managed database instance
 type ManagedDatabase struct {
-	ID             uint           `json:"id" gorm:"primaryKey"`
-	ProjectID      uint           `json:"project_id" gorm:"index;not null"`
-	UserID         uint           `json:"user_id" gorm:"index;not null"`
-	Type           DatabaseType   `json:"type" gorm:"not null"`
-	Name           string         `json:"name" gorm:"not null"`
-	Host           string         `json:"host,omitempty"`
-	Port           int            `json:"port,omitempty"`
-	Username       string         `json:"username,omitempty"`
-	Password       string         `json:"-" gorm:"not null"` // Encrypted, never expose
-	Salt           string         `json:"-" gorm:"not null"` // For password encryption
-	DatabaseName   string         `json:"database_name,omitempty"`
-	Status         DatabaseStatus `json:"status" gorm:"default:'provisioning'"`
-	ConnectionURL  string         `json:"-"` // Computed, not stored
-	FilePath       string         `json:"-"` // For SQLite only
+	ID            uint           `json:"id" gorm:"primaryKey"`
+	ProjectID     uint           `json:"project_id" gorm:"index;not null"`
+	UserID        uint           `json:"user_id" gorm:"index;not null"`
+	Type          DatabaseType   `json:"type" gorm:"not null"`
+	Name          string         `json:"name" gorm:"not null"`
+	Host          string         `json:"host,omitempty"`
+	Port          int            `json:"port,omitempty"`
+	Username      string         `json:"username,omitempty"`
+	Password      string         `json:"-" gorm:"not null"` // Encrypted, never expose
+	Salt          string         `json:"-" gorm:"not null"` // For password encryption
+	DatabaseName  string         `json:"database_name,omitempty"`
+	Status        DatabaseStatus `json:"status" gorm:"default:'provisioning'"`
+	ConnectionURL string         `json:"-"` // Computed, not stored
+	FilePath      string         `json:"-"` // For SQLite only
 
 	// Auto-provisioning flag (Replit parity)
 	IsAutoProvisioned bool `json:"is_auto_provisioned" gorm:"default:false"` // True if auto-created with project
 
 	// Usage metrics
-	StorageUsedMB  float64   `json:"storage_used_mb" gorm:"default:0"`
-	ConnectionCount int      `json:"connection_count" gorm:"default:0"`
-	QueryCount      int64    `json:"query_count" gorm:"default:0"`
+	StorageUsedMB   float64    `json:"storage_used_mb" gorm:"default:0"`
+	ConnectionCount int        `json:"connection_count" gorm:"default:0"`
+	QueryCount      int64      `json:"query_count" gorm:"default:0"`
 	LastQueried     *time.Time `json:"last_queried,omitempty"`
 
 	// Backup configuration
-	BackupEnabled   bool      `json:"backup_enabled" gorm:"default:true"`
-	BackupSchedule  string    `json:"backup_schedule,omitempty"` // Cron expression
-	LastBackup      *time.Time `json:"last_backup,omitempty"`
-	NextBackup      *time.Time `json:"next_backup,omitempty"`
+	BackupEnabled  bool       `json:"backup_enabled" gorm:"default:true"`
+	BackupSchedule string     `json:"backup_schedule,omitempty"` // Cron expression
+	LastBackup     *time.Time `json:"last_backup,omitempty"`
+	NextBackup     *time.Time `json:"next_backup,omitempty"`
 
 	// Plan limits
-	MaxStorageMB    int       `json:"max_storage_mb" gorm:"default:100"`
-	MaxConnections  int       `json:"max_connections" gorm:"default:5"`
+	MaxStorageMB   int `json:"max_storage_mb" gorm:"default:100"`
+	MaxConnections int `json:"max_connections" gorm:"default:5"`
 
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // DatabaseCredentials contains connection information (for API response)
 type DatabaseCredentials struct {
-	Host         string `json:"host,omitempty"`
-	Port         int    `json:"port,omitempty"`
-	Username     string `json:"username,omitempty"`
-	Password     string `json:"password,omitempty"`
-	DatabaseName string `json:"database_name,omitempty"`
+	Host          string `json:"host,omitempty"`
+	Port          int    `json:"port,omitempty"`
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	DatabaseName  string `json:"database_name,omitempty"`
 	ConnectionURL string `json:"connection_url"`
 }
 
 // DatabaseMetrics contains usage statistics
 type DatabaseMetrics struct {
-	StorageUsedMB   float64   `json:"storage_used_mb"`
-	ConnectionCount int       `json:"connection_count"`
-	QueryCount      int64     `json:"query_count"`
+	StorageUsedMB   float64    `json:"storage_used_mb"`
+	ConnectionCount int        `json:"connection_count"`
+	QueryCount      int64      `json:"query_count"`
 	LastQueried     *time.Time `json:"last_queried,omitempty"`
-	TableCount      int       `json:"table_count"`
-	RowCount        int64     `json:"row_count"`
+	TableCount      int        `json:"table_count"`
+	RowCount        int64      `json:"row_count"`
 }
 
 // TableInfo represents metadata about a database table
 type TableInfo struct {
-	Name       string `json:"name"`
-	RowCount   int64  `json:"row_count"`
-	SizeBytes  int64  `json:"size_bytes"`
-	ColumnCount int   `json:"column_count"`
+	Name        string `json:"name"`
+	RowCount    int64  `json:"row_count"`
+	SizeBytes   int64  `json:"size_bytes"`
+	ColumnCount int    `json:"column_count"`
 }
 
 // ColumnInfo represents metadata about a table column
@@ -170,10 +171,10 @@ type DatabaseManager struct {
 	encryptionKey []byte
 
 	// Connection pools
-	pgConnections    map[uint]*sql.DB // projectID -> connection
-	redisConnections map[uint]*redis.Client
+	pgConnections     map[uint]*sql.DB // projectID -> connection
+	redisConnections  map[uint]*redis.Client
 	sqliteConnections map[uint]*sql.DB
-	mu               sync.RWMutex
+	mu                sync.RWMutex
 }
 
 // ManagerConfig holds configuration for the database manager
@@ -216,14 +217,14 @@ func NewDatabaseManager(config *ManagerConfig) (*DatabaseManager, error) {
 	}
 
 	return &DatabaseManager{
-		baseDir:          config.BaseDir,
-		postgresHost:     config.PostgresHost,
-		postgresPort:     config.PostgresPort,
-		redisHost:        config.RedisHost,
-		redisPort:        config.RedisPort,
-		encryptionKey:    encKey,
-		pgConnections:    make(map[uint]*sql.DB),
-		redisConnections: make(map[uint]*redis.Client),
+		baseDir:           config.BaseDir,
+		postgresHost:      config.PostgresHost,
+		postgresPort:      config.PostgresPort,
+		redisHost:         config.RedisHost,
+		redisPort:         config.RedisPort,
+		encryptionKey:     encKey,
+		pgConnections:     make(map[uint]*sql.DB),
+		redisConnections:  make(map[uint]*redis.Client),
 		sqliteConnections: make(map[uint]*sql.DB),
 	}, nil
 }
@@ -549,7 +550,7 @@ func (dm *DatabaseManager) executeSQL(conn *sql.DB, query string, start time.Tim
 	queryType := strings.TrimSpace(strings.ToUpper(query))
 
 	if strings.HasPrefix(queryType, "SELECT") || strings.HasPrefix(queryType, "SHOW") ||
-	   strings.HasPrefix(queryType, "DESCRIBE") || strings.HasPrefix(queryType, "EXPLAIN") {
+		strings.HasPrefix(queryType, "DESCRIBE") || strings.HasPrefix(queryType, "EXPLAIN") {
 		// Query that returns rows
 		rows, err := conn.Query(query)
 		if err != nil {
@@ -630,7 +631,7 @@ func (dm *DatabaseManager) GetTables(db *ManagedDatabase, password string) ([]Ta
 		return nil, err
 	}
 	if result.Error != "" {
-		return nil, fmt.Errorf(result.Error)
+		return nil, errors.New(result.Error)
 	}
 
 	tables := make([]TableInfo, 0, len(result.Rows))
@@ -702,7 +703,7 @@ func (dm *DatabaseManager) GetTableSchema(db *ManagedDatabase, tableName string,
 		return nil, err
 	}
 	if result.Error != "" {
-		return nil, fmt.Errorf(result.Error)
+		return nil, errors.New(result.Error)
 	}
 
 	columns := make([]ColumnInfo, 0, len(result.Rows))

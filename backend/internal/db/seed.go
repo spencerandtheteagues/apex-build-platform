@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -192,7 +193,7 @@ func (d *Database) RunSeeds() error {
 
 	log.Println("🌱 Database seeding complete")
 	if len(errs) > 0 {
-		return fmt.Errorf(strings.Join(errs, "; "))
+		return errors.New(strings.Join(errs, "; "))
 	}
 	return nil
 }

@@ -18,6 +18,8 @@ import (
 	"sync"
 	"time"
 
+	"apex-build/internal/origins"
+
 	"github.com/gin-gonic/gin"
 	goredis "github.com/go-redis/redis/v8"
 	"golang.org/x/time/rate"
@@ -253,38 +255,7 @@ func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 
-		// Build allowed origins list from env var or defaults
-		var allowedOrigins []string
-		if envOrigins := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS")); envOrigins != "" || strings.TrimSpace(os.Getenv("CORS_ORIGINS")) != "" {
-			if envOrigins == "" {
-				envOrigins = strings.TrimSpace(os.Getenv("CORS_ORIGINS"))
-			}
-			for _, o := range strings.Split(envOrigins, ",") {
-				allowedOrigins = append(allowedOrigins, strings.TrimSpace(o))
-			}
-		} else {
-			allowedOrigins = []string{
-				"http://localhost:3000",
-				"http://localhost:5173",
-				"http://127.0.0.1:3000",
-				"https://apex.build",
-				"https://www.apex.build",
-				"https://apex-build.web.app",
-				"https://apex-build.firebaseapp.com",
-				"https://apex-frontend-gigq.onrender.com",
-			}
-		}
-
-		// Check if origin is allowed
-		allowed := false
-		for _, allowedOrigin := range allowedOrigins {
-			if origin == allowedOrigin {
-				allowed = true
-				break
-			}
-		}
-
-		if allowed {
+		if origins.IsAllowedOrigin(origin) {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Access-Control-Allow-Credentials", "true")
 		}

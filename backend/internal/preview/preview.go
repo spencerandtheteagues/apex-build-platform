@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"apex-build/internal/bundler"
+	"apex-build/internal/origins"
 	"apex-build/pkg/models"
 
 	"github.com/gorilla/websocket"
@@ -165,22 +166,11 @@ func NewPreviewServer(db *gorm.DB) *PreviewServer {
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				origin := r.Header.Get("Origin")
-				// Allow requests with no origin (same-origin requests)
 				if origin == "" {
 					return true
 				}
-				// Allow known development and production origins
-				allowedOrigins := []string{
-					"http://localhost:3000",
-					"http://localhost:5173",
-					"http://localhost:8080",
-					"https://apex.build",
-					"https://www.apex.build",
-				}
-				for _, allowed := range allowedOrigins {
-					if origin == allowed {
-						return true
-					}
+				if origins.IsAllowedOrigin(origin) {
+					return true
 				}
 				// Also allow preview server origins (localhost:9000+)
 				if strings.HasPrefix(origin, "http://localhost:") {

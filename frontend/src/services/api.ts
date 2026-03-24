@@ -50,7 +50,7 @@ import {
   CompletionStats,
 } from '@/types'
 
-const DEFAULT_PRODUCTION_API_BASE_URL = 'https://api.apex.build/api/v1'
+const DEFAULT_PRODUCTION_API_BASE_URL = 'https://api.apex-build.dev/api/v1'
 
 // Get API URL from environment or use default
 const getApiUrl = (): string => {
@@ -61,7 +61,10 @@ const getApiUrl = (): string => {
 
   // Production detection - if running on a known production domain
   const hostname = typeof window !== 'undefined' ? window.location.hostname : ''
-  if (hostname.includes('apex.build') || hostname.includes('web.app') || hostname.includes('firebaseapp.com')) {
+  if (hostname.includes('apex-build.dev')
+    || hostname.includes('apex.build')
+    || hostname.includes('web.app')
+    || hostname.includes('firebaseapp.com')) {
     return DEFAULT_PRODUCTION_API_BASE_URL
   }
   // Render staging/preview — derive backend from frontend hostname pattern

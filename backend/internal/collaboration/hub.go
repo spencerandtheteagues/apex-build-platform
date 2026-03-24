@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"apex-build/internal/auth"
+	"apex-build/internal/origins"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -144,33 +145,10 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 4096,
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
-		if envOrigins := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS")); envOrigins != "" || strings.TrimSpace(os.Getenv("CORS_ORIGINS")) != "" {
-			if envOrigins == "" {
-				envOrigins = strings.TrimSpace(os.Getenv("CORS_ORIGINS"))
-			}
-			for _, allowed := range strings.Split(envOrigins, ",") {
-				if strings.TrimSpace(allowed) == origin {
-					return true
-				}
-			}
-			return origin == "" && os.Getenv("ENVIRONMENT") != "production"
+		if origin == "" && os.Getenv("ENVIRONMENT") != "production" {
+			return true
 		}
-
-		allowedOrigins := []string{
-			"http://localhost:3000",
-			"http://localhost:5173",
-			"http://localhost:3001",
-			"http://127.0.0.1:3000",
-			"https://apex.build",
-			"https://www.apex.build",
-			"https://apex-frontend-gigq.onrender.com",
-		}
-		for _, allowed := range allowedOrigins {
-			if origin == allowed {
-				return true
-			}
-		}
-		return origin == "" && os.Getenv("ENVIRONMENT") != "production"
+		return origins.IsAllowedOrigin(origin)
 	},
 }
 

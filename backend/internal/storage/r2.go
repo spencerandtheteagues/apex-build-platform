@@ -17,17 +17,17 @@ import (
 
 // R2Provider implements storage using Cloudflare R2
 type R2Provider struct {
-	client       *s3.Client
-	presigner    *s3.PresignClient
-	uploader     *manager.Uploader
-	bucket       string
-	endpoint     string
+	client    *s3.Client
+	presigner *s3.PresignClient
+	uploader  *manager.Uploader
+	bucket    string
+	endpoint  string
 }
 
 // NewR2Provider creates a new R2 storage provider
 func NewR2Provider(accountID, accessKeyID, secretAccessKey, bucketName string) (*R2Provider, error) {
 	if accountID == "" || accessKeyID == "" || secretAccessKey == "" || bucketName == "" {
-		return nil, fmt.Errorf("R2 credentials incomplete: account_id=%q access_key_id=%q secret_access_key=%q bucket_name=%q",
+		return nil, fmt.Errorf("R2 credentials incomplete: account_id=%q access_key_id_present=%t secret_access_key_present=%t bucket_name=%q",
 			accountID, accessKeyID != "", secretAccessKey != "", bucketName)
 	}
 

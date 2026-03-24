@@ -6,8 +6,8 @@ type RuntimeConfig = {
   FEATURES?: Record<string, unknown>
 }
 
-const FALLBACK_RENDER_API_URL = 'https://apex-backend-5ypy.onrender.com/api/v1'
-const FALLBACK_RENDER_WS_URL = 'wss://apex-backend-5ypy.onrender.com/ws'
+const PRIMARY_PRODUCTION_API_URL = 'https://api.apex-build.dev/api/v1'
+const PRIMARY_PRODUCTION_WS_URL = 'wss://api.apex-build.dev/ws'
 const BROKEN_PRODUCTION_API_HOSTS = new Set(['api.apex.build'])
 const BROKEN_PRODUCTION_WS_HOSTS = new Set(['api.apex.build'])
 
@@ -31,7 +31,7 @@ export const normalizeConfiguredApiUrl = (value?: string): string => {
   try {
     const parsed = new URL(normalized)
     if (BROKEN_PRODUCTION_API_HOSTS.has(parsed.host)) {
-      return FALLBACK_RENDER_API_URL
+      return PRIMARY_PRODUCTION_API_URL
     }
     if (!parsed.pathname || parsed.pathname === '/') {
       parsed.pathname = '/api/v1'
@@ -51,7 +51,7 @@ export const normalizeConfiguredWsUrl = (value?: string): string => {
   try {
     const parsed = new URL(normalized)
     if (BROKEN_PRODUCTION_WS_HOSTS.has(parsed.host)) {
-      return FALLBACK_RENDER_WS_URL
+      return PRIMARY_PRODUCTION_WS_URL
     }
     if (!parsed.pathname || parsed.pathname === '/') {
       parsed.pathname = '/ws'

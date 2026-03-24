@@ -13,7 +13,7 @@ import {
   CursorUpdateMessage,
 } from '@/types'
 
-const DEFAULT_PRODUCTION_WS_URL = 'wss://apex-backend-5ypy.onrender.com/ws'
+const DEFAULT_PRODUCTION_WS_URL = 'wss://api.apex-build.dev/ws'
 
 export type CollaborationEvent =
   | 'user-joined'
@@ -110,7 +110,7 @@ export class WebSocketService {
 
     // Production detection - if running on Render, Firebase, or production domain
     const hostname = typeof window !== 'undefined' ? window.location.hostname : ''
-    const productionHosts = ['onrender.com', 'apex.build', 'web.app', 'firebaseapp.com']
+    const productionHosts = ['onrender.com', 'apex-build.dev', 'apex.build', 'web.app', 'firebaseapp.com']
     const isProduction = productionHosts.some(host => hostname.includes(host))
       || hostname === 'apex-frontend-gigq.onrender.com'
 

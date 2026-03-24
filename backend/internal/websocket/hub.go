@@ -9,11 +9,11 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	appmiddleware "apex-build/internal/middleware"
+	"apex-build/internal/origins"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -122,42 +122,11 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 4096,
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
-
-		// Allow env-configured origins first
-		if envOrigins := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS")); envOrigins != "" || strings.TrimSpace(os.Getenv("CORS_ORIGINS")) != "" {
-			if envOrigins == "" {
-				envOrigins = strings.TrimSpace(os.Getenv("CORS_ORIGINS"))
-			}
-			for _, allowed := range strings.Split(envOrigins, ",") {
-				if strings.TrimSpace(allowed) == origin {
-					return true
-				}
-			}
-			// Allow empty origin in non-production for testing tools
-			if origin == "" && os.Getenv("ENVIRONMENT") != "production" {
-				return true
-			}
-			return false
-		}
-
-		// Non-production: allow all for local development
-		if os.Getenv("ENVIRONMENT") != "production" {
+		if origin == "" && os.Getenv("ENVIRONMENT") != "production" {
 			return true
 		}
 
-		// Production default: strict origin check
-		allowedOrigins := []string{
-			"https://apex.build",
-			"https://www.apex.build",
-			"https://apex-frontend-gigq.onrender.com",
-		}
-		for _, allowed := range allowedOrigins {
-			if origin == allowed {
-				return true
-			}
-		}
-
-		return false
+		return origins.IsAllowedOrigin(origin)
 	},
 }
 

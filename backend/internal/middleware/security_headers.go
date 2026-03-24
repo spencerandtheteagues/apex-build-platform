@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"apex-build/internal/origins"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -62,22 +64,11 @@ func contentSecurityPolicy(path string) string {
 }
 
 func previewFrameAncestors() string {
-	frameAncestors := "'self' https://apex.build https://www.apex.build"
-	if extra := strings.TrimSpace(os.Getenv("FRAME_ANCESTORS_EXTRA")); extra != "" {
-		frameAncestors += " " + extra
-	} else if !isProductionEnvironment() {
-		frameAncestors += " https://apex-frontend-gigq.onrender.com"
-	}
-	return frameAncestors
+	return origins.PreviewFrameAncestors()
 }
 
 func isProductionEnvironment() bool {
-	for _, key := range []string{"GO_ENV", "APEX_ENV", "ENVIRONMENT", "ENV"} {
-		if value := strings.ToLower(strings.TrimSpace(os.Getenv(key))); value == "production" || value == "prod" {
-			return true
-		}
-	}
-	return false
+	return origins.IsProductionEnvironment()
 }
 
 // CSRFProtection implements CSRF protection middleware

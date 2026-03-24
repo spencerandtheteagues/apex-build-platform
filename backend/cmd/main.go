@@ -762,7 +762,7 @@ func main() {
 	auditService := enterprise.NewAuditService(database.GetDB())
 	rbacService := enterprise.NewRBACService(database.GetDB())
 
-	baseURL := getEnv("BASE_URL", "https://apex-frontend-gigq.onrender.com")
+	baseURL := getEnv("BASE_URL", "https://apex-build.dev")
 	samlConfig := &enterprise.ServiceProviderConfig{
 		EntityID:                    baseURL,
 		AssertionConsumerServiceURL: baseURL + "/api/v1/enterprise/sso/callback",
