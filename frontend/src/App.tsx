@@ -247,6 +247,7 @@ function App() {
     selectProject,
     setCurrentProject,
     updateProfile,
+    logout,
   } = useStore()
 
   const navigateToView = useCallback((view: AppView, options?: { replace?: boolean; projectId?: number | null }) => {
@@ -1322,6 +1323,38 @@ function App() {
                         </Suspense>
                       </div>
                     </ErrorBoundary>
+
+                    {/* Account / Sign Out Section */}
+                    <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                      <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                        <User className="w-5 h-5 text-red-400" />
+                        Account
+                      </h2>
+                      <div className="flex flex-col gap-4">
+                        <div className="flex items-center gap-4 p-4 bg-gray-800/50 border border-gray-700 rounded-xl">
+                          <div className="w-10 h-10 rounded-full bg-red-600/20 border border-red-500/30 flex items-center justify-center text-red-400 font-bold text-lg flex-shrink-0">
+                            {(user?.full_name?.[0] || user?.username?.[0] || 'U').toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-semibold text-white truncate">{user?.full_name || user?.username}</div>
+                            <div className="text-sm text-gray-400 truncate">{user?.email}</div>
+                          </div>
+                          <span className="text-xs font-bold uppercase px-2 py-1 rounded-full bg-red-500/15 text-red-400 flex-shrink-0">
+                            {user?.subscription_type || 'free'}
+                          </span>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            await logout()
+                            navigateToView('builder')
+                          }}
+                          className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 font-semibold text-sm hover:bg-red-500/20 hover:border-red-500/50 transition-all"
+                        >
+                          <X className="w-4 h-4" />
+                          Sign Out
+                        </button>
+                      </div>
+                    </div>
 
                     <ErrorBoundary fallback={renderSettingsSectionFallback('Legal & Policies', 'The legal documentation center failed to render. Billing and platform settings are still available.')}>
                       <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">

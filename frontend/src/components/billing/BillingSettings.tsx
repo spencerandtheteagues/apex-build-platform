@@ -1,11 +1,15 @@
 // APEX-BUILD — Billing Settings
-// Shows current plan, credit balance, plan upgrade options, and invoice history
+// Full in-app billing page with color-coded plan + credit pack cards
 
 import React, { useState, useEffect, useCallback } from 'react'
-import { Zap, CreditCard, ExternalLink, Check, ChevronRight, Loader2, AlertCircle, RefreshCw } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import {
+  Zap, CreditCard, ExternalLink, Check, Loader2,
+  AlertCircle, RefreshCw, Star, Crown, Users, Rocket, ShieldCheck,
+} from 'lucide-react'
 import apiService from '@/services/api'
 import { BuyCreditsModal } from './BuyCreditsModal'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Plan {
   type: string
@@ -35,120 +39,154 @@ interface Invoice {
   description: string
 }
 
-const planNarrative = (planType: string) => {
-  switch (planType) {
-    case 'free':
-      return 'Static frontend websites, mockups, and honest prototype work with a one-time $5 managed trial.'
-    case 'builder':
-      return 'Unlocks backend, auth, database, deploy, publish, and BYOK for serious app builds.'
-    case 'pro':
-      return 'Best default for weekly shipping, longer autonomous runs, and heavier managed usage.'
-    case 'team':
-      return 'Shared team workflow with the highest included credit runway.'
-    default:
-      return 'Plan details are still loading.'
-  }
+// ─── Plan config ──────────────────────────────────────────────────────────────
+
+const PLAN_CONFIG: Record<string, {
+  color: string
+  glow: string
+  border: string
+  bg: string
+  badge: string
+  icon: React.ReactNode
+  tagline: string
+  bestFor: string
+  features: string[]
+}> = {
+  free: {
+    color: '#9ca3af',
+    glow: 'rgba(156,163,175,0.25)',
+    border: 'rgba(156,163,175,0.25)',
+    bg: 'rgba(156,163,175,0.04)',
+    badge: '',
+    icon: <Star size={18} />,
+    tagline: 'Static websites & UI mockups',
+    bestFor: 'Landing pages, portfolios, and frontend prototypes.',
+    features: ['Static frontend builds', 'One-time $5 managed trial', 'UI mockups & prototypes', 'Honest free tier — no surprises'],
+  },
+  builder: {
+    color: '#3b82f6',
+    glow: 'rgba(59,130,246,0.3)',
+    border: 'rgba(59,130,246,0.4)',
+    bg: 'rgba(59,130,246,0.06)',
+    badge: '',
+    icon: <Rocket size={18} />,
+    tagline: 'Full-stack development unlocked',
+    bestFor: 'Early-stage teams shipping their first real app.',
+    features: ['Backend + API generation', 'Database-backed apps', 'Auth + deployment', 'Publish to production', 'BYOK (bring your own keys)'],
+  },
+  pro: {
+    color: '#00f5ff',
+    glow: 'rgba(0,245,255,0.35)',
+    border: 'rgba(0,245,255,0.45)',
+    bg: 'rgba(0,245,255,0.05)',
+    badge: 'MOST POPULAR',
+    icon: <ShieldCheck size={18} />,
+    tagline: 'Serious shipping, every week',
+    bestFor: 'Founders & operators shipping production app changes weekly.',
+    features: ['Everything in Builder', 'Longer autonomous runs', 'Higher included credits', 'Max power mode access', 'Priority for heavy workflows'],
+  },
+  team: {
+    color: '#f59e0b',
+    glow: 'rgba(245,158,11,0.3)',
+    border: 'rgba(245,158,11,0.4)',
+    bg: 'rgba(245,158,11,0.05)',
+    badge: 'BEST VALUE',
+    icon: <Users size={18} />,
+    tagline: 'Shared team credit runway',
+    bestFor: 'Collaborative product teams with heavier workloads.',
+    features: ['Everything in Pro', 'Shared team workspace', 'Largest included credit runway', 'Multi-seat delivery', 'Team billing management'],
+  },
+  enterprise: {
+    color: '#a855f7',
+    glow: 'rgba(168,85,247,0.3)',
+    border: 'rgba(168,85,247,0.4)',
+    bg: 'rgba(168,85,247,0.05)',
+    badge: '',
+    icon: <Crown size={18} />,
+    tagline: 'Custom scale & SLA',
+    bestFor: 'Large orgs that need custom limits and dedicated support.',
+    features: ['Custom credit limits', 'Dedicated support', 'Custom SLAs', 'SSO + audit logs', 'Volume pricing'],
+  },
+  owner: {
+    color: '#ff0033',
+    glow: 'rgba(255,0,51,0.3)',
+    border: 'rgba(255,0,51,0.4)',
+    bg: 'rgba(255,0,51,0.05)',
+    badge: 'ADMIN',
+    icon: <Crown size={18} />,
+    tagline: 'Unlimited platform access',
+    bestFor: 'Platform owner account.',
+    features: ['Unlimited credits', 'Bypass billing', 'All capabilities unlocked', 'Admin dashboard'],
+  },
 }
 
-const planCallouts = (planType: string) => {
-  switch (planType) {
-    case 'free':
-      return ['One-time $5 trial', 'Static/frontend-only', 'Credits do not unlock paid capabilities']
-    case 'builder':
-      return ['Full-stack unlocked', 'Publish unlocked', 'BYOK unlocked']
-    case 'pro':
-      return ['Longer runs', 'Higher included credits', 'Priority for heavier app workflows']
-    case 'team':
-      return ['Shared workspace', 'Largest included credits', 'Best for multi-seat delivery']
-    default:
-      return []
-  }
-}
+// Credit pack color tiers
+const PACK_CONFIG = [
+  { amountUsd: 10,  color: '#22c55e', glow: 'rgba(34,197,94,0.3)',   border: 'rgba(34,197,94,0.35)',   bg: 'rgba(34,197,94,0.05)',   label: 'Starter' },
+  { amountUsd: 25,  color: '#10b981', glow: 'rgba(16,185,129,0.3)',  border: 'rgba(16,185,129,0.35)',  bg: 'rgba(16,185,129,0.05)',  label: 'Builder' },
+  { amountUsd: 50,  color: '#00f5ff', glow: 'rgba(0,245,255,0.35)',  border: 'rgba(0,245,255,0.45)',   bg: 'rgba(0,245,255,0.06)',   label: 'Pro', popular: true },
+  { amountUsd: 100, color: '#f97316', glow: 'rgba(249,115,22,0.3)',  border: 'rgba(249,115,22,0.4)',   bg: 'rgba(249,115,22,0.05)',  label: 'Power' },
+]
 
-const asNumber = (value: unknown): number => {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
-}
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const asString = (value: unknown): string => {
-  return typeof value === 'string' ? value : ''
-}
+const asNumber = (v: unknown): number => typeof v === 'number' && Number.isFinite(v) ? v : 0
+const asString = (v: unknown): string => typeof v === 'string' ? v : ''
 
 const normalizePlans = (value: unknown): Plan[] => {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value
-    .filter((candidate): candidate is Record<string, unknown> => Boolean(candidate) && typeof candidate === 'object')
-    .map((candidate) => ({
-      type: asString(candidate.type),
-      name: asString(candidate.name) || 'Plan',
-      monthly_price_cents: asNumber(candidate.monthly_price_cents),
-      monthly_price_id: asString(candidate.monthly_price_id),
-      monthly_credits_usd: asNumber(candidate.monthly_credits_usd),
-      is_popular: Boolean(candidate.is_popular),
-      features: Array.isArray(candidate.features) ? candidate.features.filter((feature): feature is string => typeof feature === 'string') : [],
+  if (!Array.isArray(value)) return []
+  return (value as Record<string, unknown>[])
+    .filter(Boolean)
+    .map(c => ({
+      type: asString(c.type),
+      name: asString(c.name) || 'Plan',
+      monthly_price_cents: asNumber(c.monthly_price_cents),
+      monthly_price_id: asString(c.monthly_price_id),
+      monthly_credits_usd: asNumber(c.monthly_credits_usd),
+      is_popular: Boolean(c.is_popular),
+      features: Array.isArray(c.features) ? c.features.filter((f): f is string => typeof f === 'string') : [],
     }))
-    .filter((plan) => Boolean(plan.type))
+    .filter(p => Boolean(p.type))
 }
 
 const normalizeSubscription = (value: unknown): Subscription | null => {
-  if (!value || typeof value !== 'object') {
-    return null
-  }
-
-  const candidate = value as Record<string, unknown>
-  const planType = asString(candidate.plan_type)
-  const planName = asString(candidate.plan_name)
-  if (!planType && !planName) {
-    return null
-  }
-
+  if (!value || typeof value !== 'object') return null
+  const c = value as Record<string, unknown>
+  const planType = asString(c.plan_type)
+  const planName = asString(c.plan_name)
+  if (!planType && !planName) return null
   return {
     plan_type: planType || 'free',
     plan_name: planName || 'Free',
-    status: asString(candidate.status),
-    current_period_end: asString(candidate.current_period_end),
-    cancel_at_period_end: typeof candidate.cancel_at_period_end === 'boolean' ? candidate.cancel_at_period_end : undefined,
+    status: asString(c.status),
+    current_period_end: asString(c.current_period_end),
+    cancel_at_period_end: typeof c.cancel_at_period_end === 'boolean' ? c.cancel_at_period_end : undefined,
   }
 }
 
 const normalizeInvoices = (value: unknown): Invoice[] => {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value
-    .filter((candidate): candidate is Record<string, unknown> => Boolean(candidate) && typeof candidate === 'object')
-    .map((candidate) => ({
-      id: asString(candidate.id),
-      amount_paid: asNumber(candidate.amount_paid),
-      currency: asString(candidate.currency),
-      status: asString(candidate.status),
-      created: asNumber(candidate.created),
-      hosted_invoice_url: asString(candidate.hosted_invoice_url),
-      description: asString(candidate.description),
+  if (!Array.isArray(value)) return []
+  return (value as Record<string, unknown>[])
+    .filter(Boolean)
+    .map(c => ({
+      id: asString(c.id),
+      amount_paid: asNumber(c.amount_paid),
+      currency: asString(c.currency),
+      status: asString(c.status),
+      created: asNumber(c.created),
+      hosted_invoice_url: asString(c.hosted_invoice_url),
+      description: asString(c.description),
     }))
-    .filter((invoice) => Boolean(invoice.id))
+    .filter(i => Boolean(i.id))
 }
 
-const isPlaceholderPriceID = (priceID: string): boolean => {
-  const normalized = priceID.trim()
-  if (!normalized) {
-    return true
-  }
+const isPlaceholderPriceID = (id: string): boolean =>
+  !id.trim() || new Set([
+    'price_builder_monthly','price_builder_annual','price_pro_monthly','price_pro_annual',
+    'price_team_monthly','price_team_annual','price_enterprise_monthly','price_enterprise_annual',
+  ]).has(id.trim())
 
-  return new Set([
-    'price_builder_monthly',
-    'price_builder_annual',
-    'price_pro_monthly',
-    'price_pro_annual',
-    'price_team_monthly',
-    'price_team_annual',
-    'price_enterprise_monthly',
-    'price_enterprise_annual',
-  ]).has(normalized)
-}
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export function BillingSettings() {
   const [plans, setPlans] = useState<Plan[]>([])
@@ -163,6 +201,7 @@ export function BillingSettings() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<{ tone: 'success' | 'info'; message: string } | null>(null)
   const [showBuyCredits, setShowBuyCredits] = useState(false)
+  const [buyAmount, setBuyAmount] = useState<number | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -174,43 +213,23 @@ export function BillingSettings() {
         apiService.getCreditBalance(),
         apiService.getInvoices(),
       ])
-
       if (plansRes.status === 'fulfilled' && plansRes.value.success && plansRes.value.data) {
         const featured = ['free', 'builder', 'pro', 'team']
-        setPlans(normalizePlans(plansRes.value.data.plans).filter((plan) => featured.includes(plan.type)))
-      } else {
-        setPlans([])
-      }
-
-      if (subRes.status === 'fulfilled' && subRes.value.success && subRes.value.data) {
+        setPlans(normalizePlans(plansRes.value.data.plans).filter(p => featured.includes(p.type)))
+      } else setPlans([])
+      if (subRes.status === 'fulfilled' && subRes.value.success && subRes.value.data)
         setSubscription(normalizeSubscription(subRes.value.data))
-      } else {
-        setSubscription(null)
-      }
-
+      else setSubscription(null)
       if (balRes.status === 'fulfilled' && balRes.value.success && balRes.value.data) {
         setCreditBalance(asNumber(balRes.value.data.balance))
         setHasUnlimited(Boolean(balRes.value.data.has_unlimited))
         setBypassBilling(Boolean(balRes.value.data.bypass_billing))
-      } else {
-        setCreditBalance(null)
-        setHasUnlimited(false)
-        setBypassBilling(false)
-      }
-
-      if (invRes.status === 'fulfilled' && invRes.value.success && invRes.value.data) {
+      } else { setCreditBalance(null); setHasUnlimited(false); setBypassBilling(false) }
+      if (invRes.status === 'fulfilled' && invRes.value.success && invRes.value.data)
         setInvoices(normalizeInvoices(invRes.value.data.invoices))
-      } else {
-        setInvoices([])
-      }
+      else setInvoices([])
     } catch {
       setError('Failed to load billing information.')
-      setPlans([])
-      setSubscription(null)
-      setCreditBalance(null)
-      setHasUnlimited(false)
-      setBypassBilling(false)
-      setInvoices([])
     } finally {
       setLoading(false)
     }
@@ -220,53 +239,35 @@ export function BillingSettings() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-
     const url = new URL(window.location.href)
     const params = url.searchParams
-
-    if (params.get('success') === 'true') {
-      setNotice({ tone: 'success', message: 'Checkout completed. Billing status will update as soon as Stripe confirms the payment.' })
-    } else if (params.get('canceled') === 'true') {
-      setNotice({ tone: 'info', message: 'Checkout was canceled. No changes were made to your subscription.' })
-    } else if (params.get('credits') === 'success') {
-      setNotice({ tone: 'success', message: 'Credit purchase completed. Your balance will refresh as soon as the payment is confirmed.' })
-    } else if (params.get('credits') === 'canceled') {
-      setNotice({ tone: 'info', message: 'Credit purchase was canceled. No charges were made.' })
-    } else {
-      return
-    }
-
-    params.delete('success')
-    params.delete('canceled')
-    params.delete('credits')
-    params.delete('billing')
-
-    const nextSearch = params.toString()
-    const nextUrl = `${url.pathname}${nextSearch ? `?${nextSearch}` : ''}${url.hash}`
-    window.history.replaceState({}, '', nextUrl)
+    if (params.get('success') === 'true')
+      setNotice({ tone: 'success', message: 'Checkout completed! Your plan will update as soon as Stripe confirms.' })
+    else if (params.get('canceled') === 'true')
+      setNotice({ tone: 'info', message: 'Checkout was canceled. No changes made.' })
+    else if (params.get('credits') === 'success')
+      setNotice({ tone: 'success', message: 'Credits purchased! Your balance will refresh once payment is confirmed.' })
+    else if (params.get('credits') === 'canceled')
+      setNotice({ tone: 'info', message: 'Credit purchase canceled. No charges made.' })
+    else return
+    ;['success','canceled','credits','billing'].forEach(k => params.delete(k))
+    window.history.replaceState({}, '', `${url.pathname}${params.toString() ? `?${params}` : ''}${url.hash}`)
   }, [])
 
   const handleUpgrade = async (plan: Plan) => {
     if (!plan.monthly_price_id || isPlaceholderPriceID(plan.monthly_price_id)) {
-      setError('Stripe is not configured in this environment. Set STRIPE_PRICE_* environment variables.')
+      setError('Stripe is not configured in this environment.')
       return
     }
     setUpgradeLoading(plan.type)
     setError(null)
     try {
-      const result = await apiService.createCheckoutSession({
-        price_id: plan.monthly_price_id,
-      })
-      if (result.success && result.data?.checkout_url) {
-        window.location.href = result.data.checkout_url
-      } else {
-        setError(result.error || 'Failed to start checkout. Please try again.')
-      }
+      const result = await apiService.createCheckoutSession({ price_id: plan.monthly_price_id })
+      if (result.success && result.data?.checkout_url) window.location.href = result.data.checkout_url
+      else setError(result.error || 'Failed to start checkout. Please try again.')
     } catch (err: any) {
       setError(err?.response?.data?.error || err?.message || 'Failed to start checkout')
-    } finally {
-      setUpgradeLoading(null)
-    }
+    } finally { setUpgradeLoading(null) }
   }
 
   const handleManageSubscription = async () => {
@@ -274,294 +275,430 @@ export function BillingSettings() {
     setError(null)
     try {
       const result = await apiService.createBillingPortalSession(window.location.href)
-      if (result.success && result.data?.portal_url) {
-        window.location.href = result.data.portal_url
-      } else {
-        setError(result.error || 'Failed to open billing portal.')
-      }
+      if (result.success && result.data?.portal_url) window.location.href = result.data.portal_url
+      else setError(result.error || 'Failed to open billing portal.')
     } catch (err: any) {
       setError(err?.response?.data?.error || err?.message || 'Failed to open billing portal')
-    } finally {
-      setPortalLoading(false)
-    }
+    } finally { setPortalLoading(false) }
   }
 
   const currentPlanType = subscription?.plan_type ?? 'free'
-
+  const planCfg = PLAN_CONFIG[currentPlanType] ?? PLAN_CONFIG.free
   const creditDisplay = hasUnlimited || bypassBilling
-    ? 'Unlimited'
-    : creditBalance !== null
-      ? `$${creditBalance.toFixed(2)}`
-      : '--'
+    ? '∞'
+    : creditBalance !== null ? `$${creditBalance.toFixed(2)}` : '--'
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12 text-gray-500 gap-2 text-sm">
-        <Loader2 className="w-4 h-4 animate-spin" />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4rem 0', gap: 10, color: 'rgba(255,255,255,0.4)', fontSize: '0.875rem' }}>
+        <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
         Loading billing…
+        <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+
+      {/* ── Notices ────────────────────────────────────────────────────── */}
       {notice && (
-        <div className={cn(
-          'flex items-start gap-3 p-3 rounded-lg border text-sm',
-          notice.tone === 'success'
-            ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
-            : 'bg-blue-500/10 border-blue-500/25 text-blue-300'
-        )}>
-          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-          <span>{notice.message}</span>
-          <button
-            onClick={() => setNotice(null)}
-            className="ml-auto opacity-70 hover:opacity-100"
-            aria-label="Dismiss billing notice"
-          >
-            ✕
-          </button>
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 16px',
+          borderRadius: 10, fontSize: '0.875rem',
+          background: notice.tone === 'success' ? 'rgba(34,197,94,0.08)' : 'rgba(59,130,246,0.08)',
+          border: `1px solid ${notice.tone === 'success' ? 'rgba(34,197,94,0.25)' : 'rgba(59,130,246,0.25)'}`,
+          color: notice.tone === 'success' ? '#4ade80' : '#60a5fa',
+        }}>
+          <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ flex: 1 }}>{notice.message}</span>
+          <button onClick={() => setNotice(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', opacity: 0.6 }}>✕</button>
         </div>
       )}
-
       {error && (
-        <div className="flex items-start gap-3 p-3 bg-red-500/10 border border-red-500/25 rounded-lg text-sm text-red-400">
-          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="ml-auto text-red-400/60 hover:text-red-400">✕</button>
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 16px',
+          borderRadius: 10, fontSize: '0.875rem',
+          background: 'rgba(255,0,51,0.08)', border: '1px solid rgba(255,0,51,0.25)', color: '#f87171',
+        }}>
+          <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ flex: 1 }}>{error}</span>
+          <button onClick={() => setError(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', opacity: 0.6 }}>✕</button>
         </div>
       )}
 
-      {/* Credit Balance Card */}
-      <div className="overflow-hidden rounded-2xl border border-gray-800 bg-black/70 shadow-[0_24px_70px_rgba(0,0,0,0.38)]">
-        <div className="bg-[radial-gradient(circle_at_top_left,rgba(255,0,51,0.18),transparent_38%),radial-gradient(circle_at_top_right,rgba(34,211,238,0.14),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent_60%)] p-5">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-3">
-              <div className="text-xs text-gray-500 uppercase flex items-center gap-1.5 tracking-[0.18em]">
-                <Zap className="w-3 h-3" /> Billing control plane
-              </div>
-              <div className={cn(
-                'text-4xl font-mono font-black',
-                hasUnlimited || bypassBilling ? 'text-emerald-400' :
-                (creditBalance ?? 1) <= 0 ? 'text-red-400' :
-                (creditBalance ?? 99) < 2 ? 'text-yellow-400' : 'text-white'
-              )}>
-                {creditDisplay}
-              </div>
-              <div className="max-w-2xl text-sm leading-6 text-gray-300">
-                {planNarrative(currentPlanType)} Credits pay for managed AI usage. Subscription tier unlocks capability boundaries like backend, publish, and BYOK.
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {planCallouts(currentPlanType).map((callout) => (
-                  <div key={callout} className="rounded-full border border-gray-700 bg-gray-950/70 px-3 py-1.5 text-[11px] uppercase tracking-[0.14em] text-gray-300">
-                    {callout}
-                  </div>
-                ))}
-              </div>
+      {/* ── Account Status Hero ────────────────────────────────────────── */}
+      <div style={{
+        borderRadius: 16,
+        border: `1px solid ${planCfg.border}`,
+        background: `radial-gradient(circle at top left, ${planCfg.glow}, transparent 50%), #0a0a0a`,
+        boxShadow: `0 0 60px ${planCfg.glow}, 0 16px 40px rgba(0,0,0,0.5)`,
+        padding: '24px 28px',
+        display: 'grid',
+        gridTemplateColumns: '1fr auto',
+        gap: 24,
+        alignItems: 'center',
+      }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 36, height: 36,
+              background: `${planCfg.glow}`,
+              border: `1px solid ${planCfg.border}`,
+              borderRadius: 8,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: planCfg.color,
+            }}>
+              {planCfg.icon}
             </div>
-
-            <div className="grid min-w-[280px] gap-3">
-              <div className="rounded-xl border border-gray-800 bg-gray-950/70 p-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Current plan</div>
-                <div className="mt-2 text-lg font-semibold text-white">
-                  {subscription?.plan_name || 'Free'}
-                </div>
-                {subscription?.status && subscription.status !== 'inactive' && (
-                  <div className="mt-2">
-                    <span className={cn(
-                      'inline-flex rounded-full px-2 py-1 text-[10px] font-bold uppercase',
-                      subscription.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' :
-                      subscription.status === 'past_due' ? 'bg-yellow-500/20 text-yellow-400' :
-                      'bg-gray-700 text-gray-400'
-                    )}>
-                      {subscription.status}
-                    </span>
-                  </div>
-                )}
-                {subscription?.current_period_end && (
-                  <div className="mt-2 text-xs text-gray-400">
-                    Renews {new Date(subscription.current_period_end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </div>
-                )}
+            <div>
+              <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.18em', color: 'rgba(255,255,255,0.4)', marginBottom: 2 }}>
+                Current Plan
               </div>
-
-              <div className="flex flex-wrap gap-2">
-                {!hasUnlimited && !bypassBilling && (
-                  <button
-                    onClick={() => setShowBuyCredits(true)}
-                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-500"
-                  >
-                    <CreditCard className="w-4 h-4" />
-                    Buy credits
-                  </button>
-                )}
-                {subscription?.plan_type !== 'free' && (
-                  <button
-                    onClick={handleManageSubscription}
-                    disabled={portalLoading}
-                    className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-gray-700 bg-gray-900/70 px-4 py-3 text-sm font-medium text-gray-200 transition hover:border-gray-600 hover:text-white"
-                  >
-                    {portalLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
-                    Manage subscription
-                  </button>
+              <div style={{ fontWeight: 800, fontSize: '1.1rem', color: planCfg.color, letterSpacing: '0.04em' }}>
+                {subscription?.plan_name || 'Free'}
+                {subscription?.status && subscription.status !== 'inactive' && (
+                  <span style={{
+                    marginLeft: 8, fontSize: '0.65rem', fontWeight: 700,
+                    padding: '2px 7px', borderRadius: 100,
+                    background: subscription.status === 'active' ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.15)',
+                    color: subscription.status === 'active' ? '#4ade80' : '#fbbf24',
+                    textTransform: 'uppercase', letterSpacing: '0.1em',
+                    verticalAlign: 'middle',
+                  }}>
+                    {subscription.status}
+                  </span>
                 )}
               </div>
             </div>
           </div>
+
+          <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)', lineHeight: 1.55 }}>
+            {planCfg.tagline}
+            {subscription?.current_period_end && (
+              <span style={{ marginLeft: 8, color: 'rgba(255,255,255,0.3)' }}>
+                · Renews {new Date(subscription.current_period_end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </span>
+            )}
+          </div>
         </div>
 
-        <div className="border-t border-gray-800 bg-gray-950/50 px-5 py-4">
-          {currentPlanType === 'free' ? (
-            <div className="rounded-xl border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-sm leading-6 text-amber-100/85">
-              Free accounts can build static frontend websites and UI mockups. Upgrade to Builder or higher to unlock backend, database, auth, billing, realtime, deployment, publish, and BYOK. Credit packs extend managed usage but do not unlock those paid capabilities on their own.
+        <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+          <div>
+            <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.18em', color: 'rgba(255,255,255,0.35)', marginBottom: 4 }}>
+              Credit Balance
             </div>
-          ) : (
-            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/8 px-4 py-3 text-sm leading-6 text-emerald-100/85">
-              Your subscription unlocks app capability boundaries. Credits cover managed model usage inside that entitlement instead of acting as the entitlement itself.
+            <div style={{
+              fontFamily: 'ui-monospace, monospace', fontWeight: 900, fontSize: '2.2rem',
+              color: hasUnlimited || bypassBilling ? '#4ade80' : (creditBalance ?? 1) <= 0 ? '#f87171' : '#ffffff',
+              filter: `drop-shadow(0 0 12px ${hasUnlimited || bypassBilling ? 'rgba(74,222,128,0.6)' : planCfg.glow})`,
+              lineHeight: 1,
+            }}>
+              {creditDisplay}
             </div>
-          )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            {!hasUnlimited && !bypassBilling && (
+              <button
+                onClick={() => { setBuyAmount(null); setShowBuyCredits(true) }}
+                style={{
+                  background: 'linear-gradient(135deg,#ff0033,#cc0029)',
+                  border: 'none', borderRadius: 8, padding: '8px 14px',
+                  color: '#fff', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  boxShadow: '0 0 20px rgba(255,0,51,0.3)',
+                }}
+              >
+                <Zap size={13} />
+                Buy Credits
+              </button>
+            )}
+            {subscription?.plan_type && subscription.plan_type !== 'free' && (
+              <button
+                onClick={handleManageSubscription}
+                disabled={portalLoading}
+                style={{
+                  background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)',
+                  borderRadius: 8, padding: '8px 14px',
+                  color: 'rgba(255,255,255,0.7)', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                {portalLoading ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <ExternalLink size={13} />}
+                Manage
+              </button>
+            )}
+            <button onClick={load} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '8px 10px', color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }}>
+              <RefreshCw size={13} />
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Plan Upgrade Grid */}
+      {/* ── Subscription Plan Cards ────────────────────────────────────── */}
       <div>
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-white">Plans</h3>
-            <div className="mt-1 text-xs text-gray-500">Free is for websites. Monthly plans unlock real apps. Credits handle usage above the included monthly runway.</div>
-          </div>
-          <button onClick={load} className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 transition-colors">
-            <RefreshCw className="w-3 h-3" /> Refresh
-          </button>
+        <div style={{ marginBottom: 14 }}>
+          <h3 style={{ margin: 0, color: '#fff', fontSize: '0.95rem', fontWeight: 700 }}>Subscription Plans</h3>
+          <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,0.4)', fontSize: '0.78rem' }}>
+            Plan tier unlocks capabilities. Credits cover managed AI usage.
+          </p>
         </div>
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-4">
-          {plans.map(plan => {
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+          {(plans.length > 0 ? plans : [
+            { type: 'free', name: 'Free', monthly_price_cents: 0, monthly_price_id: '', monthly_credits_usd: 0, is_popular: false, features: [] },
+            { type: 'builder', name: 'Builder', monthly_price_cents: 1900, monthly_price_id: '', monthly_credits_usd: 10, is_popular: false, features: [] },
+            { type: 'pro', name: 'Pro', monthly_price_cents: 4900, monthly_price_id: '', monthly_credits_usd: 25, is_popular: true, features: [] },
+            { type: 'team', name: 'Team', monthly_price_cents: 9900, monthly_price_id: '', monthly_credits_usd: 60, is_popular: false, features: [] },
+          ]).map(plan => {
+            const cfg = PLAN_CONFIG[plan.type] ?? PLAN_CONFIG.free
             const isCurrent = plan.type === currentPlanType
-            const isUpgrade = !isCurrent
-            const priceStr = plan.monthly_price_cents === 0
-              ? 'Free'
-              : `$${(plan.monthly_price_cents / 100).toFixed(0)}/mo`
+            const priceStr = plan.monthly_price_cents === 0 ? 'Free' : `$${(plan.monthly_price_cents / 100).toFixed(0)}`
+            const features = plan.features.length > 0 ? plan.features : cfg.features
 
             return (
               <div
                 key={plan.type}
-                className={cn(
-                  'relative flex flex-col gap-4 rounded-2xl border p-5 transition-all shadow-[0_24px_60px_rgba(0,0,0,0.18)]',
-                  isCurrent
-                    ? 'border-emerald-500/40 bg-emerald-500/7'
-                    : plan.is_popular
-                      ? 'border-green-500/30 bg-green-500/7'
-                      : 'border-gray-800 bg-gray-900/50'
-                )}
+                style={{
+                  position: 'relative',
+                  borderRadius: 14,
+                  border: `1px solid ${isCurrent ? cfg.border : 'rgba(255,255,255,0.08)'}`,
+                  background: isCurrent ? cfg.bg : 'rgba(255,255,255,0.025)',
+                  boxShadow: isCurrent ? `0 0 40px ${cfg.glow}, 0 8px 32px rgba(0,0,0,0.4)` : '0 4px 20px rgba(0,0,0,0.3)',
+                  padding: '20px 18px 18px',
+                  display: 'flex', flexDirection: 'column', gap: 14,
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={e => {
+                  if (!isCurrent) {
+                    ;(e.currentTarget as HTMLDivElement).style.border = `1px solid ${cfg.border}`
+                    ;(e.currentTarget as HTMLDivElement).style.background = cfg.bg
+                    ;(e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 30px ${cfg.glow}, 0 8px 32px rgba(0,0,0,0.4)`
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (!isCurrent) {
+                    ;(e.currentTarget as HTMLDivElement).style.border = '1px solid rgba(255,255,255,0.08)'
+                    ;(e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.025)'
+                    ;(e.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)'
+                  }
+                }}
               >
-                {plan.is_popular && !isCurrent && (
-                  <div className="absolute -top-2.5 left-4 text-[10px] bg-green-500 text-black font-black px-2 py-0.5 rounded-full uppercase">
-                    Popular
-                  </div>
-                )}
-                {isCurrent && (
-                  <div className="absolute -top-2.5 left-4 text-[10px] bg-emerald-500 text-black font-black px-2 py-0.5 rounded-full uppercase">
-                    Current
+                {/* Badge */}
+                {(isCurrent || cfg.badge) && (
+                  <div style={{
+                    position: 'absolute', top: -11, left: 16,
+                    fontSize: '0.6rem', fontWeight: 900, letterSpacing: '0.1em',
+                    padding: '3px 9px', borderRadius: 100, textTransform: 'uppercase',
+                    background: isCurrent ? cfg.color : cfg.color,
+                    color: ['#00f5ff','#f59e0b'].includes(cfg.color) ? '#000' : '#fff',
+                  }}>
+                    {isCurrent ? 'CURRENT PLAN' : cfg.badge}
                   </div>
                 )}
 
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="font-bold text-white text-sm">{plan.name}</div>
-                    <div className="text-lg font-black font-mono text-white mt-0.5">{priceStr}</div>
-                    {plan.monthly_credits_usd > 0 && (
-                      <div className="text-[11px] text-emerald-400 mt-0.5">
-                        + ${plan.monthly_credits_usd.toFixed(0)} credits / mo
-                      </div>
+                {/* Header */}
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <div style={{ color: cfg.color }}>{cfg.icon}</div>
+                    <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#fff' }}>{plan.name}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                    <span style={{
+                      fontFamily: 'ui-monospace, monospace', fontWeight: 900, fontSize: '1.8rem',
+                      color: cfg.color,
+                      filter: isCurrent ? `drop-shadow(0 0 10px ${cfg.glow})` : 'none',
+                    }}>
+                      {priceStr}
+                    </span>
+                    {plan.monthly_price_cents > 0 && (
+                      <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.35)' }}>/mo</span>
                     )}
-                    <div className="mt-2 max-w-xs text-xs leading-5 text-gray-400">
-                      {planNarrative(plan.type)}
-                    </div>
                   </div>
-
-                  {isUpgrade && plan.type !== 'free' && (
-                    <button
-                      onClick={() => handleUpgrade(plan)}
-                      disabled={upgradeLoading === plan.type}
-                      className={cn(
-                        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all',
-                        plan.is_popular
-                          ? 'bg-green-600 hover:bg-green-500 text-white'
-                          : 'bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700'
-                      )}
-                    >
-                      {upgradeLoading === plan.type
-                        ? <Loader2 className="w-3 h-3 animate-spin" />
-                        : <ChevronRight className="w-3 h-3" />
-                      }
-                      Upgrade
-                    </button>
+                  {plan.monthly_credits_usd > 0 && (
+                    <div style={{ fontSize: '0.72rem', color: '#4ade80', marginTop: 2 }}>
+                      + ${plan.monthly_credits_usd}/mo in credits included
+                    </div>
                   )}
+                  <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.45)', marginTop: 5, lineHeight: 1.5 }}>
+                    {cfg.tagline}
+                  </div>
                 </div>
 
-                <ul className="space-y-1.5">
-                  {plan.features.slice(0, 5).map(f => (
-                    <li key={f} className="flex items-start gap-1.5 text-[11px] leading-5 text-gray-300">
-                      <Check className="w-3 h-3 text-emerald-400 flex-shrink-0 mt-0.5" />
+                {/* Features */}
+                <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+                  {features.slice(0, 5).map(f => (
+                    <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', lineHeight: 1.4 }}>
+                      <Check size={12} style={{ color: cfg.color, flexShrink: 0, marginTop: 1 }} />
                       {f}
                     </li>
                   ))}
                 </ul>
 
-                <div className="mt-auto rounded-xl border border-gray-800 bg-black/25 px-3 py-3">
-                  <div className="text-[10px] uppercase tracking-[0.16em] text-gray-500">Best for</div>
-                  <div className="mt-2 text-xs leading-5 text-gray-300">
-                    {plan.type === 'free' && 'Landing pages, UI mockups, and static marketing surfaces.'}
-                    {plan.type === 'builder' && 'Early-stage app teams that need backend, auth, and deployment without enterprise overhead.'}
-                    {plan.type === 'pro' && 'Founders and operators shipping production app changes every week.'}
-                    {plan.type === 'team' && 'Collaborative product teams that want shared credit runway and heavier workflows.'}
+                {/* CTA */}
+                {isCurrent ? (
+                  <div style={{
+                    textAlign: 'center', padding: '8px 0', fontSize: '0.75rem', fontWeight: 700,
+                    color: cfg.color, borderTop: `1px solid ${cfg.border}`,
+                  }}>
+                    ✓ Active Plan
                   </div>
-                </div>
+                ) : plan.type === 'free' ? (
+                  <div style={{
+                    textAlign: 'center', padding: '8px 0', fontSize: '0.72rem',
+                    color: 'rgba(255,255,255,0.3)', borderTop: '1px solid rgba(255,255,255,0.06)',
+                  }}>
+                    Default tier
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => handleUpgrade(plan)}
+                    disabled={upgradeLoading === plan.type}
+                    style={{
+                      width: '100%', padding: '10px 0',
+                      background: `linear-gradient(135deg, ${cfg.color}22, ${cfg.color}44)`,
+                      border: `1px solid ${cfg.border}`,
+                      borderRadius: 8, cursor: 'pointer',
+                      color: cfg.color, fontWeight: 700, fontSize: '0.82rem',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                      transition: 'all 0.2s',
+                      boxShadow: `0 0 16px ${cfg.glow}`,
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = `${cfg.color}33` }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = `linear-gradient(135deg, ${cfg.color}22, ${cfg.color}44)` }}
+                  >
+                    {upgradeLoading === plan.type
+                      ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Redirecting…</>
+                      : <><CreditCard size={13} /> Upgrade to {plan.name}</>
+                    }
+                  </button>
+                )}
               </div>
             )
           })}
         </div>
       </div>
 
-      {/* Invoice History */}
+      {/* ── Credit Pack Cards ──────────────────────────────────────────── */}
+      <div>
+        <div style={{ marginBottom: 14 }}>
+          <h3 style={{ margin: 0, color: '#fff', fontSize: '0.95rem', fontWeight: 700 }}>Credit Packs</h3>
+          <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,0.4)', fontSize: '0.78rem' }}>
+            One-time top-ups for extra AI usage runway. Don't unlock plan features on their own.
+          </p>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+          {PACK_CONFIG.map(pack => (
+            <button
+              key={pack.amountUsd}
+              onClick={() => { setBuyAmount(pack.amountUsd); setShowBuyCredits(true) }}
+              style={{
+                position: 'relative',
+                borderRadius: 12,
+                border: `1px solid ${pack.border}`,
+                background: pack.bg,
+                boxShadow: `0 0 24px ${pack.glow}, 0 4px 16px rgba(0,0,0,0.4)`,
+                padding: '18px 16px 16px',
+                cursor: 'pointer', textAlign: 'left',
+                transition: 'all 0.18s',
+                display: 'flex', flexDirection: 'column', gap: 8,
+              }}
+              onMouseEnter={e => {
+                ;(e.currentTarget as HTMLButtonElement).style.boxShadow = `0 0 40px ${pack.glow}, 0 8px 28px rgba(0,0,0,0.5)`
+                ;(e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)'
+              }}
+              onMouseLeave={e => {
+                ;(e.currentTarget as HTMLButtonElement).style.boxShadow = `0 0 24px ${pack.glow}, 0 4px 16px rgba(0,0,0,0.4)`
+                ;(e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'
+              }}
+            >
+              {pack.popular && (
+                <div style={{
+                  position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)',
+                  fontSize: '0.58rem', fontWeight: 900, letterSpacing: '0.1em',
+                  padding: '2px 10px', borderRadius: 100, textTransform: 'uppercase',
+                  background: pack.color,
+                  color: pack.color === '#00f5ff' ? '#000' : '#fff',
+                  whiteSpace: 'nowrap',
+                }}>
+                  Most Popular
+                </div>
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: pack.color }}>
+                  {pack.label}
+                </span>
+                <Zap size={14} style={{ color: pack.color }} />
+              </div>
+
+              <div>
+                <div style={{
+                  fontFamily: 'ui-monospace, monospace', fontWeight: 900, fontSize: '2rem',
+                  color: pack.color,
+                  filter: `drop-shadow(0 0 10px ${pack.glow})`,
+                  lineHeight: 1,
+                }}>
+                  ${pack.amountUsd}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>
+                  ${pack.amountUsd}.00 in AI credits
+                </div>
+              </div>
+
+              <div style={{
+                padding: '6px 10px', borderRadius: 7,
+                background: `${pack.color}18`, border: `1px solid ${pack.border}`,
+                fontSize: '0.7rem', color: pack.color, fontWeight: 600, textAlign: 'center',
+              }}>
+                Buy Now →
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Invoice History ────────────────────────────────────────────── */}
       {invoices.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-white mb-3">Invoice History</h3>
-          <div className="rounded-xl border border-gray-800 overflow-hidden">
+          <h3 style={{ margin: '0 0 12px', color: '#fff', fontSize: '0.95rem', fontWeight: 700 }}>Invoice History</h3>
+          <div style={{ borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
             {invoices.map((inv, i) => (
               <div
                 key={inv.id}
-                className={cn(
-                  'flex items-center justify-between px-4 py-3 text-sm',
-                  i > 0 && 'border-t border-gray-800'
-                )}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '12px 16px', fontSize: '0.82rem',
+                  borderTop: i > 0 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                  background: i % 2 === 0 ? 'rgba(255,255,255,0.015)' : 'transparent',
+                }}
               >
                 <div>
-                  <div className="text-white text-xs font-medium">
-                    {inv.description || 'Subscription payment'}
-                  </div>
-                  <div className="text-gray-500 text-[11px] mt-0.5">
+                  <div style={{ color: '#fff', fontWeight: 500 }}>{inv.description || 'Subscription payment'}</div>
+                  <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.72rem', marginTop: 2 }}>
                     {new Date(inv.created * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="font-mono text-white text-xs">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontFamily: 'ui-monospace, monospace', color: '#fff', fontWeight: 600 }}>
                     ${(inv.amount_paid / 100).toFixed(2)}
                   </span>
-                  <span className={cn(
-                    'text-[10px] px-1.5 py-0.5 rounded uppercase font-bold',
-                    inv.status === 'paid' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-gray-800 text-gray-400'
-                  )}>
+                  <span style={{
+                    fontSize: '0.65rem', padding: '2px 7px', borderRadius: 100, fontWeight: 700, textTransform: 'uppercase',
+                    background: inv.status === 'paid' ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.06)',
+                    color: inv.status === 'paid' ? '#4ade80' : 'rgba(255,255,255,0.4)',
+                  }}>
                     {inv.status}
                   </span>
                   {inv.hosted_invoice_url && (
-                    <a
-                      href={inv.hosted_invoice_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-gray-500 hover:text-gray-300 transition-colors"
+                    <a href={inv.hosted_invoice_url} target="_blank" rel="noopener noreferrer"
+                      style={{ color: 'rgba(255,255,255,0.3)', display: 'flex' }}
+                      onMouseEnter={e => ((e.currentTarget as HTMLAnchorElement).style.color = 'rgba(255,255,255,0.7)')}
+                      onMouseLeave={e => ((e.currentTarget as HTMLAnchorElement).style.color = 'rgba(255,255,255,0.3)')}
                     >
-                      <ExternalLink className="w-3 h-3" />
+                      <ExternalLink size={13} />
                     </a>
                   )}
                 </div>
@@ -572,8 +709,13 @@ export function BillingSettings() {
       )}
 
       {showBuyCredits && (
-        <BuyCreditsModal onClose={() => { setShowBuyCredits(false); load() }} />
+        <BuyCreditsModal
+          defaultAmount={buyAmount ?? undefined}
+          onClose={() => { setShowBuyCredits(false); setBuyAmount(null); load() }}
+        />
       )}
+
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
     </div>
   )
 }

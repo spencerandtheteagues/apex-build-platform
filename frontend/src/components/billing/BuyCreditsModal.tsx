@@ -24,11 +24,13 @@ interface Props {
   onClose: () => void
   /** Optional: highlighted message shown above the packs (e.g. "Your credits have run out.") */
   reason?: string
+  /** Optional: pre-select a specific credit pack amount */
+  defaultAmount?: number
 }
 
-export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason }) => {
+export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason, defaultAmount }) => {
   const [packs, setPacks] = useState<CreditPack[]>(DEFAULT_PACKS)
-  const [selected, setSelected] = useState<number>(50)
+  const [selected, setSelected] = useState<number>(defaultAmount ?? 50)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
