@@ -91,6 +91,7 @@ import { buildAuthenticatedWebSocketUrl } from '@/services/authSession'
 import { AssetUploader } from '@/components/project/AssetUploader'
 import DiffReviewPanel from '@/components/diff/DiffReviewPanel'
 import OrchestrationOverview from './OrchestrationOverview'
+import BuildPieProgress from './BuildPieProgress'
 
 // ============================================================================
 // TYPES
@@ -4855,28 +4856,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="pt-5">
-                  {/* Progress Bar */}
-                  <div className="mb-6">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-sm text-gray-400 font-medium">Progress</span>
-                      <span className="text-xl font-mono font-black text-red-400">{buildState.progress}%</span>
-                    </div>
-                    <div className="h-4 bg-gray-900 rounded-full overflow-hidden border border-gray-800">
-                      <div
-                        className="h-full rounded-full transition-all duration-500 relative overflow-hidden"
-                        style={{
-                          width: `${buildState.progress}%`,
-                          background: 'linear-gradient(90deg, #dc2626, #ea580c, #dc2626)',
-                          backgroundSize: '200% auto',
-                          animation: 'gradient-shift 2s linear infinite',
-                        }}
-                      >
-                        <div
-                          className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
-                          style={{ animation: 'shimmer 1s linear infinite' }}
-                        />
-                      </div>
-                    </div>
+                  {/* Pie Chart Progress */}
+                  <div className="flex justify-center mb-6">
+                    <BuildPieProgress
+                      progress={buildState.progress}
+                      status={buildState.status}
+                      phase={buildState.currentPhase}
+                      size={172}
+                    />
                   </div>
 
                   {/* Status Badge */}
