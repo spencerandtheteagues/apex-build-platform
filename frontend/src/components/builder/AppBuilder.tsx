@@ -3690,7 +3690,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
 
     if (skipAutoRestoreRef.current) {
-      skipAutoRestoreRef.current = false
       return
     }
 
