@@ -1331,7 +1331,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const chatEndRef = useRef<HTMLDivElement>(null)
   const wsReconnectAttempts = useRef(0)
   const maxWsReconnectAttempts = 5
-  const skipAutoRestoreRef = useRef(false)
+  const skipAutoRestoreRef = useRef(true)
 
   // Ref to track current isBuilding state (prevents stale closure in WebSocket onclose)
   const isBuildingRef = useRef(isBuilding)
@@ -1852,10 +1852,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     } finally {
       if (cancelFailed && currentBuild?.id) {
         persistLastWorkflowBuildId(currentBuild.id)
-        skipAutoRestoreRef.current = true
       } else {
         clearLastWorkflowBuildId()
       }
+      // Always prevent auto-restore after an explicit start-over
+      skipAutoRestoreRef.current = true
       resetBuilderState({ clearPrompt })
       addNotification({
         type: cancelFailed ? 'warning' : 'info',
@@ -1877,7 +1878,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     startOverSignalRef.current = startOverSignal
     if (startOverSignal === 0) return
 
-    void handleStartOver()
+    void handleStartOver({ skipConfirm: true })
   }, [handleStartOver, startOverSignal])
 
   // Tech stack options
