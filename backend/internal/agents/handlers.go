@@ -432,6 +432,7 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		return
 	}
 
+	userPlan := h.currentSubscriptionType(c, uid)
 	build, snapshot, restored, err := h.loadReadableBuild(buildID, uid)
 	if err == nil && build != nil {
 		// Verify ownership
@@ -469,7 +470,7 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 			"live":                   true,
 			"restored_from_snapshot": restored,
 		}
-		for key, value := range buildSnapshotStateResponseFields(copyBuildSnapshotStateLocked(build), string(build.Status)) {
+		for key, value := range buildSnapshotStateResponseFields(copyBuildSnapshotStateLocked(build), string(build.Status), userPlan) {
 			response[key] = value
 		}
 		c.JSON(http.StatusOK, response)
@@ -517,7 +518,7 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		"live":                   false,
 		"restored_from_snapshot": true,
 	}
-	for key, value := range buildSnapshotStateResponseFields(parseBuildSnapshotState(snapshot.StateJSON), snapshotStatus) {
+	for key, value := range buildSnapshotStateResponseFields(parseBuildSnapshotState(snapshot.StateJSON), snapshotStatus, userPlan) {
 		response[key] = value
 	}
 	c.JSON(http.StatusOK, response)
@@ -600,7 +601,11 @@ func writeBuildActionSessionError(c *gin.Context, err error) {
 	}
 }
 
-func buildSnapshotStateResponseFields(state BuildSnapshotState, fallbackStatus string) gin.H {
+// buildSnapshotStateResponseFields serialises BuildSnapshotState into a gin.H
+// ready for JSON response. When currentPlan is a paid tier (non-empty, non-"free")
+// any stale upgrade_required flag stored in the snapshot is cleared so that
+// previously-free builds don't keep showing an upgrade gate to paying users.
+func buildSnapshotStateResponseFields(state BuildSnapshotState, fallbackStatus string, currentPlan ...string) gin.H {
 	fields := gin.H{}
 
 	currentPhase := strings.TrimSpace(state.CurrentPhase)
@@ -626,12 +631,26 @@ func buildSnapshotStateResponseFields(state BuildSnapshotState, fallbackStatus s
 		fields["capability_detector"] = state.CapabilityState
 	}
 	if state.PolicyState != nil {
-		fields["policy_state"] = state.PolicyState
-		fields["policy"] = state.PolicyState
-		fields["build_classification"] = state.PolicyState.Classification
-		fields["classification"] = state.PolicyState.Classification
-		fields["upgrade_required"] = state.PolicyState.UpgradeRequired
-		if reason := strings.TrimSpace(state.PolicyState.UpgradeReason); reason != "" {
+		policy := *state.PolicyState
+		// If the caller supplies a paid plan, clear any stale upgrade gate that
+		// was recorded when the build was first created under a free account.
+		if len(currentPlan) > 0 && isPaidBuildPlan(currentPlan[0]) && policy.UpgradeRequired {
+			policy.UpgradeRequired = false
+			policy.UpgradeReason = ""
+			policy.RequiredPlan = ""
+			policy.Classification = "full_stack_candidate"
+			policy.PlanType = currentPlan[0]
+			policy.FullStackEligible = true
+			policy.PublishEnabled = true
+			policy.BYOKEnabled = true
+			policy.StaticFrontendOnly = false
+		}
+		fields["policy_state"] = policy
+		fields["policy"] = policy
+		fields["build_classification"] = policy.Classification
+		fields["classification"] = policy.Classification
+		fields["upgrade_required"] = policy.UpgradeRequired
+		if reason := strings.TrimSpace(policy.UpgradeReason); reason != "" {
 			fields["upgrade_reason"] = reason
 		}
 	}
@@ -696,6 +715,7 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 		return
 	}
 
+	userPlan := h.currentSubscriptionType(c, uid)
 	build, snapshot, restored, err := h.loadReadableBuild(buildID, uid)
 	if err == nil && build != nil {
 		// Verify ownership
@@ -736,7 +756,7 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 			"live":                   true,
 			"restored_from_snapshot": restored,
 		}
-		for key, value := range buildSnapshotStateResponseFields(copyBuildSnapshotStateLocked(build), string(build.Status)) {
+		for key, value := range buildSnapshotStateResponseFields(copyBuildSnapshotStateLocked(build), string(build.Status), userPlan) {
 			response[key] = value
 		}
 		c.JSON(http.StatusOK, response)
@@ -783,7 +803,7 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 		"live":                   false,
 		"restored_from_snapshot": true,
 	}
-	for key, value := range buildSnapshotStateResponseFields(snapshotState, snapshot.Status) {
+	for key, value := range buildSnapshotStateResponseFields(snapshotState, snapshot.Status, userPlan) {
 		response[key] = value
 	}
 	c.JSON(http.StatusOK, response)
@@ -1761,6 +1781,7 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 	if !ok {
 		return
 	}
+	userPlan := h.currentSubscriptionType(c, uid)
 	buildID := c.Param("buildId")
 
 	var build models.CompletedBuild
@@ -1814,7 +1835,7 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 		"live":              live,
 		"resumable":         isActiveBuildStatus(build.Status),
 	}
-	for key, value := range buildSnapshotStateResponseFields(snapshotState, build.Status) {
+	for key, value := range buildSnapshotStateResponseFields(snapshotState, build.Status, userPlan) {
 		response[key] = value
 	}
 	c.JSON(http.StatusOK, response)
