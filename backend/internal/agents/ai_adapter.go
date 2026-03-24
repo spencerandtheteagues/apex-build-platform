@@ -32,7 +32,7 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 		PowerFast:     "gemini-2.5-flash-lite",
 	},
 	ai.ProviderGrok: {
-		PowerMax:      "grok-code-fast-1",
+		PowerMax:      "grok-4.20-0309-reasoning",
 		PowerBalanced: "grok-3",
 		PowerFast:     "grok-3-mini",
 	},
