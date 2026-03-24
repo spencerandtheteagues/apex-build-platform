@@ -4163,12 +4163,13 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 				build.mu.Lock()
 				if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil && orchestration.BuildContract != nil {
 					orchestration.VerificationReports = append(orchestration.VerificationReports, *critiqueReport)
-					orchestration.BuildContract.VerificationWarnings = dedupeStrings(append(orchestration.BuildContract.VerificationWarnings, critiqueReport.Warnings...))
-					if len(critiqueReport.Blockers) > 0 {
-						orchestration.BuildContract.VerificationBlockers = dedupeStrings(append(orchestration.BuildContract.VerificationBlockers, critiqueReport.Blockers...))
-						contractBlocked = true
-						contractBlocker = strings.Join(critiqueReport.Blockers, "; ")
-					}
+					// LLM critique findings are surfaced as warnings only — never hard blockers.
+					// Deterministic validation owns hard blocks. An LLM second-opinion on a
+					// rough planning-time contract is too prone to false positives (e.g. flagging
+					// TypeScript types as invalid SQLite types, referencing table names by the
+					// wrong case). These are resolved naturally during code generation.
+					allCritiqueFindings := dedupeStrings(append(critiqueReport.Warnings, critiqueReport.Blockers...))
+					orchestration.BuildContract.VerificationWarnings = dedupeStrings(append(orchestration.BuildContract.VerificationWarnings, allCritiqueFindings...))
 				}
 				build.mu.Unlock()
 			}
