@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"apex-build/internal/applog"
+	appmiddleware "apex-build/internal/middleware"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -52,15 +53,6 @@ func classifyBuildMessageError(err error) int {
 	}
 }
 
-func userIDFromValue(c *gin.Context, value any) (uint, bool) {
-	uid, ok := value.(uint)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
-		return 0, false
-	}
-	return uid, true
-}
-
 // NewBuildHandler creates a new build handler
 func NewBuildHandler(manager *AgentManager, hub *WSHub) *BuildHandler {
 	return &BuildHandler{
@@ -73,14 +65,8 @@ func NewBuildHandler(manager *AgentManager, hub *WSHub) *BuildHandler {
 // PreflightCheck validates provider credentials and billing status before a build.
 // POST /api/v1/build/preflight
 func (h *BuildHandler) PreflightCheck(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userID.(uint)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user context"})
 		return
 	}
 
@@ -220,16 +206,9 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 	log.Printf("StartBuild handler called")
 
 	// Get user ID from auth context
-	userID, exists := c.Get("user_id")
-	if !exists {
-		log.Printf("StartBuild: unauthorized - no user_id in context")
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userID.(uint)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
-		log.Printf("StartBuild: invalid user_id type %T", userID)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user context"})
+		log.Printf("StartBuild: invalid or missing user context")
 		return
 	}
 	log.Printf("StartBuild: user_id=%d", uid)
@@ -280,6 +259,31 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 			"suggestion":     "Free accounts can build static frontend websites. Upgrade to Builder or higher to unlock backend, database, auth, billing, and realtime app generation.",
 		})
 		return
+	}
+
+	// Validate power mode against plan tier.
+	// Free → fast only; Builder → balanced max; Pro/Team/Enterprise → all modes.
+	if req.PowerMode != "" {
+		powerModeRank := map[PowerMode]int{PowerFast: 0, PowerBalanced: 1, PowerMax: 2}
+		maxAllowed := PowerFast
+		switch planType {
+		case "builder":
+			maxAllowed = PowerBalanced
+		case "pro", "team", "enterprise", "owner":
+			maxAllowed = PowerMax
+		}
+		reqRank, reqKnown := powerModeRank[req.PowerMode]
+		maxRank := powerModeRank[maxAllowed]
+		if reqKnown && reqRank > maxRank {
+			c.JSON(http.StatusPaymentRequired, gin.H{
+				"error":          fmt.Sprintf("Power mode %q requires a higher subscription tier", req.PowerMode),
+				"error_code":     "POWER_MODE_UPGRADE_REQUIRED",
+				"current_plan":   planType,
+				"max_power_mode": string(maxAllowed),
+				"suggestion":     "Upgrade your plan to use higher power modes, or select a lower power mode.",
+			})
+			return
+		}
 	}
 
 	// Validate role_assignments if provided
@@ -391,6 +395,21 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 		if err := h.manager.StartBuild(build.ID); err != nil {
 			log.Printf("Error starting build %s: %v", build.ID, err)
 			applog.BuildFailed(build.ID, uid, err.Error(), 0)
+			// Defensively broadcast the failure to any already-connected WS clients.
+			// StartBuild marks the build failed internally on most paths but a few
+			// early-exit paths (e.g. persist failure before agents spawn) set the status
+			// without sending a WS event, leaving the frontend in an infinite loading
+			// state.  This broadcast guarantees at least one error event is emitted.
+			h.manager.broadcast(build.ID, &WSMessage{
+				Type:      WSBuildError,
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"error":   "Build failed to initialize",
+					"details": err.Error(),
+					"status":  string(BuildFailed),
+				},
+			})
 		}
 	}()
 
@@ -408,12 +427,7 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 // GET /api/v1/build/:id/status
 func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -677,12 +691,7 @@ func buildSnapshotStateResponseFields(state BuildSnapshotState, fallbackStatus s
 // GET /api/v1/build/:id
 func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -795,8 +804,15 @@ func (h *BuildHandler) loadReadableBuild(buildID string, userID uint) (*Build, *
 	}
 
 	if isActiveBuildStatus(string(normalizeRestoredBuildStatus(snapshot))) {
+		// Use resumeExecution:false here.  loadReadableBuild is called by
+		// read-only endpoints (GetBuildDetails, GetBuildStatus) that may be
+		// polled many times per second.  Passing resumeExecution:true caused
+		// all pending tasks from the snapshot to be re-queued on every single
+		// read request, leading to duplicate task execution and spiralling
+		// credit burn.  Execution resumption is handled exclusively by write
+		// paths (SendMessage, getBuildActionSession).
 		restoredBuild, restored, restoreErr := h.manager.restoreBuildSessionFromSnapshotWithOptions(snapshot, restoreBuildSessionOptions{
-			resumeExecution: true,
+			resumeExecution: false,
 		})
 		if restoreErr == nil {
 			if restoredBuild.UserID != userID {
@@ -814,12 +830,7 @@ func (h *BuildHandler) loadReadableBuild(buildID string, userID uint) (*Build, *
 // POST /api/v1/build/:id/message
 func (h *BuildHandler) SendMessage(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -928,12 +939,7 @@ func (h *BuildHandler) SendMessage(c *gin.Context) {
 // GET /api/v1/build/:id/messages
 func (h *BuildHandler) GetMessages(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -972,12 +978,7 @@ func (h *BuildHandler) GetMessages(c *gin.Context) {
 // GET /api/v1/build/:id/permissions
 func (h *BuildHandler) GetPermissions(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1022,12 +1023,7 @@ func (h *BuildHandler) GetPermissions(c *gin.Context) {
 // POST /api/v1/build/:id/permissions/rules
 func (h *BuildHandler) SetPermissionRule(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1078,12 +1074,7 @@ func (h *BuildHandler) SetPermissionRule(c *gin.Context) {
 func (h *BuildHandler) ResolvePermissionRequest(c *gin.Context) {
 	buildID := c.Param("id")
 	requestID := c.Param("requestId")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1130,12 +1121,7 @@ func (h *BuildHandler) ResolvePermissionRequest(c *gin.Context) {
 // POST /api/v1/build/:id/pause
 func (h *BuildHandler) PauseBuild(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1169,12 +1155,7 @@ func (h *BuildHandler) PauseBuild(c *gin.Context) {
 // POST /api/v1/build/:id/resume
 func (h *BuildHandler) ResumeBuild(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1208,12 +1189,7 @@ func (h *BuildHandler) ResumeBuild(c *gin.Context) {
 // GET /api/v1/build/:id/checkpoints
 func (h *BuildHandler) GetCheckpoints(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1260,12 +1236,7 @@ func (h *BuildHandler) GetCheckpoints(c *gin.Context) {
 func (h *BuildHandler) RollbackCheckpoint(c *gin.Context) {
 	buildID := c.Param("id")
 	checkpointID := c.Param("checkpointId")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1312,12 +1283,7 @@ func (h *BuildHandler) RollbackCheckpoint(c *gin.Context) {
 // GET /api/v1/build/:id/agents
 func (h *BuildHandler) GetAgents(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1368,12 +1334,7 @@ func (h *BuildHandler) GetAgents(c *gin.Context) {
 // GET /api/v1/build/:id/tasks
 func (h *BuildHandler) GetTasks(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1433,12 +1394,7 @@ func (h *BuildHandler) GetTasks(c *gin.Context) {
 // GET /api/v1/build/:id/files
 func (h *BuildHandler) GetGeneratedFiles(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1488,12 +1444,7 @@ func (h *BuildHandler) GetGeneratedFiles(c *gin.Context) {
 // GET /api/v1/build/:id/artifacts
 func (h *BuildHandler) GetBuildArtifacts(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1522,12 +1473,7 @@ func (h *BuildHandler) GetBuildArtifacts(c *gin.Context) {
 // POST /api/v1/build/:id/apply
 func (h *BuildHandler) ApplyBuildArtifacts(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1680,12 +1626,7 @@ func (h *BuildHandler) ApplyBuildArtifacts(c *gin.Context) {
 // POST /api/v1/build/:id/cancel
 func (h *BuildHandler) CancelBuild(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1724,12 +1665,7 @@ func (h *BuildHandler) ListBuilds(c *gin.Context) {
 		return
 	}
 
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1821,12 +1757,7 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 		return
 	}
 
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -1897,12 +1828,7 @@ func (h *BuildHandler) DownloadCompletedBuild(c *gin.Context) {
 		return
 	}
 
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -2149,12 +2075,7 @@ func isActiveBuildStatus(status string) bool {
 // KillAllBuilds cancels all active builds for the authenticated user
 // POST /api/v1/build/kill-all
 func (h *BuildHandler) KillAllBuilds(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -2172,12 +2093,7 @@ func (h *BuildHandler) KillAllBuilds(c *gin.Context) {
 // GET /api/v1/build/:id/proposed-edits
 func (h *BuildHandler) GetProposedEdits(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -2207,12 +2123,7 @@ func (h *BuildHandler) GetProposedEdits(c *gin.Context) {
 // POST /api/v1/build/:id/approve-edits
 func (h *BuildHandler) ApproveEdits(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -2252,12 +2163,7 @@ func (h *BuildHandler) ApproveEdits(c *gin.Context) {
 // POST /api/v1/build/:id/reject-edits
 func (h *BuildHandler) RejectEdits(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -2298,12 +2204,7 @@ func (h *BuildHandler) RejectEdits(c *gin.Context) {
 // POST /api/v1/build/:id/approve-all
 func (h *BuildHandler) ApproveAllEdits(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
@@ -2329,12 +2230,7 @@ func (h *BuildHandler) ApproveAllEdits(c *gin.Context) {
 // POST /api/v1/build/:id/reject-all
 func (h *BuildHandler) RejectAllEdits(c *gin.Context) {
 	buildID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	uid, ok := userIDFromValue(c, userID)
+	uid, ok := appmiddleware.RequireUserID(c)
 	if !ok {
 		return
 	}
