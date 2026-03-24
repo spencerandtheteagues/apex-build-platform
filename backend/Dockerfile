@@ -5,7 +5,7 @@
 # ==================================================
 # Stage 1: Build
 # ==================================================
-FROM golang:1.23-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 # Build arguments for versioning
 ARG VERSION=dev
@@ -109,7 +109,7 @@ EXPOSE 8080
 
 # Health check - checks /health endpoint every 30 seconds
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
-    CMD curl -f http://localhost:8080/ready || exit 1
+    CMD curl -f http://localhost:8080/health || exit 1
 
 # Run the application
 ENTRYPOINT ["/app/apex-server"]
