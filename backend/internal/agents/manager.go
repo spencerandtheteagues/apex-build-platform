@@ -1354,7 +1354,10 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 		switch role {
 		case RolePlanner, RoleArchitect, RoleReviewer:
 			assignments[role] = pick(role, ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok)
-		case RoleFrontend, RoleBackend, RoleDatabase, RoleSolver:
+		case RoleBackend, RoleSolver:
+			// Grok-4.20-reasoning excels at complex backend logic and repair
+			assignments[role] = pick(role, ai.ProviderGrok, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini)
+		case RoleFrontend, RoleDatabase:
 			assignments[role] = pick(role, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini, ai.ProviderGrok)
 		case RoleTesting:
 			assignments[role] = pick(role, ai.ProviderGemini, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGrok)
@@ -1470,8 +1473,8 @@ func (am *AgentManager) selectLeadProvider(providers []ai.AIProvider) ai.AIProvi
 	capabilityRank := map[ai.AIProvider]int{
 		ai.ProviderClaude: 5, // Highest capability for reasoning and planning
 		ai.ProviderGPT4:   4, // Strong for code generation and complex tasks
+		ai.ProviderGrok:   4, // grok-4.20-reasoning: frontier reasoning + coding model
 		ai.ProviderGemini: 3, // Good general purpose
-		ai.ProviderGrok:   2, // Alternative option
 		ai.ProviderOllama: 1, // Local model (good but depends on specific model)
 	}
 

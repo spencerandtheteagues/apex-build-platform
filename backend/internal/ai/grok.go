@@ -208,14 +208,14 @@ func (g *GrokClient) getModel(req *AIRequest) string {
 	}
 
 	switch req.Capability {
-	case CapabilityCodeGeneration, CapabilityRefactoring, CapabilityArchitecture:
-		return "grok-code-fast-1" // Latest coding-specialized model
+	case CapabilityCodeGeneration, CapabilityRefactoring, CapabilityArchitecture, CapabilityDebugging:
+		return "grok-4.20-0309-reasoning" // Frontier reasoning model for complex codegen
+	case CapabilityCodeReview:
+		return "grok-3" // Balanced reasoning tier
 	case CapabilityCodeCompletion:
 		return "grok-3-mini" // Fast tier
-	case CapabilityCodeReview, CapabilityDebugging:
-		return "grok-3" // Balanced reasoning tier
 	default:
-		return "grok-3-mini" // Default to fast model
+		return "grok-4.20-0309-reasoning" // Default to frontier model
 	}
 }
 
@@ -364,9 +364,15 @@ func (g *GrokClient) calculateCost(inputTokens, outputTokens int, model string) 
 	case "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning":
 		inputCostPer1M = 2.00
 		outputCostPer1M = 5.00
-	case "grok-4-fast":
+	case "grok-4-fast", "grok-4-fast-non-reasoning", "grok-4-fast-reasoning":
 		inputCostPer1M = 0.20
 		outputCostPer1M = 0.50
+	case "grok-4.20-0309-reasoning", "grok-4.20-multi-agent-0309":
+		inputCostPer1M = 3.00
+		outputCostPer1M = 15.00
+	case "grok-4.20-0309-non-reasoning":
+		inputCostPer1M = 2.00
+		outputCostPer1M = 10.00
 	default:
 		inputCostPer1M = 0.30
 		outputCostPer1M = 0.50

@@ -685,9 +685,10 @@ func GetAvailableModels() map[string][]ModelInfo {
 			{ID: "gemini-2.5-flash-lite", Name: "Gemini 2.5 Flash Lite", Speed: "fast", CostTier: "low", Description: "FAST — lowest-cost Gemini tier"},
 		},
 		"grok": {
-			{ID: "grok-code-fast-1", Name: "Grok Code Fast 1", Speed: "medium", CostTier: "high", Description: "MAX — current Grok coding model"},
-			{ID: "grok-3", Name: "Grok 3", Speed: "medium", CostTier: "medium", Description: "BALANCED — stronger reasoning tier"},
-			{ID: "grok-3-mini", Name: "Grok 3 Mini", Speed: "fast", CostTier: "low", Description: "FAST — mini Grok tier"},
+			{ID: "grok-4.20-0309-reasoning", Name: "Grok 4.20 Reasoning", Speed: "medium", CostTier: "high", Description: "MAX — frontier reasoning model, used for backend + repair"},
+			{ID: "grok-4.20-0309-non-reasoning", Name: "Grok 4.20", Speed: "fast", CostTier: "high", Description: "MAX — frontier Grok without extended thinking"},
+			{ID: "grok-3", Name: "Grok 3", Speed: "medium", CostTier: "medium", Description: "BALANCED — strong reasoning tier"},
+			{ID: "grok-3-mini", Name: "Grok 3 Mini", Speed: "fast", CostTier: "low", Description: "FAST — lightweight Grok tier"},
 		},
 		"ollama": {
 			{ID: "deepseek-r1:18b", Name: "DeepSeek-R1 (18b)", Speed: "variable", CostTier: "free", Description: "Reasoning model (local)"},
