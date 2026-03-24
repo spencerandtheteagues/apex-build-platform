@@ -77,9 +77,15 @@ RUN addgroup -g 1001 -S appgroup && \
 # Set working directory
 WORKDIR /app
 
+# Install E2B SDK helper dependencies
+COPY --from=builder /app/e2b-runner/package.json /app/e2b-runner/package.json
+COPY --from=builder /app/e2b-runner/package-lock.json /app/e2b-runner/package-lock.json
+RUN cd /app/e2b-runner && npm ci --omit=dev --no-audit --no-fund
+
 # Copy binary from builder
 COPY --from=builder /app/apex-server /app/apex-server
 COPY --from=builder /app/migrations /app/migrations
+COPY --from=builder /app/e2b-runner /app/e2b-runner
 
 # Copy timezone data
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo

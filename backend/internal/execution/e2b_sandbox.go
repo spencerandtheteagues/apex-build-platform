@@ -3,11 +3,10 @@ package execution
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,77 +15,139 @@ import (
 	"github.com/google/uuid"
 )
 
-// E2BSandbox provides E2B-managed microVM sandbox execution
+// E2BSandbox provides E2B-managed microVM sandbox execution.
+// Sandbox lifecycle and command execution are delegated to a small Node helper
+// that uses the official E2B SDK, which stays compatible with the current API.
 type E2BSandbox struct {
-	apiKey     string
-	baseURL    string
-	client     *http.Client
-	executions map[string]*e2bExecution
-	mu         sync.RWMutex
+	apiKey        string
+	helperCommand []string
+	executions    map[string]*e2bExecution
+	mu            sync.RWMutex
 }
 
-// e2bExecution tracks an active E2B sandbox execution
+// e2bExecution tracks an active E2B sandbox execution.
 type e2bExecution struct {
-	ID          string
-	SandboxID   string
-	ClientID    string
-	AccessToken string
-	Language    string
-	StartTime   time.Time
+	ID        string
+	SandboxID string
+	Language  string
+	StartTime time.Time
 }
 
-// E2B API request/response types
-type createSandboxRequest struct {
-	TemplateID string `json:"templateID"`
-	Timeout    int    `json:"timeout"`
+type e2bHelperRequest struct {
+	Action    string `json:"action"`
+	SandboxID string `json:"sandboxId,omitempty"`
+	Command   string `json:"command,omitempty"`
+	Path      string `json:"path,omitempty"`
+	Content   string `json:"content,omitempty"`
+	TimeoutMs int    `json:"timeoutMs,omitempty"`
 }
 
-type createSandboxResponse struct {
-	SandboxID         string `json:"sandboxID"`
-	ClientID          string `json:"clientID"`
-	EnvdPort          int    `json:"envdPort"`
-	AccessToken       string `json:"accessToken"`
-	LegacyAccessToken string `json:"access_token"`
-}
-
-func (r createSandboxResponse) resolvedAccessToken() string {
-	if token := strings.TrimSpace(r.AccessToken); token != "" {
-		return token
-	}
-	return strings.TrimSpace(r.LegacyAccessToken)
-}
-
-type runCommandRequest struct {
-	Cmd     string `json:"cmd"`
-	Timeout int    `json:"timeout"`
+type e2bHelperResponse struct {
+	SandboxID string `json:"sandboxId,omitempty"`
+	ExitCode  int    `json:"exitCode,omitempty"`
+	Stdout    string `json:"stdout,omitempty"`
+	Stderr    string `json:"stderr,omitempty"`
+	OK        bool   `json:"ok,omitempty"`
+	Killed    bool   `json:"killed,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 type runCommandResponse struct {
-	ExitCode int    `json:"exitCode"`
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
+	ExitCode int
+	Stdout   string
+	Stderr   string
 }
 
-// NewE2BSandbox creates a new E2B sandbox executor
+// NewE2BSandbox creates a new E2B sandbox executor.
 func NewE2BSandbox(apiKey string) (*E2BSandbox, error) {
-	if apiKey == "" {
+	if strings.TrimSpace(apiKey) == "" {
 		return nil, fmt.Errorf("E2B API key is required")
 	}
 
+	helperCommand, err := defaultE2BHelperCommand()
+	if err != nil {
+		return nil, err
+	}
+
 	return &E2BSandbox{
-		apiKey:     apiKey,
-		baseURL:    "https://api.e2b.dev",
-		client:     &http.Client{Timeout: 120 * time.Second},
-		executions: make(map[string]*e2bExecution),
+		apiKey:        apiKey,
+		helperCommand: helperCommand,
+		executions:    make(map[string]*e2bExecution),
 	}, nil
 }
 
-// Execute runs code in an E2B sandbox
+func defaultE2BHelperCommand() ([]string, error) {
+	if override := strings.TrimSpace(os.Getenv("E2B_RUNNER_PATH")); override != "" {
+		return []string{"node", override}, nil
+	}
+
+	candidates := make([]string, 0, 3)
+	if executablePath, err := os.Executable(); err == nil && strings.TrimSpace(executablePath) != "" {
+		candidates = append(candidates, filepath.Join(filepath.Dir(executablePath), "e2b-runner", "exec.mjs"))
+	}
+	candidates = append(candidates, "e2b-runner/exec.mjs", "backend/e2b-runner/exec.mjs")
+
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() {
+			return []string{"node", candidate}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("E2B runner not found; expected one of %s", strings.Join(candidates, ", "))
+}
+
+func (e *E2BSandbox) runHelper(ctx context.Context, request e2bHelperRequest) (*e2bHelperResponse, error) {
+	if len(e.helperCommand) == 0 {
+		return nil, fmt.Errorf("E2B helper command is not configured")
+	}
+
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal helper request: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, e.helperCommand[0], e.helperCommand[1:]...)
+	cmd.Env = append(os.Environ(), "E2B_API_KEY="+e.apiKey)
+	cmd.Stdin = bytes.NewReader(payload)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = strings.TrimSpace(stdout.String())
+		}
+		if detail == "" {
+			return nil, fmt.Errorf("E2B helper action %q failed: %w", request.Action, err)
+		}
+		return nil, fmt.Errorf("E2B helper action %q failed: %s", request.Action, detail)
+	}
+
+	var response e2bHelperResponse
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		return nil, fmt.Errorf("failed to decode E2B helper response: %w", err)
+	}
+	if strings.TrimSpace(response.Error) != "" {
+		return nil, fmt.Errorf("%s", strings.TrimSpace(response.Error))
+	}
+
+	return &response, nil
+}
+
+// Execute runs code in an E2B sandbox.
 func (e *E2BSandbox) Execute(ctx context.Context, language, code, stdin string) (*ExecutionResult, error) {
 	return e.ExecuteWithID(ctx, "", language, code, stdin)
 }
 
-// ExecuteWithID runs code in an E2B sandbox with a specific execution ID
+// ExecuteWithID runs code in an E2B sandbox with a specific execution ID.
 func (e *E2BSandbox) ExecuteWithID(ctx context.Context, execID, language, code, stdin string) (*ExecutionResult, error) {
 	if strings.TrimSpace(execID) == "" {
 		execID = uuid.New().String()
@@ -100,8 +161,7 @@ func (e *E2BSandbox) ExecuteWithID(ctx context.Context, execID, language, code, 
 		Status:    "running",
 	}
 
-	// Create E2B sandbox
-	sandboxID, clientID, accessToken, err := e.createSandbox(ctx)
+	sandboxID, _, _, err := e.createSandbox(ctx)
 	if err != nil {
 		result.Status = "failed"
 		result.ErrorOutput = fmt.Sprintf("Failed to create E2B sandbox: %v", err)
@@ -109,29 +169,24 @@ func (e *E2BSandbox) ExecuteWithID(ctx context.Context, execID, language, code, 
 		return result, nil
 	}
 
-	// Track this execution
-	exec := &e2bExecution{
-		ID:          execID,
-		SandboxID:   sandboxID,
-		ClientID:    clientID,
-		AccessToken: accessToken,
-		Language:    language,
-		StartTime:   startTime,
+	execution := &e2bExecution{
+		ID:        execID,
+		SandboxID: sandboxID,
+		Language:  language,
+		StartTime: startTime,
 	}
 
 	e.mu.Lock()
-	e.executions[execID] = exec
+	e.executions[execID] = execution
 	e.mu.Unlock()
 
 	defer func() {
 		e.mu.Lock()
 		delete(e.executions, execID)
 		e.mu.Unlock()
-		// Kill sandbox when done
-		e.killSandbox(context.Background(), sandboxID, accessToken)
+		_ = e.killSandbox(context.Background(), sandboxID, "")
 	}()
 
-	// Get file extension and setup command for language
 	filename, setupCmd, runCmd, err := e.getLanguageCommands(language, code)
 	if err != nil {
 		result.Status = "failed"
@@ -140,17 +195,15 @@ func (e *E2BSandbox) ExecuteWithID(ctx context.Context, execID, language, code, 
 		return result, nil
 	}
 
-	// Upload code file
-	if err := e.uploadFile(ctx, sandboxID, accessToken, filename, code); err != nil {
+	if err := e.uploadFile(ctx, sandboxID, "", filename, code); err != nil {
 		result.Status = "failed"
 		result.ErrorOutput = fmt.Sprintf("Failed to upload code: %v", err)
 		result.ExitCode = 1
 		return result, nil
 	}
 
-	// Run setup command if needed
 	if setupCmd != "" {
-		setupResult, err := e.runCommand(ctx, sandboxID, accessToken, setupCmd)
+		setupResult, err := e.runCommand(ctx, sandboxID, "", setupCmd)
 		if err != nil {
 			result.Status = "failed"
 			result.ErrorOutput = fmt.Sprintf("Setup failed: %v", err)
@@ -166,25 +219,31 @@ func (e *E2BSandbox) ExecuteWithID(ctx context.Context, execID, language, code, 
 		}
 	}
 
-	// Run the code
-	cmdResult, err := e.runCommand(ctx, sandboxID, accessToken, runCmd)
+	commandResult, err := e.runCommand(ctx, sandboxID, "", runCmd)
 	if err != nil {
-		result.Status = "failed"
-		result.ErrorOutput = fmt.Sprintf("Execution failed: %v", err)
-		result.ExitCode = 1
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			result.Status = "timeout"
+			result.ErrorOutput = ctxErr.Error()
+			result.ExitCode = 124
+			result.TimedOut = ctxErr == context.DeadlineExceeded
+			result.Killed = !result.TimedOut
+		} else {
+			result.Status = "failed"
+			result.ErrorOutput = fmt.Sprintf("Execution failed: %v", err)
+			result.ExitCode = 1
+		}
 		return result, nil
 	}
 
-	// Fill in the result
 	completedAt := time.Now()
 	result.CompletedAt = &completedAt
 	result.Duration = time.Since(startTime)
 	result.DurationMs = result.Duration.Milliseconds()
-	result.Output = cmdResult.Stdout
-	result.ErrorOutput = cmdResult.Stderr
-	result.ExitCode = cmdResult.ExitCode
+	result.Output = commandResult.Stdout
+	result.ErrorOutput = commandResult.Stderr
+	result.ExitCode = commandResult.ExitCode
 
-	if cmdResult.ExitCode == 0 {
+	if commandResult.ExitCode == 0 {
 		result.Status = "completed"
 	} else {
 		result.Status = "failed"
@@ -193,39 +252,39 @@ func (e *E2BSandbox) ExecuteWithID(ctx context.Context, execID, language, code, 
 	return result, nil
 }
 
-// ExecuteFile is not supported in E2B sandbox - use Execute with code content
+// ExecuteFile is not supported in E2B sandbox - use Execute with code content.
 func (e *E2BSandbox) ExecuteFile(ctx context.Context, filepath string, args []string, stdin string) (*ExecutionResult, error) {
 	return nil, fmt.Errorf("file execution not supported in E2B sandbox - use Execute with code content")
 }
 
-// Kill terminates an E2B sandbox execution
+// Kill terminates an E2B sandbox execution.
 func (e *E2BSandbox) Kill(execID string) error {
 	e.mu.RLock()
-	exec, exists := e.executions[execID]
+	execution, exists := e.executions[execID]
 	e.mu.RUnlock()
 
 	if !exists {
 		return fmt.Errorf("execution %s not found", execID)
 	}
 
-	return e.killSandbox(context.Background(), exec.SandboxID, exec.AccessToken)
+	return e.killSandbox(context.Background(), execution.SandboxID, "")
 }
 
-// GetActiveExecutions returns the number of active executions
+// GetActiveExecutions returns the number of active executions.
 func (e *E2BSandbox) GetActiveExecutions() int {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return len(e.executions)
 }
 
-// Cleanup releases all sandbox resources
+// Cleanup releases all sandbox resources.
 func (e *E2BSandbox) Cleanup() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	var errs []error
-	for id, exec := range e.executions {
-		if err := e.killSandbox(context.Background(), exec.SandboxID, exec.AccessToken); err != nil {
+	for id, execution := range e.executions {
+		if err := e.killSandbox(context.Background(), execution.SandboxID, ""); err != nil {
 			errs = append(errs, fmt.Errorf("failed to cleanup execution %s: %w", id, err))
 		}
 	}
@@ -238,152 +297,75 @@ func (e *E2BSandbox) Cleanup() error {
 	return nil
 }
 
-// createSandbox creates a new E2B sandbox
+// createSandbox creates a new E2B sandbox.
 func (e *E2BSandbox) createSandbox(ctx context.Context) (string, string, string, error) {
-	reqBody := createSandboxRequest{
-		TemplateID: "base",
-		Timeout:    30,
-	}
-
-	jsonBody, err := json.Marshal(reqBody)
+	response, err := e.runHelper(ctx, e2bHelperRequest{
+		Action:    "create",
+		TimeoutMs: int((30 * time.Second).Milliseconds()),
+	})
 	if err != nil {
-		return "", "", "", fmt.Errorf("failed to marshal request: %w", err)
+		return "", "", "", err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", e.baseURL+"/sandboxes", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to create request: %w", err)
+	if strings.TrimSpace(response.SandboxID) == "" {
+		return "", "", "", fmt.Errorf("E2B helper did not return a sandboxId")
 	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", e.apiKey)
-
-	resp, err := e.client.Do(req)
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to make request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", "", "", fmt.Errorf("E2B API error: %d %s", resp.StatusCode, string(body))
-	}
-
-	var response createSandboxResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return "", "", "", fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return response.SandboxID, response.ClientID, response.resolvedAccessToken(), nil
+	return response.SandboxID, "", "", nil
 }
 
-// runCommand executes a command in the E2B sandbox
+// runCommand executes a command in the E2B sandbox.
 func (e *E2BSandbox) runCommand(ctx context.Context, sandboxID, accessToken, command string) (*runCommandResponse, error) {
-	reqBody := runCommandRequest{
-		Cmd:     command,
-		Timeout: 30,
-	}
-
-	jsonBody, err := json.Marshal(reqBody)
+	response, err := e.runHelper(ctx, e2bHelperRequest{
+		Action:    "run",
+		SandboxID: sandboxID,
+		Command:   command,
+		TimeoutMs: int((30 * time.Second).Milliseconds()),
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, err
 	}
-
-	url := fmt.Sprintf("%s/sandboxes/%s/commands", e.baseURL, sandboxID)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", e.apiKey)
-	if token := strings.TrimSpace(accessToken); token != "" {
-		req.Header.Set("X-Access-Token", token)
-	}
-
-	resp, err := e.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("E2B API error: %d %s", resp.StatusCode, string(body))
-	}
-
-	var response runCommandResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &response, nil
+	return &runCommandResponse{
+		ExitCode: response.ExitCode,
+		Stdout:   response.Stdout,
+		Stderr:   response.Stderr,
+	}, nil
 }
 
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
-}
-
-func buildFileWriteCommand(path, content string) string {
-	dir := filepath.Dir(path)
-	if dir == "." {
-		dir = "/"
-	}
-	encoded := base64.StdEncoding.EncodeToString([]byte(content))
-	return fmt.Sprintf(
-		"mkdir -p %s && printf %%s %s | base64 -d > %s",
-		shellQuote(dir),
-		shellQuote(encoded),
-		shellQuote(path),
-	)
-}
-
-// uploadFile uploads a file to the E2B sandbox.
-// We write via the command channel so secure-access sandboxes do not depend on
-// deprecated direct file-upload controller routes.
+// uploadFile uploads a file to the E2B sandbox via the SDK-backed helper.
 func (e *E2BSandbox) uploadFile(ctx context.Context, sandboxID, accessToken, path, content string) error {
-	result, err := e.runCommand(ctx, sandboxID, accessToken, buildFileWriteCommand(path, content))
+	response, err := e.runHelper(ctx, e2bHelperRequest{
+		Action:    "write",
+		SandboxID: sandboxID,
+		Path:      path,
+		Content:   content,
+	})
 	if err != nil {
 		return err
 	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("failed to write file: %s", strings.TrimSpace(result.Stderr))
+	if !response.OK {
+		return fmt.Errorf("E2B helper did not confirm file write")
 	}
 	return nil
 }
 
-// killSandbox terminates an E2B sandbox
+// killSandbox terminates an E2B sandbox.
 func (e *E2BSandbox) killSandbox(ctx context.Context, sandboxID, accessToken string) error {
-	url := fmt.Sprintf("%s/sandboxes/%s", e.baseURL, sandboxID)
-	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	response, err := e.runHelper(ctx, e2bHelperRequest{
+		Action:    "kill",
+		SandboxID: sandboxID,
+	})
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return err
 	}
-
-	req.Header.Set("X-API-Key", e.apiKey)
-	if token := strings.TrimSpace(accessToken); token != "" {
-		req.Header.Set("X-Access-Token", token)
+	if !response.Killed {
+		return fmt.Errorf("E2B helper did not confirm sandbox termination")
 	}
-
-	resp, err := e.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to make request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("E2B API error: %d %s", resp.StatusCode, string(body))
-	}
-
 	return nil
 }
 
-// getLanguageCommands returns the filename, setup command, and run command for a language
+// getLanguageCommands returns the filename, setup command, and run command for a language.
 func (e *E2BSandbox) getLanguageCommands(language, code string) (string, string, string, error) {
 	language = strings.ToLower(strings.TrimSpace(language))
 
-	// Handle aliases
 	aliases := map[string]string{
 		"js":        "javascript",
 		"node":      "javascript",
@@ -405,34 +387,24 @@ func (e *E2BSandbox) getLanguageCommands(language, code string) (string, string,
 	switch language {
 	case "javascript":
 		return "/code/main.js", "", "cd /code && node main.js", nil
-
 	case "typescript":
 		return "/code/main.ts", "cd /code && npm init -y && npm install -g typescript ts-node", "cd /code && ts-node main.ts", nil
-
 	case "python":
 		return "/code/main.py", "", "cd /code && python3 main.py", nil
-
 	case "go":
 		return "/code/main.go", "cd /code && go mod init main", "cd /code && go run main.go", nil
-
 	case "rust":
 		return "/code/main.rs", "cd /code && cargo init --name main", "cd /code && cargo run", nil
-
 	case "java":
 		return "/code/Main.java", "", "cd /code && javac Main.java && java Main", nil
-
 	case "c":
 		return "/code/main.c", "", "cd /code && gcc -o main main.c && ./main", nil
-
 	case "cpp":
 		return "/code/main.cpp", "", "cd /code && g++ -o main main.cpp && ./main", nil
-
 	case "ruby":
 		return "/code/main.rb", "", "cd /code && ruby main.rb", nil
-
 	case "php":
 		return "/code/main.php", "", "cd /code && php main.php", nil
-
 	default:
 		return "", "", "", fmt.Errorf("unsupported language: %s", language)
 	}
