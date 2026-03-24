@@ -122,10 +122,10 @@ const PLAN_CONFIG: Record<string, {
 
 // Credit pack color tiers
 const PACK_CONFIG = [
-  { amountUsd: 10,  color: '#22c55e', glow: 'rgba(34,197,94,0.3)',   border: 'rgba(34,197,94,0.35)',   bg: 'rgba(34,197,94,0.05)',   label: 'Starter' },
-  { amountUsd: 25,  color: '#10b981', glow: 'rgba(16,185,129,0.3)',  border: 'rgba(16,185,129,0.35)',  bg: 'rgba(16,185,129,0.05)',  label: 'Builder' },
-  { amountUsd: 50,  color: '#00f5ff', glow: 'rgba(0,245,255,0.35)',  border: 'rgba(0,245,255,0.45)',   bg: 'rgba(0,245,255,0.06)',   label: 'Pro', popular: true },
-  { amountUsd: 100, color: '#f97316', glow: 'rgba(249,115,22,0.3)',  border: 'rgba(249,115,22,0.4)',   bg: 'rgba(249,115,22,0.05)',  label: 'Power' },
+  { amountUsd: 25,  color: '#22c55e', glow: 'rgba(34,197,94,0.3)',   border: 'rgba(34,197,94,0.35)',   bg: 'rgba(34,197,94,0.05)',   label: 'Starter' },
+  { amountUsd: 50,  color: '#00f5ff', glow: 'rgba(0,245,255,0.35)',  border: 'rgba(0,245,255,0.45)',   bg: 'rgba(0,245,255,0.06)',   label: 'Builder', popular: true },
+  { amountUsd: 100, color: '#f97316', glow: 'rgba(249,115,22,0.3)',  border: 'rgba(249,115,22,0.4)',   bg: 'rgba(249,115,22,0.05)',  label: 'Pro' },
+  { amountUsd: 250, color: '#a855f7', glow: 'rgba(168,85,247,0.3)',  border: 'rgba(168,85,247,0.4)',   bg: 'rgba(168,85,247,0.05)',  label: 'Power' },
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
