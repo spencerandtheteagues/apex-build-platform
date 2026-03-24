@@ -2,12 +2,11 @@ package ai
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 	"log"
-	"math/big"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"time"
@@ -378,8 +377,8 @@ func (r *AIRouter) selectByLoadBalancing() (AIProvider, error) {
 		return "", fmt.Errorf("no healthy providers available")
 	}
 
-	// Select provider based on weighted random selection using crypto/rand
-	randomValue := cryptoRandFloat64() * totalWeight
+	// Select provider based on weighted random selection
+	randomValue := rand.Float64() * totalWeight
 	currentWeight := 0.0
 
 	for _, provider := range healthyProviders {
@@ -393,17 +392,6 @@ func (r *AIRouter) selectByLoadBalancing() (AIProvider, error) {
 	return healthyProviders[0], nil
 }
 
-// cryptoRandFloat64 generates a cryptographically secure random float64 between 0 and 1
-func cryptoRandFloat64() float64 {
-	// Generate a random 64-bit integer
-	max := big.NewInt(1 << 53) // Use 53 bits for float64 precision
-	n, err := rand.Int(rand.Reader, max)
-	if err != nil {
-		// Fallback to 0.5 on error (extremely unlikely)
-		return 0.5
-	}
-	return float64(n.Int64()) / float64(1<<53)
-}
 
 // checkRateLimit checks if a provider is within rate limits
 func (r *AIRouter) checkRateLimit(provider AIProvider) bool {

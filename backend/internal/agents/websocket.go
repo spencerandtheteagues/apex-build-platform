@@ -212,8 +212,9 @@ func (h *WSHub) HandleWebSocket(c *gin.Context) {
 	// Register connection
 	h.register <- &registerRequest{conn: wsConn, buildID: buildID}
 
-	// Subscribe to agent manager updates
-	updateChan := make(chan *WSMessage, 100)
+	// Subscribe to agent manager updates.
+	// Buffer of 512 handles burst from 8+ concurrent agents without dropping messages.
+	updateChan := make(chan *WSMessage, 512)
 	forwardDone := make(chan struct{})
 	h.manager.Subscribe(buildID, updateChan)
 

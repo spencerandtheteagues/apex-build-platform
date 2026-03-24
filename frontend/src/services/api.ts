@@ -50,7 +50,7 @@ import {
   CompletionStats,
 } from '@/types'
 
-const DEFAULT_PRODUCTION_API_BASE_URL = 'https://apex-backend-5ypy.onrender.com/api/v1'
+const DEFAULT_PRODUCTION_API_BASE_URL = 'https://api.apex.build/api/v1'
 
 // Get API URL from environment or use default
 const getApiUrl = (): string => {

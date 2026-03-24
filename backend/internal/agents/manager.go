@@ -745,7 +745,13 @@ func (am *AgentManager) inactivityMonitor(buildID string) {
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
+	for {
+		select {
+		case <-am.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
 		am.mu.RLock()
 		build, exists := am.builds[buildID]
 		am.mu.RUnlock()

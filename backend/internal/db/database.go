@@ -94,12 +94,23 @@ func NewDatabase(config *Config) (*Database, error) {
 		return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
 	}
 
-	// Set connection pool settings
-	// PERFORMANCE: Increased pool for better throughput under load
-	sqlDB.SetMaxIdleConns(25)  // Up from 10 - better for burst traffic
-	sqlDB.SetMaxOpenConns(200) // Up from 100 - supports 1000+ concurrent users
+	// Set connection pool settings from env vars (with safe defaults).
+	// Render Starter PostgreSQL caps at 25 connections; Standard allows 97.
+	// Set DB_MAX_OPEN_CONNS in the Render dashboard to match your plan's limit.
+	maxOpen := 25
+	if v := os.Getenv("DB_MAX_OPEN_CONNS"); v != "" {
+		if n, err := fmt.Sscan(v, &maxOpen); n == 0 || err != nil {
+			maxOpen = 25
+		}
+	}
+	maxIdle := maxOpen / 4
+	if maxIdle < 5 {
+		maxIdle = 5
+	}
+	sqlDB.SetMaxIdleConns(maxIdle)
+	sqlDB.SetMaxOpenConns(maxOpen)
 	sqlDB.SetConnMaxLifetime(time.Hour)
-	sqlDB.SetConnMaxIdleTime(10 * time.Minute) // Close idle connections after 10min
+	sqlDB.SetConnMaxIdleTime(10 * time.Minute)
 
 	dbWrapper := &Database{DB: db}
 

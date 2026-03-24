@@ -79,8 +79,9 @@ export default defineConfig(({ mode }) => {
       // Target modern browsers for smaller bundles
       target: 'es2020',
 
-      // Monaco is intentionally split into a large lazy chunk.
-      chunkSizeWarningLimit: 5000,
+      // Monaco is intentionally split into a large lazy chunk (~2MB). Keep warning
+      // threshold at 2MB so accidental large imports are still flagged.
+      chunkSizeWarningLimit: 2000,
 
       // Disable the modulepreload polyfill to keep CSP simpler.
       modulePreload: {
