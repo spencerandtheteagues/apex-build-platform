@@ -1072,9 +1072,9 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded overflow-hidden flex items-center justify-center">
               <img
-                src="/logo.svg"
+                src="/apex-build-logo-transparent.png"
                 alt="APEX"
-                className="w-6 h-6 object-contain"
+                className="w-6 h-6 object-contain drop-shadow-[0_0_6px_rgba(239,68,68,0.6)]"
                 onError={(e) => {
                   const img = e.currentTarget
                   img.style.display = 'none'
