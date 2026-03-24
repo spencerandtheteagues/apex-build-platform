@@ -173,7 +173,7 @@ func (am *AgentManager) providerAssistedTaskVerification(build *Build, task *Tas
 		report.TruthTags = append([]TruthTag(nil), artifact.ContractSlice.TruthTags...)
 	}
 
-	prompt := fmt.Sprintf(`Review this AI-generated task result for correctness and build safety.
+	prompt := fmt.Sprintf(`Review this AI-generated task result for concrete correctness issues only.
 
 Task type: %s
 Task description: %s
@@ -186,11 +186,20 @@ Deterministic verification errors:
 Candidate output:
 %s
 
+IMPORTANT RULES — do NOT flag these as blockers or warnings:
+- Mock classes, stub implementations, or test doubles in test files (*.test.*, *.spec.*, _test.*) — mocks are correct test practice
+- Use of interfaces or dependency injection
+- TODO comments that are inside test files
+- Placeholder values in example/seed files
+- Standard test patterns like MockJobManager, FakeRepository, StubService
+
+Only flag as a blocker if there is a concrete compilation error, a missing required import, or a structurally broken file that would prevent the build from running.
+
 Return JSON only:
 {
   "summary": "one short sentence",
-  "warnings": ["optional warning"],
-  "blockers": ["only concrete correctness/build blockers"],
+  "warnings": ["only if genuinely suspicious"],
+  "blockers": ["only concrete build-breaking issues, never test patterns"],
   "confidence": 0.0
 }`, task.Type, task.Description, effectiveTaskRoutingMode(build, task), candidate.Provider, candidate.VerifyPassed, strings.Join(candidate.VerifyErrors, "\n"), summarizeTaskOutputForJudge(candidate.Output, 12000))
 
@@ -215,13 +224,13 @@ Return JSON only:
 	if err := json.Unmarshal([]byte(payload), &critique); err != nil {
 		return nil
 	}
-	report.Warnings = append([]string(nil), critique.Warnings...)
-	report.Blockers = append([]string(nil), critique.Blockers...)
-	report.Errors = append([]string(nil), critique.Blockers...)
+	// LLM task verification is advisory only — never a hard blocker.
+	// Deterministic verification (compile checks, syntax, imports) owns hard blocks.
+	// An LLM second-opinion is too prone to false positives (e.g. flagging test mocks,
+	// dependency injection, or TODO comments in example files as "not production-ready").
+	allFindings := dedupeStrings(append(critique.Warnings, critique.Blockers...))
+	report.Warnings = allFindings
 	report.ConfidenceScore = critique.Confidence
-	if len(report.Blockers) > 0 {
-		report.Status = VerificationBlocked
-	}
 	return report
 }
 
