@@ -314,6 +314,13 @@ type DataModel struct {
 
 // analyzeRequirements uses AI to understand what needs to be built
 func (p *Planner) analyzeRequirements(ctx context.Context, description string) (*RequirementAnalysis, error) {
+	// Truncate very long specs to ~8000 chars to stay within token budgets while
+	// preserving the most important context (beginning of spec has the most signal).
+	truncDesc := description
+	if len(truncDesc) > 8000 {
+		truncDesc = truncDesc[:8000] + "\n\n[... spec truncated for analysis ...]"
+	}
+
 	prompt := fmt.Sprintf(`Analyze the following application requirements and output a structured JSON analysis.
 
 REQUIREMENTS:
@@ -337,10 +344,10 @@ Output ONLY valid JSON in this exact format (no markdown, no explanation):
   },
   "complexity": "simple|medium|complex",
   "estimated_time": "30min|1hour|2hours|4hours|8hours"
-}`, description)
+}`, truncDesc)
 
 	response, err := p.ai.Generate(ctx, prompt, AIOptions{
-		MaxTokens:    2000,
+		MaxTokens:    4000,
 		Temperature:  0.3,
 		SystemPrompt: "You are a senior software architect. Analyze requirements precisely and output valid JSON only.",
 	})

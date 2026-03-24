@@ -552,12 +552,25 @@ func verifyAndNormalizeBuildContract(intent *IntentBrief, contract *BuildContrac
 		}
 	}
 
+	// Warn but don't block when API endpoints weren't pre-planned — they'll be generated from the spec.
 	if requiredCaps[CapabilityAPI] && (corrected.APIContract == nil || len(corrected.APIContract.Endpoints) == 0) {
-		report.Blockers = append(report.Blockers, "API capability requested but API contract has no endpoints")
+		if strings.TrimSpace(corrected.AppType) == "" {
+			report.Blockers = append(report.Blockers, "API capability requested but API contract has no endpoints")
+		} else {
+			report.Warnings = append(report.Warnings, "API capability detected but no endpoints were pre-planned; endpoints will be derived during code generation")
+		}
 	}
-	if (requiredCaps[CapabilityDatabase] || requiredCaps[CapabilityStorage]) &&
-		(strings.TrimSpace(corrected.AppType) == "" || len(corrected.DBSchemaContract) == 0) {
-		report.Blockers = append(report.Blockers, "storage/database capability requested without schema entities")
+	// Only hard-block if the app type is completely undefined AND no schema was extracted.
+	// Missing schema entities alone is not a blocker — the LLM will generate schema from
+	// the description during code generation. File storage (CapabilityStorage) never
+	// requires pre-planned schema entities.
+	if requiredCaps[CapabilityDatabase] &&
+		strings.TrimSpace(corrected.AppType) == "" &&
+		len(corrected.DBSchemaContract) == 0 {
+		report.Blockers = append(report.Blockers, "database capability requested without app type or schema entities")
+	}
+	if requiredCaps[CapabilityDatabase] && len(corrected.DBSchemaContract) == 0 {
+		report.Warnings = append(report.Warnings, "database capability detected but no schema entities were pre-planned; schema will be derived during code generation")
 	}
 	if requiredCaps[CapabilityAuth] {
 		if corrected.AuthContract == nil || (!corrected.AuthContract.Required) {
