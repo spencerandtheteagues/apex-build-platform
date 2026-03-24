@@ -1,4 +1,4 @@
-import { CommandExitError, Sandbox } from 'e2b'
+import { CommandExitError, Sandbox } from 'e2b/dist/index.mjs'
 
 async function readRequest() {
   const chunks = []
