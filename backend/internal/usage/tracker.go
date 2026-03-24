@@ -53,9 +53,9 @@ func GetPlanLimits(plan PlanType) PlanLimits {
 	case PlanFree:
 		return PlanLimits{
 			Projects:         3,
-			StorageBytes:     100 * 1024 * 1024, // 100MB
-			AIRequests:       1000,              // 1000/month
-			ExecutionMinutes: 10,                // 10 min/day
+			StorageBytes:     1 * 1024 * 1024 * 1024, // 1GB (matches plans.go display)
+			AIRequests:       1000,                    // 1000/month
+			ExecutionMinutes: 10,                      // 10 min/day
 		}
 	case PlanBuilder:
 		return PlanLimits{

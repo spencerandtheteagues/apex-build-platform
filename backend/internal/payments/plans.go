@@ -232,7 +232,7 @@ func GetAllPlans() []Plan {
 				BYOKEnabled:             true,
 				BYOKUnlimited:           true,
 				ProjectsLimit:           -1,
-				StorageGB:               50,
+				StorageGB:               100, // matches tracker.go and UsageDashboard
 				CollaboratorsPerProject: -1,
 				CodeExecutionsPerDay:    5000,
 				GitHubExport:            true,

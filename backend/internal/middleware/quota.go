@@ -376,29 +376,29 @@ func getUpgradeMessage(usageType usage.UsageType, plan usage.PlanType) string {
 	case usage.PlanFree:
 		switch usageType {
 		case usage.UsageProjects:
-			return "Upgrade to Builder ($19/month) for more projects and managed AI credits, or Pro ($49/month) for higher limits."
+			return "Upgrade to Builder ($24/month) for more projects and managed AI credits, or Pro ($59/month) for higher limits."
 		case usage.UsageStorageBytes:
-			return "Upgrade to Builder ($19/month) for 5GB storage, or Pro ($49/month) for 20GB."
+			return "Upgrade to Builder ($24/month) for 5GB storage, or Pro ($59/month) for 20GB."
 		case usage.UsageAIRequests:
-			return "Upgrade to Builder ($19/month) for managed AI credits, or Pro ($49/month) for a larger monthly credit allotment."
+			return "Upgrade to Builder ($24/month) for managed AI credits, or Pro ($59/month) for a larger monthly credit allotment."
 		case usage.UsageExecutionMinutes:
-			return "Upgrade to Builder ($19/month) for longer execution time, or Pro ($49/month) for even more capacity."
+			return "Upgrade to Builder ($24/month) for longer execution time, or Pro ($59/month) for even more capacity."
 		}
 	case usage.PlanBuilder:
 		switch usageType {
 		case usage.UsageProjects, usage.UsageStorageBytes, usage.UsageAIRequests, usage.UsageExecutionMinutes:
-			return "Upgrade to Pro ($49/month) for more credits and higher limits, or Team ($99/month) for shared team capacity."
+			return "Upgrade to Pro ($59/month) for more credits and higher limits, or Team ($149/month) for shared team capacity."
 		}
 	case usage.PlanPro:
 		switch usageType {
 		case usage.UsageProjects:
-			return "Upgrade to Team ($99/month) for shared team capacity, or contact sales for Enterprise."
+			return "Upgrade to Team ($149/month) for shared team capacity, or contact sales for Enterprise."
 		case usage.UsageStorageBytes:
-			return "Upgrade to Team ($99/month) for 100GB storage, or contact sales for Enterprise."
+			return "Upgrade to Team ($149/month) for 100GB storage, or contact sales for Enterprise."
 		case usage.UsageAIRequests:
-			return "Upgrade to Team ($99/month) for more seats and managed AI credits, or contact sales for Enterprise."
+			return "Upgrade to Team ($149/month) for more seats and managed AI credits, or contact sales for Enterprise."
 		case usage.UsageExecutionMinutes:
-			return "Upgrade to Team ($99/month) for more shared execution capacity, or contact sales for Enterprise."
+			return "Upgrade to Team ($149/month) for more shared execution capacity, or contact sales for Enterprise."
 		}
 	case usage.PlanTeam:
 		return "Contact sales for Enterprise for custom limits and support."
