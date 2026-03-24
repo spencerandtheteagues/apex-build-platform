@@ -1164,8 +1164,18 @@ func setupRoutes(
 	// Add Prometheus metrics middleware (if enabled)
 	if getEnv("ENABLE_METRICS", "true") == "true" {
 		router.Use(metrics.PrometheusMiddleware())
-		// Metrics endpoint (Prometheus format)
-		router.GET("/metrics", metrics.PrometheusHandler())
+		// Metrics endpoint (Prometheus format) — requires METRICS_AUTH_TOKEN bearer token
+		metricsToken := getEnv("METRICS_AUTH_TOKEN", "")
+		router.GET("/metrics", func(c *gin.Context) {
+			if metricsToken != "" {
+				auth := c.GetHeader("Authorization")
+				if auth != "Bearer "+metricsToken {
+					c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+					return
+				}
+			}
+			metrics.PrometheusHandler()(c)
+		})
 	}
 
 	// Health check endpoints

@@ -76,8 +76,7 @@ func (q *QuotaChecker) CheckProjectQuota() gin.HandlerFunc {
 		)
 
 		if err != nil {
-			// Log error but allow request (fail open for reliability)
-			c.Next()
+			q.sendQuotaUnavailable(c, usage.UsageProjects)
 			return
 		}
 
@@ -195,7 +194,7 @@ func (q *QuotaChecker) CheckExecutionQuota(estimatedMinutes int64) gin.HandlerFu
 		)
 
 		if err != nil {
-			c.Next()
+			q.sendQuotaUnavailable(c, usage.UsageExecutionMinutes)
 			return
 		}
 
@@ -233,7 +232,7 @@ func (q *QuotaChecker) GenericQuotaCheck(usageType usage.UsageType, amount int64
 		)
 
 		if err != nil {
-			c.Next()
+			q.sendQuotaUnavailable(c, usageType)
 			return
 		}
 
