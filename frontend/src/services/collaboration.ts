@@ -2,7 +2,7 @@
 // Yjs-inspired CRDT with OT fallback for concurrent editing
 
 import { getConfiguredWsUrl } from '@/config/runtime'
-import { appendStoredAccessTokenToWebSocketUrl } from './authSession'
+import { buildAuthenticatedWebSocketUrl } from './authSession'
 
 // Browser-compatible EventEmitter implementation
 class EventEmitter {
@@ -134,7 +134,7 @@ export const getCollaborationWebSocketUrl = (): string => {
     .replace(/\/+$/, '')
     .replace(/\/ws$/, '')
 
-  return appendStoredAccessTokenToWebSocketUrl(`${baseUrl}/ws/collab`)
+  return buildAuthenticatedWebSocketUrl(`${baseUrl}/ws/collab`)
 }
 
 export interface RTCPeerState {

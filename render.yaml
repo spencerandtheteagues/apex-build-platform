@@ -41,11 +41,11 @@ services:
       - key: REDIS_URL
         sync: false  # Use Upstash Redis (Render free tier has no managed Redis)
       - key: JWT_SECRET
-        generateValue: true
+        sync: false  # Set once in Render dashboard; do not rotate automatically on deploy
       - key: JWT_REFRESH_SECRET
-        generateValue: true
+        sync: false  # Separate long-lived refresh secret; set manually and keep stable
       - key: SECRETS_MASTER_KEY
-        generateValue: true
+        sync: false  # Required for decrypting stored secrets; set manually and keep stable
       - key: ADMIN_SEED_PASSWORD
         sync: false
       - key: SPENCER_SEED_PASSWORD

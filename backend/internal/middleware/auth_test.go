@@ -133,6 +133,70 @@ func TestRequireAuth(t *testing.T) {
 	}
 }
 
+func TestRequireUserID(t *testing.T) {
+	tests := []struct {
+		name           string
+		userID         any
+		setUserID      bool
+		expectedOK     bool
+		expectedUserID uint
+		expectedStatus int
+		expectedAbort  bool
+	}{
+		{
+			name:           "valid user id",
+			userID:         uint(42),
+			setUserID:      true,
+			expectedOK:     true,
+			expectedUserID: 42,
+		},
+		{
+			name:           "missing user id",
+			setUserID:      false,
+			expectedStatus: http.StatusUnauthorized,
+			expectedAbort:  true,
+		},
+		{
+			name:           "invalid user id type",
+			userID:         "bad",
+			setUserID:      true,
+			expectedStatus: http.StatusUnauthorized,
+			expectedAbort:  true,
+		},
+		{
+			name:           "zero user id",
+			userID:         uint(0),
+			setUserID:      true,
+			expectedStatus: http.StatusUnauthorized,
+			expectedAbort:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			recorder := httptest.NewRecorder()
+			context, _ := gin.CreateTestContext(recorder)
+			context.Request = httptest.NewRequest(http.MethodGet, "/protected", nil)
+
+			if tt.setUserID {
+				context.Set("user_id", tt.userID)
+			}
+
+			userID, ok := RequireUserID(context)
+
+			assert.Equal(t, tt.expectedOK, ok)
+			assert.Equal(t, tt.expectedUserID, userID)
+			assert.Equal(t, tt.expectedAbort, context.IsAborted())
+
+			if tt.expectedStatus != 0 {
+				assert.Equal(t, tt.expectedStatus, recorder.Code)
+				assert.Contains(t, recorder.Body.String(), "AUTH_REQUIRED")
+			}
+		})
+	}
+}
+
 func TestRequireRole(t *testing.T) {
 	authService := auth.NewAuthService("test-secret-key")
 

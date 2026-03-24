@@ -239,11 +239,7 @@ func (h *ExtensionsHandler) PublishExtension(c *gin.Context) {
 		return
 	}
 
-	username, _ := c.Get("username")
-	authorName := ""
-	if username != nil {
-		authorName = username.(string)
-	}
+	authorName, _ := middleware.GetUsername(c)
 
 	var req extensions.PublishRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

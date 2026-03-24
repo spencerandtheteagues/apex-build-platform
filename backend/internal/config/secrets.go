@@ -54,8 +54,9 @@ type SecretRequirement struct {
 // SecretsConfig holds validated secrets for the application
 type SecretsConfig struct {
 	// Core secrets
-	JWTSecret    string
-	JWTSecretOld string // For rotation support
+	JWTSecret        string
+	JWTRefreshSecret string
+	JWTSecretOld     string // For rotation support
 
 	// Encryption
 	SecretsMasterKey string
@@ -101,6 +102,14 @@ func DefaultSecretRequirements() []SecretRequirement {
 			Name:        "JWT Secret",
 			EnvVar:      "JWT_SECRET",
 			Description: "Secret key for signing JWT tokens",
+			Required:    true,
+			MinLength:   MinJWTSecretLength,
+			Validator:   validateJWTSecret,
+		},
+		{
+			Name:        "JWT Refresh Secret",
+			EnvVar:      "JWT_REFRESH_SECRET",
+			Description: "Independent secret key for signing refresh tokens",
 			Required:    true,
 			MinLength:   MinJWTSecretLength,
 			Validator:   validateJWTSecret,
@@ -199,7 +208,8 @@ func ValidateSecrets() (*SecretsConfig, error) {
 
 	// Populate config with validated values
 	config.JWTSecret = os.Getenv("JWT_SECRET")
-	config.JWTSecretOld = os.Getenv("JWT_SECRET_OLD") // For rotation
+	config.JWTRefreshSecret = os.Getenv("JWT_REFRESH_SECRET")
+	config.JWTSecretOld = os.Getenv("JWT_SECRET_OLD") // For rotation support
 	config.SecretsMasterKey = os.Getenv("SECRETS_MASTER_KEY")
 	config.StripeSecretKey = os.Getenv("STRIPE_SECRET_KEY")
 	config.StripeWebhookSecret = os.Getenv("STRIPE_WEBHOOK_SECRET")
@@ -212,6 +222,9 @@ func ValidateSecrets() (*SecretsConfig, error) {
 		}
 		if config.JWTSecret == "" {
 			return nil, errors.New("FATAL: JWT_SECRET is required in production - authentication will not work")
+		}
+		if config.JWTRefreshSecret == "" {
+			return nil, errors.New("FATAL: JWT_REFRESH_SECRET is required in production - refresh token signing must use an independent secret")
 		}
 		if config.DatabaseURL == "" {
 			return nil, errors.New("FATAL: DATABASE_URL is required in production - no database connection possible")
@@ -347,6 +360,7 @@ func ValidateAndLogSecrets() (*SecretsConfig, error) {
 	// Log which secrets are configured (names only, never values)
 	log.Println("Secrets configuration status:")
 	logSecretStatus("JWT_SECRET", config.JWTSecret != "")
+	logSecretStatus("JWT_REFRESH_SECRET", config.JWTRefreshSecret != "")
 	logSecretStatus("JWT_SECRET_OLD (rotation)", config.JWTSecretOld != "")
 	logSecretStatus("SECRETS_MASTER_KEY", config.SecretsMasterKey != "")
 	logSecretStatus("STRIPE_SECRET_KEY", config.StripeSecretKey != "")

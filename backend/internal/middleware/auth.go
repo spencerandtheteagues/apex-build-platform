@@ -208,6 +208,20 @@ func GetUserID(c *gin.Context) (uint, bool) {
 	return id, true
 }
 
+// RequireUserID extracts a validated user ID from request context or aborts with 401.
+func RequireUserID(c *gin.Context) (uint, bool) {
+	id, ok := GetUserID(c)
+	if !ok || id == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "Authentication required",
+			"code":  "AUTH_REQUIRED",
+		})
+		c.Abort()
+		return 0, false
+	}
+	return id, true
+}
+
 // GetUsername helper function to extract username from context
 func GetUsername(c *gin.Context) (string, bool) {
 	username, exists := c.Get("username")

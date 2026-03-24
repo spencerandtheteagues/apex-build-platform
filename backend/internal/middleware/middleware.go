@@ -6,9 +6,11 @@ package middleware
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"runtime/debug"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	goredis "github.com/go-redis/redis/v8"
 	"golang.org/x/time/rate"
 )
 
@@ -86,16 +89,37 @@ type IPRateLimiter struct {
 	burst    int
 	cleanup  time.Duration
 	stopCh   chan struct{} // Channel to signal cleanup goroutine to stop
+	scope    string
+	window   time.Duration
+	limit    int
+	shared   sharedRateLimitStore
+}
+
+type sharedRateLimitStore interface {
+	Allow(ctx context.Context, scope string, identifier string, limit int, window time.Duration) (bool, error)
+	Close() error
+}
+
+type redisSharedRateLimitStore struct {
+	client goredis.UniversalClient
 }
 
 // NewIPRateLimiter creates a new IP-based rate limiter
 func NewIPRateLimiter(rateLimit rate.Limit, burst int) *IPRateLimiter {
+	return NewScopedIPRateLimiter(rateLimit, burst, "api")
+}
+
+func NewScopedIPRateLimiter(rateLimit rate.Limit, burst int, scope string) *IPRateLimiter {
 	limiter := &IPRateLimiter{
 		limiters: make(map[string]*RateLimiter),
 		rate:     rateLimit,
 		burst:    burst,
 		cleanup:  time.Minute * 10, // Clean up old limiters every 10 minutes
 		stopCh:   make(chan struct{}),
+		scope:    strings.TrimSpace(scope),
+		window:   time.Minute,
+		limit:    requestsPerMinuteFromRate(rateLimit, burst),
+		shared:   newSharedRateLimitStoreFromEnv(),
 	}
 
 	// Start cleanup goroutine
@@ -106,6 +130,9 @@ func NewIPRateLimiter(rateLimit rate.Limit, burst int) *IPRateLimiter {
 
 // Stop stops the cleanup goroutine
 func (irl *IPRateLimiter) Stop() {
+	if irl.shared != nil {
+		_ = irl.shared.Close()
+	}
 	close(irl.stopCh)
 }
 
@@ -126,6 +153,22 @@ func (irl *IPRateLimiter) GetLimiter(ip string) *rate.Limiter {
 	}
 
 	return limiter.limiter
+}
+
+func (irl *IPRateLimiter) Allow(ip string) bool {
+	if irl == nil {
+		return true
+	}
+	if irl.shared != nil && irl.limit > 0 {
+		allowed, err := irl.shared.Allow(context.Background(), irl.scope, ip, irl.limit, irl.window)
+		if err != nil {
+			log.Printf("WARNING: shared rate limit fallback for scope %s: %v", irl.scope, err)
+		} else if !allowed {
+			return false
+		}
+	}
+
+	return irl.GetLimiter(ip).Allow()
 }
 
 // cleanupRoutine removes old rate limiters to prevent memory leaks
@@ -157,7 +200,7 @@ var globalRateLimiter *IPRateLimiter
 // InitRateLimiter initializes the global rate limiter
 func InitRateLimiter(requestsPerMinute int, burst int) {
 	rateLimit := rate.Limit(requestsPerMinute) / 60 // Convert per minute to per second
-	globalRateLimiter = NewIPRateLimiter(rateLimit, burst)
+	globalRateLimiter = NewScopedIPRateLimiter(rateLimit, burst, "api")
 }
 
 // RateLimit middleware for rate limiting by IP
@@ -171,11 +214,8 @@ func RateLimit() gin.HandlerFunc {
 		// Get client IP
 		clientIP := c.ClientIP()
 
-		// Get rate limiter for this IP
-		limiter := globalRateLimiter.GetLimiter(clientIP)
-
 		// Check if request is allowed
-		if !limiter.Allow() {
+		if !globalRateLimiter.Allow(clientIP) {
 			c.JSON(http.StatusTooManyRequests, ErrorResponse{
 				Error: "Rate limit exceeded",
 				Code:  "RATE_LIMIT_EXCEEDED",
@@ -381,7 +421,7 @@ var authRateLimiter *IPRateLimiter
 // InitAuthRateLimiter initializes the auth-specific rate limiter
 func InitAuthRateLimiter() {
 	// 10 requests per minute for auth endpoints (much stricter than general)
-	authRateLimiter = NewIPRateLimiter(rate.Limit(10)/60, 5)
+	authRateLimiter = NewScopedIPRateLimiter(rate.Limit(10)/60, 5, "auth")
 }
 
 // AuthRateLimit middleware for strict rate limiting on auth endpoints
@@ -393,9 +433,8 @@ func AuthRateLimit() gin.HandlerFunc {
 
 	return func(c *gin.Context) {
 		clientIP := c.ClientIP()
-		limiter := authRateLimiter.GetLimiter(clientIP)
 
-		if !limiter.Allow() {
+		if !authRateLimiter.Allow(clientIP) {
 			log.Printf("⚠️  Auth rate limit exceeded for IP: %s on path: %s", clientIP, c.Request.URL.Path)
 			c.JSON(http.StatusTooManyRequests, ErrorResponse{
 				Error: "Too many authentication attempts. Please try again later.",
@@ -413,6 +452,79 @@ func AuthRateLimit() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func requestsPerMinuteFromRate(rateLimit rate.Limit, burst int) int {
+	perMinute := int(math.Ceil(float64(rateLimit) * 60))
+	if perMinute < 1 {
+		perMinute = 1
+	}
+	if perMinute < burst {
+		perMinute = burst
+	}
+	return perMinute
+}
+
+func newSharedRateLimitStoreFromEnv() sharedRateLimitStore {
+	redisURL := strings.TrimSpace(os.Getenv("REDIS_URL"))
+	if redisURL == "" {
+		return nil
+	}
+
+	opts, err := goredis.ParseURL(redisURL)
+	if err != nil {
+		log.Printf("WARNING: shared rate limiter disabled - invalid REDIS_URL: %v", err)
+		return nil
+	}
+
+	client := goredis.NewClient(opts)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		log.Printf("WARNING: shared rate limiter disabled - redis ping failed: %v", err)
+		_ = client.Close()
+		return nil
+	}
+
+	return &redisSharedRateLimitStore{client: client}
+}
+
+func rateLimitIdentifier(scope string, identifier string, windowStart time.Time) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(identifier)))
+	return fmt.Sprintf("ratelimit:%s:%d:%x", scope, windowStart.UTC().Unix(), sum[:8])
+}
+
+func (s *redisSharedRateLimitStore) Allow(ctx context.Context, scope string, identifier string, limit int, window time.Duration) (bool, error) {
+	if s == nil || s.client == nil || limit <= 0 {
+		return true, nil
+	}
+
+	now := time.Now().UTC()
+	windowStart := now.Truncate(window)
+	key := rateLimitIdentifier(scope, identifier, windowStart)
+	count, err := s.client.Incr(ctx, key).Result()
+	if err != nil {
+		return true, err
+	}
+
+	if count == 1 {
+		ttl := time.Until(windowStart.Add(window)) + time.Second
+		if ttl < time.Second {
+			ttl = time.Second
+		}
+		if err := s.client.Expire(ctx, key, ttl).Err(); err != nil {
+			return true, err
+		}
+	}
+
+	return count <= int64(limit), nil
+}
+
+func (s *redisSharedRateLimitStore) Close() error {
+	if s == nil || s.client == nil {
+		return nil
+	}
+	return s.client.Close()
 }
 
 // Maintenance middleware for maintenance mode

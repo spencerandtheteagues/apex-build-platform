@@ -10,6 +10,7 @@ import (
 	"time"
 
 	sharedhandlers "apex-build/internal/handlers"
+	appmiddleware "apex-build/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -37,12 +38,10 @@ func (h *Handler) StartTask(c *gin.Context) {
 	log.Println("Handler: StartTask called")
 
 	// Get user ID from auth context
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
-	uid := userID.(uint)
 
 	// Parse request
 	var req StartTaskRequest
@@ -87,8 +86,10 @@ func (h *Handler) GetTaskStatus(c *gin.Context) {
 	taskID := c.Param("id")
 
 	// Get user ID for authorization
-	userID, _ := c.Get("user_id")
-	uid := userID.(uint)
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
 
 	task, err := h.agent.GetTask(taskID)
 	if err != nil {
@@ -123,8 +124,10 @@ func (h *Handler) GetTaskDetails(c *gin.Context) {
 	taskID := c.Param("id")
 
 	// Get user ID for authorization
-	userID, _ := c.Get("user_id")
-	uid := userID.(uint)
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
 
 	task, err := h.agent.GetTask(taskID)
 	if err != nil {
@@ -169,8 +172,10 @@ func (h *Handler) StopTask(c *gin.Context) {
 	taskID := c.Param("id")
 
 	// Get user ID for authorization
-	userID, _ := c.Get("user_id")
-	uid := userID.(uint)
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
 
 	task, err := h.agent.GetTask(taskID)
 	if err != nil {
@@ -207,8 +212,10 @@ func (h *Handler) PauseTask(c *gin.Context) {
 	taskID := c.Param("id")
 
 	// Get user ID for authorization
-	userID, _ := c.Get("user_id")
-	uid := userID.(uint)
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
 
 	task, err := h.agent.GetTask(taskID)
 	if err != nil {
@@ -245,8 +252,10 @@ func (h *Handler) ResumeTask(c *gin.Context) {
 	taskID := c.Param("id")
 
 	// Get user ID for authorization
-	userID, _ := c.Get("user_id")
-	uid := userID.(uint)
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
 
 	task, err := h.agent.GetTask(taskID)
 	if err != nil {
@@ -283,8 +292,10 @@ func (h *Handler) GetTaskLogs(c *gin.Context) {
 	taskID := c.Param("id")
 
 	// Get user ID for authorization
-	userID, _ := c.Get("user_id")
-	uid := userID.(uint)
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
 
 	task, err := h.agent.GetTask(taskID)
 	if err != nil {
@@ -331,8 +342,10 @@ func (h *Handler) GetTaskPlan(c *gin.Context) {
 	taskID := c.Param("id")
 
 	// Get user ID for authorization
-	userID, _ := c.Get("user_id")
-	uid := userID.(uint)
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
 
 	task, err := h.agent.GetTask(taskID)
 	if err != nil {
@@ -374,8 +387,10 @@ func (h *Handler) GetTaskArtifacts(c *gin.Context) {
 	taskID := c.Param("id")
 
 	// Get user ID for authorization
-	userID, _ := c.Get("user_id")
-	uid := userID.(uint)
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
 
 	task, err := h.agent.GetTask(taskID)
 	if err != nil {

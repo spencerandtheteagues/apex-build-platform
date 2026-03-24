@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	appmiddleware "apex-build/internal/middleware"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -11,9 +12,8 @@ import (
 
 // GetUserProfile returns the current user's profile
 func (s *Server) GetUserProfile(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	userID, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
@@ -49,9 +49,8 @@ func (s *Server) GetUserProfile(c *gin.Context) {
 
 // UpdateUserProfile updates the current user's profile
 func (s *Server) UpdateUserProfile(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	userID, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 

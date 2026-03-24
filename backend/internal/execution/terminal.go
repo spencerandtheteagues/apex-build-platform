@@ -18,6 +18,7 @@ import (
 
 	"apex-build/internal/auth"
 	appconfig "apex-build/internal/config"
+	appmiddleware "apex-build/internal/middleware"
 	terminalmux "apex-build/internal/terminal"
 
 	"github.com/creack/pty"
@@ -699,15 +700,8 @@ func NewTerminalHandler(manager *TerminalManager) *TerminalHandler {
 }
 
 func (h *TerminalHandler) getOwnedSession(c *gin.Context) (*TerminalSession, bool) {
-	userIDValue, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
-		return nil, false
-	}
-
-	userID, ok := userIDValue.(uint)
+	userID, ok := appmiddleware.RequireUserID(c)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
 		return nil, false
 	}
 
@@ -732,9 +726,8 @@ func (h *TerminalHandler) CreateSessionHandler(c *gin.Context) {
 		return
 	}
 
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+	userID, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
@@ -755,7 +748,7 @@ func (h *TerminalHandler) CreateSessionHandler(c *gin.Context) {
 
 	session, err := h.manager.CreateSessionWithOptions(TerminalCreateOptions{
 		ProjectID:   req.ProjectID,
-		UserID:      userID.(uint),
+		UserID:      userID,
 		WorkDir:     req.WorkDir,
 		Shell:       req.Shell,
 		Name:        req.Name,
@@ -840,13 +833,12 @@ func (h *TerminalHandler) GetSessionHandler(c *gin.Context) {
 
 // ListSessionsHandler handles GET /api/v1/terminal/sessions
 func (h *TerminalHandler) ListSessionsHandler(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+	userID, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
-	sessions := h.manager.GetUserSessions(userID.(uint))
+	sessions := h.manager.GetUserSessions(userID)
 
 	sessionData := make([]map[string]interface{}, len(sessions))
 	for i, session := range sessions {

@@ -56,3 +56,23 @@ func TestCreateProjectRejectsPublicProjectOnFreePlan(t *testing.T) {
 	require.NoError(t, gormDB.Model(&models.Project{}).Count(&projectCount).Error)
 	require.Zero(t, projectCount)
 }
+
+func TestCreateProjectRejectsInvalidUserContext(t *testing.T) {
+	server, _, gormDB := newProjectAPITestServer(t, "pro")
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Safe Project","language":"typescript"}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Set("user_id", "not-a-uint")
+	context.Set("subscription_type", "pro")
+
+	server.CreateProject(context)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "AUTH_REQUIRED")
+
+	var projectCount int64
+	require.NoError(t, gormDB.Model(&models.Project{}).Count(&projectCount).Error)
+	require.Zero(t, projectCount)
+}

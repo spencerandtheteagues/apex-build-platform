@@ -217,6 +217,7 @@ func TestValidateSecrets_Development(t *testing.T) {
 	os.Unsetenv("ENVIRONMENT")
 	os.Unsetenv("ENV")
 	os.Unsetenv("JWT_SECRET")
+	os.Unsetenv("JWT_REFRESH_SECRET")
 	os.Unsetenv("SECRETS_MASTER_KEY")
 	os.Unsetenv("DATABASE_URL")
 	os.Unsetenv("STRIPE_SECRET_KEY")
@@ -293,6 +294,7 @@ func TestValidateSecrets_StagingRejectsInsecureDefaults(t *testing.T) {
 
 	t.Setenv("GO_ENV", "staging")
 	t.Setenv("JWT_SECRET", "ApexLocalJwt7f4Hk2pQ9mW6xZ8cT1vN3rJ5uY0sL2")
+	t.Setenv("JWT_REFRESH_SECRET", "StageRefreshSecret_7sYp3Qm5Lx2v8Rc4Nd6Tk1Hf9Wa0BeZu")
 	t.Setenv("SECRETS_MASTER_KEY", base64.StdEncoding.EncodeToString(validMasterKey))
 	t.Setenv("DATABASE_URL", "postgres://postgres:apex_local_pg_L9m3Q2v7X5k8N1r4@db.internal:5432/apex_build?sslmode=require")
 
@@ -318,6 +320,7 @@ func TestValidateSecrets_ProductionRejectsDefaultSeedPasswordMode(t *testing.T) 
 
 	t.Setenv("GO_ENV", "production")
 	t.Setenv("JWT_SECRET", "ProdJwtSecret_4ux8Pqm6sL2r9Vy1Tk7Zd3Nc5Hf0WaBe")
+	t.Setenv("JWT_REFRESH_SECRET", "ProdRefreshSecret_8wLs3Qn5Vx2r9Tc4Md6Fk1Hb7Za0CeYu")
 	t.Setenv("SECRETS_MASTER_KEY", base64.StdEncoding.EncodeToString(validMasterKey))
 	t.Setenv("DATABASE_URL", "postgres://postgres:UltraSecureProdPassword987654321@db.internal:5432/apex_build?sslmode=require")
 	t.Setenv("ALLOW_DEFAULT_SEED_PASSWORDS", "true")
@@ -329,6 +332,28 @@ func TestValidateSecrets_ProductionRejectsDefaultSeedPasswordMode(t *testing.T) 
 
 	if !strings.Contains(err.Error(), "ALLOW_DEFAULT_SEED_PASSWORDS=true") {
 		t.Fatalf("expected production validation error to mention ALLOW_DEFAULT_SEED_PASSWORDS, got %v", err)
+	}
+}
+
+func TestValidateSecrets_ProductionRequiresRefreshSecret(t *testing.T) {
+	validMasterKey := make([]byte, 32)
+	for i := range validMasterKey {
+		validMasterKey[i] = byte(i + 20)
+	}
+
+	t.Setenv("GO_ENV", "production")
+	t.Setenv("JWT_SECRET", "ProdJwtSecret_4ux8Pqm6sL2r9Vy1Tk7Zd3Nc5Hf0WaBe")
+	t.Setenv("JWT_REFRESH_SECRET", "")
+	t.Setenv("SECRETS_MASTER_KEY", base64.StdEncoding.EncodeToString(validMasterKey))
+	t.Setenv("DATABASE_URL", "postgres://postgres:UltraSecureProdPassword987654321@db.internal:5432/apex_build?sslmode=require")
+
+	_, err := ValidateSecrets()
+	if err == nil {
+		t.Fatal("ValidateSecrets() should reject missing JWT_REFRESH_SECRET in production")
+	}
+
+	if !strings.Contains(err.Error(), "JWT_REFRESH_SECRET") {
+		t.Fatalf("expected production validation error to mention JWT_REFRESH_SECRET, got %v", err)
 	}
 }
 

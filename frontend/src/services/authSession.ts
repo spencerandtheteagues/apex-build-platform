@@ -1,8 +1,13 @@
-import { TokenResponse } from '@/types'
-
-const ACCESS_TOKEN_STORAGE_KEY = 'apex_access_token'
-const REFRESH_TOKEN_STORAGE_KEY = 'apex_refresh_token'
+const LEGACY_ACCESS_TOKEN_STORAGE_KEY = 'apex_access_token'
+const LEGACY_REFRESH_TOKEN_STORAGE_KEY = 'apex_refresh_token'
 const TOKEN_EXPIRY_STORAGE_KEY = 'apex_token_expires'
+
+type SessionMetadata = {
+  access_token_expires_at: string
+  refresh_token_expires_at?: string
+  token_type?: string
+  session_strategy?: string
+}
 
 const getStorage = (): Storage | null => {
   if (typeof localStorage === 'undefined') {
@@ -27,18 +32,6 @@ const readStoredValue = (key: string): string | null => {
   return trimmed || null
 }
 
-const isTokenResponse = (value: unknown): value is TokenResponse => {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-
-  const tokenRecord = value as Record<string, unknown>
-  return typeof tokenRecord.access_token === 'string'
-    && typeof tokenRecord.refresh_token === 'string'
-    && typeof tokenRecord.access_token_expires_at === 'string'
-    && typeof tokenRecord.token_type === 'string'
-}
-
 const clearStoredValue = (key: string): void => {
   const storage = getStorage()
   if (!storage) {
@@ -47,35 +40,62 @@ const clearStoredValue = (key: string): void => {
   storage.removeItem(key)
 }
 
+const asRecord = (value: unknown): Record<string, unknown> | null => {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+  return value as Record<string, unknown>
+}
+
+const isSessionMetadata = (value: unknown): value is SessionMetadata => {
+  const record = asRecord(value)
+  return !!record && typeof record.access_token_expires_at === 'string'
+}
+
+const stripTokenQueryParam = (rawUrl: string): string => {
+  if (!rawUrl) {
+    return rawUrl
+  }
+
+  try {
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost'
+    const url = new URL(rawUrl, baseUrl)
+    url.searchParams.delete('token')
+
+    if (/^wss?:\/\//i.test(rawUrl)) {
+      return url.toString()
+    }
+
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    return rawUrl
+      .replace(/([?&])token=[^&#]*(&)?/g, (_match, prefix: string, trailingAmp: string | undefined) => {
+        return trailingAmp ? prefix : ''
+      })
+      .replace(/\?&/, '?')
+      .replace(/[?&]$/, '')
+  }
+}
+
 export const clearStoredAuthTokens = (): void => {
-  clearStoredValue(ACCESS_TOKEN_STORAGE_KEY)
-  clearStoredValue(REFRESH_TOKEN_STORAGE_KEY)
+  clearStoredValue(LEGACY_ACCESS_TOKEN_STORAGE_KEY)
+  clearStoredValue(LEGACY_REFRESH_TOKEN_STORAGE_KEY)
   clearStoredValue(TOKEN_EXPIRY_STORAGE_KEY)
 }
 
-export const getStoredAccessToken = (): string | null => {
-  return readStoredValue(ACCESS_TOKEN_STORAGE_KEY)
+export const clearLegacyReadableAuthTokens = (): void => {
+  clearStoredValue(LEGACY_ACCESS_TOKEN_STORAGE_KEY)
+  clearStoredValue(LEGACY_REFRESH_TOKEN_STORAGE_KEY)
 }
 
-export const getStoredRefreshToken = (): string | null => {
-  return readStoredValue(REFRESH_TOKEN_STORAGE_KEY)
-}
-
-export const storeAuthTokens = (tokens: TokenResponse): void => {
-  const storage = getStorage()
-  if (!storage) {
-    return
-  }
-
-  storage.setItem(ACCESS_TOKEN_STORAGE_KEY, tokens.access_token)
-  storage.setItem(REFRESH_TOKEN_STORAGE_KEY, tokens.refresh_token)
-  storage.setItem(TOKEN_EXPIRY_STORAGE_KEY, tokens.access_token_expires_at)
+export const getStoredSessionExpiry = (): string | null => {
+  return readStoredValue(TOKEN_EXPIRY_STORAGE_KEY)
 }
 
 export const markCookieSessionRefreshed = (
   expiresAt: string = new Date(Date.now() + 15 * 60 * 1000).toISOString()
 ): void => {
-  clearStoredAuthTokens()
+  clearLegacyReadableAuthTokens()
 
   const storage = getStorage()
   if (!storage) {
@@ -85,44 +105,26 @@ export const markCookieSessionRefreshed = (
   storage.setItem(TOKEN_EXPIRY_STORAGE_KEY, expiresAt)
 }
 
-export const extractTokenResponse = (value: unknown): TokenResponse | null => {
-  if (isTokenResponse(value)) {
+export const extractSessionMetadata = (value: unknown): SessionMetadata | null => {
+  if (isSessionMetadata(value)) {
     return value
   }
 
-  if (!value || typeof value !== 'object') {
+  const record = asRecord(value)
+  if (!record) {
     return null
   }
 
-  const tokenRecord = value as Record<string, unknown>
-  if (isTokenResponse(tokenRecord.tokens)) {
-    return tokenRecord.tokens
+  if (isSessionMetadata(record.tokens)) {
+    return record.tokens
   }
-  if (isTokenResponse(tokenRecord.data)) {
-    return tokenRecord.data
+  if (isSessionMetadata(record.data)) {
+    return record.data
   }
 
   return null
 }
 
-export const appendStoredAccessTokenToWebSocketUrl = (rawUrl: string): string => {
-  const accessToken = getStoredAccessToken()
-  if (!accessToken || !rawUrl) {
-    return rawUrl
-  }
-
-  try {
-    const url = new URL(rawUrl)
-    if (url.searchParams.has('token')) {
-      return url.toString()
-    }
-    url.searchParams.set('token', accessToken)
-    return url.toString()
-  } catch {
-    if (/([?&])token=/.test(rawUrl)) {
-      return rawUrl
-    }
-    const separator = rawUrl.includes('?') ? '&' : '?'
-    return `${rawUrl}${separator}token=${encodeURIComponent(accessToken)}`
-  }
+export const buildAuthenticatedWebSocketUrl = (rawUrl: string): string => {
+  return stripTokenQueryParam(rawUrl)
 }

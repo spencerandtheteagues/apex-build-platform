@@ -4,13 +4,12 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 import { getConfiguredApiUrl, getConfiguredWsUrl } from '@/config/runtime'
 import {
-  appendStoredAccessTokenToWebSocketUrl,
+  buildAuthenticatedWebSocketUrl,
+  clearLegacyReadableAuthTokens,
   clearStoredAuthTokens,
-  extractTokenResponse,
-  getStoredAccessToken,
-  getStoredRefreshToken,
+  extractSessionMetadata,
+  getStoredSessionExpiry,
   markCookieSessionRefreshed,
-  storeAuthTokens,
 } from './authSession'
 import {
   User,
@@ -156,6 +155,7 @@ export class ApiService {
 
   constructor(baseURL: string = getApiUrl()) {
     this.baseURL = baseURL
+    clearLegacyReadableAuthTokens()
     this.client = axios.create({
       baseURL,
       timeout: 30000,
@@ -169,15 +169,7 @@ export class ApiService {
   }
 
   private setupInterceptors() {
-    this.client.interceptors.request.use((config) => {
-      const accessToken = getStoredAccessToken()
-      if (!accessToken) {
-        return config
-      }
-
-      config.headers = setHeaderValue(config.headers, 'Authorization', `Bearer ${accessToken}`) as any
-      return config
-    })
+    this.client.interceptors.request.use((config) => config)
 
     // Response interceptor - Handle errors and token refresh
     this.client.interceptors.response.use(
@@ -241,12 +233,8 @@ export class ApiService {
   // Authentication endpoints
   async register(data: RegisterRequest): Promise<AuthResponse> {
     const response = await this.client.post<AuthResponse>('/auth/register', data)
-    const tokens = extractTokenResponse(response.data)
-    if (tokens) {
-      storeAuthTokens(tokens)
-    } else {
-      markCookieSessionRefreshed()
-    }
+    const session = extractSessionMetadata(response.data)
+    markCookieSessionRefreshed(session?.access_token_expires_at)
     if (response.data.user) {
       localStorage.setItem('apex_user', JSON.stringify(response.data.user))
     }
@@ -255,12 +243,8 @@ export class ApiService {
 
   async login(data: LoginRequest): Promise<AuthResponse> {
     const response = await this.client.post<AuthResponse>('/auth/login', data)
-    const tokens = extractTokenResponse(response.data)
-    if (tokens) {
-      storeAuthTokens(tokens)
-    } else {
-      markCookieSessionRefreshed()
-    }
+    const session = extractSessionMetadata(response.data)
+    markCookieSessionRefreshed(session?.access_token_expires_at)
     if (response.data.user) {
       localStorage.setItem('apex_user', JSON.stringify(response.data.user))
     }
@@ -282,22 +266,16 @@ export class ApiService {
 
   private async doRefreshToken(): Promise<TokenResponse> {
     try {
-      const refreshToken = getStoredRefreshToken()
-      const response = await this.client.post('/auth/refresh', refreshToken ? { refresh_token: refreshToken } : {})
-      const tokens = extractTokenResponse(response.data)
-      if (tokens) {
-        storeAuthTokens(tokens)
-        return tokens
-      }
-
-      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
+      const response = await this.client.post('/auth/refresh', {})
+      const session = extractSessionMetadata(response.data)
+      const expiresAt = session?.access_token_expires_at || new Date(Date.now() + 15 * 60 * 1000).toISOString()
       markCookieSessionRefreshed(expiresAt)
       return {
         access_token: '',
         refresh_token: '',
         access_token_expires_at: expiresAt,
-        refresh_token_expires_at: '',
-        token_type: 'Bearer',
+        refresh_token_expires_at: session?.refresh_token_expires_at || '',
+        token_type: session?.token_type || 'Bearer',
       }
     } catch (error: any) {
       throw error
@@ -305,9 +283,8 @@ export class ApiService {
   }
 
   async logout(): Promise<void> {
-    const refreshToken = getStoredRefreshToken()
     try {
-      await this.client.post('/auth/logout', refreshToken ? { refresh_token: refreshToken } : {})
+      await this.client.post('/auth/logout', {})
     } finally {
       this.clearAuth()
     }
@@ -955,15 +932,9 @@ export class ApiService {
   }
 
   // Utility methods
-  private getAuthToken(): string | null {
-    return getStoredAccessToken()
-  }
-
   isAuthenticated(): boolean {
-    const token = this.getAuthToken()
-    const expires = localStorage.getItem('apex_token_expires')
-
-    if (!token || !expires) {
+    const expires = getStoredSessionExpiry()
+    if (!expires) {
       return false
     }
 
@@ -1738,7 +1709,7 @@ export class ApiService {
    */
   getTerminalWebSocketUrl(sessionId: string): string {
     const fallbackHost = typeof window !== 'undefined' ? window.location.host : 'localhost:8080'
-    return appendStoredAccessTokenToWebSocketUrl(
+    return buildAuthenticatedWebSocketUrl(
       `${resolveWebSocketBaseUrl(this.baseURL, fallbackHost)}/terminal/${encodeURIComponent(sessionId)}`
     )
   }
@@ -2264,7 +2235,7 @@ export class ApiService {
 
   // Get WebSocket URL for debug events
   getDebugWebSocketUrl(sessionId: string): string {
-    return appendStoredAccessTokenToWebSocketUrl(
+    return buildAuthenticatedWebSocketUrl(
       `${resolveWebSocketBaseUrl(this.baseURL, window.location.host)}/debug/${encodeURIComponent(sessionId)}`
     )
   }
@@ -2417,7 +2388,7 @@ export class ApiService {
    * Get WebSocket URL for deployment logs streaming
    */
   getDeploymentLogsWebSocketUrl(deploymentId: string): string {
-    return appendStoredAccessTokenToWebSocketUrl(
+    return buildAuthenticatedWebSocketUrl(
       `${resolveWebSocketBaseUrl(this.baseURL, window.location.host)}/deploy/${encodeURIComponent(deploymentId)}`
     )
   }

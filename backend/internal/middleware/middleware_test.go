@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,21 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
 )
+
+type fakeSharedRateLimitStore struct {
+	allow bool
+	err   error
+	calls int
+}
+
+func (f *fakeSharedRateLimitStore) Allow(_ context.Context, _ string, _ string, _ int, _ time.Duration) (bool, error) {
+	f.calls++
+	return f.allow, f.err
+}
+
+func (f *fakeSharedRateLimitStore) Close() error {
+	return nil
+}
 
 func init() {
 	gin.SetMode(gin.TestMode)
@@ -91,6 +107,17 @@ func TestIPRateLimiter_GetLimiter(t *testing.T) {
 
 		wg.Wait()
 	})
+}
+
+func TestIPRateLimiter_AllowHonorsSharedStore(t *testing.T) {
+	limiter := NewScopedIPRateLimiter(rate.Limit(60)/60, 5, "auth")
+	shared := &fakeSharedRateLimitStore{allow: false}
+	limiter.shared = shared
+
+	allowed := limiter.Allow("192.168.1.1")
+
+	assert.False(t, allowed)
+	assert.Equal(t, 1, shared.calls)
 }
 
 func TestRateLimitMiddleware(t *testing.T) {

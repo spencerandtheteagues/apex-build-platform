@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"apex-build/internal/git"
+	appmiddleware "apex-build/internal/middleware"
 	"apex-build/internal/secrets"
 	"apex-build/pkg/models"
 
@@ -103,9 +104,8 @@ type GitHubRepoInfo struct {
 // POST /api/v1/projects/import/github
 func (h *ImportHandler) ImportGitHub(c *gin.Context) {
 	startTime := time.Now()
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
@@ -115,7 +115,7 @@ func (h *ImportHandler) ImportGitHub(c *gin.Context) {
 		return
 	}
 
-	if req.IsPublic && !requirePaidBackendPlan(c, h.db, userID.(uint), "Publishing projects") {
+	if req.IsPublic && !requirePaidBackendPlan(c, h.db, uid, "Publishing projects") {
 		return
 	}
 
@@ -146,7 +146,7 @@ func (h *ImportHandler) ImportGitHub(c *gin.Context) {
 
 	// Check if project name already exists for user
 	var existingProject models.Project
-	if err := h.db.Where("owner_id = ? AND name = ?", userID, projectName).First(&existingProject).Error; err == nil {
+	if err := h.db.Where("owner_id = ? AND name = ?", uid, projectName).First(&existingProject).Error; err == nil {
 		// Add timestamp suffix to make unique
 		projectName = fmt.Sprintf("%s-%d", projectName, time.Now().Unix())
 	}
@@ -174,7 +174,7 @@ func (h *ImportHandler) ImportGitHub(c *gin.Context) {
 		Description: description,
 		Language:    detection.PrimaryLanguage,
 		Framework:   detection.Framework,
-		OwnerID:     userID.(uint),
+		OwnerID:     uid,
 		IsPublic:    req.IsPublic,
 		EntryPoint:  detection.EntryPoint,
 		Environment: map[string]interface{}{

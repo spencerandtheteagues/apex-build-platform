@@ -22,6 +22,7 @@ Backend health configuration:
 
 Backend production notes:
 
+- Set `JWT_SECRET`, `JWT_REFRESH_SECRET`, and `SECRETS_MASTER_KEY` manually in the Render dashboard and keep them stable across deploys. The blueprint intentionally leaves them unsynced so redeploys do not invalidate sessions or orphan encrypted data.
 - the backend image now ships the SQL migrations required for production startup
 - `SECRETS_MASTER_KEY` may be either:
   - a base64-encoded 32-byte AES-256 key

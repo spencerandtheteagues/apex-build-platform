@@ -47,6 +47,15 @@ func TestNewAuthServiceFallsBackWhenRefreshSecretUnset(t *testing.T) {
 	assert.Equal(t, []byte("test-secret-key_refresh"), authService.refreshSecret)
 }
 
+func TestNewAuthServiceRejectsPredictableRefreshFallbackInStrictEnv(t *testing.T) {
+	t.Setenv("ENVIRONMENT", "production")
+	t.Setenv("JWT_REFRESH_SECRET", "")
+
+	require.Panics(t, func() {
+		_ = NewAuthService("test-secret-key")
+	})
+}
+
 func TestHashPassword(t *testing.T) {
 	authService := NewAuthService("test-secret")
 
@@ -248,6 +257,30 @@ func TestGenerateTokens(t *testing.T) {
 	}
 }
 
+func TestGenerateTokensUseUniqueAccessTokenIDs(t *testing.T) {
+	authService := NewAuthService("test-secret-key-for-unique-jti")
+	user := &models.User{
+		ID:               42,
+		Username:         "unique-jti-user",
+		Email:            "unique-jti@example.com",
+		SubscriptionType: "free",
+	}
+
+	first, err := authService.GenerateTokens(user)
+	require.NoError(t, err)
+	second, err := authService.GenerateTokens(user)
+	require.NoError(t, err)
+
+	firstClaims, err := authService.ValidateToken(first.AccessToken)
+	require.NoError(t, err)
+	secondClaims, err := authService.ValidateToken(second.AccessToken)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, firstClaims.ID)
+	require.NotEmpty(t, secondClaims.ID)
+	assert.NotEqual(t, firstClaims.ID, secondClaims.ID)
+}
+
 func TestValidateToken(t *testing.T) {
 	authService := NewAuthService("test-secret-key")
 
@@ -394,6 +427,25 @@ func TestRefreshTokens(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBlacklistTokenRejectsAcrossAuthServiceInstances(t *testing.T) {
+	authService := NewAuthService("test-secret-key-for-blacklist")
+	user := &models.User{
+		ID:               7,
+		Username:         "blacklist-user",
+		Email:            "blacklist@example.com",
+		SubscriptionType: "pro",
+	}
+
+	tokens, err := authService.GenerateTokens(user)
+	require.NoError(t, err)
+	require.NoError(t, authService.BlacklistToken(tokens.AccessToken))
+
+	freshInstance := NewAuthService("test-secret-key-for-blacklist")
+	claims, err := freshInstance.ValidateToken(tokens.AccessToken)
+	require.Nil(t, claims)
+	require.ErrorIs(t, err, ErrTokenBlacklisted)
 }
 
 func TestGetUserRole(t *testing.T) {

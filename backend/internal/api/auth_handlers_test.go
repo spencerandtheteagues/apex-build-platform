@@ -62,8 +62,13 @@ func TestLoginSetsHttpOnlyAuthCookies(t *testing.T) {
 
 	var response map[string]any
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	require.NotEmpty(t, response["access_token"])
-	require.NotEmpty(t, response["refresh_token"])
+	_, hasAccessToken := response["access_token"]
+	_, hasRefreshToken := response["refresh_token"]
+	require.False(t, hasAccessToken)
+	require.False(t, hasRefreshToken)
+	require.NotEmpty(t, response["access_token_expires_at"])
+	require.NotEmpty(t, response["refresh_token_expires_at"])
+	require.Equal(t, "cookie", response["session_strategy"])
 	require.Equal(t, "Bearer", response["token_type"])
 }
 
@@ -87,8 +92,13 @@ func TestRefreshTokenAcceptsRefreshCookie(t *testing.T) {
 
 	var response map[string]any
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	require.NotEmpty(t, response["access_token"])
-	require.NotEmpty(t, response["refresh_token"])
+	_, hasAccessToken := response["access_token"]
+	_, hasRefreshToken := response["refresh_token"]
+	require.False(t, hasAccessToken)
+	require.False(t, hasRefreshToken)
+	require.NotEmpty(t, response["access_token_expires_at"])
+	require.NotEmpty(t, response["refresh_token_expires_at"])
+	require.Equal(t, "cookie", response["session_strategy"])
 	require.Equal(t, "Bearer", response["token_type"])
 }
 

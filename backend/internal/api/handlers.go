@@ -13,6 +13,7 @@ import (
 	"apex-build/internal/ai"
 	"apex-build/internal/auth"
 	"apex-build/internal/db"
+	appmiddleware "apex-build/internal/middleware"
 	"apex-build/internal/payments"
 	"apex-build/internal/pricing"
 	"apex-build/internal/startup"
@@ -158,6 +159,20 @@ func topLevelHealthStatus(summary startup.Summary) string {
 
 // Authentication endpoints
 
+func cookieSessionPayload(tokens *auth.TokenPair) gin.H {
+	payload := gin.H{
+		"session_strategy": "cookie",
+	}
+	if tokens == nil {
+		return payload
+	}
+
+	payload["access_token_expires_at"] = tokens.AccessTokenExpiresAt
+	payload["refresh_token_expires_at"] = tokens.RefreshTokenExpiresAt
+	payload["token_type"] = tokens.TokenType
+	return payload
+}
+
 // Register handles user registration
 // SECURITY: Fixed TOCTOU race condition - now uses transaction with proper locking
 func (s *Server) Register(c *gin.Context) {
@@ -229,25 +244,21 @@ func (s *Server) Register(c *gin.Context) {
 	auth.SetAccessTokenCookie(c, tokens.AccessToken)
 	auth.SetRefreshTokenCookie(c, tokens.RefreshToken)
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message":                  "User created successfully",
-		"access_token":             tokens.AccessToken,
-		"refresh_token":            tokens.RefreshToken,
-		"access_token_expires_at":  tokens.AccessTokenExpiresAt,
-		"refresh_token_expires_at": tokens.RefreshTokenExpiresAt,
-		"token_type":               tokens.TokenType,
-		"user": gin.H{
-			"id":                    user.ID,
-			"username":              user.Username,
-			"email":                 user.Email,
-			"full_name":             user.FullName,
-			"is_admin":              user.IsAdmin,
-			"is_super_admin":        user.IsSuperAdmin,
-			"has_unlimited_credits": user.HasUnlimitedCredits,
-			"subscription_type":     user.SubscriptionType,
-			"credit_balance":        user.CreditBalance,
-		},
-	})
+	response := cookieSessionPayload(tokens)
+	response["message"] = "User created successfully"
+	response["user"] = gin.H{
+		"id":                    user.ID,
+		"username":              user.Username,
+		"email":                 user.Email,
+		"full_name":             user.FullName,
+		"is_admin":              user.IsAdmin,
+		"is_super_admin":        user.IsSuperAdmin,
+		"has_unlimited_credits": user.HasUnlimitedCredits,
+		"subscription_type":     user.SubscriptionType,
+		"credit_balance":        user.CreditBalance,
+	}
+
+	c.JSON(http.StatusCreated, response)
 }
 
 // Login handles user login — accepts username or email
@@ -303,28 +314,24 @@ func (s *Server) Login(c *gin.Context) {
 	auth.SetAccessTokenCookie(c, tokens.AccessToken)
 	auth.SetRefreshTokenCookie(c, tokens.RefreshToken)
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":                  "Login successful",
-		"access_token":             tokens.AccessToken,
-		"refresh_token":            tokens.RefreshToken,
-		"access_token_expires_at":  tokens.AccessTokenExpiresAt,
-		"refresh_token_expires_at": tokens.RefreshTokenExpiresAt,
-		"token_type":               tokens.TokenType,
-		"user": gin.H{
-			"id":                    user.ID,
-			"username":              user.Username,
-			"email":                 user.Email,
-			"full_name":             user.FullName,
-			"preferred_theme":       user.PreferredTheme,
-			"preferred_ai":          user.PreferredAI,
-			"is_admin":              user.IsAdmin,
-			"is_super_admin":        user.IsSuperAdmin,
-			"has_unlimited_credits": user.HasUnlimitedCredits,
-			"bypass_billing":        user.BypassBilling,
-			"subscription_type":     user.SubscriptionType,
-			"credit_balance":        user.CreditBalance,
-		},
-	})
+	response := cookieSessionPayload(tokens)
+	response["message"] = "Login successful"
+	response["user"] = gin.H{
+		"id":                    user.ID,
+		"username":              user.Username,
+		"email":                 user.Email,
+		"full_name":             user.FullName,
+		"preferred_theme":       user.PreferredTheme,
+		"preferred_ai":          user.PreferredAI,
+		"is_admin":              user.IsAdmin,
+		"is_super_admin":        user.IsSuperAdmin,
+		"has_unlimited_credits": user.HasUnlimitedCredits,
+		"bypass_billing":        user.BypassBilling,
+		"subscription_type":     user.SubscriptionType,
+		"credit_balance":        user.CreditBalance,
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // RefreshToken issues a new access/refresh token pair from a valid refresh token.
@@ -360,14 +367,10 @@ func (s *Server) RefreshToken(c *gin.Context) {
 	auth.SetAccessTokenCookie(c, tokens.AccessToken)
 	auth.SetRefreshTokenCookie(c, tokens.RefreshToken)
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":                  "Tokens refreshed successfully",
-		"access_token":             tokens.AccessToken,
-		"refresh_token":            tokens.RefreshToken,
-		"access_token_expires_at":  tokens.AccessTokenExpiresAt,
-		"refresh_token_expires_at": tokens.RefreshTokenExpiresAt,
-		"token_type":               tokens.TokenType,
-	})
+	response := cookieSessionPayload(tokens)
+	response["message"] = "Tokens refreshed successfully"
+
+	c.JSON(http.StatusOK, response)
 }
 
 // Logout invalidates the presented access token when possible.
@@ -402,9 +405,8 @@ func (s *Server) Logout(c *gin.Context) {
 
 // AIGenerate handles AI generation requests
 func (s *Server) AIGenerate(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
@@ -443,7 +445,7 @@ func (s *Server) AIGenerate(c *gin.Context) {
 		Temperature: request.Temperature,
 		Provider:    ai.AIProvider(provider),
 		Model:       request.Model,
-		UserID:      fmt.Sprintf("%v", userID),
+		UserID:      fmt.Sprintf("%d", uid),
 		ProjectID:   request.ProjectID,
 	}
 
@@ -455,11 +457,9 @@ func (s *Server) AIGenerate(c *gin.Context) {
 	targetRouter := s.aiRouter
 	isBYOK := false
 	if s.byok != nil {
-		if uid, ok := userID.(uint); ok && uid > 0 {
-			if userRouter, hasBYOK, err := s.byok.GetRouterForUser(uid); err == nil && userRouter != nil {
-				targetRouter = userRouter
-				isBYOK = hasBYOK
-			}
+		if userRouter, hasBYOK, err := s.byok.GetRouterForUser(uid); err == nil && userRouter != nil {
+			targetRouter = userRouter
+			isBYOK = hasBYOK
 		}
 	}
 
@@ -487,7 +487,7 @@ func (s *Server) AIGenerate(c *gin.Context) {
 			isBYOK,
 		)
 		if estimatedCost > 0 {
-			res, err := s.byok.ReserveCredits(userID.(uint), estimatedCost)
+			res, err := s.byok.ReserveCredits(uid, estimatedCost)
 			if err != nil {
 				if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
 					c.JSON(http.StatusPaymentRequired, gin.H{
@@ -518,7 +518,7 @@ func (s *Server) AIGenerate(c *gin.Context) {
 	// Save request to database
 	dbRequest := &models.AIRequest{
 		RequestID:  aiReq.ID,
-		UserID:     userID.(uint), // safe: middleware always sets as uint
+		UserID:     uid,
 		Provider:   string(response.Provider),
 		Capability: string(aiReq.Capability),
 		Prompt:     aiReq.Prompt,
@@ -548,7 +548,7 @@ func (s *Server) AIGenerate(c *gin.Context) {
 
 	// Record BYOK usage and finalize credits if applicable
 	if s.byok != nil {
-		if uid, ok := userID.(uint); ok && uid > 0 && response != nil {
+		if response != nil {
 			var projectID *uint
 			if request.ProjectID != "" {
 				if projectIDUint, err := strconv.ParseUint(request.ProjectID, 10, 32); err == nil {
@@ -590,8 +590,8 @@ func (s *Server) AIGenerate(c *gin.Context) {
 			projectID = dbRequest.ProjectID
 		}
 		tokensUsed := dbRequest.TokensUsed
-		if err := s.usage.RecordAIRequest(c.Request.Context(), userID.(uint), projectID, string(response.Provider), tokensUsed); err != nil {
-			fmt.Printf("usage tracker: failed to record AI request for user %d: %v\n", userID.(uint), err)
+		if err := s.usage.RecordAIRequest(c.Request.Context(), uid, projectID, string(response.Provider), tokensUsed); err != nil {
+			fmt.Printf("usage tracker: failed to record AI request for user %d: %v\n", uid, err)
 		}
 	}
 
@@ -607,14 +607,13 @@ func (s *Server) AIGenerate(c *gin.Context) {
 
 // GetAIUsage returns AI usage statistics for a user
 func (s *Server) GetAIUsage(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
 	var requests []models.AIRequest
-	if err := s.db.DB.Where("user_id = ?", userID).Order("created_at DESC").Limit(100).Find(&requests).Error; err != nil {
+	if err := s.db.DB.Where("user_id = ?", uid).Order("created_at DESC").Limit(100).Find(&requests).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch usage data"})
 		return
 	}
@@ -658,9 +657,8 @@ type ProviderStat struct {
 
 // CreateProject creates a new project
 func (s *Server) CreateProject(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
@@ -678,7 +676,7 @@ func (s *Server) CreateProject(c *gin.Context) {
 		return
 	}
 
-	if req.IsPublic && !requirePaidBackendPlan(c, s.db.DB, userID.(uint), "Publishing projects") {
+	if req.IsPublic && !requirePaidBackendPlan(c, s.db.DB, uid, "Publishing projects") {
 		return
 	}
 
@@ -692,7 +690,7 @@ func (s *Server) CreateProject(c *gin.Context) {
 		Description: req.Description,
 		Language:    req.Language,
 		Framework:   req.Framework,
-		OwnerID:     userID.(uint),
+		OwnerID:     uid,
 		IsPublic:    req.IsPublic,
 		Environment: req.Environment,
 	}
@@ -710,14 +708,13 @@ func (s *Server) CreateProject(c *gin.Context) {
 
 // GetProjects returns projects for a user
 func (s *Server) GetProjects(c *gin.Context) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
 	var projects []models.Project
-	if err := s.db.DB.Where("owner_id = ?", userID).Order("updated_at DESC").Find(&projects).Error; err != nil {
+	if err := s.db.DB.Where("owner_id = ?", uid).Order("updated_at DESC").Find(&projects).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch projects"})
 		return
 	}
@@ -730,9 +727,8 @@ func (s *Server) GetProjects(c *gin.Context) {
 // GetProject returns a specific project
 func (s *Server) GetProject(c *gin.Context) {
 	projectID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
@@ -740,7 +736,7 @@ func (s *Server) GetProject(c *gin.Context) {
 	query := s.db.DB.Where("id = ?", projectID)
 
 	// Only allow access to own projects or public projects
-	query = query.Where("owner_id = ? OR is_public = ?", userID, true)
+	query = query.Where("owner_id = ? OR is_public = ?", uid, true)
 
 	if err := query.Preload("Files").First(&project).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
@@ -757,9 +753,8 @@ func (s *Server) GetProject(c *gin.Context) {
 // CreateFile creates a new file in a project
 func (s *Server) CreateFile(c *gin.Context) {
 	projectID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
@@ -778,7 +773,7 @@ func (s *Server) CreateFile(c *gin.Context) {
 
 	// Verify project ownership
 	var project models.Project
-	if err := s.db.DB.Where("id = ? AND owner_id = ?", projectID, userID).First(&project).Error; err != nil {
+	if err := s.db.DB.Where("id = ? AND owner_id = ?", projectID, uid).First(&project).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
 		return
 	}
@@ -792,7 +787,7 @@ func (s *Server) CreateFile(c *gin.Context) {
 		Content:    req.Content,
 		MimeType:   req.MimeType,
 		Size:       int64(len(req.Content)),
-		LastEditBy: userID.(uint),
+		LastEditBy: uid,
 	}
 
 	if err := s.db.DB.Create(file).Error; err != nil {
@@ -809,16 +804,15 @@ func (s *Server) CreateFile(c *gin.Context) {
 // GetFiles returns files for a project
 func (s *Server) GetFiles(c *gin.Context) {
 	projectID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
 	// Verify project access
 	var project models.Project
 	query := s.db.DB.Where("id = ?", projectID)
-	query = query.Where("owner_id = ? OR is_public = ?", userID, true)
+	query = query.Where("owner_id = ? OR is_public = ?", uid, true)
 
 	if err := query.First(&project).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
@@ -839,9 +833,8 @@ func (s *Server) GetFiles(c *gin.Context) {
 // GetFile returns a specific file by ID
 func (s *Server) GetFile(c *gin.Context) {
 	fileID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
@@ -852,7 +845,7 @@ func (s *Server) GetFile(c *gin.Context) {
 	}
 
 	// Check access permissions
-	if file.Project.OwnerID != userID.(uint) && !file.Project.IsPublic {
+	if file.Project.OwnerID != uid && !file.Project.IsPublic {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
 	}
@@ -865,16 +858,15 @@ func (s *Server) GetFile(c *gin.Context) {
 // DownloadProject exports all project files as a zip archive
 func (s *Server) DownloadProject(c *gin.Context) {
 	projectID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
 	// Verify project access
 	var project models.Project
 	query := s.db.DB.Where("id = ?", projectID)
-	query = query.Where("owner_id = ? OR is_public = ?", userID, true)
+	query = query.Where("owner_id = ? OR is_public = ?", uid, true)
 
 	if err := query.First(&project).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
@@ -923,9 +915,8 @@ func (s *Server) DownloadProject(c *gin.Context) {
 // UpdateFile updates a file's content
 func (s *Server) UpdateFile(c *gin.Context) {
 	fileID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
@@ -952,7 +943,7 @@ func (s *Server) UpdateFile(c *gin.Context) {
 		return
 	}
 
-	if file.Project.OwnerID != userID.(uint) {
+	if file.Project.OwnerID != uid {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
 	}
@@ -1017,7 +1008,7 @@ func (s *Server) UpdateFile(c *gin.Context) {
 		file.Size = int64(len(*req.Content))
 	}
 
-	file.LastEditBy = userID.(uint)
+	file.LastEditBy = uid
 	file.Version++
 
 	if err := tx.Save(&file).Error; err != nil {
@@ -1040,9 +1031,8 @@ func (s *Server) UpdateFile(c *gin.Context) {
 // DeleteFile deletes a file by ID
 func (s *Server) DeleteFile(c *gin.Context) {
 	fileID := c.Param("id")
-	userID, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
 
@@ -1052,7 +1042,7 @@ func (s *Server) DeleteFile(c *gin.Context) {
 		return
 	}
 
-	if file.Project.OwnerID != userID.(uint) {
+	if file.Project.OwnerID != uid {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
 	}

@@ -50,9 +50,9 @@ describe('getCollaborationWebSocketUrl', () => {
     expect(getCollaborationWebSocketUrl()).toBe('ws://localhost:3000/ws/collab')
   })
 
-  it('appends the stored access token for websocket auth', () => {
+  it('does not append a readable token for websocket auth', () => {
     localStorage.setItem('apex_access_token', 'access-token-value')
 
-    expect(getCollaborationWebSocketUrl()).toBe('ws://localhost:3000/ws/collab?token=access-token-value')
+    expect(getCollaborationWebSocketUrl()).toBe('ws://localhost:3000/ws/collab')
   })
 })

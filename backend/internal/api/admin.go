@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	appmiddleware "apex-build/internal/middleware"
 	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
@@ -25,10 +26,8 @@ func escapeLikePattern(input string) string {
 // AdminMiddleware checks if the user is an admin
 func (s *Server) AdminMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userID, exists := c.Get("user_id")
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
-			c.Abort()
+		userID, ok := appmiddleware.RequireUserID(c)
+		if !ok {
 			return
 		}
 
@@ -133,9 +132,9 @@ func (s *Server) AdminGetUsers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"users": users,
 		"pagination": gin.H{
-			"page":       page,
-			"limit":      limit,
-			"total":      total,
+			"page":        page,
+			"limit":       limit,
+			"total":       total,
 			"total_pages": (total + int64(limit) - 1) / int64(limit),
 		},
 	})

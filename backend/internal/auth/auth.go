@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"apex-build/internal/cache"
 	"apex-build/pkg/models"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -36,9 +38,7 @@ var (
 
 // TokenBlacklist manages revoked tokens with automatic TTL-based cleanup
 type TokenBlacklist struct {
-	tokens map[string]time.Time // token -> expiration time
-	mu     sync.RWMutex
-	stopCh chan struct{}
+	cache *cache.RedisCache
 }
 
 // Global token blacklist instance
@@ -48,55 +48,47 @@ var tokenBlacklistOnce sync.Once
 // initTokenBlacklist initializes the global token blacklist with cleanup
 func initTokenBlacklist() {
 	tokenBlacklistOnce.Do(func() {
-		tokenBlacklist = &TokenBlacklist{
-			tokens: make(map[string]time.Time),
-			stopCh: make(chan struct{}),
+		config := cache.DefaultCacheConfig()
+		config.DefaultTTL = 15 * time.Minute
+
+		redisURL := strings.TrimSpace(os.Getenv("REDIS_URL"))
+		var blacklistCache *cache.RedisCache
+		if redisURL != "" {
+			blacklistCache = cache.NewRedisCacheFromURL(redisURL, config)
+		} else {
+			blacklistCache = cache.NewRedisCache(config)
 		}
-		go tokenBlacklist.cleanupRoutine()
+
+		tokenBlacklist = &TokenBlacklist{
+			cache: blacklistCache,
+		}
 	})
 }
 
-// Add adds a token to the blacklist with its expiration time
-func (tb *TokenBlacklist) Add(token string, expiresAt time.Time) {
-	tb.mu.Lock()
-	defer tb.mu.Unlock()
-	tb.tokens[token] = expiresAt
+func tokenRevocationCacheKey(identifier string) string {
+	return "auth:blacklist:" + identifier
 }
 
-// IsBlacklisted checks if a token is in the blacklist
-func (tb *TokenBlacklist) IsBlacklisted(token string) bool {
-	tb.mu.RLock()
-	defer tb.mu.RUnlock()
-	_, exists := tb.tokens[token]
-	return exists
-}
-
-// cleanupRoutine removes expired tokens from the blacklist every 5 minutes
-func (tb *TokenBlacklist) cleanupRoutine() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			tb.cleanup()
-		case <-tb.stopCh:
-			return
-		}
+func (tb *TokenBlacklist) Add(identifier string, expiresAt time.Time) error {
+	if tb == nil || tb.cache == nil || strings.TrimSpace(identifier) == "" {
+		return nil
 	}
+
+	ttl := time.Until(expiresAt)
+	if ttl <= 0 {
+		ttl = time.Minute
+	}
+
+	return tb.cache.Set(context.Background(), tokenRevocationCacheKey(identifier), []byte("1"), ttl)
 }
 
-// cleanup removes tokens that have naturally expired
-func (tb *TokenBlacklist) cleanup() {
-	tb.mu.Lock()
-	defer tb.mu.Unlock()
-
-	now := time.Now()
-	for token, expiresAt := range tb.tokens {
-		if now.After(expiresAt) {
-			delete(tb.tokens, token)
-		}
+func (tb *TokenBlacklist) IsBlacklisted(identifier string) bool {
+	if tb == nil || tb.cache == nil || strings.TrimSpace(identifier) == "" {
+		return false
 	}
+
+	_, err := tb.cache.Get(context.Background(), tokenRevocationCacheKey(identifier))
+	return err == nil
 }
 
 // AuthService handles authentication and authorization
@@ -175,6 +167,9 @@ const CurrentLegalPolicyVersion = "2026-03-21"
 func NewAuthService(jwtSecret string) *AuthService {
 	refreshSecret := strings.TrimSpace(os.Getenv("JWT_REFRESH_SECRET"))
 	if refreshSecret == "" {
+		if requiresExplicitRefreshSecret() {
+			log.Panic("CRITICAL: JWT_REFRESH_SECRET is required in strict environments; refusing predictable fallback")
+		}
 		refreshSecret = jwtSecret + "_refresh" // Backward-compatible fallback for local/test setups
 	}
 
@@ -192,6 +187,16 @@ func NewAuthService(jwtSecret string) *AuthService {
 		bcryptCost:      12,                 // Strong bcrypt cost (legacy fallback)
 		db:              nil,                // Set via SetDB for database-backed refresh tokens
 	}
+}
+
+func requiresExplicitRefreshSecret() bool {
+	for _, key := range []string{"ENVIRONMENT", "APEX_ENV", "ENV"} {
+		switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+		case "production", "staging":
+			return true
+		}
+	}
+	return false
 }
 
 // SetDB sets the database connection for refresh token storage.
@@ -269,7 +274,7 @@ func (a *AuthService) GenerateTokensWithMetadata(user *models.User, metadata *Re
 			NotBefore: jwt.NewNumericDate(now),
 			Issuer:    "apex-build",
 			Subject:   fmt.Sprintf("user:%d", user.ID),
-			ID:        fmt.Sprintf("access:%d:%d", user.ID, now.Unix()),
+			ID:        "access:" + generateUUID(),
 		},
 	}
 
@@ -357,11 +362,6 @@ func generateUUID() string {
 
 // ValidateToken validates and parses a JWT token
 func (a *AuthService) ValidateToken(tokenString string) (*JWTClaims, error) {
-	// Check if token is blacklisted (revoked on logout)
-	if tokenBlacklist != nil && tokenBlacklist.IsBlacklisted(tokenString) {
-		return nil, ErrTokenBlacklisted
-	}
-
 	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -383,6 +383,9 @@ func (a *AuthService) ValidateToken(tokenString string) (*JWTClaims, error) {
 	claims, ok := token.Claims.(*JWTClaims)
 	if !ok {
 		return nil, ErrInvalidToken
+	}
+	if tokenBlacklist != nil && tokenBlacklist.IsBlacklisted(revocationIdentifierForToken(tokenString, claims.RegisteredClaims)) {
+		return nil, ErrTokenBlacklisted
 	}
 
 	return claims, nil
@@ -454,25 +457,40 @@ func (a *AuthService) BlacklistToken(tokenString string) error {
 		initTokenBlacklist()
 	}
 
-	// Parse token to get expiration time (don't validate since we're blacklisting)
-	token, _ := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
-		return a.jwtSecret, nil
-	})
-
-	var expiresAt time.Time
-	if token != nil {
-		if claims, ok := token.Claims.(*JWTClaims); ok && claims.ExpiresAt != nil {
-			expiresAt = claims.ExpiresAt.Time
-		}
-	}
+	identifier, expiresAt := blacklistMetadataFromToken(tokenString)
 
 	// If we couldn't parse expiration, use default token expiry
 	if expiresAt.IsZero() {
 		expiresAt = time.Now().Add(a.tokenExpiry)
 	}
+	if identifier == "" {
+		identifier = hashToken(tokenString)
+	}
 
-	tokenBlacklist.Add(tokenString, expiresAt)
-	return nil
+	return tokenBlacklist.Add(identifier, expiresAt)
+}
+
+func blacklistMetadataFromToken(tokenString string) (string, time.Time) {
+	parser := jwt.NewParser()
+	claims := &JWTClaims{}
+	_, _, err := parser.ParseUnverified(tokenString, claims)
+	if err != nil {
+		return "", time.Time{}
+	}
+	if claims.ExpiresAt == nil {
+		return revocationIdentifierForToken(tokenString, claims.RegisteredClaims), time.Time{}
+	}
+	return revocationIdentifierForToken(tokenString, claims.RegisteredClaims), claims.ExpiresAt.Time
+}
+
+func revocationIdentifierForToken(tokenString string, claims jwt.RegisteredClaims) string {
+	if id := strings.TrimSpace(claims.ID); id != "" {
+		return "jti:" + id
+	}
+	if strings.TrimSpace(tokenString) == "" {
+		return ""
+	}
+	return "token:" + hashToken(tokenString)
 }
 
 // RefreshTokens generates new tokens using a refresh token (legacy JWT-based)

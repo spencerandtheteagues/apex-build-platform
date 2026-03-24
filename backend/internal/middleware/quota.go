@@ -53,8 +53,8 @@ func (q *QuotaChecker) CheckProjectQuota() gin.HandlerFunc {
 			return
 		}
 
-		userID, exists := c.Get("user_id")
-		if !exists {
+		userID, ok := GetUserID(c)
+		if !ok {
 			c.Next()
 			return
 		}
@@ -69,7 +69,7 @@ func (q *QuotaChecker) CheckProjectQuota() gin.HandlerFunc {
 
 		allowed, current, limit, err := q.tracker.CheckQuota(
 			c.Request.Context(),
-			userID.(uint),
+			userID,
 			plan,
 			usage.UsageProjects,
 			1, // Creating 1 project
@@ -93,8 +93,8 @@ func (q *QuotaChecker) CheckProjectQuota() gin.HandlerFunc {
 // CheckStorageQuota middleware checks if user has storage quota
 func (q *QuotaChecker) CheckStorageQuota(estimatedBytes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userID, exists := c.Get("user_id")
-		if !exists {
+		userID, ok := GetUserID(c)
+		if !ok {
 			c.Next()
 			return
 		}
@@ -108,7 +108,7 @@ func (q *QuotaChecker) CheckStorageQuota(estimatedBytes int64) gin.HandlerFunc {
 
 		allowed, current, limit, err := q.tracker.CheckQuota(
 			c.Request.Context(),
-			userID.(uint),
+			userID,
 			plan,
 			usage.UsageStorageBytes,
 			estimatedBytes,
@@ -131,8 +131,8 @@ func (q *QuotaChecker) CheckStorageQuota(estimatedBytes int64) gin.HandlerFunc {
 // CheckAIQuota middleware checks if user has AI request quota
 func (q *QuotaChecker) CheckAIQuota() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userID, exists := c.Get("user_id")
-		if !exists {
+		userID, ok := GetUserID(c)
+		if !ok {
 			c.Next()
 			return
 		}
@@ -146,7 +146,7 @@ func (q *QuotaChecker) CheckAIQuota() gin.HandlerFunc {
 
 		allowed, current, limit, err := q.tracker.CheckQuota(
 			c.Request.Context(),
-			userID.(uint),
+			userID,
 			plan,
 			usage.UsageAIRequests,
 			1, // 1 AI request
@@ -169,8 +169,8 @@ func (q *QuotaChecker) CheckAIQuota() gin.HandlerFunc {
 // CheckExecutionQuota middleware checks if user has execution quota
 func (q *QuotaChecker) CheckExecutionQuota(estimatedMinutes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userID, exists := c.Get("user_id")
-		if !exists {
+		userID, ok := GetUserID(c)
+		if !ok {
 			c.Next()
 			return
 		}
@@ -188,7 +188,7 @@ func (q *QuotaChecker) CheckExecutionQuota(estimatedMinutes int64) gin.HandlerFu
 
 		allowed, current, limit, err := q.tracker.CheckQuota(
 			c.Request.Context(),
-			userID.(uint),
+			userID,
 			plan,
 			usage.UsageExecutionMinutes,
 			estimatedMinutes,
@@ -211,8 +211,8 @@ func (q *QuotaChecker) CheckExecutionQuota(estimatedMinutes int64) gin.HandlerFu
 // GenericQuotaCheck is a generic quota check that can be used for any usage type
 func (q *QuotaChecker) GenericQuotaCheck(usageType usage.UsageType, amount int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userID, exists := c.Get("user_id")
-		if !exists {
+		userID, ok := GetUserID(c)
+		if !ok {
 			c.Next()
 			return
 		}
@@ -226,7 +226,7 @@ func (q *QuotaChecker) GenericQuotaCheck(usageType usage.UsageType, amount int64
 
 		allowed, current, limit, err := q.tracker.CheckQuota(
 			c.Request.Context(),
-			userID.(uint),
+			userID,
 			plan,
 			usageType,
 			amount,
@@ -296,7 +296,9 @@ func (q *QuotaChecker) sendQuotaExceeded(c *gin.Context, usageType usage.UsageTy
 	requestID := c.GetHeader("X-Request-ID")
 	if requestID == "" {
 		if rid, exists := c.Get("request_id"); exists {
-			requestID = rid.(string)
+			if requestIDValue, ok := rid.(string); ok {
+				requestID = requestIDValue
+			}
 		}
 	}
 
