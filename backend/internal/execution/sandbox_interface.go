@@ -648,6 +648,10 @@ func (f *SandboxFactory) GetCapabilities() SandboxCapabilities {
 		caps.NetworkIsolation = !cfg.NetworkEnabled
 		caps.SeccompEnabled = true // runtime default seccomp in Docker/gVisor mode
 		caps.ReadOnlyRoot = cfg.ReadOnlyRootFS
+	} else if f.e2bSandbox != nil {
+		// E2B runs code inside managed remote microVMs, so execution remains isolated
+		// even when a local Docker daemon is unavailable.
+		caps.ContainerIsolation = true
 	}
 
 	return caps

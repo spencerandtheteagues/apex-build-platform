@@ -28,6 +28,7 @@ Backend production notes:
   - a base64-encoded 32-byte AES-256 key
   - a strong raw secret string, which the backend deterministically derives into 32-byte key material
 - `EXECUTION_FORCE_CONTAINER=true` keeps public code execution fail-closed, but the core API still boots if Docker is unavailable in the host platform
+- Set `E2B_API_KEY` if you want managed code execution on Render without a local Docker daemon. When `E2B_API_KEY` is present, the backend prefers E2B-managed sandboxes over local Docker and does not disable execution just because Render lacks Docker access.
 
 Frontend health configuration:
 
@@ -111,3 +112,4 @@ npm test
 - Production SQL migrations are packaged into the backend runtime image, so first-run container deploys do not depend on source files outside the image.
 - The frontend Nginx container serves `/config.js` and health checks from the same image used in production.
 - Keep [`backend/api/openapi.yaml`](../backend/api/openapi.yaml) updated when externally consumed endpoints change.
+- After setting `E2B_API_KEY` on Render, redeploy the backend and confirm `/health` no longer reports `code_execution` as degraded because of a missing container sandbox.

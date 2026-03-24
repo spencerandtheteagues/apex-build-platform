@@ -99,6 +99,16 @@ type ExecutionHandlerConfig struct {
 	DisableExecution bool
 }
 
+func shouldRequireLocalContainerSandbox(forceContainer bool, factoryConfig *execution.SandboxFactoryConfig) bool {
+	if !forceContainer {
+		return false
+	}
+	if factoryConfig == nil {
+		return true
+	}
+	return !(factoryConfig.EnableE2B && strings.TrimSpace(factoryConfig.E2BApiKey) != "")
+}
+
 // DefaultExecutionHandlerConfig returns secure defaults for production
 func DefaultExecutionHandlerConfig() *ExecutionHandlerConfig {
 	// Check environment for configuration
@@ -126,6 +136,14 @@ func NewExecutionHandlerWithConfig(db *gorm.DB, config *ExecutionHandlerConfig) 
 		config = DefaultExecutionHandlerConfig()
 	}
 
+	// Start from the shared factory defaults so E2B and sandbox-v2 environment
+	// wiring stays aligned across the app.
+	factoryConfig := execution.DefaultSandboxFactoryConfig()
+	factoryConfig.PreferContainer = true
+	factoryConfig.ContainerConfig = execution.DefaultContainerSandboxConfig()
+	factoryConfig.ProcessConfig = execution.DefaultSandboxConfig()
+	effectiveForceContainer := shouldRequireLocalContainerSandbox(config.ForceContainer, factoryConfig)
+
 	// Check Docker availability first
 	dockerStatus := execution.CheckDockerStatus()
 	if dockerStatus.Available {
@@ -139,28 +157,26 @@ func NewExecutionHandlerWithConfig(db *gorm.DB, config *ExecutionHandlerConfig) 
 		log.Println("          - All capabilities dropped")
 	} else {
 		log.Printf("WARNING: Docker not available: %s", dockerStatus.Error)
-		if config.ForceContainer {
+		if effectiveForceContainer {
 			log.Println("SECURITY: Container execution is required but Docker is unavailable")
 			log.Println("SECURITY: Code execution features will be DISABLED")
 			config.DisableExecution = true
+		} else if factoryConfig.EnableE2B && strings.TrimSpace(factoryConfig.E2BApiKey) != "" {
+			log.Println("EXECUTION: Docker unavailable, falling back to E2B managed sandboxes")
+			log.Println("   - Managed microVMs via E2B API")
+			log.Println("   - No local Docker daemon required")
 		} else {
 			log.Println("WARNING: Falling back to process-based sandbox (less secure)")
 			log.Println("WARNING: Set EXECUTION_FORCE_CONTAINER=true to require Docker")
 		}
 	}
 
-	// Configure sandbox factory
-	factoryConfig := &execution.SandboxFactoryConfig{
-		PreferContainer: true, // Always prefer container when available
-		ForceContainer:  config.ForceContainer,
-		ContainerConfig: execution.DefaultContainerSandboxConfig(),
-		ProcessConfig:   execution.DefaultSandboxConfig(),
-	}
+	factoryConfig.ForceContainer = effectiveForceContainer
 
 	// Create sandbox factory
 	sandboxFactory, err := execution.NewSandboxFactory(factoryConfig)
 	if err != nil {
-		if config.ForceContainer {
+		if effectiveForceContainer {
 			// If container is required and unavailable, create handler with disabled execution
 			log.Printf("SECURITY: Sandbox factory failed: %v", err)
 			log.Println("SECURITY: Code execution is DISABLED due to security requirements")
@@ -180,7 +196,7 @@ func NewExecutionHandlerWithConfig(db *gorm.DB, config *ExecutionHandlerConfig) 
 				SandboxFactory:    nil, // No sandbox available
 				TerminalManager:   termManager,
 				ProjectsDir:       projectsPath,
-				ContainerRequired: true,
+				ContainerRequired: effectiveForceContainer,
 			}, nil
 		}
 		return nil, fmt.Errorf("failed to create sandbox factory: %w", err)
@@ -213,7 +229,7 @@ func NewExecutionHandlerWithConfig(db *gorm.DB, config *ExecutionHandlerConfig) 
 		SandboxFactory:    sandboxFactory,
 		TerminalManager:   termManager,
 		ProjectsDir:       projectsPath,
-		ContainerRequired: config.ForceContainer,
+		ContainerRequired: effectiveForceContainer,
 	}, nil
 }
 
@@ -1275,6 +1291,9 @@ func (h *ExecutionHandler) GetSandboxStatus() map[string]interface{} {
 	}
 
 	if h.SandboxFactory != nil {
+		for key, value := range h.SandboxFactory.GetStats() {
+			status[key] = value
+		}
 		caps := h.SandboxFactory.GetCapabilities()
 		status["container_available"] = h.SandboxFactory.IsContainerAvailable()
 		status["container_isolation"] = caps.ContainerIsolation
