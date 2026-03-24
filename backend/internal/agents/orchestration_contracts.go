@@ -599,6 +599,12 @@ func verifyAndNormalizeBuildContract(intent *IntentBrief, contract *BuildContrac
 }
 
 func compileWorkOrdersFromPlan(buildID string, contract *BuildContract, plan *BuildPlan, scorecards []ProviderScorecard) []WorkOrder {
+	return compileWorkOrdersFromPlanWithCost(buildID, contract, plan, scorecards, CostSensitivityMedium)
+}
+
+// compileWorkOrdersFromPlanWithCost compiles work orders, routing each to the provider
+// that best satisfies both task shape and the build's cost sensitivity constraint.
+func compileWorkOrdersFromPlanWithCost(buildID string, contract *BuildContract, plan *BuildPlan, scorecards []ProviderScorecard, sensitivity CostSensitivity) []WorkOrder {
 	if plan == nil {
 		return nil
 	}
@@ -624,7 +630,7 @@ func compileWorkOrdersFromPlan(buildID string, contract *BuildContract, plan *Bu
 			MaxContextBudget:   contextBudgetForRole(order.Role),
 			RiskLevel:          riskLevelForWorkOrder(order.Role, contract),
 			RoutingMode:        routingModeForRole(order.Role, contract),
-			PreferredProvider:  preferredProviderForTaskShape(taskShape, scorecards),
+			PreferredProvider:  preferredProviderForTaskShapeWithCost(taskShape, scorecards, sensitivity),
 		})
 	}
 	return orders
@@ -804,6 +810,12 @@ func preferredProviderForTaskShape(shape TaskShape, scorecards []ProviderScoreca
 }
 
 func rankedProvidersForTaskShape(shape TaskShape, scorecards []ProviderScorecard) []ai.AIProvider {
+	return rankedProvidersForTaskShapeWithCost(shape, scorecards, CostSensitivityMedium)
+}
+
+// rankedProvidersForTaskShapeWithCost ranks providers for a given task shape, using the
+// build's CostSensitivity as a hard constraint on the cost-penalty weighting.
+func rankedProvidersForTaskShapeWithCost(shape TaskShape, scorecards []ProviderScorecard, sensitivity CostSensitivity) []ai.AIProvider {
 	type providerScore struct {
 		provider ai.AIProvider
 		score    float64
@@ -813,7 +825,7 @@ func rankedProvidersForTaskShape(shape TaskShape, scorecards []ProviderScorecard
 		if scorecard.TaskShape != shape {
 			continue
 		}
-		ranked = append(ranked, providerScore{provider: scorecard.Provider, score: scoreProviderScorecard(scorecard)})
+		ranked = append(ranked, providerScore{provider: scorecard.Provider, score: scoreProviderScorecardWithCost(scorecard, sensitivity)})
 	}
 	sort.SliceStable(ranked, func(i, j int) bool {
 		if ranked[i].score == ranked[j].score {
@@ -833,10 +845,32 @@ func rankedProvidersForTaskShape(shape TaskShape, scorecards []ProviderScorecard
 	return out
 }
 
+func preferredProviderForTaskShapeWithCost(shape TaskShape, scorecards []ProviderScorecard, sensitivity CostSensitivity) ai.AIProvider {
+	ranked := rankedProvidersForTaskShapeWithCost(shape, scorecards, sensitivity)
+	if len(ranked) == 0 {
+		return ""
+	}
+	return ranked[0]
+}
+
 func scoreProviderScorecard(scorecard ProviderScorecard) float64 {
+	return scoreProviderScorecardWithCost(scorecard, CostSensitivityMedium)
+}
+
+// scoreProviderScorecardWithCost scores a provider scorecard factoring in cost sensitivity.
+// CostSensitivityHigh amplifies the cost penalty (budget mode — prefer cheap providers).
+// CostSensitivityLow reduces the penalty (PowerMax mode — prefer quality regardless of cost).
+func scoreProviderScorecardWithCost(scorecard ProviderScorecard, sensitivity CostSensitivity) float64 {
+	costPenaltyMultiplier := 1.0
+	switch sensitivity {
+	case CostSensitivityHigh:
+		costPenaltyMultiplier = 3.0 // strongly penalise expensive providers on fast/budget mode
+	case CostSensitivityLow:
+		costPenaltyMultiplier = 0.1 // nearly ignore cost when quality is paramount (PowerMax)
+	}
 	score := scorecard.CompilePassRate + scorecard.FirstPassVerificationRate + scorecard.RepairSuccessRate + scorecard.PromotionRate
 	score -= scorecard.TruncationRate + scorecard.FailureClassRecurrence
-	score -= scorecard.AverageCostPerSuccess * 0.5
+	score -= scorecard.AverageCostPerSuccess * 0.5 * costPenaltyMultiplier
 	return score
 }
 

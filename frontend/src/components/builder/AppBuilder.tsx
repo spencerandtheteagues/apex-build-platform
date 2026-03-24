@@ -87,7 +87,7 @@ import {
   resolveBuildCompletedEventStatus,
   upsertBuildTelemetrySnapshot,
 } from './buildRestore'
-import { appendStoredAccessTokenToWebSocketUrl } from '@/services/authSession'
+import { buildAuthenticatedWebSocketUrl } from '@/services/authSession'
 import { AssetUploader } from '@/components/project/AssetUploader'
 import DiffReviewPanel from '@/components/diff/DiffReviewPanel'
 import OrchestrationOverview from './OrchestrationOverview'
@@ -1512,11 +1512,39 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       setPlannerSendMode('lead')
     }
   }, [isBuildActive, plannerSendMode])
+  const normalizeFSMStateToPhase = useCallback((state: string): string => {
+    const FSM_STATE_LABELS: Record<string, string> = {
+      // Core FSM states from state_machine.go
+      planning:        'Planning',
+      executing:       'Building',
+      validating:      'Validating',
+      retrying:        'Fixing Issues',
+      rolling_back:    'Recovering',
+      rolled_back:     'Recovered',
+      paused:          'Paused',
+      completed:       'Completed',
+      failed:          'Failed',
+      // Aliases that may come through current_phase
+      provider_check:  'Checking Providers',
+      scaffolding:     'Scaffolding',
+      generating:      'Generating Code',
+      analyzing:       'Analyzing',
+      repairing:       'Repairing',
+      finalizing:      'Finalizing',
+      deploying:       'Deploying',
+      reviewing:       'Review',
+      testing:         'Testing',
+    }
+    const key = state.toLowerCase().trim()
+    return FSM_STATE_LABELS[key] ?? null
+  }, [])
   const humanizePhase = useCallback((phase: string) => {
+    const fsm = normalizeFSMStateToPhase(phase)
+    if (fsm) return fsm
     const normalized = phase.replace(/_/g, ' ').trim()
     if (!normalized) return 'Planning'
     return normalized.replace(/\b\w/g, (m) => m.toUpperCase())
-  }, [])
+  }, [normalizeFSMStateToPhase])
   const phaseLabel = useMemo(() => {
     if (!buildState) return 'Planning'
     if (buildState.currentPhase) return humanizePhase(buildState.currentPhase)
@@ -2015,7 +2043,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       }
     }
 
-    return appendStoredAccessTokenToWebSocketUrl(wsUrl)
+    return buildAuthenticatedWebSocketUrl(wsUrl)
   }, [])
 
   // WebSocket connection

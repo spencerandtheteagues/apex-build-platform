@@ -94,9 +94,13 @@ var validTransitions = []transition{
 	{StateRollingBack, EventRollbackComplete, StateFailed},
 	{StateRollingBack, EventRollbackFailed, StateFailed},
 
-	// Pause/resume
+	// Pause/resume — every active phase supports pause so user-triggered pauses
+	// are never silently rejected mid-build.  Resume always returns to Executing;
+	// the orchestrator layer is responsible for re-entering the correct sub-phase.
+	{StatePlanning, EventPause, StatePaused},
 	{StateExecuting, EventPause, StatePaused},
 	{StateValidating, EventPause, StatePaused},
+	{StateRetrying, EventPause, StatePaused},
 	{StatePaused, EventResume, StateExecuting},
 
 	// Cancel — allowed from many states
@@ -286,8 +290,10 @@ func (fsm *AgentFSM) TransitionWithMeta(event AgentEvent, metadata string) error
 		fsm.stepIndex++
 	case EventValidationFail:
 		fsm.retryCount++
-		if fsm.retryCount > fsm.maxRetries {
-			// Override: auto-escalate to rollback
+		if fsm.retryCount >= fsm.maxRetries {
+			// Retry budget exhausted — auto-escalate to rollback.
+			// Use >= so that exactly maxRetries retries are allowed before
+			// escalating; the previous > allowed one extra retry beyond the limit.
 			targetState = StateRollingBack
 			event = EventRetryExhausted
 		}

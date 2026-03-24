@@ -195,9 +195,14 @@ func (e *GuaranteeEngine) ExecuteWithGuarantee(ctx context.Context, stepName str
 
 			e.stepsRun++
 
-			// Advance FSM
+			// Advance FSM.  If the transition fails the engine's state is
+			// inconsistent with reality — downstream phases will see the wrong
+			// current state and may skip or double-execute work.  Treat this as
+			// a hard failure and roll back rather than silently continuing.
 			if err := e.fsm.Transition(core.EventStepComplete); err != nil {
-				log.Printf("[Guarantee] FSM transition warning: %v", err)
+				log.Printf("[Guarantee] FSM transition error after step %q succeeded: %v — rolling back to preserve consistency", stepName, err)
+				return e.handleRollback(ctx, result, checkpointID, start,
+					fmt.Sprintf("FSM could not advance past step %q: %v", stepName, err))
 			}
 
 			return result, nil

@@ -138,6 +138,79 @@ func (cs *ContextSelector) Select(
 	return selected
 }
 
+// SelectWithPenalty is identical to Select but accepts a previousSelections map
+// (filePath → number of times that file was included in a prior retry round).
+// Each prior inclusion applies a -50 penalty per occurrence so that when the
+// same file is repeatedly selected yet its errors are never fixed, the selector
+// automatically widens the search to include neighbouring files.  This breaks
+// the most common infinite-retry pattern where one stubborn file monopolises
+// the context budget across all retries.
+//
+// Pass nil or an empty map when there is no prior history (first attempt).
+func (cs *ContextSelector) SelectWithPenalty(
+	allFiles map[string]string,
+	errors []string,
+	recentlyModified []string,
+	previousSelections map[string]int,
+) map[string]string {
+	if len(allFiles) == 0 {
+		return nil
+	}
+
+	// Fast path: if the total size already fits, return everything.
+	if cs.fitsInBudget(allFiles) && len(allFiles) <= cs.maxFiles {
+		out := make(map[string]string, len(allFiles))
+		for k, v := range allFiles {
+			out[k] = v
+		}
+		return out
+	}
+
+	entries := cs.scoreFiles(allFiles, errors, recentlyModified)
+
+	// Apply retry-penalty: each previous selection reduces the score by 50 per
+	// occurrence, enough to push a file below a fresh candidate after two rounds.
+	if len(previousSelections) > 0 {
+		for i := range entries {
+			if count, ok := previousSelections[entries[i].Path]; ok && count > 0 {
+				entries[i].Score -= 50 * count
+			}
+		}
+	}
+
+	// Sort descending by score, then ascending by path for stability.
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Score != entries[j].Score {
+			return entries[i].Score > entries[j].Score
+		}
+		return entries[i].Path < entries[j].Path
+	})
+
+	selected := make(map[string]string)
+	tokensUsed := 0
+
+	for _, e := range entries {
+		if len(selected) >= cs.maxFiles {
+			break
+		}
+		cost := estimateTokens(e.Content)
+		if tokensUsed+cost > cs.tokenBudget {
+			if e.MentionedInError {
+				truncated := truncateToTokenBudget(e.Content, cs.tokenBudget-tokensUsed)
+				if truncated != "" {
+					selected[e.Path] = truncated
+					tokensUsed += estimateTokens(truncated)
+				}
+			}
+			continue
+		}
+		selected[e.Path] = e.Content
+		tokensUsed += cost
+	}
+
+	return selected
+}
+
 // scoreFiles assigns a relevance score to each file based on error mentions,
 // recency, and import relationships.
 func (cs *ContextSelector) scoreFiles(

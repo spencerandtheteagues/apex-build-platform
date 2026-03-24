@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"log"
 	"strings"
 
 	"apex-build/pkg/models"
@@ -28,26 +29,39 @@ var paidBuildCapabilityReasons = map[CapabilityRequirement]string{
 }
 
 func (h *BuildHandler) currentSubscriptionType(c *gin.Context, userID uint) string {
+	// Always query the database for the authoritative subscription tier.
+	// The JWT context value (set by middleware) is used only when the DB is
+	// unavailable, because an attacker with a forged or leaked JWT could claim
+	// a higher-tier plan — the DB is the ground truth.
+	if h.db != nil {
+		var user models.User
+		if err := h.db.Select("subscription_type").First(&user, userID).Error; err == nil {
+			dbPlan := strings.ToLower(strings.TrimSpace(user.SubscriptionType))
+			if dbPlan != "" {
+				// Cross-check: warn loudly if JWT and DB disagree so we can detect
+				// compromised tokens without breaking the request.
+				if ctxPlan, ok := c.Get("subscription_type"); ok {
+					if ctxPlanStr, ok := ctxPlan.(string); ok {
+						ctxPlanStr = strings.ToLower(strings.TrimSpace(ctxPlanStr))
+						if ctxPlanStr != "" && ctxPlanStr != dbPlan {
+							log.Printf("[WARN] subscription mismatch for user %d: JWT claims %q, DB has %q — using DB value", userID, ctxPlanStr, dbPlan)
+						}
+					}
+				}
+				return dbPlan
+			}
+		}
+	}
+
+	// DB unavailable — fall back to the JWT context value with a warning.
 	if plan, ok := c.Get("subscription_type"); ok {
 		if planType, ok := plan.(string); ok && strings.TrimSpace(planType) != "" {
+			log.Printf("[WARN] using JWT-cached subscription type for user %d (DB unavailable)", userID)
 			return strings.ToLower(strings.TrimSpace(planType))
 		}
 	}
 
-	if h.db == nil {
-		return "free"
-	}
-
-	var user models.User
-	if err := h.db.Select("subscription_type").First(&user, userID).Error; err != nil {
-		return "free"
-	}
-
-	planType := strings.ToLower(strings.TrimSpace(user.SubscriptionType))
-	if planType == "" {
-		return "free"
-	}
-	return planType
+	return "free"
 }
 
 func isPaidBuildPlan(planType string) bool {

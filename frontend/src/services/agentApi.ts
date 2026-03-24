@@ -21,7 +21,7 @@ import {
 } from '@/types/agent'
 import { getConfiguredWsUrl } from '@/config/runtime'
 import { apiService } from './api'
-import { appendStoredAccessTokenToWebSocketUrl } from './authSession'
+import { buildAuthenticatedWebSocketUrl } from './authSession'
 import { generateId } from '@/lib/utils'
 
 // Event handler types
@@ -92,7 +92,7 @@ export class AgentApiService {
         : `${fallbackWsRoot}/build/${buildId}`
 
       try {
-        this.ws = new WebSocket(appendStoredAccessTokenToWebSocketUrl(baseUrl))
+        this.ws = new WebSocket(buildAuthenticatedWebSocketUrl(baseUrl))
       } catch (error) {
         this.isConnecting = false
         reject(error)
@@ -107,10 +107,29 @@ export class AgentApiService {
       this.ws.onopen = () => {
         clearTimeout(timeout)
         this.isConnecting = false
+        const isReconnect = this.reconnectAttempts > 0
         this.reconnectAttempts = 0
         this.startHeartbeat()
         this.handlers.onConnected?.()
         this.flushMessageQueue()
+
+        // On reconnect, re-fetch full build state so the UI reflects any
+        // progress that arrived while the socket was down.  Without this the
+        // frontend stays frozen on the last phase it saw before disconnect.
+        if (isReconnect && this.buildId) {
+          apiService.getBuildDetails(this.buildId).then((details) => {
+            if (details) {
+              this.handlers.onStatusUpdate?.({
+                status: details.status as AgentStatus,
+                message: details.current_phase || '',
+                progress: details.progress ?? 0,
+              })
+            }
+          }).catch((err) => {
+            console.warn('[agentApi] post-reconnect state sync failed:', err)
+          })
+        }
+
         resolve()
       }
 

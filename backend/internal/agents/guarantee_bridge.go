@@ -109,6 +109,27 @@ func ExecuteTaskWithGuarantee(
 	task *Task,
 	executeFn func(ctx context.Context, task *Task) (*TaskOutput, error),
 ) (*TaskOutput, error) {
+	if task == nil {
+		return nil, fmt.Errorf("ExecuteTaskWithGuarantee: task is nil")
+	}
+	if fsmCtx == nil || fsmCtx.Engine == nil {
+		return nil, fmt.Errorf("ExecuteTaskWithGuarantee: fsmCtx or engine is nil for task %s", task.ID)
+	}
+	if executeFn == nil {
+		return nil, fmt.Errorf("ExecuteTaskWithGuarantee: executeFn is nil for task %s", task.ID)
+	}
+
+	// If the task carries a build plan in its input, ensure it is well-formed before
+	// dispatching to the guarantee engine — a plan with no files or missing spec hash
+	// will produce a vacuous build that passes validation with an empty artifact set.
+	if plan, ok := task.Input["build_plan"]; ok && plan != nil {
+		if bp, ok := plan.(*BuildPlan); ok {
+			if bp.SpecHash == "" || len(bp.Files) == 0 {
+				return nil, fmt.Errorf("ExecuteTaskWithGuarantee: task %s has degenerate build plan (spec_hash=%q files=%d)", task.ID, bp.SpecHash, len(bp.Files))
+			}
+		}
+	}
+
 	stepName := fmt.Sprintf("%s:%s", task.Type, task.ID)
 
 	result, err := fsmCtx.Engine.ExecuteWithGuarantee(ctx, stepName, func(ctx context.Context, retryCtx *guarantee.RetryContext) ([]core.BuildArtifact, error) {

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -107,6 +108,15 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 		CreatedAt:     createdAt,
 	}
 	plan.SpecHash = hashBuildPlan(plan)
+
+	// Validate that the plan has a non-empty file manifest before returning.
+	// An empty manifest means the planner returned a malformed bundle; letting
+	// the guarantee engine attempt execution would burn retries on a plan that
+	// cannot produce any output.
+	if len(plan.Files) == 0 {
+		log.Printf("[build_spec] WARNING: build %s plan has empty file manifest (appType=%s scaffold=%s) — plan may be unusable", buildID, appType, scaffold.ID)
+	}
+
 	return plan
 }
 

@@ -380,6 +380,20 @@ func (e *Executor) executeRunCommand(ctx context.Context, step *PlanStep, task *
 		return nil, fmt.Errorf("command %q is not allowed", parts[0])
 	}
 
+	// Validate every argument to prevent path-traversal and shell-metacharacter injection.
+	// exec.CommandContext never invokes a shell, so metacharacters are not interpreted, but
+	// path-traversal in args (e.g. "npm run ../../evil") could escape the work directory.
+	for i, arg := range parts[1:] {
+		if strings.Contains(arg, "..") {
+			return nil, fmt.Errorf("command argument %d contains path traversal sequence: %q", i+1, arg)
+		}
+		for _, meta := range []string{";", "|", "&", "$", "`", ">", "<", "\n", "\r"} {
+			if strings.Contains(arg, meta) {
+				return nil, fmt.Errorf("command argument %d contains disallowed character %q: %q", i+1, meta, arg)
+			}
+		}
+	}
+
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
 	cmd.Dir = e.workDir
 

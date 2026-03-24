@@ -1852,6 +1852,13 @@ func repairRecentlyModifiedPaths(task *Task, failedTask *Task) []string {
 }
 
 func (am *AgentManager) repairRelevantFiles(build *Build, task *Task, failedTask *Task, rawErrors []string) map[string]string {
+	return am.repairRelevantFilesWithHistory(build, task, failedTask, rawErrors, nil)
+}
+
+// repairRelevantFilesWithHistory is the penalty-aware variant. previousSelections maps
+// file paths to how many times they were included in context for prior repair attempts.
+// Files included before are penalised in scoring so each retry explores different context.
+func (am *AgentManager) repairRelevantFilesWithHistory(build *Build, task *Task, failedTask *Task, rawErrors []string, previousSelections map[string]int) map[string]string {
 	files := am.collectGeneratedFiles(build)
 	if len(files) == 0 {
 		return nil
@@ -1868,7 +1875,12 @@ func (am *AgentManager) repairRelevantFiles(build *Build, task *Task, failedTask
 	}
 
 	if am.ctxSelector != nil && len(rawErrors) > 0 {
-		selected := am.ctxSelector.Select(contentByPath, rawErrors, repairRecentlyModifiedPaths(task, failedTask))
+		var selected map[string]string
+		if len(previousSelections) > 0 {
+			selected = am.ctxSelector.SelectWithPenalty(contentByPath, rawErrors, repairRecentlyModifiedPaths(task, failedTask), previousSelections)
+		} else {
+			selected = am.ctxSelector.Select(contentByPath, rawErrors, repairRecentlyModifiedPaths(task, failedTask))
+		}
 		if len(selected) > 0 {
 			return selected
 		}
@@ -1967,6 +1979,13 @@ func (am *AgentManager) repairHintsForTask(build *Build, task *Task) []string {
 	if err != nil || plan == nil {
 		return heuristicHints
 	}
+	if plan.FallbackUsed {
+		// AI provider was unavailable; repair hints are heuristic-only.
+		// Log a WARNING so operations can detect when error analysis is
+		// degraded — repeated fallback means every retry uses lower-quality
+		// fixes that are less likely to resolve the error.
+		log.Printf("[WARN] build %s: error_analyzer operating in heuristic-only mode (AI provider unavailable) — repair quality may be degraded", build.ID)
+	}
 	aiHints := plan.RepairHints()
 	if len(aiHints) == 0 {
 		return heuristicHints
@@ -1988,13 +2007,53 @@ func (am *AgentManager) buildRepairWorkOrderArtifact(build *Build, agent *Agent,
 	failedArtifact := taskArtifactWorkOrderFromInput(failedTask)
 	failedLegacy := taskWorkOrderFromInput(failedTask)
 	rawErrors := repairTaskErrors(task)
-	relevantFiles := am.repairRelevantFiles(build, task, failedTask, rawErrors)
+
+	// Build a previous-selections penalty map from files that were already modified
+	// in the failed task attempt — this steers the context selector toward unexplored
+	// files on subsequent retries rather than re-sending the same failing context.
+	var previousSelections map[string]int
+	if failedTask != nil && failedTask.Output != nil && len(failedTask.Output.Files) > 0 {
+		previousSelections = make(map[string]int, len(failedTask.Output.Files))
+		for _, f := range failedTask.Output.Files {
+			if path := sanitizeFilePath(f.Path); path != "" {
+				previousSelections[path]++
+			}
+		}
+	}
+	// Also factor in files from the current (retry) task's input if it carries prior context
+	if priorCtx, ok := task.Input["previously_selected_context"].([]any); ok {
+		if previousSelections == nil {
+			previousSelections = make(map[string]int, len(priorCtx))
+		}
+		for _, v := range priorCtx {
+			if path, ok := v.(string); ok && path != "" {
+				previousSelections[sanitizeFilePath(path)]++
+			}
+		}
+	}
+
+	relevantFiles := am.repairRelevantFilesWithHistory(build, task, failedTask, rawErrors, previousSelections)
 
 	relevantPaths := make([]string, 0, len(relevantFiles))
 	for path := range relevantFiles {
 		relevantPaths = append(relevantPaths, normalizeOwnedPath(path))
 	}
 	sort.Strings(relevantPaths)
+
+	// Persist the selected context paths in the task input so the next retry
+	// attempt can build a cumulative penalty map via previously_selected_context.
+	if len(relevantPaths) > 0 {
+		if task.Input == nil {
+			task.Input = make(map[string]any)
+		}
+		existing, _ := task.Input["previously_selected_context"].([]any)
+		merged := make([]any, len(existing), len(existing)+len(relevantPaths))
+		copy(merged, existing)
+		for _, p := range relevantPaths {
+			merged = append(merged, p)
+		}
+		task.Input["previously_selected_context"] = merged
+	}
 
 	ownedFiles := append([]string(nil), relevantPaths...)
 	requiredFiles := []string{}
@@ -4053,7 +4112,11 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 				critiqueContract = &contractCopy
 			}
 			if orchestration.BuildContract != nil {
-				orchestration.WorkOrders = compileWorkOrdersFromPlan(build.ID, orchestration.BuildContract, output.Plan, orchestration.ProviderScorecards)
+				costSensitivity := CostSensitivityMedium
+				if orchestration.IntentBrief != nil && orchestration.IntentBrief.CostSensitivity != "" {
+					costSensitivity = orchestration.IntentBrief.CostSensitivity
+				}
+				orchestration.WorkOrders = compileWorkOrdersFromPlanWithCost(build.ID, orchestration.BuildContract, output.Plan, orchestration.ProviderScorecards, costSensitivity)
 			}
 		}
 		build.mu.Unlock()
@@ -15619,7 +15682,13 @@ func (am *AgentManager) getNextFallbackProviderForTask(build *Build, task *Task,
 		shape = taskShapeForRole(role)
 	}
 	if shape != "" {
-		for _, candidate := range rankedProvidersForTaskShape(shape, am.providerScorecardsForBuild(build, availableProviders)) {
+		costSensitivity := CostSensitivityMedium
+		if build != nil {
+			if orchestration := build.SnapshotState.Orchestration; orchestration != nil && orchestration.IntentBrief != nil && orchestration.IntentBrief.CostSensitivity != "" {
+				costSensitivity = orchestration.IntentBrief.CostSensitivity
+			}
+		}
+		for _, candidate := range rankedProvidersForTaskShapeWithCost(shape, am.providerScorecardsForBuild(build, availableProviders), costSensitivity) {
 			if candidate != current && available[candidate] {
 				return candidate
 			}

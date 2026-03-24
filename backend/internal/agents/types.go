@@ -366,6 +366,9 @@ type BuildPolicyState struct {
 	FullStackEligible  bool                     `json:"full_stack_eligible,omitempty"`
 	PublishEnabled     bool                     `json:"publish_enabled,omitempty"`
 	BYOKEnabled        bool                     `json:"byok_enabled,omitempty"`
+	// MaxPowerMode is the highest power mode allowed for this plan tier.
+	// Free → PowerFast only; Builder → PowerBalanced; Pro/Team → PowerMax.
+	MaxPowerMode       PowerMode                `json:"max_power_mode,omitempty"`
 }
 
 type BuildBlockerCategory string

@@ -217,8 +217,15 @@ func (h *WSHub) HandleWebSocket(c *gin.Context) {
 	forwardDone := make(chan struct{})
 	h.manager.Subscribe(buildID, updateChan)
 
-	// Forward agent updates to WebSocket
+	// Forward agent updates to WebSocket.  Panic recovery guards against a
+	// send-on-closed-channel panic if wsConn.send is closed between the nil
+	// check and the send (rare but possible during rapid disconnect/reconnect).
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[ws] panic in forward goroutine for build %s: %v", buildID, r)
+			}
+		}()
 		for {
 			select {
 			case <-forwardDone:

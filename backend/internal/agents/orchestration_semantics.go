@@ -154,6 +154,14 @@ func buildPolicyState(build *Build, capabilityState *BuildCapabilityState) *Buil
 		}
 	}
 
+	maxPowerMode := PowerFast
+	switch planType {
+	case "builder":
+		maxPowerMode = PowerBalanced
+	case "pro", "team", "enterprise", "owner":
+		maxPowerMode = PowerMax
+	}
+
 	return &BuildPolicyState{
 		PlanType:           planType,
 		Classification:     classification,
@@ -164,6 +172,7 @@ func buildPolicyState(build *Build, capabilityState *BuildCapabilityState) *Buil
 		FullStackEligible:  isPaidBuildPlan(planType),
 		PublishEnabled:     isPaidBuildPlan(planType),
 		BYOKEnabled:        isPaidBuildPlan(planType),
+		MaxPowerMode:       maxPowerMode,
 	}
 }
 

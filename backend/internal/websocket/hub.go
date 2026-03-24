@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	appmiddleware "apex-build/internal/middleware"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
@@ -58,6 +60,11 @@ type Client struct {
 	// Buffered channel of outbound messages
 	send chan []byte
 
+	// closeOnce ensures close(send) is called exactly once regardless of
+	// how many concurrent paths (broadcastToRoom full-buffer, unregisterClient,
+	// hub shutdown) try to close the channel.
+	closeOnce sync.Once
+
 	// Hub reference
 	hub *Hub
 
@@ -71,26 +78,31 @@ type Client struct {
 	mu sync.RWMutex
 }
 
+// closeSend closes the outbound channel exactly once, safe for concurrent callers.
+func (c *Client) closeSend() {
+	c.closeOnce.Do(func() { close(c.send) })
+}
+
 // CursorPosition represents a user's cursor position in a file
 type CursorPosition struct {
-	FileID   uint `json:"file_id"`
-	Line     int  `json:"line"`
-	Column   int  `json:"column"`
+	FileID    uint      `json:"file_id"`
+	Line      int       `json:"line"`
+	Column    int       `json:"column"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Message types for WebSocket communication
 const (
-	MessageTypeJoinRoom      = "join_room"
-	MessageTypeLeaveRoom     = "leave_room"
-	MessageTypeCursorUpdate  = "cursor_update"
-	MessageTypeFileChange    = "file_change"
-	MessageTypeChat          = "chat"
-	MessageTypeUserJoined    = "user_joined"
-	MessageTypeUserLeft      = "user_left"
-	MessageTypeUserList      = "user_list"
-	MessageTypeError         = "error"
-	MessageTypeHeartbeat     = "heartbeat"
+	MessageTypeJoinRoom     = "join_room"
+	MessageTypeLeaveRoom    = "leave_room"
+	MessageTypeCursorUpdate = "cursor_update"
+	MessageTypeFileChange   = "file_change"
+	MessageTypeChat         = "chat"
+	MessageTypeUserJoined   = "user_joined"
+	MessageTypeUserLeft     = "user_left"
+	MessageTypeUserList     = "user_list"
+	MessageTypeError        = "error"
+	MessageTypeHeartbeat    = "heartbeat"
 )
 
 // Message represents a WebSocket message
@@ -170,7 +182,7 @@ func (h *Hub) Run() {
 			// Graceful shutdown - close all client connections
 			h.mu.Lock()
 			for _, client := range h.clients {
-				close(client.send)
+				client.closeSend()
 			}
 			h.clients = make(map[uint]*Client)
 			h.rooms = make(map[string]map[*Client]bool)
@@ -263,8 +275,8 @@ func (h *Hub) unregisterClient(client *Client) {
 		}
 	}
 
-	// Close the send channel
-	close(client.send)
+	// Close the send channel (sync.Once; safe if broadcastToRoom already closed it)
+	client.closeSend()
 
 	log.Printf("Client unregistered: UserID=%d, RoomID=%s, Total clients=%d",
 		client.UserID, client.RoomID, len(h.clients))
@@ -283,35 +295,63 @@ func (h *Hub) broadcastMessage(message []byte) {
 	}
 }
 
-// broadcastToRoom sends a message to all clients in a specific room
+// broadcastToRoom sends a message to all clients in a specific room.
+//
+// Safety: the client set is snapshotted under RLock so that channel sends
+// never block while holding the lock.  Full-buffer clients are collected and
+// removed in a separate Write-locked pass using closeSend() (sync.Once) to
+// guarantee the channel is never closed more than once.
 func (h *Hub) broadcastToRoom(roomID string, message Message, excludeClient *Client) {
-	h.mu.RLock()
-	roomClients := h.rooms[roomID]
-	h.mu.RUnlock()
-
-	if roomClients == nil {
-		return
-	}
-
 	messageData, err := json.Marshal(message)
 	if err != nil {
 		log.Printf("Error marshaling message: %v", err)
 		return
 	}
 
-	for client := range roomClients {
+	// Snapshot the current members under a read lock.  We intentionally copy
+	// the pointers (not the channel data) so the iteration below is lock-free.
+	h.mu.RLock()
+	roomClients := h.rooms[roomID]
+	if roomClients == nil {
+		h.mu.RUnlock()
+		return
+	}
+	clients := make([]*Client, 0, len(roomClients))
+	for c := range roomClients {
+		clients = append(clients, c)
+	}
+	h.mu.RUnlock()
+
+	var toRemove []*Client
+	for _, client := range clients {
 		if client == excludeClient {
 			continue
 		}
-
 		select {
 		case client.send <- messageData:
 		default:
-			// Client's send channel is full, remove the client
-			close(client.send)
-			delete(roomClients, client)
+			// Client's outbound buffer is full; evict it rather than blocking.
+			toRemove = append(toRemove, client)
 		}
 	}
+
+	if len(toRemove) == 0 {
+		return
+	}
+
+	// Remove evicted clients under a write lock, closing their channel exactly
+	// once so writePump can drain and exit cleanly.
+	h.mu.Lock()
+	for _, client := range toRemove {
+		client.closeSend()
+		if h.rooms[roomID] != nil {
+			delete(h.rooms[roomID], client)
+			if len(h.rooms[roomID]) == 0 {
+				delete(h.rooms, roomID)
+			}
+		}
+	}
+	h.mu.Unlock()
 }
 
 // sendUserList sends the current user list to a client
@@ -327,11 +367,11 @@ func (h *Hub) sendUserList(client *Client) {
 	users := make([]map[string]interface{}, 0, len(roomClients))
 	for roomClient := range roomClients {
 		users = append(users, map[string]interface{}{
-			"user_id":  roomClient.UserID,
-			"username": roomClient.Username,
-			"email":    roomClient.Email,
+			"user_id":         roomClient.UserID,
+			"username":        roomClient.Username,
+			"email":           roomClient.Email,
 			"cursor_position": roomClient.cursorPosition,
-			"last_seen": roomClient.lastSeen,
+			"last_seen":       roomClient.lastSeen,
 		})
 	}
 
@@ -371,11 +411,11 @@ func (h *Hub) GetRoomUsers(roomID string) []map[string]interface{} {
 	users := make([]map[string]interface{}, 0, len(roomClients))
 	for client := range roomClients {
 		users = append(users, map[string]interface{}{
-			"user_id":  client.UserID,
-			"username": client.Username,
-			"email":    client.Email,
+			"user_id":         client.UserID,
+			"username":        client.Username,
+			"email":           client.Email,
 			"cursor_position": client.cursorPosition,
-			"last_seen": client.lastSeen,
+			"last_seen":       client.lastSeen,
 		})
 	}
 
@@ -434,15 +474,12 @@ func (h *Hub) BroadcastToRoom(roomID string, message Message) {
 // HandleWebSocket handles WebSocket connection upgrades
 func (h *Hub) HandleWebSocket(c *gin.Context) {
 	// Extract user information from context (set by auth middleware)
-	userIDInterface, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+	userID, ok := appmiddleware.RequireUserID(c)
+	if !ok {
 		return
 	}
-
-	userID := userIDInterface.(uint)
-	username, _ := c.Get("username")
-	email, _ := c.Get("email")
+	username, _ := appmiddleware.GetUsername(c)
+	email, _ := appmiddleware.GetUserEmail(c)
 
 	// Get room/project ID from query parameters
 	roomID := c.Query("room_id")
@@ -466,8 +503,8 @@ func (h *Hub) HandleWebSocket(c *gin.Context) {
 	client := &Client{
 		conn:      conn,
 		UserID:    userID,
-		Username:  username.(string),
-		Email:     email.(string),
+		Username:  username,
+		Email:     email,
 		RoomID:    roomID,
 		ProjectID: projectID,
 		send:      make(chan []byte, 256),

@@ -259,6 +259,11 @@ func (am *OptimizedAgentManager) removeSubscriberLocked(buildID string, sub *man
 // taskDispatcherOptimized processes tasks with proper context handling
 func (am *OptimizedAgentManager) taskDispatcherOptimized() {
 	defer am.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[manager_opt] panic recovered in taskDispatcherOptimized: %v", r)
+		}
+	}()
 
 	for {
 		select {
@@ -412,6 +417,11 @@ func (am *OptimizedAgentManager) executeTaskCore(ctx context.Context, task *Task
 // resultProcessorOptimized handles results with proper context
 func (am *OptimizedAgentManager) resultProcessorOptimized() {
 	defer am.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[manager_opt] panic recovered in resultProcessorOptimized: %v", r)
+		}
+	}()
 
 	for {
 		select {
@@ -480,6 +490,11 @@ func (am *OptimizedAgentManager) processResultCore(result *TaskResult) {
 // cleanupWorker periodically cleans up resources
 func (am *OptimizedAgentManager) cleanupWorker() {
 	defer am.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[manager_opt] panic recovered in cleanupWorker: %v", r)
+		}
+	}()
 
 	ticker := time.NewTicker(CleanupInterval)
 	defer ticker.Stop()

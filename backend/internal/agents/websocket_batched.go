@@ -292,14 +292,26 @@ func (bh *BatchedWSHub) coalescedWrite(conn *WSConnection, data []byte) {
 	copy(dataCopy, data)
 	buffer.messages = append(buffer.messages, dataCopy)
 
-	// If not pending, schedule flush
+	// If not pending, schedule a single flush goroutine.  We capture `buffer`
+	// by value (it's a pointer) so the goroutine always flushes the correct
+	// buffer even if CleanupConnection deletes the map entry first.
+	// The panic recovery prevents a closed conn.send channel from crashing the
+	// server; flushWriteBuffer's non-blocking select is the primary defence but
+	// this adds a safety net.
 	if !buffer.pending {
 		buffer.pending = true
 		buffer.lastWrite = time.Now()
 
+		capturedBuffer := buffer
+		capturedConn := conn
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[ws_batched] panic in coalesced flush for build %s: %v", capturedConn.buildID, r)
+				}
+			}()
 			time.Sleep(AgentWriteCoalesceWindow)
-			bh.flushWriteBuffer(conn, buffer)
+			bh.flushWriteBuffer(capturedConn, capturedBuffer)
 		}()
 	}
 }
