@@ -310,6 +310,38 @@ func (am *AgentManager) StartBuild(buildID string) error {
 
 	log.Printf("Build %s found, updating status to planning", buildID)
 
+	// Re-fetch the user's current subscription from DB and upgrade the build's
+	// stored plan if it is stale (e.g. build was created on a free plan before
+	// the account was upgraded). This ensures policy/blocker logic reflects the
+	// real entitlement, not the plan that was baked in at build-creation time.
+	if am.db != nil && build.UserID > 0 {
+		var u models.User
+		if err := am.db.Select("subscription_type", "has_unlimited_credits", "bypass_billing").First(&u, build.UserID).Error; err == nil {
+			livePlan := strings.ToLower(strings.TrimSpace(u.SubscriptionType))
+			if u.BypassBilling || u.HasUnlimitedCredits || isPaidBuildPlan(livePlan) {
+				if livePlan == "" {
+					livePlan = "owner"
+				}
+				build.mu.Lock()
+				build.SubscriptionPlan = livePlan
+				if build.SnapshotState.PolicyState != nil {
+					build.SnapshotState.PolicyState.PlanType = livePlan
+					build.SnapshotState.PolicyState.UpgradeRequired = false
+					build.SnapshotState.PolicyState.UpgradeReason = ""
+					build.SnapshotState.PolicyState.RequiredPlan = ""
+					build.SnapshotState.PolicyState.Classification = BuildClassificationFullStackCandidate
+					build.SnapshotState.PolicyState.FullStackEligible = true
+					build.SnapshotState.PolicyState.PublishEnabled = true
+					build.SnapshotState.PolicyState.BYOKEnabled = true
+				}
+				build.mu.Unlock()
+				log.Printf("StartBuild: upgraded plan for user %d from stored value to %q (bypass=%v unlimited=%v)", build.UserID, livePlan, u.BypassBilling, u.HasUnlimitedCredits)
+			}
+		} else {
+			log.Printf("StartBuild: could not fetch subscription for user %d: %v", build.UserID, err)
+		}
+	}
+
 	// Update status
 	build.mu.Lock()
 	build.Status = BuildPlanning
