@@ -42,6 +42,7 @@ const (
 	SandboxTypeContainer SandboxType = "container"
 	SandboxTypeProcess   SandboxType = "process"
 	SandboxTypeV2        SandboxType = "v2"
+	SandboxTypeE2B       SandboxType = "e2b"
 )
 
 // SandboxFactory creates and manages code execution sandboxes
@@ -49,8 +50,10 @@ type SandboxFactory struct {
 	containerSandbox *ContainerSandbox
 	processSandbox   *Sandbox
 	v2Sandbox        *sandboxV2ExecutorAdapter
+	e2bSandbox       *E2BExecutorAdapter
 	preferContainer  bool
 	preferV2         bool
+	preferE2B        bool
 	mu               sync.RWMutex
 	initialized      bool
 }
@@ -62,6 +65,12 @@ type SandboxFactoryConfig struct {
 
 	// PreferV2 selects sandbox-v2 for auto mode when available
 	PreferV2 bool
+
+	// EnableE2B enables E2B managed sandboxes
+	EnableE2B bool
+
+	// PreferE2B selects E2B for auto mode when available
+	PreferE2B bool
 
 	// PreferContainer attempts to use container sandbox when available
 	PreferContainer bool
@@ -75,6 +84,9 @@ type SandboxFactoryConfig struct {
 	// V2Config for sandbox-v2 execution
 	V2Config *sandboxv2.ManagerConfig
 
+	// E2BApiKey for E2B managed sandboxes
+	E2BApiKey string
+
 	// ForceContainer fails if container sandbox is unavailable
 	ForceContainer bool
 }
@@ -83,12 +95,18 @@ type SandboxFactoryConfig struct {
 func DefaultSandboxFactoryConfig() *SandboxFactoryConfig {
 	enableV2 := os.Getenv("EXECUTION_SANDBOX_V2") == "true" || os.Getenv("SANDBOX_V2_ENABLED") == "true"
 	preferV2 := os.Getenv("EXECUTION_SANDBOX_V2_PREFER") == "true"
+	e2bApiKey := os.Getenv("E2B_API_KEY")
+	enableE2B := e2bApiKey != ""
+	preferE2B := enableE2B // If E2B key is set, prefer it over Docker
 	return &SandboxFactoryConfig{
 		EnableV2:        enableV2,
 		PreferV2:        preferV2 || enableV2,
+		EnableE2B:       enableE2B,
+		PreferE2B:       preferE2B,
 		PreferContainer: true,
 		ContainerConfig: DefaultContainerSandboxConfig(),
 		ProcessConfig:   DefaultSandboxConfig(),
+		E2BApiKey:       e2bApiKey,
 		ForceContainer:  false,
 	}
 }
@@ -122,11 +140,23 @@ func NewSandboxFactory(config *SandboxFactoryConfig) (*SandboxFactory, error) {
 	factory := &SandboxFactory{
 		preferContainer: config.PreferContainer,
 		preferV2:        config.PreferV2,
+		preferE2B:       config.PreferE2B,
 	}
 
 	enableV2 := config.EnableV2 || os.Getenv("EXECUTION_SANDBOX_V2") == "true" || os.Getenv("SANDBOX_V2_ENABLED") == "true"
 	if config.PreferV2 || os.Getenv("EXECUTION_SANDBOX_V2_PREFER") == "true" {
 		factory.preferV2 = true
+	}
+
+	// Initialize E2B if enabled
+	if config.EnableE2B && config.E2BApiKey != "" {
+		e2bAdapter, err := NewE2BExecutorAdapter(config.E2BApiKey)
+		if err != nil {
+			fmt.Printf("Warning: E2B unavailable (%v), continuing with other sandboxes\n", err)
+		} else {
+			factory.e2bSandbox = e2bAdapter
+			factory.preferE2B = config.PreferE2B
+		}
 	}
 
 	if enableV2 {
@@ -179,6 +209,17 @@ func (f *SandboxFactory) Initialize(config *SandboxFactoryConfig) error {
 	enableV2 := config.EnableV2 || os.Getenv("EXECUTION_SANDBOX_V2") == "true" || os.Getenv("SANDBOX_V2_ENABLED") == "true"
 	f.preferV2 = config.PreferV2 || os.Getenv("EXECUTION_SANDBOX_V2_PREFER") == "true"
 
+	// Initialize E2B if enabled
+	if config.EnableE2B && config.E2BApiKey != "" && f.e2bSandbox == nil {
+		e2bAdapter, err := NewE2BExecutorAdapter(config.E2BApiKey)
+		if err != nil {
+			fmt.Printf("E2B unavailable: %v\n", err)
+		} else {
+			f.e2bSandbox = e2bAdapter
+			f.preferE2B = config.PreferE2B
+		}
+	}
+
 	if enableV2 && f.v2Sandbox == nil {
 		v2Adapter, err := newSandboxV2ExecutorAdapter(config.V2Config)
 		if err != nil {
@@ -223,6 +264,12 @@ func (f *SandboxFactory) GetExecutor(sandboxType SandboxType) (CodeExecutor, err
 	}
 
 	switch sandboxType {
+	case SandboxTypeE2B:
+		if f.e2bSandbox == nil {
+			return nil, fmt.Errorf("E2B sandbox is not available")
+		}
+		return f.e2bSandbox, nil
+
 	case SandboxTypeV2:
 		if f.v2Sandbox == nil {
 			return nil, fmt.Errorf("sandbox-v2 is not available")
@@ -241,6 +288,9 @@ func (f *SandboxFactory) GetExecutor(sandboxType SandboxType) (CodeExecutor, err
 	case SandboxTypeAuto:
 		fallthrough
 	default:
+		if f.preferE2B && f.e2bSandbox != nil {
+			return f.e2bSandbox, nil
+		}
 		if f.preferV2 && f.v2Sandbox != nil {
 			return f.v2Sandbox, nil
 		}
@@ -264,6 +314,8 @@ func (f *SandboxFactory) ExecuteWithID(ctx context.Context, execID, language, co
 	}
 
 	switch typed := executor.(type) {
+	case *E2BExecutorAdapter:
+		return typed.ExecuteWithID(ctx, execID, language, code, stdin)
 	case *containerExecutorAdapter:
 		return typed.sandbox.ExecuteWithID(ctx, execID, language, code, stdin)
 	case *processExecutorAdapter:
@@ -318,6 +370,8 @@ func (f *SandboxFactory) ExecuteFileWithID(ctx context.Context, execID, filepath
 	}
 
 	switch typed := executor.(type) {
+	case *E2BExecutorAdapter:
+		return nil, fmt.Errorf("file execution not supported in E2B sandbox - use Execute with code content")
 	case *processExecutorAdapter:
 		return typed.sandbox.ExecuteFileWithID(ctx, execID, filepath, args, stdin)
 	case *sandboxV2ExecutorAdapter:
@@ -336,12 +390,20 @@ func (f *SandboxFactory) Kill(execID string) error {
 	}
 
 	f.mu.RLock()
+	e2bSandbox := f.e2bSandbox
 	v2Sandbox := f.v2Sandbox
 	containerSandbox := f.containerSandbox
 	processSandbox := f.processSandbox
 	f.mu.RUnlock()
 
 	var errs []error
+	if e2bSandbox != nil {
+		if err := e2bSandbox.Kill(execID); err == nil {
+			return nil
+		} else {
+			errs = append(errs, err)
+		}
+	}
 	if v2Sandbox != nil {
 		if err := v2Sandbox.Kill(execID); err == nil {
 			return nil
@@ -374,7 +436,7 @@ func (f *SandboxFactory) Kill(execID string) error {
 func (f *SandboxFactory) IsContainerAvailable() bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.containerSandbox != nil || f.v2Sandbox != nil
+	return f.containerSandbox != nil || f.v2Sandbox != nil || f.e2bSandbox != nil
 }
 
 // GetStats returns combined statistics from all sandboxes
@@ -383,10 +445,16 @@ func (f *SandboxFactory) GetStats() map[string]interface{} {
 	defer f.mu.RUnlock()
 
 	stats := map[string]interface{}{
-		"container_available":  f.containerSandbox != nil || f.v2Sandbox != nil,
+		"container_available":  f.containerSandbox != nil || f.v2Sandbox != nil || f.e2bSandbox != nil,
 		"sandbox_v2_available": f.v2Sandbox != nil,
+		"e2b_available":        f.e2bSandbox != nil,
 		"prefer_container":     f.preferContainer,
 		"prefer_v2":            f.preferV2,
+		"prefer_e2b":           f.preferE2B,
+	}
+
+	if f.e2bSandbox != nil {
+		stats["e2b"] = f.e2bSandbox.Stats()
 	}
 
 	if f.v2Sandbox != nil {
@@ -421,6 +489,12 @@ func (f *SandboxFactory) Cleanup() error {
 	defer f.mu.Unlock()
 
 	var errs []error
+
+	if f.e2bSandbox != nil {
+		if err := f.e2bSandbox.Cleanup(); err != nil {
+			errs = append(errs, fmt.Errorf("E2B sandbox cleanup: %w", err))
+		}
+	}
 
 	if f.containerSandbox != nil {
 		if err := f.containerSandbox.Cleanup(); err != nil {

@@ -46,6 +46,7 @@ import (
 	"apex-build/internal/secrets"
 	"apex-build/internal/spend"
 	"apex-build/internal/startup"
+	"apex-build/internal/storage"
 	"apex-build/internal/usage"
 	"apex-build/internal/websocket"
 
@@ -582,7 +583,15 @@ func main() {
 
 		// Log sandbox status
 		sandboxStatus := executionHandler.GetSandboxStatus()
-		if containerAvail, ok := sandboxStatus["container_available"].(bool); ok && containerAvail {
+
+		// Check for E2B first (highest security)
+		if e2bAvail, ok := sandboxStatus["e2b_available"].(bool); ok && e2bAvail {
+			log.Println("EXECUTION: Using E2B managed sandboxes (Docker-free remote execution)")
+			log.Println("   - Managed microVMs via E2B API")
+			log.Println("   - Full isolation and security")
+			log.Println("   - No local Docker required")
+			startupRegistry.MarkReady("code_execution", executionTier, "E2B sandbox enabled", sandboxStatus)
+		} else if containerAvail, ok := sandboxStatus["container_available"].(bool); ok && containerAvail {
 			log.Println("SECURITY: Docker container sandboxing ENABLED")
 			log.Println("   - Seccomp syscall filtering: enabled")
 			log.Println("   - Network isolation: enabled by default")
@@ -597,6 +606,7 @@ func main() {
 			} else {
 				log.Println("WARNING: Docker not available - using process-based sandbox (less secure)")
 				log.Println("WARNING: Set EXECUTION_FORCE_CONTAINER=true to require Docker in production")
+				log.Println("WARNING: Set E2B_API_KEY=xxx to enable managed sandboxes without Docker")
 				startupRegistry.MarkDegraded("code_execution", executionTier, "Execution running without container sandbox", sandboxStatus)
 			}
 		}
@@ -855,6 +865,10 @@ func main() {
 	server := api.NewServer(database, authService, aiRouter, byokManager)
 	server.SetReadinessRegistry(startupRegistry)
 	server.SetUsageTracker(usageTracker)
+
+	// Initialize Storage Provider (R2 or local fallback)
+	storageProvider := storage.NewFromEnv()
+	server.SetStorageProvider(storageProvider)
 
 	// Setup routes
 	router := setupRoutes(
@@ -1277,6 +1291,12 @@ func setupRoutes(
 
 				// Protected Paths (A3)
 				protectedPathsHandler.RegisterProtectedPathsRoutes(projects)
+			}
+
+			// Asset serving endpoint (for local storage)
+			assets := v1.Group("/assets")
+			{
+				assets.GET("/raw/*key", server.ServeAsset)
 			}
 
 			// File endpoints

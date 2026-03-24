@@ -17,6 +17,7 @@ import (
 	"apex-build/internal/payments"
 	"apex-build/internal/pricing"
 	"apex-build/internal/startup"
+	"apex-build/internal/storage"
 	"apex-build/internal/usage"
 	"apex-build/pkg/models"
 
@@ -33,6 +34,7 @@ type Server struct {
 	byok      *ai.BYOKManager
 	usage     *usage.Tracker
 	readiness *startup.Registry
+	storage   storage.Provider
 }
 
 // NewServer creates a new API server
@@ -43,6 +45,11 @@ func NewServer(database *db.Database, authService *auth.AuthService, aiRouter *a
 		aiRouter: aiRouter,
 		byok:     byokManager,
 	}
+}
+
+// SetStorageProvider sets the storage provider for asset handling
+func (s *Server) SetStorageProvider(provider storage.Provider) {
+	s.storage = provider
 }
 
 func (s *Server) SetReadinessRegistry(registry *startup.Registry) {

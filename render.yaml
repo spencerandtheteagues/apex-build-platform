@@ -100,6 +100,18 @@ services:
         sync: false  # $50 → 5,000 credits top-up price ID
       - key: STRIPE_PRICE_CREDITS_100
         sync: false  # $100 → 10,000 credits top-up price ID
+      - key: E2B_API_KEY
+        sync: false  # Set in Render dashboard after signing up at e2b.dev
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        value: apex-build-assets
+      - key: R2_ENDPOINT
+        sync: false
     autoDeploy: true
 
   # ============================================

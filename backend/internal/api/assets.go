@@ -16,7 +16,6 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -30,8 +29,7 @@ import (
 
 const (
 	maxAssetSize      = 50 * 1024 * 1024 // 50 MB per file
-	uploadsBaseDir    = "./uploads/projects"
-	contentPreviewMax = 800 // chars of text preview for AI context
+	contentPreviewMax = 800              // chars of text preview for AI context
 )
 
 // allowedMimeTypes maps mime prefix → friendly file type label
@@ -203,33 +201,31 @@ func (s *Server) UploadAsset(c *gin.Context) {
 	// Extract content preview for AI context
 	preview := buildContentPreview(file, fileType, header.Filename)
 
-	// Prepare storage directory
-	projectUploadDir := filepath.Join(uploadsBaseDir, fmt.Sprintf("%d", projectID))
-	if err := os.MkdirAll(projectUploadDir, 0755); err != nil {
-		log.Printf("ERROR: Failed to create upload dir %s: %v", projectUploadDir, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Storage error"})
+	// Check if storage provider is available
+	if s.storage == nil {
+		log.Printf("ERROR: Storage provider not configured")
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Storage not available"})
 		return
 	}
 
 	// UUID-based filename prevents collisions and path traversal
 	storedName := fmt.Sprintf("%s%s", uuid.New().String(), ext)
-	storagePath := filepath.Join(projectUploadDir, storedName)
+	// Object key format: projects/{projectID}/{storedName}
+	key := fmt.Sprintf("projects/%d/%s", projectID, storedName)
 
-	dst, err := os.Create(storagePath)
-	if err != nil {
-		log.Printf("ERROR: Failed to create file %s: %v", storagePath, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Could not save file"})
-		return
-	}
-	defer dst.Close()
-
+	// Reset file reader position
 	file.Seek(0, io.SeekStart) //nolint:errcheck
-	written, err := io.Copy(dst, file)
+
+	// Upload to storage
+	ctx := c.Request.Context()
+	err = s.storage.Put(ctx, key, file, header.Size, mediaType)
 	if err != nil {
-		os.Remove(storagePath)
+		log.Printf("ERROR: Failed to upload file %s: %v", key, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to save file"})
 		return
 	}
+
+	written := header.Size
 
 	asset := models.ProjectAsset{
 		ProjectID:      uint(projectID),
@@ -240,10 +236,11 @@ func (s *Server) UploadAsset(c *gin.Context) {
 		FileSize:       written,
 		FileType:       fileType,
 		ContentPreview: preview,
-		StoragePath:    storagePath,
+		StoragePath:    key, // Store the storage key instead of file path
 	}
 	if err := db.Create(&asset).Error; err != nil {
-		os.Remove(storagePath)
+		// Clean up the uploaded file on database error
+		s.storage.Delete(ctx, key)
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Database error"})
 		return
 	}
@@ -328,8 +325,9 @@ func (s *Server) DeleteAsset(c *gin.Context) {
 		return
 	}
 
-	if asset.StoragePath != "" {
-		if err := os.Remove(asset.StoragePath); err != nil && !os.IsNotExist(err) {
+	if asset.StoragePath != "" && s.storage != nil {
+		ctx := c.Request.Context()
+		if err := s.storage.Delete(ctx, asset.StoragePath); err != nil {
 			log.Printf("WARNING: Could not delete asset file %s: %v", asset.StoragePath, err)
 		}
 	}
@@ -345,4 +343,43 @@ func (s *Server) DeleteAsset(c *gin.Context) {
 		"success": true,
 		"message": fmt.Sprintf("'%s' deleted.", asset.OriginalName),
 	})
+}
+
+// ServeAsset handles GET /api/v1/assets/raw/{key} - serves files for local storage
+func (s *Server) ServeAsset(c *gin.Context) {
+	// Get the key from wildcard parameter (includes leading slash)
+	key := c.Param("key")
+	if key == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Missing asset key"})
+		return
+	}
+	// Remove leading slash from wildcard param
+	key = strings.TrimPrefix(key, "/")
+
+	if s.storage == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Storage not available"})
+		return
+	}
+
+	ctx := c.Request.Context()
+	reader, size, err := s.storage.Get(ctx, key)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "Asset not found"})
+		return
+	}
+	defer reader.Close()
+
+	// Set appropriate headers
+	c.Header("Content-Length", fmt.Sprintf("%d", size))
+	c.Header("Cache-Control", "public, max-age=31536000") // Cache for 1 year
+
+	// Try to determine content type from key/extension
+	if ext := filepath.Ext(key); ext != "" {
+		if contentType := mime.TypeByExtension(ext); contentType != "" {
+			c.Header("Content-Type", contentType)
+		}
+	}
+
+	// Stream the file
+	io.Copy(c.Writer, reader)
 }
