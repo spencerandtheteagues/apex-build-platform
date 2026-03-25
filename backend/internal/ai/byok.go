@@ -680,8 +680,8 @@ func GetAvailableModels() map[string][]ModelInfo {
 			{ID: "gpt-4o-mini", Name: "GPT-4o Mini", Speed: "fast", CostTier: "low", Description: "FAST — mini OpenAI tier"},
 		},
 		"gemini": {
-			{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview", Speed: "slow", CostTier: "high", Description: "MAX — latest Gemini frontier model"},
-			{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash Preview", Speed: "medium", CostTier: "medium", Description: "BALANCED — fast reasoning tier"},
+			{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", Speed: "slow", CostTier: "high", Description: "MAX — latest Gemini frontier model"},
+			{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", Speed: "medium", CostTier: "medium", Description: "BALANCED — fast Gemini reasoning tier"},
 			{ID: "gemini-2.5-flash-lite", Name: "Gemini 2.5 Flash Lite", Speed: "fast", CostTier: "low", Description: "FAST — lowest-cost Gemini tier"},
 		},
 		"grok": {
