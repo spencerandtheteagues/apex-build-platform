@@ -893,10 +893,14 @@ func (am *AgentManager) runInactivityMonitor(buildID string) (normalExit bool) {
 		}
 
 		// Hard-stop builds that are stuck in an active state beyond a stall threshold.
+		// Only fire when there is genuinely nothing running — if tasks are in_progress
+		// they are actively making an AI call (which can legitimately take minutes for
+		// frontier models). The phase timeout handles the overall deadline for those.
 		stallThreshold := am.buildStallTimeoutForBuild(build)
 		if timeSinceUpdate > stallThreshold &&
-			(status == BuildPlanning || status == BuildInProgress || status == BuildTesting || status == BuildReviewing) {
-			if pendingTasks > 0 && inProgressTasks == 0 {
+			(status == BuildPlanning || status == BuildInProgress || status == BuildTesting || status == BuildReviewing) &&
+			inProgressTasks == 0 {
+			if pendingTasks > 0 {
 				log.Printf("Build %s: stalled in %s with %d pending task(s) and no active execution; attempting queue recovery before failing",
 					buildID, status, pendingTasks)
 				am.resumeBuildExecution(build, false)
@@ -3404,11 +3408,15 @@ func (am *AgentManager) executeTask(task *Task) {
 	build.RequestsUsed++
 	build.UpdatedAt = time.Now()
 
-	// Warn at 80% of the request budget so users know it's running hot before the hard stop.
+	// Warn once when crossing the 80% request budget mark.
+	// Use a first-crossing check (used-1 < threshold <= used) so the warning fires
+	// exactly once even if the threshold is hit from below by exactly 1 or if a
+	// build resumes from a snapshot already above 80%.
 	if build.MaxRequests > 0 {
 		used := build.RequestsUsed
 		maxReq := build.MaxRequests
-		if used == int(float64(maxReq)*0.8) {
+		threshold := int(float64(maxReq) * 0.8)
+		if threshold > 0 && used >= threshold && (used-1) < threshold {
 			am.broadcast(build.ID, &WSMessage{
 				Type:      WSBuildProgress,
 				BuildID:   build.ID,
@@ -4534,9 +4542,10 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 	currentRecoveryDepth := 0
 	if failedTask.Type == TaskFix {
 		if action, ok := failedTask.Input["action"].(string); ok && action == "solve_build_failure" {
-			if d, ok := failedTask.Input["recovery_depth"].(int); ok {
-				currentRecoveryDepth = d
-			}
+			// Use taskInputInt to safely read the depth regardless of whether the
+			// value was stored as int (in-process) or float64 (after JSON round-trip
+			// through cloneTaskInput / snapshot restore).
+			currentRecoveryDepth = taskInputInt(failedTask.Input, "recovery_depth")
 			if currentRecoveryDepth >= 2 {
 				log.Printf("Build %s: recovery depth limit reached for task %s, skipping further recovery", buildID, failedTask.ID)
 				return
@@ -12543,7 +12552,53 @@ func (am *AgentManager) detectLanguage(path string) string {
 
 func isGeneratedArtifactPath(path string) bool {
 	base := filepath.Base(strings.TrimSpace(path))
-	return strings.HasPrefix(base, "generated_")
+	if !strings.HasPrefix(base, "generated_") {
+		return false
+	}
+	// Only treat parser-assigned placeholder names as generated artifacts.
+	// The format is "generated_<digits>.<ext>" (e.g. generated_1.ts, generated_10.go).
+	// Paths like generated_types.ts or generated_schema.sql are intentional project
+	// files and must NOT be treated as throwaway placeholders.
+	rest := strings.TrimPrefix(base, "generated_")
+	// rest is "<digits>.<ext>" or "<digits>" for the placeholder case
+	dotIdx := strings.IndexByte(rest, '.')
+	numPart := rest
+	if dotIdx >= 0 {
+		numPart = rest[:dotIdx]
+	}
+	if numPart == "" {
+		return false
+	}
+	for _, ch := range numPart {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// taskInputInt safely reads an integer from a task input map regardless of whether
+// the value is stored as int (in-memory) or float64 (after JSON round-trip through
+// cloneTaskInput or snapshot restore). Returns 0 if the key is absent or not numeric.
+func taskInputInt(input map[string]any, key string) int {
+	if input == nil {
+		return 0
+	}
+	v, ok := input[key]
+	if !ok {
+		return 0
+	}
+	switch val := v.(type) {
+	case int:
+		return val
+	case int64:
+		return int(val)
+	case float64:
+		return int(val)
+	case float32:
+		return int(val)
+	}
+	return 0
 }
 
 // languageToExtension converts a language name to file extension
@@ -15775,10 +15830,19 @@ func (am *AgentManager) shouldRunFailureConsensus(build *Build, task *Task, erro
 	}
 	// Code generation tasks get early consensus at first retry regardless of build mode,
 	// so we can switch providers before burning all retries on the wrong strategy.
+	// Exception: recovery tasks (TaskFix with action=solve_build_failure) already have
+	// their own multi-provider fallback in ensureProblemSolverAgent and running consensus
+	// on every recovery retry wastes tokens without benefit — they fail due to code
+	// complexity, not provider availability.
 	if task.RetryCount >= 1 {
-		switch task.Type {
-		case TaskGenerateFile, TaskGenerateAPI, TaskGenerateUI, TaskGenerateSchema, TaskFix:
-			return true
+		isRecoveryTask := task.Type == TaskFix &&
+			task.Input != nil &&
+			task.Input["action"] == "solve_build_failure"
+		if !isRecoveryTask {
+			switch task.Type {
+			case TaskGenerateFile, TaskGenerateAPI, TaskGenerateUI, TaskGenerateSchema, TaskFix:
+				return true
+			}
 		}
 	}
 	if build.PowerMode == PowerFast || build.Mode == ModeFast {
