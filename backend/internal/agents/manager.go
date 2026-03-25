@@ -347,14 +347,25 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	build.Status = BuildPlanning
 	build.UpdatedAt = time.Now()
 	build.mu.Unlock()
-	if err := am.persistBuildSnapshotCritical(build, nil); err != nil {
+	var persistErr error
+	for persistAttempt := 0; persistAttempt < 3; persistAttempt++ {
+		if persistAttempt > 0 {
+			time.Sleep(500 * time.Millisecond)
+			log.Printf("Build %s: retrying initial state persistence (attempt %d/3)", buildID, persistAttempt+1)
+		}
+		if persistErr = am.persistBuildSnapshotCritical(build, nil); persistErr == nil {
+			break
+		}
+		log.Printf("Build %s: initial persist attempt %d/3 failed: %v", buildID, persistAttempt+1, persistErr)
+	}
+	if persistErr != nil {
 		build.mu.Lock()
 		build.Status = BuildFailed
-		build.Error = fmt.Sprintf("Failed to persist initial build state: %v", err)
+		build.Error = fmt.Sprintf("Failed to persist initial build state: %v", persistErr)
 		build.UpdatedAt = time.Now()
 		build.mu.Unlock()
 		am.persistBuildSnapshot(build, nil)
-		return fmt.Errorf("failed to persist initial build snapshot: %w", err)
+		return fmt.Errorf("failed to persist initial build snapshot: %w", persistErr)
 	}
 
 	log.Printf("Build %s status updated, broadcasting", buildID)
@@ -394,6 +405,12 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	}
 
 	availableProviders := am.getAvailableProvidersWithGracePeriodForBuild(build)
+	if len(availableProviders) == 0 {
+		// Give providers a 2s grace period on first check — sometimes providers are in a brief grace period.
+		log.Printf("Build %s: no providers available on first check; retrying after 2s grace period", buildID)
+		time.Sleep(2 * time.Second)
+		availableProviders = am.getAvailableProvidersWithGracePeriodForBuild(build)
+	}
 	if len(availableProviders) == 0 {
 		build.mu.Lock()
 		build.Status = BuildFailed
@@ -766,8 +783,33 @@ func (am *AgentManager) getCurrentlyAvailableProvidersForBuild(build *Build) []a
 	return hostedPlatformProviders(am.aiRouter.GetAvailableProviders())
 }
 
-// inactivityMonitor checks for build inactivity and broadcasts errors if AI isn't responding
+// inactivityMonitor checks for build inactivity and broadcasts errors if AI isn't responding.
+// It restarts itself if the inner loop exits unexpectedly (e.g. due to a panic).
 func (am *AgentManager) inactivityMonitor(buildID string) {
+	for {
+		exited := am.runInactivityMonitor(buildID)
+		if exited {
+			// Normal exit (build finished or context cancelled).
+			return
+		}
+		// Unexpected exit — restart after a brief pause.
+		log.Printf("CRITICAL: build stall monitor for %s exited unexpectedly; restarting", buildID)
+		select {
+		case <-am.ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func (am *AgentManager) runInactivityMonitor(buildID string) (normalExit bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("CRITICAL: build stall monitor panicked for build %s: %v", buildID, r)
+			normalExit = false
+		}
+	}()
+
 	// Check every 15 seconds
 	checkInterval := 15 * time.Second
 	inactivityThreshold := 120 * time.Second
@@ -780,7 +822,7 @@ func (am *AgentManager) inactivityMonitor(buildID string) {
 	for {
 		select {
 		case <-am.ctx.Done():
-			return
+			return true
 		case <-ticker.C:
 		}
 
@@ -789,7 +831,7 @@ func (am *AgentManager) inactivityMonitor(buildID string) {
 		am.mu.RUnlock()
 
 		if !exists {
-			return
+			return true
 		}
 
 		build.mu.RLock()
@@ -829,7 +871,7 @@ func (am *AgentManager) inactivityMonitor(buildID string) {
 
 		// Stop monitoring if build is complete or failed
 		if status == BuildCompleted || status == BuildFailed || status == BuildCancelled {
-			return
+			return true
 		}
 		if blockedByInteraction {
 			warningCount = 0
@@ -864,7 +906,7 @@ func (am *AgentManager) inactivityMonitor(buildID string) {
 			log.Printf("Build %s: stalled in %s for %v (pending=%d in_progress=%d recovery_active=%d); failing build",
 				buildID, status, timeSinceUpdate.Round(time.Second), pendingTasks, inProgressTasks, activeRecoveryTasks)
 			am.failBuildOnStall(buildID, status, timeSinceUpdate, pendingTasks, inProgressTasks, activeRecoveryTasks)
-			return
+			return true
 		}
 
 		if timeSinceUpdate > inactivityThreshold {
@@ -909,11 +951,15 @@ func (am *AgentManager) inactivityMonitor(buildID string) {
 }
 
 func (am *AgentManager) buildStallTimeoutForBuild(build *Build) time.Duration {
-	defaultSeconds := 180 // fast builds should not sit idle for >3 minutes in active states
+	defaultSeconds := 300 // fast builds: 5 minutes before stall fires
 	envKey := "BUILD_STALL_TIMEOUT_FAST_SECONDS"
 	if build != nil && build.Mode == ModeFull {
-		defaultSeconds = 420 // full builds get more headroom
+		defaultSeconds = 480 // full builds: 8 minutes of headroom
 		envKey = "BUILD_STALL_TIMEOUT_FULL_SECONDS"
+	}
+	// Local Ollama builds are substantially slower — give them much more idle time.
+	if _, explicitlySet := os.LookupEnv(envKey); !explicitlySet && am.isLocalDevSingleOllamaProfile() {
+		defaultSeconds = 1200 // 20 minutes for local Ollama builds
 	}
 	seconds := envInt(envKey, defaultSeconds)
 	if seconds < 90 {
@@ -1236,6 +1282,15 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 	// Spawn agents with resilience for single-provider scenarios
 	isSingleProvider := len(availableProviders) == 1
 	failedRoles := make([]AgentRole, 0)
+	successfullySpawned := make([]AgentRole, 0)
+
+	// Critical roles: build must fail if ALL of these fail with no fallback.
+	// Non-critical roles: log warning and continue with reduced team.
+	criticalRoles := map[AgentRole]bool{
+		RoleArchitect: true,
+		RoleBackend:   true,
+		RoleDatabase:  true,
+	}
 
 	for _, role := range roles {
 		provider, ok := providerAssignments[role]
@@ -1256,25 +1311,37 @@ func (am *AgentManager) SpawnAgentTeam(buildID string) error {
 						err = am.spawnAgentWithRetries(buildID, role, fallback, false)
 						if err == nil {
 							fallbackSucceeded = true
+							successfullySpawned = append(successfullySpawned, role)
 							break
 						}
 					}
 				}
 				if !fallbackSucceeded {
-					failedRoles = append(failedRoles, role)
+					if criticalRoles[role] {
+						failedRoles = append(failedRoles, role)
+					} else {
+						log.Printf("Build %s: role %s unavailable - build will proceed without it", buildID, role)
+					}
 				}
 			} else {
 				// Single provider scenario: collect failed roles for lead agent handling
 				failedRoles = append(failedRoles, role)
 			}
+		} else {
+			successfullySpawned = append(successfullySpawned, role)
 		}
+	}
+
+	// If NO agents were successfully spawned at all, abort immediately.
+	if len(successfullySpawned) == 0 {
+		return fmt.Errorf("failed to spawn any agents for build %s; all roles failed", buildID)
 	}
 
 	// Handle failed roles in single-provider scenarios
 	if isSingleProvider && len(failedRoles) > 0 {
 		return am.handleSingleProviderFailures(buildID, failedRoles, availableProviders[0])
 	} else if len(failedRoles) > 0 {
-		return fmt.Errorf("failed to spawn agents for roles: %v", failedRoles)
+		return fmt.Errorf("failed to spawn critical agents for roles: %v", failedRoles)
 	}
 
 	log.Printf("Successfully spawned agent team for build %s with %d providers", buildID, len(availableProviders))
@@ -4463,10 +4530,17 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 	if failedTask == nil || err == nil {
 		return
 	}
+	// Track recovery depth to allow one 2nd-level recovery but prevent infinite loops.
+	currentRecoveryDepth := 0
 	if failedTask.Type == TaskFix {
 		if action, ok := failedTask.Input["action"].(string); ok && action == "solve_build_failure" {
-			// Avoid recursive recovery loops if the solver task itself fails.
-			return
+			if d, ok := failedTask.Input["recovery_depth"].(int); ok {
+				currentRecoveryDepth = d
+			}
+			if currentRecoveryDepth >= 2 {
+				log.Printf("Build %s: recovery depth limit reached for task %s, skipping further recovery", buildID, failedTask.ID)
+				return
+			}
 		}
 	}
 
@@ -4511,6 +4585,7 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 			"app_description":          build.Description,
 			"retry_strategy":           "fix_and_retry",
 			"requires_regression_test": true,
+			"recovery_depth":           currentRecoveryDepth + 1,
 		},
 		CreatedAt: time.Now(),
 	}
@@ -15654,6 +15729,13 @@ func (am *AgentManager) runFailureConsensus(
 	if best < majorityNeeded {
 		winning = fallbackDecision
 	}
+	// Confidence threshold: if fewer than 2 providers actually voted (others errored or abstained),
+	// default to switch_provider as the safest option rather than acting on a minority decision.
+	if best < 2 {
+		log.Printf("Build %s: consensus confidence too low (%d/%d votes for %s); defaulting to switch_provider",
+			build.ID, best, len(votes), winning)
+		winning = decisionSwitchProvider
+	}
 
 	summary := make([]string, 0, len(votes))
 	for _, vote := range votes {
@@ -15690,6 +15772,14 @@ func (am *AgentManager) shouldRunFailureConsensus(build *Build, task *Task, erro
 	}
 	if strings.Contains(strings.ToLower(errorMsg), "all_providers_failed") {
 		return true
+	}
+	// Code generation tasks get early consensus at first retry regardless of build mode,
+	// so we can switch providers before burning all retries on the wrong strategy.
+	if task.RetryCount >= 1 {
+		switch task.Type {
+		case TaskGenerateFile, TaskGenerateAPI, TaskGenerateUI, TaskGenerateSchema, TaskFix:
+			return true
+		}
 	}
 	if build.PowerMode == PowerFast || build.Mode == ModeFast {
 		risk := taskRiskLevel(task)
