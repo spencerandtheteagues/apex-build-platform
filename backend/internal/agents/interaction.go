@@ -925,6 +925,55 @@ func (am *AgentManager) enqueueUserRevisionTask(build *Build, userRequest string
 		CreatedAt: now,
 	}
 
+	// Enrich restart tasks with build failure context so the solver knows what broke.
+	if previousStatus == BuildFailed || previousStatus == BuildInProgress {
+		task.Input["action"] = "restart_failed_build"
+		task.Priority = 999
+
+		build.mu.RLock()
+		buildErr := build.Error
+		var failedSummaries []string
+		var incompleteTypes []string
+		seenTypes := map[string]bool{}
+		for _, t := range build.Tasks {
+			if t == nil {
+				continue
+			}
+			if t.Status == TaskFailed || t.Status == TaskCancelled {
+				errSnippet := ""
+				if t.Error != "" {
+					msg := t.Error
+					if len(msg) > 200 {
+						msg = msg[:200] + "..."
+					}
+					errSnippet = ": " + msg
+				}
+				failedSummaries = append(failedSummaries, fmt.Sprintf("%s (%s)%s", t.Type, t.Description, errSnippet))
+			}
+			if t.Status == TaskPending || t.Status == TaskFailed || t.Status == TaskCancelled {
+				key := string(t.Type)
+				if !seenTypes[key] {
+					seenTypes[key] = true
+					incompleteTypes = append(incompleteTypes, key)
+				}
+			}
+		}
+		build.mu.RUnlock()
+
+		if buildErr != "" {
+			task.Input["build_error"] = buildErr
+		}
+		if len(failedSummaries) > 0 {
+			task.Input["failed_task_summaries"] = failedSummaries
+		}
+		if len(incompleteTypes) > 0 {
+			task.Input["incomplete_task_types"] = incompleteTypes
+		}
+		if task.MaxRetries < 4 {
+			task.MaxRetries = 4
+		}
+	}
+
 	build.mu.Lock()
 	build.Status = BuildInProgress
 	build.CompletedAt = nil
@@ -944,6 +993,11 @@ func (am *AgentManager) enqueueUserRevisionTask(build *Build, userRequest string
 		return fmt.Errorf("no agent is available to apply the requested changes")
 	}
 
+	broadcastMsg := "User requested changes. Launching a follow-up implementation pass."
+	if action, _ := task.Input["action"].(string); action == "restart_failed_build" {
+		broadcastMsg = "Build restart triggered. Launching aggressive recovery — fixing all failures and resuming pipeline."
+	}
+
 	am.broadcast(build.ID, &WSMessage{
 		Type:      WSBuildProgress,
 		BuildID:   build.ID,
@@ -951,7 +1005,7 @@ func (am *AgentManager) enqueueUserRevisionTask(build *Build, userRequest string
 		Data: map[string]any{
 			"phase":                 "user_feedback",
 			"status":                string(BuildInProgress),
-			"message":               "User requested changes. Launching a follow-up implementation pass.",
+			"message":               broadcastMsg,
 			"quality_gate_required": true,
 			"quality_gate_active":   true,
 			"quality_gate_stage":    "revision",

@@ -11393,6 +11393,52 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 `, errStr, fixGuidance)
 	}
 
+	// For restart_failed_build tasks, inject a rich failure context block so the solver
+	// knows exactly what broke and what needs to be fixed/generated.
+	restartFailureContext := ""
+	if action, _ := task.Input["action"].(string); action == "restart_failed_build" {
+		var sb strings.Builder
+		sb.WriteString("\n<build_failure_context>\n")
+		sb.WriteString("URGENT BUILD RESTART — This build previously failed and you are the recovery agent.\n")
+		sb.WriteString("Your job: diagnose ALL failures, fix every broken file, and ensure the build reaches a runnable state.\n\n")
+
+		if buildErr, _ := task.Input["build_error"].(string); buildErr != "" {
+			sb.WriteString(fmt.Sprintf("Build failure reason: %s\n\n", buildErr))
+		}
+
+		if summaries, _ := task.Input["failed_task_summaries"].([]string); len(summaries) > 0 {
+			sb.WriteString("Failed tasks:\n")
+			for _, s := range summaries {
+				sb.WriteString(fmt.Sprintf("  - %s\n", s))
+			}
+			sb.WriteString("\n")
+		} else if summaries, _ := task.Input["failed_task_summaries"].([]any); len(summaries) > 0 {
+			sb.WriteString("Failed tasks:\n")
+			for _, s := range summaries {
+				sb.WriteString(fmt.Sprintf("  - %s\n", s))
+			}
+			sb.WriteString("\n")
+		}
+
+		if incomplete, _ := task.Input["incomplete_task_types"].([]string); len(incomplete) > 0 {
+			sb.WriteString(fmt.Sprintf("Incomplete/missing task types: %s\n\n", strings.Join(incomplete, ", ")))
+		} else if incomplete, _ := task.Input["incomplete_task_types"].([]any); len(incomplete) > 0 {
+			items := make([]string, 0, len(incomplete))
+			for _, v := range incomplete {
+				items = append(items, fmt.Sprintf("%v", v))
+			}
+			sb.WriteString(fmt.Sprintf("Incomplete/missing task types: %s\n\n", strings.Join(items, ", ")))
+		}
+
+		sb.WriteString("INSTRUCTIONS:\n")
+		sb.WriteString("1. Fix ALL errors identified above — do not skip any\n")
+		sb.WriteString("2. Generate ALL missing files for incomplete task types\n")
+		sb.WriteString("3. Output complete, runnable file contents — no stubs, no TODOs\n")
+		sb.WriteString("4. Use the existing build plan and tech stack exactly\n")
+		sb.WriteString("</build_failure_context>\n")
+		restartFailureContext = sb.String()
+	}
+
 	repairHintsContext := ""
 	if task != nil && task.Input != nil {
 		if hints, ok := task.Input["repair_hints"]; ok {
@@ -11659,12 +11705,14 @@ App being built: %s
 %s
 %s
 %s
+%s
 %s`,
 		task.Type,
 		task.Description,
 		appDescription,
 		techStackContext,
 		errorContext,
+		restartFailureContext,
 		repairHintsContext,
 		coordinationErrorContext,
 		buildSpecContext,
