@@ -1029,8 +1029,8 @@ function App() {
 
           {/* View Toggle */}
           <div className="hidden md:flex md:min-w-0 md:flex-1 md:items-center md:gap-4">
-            <div className="min-w-0 flex-1 overflow-x-auto pb-1 -mb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-              <div className="flex min-w-max items-center gap-2 pr-1">
+            <div className="min-w-0 flex-1 overflow-x-auto py-1.5 -my-1.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <div className="flex min-w-max items-center gap-2 pr-4">
                 {navigationItems.map((item) => (
                   <button
                     key={item.view}
