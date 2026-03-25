@@ -8742,16 +8742,24 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 	defer ticker.Stop()
 
 	// Scale phase timeout by provider profile and power mode.
+	// Each retry can take up to ~60s (LLM round-trip + verification), so with maxRetries=3
+	// and solver/reviewer passes, the testing phase alone can need 10-15 minutes.
 	// Ollama needs enough time for task + potential retry (15min task * 2 = 30min).
-	phaseTimeout := 5 * time.Minute
+	phaseTimeout := 15 * time.Minute
 	if am.isLocalDevSingleOllamaProfile() {
 		phaseTimeout = 35 * time.Minute
 	} else if build.PowerMode == PowerMax {
-		phaseTimeout = 10 * time.Minute // Max mode: frontier models can be slower but produce better output
+		phaseTimeout = 25 * time.Minute // frontier models + multiple retries
 	} else if build.PowerMode == PowerBalanced {
-		phaseTimeout = 7 * time.Minute
+		phaseTimeout = 20 * time.Minute
 	}
 	timeout := time.After(phaseTimeout)
+
+	// stallGrace tracks how long we've seen pending>0 with in_progress=0.
+	// This is a transient race condition (task just re-queued, not yet dispatched)
+	// and should resolve within a few ticks. Only abort if it persists.
+	stallTicks := 0
+	const maxStallTicks = 20 // 10 seconds at 500ms per tick
 
 	for {
 		select {
@@ -8762,6 +8770,8 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 			return false
 		case <-ticker.C:
 			allDone := true
+			pendingCount := 0
+			inProgressCount := 0
 
 			build.mu.RLock()
 			buildFailed := build.Status == BuildFailed
@@ -8774,11 +8784,18 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 				if _, ok := taskSet[t.ID]; !ok {
 					continue
 				}
-				if t.Status != TaskCompleted && t.Status != TaskFailed && t.Status != TaskCancelled {
+				switch t.Status {
+				case TaskCompleted, TaskFailed, TaskCancelled:
+					completed++
+				case TaskPending:
+					pendingCount++
 					allDone = false
-					break
+				case TaskInProgress:
+					inProgressCount++
+					allDone = false
+				default:
+					allDone = false
 				}
-				completed++
 			}
 			if completed != len(taskSet) {
 				allDone = false
@@ -8789,10 +8806,25 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 				return false
 			}
 			if buildBlocked {
+				stallTicks = 0
 				continue
 			}
 			if allDone {
 				return true
+			}
+
+			// Detect a true stall: tasks are pending but nothing is running.
+			// This can be a transient race (task just re-queued, dispatcher hasn't
+			// picked it up yet), so give it a grace period before aborting.
+			if pendingCount > 0 && inProgressCount == 0 {
+				stallTicks++
+				if stallTicks >= maxStallTicks {
+					log.Printf("Build %s: Phase stalled — pending=%d in_progress=%d for %v, aborting",
+						build.ID, pendingCount, inProgressCount, time.Duration(stallTicks)*500*time.Millisecond)
+					return false
+				}
+			} else {
+				stallTicks = 0
 			}
 		}
 	}
