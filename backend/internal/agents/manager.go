@@ -3336,6 +3336,27 @@ func (am *AgentManager) executeTask(task *Task) {
 
 	build.RequestsUsed++
 	build.UpdatedAt = time.Now()
+
+	// Warn at 80% of the request budget so users know it's running hot before the hard stop.
+	if build.MaxRequests > 0 {
+		used := build.RequestsUsed
+		maxReq := build.MaxRequests
+		if used == int(float64(maxReq)*0.8) {
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSBuildProgress,
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"phase":        "budget",
+					"message":      fmt.Sprintf("Build is at %d/%d AI requests (80%% of limit) — approaching budget cap", used, maxReq),
+					"status":       "warning",
+					"used":         used,
+					"max_requests": maxReq,
+				},
+			})
+		}
+	}
+
 	build.mu.Unlock()
 
 	// Broadcast that the agent is thinking with task-specific detail
@@ -4387,16 +4408,55 @@ func (am *AgentManager) ensureProblemSolverAgent(buildID string) *Agent {
 	availableProviders := am.getCurrentlyAvailableProvidersForBuild(build)
 	if len(availableProviders) == 0 {
 		log.Printf("Build %s: unable to spawn solver agent (no providers available)", buildID)
+		am.broadcast(buildID, &WSMessage{
+			Type:      WSBuildProgress,
+			BuildID:   buildID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"phase":   "solver",
+				"message": "Could not spawn recovery agent: no AI providers available",
+				"status":  "warning",
+			},
+		})
 		return nil
 	}
 
-	provider := am.assignProvidersToRolesForBuild(build, availableProviders, []AgentRole{RoleSolver})[RoleSolver]
-	solver, err := am.spawnAgent(buildID, RoleSolver, provider)
-	if err != nil {
-		log.Printf("Build %s: failed to spawn solver agent: %v", buildID, err)
-		return nil
+	// Try the preferred provider first, then fall back through all available providers
+	// so a single provider outage doesn't silently kill recovery.
+	preferredProvider := am.assignProvidersToRolesForBuild(build, availableProviders, []AgentRole{RoleSolver})[RoleSolver]
+	providerOrder := make([]ai.AIProvider, 0, len(availableProviders))
+	providerOrder = append(providerOrder, preferredProvider)
+	for _, p := range availableProviders {
+		if p != preferredProvider {
+			providerOrder = append(providerOrder, p)
+		}
 	}
-	return solver
+
+	var solver *Agent
+	var lastErr error
+	for _, provider := range providerOrder {
+		var err error
+		solver, err = am.spawnAgent(buildID, RoleSolver, provider)
+		if err == nil {
+			log.Printf("Build %s: spawned solver agent with %s", buildID, provider)
+			return solver
+		}
+		lastErr = err
+		log.Printf("Build %s: solver spawn failed with %s: %v, trying next provider", buildID, provider, err)
+	}
+
+	log.Printf("Build %s: failed to spawn solver agent with any provider: %v", buildID, lastErr)
+	am.broadcast(buildID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   buildID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"phase":   "solver",
+			"message": "Recovery agent could not be spawned — falling back to specialist agents",
+			"status":  "warning",
+		},
+	})
+	return nil
 }
 
 func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, err error) {
@@ -4470,6 +4530,16 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 	}
 	if solver == nil {
 		log.Printf("Build %s: no solver or fallback agent available for recovery task %s", buildID, recoveryTask.ID)
+		am.broadcast(buildID, &WSMessage{
+			Type:      WSBuildProgress,
+			BuildID:   buildID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"phase":   "auto_recovery",
+				"message": "Recovery agent unavailable — build will attempt to continue without solver assistance",
+				"status":  "warning",
+			},
+		})
 		return
 	}
 
@@ -7115,11 +7185,11 @@ type validationRepairSpec struct {
 func maxAutomatedRecoveryAttempts(mode PowerMode) int {
 	switch mode {
 	case PowerMax:
-		return 3
+		return 4
 	case PowerBalanced:
-		return 2
+		return 3
 	default:
-		return 1
+		return 2 // Fast mode gets 2 attempts instead of 1
 	}
 }
 
@@ -7396,7 +7466,9 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 
 			build.mu.Lock()
 			priorErrorClass := readinessErrorClassFromBuildError(build.Error)
-			repeatedClass := build.ReadinessRecoveryAttempts > 0 && priorErrorClass != "" && priorErrorClass == currentErrorClass
+			// Require 2+ prior recovery attempts before giving up on a repeated error class.
+			// A single prior attempt may have partially fixed things; give it one more chance.
+			repeatedClass := build.ReadinessRecoveryAttempts >= 2 && priorErrorClass != "" && priorErrorClass == currentErrorClass
 			if repeatedClass {
 				build.Status = BuildFailed
 				build.CompletedAt = &now
@@ -10104,12 +10176,12 @@ Rules:
 func (am *AgentManager) defaultBuildLimits(mode BuildMode) (int, int, int, int) {
 	// Mode-based defaults
 	maxAgents := 8
-	maxRetries := 3
+	maxRetries := 4 // Full mode: 4 retries gives testing phases enough room to converge
 	maxRequests := 72
 	maxTokens := 4000
 	if mode == ModeFast {
 		maxAgents = 7
-		maxRetries = 2
+		maxRetries = 3 // Fast mode: 3 retries (was 2) to reduce premature exhaustion
 		maxRequests = 30
 		maxTokens = 2000
 	}
@@ -10140,8 +10212,10 @@ func (am *AgentManager) defaultBuildLimits(mode BuildMode) (int, int, int, int) 
 	if maxRetries < 0 {
 		maxRetries = 0
 	}
-	if maxRetries > 3 {
-		maxRetries = 3
+	// Allow up to 5 retries per task — testing phases with verification loops
+	// need more than 3 attempts to converge on correct output.
+	if maxRetries > 5 {
+		maxRetries = 5
 	}
 	if maxRequests < 0 {
 		maxRequests = 0

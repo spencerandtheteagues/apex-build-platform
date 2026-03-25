@@ -177,6 +177,14 @@ func (am *AgentManager) validateTaskCoordinationOutput(task *Task, output *TaskO
 	}
 
 	for _, file := range output.Files {
+		// Parser-assigned placeholder paths (generated_1.ts, generated_2.go, etc.) are
+		// created when the LLM omits the "// File: path" marker in its response. These are
+		// not intentional file paths — skip ownership validation so they don't cause
+		// spurious coordination failures. They'll be discarded or renamed downstream.
+		if isGeneratedArtifactPath(file.Path) {
+			log.Printf("Info: skipping ownership check for parser placeholder %q", file.Path)
+			continue
+		}
 		if !pathAllowedByWorkOrder(file.Path, workOrder) {
 			errs = append(errs, fmt.Sprintf("file %s is outside work order ownership", file.Path))
 		}
