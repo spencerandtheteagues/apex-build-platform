@@ -3572,6 +3572,51 @@ func (am *AgentManager) executeTask(task *Task) {
 		log.Printf("AI generation succeeded for task %s with provider %s", task.ID, provider)
 		candidates = append(candidates, candidate)
 	}
+
+	// Immediate provider fallback: if all primary provider(s) failed with a
+	// transient or provider-specific error (rate limit, service down, auth), try
+	// every other available provider right now before burning a full retry slot.
+	if len(candidates) == 0 && isProviderLevelFailure(generationErr) {
+		triedProviders := make(map[ai.AIProvider]bool, len(candidateProviders)+1)
+		for _, p := range candidateProviders {
+			triedProviders[p] = true
+		}
+		for _, fallback := range am.getCurrentlyAvailableProvidersForBuild(build) {
+			if triedProviders[fallback] {
+				continue
+			}
+			triedProviders[fallback] = true
+			log.Printf("Provider fallback: %s unavailable/failed, trying %s for task %s", agent.Provider, fallback, task.ID)
+			am.broadcast(agent.BuildID, &WSMessage{
+				Type:      "agent:provider_fallback",
+				BuildID:   agent.BuildID,
+				AgentID:   agent.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"task_id":           task.ID,
+					"failed_provider":   string(agent.Provider),
+					"fallback_provider": string(fallback),
+					"reason":            "primary_provider_unavailable",
+					"original_error":    generationErr.Error(),
+					"content":           fmt.Sprintf("%s agent switching to %s (primary provider unavailable)", agent.Role, fallback),
+				},
+			})
+			candidate, candidateErr := am.generateTaskOutputWithProvider(ctx, build, agent, task, prompt, systemPrompt, fallback, maxTokens, temperature)
+			if candidateErr != nil {
+				log.Printf("Fallback provider %s also failed for task %s: %v", fallback, task.ID, candidateErr)
+				if !isProviderLevelFailure(candidateErr) {
+					// Content-level failure — trying more providers won't help
+					generationErr = candidateErr
+					break
+				}
+				continue
+			}
+			log.Printf("Provider fallback succeeded: %s → %s for task %s", agent.Provider, fallback, task.ID)
+			candidates = append(candidates, candidate)
+			break
+		}
+	}
+
 	if len(candidates) == 0 {
 		finalErr := generationErr
 		if finalErr == nil {
@@ -9791,9 +9836,10 @@ func (am *AgentManager) RestartFailedBuildWithClientToken(buildID string, messag
 	var leadAgent *Agent
 
 	build.mu.Lock()
-	if build.Status != BuildFailed {
+	switch build.Status {
+	case BuildCompleted, BuildCancelled:
 		build.mu.Unlock()
-		return fmt.Errorf("restart is only available for failed builds")
+		return fmt.Errorf("restart is not available for completed or cancelled builds")
 	}
 	leadAgent = findLeadAgentLocked(build)
 	if leadAgent == nil {
@@ -15575,6 +15621,42 @@ func (am *AgentManager) isNonRetriableAIError(err error) bool {
 		return false
 	}
 	return am.isNonRetriableAIErrorMessage(err.Error())
+}
+
+// isProviderLevelFailure returns true when the error is caused by the specific AI
+// provider being unavailable, rate-limited, or misconfigured — situations where
+// trying a *different* provider immediately may succeed without burning a retry slot.
+func isProviderLevelFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	// Build-level non-retriable errors — switching provider won't help
+	if strings.Contains(msg, "build not active") ||
+		strings.Contains(msg, "budget cap exceeded") ||
+		strings.Contains(msg, "insufficient_credits") ||
+		strings.Contains(msg, "ai generation returned empty response") {
+		return false
+	}
+	return strings.Contains(msg, "rate_limit") ||
+		strings.Contains(msg, "rate limit") ||
+		strings.Contains(msg, "quota_exceeded") ||
+		strings.Contains(msg, "quota exceeded") ||
+		strings.Contains(msg, "quota exhausted") ||
+		strings.Contains(msg, "service_error") ||
+		strings.Contains(msg, "service unavailable") ||
+		strings.Contains(msg, "service temporarily unavailable") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "connection") ||
+		strings.Contains(msg, "unauthorized") ||
+		strings.Contains(msg, "forbidden") ||
+		strings.Contains(msg, "invalid api key") ||
+		strings.Contains(msg, "incorrect api key") ||
+		strings.Contains(msg, "api_error") ||
+		strings.Contains(msg, "status 5") ||
+		strings.Contains(msg, "status 429") ||
+		strings.Contains(msg, "status 401") ||
+		strings.Contains(msg, "status 403")
 }
 
 func isInsufficientCreditsErrorMessage(errorMsg string) bool {
