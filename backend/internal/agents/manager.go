@@ -12550,6 +12550,23 @@ func (am *AgentManager) detectLanguage(path string) string {
 	}
 }
 
+// isTestFile returns true for any path that is clearly a test/spec file.
+// Used to exempt test files from placeholder and empty-function checks that
+// produce false positives against standard testing patterns.
+func isTestFile(path string) bool {
+	base := strings.ToLower(filepath.Base(path))
+	lower := strings.ToLower(path)
+	return strings.Contains(base, ".test.") ||
+		strings.Contains(base, ".spec.") ||
+		strings.HasSuffix(base, "_test.go") ||
+		strings.HasSuffix(base, "_test.py") ||
+		strings.Contains(lower, "/__tests__/") ||
+		strings.Contains(lower, "/test/") ||
+		strings.Contains(lower, "/tests/") ||
+		strings.Contains(lower, "/spec/") ||
+		strings.Contains(lower, "/specs/")
+}
+
 func isGeneratedArtifactPath(path string) bool {
 	base := filepath.Base(strings.TrimSpace(path))
 	if !strings.HasPrefix(base, "generated_") {
@@ -15246,6 +15263,14 @@ func (am *AgentManager) verifyGeneratedCode(buildID string, output *TaskOutput) 
 	for _, file := range output.Files {
 		content := file.Content
 
+		// Test files legitimately use TODO comments, empty mock functions,
+		// empty beforeEach/afterEach hooks, and pending test stubs.
+		// Applying placeholder or empty-function checks to them causes
+		// deterministic false-positive failures that burn retries.
+		if isTestFile(file.Path) {
+			continue
+		}
+
 		// Check for placeholder code
 		placeholders := []string{
 			"TODO",
@@ -15382,9 +15407,13 @@ func (am *AgentManager) hasEmptyFunctions(content string, language string) bool 
 	switch language {
 	case "typescript", "javascript":
 		patterns = []string{
+			// Named functions with empty bodies — these are almost always unimplemented stubs.
 			`function\s+\w+\s*\([^)]*\)\s*\{\s*\}`,
-			`=>\s*\{\s*\}`,
 			`async\s+function\s+\w+\s*\([^)]*\)\s*\{\s*\}`,
+			// Arrow functions with at least one named parameter and an empty body.
+			// Exclude zero-arg `() => {}` — those are valid mock/callback factories
+			// (jest.fn(() => {}), beforeEach(() => {}), etc.).
+			`\(\s*\w[^)]*\)\s*=>\s*\{\s*\}`,
 		}
 	case "go":
 		patterns = []string{
