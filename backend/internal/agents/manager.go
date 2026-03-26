@@ -15437,7 +15437,12 @@ func (am *AgentManager) quickSyntaxCheck(file GeneratedFile) []string {
 		// Avoid naive brace/import validation for JS/TS.
 		// Template strings, JSX and side-effect imports trigger false positives and
 		// cause unnecessary retry loops.
-		if strings.Count(content, "```")%2 != 0 {
+		//
+		// Test files are exempted from the markdown fence check: when truncation
+		// repair leaves a partial test file, the fence count will be odd but this
+		// is already handled by the TruncatedFiles repair path. Flagging it again
+		// as a hard syntax error burns an extra retry without benefit.
+		if !isTestFile(file.Path) && strings.Count(content, "```")%2 != 0 {
 			errors = append(errors, fmt.Sprintf("%s: Contains unmatched markdown code fence", file.Path))
 		}
 		if tailErr := detectLikelyTruncatedJSTSFile(file.Path, content); tailErr != "" {
@@ -16311,7 +16316,7 @@ func (am *AgentManager) completeTruncatedFiles(
 
 		resp, err := am.aiRouter.Generate(ctx, agent.Provider, continuationPrompt, GenerateOptions{
 			UserID:      build.UserID,
-			MaxTokens:   4000,
+			MaxTokens:   8000,
 			Temperature: 0.1,
 			SystemPrompt: "You are completing a source file that was truncated. " +
 				"Output only the remaining code, starting from exactly where the file was cut off.",
