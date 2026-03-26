@@ -240,7 +240,7 @@ func (r *taskRoutingRouter) Generate(_ context.Context, provider ai.AIProvider, 
 	switch {
 	case strings.Contains(prompt, "Choose the better build candidate"):
 		return &ai.AIResponse{Content: r.judgeContent}, nil
-	case strings.Contains(prompt, "Review this AI-generated task result for correctness and build safety."):
+	case strings.Contains(prompt, "Review this AI-generated task result"):
 		return &ai.AIResponse{Content: r.verifyContent}, nil
 	case r.generationByProvider != nil:
 		if content, ok := r.generationByProvider[provider]; ok {

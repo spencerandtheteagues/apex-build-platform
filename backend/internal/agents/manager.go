@@ -4338,13 +4338,19 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 				build.mu.Lock()
 				if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil && orchestration.BuildContract != nil {
 					orchestration.VerificationReports = append(orchestration.VerificationReports, *critiqueReport)
-					// LLM critique findings are surfaced as warnings only — never hard blockers.
-					// Deterministic validation owns hard blocks. An LLM second-opinion on a
-					// rough planning-time contract is too prone to false positives (e.g. flagging
-					// TypeScript types as invalid SQLite types, referencing table names by the
-					// wrong case). These are resolved naturally during code generation.
+					// In the default path, LLM critique findings are surfaced as warnings only.
+					// Deterministic validation owns hard blocks because planning-time critique
+					// can still false-positive on rough contracts.
 					allCritiqueFindings := dedupeStrings(append(critiqueReport.Warnings, critiqueReport.Blockers...))
 					orchestration.BuildContract.VerificationWarnings = dedupeStrings(append(orchestration.BuildContract.VerificationWarnings, allCritiqueFindings...))
+					// If deterministic contract verification has been explicitly disabled,
+					// let provider critique act as the fallback hard gate so broken plans do
+					// not flow straight into generation unchecked.
+					if critiqueReport.Status == VerificationBlocked && !orchestration.Flags.EnableContractVerification {
+						contractBlocked = true
+						contractBlocker = strings.Join(critiqueReport.Blockers, "; ")
+						orchestration.BuildContract.VerificationBlockers = dedupeStrings(append(orchestration.BuildContract.VerificationBlockers, critiqueReport.Blockers...))
+					}
 				}
 				build.mu.Unlock()
 			}
@@ -9928,7 +9934,7 @@ func (am *AgentManager) RestartFailedBuildWithClientToken(buildID string, messag
 	})
 	am.broadcastInteractionUpdate(buildID, interaction)
 
-	return am.enqueueUserRevisionTask(build, restartMessage)
+	return am.enqueueRestartRecoveryTask(build, restartMessage)
 }
 
 // processUserMessage handles a user message with the lead agent

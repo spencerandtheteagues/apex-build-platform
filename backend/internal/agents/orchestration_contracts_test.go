@@ -126,7 +126,7 @@ func TestCompileBuildContractFromPlanSeedsTruthAndVerification(t *testing.T) {
 	}
 }
 
-func TestVerifyAndNormalizeBuildContractBlocksMissingAuthAndSchema(t *testing.T) {
+func TestVerifyAndNormalizeBuildContractBlocksMissingAuthAndWarnsOnMissingSchema(t *testing.T) {
 	intent := &IntentBrief{
 		AppType:              "fullstack",
 		RequiredCapabilities: []CapabilityRequirement{CapabilityAuth, CapabilityDatabase},
@@ -154,8 +154,9 @@ func TestVerifyAndNormalizeBuildContractBlocksMissingAuthAndSchema(t *testing.T)
 	if !strings.Contains(joined, "auth capability requested without an auth contract") {
 		t.Fatalf("expected auth blocker, got %v", report.Blockers)
 	}
-	if !strings.Contains(joined, "storage/database capability requested without schema entities") {
-		t.Fatalf("expected schema blocker, got %v", report.Blockers)
+	warnings := strings.Join(report.Warnings, " | ")
+	if !strings.Contains(warnings, "database capability detected but no schema entities were pre-planned") {
+		t.Fatalf("expected schema warning, got blockers=%v warnings=%v", report.Blockers, report.Warnings)
 	}
 }
 

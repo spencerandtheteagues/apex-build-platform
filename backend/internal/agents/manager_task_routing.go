@@ -224,13 +224,28 @@ Return JSON only:
 	if err := json.Unmarshal([]byte(payload), &critique); err != nil {
 		return nil
 	}
-	// LLM task verification is advisory only — never a hard blocker.
-	// Deterministic verification (compile checks, syntax, imports) owns hard blocks.
-	// An LLM second-opinion is too prone to false positives (e.g. flagging test mocks,
-	// dependency injection, or TODO comments in example files as "not production-ready").
-	allFindings := dedupeStrings(append(critique.Warnings, critique.Blockers...))
-	report.Warnings = allFindings
+
+	critique.Warnings = dedupeStrings(critique.Warnings)
+	critique.Blockers = dedupeStrings(critique.Blockers)
 	report.ConfidenceScore = critique.Confidence
+	if report.ConfidenceScore <= 0 {
+		report.ConfidenceScore = 0.72
+	}
+
+	// Single-with-verifier routing is an explicit reliability mode. If the second
+	// provider returns concrete blockers with reasonable confidence, it should be
+	// able to veto the candidate instead of being reduced to an advisory note.
+	if len(critique.Blockers) > 0 && report.ConfidenceScore >= 0.75 {
+		report.Status = VerificationBlocked
+		report.Blockers = critique.Blockers
+		report.Errors = append([]string(nil), critique.Blockers...)
+		report.Warnings = critique.Warnings
+		return report
+	}
+
+	// Low-confidence critique remains advisory so the verifier does not create a
+	// new source of false-positive build failures.
+	report.Warnings = dedupeStrings(append(critique.Warnings, critique.Blockers...))
 	return report
 }
 

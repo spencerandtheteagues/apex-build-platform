@@ -890,7 +890,19 @@ func (am *AgentManager) ResolvePermissionRequest(buildID string, requestID strin
 	return interaction, updated, nil
 }
 
+type revisionEnqueueOptions struct {
+	restartRecovery bool
+}
+
 func (am *AgentManager) enqueueUserRevisionTask(build *Build, userRequest string) error {
+	return am.enqueueRevisionTask(build, userRequest, revisionEnqueueOptions{})
+}
+
+func (am *AgentManager) enqueueRestartRecoveryTask(build *Build, userRequest string) error {
+	return am.enqueueRevisionTask(build, userRequest, revisionEnqueueOptions{restartRecovery: true})
+}
+
+func (am *AgentManager) enqueueRevisionTask(build *Build, userRequest string, opts revisionEnqueueOptions) error {
 	if build == nil {
 		return fmt.Errorf("build is required")
 	}
@@ -925,8 +937,11 @@ func (am *AgentManager) enqueueUserRevisionTask(build *Build, userRequest string
 		CreatedAt: now,
 	}
 
-	// Enrich restart tasks with build failure context so the solver knows what broke.
-	if previousStatus == BuildFailed || previousStatus == BuildInProgress {
+	// Enrich explicit restart tasks with build failure context so the solver
+	// knows what broke. Normal queued revisions during an active build must stay
+	// as user_change_request tasks; otherwise follow-up edits are misclassified as
+	// aggressive restart recoveries.
+	if opts.restartRecovery {
 		task.Input["action"] = "restart_failed_build"
 		task.Priority = 999
 

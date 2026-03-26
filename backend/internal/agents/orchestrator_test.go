@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestCompleteOrchestrationUsesManagerReadinessGate(t *testing.T) {
+func TestCompleteOrchestrationUsesManagerReadinessGateAndNormalization(t *testing.T) {
 	t.Parallel()
 
 	am := &AgentManager{
@@ -69,16 +69,13 @@ func TestCompleteOrchestrationUsesManagerReadinessGate(t *testing.T) {
 	if !build.PhasedPipelineComplete {
 		t.Fatalf("expected completeOrchestration to mark phased pipeline complete")
 	}
-	if build.Status == BuildCompleted {
-		t.Fatalf("expected orchestrator completion to respect readiness validation and avoid completed status")
-	}
-	if build.Status != BuildFailed {
-		t.Fatalf("expected build to fail validation, got %s", build.Status)
+	if build.Status != BuildCompleted {
+		t.Fatalf("expected manager finalization to normalize the backend scaffold and complete the build, got %s", build.Status)
 	}
 	if build.CompletedAt == nil {
-		t.Fatalf("expected completed_at to be set on failed finalization")
+		t.Fatalf("expected completed_at to be set on manager finalization")
 	}
-	if !strings.Contains(strings.ToLower(build.Error), "validation failed") {
-		t.Fatalf("expected validation failure error, got %q", build.Error)
+	if strings.TrimSpace(build.Error) != "" {
+		t.Fatalf("expected normalization to clear readiness errors, got %q", build.Error)
 	}
 }

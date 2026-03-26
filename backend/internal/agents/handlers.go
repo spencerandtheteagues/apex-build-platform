@@ -46,7 +46,8 @@ func classifyBuildMessageError(err error) int {
 		strings.Contains(message, "unknown command"):
 		return http.StatusBadRequest
 	case strings.Contains(message, "direct agent messages require an active build"),
-		strings.Contains(message, "restart is only available for failed builds"):
+		strings.Contains(message, "restart is only available for failed builds"),
+		strings.Contains(message, "restart is not available for completed or cancelled builds"):
 		return http.StatusConflict
 	default:
 		return http.StatusInternalServerError

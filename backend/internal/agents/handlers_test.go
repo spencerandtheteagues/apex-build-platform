@@ -1294,6 +1294,12 @@ func TestRestartFailedBuildRestoresSnapshotAndQueuesRevision(t *testing.T) {
 	}
 }
 
+func TestClassifyBuildMessageErrorTreatsRestartAvailabilityAsConflict(t *testing.T) {
+	if got := classifyBuildMessageError(fmt.Errorf("restart is not available for completed or cancelled builds")); got != http.StatusConflict {
+		t.Fatalf("expected restart availability error to map to 409, got %d", got)
+	}
+}
+
 func TestSendMessageReturnsConflictForDirectMessageToTerminalBuild(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.CompletedBuild{
