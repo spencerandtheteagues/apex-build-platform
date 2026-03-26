@@ -3818,6 +3818,11 @@ func (am *AgentManager) processResult(result *TaskResult) {
 	task := agent.CurrentTask
 	if task == nil || task.ID != result.TaskID {
 		// Stale/out-of-order result for a task this agent is no longer executing.
+		// This happens after backend restarts when multiple tasks are re-queued to
+		// the same agent: AssignTask overwrites agent.CurrentTask, so the first
+		// task's result appears "stale". We must still mark it terminal in the
+		// build's task list, otherwise allComplete is never true and the build stalls.
+		agentBuildID := agent.BuildID
 		agent.mu.Unlock()
 		log.Printf("Dropping stale task result for agent %s: result task=%s current task=%v", result.AgentID, result.TaskID, func() string {
 			if task == nil {
@@ -3825,6 +3830,32 @@ func (am *AgentManager) processResult(result *TaskResult) {
 			}
 			return task.ID
 		}())
+		if staleBuild, err := am.GetBuild(agentBuildID); err == nil {
+			staleBuild.mu.Lock()
+			for _, t := range staleBuild.Tasks {
+				if t == nil || t.ID != result.TaskID {
+					continue
+				}
+				if t.Status == TaskInProgress {
+					if result.Success {
+						t.Status = TaskCompleted
+						now := time.Now()
+						t.CompletedAt = &now
+						if result.Output != nil {
+							t.Output = result.Output
+						}
+						log.Printf("Marked stale-result task %s as completed in build %s", t.ID, agentBuildID)
+					} else if result.Error != nil && !errors.Is(result.Error, errBuildNotActive) {
+						t.Status = TaskFailed
+						t.Error = result.Error.Error()
+						log.Printf("Marked stale-result task %s as failed in build %s: %v", t.ID, agentBuildID, result.Error)
+					}
+				}
+				break
+			}
+			staleBuild.mu.Unlock()
+			am.checkBuildCompletion(staleBuild)
+		}
 		return
 	}
 	if task.Status == TaskCancelled {
