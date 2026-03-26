@@ -222,7 +222,7 @@ describe('AppBuilder control surface', () => {
 
     render(<AppBuilder />)
 
-    await screen.findByText('Planner Console')
+    await screen.findByText(/Planner Console/i)
 
     fireEvent.click(screen.getByRole('button', { name: 'All Agents' }))
 
@@ -255,6 +255,84 @@ describe('AppBuilder control surface', () => {
         })
       )
     })
+  })
+
+  it('shows only live agent and task boxes while a build is active', async () => {
+    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'build-123')
+    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'in_progress' })
+    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      agents: [
+        {
+          id: 'frontend-1',
+          role: 'frontend',
+          provider: 'gpt4',
+          model: 'gpt-4.1',
+          status: 'working',
+          progress: 62,
+          current_task: {
+            type: 'generate_ui',
+            description: 'Refining the live workspace shell',
+          },
+        },
+        {
+          id: 'backend-1',
+          role: 'backend',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+          status: 'completed',
+          progress: 100,
+          current_task: {
+            type: 'generate_api',
+            description: 'Completed API contract wiring',
+          },
+        },
+        {
+          id: 'reviewer-1',
+          role: 'reviewer',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+          status: 'error',
+          progress: 100,
+          current_task: {
+            type: 'test',
+            description: 'Verifier false positive on mocks',
+          },
+        },
+      ],
+      tasks: [
+        {
+          id: 'task-live',
+          type: 'fix',
+          description: 'Finishing the live recovery pass',
+          status: 'in_progress',
+        },
+        {
+          id: 'task-done',
+          type: 'generate_api',
+          description: 'Completed API contract wiring',
+          status: 'completed',
+        },
+        {
+          id: 'task-failed',
+          type: 'test',
+          description: 'Verifier false positive on mocks',
+          status: 'failed',
+        },
+      ],
+    }))
+
+    render(<AppBuilder />)
+
+    await screen.findByText(/AI Agents Working/i)
+
+    expect(screen.getByPlaceholderText('Message Frontend directly...')).toBeTruthy()
+    expect(screen.queryByPlaceholderText('Message Backend directly...')).toBeNull()
+    expect(screen.queryByPlaceholderText('Message Reviewer directly...')).toBeNull()
+
+    expect(screen.getByText('Live Tasks')).toBeTruthy()
+    expect(screen.getByText('Finishing the live recovery pass')).toBeTruthy()
+    expect(screen.queryByText('Completed API contract wiring')).toBeNull()
+    expect(screen.queryByText('Verifier false positive on mocks')).toBeNull()
   })
 
   it('issues a restart command for failed builds', async () => {

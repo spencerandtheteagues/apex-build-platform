@@ -82,12 +82,12 @@ describe('BillingSettings', () => {
 
     render(<BillingSettings />)
 
-    expect(await screen.findByText('Billing control plane')).toBeTruthy()
-    expect(screen.getByText(/Free accounts can build static frontend websites and UI mockups\./)).toBeTruthy()
-    expect(screen.getAllByText(/one-time \$5 managed trial/i).length).toBeGreaterThan(0)
-    expect(screen.getByText(/Credits pay for managed AI usage\. Subscription tier unlocks capability boundaries/)).toBeTruthy()
-    expect(screen.getByText('One-time $5 trial')).toBeTruthy()
-    expect(screen.getByText('Credits do not unlock paid capabilities')).toBeTruthy()
+    expect(await screen.findByText('Subscription Plans')).toBeTruthy()
+    expect(screen.getByText(/Plan tier unlocks capabilities\. Credits cover managed AI usage\./)).toBeTruthy()
+    expect(screen.getAllByText('Static websites & UI mockups').length).toBeGreaterThan(0)
+    expect(screen.getByText('Static frontend websites')).toBeTruthy()
+    expect(screen.getByText(/One-time top-ups for extra AI usage runway\. Don't unlock plan features on their own\./)).toBeTruthy()
+    expect(screen.getByText('Credit Packs')).toBeTruthy()
   })
 
   it('shows paid-plan narrative and renewal details', async () => {
@@ -111,13 +111,14 @@ describe('BillingSettings', () => {
 
     render(<BillingSettings />)
 
-    expect(await screen.findAllByText('Builder')).toHaveLength(2)
+    expect(await screen.findByText('Subscription Plans')).toBeTruthy()
     await waitFor(() => {
-      expect(screen.getByText(/Your subscription unlocks app capability boundaries\./)).toBeTruthy()
+      expect(screen.getAllByText('Full-stack development unlocked').length).toBeGreaterThan(0)
     })
-    expect(screen.getByText('Full-stack unlocked')).toBeTruthy()
-    expect(screen.getByText('Publish unlocked')).toBeTruthy()
-    expect(screen.getByText('BYOK unlocked')).toBeTruthy()
+    expect(screen.getByText('Manage')).toBeTruthy()
+    expect(screen.getByText('Backend generation')).toBeTruthy()
+    expect(screen.getByText('Publish')).toBeTruthy()
+    expect(screen.getByText('BYOK')).toBeTruthy()
     expect(screen.getByText(/Renews/)).toBeTruthy()
   })
 })

@@ -1331,7 +1331,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const chatEndRef = useRef<HTMLDivElement>(null)
   const wsReconnectAttempts = useRef(0)
   const maxWsReconnectAttempts = 5
-  const skipAutoRestoreRef = useRef(true)
+  const skipAutoRestoreRef = useRef(false)
 
   // Ref to track current isBuilding state (prevents stale closure in WebSocket onclose)
   const isBuildingRef = useRef(isBuilding)
@@ -1767,6 +1767,18 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
     return next
   }, [aiThoughts])
+  const liveProviderPanels = useMemo(
+    () => providerPanels.filter((panel) => panel.status === 'thinking' || panel.status === 'working'),
+    [providerPanels]
+  )
+  const liveAgents = useMemo(
+    () => (buildState?.agents || []).filter((agent) => agent.status === 'working'),
+    [buildState?.agents]
+  )
+  const liveTasks = useMemo(
+    () => (buildState?.tasks || []).filter((task) => task.status === 'in_progress'),
+    [buildState?.tasks]
+  )
   const hasBuilderSession = Boolean(
     buildState ||
     isBuilding ||
@@ -4657,8 +4669,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           // Build Progress View
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
             <div className="lg:col-span-3">
-              <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-4">
-                {providerPanels.map((panel) => {
+              {liveProviderPanels.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-4">
+                  {liveProviderPanels.map((panel) => {
                   const ui = PROVIDER_UI[panel.provider]
                   const isLive = panel.status === 'thinking' || panel.status === 'working'
                   const statusBadgeClass =
@@ -4835,7 +4848,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     </Card>
                   )
                 })}
-              </div>
+                </div>
+              )}
             </div>
 
             {/* Left Column - Agents & Status */}
@@ -5080,42 +5094,37 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
               </Card>
 
               {/* Active Agents */}
-              <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
-                <CardHeader className="pb-4 border-b border-gray-800">
-                  <CardTitle className="text-xl flex items-center gap-3">
-                    <Cpu className="w-7 h-7 text-orange-500" />
-                    AI Agents ({buildState.agents.length})
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-5">
-                  <div className="space-y-3">
-                    {buildState.agents.map((agent, index) => (
-                      <AgentCard
-                        key={agent.id}
-                        agent={agent}
-                        index={index}
-                        canDirectMessage={isBuildActive}
-                        getAgentEmoji={getAgentEmoji}
-                        getStatusIcon={getStatusIcon}
-                        messageDraft={agentMessageDrafts[agent.id] || ''}
-                        onMessageDraftChange={(agentId, value) => {
-                          setAgentMessageDrafts(prev => ({ ...prev, [agentId]: value }))
-                        }}
-                        onSendMessage={sendDirectAgentMessage}
-                        recentThoughts={recentThoughtsByAgent.get(agent.id) || []}
-                        sendPending={agentMessagePendingId === agent.id}
-                      />
-                    ))}
-
-                    {buildState.agents.length === 0 && (
-                      <div className="text-center text-gray-500 py-10">
-                        <Bot className="w-14 h-14 mx-auto mb-4 opacity-50 animate-pulse" />
-                        <p className="font-medium">Spawning agents...</p>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+              {liveAgents.length > 0 && (
+                <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
+                  <CardHeader className="pb-4 border-b border-gray-800">
+                    <CardTitle className="text-xl flex items-center gap-3">
+                      <Cpu className="w-7 h-7 text-orange-500" />
+                      AI Agents Working ({liveAgents.length})
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-5">
+                    <div className="space-y-3">
+                      {liveAgents.map((agent, index) => (
+                        <AgentCard
+                          key={agent.id}
+                          agent={agent}
+                          index={index}
+                          canDirectMessage={isBuildActive}
+                          getAgentEmoji={getAgentEmoji}
+                          getStatusIcon={getStatusIcon}
+                          messageDraft={agentMessageDrafts[agent.id] || ''}
+                          onMessageDraftChange={(agentId, value) => {
+                            setAgentMessageDrafts(prev => ({ ...prev, [agentId]: value }))
+                          }}
+                          onSendMessage={sendDirectAgentMessage}
+                          recentThoughts={recentThoughtsByAgent.get(agent.id) || []}
+                          sendPending={agentMessagePendingId === agent.id}
+                        />
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Checkpoints */}
               {buildState.checkpoints.length > 0 && (
@@ -5338,17 +5347,17 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 </Card>
               )}
 
-              {buildState.tasks.length > 0 && (
+              {liveTasks.length > 0 && (
                 <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
                   <CardHeader className="pb-4 border-b border-gray-800">
                     <CardTitle className="text-xl flex items-center gap-3">
                       <Layers className="w-7 h-7 text-cyan-400" />
-                      Task Timeline
+                      Live Tasks
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="pt-5">
                     <div className="space-y-3 max-h-64 overflow-y-auto">
-                      {buildState.tasks.map((task) => (
+                      {liveTasks.map((task) => (
                         <div key={task.id} className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
                           <div className="flex items-start justify-between gap-3">
                             <div>

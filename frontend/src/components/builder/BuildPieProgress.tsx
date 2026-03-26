@@ -127,6 +127,7 @@ const BuildPieProgress: React.FC<BuildPieProgressProps> = ({
   useEffect(() => {
     const el = pulseRef.current
     if (!el || !isActive) return
+    if (typeof el.animate !== 'function') return
     // keyframe-based pulse using Web Animations API
     const anim = el.animate(
       [
