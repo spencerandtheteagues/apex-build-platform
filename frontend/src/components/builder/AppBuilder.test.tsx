@@ -179,6 +179,50 @@ const installLocalStorageMock = () => {
   return storage
 }
 
+const installWebSocketMock = () => {
+  const connections: Array<{
+    url: string
+    readyState: number
+    onopen: ((event?: Event) => void) | null
+    onmessage: ((event: MessageEvent) => void) | null
+    onerror: ((event?: Event) => void) | null
+    onclose: ((event: CloseEvent) => void) | null
+    close: () => void
+  }> = []
+
+  class MockWebSocket {
+    static CONNECTING = 0
+    static OPEN = 1
+    static CLOSING = 2
+    static CLOSED = 3
+
+    readyState = MockWebSocket.CONNECTING
+    onopen: ((event?: Event) => void) | null = null
+    onmessage: ((event: MessageEvent) => void) | null = null
+    onerror: ((event?: Event) => void) | null = null
+    onclose: ((event: CloseEvent) => void) | null = null
+
+    constructor(public url: string) {
+      connections.push(this)
+    }
+
+    close = () => {
+      this.readyState = MockWebSocket.CLOSED
+    }
+  }
+
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: MockWebSocket,
+  })
+  Object.defineProperty(window, 'WebSocket', {
+    configurable: true,
+    value: MockWebSocket,
+  })
+
+  return connections
+}
+
 describe('AppBuilder control surface', () => {
   beforeEach(() => {
     installLocalStorageMock()
@@ -365,6 +409,65 @@ describe('AppBuilder control surface', () => {
           targetMode: 'lead',
         })
       )
+    })
+  })
+
+  it('hides live agent and task panels for failed builds even if stale worker state is present', async () => {
+    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'failed-build-123')
+    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'failed' })
+    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      id: 'failed-build-123',
+      build_id: 'failed-build-123',
+      status: 'failed',
+      progress: 92,
+      live: true,
+      error: 'Preview validation failed',
+      tasks: [
+        {
+          id: 'task-live',
+          type: 'fix',
+          description: 'Finishing the live recovery pass',
+          status: 'in_progress',
+        },
+      ],
+    }))
+
+    render(<AppBuilder />)
+
+    await screen.findByRole('button', { name: /restart failed build/i })
+
+    expect(screen.queryByText(/AI Agents Working/i)).toBeNull()
+    expect(screen.queryByText('Live Tasks')).toBeNull()
+    expect(screen.queryByText('Finishing the live recovery pass')).toBeNull()
+  })
+
+  it('reconnects restart recovery even when a failed build detail incorrectly reports a live session', async () => {
+    const connections = installWebSocketMock()
+
+    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'failed-build-123')
+    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'failed' })
+    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      id: 'failed-build-123',
+      build_id: 'failed-build-123',
+      status: 'failed',
+      progress: 92,
+      live: true,
+      websocket_url: 'wss://runtime.example/ws/build/failed-build-123',
+      error: 'Preview validation failed',
+    }))
+    ;(apiService.sendBuildMessage as any).mockResolvedValue({
+      interaction: buildDetail().interaction,
+      live: true,
+    })
+
+    render(<AppBuilder />)
+
+    const restartButton = await screen.findByRole('button', { name: /restart failed build/i })
+    fireEvent.click(restartButton)
+
+    await waitFor(() => {
+      expect(connections).toHaveLength(1)
+      expect(connections[0]?.url).toBe('wss://runtime.example/ws/build/failed-build-123')
     })
   })
 

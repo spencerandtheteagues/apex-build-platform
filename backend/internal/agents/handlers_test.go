@@ -1208,6 +1208,69 @@ func TestCancelRestoresActiveSnapshotAndPersistsTerminalState(t *testing.T) {
 	}
 }
 
+func TestGetBuildDetailsMarksRestoredTerminalBuildAsNotLive(t *testing.T) {
+	db := openBuildTestDB(t)
+	snapshot := &models.CompletedBuild{
+		BuildID:     "restored-failed-build",
+		UserID:      1,
+		Description: "Failed build restored into memory",
+		Status:      string(BuildFailed),
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    88,
+		FilesJSON:   "[]",
+		Error:       "Build timed out after 40m0s",
+		AgentsJSON: `[{
+			"id":"lead-1",
+			"role":"lead",
+			"provider":"claude",
+			"status":"working",
+			"progress":55
+		}]`,
+		TasksJSON: `[{
+			"id":"task-1",
+			"type":"fix",
+			"description":"Resume recovery",
+			"assigned_to":"lead-1",
+			"status":"in_progress"
+		}]`,
+	}
+	if err := db.Create(snapshot).Error; err != nil {
+		t.Fatalf("create failed snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		ctx:         context.Background(),
+		cancel:      func() {},
+		db:          db,
+		aiRouter:    &stubPreflight{configured: true, allProviders: []ai.AIProvider{ai.ProviderClaude}, userProviders: []ai.AIProvider{ai.ProviderClaude}},
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		editStore:   NewProposedEditStoreWithDB(db),
+	}
+
+	if _, _, err := am.restoreBuildSessionFromSnapshot(snapshot); err != nil {
+		t.Fatalf("restore snapshot into memory: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/restored-failed-build", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response["live"] != false {
+		t.Fatalf("expected live=false for restored failed build, got %v", response["live"])
+	}
+}
+
 func TestRestartFailedBuildRestoresSnapshotAndQueuesRevision(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.CompletedBuild{

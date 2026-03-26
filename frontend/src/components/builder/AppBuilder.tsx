@@ -1327,6 +1327,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null)
+  const wsBuildIdRef = useRef<string | null>(null)
   const wsMessageHandlerRef = useRef<(message: any) => Promise<void>>(async () => {})
   const chatEndRef = useRef<HTMLDivElement>(null)
   const wsReconnectAttempts = useRef(0)
@@ -1722,8 +1723,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     const lastThought = aiThoughts[aiThoughts.length - 1]
     const lastThoughtTime = lastThought?.timestamp instanceof Date ? lastThought.timestamp.getTime() : null
     const secondsSinceLastThought = lastThoughtTime ? Math.max(0, Math.floor((telemetryNow - lastThoughtTime) / 1000)) : null
-    const activeProviders = providerPanels.filter((panel) => panel.status === 'working' || panel.status === 'thinking').length
-    const activeAgents = buildState?.agents.filter((agent) => agent.status === 'working').length ?? 0
+    const activeProviders = isBuildActive
+      ? providerPanels.filter((panel) => panel.status === 'working' || panel.status === 'thinking').length
+      : 0
+    const activeAgents = isBuildActive
+      ? (buildState?.agents.filter((agent) => agent.status === 'working').length ?? 0)
+      : 0
     const legacyBlockerCount =
       (buildPaused ? 1 : 0) +
       (pendingQuestion ? 1 : 0) +
@@ -1756,6 +1761,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     providerPanels,
     telemetryNow,
     buildState?.blockers?.length,
+    isBuildActive,
   ])
   const recentThoughtsByAgent = useMemo(() => {
     const next = new Map<string, AIThought[]>()
@@ -1768,16 +1774,22 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     return next
   }, [aiThoughts])
   const liveProviderPanels = useMemo(
-    () => providerPanels.filter((panel) => panel.status === 'thinking' || panel.status === 'working'),
-    [providerPanels]
+    () => isBuildActive
+      ? providerPanels.filter((panel) => panel.status === 'thinking' || panel.status === 'working')
+      : [],
+    [providerPanels, isBuildActive]
   )
   const liveAgents = useMemo(
-    () => (buildState?.agents || []).filter((agent) => agent.status === 'working'),
-    [buildState?.agents]
+    () => isBuildActive
+      ? (buildState?.agents || []).filter((agent) => agent.status === 'working')
+      : [],
+    [buildState?.agents, isBuildActive]
   )
   const liveTasks = useMemo(
-    () => (buildState?.tasks || []).filter((task) => task.status === 'in_progress'),
-    [buildState?.tasks]
+    () => isBuildActive
+      ? (buildState?.tasks || []).filter((task) => task.status === 'in_progress')
+      : [],
+    [buildState?.tasks, isBuildActive]
   )
   const hasBuilderSession = Boolean(
     buildState ||
@@ -1798,6 +1810,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       wsRef.current.close()
       wsRef.current = null
     }
+    wsBuildIdRef.current = null
 
     clearActiveBuildId()
     previewPreparedRef.current = false
@@ -1995,6 +2008,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         wsRef.current.close()
         wsRef.current = null
       }
+      wsBuildIdRef.current = null
     }
   }, [])
 
@@ -2002,6 +2016,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     if (!Number.isFinite(value)) return 0
     return Math.max(0, Math.min(100, Math.round(value)))
   }
+
+  const hasUsableWebSocketConnection = useCallback((buildId: string) => {
+    const ws = wsRef.current
+    if (!ws || wsBuildIdRef.current !== buildId) return false
+    return ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN
+  }, [])
 
   const computeAgentProgressFloor = (agents: Agent[]) => {
     const workers = agents.filter(a => a.role !== 'lead')
@@ -2062,14 +2082,23 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
   // WebSocket connection
   const connectWebSocket = useCallback((buildId: string, providedUrl?: string) => {
+    if (hasUsableWebSocketConnection(buildId)) {
+      return
+    }
+
     const wsUrl = buildWebSocketUrl(buildId, providedUrl)
     console.log('Connecting to WebSocket:', wsUrl)
 
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+      wsRef.current.onopen = null
+      wsRef.current.onmessage = null
+      wsRef.current.onerror = null
+      wsRef.current.onclose = null
       wsRef.current.close()
     }
 
     const ws = new WebSocket(wsUrl)
+    wsBuildIdRef.current = buildId
 
     ws.onopen = () => {
       console.log('WebSocket connected')
@@ -2093,6 +2122,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
     ws.onclose = (event) => {
       console.log('WebSocket disconnected, code:', event.code)
+      if (wsRef.current === ws) {
+        wsRef.current = null
+      }
+      if (wsBuildIdRef.current === buildId) {
+        wsBuildIdRef.current = null
+      }
       setBuildState(prev => prev && prev.id === buildId ? { ...prev, liveSession: false } : prev)
 
       // Use ref to access current isBuilding state (prevents stale closure)
@@ -2112,7 +2147,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
 
     wsRef.current = ws
-  }, [buildWebSocketUrl])
+  }, [buildWebSocketUrl, hasUsableWebSocketConnection])
 
   // Handle WebSocket messages
   const handleWebSocketMessage = async (message: any) => {
@@ -3528,6 +3563,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     setIsPreparingPreview(false)
     previewPreparedRef.current = false
     wsReconnectAttempts.current = 0
+    const liveSessionAvailable = !isTerminalBuildStatus(status) && payload.live !== false
 
     setBuildState({
       id: String(payload.id || payload.build_id || buildId),
@@ -3570,13 +3606,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       truthBySurface: payload.truth_by_surface || payload.promotion_decision?.truth_by_surface || payload.build_contract?.truth_by_surface,
       errorMessage: extractBuildFailureReason(payload),
       websocketUrl: typeof payload.websocket_url === 'string' ? payload.websocket_url : undefined,
-      liveSession: payload.live !== false,
+      liveSession: liveSessionAvailable,
       artifactRevision: typeof payload.artifact_revision === 'string' ? payload.artifact_revision : undefined,
       interaction,
     })
     persistLastWorkflowBuildId(buildId)
 
-    const shouldReconnectLive = !isTerminalBuildStatus(status) && options?.reconnectLive !== false && payload.live !== false
+    const shouldReconnectLive = liveSessionAvailable && options?.reconnectLive !== false
     const active = isActiveBuildStatus(status)
 
     if (active) {
@@ -4051,10 +4087,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         setPendingConversationMessageStatus(clientToken, 'sent')
       }
       syncInteractionState(response.interaction)
-      if (response.live && !buildStateRef.current?.liveSession) {
-        const buildId = buildStateRef.current.id
+      const buildId = buildStateRef.current.id
+      if (response.live === true && !hasUsableWebSocketConnection(buildId)) {
+        const websocketUrl = buildStateRef.current.websocketUrl
         setBuildState(prev => prev && prev.id === buildId ? { ...prev, liveSession: true } : prev)
-        connectWebSocket(buildId, buildStateRef.current?.websocketUrl)
+        connectWebSocket(buildId, websocketUrl)
       }
       return true
     } catch (error) {
@@ -4064,7 +4101,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       addSystemMessage('Message failed to send. Please try again.')
       return false
     }
-  }, [connectWebSocket, setPendingConversationMessageStatus, syncInteractionState])
+  }, [connectWebSocket, hasUsableWebSocketConnection, setPendingConversationMessageStatus, syncInteractionState])
 
   const sendChatMessage = async () => {
     const content = chatInput.trim()

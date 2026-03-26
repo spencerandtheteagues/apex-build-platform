@@ -754,7 +754,7 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 			"messages":               interaction.Messages,
 			"interaction":            interaction,
 			"activity_timeline":      copyBuildActivityTimelineLocked(build),
-			"live":                   true,
+			"live":                   isActiveBuildStatus(string(build.Status)),
 			"restored_from_snapshot": restored,
 		}
 		for key, value := range buildSnapshotStateResponseFields(copyBuildSnapshotStateLocked(build), string(build.Status), userPlan) {
