@@ -1,0 +1,84 @@
+name: Production Canary
+
+on:
+  schedule:
+    - cron: '0 11 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: production-canary
+  cancel-in-progress: false
+
+jobs:
+  public-launch-smoke:
+    name: Public Launch Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: tests/e2e/package-lock.json
+
+      - name: Install launch smoke deps
+        working-directory: tests/e2e
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: tests/e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run public production launch smoke
+        working-directory: tests/e2e
+        env:
+          PLAYWRIGHT_BASE_URL: https://apex-build.dev
+          PLAYWRIGHT_API_URL: https://api.apex-build.dev
+          PLAYWRIGHT_EXPECT_LIVE_STRIPE: '1'
+        run: npm run test:launch -- --project=chromium
+
+  free-frontend-build-canary:
+    name: Free Frontend Build Canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run free-tier frontend preview canary
+        env:
+          BASE_URL: https://api.apex-build.dev/api/v1
+          MODE: fast
+          POWER_MODE: balanced
+          SMOKE_PROFILE: free_frontend
+          EXPECT_STATUS: completed
+          POLL_SECONDS: 10
+          MAX_POLLS: 120
+        run: ./scripts/run_platform_build_smoke.sh
+
+  paid-fullstack-build-canary:
+    name: Paid Full-Stack Build Canary
+    if: ${{ secrets.APEX_CANARY_EMAIL != '' && secrets.APEX_CANARY_PASSWORD != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run paid full-stack preview canary
+        env:
+          BASE_URL: https://api.apex-build.dev/api/v1
+          MODE: full
+          POWER_MODE: balanced
+          SMOKE_PROFILE: paid_fullstack
+          EXPECT_STATUS: completed
+          LOGIN_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
+          LOGIN_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
+          LOGIN_FULL_NAME: APEX Canary
+          POLL_SECONDS: 15
+          MAX_POLLS: 160
+        run: ./scripts/run_platform_build_smoke.sh

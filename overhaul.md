@@ -708,6 +708,44 @@ Verification completed:
 - `cd frontend && npm run build`
 - `cd frontend && npm run test -- --run`
 
+### 2026-03-26 (runtime proof + production canary pass)
+
+Completed:
+
+- Tightened backend runtime truth for preview-required builds so Node backends no longer pass final readiness without a runnable runtime script.
+- Added automatic backend runtime-script normalization for generated Node/TypeScript APIs when the manifest has a build path but no usable runtime start/dev script.
+- Strengthened final readiness behavior so preview-required Go and Python backends now fail honestly when no runnable entrypoint can be detected for runtime probing.
+- Fixed the platform build smoke script so terminal `failed` or `cancelled` results no longer exit successfully.
+- Added smoke profiles to the platform build smoke:
+  - `free_frontend` for sacrificial free-tier preview canaries
+  - `paid_fullstack` for credentialed paid-tier canaries
+- Added a scheduled production canary workflow that runs:
+  - public launch smoke against `apex-build.dev`
+  - a free frontend build canary against production
+  - an optional paid full-stack canary when dedicated canary credentials are configured
+- Documented the stronger canary path and the new smoke profiles in the launch runbook and E2E README.
+
+Files changed:
+
+- `.github/workflows/production-canary.yml`
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+- `docs/launch-runbook.md`
+- `scripts/run_platform_build_smoke.sh`
+- `tests/e2e/README.md`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestVerifyGeneratedBackendBuildReadiness|TestApplyDeterministicPreValidationNormalizationAddsBackendTSConfigAndTooling|TestApplyDeterministicPreValidationNormalizationAddsMissingBackendRuntimeScripts|TestApplyDeterministicPreValidationNormalizationAddsFrontendPreviewScriptAndViteEnvAndTestDeps'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+- `cd frontend && npm run test -- --run`
+- `cd frontend && npm run build`
+- `cd frontend && npm run lint`
+- `bash -n scripts/run_platform_build_smoke.sh`
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/production-canary.yml"); puts "ok"'`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

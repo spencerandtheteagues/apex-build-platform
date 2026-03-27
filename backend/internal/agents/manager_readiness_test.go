@@ -753,7 +753,7 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 			{Path: "backend/src/server.ts", Content: "console.log('x')"},
 		}
 
-		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		errs := am.verifyGeneratedBackendBuildReadiness(files, false)
 		if !containsError(errs, "missing a build script") {
 			t.Fatalf("expected missing build script error, got %v", errs)
 		}
@@ -778,9 +778,34 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 			{Path: "backend/src/server.js", Content: "console.log('ok')"},
 		}
 
-		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		errs := am.verifyGeneratedBackendBuildReadiness(files, false)
 		if len(errs) != 0 {
 			t.Fatalf("expected backend verification success, got %v", errs)
+		}
+	})
+
+	t.Run("missing_runtime_script_fails_when_runtime_proof_required", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := exec.LookPath("npm"); err != nil {
+			t.Skip("npm not available")
+		}
+
+		files := []GeneratedFile{
+			{
+				Path: "backend/package.json",
+				Content: `{
+  "name": "api",
+  "private": true,
+  "scripts": { "build": "node -e \"console.log('ok')\"" }
+}`,
+			},
+			{Path: "backend/src/server.js", Content: "console.log('ok')"},
+		}
+
+		errs := am.verifyGeneratedBackendBuildReadiness(files, true)
+		if !containsError(errs, "missing a runnable start/dev/serve script") {
+			t.Fatalf("expected missing runtime script error, got %v", errs)
 		}
 	})
 
@@ -809,7 +834,7 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 			{Path: "backend/src/server.js", Content: "console.log('ok')"},
 		}
 
-		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		errs := am.verifyGeneratedBackendBuildReadiness(files, false)
 		if len(errs) != 0 {
 			t.Fatalf("expected backend runtime probe success, got %v", errs)
 		}
@@ -840,7 +865,7 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 			{Path: "backend/src/server.js", Content: "console.log('ok')"},
 		}
 
-		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		errs := am.verifyGeneratedBackendBuildReadiness(files, false)
 		if !containsError(errs, "Backend runtime probe failed: /health returned HTTP 404") {
 			t.Fatalf("expected backend runtime 404 failure, got %v", errs)
 		}
@@ -871,7 +896,7 @@ func TestVerifyGeneratedBackendBuildReadiness(t *testing.T) {
 			{Path: "backend/src/server.js", Content: "console.log('ok')"},
 		}
 
-		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		errs := am.verifyGeneratedBackendBuildReadiness(files, false)
 		if len(errs) != 0 {
 			t.Fatalf("expected backend dev runtime probe success, got %v", errs)
 		}
@@ -913,7 +938,7 @@ if __name__ == "__main__":
 			},
 		}
 
-		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		errs := am.verifyGeneratedBackendBuildReadiness(files, false)
 		if len(errs) != 0 {
 			t.Fatalf("expected python runtime probe success, got %v", errs)
 		}
@@ -949,7 +974,7 @@ if __name__ == "__main__":
 			},
 		}
 
-		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		errs := am.verifyGeneratedBackendBuildReadiness(files, false)
 		if !containsError(errs, "Python backend runtime probe failed: /health returned HTTP 404") {
 			t.Fatalf("expected python runtime 404 failure, got %v", errs)
 		}
@@ -972,7 +997,7 @@ if __name__ == "__main__":
 			{Path: "tsconfig.json", Content: `{"compilerOptions":{"target":"ES2022"}}`},
 		}
 
-		errs := am.verifyGeneratedBackendBuildReadiness(files)
+		errs := am.verifyGeneratedBackendBuildReadiness(files, false)
 		if !containsError(errs, "backend/tsconfig.json is missing") {
 			t.Fatalf("expected backend tsconfig root mismatch error, got %v", errs)
 		}
@@ -2497,8 +2522,67 @@ func TestApplyDeterministicPreValidationNormalizationAddsBackendTSConfigAndTooli
 	if !strings.Contains(manifest, `"typescript"`) {
 		t.Fatalf("expected typescript dependency to be preserved or added, got %s", manifest)
 	}
+	if !strings.Contains(manifest, `"dev": "tsx watch src/index.ts"`) && !strings.Contains(manifest, `"dev": "tsx src/index.ts"`) {
+		t.Fatalf("expected backend runtime script to remain usable, got %s", manifest)
+	}
 	if _, ok := byPath["server/tsconfig.json"]; !ok {
 		t.Fatalf("expected server/tsconfig.json to be created")
+	}
+}
+
+func TestApplyDeterministicPreValidationNormalizationAddsMissingBackendRuntimeScripts(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:   "build-prevalidation-backend-runtime",
+		Mode: ModeFast,
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-api-runtime",
+				Type:   TaskGenerateAPI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "backend/package.json",
+							Content: `{
+  "name": "api",
+  "private": true,
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}`,
+						},
+						{Path: "backend/src/server.ts", Content: `import express from "express"; const app = express(); app.listen(process.env.PORT || 3001);`},
+					},
+				},
+			},
+		},
+	}
+
+	if !am.applyDeterministicPreValidationNormalization(build) {
+		t.Fatalf("expected backend runtime normalization to trigger")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+
+	manifest := byPath["backend/package.json"]
+	if !strings.Contains(manifest, `"start": "node dist/server.js"`) {
+		t.Fatalf("expected backend start script to be added, got %s", manifest)
+	}
+	if !strings.Contains(manifest, `"dev": "tsx src/server.ts"`) {
+		t.Fatalf("expected backend dev runtime script to be added, got %s", manifest)
+	}
+	if !strings.Contains(manifest, `"tsx"`) {
+		t.Fatalf("expected tsx dependency to be added, got %s", manifest)
 	}
 }
 
@@ -2537,7 +2621,7 @@ func TestNodeVerificationSkipsWhenNPMUnavailable(t *testing.T) {
 		},
 		{Path: "backend/src/server.ts", Content: "console.log('ok')"},
 	}
-	if errs := am.verifyGeneratedBackendBuildReadiness(backendFiles); len(errs) != 0 {
+	if errs := am.verifyGeneratedBackendBuildReadiness(backendFiles, false); len(errs) != 0 {
 		t.Fatalf("expected backend verifier to skip cleanly when npm is unavailable, got %v", errs)
 	}
 }

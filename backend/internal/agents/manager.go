@@ -6684,6 +6684,12 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 				manifest.Scripts = map[string]string{}
 			}
 		}
+		if repaired, summary := am.ensureGeneratedBackendRuntimeScripts(plan, files, manifestPath, manifest); repaired {
+			summaries = append(summaries, summary)
+			if err := json.Unmarshal([]byte(plan.content(manifestPath)), &manifest); err == nil && manifest.Scripts == nil {
+				manifest.Scripts = map[string]string{}
+			}
+		}
 
 		if signals.hasImportMetaEnv && manifestUsesVite(manifest) {
 			if repaired, summary := am.ensureGeneratedViteEnvDeclaration(plan, manifestPath); repaired {
@@ -13602,7 +13608,7 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 		}
 	}
 	if am.shouldRunPreviewReadinessVerification(build) {
-		for _, msg := range am.verifyGeneratedBackendBuildReadiness(files) {
+		for _, msg := range am.verifyGeneratedBackendBuildReadiness(files, am.shouldRequireBackendRuntimeProof(build)) {
 			addError(msg, &backendErrors)
 		}
 	}
@@ -13678,6 +13684,28 @@ func (am *AgentManager) shouldRunPreviewReadinessVerification(build *Build) bool
 	}
 	val := strings.TrimSpace(strings.ToLower(os.Getenv("BUILD_REQUIRE_PREVIEW_READY_DEFAULT")))
 	return val == "1" || val == "true" || val == "yes"
+}
+
+func (am *AgentManager) shouldRequireBackendRuntimeProof(build *Build) bool {
+	if build == nil || !am.shouldRunPreviewReadinessVerification(build) || buildRequiresStaticFrontendFallback(build) {
+		return false
+	}
+
+	build.mu.RLock()
+	description := build.Description
+	techStack := build.TechStack
+	build.mu.RUnlock()
+
+	if techStack != nil && strings.TrimSpace(techStack.Backend) != "" {
+		return true
+	}
+
+	switch inferIntentAppType(description, techStack) {
+	case "api", "backend", "fullstack":
+		return true
+	default:
+		return false
+	}
 }
 
 type previewManifest struct {
@@ -14286,7 +14314,7 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 	return issues
 }
 
-func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFile) []string {
+func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFile, requireRuntimeProof bool) []string {
 	if len(files) == 0 {
 		return nil
 	}
@@ -14338,6 +14366,8 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 							return []string{fmt.Sprintf("Go backend runtime probe failed: %s", summary)}
 						}
 					}
+				} else if requireRuntimeProof {
+					return []string{"Go backend verification failed: could not detect a runnable entrypoint for preview/runtime verification"}
 				} else {
 					log.Printf("Go backend runtime verification skipped: could not detect runnable entrypoint")
 				}
@@ -14400,6 +14430,8 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 							return []string{fmt.Sprintf("Python backend runtime probe failed: %s", summary)}
 						}
 					}
+				} else if requireRuntimeProof {
+					return []string{"Python backend verification failed: could not detect a runnable entrypoint for preview/runtime verification"}
 				} else {
 					log.Printf("Python backend runtime verification skipped: could not detect runnable entrypoint")
 				}
@@ -14556,14 +14588,19 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 		}
 	}
 
-	if runtimeScript := detectBackendRuntimeScript(manifest.Scripts); runtimeScript != "" {
-		if summary, skip := runBackendHTTPProbe(tmpDir, healthPaths, "npm", []string{"run", runtimeScript}); summary != "" {
-			if skip {
-				log.Printf("Backend runtime verification skipped: %s", summary)
-			} else {
-				issues = append(issues, fmt.Sprintf("Backend runtime probe failed: %s", summary))
-				return issues
-			}
+	runtimeScript := detectBackendRuntimeScript(manifest.Scripts)
+	if runtimeScript == "" {
+		if requireRuntimeProof {
+			return []string{"Backend verification failed: backend package.json is missing a runnable start/dev/serve script for preview/runtime verification"}
+		}
+		return nil
+	}
+	if summary, skip := runBackendHTTPProbe(tmpDir, healthPaths, "npm", []string{"run", runtimeScript}); summary != "" {
+		if skip {
+			log.Printf("Backend runtime verification skipped: %s", summary)
+		} else {
+			issues = append(issues, fmt.Sprintf("Backend runtime probe failed: %s", summary))
+			return issues
 		}
 	}
 
@@ -14967,6 +15004,155 @@ func backendRuntimeScriptUsable(name, command string) bool {
 	}
 
 	return strings.Contains(lowerName, "start") || strings.Contains(lowerName, "serve") || strings.Contains(lowerName, "dev")
+}
+
+func manifestLooksLikeFrontendSurface(manifest previewManifest, manifestPath string) bool {
+	pathLower := strings.ToLower(strings.TrimSpace(manifestPath))
+	return manifestUsesVite(manifest) ||
+		manifestDeclaresDependency(manifest, "react") ||
+		manifestDeclaresDependency(manifest, "react-dom") ||
+		manifestDeclaresDependency(manifest, "next") ||
+		strings.Contains(pathLower, "/frontend/") ||
+		strings.Contains(pathLower, "/web/") ||
+		strings.HasPrefix(pathLower, "frontend/") ||
+		strings.HasPrefix(pathLower, "web/")
+}
+
+func generatedManifestPrefix(manifestPath string) string {
+	sanitized := sanitizeFilePath(manifestPath)
+	if sanitized == "" {
+		return ""
+	}
+	return strings.TrimSuffix(filepath.ToSlash(sanitized), "package.json")
+}
+
+func compiledRuntimePathForGeneratedNodeSource(relativePath string) string {
+	relativePath = filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(relativePath), "./"))
+	if relativePath == "" {
+		return ""
+	}
+	ext := strings.ToLower(filepath.Ext(relativePath))
+	base := strings.TrimSuffix(relativePath, ext)
+	if strings.HasPrefix(base, "src/") {
+		base = strings.TrimPrefix(base, "src/")
+	}
+	return filepath.ToSlash(filepath.Join("dist", base+".js"))
+}
+
+func findGeneratedNodeRuntimeEntryRelative(files []GeneratedFile, manifestPath string) (string, string, bool) {
+	prefix := strings.ToLower(strings.TrimSpace(generatedManifestPrefix(manifestPath)))
+	available := make(map[string]string, len(files))
+	for _, file := range files {
+		path := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(file.Path), "./"))
+		if path == "" {
+			continue
+		}
+		pathLower := strings.ToLower(path)
+		if prefix != "" {
+			if !strings.HasPrefix(pathLower, prefix) {
+				continue
+			}
+			path = strings.TrimPrefix(path, generatedManifestPrefix(manifestPath))
+			path = strings.TrimPrefix(path, "/")
+			pathLower = strings.ToLower(path)
+		}
+		if path == "" {
+			continue
+		}
+		available[pathLower] = path
+	}
+
+	candidates := []string{
+		"src/server.ts",
+		"src/index.ts",
+		"server/index.ts",
+		"server.ts",
+		"index.ts",
+		"main.ts",
+		"app.ts",
+		"src/server.js",
+		"src/index.js",
+		"server/index.js",
+		"server.js",
+		"index.js",
+		"main.js",
+		"app.js",
+		"src/server.mjs",
+		"src/index.mjs",
+		"server/index.mjs",
+		"server.mjs",
+		"index.mjs",
+	}
+	for _, candidate := range candidates {
+		if relativePath, ok := available[strings.ToLower(candidate)]; ok {
+			ext := strings.ToLower(filepath.Ext(relativePath))
+			isTypeScript := ext == ".ts" || ext == ".tsx" || ext == ".mts" || ext == ".cts"
+			runtimePath := relativePath
+			if isTypeScript {
+				runtimePath = compiledRuntimePathForGeneratedNodeSource(relativePath)
+			}
+			return relativePath, runtimePath, isTypeScript
+		}
+	}
+
+	return "", "", false
+}
+
+func (am *AgentManager) ensureGeneratedBackendRuntimeScripts(
+	plan *generatedFilePatchPlan,
+	files []GeneratedFile,
+	manifestPath string,
+	manifest previewManifest,
+) (bool, string) {
+	if plan == nil || manifestLooksLikeFrontendSurface(manifest, manifestPath) {
+		return false, ""
+	}
+	if detectBackendRuntimeScript(manifest.Scripts) != "" {
+		return false, ""
+	}
+
+	entryPath, runtimePath, isTypeScript := findGeneratedNodeRuntimeEntryRelative(files, manifestPath)
+	if entryPath == "" {
+		return false, ""
+	}
+
+	updatedContent := plan.content(manifestPath)
+	if strings.TrimSpace(updatedContent) == "" {
+		return false, ""
+	}
+
+	changes := make([]string, 0, 2)
+	if isTypeScript {
+		if patched, added := patchManifestDependenciesJSON(updatedContent, []string{"tsx", "typescript", "@types/node"}); len(added) > 0 {
+			updatedContent = patched
+			changes = append(changes, "deps: "+strings.Join(added, ", "))
+		}
+	}
+
+	scriptAdditions := map[string]string{}
+	if isTypeScript {
+		scriptAdditions["dev"] = "tsx " + entryPath
+		if buildScriptUsesTypeScriptCompiler(manifest) {
+			scriptAdditions["start"] = "node " + runtimePath
+		} else {
+			scriptAdditions["start"] = "tsx " + entryPath
+		}
+	} else {
+		scriptAdditions["dev"] = "node " + entryPath
+		scriptAdditions["start"] = "node " + entryPath
+	}
+	if patched, added := patchManifestScriptsJSON(updatedContent, scriptAdditions); len(added) > 0 {
+		updatedContent = patched
+		changes = append(changes, "scripts: "+strings.Join(added, ", "))
+	}
+
+	if len(changes) == 0 {
+		return false, ""
+	}
+	if !plan.patchFile(manifestPath, updatedContent, "json") {
+		return false, ""
+	}
+	return true, fmt.Sprintf("%s (%s)", manifestPath, strings.Join(changes, "; "))
 }
 
 func runBackendHTTPProbe(workDir string, healthPaths []string, cmdName string, args []string) (string, bool) {

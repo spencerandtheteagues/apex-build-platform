@@ -41,3 +41,18 @@ PLAYWRIGHT_API_URL=https://api.apex-build.dev \
 PLAYWRIGHT_EXPECT_LIVE_STRIPE=1 \
 npm run test:launch
 ```
+
+## Platform build smoke
+
+`../scripts/run_platform_build_smoke.sh` runs a sacrificial build against a target API and fails unless the build reaches `completed`.
+
+Default profile:
+
+- `SMOKE_PROFILE=free_frontend`
+- registers a temporary free user
+- verifies the free-tier frontend preview path reaches a truthful completed state
+
+Optional profile:
+
+- `SMOKE_PROFILE=paid_fullstack`
+- use `LOGIN_EMAIL` and `LOGIN_PASSWORD` to exercise a paid full-stack canary account

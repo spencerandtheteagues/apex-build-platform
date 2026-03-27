@@ -60,11 +60,34 @@ POWER_MODE=balanced \
 Expected result:
 
 - the script registers a new temporary account
-- starts a build
+- starts a frontend-preview build by default (`SMOKE_PROFILE=free_frontend`)
 - polls until terminal state
+- exits non-zero unless the build reaches `completed`
 - prints the final build summary
 
 Treat any `failed`, `cancelled`, or `BUILD_DID_NOT_TERMINATE_WITHIN_POLL_WINDOW` result as a launch blocker until explained.
+
+Optional paid full-stack canary:
+
+```bash
+BASE_URL=https://api.apex-build.dev/api/v1 \
+MODE=full \
+POWER_MODE=balanced \
+SMOKE_PROFILE=paid_fullstack \
+LOGIN_EMAIL='paid-canary@example.com' \
+LOGIN_PASSWORD='replace-me' \
+./scripts/run_platform_build_smoke.sh
+```
+
+## Scheduled Production Canary
+
+GitHub Actions now includes `.github/workflows/production-canary.yml`:
+
+- `Public Launch Smoke` runs the Playwright launch smoke against `apex-build.dev`
+- `Free Frontend Build Canary` runs the sacrificial free-tier preview build against production
+- `Paid Full-Stack Build Canary` runs only when `APEX_CANARY_EMAIL` and `APEX_CANARY_PASSWORD` secrets are configured
+
+Treat any failure in that workflow as a customer-facing reliability regression until explained.
 
 ## Manual Checks
 
