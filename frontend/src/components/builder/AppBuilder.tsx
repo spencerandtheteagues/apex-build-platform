@@ -2017,6 +2017,40 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     () => workflowUpdates.length + (buildState?.checkpoints.length || 0) + (buildState?.verificationReports?.length || 0) + visibleBlockers.length,
     [buildState?.checkpoints.length, buildState?.verificationReports?.length, visibleBlockers.length, workflowUpdates.length]
   )
+  const statusRailMetrics = useMemo(() => ([
+    {
+      label: 'Section',
+      value: currentWorkflowStage?.label || phaseLabel,
+      hint: `${currentWorkflowStageIndex + 1}/${workflowStages.length} active`,
+    },
+    {
+      label: 'Live',
+      value: isBuildActive ? telemetrySummary.activeAgents : 0,
+      hint: isBuildActive
+        ? `${liveTasks.length} task${liveTasks.length === 1 ? '' : 's'} running`
+        : 'Quiet',
+    },
+    {
+      label: 'Attention',
+      value: telemetrySummary.blockerCount,
+      hint: telemetrySummary.blockerCount > 0 ? 'Open Issues' : 'Clear',
+    },
+    {
+      label: 'Files',
+      value: generatedFiles.length,
+      hint: generatedFiles.length > 0 ? 'Open Files' : 'Streaming in',
+    },
+  ]), [
+    currentWorkflowStage?.label,
+    currentWorkflowStageIndex,
+    generatedFiles.length,
+    isBuildActive,
+    liveTasks.length,
+    phaseLabel,
+    telemetrySummary.activeAgents,
+    telemetrySummary.blockerCount,
+    workflowStages.length,
+  ])
   const hasIssueViewContent = Boolean(
     visibleBlockers.length > 0 ||
     buildState?.checkpoints.length ||
@@ -5328,38 +5362,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-3">
-                    {[
-                      {
-                        label: 'Providers Live',
-                        value: `${telemetrySummary.activeProviders}/${providerPanels.length}`,
-                        hint: telemetrySummary.lastThoughtLabel,
-                      },
-                      {
-                        label: 'Agents Working',
-                        value: telemetrySummary.activeAgents,
-                        hint: `${buildState.agents.length} total`,
-                      },
-                      {
-                        label: 'Timeline Updates',
-                        value: telemetrySummary.totalUpdates,
-                        hint: 'AI activity events',
-                      },
-                      {
-                        label: 'Blockers',
-                        value: telemetrySummary.blockerCount,
-                        hint: telemetrySummary.blockerCount > 0 ? 'Needs input or approval' : 'Clear',
-                      },
-                      {
-                        label: 'Checkpoints',
-                        value: telemetrySummary.checkpointCount,
-                        hint: 'Recovery snapshots',
-                      },
-                      {
-                        label: 'Artifacts',
-                        value: generatedFiles.length,
-                        hint: buildState.status === 'completed' ? 'Ready to hand off' : 'Streaming in',
-                      },
-                    ].map((metric) => (
+                    {statusRailMetrics.map((metric) => (
                       <div
                         key={metric.label}
                         className="rounded-xl border border-gray-800 bg-gray-950/70 px-3 py-3"
@@ -5371,43 +5374,22 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     ))}
                   </div>
 
-                  {/* Power Mode Highlight */}
-                  <div className="mt-6 pt-6 border-t border-gray-800">
-                    <div className="text-xs text-gray-500 mb-3">Power Mode</div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {([
-                        { id: 'fast' as const, label: 'Fast', color: 'green' },
-                        { id: 'balanced' as const, label: 'Balanced', color: 'yellow' },
-                        { id: 'max' as const, label: 'Max Power', color: 'red' },
-                      ]).map((mode) => {
-                        const active = activePowerMode === mode.id
-                        return (
-                          <div
-                            key={mode.id}
-                            className={cn(
-                              'px-3 py-2 rounded-lg border text-center text-xs font-bold uppercase tracking-wide',
-                              active
-                                ? mode.color === 'green'
-                                  ? 'border-green-400/70 bg-green-500/20 text-green-300 shadow-lg shadow-green-500/10'
-                                  : mode.color === 'yellow'
-                                    ? 'border-yellow-400/70 bg-yellow-500/20 text-yellow-300 shadow-lg shadow-yellow-500/10'
-                                    : 'border-red-400/70 bg-red-500/20 text-red-300 shadow-lg shadow-red-500/10'
-                                : 'border-gray-700/60 text-gray-500 bg-gray-900/40'
-                            )}
-                          >
-                            {mode.label}
-                          </div>
-                        )
-                      })}
+                  <div className="mt-5 pt-5 border-t border-gray-800 space-y-3">
+                    <div className="rounded-xl border border-gray-800 bg-gray-950/70 px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Operations</div>
+                      <div className="mt-2 text-sm font-semibold text-white">
+                        {activePowerMode === 'max' ? 'Max Power' : activePowerMode === 'balanced' ? 'Balanced' : 'Fast'}
+                        {' '}mode
+                      </div>
+                      <div className="mt-1 text-xs text-gray-400">
+                        {telemetrySummary.activeProviders}/{providerPanels.length} providers live • {telemetrySummary.lastThoughtLabel}
+                      </div>
+                      <div className="mt-2 text-[10px] text-gray-500">
+                        {getPowerModeModelSummary(activePowerMode)}
+                      </div>
                     </div>
-                    <div className="mt-2 text-[10px] text-gray-500">
-                      {getPowerModeModelSummary(activePowerMode)}
-                    </div>
-                  </div>
 
-                  {/* Available AI Providers */}
-                  {buildState.availableProviders && buildState.availableProviders.length > 0 && (
-                    <div className="mt-5 pt-5 border-t border-gray-800">
+                    {(buildWorkspaceView === 'activity' || buildWorkspaceView === 'diagnostics') && buildState.availableProviders && buildState.availableProviders.length > 0 && (
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs text-gray-500 font-medium">AI Providers:</span>
                         {buildState.availableProviders.map((provider) => {
@@ -5424,8 +5406,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                           )
                         })}
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </CardContent>
               </Card>
 

@@ -284,6 +284,42 @@ Verification completed:
 - `cd backend && go build ./...`
 - `cd backend && go test ./... -timeout=120s`
 
+### 2026-03-26 (planner + timeout tightening pass)
+
+Completed:
+
+- Removed the stale backend-first execution guidance from the planner prompt and replaced it with an explicit frontend-first, contract-first sequencing rule.
+- Tightened the lead-agent prompt so user-facing progress updates stay section-oriented and plain English instead of drifting back toward generic orchestration chatter.
+- Tightened the frontend-agent prompt so the UI shell is built first against the frozen contract, with realistic loading, empty, and error states while backend work catches up.
+- Increased default timeout headroom for full-stack full builds unless operators explicitly override it, reducing premature failure on longer real app generations.
+- Made the global build timeout more activity-aware by extending the deadline when recent progress is still arriving, instead of hard-failing an active build at the first threshold edge.
+- Increased per-phase stall grace before aborting a pending-but-not-yet-running phase, preferring queue recovery over premature failure.
+- Compacted the left status rail in the builder:
+  - reduced the always-visible metric set to section, live work, attention, and files
+  - collapsed power mode/provider telemetry into a smaller operations summary
+  - kept deeper provider detail in `Activity` / `Diagnostics`
+- Preserved all prior detail views while shrinking the default surface even further.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_spawn_test.go`
+- `frontend/src/components/builder/AppBuilder.tsx`
+- `overhaul.md`
+
+Verification completed:
+
+- `cd frontend && npm run test -- --run src/components/builder/AppBuilder.test.tsx`
+- `cd frontend && npm run lint`
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run build`
+- `cd frontend && npm run test -- --run`
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_spawn_test.go`
+- `cd backend && go test ./internal/agents -run 'TestBuildExecutionPhasesPrefersFrontendBeforeBackendAndData|TestSetBuildPhaseSnapshotPersistsCurrentPhaseForRestores|TestBuildTimeoutForBuildGivesFullstackBuildsMoreHeadroomByDefault|TestBuildTimeoutForBuildHonorsExplicitEnvOverride'`
+- `cd backend && go test ./internal/agents`
+- `cd backend && go build ./...`
+- `cd backend && go test ./... -timeout=120s`
+
 Commit hash:
 
 - Not pushed yet in this pass.

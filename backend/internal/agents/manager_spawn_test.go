@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"os"
 	"testing"
 	"time"
 )
@@ -107,6 +108,50 @@ func TestSetBuildPhaseSnapshotPersistsCurrentPhaseForRestores(t *testing.T) {
 	}
 	if !build.UpdatedAt.Equal(now) {
 		t.Fatalf("expected updated_at %s, got %s", now, build.UpdatedAt)
+	}
+}
+
+func TestBuildTimeoutForBuildGivesFullstackBuildsMoreHeadroomByDefault(t *testing.T) {
+	original, hadOriginal := os.LookupEnv("BUILD_TIMEOUT_FULL_SECONDS")
+	if err := os.Unsetenv("BUILD_TIMEOUT_FULL_SECONDS"); err != nil {
+		t.Fatalf("failed to unset build timeout env: %v", err)
+	}
+	t.Cleanup(func() {
+		if hadOriginal {
+			_ = os.Setenv("BUILD_TIMEOUT_FULL_SECONDS", original)
+		} else {
+			_ = os.Unsetenv("BUILD_TIMEOUT_FULL_SECONDS")
+		}
+	})
+
+	am := &AgentManager{}
+	build := &Build{
+		Mode: ModeFull,
+		Plan: &BuildPlan{
+			AppType: "fullstack",
+		},
+	}
+
+	timeout := am.buildTimeoutForBuild(build)
+	if timeout < 30*time.Minute {
+		t.Fatalf("expected fullstack full build timeout to be at least 30m, got %s", timeout)
+	}
+}
+
+func TestBuildTimeoutForBuildHonorsExplicitEnvOverride(t *testing.T) {
+	t.Setenv("BUILD_TIMEOUT_FULL_SECONDS", "600")
+
+	am := &AgentManager{}
+	build := &Build{
+		Mode: ModeFull,
+		Plan: &BuildPlan{
+			AppType: "fullstack",
+		},
+	}
+
+	timeout := am.buildTimeoutForBuild(build)
+	if timeout != 10*time.Minute {
+		t.Fatalf("expected explicit timeout override to win, got %s", timeout)
 	}
 }
 

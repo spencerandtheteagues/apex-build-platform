@@ -600,6 +600,16 @@ func (am *AgentManager) buildTimeoutHandler(buildID string) {
 	probe := time.NewTicker(15 * time.Second)
 	defer probe.Stop()
 	deadline := time.Now().Add(timeout)
+	maxExtension := timeout / 2
+	if maxExtension < 15*time.Minute {
+		maxExtension = 15 * time.Minute
+	}
+	if maxExtension > 30*time.Minute {
+		maxExtension = 30 * time.Minute
+	}
+	hardDeadline := deadline.Add(maxExtension)
+	const recentActivityWindow = 45 * time.Second
+	const activeExtensionStep = 60 * time.Second
 
 	for {
 		select {
@@ -616,16 +626,31 @@ func (am *AgentManager) buildTimeoutHandler(buildID string) {
 			build.mu.RLock()
 			status := build.Status
 			blockedByInteraction := buildInteractionBlocksExecution(build)
+			lastUpdated := build.UpdatedAt
 			build.mu.RUnlock()
 			if status == BuildCompleted || status == BuildFailed || status == BuildCancelled {
 				return
 			}
 			if blockedByInteraction {
 				deadline = deadline.Add(15 * time.Second)
+				if deadline.After(hardDeadline) {
+					deadline = hardDeadline
+				}
 				continue
 			}
 			if time.Now().Before(deadline) {
 				continue
+			}
+			if !lastUpdated.IsZero() && time.Since(lastUpdated) <= recentActivityWindow && deadline.Before(hardDeadline) {
+				nextDeadline := time.Now().Add(activeExtensionStep)
+				if nextDeadline.After(hardDeadline) {
+					nextDeadline = hardDeadline
+				}
+				if nextDeadline.After(deadline) {
+					log.Printf("Build %s: extending timeout to %s because recent activity is still arriving", buildID, nextDeadline.Format(time.RFC3339))
+					deadline = nextDeadline
+					continue
+				}
 			}
 
 			// If build is still in progress, fail it as timeout.
@@ -692,6 +717,15 @@ func (am *AgentManager) buildTimeoutForBuild(build *Build) time.Duration {
 				defaultSeconds = 1800
 			} else {
 				defaultSeconds = 900
+			}
+		case build.Mode == ModeFull && build.Plan != nil && strings.EqualFold(strings.TrimSpace(build.Plan.AppType), "fullstack"):
+			if defaultSeconds < 1800 {
+				defaultSeconds = 1800
+			}
+		case build.Mode == ModeFull && build.TechStack != nil &&
+			(strings.TrimSpace(build.TechStack.Backend) != "" || strings.TrimSpace(build.TechStack.Database) != ""):
+			if defaultSeconds < 1500 {
+				defaultSeconds = 1500
 			}
 		}
 	}
@@ -9085,7 +9119,7 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 	// This is a transient race condition (task just re-queued, not yet dispatched)
 	// and should resolve within a few ticks. Only abort if it persists.
 	stallTicks := 0
-	const maxStallTicks = 20 // 10 seconds at 500ms per tick
+	const maxStallTicks = 60 // 30 seconds at 500ms per tick; prefer recovery over premature aborts
 
 	for {
 		select {
@@ -12184,10 +12218,21 @@ You oversee all specialist agents and serve as the primary communicator with use
 Be helpful, concise, and focused on delivering excellent production-ready results.
 When users need to provide information (API keys, credentials), clearly ask for it.
 When you can proceed without user input, do so and build maximum functionality.
-Summarize progress concisely. Coordinate agent outputs into a cohesive application.` + techHint + baseRules,
+Summarize progress concisely. Coordinate agent outputs into a cohesive application.
+
+FULL-STACK DELIVERY RULE:
+- Freeze the contract early, deliver the frontend/UI shell first, then fill backend and data behind that interface.
+- Keep user-facing updates in plain English.
+- At each major step, make it obvious what section is active now, what comes next, and whether anything is blocked.` + techHint + baseRules,
 
 		RolePlanner: `You are the Planning Agent — an expert software architect who creates detailed, actionable build plans.
 Your job: decompose the app into a precise file-by-file implementation plan.
+
+FRONTEND-FIRST PLANNING RULE:
+- For full-stack builds, think through backend, data, and integration deeply before any code is written.
+- Freeze the screen map, API contract, payloads, env vars, and persistence expectations up front.
+- Then schedule execution so the frontend/UI shell lands before backend implementation work.
+- The backend pass should feel like filling in a known contract, not inventing the app shape from scratch.
 
 YOUR OUTPUT MUST INCLUDE:
 - A clear list of every file to create, with its path and purpose
@@ -12195,7 +12240,7 @@ YOUR OUTPUT MUST INCLUDE:
 - API endpoints with methods, paths, request/response schemas
 - UI components with their props, state, and user interactions
 - External dependencies and their exact versions
-- A recommended execution order (database → backend → frontend → tests)
+- A recommended execution order (architecture/contract → frontend shell → data foundation → backend services → integration/tests → review)
 
 EXAMPLE OUTPUT FORMAT:
 ## Tech Stack
@@ -12265,6 +12310,11 @@ This contract will be shared with Frontend and Backend agents to ensure they con
 
 		RoleFrontend: `You are the Frontend Agent — an expert UI engineer who builds beautiful, responsive, production-ready interfaces.
 You specialize in modern React with TypeScript, Vite, and Tailwind CSS.
+
+FRONTEND CONTRACT RULE:
+- The architecture blueprint already froze the route structure, user flows, and API assumptions.
+- Build the visible product shell first, but do not invent backend behavior outside that contract.
+- Use realistic loading, empty, and error states so the UI remains useful before every backend edge is wired.
 
 MANDATORY FILES — always generate ALL of these for every React app:
 1. index.html — Vite entry HTML at project root (NOT inside src/)
