@@ -200,6 +200,16 @@ interface BuildState {
   interaction?: ApiBuildInteractionState
 }
 
+type BuildWorkspaceView = 'overview' | 'activity' | 'files' | 'timeline' | 'issues' | 'diagnostics' | 'console'
+type BuildWorkflowStageStatus = 'pending' | 'current' | 'complete' | 'blocked'
+
+type BuildWorkflowStage = {
+  key: string
+  label: string
+  description: string
+  status: BuildWorkflowStageStatus
+}
+
 type BuildPermissionRequest = ApiBuildPermissionRequest
 type BuildPermissionRule = ApiBuildPermissionRule
 type BuildInteractionState = ApiBuildInteractionState
@@ -232,6 +242,34 @@ const ACTIVE_BUILD_STORAGE_KEY = 'apex_active_build_id'
 const LAST_WORKFLOW_BUILD_STORAGE_KEY = 'apex_last_workflow_build_id'
 const BUILD_TELEMETRY_STORAGE_KEY = 'apex_build_telemetry_cache'
 const DEFAULT_RESTART_FAILED_MESSAGE = 'Restart the failed build from the last workable state, keep the valid work, fix the failure, and continue until the app is runnable.'
+
+const BUILD_WORKFLOW_STAGE_DEFS = [
+  {
+    key: 'scaffold',
+    label: 'Scaffold',
+    description: 'Freeze the stack, screen map, and API/data contract before runtime work starts.',
+  },
+  {
+    key: 'frontend_ui',
+    label: 'Frontend UI',
+    description: 'Build the first usable interface and core screens before backend wiring.',
+  },
+  {
+    key: 'backend_data',
+    label: 'Backend & Data',
+    description: 'Add schema, persistence, and APIs behind the visible UI contract.',
+  },
+  {
+    key: 'integration',
+    label: 'Integration',
+    description: 'Connect the UI to backend flows and verify the main vertical slice.',
+  },
+  {
+    key: 'ship',
+    label: 'Preview / Ship',
+    description: 'Run final review, package the build, and prepare it for handoff.',
+  },
+] as const
 
 const isActiveBuildStatus = (status?: string) =>
   status === 'pending' ||
@@ -1304,6 +1342,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [plannerMessagePending, setPlannerMessagePending] = useState(false)
   const [permissionActionId, setPermissionActionId] = useState<string | null>(null)
   const [buildActionPending, setBuildActionPending] = useState<'pause' | 'resume' | 'restart' | null>(null)
+  const [buildWorkspaceView, setBuildWorkspaceView] = useState<BuildWorkspaceView>('overview')
   const [proposedEdits, setProposedEdits] = useState<ProposedEdit[]>([])
   const [showDiffReview, setShowDiffReview] = useState(true)
 
@@ -1355,6 +1394,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     setAgentMessagePendingId(null)
     setPlannerMessagePending(false)
     setPlannerSendMode('lead')
+    setBuildWorkspaceView('overview')
   }, [buildState?.id])
 
   // Fetch provider statuses for model role config
@@ -1536,6 +1576,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       deploying:       'Deploying',
       reviewing:       'Review',
       testing:         'Testing',
+      scaffold:        'Scaffold',
+      frontend_ui:     'Frontend UI',
+      data_foundation: 'Data Foundation',
+      backend_services:'Backend Services',
+      integration:     'Integration',
+      ship:            'Preview / Ship',
+      planning_complete: 'Scaffold',
+      scaffold_bootstrapped: 'Scaffold',
+      contract_verification: 'Scaffold',
     }
     const key = state.toLowerCase().trim()
     return FSM_STATE_LABELS[key] ?? null
@@ -1719,6 +1768,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     () => (interactionState?.permission_rules || []).filter((rule) => rule.decision === 'allow'),
     [interactionState?.permission_rules]
   )
+  const hasBuildControlsPanel = Boolean(
+    pendingQuestion ||
+    pendingRevisionRequests.length > 0 ||
+    pendingPermissionRequests.length > 0 ||
+    grantedPermissionRules.length > 0 ||
+    buildState?.status === 'awaiting_review'
+  )
   const telemetrySummary = useMemo(() => {
     const lastThought = aiThoughts[aiThoughts.length - 1]
     const lastThoughtTime = lastThought?.timestamp instanceof Date ? lastThought.timestamp.getTime() : null
@@ -1791,6 +1847,210 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       : [],
     [buildState?.tasks, isBuildActive]
   )
+  const hasBackendDataStage = useMemo(() => {
+    if (!buildState) return false
+    const workOrderRoles = new Set((buildState.workOrders || []).map((order) => String(order.role || '').toLowerCase()))
+    return (
+      workOrderRoles.has('backend') ||
+      workOrderRoles.has('database') ||
+      Boolean(buildState.capabilityState?.requires_backend_runtime) ||
+      Boolean(buildState.capabilityState?.requires_database) ||
+      Boolean(buildState.capabilityState?.requires_storage) ||
+      Boolean(buildState.capabilityState?.requires_jobs)
+    )
+  }, [buildState])
+  const workflowStageDefs = useMemo(
+    () => BUILD_WORKFLOW_STAGE_DEFS.filter((stage) => stage.key !== 'backend_data' || hasBackendDataStage),
+    [hasBackendDataStage]
+  )
+  const currentWorkflowStageKey = useMemo(() => {
+    if (!buildState) return workflowStageDefs[0]?.key || 'scaffold'
+    const currentPhase = String(buildState.currentPhase || '').trim().toLowerCase()
+
+    if (buildState.status === 'completed') return 'ship'
+    if (
+      currentPhase.includes('review') ||
+      buildState.status === 'reviewing' ||
+      buildState.status === 'awaiting_review'
+    ) {
+      return 'ship'
+    }
+    if (
+      currentPhase.includes('integration') ||
+      currentPhase.includes('testing') ||
+      currentPhase.includes('validation') ||
+      buildState.status === 'testing'
+    ) {
+      return 'integration'
+    }
+    if (
+      currentPhase.includes('backend') ||
+      currentPhase.includes('database') ||
+      currentPhase.includes('data_foundation') ||
+      currentPhase.includes('data')
+    ) {
+      return hasBackendDataStage ? 'backend_data' : 'integration'
+    }
+    if (currentPhase.includes('frontend')) {
+      return 'frontend_ui'
+    }
+    return 'scaffold'
+  }, [buildState, hasBackendDataStage, workflowStageDefs])
+  const currentWorkflowStageIndex = useMemo(() => {
+    const index = workflowStageDefs.findIndex((stage) => stage.key === currentWorkflowStageKey)
+    return index >= 0 ? index : 0
+  }, [currentWorkflowStageKey, workflowStageDefs])
+  const workflowStages = useMemo<BuildWorkflowStage[]>(() => {
+    return workflowStageDefs.map((stage, index) => {
+      let status: BuildWorkflowStageStatus = 'pending'
+      if (buildState?.status === 'completed') {
+        status = 'complete'
+      } else if (index < currentWorkflowStageIndex) {
+        status = 'complete'
+      } else if (index === currentWorkflowStageIndex) {
+        status = buildState?.status === 'failed' || buildState?.status === 'cancelled' ? 'blocked' : 'current'
+      }
+
+      return {
+        ...stage,
+        status,
+      }
+    })
+  }, [buildState?.status, currentWorkflowStageIndex, workflowStageDefs])
+  const currentWorkflowStage = workflowStages[currentWorkflowStageIndex] || workflowStages[0]
+  const primaryBuildUpdate = useMemo(() => {
+    if (buildState?.status === 'failed') {
+      return buildState.errorMessage || 'The build stopped before the current section completed.'
+    }
+    if (buildPaused) {
+      return 'The build is paused. Resume it or leave a planner note to change direction.'
+    }
+    if (pendingQuestion) {
+      return pendingQuestion
+    }
+    if (pendingPermissionRequests.length > 0) {
+      return `${pendingPermissionRequests.length} permission request${pendingPermissionRequests.length === 1 ? '' : 's'} need a decision before the build can continue cleanly.`
+    }
+    if (liveTasks.length > 0) {
+      return liveTasks[0]?.description || currentWorkflowStage?.description || 'Build work is in progress.'
+    }
+    return currentWorkflowStage?.description || 'Build work is in progress.'
+  }, [
+    buildPaused,
+    buildState?.errorMessage,
+    buildState?.status,
+    currentWorkflowStage?.description,
+    liveTasks,
+    pendingPermissionRequests.length,
+    pendingQuestion,
+  ])
+  const workflowUpdates = useMemo(
+    () => chatMessages
+      .filter((message) => message.role !== 'user')
+      .slice(-4)
+      .reverse(),
+    [chatMessages]
+  )
+  const visibleBlockers = useMemo(
+    () => (buildState?.blockers || []).filter((blocker) =>
+      blocker.severity === 'blocking' ||
+      blocker.severity === 'warning' ||
+      Boolean(blocker.summary) ||
+      Boolean(blocker.unblocks_with)
+    ),
+    [buildState?.blockers]
+  )
+  const activityViewIsEmpty = liveProviderPanels.length === 0 && liveAgents.length === 0 && liveTasks.length === 0
+  const fileGroups = useMemo(() => {
+    const groups = new Map<string, Array<{ path: string; content: string; language: string }>>()
+    for (const file of generatedFiles) {
+      const root = file.path.includes('/') ? file.path.split('/')[0] : 'root'
+      const existing = groups.get(root) || []
+      existing.push(file)
+      groups.set(root, existing)
+    }
+    return Array.from(groups.entries())
+      .map(([root, files]) => ({
+        root,
+        files: files.slice().sort((left, right) => left.path.localeCompare(right.path)),
+      }))
+      .sort((left, right) => left.root.localeCompare(right.root))
+  }, [generatedFiles])
+  const artifactSummary = useMemo(() => {
+    const counts = {
+      frontend: 0,
+      backend: 0,
+      data: 0,
+      config: 0,
+    }
+    for (const file of generatedFiles) {
+      const path = file.path.toLowerCase()
+      if (
+        path.startsWith('src/') ||
+        path.startsWith('app/') ||
+        path.startsWith('components/') ||
+        path.startsWith('public/') ||
+        path === 'index.html'
+      ) {
+        counts.frontend += 1
+        continue
+      }
+      if (
+        path.startsWith('server/') ||
+        path.startsWith('api/') ||
+        path.startsWith('backend/') ||
+        path.endsWith('.go') ||
+        path.endsWith('.py')
+      ) {
+        counts.backend += 1
+        continue
+      }
+      if (path.startsWith('migrations/') || path.includes('schema') || path.startsWith('db/') || path.startsWith('prisma/')) {
+        counts.data += 1
+        continue
+      }
+      counts.config += 1
+    }
+    return counts
+  }, [generatedFiles])
+  const timelineEventCount = useMemo(
+    () => workflowUpdates.length + (buildState?.checkpoints.length || 0) + (buildState?.verificationReports?.length || 0) + visibleBlockers.length,
+    [buildState?.checkpoints.length, buildState?.verificationReports?.length, visibleBlockers.length, workflowUpdates.length]
+  )
+  const hasIssueViewContent = Boolean(
+    visibleBlockers.length > 0 ||
+    buildState?.checkpoints.length ||
+    hasBuildControlsPanel ||
+    (buildState?.status === 'awaiting_review' && showDiffReview && proposedEdits.length > 0)
+  )
+  const buildWorkspaceViews = useMemo(() => {
+    return [
+      { id: 'overview' as const, label: 'Overview', hint: currentWorkflowStage?.label || 'Build summary' },
+      { id: 'activity' as const, label: 'Activity', hint: activityViewIsEmpty ? 'Quiet' : `${liveAgents.length + liveTasks.length} live` },
+      { id: 'files' as const, label: 'Files', hint: generatedFiles.length > 0 ? `${generatedFiles.length} artifacts` : 'Waiting' },
+      { id: 'timeline' as const, label: 'Timeline', hint: timelineEventCount > 0 ? `${timelineEventCount} events` : 'Stage history' },
+      {
+        id: 'issues' as const,
+        label: 'Issues',
+        hint: telemetrySummary.blockerCount > 0
+          ? `${telemetrySummary.blockerCount} blocker${telemetrySummary.blockerCount === 1 ? '' : 's'}`
+          : hasBuildControlsPanel
+            ? 'Controls ready'
+            : 'Clear',
+      },
+      { id: 'diagnostics' as const, label: 'Diagnostics', hint: 'Deep orchestration detail' },
+      { id: 'console' as const, label: 'Console', hint: 'Planner chat and directives' },
+    ]
+  }, [
+    activityViewIsEmpty,
+    currentWorkflowStage?.label,
+    generatedFiles.length,
+    hasBuildControlsPanel,
+    liveAgents.length,
+    liveTasks.length,
+    telemetrySummary.blockerCount,
+    timelineEventCount,
+  ])
   const hasBuilderSession = Boolean(
     buildState ||
     isBuilding ||
@@ -2167,7 +2427,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
               : (typeof data.progress === 'number' ? clampPercent(data.progress) : prev?.progress ?? 0),
             agents: Object.values(data.agents || {}),
             powerMode: data.power_mode || data.powerMode || prev?.powerMode,
-            currentPhase: data.phase || data.current_phase || prev?.currentPhase,
+            currentPhase: data.phase_key || data.phase || data.current_phase || prev?.currentPhase,
             qualityGateRequired: typeof data.quality_gate_required === 'boolean' ? data.quality_gate_required : prev?.qualityGateRequired,
             qualityGateStage: data.quality_gate_stage || prev?.qualityGateStage,
             capabilityState: data.capability_state || prev?.capabilityState,
@@ -2200,6 +2460,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         break
 
       case 'build:progress':
+        if (data.user_update && typeof data.message === 'string' && data.message.trim()) {
+          addSystemMessage(data.message.trim())
+        }
         setBuildState(prev => {
           if (!prev) return null
           const updates: Partial<BuildState> = {}
@@ -2224,8 +2487,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             addSystemMessage(`AI Providers available: ${data.available_providers.join(', ')} (${data.provider_count} total)`)
           }
 
-          if (typeof (data.phase || data.current_phase) === 'string' && String(data.phase || data.current_phase).trim()) {
-            updates.currentPhase = data.phase || data.current_phase
+          if (typeof (data.phase_key || data.phase || data.current_phase) === 'string' && String(data.phase_key || data.phase || data.current_phase).trim()) {
+            updates.currentPhase = data.phase_key || data.phase || data.current_phase
           }
           if (data.capability_state) {
             updates.capabilityState = data.capability_state
@@ -2697,12 +2960,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         break
 
       case 'build:phase':
-        addSystemMessage(`Phase: ${data.phase || data.message || 'Next phase starting'}`)
+        addSystemMessage(typeof data.message === 'string' && data.message.trim()
+          ? data.message.trim()
+          : `Phase: ${data.phase || 'Next phase starting'}`)
         setBuildState(prev => prev
           ? {
             ...prev,
             status: (mergeBuildStatusWithTerminalPrecedence(prev.status, data.status) || prev.status) as BuildState['status'],
-            currentPhase: data.phase || prev.currentPhase,
+            currentPhase: data.phase_key || data.phase || prev.currentPhase,
             qualityGateRequired: typeof data.quality_gate_required === 'boolean' ? data.quality_gate_required : prev.qualityGateRequired,
             qualityGateStage: typeof data.quality_gate_stage === 'string' ? data.quality_gate_stage : prev.qualityGateStage,
             qualityGateStatus: data.quality_gate_active ? 'running' : prev.qualityGateStatus,
@@ -3308,6 +3573,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
     return []
   }, [buildState?.id, mergeGeneratedFiles, normalizeArtifactManifestFiles, normalizeGeneratedFiles])
+
+  useEffect(() => {
+    if (buildWorkspaceView !== 'files') return
+    if (!buildState?.id) return
+    if (generatedFiles.length > 0) return
+    void resolveGeneratedFiles(buildState.id)
+  }, [buildState?.id, buildWorkspaceView, generatedFiles.length, resolveGeneratedFiles])
 
   const deriveProjectName = useCallback((source: string) => {
     const base = source || 'Generated App'
@@ -4704,9 +4976,36 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           </div>
         ) : (
           // Build Progress View
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
+          <div className="max-w-7xl mx-auto space-y-6">
+            <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
+              <CardContent className="p-4">
+                <div className="flex flex-wrap gap-2">
+                  {buildWorkspaceViews.map((view) => (
+                    <Button
+                      key={view.id}
+                      size="sm"
+                      variant={buildWorkspaceView === view.id ? 'default' : 'outline'}
+                      onClick={() => setBuildWorkspaceView(view.id)}
+                      className={cn(
+                        'min-w-[8.5rem] justify-start',
+                        buildWorkspaceView === view.id
+                          ? 'bg-red-600 hover:bg-red-500'
+                          : 'border-gray-700 bg-gray-900/40 text-gray-200 hover:bg-gray-800'
+                      )}
+                    >
+                      <div className="text-left">
+                        <div className="text-xs font-semibold uppercase tracking-wide">{view.label}</div>
+                        <div className="text-[10px] text-inherit/70 normal-case tracking-normal">{view.hint}</div>
+                      </div>
+                    </Button>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-3">
-              {liveProviderPanels.length > 0 && (
+              {buildWorkspaceView === 'activity' && liveProviderPanels.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-4">
                   {liveProviderPanels.map((panel) => {
                   const ui = PROVIDER_UI[panel.provider]
@@ -5131,7 +5430,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
               </Card>
 
               {/* Active Agents */}
-              {liveAgents.length > 0 && (
+              {buildWorkspaceView === 'activity' && liveAgents.length > 0 && (
                 <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
                   <CardHeader className="pb-4 border-b border-gray-800">
                     <CardTitle className="text-xl flex items-center gap-3">
@@ -5164,7 +5463,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
               )}
 
               {/* Checkpoints */}
-              {buildState.checkpoints.length > 0 && (
+              {buildWorkspaceView === 'issues' && buildState.checkpoints.length > 0 && (
                 <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
                   <CardHeader className="pb-4 border-b border-gray-800">
                     <CardTitle className="text-xl flex items-center gap-3">
@@ -5208,43 +5507,454 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
             {/* Middle/Right Column - Activity & Chat */}
             <div className="lg:col-span-2 space-y-6">
-              {/* App Description */}
-              <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
-                <CardContent className="p-5">
-                  <div className="flex items-start gap-4">
-                    <div className="w-14 h-14 bg-gradient-to-br from-red-500 to-orange-600 rounded-xl flex items-center justify-center shrink-0 shadow-lg shadow-red-900/40">
-                      <Code2 className="w-7 h-7 text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-400 mb-1 font-medium">Building</p>
-                      <p className="text-white font-bold text-xl">{buildState.description}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+              {buildWorkspaceView === 'overview' && (
+                <>
+                  {/* App Description */}
+                  <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
+                    <CardContent className="p-5">
+                      <div className="flex items-start gap-4">
+                        <div className="w-14 h-14 bg-gradient-to-br from-red-500 to-orange-600 rounded-xl flex items-center justify-center shrink-0 shadow-lg shadow-red-900/40">
+                          <Code2 className="w-7 h-7 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-400 mb-1 font-medium">Building</p>
+                          <p className="text-white font-bold text-xl">{buildState.description}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
 
-              <OrchestrationOverview
-                buildStatus={buildState.status}
-                currentPhase={buildState.currentPhase}
-                qualityGateStatus={buildState.qualityGateStatus}
-                capabilityState={buildState.capabilityState}
-                policyState={buildState.policyState}
-                blockers={buildState.blockers}
-                approvals={buildState.approvals}
-                checkpoints={buildState.checkpoints}
-                interaction={buildState.interaction}
-                intentBrief={buildState.intentBrief}
-                buildContract={buildState.buildContract}
-                workOrders={buildState.workOrders}
-                patchBundles={buildState.patchBundles}
-                verificationReports={buildState.verificationReports}
-                promotionDecision={buildState.promotionDecision}
-                providerScorecards={buildState.providerScorecards}
-                failureFingerprints={buildState.failureFingerprints}
-                truthBySurface={buildState.truthBySurface}
-              />
+                  <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
+                    <CardHeader className="pb-4 border-b border-gray-800">
+                      <CardTitle className="text-xl flex items-center gap-3">
+                        <Sparkles className="w-7 h-7 text-cyan-400" />
+                        Build Flow
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-5 space-y-5">
+                      <div className={cn(
+                        'rounded-xl border px-4 py-4',
+                        buildState.status === 'failed'
+                          ? 'border-red-500/40 bg-red-950/20'
+                          : buildPaused || pendingPermissionRequests.length > 0 || pendingQuestion
+                            ? 'border-amber-500/40 bg-amber-950/20'
+                            : 'border-cyan-500/30 bg-cyan-950/20'
+                      )}>
+                        <div className="text-xs uppercase tracking-[0.18em] text-gray-400">Current Update</div>
+                        <div className="mt-2 text-base font-semibold text-white">{currentWorkflowStage?.label || 'Build in progress'}</div>
+                        <div className="mt-2 text-sm leading-relaxed text-gray-200">{primaryBuildUpdate}</div>
+                      </div>
 
-              {(pendingQuestion || pendingRevisionRequests.length > 0 || pendingPermissionRequests.length > 0 || grantedPermissionRules.length > 0 || buildState.status === 'awaiting_review') && (
+                      {hasBackendDataStage && (
+                        <div className="rounded-xl border border-violet-500/25 bg-violet-950/15 px-4 py-4">
+                          <div className="text-xs uppercase tracking-[0.18em] text-violet-300">Execution Strategy</div>
+                          <div className="mt-2 text-sm leading-relaxed text-gray-200">
+                            The planner freezes the UI, API, data, and env contract first, then the frontend shell lands before backend work fills in behind that interface.
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                        {workflowStages.map((stage, index) => (
+                          <div
+                            key={stage.key}
+                            className={cn(
+                              'rounded-xl border px-4 py-4',
+                              stage.status === 'complete' && 'border-green-500/40 bg-green-500/10',
+                              stage.status === 'current' && 'border-cyan-500/40 bg-cyan-500/10',
+                              stage.status === 'blocked' && 'border-red-500/40 bg-red-500/10',
+                              stage.status === 'pending' && 'border-gray-800 bg-gray-950/60'
+                            )}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Step {index + 1}</div>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  stage.status === 'complete' && 'border-green-500/40 bg-green-500/10 text-green-300',
+                                  stage.status === 'current' && 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300',
+                                  stage.status === 'blocked' && 'border-red-500/40 bg-red-500/10 text-red-300',
+                                  stage.status === 'pending' && 'border-gray-700 bg-gray-900/60 text-gray-300'
+                                )}
+                              >
+                                {stage.status === 'complete'
+                                  ? 'Complete'
+                                  : stage.status === 'current'
+                                    ? 'Active'
+                                    : stage.status === 'blocked'
+                                      ? 'Blocked'
+                                      : 'Pending'}
+                              </Badge>
+                            </div>
+                            <div className="mt-3 text-sm font-semibold text-white">{stage.label}</div>
+                            <div className="mt-2 text-xs leading-relaxed text-gray-400">{stage.description}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="rounded-xl border border-gray-800 bg-gray-950/70 px-4 py-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Recent Updates</div>
+                          <Badge variant="outline" className="border-gray-700 bg-gray-900/60 text-gray-300">
+                            {workflowUpdates.length} visible
+                          </Badge>
+                        </div>
+                        <div className="mt-4 space-y-3">
+                          {workflowUpdates.length === 0 ? (
+                            <div className="rounded-lg border border-dashed border-gray-800 bg-black/20 px-4 py-4 text-sm text-gray-400">
+                              Section-by-section updates will appear here as the planner moves from scaffold to UI, backend, integration, and final ship checks.
+                            </div>
+                          ) : (
+                            workflowUpdates.map((message) => (
+                              <div
+                                key={message.id}
+                                className="flex items-start justify-between gap-4 rounded-lg border border-gray-800 bg-black/20 px-4 py-3"
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-sm text-white">{message.content}</div>
+                                  <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-gray-500">
+                                    {message.role === 'lead' ? 'Planner update' : 'System update'}
+                                  </div>
+                                </div>
+                                <div className="shrink-0 text-[11px] text-gray-500">
+                                  {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="rounded-xl border border-gray-800 bg-gray-950/70 px-4 py-4">
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Phase</div>
+                          <div className="mt-2 text-base font-semibold text-white">{phaseLabel}</div>
+                          <div className="mt-1 text-xs text-gray-400">
+                            {currentWorkflowStageIndex + 1}/{workflowStages.length} sections active
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-gray-800 bg-gray-950/70 px-4 py-4">
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Quality Gate</div>
+                          <div className="mt-2 text-base font-semibold text-white">{qualityGateLabel}</div>
+                          <div className="mt-1 text-xs text-gray-400">{humanizePhase(buildState.qualityGateStage || 'validation')}</div>
+                        </div>
+                        <div className="rounded-xl border border-gray-800 bg-gray-950/70 px-4 py-4">
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Next Focus</div>
+                          <div className="mt-2 text-base font-semibold text-white">
+                            {buildState.status === 'completed'
+                              ? 'Open preview or editor'
+                              : telemetrySummary.blockerCount > 0
+                                ? 'Resolve blockers in Issues'
+                                : buildWorkspaceView === 'overview' && liveAgents.length > 0
+                                  ? 'Watch live work in Activity'
+                                  : 'Continue current section'}
+                          </div>
+                          <div className="mt-1 text-xs text-gray-400">
+                            {telemetrySummary.blockerCount > 0
+                              ? `${telemetrySummary.blockerCount} blocker${telemetrySummary.blockerCount === 1 ? '' : 's'} need attention`
+                              : `${generatedFiles.length} generated artifact${generatedFiles.length === 1 ? '' : 's'} so far`}
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+
+              {buildWorkspaceView === 'activity' && activityViewIsEmpty && (
+                <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
+                  <CardContent className="p-5">
+                    <div className="rounded-xl border border-dashed border-gray-800 bg-gray-950/60 px-5 py-6">
+                      <div className="flex items-center gap-3">
+                        <Clock className="h-5 w-5 text-cyan-400" />
+                        <div className="text-sm font-semibold text-white">No live work right now</div>
+                      </div>
+                      <div className="mt-2 text-sm leading-relaxed text-gray-400">
+                        Activity only shows currently running providers, agents, and tasks. Finished or failed work moves out of this tab so the live view stays compact.
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {buildWorkspaceView === 'files' && (
+                <>
+                  <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
+                    <CardHeader className="pb-4 border-b border-gray-800">
+                      <CardTitle className="text-xl flex items-center gap-3">
+                        <FileCode className="w-7 h-7 text-cyan-400" />
+                        Files
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-5 space-y-5">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {[
+                          { label: 'Frontend', value: artifactSummary.frontend },
+                          { label: 'Backend', value: artifactSummary.backend },
+                          { label: 'Data', value: artifactSummary.data },
+                          { label: 'Config', value: artifactSummary.config },
+                        ].map((metric) => (
+                          <div key={metric.label} className="rounded-xl border border-gray-800 bg-gray-950/70 px-4 py-4">
+                            <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">{metric.label}</div>
+                            <div className="mt-2 text-xl font-semibold text-white">{metric.value}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {generatedFiles.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-gray-800 bg-gray-950/60 px-5 py-6 text-sm text-gray-400">
+                          Generated files will appear here as the build writes real artifacts. Open this tab during or after a run to inspect what landed without scrolling through diagnostics.
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {fileGroups.map((group) => (
+                            <div key={group.root} className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="text-sm font-semibold text-white">{group.root}</div>
+                                <Badge variant="outline" className="border-gray-700 bg-gray-900/60 text-gray-300">
+                                  {group.files.length} file{group.files.length === 1 ? '' : 's'}
+                                </Badge>
+                              </div>
+                              <div className="mt-3 space-y-3">
+                                {group.files.map((file) => (
+                                  <div key={file.path} className="rounded-lg border border-gray-800 bg-black/30 px-4 py-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <div className="truncate text-sm font-medium text-white">{file.path}</div>
+                                        <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-gray-500">{file.language}</div>
+                                      </div>
+                                      <Badge variant="outline" className="border-gray-700 bg-gray-900/60 text-gray-300">
+                                        {file.content.length} chars
+                                      </Badge>
+                                    </div>
+                                    <div className="mt-3 rounded-lg border border-white/5 bg-black/40 px-3 py-3 font-mono text-xs leading-6 text-gray-300">
+                                      {file.content.slice(0, 180) || 'File captured with empty content.'}
+                                      {file.content.length > 180 ? '…' : ''}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+
+              {buildWorkspaceView === 'timeline' && (
+                <>
+                  <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
+                    <CardHeader className="pb-4 border-b border-gray-800">
+                      <CardTitle className="text-xl flex items-center gap-3">
+                        <Clock className="w-7 h-7 text-cyan-400" />
+                        Build Timeline
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-5 space-y-5">
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                        {workflowStages.map((stage, index) => (
+                          <div
+                            key={`timeline-${stage.key}`}
+                            className={cn(
+                              'rounded-xl border px-4 py-4',
+                              stage.status === 'complete' && 'border-green-500/40 bg-green-500/10',
+                              stage.status === 'current' && 'border-cyan-500/40 bg-cyan-500/10',
+                              stage.status === 'blocked' && 'border-red-500/40 bg-red-500/10',
+                              stage.status === 'pending' && 'border-gray-800 bg-gray-950/60'
+                            )}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Step {index + 1}</div>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  stage.status === 'complete' && 'border-green-500/40 bg-green-500/10 text-green-300',
+                                  stage.status === 'current' && 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300',
+                                  stage.status === 'blocked' && 'border-red-500/40 bg-red-500/10 text-red-300',
+                                  stage.status === 'pending' && 'border-gray-700 bg-gray-900/60 text-gray-300'
+                                )}
+                              >
+                                {stage.status === 'complete'
+                                  ? 'Complete'
+                                  : stage.status === 'current'
+                                    ? 'Active'
+                                    : stage.status === 'blocked'
+                                      ? 'Blocked'
+                                      : 'Pending'}
+                              </Badge>
+                            </div>
+                            <div className="mt-3 text-sm font-semibold text-white">{stage.label}</div>
+                            <div className="mt-2 text-xs leading-relaxed text-gray-400">{stage.description}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="grid gap-4 xl:grid-cols-2">
+                        <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm font-semibold text-white">Planner And System Feed</div>
+                            <Badge variant="outline" className="border-gray-700 bg-gray-900/60 text-gray-300">
+                              {workflowUpdates.length} update{workflowUpdates.length === 1 ? '' : 's'}
+                            </Badge>
+                          </div>
+                          <div className="mt-3 space-y-3">
+                            {workflowUpdates.length === 0 ? (
+                              <div className="rounded-lg border border-dashed border-gray-800 bg-black/20 px-4 py-4 text-sm text-gray-400">
+                                Planner and system milestones will accumulate here as the build moves across sections.
+                              </div>
+                            ) : (
+                              workflowUpdates.map((message) => (
+                                <div key={`timeline-message-${message.id}`} className="rounded-lg border border-gray-800 bg-black/20 px-4 py-3">
+                                  <div className="text-sm text-white">{message.content}</div>
+                                  <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-gray-500">
+                                    {message.role === 'lead' ? 'Planner update' : 'System update'} • {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-4">
+                          <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-sm font-semibold text-white">Verification And Recovery</div>
+                              <Badge variant="outline" className="border-gray-700 bg-gray-900/60 text-gray-300">
+                                {(buildState.verificationReports?.length || 0) + buildState.checkpoints.length} items
+                              </Badge>
+                            </div>
+                            <div className="mt-3 space-y-3">
+                              {(buildState.verificationReports || []).slice(0, 4).map((report, index) => (
+                                <div key={`verification-${index}`} className="rounded-lg border border-gray-800 bg-black/20 px-4 py-3">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div className="text-sm font-medium text-white">{humanizeIdentifier(report.surface || 'surface')}</div>
+                                    <Badge
+                                      variant="outline"
+                                      className={cn(
+                                        report.status === 'passed'
+                                          ? 'border-green-500/40 bg-green-500/10 text-green-300'
+                                          : 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                                      )}
+                                    >
+                                      {humanizeIdentifier(report.status || 'pending')}
+                                    </Badge>
+                                  </div>
+                                  <div className="mt-2 text-xs text-gray-400">
+                                    {humanizeIdentifier(report.phase || 'verification')}
+                                    {report.generated_at ? ` • ${new Date(report.generated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+                                  </div>
+                                </div>
+                              ))}
+                              {buildState.checkpoints.slice(0, 3).map((cp) => (
+                                <div key={`checkpoint-${cp.id}`} className="rounded-lg border border-gray-800 bg-black/20 px-4 py-3">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div className="text-sm font-medium text-white">{cp.name}</div>
+                                    <Badge variant="outline" className="border-gray-700 bg-gray-900/60 text-gray-300">
+                                      {cp.progress}%
+                                    </Badge>
+                                  </div>
+                                  <div className="mt-2 text-xs text-gray-400">Checkpoint {cp.number}</div>
+                                </div>
+                              ))}
+                              {(buildState.verificationReports?.length || 0) === 0 && buildState.checkpoints.length === 0 && (
+                                <div className="rounded-lg border border-dashed border-gray-800 bg-black/20 px-4 py-4 text-sm text-gray-400">
+                                  Verification reports and checkpoints will appear here as the build matures.
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {visibleBlockers.length > 0 && (
+                            <div className="rounded-xl border border-red-500/25 bg-red-950/10 p-4">
+                              <div className="text-sm font-semibold text-white">Active blocker</div>
+                              <div className="mt-2 text-sm text-gray-200">{visibleBlockers[0]?.summary || visibleBlockers[0]?.title}</div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+
+              {buildWorkspaceView === 'issues' && visibleBlockers.length > 0 && (
+                <Card variant="cyberpunk" className="border-2 border-red-900/40 bg-black/60 backdrop-blur-sm">
+                  <CardHeader className="pb-4 border-b border-red-900/20">
+                    <CardTitle className="text-xl flex items-center gap-3">
+                      <AlertCircle className="w-7 h-7 text-red-400" />
+                      Blockers
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-5 space-y-3">
+                    {visibleBlockers.map((blocker) => (
+                      <div
+                        key={blocker.id}
+                        className={cn(
+                          'rounded-xl border px-4 py-4',
+                          blocker.severity === 'blocking'
+                            ? 'border-red-500/30 bg-red-950/20'
+                            : 'border-amber-500/30 bg-amber-950/20'
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-white">{blocker.title}</div>
+                            {blocker.summary && (
+                              <div className="mt-2 text-sm text-gray-300">{blocker.summary}</div>
+                            )}
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              blocker.severity === 'blocking'
+                                ? 'border-red-500/40 bg-red-500/10 text-red-300'
+                                : 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                            )}
+                          >
+                            {blocker.severity === 'blocking' ? 'Blocking' : 'Warning'}
+                          </Badge>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-400">
+                          <span>{humanizeIdentifier(blocker.category || blocker.type || 'issue')}</span>
+                          {blocker.who_must_act && <span>• Owner: {blocker.who_must_act}</span>}
+                        </div>
+                        {blocker.unblocks_with && (
+                          <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-3 text-sm text-gray-200">
+                            <span className="text-gray-400">Unblock:</span> {blocker.unblocks_with}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+
+              {buildWorkspaceView === 'diagnostics' && (
+                <OrchestrationOverview
+                  buildStatus={buildState.status}
+                  currentPhase={buildState.currentPhase}
+                  qualityGateStatus={buildState.qualityGateStatus}
+                  capabilityState={buildState.capabilityState}
+                  policyState={buildState.policyState}
+                  blockers={buildState.blockers}
+                  approvals={buildState.approvals}
+                  checkpoints={buildState.checkpoints}
+                  interaction={buildState.interaction}
+                  intentBrief={buildState.intentBrief}
+                  buildContract={buildState.buildContract}
+                  workOrders={buildState.workOrders}
+                  patchBundles={buildState.patchBundles}
+                  verificationReports={buildState.verificationReports}
+                  promotionDecision={buildState.promotionDecision}
+                  providerScorecards={buildState.providerScorecards}
+                  failureFingerprints={buildState.failureFingerprints}
+                  truthBySurface={buildState.truthBySurface}
+                />
+              )}
+
+              {buildWorkspaceView === 'issues' && hasBuildControlsPanel && (
                 <Card variant="cyberpunk" className="border-2 border-violet-900/50 bg-black/60 backdrop-blur-sm">
                   <CardHeader className="pb-4 border-b border-violet-900/30">
                     <CardTitle className="text-xl flex items-center gap-3">
@@ -5384,7 +6094,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 </Card>
               )}
 
-              {liveTasks.length > 0 && (
+              {buildWorkspaceView === 'activity' && liveTasks.length > 0 && (
                 <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
                   <CardHeader className="pb-4 border-b border-gray-800">
                     <CardTitle className="text-xl flex items-center gap-3">
@@ -5423,7 +6133,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 </Card>
               )}
 
-              {buildState.status === 'awaiting_review' && showDiffReview && proposedEdits.length > 0 && (
+              {buildWorkspaceView === 'issues' && buildState.status === 'awaiting_review' && showDiffReview && proposedEdits.length > 0 && (
                 <Card variant="cyberpunk" className="border-2 border-yellow-700/40 bg-black/60 backdrop-blur-sm overflow-hidden">
                   <DiffReviewPanel
                     buildId={buildState.id}
@@ -5436,7 +6146,23 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 </Card>
               )}
 
-              {/* Terminal Output / Chat Interface */}
+              {buildWorkspaceView === 'issues' && !hasIssueViewContent && (
+                <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
+                  <CardContent className="p-5">
+                    <div className="rounded-xl border border-dashed border-gray-800 bg-gray-950/60 px-5 py-6">
+                      <div className="flex items-center gap-3">
+                        <CheckCircle2 className="h-5 w-5 text-green-400" />
+                        <div className="text-sm font-semibold text-white">No open issues right now</div>
+                      </div>
+                      <div className="mt-2 text-sm leading-relaxed text-gray-400">
+                        Blockers, approvals, checkpoints, and recovery controls will appear here only when the build needs user action.
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {buildWorkspaceView === 'console' && (
               <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm flex flex-col">
                 <CardHeader className="pb-4 border-b border-gray-800 shrink-0">
                   <div className="flex items-center justify-between">
@@ -5527,9 +6253,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   )}
                 </CardContent>
               </Card>
+              )}
 
               {/* Actions and Preview */}
-              {buildState.status === 'completed' && (
+              {buildState.status === 'completed' && buildWorkspaceView === 'overview' && (
                 <>
                   <BuildCompleteCard
                     filesCount={generatedFiles.length}
@@ -5545,6 +6272,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 </>
               )}
             </div>
+          </div>
           </div>
         )}
       </div>

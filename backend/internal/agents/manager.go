@@ -83,9 +83,9 @@ func estimatedRequestCostUSDForBuild(build *Build) float64 {
 func initialAgentRolesForBuild(build *Build) []AgentRole {
 	legacyRoles := []AgentRole{
 		RoleArchitect,
+		RoleFrontend,
 		RoleDatabase,
 		RoleBackend,
-		RoleFrontend,
 		RoleTesting,
 		RoleReviewer,
 	}
@@ -8672,6 +8672,92 @@ type agentPriority struct {
 	priority int
 }
 
+type executionPhase struct {
+	name              string
+	key               string
+	status            BuildStatus
+	qualityStage      string
+	agents            []agentPriority
+	startMessage      string
+	completionMessage string
+}
+
+func buildExecutionPhases(
+	archAgents, frontendAgents, dbAgents, backendAgents, testAgents, reviewAgents []agentPriority,
+) []executionPhase {
+	return []executionPhase{
+		{
+			name:              "Architecture",
+			key:               "architecture",
+			status:            BuildInProgress,
+			agents:            archAgents,
+			startMessage:      "Freezing the scaffold, product flow, and backend contract before implementation begins.",
+			completionMessage: "Contract is frozen. Building the frontend and UI shell first.",
+		},
+		{
+			name:              "Frontend UI",
+			key:               "frontend_ui",
+			status:            BuildInProgress,
+			agents:            frontendAgents,
+			startMessage:      "Building the frontend and UI first so the product becomes usable before backend wiring.",
+			completionMessage: "Frontend UI shell is in place. Moving into data and backend work behind the frozen contract.",
+		},
+		{
+			name:              "Data Foundation",
+			key:               "data_foundation",
+			status:            BuildInProgress,
+			agents:            dbAgents,
+			startMessage:      "Creating schema and persistence behind the frozen UI and API contract.",
+			completionMessage: "Data foundation is ready. Starting backend services.",
+		},
+		{
+			name:              "Backend Services",
+			key:               "backend_services",
+			status:            BuildInProgress,
+			agents:            backendAgents,
+			startMessage:      "Implementing APIs and server logic behind the existing UI without reshaping it.",
+			completionMessage: "Backend services are in place. Starting integration and verification.",
+		},
+		{
+			name:              "Integration",
+			key:               "integration",
+			status:            BuildTesting,
+			qualityStage:      "testing",
+			agents:            testAgents,
+			startMessage:      "Connecting the UI to backend contracts and checking the main user flow.",
+			completionMessage: "Integration checks are complete. Moving into final review.",
+		},
+		{
+			name:              "Review",
+			key:               "review",
+			status:            BuildReviewing,
+			qualityStage:      "review",
+			agents:            reviewAgents,
+			startMessage:      "Running the final quality review before handoff.",
+			completionMessage: "Final review finished. Preparing the build for handoff.",
+		},
+	}
+}
+
+func setBuildPhaseSnapshot(build *Build, phase executionPhase, now time.Time) {
+	if build == nil {
+		return
+	}
+
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	if build.Status != BuildFailed && build.Status != BuildCancelled {
+		build.Status = phase.status
+	}
+	build.UpdatedAt = now
+	build.SnapshotState.CurrentPhase = phase.key
+	required := true
+	build.SnapshotState.QualityGateRequired = &required
+	build.SnapshotState.QualityGateStage = phase.qualityStage
+	build.SnapshotState.QualityGateStatus = "running"
+}
+
 // queuePlanTasks creates and queues tasks in phased order so upstream outputs
 // (architecture, schema) are available as context for downstream agents.
 func (am *AgentManager) queuePlanTasks(build *Build) {
@@ -8699,29 +8785,32 @@ func (am *AgentManager) queuePlanTasks(build *Build) {
 	}
 
 	// Group agents by execution phase:
-	//   Phase 1: Architect (produces architecture plan for all downstream agents)
-	//   Phase 2: Database  (produces schema for backend)
-	//   Phase 3: Backend + Frontend (parallel, both get architecture context; backend also gets schema)
-	//   Phase 4: Testing   (needs all generated files)
-	//   Phase 5: Review    (runs after tests for final quality gate)
-	var archAgents, dbAgents, codeAgents, testAgents, reviewAgents []agentPriority
+	//   Phase 1: Architecture      (locks scaffold and contract context)
+	//   Phase 2: Frontend UI       (first usable shell and main screens)
+	//   Phase 3: Data Foundation   (schema and persistence behind the UI)
+	//   Phase 4: Backend Services  (APIs and server logic behind the existing UI)
+	//   Phase 5: Integration       (main vertical slice verification)
+	//   Phase 6: Review            (final quality gate)
+	var archAgents, frontendAgents, dbAgents, backendAgents, testAgents, reviewAgents []agentPriority
 	for _, ap := range allAgents {
 		switch ap.agent.Role {
 		case RoleArchitect:
 			archAgents = append(archAgents, ap)
+		case RoleFrontend:
+			frontendAgents = append(frontendAgents, ap)
 		case RoleDatabase:
 			dbAgents = append(dbAgents, ap)
+		case RoleBackend:
+			backendAgents = append(backendAgents, ap)
 		case RoleTesting:
 			testAgents = append(testAgents, ap)
 		case RoleReviewer:
 			reviewAgents = append(reviewAgents, ap)
-		default:
-			codeAgents = append(codeAgents, ap)
 		}
 	}
 
 	// Execute phases in order in a goroutine (non-blocking)
-	go am.executePhasedTasks(build, description, archAgents, dbAgents, codeAgents, testAgents, reviewAgents)
+	go am.executePhasedTasks(build, description, archAgents, frontendAgents, dbAgents, backendAgents, testAgents, reviewAgents)
 
 	log.Printf("Started phased task execution for build %s (%d agents)", build.ID, len(allAgents))
 }
@@ -8729,21 +8818,10 @@ func (am *AgentManager) queuePlanTasks(build *Build) {
 // executePhasedTasks runs agent tasks in sequential phases, waiting for each
 // phase to complete before starting the next. This ensures context flows properly.
 func (am *AgentManager) executePhasedTasks(build *Build, description string,
-	archAgents, dbAgents, codeAgents, testAgents, reviewAgents []agentPriority) {
+	archAgents, frontendAgents, dbAgents, backendAgents, testAgents, reviewAgents []agentPriority,
+) {
 
-	phases := []struct {
-		name         string
-		key          string
-		status       BuildStatus
-		qualityStage string
-		agents       []agentPriority
-	}{
-		{name: "Architecture", key: "architecture", status: BuildInProgress, qualityStage: "", agents: archAgents},
-		{name: "Database Schema", key: "database", status: BuildInProgress, qualityStage: "", agents: dbAgents},
-		{name: "Code Generation", key: "code_generation", status: BuildInProgress, qualityStage: "", agents: codeAgents},
-		{name: "Testing", key: "testing", status: BuildTesting, qualityStage: "testing", agents: testAgents},
-		{name: "Review", key: "review", status: BuildReviewing, qualityStage: "review", agents: reviewAgents},
-	}
+	phases := buildExecutionPhases(archAgents, frontendAgents, dbAgents, backendAgents, testAgents, reviewAgents)
 
 	phaseTotal := 0
 	for _, phase := range phases {
@@ -8760,19 +8838,15 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string,
 		phaseIndex++
 
 		phaseStatus := phase.status
-		build.mu.Lock()
-		if build.Status != BuildFailed && build.Status != BuildCancelled {
-			build.Status = phaseStatus
-		}
-		build.UpdatedAt = time.Now()
-		build.mu.Unlock()
+		now := time.Now()
+		setBuildPhaseSnapshot(build, phase, now)
 
 		log.Printf("Build %s: Starting phase — %s (%d agents)", build.ID, phase.name, len(phase.agents))
 
 		am.broadcast(build.ID, &WSMessage{
 			Type:      "build:phase",
 			BuildID:   build.ID,
-			Timestamp: time.Now(),
+			Timestamp: now,
 			Data: map[string]any{
 				"phase":                 phase.name,
 				"phase_key":             phase.key,
@@ -8783,7 +8857,8 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string,
 				"quality_gate_required": true,
 				"quality_gate_active":   phase.qualityStage != "",
 				"quality_gate_stage":    phase.qualityStage,
-				"message":               fmt.Sprintf("Starting %s phase", phase.name),
+				"message":               phase.startMessage,
+				"user_update":           true,
 			},
 		})
 
@@ -8795,6 +8870,19 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string,
 		}
 
 		log.Printf("Build %s: Phase %s complete", build.ID, phase.name)
+		am.broadcast(build.ID, &WSMessage{
+			Type:      WSBuildProgress,
+			BuildID:   build.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"phase":              phase.name,
+				"phase_key":          phase.key,
+				"status":             string(phaseStatus),
+				"quality_gate_stage": phase.qualityStage,
+				"message":            phase.completionMessage,
+				"user_update":        true,
+			},
+		})
 	}
 
 	am.finalizePhasedPipeline(build)
@@ -12152,6 +12240,12 @@ OUTPUT FORMAT:
 - If you include files, limit to SMALL blueprint docs only (e.g. ARCHITECTURE.md, docs/file-map.md)
 - Never emit large code blocks for runtime source files
 
+FRONTEND-FIRST EXECUTION RULE:
+- Think through the backend, data model, env vars, and integration risks deeply before implementation starts.
+- Freeze the route contract, payload shapes, and persistence expectations up front.
+- The frontend agent will build first, so your blueprint must make the later backend pass almost mechanical rather than exploratory.
+- Do not leave critical backend decisions ambiguous just because backend code lands later.
+
 MANDATORY FOR FULL-STACK BUILDS: When both a frontend and backend are present, your output MUST include an <api_contract> XML section:
 <api_contract>
 backend_port: (number — the port the backend listens on)
@@ -12231,6 +12325,11 @@ Follow this pattern: complete types, complete handlers, complete JSX.` + techHin
 
 		RoleBackend: `You are the Backend Agent — an expert API engineer who creates robust, secure server-side applications.
 You specialize in RESTful APIs, authentication, middleware, and data validation.
+
+FRONTEND-FIRST CONTRACT RULE:
+- The frontend shell may already exist before you start. Treat its route structure, user flows, and API assumptions as a frozen contract unless the architecture blueprint explicitly says otherwise.
+- Implement behind the agreed request/response shapes instead of redesigning the interface from scratch.
+- If the UI reveals a missing backend dependency, fill the gap in backend-owned files; do not push the problem back into frontend-owned files.
 
 REQUIREMENTS FOR EVERY ENDPOINT:
 - Input validation with descriptive error messages
@@ -12439,13 +12538,13 @@ func (am *AgentManager) getTaskTypeForRole(role AgentRole) TaskType {
 func (am *AgentManager) getTaskDescriptionForRole(role AgentRole, appDescription string) string {
 	switch role {
 	case RoleArchitect:
-		return fmt.Sprintf("Design the architecture for: %s", appDescription)
+		return fmt.Sprintf("Design the frontend-first architecture and freeze the backend contract for: %s", appDescription)
 	case RoleFrontend:
-		return fmt.Sprintf("Build the frontend UI for: %s", appDescription)
+		return fmt.Sprintf("Build the frontend UI shell first for: %s", appDescription)
 	case RoleBackend:
-		return fmt.Sprintf("Create the backend API for: %s", appDescription)
+		return fmt.Sprintf("Create the backend API behind the frozen UI contract for: %s", appDescription)
 	case RoleDatabase:
-		return fmt.Sprintf("Design the database schema for: %s", appDescription)
+		return fmt.Sprintf("Design the database schema behind the frozen product flows for: %s", appDescription)
 	case RoleTesting:
 		return fmt.Sprintf("Write tests for: %s", appDescription)
 	case RoleReviewer:
@@ -12461,11 +12560,11 @@ func (am *AgentManager) getPriorityForRole(role AgentRole) int {
 	switch role {
 	case RoleArchitect:
 		return 90
-	case RoleDatabase:
-		return 80
-	case RoleBackend:
-		return 70
 	case RoleFrontend:
+		return 80
+	case RoleDatabase:
+		return 70
+	case RoleBackend:
 		return 60
 	case RoleTesting:
 		return 50

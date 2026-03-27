@@ -34,9 +34,9 @@ func TestInitialAgentRolesForBuildFallsBackToLegacyRolesWithoutPlan(t *testing.T
 	roles := initialAgentRolesForBuild(&Build{})
 	expected := []AgentRole{
 		RoleArchitect,
+		RoleFrontend,
 		RoleDatabase,
 		RoleBackend,
-		RoleFrontend,
 		RoleTesting,
 		RoleReviewer,
 	}
@@ -47,6 +47,66 @@ func TestInitialAgentRolesForBuildFallsBackToLegacyRolesWithoutPlan(t *testing.T
 		if roles[i] != role {
 			t.Fatalf("expected role %d to be %s, got %s", i, role, roles[i])
 		}
+	}
+}
+
+func TestBuildExecutionPhasesPrefersFrontendBeforeBackendAndData(t *testing.T) {
+	phases := buildExecutionPhases(
+		[]agentPriority{{agent: &Agent{Role: RoleArchitect}}},
+		[]agentPriority{{agent: &Agent{Role: RoleFrontend}}},
+		[]agentPriority{{agent: &Agent{Role: RoleDatabase}}},
+		[]agentPriority{{agent: &Agent{Role: RoleBackend}}},
+		[]agentPriority{{agent: &Agent{Role: RoleTesting}}},
+		[]agentPriority{{agent: &Agent{Role: RoleReviewer}}},
+	)
+
+	expectedKeys := []string{"architecture", "frontend_ui", "data_foundation", "backend_services", "integration", "review"}
+	if len(phases) != len(expectedKeys) {
+		t.Fatalf("expected %d phases, got %d", len(expectedKeys), len(phases))
+	}
+	for i, key := range expectedKeys {
+		if phases[i].key != key {
+			t.Fatalf("expected phase %d key %q, got %q", i, key, phases[i].key)
+		}
+	}
+	if phases[1].startMessage == "" || phases[3].completionMessage == "" {
+		t.Fatalf("expected user-facing phase messages to be populated, got %+v", phases)
+	}
+	if phases[0].startMessage == "" || phases[0].completionMessage == "" {
+		t.Fatalf("expected architecture phase to narrate contract freeze, got %+v", phases[0])
+	}
+}
+
+func TestSetBuildPhaseSnapshotPersistsCurrentPhaseForRestores(t *testing.T) {
+	build := &Build{
+		Status: BuildPlanning,
+	}
+	phase := executionPhase{
+		key:          "frontend_ui",
+		status:       BuildInProgress,
+		qualityStage: "testing",
+	}
+	now := time.Now().UTC()
+
+	setBuildPhaseSnapshot(build, phase, now)
+
+	if build.Status != BuildInProgress {
+		t.Fatalf("expected build status %s, got %s", BuildInProgress, build.Status)
+	}
+	if build.SnapshotState.CurrentPhase != "frontend_ui" {
+		t.Fatalf("expected current phase frontend_ui, got %q", build.SnapshotState.CurrentPhase)
+	}
+	if build.SnapshotState.QualityGateStage != "testing" {
+		t.Fatalf("expected quality gate stage testing, got %q", build.SnapshotState.QualityGateStage)
+	}
+	if build.SnapshotState.QualityGateStatus != "running" {
+		t.Fatalf("expected quality gate status running, got %q", build.SnapshotState.QualityGateStatus)
+	}
+	if build.SnapshotState.QualityGateRequired == nil || !*build.SnapshotState.QualityGateRequired {
+		t.Fatalf("expected quality gate to be required, got %+v", build.SnapshotState.QualityGateRequired)
+	}
+	if !build.UpdatedAt.Equal(now) {
+		t.Fatalf("expected updated_at %s, got %s", now, build.UpdatedAt)
 	}
 }
 

@@ -799,7 +799,7 @@ func containsAgentRole(roles []AgentRole, target AgentRole) bool {
 }
 
 func buildWorkOrders(appType string, stack TechStack, scaffold buildScaffold, ownership []BuildOwnership, acceptance []BuildAcceptanceCheck) []BuildWorkOrder {
-	roles := []AgentRole{RoleArchitect, RoleDatabase, RoleBackend, RoleFrontend, RoleTesting, RoleReviewer, RoleSolver}
+	roles := []AgentRole{RoleArchitect, RoleFrontend, RoleDatabase, RoleBackend, RoleTesting, RoleReviewer, RoleSolver}
 	out := make([]BuildWorkOrder, 0, len(roles))
 
 	for _, role := range roles {
@@ -931,7 +931,7 @@ func deriveAcceptanceChecks(appType string, stack TechStack) []BuildAcceptanceCh
 	if stack.Frontend != "" {
 		checks = append(checks, BuildAcceptanceCheck{
 			ID:          "frontend-entry",
-			Description: "Frontend must deliver the mandatory scaffold entry files and connect to the agreed API base URL",
+			Description: "Frontend must deliver the mandatory scaffold entry files, respect the frozen UI contract, and connect to the agreed API base URL",
 			Owner:       RoleFrontend,
 			Required:    true,
 		})
@@ -939,7 +939,7 @@ func deriveAcceptanceChecks(appType string, stack TechStack) []BuildAcceptanceCh
 	if stack.Backend != "" {
 		checks = append(checks, BuildAcceptanceCheck{
 			ID:          "backend-health",
-			Description: "Backend must expose a health route and respect the agreed port and CORS contract",
+			Description: "Backend must expose a health route and preserve the agreed port, CORS, and API contract promised to the frontend",
 			Owner:       RoleBackend,
 			Required:    true,
 		})
@@ -953,6 +953,12 @@ func deriveAcceptanceChecks(appType string, stack TechStack) []BuildAcceptanceCh
 		})
 	}
 	if appType == "fullstack" {
+		checks = append(checks, BuildAcceptanceCheck{
+			ID:          "architecture-contract-freeze",
+			Description: "Architect must freeze the screen map, API contract, data expectations, and env contract before frontend and backend implementation begins",
+			Owner:       RoleArchitect,
+			Required:    true,
+		})
 		checks = append(checks, BuildAcceptanceCheck{
 			ID:          "testing-vertical-slice",
 			Description: "Testing must verify the main vertical slice across frontend and backend boundaries",
@@ -2432,13 +2438,28 @@ func valueOrNone(value string) string {
 func requiredOutputsForRole(role AgentRole) []string {
 	switch role {
 	case RoleArchitect:
-		return []string{"Architecture blueprint aligned to the scaffold", "Ownership clarifications for specialists"}
+		return []string{
+			"Architecture blueprint aligned to the scaffold",
+			"Frozen UI, API, data, and env contract for downstream specialists",
+			"Ownership clarifications for specialists",
+		}
 	case RoleFrontend:
-		return []string{"Complete frontend files within owned paths", "No backend logic in UI files"}
+		return []string{
+			"Complete frontend files within owned paths",
+			"First usable UI shell aligned to the frozen contract",
+			"No backend logic in UI files",
+		}
 	case RoleBackend:
-		return []string{"Runnable backend entrypoint and routes", "No frontend JSX/UI ownership drift"}
+		return []string{
+			"Runnable backend entrypoint and routes",
+			"Backend implementation that satisfies the frozen UI/API contract",
+			"No frontend JSX/UI ownership drift",
+		}
 	case RoleDatabase:
-		return []string{"Schema or migration files matching planned models"}
+		return []string{
+			"Schema or migration files matching planned models",
+			"Persistence design that supports the frozen product flows",
+		}
 	case RoleTesting:
 		return []string{"Executable test or verification artifacts for the main slice"}
 	case RoleReviewer:
@@ -2453,15 +2474,15 @@ func requiredOutputsForRole(role AgentRole) []string {
 func summarizeWorkOrder(role AgentRole, appType string, stack TechStack) string {
 	switch role {
 	case RoleArchitect:
-		return fmt.Sprintf("Lock the %s scaffold and document architecture decisions without rewriting specialist-owned runtime files.", appType)
+		return fmt.Sprintf("Lock the %s scaffold, screen map, and backend/data contract before specialists write runtime code.", appType)
 	case RoleFrontend:
-		return fmt.Sprintf("Implement the %s frontend on the frozen scaffold without touching backend-owned files.", valueOrNone(stack.Frontend))
+		return fmt.Sprintf("Build the first usable %s frontend and UI shell on the frozen scaffold, using the agreed contract without touching backend-owned files.", valueOrNone(stack.Frontend))
 	case RoleBackend:
-		return fmt.Sprintf("Implement the %s backend and shared runtime contract without drifting from the scaffold.", valueOrNone(stack.Backend))
+		return fmt.Sprintf("Implement the %s backend behind the already-shaped UI and frozen contract without drifting from the scaffold.", valueOrNone(stack.Backend))
 	case RoleDatabase:
-		return fmt.Sprintf("Produce schema, migrations, and persistence wiring for %s.", valueOrNone(stack.Database))
+		return fmt.Sprintf("Add schema, migrations, and persistence wiring for %s behind the frozen product flows and API contract.", valueOrNone(stack.Database))
 	case RoleTesting:
-		return "Verify the main vertical slice and catch build/runtime regressions before review."
+		return "Verify the main vertical slice after the UI and backend are wired together, then catch build/runtime regressions before review."
 	case RoleReviewer:
 		return "Review the generated app against the frozen scaffold, ownership map, and acceptance checklist."
 	case RoleSolver:

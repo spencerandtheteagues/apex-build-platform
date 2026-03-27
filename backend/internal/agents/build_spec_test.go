@@ -100,6 +100,16 @@ func TestCreateBuildPlanFromPlanningBundle(t *testing.T) {
 	} else if !pathAllowedByWorkOrder("package.json", wo) {
 		t.Fatalf("expected shared root manifest to be allowed for frontend work order, got %+v", wo)
 	}
+	if wo := getBuildWorkOrder(plan, RoleArchitect); wo == nil {
+		t.Fatalf("expected architect work order, got %+v", wo)
+	} else {
+		if !strings.Contains(strings.ToLower(wo.Summary), "contract") {
+			t.Fatalf("expected architect summary to mention contract freeze, got %q", wo.Summary)
+		}
+		if !strings.Contains(strings.ToLower(strings.Join(wo.RequiredOutputs, " ")), "frozen ui, api, data, and env contract") {
+			t.Fatalf("expected architect outputs to include frozen contract guidance, got %+v", wo.RequiredOutputs)
+		}
+	}
 	if len(plan.ScaffoldFiles) == 0 {
 		t.Fatal("expected deterministic scaffold files")
 	}

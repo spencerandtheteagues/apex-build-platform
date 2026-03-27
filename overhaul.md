@@ -189,6 +189,105 @@ Open findings:
 - Full-stack task sequencing currently does not strongly enforce a frontend-first/UI-first delivery model.
 - The default build UI still contains too many long-form orchestration panels in the primary scroll path.
 
+### 2026-03-26 (staged workflow + compact workspace pass)
+
+Completed:
+
+- Reworked backend phased execution so the default full-stack flow now runs in user-facing sections:
+  - `Architecture`
+  - `Frontend UI`
+  - `Data Foundation`
+  - `Backend Services`
+  - `Integration`
+  - `Review`
+- Changed legacy fallback role ordering and build work-order ordering so frontend work is scheduled before database/backend work when a full-stack plan is generated.
+- Added explicit user-facing phase start and completion messages so the planner can narrate section progress instead of only exposing internal phase names.
+- Reworked the default builder progress experience into focused workspace views:
+  - `Overview`
+  - `Activity`
+  - `Issues`
+  - `Diagnostics`
+  - `Console`
+- Made `Overview` the compact default with:
+  - staged build-flow cards
+  - current update
+  - recent planner/system updates
+  - phase / quality / next-focus summary
+- Kept only live providers, live agents, and in-progress tasks inside `Activity`.
+- Added a dedicated `Issues` surface for blockers, approvals, checkpoints, diff review, and recovery controls.
+- Moved the heavy orchestration report behind the `Diagnostics` view instead of leaving it in the default scroll path.
+- Added empty states so `Activity` and `Issues` stay intentionally compact when nothing needs attention.
+- Updated builder tests to match the new tabbed workflow and added coverage that deep panels stay hidden until explicitly opened.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/build_spec.go`
+- `backend/internal/agents/manager_spawn_test.go`
+- `frontend/src/components/builder/AppBuilder.tsx`
+- `frontend/src/components/builder/AppBuilder.test.tsx`
+
+Verification completed:
+
+- `cd frontend && npm run test -- --run src/components/builder/AppBuilder.test.tsx`
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run lint`
+- `cd frontend && npm run build`
+- `cd frontend && npm run test -- --run`
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/build_spec.go internal/agents/manager_spawn_test.go`
+- `cd backend && go build ./...`
+- `cd backend && go test ./internal/agents`
+- `cd backend && go test ./... -timeout=120s`
+
+### 2026-03-26 (contract-first frontend-first reliability pass)
+
+Completed:
+
+- Tightened the planner and specialist contract so full-stack builds now think through backend shape deeply before codegen while still shipping the frontend shell first.
+- Strengthened architect required outputs to freeze:
+  - screen map
+  - API contract
+  - data expectations
+  - environment contract
+- Reworded frontend, backend, and database work orders so downstream work explicitly plugs into a frozen interface instead of re-deciding the product shape mid-build.
+- Added a full-stack architect acceptance check requiring contract freeze before implementation begins.
+- Hardened phased execution state by persisting the current phase and quality-gate state into build snapshot state as each phase starts, reducing reliance on websocket timing for restore/build-details truth.
+- Added dedicated compact builder views for:
+  - `Files`
+  - `Timeline`
+- Kept the default `Overview` compact while moving generated artifacts and stage history into their own focused screens.
+- Added an explicit overview strategy card explaining the new contract-first, frontend-first execution model so the user can understand why backend work comes later without feeling unplanned.
+- Added regression coverage for:
+  - architect contract-first plan outputs
+  - snapshot phase persistence for restores
+  - focused builder views for files and timeline
+
+Files changed:
+
+- `backend/internal/agents/build_spec.go`
+- `backend/internal/agents/build_spec_test.go`
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_spawn_test.go`
+- `frontend/src/components/builder/AppBuilder.tsx`
+- `frontend/src/components/builder/AppBuilder.test.tsx`
+
+Verification completed:
+
+- `cd frontend && npm run test -- --run src/components/builder/AppBuilder.test.tsx`
+- `cd frontend && npm run lint`
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run build`
+- `cd frontend && npm run test -- --run`
+- `cd backend && gofmt -w internal/agents/build_spec.go internal/agents/build_spec_test.go internal/agents/manager.go internal/agents/manager_spawn_test.go`
+- `cd backend && go test ./internal/agents -run 'TestCreateBuildPlanFromPlanningBundle|TestBuildExecutionPhasesPrefersFrontendBeforeBackendAndData|TestSetBuildPhaseSnapshotPersistsCurrentPhaseForRestores'`
+- `cd backend && go test ./internal/agents`
+- `cd backend && go build ./...`
+- `cd backend && go test ./... -timeout=120s`
+
+Commit hash:
+
+- Not pushed yet in this pass.
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

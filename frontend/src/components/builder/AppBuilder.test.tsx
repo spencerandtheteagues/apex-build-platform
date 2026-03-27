@@ -266,6 +266,10 @@ describe('AppBuilder control surface', () => {
 
     render(<AppBuilder />)
 
+    await screen.findByText(/Build Flow/i)
+
+    fireEvent.click(screen.getByRole('button', { name: /console/i }))
+
     await screen.findByText(/Planner Console/i)
 
     fireEvent.click(screen.getByRole('button', { name: 'All Agents' }))
@@ -283,6 +287,10 @@ describe('AppBuilder control surface', () => {
         })
       )
     })
+
+    fireEvent.click(screen.getByRole('button', { name: /activity/i }))
+
+    await screen.findByText(/AI Agents Working/i)
 
     const frontendInput = await screen.findByPlaceholderText('Message Frontend directly...')
     fireEvent.change(frontendInput, { target: { value: 'Expose more build progress in the workspace.' } })
@@ -367,6 +375,8 @@ describe('AppBuilder control surface', () => {
 
     render(<AppBuilder />)
 
+    fireEvent.click(await screen.findByRole('button', { name: /activity/i }))
+
     await screen.findByText(/AI Agents Working/i)
 
     expect(screen.getByPlaceholderText('Message Frontend directly...')).toBeTruthy()
@@ -410,6 +420,44 @@ describe('AppBuilder control surface', () => {
         })
       )
     })
+  })
+
+  it('defaults to the compact overview and only opens deep panels when selected', async () => {
+    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'build-123')
+    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'in_progress' })
+    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      blockers: [
+        {
+          id: 'blocker-1',
+          title: 'Missing API key',
+          type: 'runtime',
+          category: 'secrets',
+          severity: 'blocking',
+          summary: 'The backend needs an API key before live transcription can run.',
+          unblocks_with: 'Provide the required secret and rerun verification.',
+        },
+      ],
+    }))
+
+    render(<AppBuilder />)
+
+    await screen.findByText(/Build Flow/i)
+
+    expect(screen.queryByText(/Planner Console/i)).toBeNull()
+    expect(screen.queryByText(/Build Timeline/i)).toBeNull()
+    expect(screen.queryByText(/AI Agents Working/i)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /files/i }))
+    await screen.findByText('src/App.tsx')
+
+    fireEvent.click(screen.getByRole('button', { name: /timeline/i }))
+    await screen.findByText(/Planner And System Feed/i)
+
+    fireEvent.click(screen.getByRole('button', { name: /issues/i }))
+    await screen.findByText(/Missing API key/i)
+
+    fireEvent.click(screen.getByRole('button', { name: /diagnostics/i }))
+    await screen.findByText(/Build Timeline/i)
   })
 
   it('hides live agent and task panels for failed builds even if stale worker state is present', async () => {
