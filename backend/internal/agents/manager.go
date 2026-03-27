@@ -5316,18 +5316,11 @@ func extractDependencyRepairHintsFromReadinessErrors(errors []string) []string {
 	pkgSet := map[string]bool{}
 	specSet := map[string]bool{}
 	var manifestHints []string
-	var integrationHints []string
+	integrationHints := extractIntegrationRepairHintsFromReadinessErrors(errors)
 	for _, msg := range errors {
 		msg = strings.TrimSpace(msg)
 		if msg == "" {
 			continue
-		}
-		if strings.HasPrefix(msg, "integration: ") {
-			detail := strings.TrimPrefix(msg, "integration: ")
-			integrationHints = append(integrationHints,
-				"INTEGRATION ERROR: "+detail+
-					"\nFix: ensure frontend API calls and backend routes use the same paths, ports, and CORS origins. "+
-					"Backend MUST configure CORS to allow the frontend origin.")
 		}
 		if strings.HasPrefix(msg, "missing_deliverable: README") {
 			manifestHints = append(manifestHints,
@@ -5408,6 +5401,85 @@ func extractDependencyRepairHintsFromReadinessErrors(errors []string) []string {
 	hints = append(hints, manifestHints...)
 	hints = append(hints, integrationHints...)
 	return hints
+}
+
+func extractIntegrationRepairHintsFromReadinessErrors(errors []string) []string {
+	if len(errors) == 0 {
+		return nil
+	}
+
+	missingFrontendCalls := map[string]bool{}
+	missingContractRoutes := map[string]bool{}
+	hasCORSIssue := false
+	hasPortIssue := false
+	genericIntegration := false
+
+	frontendCallRe := regexp.MustCompile(`^integration: frontend calls (\S+) but backend has no matching route$`)
+	contractRouteRe := regexp.MustCompile(`^integration: backend does not expose required contract endpoint (\S+)$`)
+
+	for _, msg := range errors {
+		msg = strings.TrimSpace(msg)
+		if msg == "" || !strings.HasPrefix(msg, "integration: ") {
+			continue
+		}
+		genericIntegration = true
+
+		if m := frontendCallRe.FindStringSubmatch(msg); len(m) == 2 {
+			missingFrontendCalls[m[1]] = true
+			continue
+		}
+		if m := contractRouteRe.FindStringSubmatch(msg); len(m) == 2 {
+			missingContractRoutes[m[1]] = true
+			continue
+		}
+		if strings.Contains(msg, "no CORS configuration") {
+			hasCORSIssue = true
+			continue
+		}
+		if strings.Contains(msg, "backend listens on wrong port") {
+			hasPortIssue = true
+			continue
+		}
+	}
+
+	if !genericIntegration {
+		return nil
+	}
+
+	hints := make([]string, 0, 4)
+	if len(missingFrontendCalls) > 0 {
+		paths := sortedStringSetKeys(missingFrontendCalls)
+		hints = append(hints,
+			fmt.Sprintf("INTEGRATION ROUTE DRIFT: frontend calls these API paths with no backend match: %s. "+
+				"Fix by adding real backend handlers for the missing routes or by rewriting the frontend to call the actual implemented backend paths. "+
+				"Do not leave placeholder fetches to dead endpoints.", strings.Join(paths, ", ")))
+	}
+	if len(missingContractRoutes) > 0 {
+		paths := sortedStringSetKeys(missingContractRoutes)
+		hints = append(hints,
+			fmt.Sprintf("CONTRACT MISMATCH: backend must expose the required contract endpoints: %s. "+
+				"Implement these routes in the existing backend router structure and keep the frontend/API contract aligned.", strings.Join(paths, ", ")))
+	}
+	if hasCORSIssue {
+		hints = append(hints, "INTEGRATION BLOCKER: backend must configure CORS for the frontend origin before preview/runtime verification can pass.")
+	}
+	if hasPortIssue {
+		hints = append(hints, "INTEGRATION BLOCKER: backend must listen on the expected preview/runtime port (or $PORT) so frontend proxying and preview startup can connect.")
+	}
+	if len(hints) == 0 {
+		hints = append(hints,
+			"INTEGRATION ERROR: ensure frontend API calls and backend routes use the same paths, ports, and CORS origins. Backend must configure CORS to allow the frontend origin.")
+	}
+	return hints
+}
+
+func sortedStringSetKeys(items map[string]bool) []string {
+	keys := make([]string, 0, len(items))
+	for item := range items {
+		keys = append(keys, item)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func dependencyRepairPlacementHint(pkg string) string {
@@ -7586,6 +7658,7 @@ func (am *AgentManager) updateBuildProgress(build *Build) {
 	// Scale task progress into the 20-100 range (20% is the planning baseline)
 	taskProgress := (completed * 80) / len(build.Tasks)
 	progress := 20 + taskProgress
+	taskProgressPct := (completed * 100) / len(build.Tasks)
 
 	// Also track progress by worker-agent completion so long-running tasks don't look stuck.
 	workerTotal := 0
@@ -7595,11 +7668,24 @@ func (am *AgentManager) updateBuildProgress(build *Build) {
 			continue
 		}
 		workerTotal++
-		if agent.Status == StatusCompleted || agent.Status == StatusError {
+		if agent.Status == StatusCompleted {
 			workerDone++
 		}
 	}
 	if workerTotal > 0 {
+		agentProgressPct := (workerDone * 100) / workerTotal
+		if agentProgressPct > taskProgressPct {
+			taskProgressPct = agentProgressPct
+		}
+	}
+
+	phaseMin, phaseMax, ok := buildPhaseProgressWindow(build.SnapshotState.CurrentPhase, build.Status)
+	if ok {
+		progress = phaseMin
+		if phaseMax > phaseMin {
+			progress = phaseMin + (taskProgressPct*(phaseMax-phaseMin))/100
+		}
+	} else if workerTotal > 0 {
 		agentProgress := 20 + (workerDone*70)/workerTotal
 		if agentProgress > progress {
 			progress = agentProgress
@@ -7642,6 +7728,40 @@ func (am *AgentManager) updateBuildProgress(build *Build) {
 
 	// Persist rolling progress so recent builds can be resumed after restart/login.
 	am.persistBuildSnapshot(build, nil)
+}
+
+func buildPhaseProgressWindow(currentPhase string, status BuildStatus) (int, int, bool) {
+	switch strings.TrimSpace(strings.ToLower(currentPhase)) {
+	case "planning", "provider_check", "contract_compilation", "request_intake":
+		return 0, 9, true
+	case "architecture":
+		return 10, 19, true
+	case "frontend_ui":
+		return 20, 44, true
+	case "data_foundation":
+		return 45, 59, true
+	case "backend_services":
+		return 60, 79, true
+	case "integration", "testing":
+		return 80, 89, true
+	case "review", "validation":
+		return 90, 98, true
+	case "completed":
+		return 100, 100, true
+	}
+
+	switch status {
+	case BuildPending, BuildPlanning:
+		return 0, 9, true
+	case BuildTesting:
+		return 80, 89, true
+	case BuildReviewing:
+		return 90, 98, true
+	case BuildCompleted:
+		return 100, 100, true
+	default:
+		return 0, 0, false
+	}
 }
 
 type buildCompletionSnapshot struct {

@@ -1933,6 +1933,32 @@ func TestExtractDependencyRepairHintsFromReadinessErrors(t *testing.T) {
 	}
 }
 
+func TestExtractDependencyRepairHintsFromReadinessErrorsIncludesSpecificIntegrationRouteGuidance(t *testing.T) {
+	t.Parallel()
+
+	errs := []string{
+		`integration: frontend calls /api/auth/login but backend has no matching route`,
+		`integration: frontend calls /api/dashboard/kpis but backend has no matching route`,
+		`integration: backend does not expose required contract endpoint /api/projects`,
+		`integration: backend has no CORS configuration — frontend requests will be blocked by the browser`,
+	}
+
+	hints := extractDependencyRepairHintsFromReadinessErrors(errs)
+	if len(hints) == 0 {
+		t.Fatalf("expected integration repair hints")
+	}
+
+	joined := strings.Join(hints, "\n")
+	for _, needle := range []string{"/api/auth/login", "/api/dashboard/kpis", "/api/projects", "CORS"} {
+		if !strings.Contains(joined, needle) {
+			t.Fatalf("expected integration hint to mention %q, got %q", needle, joined)
+		}
+	}
+	if !strings.Contains(joined, "Do not leave placeholder fetches to dead endpoints") {
+		t.Fatalf("expected explicit route-repair guidance, got %q", joined)
+	}
+}
+
 func TestParseMissingDependenciesByVerificationScope(t *testing.T) {
 	t.Parallel()
 
@@ -3215,7 +3241,8 @@ func TestAssignTaskBuildsRepairWorkOrderArtifactForFixTasks(t *testing.T) {
 	if len(hints) == 0 {
 		t.Fatalf("expected repair hints to be attached, got %+v", fixTask.Input["repair_hints"])
 	}
-	if !strings.Contains(strings.Join(hints, "\n"), "INTEGRATION ERROR") {
+	joinedHints := strings.Join(hints, "\n")
+	if !strings.Contains(joinedHints, "INTEGRATION ROUTE DRIFT") || !strings.Contains(joinedHints, "/api/data") {
 		t.Fatalf("expected integration repair hint, got %+v", hints)
 	}
 }

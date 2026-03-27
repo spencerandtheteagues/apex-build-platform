@@ -894,6 +894,37 @@ Verification completed:
 - `cd frontend && npm run lint`
 - `cd frontend && npm run build`
 
+Date: 2026-03-27
+
+Active investigation:
+
+- Ran a fresh live paid full-stack canary on the admin account after the account was moved to the Team tier.
+- Confirmed the platform itself is healthy again (`/health/features` is fully green for Redis, database, preview, and orchestration).
+- Confirmed a live status-truth bug remains on paid/full-stack builds: the canary jumps from `planning 0%` to `in_progress 99%` almost immediately, then can continue through `testing` and `reviewing` while still reporting `99%`.
+- Root cause isolated in code: overall build progress can currently jump into the terminal band off worker-agent completion even when the build is still in architecture, frontend, or integration phases.
+- Phase-aware progress capping is now the active fix in progress so build status reflects the real execution stage instead of looking almost finished long before handoff.
+
+Date: 2026-03-27
+
+Change summary:
+
+- Fixed the status-truth bug behind the live paid/full-stack canary by capping overall build progress to the active execution phase instead of letting worker completion push builds into a fake `99%` state during architecture, frontend, or integration work.
+- Stopped counting errored workers as completed progress so failed agents no longer make an unfinished build look nearly done.
+- Strengthened final-validation solver recovery hints for route-drift failures so the solver gets explicit missing-endpoint guidance when frontend API calls and backend routes do not match.
+- Confirmed on the live paid canary that the next real full-stack blocker is integration-route drift (`/api/auth/login`, `/api/dashboard/kpis`, etc.), and also observed the smoke harness session can age out mid-poll with `authentication required`, which needs separate hardening in the canary runner.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_progress_test.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestUpdateBuildProgressCapsArchitecturePhaseProgress|TestUpdateBuildProgressKeepsReviewPhaseBelowCompletion|TestExtractDependencyRepairHintsFromReadinessErrorsIncludesSpecificIntegrationRouteGuidance'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:
