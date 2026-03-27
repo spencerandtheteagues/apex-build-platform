@@ -65,7 +65,14 @@ vi.mock('./OnboardingTour', () => ({
 }))
 
 vi.mock('./BuildHistory', () => ({
-  BuildHistory: () => null,
+  BuildHistory: ({ onOpenBuild }: any) => (
+    <button
+      type="button"
+      onClick={() => onOpenBuild?.('history-build-1', 'resume')}
+    >
+      Open mocked build
+    </button>
+  ),
 }))
 
 vi.mock('@/components/project/AssetUploader', () => ({
@@ -89,6 +96,7 @@ import apiService from '@/services/api'
 
 const ACTIVE_BUILD_STORAGE_KEY = 'apex_active_build_id:7'
 const DEFAULT_RESTART_FAILED_MESSAGE = 'Restart the failed build from the last workable state, keep the valid work, fix the failure, and continue until the app is runnable.'
+const MOCK_HISTORY_BUILD_ID = 'history-build-1'
 
 const buildDetail = (overrides: Record<string, any> = {}) => ({
   id: 'build-123',
@@ -224,6 +232,11 @@ const installWebSocketMock = () => {
   return connections
 }
 
+const openMockedBuild = async () => {
+  fireEvent.click(await screen.findByRole('button', { name: /open mocked build/i }))
+  await screen.findByText(/Build Flow/i)
+}
+
 describe('AppBuilder control surface', () => {
   beforeEach(() => {
     installLocalStorageMock()
@@ -265,9 +278,14 @@ describe('AppBuilder control surface', () => {
   })
 
   it('routes planner broadcasts and direct agent messages with the expected targets', async () => {
-    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'build-123')
-    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'in_progress' })
-    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail())
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+    }))
+    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+    }))
     ;(apiService.sendBuildMessage as any).mockResolvedValue({
       interaction: buildDetail().interaction,
       live: false,
@@ -275,9 +293,9 @@ describe('AppBuilder control surface', () => {
 
     render(<AppBuilder />)
 
-    await screen.findByText(/Build Flow/i)
+    await openMockedBuild()
 
-    fireEvent.click(screen.getByRole('button', { name: /console/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Steer Build$/i }))
 
     await screen.findByText(/Planner Console/i)
 
@@ -289,7 +307,7 @@ describe('AppBuilder control surface', () => {
 
     await waitFor(() => {
       expect(apiService.sendBuildMessage).toHaveBeenCalledWith(
-        'build-123',
+        MOCK_HISTORY_BUILD_ID,
         'Keep the user in the loop at each section.',
         expect.objectContaining({
           targetMode: 'all_agents',
@@ -307,7 +325,7 @@ describe('AppBuilder control surface', () => {
 
     await waitFor(() => {
       expect(apiService.sendBuildMessage).toHaveBeenCalledWith(
-        'build-123',
+        MOCK_HISTORY_BUILD_ID,
         'Expose more build progress in the workspace.',
         expect.objectContaining({
           targetMode: 'agent',
@@ -319,9 +337,13 @@ describe('AppBuilder control surface', () => {
   })
 
   it('shows only live agent and task boxes while a build is active', async () => {
-    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'build-123')
-    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'in_progress' })
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+    }))
     ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
       agents: [
         {
           id: 'frontend-1',
@@ -384,6 +406,8 @@ describe('AppBuilder control surface', () => {
 
     render(<AppBuilder />)
 
+    await openMockedBuild()
+
     fireEvent.click(await screen.findByRole('button', { name: /activity/i }))
 
     await screen.findByText(/AI Agents Working/i)
@@ -399,8 +423,14 @@ describe('AppBuilder control surface', () => {
   })
 
   it('issues a restart command for failed builds', async () => {
-    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'failed-build-123')
-    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'failed' })
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
+      id: 'failed-build-123',
+      build_id: 'failed-build-123',
+      status: 'failed',
+      progress: 92,
+      live: false,
+      error: 'Preview validation failed',
+    }))
     ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
       id: 'failed-build-123',
       build_id: 'failed-build-123',
@@ -415,6 +445,8 @@ describe('AppBuilder control surface', () => {
     })
 
     render(<AppBuilder />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /open mocked build/i }))
 
     const restartButton = await screen.findByRole('button', { name: /restart failed build/i })
     fireEvent.click(restartButton)
@@ -432,9 +464,13 @@ describe('AppBuilder control surface', () => {
   })
 
   it('defaults to the compact overview and only opens deep panels when selected', async () => {
-    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'build-123')
-    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'in_progress' })
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+    }))
     ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
       blockers: [
         {
           id: 'blocker-1',
@@ -450,7 +486,7 @@ describe('AppBuilder control surface', () => {
 
     render(<AppBuilder />)
 
-    await screen.findByText(/Build Flow/i)
+    await openMockedBuild()
 
     expect(screen.queryByText(/Planner Console/i)).toBeNull()
     expect(screen.queryByText(/Build Timeline/i)).toBeNull()
@@ -470,9 +506,14 @@ describe('AppBuilder control surface', () => {
   })
 
   it('surfaces the Redis allowlist fix when platform readiness exposes the misconfiguration', async () => {
-    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'build-123')
-    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'in_progress' })
-    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail())
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+    }))
+    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+    }))
     ;(apiService.featureReadiness as any).mockResolvedValue({
       phase: 'ready',
       status: 'degraded',
@@ -500,6 +541,8 @@ describe('AppBuilder control surface', () => {
 
     render(<AppBuilder />)
 
+    await openMockedBuild()
+
     await screen.findByText(/Redis cache is misconfigured/i)
     expect(screen.getByText(/Redis is using an external allowlisted endpoint/i)).toBeTruthy()
     expect(screen.getByText(/internal connection string/i)).toBeTruthy()
@@ -507,8 +550,14 @@ describe('AppBuilder control surface', () => {
   })
 
   it('frames failed builds as platform-related when critical runtime services are degraded', async () => {
-    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'failed-build-123')
-    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'failed' })
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
+      id: 'failed-build-123',
+      build_id: 'failed-build-123',
+      status: 'failed',
+      progress: 88,
+      live: false,
+      error: 'Build session unavailable',
+    }))
     ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
       id: 'failed-build-123',
       build_id: 'failed-build-123',
@@ -534,6 +583,8 @@ describe('AppBuilder control surface', () => {
 
     render(<AppBuilder />)
 
+    fireEvent.click(await screen.findByRole('button', { name: /open mocked build/i }))
+
     await screen.findByText(/This failure may be platform-related/i)
     expect(screen.getAllByText(/Primary database connectivity dropped while the build was running/i).length).toBeGreaterThan(0)
     expect(screen.getByText(/Captured build error: Build session unavailable/i)).toBeTruthy()
@@ -545,8 +596,22 @@ describe('AppBuilder control surface', () => {
   })
 
   it('hides live agent and task panels for failed builds even if stale worker state is present', async () => {
-    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'failed-build-123')
-    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'failed' })
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
+      id: 'failed-build-123',
+      build_id: 'failed-build-123',
+      status: 'failed',
+      progress: 92,
+      live: true,
+      error: 'Preview validation failed',
+      tasks: [
+        {
+          id: 'task-live',
+          type: 'fix',
+          description: 'Finishing the live recovery pass',
+          status: 'in_progress',
+        },
+      ],
+    }))
     ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
       id: 'failed-build-123',
       build_id: 'failed-build-123',
@@ -566,6 +631,8 @@ describe('AppBuilder control surface', () => {
 
     render(<AppBuilder />)
 
+    fireEvent.click(await screen.findByRole('button', { name: /open mocked build/i }))
+
     await screen.findByRole('button', { name: /restart failed build/i })
 
     expect(screen.queryByText(/AI Agents Working/i)).toBeNull()
@@ -576,8 +643,15 @@ describe('AppBuilder control surface', () => {
   it('reconnects restart recovery even when a failed build detail incorrectly reports a live session', async () => {
     const connections = installWebSocketMock()
 
-    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'failed-build-123')
-    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'failed' })
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
+      id: 'failed-build-123',
+      build_id: 'failed-build-123',
+      status: 'failed',
+      progress: 92,
+      live: true,
+      websocket_url: 'wss://runtime.example/ws/build/failed-build-123',
+      error: 'Preview validation failed',
+    }))
     ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
       id: 'failed-build-123',
       build_id: 'failed-build-123',
@@ -594,6 +668,8 @@ describe('AppBuilder control surface', () => {
 
     render(<AppBuilder />)
 
+    fireEvent.click(await screen.findByRole('button', { name: /open mocked build/i }))
+
     const restartButton = await screen.findByRole('button', { name: /restart failed build/i })
     fireEvent.click(restartButton)
 
@@ -603,70 +679,45 @@ describe('AppBuilder control surface', () => {
     })
   })
 
-  it('restores a failed workflow from legacy unscoped storage after login', async () => {
-    localStorage.setItem('apex_active_build_id', 'legacy-failed-build')
-    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'failed' })
-    ;(apiService.getBuildDetails as any).mockRejectedValue(new Error('not live'))
-    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
-      id: 'legacy-failed-build',
-      build_id: 'legacy-failed-build',
-      status: 'failed',
-      progress: 88,
-      live: false,
-      error: 'Legacy snapshot restore',
-    }))
+  it('keeps the builder on a fresh prompt after login until the user opens a previous build', async () => {
+    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'legacy-failed-build')
+    localStorage.setItem('apex_last_workflow_build_id:7', 'legacy-failed-build')
 
     render(<AppBuilder />)
 
-    await screen.findByRole('button', { name: /restart failed build/i })
+    await screen.findByPlaceholderText(/Describe the app you want to build/i)
 
-    expect(apiService.getBuildStatus).toHaveBeenCalledWith('legacy-failed-build')
-    expect(localStorage.getItem('apex_last_workflow_build_id:7')).toBe('legacy-failed-build')
-    expect(localStorage.getItem('apex_active_build_id')).toBeNull()
+    expect(apiService.getBuildStatus).not.toHaveBeenCalled()
+    expect(apiService.getBuildDetails).not.toHaveBeenCalled()
+    expect(apiService.getCompletedBuild).not.toHaveBeenCalled()
   })
 
-  it('falls back to the latest failed server build when no local workflow id survives login', async () => {
-    ;(apiService.listBuilds as any).mockResolvedValue({
-      builds: [
-        {
-          id: 17,
-          build_id: 'server-failed-build',
-          project_id: null,
-          project_name: '',
-          description: 'Recover a failed investor metrics build',
-          status: 'failed',
-          mode: 'full',
-          power_mode: 'balanced',
-          tech_stack: null,
-          files_count: 4,
-          total_cost: 0.12,
-          progress: 91,
-          duration_ms: 42000,
-          created_at: '2026-03-20T21:00:00Z',
-          live: false,
-          resumable: false,
-        },
-      ],
-      total: 1,
-      page: 1,
-      limit: 10,
-    })
-    ;(apiService.getBuildDetails as any).mockRejectedValue(new Error('not live'))
+  it('opens a previous build only after the user selects it from history', async () => {
     ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
-      id: 'server-failed-build',
-      build_id: 'server-failed-build',
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
       status: 'failed',
       progress: 91,
       live: false,
-      error: 'Recovered from server history',
+      error: 'Recovered from explicit history open',
+    }))
+    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+      status: 'failed',
+      progress: 91,
+      live: false,
+      error: 'Recovered from explicit history open',
     }))
 
     render(<AppBuilder />)
 
-    await screen.findByRole('button', { name: /restart failed build/i })
+    await screen.findByPlaceholderText(/Describe the app you want to build/i)
+    expect(apiService.getCompletedBuild).not.toHaveBeenCalled()
 
-    expect(apiService.listBuilds).toHaveBeenCalledWith(1, 10)
-    expect(apiService.getCompletedBuild).toHaveBeenCalledWith('server-failed-build')
-    expect(localStorage.getItem('apex_last_workflow_build_id:7')).toBe('server-failed-build')
+    fireEvent.click(await screen.findByRole('button', { name: /open mocked build/i }))
+
+    await screen.findByRole('button', { name: /restart failed build/i })
+    expect(apiService.getCompletedBuild).toHaveBeenCalledWith(MOCK_HISTORY_BUILD_ID)
   })
 })

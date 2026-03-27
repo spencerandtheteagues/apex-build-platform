@@ -608,6 +608,32 @@ Verification completed:
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
 
+### 2026-03-26 (builder steering + fresh entry pass)
+
+Completed:
+
+- Added a visible `Steer Build` action directly to the build status card so users can steer the planner without hunting through deep telemetry views.
+- Clarified the build controls with helper copy that distinguishes planner steering from agent-specific `Direct Control` inside the `Activity` view.
+- Wired the steering action to open the `Console` workspace, reveal planner chat, and focus the message input immediately.
+- Changed the builder entry behavior so login no longer auto-restores the last active or recent build into the main workspace.
+- Kept previous builds available explicitly through build history, so archived or failed work only reopens when the user intentionally selects it.
+- Updated the recent-build copy to explain the new fresh-entry behavior and avoid confusion about why the builder opens blank on return.
+- Reworked builder tests so resumed-build behaviors are triggered by explicit history selection instead of hidden local-storage auto-restore.
+
+Files changed:
+
+- `frontend/src/components/builder/AppBuilder.tsx`
+- `frontend/src/components/builder/AppBuilder.test.tsx`
+- `frontend/src/components/builder/BuildHistory.tsx`
+
+Verification completed:
+
+- `cd frontend && npm run test -- --run src/components/builder/AppBuilder.test.tsx`
+- `cd frontend && npm run lint`
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run build`
+- `cd frontend && npm run test -- --run`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

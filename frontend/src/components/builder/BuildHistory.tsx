@@ -165,7 +165,7 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild 
       </div>
 
       <p className="mb-4 text-sm text-gray-500">
-        Saved on the server. You can reopen the workflow or code after logging back in.
+        The builder now opens to a fresh prompt by default. Previous runs stay saved here, and you can click any build to reopen its workflow or code when you actually want it.
       </p>
 
       <div className="space-y-2.5">

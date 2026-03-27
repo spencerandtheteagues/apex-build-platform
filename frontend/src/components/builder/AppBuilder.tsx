@@ -1389,6 +1389,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [isImporting, setIsImporting] = useState(false)
   const [rollbackCheckpointId, setRollbackCheckpointId] = useState<string | null>(null)
   const [isStartingOver, setIsStartingOver] = useState(false)
+  const plannerInputRef = useRef<HTMLInputElement | null>(null)
 
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null)
@@ -1397,7 +1398,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const chatEndRef = useRef<HTMLDivElement>(null)
   const wsReconnectAttempts = useRef(0)
   const maxWsReconnectAttempts = 5
-  const skipAutoRestoreRef = useRef(false)
 
   // Ref to track current isBuilding state (prevents stale closure in WebSocket onclose)
   const isBuildingRef = useRef(isBuilding)
@@ -1422,6 +1422,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     setPlannerSendMode('lead')
     setBuildWorkspaceView('overview')
   }, [buildState?.id])
+
+  useEffect(() => {
+    if (buildWorkspaceView !== 'console' || !showChat) {
+      return
+    }
+    const timer = window.setTimeout(() => {
+      plannerInputRef.current?.focus()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [buildWorkspaceView, showChat])
 
   // Fetch provider statuses for model role config
   useEffect(() => {
@@ -1544,14 +1554,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const clearActiveBuildId = useCallback(() => {
     clearStoredValue(ACTIVE_BUILD_STORAGE_KEY)
   }, [clearStoredValue])
-  const getStoredActiveBuildId = useCallback(() => readStoredValue(ACTIVE_BUILD_STORAGE_KEY), [readStoredValue])
   const persistLastWorkflowBuildId = useCallback((buildId: string) => {
     writeStoredValue(LAST_WORKFLOW_BUILD_STORAGE_KEY, buildId)
   }, [writeStoredValue])
-  const getStoredLastWorkflowBuildId = useCallback(
-    () => readStoredValue(LAST_WORKFLOW_BUILD_STORAGE_KEY),
-    [readStoredValue]
-  )
   const clearLastWorkflowBuildId = useCallback(() => {
     clearStoredValue(LAST_WORKFLOW_BUILD_STORAGE_KEY)
   }, [clearStoredValue])
@@ -2206,7 +2211,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             : 'Clear',
       },
       { id: 'diagnostics' as const, label: 'Diagnostics', hint: 'Deep orchestration detail' },
-      { id: 'console' as const, label: 'Console', hint: 'Planner chat and directives' },
+      { id: 'console' as const, label: 'Console', hint: 'Steer build and directives' },
     ]
   }, [
     activityViewIsEmpty,
@@ -2359,8 +2364,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       } else {
         clearLastWorkflowBuildId()
       }
-      // Always prevent auto-restore after an explicit start-over
-      skipAutoRestoreRef.current = true
       resetBuilderState({ clearPrompt })
       addNotification({
         type: cancelFailed ? 'warning' : 'info',
@@ -4227,85 +4230,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
   }, [buildState?.id, buildState?.status, clearActiveBuildId, persistActiveBuildId])
 
-  useEffect(() => {
-    if (!user?.id || buildState?.id) {
-      return
-    }
-
-    if (skipAutoRestoreRef.current) {
-      return
-    }
-
-    let cancelled = false
-    const restoreLatestWorkflow = async () => {
-      const activeBuildId = getStoredActiveBuildId()
-      const candidateIds = [activeBuildId, getStoredLastWorkflowBuildId()].filter(
-        (value, index, values): value is string => Boolean(value) && values.indexOf(value) === index
-      )
-
-      for (const buildId of candidateIds) {
-        try {
-          const status = await apiService.getBuildStatus(buildId)
-          if (cancelled) return
-
-          if (isActiveBuildStatus(String(status?.status || ''))) {
-            await hydrateBuildContext(buildId, { reconnectLive: true, notify: true })
-            return
-          }
-
-          clearActiveBuildId()
-          await hydrateBuildContext(buildId, { reconnectLive: false, notify: true })
-          return
-        } catch (error) {
-          if (buildId === activeBuildId) {
-            clearActiveBuildId()
-          }
-          const statusCode = (error as { response?: { status?: number } })?.response?.status
-          if (statusCode === 403 || statusCode === 404) {
-            clearLastWorkflowBuildId()
-          }
-        }
-      }
-
-      try {
-        const history = await apiService.listBuilds(1, 10)
-        if (cancelled) return
-
-        const fallbackBuild = (history.builds || []).find((build) => {
-          if (!build?.build_id) return false
-          if (candidateIds.includes(build.build_id)) return false
-          return build.status !== 'completed'
-        })
-
-        if (!fallbackBuild) {
-          return
-        }
-
-        persistLastWorkflowBuildId(fallbackBuild.build_id)
-        await hydrateBuildContext(fallbackBuild.build_id, {
-          reconnectLive: !isTerminalBuildStatus(String(fallbackBuild.status || '')) && fallbackBuild.live !== false,
-          notify: true,
-        })
-      } catch {
-        // Non-fatal: if history is unavailable we leave the builder at a blank prompt.
-      }
-    }
-
-    void restoreLatestWorkflow()
-    return () => {
-      cancelled = true
-    }
-  }, [
-    buildState?.id,
-    clearActiveBuildId,
-    clearLastWorkflowBuildId,
-    getStoredActiveBuildId,
-    getStoredLastWorkflowBuildId,
-    hydrateBuildContext,
-    persistLastWorkflowBuildId,
-    user?.id,
-  ])
-
   // Start build
   const startBuild = async () => {
     if (!appDescription.trim()) return
@@ -4614,6 +4538,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       setPlannerMessagePending(false)
     }
   }
+
+  const openPlannerConsole = useCallback((mode: BuildMessageTargetMode = 'lead') => {
+    setPlannerSendMode(mode)
+    setShowChat(true)
+    setBuildWorkspaceView('console')
+  }, [])
 
   const sendDirectAgentMessage = async (agent: Agent) => {
     const content = agentMessageDrafts[agent.id]?.trim()
@@ -5476,6 +5406,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   )}
 
                   <div className="mt-4 flex flex-wrap gap-3">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => openPlannerConsole('lead')}
+                      className="border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"
+                    >
+                      <MessageSquare className="w-4 h-4 mr-2" />
+                      Steer Build
+                    </Button>
                     {buildState.status === 'failed' && (
                       <Button
                         size="sm"
@@ -5525,6 +5464,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                           ? 'Cancel & Start Fresh'
                           : 'Start Fresh'}
                     </Button>
+                  </div>
+
+                  <div className="mt-3 text-xs leading-relaxed text-gray-400">
+                    Need to change direction? Use <span className="text-cyan-200">Steer Build</span> to message the planner. For agent-specific changes, open <span className="text-cyan-200">Activity</span> and use <span className="text-cyan-200">Direct Control</span> on a live agent card.
                   </div>
 
                   {/* Pipeline telemetry */}
@@ -6515,6 +6458,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                       </div>
                       <div className="flex gap-3">
                         <input
+                          ref={plannerInputRef}
                           type="text"
                           value={chatInput}
                           onChange={(e) => setChatInput(e.target.value)}
