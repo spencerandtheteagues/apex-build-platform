@@ -45,3 +45,28 @@ func TestGetSystemPromptIncludesBuildAssuranceMission(t *testing.T) {
 		t.Fatalf("expected paid-plan delivery target guidance, got %q", paidPrompt)
 	}
 }
+
+func TestPlanningDescriptionForBuildAddsFreeTierFallbackGuidance(t *testing.T) {
+	t.Parallel()
+
+	build := &Build{
+		Description:      "Build a full-stack CRM with auth, data sync, and billing.",
+		SubscriptionPlan: "free",
+		SnapshotState: BuildSnapshotState{
+			PolicyState: &BuildPolicyState{
+				PlanType:           "free",
+				Classification:     BuildClassificationUpgradeRequired,
+				UpgradeRequired:    true,
+				StaticFrontendOnly: true,
+			},
+		},
+	}
+
+	description := planningDescriptionForBuild(build)
+	if !strings.Contains(description, "APEX BUILD DELIVERY TARGET") {
+		t.Fatalf("expected planning fallback guidance, got %q", description)
+	}
+	if !strings.Contains(description, "frontend-only app preview") {
+		t.Fatalf("expected frontend-only preview language, got %q", description)
+	}
+}

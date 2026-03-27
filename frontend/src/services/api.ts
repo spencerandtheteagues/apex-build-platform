@@ -465,6 +465,7 @@ export class ApiService {
     mode: 'fast' | 'full'
     power_mode?: 'fast' | 'balanced' | 'max'
     provider_mode?: 'platform' | 'byok'
+    require_preview_ready?: boolean
     tech_stack?: {
       frontend?: string
       backend?: string
@@ -3327,6 +3328,7 @@ export interface BuildContractSummary {
   id: string
   build_id: string
   app_type?: string
+  delivery_mode?: string
   verified?: boolean
   auth_contract?: {
     required?: boolean

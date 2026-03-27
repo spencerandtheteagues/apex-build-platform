@@ -424,18 +424,13 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 		})
 		return
 	}
+	if !req.RequirePreviewReady && inferIntentAppType(req.Description, req.TechStack) != "api" {
+		req.RequirePreviewReady = true
+	}
 
 	planType := h.currentSubscriptionType(c, uid)
 	if requiresUpgrade, reason := buildSubscriptionRequirement(&req); requiresUpgrade && !isPaidBuildPlan(planType) {
-		c.JSON(http.StatusPaymentRequired, gin.H{
-			"error":          "Backend and full-stack builds require a paid subscription",
-			"error_code":     backendSubscriptionRequiredCode,
-			"current_plan":   planType,
-			"required_plan":  "builder",
-			"blocked_reason": reason,
-			"suggestion":     "Free accounts can build static frontend websites. Upgrade to Builder or higher to unlock backend, database, auth, billing, and realtime app generation.",
-		})
-		return
+		log.Printf("StartBuild: free-tier request includes paid runtime scope (%s); continuing with truthful frontend-only fallback", reason)
 	}
 
 	// Validate power mode against plan tier.

@@ -514,7 +514,7 @@ func TestStartBuildValidatesMalformedRequestBeforeCreditCheck(t *testing.T) {
 	}
 }
 
-func TestStartBuildRequiresPaidSubscriptionForBackendApps(t *testing.T) {
+func TestStartBuildFallsBackToFrontendPreviewForFreeFullStackRequests(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.User{
 		ID:               1,
@@ -522,6 +522,7 @@ func TestStartBuildRequiresPaidSubscriptionForBackendApps(t *testing.T) {
 		Email:            "free@example.com",
 		PasswordHash:     "hashed",
 		SubscriptionType: "free",
+		CreditBalance:    10,
 	}).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -547,19 +548,34 @@ func TestStartBuildRequiresPaidSubscriptionForBackendApps(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	testRouter(am).ServeHTTP(w, req)
 
-	if w.Code != http.StatusPaymentRequired {
-		t.Fatalf("expected 402, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var response map[string]any
+	var response BuildResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if response["error_code"] != backendSubscriptionRequiredCode {
-		t.Fatalf("expected error_code=%s, got %v", backendSubscriptionRequiredCode, response["error_code"])
+	if strings.TrimSpace(response.BuildID) == "" {
+		t.Fatalf("expected build ID in response, got %+v", response)
 	}
-	if response["required_plan"] != "builder" {
-		t.Fatalf("expected required_plan=builder, got %v", response["required_plan"])
+	build, err := am.GetBuild(response.BuildID)
+	if err != nil {
+		t.Fatalf("expected created build in manager: %v", err)
+	}
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	if !build.RequirePreviewReady {
+		t.Fatalf("expected frontend/full-stack free fallback builds to require preview readiness")
+	}
+	if build.SnapshotState.PolicyState == nil {
+		t.Fatalf("expected policy state on build")
+	}
+	if !build.SnapshotState.PolicyState.StaticFrontendOnly {
+		t.Fatalf("expected free full-stack request to enter static frontend fallback, got %+v", build.SnapshotState.PolicyState)
+	}
+	if build.SnapshotState.PolicyState.RequiredPlan != "builder" {
+		t.Fatalf("expected required plan builder, got %+v", build.SnapshotState.PolicyState)
 	}
 }
 

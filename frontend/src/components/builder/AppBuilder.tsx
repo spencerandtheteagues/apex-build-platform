@@ -4288,6 +4288,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         mode: buildMode,
         power_mode: powerMode,
         provider_mode: freshProviderMode,
+        require_preview_ready: true,
         tech_stack: techStackOverride || undefined,
         diff_mode: false,
         role_assignments: roleConfigMode === 'manual' ? roleAssignments : undefined,

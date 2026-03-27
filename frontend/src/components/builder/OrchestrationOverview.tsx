@@ -417,7 +417,18 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
   const dataTags = truthBySurface.data || EMPTY_TAGS
   const integrationTags = truthBySurface.integration || EMPTY_TAGS
   const deploymentTags = truthBySurface.deployment || EMPTY_TAGS
+  const deliveryModeLabel = contract?.delivery_mode
+    ? humanize(contract.delivery_mode)
+    : props.policyState?.static_frontend_only
+      ? 'Frontend preview only'
+      : props.policyState?.classification === 'full_stack_candidate'
+        ? 'Full stack preview'
+        : 'Preview pending'
   const architectureItems = [
+    {
+      label: 'Delivery',
+      value: deliveryModeLabel,
+    },
     {
       label: 'Frontend',
       value: contract?.app_type === 'api'
@@ -636,7 +647,7 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
   const classificationLabel = humanize(props.policyState?.classification || 'pending')
   const planLabel = humanize(props.policyState?.plan_type || 'unknown')
   const planSummary = props.policyState?.classification === 'upgrade_required'
-    ? `This request crossed into paid capability territory. The system should stay honest about what can continue in static mode and what must stop until Builder or higher is approved.`
+    ? `This request crossed into paid capability territory. The system should still ship a truthful frontend preview now, while deferring backend/runtime scope until Builder or higher is active.`
     : props.policyState?.classification === 'static_ready'
       ? 'The current request fits the free static path. Backend, publish, and BYOK claims should stay off the table unless the user explicitly upgrades.'
       : 'The current plan allows the full-stack path, so orchestration can keep verifying runtime, integration, and promotion work instead of falling back to a mock.'

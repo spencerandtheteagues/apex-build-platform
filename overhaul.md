@@ -675,6 +675,39 @@ Verification completed:
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyBuildAssurancePolicyToPlanDowngradesFreeFullStackToFrontendPreview|TestRefreshDerivedSnapshotStateLockedUpgradeRequiredBuildIncludesPlanAcknowledgement|TestGetSystemPromptIncludesBuildAssuranceMission|TestCreateBuildPlanFromPlanningBundleHonorsStaticFrontendIntent'`
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
 
+### 2026-03-26 (preview-first start path pass)
+
+Completed:
+
+- Moved the free-tier truthful frontend fallback earlier in the lifecycle so builds no longer wait until deep orchestration to acknowledge the delivery target.
+- Changed planner input generation so free-tier full-stack requests explicitly ask for the strongest truthful frontend-only preview while freezing deferred backend/runtime contracts for a later paid pass.
+- Removed the backend/full-stack paid-plan hard stop from `StartBuild`, allowing free users to enter the build pipeline instead of bouncing on a `402` before any frontend preview work begins.
+- Defaulted non-API build starts toward preview-readiness verification so frontend/UI output is judged against live preview behavior more consistently.
+- Surfaced delivery mode in the orchestration overview so the builder tells the user whether the current run is targeting a frontend preview or a full-stack preview.
+- Kept paid-plan upgrade truth visible in the overview, but reframed it around shipping a truthful preview now and deferring backend/runtime scope until Builder or higher is active.
+
+Files changed:
+
+- `backend/internal/agents/build_assurance_test.go`
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+- `backend/internal/agents/planning_contracts.go`
+- `frontend/src/components/builder/AppBuilder.tsx`
+- `frontend/src/components/builder/OrchestrationOverview.tsx`
+- `frontend/src/services/api.ts`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestPlanningDescriptionForBuildAddsFreeTierFallbackGuidance|TestStartBuildFallsBackToFrontendPreviewForFreeFullStackRequests|TestApplyBuildAssurancePolicyToPlanDowngradesFreeFullStackToFrontendPreview|TestRefreshDerivedSnapshotStateLockedUpgradeRequiredBuildIncludesPlanAcknowledgement|TestGetSystemPromptIncludesBuildAssuranceMission|TestCreateBuildPlanFromPlanningBundleHonorsStaticFrontendIntent'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+- `cd frontend && npm run test -- --run src/components/builder/OrchestrationOverview.test.tsx src/components/builder/AppBuilder.test.tsx`
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run lint`
+- `cd frontend && npm run build`
+- `cd frontend && npm run test -- --run`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

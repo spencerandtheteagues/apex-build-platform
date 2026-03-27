@@ -35,7 +35,7 @@ func (am *AgentManager) executeStructuredPlanningTask(ctx context.Context, task 
 		usePlatformKeys: am.buildUsesPlatformKeys(build),
 	})
 
-	bundle, err := planner.CreatePlanningBundle(ctx, build.Description)
+	bundle, err := planner.CreatePlanningBundle(ctx, planningDescriptionForBuild(build))
 	if err != nil {
 		return nil, err
 	}
@@ -56,6 +56,27 @@ func (am *AgentManager) executeStructuredPlanningTask(ctx context.Context, task 
 		},
 		Plan: plan,
 	}, nil
+}
+
+func planningDescriptionForBuild(build *Build) string {
+	if build == nil {
+		return ""
+	}
+	description := strings.TrimSpace(build.Description)
+	if description == "" {
+		return ""
+	}
+	if !buildRequiresStaticFrontendFallback(build) {
+		return description
+	}
+
+	return fmt.Sprintf(`%s
+
+APEX BUILD DELIVERY TARGET:
+- This account is on the free/static tier.
+- Plan and build the strongest truthful frontend-only app preview that matches the prompt.
+- Do not require backend, database, auth, billing, jobs, or realtime implementation to succeed in this pass.
+- Preserve the product shape by freezing deferred backend/data/runtime contracts in the architecture and UI states so a later paid pass can wire them in behind the same interface.`, description)
 }
 
 func extractTaskCheckins(response string) (string, *TaskStartAck, *TaskCompletionReport) {
