@@ -18,6 +18,7 @@ This is the minimum go-live runbook for opening `apex-build.dev` to real custome
   - `STRIPE_WEBHOOK_SECRET`
   - every `STRIPE_PRICE_*` value used by the app
 - Confirm `https://apex-build.dev` and `https://api.apex-build.dev` are serving the latest deployed commit.
+- Confirm backend `REDIS_URL` resolves to the internal `apex-redis` Render Key Value connection string, not an external allowlisted Redis URL.
 
 ## Automated Checks
 
@@ -86,6 +87,7 @@ Do not open the product to customers if any of these are true:
 
 - `/health` is not `200`
 - `/health/features` is not `200`
+- `/health/features` reports `redis_cache` degraded because of an allowlist or external Redis connection error
 - billing plans return placeholder Stripe price IDs
 - the platform build smoke does not reach a clean terminal result
 - restart recovery acknowledges the action but does not create new execution

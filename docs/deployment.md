@@ -12,6 +12,7 @@ The current production blueprint defines:
 
 - `apex-api` as a Docker web service
 - `apex-frontend` as a Docker web service
+- `apex-redis` as a Render Key Value service
 - `apex-db` as a PostgreSQL database
 
 Backend health configuration:
@@ -23,6 +24,7 @@ Backend health configuration:
 Backend production notes:
 
 - Set `JWT_SECRET`, `JWT_REFRESH_SECRET`, and `SECRETS_MASTER_KEY` manually in the Render dashboard and keep them stable across deploys. The blueprint intentionally leaves them unsynced so redeploys do not invalidate sessions or orphan encrypted data.
+- `REDIS_URL` should come from the `apex-redis` Render Key Value instance's private `connectionString`, not from an external allowlisted Redis URL. In the blueprint this is wired via `fromService -> type: keyvalue -> property: connectionString`.
 - the backend image now ships the SQL migrations required for production startup
 - `SECRETS_MASTER_KEY` may be either:
   - a base64-encoded 32-byte AES-256 key
@@ -115,3 +117,4 @@ For public go-live validation, run the dedicated [launch runbook](./launch-runbo
 - The frontend Nginx container serves `/config.js` and health checks from the same image used in production.
 - Keep [`backend/api/openapi.yaml`](../backend/api/openapi.yaml) updated when externally consumed endpoints change.
 - After setting `E2B_API_KEY` on Render, redeploy the backend and confirm `/health` no longer reports `code_execution` as degraded because of a missing container sandbox.
+- If `/health/features` shows `redis_cache` degraded with an allowlist error, the backend is pointed at an external Redis endpoint. Update `REDIS_URL` to the internal `apex-redis` connection string and redeploy the backend.

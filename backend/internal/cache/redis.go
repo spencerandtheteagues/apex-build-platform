@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -115,6 +116,7 @@ type Status struct {
 	RedisConfigured bool   `json:"redis_configured"`
 	RedisConnected  bool   `json:"redis_connected"`
 	FallbackReason  string `json:"fallback_reason,omitempty"`
+	RecommendedFix  string `json:"recommended_fix,omitempty"`
 }
 
 // DefaultCacheConfig returns the default cache configuration
@@ -308,11 +310,13 @@ func (c *RedisCache) Status() Status {
 		storedFallbackReason = liveFallbackReason
 		backend = "memory"
 	}
+	recommendedFix := recommendedRedisFix(storedFallbackReason)
 	return Status{
 		Backend:         backend,
 		RedisConfigured: redisConfigured,
 		RedisConnected:  false,
 		FallbackReason:  storedFallbackReason,
+		RecommendedFix:  recommendedFix,
 	}
 }
 
@@ -533,6 +537,16 @@ func (c *RedisCache) liveRedisStatus() (bool, string) {
 	}
 	c.clearRedisFallback()
 	return true, ""
+}
+
+func recommendedRedisFix(fallbackReason string) string {
+	message := strings.ToLower(strings.TrimSpace(fallbackReason))
+	switch {
+	case strings.Contains(message, "allowlist"):
+		return "On Render, point REDIS_URL at the apex-redis internal connection string instead of an external allowlisted Redis URL."
+	default:
+		return ""
+	}
 }
 
 // matchPattern provides simple glob-style matching for cache keys

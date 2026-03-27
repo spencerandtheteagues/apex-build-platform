@@ -539,6 +539,10 @@ func main() {
 	if cacheStatus.FallbackReason != "" {
 		cacheDetails["fallback_reason"] = cacheStatus.FallbackReason
 	}
+	if cacheStatus.RecommendedFix != "" {
+		cacheDetails["recommended_fix"] = cacheStatus.RecommendedFix
+		log.Printf("Redis cache remediation: %s", cacheStatus.RecommendedFix)
+	}
 	if redisCache.HasRedisBackend() {
 		startupRegistry.MarkReady("redis_cache", startup.TierOptional, "Redis cache backend connected", map[string]any{
 			"backend":         "redis",

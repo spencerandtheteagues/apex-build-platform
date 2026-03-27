@@ -41,7 +41,10 @@ services:
       - key: COOKIE_SECURE
         value: "true"
       - key: REDIS_URL
-        sync: false  # Use Upstash Redis (Render free tier has no managed Redis)
+        fromService:
+          type: keyvalue
+          name: apex-redis
+          property: connectionString
       - key: JWT_SECRET
         sync: false  # Set once in Render dashboard; do not rotate automatically on deploy
       - key: JWT_REFRESH_SECRET
@@ -148,6 +151,14 @@ services:
         value: strict-origin-when-cross-origin
 
   # ============================================
+  # Managed Key Value Cache
+  # ============================================
+  - type: keyvalue
+    name: apex-redis
+    region: oregon
+    ipAllowList: []  # Internal-only; backend receives the private connection string via REDIS_URL
+
+  # ============================================
   # Background Worker (optional)
   # ============================================
   # - type: worker
@@ -173,15 +184,6 @@ databases:
     postgresMajorVersion: 15
     # databaseName: apex_build
     # user: apex_user
-
-# ============================================
-# Redis Cache - Use Upstash (free tier)
-# ============================================
-# Render managed Redis requires Pro plan or higher.
-# Set REDIS_URL manually in each service's env vars using Upstash:
-#   1. Create free Redis at https://upstash.com
-#   2. Copy the Redis URL
-#   3. Set REDIS_URL in Render Dashboard → apex-api → Environment
 
 # Preview Environments (for PRs)
 previewsEnabled: false

@@ -249,6 +249,65 @@ func TestFeatureReadinessReflectsRuntimeRedisFallbackEvenAfterHealthyStartup(t *
 	require.Contains(t, payload["degraded_features"], "redis_cache")
 }
 
+func TestFeatureReadinessIncludesRedisAllowlistRemediation(t *testing.T) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	gormDB, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+
+	server := NewServer(
+		&db.Database{DB: gormDB},
+		auth.NewAuthService("test-jwt-secret-with-sufficient-length-1234567890"),
+		ai.NewAIRouter("", "", ""),
+		nil,
+	)
+
+	registry := startup.NewRegistry()
+	registry.MarkReady("primary_database", startup.TierCritical, "Database connected", nil)
+	registry.MarkReady("auth_service", startup.TierCritical, "Auth initialized", nil)
+	registry.SetPhase(startup.PhaseReady)
+	server.SetReadinessRegistry(registry)
+	server.SetCacheStatusProvider(func() cache.Status {
+		return cache.Status{
+			Backend:         "memory",
+			RedisConfigured: true,
+			RedisConnected:  false,
+			FallbackReason:  "redis ping failed: AUTH failed: Client IP address is not in the allowlist.",
+			RecommendedFix:  "On Render, point REDIS_URL at the apex-redis internal connection string instead of an external allowlisted Redis URL.",
+		}
+	})
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/health/features", nil)
+
+	server.FeatureReadiness(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var payload struct {
+		Services []struct {
+			Name    string         `json:"name"`
+			Details map[string]any `json:"details"`
+		} `json:"services"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+
+	var redisDetails map[string]any
+	for _, service := range payload.Services {
+		if service.Name == "redis_cache" {
+			redisDetails = service.Details
+			break
+		}
+	}
+	require.NotNil(t, redisDetails)
+	require.Equal(t,
+		"On Render, point REDIS_URL at the apex-redis internal connection string instead of an external allowlisted Redis URL.",
+		redisDetails["recommended_fix"],
+	)
+}
+
 func TestDeepHealthReportsUnavailableWhenPrimaryDatabasePingFails(t *testing.T) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

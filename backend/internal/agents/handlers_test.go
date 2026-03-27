@@ -70,6 +70,25 @@ func openBuildTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestBuildPlatformIssueFromErrorClassifiesRedisAllowlistAsConfiguration(t *testing.T) {
+	issue := buildPlatformIssueFromError(errors.New("redis ping failed: AUTH failed: Client IP address is not in the allowlist."))
+	if issue == nil {
+		t.Fatal("expected platform issue classification")
+	}
+	if issue.Service != "redis_cache" {
+		t.Fatalf("expected redis_cache service, got %s", issue.Service)
+	}
+	if issue.IssueType != "platform_configuration" {
+		t.Fatalf("expected platform_configuration, got %s", issue.IssueType)
+	}
+	if issue.Retryable {
+		t.Fatal("expected allowlist misconfiguration to be non-retryable until fixed")
+	}
+	if !strings.Contains(strings.ToLower(issue.Summary), "internal render key value connection string") {
+		t.Fatalf("expected actionable remediation summary, got %q", issue.Summary)
+	}
+}
+
 func TestGetBuildSessionForUserRestoresSnapshotWhenLiveBuildIsGone(t *testing.T) {
 	db := openBuildTestDB(t)
 	snapshot := &models.CompletedBuild{

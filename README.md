@@ -271,7 +271,7 @@ All plans: all 10 agent roles, live preview, deployment integrations, full Git, 
 
 **Frontend:** React 18, TypeScript, Vite 5, TailwindCSS, Monaco Editor, xterm.js, Framer Motion, Zustand
 
-**Infrastructure:** Render (backend + frontend), Render Managed PostgreSQL, Upstash Redis, Stripe live mode
+**Infrastructure:** Render (backend + frontend), Render Managed PostgreSQL, Render Key Value, Stripe live mode
 
 ### Repository Layout
 

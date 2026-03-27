@@ -159,6 +159,30 @@ Acceptance:
 
 ## Work Log
 
+### 2026-03-26 (redis allowlist remediation pass)
+
+Completed:
+
+- Replaced the stale external-Redis blueprint path with managed Render Key Value wiring in `render.yaml`.
+- Changed backend `REDIS_URL` to come from `apex-redis` via `fromService -> type: keyvalue -> property: connectionString`.
+- Added the `apex-redis` Key Value service to the Render blueprint as an internal-only dependency.
+- Removed outdated Upstash/managed-Redis comments that no longer matched current Render capabilities.
+- Added Redis fallback remediation hints so health/readiness surfaces now explain the exact fix when the backend is pointed at an external allowlisted Redis endpoint.
+- Tightened failed-build platform-issue classification so Redis allowlist rejections are treated as configuration errors instead of transient maintenance.
+- Updated the compact builder platform notice to show the concrete Redis remediation step instead of a generic degradation message.
+- Updated launch and deployment docs to require the internal Render Key Value URL for `REDIS_URL`.
+
+Verification completed:
+
+- `cd backend && go test ./internal/cache ./internal/api ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+- `cd frontend && npm run test -- --run src/components/builder/AppBuilder.test.tsx`
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run lint`
+- `cd frontend && npm run build`
+- `cd frontend && npm run test -- --run`
+
 ### 2026-03-26
 
 Completed:

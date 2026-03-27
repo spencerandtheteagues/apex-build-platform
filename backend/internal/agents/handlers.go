@@ -83,6 +83,15 @@ func buildPlatformIssueFromError(err error) *buildPlatformIssue {
 	}
 
 	if strings.Contains(message, "redis") {
+		if strings.Contains(message, "allowlist") {
+			return &buildPlatformIssue{
+				Service:           "redis_cache",
+				IssueType:         "platform_configuration",
+				Summary:           "Redis is configured with an external allowlisted endpoint. Point REDIS_URL at the internal Render Key Value connection string so live build coordination can recover.",
+				Retryable:         false,
+				MaintenanceWindow: false,
+			}
+		}
 		maintenance := looksLikeMaintenanceWindow(message)
 		issueType := "platform_service_interruption"
 		if maintenance {

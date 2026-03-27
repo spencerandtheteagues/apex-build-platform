@@ -2006,6 +2006,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
 
     const serviceName = issue?.service || primaryService?.name
+    const primaryServiceDetails = (primaryService?.details ?? {}) as Record<string, unknown>
+    const recommendedFix = typeof primaryServiceDetails.recommended_fix === 'string' ? primaryServiceDetails.recommended_fix : ''
+    const fallbackReason = typeof primaryServiceDetails.fallback_reason === 'string' ? primaryServiceDetails.fallback_reason.toLowerCase() : ''
     const maintenanceWindow = issue?.maintenanceWindow === true || issue?.issueType === 'platform_maintenance'
     let title = maintenanceWindow ? 'Build paused by platform maintenance' : 'This failure may be platform-related'
     let body = issue?.summary || 'A platform interruption may have stopped this build before the current section completed.'
@@ -2021,6 +2024,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           : 'Retry after database connectivity returns, then reopen the build or request a restart from the last healthy checkpoint.'
         break
       case 'redis_cache':
+        if (issue?.issueType === 'platform_configuration' || fallbackReason.includes('allowlist')) {
+          title = 'Redis cache is misconfigured'
+          body = issue?.summary || 'Redis is pointed at an external allowlisted endpoint, so live build coordination can fail even though the generated files may still be intact.'
+          detail = recommendedFix || 'Update REDIS_URL to the internal Render Key Value connection string, redeploy the backend, then retry the build.'
+          break
+        }
         title = maintenanceWindow ? 'Live build timing affected by platform maintenance' : 'Live build timing may be platform-related'
         body = issue?.summary || 'Redis connectivity is degraded. Live coordination can stall or look incomplete even when the generated files are still intact.'
         detail = 'Build output may still be usable. Open Files or Diagnostics before assuming the app code itself is broken.'
@@ -2229,6 +2238,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
 
     const primaryService = impactedServices[0]
+    const primaryServiceDetails = (primaryService.details ?? {}) as Record<string, unknown>
+    const recommendedFix = typeof primaryServiceDetails.recommended_fix === 'string' ? primaryServiceDetails.recommended_fix : ''
+    const fallbackReason = typeof primaryServiceDetails.fallback_reason === 'string' ? primaryServiceDetails.fallback_reason.toLowerCase() : ''
     const isCritical = primaryService.tier === 'critical' || !platformReadiness.ready
     let title = isCritical ? 'Platform services interrupted' : 'Platform services degraded'
     let body = primaryService.summary
@@ -2240,6 +2252,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
     switch (primaryService.name) {
       case 'redis_cache':
+        if (fallbackReason.includes('allowlist')) {
+          title = 'Redis cache is misconfigured'
+          body = 'Redis is using an external allowlisted endpoint. The backend should use the internal Render Key Value URL instead.'
+          detail = recommendedFix || 'Update REDIS_URL to the apex-redis internal connection string and redeploy the backend.'
+          break
+        }
         body = 'Redis cache is degraded. Builds continue with in-memory fallback, but live coordination can feel slower until maintenance finishes.'
         detail = impactedServices.length > 1
           ? `${impactedServices.length} platform services are affected right now.`

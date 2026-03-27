@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -60,5 +61,19 @@ func TestRedisCacheStatusReturnsToRedisAfterRecovery(t *testing.T) {
 	}
 	if status.FallbackReason != "" {
 		t.Fatalf("expected fallback reason to clear after recovery, got %q", status.FallbackReason)
+	}
+}
+
+func TestRedisCacheStatusIncludesAllowlistFixHint(t *testing.T) {
+	cache := NewRedisCacheWithClient(&stubRedisClient{
+		pingErr: errors.New("AUTH failed: Client IP address is not in the allowlist."),
+	}, DefaultCacheConfig())
+
+	status := cache.Status()
+	if status.RecommendedFix == "" {
+		t.Fatal("expected recommended fix for allowlist failure")
+	}
+	if !strings.Contains(status.RecommendedFix, "internal connection string") {
+		t.Fatalf("expected internal connection guidance, got %q", status.RecommendedFix)
 	}
 }

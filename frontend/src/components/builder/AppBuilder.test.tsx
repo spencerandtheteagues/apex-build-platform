@@ -469,7 +469,7 @@ describe('AppBuilder control surface', () => {
     await screen.findByText(/Build Timeline/i)
   })
 
-  it('shows a compact platform status notice when runtime services are degraded', async () => {
+  it('surfaces the Redis allowlist fix when platform readiness exposes the misconfiguration', async () => {
     localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'build-123')
     ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'in_progress' })
     ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail())
@@ -490,14 +490,19 @@ describe('AppBuilder control surface', () => {
           tier: 'optional',
           state: 'degraded',
           summary: 'Using in-memory cache fallback',
+          details: {
+            fallback_reason: 'redis ping failed: AUTH failed: Client IP address is not in the allowlist.',
+            recommended_fix: 'On Render, point REDIS_URL at the apex-redis internal connection string instead of an external allowlisted Redis URL.',
+          },
         },
       ],
     })
 
     render(<AppBuilder />)
 
-    await screen.findByText(/Platform services degraded/i)
-    expect(screen.getByText(/Redis cache is degraded/i)).toBeTruthy()
+    await screen.findByText(/Redis cache is misconfigured/i)
+    expect(screen.getByText(/Redis is using an external allowlisted endpoint/i)).toBeTruthy()
+    expect(screen.getByText(/internal connection string/i)).toBeTruthy()
     expect(screen.getByRole('button', { name: /open issues/i })).toBeTruthy()
   })
 

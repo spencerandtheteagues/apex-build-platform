@@ -142,12 +142,20 @@ func (s *Server) runtimeReadinessSummary(includeDatabaseHealth bool) startup.Sum
 			cacheState = startup.StateDegraded
 			cacheSummary = "Using in-memory cache fallback"
 		}
+		cacheDetails := map[string]any{
+			"backend":         cacheStatus.Backend,
+			"redis_connected": cacheStatus.RedisConnected,
+			"fallback_reason": cacheStatus.FallbackReason,
+		}
+		if cacheStatus.RecommendedFix != "" {
+			cacheDetails["recommended_fix"] = cacheStatus.RecommendedFix
+		}
 		summary = startup.ApplyRuntimeService(summary, startup.Service{
 			Name:      "redis_cache",
 			Tier:      startup.TierOptional,
 			State:     cacheState,
 			Summary:   cacheSummary,
-			Details:   map[string]any{"backend": cacheStatus.Backend, "redis_connected": cacheStatus.RedisConnected, "fallback_reason": cacheStatus.FallbackReason},
+			Details:   cacheDetails,
 			UpdatedAt: time.Now().UTC(),
 		})
 	}
