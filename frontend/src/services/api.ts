@@ -677,6 +677,10 @@ export class ApiService {
     await this.client.post(`/build/${buildId}/cancel`)
   }
 
+  async deleteBuild(buildId: string): Promise<void> {
+    await this.client.delete(`/builds/${buildId}`)
+  }
+
   async startFullStackPreview(data: {
     project_id: number
     entry_point?: string

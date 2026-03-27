@@ -867,6 +867,33 @@ Verification completed:
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
 
+Date: 2026-03-27
+
+Change summary:
+
+- Added a real build-history delete path so terminal builds can be removed from Recent Builds instead of piling up forever.
+- Kept active builds safe by rejecting delete on non-terminal snapshots and exposing explicit cancel controls in the history UI for resumable/live runs.
+- Removed deleted terminal builds from both persisted history and in-memory build coordination state so a removed build does not silently reappear.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+- `frontend/src/services/api.ts`
+- `frontend/src/components/builder/BuildHistory.tsx`
+- `frontend/src/components/builder/BuildHistory.test.tsx`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestDeleteBuildRemovesTerminalSnapshotFromHistory|TestDeleteBuildRejectsActiveSnapshot'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd frontend && npm run test -- --run src/components/builder/BuildHistory.test.tsx`
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run lint`
+- `cd frontend && npm run build`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

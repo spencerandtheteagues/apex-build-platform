@@ -2171,6 +2171,77 @@ func (h *BuildHandler) DownloadCompletedBuild(c *gin.Context) {
 	}
 }
 
+// DeleteBuild removes a saved terminal build from build history.
+// DELETE /api/v1/builds/:buildId
+func (h *BuildHandler) DeleteBuild(c *gin.Context) {
+	if h.db == nil {
+		c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(fmt.Errorf("build history not available"), "build history not available", "Build history is temporarily unavailable because the primary database is offline."))
+		return
+	}
+
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
+	buildID := strings.TrimSpace(c.Param("buildId"))
+	if buildID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "build id is required"})
+		return
+	}
+
+	snapshot, err := h.getBuildSnapshot(uid, buildID)
+	if err != nil {
+		if buildPlatformIssueFromError(err) != nil {
+			c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(err, "build history not available", "Build history is temporarily unavailable because the primary database is offline."))
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		return
+	}
+
+	displayStatus := presentedSnapshotStatus(snapshot)
+	if isActiveBuildStatus(string(displayStatus)) {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":   "build must be cancelled before removal",
+			"details": "Only completed, failed, or cancelled builds can be removed from history",
+		})
+		return
+	}
+
+	if liveBuild, liveErr := h.manager.GetBuild(buildID); liveErr == nil && liveBuild != nil &&
+		liveBuild.Status != BuildCompleted && liveBuild.Status != BuildFailed && liveBuild.Status != BuildCancelled {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":   "build must be cancelled before removal",
+			"details": "Cancel the active build before removing it from history",
+		})
+		return
+	}
+
+	if err := h.db.Unscoped().Where("build_id = ? AND user_id = ?", buildID, uid).Delete(&models.CompletedBuild{}).Error; err != nil {
+		if buildPlatformIssueFromError(err) != nil {
+			c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(err, "build history not available", "Build history is temporarily unavailable because the primary database is offline."))
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove build"})
+		return
+	}
+
+	if h.manager != nil && h.manager.editStore != nil {
+		h.manager.editStore.Clear(buildID)
+	}
+	if h.hub != nil {
+		h.hub.CloseAllConnections(buildID)
+	}
+	if h.manager != nil {
+		h.manager.ForgetBuild(buildID)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":   "deleted",
+		"build_id": buildID,
+	})
+}
+
 func (h *BuildHandler) getBuildSnapshot(userID uint, buildID string) (*models.CompletedBuild, error) {
 	if h.db == nil {
 		return nil, fmt.Errorf("build history not available")
@@ -2525,4 +2596,5 @@ func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/builds", h.ListBuilds)
 	rg.GET("/builds/:buildId", h.GetCompletedBuild)
 	rg.GET("/builds/:buildId/download", h.DownloadCompletedBuild)
+	rg.DELETE("/builds/:buildId", h.DeleteBuild)
 }

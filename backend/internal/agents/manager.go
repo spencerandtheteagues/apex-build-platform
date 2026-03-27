@@ -11638,6 +11638,27 @@ func (am *AgentManager) CancelBuild(buildID string) error {
 	return nil
 }
 
+// ForgetBuild removes a build session and any attached in-memory coordination state.
+// It is used after a terminal build snapshot is explicitly deleted from history.
+func (am *AgentManager) ForgetBuild(buildID string) {
+	if am == nil || strings.TrimSpace(buildID) == "" {
+		return
+	}
+
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	if build, exists := am.builds[buildID]; exists && build != nil {
+		for agentID := range build.Agents {
+			delete(am.agents, agentID)
+		}
+	}
+
+	delete(am.builds, buildID)
+	delete(am.subscribers, buildID)
+	delete(am.buildMonitors, buildID)
+}
+
 // KillAllBuilds cancels all active builds for a given user. Returns count killed.
 func (am *AgentManager) KillAllBuilds(userID uint) int {
 	am.mu.RLock()

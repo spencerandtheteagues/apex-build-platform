@@ -54,6 +54,7 @@ func testRouter(am *AgentManager) *gin.Engine {
 	rg.GET("/builds", h.ListBuilds)
 	rg.GET("/builds/:buildId", h.GetCompletedBuild)
 	rg.GET("/builds/:buildId/download", h.DownloadCompletedBuild)
+	rg.DELETE("/builds/:buildId", h.DeleteBuild)
 	return r
 }
 
@@ -1306,6 +1307,117 @@ func TestCancelRestoresActiveSnapshotAndPersistsTerminalState(t *testing.T) {
 	}
 	if snapshot.Error != "cancelled by user" {
 		t.Fatalf("expected persisted cancel error, got %s", snapshot.Error)
+	}
+}
+
+func TestDeleteBuildRemovesTerminalSnapshotFromHistory(t *testing.T) {
+	db := openBuildTestDB(t)
+	snapshot := &models.CompletedBuild{
+		BuildID:     "delete-build",
+		UserID:      1,
+		Description: "Remove this failed build from history",
+		Status:      string(BuildFailed),
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    88,
+		FilesJSON:   "[]",
+		Error:       "preview failed",
+	}
+	if err := db.Create(snapshot).Error; err != nil {
+		t.Fatalf("create failed snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db: db,
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		editStore:   NewProposedEditStoreWithDB(db),
+	}
+
+	am.builds[snapshot.BuildID] = &Build{
+		ID:     snapshot.BuildID,
+		Status: BuildFailed,
+		Agents: map[string]*Agent{
+			"lead-delete": {
+				ID:      "lead-delete",
+				BuildID: snapshot.BuildID,
+			},
+		},
+	}
+	am.agents["lead-delete"] = &Agent{
+		ID:      "lead-delete",
+		BuildID: snapshot.BuildID,
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("DELETE", "/api/v1/builds/delete-build", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected delete 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var count int64
+	if err := db.Model(&models.CompletedBuild{}).Where("build_id = ?", "delete-build").Count(&count).Error; err != nil {
+		t.Fatalf("count snapshots: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected deleted snapshot to disappear from history, found %d rows", count)
+	}
+
+	if _, err := am.GetBuild("delete-build"); err == nil {
+		t.Fatalf("expected deleted build to be forgotten from memory")
+	}
+}
+
+func TestDeleteBuildRejectsActiveSnapshot(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-build-delete",
+		UserID:      1,
+		Description: "Still running",
+		Status:      string(BuildReviewing),
+		Mode:        "full",
+		PowerMode:   "balanced",
+		Progress:    94,
+		FilesJSON:   "[]",
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db: db,
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		editStore:   NewProposedEditStoreWithDB(db),
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("DELETE", "/api/v1/builds/active-build-delete", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected active delete 409, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var count int64
+	if err := db.Model(&models.CompletedBuild{}).Where("build_id = ?", "active-build-delete").Count(&count).Error; err != nil {
+		t.Fatalf("count active snapshots: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected active snapshot to remain, found %d rows", count)
 	}
 }
 

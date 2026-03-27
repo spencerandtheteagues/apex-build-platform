@@ -16,6 +16,8 @@ import {
   Cpu,
   Rocket,
   FolderOpen,
+  Trash2,
+  Square,
 } from 'lucide-react'
 
 interface BuildHistoryProps {
@@ -27,7 +29,9 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild 
   const [builds, setBuilds] = useState<CompletedBuildSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [downloading, setDownloading] = useState<string | null>(null)
+  const [actingBuildId, setActingBuildId] = useState<string | null>(null)
 
   const loadBuilds = useCallback(async () => {
     if (!userId) {
@@ -40,6 +44,7 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild 
     try {
       setLoading(true)
       setError(null)
+      setActionError(null)
       const data = await apiService.listBuilds(1, 10)
       setBuilds(data.builds || [])
     } catch (err: any) {
@@ -87,6 +92,38 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild 
       console.error('Download failed:', err)
     } finally {
       setDownloading(null)
+    }
+  }
+
+  const handleCancel = async (build: CompletedBuildSummary) => {
+    const confirmed = window.confirm('Cancel this active build? It will stay in Recent Builds so you can inspect it later.')
+    if (!confirmed) return
+
+    try {
+      setActingBuildId(build.build_id)
+      setActionError(null)
+      await apiService.cancelBuild(build.build_id)
+      await loadBuilds()
+    } catch (err) {
+      setActionError('Unable to cancel that build right now.')
+    } finally {
+      setActingBuildId(null)
+    }
+  }
+
+  const handleDelete = async (build: CompletedBuildSummary) => {
+    const confirmed = window.confirm('Remove this saved build from Recent Builds? This only deletes the saved history entry.')
+    if (!confirmed) return
+
+    try {
+      setActingBuildId(build.build_id)
+      setActionError(null)
+      await apiService.deleteBuild(build.build_id)
+      await loadBuilds()
+    } catch (err) {
+      setActionError('Unable to remove that build right now.')
+    } finally {
+      setActingBuildId(null)
     }
   }
 
@@ -168,6 +205,12 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild 
         The builder now opens to a fresh prompt by default. Previous runs stay saved here, and you can click any build to reopen its workflow or code when you actually want it.
       </p>
 
+      {actionError ? (
+        <div className="mb-4 rounded-xl border border-red-900/40 bg-red-950/20 px-4 py-3 text-sm text-red-200">
+          {actionError}
+        </div>
+      ) : null}
+
       <div className="space-y-2.5">
         {builds.map((build) => (
           <div
@@ -220,7 +263,39 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild 
             </span>
 
             {/* Actions */}
-            <div className="flex items-center gap-1.5 shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-1.5 shrink-0">
+              {build.resumable ? (
+                <button
+                  onClick={(e) => { e.stopPropagation(); void handleCancel(build) }}
+                  className="inline-flex items-center gap-1 rounded-lg border border-red-900/50 px-2 py-1.5 text-xs font-medium text-red-200 hover:bg-red-900/20 transition-colors"
+                  title="Cancel active build"
+                  aria-label={`Cancel build ${build.description}`}
+                  disabled={actingBuildId === build.build_id}
+                >
+                  {actingBuildId === build.build_id ? (
+                    <div className="w-3.5 h-3.5 border-2 border-red-200/50 border-t-red-100 rounded-full animate-spin" />
+                  ) : (
+                    <Square className="w-3.5 h-3.5" />
+                  )}
+                  Cancel
+                </button>
+              ) : (
+                <button
+                  onClick={(e) => { e.stopPropagation(); void handleDelete(build) }}
+                  className="inline-flex items-center gap-1 rounded-lg border border-gray-800 px-2 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+                  title="Remove saved build"
+                  aria-label={`Remove build ${build.description}`}
+                  disabled={actingBuildId === build.build_id}
+                >
+                  {actingBuildId === build.build_id ? (
+                    <div className="w-3.5 h-3.5 border-2 border-gray-500 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <Trash2 className="w-3.5 h-3.5" />
+                  )}
+                  Remove
+                </button>
+              )}
+              <div className="flex items-center gap-1.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
               <button
                 onClick={(e) => { e.stopPropagation(); onOpenBuild?.(build.build_id, 'resume') }}
                 className="hidden md:inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
@@ -247,6 +322,7 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild 
               >
                 <FolderOpen className="w-4 h-4" />
               </button>
+              </div>
             </div>
 
             <ChevronRight className="w-4 h-4 text-gray-700 group-hover:text-gray-500 transition-colors shrink-0" />
