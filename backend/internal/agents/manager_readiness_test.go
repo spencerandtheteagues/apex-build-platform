@@ -574,6 +574,45 @@ func TestVerifyGeneratedFrontendPreviewReadiness(t *testing.T) {
 		}
 	})
 
+	t.Run("missing_local_component_import_fails_preflight", func(t *testing.T) {
+		t.Parallel()
+
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "preview-test",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0"
+  }
+}`,
+			},
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div><script type=\"module\" src=\"/src/main.tsx\"></script></body></html>"},
+			{Path: "src/main.tsx", Content: "import React from 'react'; import ReactDOM from 'react-dom/client'; import App from './App'; ReactDOM.createRoot(document.getElementById('root')!).render(<App />);"},
+			{Path: "src/App.tsx", Content: "import Projects from './pages/Projects'; export default function App(){ return <Projects /> }"},
+			{Path: "src/pages/Projects.tsx", Content: "import KanbanColumn from '../components/projects/KanbanColumn'; export default function Projects(){ return <KanbanColumn /> }"},
+			{Path: "vite.config.ts", Content: "import { defineConfig } from 'vite'; import react from '@vitejs/plugin-react'; export default defineConfig({ plugins: [react()] });"},
+			{Path: "tsconfig.json", Content: `{"compilerOptions":{"jsx":"react-jsx","module":"ESNext","target":"ES2020","moduleResolution":"Bundler","strict":true,"noEmit":true},"include":["src"]}`},
+		}
+
+		errs := am.verifyGeneratedFrontendPreviewReadiness(files, false)
+		if !containsError(errs, `source imports local module "../components/projects/KanbanColumn"`) {
+			t.Fatalf("expected missing local module preflight error, got %v", errs)
+		}
+	})
+
 	t.Run("ignores_test_only_imports_for_preflight", func(t *testing.T) {
 		t.Parallel()
 
@@ -2196,6 +2235,83 @@ func TestApplyDeterministicValidationRepairsAppliesBundleToSnapshotFiles(t *test
 	state := build.SnapshotState.Orchestration
 	if state == nil || len(state.PatchBundles) == 0 {
 		t.Fatalf("expected recorded patch bundle, got %+v", state)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsCreatesMissingLocalModulePlaceholder(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-missing-local-module-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "package.json",
+				Content: "{\"name\":\"preview-test\",\"private\":true}\n",
+				IsNew:   true,
+			},
+			{
+				Path:    "src/pages/Projects.tsx",
+				Content: "import KanbanColumn from '../components/projects/KanbanColumn';\nexport default function Projects(){ return <KanbanColumn /> }\n",
+				IsNew:   true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Preview verification local import check failed: source imports local module "../components/projects/KanbanColumn" from "src/pages/Projects.tsx" but generated file "src/components/projects/KanbanColumn.tsx" is missing`},
+		"missing local module",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected missing local module repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var placeholder *GeneratedFile
+	for i := range files {
+		if files[i].Path == "src/components/projects/KanbanColumn.tsx" {
+			placeholder = &files[i]
+			break
+		}
+	}
+	if placeholder == nil {
+		t.Fatalf("expected placeholder file to be created, got %+v", files)
+	}
+	if !strings.Contains(placeholder.Content, "const KanbanColumn") {
+		t.Fatalf("expected placeholder component export, got %q", placeholder.Content)
+	}
+	if !strings.Contains(placeholder.Content, "export default KanbanColumn") {
+		t.Fatalf("expected default export for placeholder component, got %q", placeholder.Content)
+	}
+
+	state := build.SnapshotState.Orchestration
+	if state == nil || len(state.PatchBundles) == 0 {
+		t.Fatalf("expected recorded patch bundle, got %+v", state)
+	}
+	foundCreate := false
+	for _, bundle := range state.PatchBundles {
+		for _, op := range bundle.Operations {
+			if op.Type == PatchCreateFile && op.Path == "src/components/projects/KanbanColumn.tsx" {
+				foundCreate = true
+				break
+			}
+		}
+		if foundCreate {
+			break
+		}
+	}
+	if !foundCreate {
+		t.Fatalf("expected create_file operation for missing local module, got %+v", state.PatchBundles)
 	}
 }
 

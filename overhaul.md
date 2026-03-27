@@ -804,6 +804,27 @@ Additional verification completed:
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
 - `bash -n scripts/run_platform_build_smoke.sh`
 
+Date: 2026-03-27
+
+Change summary:
+
+- Reproduced the next real free-canary production failure after the paid-gating fix by rebuilding the live generated app locally from build `8591de16-7337-45de-921d-2ec198e8c09e`.
+- Added frontend preview preflight detection for missing generated local modules so unresolved relative imports now fail early with the exact missing file path instead of surfacing later as a generic Rollup error.
+- Added a deterministic repair path that materializes compile-safe placeholder frontend modules for missing generated local component imports, so the preview pipeline can continue repairing toward a visible UI instead of terminal-failing on omitted files.
+- Added regressions covering both the preflight detection and the placeholder repair bundle capture.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairsCreatesMissingLocalModulePlaceholder|TestVerifyGeneratedFrontendPreviewReadiness'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

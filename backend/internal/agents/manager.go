@@ -6097,6 +6097,244 @@ func parsePreviewSyntaxErrorTargetFiles(errors []string) []string {
 	return paths
 }
 
+type missingLocalModuleRepairTarget struct {
+	SourcePath string
+	Specifier  string
+	TargetPath string
+}
+
+func parseMissingLocalModuleRepairTargets(errors []string) []missingLocalModuleRepairTarget {
+	if len(errors) == 0 {
+		return nil
+	}
+
+	re := regexp.MustCompile(`source imports local module "([^"]+)" from "([^"]+)" but generated file "([^"]+)" is missing`)
+	seen := map[string]bool{}
+	targets := make([]missingLocalModuleRepairTarget, 0)
+	for _, msg := range errors {
+		matches := re.FindAllStringSubmatch(msg, -1)
+		for _, match := range matches {
+			if len(match) != 4 {
+				continue
+			}
+			target := missingLocalModuleRepairTarget{
+				Specifier:  strings.TrimSpace(match[1]),
+				SourcePath: sanitizeFilePath(strings.TrimSpace(match[2])),
+				TargetPath: sanitizeFilePath(strings.TrimSpace(match[3])),
+			}
+			if target.SourcePath == "" || target.TargetPath == "" || target.Specifier == "" {
+				continue
+			}
+			key := target.SourcePath + "|" + target.Specifier + "|" + target.TargetPath
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			targets = append(targets, target)
+		}
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		if targets[i].TargetPath == targets[j].TargetPath {
+			return targets[i].SourcePath < targets[j].SourcePath
+		}
+		return targets[i].TargetPath < targets[j].TargetPath
+	})
+	return targets
+}
+
+type generatedImportBinding struct {
+	DefaultImport string
+	NamedImports  []string
+}
+
+func parseGeneratedImportBinding(sourceContent string, specifier string) generatedImportBinding {
+	specifier = strings.TrimSpace(specifier)
+	if strings.TrimSpace(sourceContent) == "" || specifier == "" {
+		return generatedImportBinding{}
+	}
+
+	pattern := regexp.MustCompile(`(?m)^\s*import\s+(.+?)\s+from\s+['"]` + regexp.QuoteMeta(specifier) + `['"]`)
+	match := pattern.FindStringSubmatch(sourceContent)
+	if len(match) != 2 {
+		return generatedImportBinding{}
+	}
+	clause := strings.TrimSpace(match[1])
+	clause = strings.TrimPrefix(clause, "type ")
+	if clause == "" {
+		return generatedImportBinding{}
+	}
+
+	binding := generatedImportBinding{}
+	if strings.Contains(clause, ",") {
+		parts := strings.SplitN(clause, ",", 2)
+		binding.DefaultImport = strings.TrimSpace(parts[0])
+		clause = strings.TrimSpace(parts[1])
+	} else if !strings.HasPrefix(clause, "{") && !strings.HasPrefix(clause, "*") {
+		binding.DefaultImport = clause
+		clause = ""
+	}
+
+	if strings.HasPrefix(clause, "{") && strings.Contains(clause, "}") {
+		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(clause, "{"), "}"))
+		for _, part := range strings.Split(inner, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if strings.Contains(part, " as ") {
+				pieces := strings.Split(part, " as ")
+				part = strings.TrimSpace(pieces[len(pieces)-1])
+			}
+			if part != "" {
+				binding.NamedImports = append(binding.NamedImports, part)
+			}
+		}
+	}
+
+	binding.NamedImports = dedupeStrings(binding.NamedImports)
+	return binding
+}
+
+func isLikelyReactComponentName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	r := rune(name[0])
+	return r >= 'A' && r <= 'Z'
+}
+
+func sanitizeGeneratedIdentifier(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	var b strings.Builder
+	for i, r := range name {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '_' || (i > 0 && r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func placeholderComponentIdentifier(targetPath string, binding generatedImportBinding) string {
+	candidates := []string{binding.DefaultImport}
+	candidates = append(candidates, binding.NamedImports...)
+	for _, candidate := range candidates {
+		candidate = sanitizeGeneratedIdentifier(candidate)
+		if isLikelyReactComponentName(candidate) {
+			return candidate
+		}
+	}
+	base := strings.TrimSuffix(filepath.Base(targetPath), filepath.Ext(targetPath))
+	base = sanitizeGeneratedIdentifier(base)
+	if base == "" {
+		return "GeneratedPlaceholder"
+	}
+	if !isLikelyReactComponentName(base) {
+		return "GeneratedPlaceholder"
+	}
+	return base
+}
+
+func missingLocalModulePlaceholderContent(targetPath string, binding generatedImportBinding) string {
+	targetPath = sanitizeFilePath(targetPath)
+	ext := strings.ToLower(filepath.Ext(targetPath))
+	componentLike := strings.Contains(targetPath, "/components/") ||
+		ext == ".tsx" || ext == ".jsx" ||
+		isLikelyReactComponentName(binding.DefaultImport)
+	for _, name := range binding.NamedImports {
+		if isLikelyReactComponentName(name) {
+			componentLike = true
+			break
+		}
+	}
+
+	if componentLike {
+		componentName := placeholderComponentIdentifier(targetPath, binding)
+		label := strings.TrimSuffix(filepath.Base(targetPath), filepath.Ext(targetPath))
+		var b strings.Builder
+		b.WriteString("import React from 'react';\n\n")
+		b.WriteString("type PlaceholderProps = Record<string, unknown>;\n\n")
+		b.WriteString(fmt.Sprintf("const %s: React.FC<PlaceholderProps> = () => (\n", componentName))
+		b.WriteString("  <div className='rounded-lg border border-dashed border-slate-700/60 bg-slate-900/40 p-4 text-sm text-slate-300'>\n")
+		b.WriteString(fmt.Sprintf("    %s placeholder\n", label))
+		b.WriteString("  </div>\n")
+		b.WriteString(");\n\n")
+		for _, name := range binding.NamedImports {
+			name = sanitizeGeneratedIdentifier(name)
+			if name == "" {
+				continue
+			}
+			if isLikelyReactComponentName(name) {
+				b.WriteString(fmt.Sprintf("export const %s = %s;\n", name, componentName))
+			} else {
+				b.WriteString(fmt.Sprintf("export const %s: any = {};\n", name))
+			}
+		}
+		if strings.TrimSpace(binding.DefaultImport) != "" {
+			b.WriteString("\n")
+			b.WriteString(fmt.Sprintf("export default %s;\n", componentName))
+		}
+		return b.String()
+	}
+
+	var b strings.Builder
+	for _, name := range binding.NamedImports {
+		name = sanitizeGeneratedIdentifier(name)
+		if name == "" {
+			continue
+		}
+		b.WriteString(fmt.Sprintf("export const %s: any = {};\n", name))
+	}
+	if strings.TrimSpace(binding.DefaultImport) != "" {
+		b.WriteString("const defaultExport: any = {};\n")
+		b.WriteString("export default defaultExport;\n")
+	}
+	if b.Len() == 0 {
+		b.WriteString("export {};\n")
+	}
+	return b.String()
+}
+
+func (am *AgentManager) applyDeterministicMissingLocalModuleRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+	targets := parseMissingLocalModuleRepairTargets(readinessErrors)
+	if len(targets) == 0 {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 {
+		return nil, ""
+	}
+
+	applied := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if strings.TrimSpace(plan.content(target.TargetPath)) != "" {
+			continue
+		}
+		sourceContent := plan.content(target.SourcePath)
+		binding := parseGeneratedImportBinding(sourceContent, target.Specifier)
+		content := missingLocalModulePlaceholderContent(target.TargetPath, binding)
+		language := am.detectLanguage(target.TargetPath)
+		if !plan.createFile(target.TargetPath, content, language) {
+			continue
+		}
+		applied = append(applied, fmt.Sprintf("%s (from %s)", target.TargetPath, target.SourcePath))
+	}
+
+	if len(applied) == 0 {
+		return nil, ""
+	}
+
+	summary := "generated placeholder module(s): " + strings.Join(applied, ", ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "missing_local_module_repair: "+summary), summary
+}
+
 func repairDoubleSingleQuoteCorruption(path, content string) (string, bool) {
 	if strings.TrimSpace(content) == "" || strings.Count(content, "''") < 2 {
 		return content, false
@@ -7528,6 +7766,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 	}
 
 	repairs := []validationRepairSpec{
+		{
+			apply:       am.applyDeterministicMissingLocalModuleRepair,
+			errorFormat: "Final output validation failed: %s (applied missing local module repair: %s)",
+			message:     "Applied deterministic local module repair for missing generated frontend files. Re-running final validation before solver recovery.",
+			summaryKey:  "missing_local_module_repair",
+		},
 		{
 			apply:       am.applyDeterministicManifestDependencyRepair,
 			errorFormat: "Final output validation failed: %s (applied deterministic manifest repair: %s)",
@@ -14007,6 +14251,138 @@ func packageNameFromImportPath(spec string) string {
 	return spec
 }
 
+func localImportResolutionCandidates(importerPath string, spec string) []string {
+	spec = strings.TrimSpace(spec)
+	importerPath = filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(importerPath), "./"))
+	if spec == "" || importerPath == "" {
+		return nil
+	}
+
+	var base string
+	switch {
+	case strings.HasPrefix(spec, "@/"):
+		base = strings.TrimPrefix(spec, "@/")
+	case strings.HasPrefix(spec, "~/"):
+		base = strings.TrimPrefix(spec, "~/")
+	case strings.HasPrefix(spec, "."):
+		base = filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(importerPath), spec)))
+	default:
+		return nil
+	}
+	base = strings.TrimPrefix(filepath.ToSlash(base), "./")
+	base = strings.TrimPrefix(base, "/")
+	if base == "" || strings.HasPrefix(base, "../") {
+		return nil
+	}
+
+	if ext := strings.ToLower(filepath.Ext(base)); ext != "" {
+		return []string{base}
+	}
+
+	exts := []string{".tsx", ".ts", ".jsx", ".js", ".mts", ".cts", ".mjs", ".cjs", ".json"}
+	candidates := make([]string, 0, len(exts)*2)
+	for _, ext := range exts {
+		candidates = append(candidates, base+ext)
+	}
+	for _, ext := range exts {
+		candidates = append(candidates, filepath.ToSlash(filepath.Join(base, "index"+ext)))
+	}
+	return dedupeStrings(candidates)
+}
+
+func validateGeneratedLocalModuleImports(files []GeneratedFile, prefix string) []string {
+	if len(files) == 0 {
+		return nil
+	}
+
+	available := map[string]bool{}
+	seenIssues := map[string]bool{}
+	issues := make([]string, 0)
+	prefixLower := strings.ToLower(prefix)
+
+	for _, f := range files {
+		path := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(f.Path), "./"))
+		if path == "" {
+			continue
+		}
+		if prefixLower != "" {
+			if !strings.HasPrefix(strings.ToLower(path), prefixLower) {
+				continue
+			}
+			path = strings.TrimPrefix(path, prefix)
+		}
+		path = strings.TrimPrefix(path, "/")
+		if path == "" {
+			continue
+		}
+		available[strings.ToLower(path)] = true
+	}
+
+	for _, f := range files {
+		path := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(f.Path), "./"))
+		if path == "" || strings.TrimSpace(f.Content) == "" {
+			continue
+		}
+		if prefixLower != "" {
+			if !strings.HasPrefix(strings.ToLower(path), prefixLower) {
+				continue
+			}
+			path = strings.TrimPrefix(path, prefix)
+		}
+		path = strings.TrimPrefix(path, "/")
+		if path == "" {
+			continue
+		}
+
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs":
+		default:
+			continue
+		}
+
+		pathLower := strings.ToLower(path)
+		if strings.Contains(pathLower, "/__tests__/") ||
+			strings.Contains(pathLower, "/test/") ||
+			strings.Contains(pathLower, "/tests/") ||
+			strings.Contains(pathLower, ".test.") ||
+			strings.Contains(pathLower, ".spec.") {
+			continue
+		}
+
+		for _, match := range generatedImportPathPattern.FindAllStringSubmatch(f.Content, -1) {
+			if len(match) != 2 {
+				continue
+			}
+			spec := strings.TrimSpace(match[1])
+			if !(strings.HasPrefix(spec, ".") || strings.HasPrefix(spec, "@/") || strings.HasPrefix(spec, "~/")) {
+				continue
+			}
+			candidates := localImportResolutionCandidates(path, spec)
+			if len(candidates) == 0 {
+				continue
+			}
+			found := false
+			for _, candidate := range candidates {
+				if available[strings.ToLower(candidate)] {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
+			}
+			issue := fmt.Sprintf("source imports local module %q from %q but generated file %q is missing", spec, path, candidates[0])
+			if seenIssues[issue] {
+				continue
+			}
+			seenIssues[issue] = true
+			issues = append(issues, issue)
+		}
+	}
+
+	return dedupePreviewIssues(issues)
+}
+
 func validateGeneratedImportDependencies(files []GeneratedFile, prefix string, manifest previewManifest) []string {
 	declared := map[string]bool{}
 	for name := range manifest.Dependencies {
@@ -14262,6 +14638,12 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 	if importIssues := validateGeneratedImportDependencies(files, prefix, manifest); len(importIssues) > 0 {
 		for _, issue := range importIssues {
 			issues = append(issues, "Preview verification dependency check failed: "+issue)
+		}
+		return issues
+	}
+	if localImportIssues := validateGeneratedLocalModuleImports(files, prefix); len(localImportIssues) > 0 {
+		for _, issue := range localImportIssues {
+			issues = append(issues, "Preview verification local import check failed: "+issue)
 		}
 		return issues
 	}
