@@ -4,6 +4,7 @@ package agents
 
 import (
 	"archive/zip"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +35,14 @@ type BuildHandler struct {
 	db      *gorm.DB
 }
 
+type buildPlatformIssue struct {
+	Service           string
+	IssueType         string
+	Summary           string
+	Retryable         bool
+	MaintenanceWindow bool
+}
+
 func classifyBuildMessageError(err error) int {
 	if err == nil {
 		return http.StatusOK
@@ -61,6 +70,164 @@ func NewBuildHandler(manager *AgentManager, hub *WSHub) *BuildHandler {
 		hub:     hub,
 		db:      manager.db,
 	}
+}
+
+func buildPlatformIssueFromError(err error) *buildPlatformIssue {
+	if err == nil {
+		return nil
+	}
+
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	if message == "" {
+		return nil
+	}
+
+	if strings.Contains(message, "redis") {
+		maintenance := looksLikeMaintenanceWindow(message)
+		issueType := "platform_service_interruption"
+		if maintenance {
+			issueType = "platform_maintenance"
+		}
+		return &buildPlatformIssue{
+			Service:           "redis_cache",
+			IssueType:         issueType,
+			Summary:           "Redis connectivity is temporarily degraded. Live coordination may lag while the platform reconnects.",
+			Retryable:         true,
+			MaintenanceWindow: maintenance,
+		}
+	}
+
+	if isDatabaseIssueError(err) || isDatabaseIssueMessage(message) {
+		maintenance := looksLikeMaintenanceWindow(message)
+		issueType := "platform_service_interruption"
+		if maintenance {
+			issueType = "platform_maintenance"
+		}
+		return &buildPlatformIssue{
+			Service:           "primary_database",
+			IssueType:         issueType,
+			Summary:           "Primary database connectivity is temporarily unavailable. Build history, restore, and status sync can pause until the platform reconnects.",
+			Retryable:         true,
+			MaintenanceWindow: maintenance,
+		}
+	}
+
+	return nil
+}
+
+func isDatabaseIssueError(err error) bool {
+	return errors.Is(err, sql.ErrConnDone) || errors.Is(err, gorm.ErrInvalidDB)
+}
+
+func isDatabaseIssueMessage(message string) bool {
+	indicators := []string{
+		"build history not available",
+		"database unavailable",
+		"database is closed",
+		"driver: bad connection",
+		"bad connection",
+		"sqlstate",
+		"sql:",
+		"dial tcp",
+		"connection refused",
+		"connection reset",
+		"broken pipe",
+		"server closed the connection unexpectedly",
+		"terminating connection",
+		"the database system is starting up",
+		"could not connect to server",
+		"connection exception",
+		"connection timed out",
+		"i/o timeout",
+		"no such host",
+		"timeout expired",
+	}
+	for _, indicator := range indicators {
+		if strings.Contains(message, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeMaintenanceWindow(message string) bool {
+	indicators := []string{
+		"maintenance",
+		"server closed the connection unexpectedly",
+		"terminating connection",
+		"the database system is starting up",
+		"connection reset",
+		"broken pipe",
+		"driver: bad connection",
+		"database is closed",
+	}
+	for _, indicator := range indicators {
+		if strings.Contains(message, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+func buildPlatformIssueResponse(err error, fallbackError string, fallbackDetails string) gin.H {
+	response := gin.H{
+		"error": fallbackError,
+	}
+	details := strings.TrimSpace(fallbackDetails)
+	if details == "" && err != nil {
+		details = strings.TrimSpace(err.Error())
+	}
+	if details != "" {
+		response["details"] = details
+	}
+
+	if issue := buildPlatformIssueFromError(err); issue != nil {
+		response["platform_issue"] = true
+		response["platform_service"] = issue.Service
+		response["platform_issue_type"] = issue.IssueType
+		response["platform_issue_summary"] = issue.Summary
+		response["retryable"] = issue.Retryable
+		response["maintenance_window"] = issue.MaintenanceWindow
+	}
+
+	return response
+}
+
+func retryBuildHistoryRead(operation string, fn func() error) error {
+	var lastErr error
+	for attempt := 0; attempt < 4; attempt++ {
+		lastErr = fn()
+		if lastErr == nil || errors.Is(lastErr, gorm.ErrRecordNotFound) {
+			return lastErr
+		}
+		if buildPlatformIssueFromError(lastErr) == nil {
+			return lastErr
+		}
+		if attempt == 3 {
+			return lastErr
+		}
+		time.Sleep(time.Duration(attempt+1) * 150 * time.Millisecond)
+	}
+
+	if lastErr != nil {
+		log.Printf("build history read %s exhausted retries: %v", operation, lastErr)
+	}
+	return lastErr
+}
+
+func writeBuildLookupError(c *gin.Context, err error, fallbackErr error) {
+	lookupErr := err
+	if lookupErr == nil {
+		lookupErr = fallbackErr
+	}
+	if buildPlatformIssueFromError(lookupErr) != nil {
+		c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(lookupErr, "build session unavailable", "The build state could not be loaded because a platform service is temporarily unavailable."))
+		return
+	}
+	c.JSON(http.StatusNotFound, gin.H{
+		"error":   "build not found",
+		"details": fallbackErr.Error(),
+	})
 }
 
 // PreflightCheck validates provider credentials and billing status before a build.
@@ -478,11 +645,12 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		return
 	}
 
-	if err != nil || snapshot == nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":   "build not found",
-			"details": err.Error(),
-		})
+	if err != nil {
+		writeBuildLookupError(c, err, err)
+		return
+	}
+	if snapshot == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
 		return
 	}
 
@@ -595,10 +763,7 @@ func writeBuildActionSessionError(c *gin.Context, err error) {
 			"details": "Only active builds can be controlled or reviewed",
 		})
 	default:
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error":   "build session unavailable",
-			"details": err.Error(),
-		})
+		c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(err, "build session unavailable", err.Error()))
 	}
 }
 
@@ -764,11 +929,12 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 		return
 	}
 
-	if err != nil || snapshot == nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":   "build not found",
-			"details": err.Error(),
-		})
+	if err != nil {
+		writeBuildLookupError(c, err, err)
+		return
+	}
+	if snapshot == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
 		return
 	}
 
@@ -862,19 +1028,13 @@ func (h *BuildHandler) SendMessage(c *gin.Context) {
 	if err != nil {
 		snapshot, snapErr := h.getBuildSnapshot(uid, buildID)
 		if snapErr != nil {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error":   "build not found",
-				"details": err.Error(),
-			})
+			writeBuildLookupError(c, snapErr, err)
 			return
 		}
 
 		build, restoredSession, err = h.manager.restoreBuildSessionFromSnapshot(snapshot)
 		if err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"error":   "build session unavailable",
-				"details": err.Error(),
-			})
+			c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(err, "build session unavailable", err.Error()))
 			return
 		}
 	}
@@ -983,7 +1143,7 @@ func (h *BuildHandler) GetMessages(c *gin.Context) {
 
 	snapshot, err := h.getBuildSnapshot(uid, buildID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		writeBuildLookupError(c, err, err)
 		return
 	}
 
@@ -1027,7 +1187,7 @@ func (h *BuildHandler) GetPermissions(c *gin.Context) {
 
 	snapshot, err := h.getBuildSnapshot(uid, buildID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
+		writeBuildLookupError(c, err, err)
 		return
 	}
 
@@ -1236,10 +1396,7 @@ func (h *BuildHandler) GetCheckpoints(c *gin.Context) {
 
 	snapshot, snapErr := h.getBuildSnapshot(uid, buildID)
 	if snapErr != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":   "build not found",
-			"details": err.Error(),
-		})
+		writeBuildLookupError(c, snapErr, err)
 		return
 	}
 
@@ -1270,6 +1427,9 @@ func (h *BuildHandler) RollbackCheckpoint(c *gin.Context) {
 				"error":   "rollback unavailable",
 				"details": "Rollback is only supported for active live builds",
 			})
+			return
+		} else if buildPlatformIssueFromError(snapErr) != nil {
+			writeBuildLookupError(c, snapErr, err)
 			return
 		}
 		c.JSON(http.StatusNotFound, gin.H{
@@ -1335,10 +1495,7 @@ func (h *BuildHandler) GetAgents(c *gin.Context) {
 
 	snapshot, snapErr := h.getBuildSnapshot(uid, buildID)
 	if snapErr != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":   "build not found",
-			"details": err.Error(),
-		})
+		writeBuildLookupError(c, snapErr, err)
 		return
 	}
 
@@ -1388,10 +1545,7 @@ func (h *BuildHandler) GetTasks(c *gin.Context) {
 
 	snapshot, snapErr := h.getBuildSnapshot(uid, buildID)
 	if snapErr != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":   "build not found",
-			"details": err.Error(),
-		})
+		writeBuildLookupError(c, snapErr, err)
 		return
 	}
 
@@ -1445,10 +1599,7 @@ func (h *BuildHandler) GetGeneratedFiles(c *gin.Context) {
 
 	snapshot, snapErr := h.getBuildSnapshot(uid, buildID)
 	if snapErr != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":   "build not found",
-			"details": err.Error(),
-		})
+		writeBuildLookupError(c, snapErr, err)
 		return
 	}
 
@@ -1472,6 +1623,10 @@ func (h *BuildHandler) GetBuildArtifacts(c *gin.Context) {
 
 	manifest, live, err := h.loadArtifactManifestForUser(uid, buildID)
 	if err != nil {
+		if buildPlatformIssueFromError(err) != nil {
+			c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(err, "build artifacts unavailable", "The build artifacts could not be loaded because a platform service is temporarily unavailable."))
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{
 			"error":   "build not found",
 			"details": err.Error(),
@@ -1514,6 +1669,10 @@ func (h *BuildHandler) ApplyBuildArtifacts(c *gin.Context) {
 
 	manifest, live, err := h.loadArtifactManifestForUser(uid, buildID)
 	if err != nil {
+		if buildPlatformIssueFromError(err) != nil {
+			c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(err, "build artifacts unavailable", "The build artifacts could not be loaded because a platform service is temporarily unavailable."))
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{
 			"error":   "build not found",
 			"details": err.Error(),
@@ -1538,7 +1697,7 @@ func (h *BuildHandler) ApplyBuildArtifacts(c *gin.Context) {
 	var createdProject bool
 
 	if h.db == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database unavailable"})
+		c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(fmt.Errorf("database unavailable"), "database unavailable", "Project persistence is temporarily unavailable because the primary database is offline."))
 		return
 	}
 
@@ -1682,7 +1841,7 @@ func (h *BuildHandler) CancelBuild(c *gin.Context) {
 // GET /api/v1/builds
 func (h *BuildHandler) ListBuilds(c *gin.Context) {
 	if h.db == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "build history not available"})
+		c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(fmt.Errorf("build history not available"), "build history not available", "Build history is temporarily unavailable because the primary database is offline."))
 		return
 	}
 
@@ -1704,8 +1863,18 @@ func (h *BuildHandler) ListBuilds(c *gin.Context) {
 	var builds []models.CompletedBuild
 	var total int64
 
-	h.db.Model(&models.CompletedBuild{}).Where("user_id = ?", uid).Count(&total)
-	h.db.Where("user_id = ?", uid).Order("updated_at DESC").Offset(offset).Limit(limit).Find(&builds)
+	if err := retryBuildHistoryRead("list_builds_count", func() error {
+		return h.db.Model(&models.CompletedBuild{}).Where("user_id = ?", uid).Count(&total).Error
+	}); err != nil {
+		c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(err, "build history not available", "Build history is temporarily unavailable because the primary database is offline."))
+		return
+	}
+	if err := retryBuildHistoryRead("list_builds_page", func() error {
+		return h.db.Where("user_id = ?", uid).Order("updated_at DESC").Offset(offset).Limit(limit).Find(&builds).Error
+	}); err != nil {
+		c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(err, "build history not available", "Build history is temporarily unavailable because the primary database is offline."))
+		return
+	}
 
 	// Convert to response format (exclude raw files JSON, include file count)
 	type BuildSummary struct {
@@ -1774,7 +1943,7 @@ func (h *BuildHandler) ListBuilds(c *gin.Context) {
 // GET /api/v1/builds/:buildId
 func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 	if h.db == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "build history not available"})
+		c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(fmt.Errorf("build history not available"), "build history not available", "Completed build details are temporarily unavailable because the primary database is offline."))
 		return
 	}
 
@@ -1786,7 +1955,13 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 	buildID := c.Param("buildId")
 
 	var build models.CompletedBuild
-	if err := h.db.Where("build_id = ? AND user_id = ?", buildID, uid).First(&build).Error; err != nil {
+	if err := retryBuildHistoryRead("get_completed_build", func() error {
+		return h.db.Where("build_id = ? AND user_id = ?", buildID, uid).First(&build).Error
+	}); err != nil {
+		if buildPlatformIssueFromError(err) != nil {
+			c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(err, "build history not available", "Completed build details are temporarily unavailable because the primary database is offline."))
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
 		return
 	}
@@ -1846,7 +2021,7 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 // GET /api/v1/builds/:buildId/download
 func (h *BuildHandler) DownloadCompletedBuild(c *gin.Context) {
 	if h.db == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "build history not available"})
+		c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(fmt.Errorf("build history not available"), "build history not available", "Build download is temporarily unavailable because the primary database is offline."))
 		return
 	}
 
@@ -1857,7 +2032,13 @@ func (h *BuildHandler) DownloadCompletedBuild(c *gin.Context) {
 	buildID := c.Param("buildId")
 
 	var build models.CompletedBuild
-	if err := h.db.Where("build_id = ? AND user_id = ?", buildID, uid).First(&build).Error; err != nil {
+	if err := retryBuildHistoryRead("download_completed_build", func() error {
+		return h.db.Where("build_id = ? AND user_id = ?", buildID, uid).First(&build).Error
+	}); err != nil {
+		if buildPlatformIssueFromError(err) != nil {
+			c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(err, "build history not available", "Build download is temporarily unavailable because the primary database is offline."))
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "build not found"})
 		return
 	}

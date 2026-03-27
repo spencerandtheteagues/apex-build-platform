@@ -166,6 +166,14 @@ interface AIThought {
   timestamp: Date
 }
 
+interface BuildPlatformIssueContext {
+  service?: string
+  issueType?: string
+  summary?: string
+  retryable?: boolean
+  maintenanceWindow?: boolean
+}
+
 interface BuildState {
   id: string
   status: 'idle' | 'pending' | 'planning' | 'in_progress' | 'testing' | 'reviewing' | 'awaiting_review' | 'completed' | 'failed' | 'cancelled'
@@ -199,6 +207,7 @@ interface BuildState {
   failureFingerprints?: BuildFailureFingerprintState[]
   truthBySurface?: Record<string, string[]>
   interaction?: ApiBuildInteractionState
+  platformIssue?: BuildPlatformIssueContext
 }
 
 type BuildWorkspaceView = 'overview' | 'activity' | 'files' | 'timeline' | 'issues' | 'diagnostics' | 'console'
@@ -243,6 +252,21 @@ const ACTIVE_BUILD_STORAGE_KEY = 'apex_active_build_id'
 const LAST_WORKFLOW_BUILD_STORAGE_KEY = 'apex_last_workflow_build_id'
 const BUILD_TELEMETRY_STORAGE_KEY = 'apex_build_telemetry_cache'
 const DEFAULT_RESTART_FAILED_MESSAGE = 'Restart the failed build from the last workable state, keep the valid work, fix the failure, and continue until the app is runnable.'
+
+const extractPlatformIssue = (source: any): BuildPlatformIssueContext | undefined => {
+  const payload = source?.response?.data ?? source
+  if (!payload || payload.platform_issue !== true) {
+    return undefined
+  }
+
+  return {
+    service: typeof payload.platform_service === 'string' ? payload.platform_service : undefined,
+    issueType: typeof payload.platform_issue_type === 'string' ? payload.platform_issue_type : undefined,
+    summary: typeof payload.platform_issue_summary === 'string' ? payload.platform_issue_summary : undefined,
+    retryable: typeof payload.retryable === 'boolean' ? payload.retryable : undefined,
+    maintenanceWindow: payload.maintenance_window === true,
+  }
+}
 
 const BUILD_WORKFLOW_STAGE_DEFS = [
   {
@@ -1951,9 +1975,74 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     })
   }, [buildState?.status, currentWorkflowStageIndex, workflowStageDefs])
   const currentWorkflowStage = workflowStages[currentWorkflowStageIndex] || workflowStages[0]
+  const impactedPlatformServices = useMemo(() => {
+    if (!platformReadiness || platformReadiness.status === 'healthy') {
+      return []
+    }
+
+    return (platformReadiness.services || [])
+      .filter(service => service.state !== 'ready')
+      .slice()
+      .sort((left, right) => {
+        const weight = (tier: string) => tier === 'critical' ? 0 : 1
+        if (weight(left.tier) !== weight(right.tier)) {
+          return weight(left.tier) - weight(right.tier)
+        }
+        return left.name.localeCompare(right.name)
+      })
+  }, [platformReadiness])
+  const buildFailureAttribution = useMemo(() => {
+    if (buildState?.status !== 'failed') {
+      return null
+    }
+
+    const issue = buildState.platformIssue
+    const primaryService = issue?.service
+      ? impactedPlatformServices.find(service => service.name === issue.service) || impactedPlatformServices[0]
+      : impactedPlatformServices[0]
+
+    if (!issue && !primaryService) {
+      return null
+    }
+
+    const serviceName = issue?.service || primaryService?.name
+    const maintenanceWindow = issue?.maintenanceWindow === true || issue?.issueType === 'platform_maintenance'
+    let title = maintenanceWindow ? 'Build paused by platform maintenance' : 'This failure may be platform-related'
+    let body = issue?.summary || 'A platform interruption may have stopped this build before the current section completed.'
+    let detail = issue?.retryable === false
+      ? 'Open diagnostics before retrying so the underlying platform issue can be understood.'
+      : 'The generated app work may still be valid. Retry once platform health returns, or open diagnostics for the captured build error.'
+
+    switch (serviceName) {
+      case 'primary_database':
+        body = issue?.summary || 'Primary database connectivity dropped while the build was running. Build recovery, history reads, and status sync can fail even when the generated app code is still intact.'
+        detail = maintenanceWindow
+          ? 'This usually clears after the platform finishes reconnecting the database. Retry the build once the maintenance window ends.'
+          : 'Retry after database connectivity returns, then reopen the build or request a restart from the last healthy checkpoint.'
+        break
+      case 'redis_cache':
+        title = maintenanceWindow ? 'Live build timing affected by platform maintenance' : 'Live build timing may be platform-related'
+        body = issue?.summary || 'Redis connectivity is degraded. Live coordination can stall or look incomplete even when the generated files are still intact.'
+        detail = 'Build output may still be usable. Open Files or Diagnostics before assuming the app code itself is broken.'
+        break
+      default:
+        if (primaryService && primaryService.name !== serviceName) {
+          title = maintenanceWindow ? 'Build paused by platform maintenance' : 'This failure may be platform-related'
+        }
+        break
+    }
+
+    return {
+      title,
+      body,
+      detail,
+      isCritical: serviceName !== 'redis_cache',
+      capturedError: buildState.errorMessage,
+    }
+  }, [buildState?.errorMessage, buildState?.platformIssue, buildState?.status, impactedPlatformServices])
   const primaryBuildUpdate = useMemo(() => {
     if (buildState?.status === 'failed') {
-      return buildState.errorMessage || 'The build stopped before the current section completed.'
+      return buildFailureAttribution?.body || buildState.errorMessage || 'The build stopped before the current section completed.'
     }
     if (buildPaused) {
       return 'The build is paused. Resume it or leave a planner note to change direction.'
@@ -1972,6 +2061,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     buildPaused,
     buildState?.errorMessage,
     buildState?.status,
+    buildFailureAttribution?.body,
     currentWorkflowStage?.description,
     liveTasks,
     pendingPermissionRequests.length,
@@ -2085,6 +2175,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     workflowStages.length,
   ])
   const hasIssueViewContent = Boolean(
+    buildFailureAttribution ||
     visibleBlockers.length > 0 ||
     buildState?.checkpoints.length ||
     hasBuildControlsPanel ||
@@ -2128,21 +2219,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     createdProjectId
   )
   const platformReadinessNotice = useMemo(() => {
-    if (!platformReadiness || platformReadiness.status === 'healthy') {
+    if (buildState?.status === 'failed' || !platformReadiness || platformReadiness.status === 'healthy') {
       return null
     }
 
-    const impactedServices = (platformReadiness.services || [])
-      .filter(service => service.state !== 'ready')
-      .slice()
-      .sort((left, right) => {
-        const weight = (tier: string) => tier === 'critical' ? 0 : 1
-        if (weight(left.tier) !== weight(right.tier)) {
-          return weight(left.tier) - weight(right.tier)
-        }
-        return left.name.localeCompare(right.name)
-      })
-
+    const impactedServices = impactedPlatformServices
     if (impactedServices.length === 0) {
       return null
     }
@@ -2178,7 +2259,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       detail,
       isCritical,
     }
-  }, [platformReadiness])
+  }, [buildState?.status, impactedPlatformServices, platformReadiness])
 
   const resetBuilderState = useCallback((options?: { clearPrompt?: boolean }) => {
     isBuildingRef.current = false
@@ -3875,9 +3956,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
   ) => {
     let payload: any
+    let loadPlatformIssue: BuildPlatformIssueContext | undefined
     try {
       payload = await apiService.getBuildDetails(buildId)
-    } catch {
+    } catch (error) {
+      loadPlatformIssue = extractPlatformIssue(error)
       const fallback = options?.fallbackDetail || await apiService.getCompletedBuild(buildId)
       payload = {
         id: fallback.build_id,
@@ -3997,6 +4080,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       failureFingerprints: Array.isArray(payload.failure_fingerprints) ? payload.failure_fingerprints : [],
       truthBySurface: payload.truth_by_surface || payload.promotion_decision?.truth_by_surface || payload.build_contract?.truth_by_surface,
       errorMessage: extractBuildFailureReason(payload),
+      platformIssue: extractPlatformIssue(payload) || loadPlatformIssue,
       websocketUrl: typeof payload.websocket_url === 'string' ? payload.websocket_url : undefined,
       liveSession: liveSessionAvailable,
       artifactRevision: typeof payload.artifact_revision === 'string' ? payload.artifact_revision : undefined,
@@ -4111,7 +4195,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         fallbackDetail: completed,
       })
     } catch (error) {
-      addSystemMessage('Failed to open build. Please try again.')
+      const platformIssue = extractPlatformIssue(error)
+      addSystemMessage(platformIssue?.summary || 'Failed to open build. Please try again.')
     }
   }
 
@@ -5613,6 +5698,45 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                         <div className="mt-2 text-sm leading-relaxed text-gray-200">{primaryBuildUpdate}</div>
                       </div>
 
+                      {buildFailureAttribution && (
+                        <div className={cn(
+                          'rounded-xl border px-4 py-4',
+                          buildFailureAttribution.isCritical
+                            ? 'border-red-500/35 bg-red-950/15'
+                            : 'border-amber-500/35 bg-amber-950/15'
+                        )}>
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <div className="text-xs uppercase tracking-[0.18em] text-gray-400">Failure Context</div>
+                              <div className="mt-2 text-base font-semibold text-white">{buildFailureAttribution.title}</div>
+                              <div className="mt-2 text-sm leading-relaxed text-gray-200">{buildFailureAttribution.body}</div>
+                              <div className="mt-2 text-xs leading-relaxed text-gray-400">{buildFailureAttribution.detail}</div>
+                              {buildFailureAttribution.capturedError && (
+                                <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-3 text-xs leading-relaxed text-gray-300">
+                                  Captured build error: {buildFailureAttribution.capturedError}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex shrink-0 gap-2">
+                              <Button
+                                variant="outline"
+                                onClick={() => setBuildWorkspaceView('issues')}
+                                className="border-gray-700 bg-black/20 text-gray-200 hover:border-gray-500 hover:bg-gray-900/70"
+                              >
+                                Open Issues
+                              </Button>
+                              <Button
+                                variant="outline"
+                                onClick={() => setBuildWorkspaceView('diagnostics')}
+                                className="border-gray-700 bg-black/20 text-gray-200 hover:border-gray-500 hover:bg-gray-900/70"
+                              >
+                                Diagnostics
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {platformReadinessNotice && (
                         <div className={cn(
                           'rounded-xl border px-4 py-4',
@@ -6033,6 +6157,34 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 </Card>
               )}
 
+              {buildWorkspaceView === 'issues' && buildFailureAttribution && (
+                <Card variant="cyberpunk" className="border-2 border-amber-900/40 bg-black/60 backdrop-blur-sm">
+                  <CardHeader className="pb-4 border-b border-amber-900/20">
+                    <CardTitle className="text-xl flex items-center gap-3">
+                      <AlertCircle className="w-7 h-7 text-amber-300" />
+                      Failure Context
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-5">
+                    <div className={cn(
+                      'rounded-xl border px-4 py-4',
+                      buildFailureAttribution.isCritical
+                        ? 'border-red-500/30 bg-red-950/20'
+                        : 'border-amber-500/30 bg-amber-950/20'
+                    )}>
+                      <div className="text-sm font-semibold text-white">{buildFailureAttribution.title}</div>
+                      <div className="mt-2 text-sm leading-relaxed text-gray-200">{buildFailureAttribution.body}</div>
+                      <div className="mt-3 text-xs leading-relaxed text-gray-400">{buildFailureAttribution.detail}</div>
+                      {buildFailureAttribution.capturedError && (
+                        <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-3 text-xs leading-relaxed text-gray-300">
+                          Captured build error: {buildFailureAttribution.capturedError}
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {buildWorkspaceView === 'diagnostics' && (
                 <OrchestrationOverview
                   buildStatus={buildState.status}
@@ -6283,7 +6435,24 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   </div>
                 </CardHeader>
                 <CardContent className="flex-1 flex flex-col overflow-hidden p-5">
-                  {buildState.status === 'failed' && buildState.errorMessage && (
+                  {buildState.status === 'failed' && buildFailureAttribution && (
+                    <div className={cn(
+                      'mb-4 rounded-lg border px-4 py-3',
+                      buildFailureAttribution.isCritical
+                        ? 'border-red-500/40 bg-red-950/30 text-red-100'
+                        : 'border-amber-500/40 bg-amber-950/25 text-amber-100'
+                    )}>
+                      <div className="text-sm font-semibold">{buildFailureAttribution.title}</div>
+                      <div className="mt-2 text-sm leading-relaxed">{buildFailureAttribution.body}</div>
+                      <div className="mt-2 text-xs leading-relaxed text-gray-300">{buildFailureAttribution.detail}</div>
+                      {buildFailureAttribution.capturedError && (
+                        <div className="mt-3 text-xs text-gray-200">
+                          Captured build error: {buildFailureAttribution.capturedError}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {buildState.status === 'failed' && !buildFailureAttribution && buildState.errorMessage && (
                     <div className="mb-4 rounded-lg border border-red-500/40 bg-red-950/30 px-4 py-3 text-sm text-red-200">
                       Failure reason: {buildState.errorMessage}
                     </div>

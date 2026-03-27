@@ -51,6 +51,7 @@ func testRouter(am *AgentManager) *gin.Engine {
 	build.GET("/:id", h.GetBuildDetails)
 	build.GET("/:id/status", h.GetBuildStatus)
 	rg := r.Group("/api/v1", auth)
+	rg.GET("/builds", h.ListBuilds)
 	rg.GET("/builds/:buildId", h.GetCompletedBuild)
 	rg.GET("/builds/:buildId/download", h.DownloadCompletedBuild)
 	return r
@@ -1770,5 +1771,135 @@ func TestStartBuildRejectsWhenNoProviderConfigured(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &respBody)
 	if respBody["error_code"] != "NO_PROVIDER" {
 		t.Fatalf("expected error_code=NO_PROVIDER, got %v", respBody["error_code"])
+	}
+}
+
+func TestListBuildsReturnsPlatformIssueWhenDatabaseUnavailable(t *testing.T) {
+	db := openBuildTestDB(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("sql db: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	am := &AgentManager{db: db}
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/builds", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response["platform_issue"] != true {
+		t.Fatalf("expected platform_issue=true, got %v", response["platform_issue"])
+	}
+	if response["platform_service"] != "primary_database" {
+		t.Fatalf("expected primary_database service, got %v", response["platform_service"])
+	}
+	if response["retryable"] != true {
+		t.Fatalf("expected retryable=true, got %v", response["retryable"])
+	}
+}
+
+func TestGetCompletedBuildReturnsPlatformIssueWhenDatabaseUnavailable(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "completed-build-db-outage",
+		UserID:      1,
+		Description: "Completed build during maintenance",
+		Status:      string(BuildCompleted),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		FilesJSON:   "[]",
+	}).Error; err != nil {
+		t.Fatalf("create build: %v", err)
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("sql db: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	am := &AgentManager{db: db}
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/builds/completed-build-db-outage", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response["platform_issue"] != true {
+		t.Fatalf("expected platform_issue=true, got %v", response["platform_issue"])
+	}
+	if response["platform_service"] != "primary_database" {
+		t.Fatalf("expected primary_database service, got %v", response["platform_service"])
+	}
+}
+
+func TestSendMessageReturnsPlatformIssueWhenSnapshotLookupFails(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "message-db-outage",
+		UserID:      1,
+		Description: "Snapshot exists but database drops during restart",
+		Status:      string(BuildFailed),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		FilesJSON:   "[]",
+	}).Error; err != nil {
+		t.Fatalf("create build: %v", err)
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("sql db: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"content": "Restart from the last healthy checkpoint.",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/message-db-outage/message", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response["platform_issue"] != true {
+		t.Fatalf("expected platform_issue=true, got %v", response["platform_issue"])
+	}
+	if response["platform_service"] != "primary_database" {
+		t.Fatalf("expected primary_database service, got %v", response["platform_service"])
 	}
 }

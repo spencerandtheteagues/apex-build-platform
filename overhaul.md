@@ -378,6 +378,53 @@ Commit hash:
 - local `7aabc26`
 - published remote `e14ca56` via GitHub connector
 
+### 2026-03-26 (maintenance-aware build failure attribution + build-history retry pass)
+
+Completed:
+
+- Normalized build-session and build-history failures so primary database interruptions no longer masquerade as `404 build not found` or generic unclassified `503` responses.
+- Added structured build error metadata for platform-originated outages:
+  - `platform_issue`
+  - `platform_service`
+  - `platform_issue_type`
+  - `platform_issue_summary`
+  - `retryable`
+  - `maintenance_window`
+- Added bounded retry/backoff for build-history reads so transient database reconnect windows have a chance to recover before the UI shows an outage.
+- Hardened these build surfaces against temporary database interruptions:
+  - build details / status restore reads
+  - restart / message restore path
+  - build history list
+  - completed build detail
+  - completed build download
+  - artifact reads / apply path
+  - snapshot-backed messages, permissions, checkpoints, tasks, agents, and files
+- Tightened the builder failure UX so failed builds can be framed as platform-related when runtime health is degraded instead of always reading like app-code failure.
+- Added compact `Failure Context` cards in `Overview`, `Issues`, and `Console` so the user can quickly tell:
+  - whether the failure is likely platform-related
+  - which platform service is implicated
+  - whether the failure is retryable
+  - what the captured build error was
+
+Files changed:
+
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+- `frontend/src/components/builder/AppBuilder.tsx`
+- `frontend/src/components/builder/AppBuilder.test.tsx`
+
+Verification completed:
+
+- `cd frontend && npm run test -- --run src/components/builder/AppBuilder.test.tsx`
+- `cd frontend && npm run lint`
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run build`
+- `cd frontend && npm run test -- --run`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestListBuildsReturnsPlatformIssueWhenDatabaseUnavailable|TestGetCompletedBuildReturnsPlatformIssueWhenDatabaseUnavailable|TestSendMessageReturnsPlatformIssueWhenSnapshotLookupFails|TestGetBuildDetailsMarksRestoredTerminalBuildAsNotLive|TestRestartFailedBuildRestoresSnapshotAndQueuesRevision'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

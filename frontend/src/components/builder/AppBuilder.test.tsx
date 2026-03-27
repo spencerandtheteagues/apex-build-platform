@@ -501,6 +501,44 @@ describe('AppBuilder control surface', () => {
     expect(screen.getByRole('button', { name: /open issues/i })).toBeTruthy()
   })
 
+  it('frames failed builds as platform-related when critical runtime services are degraded', async () => {
+    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'failed-build-123')
+    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'failed' })
+    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      id: 'failed-build-123',
+      build_id: 'failed-build-123',
+      status: 'failed',
+      progress: 88,
+      live: false,
+      error: 'Build session unavailable',
+    }))
+    ;(apiService.featureReadiness as any).mockResolvedValue({
+      phase: 'failed',
+      status: 'failed',
+      ready: false,
+      degraded_features: [],
+      services: [
+        {
+          name: 'primary_database',
+          tier: 'critical',
+          state: 'failed',
+          summary: 'Primary database unavailable',
+        },
+      ],
+    })
+
+    render(<AppBuilder />)
+
+    await screen.findByText(/This failure may be platform-related/i)
+    expect(screen.getAllByText(/Primary database connectivity dropped while the build was running/i).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Captured build error: Build session unavailable/i)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /console/i }))
+
+    await screen.findByText(/Planner Console/i)
+    expect(screen.getAllByText(/This failure may be platform-related/i).length).toBeGreaterThan(0)
+  })
+
   it('hides live agent and task panels for failed builds even if stale worker state is present', async () => {
     localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'failed-build-123')
     ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'failed' })
