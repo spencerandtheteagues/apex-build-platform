@@ -1084,6 +1084,8 @@ func TestSelectBuildScaffoldNewStacks(t *testing.T) {
 		wantID string
 	}{
 		{"react+express", TechStack{Frontend: "React", Backend: "Express"}, "fullstack/react-vite-express-ts"},
+		{"react18 frontend preview", TechStack{Frontend: "React 18", Styling: "Tailwind CSS"}, "frontend/react-vite-spa"},
+		{"react18+nodejs fullstack", TechStack{Frontend: "React 18", Backend: "Node.js + Express", Styling: "Tailwind CSS"}, "fullstack/react-vite-express-ts"},
 		{"react+go", TechStack{Frontend: "React", Backend: "Go"}, "fullstack/react-vite-go"},
 		{"react+python", TechStack{Frontend: "React", Backend: "Python"}, "fullstack/react-vite-fastapi"},
 		{"react+fastapi", TechStack{Frontend: "React", Backend: "FastAPI"}, "fullstack/react-vite-fastapi"},
@@ -1103,6 +1105,56 @@ func TestSelectBuildScaffoldNewStacks(t *testing.T) {
 				t.Errorf("selectBuildScaffold(%q) = %q, want %q", tt.name, scaffold.ID, tt.wantID)
 			}
 		})
+	}
+}
+
+func TestCreateBuildPlanFromPlanningBundlePulseBoardUsesFrontendScaffoldAndFrontendOwnership(t *testing.T) {
+	t.Parallel()
+
+	description := "Build a polished frontend-only client dashboard called PulseBoard using React 18, Vite, and Tailwind CSS with a responsive dark modern UI that works well in the preview pane, a dashboard home with KPI cards, trend widgets, an activity feed, and a highlighted primary action, a clients page with searchable cards, filters, empty states, and detail panels, a projects page with kanban-style status columns and clear progress visuals, a settings page with profile, notifications, and theme sections, realistic seed content in the UI so the preview feels complete immediately, strong loading, empty, and error states, reusable components and a clean file structure, and no backend, no database, and no fake API requirements in this free-tier preview pass."
+	plan := createBuildPlanFromPlanningBundle("build-pulseboard", description, nil, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "web",
+			TechStack: &autonomous.TechStack{
+				Frontend: "React 18",
+				Backend:  "none",
+				Database: "none",
+				Styling:  "Tailwind CSS",
+			},
+		},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-pulseboard",
+			EstimatedTime: 20 * time.Minute,
+			CreatedAt:     time.Now().UTC(),
+		},
+	})
+
+	if plan == nil {
+		t.Fatal("expected build plan")
+	}
+	if plan.TechStack.Frontend != "React" {
+		t.Fatalf("expected React frontend normalization, got %+v", plan.TechStack)
+	}
+	if plan.TechStack.Styling != "Tailwind" {
+		t.Fatalf("expected Tailwind styling normalization, got %+v", plan.TechStack)
+	}
+	if plan.ScaffoldID != "frontend/react-vite-spa" {
+		t.Fatalf("expected frontend scaffold, got %q", plan.ScaffoldID)
+	}
+	if wo := getBuildWorkOrder(plan, RoleFrontend); wo == nil {
+		t.Fatal("expected frontend work order")
+	} else {
+		if !pathAllowedByWorkOrder("src/App.tsx", wo) || !pathAllowedByWorkOrder("index.html", wo) || !pathAllowedByWorkOrder("vite.config.ts", wo) {
+			t.Fatalf("expected frontend work order to own Vite app shell files, got %+v", wo)
+		}
+		for _, forbidden := range wo.ForbiddenFiles {
+			if forbidden == "src/**" || forbidden == "index.html" || forbidden == "vite.config.ts" {
+				t.Fatalf("did not expect frontend shell files to be forbidden, got %+v", wo.ForbiddenFiles)
+			}
+		}
+	}
+	if wo := getBuildWorkOrder(plan, RoleBackend); wo != nil {
+		t.Fatalf("expected no backend work order for PulseBoard frontend-only plan, got %+v", wo)
 	}
 }
 

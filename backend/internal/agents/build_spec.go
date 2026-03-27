@@ -1099,8 +1099,8 @@ func deriveAcceptanceChecks(appType string, stack TechStack) []BuildAcceptanceCh
 }
 
 func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
-	frontend := strings.ToLower(stack.Frontend)
-	backend := strings.ToLower(stack.Backend)
+	frontend := strings.ToLower(canonicalFrontendName(stack.Frontend))
+	backend := strings.ToLower(canonicalBackendName(stack.Backend))
 
 	switch {
 	case frontend == "react" && (backend == "express" || backend == "node"):
@@ -2624,31 +2624,71 @@ func summarizeWorkOrder(role AgentRole, appType string, stack TechStack) string 
 }
 
 func canonicalFrontendName(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "none", "no frontend", "frontend only":
+	normalized := normalizeDetectionText(value)
+	switch {
+	case normalized == "":
 		return ""
-	case "react":
-		return "React"
-	case "vue":
-		return "Vue"
-	case "next.js", "next", "nextjs":
+	case containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("none"),
+		normalizeDetectionText("no frontend"),
+		normalizeDetectionText("frontend only"),
+	}):
+		return ""
+	case containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("next.js"),
+		normalizeDetectionText("next js"),
+		normalizeDetectionText("nextjs"),
+		normalizeDetectionText("next"),
+	}):
 		return "Next.js"
+	case containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("react"),
+	}):
+		return "React"
+	case containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("vue"),
+	}):
+		return "Vue"
 	default:
 		return strings.TrimSpace(value)
 	}
 }
 
 func canonicalBackendName(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "none", "no backend", "frontend only":
+	normalized := normalizeDetectionText(value)
+	switch {
+	case normalized == "":
 		return ""
-	case "node", "node.js", "express", "express.js":
+	case containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("none"),
+		normalizeDetectionText("no backend"),
+		normalizeDetectionText("frontend only"),
+	}):
+		return ""
+	case containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("express"),
+		normalizeDetectionText("express.js"),
+		normalizeDetectionText("node"),
+		normalizeDetectionText("node.js"),
+		normalizeDetectionText("node js"),
+	}):
 		return "Express"
-	case "go", "golang":
+	case containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("go"),
+		normalizeDetectionText("golang"),
+	}):
 		return "Go"
-	case "fastapi", "fast-api":
+	case containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("fastapi"),
+		normalizeDetectionText("fast api"),
+		normalizeDetectionText("fast-api"),
+	}):
 		return "FastAPI"
-	case "python", "django", "flask":
+	case containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("python"),
+		normalizeDetectionText("django"),
+		normalizeDetectionText("flask"),
+	}):
 		return "Python"
 	default:
 		return strings.TrimSpace(value)
@@ -2671,12 +2711,24 @@ func canonicalDatabaseName(value string) string {
 }
 
 func canonicalStylingName(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "none", "unstyled":
+	normalized := normalizeDetectionText(value)
+	switch {
+	case normalized == "":
 		return ""
-	case "tailwind", "tailwindcss":
+	case containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("none"),
+		normalizeDetectionText("unstyled"),
+	}):
+		return ""
+	case containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("tailwind"),
+		normalizeDetectionText("tailwind css"),
+		normalizeDetectionText("tailwindcss"),
+	}):
 		return "Tailwind"
-	case "css modules":
+	case containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("css modules"),
+	}):
 		return "CSS Modules"
 	default:
 		return strings.TrimSpace(value)

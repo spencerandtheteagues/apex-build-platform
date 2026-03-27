@@ -825,6 +825,27 @@ Verification completed:
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
 
+Date: 2026-03-27
+
+Change summary:
+
+- Re-ran the live free frontend canary after deploy and confirmed the next real blocker moved upstream into work-order ownership, not preview compilation.
+- Identified that planner stack labels like `React 18` and `Tailwind CSS` were not canonicalized before scaffold selection, causing frontend-only web builds to fall through to the default API scaffold.
+- Fixed scaffold selection to normalize versioned/framework-labeled frontend and backend stack strings before routing, so frontend-preview plans now keep the Vite SPA scaffold and truthful frontend ownership.
+- Added a regression for the exact `PulseBoard` canary prompt to ensure the frontend work order owns `src/**`, `index.html`, and `vite.config.ts`, and that no backend work order leaks into the free frontend-preview path.
+
+Files changed:
+
+- `backend/internal/agents/build_spec.go`
+- `backend/internal/agents/build_spec_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestSelectBuildScaffoldNewStacks|TestCreateBuildPlanFromPlanningBundlePulseBoardUsesFrontendScaffoldAndFrontendOwnership|TestCreateBuildPlanFromPlanningBundleHonorsStaticFrontendIntent|TestApplyBuildAssurancePolicyToPlanDowngradesFreeFullStackToFrontendPreview'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:
