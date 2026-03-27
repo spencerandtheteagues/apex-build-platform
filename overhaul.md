@@ -425,6 +425,35 @@ Verification completed:
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
 
+### 2026-03-26 (launch-readiness billing hardening pass)
+
+Completed:
+
+- Closed the Stripe billing portal return-path trust gap by forcing `return_url` to stay on the configured app origin in production and only allowing additional approved origins in non-production environments.
+- Normalized relative billing-portal return paths against the configured app URL so the browser no longer needs to send a full absolute URL back to the server.
+- Rejected placeholder Stripe plan price IDs before checkout session creation so half-configured billing environments fail clearly instead of surfacing opaque Stripe errors.
+- Rejected unknown subscription price IDs at the handler boundary so checkout requests can only target the server's real plan catalog.
+- Verified that live customer-facing pricing copy still matches the backend plan catalog after the hardening changes.
+
+Files changed:
+
+- `backend/internal/handlers/payments.go`
+- `backend/internal/handlers/payments_launch_test.go`
+- `backend/internal/payments/plans.go`
+- `backend/internal/payments/plans_test.go`
+- `frontend/src/components/billing/BillingSettings.tsx`
+
+Verification completed:
+
+- `cd frontend && npm run test -- --run src/components/billing/BillingSettings.test.tsx`
+- `cd frontend && npm run lint`
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run build`
+- `cd frontend && npm run test -- --run`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/handlers ./internal/payments`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

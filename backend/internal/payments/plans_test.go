@@ -45,3 +45,21 @@ func TestCreditPacksMatchPricingStructure(t *testing.T) {
 		}
 	}
 }
+
+func TestGetPlanByPriceIDRejectsPlaceholderDefaults(t *testing.T) {
+	if plan := GetPlanByPriceID("price_builder_monthly"); plan != nil {
+		t.Fatalf("expected placeholder Stripe price ID to be rejected, got %+v", plan)
+	}
+}
+
+func TestGetPlanByPriceIDAcceptsConfiguredLivePrice(t *testing.T) {
+	t.Setenv("STRIPE_PRICE_BUILDER_MONTHLY", "price_builder_live_123")
+
+	plan := GetPlanByPriceID("price_builder_live_123")
+	if plan == nil {
+		t.Fatal("expected configured Stripe price ID to resolve to a plan")
+	}
+	if plan.Type != PlanBuilder {
+		t.Fatalf("plan.Type = %q, want %q", plan.Type, PlanBuilder)
+	}
+}

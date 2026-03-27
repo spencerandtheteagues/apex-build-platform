@@ -274,7 +274,8 @@ export function BillingSettings() {
     setPortalLoading(true)
     setError(null)
     try {
-      const result = await apiService.createBillingPortalSession(window.location.href)
+      const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
+      const result = await apiService.createBillingPortalSession(returnPath)
       if (result.success && result.data?.portal_url) window.location.href = result.data.portal_url
       else setError(result.error || 'Failed to open billing portal.')
     } catch (err: any) {

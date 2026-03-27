@@ -10,11 +10,13 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"apex-build/internal/origins"
 	"apex-build/internal/payments"
 	"apex-build/pkg/models"
 
@@ -48,6 +50,58 @@ func isDuplicateInsertError(err error) bool {
 	return strings.Contains(message, "duplicate") || strings.Contains(message, "unique")
 }
 
+func configuredAppURL() string {
+	appURL := strings.TrimRight(os.Getenv("APP_URL"), "/")
+	if appURL == "" {
+		appURL = strings.TrimRight(os.Getenv("FRONTEND_URL"), "/")
+	}
+	if appURL == "" {
+		appURL = "https://apex-build.dev"
+	}
+	return appURL
+}
+
+func sanitizeBillingPortalReturnURL(raw string) (string, error) {
+	base, err := url.Parse(configuredAppURL())
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return "", errors.New("configured app url is invalid")
+	}
+
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", errors.New("invalid return url")
+	}
+	if parsed.User != nil {
+		return "", errors.New("invalid return url")
+	}
+
+	if parsed.IsAbs() {
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return "", errors.New("invalid return url")
+		}
+
+		baseOrigin := base.Scheme + "://" + base.Host
+		candidateOrigin := parsed.Scheme + "://" + parsed.Host
+		if candidateOrigin != baseOrigin {
+			if origins.IsProductionEnvironment() || !origins.IsAllowedOrigin(candidateOrigin) {
+				return "", errors.New("return url must stay on an approved app origin")
+			}
+		}
+
+		return parsed.String(), nil
+	}
+
+	if parsed.Host != "" || parsed.Scheme != "" {
+		return "", errors.New("invalid return url")
+	}
+
+	if parsed.Path == "" {
+		parsed.Path = "/"
+	}
+
+	return base.ResolveReference(parsed).String(), nil
+}
+
 // CreateCheckoutSession creates a Stripe checkout session for subscription
 // POST /api/v1/billing/checkout
 func (h *PaymentHandlers) CreateCheckoutSession(c *gin.Context) {
@@ -74,14 +128,26 @@ func (h *PaymentHandlers) CreateCheckoutSession(c *gin.Context) {
 		return
 	}
 
+	if payments.IsPlaceholderPriceID(req.PriceID) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "Billing is not configured for the selected plan yet",
+			"code":    "PLAN_NOT_CONFIGURED",
+		})
+		return
+	}
+
+	if payments.GetPlanByPriceID(req.PriceID) == nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid subscription plan",
+			"code":    "INVALID_PRICE_ID",
+		})
+		return
+	}
+
 	// Generate redirect URLs server-side from configured base URL
-	appURL := strings.TrimRight(os.Getenv("APP_URL"), "/")
-	if appURL == "" {
-		appURL = strings.TrimRight(os.Getenv("FRONTEND_URL"), "/")
-	}
-	if appURL == "" {
-		appURL = "https://apex-build.dev"
-	}
+	appURL := configuredAppURL()
 	successURL := appURL + "/billing?success=true"
 	cancelURL := appURL + "/billing?canceled=true"
 
@@ -540,6 +606,16 @@ func (h *PaymentHandlers) CreateBillingPortalSession(c *gin.Context) {
 		return
 	}
 
+	returnURL, err := sanitizeBillingPortalReturnURL(req.ReturnURL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "return_url must stay on an approved app origin",
+			"code":    "INVALID_RETURN_URL",
+		})
+		return
+	}
+
 	// Get user from database
 	var user models.User
 	if err := h.db.First(&user, userID).Error; err != nil {
@@ -571,7 +647,7 @@ func (h *PaymentHandlers) CreateBillingPortalSession(c *gin.Context) {
 	}
 
 	ctx := context.Background()
-	result, err := h.stripeService.CreateBillingPortalSession(ctx, user.StripeCustomerID, req.ReturnURL)
+	result, err := h.stripeService.CreateBillingPortalSession(ctx, user.StripeCustomerID, returnURL)
 	if err != nil {
 		log.Printf("Failed to create billing portal session: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -1128,13 +1204,7 @@ func (h *PaymentHandlers) PurchaseCredits(c *gin.Context) {
 	}
 
 	// Generate redirect URLs server-side
-	creditAppURL := strings.TrimRight(os.Getenv("APP_URL"), "/")
-	if creditAppURL == "" {
-		creditAppURL = strings.TrimRight(os.Getenv("FRONTEND_URL"), "/")
-	}
-	if creditAppURL == "" {
-		creditAppURL = "https://apex-build.dev"
-	}
+	creditAppURL := configuredAppURL()
 	creditSuccessURL := creditAppURL + "/billing?credits=success"
 	creditCancelURL := creditAppURL + "/billing?credits=canceled"
 

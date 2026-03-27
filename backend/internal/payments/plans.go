@@ -5,6 +5,7 @@ package payments
 
 import (
 	"os"
+	"strings"
 )
 
 // PlanType represents different subscription tiers
@@ -96,6 +97,28 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+var placeholderStripePriceIDs = map[string]struct{}{
+	"price_builder_monthly":    {},
+	"price_builder_annual":     {},
+	"price_pro_monthly":        {},
+	"price_pro_annual":         {},
+	"price_team_monthly":       {},
+	"price_team_annual":        {},
+	"price_enterprise_monthly": {},
+	"price_enterprise_annual":  {},
+}
+
+// IsPlaceholderPriceID reports whether a Stripe price ID is empty or still using
+// the repository's placeholder defaults instead of a configured live/test value.
+func IsPlaceholderPriceID(priceID string) bool {
+	trimmed := strings.TrimSpace(priceID)
+	if trimmed == "" {
+		return true
+	}
+	_, exists := placeholderStripePriceIDs[trimmed]
+	return exists
 }
 
 // GetAllPlans returns all available subscription plans
@@ -309,7 +332,7 @@ func GetPlanByType(planType PlanType) *Plan {
 
 // GetPlanByPriceID returns a plan by its Stripe price ID
 func GetPlanByPriceID(priceID string) *Plan {
-	if priceID == "" {
+	if IsPlaceholderPriceID(priceID) {
 		return nil
 	}
 
