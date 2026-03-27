@@ -44,6 +44,7 @@ func (am *AgentManager) executeStructuredPlanningTask(ctx context.Context, task 
 	if plan == nil {
 		return nil, fmt.Errorf("planner produced no build plan")
 	}
+	plan = applyBuildAssurancePolicyToPlan(build, plan)
 
 	return &TaskOutput{
 		Messages: []string{summarizeBuildPlan(plan)},

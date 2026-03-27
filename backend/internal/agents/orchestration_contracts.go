@@ -224,6 +224,7 @@ type BuildContract struct {
 	BuildID              string                      `json:"build_id"`
 	SpecHash             string                      `json:"spec_hash,omitempty"`
 	AppType              string                      `json:"app_type"`
+	DeliveryMode         string                      `json:"delivery_mode,omitempty"`
 	RoutePageMap         []ContractRoute             `json:"route_page_map,omitempty"`
 	BackendResourceMap   []ContractBackendResource   `json:"backend_resource_map,omitempty"`
 	APIContract          *BuildAPIContract           `json:"api_contract,omitempty"`
@@ -483,6 +484,7 @@ func compileBuildContractFromPlan(buildID string, intent *IntentBrief, plan *Bui
 		BuildID:             buildID,
 		SpecHash:            plan.SpecHash,
 		AppType:             firstNonEmpty(plan.AppType, intentAppType(intent)),
+		DeliveryMode:        strings.TrimSpace(plan.DeliveryMode),
 		RoutePageMap:        deriveContractRoutes(plan),
 		BackendResourceMap:  deriveBackendResources(plan),
 		APIContract:         cloneAPIContract(plan.APIContract),
@@ -551,6 +553,7 @@ func verifyAndNormalizeBuildContract(intent *IntentBrief, contract *BuildContrac
 			requiredCaps[cap] = true
 		}
 	}
+	frontendPreviewOnly := strings.EqualFold(strings.TrimSpace(corrected.DeliveryMode), "frontend_preview_only")
 
 	// Warn but don't block when API endpoints weren't pre-planned — they'll be generated from the spec.
 	if requiredCaps[CapabilityAPI] && (corrected.APIContract == nil || len(corrected.APIContract.Endpoints) == 0) {
@@ -570,10 +573,15 @@ func verifyAndNormalizeBuildContract(intent *IntentBrief, contract *BuildContrac
 		report.Blockers = append(report.Blockers, "database capability requested without app type or schema entities")
 	}
 	if requiredCaps[CapabilityDatabase] && len(corrected.DBSchemaContract) == 0 {
+		if frontendPreviewOnly {
+			report.Warnings = append(report.Warnings, "database-backed runtime is deferred to a later paid/full-stack pass; frontend preview mode stays truthful")
+		}
 		report.Warnings = append(report.Warnings, "database capability detected but no schema entities were pre-planned; schema will be derived during code generation")
 	}
 	if requiredCaps[CapabilityAuth] {
-		if corrected.AuthContract == nil || (!corrected.AuthContract.Required) {
+		if frontendPreviewOnly {
+			report.Warnings = append(report.Warnings, "auth/runtime capability is deferred in frontend-preview-only mode")
+		} else if corrected.AuthContract == nil || (!corrected.AuthContract.Required) {
 			report.Blockers = append(report.Blockers, "auth capability requested without an auth contract")
 		} else if corrected.AuthContract.CallbackStrategy == "" &&
 			corrected.AuthContract.SessionStrategy == "" &&
@@ -581,10 +589,12 @@ func verifyAndNormalizeBuildContract(intent *IntentBrief, contract *BuildContrac
 			report.Blockers = append(report.Blockers, "auth contract is missing callback/session/token strategy")
 		}
 	}
-	if requiredCaps[CapabilityBilling] && !contractHasEnvVar(corrected.EnvVarContract, "STRIPE", "BILLING") {
+	if requiredCaps[CapabilityBilling] && frontendPreviewOnly {
+		report.Warnings = append(report.Warnings, "billing/runtime capability is deferred in frontend-preview-only mode")
+	} else if requiredCaps[CapabilityBilling] && !contractHasEnvVar(corrected.EnvVarContract, "STRIPE", "BILLING") {
 		report.Blockers = append(report.Blockers, "billing capability requested without billing/env contract")
 	}
-	if requiresIntegrationSurface(corrected) && (corrected.APIContract == nil || corrected.APIContract.BackendPort == 0) {
+	if !frontendPreviewOnly && requiresIntegrationSurface(corrected) && (corrected.APIContract == nil || corrected.APIContract.BackendPort == 0) {
 		report.Blockers = append(report.Blockers, "frontend/backend integration requested without backend runtime contract")
 	}
 	if missingAcceptanceSurfaces(corrected.AcceptanceBySurface, corrected) {
@@ -1200,11 +1210,11 @@ func deriveAcceptanceSeed(appType string, capabilities []CapabilityRequirement, 
 	seed := []string{}
 	switch appType {
 	case "fullstack":
-		seed = append(seed, "frontend routes render", "backend API responds", "frontend/backend contract aligns")
+		seed = append(seed, "frontend routes render", "backend API responds", "frontend/backend contract aligns", "interactive preview serves the app")
 	case "api":
 		seed = append(seed, "API contract endpoints respond")
 	default:
-		seed = append(seed, "frontend renders and navigation works")
+		seed = append(seed, "frontend renders and navigation works", "interactive preview serves the app")
 	}
 	if requirePreview {
 		seed = append(seed, "preview build installs, compiles, and serves")

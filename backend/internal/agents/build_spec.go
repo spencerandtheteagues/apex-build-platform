@@ -90,6 +90,7 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 		ID:            uuid.New().String(),
 		BuildID:       buildID,
 		AppType:       appType,
+		DeliveryMode:  defaultDeliveryModeForAppType(appType),
 		TechStack:     stack,
 		Features:      features,
 		DataModels:    models,
@@ -118,6 +119,128 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 	}
 
 	return plan
+}
+
+func applyBuildAssurancePolicyToPlan(build *Build, plan *BuildPlan) *BuildPlan {
+	if build == nil || plan == nil || !buildRequiresStaticFrontendFallback(build) {
+		return plan
+	}
+
+	staticStack := plan.TechStack
+	if strings.TrimSpace(staticStack.Frontend) == "" {
+		staticStack.Frontend = "React"
+	}
+	if strings.TrimSpace(staticStack.Styling) == "" && strings.TrimSpace(staticStack.Frontend) != "" {
+		staticStack.Styling = "Tailwind"
+	}
+	staticStack.Backend = ""
+	staticStack.Database = ""
+
+	scaffold := selectBuildScaffold("web", staticStack)
+	ownership := buildOwnershipMap(scaffold)
+	acceptance := append([]BuildAcceptanceCheck(nil), scaffold.Acceptance...)
+	acceptance = append(acceptance, deriveAcceptanceChecks("web", staticStack)...)
+	acceptance = append(acceptance,
+		BuildAcceptanceCheck{
+			ID:          "frontend-preview-guarantee",
+			Description: "Frontend must compile into a usable interactive preview that matches the requested product surface within frontend-only scope",
+			Owner:       RoleFrontend,
+			Required:    true,
+		},
+		BuildAcceptanceCheck{
+			ID:          "tier-honesty-contract",
+			Description: "Architecture must record any deferred backend/data/runtime contract honestly so a paid follow-up can wire it behind the shipped UI without redesigning the app",
+			Owner:       RoleArchitect,
+			Required:    true,
+		},
+	)
+
+	plan.AppType = "web"
+	plan.DeliveryMode = "frontend_preview_only"
+	plan.TechStack = staticStack
+	plan.Files = mergePlannedFiles(scaffold.Required, filterFrontendFallbackPlannedFiles(plan.Files)...)
+	plan.ScaffoldID = scaffold.ID
+	plan.ScaffoldFiles = scaffoldBootstrapFiles(scaffold, build.Description, staticStack)
+	plan.Ownership = ownership
+	plan.EnvVars = filterFrontendFallbackEnvVars(plan.EnvVars)
+	plan.Acceptance = dedupeAcceptanceChecks(acceptance)
+	plan.WorkOrders = buildWorkOrders("web", staticStack, scaffold, ownership, plan.Acceptance)
+	plan.APIContract = nil
+	plan.APIEndpoints = nil
+	plan.DataModels = nil
+	plan.SpecHash = hashBuildPlan(plan)
+
+	return plan
+}
+
+func defaultDeliveryModeForAppType(appType string) string {
+	switch strings.TrimSpace(strings.ToLower(appType)) {
+	case "fullstack":
+		return "full_stack_preview"
+	case "api":
+		return "api_runtime"
+	default:
+		return "frontend_preview"
+	}
+}
+
+func filterFrontendFallbackPlannedFiles(files []PlannedFile) []PlannedFile {
+	if len(files) == 0 {
+		return nil
+	}
+
+	out := make([]PlannedFile, 0, len(files))
+	for _, file := range files {
+		path := strings.TrimSpace(strings.ToLower(file.Path))
+		switch {
+		case path == "":
+			continue
+		case file.Type == "backend" || file.Type == "database":
+			continue
+		case strings.HasPrefix(path, "server/"),
+			strings.HasPrefix(path, "api/"),
+			strings.HasPrefix(path, "routers/"),
+			strings.HasPrefix(path, "models/"),
+			strings.HasPrefix(path, "services/"),
+			strings.HasPrefix(path, "middleware/"),
+			strings.HasPrefix(path, "handlers/"),
+			strings.HasPrefix(path, "internal/"),
+			strings.HasPrefix(path, "pkg/"),
+			strings.HasPrefix(path, "cmd/"),
+			strings.HasPrefix(path, "migrations/"),
+			strings.HasPrefix(path, "db/"),
+			strings.HasPrefix(path, "prisma/"),
+			strings.HasSuffix(path, "schema.sql"),
+			path == "go.mod",
+			path == "requirements.txt",
+			path == "main.go",
+			path == "main.py":
+			continue
+		default:
+			out = append(out, file)
+		}
+	}
+	return out
+}
+
+func filterFrontendFallbackEnvVars(envVars []BuildEnvVar) []BuildEnvVar {
+	if len(envVars) == 0 {
+		return nil
+	}
+
+	out := make([]BuildEnvVar, 0, len(envVars))
+	for _, env := range envVars {
+		name := strings.TrimSpace(strings.ToUpper(env.Name))
+		switch {
+		case name == "":
+			continue
+		case strings.HasPrefix(name, "VITE_"):
+			out = append(out, env)
+		case strings.Contains(name, "FRONTEND"):
+			out = append(out, env)
+		}
+	}
+	return out
 }
 
 func summarizeBuildPlan(plan *BuildPlan) string {
@@ -935,6 +1058,12 @@ func deriveAcceptanceChecks(appType string, stack TechStack) []BuildAcceptanceCh
 			Owner:       RoleFrontend,
 			Required:    true,
 		})
+		checks = append(checks, BuildAcceptanceCheck{
+			ID:          "frontend-preview",
+			Description: "Frontend must compile and serve cleanly in the interactive preview path",
+			Owner:       RoleFrontend,
+			Required:    true,
+		})
 	}
 	if stack.Backend != "" {
 		checks = append(checks, BuildAcceptanceCheck{
@@ -961,7 +1090,7 @@ func deriveAcceptanceChecks(appType string, stack TechStack) []BuildAcceptanceCh
 		})
 		checks = append(checks, BuildAcceptanceCheck{
 			ID:          "testing-vertical-slice",
-			Description: "Testing must verify the main vertical slice across frontend and backend boundaries",
+			Description: "Testing must verify the main vertical slice across frontend and backend boundaries, including preview readiness",
 			Owner:       RoleTesting,
 			Required:    true,
 		})
@@ -2447,12 +2576,14 @@ func requiredOutputsForRole(role AgentRole) []string {
 		return []string{
 			"Complete frontend files within owned paths",
 			"First usable UI shell aligned to the frozen contract",
+			"Preview-ready frontend experience that matches the requested product surface",
 			"No backend logic in UI files",
 		}
 	case RoleBackend:
 		return []string{
 			"Runnable backend entrypoint and routes",
 			"Backend implementation that satisfies the frozen UI/API contract",
+			"Preview-compatible runtime behavior for the full-stack vertical slice",
 			"No frontend JSX/UI ownership drift",
 		}
 	case RoleDatabase:
@@ -2465,7 +2596,7 @@ func requiredOutputsForRole(role AgentRole) []string {
 	case RoleReviewer:
 		return []string{"Concrete findings or explicit no-findings review"}
 	case RoleSolver:
-		return []string{"Minimal repair patch that restores verification"}
+		return []string{"Minimal repair patch that restores verification and preview readiness"}
 	default:
 		return nil
 	}

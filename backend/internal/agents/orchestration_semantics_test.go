@@ -182,6 +182,25 @@ func TestRefreshDerivedSnapshotStateLockedUpgradeRequiredBuildIncludesPlanAcknow
 			t.Fatalf("expected pending status for %s, got %s", kind, approval.Status)
 		}
 	}
+
+	if !build.SnapshotState.PolicyState.StaticFrontendOnly {
+		t.Fatalf("expected free upgrade-required build to retain static frontend fallback")
+	}
+
+	blockersByID := map[string]BuildBlocker{}
+	for _, blocker := range build.SnapshotState.Blockers {
+		blockersByID[blocker.ID] = blocker
+	}
+	upgradeBlocker, ok := blockersByID["plan-upgrade-required"]
+	if !ok {
+		t.Fatalf("expected plan-upgrade-required blocker")
+	}
+	if upgradeBlocker.Severity != BlockerSeverityWarning {
+		t.Fatalf("expected upgrade blocker to be downgraded to warning during static fallback, got %s", upgradeBlocker.Severity)
+	}
+	if !upgradeBlocker.PartialProgressAllowed {
+		t.Fatalf("expected static fallback to allow partial progress, got %+v", upgradeBlocker)
+	}
 }
 
 func TestBroadcastBuildProgressIncludesDerivedSemanticState(t *testing.T) {

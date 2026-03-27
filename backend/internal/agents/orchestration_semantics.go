@@ -145,12 +145,15 @@ func buildPolicyState(build *Build, capabilityState *BuildCapabilityState) *Buil
 
 	classification := BuildClassificationStaticReady
 	requiredPlan := ""
+	staticFrontendOnly := !isPaidBuildPlan(planType)
 	if requiresPaidFeatures {
 		if isPaidBuildPlan(planType) {
 			classification = BuildClassificationFullStackCandidate
+			staticFrontendOnly = false
 		} else {
 			classification = BuildClassificationUpgradeRequired
 			requiredPlan = "builder"
+			staticFrontendOnly = true
 		}
 	}
 
@@ -168,7 +171,7 @@ func buildPolicyState(build *Build, capabilityState *BuildCapabilityState) *Buil
 		UpgradeRequired:    classification == BuildClassificationUpgradeRequired,
 		UpgradeReason:      upgradeReason,
 		RequiredPlan:       requiredPlan,
-		StaticFrontendOnly: classification == BuildClassificationStaticReady,
+		StaticFrontendOnly: staticFrontendOnly,
 		FullStackEligible:  isPaidBuildPlan(planType),
 		PublishEnabled:     isPaidBuildPlan(planType),
 		BYOKEnabled:        isPaidBuildPlan(planType),
@@ -208,15 +211,23 @@ func deriveBuildBlockers(build *Build, policy *BuildPolicyState) []BuildBlocker 
 	}
 
 	if policy != nil && policy.UpgradeRequired {
+		severity := BlockerSeverityBlocking
+		summary := fmt.Sprintf("This request needs %s, which is locked on the %s plan.", firstNonEmptyString(policy.UpgradeReason, "paid capabilities"), firstNonEmptyString(policy.PlanType, "free"))
+		unblocksWith := "Upgrade to Builder or higher, or continue in honest static-only mode."
+		if policy.StaticFrontendOnly {
+			severity = BlockerSeverityWarning
+			summary = fmt.Sprintf("Paid runtime scope (%s) is deferred on the %s plan, but the build should still ship a frontend-only preview.", firstNonEmptyString(policy.UpgradeReason, "paid capabilities"), firstNonEmptyString(policy.PlanType, "free"))
+			unblocksWith = "Upgrade to Builder or higher to unlock backend/runtime delivery. The frontend-only preview can still continue now."
+		}
 		appendBlocker(BuildBlocker{
 			ID:                     "plan-upgrade-required",
 			Title:                  "Upgrade required for full-stack work",
 			Type:                   "plan_upgrade_required",
 			Category:               BlockerCategoryPlanTier,
-			Severity:               BlockerSeverityBlocking,
+			Severity:               severity,
 			WhoMustAct:             "user",
-			Summary:                fmt.Sprintf("This request needs %s, which is locked on the %s plan.", firstNonEmptyString(policy.UpgradeReason, "paid capabilities"), firstNonEmptyString(policy.PlanType, "free")),
-			UnblocksWith:           "Upgrade to Builder or higher, or continue in honest static-only mode.",
+			Summary:                summary,
+			UnblocksWith:           unblocksWith,
 			PartialProgressAllowed: true,
 			PlanTierRelated:        true,
 		})
@@ -449,7 +460,13 @@ func refreshDerivedTruthLocked(state *BuildOrchestrationState, capabilityState *
 			globalTags = append(globalTags, TruthPrototypeUIOnly)
 			frontendTags = append(frontendTags, TruthPrototypeUIOnly)
 		case BuildClassificationUpgradeRequired:
-			globalTags = append(globalTags, TruthUpgradeRequired, TruthBlocked)
+			globalTags = append(globalTags, TruthUpgradeRequired)
+			if policy.StaticFrontendOnly {
+				globalTags = append(globalTags, TruthPrototypeUIOnly)
+				frontendTags = append(frontendTags, TruthPrototypeUIOnly)
+			} else {
+				globalTags = append(globalTags, TruthBlocked)
+			}
 		}
 	}
 

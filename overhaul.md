@@ -8,6 +8,15 @@ Status: In progress
 
 Make the APEX build experience reliable, staged, compact, and easy to understand.
 
+## Build Assurance Mandate
+
+For APEX Build specifically, the standing goal is now:
+
+- Free users must always receive a prompt-matching frontend UI that runs in the interactive preview pane.
+- Paid users must always converge toward a completely working full-stack app that runs end-to-end in the interactive preview pane.
+- Full-stack delivery remains contract-first and frontend-first: freeze the backend/data contract early, land the UI shell early, then fill the runtime behind it.
+- The system should prefer truthful fallback, repair, retry, and provider recovery over preventable terminal build failure.
+
 The current workflow exposes too much internal orchestration detail, does not communicate the build path clearly, and does not recover failed builds reliably enough. The target state is a build system that:
 
 - builds in clear sections from `0%` to `100%`
@@ -633,6 +642,38 @@ Verification completed:
 - `cd frontend && npm run typecheck`
 - `cd frontend && npm run build`
 - `cd frontend && npm run test -- --run`
+
+### 2026-03-26 (build assurance mandate pass)
+
+Completed:
+
+- Added an explicit APEX Build assurance mandate to the orchestration layer so future planner, frontend, backend, reviewer, and solver prompts all optimize toward preview-ready delivery instead of only file generation.
+- Split delivery targeting by plan tier:
+  - free/static tiers now target a truthful frontend-only preview deliverable
+  - paid tiers now target a verified full-stack preview deliverable
+- Added a plan-level fallback that rewrites free-plan full-stack outputs into frontend-only React/Vite delivery plans instead of letting backend/database work orders proceed and fail dishonestly.
+- Added an explicit `delivery_mode` signal to the build plan and build contract so verification can distinguish intentional frontend-preview fallback from accidental missing backend work.
+- Relaxed contract verification for deferred auth/database/billing runtime only when the plan is explicitly in `frontend_preview_only` mode.
+- Changed free-plan upgrade blockers from hard-stop framing to warning framing when static frontend fallback is active, so the build can continue toward a truthful preview instead of reading as totally blocked.
+- Strengthened acceptance language so frontend preview readiness is part of the frozen build contract, not just an implied expectation.
+
+Files changed:
+
+- `backend/internal/agents/build_assurance.go`
+- `backend/internal/agents/build_assurance_test.go`
+- `backend/internal/agents/build_spec.go`
+- `backend/internal/agents/build_spec_test.go`
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/orchestration_contracts.go`
+- `backend/internal/agents/orchestration_semantics.go`
+- `backend/internal/agents/orchestration_semantics_test.go`
+- `backend/internal/agents/planning_contracts.go`
+- `backend/internal/agents/types.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyBuildAssurancePolicyToPlanDowngradesFreeFullStackToFrontendPreview|TestRefreshDerivedSnapshotStateLockedUpgradeRequiredBuildIncludesPlanAcknowledgement|TestGetSystemPromptIncludesBuildAssuranceMission|TestCreateBuildPlanFromPlanningBundleHonorsStaticFrontendIntent'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
 
 ## Logging Rules
 

@@ -10052,7 +10052,12 @@ func (am *AgentManager) RestartFailedBuildWithClientToken(buildID string, messag
 
 	restartMessage := strings.TrimSpace(message)
 	if restartMessage == "" {
-		restartMessage = "Restart the failed build from the last workable state, keep the valid work, fix the failure, and continue until the app is runnable."
+		restartMessage = "Restart the failed build from the last workable state, keep the valid work, fix the failure, and continue until the preview is runnable."
+		if buildRequiresStaticFrontendFallback(build) {
+			restartMessage += " On the current free/static plan, guarantee a prompt-matching frontend UI in preview and defer paid runtime scope honestly."
+		} else {
+			restartMessage += " Guarantee a fully working full-stack app in preview with the real backend/data contract."
+		}
 	}
 
 	now := time.Now().UTC()
@@ -11836,6 +11841,7 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 			interactionContext = "\n" + ctx + "\n"
 		}
 	}
+	assuranceContext := buildAssuranceTaskContext(build)
 
 	deliveryConstraintsContext := ""
 	if build != nil && am.isLocalDevStrictPreviewBuild(build) {
@@ -11932,10 +11938,12 @@ App being built: %s
 %s
 %s
 %s
+%s
 %s`,
 		task.Type,
 		task.Description,
 		appDescription,
+		assuranceContext,
 		techStackContext,
 		errorContext,
 		restartFailureContext,
@@ -12261,6 +12269,10 @@ ABSOLUTE RULES:
 
 	localStrictStackLock := ""
 	localStrictScopeHint := ""
+	assuranceContext := strings.TrimSpace(apexBuildAssuranceMission)
+	if len(build) > 0 && build[0] != nil {
+		assuranceContext = buildAssurancePromptContext(build[0])
+	}
 	if len(build) > 0 && build[0] != nil && am.isLocalDevStrictPreviewBuild(build[0]) {
 		localStrictStackLock = `
 
@@ -12291,7 +12303,7 @@ Summarize progress concisely. Coordinate agent outputs into a cohesive applicati
 FULL-STACK DELIVERY RULE:
 - Freeze the contract early, deliver the frontend/UI shell first, then fill backend and data behind that interface.
 - Keep user-facing updates in plain English.
-- At each major step, make it obvious what section is active now, what comes next, and whether anything is blocked.` + techHint + baseRules,
+- At each major step, make it obvious what section is active now, what comes next, and whether anything is blocked.` + "\n\n" + assuranceContext + techHint + baseRules,
 
 		RolePlanner: `You are the Planning Agent — an expert software architect who creates detailed, actionable build plans.
 Your job: decompose the app into a precise file-by-file implementation plan.
@@ -12328,7 +12340,7 @@ EXAMPLE OUTPUT FORMAT:
 - id: UUID (primary key)
 - email: string (unique, indexed)
 - passwordHash: string
-- createdAt: DateTime` + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
+- createdAt: DateTime` + "\n\n" + assuranceContext + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
 
 		RoleArchitect: `You are the Architect Agent — a senior systems architect who designs production-grade software architectures.
 Your job: make concrete technology decisions and produce a concise implementation blueprint for the coding agents.
@@ -12374,7 +12386,7 @@ env_vars:
   - PORT=3001
   (list all environment variables with example values)
 </api_contract>
-This contract will be shared with Frontend and Backend agents to ensure they connect correctly.` + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
+This contract will be shared with Frontend and Backend agents to ensure they connect correctly.` + "\n\n" + assuranceContext + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
 
 		RoleFrontend: `You are the Frontend Agent — an expert UI engineer who builds beautiful, responsive, production-ready interfaces.
 You specialize in modern React with TypeScript, Vite, and Tailwind CSS.
@@ -12439,7 +12451,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
 };
 ` + "```" + `
 
-Follow this pattern: complete types, complete handlers, complete JSX.` + techHint + baseRules,
+Follow this pattern: complete types, complete handlers, complete JSX.` + "\n\n" + assuranceContext + techHint + baseRules,
 
 		RoleBackend: `You are the Backend Agent — an expert API engineer who creates robust, secure server-side applications.
 You specialize in RESTful APIs, authentication, middleware, and data validation.
@@ -12487,7 +12499,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 ` + "```" + `
 
-Follow this pattern: validation, auth, error handling, proper status codes.` + techHint + baseRules,
+Follow this pattern: validation, auth, error handling, proper status codes.` + "\n\n" + assuranceContext + techHint + baseRules,
 
 		RoleDatabase: `You are the Database Agent — an expert data architect who designs efficient, normalized schemas.
 You specialize in relational database design, query optimization, and data integrity.
@@ -12526,7 +12538,7 @@ enum Role {
   USER
   ADMIN
 }
-` + "```" + `` + techHint + baseRules,
+` + "```" + `` + "\n\n" + assuranceContext + techHint + baseRules,
 
 		RoleTesting: `You are the Testing Agent — an expert QA engineer who writes comprehensive, executable tests.
 You specialize in unit tests, integration tests, and edge case coverage.
@@ -12572,7 +12584,7 @@ describe('AuthService', () => {
 });
 ` + "```" + `
 
-Follow this pattern: setup, happy path, error cases, edge cases, specific assertions.` + techHint + baseRules,
+Follow this pattern: setup, happy path, error cases, edge cases, specific assertions.` + "\n\n" + assuranceContext + techHint + baseRules,
 
 		RoleReviewer: `You are the Reviewer Agent — a senior code reviewer focused on production-readiness, security, and quality.
 You perform thorough code review and provide ACTIONABLE fixes, not just suggestions.
@@ -12613,7 +12625,7 @@ try {
 }
 ` + "```" + `
 
-Output COMPLETE fixes with before/after code. Not just descriptions.` + techHint + baseRules,
+Output COMPLETE fixes with before/after code. Not just descriptions.` + "\n\n" + assuranceContext + techHint + baseRules,
 
 		RoleSolver: `You are the Solver Agent — a senior incident response engineer for failed builds.
 Your job is to diagnose why a task failed, apply concrete fixes, and restore build health.
@@ -12625,7 +12637,7 @@ WORKFLOW:
 4. Keep patches minimal, deterministic, and production-ready
 5. If a fix needs follow-up validation, explicitly note test/review targets
 
-NEVER return vague advice only. Return concrete, corrected code/files.` + techHint + baseRules,
+NEVER return vague advice only. Return concrete, corrected code/files.` + "\n\n" + assuranceContext + techHint + baseRules,
 	}
 	return prompts[role]
 }

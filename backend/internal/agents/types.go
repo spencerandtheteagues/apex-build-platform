@@ -368,7 +368,7 @@ type BuildPolicyState struct {
 	BYOKEnabled        bool                     `json:"byok_enabled,omitempty"`
 	// MaxPowerMode is the highest power mode allowed for this plan tier.
 	// Free → PowerFast only; Builder → PowerBalanced; Pro/Team → PowerMax.
-	MaxPowerMode       PowerMode                `json:"max_power_mode,omitempty"`
+	MaxPowerMode PowerMode `json:"max_power_mode,omitempty"`
 }
 
 type BuildBlockerCategory string
@@ -556,6 +556,7 @@ type BuildPlan struct {
 	ID            string                 `json:"id"`
 	BuildID       string                 `json:"build_id"`
 	AppType       string                 `json:"app_type"` // web, api, fullstack, etc.
+	DeliveryMode  string                 `json:"delivery_mode,omitempty"`
 	TechStack     TechStack              `json:"tech_stack"`
 	Features      []Feature              `json:"features"`
 	DataModels    []DataModel            `json:"data_models"`

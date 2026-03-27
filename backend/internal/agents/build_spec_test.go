@@ -231,6 +231,99 @@ func TestCreateBuildPlanFromPlanningBundleIgnoresContradictoryPlannerBackendForS
 	}
 }
 
+func TestApplyBuildAssurancePolicyToPlanDowngradesFreeFullStackToFrontendPreview(t *testing.T) {
+	t.Parallel()
+
+	build := &Build{
+		ID:               "free-build",
+		UserID:           11,
+		SubscriptionPlan: "free",
+		Description:      "Build a full-stack CRM with auth, database-backed clients, projects, and reporting dashboards",
+		SnapshotState: BuildSnapshotState{
+			PolicyState: &BuildPolicyState{
+				PlanType:           "free",
+				Classification:     BuildClassificationUpgradeRequired,
+				UpgradeRequired:    true,
+				StaticFrontendOnly: true,
+				RequiredPlan:       "builder",
+			},
+		},
+	}
+
+	plan := createBuildPlanFromPlanningBundle("build-free-fallback", build.Description, nil, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "fullstack",
+			TechStack: &autonomous.TechStack{
+				Frontend: "React",
+				Backend:  "Node",
+				Database: "PostgreSQL",
+				Styling:  "Tailwind",
+			},
+		},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-free-fallback",
+			EstimatedTime: 25 * time.Minute,
+			CreatedAt:     time.Now().UTC(),
+			Steps: []*autonomous.PlanStep{
+				{ID: "frontend", ActionType: autonomous.ActionAIGenerate, Input: map[string]any{"type": "frontend"}},
+				{ID: "backend", ActionType: autonomous.ActionAIGenerate, Input: map[string]any{"type": "backend"}},
+				{ID: "data", ActionType: autonomous.ActionAIGenerate, Input: map[string]any{"type": "data_models"}},
+			},
+		},
+	})
+
+	plan = applyBuildAssurancePolicyToPlan(build, plan)
+	if plan == nil {
+		t.Fatal("expected plan")
+	}
+	if plan.AppType != "web" {
+		t.Fatalf("expected web app type after fallback, got %q", plan.AppType)
+	}
+	if plan.DeliveryMode != "frontend_preview_only" {
+		t.Fatalf("expected frontend preview delivery mode, got %q", plan.DeliveryMode)
+	}
+	if plan.TechStack.Backend != "" || plan.TechStack.Database != "" {
+		t.Fatalf("expected backend/database to be stripped, got %+v", plan.TechStack)
+	}
+	if plan.APIContract != nil {
+		t.Fatalf("expected no API contract in frontend-only fallback, got %+v", plan.APIContract)
+	}
+	if plan.ScaffoldID != "frontend/react-vite-spa" {
+		t.Fatalf("expected frontend scaffold after fallback, got %q", plan.ScaffoldID)
+	}
+	if wo := getBuildWorkOrder(plan, RoleBackend); wo != nil {
+		t.Fatalf("expected backend work order to be removed, got %+v", wo)
+	}
+	if wo := getBuildWorkOrder(plan, RoleDatabase); wo != nil {
+		t.Fatalf("expected database work order to be removed, got %+v", wo)
+	}
+
+	joinedFiles := make([]string, 0, len(plan.Files))
+	for _, file := range plan.Files {
+		joinedFiles = append(joinedFiles, file.Path)
+	}
+	if strings.Contains(strings.Join(joinedFiles, ","), "server/index.ts") || strings.Contains(strings.Join(joinedFiles, ","), "migrations/001_initial.sql") {
+		t.Fatalf("expected backend/database files to be removed, got %+v", joinedFiles)
+	}
+
+	intent := &IntentBrief{
+		AppType:               "fullstack",
+		RequiredCapabilities:  []CapabilityRequirement{CapabilityAuth, CapabilityDatabase, CapabilityAPI},
+		AcceptanceSummarySeed: []string{"interactive preview serves the app"},
+	}
+	contract := compileBuildContractFromPlan(build.ID, intent, plan)
+	if contract == nil {
+		t.Fatal("expected build contract")
+	}
+	verified, report := verifyAndNormalizeBuildContract(intent, contract)
+	if verified == nil {
+		t.Fatal("expected verified contract")
+	}
+	if report.Status == VerificationBlocked {
+		t.Fatalf("expected frontend preview fallback contract to verify, got blockers %v", report.Blockers)
+	}
+}
+
 func TestCreateBuildPlanFromPlanningBundlePrefersStaticIntentOverPlannerFullstackAppType(t *testing.T) {
 	t.Parallel()
 
