@@ -3360,6 +3360,29 @@ func (am *AgentManager) taskDispatcher() {
 	}
 }
 
+func (am *AgentManager) markQueuedTaskExecutionStarted(agent *Agent, task *Task) bool {
+	if agent == nil || task == nil {
+		return false
+	}
+
+	if task.Status == TaskInProgress {
+		return false
+	}
+
+	now := time.Now()
+	agent.mu.Lock()
+	agent.CurrentTask = task
+	agent.Status = StatusWorking
+	agent.UpdatedAt = now
+	agent.mu.Unlock()
+
+	task.AssignedTo = agent.ID
+	task.Status = TaskInProgress
+	task.StartedAt = &now
+
+	return true
+}
+
 // executeTask runs a task using the appropriate AI agent
 func (am *AgentManager) executeTask(task *Task) {
 	log.Printf("executeTask called for task %s (type: %s, assignedTo: %s)", task.ID, task.Type, task.AssignedTo)
@@ -3395,6 +3418,25 @@ func (am *AgentManager) executeTask(task *Task) {
 		return
 	}
 	log.Printf("Found build %s for task execution", build.ID)
+
+	requeuedTaskStarted := am.markQueuedTaskExecutionStarted(agent, task)
+	if requeuedTaskStarted {
+		am.broadcast(agent.BuildID, &WSMessage{
+			Type:      WSAgentWorking,
+			BuildID:   agent.BuildID,
+			AgentID:   agent.ID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"task_id":     task.ID,
+				"task_type":   string(task.Type),
+				"description": task.Description,
+				"agent_role":  string(agent.Role),
+				"provider":    string(agent.Provider),
+				"model":       agent.Model,
+				"retry_count": task.RetryCount,
+			},
+		})
+	}
 
 	if err := am.waitForBuildInteractionClear(build); err != nil {
 		am.resultQueue <- &TaskResult{

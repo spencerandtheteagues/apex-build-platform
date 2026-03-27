@@ -20,6 +20,19 @@ This is the minimum go-live runbook for opening `apex-build.dev` to real custome
 - Confirm `https://apex-build.dev` and `https://api.apex-build.dev` are serving the latest deployed commit.
 - Confirm backend `REDIS_URL` resolves to the internal `apex-redis` Render Key Value connection string, not an external allowlisted Redis URL.
 
+## Render Workspace Setup
+
+Set these before public launch:
+
+- `Notifications`: enable workspace notifications for failed deploys and unhealthy services. Connect Slack and/or email, and make sure `apex-api` and `apex-frontend` are covered.
+- `Service metrics` and `logs`: use Render's built-in dashboards for `apex-api`, `apex-frontend`, `apex-db`, and `apex-redis` during launch.
+
+Do not treat these as launch blockers unless you already depend on them operationally:
+
+- `Webhooks`: optional. Only set this up if you want custom automation when deploys fail or services change state.
+- `Private Links`: not required for the current APEX.BUILD production path. Render-managed Postgres and Key Value already use internal wiring, and E2B currently works over the normal outbound API-key path.
+- External observability sinks: optional. Add external log or metrics streaming only if you already have a destination such as Datadog, Grafana, or another monitoring stack.
+
 ## Automated Checks
 
 ### 1. Public launch smoke

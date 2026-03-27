@@ -963,6 +963,29 @@ Verification completed:
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
 
+Date: 2026-03-27
+
+Change summary:
+
+- Fixed the next real paid/full-stack canary failure path: retried phase tasks could be re-queued as `pending` without being promoted back to `in_progress` when execution resumed.
+- That let `waitForPhaseCompletion` falsely conclude nothing was running and abort the phase after the stall grace window, which matches the live `Data Foundation aborted before task completion (pending=1, in_progress=0)` failure signature.
+- Added a retry-dispatch promotion step so re-queued tasks immediately re-enter `in_progress`, refresh their start time, and re-surface as active work before the next execution attempt begins.
+- Added the Render launch note that workspace notifications should be enabled now, while Render webhooks, private links, and external observability sinks remain optional for the current production path.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+- `docs/launch-runbook.md`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestMarkQueuedTaskExecutionStartedPromotesPendingRetryTask|TestHandleTaskCompletionSkipsPostFixValidationForIntegrationPreflightFix|TestApplyDeterministicIntegrationPreflightRepairsExpressRuntime|TestLaunchIntegrationPreflightRecoveryCreatesScopedFixTask'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

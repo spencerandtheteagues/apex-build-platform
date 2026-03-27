@@ -3247,6 +3247,52 @@ func TestAssignTaskBuildsRepairWorkOrderArtifactForFixTasks(t *testing.T) {
 	}
 }
 
+func TestMarkQueuedTaskExecutionStartedPromotesPendingRetryTask(t *testing.T) {
+	t.Parallel()
+
+	build := &Build{ID: "build-retry-start"}
+	agent := &Agent{
+		ID:       "agent-retry-start",
+		Role:     RoleDatabase,
+		Provider: ai.ProviderClaude,
+		Model:    "claude-sonnet-4-6",
+		BuildID:  build.ID,
+		Status:   StatusError,
+	}
+	task := &Task{
+		ID:          "task-retry-start",
+		Type:        TaskGenerateSchema,
+		Description: "Retry schema generation",
+		AssignedTo:  agent.ID,
+		Status:      TaskPending,
+		RetryCount:  1,
+	}
+
+	am := &AgentManager{
+		subscribers: map[string][]chan *WSMessage{},
+	}
+
+	started := am.markQueuedTaskExecutionStarted(agent, task)
+	if !started {
+		t.Fatalf("expected pending retry task to be promoted to in-progress")
+	}
+	if task.Status != TaskInProgress {
+		t.Fatalf("expected task status in_progress, got %s", task.Status)
+	}
+	if task.StartedAt == nil {
+		t.Fatal("expected retry task start time to be set")
+	}
+	if task.AssignedTo != agent.ID {
+		t.Fatalf("expected task assigned to %s, got %s", agent.ID, task.AssignedTo)
+	}
+	if agent.Status != StatusWorking {
+		t.Fatalf("expected agent status working, got %s", agent.Status)
+	}
+	if agent.CurrentTask != task {
+		t.Fatal("expected agent current task to be updated")
+	}
+}
+
 func TestRecordTaskExecutionOutcomeAccumulatesTokenCostToRecovery(t *testing.T) {
 	t.Parallel()
 
