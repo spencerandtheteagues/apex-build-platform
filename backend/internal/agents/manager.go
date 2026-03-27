@@ -4433,6 +4433,7 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 				orchestration.WorkOrders = compileWorkOrdersFromPlanWithCost(build.ID, orchestration.BuildContract, output.Plan, orchestration.ProviderScorecards, costSensitivity)
 			}
 		}
+		refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
 		build.mu.Unlock()
 		if runProviderCritique && critiqueContract != nil {
 			if critiqueReport := am.providerAssistedContractCritique(build, critiqueContract); critiqueReport != nil {
@@ -8030,13 +8031,13 @@ func (am *AgentManager) persistBuildSnapshotWithRetry(build *Build, files []Gene
 		DurationMs:      durationMs,
 		Error:           build.Error,
 		CompletedAt:     build.CompletedAt,
+		UpdatedAt:       build.UpdatedAt,
+		CreatedAt:       build.CreatedAt,
 	}
 	build.mu.RUnlock()
 
-	now := time.Now()
-	snapshot.UpdatedAt = now
-	if snapshot.CreatedAt.IsZero() {
-		snapshot.CreatedAt = build.CreatedAt
+	if snapshot.UpdatedAt.IsZero() {
+		snapshot.UpdatedAt = time.Now()
 	}
 
 	assignments := map[string]any{
@@ -8061,7 +8062,7 @@ func (am *AgentManager) persistBuildSnapshotWithRetry(build *Build, files []Gene
 		"duration_ms":      snapshot.DurationMs,
 		"error":            snapshot.Error,
 		"completed_at":     snapshot.CompletedAt,
-		"updated_at":       now,
+		"updated_at":       snapshot.UpdatedAt,
 	}
 
 	var lastErr error
@@ -8069,6 +8070,9 @@ func (am *AgentManager) persistBuildSnapshotWithRetry(build *Build, files []Gene
 		lastErr = am.db.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "build_id"}},
 			DoUpdates: clause.Assignments(assignments),
+			Where: clause.Where{Exprs: []clause.Expression{
+				clause.Expr{SQL: "excluded.updated_at >= completed_builds.updated_at"},
+			}},
 		}).Create(snapshot).Error
 		if lastErr == nil {
 			return nil

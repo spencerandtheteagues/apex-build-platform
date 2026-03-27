@@ -61,6 +61,31 @@ func TestCompileIntentBriefFromRequestHonorsNegatedBackendRequirements(t *testin
 	}
 }
 
+func TestCompileIntentBriefFromRequestDoesNotTreatCleanFileStructureAsUploadStorage(t *testing.T) {
+	req := &BuildRequest{
+		Description: "Build a polished frontend-only client dashboard called PulseBoard using React 18, Vite, and Tailwind CSS with a responsive dark modern UI that works well in the preview pane, a dashboard home with KPI cards, trend widgets, an activity feed, and a highlighted primary action, a clients page with searchable cards, filters, empty states, and detail panels, a projects page with kanban-style status columns and clear progress visuals, a settings page with profile, notifications, and theme sections, realistic seed content in the UI so the preview feels complete immediately, strong loading, empty, and error states, reusable components and a clean file structure, and no backend, no database, and no fake API requirements in this free-tier preview pass.",
+		Mode:        ModeFull,
+		PowerMode:   PowerFast,
+	}
+
+	brief := compileIntentBriefFromRequest(req, "platform")
+	if brief == nil {
+		t.Fatal("expected intent brief")
+	}
+	if brief.AppType != "web" {
+		t.Fatalf("app type = %q, want web", brief.AppType)
+	}
+	if capabilityRequired(brief, CapabilityStorage) {
+		t.Fatalf("did not expect storage capability for clean file structure prompt, got %+v", brief.RequiredCapabilities)
+	}
+	if capabilityRequired(brief, CapabilityFileUpload) {
+		t.Fatalf("did not expect file_upload capability for clean file structure prompt, got %+v", brief.RequiredCapabilities)
+	}
+	if capabilityRequired(brief, CapabilityAPI) || capabilityRequired(brief, CapabilityDatabase) {
+		t.Fatalf("did not expect backend/database capabilities for frontend-only canary prompt, got %+v", brief.RequiredCapabilities)
+	}
+}
+
 func TestCompileBuildContractFromPlanSeedsTruthAndVerification(t *testing.T) {
 	plan := &BuildPlan{
 		ID:      "plan-1",

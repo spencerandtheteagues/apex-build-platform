@@ -62,6 +62,13 @@ func TestBuildSubscriptionRequirement(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "clean file structure does not imply file uploads",
+			req: &BuildRequest{
+				Description: "Build a polished frontend-only client dashboard using React with a clean file structure, reusable components, loading states, and realistic seed content. No backend. No database.",
+			},
+			want: false,
+		},
 	}
 
 	for _, tc := range tests {

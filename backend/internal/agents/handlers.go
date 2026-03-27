@@ -658,16 +658,8 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 		return
 	}
 
-	// Normalize snapshot status: if completed_at is set and no error, it's completed
-	snapshotStatus := snapshot.Status
-	if !snapshot.CompletedAt.IsZero() && snapshot.Error == "" &&
-		snapshotStatus != "failed" && snapshotStatus != "cancelled" {
-		snapshotStatus = "completed"
-	}
-	snapshotProgress := snapshot.Progress
-	if snapshotStatus == "completed" {
-		snapshotProgress = 100
-	}
+	snapshotStatus := string(presentedSnapshotStatus(snapshot))
+	snapshotProgress := presentedSnapshotProgress(snapshot, BuildStatus(snapshotStatus))
 	agents := parseBuildAgents(snapshot.AgentsJSON)
 	tasks := parseBuildTasks(snapshot.TasksJSON)
 	checkpoints := parseBuildCheckpoints(snapshot.CheckpointsJSON)
@@ -769,6 +761,33 @@ func writeBuildActionSessionError(c *gin.Context, err error) {
 	default:
 		c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(err, "build session unavailable", err.Error()))
 	}
+}
+
+func presentedSnapshotStatus(snapshot *models.CompletedBuild) BuildStatus {
+	if snapshot == nil {
+		return BuildCompleted
+	}
+	if snapshot.CompletedAt != nil && strings.TrimSpace(snapshot.Error) == "" {
+		if BuildStatus(strings.TrimSpace(snapshot.Status)) == BuildCancelled {
+			return BuildCancelled
+		}
+		return BuildCompleted
+	}
+	return normalizeRestoredBuildStatus(snapshot)
+}
+
+func presentedSnapshotProgress(snapshot *models.CompletedBuild, status BuildStatus) int {
+	if snapshot == nil {
+		if status == BuildCompleted {
+			return 100
+		}
+		return 0
+	}
+	progress := snapshot.Progress
+	if status == BuildCompleted && progress < 100 {
+		progress = 100
+	}
+	return progress
 }
 
 // buildSnapshotStateResponseFields serialises BuildSnapshotState into a gin.H
@@ -949,12 +968,14 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 	interaction := parseBuildInteraction(snapshot.InteractionJSON)
 	activityTimeline := parseBuildActivityTimeline(snapshot.ActivityJSON)
 	snapshotState := parseBuildSnapshotState(snapshot.StateJSON)
+	snapshotStatus := string(presentedSnapshotStatus(snapshot))
+	snapshotProgress := presentedSnapshotProgress(snapshot, BuildStatus(snapshotStatus))
 
 	response := gin.H{
 		"id":                     snapshot.BuildID,
 		"user_id":                snapshot.UserID,
 		"project_id":             snapshot.ProjectID,
-		"status":                 snapshot.Status,
+		"status":                 snapshotStatus,
 		"mode":                   snapshot.Mode,
 		"power_mode":             snapshot.PowerMode,
 		"description":            snapshot.Description,
@@ -962,7 +983,7 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 		"agents":                 agents,
 		"tasks":                  tasks,
 		"checkpoints":            checkpoints,
-		"progress":               snapshot.Progress,
+		"progress":               snapshotProgress,
 		"created_at":             snapshot.CreatedAt,
 		"updated_at":             snapshot.UpdatedAt,
 		"completed_at":           snapshot.CompletedAt,
@@ -974,7 +995,7 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 		"live":                   false,
 		"restored_from_snapshot": true,
 	}
-	for key, value := range buildSnapshotStateResponseFields(snapshotState, snapshot.Status, userPlan) {
+	for key, value := range buildSnapshotStateResponseFields(snapshotState, snapshotStatus, userPlan) {
 		response[key] = value
 	}
 	c.JSON(http.StatusOK, response)
@@ -1907,23 +1928,24 @@ func (h *BuildHandler) ListBuilds(c *gin.Context) {
 		if b.TechStack != "" {
 			json.Unmarshal([]byte(b.TechStack), &techStack)
 		}
+		displayStatus := presentedSnapshotStatus(&b)
 		s := BuildSummary{
 			ID:          b.ID,
 			BuildID:     b.BuildID,
 			ProjectID:   b.ProjectID,
 			ProjectName: b.ProjectName,
 			Description: b.Description,
-			Status:      b.Status,
+			Status:      string(displayStatus),
 			Mode:        b.Mode,
 			PowerMode:   b.PowerMode,
 			TechStack:   techStack,
 			FilesCount:  b.FilesCount,
 			TotalCost:   b.TotalCost,
-			Progress:    b.Progress,
+			Progress:    presentedSnapshotProgress(&b, displayStatus),
 			DurationMs:  b.DurationMs,
 			CreatedAt:   b.CreatedAt.Format("2006-01-02T15:04:05Z"),
 			Live:        false,
-			Resumable:   isActiveBuildStatus(b.Status),
+			Resumable:   isActiveBuildStatus(string(displayStatus)),
 		}
 		if _, liveErr := h.manager.GetBuild(b.BuildID); liveErr == nil {
 			s.Live = true
@@ -1960,7 +1982,10 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 
 	var build models.CompletedBuild
 	if err := retryBuildHistoryRead("get_completed_build", func() error {
-		return h.db.Where("build_id = ? AND user_id = ?", buildID, uid).First(&build).Error
+		return h.db.Where("build_id = ? AND user_id = ?", buildID, uid).
+			Order("updated_at DESC").
+			Order("id DESC").
+			First(&build).Error
 	}); err != nil {
 		if buildPlatformIssueFromError(err) != nil {
 			c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(err, "build history not available", "Completed build details are temporarily unavailable because the primary database is offline."))
@@ -1987,6 +2012,8 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 	if _, liveErr := h.manager.GetBuild(build.BuildID); liveErr == nil {
 		live = true
 	}
+	displayStatus := presentedSnapshotStatus(&build)
+	displayProgress := presentedSnapshotProgress(&build, displayStatus)
 
 	response := gin.H{
 		"id":                build.ID,
@@ -1994,7 +2021,7 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 		"project_id":        build.ProjectID,
 		"project_name":      build.ProjectName,
 		"description":       build.Description,
-		"status":            build.Status,
+		"status":            string(displayStatus),
 		"mode":              build.Mode,
 		"power_mode":        build.PowerMode,
 		"tech_stack":        techStack,
@@ -2007,15 +2034,15 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 		"activity_timeline": activityTimeline,
 		"files_count":       build.FilesCount,
 		"total_cost":        build.TotalCost,
-		"progress":          build.Progress,
+		"progress":          displayProgress,
 		"duration_ms":       build.DurationMs,
 		"error":             build.Error,
 		"created_at":        build.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		"completed_at":      build.CompletedAt,
 		"live":              live,
-		"resumable":         isActiveBuildStatus(build.Status),
+		"resumable":         isActiveBuildStatus(string(displayStatus)),
 	}
-	for key, value := range buildSnapshotStateResponseFields(snapshotState, build.Status, userPlan) {
+	for key, value := range buildSnapshotStateResponseFields(snapshotState, string(displayStatus), userPlan) {
 		response[key] = value
 	}
 	c.JSON(http.StatusOK, response)
@@ -2037,7 +2064,10 @@ func (h *BuildHandler) DownloadCompletedBuild(c *gin.Context) {
 
 	var build models.CompletedBuild
 	if err := retryBuildHistoryRead("download_completed_build", func() error {
-		return h.db.Where("build_id = ? AND user_id = ?", buildID, uid).First(&build).Error
+		return h.db.Where("build_id = ? AND user_id = ?", buildID, uid).
+			Order("updated_at DESC").
+			Order("id DESC").
+			First(&build).Error
 	}); err != nil {
 		if buildPlatformIssueFromError(err) != nil {
 			c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(err, "build history not available", "Build download is temporarily unavailable because the primary database is offline."))
@@ -2061,7 +2091,7 @@ func (h *BuildHandler) DownloadCompletedBuild(c *gin.Context) {
 		return
 	}
 
-	buildStatus := normalizeRestoredBuildStatus(&build)
+	buildStatus := presentedSnapshotStatus(&build)
 	if buildStatus != BuildCompleted {
 		c.JSON(http.StatusConflict, gin.H{
 			"error":        "build is not exportable",

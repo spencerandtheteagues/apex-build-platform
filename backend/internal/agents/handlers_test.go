@@ -923,6 +923,71 @@ func TestGetBuildDetailsIncludesSnapshotState(t *testing.T) {
 	}
 }
 
+func TestCompletedBuildEndpointsPresentCompletedTerminalSnapshot(t *testing.T) {
+	db := openBuildTestDB(t)
+	completedAt := time.Now().UTC()
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "terminal-presented-build",
+		UserID:      1,
+		Description: "Completed build should present terminal success",
+		Status:      string(BuildFailed),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerFast),
+		Progress:    93,
+		Error:       "",
+		FilesJSON:   "[]",
+		StateJSON:   `{"current_phase":"completed","quality_gate_required":true,"quality_gate_status":"passed","quality_gate_stage":"validation"}`,
+		CreatedAt:   completedAt.Add(-time.Minute),
+		UpdatedAt:   completedAt,
+		CompletedAt: &completedAt,
+	}).Error; err != nil {
+		t.Fatalf("create completed build snapshot: %v", err)
+	}
+
+	am := &AgentManager{db: db}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/terminal-presented-build/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected build status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal build status response: %v", err)
+	}
+	if body["status"] != "completed" {
+		t.Fatalf("expected normalized status completed, got %v", body["status"])
+	}
+	if body["progress"] != float64(100) {
+		t.Fatalf("expected normalized progress 100, got %v", body["progress"])
+	}
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/v1/builds/terminal-presented-build", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected completed build 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	body = map[string]any{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal completed build response: %v", err)
+	}
+	if body["status"] != "completed" {
+		t.Fatalf("expected completed build status=completed, got %v", body["status"])
+	}
+	if body["progress"] != float64(100) {
+		t.Fatalf("expected completed build progress=100, got %v", body["progress"])
+	}
+	if body["resumable"] != false {
+		t.Fatalf("expected completed build resumable=false, got %v", body["resumable"])
+	}
+}
+
 func TestSnapshotReadEndpointsFallbackToPersistedState(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.CompletedBuild{

@@ -21,6 +21,46 @@ func buildSubscriptionPlan(build *Build) string {
 	return "free"
 }
 
+func buildCurrentDeliveryMode(build *Build) string {
+	if build == nil {
+		return ""
+	}
+	if build.Plan != nil {
+		if mode := strings.TrimSpace(strings.ToLower(build.Plan.DeliveryMode)); mode != "" {
+			return mode
+		}
+	}
+	if build.SnapshotState.RestoreContext != nil && build.SnapshotState.RestoreContext.Plan != nil {
+		if mode := strings.TrimSpace(strings.ToLower(build.SnapshotState.RestoreContext.Plan.DeliveryMode)); mode != "" {
+			return mode
+		}
+	}
+	if orchestration := build.SnapshotState.Orchestration; orchestration != nil && orchestration.BuildContract != nil {
+		if mode := strings.TrimSpace(strings.ToLower(orchestration.BuildContract.DeliveryMode)); mode != "" {
+			return mode
+		}
+	}
+	return ""
+}
+
+func buildUsesFrontendPreviewOnlyDelivery(build *Build) bool {
+	return buildCurrentDeliveryMode(build) == "frontend_preview_only"
+}
+
+func filterFrontendPreviewCapabilities(required []CapabilityRequirement) []CapabilityRequirement {
+	if len(required) == 0 {
+		return nil
+	}
+	allowed := make([]CapabilityRequirement, 0, len(required))
+	for _, capability := range required {
+		switch capability {
+		case CapabilitySearch:
+			allowed = append(allowed, capability)
+		}
+	}
+	return dedupeCapabilities(allowed)
+}
+
 func buildPreflightSemanticState(req *BuildRequest, planType string) (*BuildCapabilityState, *BuildPolicyState) {
 	if req == nil {
 		return nil, nil
@@ -136,6 +176,19 @@ func buildCapabilityState(build *Build) *BuildCapabilityState {
 		state.RequiresBYOK = true
 	}
 
+	if buildUsesFrontendPreviewOnlyDelivery(build) {
+		state.RequiredCapabilities = capabilityStrings(filterFrontendPreviewCapabilities(required))
+		state.RequiresAuth = false
+		state.RequiresDatabase = false
+		state.RequiresStorage = false
+		state.RequiresExternalAPI = false
+		state.RequiresBilling = false
+		state.RequiresRealtime = false
+		state.RequiresJobs = false
+		state.RequiresBackendRuntime = false
+		state.RequiresPublish = false
+	}
+
 	return state
 }
 
@@ -194,6 +247,7 @@ func deriveBuildBlockers(build *Build, policy *BuildPolicyState) []BuildBlocker 
 	if build == nil {
 		return nil
 	}
+	previewOnlyCurrentDelivery := buildUsesFrontendPreviewOnlyDelivery(build)
 
 	now := build.UpdatedAt
 	if now.IsZero() {
@@ -210,7 +264,7 @@ func deriveBuildBlockers(build *Build, policy *BuildPolicyState) []BuildBlocker 
 		blockers = append(blockers, blocker)
 	}
 
-	if policy != nil && policy.UpgradeRequired {
+	if policy != nil && policy.UpgradeRequired && !previewOnlyCurrentDelivery {
 		severity := BlockerSeverityBlocking
 		summary := fmt.Sprintf("This request needs %s, which is locked on the %s plan.", firstNonEmptyString(policy.UpgradeReason, "paid capabilities"), firstNonEmptyString(policy.PlanType, "free"))
 		unblocksWith := "Upgrade to Builder or higher, or continue in honest static-only mode."
@@ -345,6 +399,7 @@ func deriveBuildApprovals(build *Build, capabilityState *BuildCapabilityState, p
 	if build == nil || capabilityState == nil {
 		return nil
 	}
+	previewOnlyCurrentDelivery := buildUsesFrontendPreviewOnlyDelivery(build)
 
 	now := build.CreatedAt
 	if now.IsZero() {
@@ -389,14 +444,14 @@ func deriveBuildApprovals(build *Build, capabilityState *BuildCapabilityState, p
 		}
 	}
 
-	upgradeBlocked := policy != nil && policy.UpgradeRequired
+	upgradeBlocked := policy != nil && policy.UpgradeRequired && !previewOnlyCurrentDelivery
 	appendApproval("plan_upgrade_acknowledgement", "Plan upgrade acknowledgement", upgradeBlocked, upgradeBlocked, "This request exceeds the current plan and needs explicit user acknowledgement or an upgrade before paid-only work can continue.")
 	if upgradeBlocked && len(approvals) > 0 {
 		approvals[len(approvals)-1].Actor = "user"
 		approvals[len(approvals)-1].AcknowledgementRequired = true
 		approvals[len(approvals)-1].PlanTierRelated = true
 	}
-	appendApproval("full_stack_upgrade", "Full-stack upgrade", policy != nil && policy.Classification != BuildClassificationStaticReady, upgradeBlocked, policy.UpgradeReason)
+	appendApproval("full_stack_upgrade", "Full-stack upgrade", policy != nil && policy.Classification != BuildClassificationStaticReady && !previewOnlyCurrentDelivery, upgradeBlocked, policy.UpgradeReason)
 	appendApproval("auth", "Authentication and session wiring", capabilityState.RequiresAuth, upgradeBlocked, "Authentication flows need runtime support, secret review, and truthful session semantics.")
 	appendApproval("database", "Database access", capabilityState.RequiresDatabase, upgradeBlocked, "Persistent data needs a paid full-stack plan.")
 	appendApproval("external_api", "External API access", capabilityState.RequiresExternalAPI, false, "External integrations need secrets and integration review.")

@@ -56,6 +56,59 @@ func TestRefreshDerivedSnapshotStateLockedStaticReadyBuild(t *testing.T) {
 	}
 }
 
+func TestRefreshDerivedSnapshotStateLockedFrontendCanaryPromptAvoidsUpgradeRequired(t *testing.T) {
+	build := &Build{
+		ID:               "pulseboard-free-canary",
+		UserID:           101,
+		Status:           BuildPending,
+		Mode:             ModeFull,
+		PowerMode:        PowerFast,
+		SubscriptionPlan: "free",
+		ProviderMode:     "platform",
+		Description:      "Build a polished frontend-only client dashboard called PulseBoard using React 18, Vite, and Tailwind CSS with a responsive dark modern UI that works well in the preview pane, a dashboard home with KPI cards, trend widgets, an activity feed, and a highlighted primary action, a clients page with searchable cards, filters, empty states, and detail panels, a projects page with kanban-style status columns and clear progress visuals, a settings page with profile, notifications, and theme sections, realistic seed content in the UI so the preview feels complete immediately, strong loading, empty, and error states, reusable components and a clean file structure, and no backend, no database, and no fake API requirements in this free-tier preview pass.",
+		Agents:           map[string]*Agent{},
+		Tasks:            []*Task{},
+		Checkpoints:      []*Checkpoint{},
+		CreatedAt:        time.Now().Add(-time.Minute).UTC(),
+		UpdatedAt:        time.Now().UTC(),
+	}
+	if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil {
+		orchestration.IntentBrief = compileIntentBriefFromRequest(&BuildRequest{
+			Description: build.Description,
+			Mode:        build.Mode,
+			PowerMode:   build.PowerMode,
+		}, build.ProviderMode)
+	}
+
+	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
+
+	if build.SnapshotState.PolicyState == nil {
+		t.Fatalf("expected policy state")
+	}
+	if build.SnapshotState.PolicyState.Classification != BuildClassificationStaticReady {
+		t.Fatalf("expected static_ready classification, got %+v", build.SnapshotState.PolicyState)
+	}
+	if build.SnapshotState.PolicyState.UpgradeRequired {
+		t.Fatalf("did not expect upgrade_required for free frontend canary prompt, got %+v", build.SnapshotState.PolicyState)
+	}
+	if build.SnapshotState.CapabilityState == nil {
+		t.Fatalf("expected capability state")
+	}
+	if build.SnapshotState.CapabilityState.RequiresStorage || build.SnapshotState.CapabilityState.RequiresBackendRuntime {
+		t.Fatalf("did not expect storage/backend runtime flags, got %+v", build.SnapshotState.CapabilityState)
+	}
+	if len(build.SnapshotState.Blockers) != 0 {
+		t.Fatalf("expected no blockers for frontend canary prompt, got %+v", build.SnapshotState.Blockers)
+	}
+	for _, approval := range build.SnapshotState.Approvals {
+		if approval.Kind == "file_storage" || approval.Kind == "full_stack_upgrade" || approval.Kind == "plan_upgrade_acknowledgement" {
+			if approval.Status == ApprovalStatusPending || approval.Required {
+				t.Fatalf("did not expect active paid upgrade approvals for frontend canary prompt, got %+v", build.SnapshotState.Approvals)
+			}
+		}
+	}
+}
+
 func TestRefreshDerivedSnapshotStateLockedFullStackPaidBuild(t *testing.T) {
 	build := &Build{
 		ID:               "fullstack-build",
@@ -200,6 +253,81 @@ func TestRefreshDerivedSnapshotStateLockedUpgradeRequiredBuildIncludesPlanAcknow
 	}
 	if !upgradeBlocker.PartialProgressAllowed {
 		t.Fatalf("expected static fallback to allow partial progress, got %+v", upgradeBlocker)
+	}
+}
+
+func TestRefreshDerivedSnapshotStateLockedFrontendPreviewOnlyClearsPaidRuntimeApprovals(t *testing.T) {
+	build := &Build{
+		ID:               "preview-only-build",
+		UserID:           11,
+		Status:           BuildReviewing,
+		Mode:             ModeFull,
+		PowerMode:        PowerFast,
+		SubscriptionPlan: "free",
+		ProviderMode:     "platform",
+		Description:      "Build a full stack CRM with auth, postgres database, file uploads, background jobs, and global search.",
+		Plan: &BuildPlan{
+			ID:           "plan-preview-only",
+			BuildID:      "preview-only-build",
+			AppType:      "web",
+			DeliveryMode: "frontend_preview_only",
+			TechStack:    TechStack{Frontend: "React", Styling: "Tailwind"},
+		},
+		Agents:      map[string]*Agent{},
+		Tasks:       []*Task{},
+		Checkpoints: []*Checkpoint{},
+		CreatedAt:   time.Now().Add(-time.Minute).UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil {
+		orchestration.IntentBrief = compileIntentBriefFromRequest(&BuildRequest{
+			Description: build.Description,
+			Mode:        build.Mode,
+			PowerMode:   build.PowerMode,
+		}, build.ProviderMode)
+		orchestration.BuildContract = &BuildContract{
+			BuildID:      build.ID,
+			AppType:      "web",
+			DeliveryMode: "frontend_preview_only",
+			TruthBySurface: map[string][]TruthTag{
+				string(SurfaceGlobal):   {},
+				string(SurfaceFrontend): {},
+				string(SurfaceBackend):  {},
+			},
+		}
+	}
+
+	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
+
+	if build.SnapshotState.CapabilityState == nil {
+		t.Fatalf("expected capability state")
+	}
+	if build.SnapshotState.CapabilityState.RequiresAuth ||
+		build.SnapshotState.CapabilityState.RequiresDatabase ||
+		build.SnapshotState.CapabilityState.RequiresStorage ||
+		build.SnapshotState.CapabilityState.RequiresJobs ||
+		build.SnapshotState.CapabilityState.RequiresBackendRuntime {
+		t.Fatalf("expected paid runtime capabilities to be cleared in preview-only mode, got %+v", build.SnapshotState.CapabilityState)
+	}
+
+	approvalsByKind := map[string]BuildApproval{}
+	for _, approval := range build.SnapshotState.Approvals {
+		approvalsByKind[approval.Kind] = approval
+	}
+	for _, kind := range []string{"plan_upgrade_acknowledgement", "full_stack_upgrade", "auth", "database", "file_storage", "background_jobs"} {
+		approval, ok := approvalsByKind[kind]
+		if !ok {
+			t.Fatalf("expected approval %s", kind)
+		}
+		if approval.Status != ApprovalStatusNotRequired {
+			t.Fatalf("expected %s to be not_required in frontend preview mode, got %s", kind, approval.Status)
+		}
+	}
+
+	for _, blocker := range build.SnapshotState.Blockers {
+		if blocker.ID == "plan-upgrade-required" {
+			t.Fatalf("did not expect plan upgrade blocker once delivery is explicitly frontend_preview_only: %+v", blocker)
+		}
 	}
 }
 

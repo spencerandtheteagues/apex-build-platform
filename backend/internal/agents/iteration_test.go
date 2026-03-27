@@ -142,6 +142,66 @@ func TestNormalizeRestoredBuildStatusTreatsLegacyBuildingAsResumable(t *testing.
 	}
 }
 
+func TestPersistBuildSnapshotDoesNotOverwriteNewerTerminalSnapshot(t *testing.T) {
+	db := openBuildTestDB(t)
+	manager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	})
+	manager.db = db
+
+	now := time.Now().UTC()
+	completedAt := now.Add(-10 * time.Second)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "snapshot-order-build",
+		UserID:      1,
+		Description: "Newest successful snapshot",
+		Status:      string(BuildCompleted),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerFast),
+		Progress:    100,
+		Error:       "",
+		CreatedAt:   now.Add(-2 * time.Minute),
+		UpdatedAt:   now,
+		CompletedAt: &completedAt,
+	}).Error; err != nil {
+		t.Fatalf("create completed snapshot: %v", err)
+	}
+
+	build := &Build{
+		ID:          "snapshot-order-build",
+		UserID:      1,
+		Status:      BuildFailed,
+		Mode:        ModeFull,
+		PowerMode:   PowerFast,
+		Description: "Older failed write should not win",
+		Progress:    93,
+		Error:       "stale failure",
+		Agents:      map[string]*Agent{},
+		Tasks:       []*Task{},
+		Checkpoints: []*Checkpoint{},
+		CreatedAt:   now.Add(-3 * time.Minute),
+		UpdatedAt:   now.Add(-time.Minute),
+	}
+
+	manager.persistBuildSnapshot(build, nil)
+
+	var snapshot models.CompletedBuild
+	if err := db.Where("build_id = ?", build.ID).First(&snapshot).Error; err != nil {
+		t.Fatalf("fetch snapshot: %v", err)
+	}
+	if snapshot.Status != string(BuildCompleted) {
+		t.Fatalf("expected newer completed snapshot to survive, got %s", snapshot.Status)
+	}
+	if snapshot.Progress != 100 {
+		t.Fatalf("expected newer progress 100 to survive, got %d", snapshot.Progress)
+	}
+	if strings.TrimSpace(snapshot.Error) != "" {
+		t.Fatalf("expected completed snapshot error to remain empty, got %q", snapshot.Error)
+	}
+}
+
 func TestRestoreBuildSessionFromSnapshotRequeuesInterruptedTasks(t *testing.T) {
 	db := openBuildTestDB(t)
 	manager := newTestIterationManager(&stubPreflight{

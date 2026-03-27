@@ -1,6 +1,6 @@
 # Build Workflow Overhaul
 
-Last updated: 2026-03-26
+Last updated: 2026-03-27
 Owner: Codex + Spencer
 Status: In progress
 
@@ -745,6 +745,64 @@ Verification completed:
 - `cd frontend && npm run lint`
 - `bash -n scripts/run_platform_build_smoke.sh`
 - `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/production-canary.yml"); puts "ok"'`
+
+### 2026-03-27 (canary truth + snapshot consistency pass)
+
+Completed:
+
+- Tightened capability detection so phrases like `clean file structure` no longer falsely escalate a free frontend prompt into paid file-upload/storage scope.
+- Taught derived snapshot semantics to honor the frozen `frontend_preview_only` delivery target after planning completes, instead of continuing to show paid/full-stack approvals and blockers on a truthful free preview run.
+- Refreshed derived snapshot state immediately after plan freeze so persisted orchestration truth matches the downgraded plan before later phases and history reads.
+- Hardened completed-build presentation so terminal snapshots with `completed_at` and no error are shown consistently as completed across status, details, history, and download/export checks.
+- Guarded snapshot upserts against stale late writes by refusing to let an older `updated_at` overwrite a newer terminal snapshot row.
+- Upgraded the production smoke script to match the real auth flow, support cookie sessions, and fail if `/build/:id/status` says completed but `/builds/:id` disagrees.
+- Added a Claude Code handoff runbook with exact canary commands, expected outputs, and failure-to-fix mapping for this reliability track.
+
+Files changed:
+
+- `backend/internal/agents/entitlements_test.go`
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+- `backend/internal/agents/iteration_test.go`
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/orchestration_contracts.go`
+- `backend/internal/agents/orchestration_semantics.go`
+- `backend/internal/agents/orchestration_semantics_test.go`
+- `docs/canary-reliability-handoff.md`
+- `scripts/run_platform_build_smoke.sh`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestBuildSubscriptionRequirement|TestRefreshDerivedSnapshotStateLockedUpgradeRequiredBuildIncludesPlanAcknowledgement|TestRefreshDerivedSnapshotStateLockedFrontendPreviewOnlyClearsPaidRuntimeApprovals|TestNormalizeRestoredBuildStatusTreatsLegacyBuildingAsResumable|TestPersistBuildSnapshotDoesNotOverwriteNewerTerminalSnapshot|TestCompletedBuildEndpointsPresentCompletedTerminalSnapshot'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestGetBuildDetailsIncludesSnapshotState|TestSnapshotReadEndpointsFallbackToPersistedState|TestApplyBuildAssurancePolicyToPlanDowngradesFreeFullStackToFrontendPreview'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+- `bash -n scripts/run_platform_build_smoke.sh`
+
+Live confirmation:
+
+- Reproduced the still-deployed production bug on a disposable canary account with build `10677c84-71c5-4b79-9705-4930bc21f40a`.
+- Confirmed the old production backend still misclassifies the free `PulseBoard` frontend-only canary as `upgrade_required` because `clean file structure` still trips stale `file_upload` / `storage` capability detection.
+- Updated `docs/canary-reliability-handoff.md` with:
+  - the exact reproduced build id
+  - the observed wrong approvals/blockers
+  - the immediate post-deploy canary checklist
+  - the next repair path if the free canary then fails with `preview_build_failed` / `Unterminated string literal`
+
+Additional tightening after the live repro:
+
+- Added a regression around the exact `PulseBoard` prompt so `compileIntentBriefFromRequest` no longer treats a frontend-only dashboard prompt as `fullstack`.
+- Narrowed `inferIntentAppType` so `dashboard` only implies `fullstack` when paired with affirmed runtime signals such as auth, database, billing, API, or backend terms.
+- Added a derived-snapshot regression to ensure the exact free canary prompt stays `static_ready` and does not surface active paid-upgrade approvals.
+
+Additional verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestBuildSubscriptionRequirement|TestCompileIntentBriefFromRequestDoesNotTreatCleanFileStructureAsUploadStorage|TestRefreshDerivedSnapshotStateLockedFrontendCanaryPromptAvoidsUpgradeRequired|TestRefreshDerivedSnapshotStateLockedUpgradeRequiredBuildIncludesPlanAcknowledgement|TestRefreshDerivedSnapshotStateLockedFrontendPreviewOnlyClearsPaidRuntimeApprovals|TestNormalizeRestoredBuildStatusTreatsLegacyBuildingAsResumable|TestPersistBuildSnapshotDoesNotOverwriteNewerTerminalSnapshot|TestCompletedBuildEndpointsPresentCompletedTerminalSnapshot'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+- `bash -n scripts/run_platform_build_smoke.sh`
 
 ## Logging Rules
 

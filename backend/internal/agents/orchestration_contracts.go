@@ -1071,13 +1071,30 @@ func inferIntentAppType(description string, stack *TechStack) string {
 		}
 	}
 	normalized := normalizeDetectionText(description)
+	dashboardWithRuntimeSignals := containsAffirmedTerm(normalized, normalizeDetectionText("dashboard")) &&
+		containsAnyAffirmedTerm(normalized, []string{
+			normalizeDetectionText("auth"),
+			normalizeDetectionText("login"),
+			normalizeDetectionText("signup"),
+			normalizeDetectionText("database"),
+			normalizeDetectionText("postgres"),
+			normalizeDetectionText("mysql"),
+			normalizeDetectionText("sqlite"),
+			normalizeDetectionText("stripe"),
+			normalizeDetectionText("billing"),
+			normalizeDetectionText("payment"),
+			normalizeDetectionText("subscription"),
+			normalizeDetectionText("api"),
+			normalizeDetectionText("backend"),
+			normalizeDetectionText("server"),
+			normalizeDetectionText("endpoint"),
+		})
 	switch {
 	case containsAnyAffirmedTerm(normalized, []string{
 		normalizeDetectionText("full stack"),
 		normalizeDetectionText("fullstack"),
-		normalizeDetectionText("dashboard"),
 		normalizeDetectionText("app with api"),
-	}):
+	}) || dashboardWithRuntimeSignals:
 		return "fullstack"
 	case containsAnyAffirmedTerm(normalized, []string{
 		normalizeDetectionText("api"),
@@ -1111,12 +1128,12 @@ func detectRequiredCapabilities(description string, stack *TechStack) []Capabili
 	}{
 		{CapabilityAuth, []string{"auth", "login", "signup", "session", "oauth"}},
 		{CapabilityDatabase, []string{"database", "postgres", "mysql", "sqlite", "record", "persist"}},
-		{CapabilityStorage, []string{"upload", "file", "storage", "s3", "blob"}},
+		{CapabilityStorage, []string{"upload", "uploads", "storage", "file storage", "s3", "blob", "bucket", "object store"}},
 		{CapabilityJobs, []string{"queue", "job", "worker", "cron", "background"}},
 		{CapabilityBilling, []string{"stripe", "billing", "payment", "subscription"}},
 		{CapabilitySearch, []string{"search", "filter", "query"}},
 		{CapabilityRealtime, []string{"realtime", "real-time", "stream", "websocket", "socket"}},
-		{CapabilityFileUpload, []string{"upload", "file", "transcribe", "attachment"}},
+		{CapabilityFileUpload, []string{"upload", "uploads", "file upload", "transcribe", "attachment", "attachments"}},
 		{CapabilityExternalAPI, []string{"api integration", "third-party", "openai", "anthropic", "external api"}},
 	}
 	for _, item := range detect {
