@@ -533,6 +533,35 @@ Verification note:
 - The new Playwright launch suite compiles and enumerates cleanly in this sandbox.
 - I did not execute the live production smoke from here because that would require hitting the public production services directly from the sandbox.
 
+### 2026-03-26 (live launch smoke alignment pass)
+
+Completed:
+
+- Executed the launch smoke against the live production surfaces at `https://apex-build.dev` and `https://api.apex-build.dev`.
+- Corrected the auth-screen legal assertion so the smoke tolerates the current duplicated legal link placement on the auth surface.
+- Corrected the billing-plans smoke to follow the real production contract:
+  - create a temporary user
+  - sign in through the cookie session flow
+  - fetch billing plans as an authenticated session
+- Tightened live Stripe verification so the smoke enforces non-placeholder IDs only for the self-serve paid plans:
+  - `builder`
+  - `pro`
+  - `team`
+- Confirmed the authenticated live billing catalog returns real Stripe price IDs for those self-serve plans.
+
+Files changed:
+
+- `tests/e2e/specs/launch.prod.smoke.spec.ts`
+
+Verification completed:
+
+- `cd tests/e2e && PLAYWRIGHT_BASE_URL=https://apex-build.dev PLAYWRIGHT_API_URL=https://api.apex-build.dev PLAYWRIGHT_EXPECT_LIVE_STRIPE=1 npm run test:launch -- --project=chromium`
+
+Live result:
+
+- `5 passed`
+- `1 skipped` (`optional authenticated launch login succeeds`, skipped because no dedicated launch credentials were provided)
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

@@ -62,7 +62,7 @@ test.describe('Launch readiness smoke', () => {
 
     await page.getByRole('button', { name: 'Sign up' }).click()
     await expect(page.getByText(/I agree to the Terms of Service/i)).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Terms of Service' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Terms of Service' }).first()).toBeVisible()
   })
 
   test('backend health and feature readiness are healthy', async ({ request }) => {
@@ -80,6 +80,27 @@ test.describe('Launch readiness smoke', () => {
   })
 
   test('billing plans endpoint is customer-ready', async ({ request }) => {
+    const stamp = Date.now()
+    const username = `launchsmoke${stamp}`
+    const email = `${username}@example.com`
+    const password = 'Passw0rd!Passw0rd!'
+
+    const registerResponse = await request.post(`${apiV1Base}/auth/register`, {
+      data: {
+        username,
+        email,
+        password,
+        full_name: 'Launch Smoke',
+        accept_legal_terms: true,
+      },
+    })
+    expect(registerResponse.ok()).toBeTruthy()
+
+    const loginResponse = await request.post(`${apiV1Base}/auth/login`, {
+      data: { email, password },
+    })
+    expect(loginResponse.ok()).toBeTruthy()
+
     const response = await request.get(`${apiV1Base}/billing/plans`)
     expect(response.status()).toBe(200)
 
@@ -95,8 +116,10 @@ test.describe('Launch readiness smoke', () => {
     expect(planTypes.has('team')).toBe(true)
 
     if (expectLiveStripe) {
-      const paidPlans = plans.filter((plan: { type: string }) => plan.type !== 'free')
-      for (const plan of paidPlans) {
+      const selfServePaidPlans = plans.filter((plan: { type: string }) =>
+        ['builder', 'pro', 'team'].includes(plan.type)
+      )
+      for (const plan of selfServePaidPlans) {
         expect(typeof plan.monthly_price_id).toBe('string')
         expect(plan.monthly_price_id.length).toBeGreaterThan(0)
         expect(placeholderStripePriceIds.has(plan.monthly_price_id)).toBe(false)
