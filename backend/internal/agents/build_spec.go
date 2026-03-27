@@ -1127,7 +1127,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
 				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "index.html", "src/**", "public/**"},
 				RoleBackend:   {"package.json", "tsconfig.json", ".env.example", "server/**"},
-				RoleDatabase:  {"migrations/**", "db/**", "prisma/**", "schema.sql", "server/db/**"},
+				RoleDatabase:  {"migrations/**", "db/**", "prisma/**", "schema.sql", "server/db/**", "server/migrate.ts", "server/seed.ts"},
 				RoleTesting:   {"tests/**", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"},
 				RoleReviewer:  {"**"},
 				RoleSolver:    {"**"},

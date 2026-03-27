@@ -846,6 +846,27 @@ Verification completed:
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
 
+Date: 2026-03-27
+
+Change summary:
+
+- Confirmed the free production canary now completes successfully end to end after the preview-scaffold and missing-local-module fixes.
+- Used the admin owner account to run the paid full-stack canary and isolated the next orchestration blocker from the live build record instead of guessing.
+- Found that the database schema task legitimately emitted `server/migrate.ts` and `server/seed.ts`, but the fullstack React+Express scaffold ownership map rejected those files as out-of-scope, causing a coordination-contract retry loop that parked the build in `data_foundation`.
+- Expanded the fullstack React+Express database ownership map to include `server/migrate.ts` and `server/seed.ts`, and added a regression to keep those database runtime helpers owned by the database role.
+
+Files changed:
+
+- `backend/internal/agents/build_spec.go`
+- `backend/internal/agents/build_spec_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestFullstackExpressScaffoldAssignsDatabaseRuntimeHelpersToDatabaseRole|TestSelectBuildScaffoldNewStacks|TestCreateBuildPlanFromPlanningBundlePulseBoardUsesFrontendScaffoldAndFrontendOwnership'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

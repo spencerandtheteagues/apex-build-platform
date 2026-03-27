@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1184,6 +1185,23 @@ func TestSelectBuildScaffoldNextFullstackSeedsAPIContractAndAcceptance(t *testin
 	}
 	if !strings.Contains(acceptance, string(RoleTesting)) {
 		t.Fatalf("expected integration acceptance coverage, got %s", acceptance)
+	}
+}
+
+func TestFullstackExpressScaffoldAssignsDatabaseRuntimeHelpersToDatabaseRole(t *testing.T) {
+	t.Parallel()
+
+	scaffold := selectBuildScaffold("fullstack", TechStack{Frontend: "React", Backend: "Express", Database: "PostgreSQL"})
+	if scaffold.ID != "fullstack/react-vite-express-ts" {
+		t.Fatalf("unexpected scaffold id: %s", scaffold.ID)
+	}
+
+	databaseOwned := scaffold.Ownership[RoleDatabase]
+	if !slices.Contains(databaseOwned, "server/migrate.ts") {
+		t.Fatalf("expected database role to own server/migrate.ts, got %+v", databaseOwned)
+	}
+	if !slices.Contains(databaseOwned, "server/seed.ts") {
+		t.Fatalf("expected database role to own server/seed.ts, got %+v", databaseOwned)
 	}
 }
 
