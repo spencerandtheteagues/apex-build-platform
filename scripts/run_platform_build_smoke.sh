@@ -20,6 +20,7 @@ fi
 
 prompt_file=""
 cookie_jar=""
+TOKEN=""
 cleanup() {
   if [[ -n "${prompt_file}" && -f "${prompt_file}" ]]; then
     rm -f "${prompt_file}"
@@ -31,6 +32,33 @@ cleanup() {
 trap cleanup EXIT
 
 cookie_jar="$(mktemp)"
+
+refresh_auth_args() {
+  auth_args=(-b "$cookie_jar" -c "$cookie_jar")
+  if [[ -n "${TOKEN}" && "${TOKEN}" != "null" ]]; then
+    auth_args+=(-H "Authorization: Bearer $TOKEN")
+  fi
+}
+
+login_or_exit() {
+  local login_payload
+  login_payload="$(jq -n --arg u "$USER" --arg e "$EMAIL" --arg p "$PASS" '{username:($e // $u),email:$e,password:$p}')"
+  curl -sS -c "$cookie_jar" -b "$cookie_jar" -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" -d "$login_payload" >/tmp/apex_login.json
+
+  TOKEN="$(jq -r '.access_token // .token // .data.access_token // .tokens.access_token // empty' /tmp/apex_login.json)"
+  LOGIN_ERROR="$(jq -r '.error // empty' /tmp/apex_login.json)"
+  HAS_SESSION_COOKIE="0"
+  if [[ -s "$cookie_jar" ]] && grep -q $'apex_access_token\t' "$cookie_jar"; then
+    HAS_SESSION_COOKIE="1"
+  fi
+  if [[ "$LOGIN_ERROR" != "" && ( -z "$TOKEN" || "$TOKEN" == "null" ) && "$HAS_SESSION_COOKIE" != "1" ]]; then
+    echo "LOGIN_FAILED"
+    cat /tmp/apex_login.json
+    exit 1
+  fi
+
+  refresh_auth_args
+}
 
 if [[ $# -gt 0 ]]; then
   prompt_file="$1"
@@ -83,25 +111,7 @@ if [[ -z "$LOGIN_EMAIL" || -z "$LOGIN_PASSWORD" ]]; then
   fi
 fi
 
-login_payload="$(jq -n --arg u "$USER" --arg e "$EMAIL" --arg p "$PASS" '{username:($e // $u),email:$e,password:$p}')"
-curl -sS -c "$cookie_jar" -b "$cookie_jar" -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" -d "$login_payload" >/tmp/apex_login.json
-
-TOKEN="$(jq -r '.access_token // .token // .data.access_token // .tokens.access_token // empty' /tmp/apex_login.json)"
-LOGIN_ERROR="$(jq -r '.error // empty' /tmp/apex_login.json)"
-HAS_SESSION_COOKIE="0"
-if [[ -s "$cookie_jar" ]] && grep -q $'apex_access_token\t' "$cookie_jar"; then
-  HAS_SESSION_COOKIE="1"
-fi
-if [[ "$LOGIN_ERROR" != "" && ( -z "$TOKEN" || "$TOKEN" == "null" ) && "$HAS_SESSION_COOKIE" != "1" ]]; then
-  echo "LOGIN_FAILED"
-  cat /tmp/apex_login.json
-  exit 1
-fi
-
-auth_args=(-b "$cookie_jar" -c "$cookie_jar")
-if [[ -n "$TOKEN" && "$TOKEN" != "null" ]]; then
-  auth_args+=(-H "Authorization: Bearer $TOKEN")
-fi
+login_or_exit
 
 build_payload="$(jq -n \
   --arg d "$PROMPT" \
@@ -128,6 +138,11 @@ echo "SMOKE_PROFILE=$SMOKE_PROFILE"
 final_status=""
 for _ in $(seq 1 "$MAX_POLLS"); do
   status_json="$(curl -sS "${auth_args[@]}" "$BASE_URL/build/$BUILD_ID/status" || true)"
+  auth_error="$(jq -r '.error // empty' <<<"$status_json" 2>/dev/null || true)"
+  if [[ "$auth_error" == "authentication required" || "$auth_error" == "invalid or expired token" ]]; then
+    login_or_exit
+    status_json="$(curl -sS "${auth_args[@]}" "$BASE_URL/build/$BUILD_ID/status" || true)"
+  fi
   status="$(jq -r '.status // empty' <<<"$status_json" 2>/dev/null || true)"
   progress="$(jq -r '.progress // empty' <<<"$status_json" 2>/dev/null || true)"
   files="$(jq -r '.files_count // empty' <<<"$status_json" 2>/dev/null || true)"
@@ -143,11 +158,21 @@ for _ in $(seq 1 "$MAX_POLLS"); do
 done
 
 curl -sS "${auth_args[@]}" "$BASE_URL/build/$BUILD_ID" >/tmp/apex_build_detail.json || true
+detail_auth_error="$(jq -r '.error // empty' /tmp/apex_build_detail.json 2>/dev/null || true)"
+if [[ "$detail_auth_error" == "authentication required" || "$detail_auth_error" == "invalid or expired token" ]]; then
+  login_or_exit
+  curl -sS "${auth_args[@]}" "$BASE_URL/build/$BUILD_ID" >/tmp/apex_build_detail.json || true
+fi
 echo "FINAL_DETAIL_SUMMARY"
 jq '{id,status,progress,error,provider_mode,power_mode,require_preview_ready,files_count:(.files|length)}' /tmp/apex_build_detail.json || cat /tmp/apex_build_detail.json
 
 if [[ "$final_status" == "completed" ]]; then
   curl -sS "${auth_args[@]}" "$BASE_URL/builds/$BUILD_ID" >/tmp/apex_build_completed.json || true
+  completed_auth_error="$(jq -r '.error // empty' /tmp/apex_build_completed.json 2>/dev/null || true)"
+  if [[ "$completed_auth_error" == "authentication required" || "$completed_auth_error" == "invalid or expired token" ]]; then
+    login_or_exit
+    curl -sS "${auth_args[@]}" "$BASE_URL/builds/$BUILD_ID" >/tmp/apex_build_completed.json || true
+  fi
   echo "COMPLETED_BUILD_SUMMARY"
   jq '{build_id,status,progress,error,files_count,live,resumable}' /tmp/apex_build_completed.json || cat /tmp/apex_build_completed.json
   completed_status="$(jq -r '.status // empty' /tmp/apex_build_completed.json 2>/dev/null || true)"

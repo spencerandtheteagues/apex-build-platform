@@ -925,6 +925,22 @@ Verification completed:
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
 
+Date: 2026-03-27
+
+Change summary:
+
+- Hardened the production canary smoke runner so long paid/full-stack builds can re-authenticate mid-poll instead of collapsing into repeated `authentication required` responses after the initial login ages out.
+- Added automatic re-login before the status poll, final detail fetch, and completed-build fetch whenever the live API reports an expired or missing session.
+- This keeps the canary useful while the deeper paid/full-stack integration-route drift issue is still being chased in the product itself.
+
+Files changed:
+
+- `scripts/run_platform_build_smoke.sh`
+
+Verification completed:
+
+- `bash -n scripts/run_platform_build_smoke.sh`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:
