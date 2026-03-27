@@ -2,7 +2,9 @@
 // Advanced code editor with multi-AI integration and multiplayer collaboration
 
 import React, { useEffect, useRef, useState, forwardRef, useCallback, useMemo } from 'react'
-import * as monaco from 'monaco-editor'
+import type * as MonacoTypes from 'monaco-editor'
+import { monaco } from '@monaco-runtime'
+import { ensureMonacoLanguageSupport } from '@monaco-language-support'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
 import { useCollaboration, RemoteCursor } from '@/hooks/useCollaboration'
@@ -42,7 +44,7 @@ function debounce<T extends (...args: any[]) => any>(
   }
 }
 
-const buildOperationsFromChanges = (changes: readonly monaco.editor.IModelContentChange[]): Operation[] => {
+const buildOperationsFromChanges = (changes: readonly MonacoTypes.editor.IModelContentChange[]): Operation[] => {
   const operations: Operation[] = []
   let offsetDelta = 0
 
@@ -73,7 +75,7 @@ const buildOperationsFromChanges = (changes: readonly monaco.editor.IModelConten
 }
 
 const applyOperationsToEditor = (
-  editor: monaco.editor.IStandaloneCodeEditor,
+  editor: MonacoTypes.editor.IStandaloneCodeEditor,
   operations: Operation[]
 ): void => {
   const model = editor.getModel()
@@ -81,7 +83,7 @@ const applyOperationsToEditor = (
     return
   }
 
-  const edits: monaco.editor.IIdentifiedSingleEditOperation[] = []
+  const edits: MonacoTypes.editor.IIdentifiedSingleEditOperation[] = []
   for (const operation of operations) {
     switch (operation.type) {
       case 'insert': {
@@ -250,6 +252,16 @@ const LANGUAGE_CONFIGS = {
   json: { id: 'json', defaultCode: '{\n  "name": "apex-build",\n  "version": "1.0.0",\n  "description": "Cyberpunk cloud development platform"\n}' },
 }
 
+type MonacoCodeEditor = MonacoTypes.editor.IStandaloneCodeEditor
+type MonacoDisposable = MonacoTypes.IDisposable
+type MonacoChangeEvent = MonacoTypes.editor.IModelContentChangedEvent
+type MonacoCursorPositionEvent = MonacoTypes.editor.ICursorPositionChangedEvent
+type MonacoCursorSelectionEvent = MonacoTypes.editor.ICursorSelectionChangedEvent
+type MonacoTextModel = MonacoTypes.editor.ITextModel
+type MonacoPosition = MonacoTypes.Position
+type MonacoInlineContext = MonacoTypes.languages.InlineCompletionContext
+type MonacoCancellationToken = MonacoTypes.CancellationToken
+
 export interface MonacoEditorProps {
   file?: File
   value?: string
@@ -270,7 +282,7 @@ export interface MonacoEditorProps {
   framework?: string
 }
 
-const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, MonacoEditorProps>(
+const MonacoEditor = forwardRef<MonacoCodeEditor | null, MonacoEditorProps>(
   ({
     file,
     value = '',
@@ -289,7 +301,7 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
     framework,
   }, ref) => {
     const editorRef = useRef<HTMLDivElement>(null)
-    const [editor, setEditor] = useState<monaco.editor.IStandaloneCodeEditor | null>(null)
+    const [editor, setEditor] = useState<MonacoCodeEditor | null>(null)
     const [isAILoading, setIsAILoading] = useState(false)
     const [aiCapability, setAICapability] = useState<AICapability>('code_completion')
     const [aiPrompt, setAIPrompt] = useState('')
@@ -301,7 +313,7 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
     const [isCompletionLoading, setIsCompletionLoading] = useState(false)
     const [completionsEnabled, setCompletionsEnabled] = useState(enableInlineCompletions)
     const lastCompletionRef = useRef<CompletionItem | null>(null)
-    const completionProviderRef = useRef<monaco.IDisposable | null>(null)
+    const completionProviderRef = useRef<MonacoDisposable | null>(null)
     const applyingRemoteChangeRef = useRef(false)
     const currentFileRef = useRef<{ fileId?: number; fileName?: string }>({ fileId: file?.id, fileName: file?.name })
 
@@ -379,11 +391,13 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
       if (!editorRef.current) return
 
       let disposed = false
-      let editorInstance: monaco.editor.IStandaloneCodeEditor | null = null
+      let editorInstance: MonacoCodeEditor | null = null
 
       const initialize = async () => {
         // Keep Monaco worker bundles on the lazy editor path instead of app entry.
         await ensureMonacoWorkersInitialized()
+        const initialLanguage = getLanguageFromFile(file?.name || '')
+        await ensureMonacoLanguageSupport(initialLanguage)
         if (disposed || !editorRef.current) return
 
         // Register custom themes
@@ -394,7 +408,7 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
         // Create editor instance
         editorInstance = monaco.editor.create(editorRef.current, {
           value: value || (file?.content || ''),
-          language: getLanguageFromFile(file?.name || ''),
+          language: initialLanguage,
           theme: `apex-${themeId}`,
           automaticLayout: true,
           readOnly,
@@ -425,7 +439,7 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
         })
 
         // Set up event listeners
-        editorInstance.onDidChangeModelContent((event) => {
+        editorInstance.onDidChangeModelContent((event: MonacoChangeEvent) => {
           const currentValue = editorInstance!.getValue()
 
           if (applyingRemoteChangeRef.current) {
@@ -451,7 +465,7 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
         })
 
         // Cursor position change handler for collaboration
-        editorInstance.onDidChangeCursorPosition((e) => {
+        editorInstance.onDidChangeCursorPosition((e: MonacoCursorPositionEvent) => {
           const currentFile = currentFileRef.current
           if (enableCollaboration && currentFile.fileId && currentFile.fileName) {
             collaborationService.updateCursor(
@@ -464,7 +478,7 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
         })
 
         // Selection change handler for collaboration
-        editorInstance.onDidChangeCursorSelection((e) => {
+        editorInstance.onDidChangeCursorSelection((e: MonacoCursorSelectionEvent) => {
           if (enableCollaboration) {
             const selection = e.selection
             if (selection.isEmpty()) {
@@ -530,7 +544,9 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
           applyingRemoteChangeRef.current = true
           model.setValue(file.content)
           const language = getLanguageFromFile(file.name)
-          monaco.editor.setModelLanguage(model, language)
+          void ensureMonacoLanguageSupport(language).then(() => {
+            monaco.editor.setModelLanguage(model, language)
+          })
         }
       }
     }, [file, editor])
@@ -560,7 +576,12 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
 
       // Register the inline completion provider
       const provider = monaco.languages.registerInlineCompletionsProvider(language, {
-        provideInlineCompletions: async (model, position, context, token) => {
+        provideInlineCompletions: async (
+          model: MonacoTextModel,
+          position: MonacoPosition,
+          context: MonacoInlineContext,
+          token: MonacoCancellationToken
+        ) => {
           // Only trigger on automatic or explicit invocation
           if (
             context.triggerKind !== monaco.languages.InlineCompletionTriggerKind.Automatic &&
@@ -688,7 +709,7 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
       editor.addAction({
         id: 'apex.acceptCompletion',
         label: 'Accept AI Completion',
-        run: (_, completionId?: string) => {
+        run: (_: unknown, completionId?: string) => {
           const idToTrack = completionId || lastCompletionRef.current?.id
           if (idToTrack) {
             apiService.acceptCompletion(idToTrack, true).catch((err) => {
@@ -699,7 +720,7 @@ const MonacoEditor = forwardRef<monaco.editor.IStandaloneCodeEditor | null, Mona
       })
 
       // Track when inline completion is accepted via Tab key
-      const tabDisposable = editor.onDidChangeModelContent((e) => {
+      const tabDisposable = editor.onDidChangeModelContent((e: MonacoChangeEvent) => {
         // If we have a pending completion and content changed, check if it was accepted
         if (lastCompletionRef.current && e.changes.length > 0) {
           const change = e.changes[0]

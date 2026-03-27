@@ -30,7 +30,9 @@
       "@types/*": ["src/types/*"],
       "@utils/*": ["src/utils/*"],
       "@styles/*": ["src/styles/*"],
-      "@monaco-worker-setup": ["src/components/editor/setupMonacoWorkers"]
+      "@monaco-worker-setup": ["src/components/editor/setupMonacoWorkers"],
+      "@monaco-runtime": ["src/components/editor/monacoRuntime"],
+      "@monaco-language-support": ["src/components/editor/monacoLanguageSupport"]
     }
   },
   "include": ["src"],

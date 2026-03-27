@@ -14,6 +14,12 @@ export default defineConfig(({ mode }) => {
   const monacoWorkerSetupModule = env.VITE_MONACO_FULL_LANGUAGE_WORKERS === 'true'
     ? './src/components/editor/setupMonacoWorkers.full.ts'
     : './src/components/editor/setupMonacoWorkers.ts'
+  const monacoRuntimeModule = env.VITE_MONACO_FULL_LANGUAGE_WORKERS === 'true'
+    ? './src/components/editor/monacoRuntime.full.ts'
+    : './src/components/editor/monacoRuntime.ts'
+  const monacoLanguageSupportModule = env.VITE_MONACO_FULL_LANGUAGE_WORKERS === 'true'
+    ? './src/components/editor/monacoLanguageSupport.full.ts'
+    : './src/components/editor/monacoLanguageSupport.ts'
 
   return {
     plugins: [
@@ -69,6 +75,8 @@ export default defineConfig(({ mode }) => {
         '@utils': path.resolve(__dirname, './src/utils'),
         '@styles': path.resolve(__dirname, './src/styles'),
         '@monaco-worker-setup': path.resolve(__dirname, monacoWorkerSetupModule),
+        '@monaco-runtime': path.resolve(__dirname, monacoRuntimeModule),
+        '@monaco-language-support': path.resolve(__dirname, monacoLanguageSupportModule),
       },
     },
 
@@ -79,9 +87,11 @@ export default defineConfig(({ mode }) => {
       // Target modern browsers for smaller bundles
       target: 'es2020',
 
-      // Monaco is intentionally split into a large lazy chunk (~2MB). Keep warning
-      // threshold at 2MB so accidental large imports are still flagged.
-      chunkSizeWarningLimit: 2000,
+      // Monaco stays on a lazy editor path and now resolves to a single isolated
+      // core editor chunk plus small language packs. Keep the threshold tight,
+      // but slightly above the intentional Monaco core bundle so real regressions
+      // in customer-facing app chunks still surface in CI.
+      chunkSizeWarningLimit: 2300,
 
       // Disable the modulepreload polyfill to keep CSP simpler.
       modulePreload: {

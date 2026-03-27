@@ -2,12 +2,13 @@
 // Real-time cursor visualization for Monaco editor collaboration
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
-import * as monaco from 'monaco-editor'
+import type * as MonacoTypes from 'monaco-editor'
+import { monaco } from '@monaco-runtime'
 import { RemoteCursor } from '@/hooks/useCollaboration'
 import { cn } from '@/lib/utils'
 
 export interface MultiplayerCursorsProps {
-  editor: monaco.editor.IStandaloneCodeEditor | null
+  editor: MonacoTypes.editor.IStandaloneCodeEditor | null
   cursors: RemoteCursor[]
   fileId?: number
   className?: string
@@ -171,7 +172,7 @@ export const MultiplayerCursors: React.FC<MultiplayerCursorsProps> = ({
     if (!model) return
 
     // Collect all decorations to add
-    const newDecorations: monaco.editor.IModelDeltaDecoration[] = []
+    const newDecorations: MonacoTypes.editor.IModelDeltaDecoration[] = []
     const oldDecorationIds: string[] = []
 
     // Collect old decoration IDs

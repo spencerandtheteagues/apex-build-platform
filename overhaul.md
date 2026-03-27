@@ -454,6 +454,37 @@ Verification completed:
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
 
+### 2026-03-26 (frontend Monaco/Vite slimming pass)
+
+Completed:
+
+- Removed the default Monaco TypeScript worker from the standard build path so the frontend no longer ships the previous 4.7 MB worker bundle by default.
+- Swapped editor surfaces from the full `monaco-editor` root import to a slimmer runtime path while keeping Monaco types available through type-only imports.
+- Added alias-driven Monaco runtime selection so normal builds use the lean runtime and full semantic workers remain opt-in through `VITE_MONACO_FULL_LANGUAGE_WORKERS=true`.
+- Split Monaco language registration into on-demand language support loaders so editor language packs stay modular instead of bloating the app entry path.
+- Tightened the Vite warning threshold around the now-isolated Monaco core chunk so the build stops reporting the lazy Monaco bundle as a generic frontend regression.
+
+Files changed:
+
+- `frontend/src/components/editor/InlineCompletionProvider.ts`
+- `frontend/src/components/editor/MonacoEditor.tsx`
+- `frontend/src/components/editor/MultiplayerCursors.tsx`
+- `frontend/src/components/editor/monacoLanguageSupport.ts`
+- `frontend/src/components/editor/monacoLanguageSupport.full.ts`
+- `frontend/src/components/editor/monacoRuntime.ts`
+- `frontend/src/components/editor/monacoRuntime.full.ts`
+- `frontend/src/components/editor/setupMonacoWorkers.ts`
+- `frontend/src/components/ide/DiffViewer.tsx`
+- `frontend/tsconfig.json`
+- `frontend/vite.config.ts`
+
+Verification completed:
+
+- `cd frontend && npm run lint`
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run build`
+- `cd frontend && npm run test -- --run`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

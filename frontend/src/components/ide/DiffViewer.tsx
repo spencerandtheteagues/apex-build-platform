@@ -2,7 +2,9 @@
 // Side-by-side code comparison using Monaco Diff Editor
 
 import React, { useEffect, useRef, useState } from 'react'
-import * as monaco from 'monaco-editor'
+import type * as MonacoTypes from 'monaco-editor'
+import { monaco } from '@monaco-runtime'
+import { ensureMonacoLanguageSupport } from '@monaco-language-support'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
 import { Button, Badge } from '@/components/ui'
@@ -32,40 +34,51 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onReject
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
-  const diffEditorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null)
+  const diffEditorRef = useRef<MonacoTypes.editor.IStandaloneDiffEditor | null>(null)
   const { currentTheme } = useStore()
 
   // Initialize Diff Editor
   useEffect(() => {
     if (!containerRef.current) return
 
-    // Create models
-    const originalModel = monaco.editor.createModel(originalContent, language)
-    const modifiedModel = monaco.editor.createModel(modifiedContent, language)
+    let disposed = false
+    let diffEditor: MonacoTypes.editor.IStandaloneDiffEditor | null = null
+    let originalModel: MonacoTypes.editor.ITextModel | null = null
+    let modifiedModel: MonacoTypes.editor.ITextModel | null = null
 
-    // Create editor
-    const diffEditor = monaco.editor.createDiffEditor(containerRef.current, {
-      originalEditable: false,
-      readOnly: true,
-      theme: `apex-${currentTheme.id}`, // Reuse theme from MonacoEditor setup
-      automaticLayout: true,
-      renderSideBySide: true,
-      fontSize: 14,
-      fontFamily: '"Fira Code", "SF Mono", Monaco, Menlo, Consolas, monospace',
-      minimap: { enabled: false },
-    })
+    const initialize = async () => {
+      await ensureMonacoLanguageSupport(language)
+      if (disposed || !containerRef.current) return
 
-    diffEditor.setModel({
-      original: originalModel,
-      modified: modifiedModel
-    })
+      originalModel = monaco.editor.createModel(originalContent, language)
+      modifiedModel = monaco.editor.createModel(modifiedContent, language)
 
-    diffEditorRef.current = diffEditor
+      diffEditor = monaco.editor.createDiffEditor(containerRef.current, {
+        originalEditable: false,
+        readOnly: true,
+        theme: `apex-${currentTheme.id}`, // Reuse theme from MonacoEditor setup
+        automaticLayout: true,
+        renderSideBySide: true,
+        fontSize: 14,
+        fontFamily: '"Fira Code", "SF Mono", Monaco, Menlo, Consolas, monospace',
+        minimap: { enabled: false },
+      })
+
+      diffEditor.setModel({
+        original: originalModel,
+        modified: modifiedModel
+      })
+
+      diffEditorRef.current = diffEditor
+    }
+
+    void initialize()
 
     return () => {
-      diffEditor.dispose()
-      originalModel.dispose()
-      modifiedModel.dispose()
+      disposed = true
+      diffEditor?.dispose()
+      originalModel?.dispose()
+      modifiedModel?.dispose()
     }
   }, [originalContent, modifiedContent, language, currentTheme.id])
 

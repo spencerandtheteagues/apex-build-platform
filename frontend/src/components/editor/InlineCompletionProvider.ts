@@ -1,8 +1,11 @@
 // APEX-BUILD Inline Completion Provider
 // Monaco Editor integration for ghost text suggestions (Tab completion)
 
-import * as monaco from 'monaco-editor'
+import type * as MonacoTypes from 'monaco-editor'
+import { monaco } from '@monaco-runtime'
 import { aiService, AICompletionSuggestion } from '@/services/aiService'
+
+type MonacoInlineCompletionsProvider = MonacoTypes.languages.InlineCompletionsProvider
 
 export interface InlineCompletionConfig {
   enabled: boolean
@@ -22,7 +25,7 @@ const DEFAULT_CONFIG: InlineCompletionConfig = {
   provider: 'auto',
 }
 
-export class InlineCompletionProvider implements monaco.languages.InlineCompletionsProvider {
+export class InlineCompletionProvider implements MonacoInlineCompletionsProvider {
   private config: InlineCompletionConfig
   private debounceTimer: ReturnType<typeof setTimeout> | null = null
   private currentSuggestion: AICompletionSuggestion | null = null
@@ -58,11 +61,11 @@ export class InlineCompletionProvider implements monaco.languages.InlineCompleti
 
   // Main provider method called by Monaco
   async provideInlineCompletions(
-    model: monaco.editor.ITextModel,
-    position: monaco.Position,
-    context: monaco.languages.InlineCompletionContext,
-    token: monaco.CancellationToken
-  ): Promise<monaco.languages.InlineCompletions | undefined> {
+    model: MonacoTypes.editor.ITextModel,
+    position: MonacoTypes.Position,
+    context: MonacoTypes.languages.InlineCompletionContext,
+    token: MonacoTypes.CancellationToken
+  ): Promise<MonacoTypes.languages.InlineCompletions | undefined> {
     if (!this.config.enabled || !this.isEnabled) {
       return undefined
     }
@@ -121,9 +124,9 @@ export class InlineCompletionProvider implements monaco.languages.InlineCompleti
 
   // Check if we should trigger completion
   private shouldTrigger(
-    model: monaco.editor.ITextModel,
-    position: monaco.Position,
-    context: monaco.languages.InlineCompletionContext
+    model: MonacoTypes.editor.ITextModel,
+    position: MonacoTypes.Position,
+    context: MonacoTypes.languages.InlineCompletionContext
   ): boolean {
     // Check if triggered by a specific character
     if (context.triggerKind === monaco.languages.InlineCompletionTriggerKind.Automatic) {
@@ -151,8 +154,8 @@ export class InlineCompletionProvider implements monaco.languages.InlineCompleti
 
   // Get completion from AI service
   private async getCompletion(
-    model: monaco.editor.ITextModel,
-    position: monaco.Position
+    model: MonacoTypes.editor.ITextModel,
+    position: MonacoTypes.Position
   ): Promise<AICompletionSuggestion | null> {
     const language = model.getLanguageId()
     const fullContent = model.getValue()
@@ -197,8 +200,8 @@ export class InlineCompletionProvider implements monaco.languages.InlineCompleti
 
   // Get context lines before or after cursor
   private getContext(
-    model: monaco.editor.ITextModel,
-    position: monaco.Position,
+    model: MonacoTypes.editor.ITextModel,
+    position: MonacoTypes.Position,
     direction: 'before' | 'after'
   ): string {
     const lines: string[] = []
@@ -244,7 +247,7 @@ Provide a natural continuation of the code:`
   }
 
   // Handle free completions (required by interface)
-  freeInlineCompletions(completions: monaco.languages.InlineCompletions): void {
+  freeInlineCompletions(completions: MonacoTypes.languages.InlineCompletions): void {
     // Cleanup if needed
   }
 }
@@ -253,10 +256,10 @@ Provide a natural continuation of the code:`
 export function registerInlineCompletionProvider(
   languages: string[],
   config?: Partial<InlineCompletionConfig>
-): monaco.IDisposable {
+): MonacoTypes.IDisposable {
   const provider = new InlineCompletionProvider(config)
 
-  const disposables: monaco.IDisposable[] = []
+  const disposables: MonacoTypes.IDisposable[] = []
 
   for (const language of languages) {
     const disposable = monaco.languages.registerInlineCompletionsProvider(language, provider)
