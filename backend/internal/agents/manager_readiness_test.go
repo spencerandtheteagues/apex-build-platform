@@ -3323,3 +3323,183 @@ func hasProviderScorecardFailure(scorecards []ProviderScorecard, provider ai.AIP
 	}
 	return false
 }
+
+func TestApplyDeterministicIntegrationPreflightRepairsExpressRuntime(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-express-integration-repair",
+		TechStack: &TechStack{
+			Frontend: "React",
+			Backend:  "Express",
+		},
+		Plan: &BuildPlan{
+			APIContract: &BuildAPIContract{
+				CORSOrigins: []string{"http://localhost:5173"},
+				Endpoints: []APIEndpoint{
+					{Method: "GET", Path: "/api/health"},
+				},
+			},
+		},
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/index.ts",
+				Content: `import express from "express";
+
+const app = express();
+app.use(express.json());
+app.listen(4000, () => {
+  console.log("listening");
+});
+`,
+				Language: "typescript",
+				IsNew:    true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	issues := []string{
+		`integration: backend does not expose required contract endpoint /api/health`,
+		`integration: backend has no CORS configuration — frontend requests will be blocked by the browser`,
+		`integration: backend listens on wrong port — must use port 3001 (or $PORT) to match frontend configuration`,
+	}
+
+	if !am.applyDeterministicIntegrationPreflightRepairs(build, issues, time.Now()) {
+		t.Fatal("expected deterministic integration repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	content := ""
+	for _, file := range files {
+		if file.Path == "server/index.ts" {
+			content = file.Content
+			break
+		}
+	}
+	if content == "" {
+		t.Fatalf("expected repaired server entry file, got %+v", files)
+	}
+	for _, needle := range []string{
+		`import cors from "cors";`,
+		`app.use(cors({ origin: ["http://localhost:5173"], credentials: true }));`,
+		`app.get("/api/health", (_req, res) => res.json({ status: "ok" }));`,
+		`app.listen(Number(process.env.PORT || 3001), () => {`,
+	} {
+		if !strings.Contains(content, needle) {
+			t.Fatalf("expected repaired server content to contain %q, got:\n%s", needle, content)
+		}
+	}
+}
+
+func TestLaunchIntegrationPreflightRecoveryCreatesScopedFixTask(t *testing.T) {
+	t.Parallel()
+
+	build := &Build{
+		ID:          "build-integration-recovery",
+		Description: "Build a full-stack CRM with auth and dashboards",
+		Status:      BuildInProgress,
+		MaxRetries:  2,
+		TechStack: &TechStack{
+			Frontend: "React",
+			Backend:  "Express",
+		},
+		Agents: map[string]*Agent{
+			"solver-1": {
+				ID:       "solver-1",
+				Role:     RoleSolver,
+				Provider: ai.ProviderGPT4,
+				BuildID:  "build-integration-recovery",
+				Status:   StatusIdle,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+	am := &AgentManager{
+		agents:      map[string]*Agent{"solver-1": build.Agents["solver-1"]},
+		builds:      map[string]*Build{build.ID: build},
+		taskQueue:   make(chan *Task, 1),
+		resultQueue: make(chan *TaskResult, 1),
+		subscribers: map[string][]chan *WSMessage{},
+		ctx:         context.Background(),
+	}
+
+	issues := []string{
+		`integration: frontend calls /api/auth/login but backend has no matching route`,
+		`integration: frontend calls /api/dashboard/kpis but backend has no matching route`,
+	}
+
+	task, launched := am.launchIntegrationPreflightRecovery(build, issues, time.Now())
+	if !launched || task == nil {
+		t.Fatal("expected integration preflight recovery task to launch")
+	}
+	if task.Type != TaskFix {
+		t.Fatalf("expected task type %s, got %s", TaskFix, task.Type)
+	}
+	if action, _ := task.Input["action"].(string); action != "fix_integration_contract" {
+		t.Fatalf("expected integration fix action, got %+v", task.Input["action"])
+	}
+	if skip, _ := task.Input["skip_post_fix_validation"].(bool); !skip {
+		t.Fatalf("expected integration fix to skip post-fix validation, got %+v", task.Input["skip_post_fix_validation"])
+	}
+	if task.AssignedTo != "solver-1" {
+		t.Fatalf("expected solver assignment, got %q", task.AssignedTo)
+	}
+	if task.Status != TaskInProgress {
+		t.Fatalf("expected in-progress integration fix task, got %s", task.Status)
+	}
+	if build.Status != BuildTesting || build.SnapshotState.CurrentPhase != "integration" {
+		t.Fatalf("expected build to move into integration/testing state, got status=%s phase=%q", build.Status, build.SnapshotState.CurrentPhase)
+	}
+	hints := repairErrorStringsFromValue(task.Input["repair_hints"])
+	joined := strings.Join(hints, "\n")
+	for _, needle := range []string{"/api/auth/login", "/api/dashboard/kpis"} {
+		if !strings.Contains(joined, needle) {
+			t.Fatalf("expected repair hints to mention %q, got %q", needle, joined)
+		}
+	}
+}
+
+func TestHandleTaskCompletionSkipsPostFixValidationForIntegrationPreflightFix(t *testing.T) {
+	t.Parallel()
+
+	build := &Build{
+		ID: "build-skip-post-fix-validation",
+		Agents: map[string]*Agent{
+			"testing-1": {ID: "testing-1", Role: RoleTesting, BuildID: "build-skip-post-fix-validation"},
+			"review-1":  {ID: "review-1", Role: RoleReviewer, BuildID: "build-skip-post-fix-validation"},
+		},
+	}
+	am := &AgentManager{
+		builds:      map[string]*Build{build.ID: build},
+		agents:      map[string]*Agent{"testing-1": build.Agents["testing-1"], "review-1": build.Agents["review-1"]},
+		taskQueue:   make(chan *Task, 2),
+		resultQueue: make(chan *TaskResult, 1),
+		subscribers: map[string][]chan *WSMessage{},
+	}
+
+	task := &Task{
+		ID:     "fix-integration",
+		Type:   TaskFix,
+		Status: TaskCompleted,
+		Input: map[string]any{
+			"action":                   "fix_integration_contract",
+			"skip_post_fix_validation": true,
+		},
+	}
+
+	am.handleTaskCompletion(build.ID, task, &TaskOutput{})
+
+	if len(build.Tasks) != 0 {
+		t.Fatalf("expected no follow-up validation tasks for integration preflight fix, got %+v", build.Tasks)
+	}
+}

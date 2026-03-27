@@ -895,7 +895,7 @@ func (am *AgentManager) runInactivityMonitor(buildID string) (normalExit bool) {
 			if task.Status == TaskPending || task.Status == TaskInProgress {
 				if action, _ := task.Input["action"].(string); action != "" {
 					switch action {
-					case "fix_review_issues", "fix_tests", "regression_test", "post_fix_review", "solve_build_failure":
+					case "fix_review_issues", "fix_tests", "fix_integration_contract", "regression_test", "post_fix_review", "solve_build_failure":
 						activeRecoveryTasks++
 					}
 				}
@@ -4369,8 +4369,12 @@ func (am *AgentManager) handleTaskCompletion(buildID string, task *Task, output 
 		// Review completed - apply fixes if needed
 		am.handleReviewCompletion(build, output)
 	case TaskFix:
-		// Any fix task is followed by fresh tests and review before completion.
-		am.schedulePostFixValidation(build, task)
+		// Integration-preflight fixes stay inside the phased pipeline and should not
+		// spawn duplicate validation tasks before the dedicated integration/review phases.
+		if skip, _ := task.Input["skip_post_fix_validation"].(bool); !skip {
+			// Any other fix task is followed by fresh tests and review before completion.
+			am.schedulePostFixValidation(build, task)
+		}
 	}
 
 	// Update build progress
@@ -5252,6 +5256,8 @@ func (am *AgentManager) maxAutomatedFixLoops(build *Build, action string) int {
 		envKey = "BUILD_MAX_REVIEW_FIX_LOOPS"
 	} else if action == "fix_tests" {
 		envKey = "BUILD_MAX_TEST_FIX_LOOPS"
+	} else if action == "fix_integration_contract" {
+		envKey = "BUILD_MAX_INTEGRATION_FIX_LOOPS"
 	}
 
 	limit := envInt(envKey, defaultLimit)
@@ -5262,6 +5268,179 @@ func (am *AgentManager) maxAutomatedFixLoops(build *Build, action string) int {
 		limit = 0
 	}
 	return limit
+}
+
+func buildHasRuntimeIntegrationSurface(build *Build) bool {
+	if build == nil || build.TechStack == nil || buildRequiresStaticFrontendFallback(build) {
+		return false
+	}
+	return strings.TrimSpace(build.TechStack.Frontend) != "" && strings.TrimSpace(build.TechStack.Backend) != ""
+}
+
+func (am *AgentManager) launchIntegrationPreflightRecovery(build *Build, issues []string, now time.Time) (*Task, bool) {
+	if build == nil || len(issues) == 0 || !am.canCreateAutomatedFixTask(build, "fix_integration_contract") {
+		return nil, false
+	}
+
+	agent := am.selectFixAgent(build, []AgentRole{RoleSolver, RoleBackend, RoleFrontend, RoleReviewer})
+	if agent == nil {
+		return nil, false
+	}
+
+	fixTask := &Task{
+		ID:          uuid.New().String(),
+		Type:        TaskFix,
+		Description: "Repair frontend/backend contract drift before final review",
+		Priority:    90,
+		Status:      TaskPending,
+		MaxRetries:  build.MaxRetries,
+		Input: map[string]any{
+			"action":                   "fix_integration_contract",
+			"verification_errors":      append([]string(nil), issues...),
+			"previous_errors":          append([]string(nil), issues...),
+			"failure_error":            strings.Join(issues, "; "),
+			"app_description":          build.Description,
+			"retry_strategy":           "fix_and_retry",
+			"requires_regression_test": false,
+			"skip_post_fix_validation": true,
+		},
+		CreatedAt: now,
+	}
+	if hints := extractDependencyRepairHintsFromReadinessErrors(issues); len(hints) > 0 {
+		fixTask.Input["repair_hints"] = hints
+	}
+
+	build.mu.Lock()
+	build.Tasks = append(build.Tasks, fixTask)
+	build.Status = BuildTesting
+	build.CompletedAt = nil
+	build.UpdatedAt = now
+	if build.Progress < 82 {
+		build.Progress = 82
+	}
+	build.Error = fmt.Sprintf("Integration preflight detected drift: %s", strings.Join(issues, "; "))
+	build.SnapshotState.CurrentPhase = "integration"
+	required := true
+	build.SnapshotState.QualityGateRequired = &required
+	build.SnapshotState.QualityGateStage = "testing"
+	build.SnapshotState.QualityGateStatus = "running"
+	build.mu.Unlock()
+
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"phase":                 "integration",
+			"status":                string(BuildTesting),
+			"message":               "Frontend/backend contract drift detected. Launching a focused integration repair pass before review.",
+			"quality_gate_required": true,
+			"quality_gate_active":   true,
+			"quality_gate_stage":    "testing",
+			"integration_errors":    issues,
+			"recovery_task":         fixTask.ID,
+		},
+	})
+
+	if err := am.AssignTask(agent.ID, fixTask); err != nil {
+		build.mu.Lock()
+		fixTask.Status = TaskCancelled
+		fixTask.Error = err.Error()
+		build.UpdatedAt = time.Now()
+		build.mu.Unlock()
+		return nil, false
+	}
+
+	return fixTask, true
+}
+
+func (am *AgentManager) failBuildForIntegrationPreflight(build *Build, issues []string, now time.Time) {
+	if build == nil {
+		return
+	}
+
+	summary := strings.Join(dedupeStrings(issues), "; ")
+	allFiles := am.collectGeneratedFiles(build)
+
+	build.mu.Lock()
+	if build.Status == BuildCompleted || build.Status == BuildCancelled {
+		build.mu.Unlock()
+		return
+	}
+	build.Status = BuildFailed
+	build.CompletedAt = &now
+	build.UpdatedAt = now
+	if build.Progress < 82 || build.Progress > 89 {
+		build.Progress = 89
+	}
+	build.Error = fmt.Sprintf("Integration preflight failed: %s", summary)
+	progress := build.Progress
+	mode := string(build.Mode)
+	build.mu.Unlock()
+
+	am.createCheckpoint(build, "Integration Preflight Failed", "Frontend/backend route or runtime contract drift remained unresolved before review.")
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildError,
+		BuildID:   build.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"status":                string(BuildFailed),
+			"error":                 "Integration preflight failed",
+			"details":               summary,
+			"phase":                 "integration",
+			"progress":              progress,
+			"integration_errors":    issues,
+			"files_count":           len(allFiles),
+			"files":                 allFiles,
+			"recoverable":           true,
+			"quality_gate_required": true,
+			"quality_gate_passed":   false,
+			"quality_gate_stage":    "testing",
+		},
+	})
+
+	metrics.RecordBuildFinalization(string(BuildFailed), mode, "integration_preflight")
+	am.persistCompletedBuild(build, allFiles)
+}
+
+func (am *AgentManager) runIntegrationPreflightRecovery(build *Build) bool {
+	if !buildHasRuntimeIntegrationSurface(build) {
+		return true
+	}
+
+	maxAttempts := am.maxAutomatedFixLoops(build, "fix_integration_contract") + 1
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
+	var lastIssues []string
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		lastIssues = am.checkIntegrationCoherence(build, am.collectGeneratedFiles(build))
+		if len(lastIssues) == 0 {
+			return true
+		}
+
+		now := time.Now()
+		if am.applyDeterministicIntegrationPreflightRepairs(build, lastIssues, now) {
+			continue
+		}
+
+		task, launched := am.launchIntegrationPreflightRecovery(build, lastIssues, now)
+		if !launched || task == nil {
+			break
+		}
+		if !am.waitForPhaseCompletion(build, []string{task.ID}) {
+			return false
+		}
+	}
+
+	lastIssues = am.checkIntegrationCoherence(build, am.collectGeneratedFiles(build))
+	if len(lastIssues) == 0 {
+		return true
+	}
+
+	am.failBuildForIntegrationPreflight(build, lastIssues, time.Now())
+	return false
 }
 
 func summarizeReadinessErrorClass(errors []string) string {
@@ -7602,6 +7781,330 @@ func (am *AgentManager) applyDeterministicMissingDeliverableRepair(build *Build,
 	return am.bundleFromPatchPlan(build.ID, existingFiles, plan, "deliverable_repair: "+summary), summary
 }
 
+type expressIntegrationRepairRequirements struct {
+	MissingCORS  bool
+	MissingPort  bool
+	HealthRoutes []string
+}
+
+func parseExpressIntegrationRepairRequirements(errors []string) expressIntegrationRepairRequirements {
+	req := expressIntegrationRepairRequirements{}
+	if len(errors) == 0 {
+		return req
+	}
+
+	healthSet := map[string]bool{}
+	contractRouteRe := regexp.MustCompile(`^integration: backend does not expose required contract endpoint (\S+)$`)
+	frontendRouteRe := regexp.MustCompile(`^integration: frontend calls (\S+) but backend has no matching route$`)
+
+	for _, msg := range errors {
+		msg = strings.TrimSpace(msg)
+		if msg == "" || !strings.HasPrefix(msg, "integration: ") {
+			continue
+		}
+		if strings.Contains(msg, "no CORS configuration") {
+			req.MissingCORS = true
+		}
+		if strings.Contains(msg, "backend listens on wrong port") {
+			req.MissingPort = true
+		}
+		if match := contractRouteRe.FindStringSubmatch(msg); len(match) == 2 {
+			if path := normalizeIntegrationRoutePath(match[1]); isHealthLikeIntegrationPath(path) {
+				healthSet[path] = true
+			}
+			continue
+		}
+		if match := frontendRouteRe.FindStringSubmatch(msg); len(match) == 2 {
+			if path := normalizeIntegrationRoutePath(match[1]); isHealthLikeIntegrationPath(path) {
+				healthSet[path] = true
+			}
+		}
+	}
+
+	req.HealthRoutes = sortedStringSetKeys(healthSet)
+	return req
+}
+
+func isHealthLikeIntegrationPath(path string) bool {
+	path = normalizeIntegrationRoutePath(path)
+	if path == "" {
+		return false
+	}
+	return strings.HasSuffix(path, "/health") || path == "/health" || strings.HasSuffix(path, "/ready") || path == "/ready"
+}
+
+func findExpressIntegrationEntryPath(files []GeneratedFile) string {
+	if len(files) == 0 {
+		return ""
+	}
+
+	candidates := []string{
+		"server/index.ts",
+		"server/index.js",
+		"src/server.ts",
+		"src/server.js",
+		"src/server/index.ts",
+		"src/server/index.js",
+		"backend/src/server.ts",
+		"backend/src/server.js",
+		"backend/server.ts",
+		"backend/server.js",
+		"server.ts",
+		"server.js",
+	}
+
+	fileMap := make(map[string]string, len(files))
+	for _, file := range files {
+		path := sanitizeFilePath(file.Path)
+		if path == "" {
+			continue
+		}
+		fileMap[path] = file.Content
+	}
+
+	for _, candidate := range candidates {
+		content := fileMap[candidate]
+		if strings.Contains(content, "app.listen(") && strings.Contains(strings.ToLower(content), "express") {
+			return candidate
+		}
+	}
+
+	for path, content := range fileMap {
+		ext := strings.ToLower(filepath.Ext(path))
+		if (ext == ".ts" || ext == ".js") && strings.Contains(content, "app.listen(") && strings.Contains(strings.ToLower(content), "express") {
+			return path
+		}
+	}
+
+	return ""
+}
+
+func insertJSImport(content, statement string) string {
+	if strings.TrimSpace(statement) == "" || strings.Contains(content, statement) {
+		return content
+	}
+
+	importBlockRe := regexp.MustCompile(`(?ms)\A((?:\s*import[^\n]+\n)+)`)
+	if loc := importBlockRe.FindStringSubmatchIndex(content); loc != nil && len(loc) >= 4 {
+		return content[:loc[3]] + statement + "\n" + content[loc[3]:]
+	}
+
+	return statement + "\n" + content
+}
+
+func insertAfterExpressAppBootstrap(content, statement string) (string, bool) {
+	if strings.TrimSpace(statement) == "" || strings.Contains(content, statement) {
+		return content, false
+	}
+
+	markers := []string{
+		"app.use(express.json());",
+		"app.use(express.urlencoded({ extended: true }));",
+		"const app = express();",
+		"let app = express();",
+		"var app = express();",
+	}
+	for _, marker := range markers {
+		if idx := strings.Index(content, marker); idx >= 0 {
+			insertAt := idx + len(marker)
+			return content[:insertAt] + "\n" + statement + content[insertAt:], true
+		}
+	}
+
+	return content, false
+}
+
+func insertBeforeExpressListen(content, statement string) (string, bool) {
+	if strings.TrimSpace(statement) == "" || strings.Contains(content, statement) {
+		return content, false
+	}
+	if idx := strings.Index(content, "app.listen("); idx >= 0 {
+		return content[:idx] + statement + "\n" + content[idx:], true
+	}
+	if strings.TrimSpace(content) == "" {
+		return statement + "\n", true
+	}
+	return content + "\n" + statement + "\n", true
+}
+
+func formatJSStringArray(values []string) string {
+	if len(values) == 0 {
+		return "[]"
+	}
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		quoted = append(quoted, fmt.Sprintf("%q", value))
+	}
+	if len(quoted) == 0 {
+		return "[]"
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+func patchExpressIntegrationEntryContent(
+	content string,
+	contract *BuildAPIContract,
+	req expressIntegrationRepairRequirements,
+) (string, []string) {
+	if strings.TrimSpace(content) == "" {
+		return content, nil
+	}
+
+	updated := content
+	summaries := make([]string, 0, 4)
+
+	if req.MissingCORS && !strings.Contains(updated, "app.use(cors(") {
+		importStmt := `import cors from "cors";`
+		if strings.Contains(updated, "require(") && !strings.Contains(updated, "import ") {
+			importStmt = `const cors = require("cors");`
+		}
+		updated = insertJSImport(updated, importStmt)
+
+		origins := []string{"http://localhost:5173", "http://localhost:3000"}
+		if contract != nil && len(contract.CORSOrigins) > 0 {
+			origins = append([]string(nil), contract.CORSOrigins...)
+		}
+		corsStmt := fmt.Sprintf("app.use(cors({ origin: %s, credentials: true }));", formatJSStringArray(origins))
+		if next, ok := insertAfterExpressAppBootstrap(updated, corsStmt); ok {
+			updated = next
+			summaries = append(summaries, "added Express CORS middleware")
+		}
+	}
+
+	for _, healthRoute := range req.HealthRoutes {
+		if healthRoute == "" || strings.Contains(updated, healthRoute) {
+			continue
+		}
+		healthStmt := fmt.Sprintf("app.get(%q, (_req, res) => res.json({ status: \"ok\" }));", healthRoute)
+		if next, ok := insertBeforeExpressListen(updated, healthStmt); ok {
+			updated = next
+			summaries = append(summaries, "added health route "+healthRoute)
+		}
+	}
+
+	if req.MissingPort && !strings.Contains(updated, "process.env.PORT") {
+		portReplacement := fmt.Sprintf("app.listen(Number(process.env.PORT || %d)", canonicalBackendPort("express"))
+		listenLiteralRe := regexp.MustCompile(`app\.listen\(\s*\d{4,5}`)
+		if listenLiteralRe.MatchString(updated) {
+			updated = listenLiteralRe.ReplaceAllString(updated, portReplacement)
+			summaries = append(summaries, "normalized Express listen port to process.env.PORT")
+		}
+	}
+
+	if strings.TrimSpace(updated) == strings.TrimSpace(content) {
+		return content, nil
+	}
+	return updated, dedupeStrings(summaries)
+}
+
+func (am *AgentManager) applyDeterministicExpressIntegrationRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || build.TechStack == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+
+	switch strings.ToLower(strings.TrimSpace(build.TechStack.Backend)) {
+	case "express", "express.js", "node.js", "node":
+	default:
+		return nil, ""
+	}
+
+	req := parseExpressIntegrationRepairRequirements(readinessErrors)
+	if !req.MissingCORS && !req.MissingPort && len(req.HealthRoutes) == 0 {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 {
+		return nil, ""
+	}
+
+	targetPath := findExpressIntegrationEntryPath(files)
+	if targetPath == "" {
+		return nil, ""
+	}
+
+	var contract *BuildAPIContract
+	if build.Plan != nil {
+		contract = build.Plan.APIContract
+	}
+	updated, summaries := patchExpressIntegrationEntryContent(plan.content(targetPath), contract, req)
+	if len(summaries) == 0 {
+		return nil, ""
+	}
+	if !plan.patchFile(targetPath, updated, am.detectLanguage(targetPath)) {
+		return nil, ""
+	}
+
+	summary := fmt.Sprintf("%s (%s)", targetPath, strings.Join(summaries, "; "))
+	return am.bundleFromPatchPlan(build.ID, files, plan, "integration_repair: "+summary), summary
+}
+
+func (am *AgentManager) applyDeterministicIntegrationPreflightRepairs(build *Build, issues []string, now time.Time) bool {
+	if build == nil || len(issues) == 0 {
+		return false
+	}
+
+	build.mu.Lock()
+	orchestration := ensureBuildOrchestrationStateLocked(build)
+	recordPatchBundles := orchestration != nil && orchestration.Flags.EnablePatchBundles
+	build.mu.Unlock()
+
+	bundle, summary := am.applyDeterministicExpressIntegrationRepair(build, issues)
+	if bundle == nil || strings.TrimSpace(summary) == "" {
+		return false
+	}
+
+	bundle.BuildID = build.ID
+	if strings.TrimSpace(bundle.Justification) == "" {
+		bundle.Justification = "integration_repair: " + summary
+	}
+	if !am.applyPatchBundleToBuild(build, bundle) {
+		return false
+	}
+	if recordPatchBundles {
+		appendPatchBundle(build, *bundle)
+	}
+
+	build.mu.Lock()
+	build.Status = BuildTesting
+	build.CompletedAt = nil
+	build.UpdatedAt = now
+	if build.Progress < 82 {
+		build.Progress = 82
+	}
+	build.Error = fmt.Sprintf("Integration preflight detected drift: %s", strings.Join(issues, "; "))
+	build.SnapshotState.CurrentPhase = "integration"
+	required := true
+	build.SnapshotState.QualityGateRequired = &required
+	build.SnapshotState.QualityGateStage = "testing"
+	build.SnapshotState.QualityGateStatus = "running"
+	progress := build.Progress
+	build.mu.Unlock()
+
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"phase":                 "integration",
+			"status":                string(BuildTesting),
+			"progress":              progress,
+			"message":               fmt.Sprintf("Applied deterministic integration repair (%s). Re-checking frontend/backend contract before review.", summary),
+			"quality_gate_required": true,
+			"quality_gate_active":   true,
+			"quality_gate_stage":    "testing",
+			"integration_errors":    issues,
+			"integration_repair":    summary,
+		},
+	})
+
+	return true
+}
+
 func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
 	if build == nil {
 		return
@@ -7609,7 +8112,7 @@ func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
 
 	isRecoveryAction := func(action string) bool {
 		switch strings.TrimSpace(action) {
-		case "fix_review_issues", "fix_tests", "regression_test", "post_fix_review", "solve_build_failure":
+		case "fix_review_issues", "fix_tests", "fix_integration_contract", "regression_test", "post_fix_review", "solve_build_failure":
 			return true
 		default:
 			return false
@@ -9342,6 +9845,12 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string,
 			log.Printf("Build %s: Phase %s aborted (build cancelled or timed out)", build.ID, phase.name)
 			am.failBuildOnPhaseAbort(build, phase.name, phase.status, taskIDs)
 			return
+		}
+
+		if phase.key == "backend_services" {
+			if !am.runIntegrationPreflightRecovery(build) {
+				return
+			}
 		}
 
 		log.Printf("Build %s: Phase %s complete", build.ID, phase.name)
@@ -12790,6 +13299,8 @@ FRONTEND CONTRACT RULE:
 - The architecture blueprint already froze the route structure, user flows, and API assumptions.
 - Build the visible product shell first, but do not invent backend behavior outside that contract.
 - Use realistic loading, empty, and error states so the UI remains useful before every backend edge is wired.
+- Only call API routes that exist in the frozen API contract or in already-implemented backend-owned files.
+- If a backend endpoint is not part of the contract yet, keep the UI truthful with local state or staged placeholder behavior instead of inventing a dead fetch target.
 
 MANDATORY FILES — always generate ALL of these for every React app:
 1. index.html — Vite entry HTML at project root (NOT inside src/)
@@ -12855,6 +13366,8 @@ FRONTEND-FIRST CONTRACT RULE:
 - The frontend shell may already exist before you start. Treat its route structure, user flows, and API assumptions as a frozen contract unless the architecture blueprint explicitly says otherwise.
 - Implement behind the agreed request/response shapes instead of redesigning the interface from scratch.
 - If the UI reveals a missing backend dependency, fill the gap in backend-owned files; do not push the problem back into frontend-owned files.
+- Implement every endpoint required by the frozen API contract and every endpoint actively called by the generated frontend.
+- Before finishing, compare the frontend fetch/EventSource URLs against the backend routes you registered and remove any drift.
 
 REQUIREMENTS FOR EVERY ENDPOINT:
 - Input validation with descriptive error messages
@@ -12938,6 +13451,11 @@ enum Role {
 		RoleTesting: `You are the Testing Agent — an expert QA engineer who writes comprehensive, executable tests.
 You specialize in unit tests, integration tests, and edge case coverage.
 
+FULL-STACK TESTING RULE:
+- For full-stack builds, explicitly compare frontend fetch/EventSource URLs, backend registered routes, CORS, and configured ports.
+- If the frontend calls /api paths that do not exist in the backend, fail with the exact missing route names.
+- Do not hide integration drift behind a generic "tests failed" message when you can name the broken route or runtime mismatch.
+
 REQUIREMENTS FOR EVERY TEST FILE:
 - Import the module under test correctly
 - Test the happy path first, then error cases, then edge cases
@@ -12990,6 +13508,7 @@ YOUR REVIEW MUST CHECK:
 3. Performance: N+1 queries, missing indexes, unnecessary re-renders, memory leaks
 4. Completeness: Empty functions, TODO comments, placeholder data, missing imports
 5. Types: Missing TypeScript types, any usage, incorrect type assertions
+6. Full-stack contract truth: frontend API calls must match real backend routes, CORS, and ports
 
 FOR EACH ISSUE FOUND, output the fix as a complete corrected code block:
 
@@ -13031,6 +13550,7 @@ WORKFLOW:
 3. Prioritize build-blocking fixes first (syntax/runtime/config/dependency)
 4. Keep patches minimal, deterministic, and production-ready
 5. If a fix needs follow-up validation, explicitly note test/review targets
+6. For integration failures, repair the real route drift or runtime mismatch itself; do not hide it by deleting product features unless the contract explicitly changed.
 
 NEVER return vague advice only. Return concrete, corrected code/files.` + "\n\n" + assuranceContext + techHint + baseRules,
 	}
@@ -13071,7 +13591,7 @@ func (am *AgentManager) getTaskDescriptionForRole(role AgentRole, appDescription
 	case RoleDatabase:
 		return fmt.Sprintf("Design the database schema behind the frozen product flows for: %s", appDescription)
 	case RoleTesting:
-		return fmt.Sprintf("Write tests for: %s", appDescription)
+		return fmt.Sprintf("Verify the integrated frontend/backend contract and main user flow for: %s", appDescription)
 	case RoleReviewer:
 		return fmt.Sprintf("Review code quality for: %s", appDescription)
 	case RoleSolver:

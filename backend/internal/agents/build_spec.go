@@ -2577,12 +2577,14 @@ func requiredOutputsForRole(role AgentRole) []string {
 			"Complete frontend files within owned paths",
 			"First usable UI shell aligned to the frozen contract",
 			"Preview-ready frontend experience that matches the requested product surface",
+			"Frontend API calls restricted to the frozen API contract or the actual implemented backend routes",
 			"No backend logic in UI files",
 		}
 	case RoleBackend:
 		return []string{
 			"Runnable backend entrypoint and routes",
 			"Backend implementation that satisfies the frozen UI/API contract",
+			"Every API path promised by the contract and used by the frontend implemented in backend-owned files",
 			"Preview-compatible runtime behavior for the full-stack vertical slice",
 			"No frontend JSX/UI ownership drift",
 		}
@@ -2592,7 +2594,10 @@ func requiredOutputsForRole(role AgentRole) []string {
 			"Persistence design that supports the frozen product flows",
 		}
 	case RoleTesting:
-		return []string{"Executable test or verification artifacts for the main slice"}
+		return []string{
+			"Executable test or verification artifacts for the main slice",
+			"Explicit frontend/backend route, CORS, and contract alignment verification for full-stack builds",
+		}
 	case RoleReviewer:
 		return []string{"Concrete findings or explicit no-findings review"}
 	case RoleSolver:
@@ -2613,7 +2618,7 @@ func summarizeWorkOrder(role AgentRole, appType string, stack TechStack) string 
 	case RoleDatabase:
 		return fmt.Sprintf("Add schema, migrations, and persistence wiring for %s behind the frozen product flows and API contract.", valueOrNone(stack.Database))
 	case RoleTesting:
-		return "Verify the main vertical slice after the UI and backend are wired together, then catch build/runtime regressions before review."
+		return "Verify the main vertical slice after the UI and backend are wired together, explicitly catch route/CORS/API drift, then catch build/runtime regressions before review."
 	case RoleReviewer:
 		return "Review the generated app against the frozen scaffold, ownership map, and acceptance checklist."
 	case RoleSolver:

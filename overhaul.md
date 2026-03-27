@@ -941,6 +941,28 @@ Verification completed:
 
 - `bash -n scripts/run_platform_build_smoke.sh`
 
+Date: 2026-03-27
+
+Change summary:
+
+- Added an integration-preflight repair lane immediately after the backend-services phase for full-stack builds, so frontend/backend route drift is caught and repaired before the build enters final review.
+- Added a dedicated scoped recovery action, `fix_integration_contract`, with its own loop cap and no duplicate post-fix validation fan-out, so integration repairs stay inside the phased pipeline instead of ballooning into overlapping review/test work.
+- Added a deterministic Express integration repair for the common cheap failures: missing CORS middleware, missing health route, and a hardcoded listen port instead of `process.env.PORT`.
+- Tightened frontend/backend/testing/reviewer/solver contract instructions so the frontend stops inventing dead API calls, the backend explicitly implements frontend-called routes, and testing/review call out exact route drift instead of generic integration failure.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/build_spec.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicIntegrationPreflightRepairsExpressRuntime|TestLaunchIntegrationPreflightRecoveryCreatesScopedFixTask|TestHandleTaskCompletionSkipsPostFixValidationForIntegrationPreflightFix|TestUpdateBuildProgressCapsArchitecturePhaseProgress|TestUpdateBuildProgressKeepsReviewPhaseBelowCompletion|TestExtractDependencyRepairHintsFromReadinessErrorsIncludesSpecificIntegrationRouteGuidance'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:
