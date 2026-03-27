@@ -14108,6 +14108,13 @@ func (am *AgentManager) checkIntegrationCoherence(build *Build, files []Generate
 		if strings.Contains(path, "node_modules/") {
 			continue
 		}
+		if strings.Contains(path, "/__tests__/") ||
+			strings.Contains(path, "/test/") ||
+			strings.Contains(path, "/tests/") ||
+			strings.Contains(path, ".test.") ||
+			strings.Contains(path, ".spec.") {
+			continue
+		}
 
 		// Frontend files: scan for API calls.
 		if ext == ".ts" || ext == ".tsx" || ext == ".js" || ext == ".jsx" {

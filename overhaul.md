@@ -986,6 +986,28 @@ Verification completed:
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
 
+Date: 2026-03-27
+
+Change summary:
+
+- Confirmed on the next live paid full-stack canary that the Data Foundation stall was fixed; the build now advances through testing/review and fails on a later integration validator.
+- Fixed a new false-positive validator path: `checkIntegrationCoherence` was scanning generated `__tests__`, `.test.*`, and `.spec.*` files as if they were real runtime frontend dependencies.
+- That allowed test-only dead-route checks such as `/api/nonexistent-route` to fail an otherwise valid full-stack build during final integration validation.
+- Integration coherence now ignores test/spec files, preserving real route/CORS/port checks on actual runtime code while dropping synthetic dead-route noise from tests.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestCheckIntegrationCoherenceIgnoresFrontendTestOnlyDeadRoutes|TestMarkQueuedTaskExecutionStartedPromotesPendingRetryTask|TestApplyDeterministicIntegrationPreflightRepairsExpressRuntime|TestLaunchIntegrationPreflightRecoveryCreatesScopedFixTask'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

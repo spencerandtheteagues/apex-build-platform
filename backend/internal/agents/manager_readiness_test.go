@@ -2094,6 +2094,57 @@ func TestPatchManifestDependenciesJSON(t *testing.T) {
 	}
 }
 
+func TestCheckIntegrationCoherenceIgnoresFrontendTestOnlyDeadRoutes(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		TechStack: &TechStack{
+			Frontend: "React",
+			Backend:  "Express",
+		},
+		Plan: &BuildPlan{
+			APIContract: &BuildAPIContract{
+				Endpoints: []APIEndpoint{
+					{Method: "GET", Path: "/api/health"},
+				},
+			},
+		},
+	}
+
+	files := []GeneratedFile{
+		{
+			Path: "src/App.tsx",
+			Content: "fetch(`${API_BASE}/api/health`)\n" +
+				"  .then((response) => response.json())\n" +
+				"  .then(console.log)\n",
+		},
+		{
+			Path: "src/__tests__/api.test.ts",
+			Content: "it('handles 404s', async () => {\n" +
+				"  await fetch('/api/nonexistent-route')\n" +
+				"})\n",
+		},
+		{
+			Path: "server/index.ts",
+			Content: `import cors from "cors";
+const app = express();
+app.use(cors());
+app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
+app.listen(process.env.PORT || 3001);`,
+		},
+	}
+
+	errs := am.checkIntegrationCoherence(build, files)
+	joined := strings.Join(errs, "\n")
+	if strings.Contains(joined, "/api/nonexistent-route") {
+		t.Fatalf("expected test-only dead route to be ignored, got %v", errs)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("expected no integration coherence errors, got %v", errs)
+	}
+}
+
 func TestApplyDeterministicValidationRepairsCapturesPatchBundle(t *testing.T) {
 	t.Parallel()
 
