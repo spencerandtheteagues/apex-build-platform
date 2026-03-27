@@ -1418,6 +1418,61 @@ func TestMaterializeStructuredPatchOutputUsesBaselineAndTracksDeletes(t *testing
 	}
 }
 
+func TestPruneEchoedExistingFilesIgnoresUnchangedContextOutsideOwnership(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-echo-filter",
+		SnapshotFiles: []GeneratedFile{
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>\n", Language: "html"},
+			{Path: "src/App.tsx", Content: "export default function App(){ return <div>shell</div> }\n", Language: "typescript"},
+			{Path: "src/index.css", Content: "body { background: #000; }\n", Language: "css"},
+			{Path: "src/main.tsx", Content: "import React from 'react'\n", Language: "typescript"},
+			{Path: "vite.config.ts", Content: "export default {}\n", Language: "typescript"},
+		},
+	}
+	task := &Task{
+		ID: "task-database",
+		Input: map[string]any{
+			"work_order": &BuildWorkOrder{
+				Role:           RoleDatabase,
+				OwnedFiles:     []string{"migrations/**", "server/db/**"},
+				RequiredFiles:  []string{"migrations/001_initial.sql"},
+				ForbiddenFiles: []string{"index.html", "src/**", "vite.config.ts"},
+			},
+		},
+	}
+	output := &TaskOutput{
+		Completion: &TaskCompletionReport{
+			Summary:      "database files generated",
+			CreatedFiles: []string{"index.html", "src/App.tsx", "migrations/001_initial.sql"},
+		},
+		Files: []GeneratedFile{
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>\n", Language: "html"},
+			{Path: "src/App.tsx", Content: "export default function App(){ return <div>shell</div> }\n", Language: "typescript"},
+			{Path: "migrations/001_initial.sql", Content: "create table clients(id integer primary key);\n", Language: "sql"},
+		},
+	}
+
+	am.pruneEchoedExistingFiles(build, output)
+
+	if len(output.Files) != 1 || output.Files[0].Path != "migrations/001_initial.sql" {
+		t.Fatalf("expected only owned database file to remain, got %+v", output.Files)
+	}
+	if output.Completion == nil || len(output.Completion.CreatedFiles) != 1 || output.Completion.CreatedFiles[0] != "migrations/001_initial.sql" {
+		t.Fatalf("expected completion report to drop echoed context files, got %+v", output.Completion)
+	}
+	if taskOutputMetricInt(output, "ignored_unchanged_file_count") != 2 {
+		t.Fatalf("expected ignored unchanged file metric, got %+v", output.Metrics)
+	}
+
+	errs := am.validateTaskCoordinationOutput(task, output)
+	if len(errs) != 0 {
+		t.Fatalf("expected unchanged echoed context files to be ignored, got %v", errs)
+	}
+}
+
 func TestVerifyGeneratedCodeAllowsDeleteOnlyStructuredPatchOutput(t *testing.T) {
 	t.Parallel()
 

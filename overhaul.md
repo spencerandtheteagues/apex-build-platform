@@ -586,6 +586,28 @@ Live result:
 - `5 passed`
 - `1 skipped` (`optional authenticated launch login succeeds`, skipped because no dedicated launch credentials were provided)
 
+### 2026-03-26 (ownership echo-filter pass)
+
+Completed:
+
+- Fixed a coordinator failure mode where later full-stack phases could abort if a model re-emitted unchanged frontend scaffold files from earlier phases.
+- Added an output-pruning step before ownership validation so unchanged files already present in the build snapshot are ignored instead of being treated as fresh cross-role writes.
+- Preserved hard ownership enforcement for real drift: changed files outside the active work order still fail coordination validation.
+- Tightened the shared agent prompt so tasks return only files they actually created or changed, instead of repeating untouched context files from other roles.
+- Added a regression test that reproduces the `Data Foundation` style failure with echoed Vite scaffold files and verifies the database task now proceeds cleanly when only its owned file actually changes.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestPruneEchoedExistingFilesIgnoresUnchangedContextOutsideOwnership|TestValidateTaskCoordinationOutputRejectsOutOfScopeFiles'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

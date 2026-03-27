@@ -2669,6 +2669,71 @@ func mergeGeneratedFiles(base []GeneratedFile, overlay []GeneratedFile) []Genera
 	return files
 }
 
+func (am *AgentManager) pruneEchoedExistingFiles(build *Build, output *TaskOutput) {
+	if am == nil || build == nil || output == nil || len(output.Files) == 0 {
+		return
+	}
+
+	existing := generatedFileMap(am.collectGeneratedFiles(build))
+	if len(existing) == 0 {
+		return
+	}
+
+	kept := make([]GeneratedFile, 0, len(output.Files))
+	dropped := make(map[string]bool)
+	for _, file := range output.Files {
+		path := sanitizeFilePath(file.Path)
+		if path == "" {
+			continue
+		}
+		file.Path = path
+		file.Content = normalizeGeneratedFileContent(path, file.Content)
+		file.Size = int64(len(file.Content))
+
+		if existingFile, ok := existing[path]; ok {
+			existingContent := normalizeGeneratedFileContent(path, existingFile.Content)
+			if existingContent == file.Content {
+				dropped[path] = true
+				continue
+			}
+		}
+
+		kept = append(kept, file)
+	}
+
+	output.Files = kept
+	if len(dropped) == 0 {
+		return
+	}
+
+	filterList := func(paths []string) []string {
+		if len(paths) == 0 {
+			return nil
+		}
+		out := make([]string, 0, len(paths))
+		for _, path := range paths {
+			sanitized := sanitizeFilePath(path)
+			if sanitized == "" || dropped[sanitized] {
+				continue
+			}
+			out = append(out, sanitized)
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return dedupeStrings(out)
+	}
+
+	if output.Completion != nil {
+		output.Completion.CreatedFiles = filterList(output.Completion.CreatedFiles)
+		output.Completion.ModifiedFiles = filterList(output.Completion.ModifiedFiles)
+	}
+	if output.Metrics == nil {
+		output.Metrics = map[string]any{}
+	}
+	output.Metrics["ignored_unchanged_file_count"] = len(dropped)
+}
+
 func clonePatchBundle(bundle *PatchBundle) *PatchBundle {
 	if bundle == nil {
 		return nil
@@ -3938,6 +4003,8 @@ func (am *AgentManager) processResult(result *TaskResult) {
 			agent.mu.Unlock()
 			return
 		}
+
+		am.pruneEchoedExistingFiles(build, result.Output)
 
 		var taskVerificationReport *VerificationReport
 		if task != nil {
@@ -12171,7 +12238,8 @@ ABSOLUTE RULES:
    WRONG:   // File: src/index.tsx (entry point)
 9. For React/Vite apps ALWAYS generate: index.html at project root AND vite.config.ts
 10. React apps MUST include both 'react' and 'react-dom' in package.json dependencies
-11. Before finishing, self-check: no placeholder text, valid package.json scripts, and real runnable entry points`
+11. Return ONLY files you actually created or changed in this task. NEVER repeat unchanged context files from other roles.
+12. Before finishing, self-check: no placeholder text, valid package.json scripts, and real runnable entry points`
 
 	// Build tech stack context if available
 	techHint := ""
