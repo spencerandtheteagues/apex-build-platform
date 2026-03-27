@@ -22,6 +22,7 @@ import apiService, {
   BuildVerificationReportState,
   BuildWorkOrderState,
   BuildConversationMessage as ApiBuildConversationMessage,
+  FeatureReadinessSummary,
   BuildInteractionState as ApiBuildInteractionState,
   BuildPermissionRequest as ApiBuildPermissionRequest,
   BuildPermissionRule as ApiBuildPermissionRule,
@@ -1343,6 +1344,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [permissionActionId, setPermissionActionId] = useState<string | null>(null)
   const [buildActionPending, setBuildActionPending] = useState<'pause' | 'resume' | 'restart' | null>(null)
   const [buildWorkspaceView, setBuildWorkspaceView] = useState<BuildWorkspaceView>('overview')
+  const [platformReadiness, setPlatformReadiness] = useState<FeatureReadinessSummary | null>(null)
   const [proposedEdits, setProposedEdits] = useState<ProposedEdit[]>([])
   const [showDiffReview, setShowDiffReview] = useState(true)
 
@@ -1410,6 +1412,37 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       // Non-fatal: preflight may not be available
     })
   }, [])
+
+  useEffect(() => {
+    if (!buildState?.id && !isBuilding && !createdProjectId) {
+      setPlatformReadiness(null)
+      return
+    }
+
+    let cancelled = false
+    const loadPlatformReadiness = async () => {
+      try {
+        const summary = await apiService.featureReadiness()
+        if (!cancelled) {
+          setPlatformReadiness(summary)
+        }
+      } catch {
+        if (!cancelled) {
+          setPlatformReadiness(null)
+        }
+      }
+    }
+
+    void loadPlatformReadiness()
+    const intervalId = window.setInterval(() => {
+      void loadPlatformReadiness()
+    }, 45000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [buildState?.id, buildState?.status, createdProjectId, isBuilding])
 
   // Validate role assignments in manual mode
   const isRoleAssignmentValid = useMemo(() => {
@@ -2094,6 +2127,58 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     proposedEdits.length > 0 ||
     createdProjectId
   )
+  const platformReadinessNotice = useMemo(() => {
+    if (!platformReadiness || platformReadiness.status === 'healthy') {
+      return null
+    }
+
+    const impactedServices = (platformReadiness.services || [])
+      .filter(service => service.state !== 'ready')
+      .slice()
+      .sort((left, right) => {
+        const weight = (tier: string) => tier === 'critical' ? 0 : 1
+        if (weight(left.tier) !== weight(right.tier)) {
+          return weight(left.tier) - weight(right.tier)
+        }
+        return left.name.localeCompare(right.name)
+      })
+
+    if (impactedServices.length === 0) {
+      return null
+    }
+
+    const primaryService = impactedServices[0]
+    const isCritical = primaryService.tier === 'critical' || !platformReadiness.ready
+    let title = isCritical ? 'Platform services interrupted' : 'Platform services degraded'
+    let body = primaryService.summary
+    let detail = impactedServices.length > 1
+      ? `${impactedServices.length} platform services currently need attention.`
+      : isCritical
+        ? 'Build recovery, status sync, or preview actions may pause until the service returns.'
+        : 'Builds continue with fallbacks where possible while maintenance completes.'
+
+    switch (primaryService.name) {
+      case 'redis_cache':
+        body = 'Redis cache is degraded. Builds continue with in-memory fallback, but live coordination can feel slower until maintenance finishes.'
+        detail = impactedServices.length > 1
+          ? `${impactedServices.length} platform services are affected right now.`
+          : 'Background cache fallbacks are active, so builds can keep moving.'
+        break
+      case 'primary_database':
+        body = 'Primary database connectivity is interrupted. New writes, build recovery, and status sync can pause until the database returns.'
+        break
+      default:
+        title = isCritical ? 'Platform service interrupted' : 'Platform service degraded'
+        break
+    }
+
+    return {
+      title,
+      body,
+      detail,
+      isCritical,
+    }
+  }, [platformReadiness])
 
   const resetBuilderState = useCallback((options?: { clearPrompt?: boolean }) => {
     isBuildingRef.current = false
@@ -2129,6 +2214,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     setRollbackCheckpointId(null)
     setShowBuyCredits(false)
     setBuyCreditsReason(undefined)
+    setPlatformReadiness(null)
     if (options?.clearPrompt) {
       setAppDescription('')
     }
@@ -5526,6 +5612,40 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                         <div className="mt-2 text-base font-semibold text-white">{currentWorkflowStage?.label || 'Build in progress'}</div>
                         <div className="mt-2 text-sm leading-relaxed text-gray-200">{primaryBuildUpdate}</div>
                       </div>
+
+                      {platformReadinessNotice && (
+                        <div className={cn(
+                          'rounded-xl border px-4 py-4',
+                          platformReadinessNotice.isCritical
+                            ? 'border-red-500/35 bg-red-950/15'
+                            : 'border-amber-500/35 bg-amber-950/15'
+                        )}>
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <div className="text-xs uppercase tracking-[0.18em] text-gray-400">Platform Status</div>
+                              <div className="mt-2 text-base font-semibold text-white">{platformReadinessNotice.title}</div>
+                              <div className="mt-2 text-sm leading-relaxed text-gray-200">{platformReadinessNotice.body}</div>
+                              <div className="mt-2 text-xs leading-relaxed text-gray-400">{platformReadinessNotice.detail}</div>
+                            </div>
+                            <div className="flex shrink-0 gap-2">
+                              <Button
+                                variant="outline"
+                                onClick={() => setBuildWorkspaceView('issues')}
+                                className="border-gray-700 bg-black/20 text-gray-200 hover:border-gray-500 hover:bg-gray-900/70"
+                              >
+                                Open Issues
+                              </Button>
+                              <Button
+                                variant="outline"
+                                onClick={() => setBuildWorkspaceView('diagnostics')}
+                                className="border-gray-700 bg-black/20 text-gray-200 hover:border-gray-500 hover:bg-gray-900/70"
+                              >
+                                Diagnostics
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       {hasBackendDataStage && (
                         <div className="rounded-xl border border-violet-500/25 bg-violet-950/15 px-4 py-4">

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -61,6 +62,68 @@ func resolveGormLogLevel() logger.LogLevel {
 	return logger.Info
 }
 
+type sqlHealthPinger interface {
+	PingContext(ctx context.Context) error
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed <= 0 {
+		log.Printf("WARNING: invalid %s=%q, using %s", key, raw, fallback)
+		return fallback
+	}
+
+	return parsed
+}
+
+func waitForDatabasePing(ctx context.Context, pinger sqlHealthPinger, retryInterval time.Duration) error {
+	if pinger == nil {
+		return fmt.Errorf("database pinger is nil")
+	}
+	if retryInterval <= 0 {
+		retryInterval = time.Second
+	}
+
+	var lastErr error
+	for {
+		pingCtx, cancel := context.WithTimeout(ctx, envDuration("DB_PING_TIMEOUT", 3*time.Second))
+		err := pinger.PingContext(pingCtx)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		if ctx.Err() != nil {
+			break
+		}
+
+		log.Printf("WARNING: database ping failed, retrying in %s: %v", retryInterval, err)
+		timer := time.NewTimer(retryInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+
+	if lastErr == nil {
+		lastErr = ctx.Err()
+	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("database ping failed after retries: %w", ctx.Err())
+	}
+	return fmt.Errorf("database ping failed after retries: %w", lastErr)
+}
+
 // NewDatabase creates a new database connection
 func NewDatabase(config *Config) (*Database, error) {
 	// Configure GORM with custom logger
@@ -111,6 +174,14 @@ func NewDatabase(config *Config) (*Database, error) {
 	sqlDB.SetMaxOpenConns(maxOpen)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 	sqlDB.SetConnMaxIdleTime(10 * time.Minute)
+
+	connectMaxWait := envDuration("DB_CONNECT_MAX_WAIT", 45*time.Second)
+	retryInterval := envDuration("DB_CONNECT_RETRY_INTERVAL", 2*time.Second)
+	connectCtx, cancelConnect := context.WithTimeout(context.Background(), connectMaxWait)
+	defer cancelConnect()
+	if err := waitForDatabasePing(connectCtx, sqlDB, retryInterval); err != nil {
+		return nil, fmt.Errorf("failed to confirm database connectivity: %w", err)
+	}
 
 	dbWrapper := &Database{DB: db}
 
@@ -416,12 +487,19 @@ func (d *Database) createIndexes() error {
 
 // Health checks database connectivity
 func (d *Database) Health() error {
+	ctx, cancel := context.WithTimeout(context.Background(), envDuration("DB_PING_TIMEOUT", 3*time.Second))
+	defer cancel()
+	return d.HealthContext(ctx)
+}
+
+// HealthContext checks database connectivity with caller-provided timeout semantics.
+func (d *Database) HealthContext(ctx context.Context) error {
 	sqlDB, err := d.DB.DB()
 	if err != nil {
 		return fmt.Errorf("failed to get underlying sql.DB: %w", err)
 	}
 
-	if err := sqlDB.Ping(); err != nil {
+	if err := sqlDB.PingContext(ctx); err != nil {
 		return fmt.Errorf("database ping failed: %w", err)
 	}
 

@@ -865,6 +865,7 @@ func main() {
 	server := api.NewServer(database, authService, aiRouter, byokManager)
 	server.SetReadinessRegistry(startupRegistry)
 	server.SetUsageTracker(usageTracker)
+	server.SetCacheStatusProvider(redisCache.Status)
 
 	// Initialize Storage Provider (R2 or local fallback)
 	storageProvider := storage.NewFromEnv()

@@ -310,6 +310,13 @@ func (dm *DatabaseManager) createPostgreSQLDatabase(db *ManagedDatabase) error {
 	}
 	defer adminDB.Close()
 
+	pingCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := adminDB.PingContext(pingCtx); err != nil {
+		db.Type = DatabaseTypeSQLite
+		return dm.createSQLiteDatabase(db)
+	}
+
 	// Validate and quote identifiers to prevent SQL injection
 	quotedDBName, err := quoteIdentifier(db.DatabaseName)
 	if err != nil {

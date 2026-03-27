@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/services/api', () => ({
   default: {
     buildPreflight: vi.fn(),
+    featureReadiness: vi.fn(),
     getBuildStatus: vi.fn(),
     getBuildDetails: vi.fn(),
     getCompletedBuild: vi.fn(),
@@ -231,6 +232,7 @@ describe('AppBuilder control surface', () => {
       value: vi.fn(),
     })
     ;(apiService.buildPreflight as any).mockReset()
+    ;(apiService.featureReadiness as any).mockReset()
     ;(apiService.getBuildStatus as any).mockReset()
     ;(apiService.getBuildDetails as any).mockReset()
     ;(apiService.getCompletedBuild as any).mockReset()
@@ -252,6 +254,13 @@ describe('AppBuilder control surface', () => {
       total: 0,
       page: 1,
       limit: 10,
+    })
+    ;(apiService.featureReadiness as any).mockResolvedValue({
+      phase: 'ready',
+      status: 'healthy',
+      ready: true,
+      degraded_features: [],
+      services: [],
     })
   })
 
@@ -458,6 +467,38 @@ describe('AppBuilder control surface', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /diagnostics/i }))
     await screen.findByText(/Build Timeline/i)
+  })
+
+  it('shows a compact platform status notice when runtime services are degraded', async () => {
+    localStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, 'build-123')
+    ;(apiService.getBuildStatus as any).mockResolvedValue({ status: 'in_progress' })
+    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail())
+    ;(apiService.featureReadiness as any).mockResolvedValue({
+      phase: 'ready',
+      status: 'degraded',
+      ready: true,
+      degraded_features: ['redis_cache'],
+      services: [
+        {
+          name: 'primary_database',
+          tier: 'critical',
+          state: 'ready',
+          summary: 'Primary database connected',
+        },
+        {
+          name: 'redis_cache',
+          tier: 'optional',
+          state: 'degraded',
+          summary: 'Using in-memory cache fallback',
+        },
+      ],
+    })
+
+    render(<AppBuilder />)
+
+    await screen.findByText(/Platform services degraded/i)
+    expect(screen.getByText(/Redis cache is degraded/i)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /open issues/i })).toBeTruthy()
   })
 
   it('hides live agent and task panels for failed builds even if stale worker state is present', async () => {

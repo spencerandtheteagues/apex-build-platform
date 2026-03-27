@@ -1,6 +1,9 @@
 package startup
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestSnapshotReadyAndDegradedStatus(t *testing.T) {
 	registry := NewRegistry()
@@ -42,5 +45,38 @@ func TestSnapshotUnhealthyWhenCriticalServiceDegraded(t *testing.T) {
 	}
 	if summary.Ready {
 		t.Fatal("expected registry to be not ready when a critical service is degraded")
+	}
+}
+
+func TestApplyRuntimeServiceRecomputesDegradedFeatures(t *testing.T) {
+	now := time.Now().UTC()
+	summary := Summary{
+		Phase:     PhaseReady,
+		Status:    "healthy",
+		Ready:     true,
+		StartedAt: now.Add(-time.Minute),
+		UpdatedAt: now,
+		Services: []Service{
+			{Name: "primary_database", Tier: TierCritical, State: StateReady, Summary: "Database connected", UpdatedAt: now},
+			{Name: "redis_cache", Tier: TierOptional, State: StateReady, Summary: "Redis cache connected", UpdatedAt: now},
+		},
+	}
+
+	next := ApplyRuntimeService(summary, Service{
+		Name:      "redis_cache",
+		Tier:      TierOptional,
+		State:     StateDegraded,
+		Summary:   "Using in-memory cache fallback",
+		UpdatedAt: now.Add(time.Second),
+	})
+
+	if next.Status != "degraded" {
+		t.Fatalf("expected degraded status after runtime overlay, got %q", next.Status)
+	}
+	if !next.Ready {
+		t.Fatal("expected readiness to stay true when only optional service is degraded")
+	}
+	if len(next.DegradedFeatures) != 1 || next.DegradedFeatures[0] != "redis_cache" {
+		t.Fatalf("unexpected degraded features after overlay: %#v", next.DegradedFeatures)
 	}
 }

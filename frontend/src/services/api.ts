@@ -151,6 +151,23 @@ const removeHeaderValue = (headers: AxiosRequestConfig['headers'], key: string):
   return headerStore
 }
 
+export interface FeatureReadinessService {
+  name: string
+  tier: 'critical' | 'optional'
+  state: 'pending' | 'ready' | 'degraded' | 'failed'
+  summary: string
+  details?: Record<string, any>
+  updated_at?: string
+}
+
+export interface FeatureReadinessSummary {
+  phase: 'starting' | 'ready' | 'shutting_down' | 'failed'
+  status: 'healthy' | 'degraded' | 'unhealthy' | 'starting' | 'failed' | 'shutting_down'
+  ready: boolean
+  degraded_features?: string[]
+  services: FeatureReadinessService[]
+}
+
 export class ApiService {
   public client: AxiosInstance
   private baseURL: string
@@ -230,6 +247,13 @@ export class ApiService {
   // Health check
   async health(): Promise<any> {
     const response = await this.client.get('/health')
+    return response.data
+  }
+
+  async featureReadiness(): Promise<FeatureReadinessSummary> {
+    const response = await this.client.get<FeatureReadinessSummary>('/health/features', {
+      validateStatus: () => true,
+    })
     return response.data
   }
 

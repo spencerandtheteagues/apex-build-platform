@@ -2,15 +2,18 @@ package api
 
 import (
 	"archive/zip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"apex-build/internal/ai"
 	"apex-build/internal/auth"
+	"apex-build/internal/cache"
 	"apex-build/internal/db"
 	appmiddleware "apex-build/internal/middleware"
 	"apex-build/internal/origins"
@@ -35,6 +38,7 @@ type Server struct {
 	usage     *usage.Tracker
 	readiness *startup.Registry
 	storage   storage.Provider
+	cache     func() cache.Status
 }
 
 // NewServer creates a new API server
@@ -60,9 +64,13 @@ func (s *Server) SetUsageTracker(tracker *usage.Tracker) {
 	s.usage = tracker
 }
 
+func (s *Server) SetCacheStatusProvider(provider func() cache.Status) {
+	s.cache = provider
+}
+
 // Health endpoint - Returns quickly for load balancer health checks
 func (s *Server) Health(c *gin.Context) {
-	summary := s.readinessSummary()
+	summary := s.runtimeReadinessSummary(false)
 	aiHealth, healthyProviders := s.aiHealthSnapshot()
 	c.JSON(http.StatusOK, gin.H{
 		"status":                   topLevelHealthStatus(summary),
@@ -80,19 +88,7 @@ func (s *Server) Health(c *gin.Context) {
 
 // DeepHealth endpoint - Full health check with database ping (for monitoring)
 func (s *Server) DeepHealth(c *gin.Context) {
-	summary := s.readinessSummary()
-
-	// Check database health with timeout
-	if err := s.db.Health(); err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"status":  "unhealthy",
-			"ready":   false,
-			"error":   "database connection failed",
-			"details": err.Error(),
-			"startup": summary,
-		})
-		return
-	}
+	summary := s.runtimeReadinessSummary(true)
 
 	// Check AI providers health
 	aiHealth, healthyProviders := s.aiHealthSnapshot()
@@ -105,7 +101,7 @@ func (s *Server) DeepHealth(c *gin.Context) {
 	c.JSON(statusCode, gin.H{
 		"status":                   topLevelHealthStatus(summary),
 		"ready":                    summary.Ready,
-		"database":                 "connected",
+		"database":                 primaryDatabaseHealth(summary),
 		"ai_providers":             aiHealth,
 		"healthy_providers":        healthyProviders,
 		"total_providers":          len(aiHealth),
@@ -116,7 +112,7 @@ func (s *Server) DeepHealth(c *gin.Context) {
 }
 
 func (s *Server) FeatureReadiness(c *gin.Context) {
-	summary := s.readinessSummary()
+	summary := s.runtimeReadinessSummary(true)
 	statusCode := http.StatusOK
 	if !summary.Ready {
 		statusCode = http.StatusServiceUnavailable
@@ -133,6 +129,53 @@ func (s *Server) readinessSummary() startup.Summary {
 		}
 	}
 	return s.readiness.Snapshot()
+}
+
+func (s *Server) runtimeReadinessSummary(includeDatabaseHealth bool) startup.Summary {
+	summary := s.readinessSummary()
+
+	if s.cache != nil {
+		cacheStatus := s.cache()
+		cacheState := startup.StateReady
+		cacheSummary := "Redis cache backend connected"
+		if !cacheStatus.RedisConnected {
+			cacheState = startup.StateDegraded
+			cacheSummary = "Using in-memory cache fallback"
+		}
+		summary = startup.ApplyRuntimeService(summary, startup.Service{
+			Name:      "redis_cache",
+			Tier:      startup.TierOptional,
+			State:     cacheState,
+			Summary:   cacheSummary,
+			Details:   map[string]any{"backend": cacheStatus.Backend, "redis_connected": cacheStatus.RedisConnected, "fallback_reason": cacheStatus.FallbackReason},
+			UpdatedAt: time.Now().UTC(),
+		})
+	}
+
+	if includeDatabaseHealth && s.db != nil {
+		now := time.Now().UTC()
+		dbState := startup.StateReady
+		dbSummary := "Primary database connected"
+		dbDetails := map[string]any{}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := s.db.HealthContext(ctx)
+		cancel()
+		if err != nil {
+			dbState = startup.StateFailed
+			dbSummary = "Primary database unavailable"
+			dbDetails["error"] = err.Error()
+		}
+		summary = startup.ApplyRuntimeService(summary, startup.Service{
+			Name:      "primary_database",
+			Tier:      startup.TierCritical,
+			State:     dbState,
+			Summary:   dbSummary,
+			Details:   dbDetails,
+			UpdatedAt: now,
+		})
+	}
+
+	return summary
 }
 
 func (s *Server) aiHealthSnapshot() (map[string]*ai.ProviderHealthDetail, int) {
@@ -162,6 +205,19 @@ func topLevelHealthStatus(summary startup.Summary) string {
 		return "starting"
 	}
 	return "unhealthy"
+}
+
+func primaryDatabaseHealth(summary startup.Summary) string {
+	for _, service := range summary.Services {
+		if service.Name != "primary_database" {
+			continue
+		}
+		if service.State == startup.StateReady {
+			return "connected"
+		}
+		return "unavailable"
+	}
+	return "configured"
 }
 
 // Authentication endpoints

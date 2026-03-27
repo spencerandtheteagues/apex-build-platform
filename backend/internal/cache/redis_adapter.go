@@ -16,7 +16,7 @@ type goRedisAdapter struct {
 func (a *goRedisAdapter) Get(ctx context.Context, key string) (string, error) {
 	val, err := a.client.Get(ctx, key).Result()
 	if err == goredis.Nil {
-		return "", fmt.Errorf("cache: key not found: %s", key)
+		return "", fmt.Errorf("%w: %s", ErrRedisKeyNotFound, key)
 	}
 	return val, err
 }
@@ -49,6 +49,10 @@ func (a *goRedisAdapter) Pipeline() RedisPipeline {
 
 func (a *goRedisAdapter) Close() error {
 	return a.client.Close()
+}
+
+func (a *goRedisAdapter) Ping(ctx context.Context) error {
+	return a.client.Ping(ctx).Err()
 }
 
 // noopPipeline satisfies RedisPipeline but performs no batching.

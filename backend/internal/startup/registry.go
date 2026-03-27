@@ -110,6 +110,35 @@ func (r *Registry) Snapshot() Summary {
 		services = append(services, cloneService(service))
 	}
 
+	return summarizeServices(r.phase, r.startedAt, r.updatedAt, services)
+}
+
+// ApplyRuntimeService overlays a runtime health result onto a previously captured
+// summary and recomputes aggregate readiness counts.
+func ApplyRuntimeService(summary Summary, service Service) Summary {
+	services := make([]Service, 0, len(summary.Services)+1)
+	replaced := false
+	for _, existing := range summary.Services {
+		if existing.Name == service.Name {
+			services = append(services, cloneService(service))
+			replaced = true
+			continue
+		}
+		services = append(services, cloneService(existing))
+	}
+	if !replaced {
+		services = append(services, cloneService(service))
+	}
+
+	updatedAt := summary.UpdatedAt
+	if service.UpdatedAt.After(updatedAt) {
+		updatedAt = service.UpdatedAt
+	}
+
+	return summarizeServices(summary.Phase, summary.StartedAt, updatedAt, services)
+}
+
+func summarizeServices(phase Phase, startedAt, updatedAt time.Time, services []Service) Summary {
 	sort.Slice(services, func(i, j int) bool {
 		if services[i].Tier != services[j].Tier {
 			return services[i].Tier < services[j].Tier
@@ -118,9 +147,9 @@ func (r *Registry) Snapshot() Summary {
 	})
 
 	summary := Summary{
-		Phase:     r.phase,
-		StartedAt: r.startedAt,
-		UpdatedAt: r.updatedAt,
+		Phase:     phase,
+		StartedAt: startedAt,
+		UpdatedAt: updatedAt,
 		Services:  services,
 	}
 

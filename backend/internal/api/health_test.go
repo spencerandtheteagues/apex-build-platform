@@ -8,6 +8,7 @@ import (
 
 	"apex-build/internal/ai"
 	"apex-build/internal/auth"
+	"apex-build/internal/cache"
 	"apex-build/internal/db"
 	"apex-build/internal/startup"
 
@@ -159,7 +160,9 @@ func TestFeatureReadinessEndpointShowsLaunchBlockers(t *testing.T) {
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
 	require.Equal(t, "starting", payload["status"])
 	require.Equal(t, false, payload["ready"])
-	require.Len(t, payload["services"], 1)
+	services, ok := payload["services"].([]any)
+	require.True(t, ok)
+	require.Len(t, services, 2)
 }
 
 func TestFeatureReadinessReportsOptionalDegradation(t *testing.T) {
@@ -200,4 +203,86 @@ func TestFeatureReadinessReportsOptionalDegradation(t *testing.T) {
 	require.Equal(t, "degraded", payload["status"])
 	require.Equal(t, true, payload["ready"])
 	require.Contains(t, payload["degraded_features"], "redis_cache")
+}
+
+func TestFeatureReadinessReflectsRuntimeRedisFallbackEvenAfterHealthyStartup(t *testing.T) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	gormDB, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+
+	server := NewServer(
+		&db.Database{DB: gormDB},
+		auth.NewAuthService("test-jwt-secret-with-sufficient-length-1234567890"),
+		ai.NewAIRouter("", "", ""),
+		nil,
+	)
+
+	registry := startup.NewRegistry()
+	registry.MarkReady("primary_database", startup.TierCritical, "Database connected", nil)
+	registry.MarkReady("auth_service", startup.TierCritical, "Auth initialized", nil)
+	registry.MarkReady("redis_cache", startup.TierOptional, "Redis cache connected", map[string]any{"backend": "redis"})
+	registry.SetPhase(startup.PhaseReady)
+	server.SetReadinessRegistry(registry)
+	server.SetCacheStatusProvider(func() cache.Status {
+		return cache.Status{
+			Backend:         "memory",
+			RedisConfigured: true,
+			RedisConnected:  false,
+			FallbackReason:  "redis ping failed: maintenance window",
+		}
+	})
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/health/features", nil)
+
+	server.FeatureReadiness(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.Equal(t, "degraded", payload["status"])
+	require.Equal(t, true, payload["ready"])
+	require.Contains(t, payload["degraded_features"], "redis_cache")
+}
+
+func TestDeepHealthReportsUnavailableWhenPrimaryDatabasePingFails(t *testing.T) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	gormDB, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+
+	sqlDB, err := gormDB.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	server := NewServer(
+		&db.Database{DB: gormDB},
+		auth.NewAuthService("test-jwt-secret-with-sufficient-length-1234567890"),
+		ai.NewAIRouter("", "", ""),
+		nil,
+	)
+
+	registry := startup.NewRegistry()
+	registry.MarkReady("primary_database", startup.TierCritical, "Database connected", nil)
+	registry.MarkReady("auth_service", startup.TierCritical, "Auth initialized", nil)
+	registry.SetPhase(startup.PhaseReady)
+	server.SetReadinessRegistry(registry)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/ready", nil)
+
+	server.DeepHealth(context)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.Equal(t, "unhealthy", payload["status"])
+	require.Equal(t, "unavailable", payload["database"])
 }

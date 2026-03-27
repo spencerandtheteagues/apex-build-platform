@@ -5,6 +5,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ type RedisCache struct {
 	backend         string
 	fallbackReason  string
 	redisConfigured bool
+	stateMu         sync.RWMutex
 
 	// Configuration
 	defaultTTL time.Duration
@@ -37,6 +39,10 @@ type RedisCache struct {
 
 func (c *RedisCache) HasRedisBackend() bool {
 	return c != nil && c.redisClient != nil
+}
+
+type redisHealthClient interface {
+	Ping(ctx context.Context) error
 }
 
 // RedisClient interface for Redis operations
@@ -72,6 +78,9 @@ type StatusCmd struct {
 func (c *StringCmd) Val() string { return c.val }
 func (c *StringCmd) Err() error  { return c.err }
 func (c *StatusCmd) Err() error  { return c.err }
+
+// ErrRedisKeyNotFound indicates the Redis backend did not contain the requested key.
+var ErrRedisKeyNotFound = errors.New("cache: key not found")
 
 // cacheEntry represents a cached item with expiration
 type cacheEntry struct {
@@ -170,8 +179,12 @@ func (c *RedisCache) Get(ctx context.Context, key string) ([]byte, error) {
 	if c.redisClient != nil {
 		val, err := c.redisClient.Get(ctx, key)
 		if err == nil {
+			c.clearRedisFallback()
 			c.recordHit()
 			return []byte(val), nil
+		}
+		if !errors.Is(err, ErrRedisKeyNotFound) {
+			c.recordRedisFallback(err)
 		}
 	}
 
@@ -206,7 +219,10 @@ func (c *RedisCache) Set(ctx context.Context, key string, value []byte, ttl time
 	// Store in Redis if available
 	if c.redisClient != nil {
 		if err := c.redisClient.Set(ctx, key, string(value), ttl); err == nil {
+			c.clearRedisFallback()
 			return nil
+		} else {
+			c.recordRedisFallback(err)
 		}
 		// Fall through to memory cache on Redis error
 	}
@@ -231,7 +247,11 @@ func (c *RedisCache) Set(ctx context.Context, key string, value []byte, ttl time
 // Delete removes a key from cache
 func (c *RedisCache) Delete(ctx context.Context, key string) error {
 	if c.redisClient != nil {
-		c.redisClient.Del(ctx, key)
+		if err := c.redisClient.Del(ctx, key); err == nil {
+			c.clearRedisFallback()
+		} else {
+			c.recordRedisFallback(err)
+		}
 	}
 
 	c.memMu.Lock()
@@ -246,7 +266,13 @@ func (c *RedisCache) DeletePattern(ctx context.Context, pattern string) error {
 	if c.redisClient != nil {
 		keys, err := c.redisClient.Keys(ctx, pattern)
 		if err == nil && len(keys) > 0 {
-			c.redisClient.Del(ctx, keys...)
+			if delErr := c.redisClient.Del(ctx, keys...); delErr == nil {
+				c.clearRedisFallback()
+			} else {
+				c.recordRedisFallback(delErr)
+			}
+		} else if err != nil {
+			c.recordRedisFallback(err)
 		}
 	}
 
@@ -265,11 +291,28 @@ func (c *RedisCache) DeletePattern(ctx context.Context, pattern string) error {
 
 // Status reports which cache backend is active and whether Redis is in use.
 func (c *RedisCache) Status() Status {
+	if c == nil {
+		return Status{Backend: "memory"}
+	}
+
+	connected, liveFallbackReason := c.liveRedisStatus()
+	backend, storedFallbackReason, redisConfigured := c.currentBackendState()
+	if connected {
+		return Status{
+			Backend:         "redis",
+			RedisConfigured: redisConfigured,
+			RedisConnected:  true,
+		}
+	}
+	if liveFallbackReason != "" {
+		storedFallbackReason = liveFallbackReason
+		backend = "memory"
+	}
 	return Status{
-		Backend:         c.backend,
-		RedisConfigured: c.redisConfigured,
-		RedisConnected:  c.redisClient != nil,
-		FallbackReason:  c.fallbackReason,
+		Backend:         backend,
+		RedisConfigured: redisConfigured,
+		RedisConnected:  false,
+		FallbackReason:  storedFallbackReason,
 	}
 }
 
@@ -441,6 +484,55 @@ func (c *RedisCache) cleanup() {
 			delete(c.memCache, key)
 		}
 	}
+}
+
+func (c *RedisCache) currentBackendState() (string, string, bool) {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	return c.backend, c.fallbackReason, c.redisConfigured
+}
+
+func (c *RedisCache) recordRedisFallback(err error) {
+	if c == nil || c.redisClient == nil || err == nil {
+		return
+	}
+	c.stateMu.Lock()
+	c.backend = "memory"
+	c.fallbackReason = fmt.Sprintf("redis unavailable: %v", err)
+	c.redisConfigured = true
+	c.stateMu.Unlock()
+}
+
+func (c *RedisCache) clearRedisFallback() {
+	if c == nil || c.redisClient == nil {
+		return
+	}
+	c.stateMu.Lock()
+	c.backend = "redis"
+	c.fallbackReason = ""
+	c.redisConfigured = true
+	c.stateMu.Unlock()
+}
+
+func (c *RedisCache) liveRedisStatus() (bool, string) {
+	if c == nil || c.redisClient == nil {
+		return false, ""
+	}
+
+	pinger, ok := c.redisClient.(redisHealthClient)
+	if !ok {
+		backend, _, _ := c.currentBackendState()
+		return backend == "redis", ""
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := pinger.Ping(ctx); err != nil {
+		c.recordRedisFallback(err)
+		return false, fmt.Sprintf("redis ping failed: %v", err)
+	}
+	c.clearRedisFallback()
+	return true, ""
 }
 
 // matchPattern provides simple glob-style matching for cache keys

@@ -324,6 +324,58 @@ Commit hash:
 
 - Not pushed yet in this pass.
 
+### 2026-03-26 (infra-maintenance resilience + builder platform status pass)
+
+Completed:
+
+- Hardened primary database startup by adding a bounded ping-with-retry loop before the backend declares the database ready.
+- Added context-aware database health checks so runtime readiness and deep health probes reflect live database availability instead of only startup success.
+- Made Redis cache status truthful after startup:
+  - runtime health now pings Redis instead of assuming a non-nil client means healthy
+  - cache status falls back to `memory` with a concrete reason during Redis maintenance
+  - cache status recovers back to `redis` automatically once Redis responds again
+- Added runtime readiness overlays so `/health`, `/health/features`, and `/ready` can reflect current Redis/database state instead of stale startup-only state.
+- Tightened managed PostgreSQL provisioning fallback so temporary Postgres unavailability falls back to SQLite at ping time, not only when `sql.Open` fails immediately.
+- Added a compact builder `Platform Status` notice in `Overview` so users can tell when the platform itself is degraded and jump directly to `Issues` or `Diagnostics`.
+- Added regression coverage for:
+  - Redis cache runtime fallback / recovery status
+  - database ping retry behavior
+  - runtime readiness overlays for Redis fallback
+  - deep health reporting when the primary database becomes unavailable
+  - compact builder platform-status rendering
+
+Files changed:
+
+- `backend/cmd/main.go`
+- `backend/internal/api/handlers.go`
+- `backend/internal/api/health_test.go`
+- `backend/internal/cache/redis.go`
+- `backend/internal/cache/redis_adapter.go`
+- `backend/internal/cache/redis_status_test.go`
+- `backend/internal/database/manager.go`
+- `backend/internal/db/database.go`
+- `backend/internal/db/database_health_test.go`
+- `backend/internal/startup/registry.go`
+- `backend/internal/startup/registry_test.go`
+- `frontend/src/components/builder/AppBuilder.tsx`
+- `frontend/src/components/builder/AppBuilder.test.tsx`
+- `frontend/src/services/api.ts`
+
+Verification completed:
+
+- `cd frontend && npm run test -- --run src/components/builder/AppBuilder.test.tsx`
+- `cd frontend && npm run lint`
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run build`
+- `cd frontend && npm run test -- --run`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/cache ./internal/db ./internal/startup ./internal/api`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash:
+
+- Not pushed yet in this pass.
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:
