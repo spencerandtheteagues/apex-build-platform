@@ -10,6 +10,7 @@ import {
   Globe, BarChart3, Cpu, Lock, Eye, Code2, Database,
   Package, Activity, TrendingDown, Sparkles, X,
 } from 'lucide-react'
+import { getConfiguredApiUrl } from '../config/runtime'
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -255,6 +256,29 @@ const LEFT_FEATURES  = FEATURES.slice(0, 6)
 const RIGHT_FEATURES = FEATURES.slice(6)
 
 interface LandingProps { onGetStarted: (mode?: string, planType?: string) => void }
+
+const getPlatformStatusHref = (): string => {
+  const apiUrl = getConfiguredApiUrl()
+  if (!apiUrl) return '/health/features'
+
+  try {
+    const base = typeof window !== 'undefined' ? window.location.origin : 'https://apex-build.dev'
+    const parsed = new URL(apiUrl, base)
+    parsed.pathname = '/health/features'
+    parsed.search = ''
+    parsed.hash = ''
+    return parsed.toString()
+  } catch {
+    return '/health/features'
+  }
+}
+
+const FOOTER_LINKS: Array<{ label: string; href: string; external?: boolean }> = [
+  { label: 'Privacy', href: '/?legal=privacy' },
+  { label: 'Terms', href: '/?legal=terms' },
+  { label: 'Docs', href: '/?help=1' },
+  { label: 'Status', href: getPlatformStatusHref(), external: true },
+]
 
 // ─── Scroll-spy hook ──────────────────────────────────────────────────────────
 
@@ -2021,14 +2045,19 @@ const Footer: React.FC = () => (
       © {new Date().getFullYear()} Apex Build · Built with the models it powers
     </div>
     <div style={{ display: 'flex', gap: 20 }}>
-      {['Privacy', 'Terms', 'Docs', 'Status'].map(l => (
-        <a key={l} href="#" style={{
+      {FOOTER_LINKS.map((link) => (
+        <a
+          key={link.label}
+          href={link.href}
+          target={link.external ? '_blank' : undefined}
+          rel={link.external ? 'noreferrer' : undefined}
+          style={{
           fontFamily: fBody, fontSize: '0.73rem', color: C.textMuted,
           textDecoration: 'none', transition: 'color 0.15s',
         }}
           onMouseEnter={e => (e.currentTarget.style.color = C.textSub)}
           onMouseLeave={e => (e.currentTarget.style.color = C.textMuted)}
-        >{l}</a>
+        >{link.label}</a>
       ))}
     </div>
   </footer>

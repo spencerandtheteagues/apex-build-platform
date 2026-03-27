@@ -55,6 +55,9 @@ const LandingPage = lazy(() => import('./pages/Landing').then(m => ({ default: m
 const HelpButton = lazy(() =>
   import('./components/help/HelpCenter').then((m) => ({ default: m.HelpButton }))
 )
+const HelpCenterModal = lazy(() =>
+  import('./components/help/HelpCenter').then((m) => ({ default: m.HelpCenter }))
+)
 
 const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
   <div className="h-full flex items-center justify-center bg-black/40">
@@ -70,6 +73,32 @@ const getProjectIdFromPath = (): number | null => {
 
   const projectId = Number(match[1])
   return Number.isInteger(projectId) && projectId > 0 ? projectId : null
+}
+
+const LEGAL_DOCUMENT_IDS: LegalDocumentId[] = [
+  'terms',
+  'privacy',
+  'acceptable-use',
+  'billing',
+  'ai-policy',
+]
+
+const normalizeRequestedLegalDocument = (value: string | null): LegalDocumentId | null => {
+  if (!value) return null
+  return LEGAL_DOCUMENT_IDS.includes(value as LegalDocumentId) ? (value as LegalDocumentId) : null
+}
+
+const getRequestedLegalDocument = (): LegalDocumentId | null => {
+  if (typeof window === 'undefined') return null
+  return normalizeRequestedLegalDocument(new URLSearchParams(window.location.search).get('legal'))
+}
+
+const shouldOpenHelpCenterFromLocation = (): boolean => {
+  if (typeof window === 'undefined') return false
+  const value = new URLSearchParams(window.location.search).get('help')
+  if (value == null) return false
+  const normalized = value.trim().toLowerCase()
+  return normalized === '' || normalized === '1' || normalized === 'true' || normalized === 'yes'
 }
 
 const getInitialRouteState = (): {
@@ -216,7 +245,8 @@ function App() {
   const [authErrors, setAuthErrors] = useState<Record<string, string>>({})
   const [showPassword, setShowPassword] = useState(false)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
-  const [activeLegalDocument, setActiveLegalDocument] = useState<LegalDocumentId | null>(null)
+  const [activeLegalDocument, setActiveLegalDocument] = useState<LegalDocumentId | null>(() => getRequestedLegalDocument())
+  const [showHelpCenter, setShowHelpCenter] = useState<boolean>(() => shouldOpenHelpCenterFromLocation())
   const [uiColorScheme, setUIColorScheme] = useState<UIColorScheme>(() => {
     if (typeof window === 'undefined') return 'red-dark'
     try {
@@ -291,6 +321,26 @@ function App() {
     navigateToView('builder')
     setBuilderStartOverSignal((prev) => prev + 1)
   }, [navigateToView])
+
+  const clearQueryParam = useCallback((key: string) => {
+    if (typeof window === 'undefined') return
+
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has(key)) return
+
+    url.searchParams.delete(key)
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+  }, [])
+
+  const closeLegalDocument = useCallback(() => {
+    setActiveLegalDocument(null)
+    clearQueryParam('legal')
+  }, [clearQueryParam])
+
+  const closeHelpCenter = useCallback(() => {
+    setShowHelpCenter(false)
+    clearQueryParam('help')
+  }, [clearQueryParam])
 
   const navigationItems = useMemo(() => {
     const items: Array<{
@@ -662,6 +712,8 @@ function App() {
       pendingProjectIdRef.current = routeState.projectId
       setShowLanding(routeState.showLanding)
       setCurrentView(routeState.currentView)
+      setActiveLegalDocument(getRequestedLegalDocument())
+      setShowHelpCenter(shouldOpenHelpCenterFromLocation())
       if (routeState.currentView === 'ide') {
         setIdeLaunchTarget('dashboard')
       }
@@ -715,16 +767,45 @@ function App() {
     )
   }
 
+  const legalDocumentModal = activeLegalDocument ? (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+      <div className="absolute inset-0" onClick={closeLegalDocument} />
+      <div className="relative z-10 max-h-[90vh] w-full max-w-5xl overflow-y-auto">
+        <div className="mb-3 flex justify-end">
+          <button
+            type="button"
+            onClick={closeLegalDocument}
+            className="inline-flex items-center gap-2 rounded-full border border-gray-700 bg-black/70 px-3 py-2 text-sm text-gray-200 hover:border-red-500/50 hover:text-white"
+          >
+            <X className="h-4 w-4" />
+            Close
+          </button>
+        </div>
+        <LegalDocuments key={activeLegalDocument} initialDocumentId={activeLegalDocument} compact />
+      </div>
+    </div>
+  ) : null
+
+  const helpCenterModal = showHelpCenter ? (
+    <Suspense fallback={null}>
+      <HelpCenterModal isOpen={showHelpCenter} onClose={closeHelpCenter} />
+    </Suspense>
+  ) : null
+
   // Landing page — shown to unauthenticated visitors before the auth form
   if (!isAuthenticated && showLanding) {
     return (
-      <Suspense fallback={<div style={{ background: '#000', minHeight: '100vh' }} />}>
-        <LandingPage onGetStarted={(mode, planType) => {
-          if (mode === 'login' || mode === 'register') setIsAuthMode(mode)
-          if (planType && planType !== 'free') setPendingPlanType(planType)
-          setShowLanding(false)
-        }} />
-      </Suspense>
+      <>
+        <Suspense fallback={<div style={{ background: '#000', minHeight: '100vh' }} />}>
+          <LandingPage onGetStarted={(mode, planType) => {
+            if (mode === 'login' || mode === 'register') setIsAuthMode(mode)
+            if (planType && planType !== 'free') setPendingPlanType(planType)
+            setShowLanding(false)
+          }} />
+        </Suspense>
+        {legalDocumentModal}
+        {helpCenterModal}
+      </>
     )
   }
 
@@ -980,24 +1061,8 @@ function App() {
           </div>
         </div>
 
-        {activeLegalDocument && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-            <div className="absolute inset-0" onClick={() => setActiveLegalDocument(null)} />
-            <div className="relative z-10 max-h-[90vh] w-full max-w-5xl overflow-y-auto">
-              <div className="mb-3 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setActiveLegalDocument(null)}
-                  className="inline-flex items-center gap-2 rounded-full border border-gray-700 bg-black/70 px-3 py-2 text-sm text-gray-200 hover:border-red-500/50 hover:text-white"
-                >
-                  <X className="h-4 w-4" />
-                  Close
-                </button>
-              </div>
-              <LegalDocuments key={activeLegalDocument} initialDocumentId={activeLegalDocument} compact />
-            </div>
-          </div>
-        )}
+        {legalDocumentModal}
+        {helpCenterModal}
       </>
     )
   }
@@ -1388,6 +1453,9 @@ function App() {
           </ErrorBoundary>
         </div>
       )}
+
+      {legalDocumentModal}
+      {helpCenterModal}
 
       {/* Floating Help Button */}
       <Suspense fallback={null}>

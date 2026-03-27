@@ -485,6 +485,54 @@ Verification completed:
 - `cd frontend && npm run build`
 - `cd frontend && npm run test -- --run`
 
+### 2026-03-26 (launch smoke + public resource routing pass)
+
+Completed:
+
+- Added a dedicated non-destructive launch smoke in `tests/e2e` covering:
+  - public landing resource links
+  - public legal and help surfaces without authentication
+  - auth/legal acceptance surface
+  - backend `/health`
+  - backend `/health/features`
+  - public billing plans readiness
+  - optional authenticated sign-in with provided smoke credentials
+- Added a first-class `npm run test:launch` command to the Playwright harness so launch validation is no longer buried in ad hoc notes.
+- Added `docs/launch-runbook.md` as the operator-facing go-live checklist, including:
+  - preconditions
+  - automated checks
+  - platform build smoke
+  - manual checks
+  - hold criteria
+  - first-hour monitoring
+  - rollback triggers
+- Linked the deployment guide to the launch runbook so release verification and go-live verification are now connected.
+- Fixed the public landing footer so customer-facing resource links no longer point at dead `#` anchors.
+- Added public query-param routing for `legal` and `help` so unauthenticated visitors can open the legal center and help center directly from the landing surface.
+
+Files changed:
+
+- `docs/deployment.md`
+- `docs/launch-runbook.md`
+- `frontend/src/App.tsx`
+- `frontend/src/pages/Landing.tsx`
+- `tests/e2e/README.md`
+- `tests/e2e/package.json`
+- `tests/e2e/specs/launch.prod.smoke.spec.ts`
+
+Verification completed:
+
+- `cd frontend && npm run lint`
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run build`
+- `cd frontend && npm run test -- --run`
+- `cd tests/e2e && npm run test:launch -- --list`
+
+Verification note:
+
+- The new Playwright launch suite compiles and enumerates cleanly in this sandbox.
+- I did not execute the live production smoke from here because that would require hitting the public production services directly from the sandbox.
+
 ## Logging Rules
 
 For every completed work item during this overhaul, append:

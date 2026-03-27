@@ -106,6 +106,8 @@ npm run generate
 npm test
 ```
 
+For public go-live validation, run the dedicated [launch runbook](./launch-runbook.md) after the normal release checklist passes.
+
 ## Deployment-specific notes
 
 - The backend starts a bootstrap HTTP listener early so load balancer health checks succeed while deeper initialization continues.
