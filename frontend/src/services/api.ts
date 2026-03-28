@@ -172,6 +172,8 @@ export class ApiService {
   public client: AxiosInstance
   private baseURL: string
   private refreshPromise: Promise<TokenResponse> | null = null
+  private csrfToken: string | null = null
+  private csrfTokenFetchPromise: Promise<void> | null = null
 
   constructor(baseURL: string = getApiUrl()) {
     this.baseURL = baseURL
@@ -188,8 +190,36 @@ export class ApiService {
     this.setupInterceptors()
   }
 
+  private async fetchCsrfToken(): Promise<void> {
+    if (this.csrfToken) return
+    if (this.csrfTokenFetchPromise) return this.csrfTokenFetchPromise
+
+    this.csrfTokenFetchPromise = axios
+      .get(`${this.baseURL}/csrf-token`)
+      .then((r) => {
+        this.csrfToken = r.data?.token ?? null
+      })
+      .catch(() => {
+        // Non-fatal: CSRF protection degrades gracefully
+      })
+      .finally(() => {
+        this.csrfTokenFetchPromise = null
+      })
+
+    return this.csrfTokenFetchPromise
+  }
+
   private setupInterceptors() {
-    this.client.interceptors.request.use((config) => config)
+    this.client.interceptors.request.use(async (config) => {
+      const method = (config.method ?? 'get').toLowerCase()
+      if (method !== 'get' && method !== 'head' && method !== 'options') {
+        await this.fetchCsrfToken()
+        if (this.csrfToken) {
+          config.headers = setHeaderValue(config.headers, 'X-CSRF-Token', this.csrfToken) as typeof config.headers
+        }
+      }
+      return config
+    })
 
     // Response interceptor - Handle errors and token refresh
     this.client.interceptors.response.use(

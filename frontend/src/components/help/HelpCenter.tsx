@@ -1872,9 +1872,18 @@ const ArticleRenderer: React.FC<{ content: string }> = ({ content }) => {
   return <div className="space-y-0.5">{elements}</div>
 }
 
+// Escape HTML special characters before injecting into innerHTML
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 // Format inline text: **bold**, `code`, "quotes"
+// Input is escaped first so no raw HTML from content can execute.
 function formatInlineText(text: string): string {
-  return text
+  return escapeHtml(text)
     .replace(/\*\*(.+?)\*\*/g, '<strong class="text-white font-semibold">$1</strong>')
     .replace(/`(.+?)`/g, '<code class="px-1.5 py-0.5 bg-gray-800 text-red-400 rounded text-xs font-mono">$1</code>')
     .replace(/"(.+?)"/g, '<span class="text-gray-200">"$1"</span>')

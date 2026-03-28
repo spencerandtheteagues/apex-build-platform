@@ -1308,9 +1308,17 @@ func setupRoutes(
 		// Raw body is required for signature verification — do NOT add body parsers here
 		v1.POST("/billing/webhook", paymentHandler.HandleWebhook)
 
+		// CSRF token endpoint — public GET, issues a time-limited HMAC token.
+		// The frontend fetches this once and attaches it as X-CSRF-Token on all
+		// state-mutating requests to the protected group.
+		v1.GET("/csrf-token", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"token": middleware.GenerateCSRFToken()})
+		})
+
 		// Protected routes (authentication required)
 		protected := v1.Group("/")
 		protected.Use(server.AuthMiddleware())
+		protected.Use(middleware.CSRFProtection())
 		{
 			// Usage tracking and quota API endpoints (REVENUE PROTECTION)
 			usageHandler.RegisterUsageRoutes(protected)
