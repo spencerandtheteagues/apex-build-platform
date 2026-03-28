@@ -1108,6 +1108,32 @@ Date: 2026-03-28
 
 Change summary:
 
+- Re-ran the paid full-stack canary after the qualifier-normalization deploy and confirmed the prior schema blockers were gone; the build advanced through schema, testing, and review before failing at preview verification.
+- Diagnosed the next live paid-canary failure on build `fb0e266d-9adc-49c5-a373-7450f410c193`: preview verification rejected the build with `No backend server entry file found ...` even though the generated backend entry was `server/index.ts`.
+- Fixed backend preview entry detection so the verifier now accepts common TypeScript/Node backend entrypoints such as `server/index.ts`, `server/main.ts`, `backend/index.ts`, and similar API-folder variants.
+- Added a regression proving that a full-stack build with `server/index.ts` plus a normal Express listen/route setup passes static backend preview verification.
+
+Files changed:
+
+- `backend/internal/preview/verifier.go`
+- `backend/internal/preview/verifier_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/preview/verifier.go internal/preview/verifier_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/preview -run 'TestVerifier_FullStack_AcceptsServerIndexTSBackendEntry|TestVerifier_FullStack_PassesValidExpressApp|TestVerifier_FullStack_FailsMissingBackend'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Re-ran live canaries after the truncation-repair deploy: the free frontend canary completed successfully on build `f8de29ae-8f58-4b0e-bf4c-476bdfca514a`, but the completed-build summary surface lagged briefly behind the terminal detail view before converging.
 - Diagnosed the next paid full-stack blocker on build `28833c8f-4e1a-4515-a03f-e31a8cbbc27a`: architecture/data-model verification was emitting blockers like `Tenant field 'slug' has type 'string unique' but unique is false` and `User field 'email' has type 'string unique' but unique is false`.
 - Fixed contract normalization so model-field type qualifiers such as `unique`, `not null`, `nullable`, and `optional` are converted into `Unique` / `Required` flags instead of leaking through as contradictory raw type strings.

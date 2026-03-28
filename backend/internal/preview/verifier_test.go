@@ -94,7 +94,7 @@ func TestVerifier_FailsBlankEntrypoint(t *testing.T) {
 func TestVerifier_FailsMarkdownFencesInHTML(t *testing.T) {
 	files := []VerifiableFile{
 		{
-			Path: "index.html",
+			Path:    "index.html",
 			Content: "```html\n<!DOCTYPE html>\n<html><body><div id='root'></div></body></html>\n```",
 		},
 		{
@@ -223,6 +223,30 @@ func TestVerifier_FullStack_FailsNoListenCall(t *testing.T) {
 	}
 	if result.FailureKind != "backend_no_listen" {
 		t.Errorf("expected backend_no_listen, got %q", result.FailureKind)
+	}
+}
+
+func TestVerifier_FullStack_AcceptsServerIndexTSBackendEntry(t *testing.T) {
+	files := []VerifiableFile{
+		{
+			Path:    "index.html",
+			Content: "<!DOCTYPE html><html><body><div id='root'>content</div></body></html>",
+		},
+		{
+			Path: "server/index.ts",
+			Content: `import express from 'express'
+const app = express()
+app.get('/api/health', (_req, res) => res.json({ ok: true }))
+app.listen(3001)
+`,
+		},
+	}
+
+	v := NewVerifier(nil)
+	result := v.VerifyFiles(context.Background(), files, true)
+
+	if !result.Passed {
+		t.Fatalf("expected server/index.ts backend entry to pass static detection, got kind=%s details=%s", result.FailureKind, result.Details)
 	}
 }
 
