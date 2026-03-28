@@ -21,6 +21,7 @@ fi
 prompt_file=""
 cookie_jar=""
 TOKEN=""
+CSRF_TOKEN=""
 cleanup() {
   if [[ -n "${prompt_file}" && -f "${prompt_file}" ]]; then
     rm -f "${prompt_file}"
@@ -38,6 +39,18 @@ refresh_auth_args() {
   if [[ -n "${TOKEN}" && "${TOKEN}" != "null" ]]; then
     auth_args+=(-H "Authorization: Bearer $TOKEN")
   fi
+  if [[ -n "${CSRF_TOKEN}" && "${CSRF_TOKEN}" != "null" ]]; then
+    auth_args+=(-H "X-CSRF-Token: $CSRF_TOKEN")
+  fi
+}
+
+fetch_csrf_token_or_exit() {
+  CSRF_TOKEN="$(curl -sS -c "$cookie_jar" -b "$cookie_jar" "$BASE_URL/csrf-token" | jq -r '.token // empty')"
+  if [[ -z "${CSRF_TOKEN}" ]]; then
+    echo "CSRF_TOKEN_FETCH_FAILED"
+    exit 1
+  fi
+  refresh_auth_args
 }
 
 login_or_exit() {
@@ -58,6 +71,7 @@ login_or_exit() {
   fi
 
   refresh_auth_args
+  fetch_csrf_token_or_exit
 }
 
 if [[ $# -gt 0 ]]; then

@@ -2392,6 +2392,83 @@ func TestApplyDeterministicValidationRepairsCreatesMissingLocalModulePlaceholder
 	}
 }
 
+func TestExtractBrokenGeneratedTestPaths(t *testing.T) {
+	t.Parallel()
+
+	errs := []string{
+		`Preview verification build failed: src/__tests__/AppShell.test.tsx(2,18): error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.`,
+		`Preview verification build failed: src/components/AppShell.tsx(11,7): error TS2322: Type '"x"' is not assignable to type '"y"'.`,
+	}
+
+	targets := ExtractBrokenTestPaths(strings.Join(errs, "\n"))
+	if len(targets) != 1 || targets[0] != "src/__tests__/AppShell.test.tsx" {
+		t.Fatalf("unexpected generated test targets: %+v", targets)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsReplacesBrokenGeneratedTestFile(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-generated-test-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "package.json",
+				Content: "{\"name\":\"preview-test\",\"private\":true}\n",
+				IsNew:   true,
+			},
+			{
+				Path: "src/__tests__/AppShell.test.tsx",
+				Content: `import { render, screen } from "@testing-library/react";
+import { AppShell } from "../components/AppShell";
+test("renders", () => {
+  render(<AppShell />);
+  expect(screen.getByText("Dashboard")).toBeInTheDocument();
+});`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Preview verification build failed: src/__tests__/AppShell.test.tsx(2,18): error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.`},
+		"broken generated test",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected broken generated test repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "src/__tests__/AppShell.test.tsx" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired test file to exist, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, `render, screen } from "@testing-library/react"`) {
+		t.Fatalf("expected broken RTL screen import to be repaired, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "generated verification placeholder") &&
+		!strings.Contains(repairedFile.Content, `from '@testing-library/dom'`) {
+		t.Fatalf("expected placeholder fallback or patched screen import, got %q", repairedFile.Content)
+	}
+}
+
 func TestParsePreviewSyntaxErrorTargetFiles(t *testing.T) {
 	t.Parallel()
 

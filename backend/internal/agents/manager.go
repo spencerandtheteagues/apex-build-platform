@@ -6988,6 +6988,45 @@ func (am *AgentManager) applyDeterministicQuoteSyntaxRepair(build *Build, readin
 	return am.bundleFromPatchPlan(build.ID, files, plan, "syntax_repair: "+summary), summary
 }
 
+func (am *AgentManager) applyDeterministicBrokenGeneratedTestRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+
+	compilerOutput := strings.Join(readinessErrors, "\n")
+	targets := ExtractBrokenTestPaths(compilerOutput)
+	if len(targets) == 0 {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 {
+		return nil, ""
+	}
+
+	contents := make(map[string]string, len(targets))
+	for _, target := range targets {
+		contents[target] = plan.content(target)
+	}
+	repairs := RepairAll(compilerOutput, contents)
+	applied := make([]string, 0, len(repairs))
+	for _, repair := range repairs {
+		if strings.TrimSpace(repair.RepairedContent) == "" {
+			continue
+		}
+		if !plan.patchFile(repair.FilePath, repair.RepairedContent, am.detectLanguage(repair.FilePath)) {
+			continue
+		}
+		applied = append(applied, fmt.Sprintf("%s (%s)", repair.FilePath, repair.Strategy))
+	}
+	if len(applied) == 0 {
+		return nil, ""
+	}
+
+	summary := "generated test placeholder repair: " + strings.Join(applied, ", ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "generated_test_repair: "+summary), summary
+}
+
 func parseMissingTypePackagesFromBuildErrors(errors []string) []string {
 	if len(errors) == 0 {
 		return nil
@@ -8756,6 +8795,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			errorFormat: "Final output validation failed: %s (applied deterministic manifest repair: %s)",
 			message:     "Applied deterministic package.json dependency repair. Re-running final validation before solver recovery.",
 			summaryKey:  "manifest_repair",
+		},
+		{
+			apply:       am.applyDeterministicBrokenGeneratedTestRepair,
+			errorFormat: "Final output validation failed: %s (applied generated test repair: %s)",
+			message:     "Applied deterministic repair to broken generated test files. Re-running final validation before solver recovery.",
+			summaryKey:  "generated_test_repair",
 		},
 		{
 			apply:       am.applyDeterministicQuoteSyntaxRepair,

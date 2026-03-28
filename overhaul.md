@@ -1108,6 +1108,33 @@ Date: 2026-03-28
 
 Change summary:
 
+- Added a deterministic generated-test repair pass in final validation so late-stage preview/test failures from broken generated `*.test.*` / `*.spec.*` files do not terminal-fail the entire build when they can be patched or downgraded safely.
+- Wired the repair into `applyDeterministicValidationRepairs`, using the pure helper lane to rewrite broken test imports or fall back to compile-safe placeholders only for generated test files.
+- Updated the live canary smoke script to fetch and send a CSRF token after login, which is now required by production `POST /api/v1/build/start`.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+- `scripts/run_platform_build_smoke.sh`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestDetectSourceFlaws_CleanFile|TestRepairGeneratedTestFile_PatchesMissingVitestImport|TestApplyDeterministicValidationRepairsReplacesBrokenGeneratedTestFile|TestApplyDeterministicProviderBlockedTestRepairAddsMissingJestDependency|TestApplyDeterministicPreValidationNormalizationAddsJestDependencyForGeneratedJestTests'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+- `bash -n scripts/run_platform_build_smoke.sh`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Ran a fresh paid full-stack production canary against the live backend with runtime preview proof enabled.
 - Confirmed the earlier preview-route false positive is fixed: the canary advanced through testing and review instead of failing at the old `server/index.ts defines no routes` check.
 - Found a new narrower blocker at `97%`: a late provider-verification repair task can fail the build when generated Jest-style tests exist but the root manifest does not yet declare the required test tooling.
