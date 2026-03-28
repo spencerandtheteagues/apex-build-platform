@@ -250,6 +250,80 @@ app.listen(3001)
 	}
 }
 
+func TestVerifier_FullStack_AcceptsMountedRouteModuleInServerTree(t *testing.T) {
+	files := []VerifiableFile{
+		{
+			Path:    "index.html",
+			Content: "<!DOCTYPE html><html><body><div id='root'>content</div></body></html>",
+		},
+		{
+			Path: "server/index.ts",
+			Content: `import cors from "cors"
+import express from "express"
+import apiRouter from "./routes/api"
+
+const app = express()
+app.use(cors())
+app.use(express.json())
+app.use("/api", apiRouter)
+app.listen(3001)
+`,
+		},
+		{
+			Path: "server/routes/api.ts",
+			Content: `import { Router } from "express"
+
+const router = Router()
+router.get("/health", (_req, res) => res.json({ ok: true }))
+router.post("/auth/login", (_req, res) => res.json({ token: "x" }))
+
+export default router
+`,
+		},
+	}
+
+	v := NewVerifier(nil)
+	result := v.VerifyFiles(context.Background(), files, true)
+
+	if !result.Passed {
+		t.Fatalf("expected mounted route module to satisfy backend route detection, got kind=%s details=%s", result.FailureKind, result.Details)
+	}
+}
+
+func TestVerifier_FullStack_AcceptsAppImportWithRoutesInSiblingFile(t *testing.T) {
+	files := []VerifiableFile{
+		{
+			Path:    "index.html",
+			Content: "<!DOCTYPE html><html><body><div id='root'>content</div></body></html>",
+		},
+		{
+			Path: "server/index.ts",
+			Content: `import app from "./app"
+
+const port = Number(process.env.PORT || 3001)
+app.listen(port)
+`,
+		},
+		{
+			Path: "server/app.ts",
+			Content: `import express from "express"
+
+const app = express()
+app.get("/api/health", (_req, res) => res.json({ ok: true }))
+
+export default app
+`,
+		},
+	}
+
+	v := NewVerifier(nil)
+	result := v.VerifyFiles(context.Background(), files, true)
+
+	if !result.Passed {
+		t.Fatalf("expected sibling app module routes to satisfy backend route detection, got kind=%s details=%s", result.FailureKind, result.Details)
+	}
+}
+
 func TestVerifier_FullStack_PassesValidExpressApp(t *testing.T) {
 	files := []VerifiableFile{
 		{

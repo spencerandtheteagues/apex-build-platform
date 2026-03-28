@@ -1106,6 +1106,23 @@ Commit hash if pushed:
 
 Date: 2026-03-28
 
+Live canary status update:
+
+- Pushed `fix: sync seeded auth contracts into build plans` as `9c78b7d` and confirmed Render rolled the backend at `started_at=2026-03-28T18:51:28.564317981Z`.
+- Production feature health stayed green after deploy, including `preview_runtime_verify` with browser proof enabled and Chrome available.
+- Re-ran the paid full-stack canary on build `9792219d-a297-4d29-bd0c-a9b576495f3d`.
+- The new deploy cleared the earlier planning/runtime blockers:
+  - the build moved cleanly through planning, generation, and review phases
+  - the prior `/api/auth/me` drift is gone
+  - the prior database ownership conflict on `server/migrate.ts`, `server/seed.ts`, and `server/db/index.ts` is gone
+- The remaining live blocker is now narrower and later in the pipeline:
+  - integration preflight briefly reported only `/api/auth/login` drift
+  - the build then advanced into preview verification
+  - terminal failure at `96%` is `Preview verification failed: Backend entry "server/index.ts" defines no routes.`
+- This means the next reliability pass should focus on backend route detection/runtime proof in the preview verifier rather than planning/contract hydration.
+
+Date: 2026-03-28
+
 Change summary:
 
 - Fixed the paid full-stack canary drift exposed by live build `4010066c-9e2c-4b31-a9be-7b34273a0cf6`, where the frontend correctly called `/api/auth/login` and `/api/auth/me` but the backend work order still only saw the stale `/api/health` contract.

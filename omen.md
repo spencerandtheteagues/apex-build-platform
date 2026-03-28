@@ -284,9 +284,59 @@ MAX_POLLS=180 \
 
 If starting fresh on the new machine, the situation is:
 
-- frontend/free path: currently passing live
-- paid/full-stack path: still failing live
-- browser-proof code: shipped
-- browser-proof in production: not actually enabled yet
-- deploy image/toolchain mismatch: already fixed
-- biggest remaining blocker: truncated generated TS/test outputs on paid full-stack canaries
+- frontend/free path: passing live
+- paid/full-stack path: still failing live, but much later in the pipeline than before
+- browser-proof code: shipped and now live in production
+- production `preview_runtime_verify`: enabled and healthy, with Chrome available
+- deploy image/toolchain mismatch: fixed
+- the older blockers are resolved:
+  - truncated generated TS/test-file failure class repaired
+  - qualifier normalization (`string unique`) repaired
+  - TypeScript backend preview entry detection repaired
+  - database ownership precedence repaired
+  - seeded auth/API contract now syncs back into `build.Plan` before task spawn
+- the current highest-value blocker is now preview/backend route proof
+
+## Latest Live Status
+
+Production backend after the latest deploy:
+
+- pushed fix: `9c78b7d` `fix: sync seeded auth contracts into build plans`
+- production `started_at`: `2026-03-28T18:51:28.564317981Z`
+- `/health/features`: healthy
+- `preview_runtime_verify`: ready
+  - `enabled: true`
+  - `browser_proof: true`
+  - `chrome_available: true`
+
+Latest paid full-stack canary:
+
+- build id: `9792219d-a297-4d29-bd0c-a9b576495f3d`
+- improvements confirmed:
+  - build now moves through planning and generation on the new deploy
+  - prior `/api/auth/me` integration drift is gone
+  - prior database work-order ownership conflict is gone
+- current blocker:
+  - preview verification reaches `server/index.ts` and fails terminally at `96%` with:
+    - `Preview verification failed: Backend entry "server/index.ts" defines no routes.`
+
+Interpretation:
+
+- planning/contract hydration is no longer the main failure surface
+- the next pass should focus on preview verifier backend route detection/runtime truth
+- likely target files:
+  - `backend/internal/preview/verifier.go`
+  - `backend/internal/preview/runtime_verifier.go`
+  - related preview tests under `backend/internal/preview/*_test.go`
+
+## Immediate Next Task
+
+Fix the preview verifier so valid backend TypeScript entries that mount routes indirectly still count as route-bearing when they are actually runnable. The current verifier is still too literal about route definitions in `server/index.ts`.
+
+Concrete objective:
+
+- paid canary should complete with preview proof on the current production contract stack
+- route detection should not falsely fail when:
+  - routes are imported from another file and mounted with `app.use(...)`
+  - router setup happens through modularized handlers
+  - Express app creation and route registration are split across files
