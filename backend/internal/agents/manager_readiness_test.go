@@ -2469,6 +2469,76 @@ test("renders", () => {
 	}
 }
 
+func TestApplyDeterministicValidationRepairsReplacesBrokenBackendGeneratedTestFileWithPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-generated-backend-test-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "package.json",
+				Content: "{\"name\":\"agency-ops\",\"private\":true}\n",
+				IsNew:   true,
+			},
+			{
+				Path: "server/__tests__/api.test.ts",
+				Content: `import request from "supertest";
+import { describe, it, expect } from "@jest/globals";
+import { apiRouter } from "../routes/api";
+
+describe("api", () => {
+  it("responds", async () => {
+    expect(apiRouter).toBeTruthy();
+    expect(request).toBeTruthy();
+  });
+});`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/__tests__/api.test.ts(1,21): error TS2307: Cannot find module 'supertest' or its corresponding type declarations.`,
+			`server/__tests__/api.test.ts(4,10): error TS2614: Module '"../routes/api"' has no exported member 'apiRouter'. Did you mean to use 'import apiRouter from "../routes/api"' instead?`,
+			`server/__tests__/api.test.ts(6,1): error TS2582: Cannot find name 'describe'.`,
+		},
+		"broken generated backend test",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected broken backend generated test repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/__tests__/api.test.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired backend test file to exist, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, "supertest") || strings.Contains(repairedFile.Content, "apiRouter") {
+		t.Fatalf("expected backend placeholder repair to strip brittle imports, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "generated verification placeholder") {
+		t.Fatalf("expected backend placeholder repair content, got %q", repairedFile.Content)
+	}
+}
+
 func TestParsePreviewSyntaxErrorTargetFiles(t *testing.T) {
 	t.Parallel()
 

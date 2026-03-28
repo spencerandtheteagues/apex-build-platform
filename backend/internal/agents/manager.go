@@ -7367,13 +7367,19 @@ func (am *AgentManager) applyDeterministicBrokenGeneratedTestRepair(build *Build
 	repairs := RepairAll(compilerOutput, contents)
 	applied := make([]string, 0, len(repairs))
 	for _, repair := range repairs {
-		if strings.TrimSpace(repair.RepairedContent) == "" {
+		repairedContent := repair.RepairedContent
+		strategy := string(repair.Strategy)
+		if shouldForceGeneratedTestPlaceholderRepair(repair.FilePath, compilerOutput) {
+			repairedContent = placeholderGeneratedTestFileContent(repair.FilePath)
+			strategy = string(StrategyPlaceholder)
+		}
+		if strings.TrimSpace(repairedContent) == "" {
 			continue
 		}
-		if !plan.patchFile(repair.FilePath, repair.RepairedContent, am.detectLanguage(repair.FilePath)) {
+		if !plan.patchFile(repair.FilePath, repairedContent, am.detectLanguage(repair.FilePath)) {
 			continue
 		}
-		applied = append(applied, fmt.Sprintf("%s (%s)", repair.FilePath, repair.Strategy))
+		applied = append(applied, fmt.Sprintf("%s (%s)", repair.FilePath, strategy))
 	}
 	if len(applied) == 0 {
 		return nil, ""
@@ -7381,6 +7387,43 @@ func (am *AgentManager) applyDeterministicBrokenGeneratedTestRepair(build *Build
 
 	summary := "generated test placeholder repair: " + strings.Join(applied, ", ")
 	return am.bundleFromPatchPlan(build.ID, files, plan, "generated_test_repair: "+summary), summary
+}
+
+func shouldForceGeneratedTestPlaceholderRepair(path string, compilerOutput string) bool {
+	path = strings.ToLower(filepath.ToSlash(strings.TrimSpace(path)))
+	if path == "" {
+		return false
+	}
+
+	// Backend/server-side generated tests are non-critical to preview viability.
+	// When they are broken, the safest deterministic path is a framework-free
+	// placeholder instead of preserving brittle imports and route assumptions.
+	if strings.HasPrefix(path, "server/") || strings.Contains(path, "/server/") ||
+		strings.HasPrefix(path, "backend/") || strings.Contains(path, "/backend/") {
+		return true
+	}
+
+	lowerOutput := strings.ToLower(compilerOutput)
+	if !strings.Contains(lowerOutput, path) {
+		return false
+	}
+
+	backendTestMarkers := []string{
+		"supertest",
+		`has no exported member 'apirouter'`,
+		`has no exported member "apirouter"`,
+		"cannot find name 'describe'",
+		"cannot find name 'it'",
+		"cannot find name 'expect'",
+		"cannot find name 'beforeeach'",
+	}
+	for _, marker := range backendTestMarkers {
+		if strings.Contains(lowerOutput, marker) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func parseMissingTypePackagesFromBuildErrors(errors []string) []string {

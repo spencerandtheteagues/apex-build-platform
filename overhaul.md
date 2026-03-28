@@ -1108,6 +1108,37 @@ Date: 2026-03-28
 
 Change summary:
 
+- Confirmed the autoscaling read-path fix on live production. The next paid full-stack canary advanced monotonically through the real phase path instead of bouncing between `planning 0%` and stale live snapshots.
+- Live paid canary `b9e6dde9-90f4-42aa-b952-c09abba65a80` moved:
+  - `0 -> 19 -> 44 -> 79 -> 89 -> failed at 96`
+- The next blocker is no longer orchestration or status truth. It is a narrow generated backend test artifact:
+  - `server/__tests__/api.test.ts` imported `supertest`
+  - it expected a named `apiRouter` export that did not exist
+  - it also depended on missing test globals
+- Tightened deterministic generated-test repair so broken backend/server tests are forced to a framework-free placeholder instead of brittle partial import patching.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairsReplacesBrokenGeneratedTestFile|TestApplyDeterministicValidationRepairsReplacesBrokenBackendGeneratedTestFileWithPlaceholder'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Diagnosed the next live paid-fullstack blocker after enabling Render autoscaling. The build itself was advancing, but repeated `GET /build/:id` polls could alternate between the real owner instance and a second instance that had reconstructed an active planning snapshot into memory.
 - Root cause: `loadReadableBuild` restored active snapshots on read-only status/detail requests. In an autoscaled deployment that created a fake second "live" build session on a non-owner instance, so polling oscillated between `planning 0%` and the real in-progress phase.
 - Fixed the read path so build detail/status endpoints now either:
