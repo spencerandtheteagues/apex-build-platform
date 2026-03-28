@@ -950,3 +950,55 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start the next paid full-stack canary
 4. If it clears `/api/auth/*`, continue on the next remaining late-stage generated-project blocker until the paid path is green
+
+## Latest Live Paid Canary After Nested Express Route Resolution Fix
+
+Production backend during run:
+
+- `started_at = 2026-03-28T23:27:41.957042037Z`
+
+Live canary:
+
+- build id: `1ae03f7f-6128-4740-a58c-931c691c160b`
+
+What improved:
+
+- the old auth-route false negative is cleared
+- the run advanced through:
+  - `0 -> 19 -> 44 -> 79 -> 89 -> 95`
+- the nested Express verifier fix is therefore confirmed live
+
+Current blocker:
+
+- final output validation failed at `95%`
+- exact failure:
+  - `server/db/models.ts(...): error TS2353: Object literal may only specify known properties, and 'uniqueKeys' does not exist in type 'InitOptions<...>'`
+
+Interpretation:
+
+- orchestration, autoscaling reads, preview proof, and nested-route verification are all now healthier than before
+- the next blocker is a deterministic Sequelize typings mismatch in the generated project itself
+- this is the right kind of remaining failure: late, narrow, and patchable
+
+Newest local fix after that canary:
+
+- deterministic validation repair now strips unsupported Sequelize `uniqueKeys` blocks from generated `Model.init(..., options)` objects
+- this avoids falling through to slow solver recovery for a repeated typing issue that the platform can repair itself
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairsStripsSequelizeUniqueKeys|TestApplyDeterministicValidationRepairsReplacesBrokenBackendGeneratedTestFileWithPlaceholder|TestExtractExpressResolvedRoutesResolvesNestedMountedRouters|TestCheckIntegrationCoherenceAcceptsNestedMountedExpressRoutes'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+
+Next exact step:
+
+1. Push the Sequelize `uniqueKeys` repair
+2. Wait for Render to deploy
+3. Start the next paid full-stack canary
+4. If it clears this model-typing issue, continue on the next remaining late-stage generated-project blocker until the paid path is green

@@ -1108,6 +1108,33 @@ Date: 2026-03-28
 
 Change summary:
 
+- Confirmed the nested Express-route fix worked on live production. Paid canary `1ae03f7f-6128-4740-a58c-931c691c160b` cleared the old `/api/auth/login` and `/api/auth/me` false-negative and advanced into final preview validation.
+- The next real blocker is a deterministic Sequelize typing issue at `95%`:
+  - generated `server/db/models.ts` places `uniqueKeys` inside `Model.init(..., options)`
+  - current Sequelize typings reject that with `TS2353`
+- Added a deterministic validation repair that strips unsupported `uniqueKeys` option blocks from generated Sequelize model files so preview validation can continue instead of falling through to solver recovery.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairsStripsSequelizeUniqueKeys|TestApplyDeterministicValidationRepairsReplacesBrokenBackendGeneratedTestFileWithPlaceholder|TestExtractExpressResolvedRoutesResolvesNestedMountedRouters|TestCheckIntegrationCoherenceAcceptsNestedMountedExpressRoutes'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Confirmed the backend generated-test placeholder repair worked on live production. The next paid canary no longer died on `server/__tests__/api.test.ts`.
 - The new live failure on `892d028e-d5bc-4244-8b09-25fa5de231b1` exposed a verifier bug instead of a generated artifact:
   - generated backend structure was:

@@ -7344,6 +7344,102 @@ func (am *AgentManager) applyDeterministicTSJSXProviderRepair(build *Build, read
 	return am.bundleFromPatchPlan(build.ID, files, plan, "ts_jsx_repair: "+summary), summary
 }
 
+func parseSequelizeUniqueKeysRepairTargets(errors []string) []string {
+	if len(errors) == 0 {
+		return nil
+	}
+	re := regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS2353: Object literal may only specify known properties, and 'uniqueKeys' does not exist`)
+	seen := map[string]bool{}
+	targets := make([]string, 0)
+	for _, msg := range errors {
+		for _, match := range re.FindAllStringSubmatch(msg, -1) {
+			if len(match) != 2 {
+				continue
+			}
+			path := sanitizeFilePath(strings.TrimSpace(match[1]))
+			if path == "" || seen[strings.ToLower(path)] {
+				continue
+			}
+			seen[strings.ToLower(path)] = true
+			targets = append(targets, path)
+		}
+	}
+	sort.Strings(targets)
+	return targets
+}
+
+func stripSequelizeUniqueKeysOptions(content string) (string, bool) {
+	if !strings.Contains(content, "uniqueKeys:") {
+		return content, false
+	}
+
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
+	changed := false
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if !strings.Contains(line, "uniqueKeys:") {
+			out = append(out, line)
+			continue
+		}
+
+		braceDepth := strings.Count(line, "{") - strings.Count(line, "}")
+		changed = true
+		for i+1 < len(lines) {
+			i++
+			next := lines[i]
+			braceDepth += strings.Count(next, "{") - strings.Count(next, "}")
+			if braceDepth <= 0 {
+				break
+			}
+		}
+	}
+
+	if !changed {
+		return content, false
+	}
+	return strings.Join(out, "\n"), true
+}
+
+func (am *AgentManager) applyDeterministicSequelizeUniqueKeysRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+
+	targets := parseSequelizeUniqueKeysRepairTargets(readinessErrors)
+	if len(targets) == 0 {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 {
+		return nil, ""
+	}
+
+	applied := make([]string, 0, len(targets))
+	for _, target := range targets {
+		content := plan.content(target)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		repaired, changed := stripSequelizeUniqueKeysOptions(content)
+		if !changed {
+			continue
+		}
+		if !plan.patchFile(target, repaired, am.detectLanguage(target)) {
+			continue
+		}
+		applied = append(applied, target)
+	}
+	if len(applied) == 0 {
+		return nil, ""
+	}
+
+	summary := "sequelize uniqueKeys removal on " + strings.Join(applied, ", ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "sequelize_unique_keys_repair: "+summary), summary
+}
+
 func (am *AgentManager) applyDeterministicBrokenGeneratedTestRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
 	if build == nil || len(readinessErrors) == 0 {
 		return nil, ""
@@ -9343,6 +9439,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			errorFormat: "Final output validation failed: %s (applied JSX-in-TS repair: %s)",
 			message:     "Applied deterministic repair to generated .ts/.js provider files that contained JSX. Re-running final validation before solver recovery.",
 			summaryKey:  "ts_jsx_repair",
+		},
+		{
+			apply:       am.applyDeterministicSequelizeUniqueKeysRepair,
+			errorFormat: "Final output validation failed: %s (applied Sequelize uniqueKeys repair: %s)",
+			message:     "Applied deterministic repair to generated Sequelize model options that used unsupported uniqueKeys metadata. Re-running final validation before solver recovery.",
+			summaryKey:  "sequelize_unique_keys_repair",
 		},
 		{
 			apply:       am.applyDeterministicQuoteSyntaxRepair,

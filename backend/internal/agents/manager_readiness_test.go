@@ -2609,6 +2609,75 @@ describe("api", () => {
 	}
 }
 
+func TestApplyDeterministicValidationRepairsStripsSequelizeUniqueKeys(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-unique-keys-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/db/models.ts",
+				Content: `import { Sequelize, DataTypes, Model } from "sequelize";
+
+export class User extends Model {}
+User.init({}, {
+  sequelize,
+  tableName: "user",
+  indexes: [
+    { fields: ["email"] },
+  ],
+  uniqueKeys: {
+    unique_email_per_tenant: {
+      fields: ["tenant_id", "email"],
+    },
+  },
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/db/models.ts(9,3): error TS2353: Object literal may only specify known properties, and 'uniqueKeys' does not exist in type 'InitOptions<User>'.`,
+		},
+		"broken sequelize init options",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected sequelize uniqueKeys repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/db/models.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired sequelize models file to exist, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, "uniqueKeys:") {
+		t.Fatalf("expected uniqueKeys block to be removed, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "indexes:") {
+		t.Fatalf("expected surrounding init options to remain intact, got %q", repairedFile.Content)
+	}
+}
+
 func TestParsePreviewSyntaxErrorTargetFiles(t *testing.T) {
 	t.Parallel()
 
