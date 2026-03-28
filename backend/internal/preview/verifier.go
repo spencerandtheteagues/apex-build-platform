@@ -58,12 +58,12 @@ func NewVerifier(serverRunner *ServerRunner) *Verifier {
 }
 
 // NewVerifierWithRuntime returns a Verifier with runtime boot verification
-// enabled for Vite/React projects. This adds ~30-90 s to finalization time
-// but provides proof that the generated app actually serves correctly.
+// enabled for Vite/React projects. Includes headless Chrome browser proof
+// when Chrome is available (adds ~30-120 s to finalization).
 func NewVerifierWithRuntime(serverRunner *ServerRunner) *Verifier {
 	return &Verifier{
 		serverRunner:    serverRunner,
-		runtimeVerifier: NewRuntimeVerifier(),
+		runtimeVerifier: NewRuntimeVerifierWithBrowser(),
 	}
 }
 

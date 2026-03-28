@@ -445,12 +445,26 @@ func main() {
 	}
 	agentManager.SetPreviewVerifier(&previewVerifierBridge{verifier: pvVerifier})
 
-	// Surface runtime verify capability in /health/features.
-	pvRuntimeDetails := map[string]any{"enabled": runtimeVerifyEnabled}
+	// Surface runtime/browser verify capability in /health/features.
+	chromePath := preview.FindChrome()
+	pvRuntimeDetails := map[string]any{
+		"enabled":          runtimeVerifyEnabled,
+		"browser_proof":    runtimeVerifyEnabled && chromePath != "",
+		"chrome_available": chromePath != "",
+	}
 	if runtimeVerifyEnabled {
-		startupRegistry.MarkReady("preview_runtime_verify", startup.TierOptional, "Runtime Vite boot proof enabled", pvRuntimeDetails)
+		if chromePath != "" {
+			startupRegistry.MarkReady("preview_runtime_verify", startup.TierOptional,
+				"Runtime Vite boot proof enabled (browser: yes)",
+				pvRuntimeDetails)
+		} else {
+			startupRegistry.MarkDegraded("preview_runtime_verify", startup.TierOptional,
+				"Runtime Vite boot proof enabled but Chrome was not found on PATH",
+				pvRuntimeDetails)
+		}
 	} else {
-		startupRegistry.MarkDegraded("preview_runtime_verify", startup.TierOptional, "Runtime Vite boot proof disabled (set APEX_PREVIEW_RUNTIME_VERIFY=true)", pvRuntimeDetails)
+		startupRegistry.MarkDegraded("preview_runtime_verify", startup.TierOptional,
+			"Runtime Vite boot proof disabled (set APEX_PREVIEW_RUNTIME_VERIFY=true)", pvRuntimeDetails)
 	}
 
 	log.Println("Live Preview Server initialized")

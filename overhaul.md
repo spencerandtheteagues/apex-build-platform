@@ -1133,3 +1133,30 @@ Commit hash if pushed:
 
 - Local: `5014d78`, `0fdaf58`, hardening follow-up pending
 - Remote: pending
+
+Date: 2026-03-27
+
+Change summary:
+
+- Verified Claude’s headless Chrome browser execution proof layer on top of the runtime Vite verifier and confirmed the full backend suite still passes with the browser dependency path enabled.
+- Tightened one truth gap before shipping: when runtime preview verification is enabled but Chrome is missing, the system no longer silently downgrades to weaker HTTP-only proof while reporting the feature as ready.
+- `preview_runtime_verify` now degrades honestly in startup health when Chrome is unavailable, and the runtime verifier fails with `browser_unavailable` instead of quietly skipping browser proof.
+
+Files changed:
+
+- `backend/cmd/main.go`
+- `backend/internal/preview/runtime_verifier.go`
+- `backend/internal/preview/runtime_verifier_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w cmd/main.go internal/preview/runtime_verifier.go internal/preview/runtime_verifier_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/preview -run 'TestRuntimeVerifierFailsWhenBrowserProofEnabledButChromeUnavailable|TestBrowserVerifier_PassesWhenAppRendered|TestCheckRootPage_OK'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/preview`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending

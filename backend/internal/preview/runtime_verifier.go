@@ -36,13 +36,22 @@ import (
 	"time"
 )
 
-// RuntimeVerifier performs actual dev-server boot and HTTP-level checks
+// RuntimeVerifier performs actual dev-server boot, HTTP-level checks, and
+// (when a BrowserVerifier is wired in) headless browser page-load proof
 // against generated Vite/React applications.
-type RuntimeVerifier struct{}
+type RuntimeVerifier struct {
+	browser *BrowserVerifier // nil = browser proof disabled
+}
 
-// NewRuntimeVerifier creates a new RuntimeVerifier. It is stateless and safe
-// to share across builds (each call to VerifyViteApp is fully isolated).
+// NewRuntimeVerifier creates a RuntimeVerifier with HTTP checks only.
 func NewRuntimeVerifier() *RuntimeVerifier { return &RuntimeVerifier{} }
+
+// NewRuntimeVerifierWithBrowser creates a RuntimeVerifier that adds headless
+// Chrome page-load proof after HTTP checks pass (Chrome auto-detected;
+// if unavailable the browser step is silently skipped).
+func NewRuntimeVerifierWithBrowser() *RuntimeVerifier {
+	return &RuntimeVerifier{browser: NewBrowserVerifier()}
+}
 
 // RuntimeVerificationResult is returned by VerifyViteApp.
 type RuntimeVerificationResult struct {
@@ -59,11 +68,24 @@ type RuntimeVerificationResult struct {
 // ── Public entry point ────────────────────────────────────────────────────────
 
 // VerifyViteApp proves the generated app boots and serves correctly.
-// Total bounded timeout is 90 s; returns Skipped=true when npm/vite are absent.
+// Total bounded timeout is 90 s (120 s when headless browser proof is enabled).
+// Returns Skipped=true when npm/vite are absent.
 func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []VerifiableFile) *RuntimeVerificationResult {
 	start := time.Now()
-	bootCtx, bootCancel := context.WithTimeout(ctx, 90*time.Second)
+	totalTimeout := 90 * time.Second
+	if rv.browser != nil && rv.browser.Available() {
+		totalTimeout = 120 * time.Second // extra 30 s for Chrome launch + page load
+	}
+	bootCtx, bootCancel := context.WithTimeout(ctx, totalTimeout)
 	defer bootCancel()
+
+	if rv.browser != nil && !rv.browser.Available() {
+		return rv.rtFail("browser_unavailable",
+			"runtime preview verification requires Chrome, but no Chrome/Chromium binary was found on PATH",
+			"Install Chrome/Chromium in the backend runtime or disable APEX_PREVIEW_RUNTIME_VERIFY until browser proof is available.",
+			start,
+		)
+	}
 
 	npmPath, err := exec.LookPath("npm")
 	if err != nil {
@@ -206,6 +228,32 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 			return rv.rtFail("boot_failed", cssCheck.Detail,
 				fmt.Sprintf("Ensure %s exists and is a valid CSS file.", href),
 				start)
+		}
+	}
+
+	// ── 7. Browser page-load proof (headless Chrome) ────────────────────────
+	if rv.browser != nil {
+		br := rv.browser.VerifyPageLoad(bootCtx, baseURL)
+		if br.Skipped {
+			return rv.rtFail("browser_unavailable",
+				"browser page-load proof skipped because Chrome became unavailable during verification",
+				"Ensure Chrome/Chromium is installed and stable in the backend runtime before enabling APEX_PREVIEW_RUNTIME_VERIFY.",
+				start,
+			)
+		}
+		if !br.Passed {
+			serverLogs := truncateLog(viteStderr.String(), 1500)
+			hint := ""
+			if len(br.RepairHints) > 0 {
+				hint = br.RepairHints[0]
+			}
+			return rv.rtFailWithLogs(br.FailureKind, br.Details, hint, start, serverLogs)
+		} else {
+			detail := fmt.Sprintf("mount rendered in browser (children: %d)", br.MountChildCount)
+			if len(br.JSErrors) > 0 {
+				detail += fmt.Sprintf("; %d non-fatal JS error(s)", len(br.JSErrors))
+			}
+			result.Checks = append(result.Checks, check("browser_page_load", true, detail))
 		}
 	}
 

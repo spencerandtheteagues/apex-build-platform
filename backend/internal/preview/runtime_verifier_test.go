@@ -298,6 +298,19 @@ func TestIsViteProject_NotVite(t *testing.T) {
 	}
 }
 
+func TestRuntimeVerifierFailsWhenBrowserProofEnabledButChromeUnavailable(t *testing.T) {
+	rv := &RuntimeVerifier{browser: &BrowserVerifier{chromePath: ""}}
+	result := rv.VerifyViteApp(context.Background(), []VerifiableFile{
+		{Path: "package.json", Content: `{"name":"x","scripts":{"dev":"vite"}}`},
+	})
+	if result.Passed {
+		t.Fatal("expected runtime verifier to fail when browser proof is enabled but Chrome is unavailable")
+	}
+	if result.FailureKind != "browser_unavailable" {
+		t.Fatalf("expected failure kind browser_unavailable, got %q", result.FailureKind)
+	}
+}
+
 func TestSanitizeRuntimeVerifyPath(t *testing.T) {
 	tests := []struct {
 		path string
