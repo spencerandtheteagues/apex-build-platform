@@ -501,3 +501,39 @@ Next exact step:
 2. Wait for Render to deploy
 3. Rerun the paid full-stack canary again
 4. If green, run repeated paid canaries across power modes and autoscaled conditions
+
+## Latest Live Canary Result After FK Reference Fix
+
+Paid canary rerun:
+
+- build id: `0e1a596f-dccd-47de-bc65-27794a07727a`
+- backend deploy start time during run: `2026-03-28T20:36:23.098875616Z`
+
+What changed:
+
+- the earlier FK reference blocker no longer surfaced as the first issue
+- instead, the build exposed a planning handoff stall
+
+Newest blocker:
+
+- the `plan` task completed, but the build remained in `planning`
+- no team spawned
+- no concrete build error was recorded
+- this pointed at provider-assisted contract critique hanging on the critical path instead of a generated-app failure
+
+Newest local fix after that canary:
+
+- provider-assisted contract critique now runs under a hard `20s` timeout
+- if the critique provider stalls, the critique degrades to `nil` instead of freezing the entire build in planning
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_contract_critique_test.go`
+
+Next exact step:
+
+1. Push the critique-timeout fix
+2. Wait for Render to deploy
+3. Start a fresh paid full-stack canary
+4. If it clears planning and goes green, move to repeated paid canaries across power modes and autoscaled conditions

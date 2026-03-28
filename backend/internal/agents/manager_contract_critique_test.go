@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"apex-build/internal/ai"
 )
@@ -21,6 +22,17 @@ func (r *contractCritiqueRouter) Generate(_ context.Context, _ ai.AIProvider, _ 
 		return nil, r.err
 	}
 	return &ai.AIResponse{Content: r.content}, nil
+}
+
+type blockingContractCritiqueRouter struct {
+	stubAIRouter
+	calls int
+}
+
+func (r *blockingContractCritiqueRouter) Generate(ctx context.Context, _ ai.AIProvider, _ string, _ GenerateOptions) (*ai.AIResponse, error) {
+	r.calls++
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 func TestProviderAssistedContractCritiqueReturnsVerificationReport(t *testing.T) {
@@ -58,6 +70,42 @@ func TestProviderAssistedContractCritiqueReturnsVerificationReport(t *testing.T)
 	}
 	if len(report.Blockers) != 1 || !strings.Contains(report.Blockers[0], "auth capability requested") {
 		t.Fatalf("expected parsed blocker, got %+v", report)
+	}
+}
+
+func TestProviderAssistedContractCritiqueTimesOutAndReturnsNil(t *testing.T) {
+	router := &blockingContractCritiqueRouter{
+		stubAIRouter: stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderClaude},
+			hasConfiguredProvider: true,
+		},
+	}
+	am := &AgentManager{
+		aiRouter: router,
+		ctx:      context.Background(),
+	}
+
+	build := &Build{
+		ID:           "build-contract-critique-timeout",
+		UserID:       8,
+		ProviderMode: "platform",
+	}
+	contract := &BuildContract{
+		ID:      "contract-critique-timeout",
+		BuildID: build.ID,
+		AppType: "fullstack",
+	}
+
+	start := time.Now()
+	report := am.providerAssistedContractCritique(build, contract)
+	if report != nil {
+		t.Fatalf("expected timeout critique to return nil, got %+v", report)
+	}
+	if router.calls != 1 {
+		t.Fatalf("expected one critique call, got %d", router.calls)
+	}
+	if elapsed := time.Since(start); elapsed > 25*time.Second {
+		t.Fatalf("expected critique timeout to stop within 25s, took %s", elapsed)
 	}
 }
 

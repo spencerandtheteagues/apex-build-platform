@@ -2430,7 +2430,14 @@ Contract:
 %s
 `, string(payload))
 
-	resp, err := am.aiRouter.Generate(am.ctx, provider, prompt, GenerateOptions{
+	ctx := am.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	critiqueCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	resp, err := am.aiRouter.Generate(critiqueCtx, provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
 		MaxTokens:       600,
 		Temperature:     0.1,
