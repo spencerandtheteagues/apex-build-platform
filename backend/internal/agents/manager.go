@@ -8625,9 +8625,8 @@ func parseExpressIntegrationRepairRequirements(errors []string) expressIntegrati
 }
 
 func extractExpressResolvedRoutes(files []GeneratedFile) map[string]bool {
-	resolved := map[string]bool{}
 	if len(files) == 0 {
-		return resolved
+		return map[string]bool{}
 	}
 
 	expressRouteRe := regexp.MustCompile(`(?:app|router)\s*\.\s*(get|post|put|delete|patch|use)\s*\(\s*['"]([^'"]+)['"]`)
@@ -8656,24 +8655,10 @@ func extractExpressResolvedRoutes(files []GeneratedFile) map[string]bool {
 				continue
 			}
 			terminalRoutes[routePath] = true
-			resolved[routePath] = true
 		}
 	}
 
-	for mountPath := range mountRoutes {
-		for terminalPath := range terminalRoutes {
-			joinedPath := joinIntegrationRoutePath(mountPath, terminalPath)
-			if joinedPath == "" {
-				continue
-			}
-			if mountRoutes[joinedPath] && normalizeIntegrationRoutePath(terminalPath) != "/" {
-				continue
-			}
-			resolved[joinedPath] = true
-		}
-	}
-
-	return resolved
+	return resolveMountedIntegrationRoutes(mountRoutes, terminalRoutes)
 }
 
 func expressRoutesNeedAPIPrefixAlias(resolvedRoutes map[string]bool, frontendMissingRoutes []string) bool {
@@ -8711,6 +8696,49 @@ func expressRoutesNeedAPIPrefixAlias(resolvedRoutes map[string]bool, frontendMis
 	}
 
 	return supported
+}
+
+func resolveMountedIntegrationRoutes(mountRoutes map[string]bool, terminalRoutes map[string]bool) map[string]bool {
+	resolved := map[string]bool{}
+	for terminalPath := range terminalRoutes {
+		if normalized := normalizeIntegrationRoutePath(terminalPath); normalized != "" {
+			resolved[normalized] = true
+		}
+	}
+
+	maxDepth := len(mountRoutes)
+	if maxDepth < 1 {
+		return resolved
+	}
+	for depth := 0; depth < maxDepth; depth++ {
+		added := false
+		current := make([]string, 0, len(resolved))
+		for routePath := range resolved {
+			current = append(current, routePath)
+		}
+		for mountPath := range mountRoutes {
+			mountPath = normalizeIntegrationRoutePath(mountPath)
+			if mountPath == "" {
+				continue
+			}
+			for _, routePath := range current {
+				if routePath == mountPath || strings.HasPrefix(routePath, mountPath+"/") {
+					continue
+				}
+				joinedPath := joinIntegrationRoutePath(mountPath, routePath)
+				if joinedPath == "" || resolved[joinedPath] {
+					continue
+				}
+				resolved[joinedPath] = true
+				added = true
+			}
+		}
+		if !added {
+			break
+		}
+	}
+
+	return resolved
 }
 
 func isHealthLikeIntegrationPath(path string) bool {
@@ -15319,18 +15347,7 @@ func (am *AgentManager) checkIntegrationCoherence(build *Build, files []Generate
 		}
 	}
 
-	for mountPath := range backendMountRoutes {
-		for terminalPath := range backendTerminalRoutes {
-			joinedPath := joinIntegrationRoutePath(mountPath, terminalPath)
-			if joinedPath == "" {
-				continue
-			}
-			if backendMountRoutes[joinedPath] && normalizeIntegrationRoutePath(terminalPath) != "/" {
-				continue
-			}
-			resolvedBackendRoutes[joinedPath] = true
-		}
-	}
+	resolvedBackendRoutes = resolveMountedIntegrationRoutes(backendMountRoutes, backendTerminalRoutes)
 
 	if build.Plan != nil && build.Plan.APIContract != nil {
 		for _, endpoint := range build.Plan.APIContract.Endpoints {

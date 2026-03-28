@@ -889,3 +889,64 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start the next paid full-stack canary
 4. If it clears this backend-test artifact, continue on the next remaining late-stage generated-project blocker until the paid path is green
+
+## Latest Live Paid Canary After Backend Generated-Test Placeholder Repair
+
+Production backend during run:
+
+- `started_at = 2026-03-28T23:06:33.159174308Z`
+
+Live canary:
+
+- build id: `892d028e-d5bc-4244-8b09-25fa5de231b1`
+
+What improved:
+
+- the prior backend test artifact was cleared
+- the run advanced cleanly again through:
+  - `0 -> 19 -> 44 -> 59 -> 82 -> 89`
+- this confirms the backend generated-test placeholder repair is working on production
+
+Current blocker:
+
+- integration preflight still failed at `89%`
+- exact failure:
+  - `integration: frontend calls /api/auth/login but backend has no matching route`
+  - `integration: frontend calls /api/auth/me but backend has no matching route`
+
+Root cause discovered from the generated files:
+
+- the backend actually generated the correct nested Express structure:
+  - `app.use("/api", apiRouter)`
+  - `router.use("/auth", authRouter)`
+  - `authRouter.post("/login")`
+  - `authRouter.get("/me")`
+- the verifier bug was ours:
+  - route resolution only expanded one mount level
+  - it could see `/api/login` and `/auth/login`
+  - it could not derive the true nested route `/api/auth/login`
+
+Newest local fix after that canary:
+
+- nested Express route resolution now expands mounted routers transitively
+- the fix is bounded so it does not recurse forever by repeatedly re-prefixing the same mount path
+- integration tests now cover nested mounted routes directly
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestExtractExpressResolvedRoutesResolvesNestedMountedRouters|TestCheckIntegrationCoherenceAcceptsNestedMountedExpressRoutes|TestCheckIntegrationCoherenceCatchesRouteDrift|TestApplyDeterministicExpressIntegrationRepairAddsAPIPrefixAlias'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the nested Express route-resolution fix
+2. Wait for Render to deploy
+3. Start the next paid full-stack canary
+4. If it clears `/api/auth/*`, continue on the next remaining late-stage generated-project blocker until the paid path is green

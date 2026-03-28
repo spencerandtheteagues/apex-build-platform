@@ -1108,6 +1108,39 @@ Date: 2026-03-28
 
 Change summary:
 
+- Confirmed the backend generated-test placeholder repair worked on live production. The next paid canary no longer died on `server/__tests__/api.test.ts`.
+- The new live failure on `892d028e-d5bc-4244-8b09-25fa5de231b1` exposed a verifier bug instead of a generated artifact:
+  - generated backend structure was:
+    - `app.use("/api", apiRouter)`
+    - `router.use("/auth", authRouter)`
+    - `authRouter.post("/login")`
+    - `authRouter.get("/me")`
+  - but the integration verifier only resolved one mount level, so it missed `/api/auth/login` and `/api/auth/me`
+- Fixed route resolution to expand nested Express mounts transitively without infinite self-prefixing.
+- Updated integration-coherence tests to cover nested mounted routers directly.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestExtractExpressResolvedRoutesResolvesNestedMountedRouters|TestCheckIntegrationCoherenceAcceptsNestedMountedExpressRoutes|TestCheckIntegrationCoherenceCatchesRouteDrift|TestApplyDeterministicExpressIntegrationRepairAddsAPIPrefixAlias'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Confirmed the autoscaling read-path fix on live production. The next paid full-stack canary advanced monotonically through the real phase path instead of bouncing between `planning 0%` and stale live snapshots.
 - Live paid canary `b9e6dde9-90f4-42aa-b952-c09abba65a80` moved:
   - `0 -> 19 -> 44 -> 79 -> 89 -> failed at 96`

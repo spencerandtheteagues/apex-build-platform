@@ -2056,11 +2056,81 @@ app.listen(process.env.PORT || 3001);`,
 
 	errs := am.checkIntegrationCoherence(build, files)
 	joined := strings.Join(errs, "\n")
-	if !strings.Contains(joined, "backend does not expose required contract endpoint /api/health") {
-		t.Fatalf("expected missing contract health route, got %v", errs)
-	}
 	if !strings.Contains(joined, "frontend calls /api/transcribe/:param/progress but backend has no matching route") {
 		t.Fatalf("expected missing progress route integration error, got %v", errs)
+	}
+	if strings.Contains(joined, "backend does not expose required contract endpoint /api/health") {
+		t.Fatalf("expected nested mount route resolution to satisfy /api/health, got %v", errs)
+	}
+}
+
+func TestExtractExpressResolvedRoutesResolvesNestedMountedRouters(t *testing.T) {
+	t.Parallel()
+
+	files := []GeneratedFile{
+		{
+			Path: "server/index.ts",
+			Content: `import apiRouter from "./routes/api";
+app.use("/api", apiRouter);`,
+		},
+		{
+			Path: "server/routes/api.ts",
+			Content: `import authRouter from "./auth";
+router.use("/auth", authRouter);`,
+		},
+		{
+			Path: "server/routes/auth.ts",
+			Content: `router.post("/login", handler);
+router.get("/me", handler);`,
+		},
+	}
+
+	resolved := extractExpressResolvedRoutes(files)
+	for _, route := range []string{"/auth/login", "/auth/me", "/api/auth/login", "/api/auth/me"} {
+		if !resolved[route] {
+			t.Fatalf("expected resolved routes to include %s, got %+v", route, resolved)
+		}
+	}
+}
+
+func TestCheckIntegrationCoherenceAcceptsNestedMountedExpressRoutes(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		TechStack: &TechStack{Frontend: "React", Backend: "Node"},
+	}
+
+	files := []GeneratedFile{
+		{
+			Path: "src/App.tsx",
+			Content: "fetch(`${API_BASE}/api/auth/login`);\n" +
+				"fetch(`${API_BASE}/api/auth/me`);",
+		},
+		{
+			Path: "server/index.ts",
+			Content: `import cors from "cors";
+import apiRouter from "./routes/api";
+app.use(cors());
+app.use("/api", apiRouter);
+app.listen(process.env.PORT || 3001);`,
+		},
+		{
+			Path: "server/routes/api.ts",
+			Content: `import authRouter from "./auth";
+router.use("/auth", authRouter);`,
+		},
+		{
+			Path: "server/routes/auth.ts",
+			Content: `router.post("/login", handler);
+router.get("/me", handler);`,
+		},
+	}
+
+	errs := am.checkIntegrationCoherence(build, files)
+	joined := strings.Join(errs, "\n")
+	if strings.Contains(joined, "/api/auth/login") || strings.Contains(joined, "/api/auth/me") {
+		t.Fatalf("expected nested mounted routes to satisfy integration check, got %v", errs)
 	}
 }
 
