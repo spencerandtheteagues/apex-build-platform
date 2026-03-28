@@ -239,6 +239,11 @@ func pathAllowedByWorkOrder(path string, workOrder *BuildWorkOrder) bool {
 		return false
 	}
 
+	for _, owned := range workOrder.OwnedFiles {
+		if pathMatchesOwnedPattern(cleanPath, owned) {
+			return true
+		}
+	}
 	for _, forbidden := range workOrder.ForbiddenFiles {
 		if pathMatchesOwnedPattern(cleanPath, forbidden) {
 			return false
@@ -246,11 +251,6 @@ func pathAllowedByWorkOrder(path string, workOrder *BuildWorkOrder) bool {
 	}
 	if len(workOrder.OwnedFiles) == 0 {
 		return true
-	}
-	for _, owned := range workOrder.OwnedFiles {
-		if pathMatchesOwnedPattern(cleanPath, owned) {
-			return true
-		}
 	}
 	return false
 }

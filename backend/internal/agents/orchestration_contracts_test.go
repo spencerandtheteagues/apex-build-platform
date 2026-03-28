@@ -197,6 +197,74 @@ func TestCompileBuildContractFromPlanNormalizesUniqueTypeQualifiers(t *testing.T
 	}
 }
 
+func TestCompileBuildContractFromPlanSeedsAuthEndpointsFromIntent(t *testing.T) {
+	t.Parallel()
+
+	plan := &BuildPlan{
+		ID:      "plan-auth-seed",
+		BuildID: "build-auth-seed",
+		AppType: "fullstack",
+		TechStack: TechStack{
+			Frontend: "React",
+			Backend:  "Express",
+			Database: "SQLite",
+		},
+		EnvVars: []BuildEnvVar{
+			{Name: "JWT_SECRET", Required: true},
+		},
+	}
+
+	intent := &IntentBrief{
+		AppType:              "fullstack",
+		NormalizedRequest:    "Build a CRM where users can create an account, log in, and manage clients from a dashboard.",
+		RequiredCapabilities: []CapabilityRequirement{CapabilityAPI, CapabilityAuth},
+	}
+
+	contract := compileBuildContractFromPlan("build-auth-seed", intent, plan)
+	if contract == nil {
+		t.Fatal("expected contract")
+	}
+	if contract.APIContract == nil {
+		t.Fatal("expected API contract to be seeded")
+	}
+	if contract.APIContract.BackendPort != 3001 {
+		t.Fatalf("expected backend port 3001, got %+v", contract.APIContract)
+	}
+	if contract.APIContract.APIBaseURL != "/api" {
+		t.Fatalf("expected API base URL /api, got %+v", contract.APIContract)
+	}
+	if contract.AuthContract == nil || !contract.AuthContract.Required || contract.AuthContract.TokenStrategy != "token" {
+		t.Fatalf("expected auth contract with token strategy, got %+v", contract.AuthContract)
+	}
+
+	endpoints := make(map[string]bool)
+	for _, endpoint := range contract.APIContract.Endpoints {
+		endpoints[strings.ToUpper(strings.TrimSpace(endpoint.Method))+" "+strings.TrimSpace(endpoint.Path)] = true
+	}
+	for _, key := range []string{
+		"GET /api/health",
+		"POST /api/auth/login",
+		"GET /api/auth/me",
+		"POST /api/auth/register",
+	} {
+		if !endpoints[key] {
+			t.Fatalf("expected seeded API endpoint %q, got %+v", key, contract.APIContract.Endpoints)
+		}
+	}
+
+	backendDeps := make(map[string]bool)
+	for _, resource := range contract.BackendResourceMap {
+		for _, dep := range resource.DependsOn {
+			backendDeps[dep] = true
+		}
+	}
+	for _, dep := range []string{"POST /api/auth/login", "GET /api/auth/me", "POST /api/auth/register"} {
+		if !backendDeps[dep] {
+			t.Fatalf("expected backend resource dependency %q, got %+v", dep, contract.BackendResourceMap)
+		}
+	}
+}
+
 func TestVerifyAndNormalizeBuildContractBlocksMissingAuthAndWarnsOnMissingSchema(t *testing.T) {
 	intent := &IntentBrief{
 		AppType:              "fullstack",

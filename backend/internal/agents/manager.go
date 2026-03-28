@@ -4464,10 +4464,18 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 		if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil {
 			if orchestration.Flags.EnableBuildContract {
 				orchestration.BuildContract = compileBuildContractFromPlan(build.ID, orchestration.IntentBrief, output.Plan)
+				if orchestration.BuildContract != nil {
+					build.Plan.APIContract = cloneAPIContract(orchestration.BuildContract.APIContract)
+					build.Plan.APIEndpoints = apiEndpointsFromContract(build.Plan.APIContract)
+				}
 			}
 			if orchestration.Flags.EnableContractVerification && orchestration.BuildContract != nil {
 				verifiedContract, report := verifyAndNormalizeBuildContract(orchestration.IntentBrief, orchestration.BuildContract)
 				orchestration.BuildContract = verifiedContract
+				if orchestration.BuildContract != nil {
+					build.Plan.APIContract = cloneAPIContract(orchestration.BuildContract.APIContract)
+					build.Plan.APIEndpoints = apiEndpointsFromContract(build.Plan.APIContract)
+				}
 				orchestration.VerificationReports = append(orchestration.VerificationReports, report)
 				if report.Status == VerificationBlocked {
 					contractBlocked = true

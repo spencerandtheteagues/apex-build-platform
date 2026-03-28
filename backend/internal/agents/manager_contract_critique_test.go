@@ -135,6 +135,96 @@ func TestHandlePlanCompletionBlocksOnProviderAssistedContractCritique(t *testing
 	}
 }
 
+func TestHandlePlanCompletionSyncsSeededAPIContractBackIntoPlan(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderGPT4},
+			hasConfiguredProvider: true,
+		},
+		agents:      map[string]*Agent{},
+		builds:      map[string]*Build{},
+		taskQueue:   make(chan *Task, 16),
+		resultQueue: make(chan *TaskResult, 16),
+		subscribers: map[string][]chan *WSMessage{},
+		ctx:         context.Background(),
+	}
+
+	build := &Build{
+		ID:           "build-plan-sync",
+		UserID:       101,
+		Status:       BuildPlanning,
+		Mode:         ModeFull,
+		Description:  "Build a fullstack CRM where users can create an account, log in, and manage clients from a dashboard.",
+		ProviderMode: "platform",
+		Agents:       map[string]*Agent{},
+		Tasks:        []*Task{},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: func() BuildOrchestrationFlags {
+					flags := defaultBuildOrchestrationFlags()
+					flags.EnableSelectiveEscalation = false
+					return flags
+				}(),
+				IntentBrief: &IntentBrief{
+					ID:                "intent-plan-sync",
+					NormalizedRequest: "Build a fullstack CRM where users can create an account, log in, and manage clients from a dashboard.",
+					AppType:           "fullstack",
+					RequiredCapabilities: []CapabilityRequirement{
+						CapabilityAPI,
+						CapabilityAuth,
+					},
+				},
+			},
+		},
+	}
+	am.builds[build.ID] = build
+
+	plan := createBuildPlanFromPlanningBundle(build.ID, build.Description, &TechStack{
+		Frontend: "React",
+		Backend:  "Express",
+		Database: "SQLite",
+	}, nil)
+	if plan == nil {
+		t.Fatal("expected build plan")
+	}
+	plan.APIContract = &BuildAPIContract{
+		BackendPort: 3001,
+		Endpoints: []APIEndpoint{
+			{Method: "GET", Path: "/api/health", Description: "health"},
+		},
+	}
+	plan.APIEndpoints = apiEndpointsFromContract(plan.APIContract)
+	plan.EnvVars = append(plan.EnvVars, BuildEnvVar{Name: "JWT_SECRET", Required: true})
+
+	am.handlePlanCompletion(build, &TaskOutput{Plan: plan})
+
+	if build.Status == BuildFailed {
+		t.Fatalf("expected plan completion to proceed, got failed build error=%q", build.Error)
+	}
+	if build.Plan == nil || build.Plan.APIContract == nil {
+		t.Fatalf("expected seeded API contract on build plan, got %+v", build.Plan)
+	}
+
+	endpoints := make(map[string]bool)
+	for _, endpoint := range build.Plan.APIContract.Endpoints {
+		endpoints[strings.ToUpper(strings.TrimSpace(endpoint.Method))+" "+strings.TrimSpace(endpoint.Path)] = true
+	}
+	for _, key := range []string{
+		"GET /api/health",
+		"POST /api/auth/login",
+		"GET /api/auth/me",
+		"POST /api/auth/register",
+	} {
+		if !endpoints[key] {
+			t.Fatalf("expected seeded API endpoint %q on build plan, got %+v", key, build.Plan.APIContract.Endpoints)
+		}
+	}
+
+	if len(build.Plan.APIEndpoints) != len(build.Plan.APIContract.Endpoints) {
+		t.Fatalf("expected APIEndpoints to sync from APIContract, got endpoints=%d contract=%d", len(build.Plan.APIEndpoints), len(build.Plan.APIContract.Endpoints))
+	}
+}
+
 func TestShouldRunProviderAssistedContractCritiqueSkipsFastLowRiskContracts(t *testing.T) {
 	build := &Build{PowerMode: PowerFast}
 	contract := &BuildContract{

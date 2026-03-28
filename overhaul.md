@@ -1108,6 +1108,38 @@ Date: 2026-03-28
 
 Change summary:
 
+- Fixed the paid full-stack canary drift exposed by live build `4010066c-9e2c-4b31-a9be-7b34273a0cf6`, where the frontend correctly called `/api/auth/login` and `/api/auth/me` but the backend work order still only saw the stale `/api/health` contract.
+- Synced the verified/orchestrated API contract back into `build.Plan` during `handlePlanCompletion`, so the specialist tasks now inherit the same auth/API surface that contract compilation and verification already inferred from the user intent.
+- Fixed work-order ownership precedence so specifically-owned database files under `server/` no longer get rejected by the same work order's broad `server/**` forbidden pattern.
+- Kept frontend-preview-only builds truthful while preserving deferred API/auth shape: static/frontend-only builds no longer get an injected backend API contract, and `frontend_preview_only` verification now requires frontend/deployment proof without falsely demanding backend runtime or integration acceptance.
+- Tightened contract compilation coherence by deriving backend resources and auth strategy from the normalized seeded endpoint set instead of the stale pre-seeded endpoint list.
+
+Files changed:
+
+- `backend/internal/agents/planning_contracts.go`
+- `backend/internal/agents/build_spec_test.go`
+- `backend/internal/agents/orchestration_contracts.go`
+- `backend/internal/agents/orchestration_contracts_test.go`
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_contract_critique_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestValidateTaskCoordinationOutputRejectsOutOfScopeFiles|TestPathAllowedByWorkOrderSpecificOwnedPathOverridesBroadForbiddenPattern|TestCompileBuildContractFromPlanSeedsAuthEndpointsFromIntent|TestHandlePlanCompletionSyncsSeededAPIContractBackIntoPlan'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestCreateBuildPlanFromPlanningBundleHonorsStaticFrontendIntent|TestApplyBuildAssurancePolicyToPlanDowngradesFreeFullStackToFrontendPreview|TestCompileBuildContractFromPlanSeedsAuthEndpointsFromIntent|TestHandlePlanCompletionSyncsSeededAPIContractBackIntoPlan'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Re-ran the paid full-stack canary after the qualifier-normalization deploy and confirmed the prior schema blockers were gone; the build advanced through schema, testing, and review before failing at preview verification.
 - Diagnosed the next live paid-canary failure on build `fb0e266d-9adc-49c5-a373-7450f410c193`: preview verification rejected the build with `No backend server entry file found ...` even though the generated backend entry was `server/index.ts`.
 - Fixed backend preview entry detection so the verifier now accepts common TypeScript/Node backend entrypoints such as `server/index.ts`, `server/main.ts`, `backend/index.ts`, and similar API-folder variants.

@@ -870,6 +870,32 @@ func TestValidateTaskCoordinationOutputRejectsOutOfScopeFiles(t *testing.T) {
 	}
 }
 
+func TestPathAllowedByWorkOrderSpecificOwnedPathOverridesBroadForbiddenPattern(t *testing.T) {
+	t.Parallel()
+
+	workOrder := &BuildWorkOrder{
+		Role: RoleDatabase,
+		OwnedFiles: []string{
+			"server/db/**",
+			"server/migrate.ts",
+			"server/seed.ts",
+		},
+		ForbiddenFiles: []string{
+			"server/**",
+			"src/**",
+		},
+	}
+
+	for _, path := range []string{"server/migrate.ts", "server/seed.ts", "server/db/index.ts"} {
+		if !pathAllowedByWorkOrder(path, workOrder) {
+			t.Fatalf("expected %s to be allowed by specific database ownership override", path)
+		}
+	}
+	if pathAllowedByWorkOrder("server/routes/api.ts", workOrder) {
+		t.Fatal("did not expect unrelated server path to bypass broad forbidden pattern")
+	}
+}
+
 func TestBootstrapBuildScaffoldCreatesSyntheticTask(t *testing.T) {
 	t.Parallel()
 
