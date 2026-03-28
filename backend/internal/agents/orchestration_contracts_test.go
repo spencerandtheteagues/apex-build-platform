@@ -239,6 +239,52 @@ func TestCompileBuildContractFromPlanInfersForeignKeyReferences(t *testing.T) {
 	}
 }
 
+func TestCompileBuildContractFromPlanInfersActorForeignKeyReferences(t *testing.T) {
+	t.Parallel()
+
+	plan := &BuildPlan{
+		ID:      "plan-actor-fk-refs",
+		BuildID: "build-actor-fk-refs",
+		AppType: "fullstack",
+		TechStack: TechStack{
+			Frontend: "react",
+			Backend:  "node",
+			Database: "postgres",
+		},
+		DataModels: []DataModel{
+			{
+				Name: "User",
+				Fields: []ModelField{
+					{Name: "id", Type: "uuid primary key"},
+				},
+			},
+			{
+				Name: "Task",
+				Fields: []ModelField{
+					{Name: "created_by", Type: "uuid foreign key"},
+					{Name: "assigned_to", Type: "uuid foreign key"},
+				},
+			},
+		},
+	}
+
+	contract := compileBuildContractFromPlan("build-actor-fk-refs", &IntentBrief{AppType: "fullstack"}, plan)
+	if contract == nil {
+		t.Fatal("expected contract")
+	}
+	if len(contract.DBSchemaContract) != 2 {
+		t.Fatalf("expected normalized schema models, got %+v", contract.DBSchemaContract)
+	}
+
+	taskFields := contract.DBSchemaContract[1].Fields
+	if taskFields[0].Type != "uuid foreign key references User(id)" {
+		t.Fatalf("expected created_by foreign key reference to be inferred, got %+v", taskFields[0])
+	}
+	if taskFields[1].Type != "uuid foreign key references User(id)" {
+		t.Fatalf("expected assigned_to foreign key reference to be inferred, got %+v", taskFields[1])
+	}
+}
+
 func TestCompileBuildContractFromPlanSeedsAuthEndpointsFromIntent(t *testing.T) {
 	t.Parallel()
 

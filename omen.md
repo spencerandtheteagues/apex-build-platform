@@ -580,3 +580,52 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start a fresh paid full-stack canary
 4. If it reaches backend/data/integration/review cleanly, move to repeated paid canaries across power modes and autoscaled conditions
+
+## Latest Live Canary Result After Phased-Gap Recovery Fix
+
+Paid canary rerun:
+
+- build id: `f149c461-cce3-4f5d-a3ad-b5aeccc9de75`
+- backend deploy start time during run: `2026-03-28T20:51:07.841799849Z`
+
+What changed:
+
+- the build no longer froze between `Frontend UI` and `Data Foundation` because of the earlier between-phase gap
+- instead, it exposed the next contract-normalization miss during architecture/contract critique
+
+Newest blocker:
+
+- provider critique still flagged actor-style foreign keys with no explicit references:
+  - `Invoice.created_by`
+  - `Payment.recorded_by`
+  - `Project.created_by`
+  - `Task.assigned_to`
+  - `Task.created_by`
+
+Interpretation:
+
+- this is still not a preview/runtime crash
+- it is a schema-contract normalization gap
+- the compiler already handles `tenant_id`-style FKs, but it did not yet map actor-reference fields onto the obvious identity model
+
+Newest local fix after that canary:
+
+- actor-style FK inference now treats fields like `created_by`, `recorded_by`, `assigned_to`, `owner`, and `assignee_id` as identity references and maps them to common identity models when present (`User`, `Member`, `Agent`, `Admin`, `Profile`)
+
+Files:
+
+- `backend/internal/agents/build_spec.go`
+- `backend/internal/agents/orchestration_contracts_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the actor-reference FK fix
+2. Wait for Render to deploy
+3. Start a fresh paid full-stack canary
+4. If it clears architecture + contract critique cleanly, continue pushing toward the first fully green paid canary

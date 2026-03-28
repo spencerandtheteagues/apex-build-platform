@@ -1108,6 +1108,32 @@ Date: 2026-03-28
 
 Change summary:
 
+- Live paid canary `f149c461-cce3-4f5d-a3ad-b5aeccc9de75` exposed the next contract-normalization gap after the phased-gap recovery push: actor-style foreign keys like `created_by`, `recorded_by`, and `assigned_to` were still reaching provider critique without explicit `references User(id)`.
+- Extended FK inference so actor-reference fields now map to common identity models (`User`, `Member`, `Agent`, `Admin`, `Profile`) instead of only handling `_id` suffixes.
+- Added a regression that covers the exact `created_by` / `assigned_to` live failure shape.
+
+Files changed:
+
+- `backend/internal/agents/build_spec.go`
+- `backend/internal/agents/orchestration_contracts_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/build_spec.go internal/agents/orchestration_contracts_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestCompileBuildContractFromPlanInfersForeignKeyReferences|TestCompileBuildContractFromPlanInfersActorForeignKeyReferences'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Diagnosed a new autoscaled/live paid canary stall after frontend completion. The build was not blocked and the frontend task had completed, but the phased pipeline never started `Data Foundation`, leaving the build stuck at `44%` in `frontend_ui`.
 - Added deterministic phased-pipeline gap recovery in the build inactivity monitor. When all tasks in the current phase are terminal but the phased pipeline is not complete, the manager now starts the next missing execution phase instead of waiting forever for the original phase goroutine.
 - Refactored phased execution startup so phase start + task assignment can be reused by both the normal pipeline and the stalled-phase recovery path, and phase snapshots are now persisted immediately when a phase begins.

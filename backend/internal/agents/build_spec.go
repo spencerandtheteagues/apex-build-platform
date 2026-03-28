@@ -764,6 +764,9 @@ func inferForeignKeyTargetModel(fieldName string, modelNames []string) string {
 			candidates = append(candidates, base)
 		}
 	}
+	if looksLikeActorReferenceField(field) {
+		candidates = append(candidates, "user", "member", "agent", "admin", "profile")
+	}
 
 	for _, candidate := range dedupeStrings(candidates) {
 		candidateNorm := normalizeDataModelIdentifier(candidate)
@@ -774,6 +777,34 @@ func inferForeignKeyTargetModel(fieldName string, modelNames []string) string {
 		}
 	}
 	return ""
+}
+
+func looksLikeActorReferenceField(field string) bool {
+	field = strings.TrimSpace(strings.ToLower(field))
+	if field == "" {
+		return false
+	}
+
+	switch field {
+	case "assigned_to", "assignee", "assignee_id", "owner", "owner_id":
+		return true
+	}
+
+	for _, suffix := range []string{
+		"_by",
+		"by",
+	} {
+		if strings.HasSuffix(field, suffix) {
+			base := strings.TrimSuffix(field, suffix)
+			base = strings.TrimSuffix(base, "_")
+			switch base {
+			case "created", "updated", "deleted", "recorded", "approved", "submitted", "requested", "modified", "assigned":
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func normalizeDataModelIdentifier(name string) string {
