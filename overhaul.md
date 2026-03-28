@@ -990,6 +990,27 @@ Date: 2026-03-27
 
 Change summary:
 
+- Fixed a deeper phased-pipeline reliability gap: phase completion used to watch only the original phase task IDs, so a failed phase task that was superseded by solver recovery and post-fix validation could let the phase advance too early.
+- Added recovery-lineage tracking for phase completion, so the waiter now follows `superseded_by_recovery`, `failed_task_id`, and `trigger_task` descendants instead of pretending the phase is done as soon as the first-generation tasks go terminal.
+- Added a fast unresolved-failure abort path for phase lineages with no active descendant recovery, which prevents misleading downstream stalls and keeps failure causes closer to the original broken task.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/reliability_helpers_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/reliability_helpers_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestRelatedPhaseTaskIDsIncludesRecoveryAndValidationDescendants|TestWaitForPhaseCompletionWaitsForRecoveryLineage|TestWaitForPhaseCompletionFailsOnUnresolvedLineageFailure|TestMarkQueuedTaskExecutionStartedPromotesPendingRetryTask|TestCheckIntegrationCoherenceIgnoresFrontendTestOnlyDeadRoutes|TestGetBuildStatusNormalizesLiveProgressWithinPhaseWindow'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Date: 2026-03-27
+
+Change summary:
+
 - Fixed the remaining live progress-truth bug after the paid full-stack canary succeeded: active builds could briefly expose raw internal progress like `99%` even while still in early phases such as architecture or frontend UI.
 - Added a presentation-only live progress normalizer that caps active build progress to the current phase window while leaving internal orchestration state untouched.
 - Applied that normalization consistently across the status/detail APIs, websocket build-state sync, and outgoing build progress/error messages so the UI and canaries see the same truthful phase-bounded progress.

@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -116,5 +117,110 @@ func TestFailBuildOnStallMarksFailedAndCancelsActiveTasks(t *testing.T) {
 	}
 	if len(build.Checkpoints) == 0 {
 		t.Fatalf("expected a checkpoint to be created for stalled build")
+	}
+}
+
+func TestRelatedPhaseTaskIDsIncludesRecoveryAndValidationDescendants(t *testing.T) {
+	roots := map[string]struct{}{"phase-task": {}}
+	tasks := []*Task{
+		{
+			ID:     "phase-task",
+			Status: TaskCancelled,
+			Input: map[string]any{
+				"superseded_by_recovery": "recovery-task",
+			},
+		},
+		{
+			ID:     "recovery-task",
+			Status: TaskCompleted,
+			Input: map[string]any{
+				"failed_task_id": "phase-task",
+			},
+		},
+		{
+			ID:     "validation-task",
+			Status: TaskPending,
+			Input: map[string]any{
+				"trigger_task": "recovery-task",
+			},
+		},
+	}
+
+	related := relatedPhaseTaskIDs(tasks, roots)
+
+	for _, taskID := range []string{"phase-task", "recovery-task", "validation-task"} {
+		if _, ok := related[taskID]; !ok {
+			t.Fatalf("expected related phase task set to include %s", taskID)
+		}
+	}
+}
+
+func TestWaitForPhaseCompletionWaitsForRecoveryLineage(t *testing.T) {
+	manager := &AgentManager{
+		ctx:         context.Background(),
+		builds:      make(map[string]*Build),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+
+	build := &Build{
+		ID:     "phase-lineage-wait",
+		Status: BuildInProgress,
+		Tasks: []*Task{
+			{
+				ID:     "phase-task",
+				Status: TaskCancelled,
+				Input: map[string]any{
+					"superseded_by_recovery": "recovery-task",
+				},
+			},
+			{
+				ID:     "recovery-task",
+				Status: TaskInProgress,
+				Input: map[string]any{
+					"failed_task_id": "phase-task",
+				},
+			},
+		},
+	}
+
+	go func() {
+		time.Sleep(700 * time.Millisecond)
+		build.mu.Lock()
+		build.Tasks[1].Status = TaskCompleted
+		now := time.Now()
+		build.Tasks[1].CompletedAt = &now
+		build.UpdatedAt = now
+		build.mu.Unlock()
+	}()
+
+	if ok := manager.waitForPhaseCompletion(build, []string{"phase-task"}); !ok {
+		t.Fatal("expected phase completion to wait for recovery lineage and then succeed")
+	}
+}
+
+func TestWaitForPhaseCompletionFailsOnUnresolvedLineageFailure(t *testing.T) {
+	manager := &AgentManager{
+		ctx:         context.Background(),
+		builds:      make(map[string]*Build),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+
+	build := &Build{
+		ID:     "phase-lineage-fail",
+		Status: BuildInProgress,
+		Tasks: []*Task{
+			{
+				ID:     "phase-task",
+				Status: TaskFailed,
+			},
+		},
+	}
+
+	start := time.Now()
+	if ok := manager.waitForPhaseCompletion(build, []string{"phase-task"}); ok {
+		t.Fatal("expected phase completion to abort on unresolved failed phase task")
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("expected unresolved failure to abort quickly, took %v", time.Since(start))
 	}
 }

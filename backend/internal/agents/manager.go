@@ -10128,17 +10128,24 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 			build.mu.RLock()
 			buildFailed := build.Status == BuildFailed
 			buildBlocked := build.Interaction.Paused || build.Interaction.WaitingForUser
+			relatedTaskSet := relatedPhaseTaskIDs(build.Tasks, taskSet)
 			completed := 0
+			unresolvedFailure := false
 			for _, t := range build.Tasks {
 				if t == nil {
 					continue
 				}
-				if _, ok := taskSet[t.ID]; !ok {
+				if _, ok := relatedTaskSet[t.ID]; !ok {
 					continue
 				}
 				switch t.Status {
-				case TaskCompleted, TaskFailed, TaskCancelled:
+				case TaskCompleted:
 					completed++
+				case TaskFailed, TaskCancelled:
+					completed++
+					if !relatedPhaseTaskHasChild(build.Tasks, relatedTaskSet, t.ID) {
+						unresolvedFailure = true
+					}
 				case TaskPending:
 					pendingCount++
 					allDone = false
@@ -10149,7 +10156,7 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 					allDone = false
 				}
 			}
-			if completed != len(taskSet) {
+			if completed != len(relatedTaskSet) {
 				allDone = false
 			}
 			build.mu.RUnlock()
@@ -10160,6 +10167,10 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 			if buildBlocked {
 				stallTicks = 0
 				continue
+			}
+			if unresolvedFailure {
+				log.Printf("Build %s: Phase has unresolved failed task in lineage, aborting", build.ID)
+				return false
 			}
 			if allDone {
 				return true
@@ -10180,6 +10191,78 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 			}
 		}
 	}
+}
+
+func relatedPhaseTaskIDs(tasks []*Task, roots map[string]struct{}) map[string]struct{} {
+	related := make(map[string]struct{}, len(roots))
+	for id := range roots {
+		if strings.TrimSpace(id) != "" {
+			related[id] = struct{}{}
+		}
+	}
+	if len(related) == 0 || len(tasks) == 0 {
+		return related
+	}
+
+	changed := true
+	for changed {
+		changed = false
+		for _, task := range tasks {
+			if task == nil {
+				continue
+			}
+			if _, ok := related[task.ID]; ok {
+				if childID := taskInputStringValue(task.Input, "superseded_by_recovery"); childID != "" {
+					if _, seen := related[childID]; !seen {
+						related[childID] = struct{}{}
+						changed = true
+					}
+				}
+				continue
+			}
+			for _, ref := range []string{
+				taskInputStringValue(task.Input, "failed_task_id"),
+				taskInputStringValue(task.Input, "trigger_task"),
+			} {
+				if ref == "" {
+					continue
+				}
+				if _, ok := related[ref]; ok {
+					related[task.ID] = struct{}{}
+					changed = true
+					break
+				}
+			}
+		}
+	}
+
+	return related
+}
+
+func relatedPhaseTaskHasChild(tasks []*Task, related map[string]struct{}, taskID string) bool {
+	if strings.TrimSpace(taskID) == "" {
+		return false
+	}
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		if _, ok := related[task.ID]; !ok {
+			continue
+		}
+		if taskInputStringValue(task.Input, "failed_task_id") == taskID || taskInputStringValue(task.Input, "trigger_task") == taskID {
+			return true
+		}
+		if task.ID == taskID {
+			childID := taskInputStringValue(task.Input, "superseded_by_recovery")
+			if childID != "" {
+				if _, ok := related[childID]; ok {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // GetBuild retrieves a build by ID
@@ -13915,6 +13998,17 @@ func isGeneratedArtifactPath(path string) bool {
 // taskInputInt safely reads an integer from a task input map regardless of whether
 // the value is stored as int (in-memory) or float64 (after JSON round-trip through
 // cloneTaskInput or snapshot restore). Returns 0 if the key is absent or not numeric.
+func taskInputStringValue(input map[string]any, key string) string {
+	if input == nil {
+		return ""
+	}
+	v, ok := input[key]
+	if !ok || v == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", v))
+}
+
 func taskInputInt(input map[string]any, key string) int {
 	if input == nil {
 		return 0
