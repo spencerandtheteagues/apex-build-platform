@@ -1009,6 +1009,13 @@ Verification completed:
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
 - `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+- Live canary after deploy: `BASE_URL='https://api.apex-build.dev/api/v1' SMOKE_PROFILE='paid_fullstack' LOGIN_EMAIL='admin@apex.build' LOGIN_PASSWORD='TheStarsh1pKEY!' PROJECT_NAME='agency-ops-platform' POWER_MODE='balanced' ./scripts/run_platform_build_smoke.sh`
+- Live canary result: build `db10a65d-aad9-4a70-9c68-ad1b3ab2db23` completed with truthful progress `0 -> 19 -> 44 -> 79 -> 89 -> 100`
+
+Commit hash if pushed:
+
+- Local: `46421f4`
+- Remote: `2242e77`
 
 Date: 2026-03-27
 
