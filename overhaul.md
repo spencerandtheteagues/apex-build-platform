@@ -1108,6 +1108,38 @@ Date: 2026-03-28
 
 Change summary:
 
+- Reran the paid full-stack canary on backend deploy `started_at=2026-03-28T22:17:26.955291407Z`.
+- The run advanced through planning, architecture, frontend UI, and data/backend into integration: `0 -> 19 -> 44 -> 82`.
+- The next real blocker is now integration drift, not preview typing:
+  - build id: `ad01dbbe-6efe-4ee4-abe0-784713fa6124`
+  - error: `frontend calls /api/auth/login but backend has no matching route; frontend calls /api/auth/me but backend has no matching route`
+- Extended deterministic Express integration repair to handle one common real generation pattern:
+  - backend already exposes `/auth/login` and `/auth/me`
+  - frontend calls `/api/auth/login` and `/api/auth/me`
+  - repair now adds an Express `/api` alias middleware only when the backend already has matching non-`/api` routes and does not already expose true `/api/*` routes
+- This keeps the fix narrow and truthful; it does not invent placeholder endpoints or override existing `/api` handlers.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicExpressIntegrationRepairAddsAPIPrefixAlias|TestExtractDependencyRepairHintsFromReadinessErrorsIncludesSpecificIntegrationRouteGuidance|TestCheckIntegrationCoherence'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Reran the paid full-stack canary on backend deploy `started_at=2026-03-28T22:02:29.178083226Z`.
 - The run advanced cleanly through planning, architecture, frontend, backend/data, testing, and into review: `0 -> 19 -> 44 -> 59 -> 79 -> 89 -> 95`.
 - The remaining failure is now a single deterministic preview-verification issue in generated TypeScript backend helper files, not orchestration:

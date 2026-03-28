@@ -722,3 +722,59 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start a fresh paid full-stack canary
 4. If it clears the prior `pg` typing failure, keep pushing on the next remaining generated-project gap until the paid canary is fully green
+
+## Latest Live Paid Canary After `@types/pg` Repair
+
+Production backend during run:
+
+- `started_at = 2026-03-28T22:17:26.955291407Z`
+
+Live canary:
+
+- build id: `ad01dbbe-6efe-4ee4-abe0-784713fa6124`
+
+What improved:
+
+- the prior `pg` declaration failure is cleared
+- the run advanced deeper into the real paid path:
+  - `0 -> 19 -> 44 -> 82`
+- this confirms the `@types/pg` repair is no longer the blocker
+
+Current blocker:
+
+- integration preflight failed at `82%`
+- exact failure:
+  - `integration: frontend calls /api/auth/login but backend has no matching route`
+  - `integration: frontend calls /api/auth/me but backend has no matching route`
+
+Interpretation:
+
+- the backend likely generated `/auth/login` and `/auth/me` routes without the `/api` prefix, while the frontend is correctly calling them under `/api/auth/*`
+- orchestration is still healthy; this is a deterministic integration-route alignment gap
+
+Newest local fix after that canary:
+
+- deterministic Express integration repair now adds an `/api` alias middleware only when:
+  - the frontend-missing routes all begin with `/api/`
+  - the backend already has matching non-`/api` routes
+  - the backend does not already expose real `/api/*` routes
+- this is a narrow, truthful compatibility fix rather than a fake route generator
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicExpressIntegrationRepairAddsAPIPrefixAlias|TestExtractDependencyRepairHintsFromReadinessErrorsIncludesSpecificIntegrationRouteGuidance|TestCheckIntegrationCoherence'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the Express `/api` alias integration repair
+2. Wait for Render to deploy
+3. Start a fresh paid full-stack canary
+4. If it clears the auth-route drift, continue through the next remaining generated-project blocker until the paid path is fully green

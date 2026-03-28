@@ -8533,9 +8533,10 @@ func (am *AgentManager) applyDeterministicMissingDeliverableRepair(build *Build,
 }
 
 type expressIntegrationRepairRequirements struct {
-	MissingCORS  bool
-	MissingPort  bool
-	HealthRoutes []string
+	MissingCORS           bool
+	MissingPort           bool
+	HealthRoutes          []string
+	FrontendMissingRoutes []string
 }
 
 func parseExpressIntegrationRepairRequirements(errors []string) expressIntegrationRepairRequirements {
@@ -8545,6 +8546,7 @@ func parseExpressIntegrationRepairRequirements(errors []string) expressIntegrati
 	}
 
 	healthSet := map[string]bool{}
+	frontendSet := map[string]bool{}
 	contractRouteRe := regexp.MustCompile(`^integration: backend does not expose required contract endpoint (\S+)$`)
 	frontendRouteRe := regexp.MustCompile(`^integration: frontend calls (\S+) but backend has no matching route$`)
 
@@ -8568,12 +8570,104 @@ func parseExpressIntegrationRepairRequirements(errors []string) expressIntegrati
 		if match := frontendRouteRe.FindStringSubmatch(msg); len(match) == 2 {
 			if path := normalizeIntegrationRoutePath(match[1]); isHealthLikeIntegrationPath(path) {
 				healthSet[path] = true
+			} else if path != "" {
+				frontendSet[path] = true
 			}
 		}
 	}
 
 	req.HealthRoutes = sortedStringSetKeys(healthSet)
+	req.FrontendMissingRoutes = sortedStringSetKeys(frontendSet)
 	return req
+}
+
+func extractExpressResolvedRoutes(files []GeneratedFile) map[string]bool {
+	resolved := map[string]bool{}
+	if len(files) == 0 {
+		return resolved
+	}
+
+	expressRouteRe := regexp.MustCompile(`(?:app|router)\s*\.\s*(get|post|put|delete|patch|use)\s*\(\s*['"]([^'"]+)['"]`)
+	terminalRoutes := map[string]bool{}
+	mountRoutes := map[string]bool{}
+
+	for _, file := range files {
+		path := strings.ToLower(strings.TrimSpace(file.Path))
+		if path == "" || strings.Contains(path, "node_modules/") {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext != ".ts" && ext != ".js" {
+			continue
+		}
+		for _, match := range expressRouteRe.FindAllStringSubmatch(file.Content, -1) {
+			if len(match) < 3 {
+				continue
+			}
+			routePath := normalizeIntegrationRoutePath(match[2])
+			if routePath == "" {
+				continue
+			}
+			if strings.EqualFold(match[1], "use") {
+				mountRoutes[routePath] = true
+				continue
+			}
+			terminalRoutes[routePath] = true
+			resolved[routePath] = true
+		}
+	}
+
+	for mountPath := range mountRoutes {
+		for terminalPath := range terminalRoutes {
+			joinedPath := joinIntegrationRoutePath(mountPath, terminalPath)
+			if joinedPath == "" {
+				continue
+			}
+			if mountRoutes[joinedPath] && normalizeIntegrationRoutePath(terminalPath) != "/" {
+				continue
+			}
+			resolved[joinedPath] = true
+		}
+	}
+
+	return resolved
+}
+
+func expressRoutesNeedAPIPrefixAlias(resolvedRoutes map[string]bool, frontendMissingRoutes []string) bool {
+	if len(resolvedRoutes) == 0 || len(frontendMissingRoutes) == 0 {
+		return false
+	}
+	for route := range resolvedRoutes {
+		normalized := normalizeIntegrationRoutePath(route)
+		if normalized == "/api" || strings.HasPrefix(normalized, "/api/") {
+			return false
+		}
+	}
+
+	supported := false
+	for _, frontendRoute := range frontendMissingRoutes {
+		normalized := normalizeIntegrationRoutePath(frontendRoute)
+		if normalized == "" || !strings.HasPrefix(normalized, "/api/") {
+			return false
+		}
+		aliasTarget := normalizeIntegrationRoutePath(strings.TrimPrefix(normalized, "/api"))
+		if aliasTarget == "" {
+			return false
+		}
+		matched := false
+		for backendRoute := range resolvedRoutes {
+			if integrationRoutePathsMatch(aliasTarget, backendRoute) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+		supported = true
+	}
+
+	return supported
 }
 
 func isHealthLikeIntegrationPath(path string) bool {
@@ -8700,6 +8794,7 @@ func patchExpressIntegrationEntryContent(
 	content string,
 	contract *BuildAPIContract,
 	req expressIntegrationRepairRequirements,
+	addAPIPrefixAlias bool,
 ) (string, []string) {
 	if strings.TrimSpace(content) == "" {
 		return content, nil
@@ -8723,6 +8818,19 @@ func patchExpressIntegrationEntryContent(
 		if next, ok := insertAfterExpressAppBootstrap(updated, corsStmt); ok {
 			updated = next
 			summaries = append(summaries, "added Express CORS middleware")
+		}
+	}
+
+	if addAPIPrefixAlias && !strings.Contains(updated, `req.url.startsWith("/api/")`) {
+		aliasStmt := `app.use((req, _res, next) => {
+  if (req.url === "/api" || req.url.startsWith("/api/")) {
+    req.url = req.url.slice(4) || "/";
+  }
+  next();
+});`
+		if next, ok := insertAfterExpressAppBootstrap(updated, aliasStmt); ok {
+			updated = next
+			summaries = append(summaries, "added Express /api route alias middleware")
 		}
 	}
 
@@ -8764,7 +8872,7 @@ func (am *AgentManager) applyDeterministicExpressIntegrationRepair(build *Build,
 	}
 
 	req := parseExpressIntegrationRepairRequirements(readinessErrors)
-	if !req.MissingCORS && !req.MissingPort && len(req.HealthRoutes) == 0 {
+	if !req.MissingCORS && !req.MissingPort && len(req.HealthRoutes) == 0 && len(req.FrontendMissingRoutes) == 0 {
 		return nil, ""
 	}
 
@@ -8777,12 +8885,13 @@ func (am *AgentManager) applyDeterministicExpressIntegrationRepair(build *Build,
 	if targetPath == "" {
 		return nil, ""
 	}
+	addAPIPrefixAlias := expressRoutesNeedAPIPrefixAlias(extractExpressResolvedRoutes(files), req.FrontendMissingRoutes)
 
 	var contract *BuildAPIContract
 	if build.Plan != nil {
 		contract = build.Plan.APIContract
 	}
-	updated, summaries := patchExpressIntegrationEntryContent(plan.content(targetPath), contract, req)
+	updated, summaries := patchExpressIntegrationEntryContent(plan.content(targetPath), contract, req, addAPIPrefixAlias)
 	if len(summaries) == 0 {
 		return nil, ""
 	}

@@ -4012,3 +4012,73 @@ func TestHandleTaskCompletionSkipsPostFixValidationForIntegrationPreflightFix(t 
 		t.Fatalf("expected no follow-up validation tasks for integration preflight fix, got %+v", build.Tasks)
 	}
 }
+
+func TestApplyDeterministicExpressIntegrationRepairAddsAPIPrefixAlias(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-express-api-alias-repair",
+		TechStack: &TechStack{
+			Frontend: "React",
+			Backend:  "Express",
+		},
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-api",
+				Type:   TaskGenerateAPI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "server/index.ts",
+							Content: `import express from "express";
+import authRouter from "./routes/auth";
+
+const app = express();
+app.use(express.json());
+app.use("/auth", authRouter);
+app.listen(process.env.PORT || 3001);`,
+						},
+						{
+							Path: "server/routes/auth.ts",
+							Content: `import { Router } from "express";
+const router = Router();
+router.post("/login", (_req, res) => res.json({ ok: true }));
+router.get("/me", (_req, res) => res.json({ ok: true }));
+export default router;`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	bundle, summary := am.applyDeterministicExpressIntegrationRepair(build, []string{
+		`integration: frontend calls /api/auth/login but backend has no matching route`,
+		`integration: frontend calls /api/auth/me but backend has no matching route`,
+	})
+	if bundle == nil {
+		t.Fatal("expected express integration repair to produce a patch bundle")
+	}
+	if !strings.Contains(summary, "api route alias") {
+		t.Fatalf("expected summary to mention api route alias, got %q", summary)
+	}
+	if !am.applyPatchBundleToBuild(build, bundle) {
+		t.Fatal("expected patch bundle to apply")
+	}
+
+	var entry string
+	for _, file := range am.collectGeneratedFiles(build) {
+		if file.Path == "server/index.ts" {
+			entry = file.Content
+			break
+		}
+	}
+	if entry == "" {
+		t.Fatal("expected patched server/index.ts to remain present")
+	}
+	if !strings.Contains(entry, `req.url.startsWith("/api/")`) {
+		t.Fatalf("expected Express /api alias middleware to be added, got %s", entry)
+	}
+}
