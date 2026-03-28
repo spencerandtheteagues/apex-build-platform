@@ -1108,6 +1108,35 @@ Date: 2026-03-28
 
 Change summary:
 
+- Diagnosed the next live paid-fullstack blocker after enabling Render autoscaling. The build itself was advancing, but repeated `GET /build/:id` polls could alternate between the real owner instance and a second instance that had reconstructed an active planning snapshot into memory.
+- Root cause: `loadReadableBuild` restored active snapshots on read-only status/detail requests. In an autoscaled deployment that created a fake second "live" build session on a non-owner instance, so polling oscillated between `planning 0%` and the real in-progress phase.
+- Fixed the read path so build detail/status endpoints now either:
+  - return the true local live build, or
+  - serve the persisted snapshot as `live=false`
+- Read-only polling no longer materializes active snapshots into manager memory.
+
+Files changed:
+
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/handlers.go internal/agents/handlers_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestGetBuildStatusServesActiveSnapshotReadOnlyWithoutRestoringSession|TestGetBuildDetailsServesActiveSnapshotReadOnlyWithoutRestoringSession|TestGetBuildDetailsMarksRestoredTerminalBuildAsNotLive|TestGetBuildDetailsNormalizesLiveProgressWithinPhaseWindow|TestGetBuildStatusNormalizesLiveProgressWithinPhaseWindow'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Reran the paid full-stack canary on backend deploy `started_at=2026-03-28T22:17:26.955291407Z`.
 - The run advanced through planning, architecture, frontend UI, and data/backend into integration: `0 -> 19 -> 44 -> 82`.
 - The next real blocker is now integration drift, not preview typing:

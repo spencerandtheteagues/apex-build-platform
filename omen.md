@@ -778,3 +778,56 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start a fresh paid full-stack canary
 4. If it clears the auth-route drift, continue through the next remaining generated-project blocker until the paid path is fully green
+
+## Latest Live Paid Canary After Express `/api` Alias Repair
+
+Production backend during run:
+
+- `started_at = 2026-03-28T22:34:41.938698813Z`
+
+Live canary:
+
+- build id: `77f56547-f47d-411c-9737-cc6121caad9d`
+
+What happened:
+
+- the real build advanced into `architecture` / `in_progress 19%`
+- but repeated status polls oscillated between:
+  - `planning / 0%`
+  - `in_progress / 19%`
+- the build-detail endpoint sometimes returned `live=true` planning state with an older `updated_at`, then a moment later returned the newer architecture state
+
+Root cause:
+
+- this was an autoscaling read-path bug, not a new generator failure
+- `GET /build/:id` and `GET /build/:id/status` were restoring active snapshots into memory on non-owner instances
+- once that happened, a second instance could report a fake "live" planning session from stale snapshot state, while the real owner instance reported the true in-progress build
+- this explains the oscillation after enabling Render autoscaling
+
+Newest local fix after that canary:
+
+- read-only build endpoints no longer restore active snapshots into manager memory
+- they now either:
+  - return the true local live build, or
+  - serve the persisted snapshot as `live=false`
+- this keeps polling truthful under autoscaling and stops fake live planning sessions from being created by reads alone
+
+Files:
+
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestGetBuildStatusServesActiveSnapshotReadOnlyWithoutRestoringSession|TestGetBuildDetailsServesActiveSnapshotReadOnlyWithoutRestoringSession|TestGetBuildDetailsMarksRestoredTerminalBuildAsNotLive|TestGetBuildDetailsNormalizesLiveProgressWithinPhaseWindow|TestGetBuildStatusNormalizesLiveProgressWithinPhaseWindow'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the autoscaling read-path fix
+2. Wait for Render to deploy
+3. Start a fresh paid full-stack canary
+4. Verify polling stays monotonic instead of bouncing between `planning` and `in_progress`
+5. If the canary reaches the next real generator/verifier blocker, fix that next narrow failure class and repeat

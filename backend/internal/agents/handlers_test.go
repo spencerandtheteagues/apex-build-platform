@@ -187,7 +187,7 @@ func TestGetBuildSnapshotFallsBackToUnscopedLookup(t *testing.T) {
 	}
 }
 
-func TestGetBuildStatusRestoresActiveSnapshotOnRead(t *testing.T) {
+func TestGetBuildStatusServesActiveSnapshotReadOnlyWithoutRestoringSession(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.CompletedBuild{
 		BuildID:     "active-status-restore",
@@ -249,8 +249,8 @@ func TestGetBuildStatusRestoresActiveSnapshotOnRead(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if body["live"] != true {
-		t.Fatalf("expected restored active session to be live, got %v", body["live"])
+	if body["live"] != false {
+		t.Fatalf("expected active snapshot read to stay non-live, got %v", body["live"])
 	}
 	if body["restored_from_snapshot"] != true {
 		t.Fatalf("expected restored_from_snapshot=true, got %v", body["restored_from_snapshot"])
@@ -258,8 +258,84 @@ func TestGetBuildStatusRestoresActiveSnapshotOnRead(t *testing.T) {
 	if body["status"] != string(BuildReviewing) {
 		t.Fatalf("expected reviewing status, got %v", body["status"])
 	}
-	if _, err := am.GetBuild("active-status-restore"); err != nil {
-		t.Fatalf("expected active build session to be restored into manager: %v", err)
+	if _, exists := am.builds["active-status-restore"]; exists {
+		t.Fatal("expected read-only status request not to restore build session into memory")
+	}
+}
+
+func TestGetBuildDetailsServesActiveSnapshotReadOnlyWithoutRestoringSession(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-details-restore",
+		UserID:      1,
+		Description: "Continue building a full-stack dashboard",
+		Status:      string(BuildInProgress),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    44,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"frontend-1",
+			"role":"frontend",
+			"provider":"gpt4",
+			"status":"working",
+			"progress":55
+		}]`,
+		TasksJSON: `[{
+			"id":"task-ui",
+			"type":"generate_ui",
+			"description":"Build the dashboard shell",
+			"assigned_to":"frontend-1",
+			"status":"in_progress"
+		}]`,
+		StateJSON: `{
+			"current_phase":"frontend_ui",
+			"quality_gate_required":true
+		}`,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+		taskQueue:   make(chan *Task, 8),
+		resultQueue: make(chan *TaskResult, 8),
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/active-details-restore", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body["live"] != false {
+		t.Fatalf("expected details endpoint to serve snapshot as non-live, got %v", body["live"])
+	}
+	if body["restored_from_snapshot"] != true {
+		t.Fatalf("expected restored_from_snapshot=true, got %v", body["restored_from_snapshot"])
+	}
+	if body["status"] != string(BuildInProgress) {
+		t.Fatalf("expected in_progress status, got %v", body["status"])
+	}
+	if _, exists := am.builds["active-details-restore"]; exists {
+		t.Fatal("expected read-only details request not to restore build session into memory")
 	}
 }
 

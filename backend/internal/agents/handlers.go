@@ -1088,26 +1088,11 @@ func (h *BuildHandler) loadReadableBuild(buildID string, userID uint) (*Build, *
 		return nil, nil, false, snapErr
 	}
 
-	if isActiveBuildStatus(string(normalizeRestoredBuildStatus(snapshot))) {
-		// Use resumeExecution:false here.  loadReadableBuild is called by
-		// read-only endpoints (GetBuildDetails, GetBuildStatus) that may be
-		// polled many times per second.  Passing resumeExecution:true caused
-		// all pending tasks from the snapshot to be re-queued on every single
-		// read request, leading to duplicate task execution and spiralling
-		// credit burn.  Execution resumption is handled exclusively by write
-		// paths (SendMessage, getBuildActionSession).
-		restoredBuild, restored, restoreErr := h.manager.restoreBuildSessionFromSnapshotWithOptions(snapshot, restoreBuildSessionOptions{
-			resumeExecution: false,
-		})
-		if restoreErr == nil {
-			if restoredBuild.UserID != userID {
-				return nil, nil, false, errBuildAccessDenied
-			}
-			return restoredBuild, nil, restored, nil
-		}
-		log.Printf("Build %s: snapshot found but restore-on-read failed, serving persisted snapshot: %v", buildID, restoreErr)
-	}
-
+	// Read-only build endpoints must never materialize active snapshots into a
+	// second in-memory session. In autoscaled production that creates a fake
+	// "live" copy on a non-owner instance, causing status polling to oscillate
+	// between the true live build and stale snapshot state. Execution resumption
+	// remains exclusive to write/control paths.
 	return nil, snapshot, false, nil
 }
 
