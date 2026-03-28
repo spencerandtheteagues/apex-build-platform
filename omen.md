@@ -668,3 +668,57 @@ Next exact step:
 3. Start a fresh paid full-stack canary
 4. Watch specifically for any retry/provider-switch event on long `generate_ui` / `generate_api` attempts instead of a silent wedge
 5. If the canary completes, move immediately to repeated paid canaries across `fast`, `balanced`, and `max`
+
+## Latest Live Paid Canary After Stale-Task Recovery
+
+Production backend during run:
+
+- `started_at = 2026-03-28T22:02:29.178083226Z`
+
+Live canary:
+
+- build id: `58fa8cce-6a8d-4548-8aa8-5868ebe39352`
+
+What improved:
+
+- the run no longer wedged in early planning or on a long in-flight architecture/frontend task
+- it advanced cleanly through the major sections:
+  - `0 -> 19 -> 44 -> 59 -> 79 -> 89 -> 95`
+- this confirms the stale-task recovery work is functioning on the live paid path
+
+Current blocker:
+
+- final preview validation still failed at `95%`
+- exact failure:
+  - `server/migrate.ts(1,22): error TS7016: Could not find a declaration file for module 'pg'`
+  - `server/seed.ts(1,22): error TS7016: Could not find a declaration file for module 'pg'`
+
+Interpretation:
+
+- orchestration is no longer the main blocker here
+- the remaining issue is a deterministic generated-project repair gap
+- the existing TypeScript type-package repair path already handles modules like `express`, `cors`, `react`, and `react-dom`, but it did not yet map `pg -> @types/pg`
+
+Newest local fix after that canary:
+
+- missing declaration-file repair now maps `pg` to `@types/pg`
+- added a regression test that mirrors the live paid canary failure and verifies deterministic manifest repair injects `@types/pg`
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestParseMissingTypePackagesFromBuildErrors|TestApplyDeterministicTypeDeclarationRepairAddsPgTypes'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the `@types/pg` deterministic repair
+2. Wait for Render to deploy
+3. Start a fresh paid full-stack canary
+4. If it clears the prior `pg` typing failure, keep pushing on the next remaining generated-project gap until the paid canary is fully green

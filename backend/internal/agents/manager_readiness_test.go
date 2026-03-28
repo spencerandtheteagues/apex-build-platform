@@ -2780,13 +2780,78 @@ func TestParseMissingTypePackagesFromBuildErrors(t *testing.T) {
 			"src/api/server.ts(2,18): error TS7016: Could not find a declaration file for module 'cors'.\n" +
 			"src/App.tsx(1,19): error TS7016: Could not find a declaration file for module 'react'.\n" +
 			"src/main.tsx(2,22): error TS7016: Could not find a declaration file for module 'react-dom/client'.\n" +
+			"server/migrate.ts(1,22): error TS7016: Could not find a declaration file for module 'pg'.\n" +
 			"src/lib/x.ts(3,1): error TS7016: Could not find a declaration file for module '@scoped/pkg'.",
 	}
 
 	got := strings.Join(parseMissingTypePackagesFromBuildErrors(errs), ",")
-	want := "@types/cors,@types/express,@types/react,@types/react-dom"
+	want := "@types/cors,@types/express,@types/pg,@types/react,@types/react-dom"
 	if got != want {
 		t.Fatalf("unexpected parsed type packages: got %q want %q", got, want)
+	}
+}
+
+func TestApplyDeterministicTypeDeclarationRepairAddsPgTypes(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-pg-types-repair",
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-api",
+				Type:   TaskGenerateAPI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "api-test",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p server/tsconfig.json"
+  },
+  "dependencies": {
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}`,
+						},
+						{Path: "server/migrate.ts", Content: `import { Pool } from 'pg'; const pool = new Pool(); export default pool;`},
+					},
+				},
+			},
+		},
+	}
+
+	bundle, summary := am.applyDeterministicTypeDeclarationRepair(build, []string{
+		"Preview verification build failed: server/migrate.ts(1,22): error TS7016: Could not find a declaration file for module 'pg'.",
+	})
+	if bundle == nil {
+		t.Fatalf("expected pg type declaration repair to trigger")
+	}
+	if !am.applyPatchBundleToBuild(build, bundle) {
+		t.Fatalf("expected patch bundle to apply")
+	}
+	if !strings.Contains(summary, "@types/pg") {
+		t.Fatalf("expected summary to mention @types/pg, got %q", summary)
+	}
+
+	var manifest string
+	for _, file := range am.collectGeneratedFiles(build) {
+		if file.Path == "package.json" {
+			manifest = file.Content
+			break
+		}
+	}
+	if manifest == "" {
+		t.Fatal("expected patched package.json to remain present")
+	}
+	if !strings.Contains(manifest, `"@types/pg"`) {
+		t.Fatalf("expected package.json to include @types/pg, got %s", manifest)
 	}
 }
 

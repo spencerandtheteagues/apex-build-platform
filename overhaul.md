@@ -1108,6 +1108,34 @@ Date: 2026-03-28
 
 Change summary:
 
+- Reran the paid full-stack canary on backend deploy `started_at=2026-03-28T22:02:29.178083226Z`.
+- The run advanced cleanly through planning, architecture, frontend, backend/data, testing, and into review: `0 -> 19 -> 44 -> 59 -> 79 -> 89 -> 95`.
+- The remaining failure is now a single deterministic preview-verification issue in generated TypeScript backend helper files, not orchestration:
+  - build id: `58fa8cce-6a8d-4548-8aa8-5868ebe39352`
+  - error: `server/migrate.ts` and `server/seed.ts` import `pg` without declarations, causing TS7016 during preview validation
+- Extended the deterministic type-package repair so missing declarations for `pg` now map to `@types/pg`, which lets this exact paid canary failure auto-heal instead of forcing solver recovery.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestParseMissingTypePackagesFromBuildErrors|TestApplyDeterministicTypeDeclarationRepairAddsPgTypes'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Diagnosed the newest paid full-stack canary on the latest live backend: planning, contract critique, and phase handoff were all fixed, but the build could still wedge with `generate_ui` stuck `in_progress` and no new activity while the manager refused to intervene because something was still marked running.
 - Added task-level stale execution recovery to the orchestration core. The manager now computes a provider-aware per-task execution budget instead of relying on the old blanket `15m` deadline, and the inactivity monitor can synthesize a timeout failure for an overlong in-flight attempt so the normal retry/provider-switch path takes over before the whole build times out.
 - Added stale-attempt protection in result handling so a late result from an older cancelled/timed-out attempt cannot overwrite a newer retry of the same task.

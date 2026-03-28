@@ -7418,7 +7418,7 @@ func typePackageForModule(module string) string {
 		return ""
 	}
 	switch module {
-	case "express", "cors", "jsonwebtoken", "body-parser", "bcrypt", "uuid":
+	case "express", "cors", "jsonwebtoken", "body-parser", "bcrypt", "uuid", "pg":
 		return "@types/" + module
 	case "react", "react/jsx-runtime":
 		return "@types/react"
