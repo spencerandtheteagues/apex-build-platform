@@ -1108,6 +1108,32 @@ Date: 2026-03-28
 
 Change summary:
 
+- Diagnosed a new autoscaled/live paid canary stall after frontend completion. The build was not blocked and the frontend task had completed, but the phased pipeline never started `Data Foundation`, leaving the build stuck at `44%` in `frontend_ui`.
+- Added deterministic phased-pipeline gap recovery in the build inactivity monitor. When all tasks in the current phase are terminal but the phased pipeline is not complete, the manager now starts the next missing execution phase instead of waiting forever for the original phase goroutine.
+- Refactored phased execution startup so phase start + task assignment can be reused by both the normal pipeline and the stalled-phase recovery path, and phase snapshots are now persisted immediately when a phase begins.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_spawn_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_spawn_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestRecoverStalledPhasedExecutionStartsNextPhaseAfterFrontend|TestBuildExecutionPhasesPrefersFrontendBeforeBackendAndData|TestResumeBuildExecutionRequeuesPendingRecoveryTasksAndRefreshesTimestamp'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - The next paid canary on backend `started_at=2026-03-28T20:36:23.098875616Z` exposed a different failure mode: the `plan` task completed, but the build remained parked in `planning` with no blockers and no agent team spawned.
 - Traced that stall to provider-assisted contract critique still running on the critical path without a hard timeout.
 - Added a `20s` timeout around `providerAssistedContractCritique` so a slow critique provider now degrades to `nil` instead of leaving the whole build apparently frozen in planning.

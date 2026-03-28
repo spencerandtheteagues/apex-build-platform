@@ -917,10 +917,15 @@ func (am *AgentManager) runInactivityMonitor(buildID string) (normalExit bool) {
 		timeSinceUpdate := time.Since(lastUpdate)
 
 		// Self-heal builds that have reached a terminal task state but are still marked active.
-		// This covers finalization races where all tasks are done but checkBuildCompletion was not re-triggered.
+		// This covers finalization races where all tasks are done but checkBuildCompletion was not re-triggered,
+		// and phased-pipeline gaps where the next execution phase was never started after the prior phase completed.
 		if allTasksTerminal &&
 			(status == BuildPlanning || status == BuildInProgress || status == BuildTesting || status == BuildReviewing) &&
 			timeSinceUpdate > (2*checkInterval) {
+			if am.recoverStalledPhasedExecution(build) {
+				warningCount = 0
+				continue
+			}
 			log.Printf("Build %s: all tasks are terminal but build remains %s (idle %v). Re-running finalization.",
 				buildID, status, timeSinceUpdate.Round(time.Second))
 			am.checkBuildCompletion(build)
@@ -10278,6 +10283,60 @@ func buildExecutionPhases(
 	}
 }
 
+func (am *AgentManager) buildExecutionPhasesForBuild(build *Build) (string, []executionPhase) {
+	if build == nil {
+		return "", nil
+	}
+
+	build.mu.RLock()
+	description := build.Description
+	allAgents := make([]agentPriority, 0, len(build.Agents))
+	for _, agent := range build.Agents {
+		if agent == nil {
+			continue
+		}
+		// Planner and solver are on-demand specialists, not part of the default phased pipeline.
+		if agent.Role == RoleLead || agent.Role == RolePlanner || agent.Role == RoleSolver {
+			continue
+		}
+		allAgents = append(allAgents, agentPriority{
+			agent:    agent,
+			priority: am.getPriorityForRole(agent.Role),
+		})
+	}
+	build.mu.RUnlock()
+
+	var archAgents, frontendAgents, dbAgents, backendAgents, testAgents, reviewAgents []agentPriority
+	for _, ap := range allAgents {
+		switch ap.agent.Role {
+		case RoleArchitect:
+			archAgents = append(archAgents, ap)
+		case RoleFrontend:
+			frontendAgents = append(frontendAgents, ap)
+		case RoleDatabase:
+			dbAgents = append(dbAgents, ap)
+		case RoleBackend:
+			backendAgents = append(backendAgents, ap)
+		case RoleTesting:
+			testAgents = append(testAgents, ap)
+		case RoleReviewer:
+			reviewAgents = append(reviewAgents, ap)
+		}
+	}
+
+	return description, buildExecutionPhases(archAgents, frontendAgents, dbAgents, backendAgents, testAgents, reviewAgents)
+}
+
+func countActiveExecutionPhases(phases []executionPhase) int {
+	total := 0
+	for _, phase := range phases {
+		if len(phase.agents) > 0 {
+			total++
+		}
+	}
+	return total
+}
+
 func setBuildPhaseSnapshot(build *Build, phase executionPhase, now time.Time) {
 	if build == nil {
 		return
@@ -10297,77 +10356,179 @@ func setBuildPhaseSnapshot(build *Build, phase executionPhase, now time.Time) {
 	build.SnapshotState.QualityGateStatus = "running"
 }
 
+func (am *AgentManager) startExecutionPhase(build *Build, description string, phase executionPhase, phaseIndex int, phaseTotal int) []string {
+	if build == nil || len(phase.agents) == 0 {
+		return nil
+	}
+
+	phaseStatus := phase.status
+	now := time.Now()
+	setBuildPhaseSnapshot(build, phase, now)
+
+	log.Printf("Build %s: Starting phase — %s (%d agents)", build.ID, phase.name, len(phase.agents))
+
+	am.broadcast(build.ID, &WSMessage{
+		Type:      "build:phase",
+		BuildID:   build.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"phase":                 phase.name,
+			"phase_key":             phase.key,
+			"phase_index":           phaseIndex,
+			"phase_total":           phaseTotal,
+			"agents":                len(phase.agents),
+			"status":                string(phaseStatus),
+			"quality_gate_required": true,
+			"quality_gate_active":   phase.qualityStage != "",
+			"quality_gate_stage":    phase.qualityStage,
+			"message":               phase.startMessage,
+			"user_update":           true,
+		},
+	})
+
+	taskIDs := am.assignPhaseAgents(build, phase.agents, description)
+	am.persistBuildSnapshot(build, nil)
+	return taskIDs
+}
+
+func taskMatchesExecutionPhase(task *Task, phase executionPhase) bool {
+	if task == nil {
+		return false
+	}
+	role := restoredTaskRole(task)
+	if role == "" {
+		return false
+	}
+	for _, ap := range phase.agents {
+		if ap.agent != nil && ap.agent.Role == role {
+			return true
+		}
+	}
+	return false
+}
+
+func executionPhaseTasksTerminal(build *Build, phase executionPhase) bool {
+	if build == nil {
+		return false
+	}
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+
+	hasPhaseTask := false
+	for _, task := range build.Tasks {
+		if !taskMatchesExecutionPhase(task, phase) {
+			continue
+		}
+		hasPhaseTask = true
+		if task.Status == TaskPending || task.Status == TaskInProgress {
+			return false
+		}
+	}
+	return hasPhaseTask
+}
+
+func executionPhaseHasAnyTask(build *Build, phase executionPhase) bool {
+	if build == nil {
+		return false
+	}
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	for _, task := range build.Tasks {
+		if taskMatchesExecutionPhase(task, phase) {
+			return true
+		}
+	}
+	return false
+}
+
+func (am *AgentManager) recoverStalledPhasedExecution(build *Build) bool {
+	if build == nil {
+		return false
+	}
+
+	description, phases := am.buildExecutionPhasesForBuild(build)
+	if len(phases) == 0 {
+		return false
+	}
+
+	build.mu.RLock()
+	currentPhase := build.SnapshotState.CurrentPhase
+	phasedComplete := build.PhasedPipelineComplete
+	blockedByInteraction := buildInteractionBlocksExecution(build)
+	build.mu.RUnlock()
+	if phasedComplete || blockedByInteraction {
+		return false
+	}
+
+	phaseTotal := countActiveExecutionPhases(phases)
+	if phaseTotal == 0 {
+		return false
+	}
+
+	currentIndex := -1
+	currentOrdinal := 0
+	for i, phase := range phases {
+		if len(phase.agents) == 0 {
+			continue
+		}
+		currentOrdinal++
+		if phase.key == currentPhase {
+			currentIndex = i
+			break
+		}
+	}
+	if currentIndex == -1 {
+		return false
+	}
+	if !executionPhaseTasksTerminal(build, phases[currentIndex]) {
+		return false
+	}
+
+	nextOrdinal := currentOrdinal
+	for i := currentIndex + 1; i < len(phases); i++ {
+		phase := phases[i]
+		if len(phase.agents) == 0 {
+			continue
+		}
+		nextOrdinal++
+		if executionPhaseHasAnyTask(build, phase) {
+			return false
+		}
+
+		taskIDs := am.startExecutionPhase(build, description, phase, nextOrdinal, phaseTotal)
+		if len(taskIDs) == 0 {
+			return false
+		}
+		log.Printf("Build %s: recovered stalled phased execution by starting %s", build.ID, phase.name)
+		return true
+	}
+
+	log.Printf("Build %s: recovered stalled phased execution by finalizing the phased pipeline", build.ID)
+	am.finalizePhasedPipeline(build)
+	return true
+}
+
 // queuePlanTasks creates and queues tasks in phased order so upstream outputs
 // (architecture, schema) are available as context for downstream agents.
 func (am *AgentManager) queuePlanTasks(build *Build) {
 	log.Printf("queuePlanTasks called for build %s", build.ID)
 
-	build.mu.RLock()
-	agents := make(map[string]*Agent)
-	for k, v := range build.Agents {
-		agents[k] = v
-	}
-	description := build.Description
-	build.mu.RUnlock()
-
-	// Collect non-lead agents
-	allAgents := make([]agentPriority, 0)
-	for _, agent := range agents {
-		// Planner and solver are on-demand specialists, not part of the default phased pipeline.
-		if agent.Role == RoleLead || agent.Role == RolePlanner || agent.Role == RoleSolver {
-			continue
-		}
-		allAgents = append(allAgents, agentPriority{
-			agent:    agent,
-			priority: am.getPriorityForRole(agent.Role),
-		})
-	}
-
-	// Group agents by execution phase:
-	//   Phase 1: Architecture      (locks scaffold and contract context)
-	//   Phase 2: Frontend UI       (first usable shell and main screens)
-	//   Phase 3: Data Foundation   (schema and persistence behind the UI)
-	//   Phase 4: Backend Services  (APIs and server logic behind the existing UI)
-	//   Phase 5: Integration       (main vertical slice verification)
-	//   Phase 6: Review            (final quality gate)
-	var archAgents, frontendAgents, dbAgents, backendAgents, testAgents, reviewAgents []agentPriority
-	for _, ap := range allAgents {
-		switch ap.agent.Role {
-		case RoleArchitect:
-			archAgents = append(archAgents, ap)
-		case RoleFrontend:
-			frontendAgents = append(frontendAgents, ap)
-		case RoleDatabase:
-			dbAgents = append(dbAgents, ap)
-		case RoleBackend:
-			backendAgents = append(backendAgents, ap)
-		case RoleTesting:
-			testAgents = append(testAgents, ap)
-		case RoleReviewer:
-			reviewAgents = append(reviewAgents, ap)
-		}
+	description, phases := am.buildExecutionPhasesForBuild(build)
+	agentCount := 0
+	for _, phase := range phases {
+		agentCount += len(phase.agents)
 	}
 
 	// Execute phases in order in a goroutine (non-blocking)
-	go am.executePhasedTasks(build, description, archAgents, frontendAgents, dbAgents, backendAgents, testAgents, reviewAgents)
+	go am.executePhasedTasks(build, description, phases)
 
-	log.Printf("Started phased task execution for build %s (%d agents)", build.ID, len(allAgents))
+	log.Printf("Started phased task execution for build %s (%d agents)", build.ID, agentCount)
 }
 
 // executePhasedTasks runs agent tasks in sequential phases, waiting for each
 // phase to complete before starting the next. This ensures context flows properly.
-func (am *AgentManager) executePhasedTasks(build *Build, description string,
-	archAgents, frontendAgents, dbAgents, backendAgents, testAgents, reviewAgents []agentPriority,
-) {
-
-	phases := buildExecutionPhases(archAgents, frontendAgents, dbAgents, backendAgents, testAgents, reviewAgents)
-
-	phaseTotal := 0
-	for _, phase := range phases {
-		if len(phase.agents) > 0 {
-			phaseTotal++
-		}
-	}
+func (am *AgentManager) executePhasedTasks(build *Build, description string, phases []executionPhase) {
+	phaseTotal := countActiveExecutionPhases(phases)
 
 	phaseIndex := 0
 	for _, phase := range phases {
@@ -10375,33 +10536,8 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string,
 			continue
 		}
 		phaseIndex++
-
 		phaseStatus := phase.status
-		now := time.Now()
-		setBuildPhaseSnapshot(build, phase, now)
-
-		log.Printf("Build %s: Starting phase — %s (%d agents)", build.ID, phase.name, len(phase.agents))
-
-		am.broadcast(build.ID, &WSMessage{
-			Type:      "build:phase",
-			BuildID:   build.ID,
-			Timestamp: now,
-			Data: map[string]any{
-				"phase":                 phase.name,
-				"phase_key":             phase.key,
-				"phase_index":           phaseIndex,
-				"phase_total":           phaseTotal,
-				"agents":                len(phase.agents),
-				"status":                string(phaseStatus),
-				"quality_gate_required": true,
-				"quality_gate_active":   phase.qualityStage != "",
-				"quality_gate_stage":    phase.qualityStage,
-				"message":               phase.startMessage,
-				"user_update":           true,
-			},
-		})
-
-		taskIDs := am.assignPhaseAgents(build, phase.agents, description)
+		taskIDs := am.startExecutionPhase(build, description, phase, phaseIndex, phaseTotal)
 		if !am.waitForPhaseCompletion(build, taskIDs) {
 			log.Printf("Build %s: Phase %s aborted (build cancelled or timed out)", build.ID, phase.name)
 			am.failBuildOnPhaseAbort(build, phase.name, phase.status, taskIDs)

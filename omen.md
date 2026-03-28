@@ -537,3 +537,46 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start a fresh paid full-stack canary
 4. If it clears planning and goes green, move to repeated paid canaries across power modes and autoscaled conditions
+
+## Latest Live Canary Result After Critique Timeout Fix
+
+Paid canary rerun:
+
+- build id: `e2ad3f45-8da8-4622-88eb-2865d22574bd`
+- backend deploy start time during run: `2026-03-28T20:43:47.520232289Z`
+
+What changed:
+
+- the build cleared the earlier planning freeze
+- `plan`, scaffold bootstrap, architecture, and frontend UI all completed
+- the build then wedged at `44%` in `frontend_ui` with no blocker, no failure, and no downstream phase start
+
+Newest blocker:
+
+- phased execution stalled between phases
+- `Data Foundation` never started even though the `Frontend UI` task was already terminal
+- this is an orchestration recovery gap, not a generated-app/runtime failure
+
+Newest local fix after that canary:
+
+- the inactivity monitor now detects a terminal-task phased gap and starts the next missing execution phase instead of waiting forever
+- phase starts are now funneled through a shared helper so the recovery path and the normal phased pipeline use the same snapshot/broadcast/task-assignment behavior
+- phase state is persisted immediately when the next phase starts
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_spawn_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the phased-gap recovery fix
+2. Wait for Render to deploy
+3. Start a fresh paid full-stack canary
+4. If it reaches backend/data/integration/review cleanly, move to repeated paid canaries across power modes and autoscaled conditions
