@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -99,6 +101,21 @@ func TestFindChrome_ReturnsStringOrEmpty(t *testing.T) {
 		if strings.Contains(result, "\n") {
 			t.Errorf("findChrome returned path with newline: %q", result)
 		}
+	}
+}
+
+func TestFindChromePrefersConfiguredPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	fakeChrome := filepath.Join(tmpDir, "chromium-browser")
+	if err := os.WriteFile(fakeChrome, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake chrome: %v", err)
+	}
+
+	t.Setenv("APEX_CHROME_PATH", fakeChrome)
+	t.Setenv("CHROME_BIN", "")
+
+	if got := findChrome(); got != fakeChrome {
+		t.Fatalf("expected configured chrome path %q, got %q", fakeChrome, got)
 	}
 }
 

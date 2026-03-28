@@ -57,6 +57,7 @@ LABEL org.opencontainers.image.vendor="APEX.BUILD"
 LABEL org.opencontainers.image.source="https://github.com/apex-build/apex-build"
 
 # Install runtime dependencies + Node.js (esbuild bundling) + Python3 (FastAPI/Flask preview)
+# + Chromium for browser-execution preview verification.
 RUN apk --no-cache add \
     ca-certificates \
     tzdata \
@@ -65,6 +66,11 @@ RUN apk --no-cache add \
     npm \
     python3 \
     py3-pip \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ttf-freefont \
     && npm install -g esbuild@0.24.2 \
     && ln -sf /usr/bin/python3 /usr/bin/python \
     && ln -sf /usr/bin/pip3 /usr/bin/pip \
@@ -102,6 +108,7 @@ ENV ENVIRONMENT=production
 ENV PORT=8080
 ENV GIN_MODE=release
 ENV TZ=UTC
+ENV CHROME_BIN=/usr/bin/chromium-browser
 
 # Log configuration
 ENV LOG_FORMAT=json

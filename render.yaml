@@ -71,6 +71,8 @@ services:
         value: "300"
       - key: BUILD_TIMEOUT_FULL_SECONDS
         value: "900"
+      - key: APEX_PREVIEW_RUNTIME_VERIFY
+        value: "true"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: OPENAI_API_KEY

@@ -1108,6 +1108,33 @@ Date: 2026-03-27
 
 Change summary:
 
+- Productionized browser-execution proof for Render by baking Chromium and supporting libraries into the backend runtime image and enabling `APEX_PREVIEW_RUNTIME_VERIFY` in the Render blueprint.
+- Hardened Chrome discovery to honor `APEX_CHROME_PATH` and `CHROME_BIN`, added container-safe launch flags (`headless`, `disable-dev-shm-usage`, `no-sandbox`, background-networking shutdown), and added coverage for configured browser path detection.
+- This closes the gap between “browser proof exists in code” and “production can actually run it after deploy”.
+
+Files changed:
+
+- `backend/Dockerfile`
+- `backend/internal/preview/browser_verifier.go`
+- `backend/internal/preview/browser_verifier_test.go`
+- `render.yaml`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/preview/browser_verifier.go internal/preview/browser_verifier_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/preview -run 'TestFindChromePrefersConfiguredPath|TestBrowserVerifier_PassesWhenAppRendered|TestRuntimeVerifierFailsWhenBrowserProofEnabledButChromeUnavailable'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-27
+
+Change summary:
+
 - Added a runtime Vite preview verification layer on top of the static preview gate, with an opt-in `APEX_PREVIEW_RUNTIME_VERIFY=true` path that boots the generated Vite dev server and checks the root page, mount point, Vite client, entry module, and CSS asset availability.
 - Wired runtime-preview verification visibility into startup/feature reporting and the preview verification E2E canary surface so production can expose whether runtime proof is active.
 - Hardened the runtime verifier after integration review: enabled runtime proof now fails honestly instead of silently skipping when npm is unavailable or install timeouts occur, and temp-workdir file writes now reject unsafe absolute/escaping paths from generated output.

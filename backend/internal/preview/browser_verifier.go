@@ -7,11 +7,13 @@
 //   - no uncaught JS exceptions prevented the initial render
 //
 // Chrome is required; when not found, Available() returns false and
-// VerifyPageLoad returns Skipped=true (builds are not failed for missing Chrome).
+// VerifyPageLoad returns Skipped=true so higher-level runtime verification can
+// decide whether that is blocking.
 //
-// Security model: Chrome runs --incognito with no extensions, proxy set to
-// direct:// with loopback-only bypass (external DNS blocked at proxy level),
-// restricting reachable hosts to 127.0.0.1 (the ephemeral Vite port).
+// Security model: Chrome runs as the non-root backend user inside the backend
+// container, with loopback-only proxy settings and hardened headless flags for
+// container execution on Render. Browser reachability is restricted to the
+// local ephemeral Vite port.
 package preview
 
 import (
@@ -50,6 +52,13 @@ func FindChrome() string { return findChrome() }
 
 // findChrome is the internal implementation.
 func findChrome() string {
+	for _, envKey := range []string{"APEX_CHROME_PATH", "CHROME_BIN"} {
+		if candidate := strings.TrimSpace(os.Getenv(envKey)); candidate != "" {
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+		}
+	}
 	for _, c := range chromeCandidates {
 		if p, err := exec.LookPath(c); err == nil {
 			return p
@@ -149,11 +158,22 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 	// ── Launch sandboxed Chrome ──────────────────────────────────────────────
 	allocOpts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(bv.chromePath),
+		chromedp.Flag("headless", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("disable-background-networking", true),
+		chromedp.Flag("disable-component-update", true),
+		chromedp.Flag("disable-default-apps", true),
 		chromedp.Flag("incognito", true),
 		chromedp.Flag("mute-audio", true),
+		chromedp.Flag("no-default-browser-check", true),
+		chromedp.Flag("no-first-run", true),
+		chromedp.Flag("hide-scrollbars", true),
 		chromedp.Flag("disable-sync", true),
 		chromedp.Flag("disable-translate", true),
 		chromedp.Flag("disable-plugins", true),
+		chromedp.Flag("disable-features", "Translate,OptimizationHints,MediaRouter"),
+		chromedp.Flag("no-sandbox", true),
 		// Restrict to loopback: block DNS for all external hosts while still
 		// allowing direct IP connections to 127.0.0.1 (the Vite server).
 		// NOTE: "MAP * NOTFOUND" also blocks IP literals in some Chrome builds,
