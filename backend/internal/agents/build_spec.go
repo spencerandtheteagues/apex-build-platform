@@ -711,8 +711,15 @@ func normalizeModelFields(fields []ModelField) []ModelField {
 
 		normalized := field
 		normalized.Name = name
-		normalized.Type = fieldType
-		if isNullableModelFieldType(fieldType) {
+		normalizedType, qualifiers := normalizeModelFieldTypeDescriptor(fieldType)
+		normalized.Type = normalizedType
+		if qualifiers.requiredSet {
+			normalized.Required = qualifiers.required
+		}
+		if qualifiers.unique {
+			normalized.Unique = true
+		}
+		if isNullableModelFieldType(normalized.Type) {
 			normalized.Required = false
 		}
 		if isCanonicalPrimaryKeyField(name) {
@@ -723,6 +730,64 @@ func normalizeModelFields(fields []ModelField) []ModelField {
 	}
 
 	return out
+}
+
+type modelFieldQualifierFlags struct {
+	requiredSet bool
+	required    bool
+	unique      bool
+}
+
+func normalizeModelFieldTypeDescriptor(fieldType string) (string, modelFieldQualifierFlags) {
+	trimmed := strings.TrimSpace(fieldType)
+	if trimmed == "" {
+		return "", modelFieldQualifierFlags{}
+	}
+
+	flags := modelFieldQualifierFlags{}
+	tokens := strings.Fields(trimmed)
+	baseTokens := make([]string, 0, len(tokens))
+
+	for i := 0; i < len(tokens); i++ {
+		token := strings.TrimSpace(tokens[i])
+		lower := strings.ToLower(strings.Trim(token, ","))
+		switch lower {
+		case "|", "&", ",":
+			continue
+		case "unique":
+			flags.unique = true
+			continue
+		case "required":
+			flags.requiredSet = true
+			flags.required = true
+			continue
+		case "optional", "nullable":
+			flags.requiredSet = true
+			flags.required = false
+			continue
+		case "null":
+			flags.requiredSet = true
+			flags.required = false
+			continue
+		case "index", "indexed":
+			continue
+		case "not":
+			if i+1 < len(tokens) && strings.EqualFold(strings.Trim(tokens[i+1], ","), "null") {
+				flags.requiredSet = true
+				flags.required = true
+				i++
+				continue
+			}
+		}
+		baseTokens = append(baseTokens, token)
+	}
+
+	normalized := strings.TrimSpace(strings.Join(baseTokens, " "))
+	if normalized == "" {
+		normalized = trimmed
+	}
+
+	return normalized, flags
 }
 
 func isCanonicalPrimaryKeyField(name string) bool {

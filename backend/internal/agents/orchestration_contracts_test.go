@@ -151,6 +151,52 @@ func TestCompileBuildContractFromPlanSeedsTruthAndVerification(t *testing.T) {
 	}
 }
 
+func TestCompileBuildContractFromPlanNormalizesUniqueTypeQualifiers(t *testing.T) {
+	t.Parallel()
+
+	plan := &BuildPlan{
+		ID:      "plan-qualifiers",
+		BuildID: "build-qualifiers",
+		AppType: "fullstack",
+		TechStack: TechStack{
+			Frontend: "react",
+			Backend:  "node",
+			Database: "postgres",
+		},
+		DataModels: []DataModel{
+			{
+				Name: "Tenant",
+				Fields: []ModelField{
+					{Name: "slug", Type: "string unique"},
+				},
+			},
+			{
+				Name: "User",
+				Fields: []ModelField{
+					{Name: "email", Type: "string unique"},
+				},
+			},
+		},
+	}
+
+	contract := compileBuildContractFromPlan("build-qualifiers", &IntentBrief{AppType: "fullstack"}, plan)
+	if contract == nil {
+		t.Fatal("expected contract")
+	}
+	if len(contract.DBSchemaContract) != 2 {
+		t.Fatalf("expected normalized schema models, got %+v", contract.DBSchemaContract)
+	}
+
+	tenantField := contract.DBSchemaContract[0].Fields[0]
+	userField := contract.DBSchemaContract[1].Fields[0]
+	if tenantField.Type != "string" || !tenantField.Unique {
+		t.Fatalf("expected tenant slug field to normalize unique qualifier, got %+v", tenantField)
+	}
+	if userField.Type != "string" || !userField.Unique {
+		t.Fatalf("expected user email field to normalize unique qualifier, got %+v", userField)
+	}
+}
+
 func TestVerifyAndNormalizeBuildContractBlocksMissingAuthAndWarnsOnMissingSchema(t *testing.T) {
 	intent := &IntentBrief{
 		AppType:              "fullstack",

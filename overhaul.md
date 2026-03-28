@@ -1108,6 +1108,34 @@ Date: 2026-03-28
 
 Change summary:
 
+- Re-ran live canaries after the truncation-repair deploy: the free frontend canary completed successfully on build `f8de29ae-8f58-4b0e-bf4c-476bdfca514a`, but the completed-build summary surface lagged briefly behind the terminal detail view before converging.
+- Diagnosed the next paid full-stack blocker on build `28833c8f-4e1a-4515-a03f-e31a8cbbc27a`: architecture/data-model verification was emitting blockers like `Tenant field 'slug' has type 'string unique' but unique is false` and `User field 'email' has type 'string unique' but unique is false`.
+- Fixed contract normalization so model-field type qualifiers such as `unique`, `not null`, `nullable`, and `optional` are converted into `Unique` / `Required` flags instead of leaking through as contradictory raw type strings.
+- Added regressions for both plan normalization and contract compilation so `string unique` now becomes `type=string` with `unique=true` before verifier review.
+
+Files changed:
+
+- `backend/internal/agents/build_spec.go`
+- `backend/internal/agents/build_spec_test.go`
+- `backend/internal/agents/orchestration_contracts_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/build_spec.go internal/agents/build_spec_test.go internal/agents/orchestration_contracts_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestNormalizeModelFieldsPromotesTypeQualifiersToFlags|TestCompileBuildContractFromPlanNormalizesUniqueTypeQualifiers|TestCreateBuildPlanFromPlanningBundle|TestCompileBuildContractFromPlanSeedsTruthAndVerification'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Fixed the live paid-canary failure class where provider verification could hard-block a generated task because a top-level generated test file such as `tests/verify-integration.ts` was truncated mid-function.
 - Added a deterministic pre-acceptance repair that replaces truncated generated JS/TS test artifacts with compile-safe placeholder verification content before provider verification aborts the task.
 - Broadened syntax-target parsing to recognize abrupt-EOF / missing-closing-brace verifier messages, and fixed root-level `tests/...` paths so they are consistently treated as test files.

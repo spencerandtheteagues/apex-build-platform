@@ -148,6 +148,30 @@ func TestCreateBuildPlanFromPlanningBundle(t *testing.T) {
 	}
 }
 
+func TestNormalizeModelFieldsPromotesTypeQualifiersToFlags(t *testing.T) {
+	t.Parallel()
+
+	fields := normalizeModelFields([]ModelField{
+		{Name: "slug", Type: "string unique"},
+		{Name: "email", Type: "TEXT NOT NULL UNIQUE"},
+		{Name: "completedAt", Type: "datetime | null", Required: true},
+	})
+
+	if len(fields) != 3 {
+		t.Fatalf("expected 3 normalized fields, got %+v", fields)
+	}
+
+	if fields[0].Type != "string" || !fields[0].Unique {
+		t.Fatalf("expected slug field to normalize unique qualifier, got %+v", fields[0])
+	}
+	if fields[1].Type != "TEXT" || !fields[1].Unique || !fields[1].Required {
+		t.Fatalf("expected SQL qualifiers to normalize into flags, got %+v", fields[1])
+	}
+	if fields[2].Type != "datetime" || fields[2].Required {
+		t.Fatalf("expected nullable qualifier to clear required flag, got %+v", fields[2])
+	}
+}
+
 func TestCreateBuildPlanFromPlanningBundleHonorsStaticFrontendIntent(t *testing.T) {
 	t.Parallel()
 
