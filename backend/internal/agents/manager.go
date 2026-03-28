@@ -7440,6 +7440,99 @@ func (am *AgentManager) applyDeterministicSequelizeUniqueKeysRepair(build *Build
 	return am.bundleFromPatchPlan(build.ID, files, plan, "sequelize_unique_keys_repair: "+summary), summary
 }
 
+func parseSequelizeConstructorRepairTargets(errors []string) []string {
+	if len(errors) == 0 {
+		return nil
+	}
+	re := regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS2769: No overload matches this call\.`)
+	seen := map[string]bool{}
+	targets := make([]string, 0)
+	for _, msg := range errors {
+		if !strings.Contains(msg, "Sequelize") {
+			continue
+		}
+		for _, match := range re.FindAllStringSubmatch(msg, -1) {
+			if len(match) != 2 {
+				continue
+			}
+			path := sanitizeFilePath(strings.TrimSpace(match[1]))
+			if path == "" || seen[strings.ToLower(path)] {
+				continue
+			}
+			seen[strings.ToLower(path)] = true
+			targets = append(targets, path)
+		}
+	}
+	sort.Strings(targets)
+	return targets
+}
+
+func rewriteSequelizeConstructorToObjectForm(content string) (string, bool) {
+	if !strings.Contains(content, "new Sequelize(") || !strings.Contains(content, "models:") {
+		return content, false
+	}
+
+	re := regexp.MustCompile(`(?s)export const sequelize = new Sequelize\(\s*database\s*,\s*username\s*,\s*password\s*,\s*\{(.*?)\}\s*\);`)
+	matches := re.FindStringSubmatch(content)
+	if len(matches) != 2 {
+		return content, false
+	}
+	optionsBody := strings.TrimSpace(matches[1])
+	replacement := "export const sequelize = new Sequelize({\n  database,\n  username,\n  password,\n" + indentMultiline(optionsBody, "  ") + "\n});"
+	return re.ReplaceAllString(content, replacement), true
+}
+
+func indentMultiline(content string, prefix string) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimRight(line, " \t")
+		if strings.TrimSpace(trimmed) == "" {
+			lines[i] = ""
+			continue
+		}
+		lines[i] = prefix + strings.TrimLeft(trimmed, " \t")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (am *AgentManager) applyDeterministicSequelizeConstructorRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+
+	targets := parseSequelizeConstructorRepairTargets(readinessErrors)
+	if len(targets) == 0 {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 {
+		return nil, ""
+	}
+
+	applied := make([]string, 0, len(targets))
+	for _, target := range targets {
+		content := plan.content(target)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		repaired, changed := rewriteSequelizeConstructorToObjectForm(content)
+		if !changed {
+			continue
+		}
+		if !plan.patchFile(target, repaired, am.detectLanguage(target)) {
+			continue
+		}
+		applied = append(applied, target)
+	}
+	if len(applied) == 0 {
+		return nil, ""
+	}
+
+	summary := "sequelize constructor normalization on " + strings.Join(applied, ", ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "sequelize_constructor_repair: "+summary), summary
+}
+
 func (am *AgentManager) applyDeterministicBrokenGeneratedTestRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
 	if build == nil || len(readinessErrors) == 0 {
 		return nil, ""
@@ -9445,6 +9538,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			errorFormat: "Final output validation failed: %s (applied Sequelize uniqueKeys repair: %s)",
 			message:     "Applied deterministic repair to generated Sequelize model options that used unsupported uniqueKeys metadata. Re-running final validation before solver recovery.",
 			summaryKey:  "sequelize_unique_keys_repair",
+		},
+		{
+			apply:       am.applyDeterministicSequelizeConstructorRepair,
+			errorFormat: "Final output validation failed: %s (applied Sequelize constructor repair: %s)",
+			message:     "Applied deterministic repair to generated Sequelize constructor calls that used an invalid argument shape. Re-running final validation before solver recovery.",
+			summaryKey:  "sequelize_constructor_repair",
 		},
 		{
 			apply:       am.applyDeterministicQuoteSyntaxRepair,

@@ -2678,6 +2678,87 @@ User.init({}, {
 	}
 }
 
+func TestApplyDeterministicValidationRepairsNormalizesSequelizeConstructor(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-constructor-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/db/index.ts",
+				Content: `import { Sequelize } from 'sequelize-typescript';
+import path from 'path';
+
+const databaseUrl = process.env.DATABASE_URL;
+const urlParts = new URL(databaseUrl!);
+const username = urlParts.username;
+const password = urlParts.password;
+const host = urlParts.hostname;
+const port = urlParts.port;
+const database = urlParts.pathname.slice(1);
+
+export const sequelize = new Sequelize(database, username, password, {
+  host,
+  port: Number(port),
+  dialect: 'postgres',
+  logging: false,
+  models: [path.resolve(__dirname, 'models')],
+  define: {
+    underscored: true,
+    freezeTableName: true,
+    timestamps: false
+  }
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/db/index.ts(9,30): error TS2769: No overload matches this call.
+Overload 1 of 4, '(database: string, username: string, password?: string | undefined, options?: SequelizeOptions | undefined): Sequelize', gave the following error.`,
+		},
+		"broken sequelize constructor",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected sequelize constructor repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/db/index.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired sequelize db file to exist, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, "new Sequelize(database, username, password") {
+		t.Fatalf("expected constructor call to be normalized, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "new Sequelize({") {
+		t.Fatalf("expected object-form sequelize constructor, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "models: [path.resolve(__dirname, 'models')]") {
+		t.Fatalf("expected models option to remain intact, got %q", repairedFile.Content)
+	}
+}
+
 func TestParsePreviewSyntaxErrorTargetFiles(t *testing.T) {
 	t.Parallel()
 

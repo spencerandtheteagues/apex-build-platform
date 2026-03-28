@@ -1002,3 +1002,59 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start the next paid full-stack canary
 4. If it clears this model-typing issue, continue on the next remaining late-stage generated-project blocker until the paid path is green
+
+## Latest Live Paid Canary After Sequelize `uniqueKeys` Repair
+
+Production backend during run:
+
+- `started_at = 2026-03-28T23:42:40.795307181Z`
+
+Live canary:
+
+- build id: `93752902-7b8e-49b6-9614-d6a01e0c8842`
+
+What improved:
+
+- the prior `uniqueKeys` typing issue is cleared
+- the run advanced through:
+  - `0 -> 19 -> 44 -> 79 -> 89 -> 95 -> 96`
+- this confirms the Sequelize `uniqueKeys` repair is working on production
+
+Current blocker:
+
+- final output validation failed at `95-96%`
+- exact failure:
+  - `server/db/index.ts(...): error TS2769: No overload matches this call`
+- the generated file is constructing `sequelize-typescript` with the 4-argument core constructor shape while also passing `models`, which the typings reject
+
+Interpretation:
+
+- the paid path is now reaching very late-stage project-specific typing issues
+- the remaining failures are narrow and deterministic enough to patch directly in the validation-repair lane
+
+Newest local fix after that canary:
+
+- deterministic validation repair now rewrites generated `sequelize-typescript` constructor calls from:
+  - `new Sequelize(database, username, password, { ... })`
+- to the object-form constructor:
+  - `new Sequelize({ database, username, password, ... })`
+- this preserves the original connection parsing and `models` option while satisfying the typings
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairsNormalizesSequelizeConstructor|TestApplyDeterministicValidationRepairsStripsSequelizeUniqueKeys'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the Sequelize constructor repair
+2. Wait for Render to deploy
+3. Start the next paid full-stack canary
+4. If it clears this constructor-typing issue, continue on the next remaining late-stage generated-project blocker until the paid path is green

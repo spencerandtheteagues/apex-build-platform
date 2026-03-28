@@ -1108,6 +1108,35 @@ Date: 2026-03-28
 
 Change summary:
 
+- Confirmed the Sequelize `uniqueKeys` repair worked on live production. The next paid canary on backend `started_at=2026-03-28T23:42:40.795307181Z` advanced through:
+  - `0 -> 19 -> 44 -> 79 -> 89 -> 95 -> 96`
+- The next blocker is another deterministic Sequelize typing issue:
+  - generated `server/db/index.ts` uses `new Sequelize(database, username, password, { ... models: [...] ... })`
+  - `sequelize-typescript` rejects that argument shape with `TS2769`
+- Added a deterministic repair that rewrites generated Sequelize constructor calls into the object-form constructor expected by `sequelize-typescript`, preserving the parsed connection fields and `models` option.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairsNormalizesSequelizeConstructor|TestApplyDeterministicValidationRepairsStripsSequelizeUniqueKeys'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Confirmed the nested Express-route fix worked on live production. Paid canary `1ae03f7f-6128-4740-a58c-931c691c160b` cleared the old `/api/auth/login` and `/api/auth/me` false-negative and advanced into final preview validation.
 - The next real blocker is a deterministic Sequelize typing issue at `95%`:
   - generated `server/db/models.ts` places `uniqueKeys` inside `Model.init(..., options)`
