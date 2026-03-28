@@ -417,3 +417,47 @@ Then:
 2. Wait for Render backend deploy to finish
 3. Run the paid full-stack canary again
 4. If it passes, repeat paid canaries across `fast`, `balanced`, and `max`
+
+## Latest Live Canary Result After Generated-Test Fix
+
+Paid canary rerun:
+
+- build id: `c932433a-80f0-4f7a-8f5f-602e3d0e5d22`
+- backend deploy start time during run: `2026-03-28T20:11:29.002243633Z`
+- progress path:
+  - `19` frontend UI
+  - `44` backend/data
+  - `79` testing
+  - `89` review
+  - `95-97` preview/final validation
+
+What it proved:
+
+- the earlier generated-test failure is fixed
+- the build now survives past that lane and fails later on a different deterministic issue
+
+Newest blocker:
+
+- `src/hooks/useAuth.ts` contains JSX even though it is a `.ts` file
+- live preview verification error:
+  - `Transform failed with 1 error`
+  - `src/hooks/useAuth.ts:90:6: ERROR: Expected ">" but found "value"`
+
+Newest local fix after that canary:
+
+- deterministic JSX-in-TS provider repair in final validation
+  - rewrites generated provider returns from JSX to `React.createElement(...)`
+  - adds a default React import when the file only had named React imports
+  - preserves provider logic instead of replacing the whole file with a placeholder
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Next exact step:
+
+1. Push this JSX-in-TS repair
+2. Wait for Render to deploy
+3. Rerun the paid full-stack canary
+4. If green, move to repeated paid canaries across power modes and autoscaled conditions

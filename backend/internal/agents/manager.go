@@ -6415,6 +6415,40 @@ func parsePreviewSyntaxErrorTargetFiles(errors []string) []string {
 	return paths
 }
 
+func parsePreviewJSXInTSRepairTargets(errors []string) []string {
+	if len(errors) == 0 {
+		return nil
+	}
+	joined := strings.Join(errors, "\n")
+	lower := strings.ToLower(joined)
+	if !strings.Contains(lower, `expected ">" but found`) {
+		return nil
+	}
+
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?m)(src/[A-Za-z0-9_./-]+\.(?:ts|js)):\d+:\d+:\s+ERROR:\s+Expected\s+">"\s+but found\s+"[^"]+"`),
+		regexp.MustCompile(`(?m)([A-Za-z0-9_./-]+\.(?:ts|js)):\d+:\d+:\s+ERROR:\s+Expected\s+">"\s+but found\s+"[^"]+"`),
+	}
+
+	seen := map[string]bool{}
+	paths := make([]string, 0, 2)
+	for _, pattern := range patterns {
+		for _, match := range pattern.FindAllStringSubmatch(joined, -1) {
+			if len(match) != 2 {
+				continue
+			}
+			p := sanitizeFilePath(strings.TrimSpace(match[1]))
+			if p == "" || seen[p] {
+				continue
+			}
+			seen[p] = true
+			paths = append(paths, p)
+		}
+	}
+	sort.Strings(paths)
+	return paths
+}
+
 func parseTruncatedGeneratedTestRepairTargets(errors []string) []string {
 	if len(errors) == 0 {
 		return nil
@@ -6951,6 +6985,65 @@ func repairDoubleSingleQuoteCorruption(path, content string) (string, bool) {
 	return repaired, true
 }
 
+func ensureReactDefaultImport(content string) string {
+	if strings.Contains(content, "import React") {
+		return content
+	}
+
+	namedReactImportRe := regexp.MustCompile(`(?m)^import\s*\{([^}]*)\}\s*from\s*("react"|'react');?\s*$`)
+	if loc := namedReactImportRe.FindStringSubmatchIndex(content); loc != nil {
+		members := strings.TrimSpace(content[loc[2]:loc[3]])
+		quote := content[loc[4]:loc[5]]
+		replacement := fmt.Sprintf("import React, { %s } from %s;", members, quote)
+		return content[:loc[0]] + replacement + content[loc[1]:]
+	}
+
+	namespaceReactImportRe := regexp.MustCompile(`(?m)^import\s*\*\s*as\s*React\s*from\s*("react"|'react');?\s*$`)
+	if loc := namespaceReactImportRe.FindStringIndex(content); loc != nil {
+		return content
+	}
+
+	if strings.Contains(content, `from "react"`) {
+		return "import React from \"react\";\n" + content
+	}
+	return "import React from 'react';\n" + content
+}
+
+func repairJSXInNonTSXFile(path, content string) (string, bool) {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext != ".ts" && ext != ".js" {
+		return content, false
+	}
+	if !strings.Contains(content, ".Provider") || !strings.Contains(content, "{children}") {
+		return content, false
+	}
+
+	providerRe := regexp.MustCompile(`(?s)return\s*\(\s*<([A-Za-z0-9_.]+)\.Provider\s+value=\{\{(.*?)\}\}\s*>\s*\{children\}\s*</([A-Za-z0-9_.]+)\.Provider>\s*\);`)
+	loc := providerRe.FindStringSubmatchIndex(content)
+	if loc == nil || len(loc) < 8 {
+		return content, false
+	}
+
+	providerName := strings.TrimSpace(content[loc[2]:loc[3]])
+	closingProviderName := strings.TrimSpace(content[loc[6]:loc[7]])
+	valueExpr := strings.TrimSpace(content[loc[4]:loc[5]])
+	if providerName == "" || valueExpr == "" {
+		return content, false
+	}
+	if providerName != closingProviderName {
+		return content, false
+	}
+
+	replacement := fmt.Sprintf("return React.createElement(%s.Provider, { value: { %s } }, children);", providerName, valueExpr)
+	repaired := content[:loc[0]] + replacement + content[loc[1]:]
+	repaired = ensureReactDefaultImport(repaired)
+	repaired = normalizeGeneratedFileContent(path, repaired)
+	if repaired == content {
+		return content, false
+	}
+	return repaired, true
+}
+
 func (am *AgentManager) applyDeterministicQuoteSyntaxRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
 	if build == nil || len(readinessErrors) == 0 {
 		return nil, ""
@@ -6986,6 +7079,44 @@ func (am *AgentManager) applyDeterministicQuoteSyntaxRepair(build *Build, readin
 	}
 	summary := fmt.Sprintf("quote-correction on %s", strings.Join(summaries, ", "))
 	return am.bundleFromPatchPlan(build.ID, files, plan, "syntax_repair: "+summary), summary
+}
+
+func (am *AgentManager) applyDeterministicTSJSXProviderRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+
+	targets := parsePreviewJSXInTSRepairTargets(readinessErrors)
+	if len(targets) == 0 {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 {
+		return nil, ""
+	}
+
+	applied := make([]string, 0, len(targets))
+	for _, target := range targets {
+		content := plan.content(target)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		repaired, changed := repairJSXInNonTSXFile(target, content)
+		if !changed {
+			continue
+		}
+		if !plan.patchFile(target, repaired, am.detectLanguage(target)) {
+			continue
+		}
+		applied = append(applied, target)
+	}
+	if len(applied) == 0 {
+		return nil, ""
+	}
+
+	summary := "jsx-in-ts normalization on " + strings.Join(applied, ", ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "ts_jsx_repair: "+summary), summary
 }
 
 func (am *AgentManager) applyDeterministicBrokenGeneratedTestRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
@@ -8801,6 +8932,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			errorFormat: "Final output validation failed: %s (applied generated test repair: %s)",
 			message:     "Applied deterministic repair to broken generated test files. Re-running final validation before solver recovery.",
 			summaryKey:  "generated_test_repair",
+		},
+		{
+			apply:       am.applyDeterministicTSJSXProviderRepair,
+			errorFormat: "Final output validation failed: %s (applied JSX-in-TS repair: %s)",
+			message:     "Applied deterministic repair to generated .ts/.js provider files that contained JSX. Re-running final validation before solver recovery.",
+			summaryKey:  "ts_jsx_repair",
 		},
 		{
 			apply:       am.applyDeterministicQuoteSyntaxRepair,

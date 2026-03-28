@@ -2499,6 +2499,92 @@ func TestParsePreviewSyntaxErrorTargetFilesIncludesAbruptEOFMessages(t *testing.
 	}
 }
 
+func TestParsePreviewJSXInTSRepairTargets(t *testing.T) {
+	t.Parallel()
+
+	errs := []string{
+		`Final output validation failed: Preview verification build failed: [vite:esbuild] Transform failed with 1 error:
+/tmp/apex-preview-verify-1861641592/src/hooks/useAuth.ts:90:6: ERROR: Expected ">" but found "value"`,
+	}
+
+	targets := parsePreviewJSXInTSRepairTargets(errs)
+	if len(targets) != 1 || targets[0] != "src/hooks/useAuth.ts" {
+		t.Fatalf("unexpected JSX-in-TS target files: %+v", targets)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsConvertsJSXInTSProviderFile(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-jsx-in-ts-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "package.json",
+				Content: "{\"name\":\"preview-test\",\"private\":true}\n",
+				IsNew:   true,
+			},
+			{
+				Path: "src/hooks/useAuth.ts",
+				Content: `import { useState, createContext } from "react";
+
+const AuthContext = createContext<any>(undefined);
+
+export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+  const [user] = useState(null);
+
+  return (
+    <AuthContext.Provider
+      value={{ user }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+};`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Final output validation failed: Preview verification build failed: [vite:esbuild] Transform failed with 1 error:
+/tmp/apex-preview-verify-1861641592/src/hooks/useAuth.ts:90:6: ERROR: Expected ">" but found "value"`},
+		"jsx in .ts provider",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected JSX-in-TS provider repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "src/hooks/useAuth.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired auth hook file to exist, got %+v", files)
+	}
+	if !strings.Contains(repairedFile.Content, "React.createElement(AuthContext.Provider") {
+		t.Fatalf("expected provider JSX to be normalized with React.createElement, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, `import React, { useState, createContext } from "react";`) {
+		t.Fatalf("expected React default import to be injected, got %q", repairedFile.Content)
+	}
+}
+
 func TestApplyDeterministicProviderBlockedTestRepair(t *testing.T) {
 	t.Parallel()
 

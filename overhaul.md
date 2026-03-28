@@ -1108,6 +1108,33 @@ Date: 2026-03-28
 
 Change summary:
 
+- Reran the paid full-stack production canary on backend `started_at=2026-03-28T20:11:29.002243633Z`.
+- Confirmed the previous generated-test blocker is fixed: the build now clears testing and enters review before failing.
+- Found the next deterministic blocker at `95-97%`: generated JSX inside a `.ts` provider file (`src/hooks/useAuth.ts`) caused esbuild to fail with `Expected ">" but found "value"`.
+- Added a deterministic validation repair that normalizes generated `.ts`/`.js` provider files containing JSX into `React.createElement(...)` form, preserving the auth/provider logic without renaming files.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestParsePreviewJSXInTSRepairTargets|TestApplyDeterministicValidationRepairsConvertsJSXInTSProviderFile|TestParsePreviewSyntaxErrorTargetFiles|TestApplyDeterministicValidationRepairsReplacesBrokenGeneratedTestFile'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Added a deterministic generated-test repair pass in final validation so late-stage preview/test failures from broken generated `*.test.*` / `*.spec.*` files do not terminal-fail the entire build when they can be patched or downgraded safely.
 - Wired the repair into `applyDeterministicValidationRepairs`, using the pure helper lane to rewrite broken test imports or fall back to compile-safe placeholders only for generated test files.
 - Updated the live canary smoke script to fetch and send a CSRF token after login, which is now required by production `POST /api/v1/build/start`.
