@@ -451,20 +451,21 @@ type BuildSnapshotState struct {
 }
 
 type BuildRestoreContext struct {
-	SubscriptionPlan          string            `json:"subscription_plan,omitempty"`
-	ProviderMode              string            `json:"provider_mode,omitempty"`
-	RequirePreviewReady       bool              `json:"require_preview_ready,omitempty"`
-	RequestsUsed              int               `json:"requests_used,omitempty"`
-	ReadinessRecoveryAttempts int               `json:"readiness_recovery_attempts,omitempty"`
-	MaxAgents                 int               `json:"max_agents,omitempty"`
-	MaxRetries                int               `json:"max_retries,omitempty"`
-	MaxRequests               int               `json:"max_requests,omitempty"`
-	MaxTokensPerRequest       int               `json:"max_tokens_per_request,omitempty"`
-	PhasedPipelineComplete    bool              `json:"phased_pipeline_complete,omitempty"`
-	DiffMode                  bool              `json:"diff_mode,omitempty"`
-	RoleAssignments           map[string]string `json:"role_assignments,omitempty"`
-	TechStack                 *TechStack        `json:"tech_stack,omitempty"`
-	Plan                      *BuildPlan        `json:"plan,omitempty"`
+	SubscriptionPlan            string            `json:"subscription_plan,omitempty"`
+	ProviderMode                string            `json:"provider_mode,omitempty"`
+	RequirePreviewReady         bool              `json:"require_preview_ready,omitempty"`
+	RequestsUsed                int               `json:"requests_used,omitempty"`
+	ReadinessRecoveryAttempts   int               `json:"readiness_recovery_attempts,omitempty"`
+	PreviewVerificationAttempts int               `json:"preview_verification_attempts,omitempty"`
+	MaxAgents                   int               `json:"max_agents,omitempty"`
+	MaxRetries                  int               `json:"max_retries,omitempty"`
+	MaxRequests                 int               `json:"max_requests,omitempty"`
+	MaxTokensPerRequest         int               `json:"max_tokens_per_request,omitempty"`
+	PhasedPipelineComplete      bool              `json:"phased_pipeline_complete,omitempty"`
+	DiffMode                    bool              `json:"diff_mode,omitempty"`
+	RoleAssignments             map[string]string `json:"role_assignments,omitempty"`
+	TechStack                   *TechStack        `json:"tech_stack,omitempty"`
+	Plan                        *BuildPlan        `json:"plan,omitempty"`
 }
 
 // Build represents an entire app-building session
@@ -486,23 +487,24 @@ type Build struct {
 	Checkpoints         []*Checkpoint     `json:"checkpoints"`
 	Progress            int               `json:"progress"` // 0-100
 	// Guardrails
-	MaxAgents                 int                   `json:"max_agents,omitempty"`
-	MaxRetries                int                   `json:"max_retries,omitempty"`
-	MaxRequests               int                   `json:"max_requests,omitempty"`
-	MaxTokensPerRequest       int                   `json:"max_tokens_per_request,omitempty"`
-	RequestsUsed              int                   `json:"requests_used,omitempty"`
-	ReadinessRecoveryAttempts int                   `json:"readiness_recovery_attempts,omitempty"`
-	PhasedPipelineComplete    bool                  `json:"phased_pipeline_complete,omitempty"`
-	DiffMode                  bool                  `json:"diff_mode,omitempty"`        // When true, changes require user review before applying
-	RoleAssignments           map[string]string     `json:"role_assignments,omitempty"` // User-specified provider per role category
-	Interaction               BuildInteractionState `json:"interaction,omitempty"`
-	ActivityTimeline          []BuildActivityEntry  `json:"activity_timeline,omitempty"`
-	SnapshotState             BuildSnapshotState    `json:"snapshot_state,omitempty"`
-	SnapshotFiles             []GeneratedFile       `json:"-"`
-	CreatedAt                 time.Time             `json:"created_at"`
-	UpdatedAt                 time.Time             `json:"updated_at"`
-	CompletedAt               *time.Time            `json:"completed_at,omitempty"`
-	Error                     string                `json:"error,omitempty"`
+	MaxAgents                   int                   `json:"max_agents,omitempty"`
+	MaxRetries                  int                   `json:"max_retries,omitempty"`
+	MaxRequests                 int                   `json:"max_requests,omitempty"`
+	MaxTokensPerRequest         int                   `json:"max_tokens_per_request,omitempty"`
+	RequestsUsed                int                   `json:"requests_used,omitempty"`
+	ReadinessRecoveryAttempts   int                   `json:"readiness_recovery_attempts,omitempty"`
+	PreviewVerificationAttempts int                   `json:"preview_verification_attempts,omitempty"`
+	PhasedPipelineComplete      bool                  `json:"phased_pipeline_complete,omitempty"`
+	DiffMode                    bool                  `json:"diff_mode,omitempty"`        // When true, changes require user review before applying
+	RoleAssignments             map[string]string     `json:"role_assignments,omitempty"` // User-specified provider per role category
+	Interaction                 BuildInteractionState `json:"interaction,omitempty"`
+	ActivityTimeline            []BuildActivityEntry  `json:"activity_timeline,omitempty"`
+	SnapshotState               BuildSnapshotState    `json:"snapshot_state,omitempty"`
+	SnapshotFiles               []GeneratedFile       `json:"-"`
+	CreatedAt                   time.Time             `json:"created_at"`
+	UpdatedAt                   time.Time             `json:"updated_at"`
+	CompletedAt                 *time.Time            `json:"completed_at,omitempty"`
+	Error                       string                `json:"error,omitempty"`
 
 	mu sync.RWMutex
 }

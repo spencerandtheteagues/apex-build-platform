@@ -301,27 +301,28 @@ func TestRestoreBuildSessionFromSnapshotPreservesRuntimeAndTaskState(t *testing.
 
 	now := time.Now().UTC()
 	build := &Build{
-		ID:                        "restore-runtime-build",
-		UserID:                    42,
-		Status:                    BuildReviewing,
-		Mode:                      ModeFull,
-		PowerMode:                 PowerMax,
-		SubscriptionPlan:          "team",
-		ProviderMode:              "byok",
-		RequirePreviewReady:       true,
-		Description:               "Resume the orchestration state faithfully",
-		TechStack:                 &TechStack{Frontend: "React", Backend: "Go", Database: "PostgreSQL", Extras: []string{"Redis"}},
-		Plan:                      &BuildPlan{ID: "plan-1", BuildID: "restore-runtime-build", AppType: "fullstack", TechStack: TechStack{Frontend: "React", Backend: "Go"}},
-		Progress:                  88,
-		MaxAgents:                 6,
-		MaxRetries:                4,
-		MaxRequests:               17,
-		MaxTokensPerRequest:       4096,
-		RequestsUsed:              5,
-		ReadinessRecoveryAttempts: 2,
-		PhasedPipelineComplete:    true,
-		DiffMode:                  true,
-		RoleAssignments:           map[string]string{"architect": "claude", "frontend": "gpt4"},
+		ID:                          "restore-runtime-build",
+		UserID:                      42,
+		Status:                      BuildReviewing,
+		Mode:                        ModeFull,
+		PowerMode:                   PowerMax,
+		SubscriptionPlan:            "team",
+		ProviderMode:                "byok",
+		RequirePreviewReady:         true,
+		Description:                 "Resume the orchestration state faithfully",
+		TechStack:                   &TechStack{Frontend: "React", Backend: "Go", Database: "PostgreSQL", Extras: []string{"Redis"}},
+		Plan:                        &BuildPlan{ID: "plan-1", BuildID: "restore-runtime-build", AppType: "fullstack", TechStack: TechStack{Frontend: "React", Backend: "Go"}},
+		Progress:                    88,
+		MaxAgents:                   6,
+		MaxRetries:                  4,
+		MaxRequests:                 17,
+		MaxTokensPerRequest:         4096,
+		RequestsUsed:                5,
+		ReadinessRecoveryAttempts:   2,
+		PreviewVerificationAttempts: 1,
+		PhasedPipelineComplete:      true,
+		DiffMode:                    true,
+		RoleAssignments:             map[string]string{"architect": "claude", "frontend": "gpt4"},
 		Tasks: []*Task{
 			{
 				ID:            "task-fix",
@@ -380,6 +381,9 @@ func TestRestoreBuildSessionFromSnapshotPreservesRuntimeAndTaskState(t *testing.
 	}
 	if restoredBuild.ReadinessRecoveryAttempts != 2 {
 		t.Fatalf("expected ReadinessRecoveryAttempts=2, got %d", restoredBuild.ReadinessRecoveryAttempts)
+	}
+	if restoredBuild.PreviewVerificationAttempts != 1 {
+		t.Fatalf("expected PreviewVerificationAttempts=1, got %d", restoredBuild.PreviewVerificationAttempts)
 	}
 	if restoredBuild.MaxRequests != 17 || restoredBuild.MaxTokensPerRequest != 4096 {
 		t.Fatalf("expected restored max request limits, got max_requests=%d max_tokens=%d", restoredBuild.MaxRequests, restoredBuild.MaxTokensPerRequest)

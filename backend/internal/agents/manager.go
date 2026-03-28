@@ -125,24 +125,25 @@ func filterAgentRoles(roles []AgentRole, allowed map[AgentRole]bool) []AgentRole
 
 // AgentManager handles the lifecycle and coordination of AI agents
 type AgentManager struct {
-	agents         map[string]*Agent
-	builds         map[string]*Build
-	taskQueue      chan *Task
-	resultQueue    chan *TaskResult
-	subscribers    map[string][]chan *WSMessage
-	buildMonitors  map[string]struct{}
-	aiRouter       AIRouter
-	db             *gorm.DB // Database connection for persisting completed builds
-	editStore      *ProposedEditStore
-	pathGuard      *PathGuard
-	spendTracker   *spend.SpendTracker
-	budgetEnforcer *budget.BudgetEnforcer
-	errorAnalyzer  *ErrorAnalyzer   // LLM-powered build error analysis (falls back to heuristics if AI unavailable)
-	ctxSelector    *ContextSelector // smart file context selection for LLM prompts
-	chunkedEditor  *ChunkedEditor   // splits/reassembles large-file edits to stay within output token limits
-	mu             sync.RWMutex
-	ctx            context.Context
-	cancel         context.CancelFunc
+	agents          map[string]*Agent
+	builds          map[string]*Build
+	taskQueue       chan *Task
+	resultQueue     chan *TaskResult
+	subscribers     map[string][]chan *WSMessage
+	buildMonitors   map[string]struct{}
+	aiRouter        AIRouter
+	db              *gorm.DB // Database connection for persisting completed builds
+	editStore       *ProposedEditStore
+	pathGuard       *PathGuard
+	spendTracker    *spend.SpendTracker
+	budgetEnforcer  *budget.BudgetEnforcer
+	errorAnalyzer   *ErrorAnalyzer       // LLM-powered build error analysis (falls back to heuristics if AI unavailable)
+	ctxSelector     *ContextSelector     // smart file context selection for LLM prompts
+	chunkedEditor   *ChunkedEditor       // splits/reassembles large-file edits to stay within output token limits
+	previewVerifier BuildPreviewVerifier // optional preview readiness verifier (wired in main.go)
+	mu              sync.RWMutex
+	ctx             context.Context
+	cancel          context.CancelFunc
 }
 
 // AIRouter interface for communicating with AI providers
@@ -8703,6 +8704,22 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 				progress = build.Progress
 			}
 			build.mu.Unlock()
+
+			// Preview verification gate: confirm the generated output would produce
+			// a loadable interactive preview before declaring the build complete.
+			// Returns true if a repair was queued and finalization should stop here.
+			if am.runPreviewVerificationGate(build, allFiles, &status, &buildError, now) {
+				return
+			}
+			if status != BuildCompleted {
+				build.mu.RLock()
+				status = build.Status
+				progress = build.Progress
+				if strings.TrimSpace(build.Error) != "" {
+					buildError = build.Error
+				}
+				build.mu.RUnlock()
+			}
 		}
 	}
 
@@ -10533,6 +10550,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 	requirePreviewReady := false
 	requestsUsed := 0
 	readinessRecoveryAttempts := 0
+	previewVerificationAttempts := 0
 	roleAssignments := map[string]string(nil)
 	phasedPipelineComplete := false
 	diffMode := false
@@ -10545,6 +10563,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 		requirePreviewReady = restoreContext.RequirePreviewReady
 		requestsUsed = restoreContext.RequestsUsed
 		readinessRecoveryAttempts = restoreContext.ReadinessRecoveryAttempts
+		previewVerificationAttempts = restoreContext.PreviewVerificationAttempts
 		if restoreContext.MaxAgents > 0 {
 			maxAgents = restoreContext.MaxAgents
 		}
@@ -10572,39 +10591,40 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 
 	restoredFiles, _ := parseBuildFiles(snapshot.FilesJSON)
 	build := &Build{
-		ID:                        snapshot.BuildID,
-		UserID:                    snapshot.UserID,
-		ProjectID:                 snapshot.ProjectID,
-		Status:                    normalizeRestoredBuildStatus(snapshot),
-		Mode:                      mode,
-		PowerMode:                 powerMode,
-		SubscriptionPlan:          subscriptionPlan,
-		ProviderMode:              providerMode,
-		RequirePreviewReady:       requirePreviewReady,
-		Description:               snapshot.Description,
-		TechStack:                 techStack,
-		Plan:                      plan,
-		Agents:                    parseBuildAgents(snapshot.AgentsJSON),
-		Tasks:                     parseBuildTasks(snapshot.TasksJSON),
-		Checkpoints:               parseBuildCheckpoints(snapshot.CheckpointsJSON),
-		Progress:                  snapshot.Progress,
-		MaxAgents:                 maxAgents,
-		MaxRetries:                maxRetries,
-		MaxRequests:               maxRequests,
-		MaxTokensPerRequest:       maxTokens,
-		RequestsUsed:              requestsUsed,
-		ReadinessRecoveryAttempts: readinessRecoveryAttempts,
-		PhasedPipelineComplete:    phasedPipelineComplete,
-		DiffMode:                  diffMode,
-		RoleAssignments:           roleAssignments,
-		Interaction:               parseBuildInteraction(snapshot.InteractionJSON),
-		ActivityTimeline:          parseBuildActivityTimeline(snapshot.ActivityJSON),
-		SnapshotState:             snapshotState,
-		SnapshotFiles:             restoredFiles,
-		CreatedAt:                 snapshot.CreatedAt,
-		UpdatedAt:                 snapshot.UpdatedAt,
-		CompletedAt:               snapshot.CompletedAt,
-		Error:                     snapshot.Error,
+		ID:                          snapshot.BuildID,
+		UserID:                      snapshot.UserID,
+		ProjectID:                   snapshot.ProjectID,
+		Status:                      normalizeRestoredBuildStatus(snapshot),
+		Mode:                        mode,
+		PowerMode:                   powerMode,
+		SubscriptionPlan:            subscriptionPlan,
+		ProviderMode:                providerMode,
+		RequirePreviewReady:         requirePreviewReady,
+		Description:                 snapshot.Description,
+		TechStack:                   techStack,
+		Plan:                        plan,
+		Agents:                      parseBuildAgents(snapshot.AgentsJSON),
+		Tasks:                       parseBuildTasks(snapshot.TasksJSON),
+		Checkpoints:                 parseBuildCheckpoints(snapshot.CheckpointsJSON),
+		Progress:                    snapshot.Progress,
+		MaxAgents:                   maxAgents,
+		MaxRetries:                  maxRetries,
+		MaxRequests:                 maxRequests,
+		MaxTokensPerRequest:         maxTokens,
+		RequestsUsed:                requestsUsed,
+		ReadinessRecoveryAttempts:   readinessRecoveryAttempts,
+		PreviewVerificationAttempts: previewVerificationAttempts,
+		PhasedPipelineComplete:      phasedPipelineComplete,
+		DiffMode:                    diffMode,
+		RoleAssignments:             roleAssignments,
+		Interaction:                 parseBuildInteraction(snapshot.InteractionJSON),
+		ActivityTimeline:            parseBuildActivityTimeline(snapshot.ActivityJSON),
+		SnapshotState:               snapshotState,
+		SnapshotFiles:               restoredFiles,
+		CreatedAt:                   snapshot.CreatedAt,
+		UpdatedAt:                   snapshot.UpdatedAt,
+		CompletedAt:                 snapshot.CompletedAt,
+		Error:                       snapshot.Error,
 	}
 	if build.Agents == nil {
 		build.Agents = make(map[string]*Agent)

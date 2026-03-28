@@ -1071,3 +1071,65 @@ For every completed work item during this overhaul, append:
 - commit hash if pushed
 
 Do not remove old entries. Keep this file as the running implementation log until the overhaul is complete.
+
+Date: 2026-03-27
+
+Change summary:
+
+- Merged the first-class preview verification gate into the active reliability branch and verified the full backend suite with the gate enabled.
+- Fixed a restore-state hole where `PreviewVerificationAttempts` was not persisted through build snapshots, which could let restarted builds retry preview verification as if no prior repair had happened.
+- Fixed terminal preview-gate failure truth so a build that fails preview verification no longer remains at `100%`; failed preview verification now caps progress below completion, and deterministic fence-strip repair re-enters testing at `95%`.
+- Re-ran the live paid full-stack canary on production after the latest backend deploy and confirmed successful completion on build `ed5167b7-87eb-46a5-9ecd-12698d631f82`.
+
+Files changed:
+
+- `backend/internal/agents/build_snapshot.go`
+- `backend/internal/agents/iteration_test.go`
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/preview_gate.go`
+- `backend/internal/agents/preview_gate_test.go`
+- `backend/internal/agents/types.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/build_snapshot.go internal/agents/iteration_test.go internal/agents/manager.go internal/agents/preview_gate.go internal/agents/types.go internal/agents/preview_gate_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyPreviewFenceStripRepairResetsProgressAndAttempts|TestRunPreviewVerificationGateTerminalFailureDropsProgressBelowCompletion|TestRestoreBuildSessionFromSnapshotPreservesRuntimeAndTaskState'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+- Live canary after deploy: `BASE_URL='https://api.apex-build.dev/api/v1' SMOKE_PROFILE='paid_fullstack' LOGIN_EMAIL='admin@apex.build' LOGIN_PASSWORD='TheStarsh1pKEY!' PROJECT_NAME='agency-ops-platform' POWER_MODE='balanced' ./scripts/run_platform_build_smoke.sh`
+- Live canary result: build `ed5167b7-87eb-46a5-9ecd-12698d631f82` completed successfully with truthful phase progress and final completion
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-27
+
+Change summary:
+
+- Added a runtime Vite preview verification layer on top of the static preview gate, with an opt-in `APEX_PREVIEW_RUNTIME_VERIFY=true` path that boots the generated Vite dev server and checks the root page, mount point, Vite client, entry module, and CSS asset availability.
+- Wired runtime-preview verification visibility into startup/feature reporting and the preview verification E2E canary surface so production can expose whether runtime proof is active.
+- Hardened the runtime verifier after integration review: enabled runtime proof now fails honestly instead of silently skipping when npm is unavailable or install timeouts occur, and temp-workdir file writes now reject unsafe absolute/escaping paths from generated output.
+
+Files changed:
+
+- `backend/cmd/main.go`
+- `backend/internal/preview/runtime_verifier.go`
+- `backend/internal/preview/runtime_verifier_integration_test.go`
+- `backend/internal/preview/runtime_verifier_test.go`
+- `backend/internal/preview/verifier.go`
+- `tests/e2e/specs/preview-verification.spec.ts`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/preview/runtime_verifier.go internal/preview/runtime_verifier_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/preview`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+- `cd tests/e2e && npm run test -- --list specs/preview-verification.spec.ts`
+
+Commit hash if pushed:
+
+- Local: `5014d78`, `0fdaf58`, hardening follow-up pending
+- Remote: pending

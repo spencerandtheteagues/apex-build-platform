@@ -430,6 +430,29 @@ func main() {
 		previewHandler = handlers.NewPreviewHandlerWithFactory(database.GetDB(), previewFactory, authService)
 	}
 
+	// Wire preview verification gate into the agent manager.
+	// The bridge converts between agents.VerifiableFile and preview.VerifiableFile
+	// so neither package needs to import the other.
+	// APEX_PREVIEW_RUNTIME_VERIFY=true enables live Vite boot proof (+30-90 s per build).
+	runtimeVerifyEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("APEX_PREVIEW_RUNTIME_VERIFY")), "true")
+	var pvVerifier *preview.Verifier
+	if runtimeVerifyEnabled {
+		pvVerifier = preview.NewVerifierWithRuntime(previewHandler.GetServerRunner())
+		log.Println("Preview verification gate enabled (runtime boot proof ON)")
+	} else {
+		pvVerifier = preview.NewVerifier(previewHandler.GetServerRunner())
+		log.Println("Preview verification gate enabled (static checks only; set APEX_PREVIEW_RUNTIME_VERIFY=true for live boot proof)")
+	}
+	agentManager.SetPreviewVerifier(&previewVerifierBridge{verifier: pvVerifier})
+
+	// Surface runtime verify capability in /health/features.
+	pvRuntimeDetails := map[string]any{"enabled": runtimeVerifyEnabled}
+	if runtimeVerifyEnabled {
+		startupRegistry.MarkReady("preview_runtime_verify", startup.TierOptional, "Runtime Vite boot proof enabled", pvRuntimeDetails)
+	} else {
+		startupRegistry.MarkDegraded("preview_runtime_verify", startup.TierOptional, "Runtime Vite boot proof disabled (set APEX_PREVIEW_RUNTIME_VERIFY=true)", pvRuntimeDetails)
+	}
+
 	log.Println("Live Preview Server initialized")
 	previewFeatureStatus := previewHandler.FeatureStatus()
 	if previewFactoryErr != nil {
@@ -1689,4 +1712,31 @@ func getOllamaStatus(baseURL string) string {
 		return "✅ Enabled (" + baseURL + ")"
 	}
 	return "❌ Disabled (set OLLAMA_BASE_URL)"
+}
+
+// previewVerifierBridge adapts preview.Verifier to the agents.BuildPreviewVerifier
+// interface without creating a circular import between the two packages.
+type previewVerifierBridge struct {
+	verifier *preview.Verifier
+}
+
+func (b *previewVerifierBridge) VerifyBuildFiles(
+	ctx context.Context,
+	files []agents.VerifiableFile,
+	isFullStack bool,
+) *agents.PreviewVerificationResult {
+	pvFiles := make([]preview.VerifiableFile, len(files))
+	for i, f := range files {
+		pvFiles[i] = preview.VerifiableFile{Path: f.Path, Content: f.Content}
+	}
+	res := b.verifier.VerifyFiles(ctx, pvFiles, isFullStack)
+	if res == nil {
+		return &agents.PreviewVerificationResult{Passed: true}
+	}
+	return &agents.PreviewVerificationResult{
+		Passed:      res.Passed,
+		FailureKind: res.FailureKind,
+		RepairHints: res.RepairHints,
+		Details:     res.Details,
+	}
 }

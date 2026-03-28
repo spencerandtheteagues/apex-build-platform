@@ -73,20 +73,21 @@ func snapshotStateForPersistenceLocked(build *Build) BuildSnapshotState {
 		return state
 	}
 	state.RestoreContext = &BuildRestoreContext{
-		SubscriptionPlan:          build.SubscriptionPlan,
-		ProviderMode:              build.ProviderMode,
-		RequirePreviewReady:       build.RequirePreviewReady,
-		RequestsUsed:              build.RequestsUsed,
-		ReadinessRecoveryAttempts: build.ReadinessRecoveryAttempts,
-		MaxAgents:                 build.MaxAgents,
-		MaxRetries:                build.MaxRetries,
-		MaxRequests:               build.MaxRequests,
-		MaxTokensPerRequest:       build.MaxTokensPerRequest,
-		PhasedPipelineComplete:    build.PhasedPipelineComplete,
-		DiffMode:                  build.DiffMode,
-		RoleAssignments:           cloneStringMap(build.RoleAssignments),
-		TechStack:                 cloneTechStack(build.TechStack),
-		Plan:                      cloneBuildPlan(build.Plan),
+		SubscriptionPlan:            build.SubscriptionPlan,
+		ProviderMode:                build.ProviderMode,
+		RequirePreviewReady:         build.RequirePreviewReady,
+		RequestsUsed:                build.RequestsUsed,
+		ReadinessRecoveryAttempts:   build.ReadinessRecoveryAttempts,
+		PreviewVerificationAttempts: build.PreviewVerificationAttempts,
+		MaxAgents:                   build.MaxAgents,
+		MaxRetries:                  build.MaxRetries,
+		MaxRequests:                 build.MaxRequests,
+		MaxTokensPerRequest:         build.MaxTokensPerRequest,
+		PhasedPipelineComplete:      build.PhasedPipelineComplete,
+		DiffMode:                    build.DiffMode,
+		RoleAssignments:             cloneStringMap(build.RoleAssignments),
+		TechStack:                   cloneTechStack(build.TechStack),
+		Plan:                        cloneBuildPlan(build.Plan),
 	}
 	return state
 }
