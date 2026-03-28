@@ -727,16 +727,26 @@ func decorateForeignKeyReferences(models []DataModel) {
 				continue
 			}
 
-			target := strings.TrimSpace(relationTargets[strings.ToLower(field.Name)])
-			if target == "" {
-				target = inferForeignKeyTargetModel(field.Name, modelNames)
-			}
+			target := resolveForeignKeyTargetModel(field.Name, relationTargets[strings.ToLower(field.Name)], modelNames)
 			if target == "" {
 				continue
 			}
 			field.Type = strings.TrimSpace(field.Type) + " references " + target + "(id)"
 		}
 	}
+}
+
+func resolveForeignKeyTargetModel(fieldName string, relationTarget string, modelNames []string) string {
+	if target := canonicalDataModelName(relationTarget, modelNames); target != "" {
+		return target
+	}
+	if target := inferForeignKeyTargetModel(fieldName, modelNames); target != "" {
+		return target
+	}
+	if target := inferForeignKeyTargetModel(relationTarget, modelNames); target != "" {
+		return target
+	}
+	return ""
 }
 
 func inferForeignKeyTargetModel(fieldName string, modelNames []string) string {
@@ -764,16 +774,20 @@ func inferForeignKeyTargetModel(fieldName string, modelNames []string) string {
 			candidates = append(candidates, base)
 		}
 	}
-	if looksLikeActorReferenceField(field) {
-		candidates = append(candidates, "user", "member", "agent", "admin", "profile")
-	}
 
 	for _, candidate := range dedupeStrings(candidates) {
-		candidateNorm := normalizeDataModelIdentifier(candidate)
-		for _, modelName := range modelNames {
-			if normalizeDataModelIdentifier(modelName) == candidateNorm {
-				return modelName
+		if target := canonicalDataModelName(candidate, modelNames); target != "" {
+			return target
+		}
+		if looksLikeIdentityRoleCandidate(candidate) {
+			if target := preferredIdentityModelName(modelNames); target != "" {
+				return target
 			}
+		}
+	}
+	if looksLikeActorReferenceField(field) {
+		if target := preferredIdentityModelName(modelNames); target != "" {
+			return target
 		}
 	}
 	return ""
@@ -786,7 +800,7 @@ func looksLikeActorReferenceField(field string) bool {
 	}
 
 	switch field {
-	case "assigned_to", "assignee", "assignee_id", "owner", "owner_id":
+	case "assigned_to", "assignee", "assignee_id", "owner", "owner_id", "manager", "manager_id", "creator_id", "author_id", "reviewer_id":
 		return true
 	}
 
@@ -805,6 +819,37 @@ func looksLikeActorReferenceField(field string) bool {
 	}
 
 	return false
+}
+
+func looksLikeIdentityRoleCandidate(candidate string) bool {
+	switch strings.TrimSpace(strings.ToLower(candidate)) {
+	case "user", "member", "agent", "admin", "profile", "manager", "assignee", "owner", "creator", "author", "reviewer", "editor", "approver", "operator":
+		return true
+	default:
+		return false
+	}
+}
+
+func preferredIdentityModelName(modelNames []string) string {
+	for _, preferred := range []string{"User", "Member", "Agent", "Admin", "Profile"} {
+		if target := canonicalDataModelName(preferred, modelNames); target != "" {
+			return target
+		}
+	}
+	return ""
+}
+
+func canonicalDataModelName(candidate string, modelNames []string) string {
+	candidateNorm := normalizeDataModelIdentifier(candidate)
+	if candidateNorm == "" {
+		return ""
+	}
+	for _, modelName := range modelNames {
+		if normalizeDataModelIdentifier(modelName) == candidateNorm {
+			return modelName
+		}
+	}
+	return ""
 }
 
 func normalizeDataModelIdentifier(name string) string {

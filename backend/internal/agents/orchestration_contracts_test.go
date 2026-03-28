@@ -285,6 +285,51 @@ func TestCompileBuildContractFromPlanInfersActorForeignKeyReferences(t *testing.
 	}
 }
 
+func TestCompileBuildContractFromPlanNormalizesActorRelationTargetsToIdentityModel(t *testing.T) {
+	t.Parallel()
+
+	plan := &BuildPlan{
+		ID:      "plan-actor-relation-targets",
+		BuildID: "build-actor-relation-targets",
+		AppType: "fullstack",
+		TechStack: TechStack{
+			Frontend: "react",
+			Backend:  "node",
+			Database: "postgres",
+		},
+		DataModels: []DataModel{
+			{
+				Name: "User",
+				Fields: []ModelField{
+					{Name: "id", Type: "uuid primary key"},
+				},
+			},
+			{
+				Name: "Project",
+				Fields: []ModelField{
+					{Name: "manager_id", Type: "uuid foreign key"},
+				},
+				Relations: []Relation{
+					{Field: "manager_id", Target: "Manager"},
+				},
+			},
+		},
+	}
+
+	contract := compileBuildContractFromPlan("build-actor-relation-targets", &IntentBrief{AppType: "fullstack"}, plan)
+	if contract == nil {
+		t.Fatal("expected contract")
+	}
+	if len(contract.DBSchemaContract) != 2 {
+		t.Fatalf("expected normalized schema models, got %+v", contract.DBSchemaContract)
+	}
+
+	managerField := contract.DBSchemaContract[1].Fields[0]
+	if managerField.Type != "uuid foreign key references User(id)" {
+		t.Fatalf("expected manager_id foreign key relation target to normalize to User(id), got %+v", managerField)
+	}
+}
+
 func TestCompileBuildContractFromPlanSeedsAuthEndpointsFromIntent(t *testing.T) {
 	t.Parallel()
 

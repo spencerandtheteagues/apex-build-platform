@@ -611,6 +611,7 @@ Interpretation:
 Newest local fix after that canary:
 
 - actor-style FK inference now treats fields like `created_by`, `recorded_by`, `assigned_to`, `owner`, and `assignee_id` as identity references and maps them to common identity models when present (`User`, `Member`, `Agent`, `Admin`, `Profile`)
+- planner relation targets like `Manager` or `Assignee` are now normalized too, so the compiler prefers the real identity model already present in the schema (for this canary: `User`) instead of preserving a non-existent table reference
 
 Files:
 

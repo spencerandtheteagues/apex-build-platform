@@ -1110,6 +1110,7 @@ Change summary:
 
 - Live paid canary `f149c461-cce3-4f5d-a3ad-b5aeccc9de75` exposed the next contract-normalization gap after the phased-gap recovery push: actor-style foreign keys like `created_by`, `recorded_by`, and `assigned_to` were still reaching provider critique without explicit `references User(id)`.
 - Extended FK inference so actor-reference fields now map to common identity models (`User`, `Member`, `Agent`, `Admin`, `Profile`) instead of only handling `_id` suffixes.
+- Hardened relation-target normalization as well: if the planner emits raw targets like `Manager` or `Assignee` but the actual schema only has `User`, the compiler now rewrites those role aliases onto the real identity model instead of preserving a broken references clause.
 - Added a regression that covers the exact `created_by` / `assigned_to` live failure shape.
 
 Files changed:
