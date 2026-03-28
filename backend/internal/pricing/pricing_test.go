@@ -463,7 +463,7 @@ func TestDefaultModel(t *testing.T) {
 		{"gemini", "max", "gemini-3.1-pro-preview"},
 		{"grok", "fast", "grok-3-mini"},
 		{"grok", "balanced", "grok-3"},
-		{"grok", "max", "grok-code-fast-1"},
+		{"grok", "max", "grok-4.20-0309-reasoning"},
 	}
 
 	for _, tt := range tests {

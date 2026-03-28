@@ -72,7 +72,7 @@ const tourSteps: TourStep[] = [
     details: [
       'Fast & Cheap (1.6x) — Budget models for quick prototypes and experiments',
       'Balanced (1.8x) — Mid-tier models for solid production code',
-      'Max Power (2.0x) — Flagship models (Claude Opus 4.6, GPT-5.4, Gemini 3.1 Pro Preview, Grok Code Fast 1) for the highest quality',
+      'Max Power (2.0x) — Flagship models (Claude Opus 4.6, GPT-5.4, Gemini 3.1 Pro Preview, Grok 4.20) for the highest quality',
     ],
     tip: 'Start with Fast mode to test your idea, then rebuild with Max Power once you\'re happy with the concept.',
   },

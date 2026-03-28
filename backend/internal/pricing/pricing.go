@@ -105,7 +105,7 @@ func newEngineFromEnv() *Engine {
 			"grok": {
 				Default: ModelPricing{InputPer1M: 3.00, OutputPer1M: 15.00},
 				Models: map[string]ModelPricing{
-					"grok-code-fast-1":            {InputPer1M: 2.00, OutputPer1M: 15.00},
+					"grok-4.20-0309-reasoning":    {InputPer1M: 3.00, OutputPer1M: 15.00},
 					"grok-3":                      {InputPer1M: 3.00, OutputPer1M: 15.00},
 					"grok-3-mini":                 {InputPer1M: 0.30, OutputPer1M: 0.50},
 					"grok-4-1-fast-reasoning":     {InputPer1M: 2.00, OutputPer1M: 5.00}, // legacy
@@ -235,7 +235,7 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 		return "gemini-2.5-flash-lite"
 	case "grok":
 		if mode == ModeMax {
-			return "grok-code-fast-1"
+			return "grok-4.20-0309-reasoning"
 		}
 		if mode == ModeBalanced {
 			return "grok-3"

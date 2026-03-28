@@ -514,7 +514,7 @@ export const SteampunkDashboard: React.FC<SteampunkDashboardProps> = ({ onNaviga
                 { name: 'Claude Opus 4.6', color: '#d97706', status: 'Ready' },
                 { name: 'OpenAI GPT-5.4', color: '#4ade80', status: 'Ready' },
                 { name: 'Gemini 3.1 Pro Preview', color: '#3b82f6', status: 'Ready' },
-                { name: 'Grok Code Fast 1', color: '#d946ef', status: 'Ready' },
+                { name: 'Grok 4.20', color: '#d946ef', status: 'Ready' },
               ].map((ai) => (
                 <div
                   key={ai.name}

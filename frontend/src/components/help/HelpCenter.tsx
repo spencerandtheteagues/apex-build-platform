@@ -251,7 +251,7 @@ The user avatar in the top-right shows your username. Your session persists acro
 - Best for: Most real-world applications
 
 **Max Power (2.0x platform cost)**
-- Models: Claude Opus 4.6, GPT-5.4, Gemini 3.1 Pro Preview, Grok Code Fast 1
+- Models: Claude Opus 4.6, GPT-5.4, Gemini 3.1 Pro Preview, Grok 4.20
 - Speed: Slower (larger models take longer)
 - Quality: Highest possible — most capable models
 - Best for: Complex apps, mission-critical code, production builds
@@ -723,7 +723,7 @@ Choose which AI provider to use, or leave on "Auto" for intelligent routing.`,
 - Best for: Quick tasks, documentation, data processing code
 
 **Grok (xAI)**
-- Models: Grok Code Fast 1 (most capable), Grok 3 (balanced), Grok 3 Mini (fast)
+- Models: Grok 4.20 (most capable), Grok 3 (balanced), Grok 3 Mini (fast)
 - Strengths: Real-time knowledge, creative problem-solving
 - Best for: Cutting-edge tasks, up-to-date solutions
 

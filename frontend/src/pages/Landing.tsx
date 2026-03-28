@@ -106,10 +106,10 @@ const FEATURES = [
       { icon: '🟠', label: 'Claude (Anthropic)', desc: 'Best-in-class for code review, documentation, and complex multi-step reasoning. Haiku (fast), Sonnet (balanced), and Opus (max) available.' },
       { icon: '🟢', label: 'OpenAI', desc: 'Strong code generation with fast iteration loops. GPT-4o Mini handles fast work, GPT-4.1 covers balanced builds, and GPT-5.4 is reserved for max power.' },
       { icon: '🔵', label: 'Gemini (Google)', desc: 'Best for long-context tasks and multi-modal inputs. Gemini 2.5 Flash Lite is the fast tier, Gemini 3 Flash Preview is balanced, and Gemini 3.1 Pro Preview is max.' },
-      { icon: '⬜', label: 'Grok (xAI)', desc: 'Sharp reasoning with a coding-focused max tier. Grok 3 Mini is fast, Grok 3 is balanced, and Grok Code Fast 1 is the current max model.' },
+      { icon: '⬜', label: 'Grok (xAI)', desc: 'Sharp reasoning with a coding-focused max tier. Grok 3 Mini is fast, Grok 3 is balanced, and Grok 4.20 is the current max model.' },
       { icon: '🟣', label: 'Ollama (Local / BYOK only)', desc: 'Run Llama 3, Mistral, or other open-source models locally. Zero API cost. Complete privacy. Ollama is not used for hosted platform builds.' },
     ],
-    useCase: 'Power mode: Fast uses Haiku 4.5 + GPT-4o Mini + Gemini 2.5 Flash Lite + Grok 3 Mini. Balanced uses Sonnet 4.6 + GPT-4.1 + Gemini 3 Flash Preview + Grok 3. Max uses Opus 4.6 + GPT-5.4 + Gemini 3.1 Pro Preview + Grok Code Fast 1. Hosted routing stays inside those providers; Ollama is available only when you explicitly connect it through BYOK/local settings.',
+    useCase: 'Power mode: Fast uses Haiku 4.5 + GPT-4o Mini + Gemini 2.5 Flash Lite + Grok 3 Mini. Balanced uses Sonnet 4.6 + GPT-4.1 + Gemini 3 Flash Preview + Grok 3. Max uses Opus 4.6 + GPT-5.4 + Gemini 3.1 Pro Preview + Grok 4.20. Hosted routing stays inside those providers; Ollama is available only when you explicitly connect it through BYOK/local settings.',
     visual: 'ai',
   },
   {
@@ -566,7 +566,7 @@ const PROVIDERS = [
   { name: 'Claude',  sub: 'Anthropic',    color: '#D97757', models: ['Haiku 4.5', 'Sonnet 4.6', 'Opus 4.6'],                    costRange: 'Live per-model pricing' },
   { name: 'OpenAI',  sub: 'GPT family',   color: '#10A37F', models: ['GPT-4o Mini', 'GPT-4.1', 'GPT-5.4'],                    costRange: 'Live per-model pricing' },
   { name: 'Gemini',  sub: 'Google',       color: '#4285F4', models: ['2.5 Flash Lite', '3 Flash Preview', '3.1 Pro Preview'], costRange: 'Live per-model pricing' },
-  { name: 'Grok',    sub: 'xAI',          color: '#e5e5e5', models: ['Grok 3 Mini', 'Grok 3', 'Grok Code Fast 1'],            costRange: 'Live per-model pricing' },
+  { name: 'Grok',    sub: 'xAI',          color: '#e5e5e5', models: ['Grok 3 Mini', 'Grok 3', 'Grok 4.20'],                  costRange: 'Live per-model pricing' },
   { name: 'Ollama',  sub: 'Local / BYOK', color: '#7C3AED', models: ['Llama 3', 'Mistral', 'Any model'],   costRange: 'No cloud-model API bill' },
 ]
 

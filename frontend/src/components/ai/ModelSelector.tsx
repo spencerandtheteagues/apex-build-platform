@@ -61,7 +61,7 @@ const FALLBACK_MODELS: Record<string, ModelInfo[]> = {
     { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
   ],
   grok: [
-    { id: 'grok-code-fast-1', name: 'Grok Code Fast 1', speed: 'medium', cost_tier: 'high', description: 'Max tier — latest Grok coding model' },
+    { id: 'grok-4.20-0309-reasoning', name: 'Grok 4.20', speed: 'medium', cost_tier: 'high', description: 'Max tier — frontier reasoning model' },
     { id: 'grok-3', name: 'Grok 3', speed: 'medium', cost_tier: 'medium', description: 'Balanced tier — stronger reasoning' },
     { id: 'grok-3-mini', name: 'Grok 3 Mini', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
   ],
