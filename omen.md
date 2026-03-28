@@ -461,3 +461,43 @@ Next exact step:
 2. Wait for Render to deploy
 3. Rerun the paid full-stack canary
 4. If green, move to repeated paid canaries across power modes and autoscaled conditions
+
+## Latest Live Canary Result After JSX-In-TS Fix
+
+Paid canary rerun:
+
+- build id: `d1b1d260-3c13-4009-9c0d-33eb5e46215a`
+- backend deploy start time during run: `2026-03-28T20:29:04.350552658Z`
+
+What changed:
+
+- the previous JSX-in-`.ts` preview failure was no longer the first issue encountered
+- the build exposed an earlier contract/schema normalization blocker instead
+
+Newest blocker:
+
+- provider-assisted contract critique flagged:
+  - `Foreign keys in db_schema_contract do not specify referenced tables, e.g., tenant_id in User`
+
+Interpretation:
+
+- this is not a runtime build crash
+- it is a build-contract normalization gap
+- the schema already implies the relationship; the compiler just needs to make it explicit before critique runs
+
+Newest local fix after that canary:
+
+- data-model normalization now infers explicit FK references for obvious `_id` fields
+  - example: `tenant_id` with type `uuid foreign key` becomes `uuid foreign key references Tenant(id)`
+
+Files:
+
+- `backend/internal/agents/build_spec.go`
+- `backend/internal/agents/orchestration_contracts_test.go`
+
+Next exact step:
+
+1. Push the FK-reference normalization fix
+2. Wait for Render to deploy
+3. Rerun the paid full-stack canary again
+4. If green, run repeated paid canaries across power modes and autoscaled conditions

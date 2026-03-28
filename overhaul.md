@@ -1108,6 +1108,32 @@ Date: 2026-03-28
 
 Change summary:
 
+- Reran the paid full-stack canary on backend `started_at=2026-03-28T20:29:04.350552658Z`.
+- Found a new earlier blocker during contract/provider critique: schema fields like `tenant_id` were normalized as `uuid foreign key` without an explicit referenced table, which triggered a provider critique blocker even though the relationship was obvious.
+- Extended data-model normalization to infer explicit `references Model(id)` clauses for obvious foreign keys such as `tenant_id -> Tenant(id)` before the build contract is critiqued.
+
+Files changed:
+
+- `backend/internal/agents/build_spec.go`
+- `backend/internal/agents/orchestration_contracts_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/build_spec.go internal/agents/orchestration_contracts_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestCompileBuildContractFromPlanInfersForeignKeyReferences|TestCompileBuildContractFromPlanNormalizesUniqueTypeQualifiers|TestVerifyAndNormalizeBuildContractAcceptsNextFullstackScaffoldContract'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Reran the paid full-stack production canary on backend `started_at=2026-03-28T20:11:29.002243633Z`.
 - Confirmed the previous generated-test blocker is fixed: the build now clears testing and enters review before failing.
 - Found the next deterministic blocker at `95-97%`: generated JSX inside a `.ts` provider file (`src/hooks/useAuth.ts`) caused esbuild to fail with `Expected ">" but found "value"`.

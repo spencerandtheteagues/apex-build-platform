@@ -693,7 +693,101 @@ func normalizeDataModels(models []DataModel) []DataModel {
 		})
 	}
 
+	decorateForeignKeyReferences(out)
 	return out
+}
+
+func decorateForeignKeyReferences(models []DataModel) {
+	if len(models) == 0 {
+		return
+	}
+
+	modelNames := make([]string, 0, len(models))
+	for _, model := range models {
+		if strings.TrimSpace(model.Name) != "" {
+			modelNames = append(modelNames, strings.TrimSpace(model.Name))
+		}
+	}
+
+	for mi := range models {
+		model := &models[mi]
+		relationTargets := make(map[string]string, len(model.Relations))
+		for _, relation := range model.Relations {
+			field := strings.TrimSpace(relation.Field)
+			target := strings.TrimSpace(relation.Target)
+			if field != "" && target != "" {
+				relationTargets[strings.ToLower(field)] = target
+			}
+		}
+
+		for fi := range model.Fields {
+			field := &model.Fields[fi]
+			if !strings.Contains(strings.ToLower(field.Type), "foreign key") ||
+				strings.Contains(strings.ToLower(field.Type), "references") {
+				continue
+			}
+
+			target := strings.TrimSpace(relationTargets[strings.ToLower(field.Name)])
+			if target == "" {
+				target = inferForeignKeyTargetModel(field.Name, modelNames)
+			}
+			if target == "" {
+				continue
+			}
+			field.Type = strings.TrimSpace(field.Type) + " references " + target + "(id)"
+		}
+	}
+}
+
+func inferForeignKeyTargetModel(fieldName string, modelNames []string) string {
+	field := strings.TrimSpace(strings.ToLower(fieldName))
+	if field == "" {
+		return ""
+	}
+
+	candidates := make([]string, 0, 3)
+	if strings.HasSuffix(field, "_id") {
+		base := strings.TrimSuffix(field, "_id")
+		if base != "" {
+			candidates = append(candidates, base)
+			if strings.HasSuffix(base, "s") {
+				candidates = append(candidates, strings.TrimSuffix(base, "s"))
+			} else {
+				candidates = append(candidates, base+"s")
+			}
+		}
+	}
+	if strings.HasSuffix(field, "id") && !strings.HasSuffix(field, "_id") {
+		base := strings.TrimSuffix(field, "id")
+		base = strings.TrimSuffix(base, "_")
+		if base != "" {
+			candidates = append(candidates, base)
+		}
+	}
+
+	for _, candidate := range dedupeStrings(candidates) {
+		candidateNorm := normalizeDataModelIdentifier(candidate)
+		for _, modelName := range modelNames {
+			if normalizeDataModelIdentifier(modelName) == candidateNorm {
+				return modelName
+			}
+		}
+	}
+	return ""
+}
+
+func normalizeDataModelIdentifier(name string) string {
+	trimmed := strings.TrimSpace(strings.ToLower(name))
+	if trimmed == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range trimmed {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func normalizeModelFields(fields []ModelField) []ModelField {

@@ -197,6 +197,48 @@ func TestCompileBuildContractFromPlanNormalizesUniqueTypeQualifiers(t *testing.T
 	}
 }
 
+func TestCompileBuildContractFromPlanInfersForeignKeyReferences(t *testing.T) {
+	t.Parallel()
+
+	plan := &BuildPlan{
+		ID:      "plan-fk-refs",
+		BuildID: "build-fk-refs",
+		AppType: "fullstack",
+		TechStack: TechStack{
+			Frontend: "react",
+			Backend:  "node",
+			Database: "postgres",
+		},
+		DataModels: []DataModel{
+			{
+				Name: "Tenant",
+				Fields: []ModelField{
+					{Name: "id", Type: "uuid primary key"},
+				},
+			},
+			{
+				Name: "User",
+				Fields: []ModelField{
+					{Name: "tenant_id", Type: "uuid foreign key"},
+				},
+			},
+		},
+	}
+
+	contract := compileBuildContractFromPlan("build-fk-refs", &IntentBrief{AppType: "fullstack"}, plan)
+	if contract == nil {
+		t.Fatal("expected contract")
+	}
+	if len(contract.DBSchemaContract) != 2 {
+		t.Fatalf("expected normalized schema models, got %+v", contract.DBSchemaContract)
+	}
+
+	userField := contract.DBSchemaContract[1].Fields[0]
+	if userField.Type != "uuid foreign key references Tenant(id)" {
+		t.Fatalf("expected tenant_id foreign key reference to be inferred, got %+v", userField)
+	}
+}
+
 func TestCompileBuildContractFromPlanSeedsAuthEndpointsFromIntent(t *testing.T) {
 	t.Parallel()
 
