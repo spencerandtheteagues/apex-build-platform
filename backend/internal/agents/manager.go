@@ -12140,6 +12140,7 @@ func (am *AgentManager) broadcast(buildID string, msg *WSMessage) {
 			shouldPersist = shouldPersistBuildSnapshotMessage(msg.Type)
 		}
 		enrichBuildMessageSnapshotStateLocked(build, msg)
+		normalizeBuildMessageProgress(msg, copyBuildSnapshotStateLocked(build), build.Status)
 		entry, ok := buildActivityEntryForMessageLocked(build, msg)
 		if ok {
 			appendBuildActivityEntryLocked(build, entry)

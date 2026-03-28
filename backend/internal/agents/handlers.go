@@ -621,6 +621,8 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 			errorMessage = latestFailedTaskErrorLocked(build)
 		}
 		interaction := copyBuildInteractionStateLocked(build)
+		snapshotState := copyBuildSnapshotStateLocked(build)
+		displayProgress := presentedLiveBuildProgress(build.Progress, snapshotState, build.Status)
 
 		response := gin.H{
 			"id":                     build.ID,
@@ -630,7 +632,7 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 			"provider_mode":          build.ProviderMode,
 			"require_preview_ready":  build.RequirePreviewReady,
 			"description":            build.Description,
-			"progress":               build.Progress,
+			"progress":               displayProgress,
 			"agents_count":           len(build.Agents),
 			"tasks_count":            len(build.Tasks),
 			"checkpoints":            len(build.Checkpoints),
@@ -642,7 +644,7 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 			"live":                   true,
 			"restored_from_snapshot": restored,
 		}
-		for key, value := range buildSnapshotStateResponseFields(copyBuildSnapshotStateLocked(build), string(build.Status), userPlan) {
+		for key, value := range buildSnapshotStateResponseFields(snapshotState, string(build.Status), userPlan) {
 			response[key] = value
 		}
 		c.JSON(http.StatusOK, response)
@@ -790,6 +792,75 @@ func presentedSnapshotProgress(snapshot *models.CompletedBuild, status BuildStat
 	return progress
 }
 
+func presentedLiveBuildProgress(progress int, state BuildSnapshotState, status BuildStatus) int {
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 100 {
+		progress = 100
+	}
+	if status == BuildCompleted && progress < 100 {
+		return 100
+	}
+	if !isActiveBuildStatus(string(status)) {
+		return progress
+	}
+	_, phaseMax, ok := buildPhaseProgressWindow(state.CurrentPhase, status)
+	if ok && progress > phaseMax {
+		return phaseMax
+	}
+	return progress
+}
+
+func normalizeBuildMessageProgress(msg *WSMessage, state BuildSnapshotState, status BuildStatus) {
+	if msg == nil || msg.Data == nil {
+		return
+	}
+	data, ok := msg.Data.(map[string]any)
+	if !ok {
+		return
+	}
+	progress, ok := progressValue(data["progress"])
+	if !ok {
+		return
+	}
+	data["progress"] = presentedLiveBuildProgress(progress, state, status)
+}
+
+func progressValue(value any) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case int8:
+		return int(v), true
+	case int16:
+		return int(v), true
+	case int32:
+		return int(v), true
+	case int64:
+		return int(v), true
+	case uint:
+		return int(v), true
+	case uint8:
+		return int(v), true
+	case uint16:
+		return int(v), true
+	case uint32:
+		return int(v), true
+	case uint64:
+		return int(v), true
+	case float32:
+		return int(v), true
+	case float64:
+		return int(v), true
+	case json.Number:
+		if parsed, err := v.Int64(); err == nil {
+			return int(parsed), true
+		}
+	}
+	return 0, false
+}
+
 // buildSnapshotStateResponseFields serialises BuildSnapshotState into a gin.H
 // ready for JSON response. When currentPlan is a paid tier (non-empty, non-"free")
 // any stale upgrade_required flag stored in the snapshot is cleared so that
@@ -918,6 +989,8 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 
 		agents := orderedBuildAgents(build.Agents)
 		interaction := copyBuildInteractionStateLocked(build)
+		snapshotState := copyBuildSnapshotStateLocked(build)
+		displayProgress := presentedLiveBuildProgress(build.Progress, snapshotState, build.Status)
 
 		response := gin.H{
 			"id":                     build.ID,
@@ -933,7 +1006,7 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 			"agents":                 agents,
 			"tasks":                  build.Tasks,
 			"checkpoints":            build.Checkpoints,
-			"progress":               build.Progress,
+			"progress":               displayProgress,
 			"created_at":             build.CreatedAt,
 			"updated_at":             build.UpdatedAt,
 			"completed_at":           build.CompletedAt,
@@ -945,7 +1018,7 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 			"live":                   isActiveBuildStatus(string(build.Status)),
 			"restored_from_snapshot": restored,
 		}
-		for key, value := range buildSnapshotStateResponseFields(copyBuildSnapshotStateLocked(build), string(build.Status), userPlan) {
+		for key, value := range buildSnapshotStateResponseFields(snapshotState, string(build.Status), userPlan) {
 			response[key] = value
 		}
 		c.JSON(http.StatusOK, response)

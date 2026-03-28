@@ -990,6 +990,30 @@ Date: 2026-03-27
 
 Change summary:
 
+- Fixed the remaining live progress-truth bug after the paid full-stack canary succeeded: active builds could briefly expose raw internal progress like `99%` even while still in early phases such as architecture or frontend UI.
+- Added a presentation-only live progress normalizer that caps active build progress to the current phase window while leaving internal orchestration state untouched.
+- Applied that normalization consistently across the status/detail APIs, websocket build-state sync, and outgoing build progress/error messages so the UI and canaries see the same truthful phase-bounded progress.
+- Added regressions covering live status, live build details, and outbound websocket/build-progress normalization.
+
+Files changed:
+
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/websocket.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/handlers.go internal/agents/handlers_test.go internal/agents/websocket.go internal/agents/manager.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestGetBuildStatusNormalizesLiveProgressWithinPhaseWindow|TestGetBuildDetailsNormalizesLiveProgressWithinPhaseWindow|TestNormalizeBuildMessageProgressCapsActiveBuildUpdates|TestMarkQueuedTaskExecutionStartedPromotesPendingRetryTask|TestCheckIntegrationCoherenceIgnoresFrontendTestOnlyDeadRoutes'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Date: 2026-03-27
+
+Change summary:
+
 - Confirmed on the next live paid full-stack canary that the Data Foundation stall was fixed; the build now advances through testing/review and fails on a later integration validator.
 - Fixed a new false-positive validator path: `checkIntegrationCoherence` was scanning generated `__tests__`, `.test.*`, and `.spec.*` files as if they were real runtime frontend dependencies.
 - That allowed test-only dead-route checks such as `/api/nonexistent-route` to fail an otherwise valid full-stack build during final integration validation.

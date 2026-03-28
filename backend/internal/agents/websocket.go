@@ -508,12 +508,13 @@ func (c *WSConnection) sendBuildState() {
 	}
 
 	// Send build info
+	snapshotState := copyBuildSnapshotStateLocked(build)
 	dataFields := map[string]any{
 		"status":       string(build.Status),
 		"mode":         string(build.Mode),
 		"power_mode":   string(build.PowerMode),
 		"description":  build.Description,
-		"progress":     build.Progress,
+		"progress":     presentedLiveBuildProgress(build.Progress, snapshotState, build.Status),
 		"agents":       agentsList,
 		"agents_count": len(agentsList),
 		"tasks":        tasksList,
@@ -528,7 +529,7 @@ func (c *WSConnection) sendBuildState() {
 		"messages":     interaction.Messages,
 		"interaction":  interaction,
 	}
-	for key, value := range buildSnapshotStateResponseFields(copyBuildSnapshotStateLocked(build), string(build.Status)) {
+	for key, value := range buildSnapshotStateResponseFields(snapshotState, string(build.Status)) {
 		dataFields[key] = value
 	}
 

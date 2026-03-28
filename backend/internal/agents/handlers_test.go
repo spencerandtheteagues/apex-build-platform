@@ -263,6 +263,98 @@ func TestGetBuildStatusRestoresActiveSnapshotOnRead(t *testing.T) {
 	}
 }
 
+func TestGetBuildStatusNormalizesLiveProgressWithinPhaseWindow(t *testing.T) {
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+
+	build := &Build{
+		ID:          "live-progress-status",
+		UserID:      1,
+		Status:      BuildInProgress,
+		Description: "Live build should not overstate architecture progress",
+		Progress:    99,
+		Agents:      map[string]*Agent{},
+		Tasks:       []*Task{},
+		SnapshotState: BuildSnapshotState{
+			CurrentPhase: "architecture",
+		},
+	}
+	am.builds[build.ID] = build
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/live-progress-status/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if got := int(body["progress"].(float64)); got != 19 {
+		t.Fatalf("expected architecture progress to be capped at 19, got %d", got)
+	}
+}
+
+func TestGetBuildDetailsNormalizesLiveProgressWithinPhaseWindow(t *testing.T) {
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+
+	build := &Build{
+		ID:          "live-progress-details",
+		UserID:      1,
+		Status:      BuildReviewing,
+		Description: "Live build details should not overstate review progress",
+		Progress:    99,
+		Agents:      map[string]*Agent{},
+		Tasks:       []*Task{},
+		SnapshotState: BuildSnapshotState{
+			CurrentPhase: "review",
+		},
+	}
+	am.builds[build.ID] = build
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/live-progress-details", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if got := int(body["progress"].(float64)); got != 98 {
+		t.Fatalf("expected review progress to be capped at 98, got %d", got)
+	}
+}
+
+func TestNormalizeBuildMessageProgressCapsActiveBuildUpdates(t *testing.T) {
+	msg := &WSMessage{
+		Type: WSBuildProgress,
+		Data: map[string]any{
+			"progress": 99,
+		},
+	}
+
+	normalizeBuildMessageProgress(msg, BuildSnapshotState{CurrentPhase: "frontend_ui"}, BuildInProgress)
+
+	data := msg.Data.(map[string]any)
+	if got := data["progress"]; got != 44 {
+		t.Fatalf("expected frontend_ui progress to be capped at 44, got %v", got)
+	}
+}
+
 func TestPreflightReturnsReadyWithProviders(t *testing.T) {
 	am := &AgentManager{
 		aiRouter: &stubPreflight{
