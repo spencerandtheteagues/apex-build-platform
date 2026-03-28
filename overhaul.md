@@ -1104,6 +1104,59 @@ Commit hash if pushed:
 - Local: pending
 - Remote: pending
 
+Date: 2026-03-28
+
+Change summary:
+
+- Fixed the live paid-canary failure class where provider verification could hard-block a generated task because a top-level generated test file such as `tests/verify-integration.ts` was truncated mid-function.
+- Added a deterministic pre-acceptance repair that replaces truncated generated JS/TS test artifacts with compile-safe placeholder verification content before provider verification aborts the task.
+- Broadened syntax-target parsing to recognize abrupt-EOF / missing-closing-brace verifier messages, and fixed root-level `tests/...` paths so they are consistently treated as test files.
+- Hardened production startup truth by defaulting preview runtime verification on in production when Chrome is available unless `APEX_PREVIEW_RUNTIME_VERIFY=false` is explicitly set.
+
+Files changed:
+
+- `backend/cmd/main.go`
+- `backend/cmd/main_test.go`
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w cmd/main.go cmd/main_test.go internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./cmd ./internal/agents -run 'TestPreviewRuntimeVerificationEnabled|TestParsePreviewSyntaxErrorTargetFiles|TestParsePreviewSyntaxErrorTargetFilesIncludesAbruptEOFMessages|TestApplyDeterministicProviderBlockedTestRepair'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
+- Fixed the production backend image definitions to use Go 1.26 so Render can actually build the shipped browser-proof preview runtime after `backend/go.mod` was raised to `go 1.26`.
+- Aligned all maintained backend Dockerfiles with the current module toolchain requirement instead of leaving Render on the stale `golang:1.25-alpine` builder image.
+- Treated this as a deploy-pipeline reliability fix rather than an orchestration fix: the product code was ready, but the hosted image could not be produced.
+
+Files changed:
+
+- `backend/Dockerfile`
+- `backend/Dockerfile.prod`
+- `backend/Dockerfile.production`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/preview`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
 Date: 2026-03-27
 
 Change summary:

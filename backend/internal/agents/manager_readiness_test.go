@@ -2409,6 +2409,54 @@ func TestParsePreviewSyntaxErrorTargetFiles(t *testing.T) {
 	}
 }
 
+func TestParsePreviewSyntaxErrorTargetFilesIncludesAbruptEOFMessages(t *testing.T) {
+	t.Parallel()
+
+	errs := []string{
+		`provider verification blocked task output: The file tests/verify-integration.ts ends abruptly without completing the function, resulting in a missing closing brace and compilation failure.`,
+	}
+
+	targets := parsePreviewSyntaxErrorTargetFiles(errs)
+	if len(targets) != 1 || targets[0] != "tests/verify-integration.ts" {
+		t.Fatalf("unexpected syntax target files: %+v", targets)
+	}
+}
+
+func TestApplyDeterministicProviderBlockedTestRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	output := &TaskOutput{
+		Files: []GeneratedFile{
+			{
+				Path:     "tests/verify-integration.ts",
+				Language: "typescript",
+				Content:  "export async function verifyIntegration() {\n  const result = await",
+			},
+		},
+		TruncatedFiles: []string{"tests/verify-integration.ts"},
+	}
+
+	repaired, summary := am.applyDeterministicProviderBlockedTestRepair(output, []string{
+		`The file tests/verify-integration.ts ends abruptly without completing the function, resulting in a missing closing brace and compilation failure.`,
+	})
+	if !repaired {
+		t.Fatal("expected deterministic provider-blocked test repair to apply")
+	}
+	if !strings.Contains(summary, "tests/verify-integration.ts") {
+		t.Fatalf("unexpected repair summary: %q", summary)
+	}
+	if strings.Contains(output.Files[0].Content, "await") {
+		t.Fatalf("expected truncated content to be replaced, got %q", output.Files[0].Content)
+	}
+	if !strings.Contains(output.Files[0].Content, "generated verification placeholder") {
+		t.Fatalf("expected placeholder verification content, got %q", output.Files[0].Content)
+	}
+	if len(output.TruncatedFiles) != 0 {
+		t.Fatalf("expected repaired file to be removed from truncated files, got %+v", output.TruncatedFiles)
+	}
+}
+
 func TestRepairDoubleSingleQuoteCorruption(t *testing.T) {
 	t.Parallel()
 

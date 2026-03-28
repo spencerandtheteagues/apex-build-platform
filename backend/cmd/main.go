@@ -434,7 +434,13 @@ func main() {
 	// The bridge converts between agents.VerifiableFile and preview.VerifiableFile
 	// so neither package needs to import the other.
 	// APEX_PREVIEW_RUNTIME_VERIFY=true enables live Vite boot proof (+30-90 s per build).
-	runtimeVerifyEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("APEX_PREVIEW_RUNTIME_VERIFY")), "true")
+	// In production, default it on when Chrome is available unless explicitly disabled.
+	chromePath := preview.FindChrome()
+	runtimeVerifyEnabled := previewRuntimeVerificationEnabled(
+		strings.TrimSpace(os.Getenv("ENVIRONMENT")),
+		strings.TrimSpace(os.Getenv("APEX_PREVIEW_RUNTIME_VERIFY")),
+		chromePath,
+	)
 	var pvVerifier *preview.Verifier
 	if runtimeVerifyEnabled {
 		pvVerifier = preview.NewVerifierWithRuntime(previewHandler.GetServerRunner())
@@ -446,7 +452,6 @@ func main() {
 	agentManager.SetPreviewVerifier(&previewVerifierBridge{verifier: pvVerifier})
 
 	// Surface runtime/browser verify capability in /health/features.
-	chromePath := preview.FindChrome()
 	pvRuntimeDetails := map[string]any{
 		"enabled":          runtimeVerifyEnabled,
 		"browser_proof":    runtimeVerifyEnabled && chromePath != "",
@@ -1712,6 +1717,17 @@ func getEnvInt(key string, defaultValue int) int {
 		}
 	}
 	return defaultValue
+}
+
+func previewRuntimeVerificationEnabled(environment, explicitSetting, chromePath string) bool {
+	setting := strings.TrimSpace(explicitSetting)
+	if strings.EqualFold(setting, "true") {
+		return true
+	}
+	if strings.EqualFold(setting, "false") {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(environment), "production") && strings.TrimSpace(chromePath) != ""
 }
 
 func getStatusIcon(enabled bool) string {
