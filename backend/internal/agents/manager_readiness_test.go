@@ -2437,7 +2437,7 @@ func TestApplyDeterministicProviderBlockedTestRepair(t *testing.T) {
 		TruncatedFiles: []string{"tests/verify-integration.ts"},
 	}
 
-	repaired, summary := am.applyDeterministicProviderBlockedTestRepair(output, []string{
+	repaired, summary := am.applyDeterministicProviderBlockedTestRepair(nil, output, []string{
 		`The file tests/verify-integration.ts ends abruptly without completing the function, resulting in a missing closing brace and compilation failure.`,
 	})
 	if !repaired {
@@ -2454,6 +2454,142 @@ func TestApplyDeterministicProviderBlockedTestRepair(t *testing.T) {
 	}
 	if len(output.TruncatedFiles) != 0 {
 		t.Fatalf("expected repaired file to be removed from truncated files, got %+v", output.TruncatedFiles)
+	}
+}
+
+func TestApplyDeterministicProviderBlockedTestRepairAddsMissingJestDependency(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-provider-test-tooling",
+		Tasks: []*Task{
+			{
+				ID:     "task-testing",
+				Type:   TaskTest,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "agency-ops",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}`,
+						},
+						{
+							Path: "server/__tests__/api.test.ts",
+							Content: `import { describe, it, expect } from "@jest/globals";
+
+describe("health", () => {
+  it("works", () => {
+    expect(true).toBe(true);
+  });
+});`,
+						},
+					},
+				},
+			},
+		},
+	}
+	output := &TaskOutput{
+		Files: []GeneratedFile{
+			{
+				Path:    "server/index.ts",
+				Content: `console.log("backend fix");`,
+			},
+		},
+	}
+
+	repaired, summary := am.applyDeterministicProviderBlockedTestRepair(build, output, []string{
+		`The 'AFTER' version of package.json does not add Jest to devDependencies, which is required for the test script to run and would cause build failures.`,
+	})
+	if !repaired {
+		t.Fatal("expected deterministic provider-blocked manifest repair to apply")
+	}
+	if !strings.Contains(summary, "package.json") || !strings.Contains(summary, "jest") {
+		t.Fatalf("unexpected repair summary: %q", summary)
+	}
+
+	var manifest string
+	for _, file := range output.Files {
+		if file.Path == "package.json" {
+			manifest = file.Content
+			break
+		}
+	}
+	if manifest == "" {
+		t.Fatal("expected repaired output to include package.json")
+	}
+	if !strings.Contains(manifest, `"jest"`) {
+		t.Fatalf("expected repaired manifest to include jest dependency, got %s", manifest)
+	}
+}
+
+func TestApplyDeterministicPreValidationNormalizationAddsJestDependencyForGeneratedJestTests(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:   "build-prevalidation-jest-tests",
+		Mode: ModeFast,
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-ui",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "agency-ops",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}`,
+						},
+						{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+						{Path: "src/main.tsx", Content: `import React from "react"; import ReactDOM from "react-dom/client"; ReactDOM.createRoot(document.getElementById("root")!).render(<div />);`},
+						{Path: "src/App.tsx", Content: `export default function App(){ return <div>ok</div>; }`},
+						{Path: "src/__tests__/app.test.tsx", Content: `import { describe, it, expect } from "@jest/globals"; describe("App", () => { it("renders", () => { expect(true).toBe(true); }); });`},
+					},
+				},
+			},
+		},
+	}
+
+	if !am.applyDeterministicPreValidationNormalization(build) {
+		t.Fatalf("expected pre-validation normalization to trigger for generated jest tests")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+
+	manifest := byPath["package.json"]
+	if !strings.Contains(manifest, `"jest"`) {
+		t.Fatalf("expected jest dependency to be added, got %s", manifest)
 	}
 }
 

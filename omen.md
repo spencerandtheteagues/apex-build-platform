@@ -340,3 +340,43 @@ Concrete objective:
   - routes are imported from another file and mounted with `app.use(...)`
   - router setup happens through modularized handlers
   - Express app creation and route registration are split across files
+
+## Newest Live State
+
+Render / production status:
+
+- backend live and healthy after the runtime-preview deployment
+- `preview_runtime_verify` is ready in production
+- Chrome/browser proof is available in the live backend
+
+Newest paid full-stack canary:
+
+- build id: `295e7be8-263c-40f1-94b0-e0e1c9a260e0`
+- path improved:
+  - planning passed
+  - generation passed
+  - testing passed
+  - review advanced to the high 90s
+- new blocker:
+  - the old `server/index.ts defines no routes` preview-verifier false positive is fixed
+  - the build now fails later at `97%` because a provider-verification repair task can veto the output when generated Jest-style tests exist but `package.json` does not yet declare `jest`
+
+Exact live failure:
+
+- `Failed after 1 attempts: provider verification blocked task output: The 'AFTER' version of package.json does not add Jest to devDependencies, which is required for the test script to run and would cause build failures.`
+
+What was fixed locally after that canary:
+
+- `backend/internal/agents/manager.go`
+  - provider-blocked deterministic repairs now patch missing test-tooling manifest dependencies instead of immediately failing the task
+  - pre-validation normalization now recognizes generated `@jest/globals` usage and adds `jest`
+- `backend/internal/agents/manager_readiness_test.go`
+  - added regressions for:
+    - provider-blocked manifest repair for missing `jest`
+    - pre-validation normalization adding `jest` for generated Jest tests
+
+Current next step:
+
+- push/deploy the new orchestration repair
+- rerun the paid full-stack canary
+- if it passes, move immediately to repeated canaries across power modes / autoscaled conditions

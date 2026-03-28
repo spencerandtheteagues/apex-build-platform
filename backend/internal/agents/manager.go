@@ -3819,7 +3819,7 @@ func (am *AgentManager) executeTask(task *Task) {
 				selectedCandidate.Output.Messages = append(selectedCandidate.Output.Messages, report.Warnings...)
 			}
 			if report.Status == VerificationBlocked && len(report.Blockers) > 0 {
-				if repaired, summary := am.applyDeterministicProviderBlockedTestRepair(selectedCandidate.Output, report.Blockers); repaired {
+				if repaired, summary := am.applyDeterministicProviderBlockedTestRepair(build, selectedCandidate.Output, report.Blockers); repaired {
 					report.Status = VerificationPassed
 					report.Warnings = append(report.Warnings, "Applied deterministic truncated generated test repair before task acceptance: "+summary)
 					report.Blockers = nil
@@ -6501,52 +6501,197 @@ if (__apexDescribe && __apexTest) {
 `) + "\n"
 }
 
-func (am *AgentManager) applyDeterministicProviderBlockedTestRepair(output *TaskOutput, blockers []string) (bool, string) {
-	if output == nil || len(output.Files) == 0 || len(blockers) == 0 {
+func (am *AgentManager) applyDeterministicProviderBlockedTestRepair(build *Build, output *TaskOutput, blockers []string) (bool, string) {
+	if output == nil || len(blockers) == 0 {
 		return false, ""
 	}
 
+	appliedSummaries := make([]string, 0, 2)
 	targets := parseTruncatedGeneratedTestRepairTargets(blockers)
-	if len(targets) == 0 {
+	if len(targets) > 0 && len(output.Files) > 0 {
+		targetSet := make(map[string]bool, len(targets))
+		for _, target := range targets {
+			targetSet[strings.ToLower(target)] = true
+		}
+
+		applied := make([]string, 0, len(targets))
+		for i := range output.Files {
+			path := sanitizeFilePath(strings.TrimSpace(output.Files[i].Path))
+			if path == "" || !targetSet[strings.ToLower(path)] {
+				continue
+			}
+			output.Files[i].Content = placeholderGeneratedTestFileContent(path)
+			output.Files[i].Size = int64(len(output.Files[i].Content))
+			if strings.TrimSpace(output.Files[i].Language) == "" {
+				output.Files[i].Language = am.detectLanguage(path)
+			}
+			applied = append(applied, path)
+		}
+		if len(applied) > 0 {
+			if len(output.TruncatedFiles) > 0 {
+				filtered := make([]string, 0, len(output.TruncatedFiles))
+				for _, path := range output.TruncatedFiles {
+					if !targetSet[strings.ToLower(strings.TrimSpace(path))] {
+						filtered = append(filtered, path)
+					}
+				}
+				output.TruncatedFiles = filtered
+			}
+			sort.Strings(applied)
+			appliedSummaries = append(appliedSummaries, "placeholder tests: "+strings.Join(applied, ", "))
+		}
+	}
+
+	if repaired, summary := am.applyDeterministicProviderBlockedTestingManifestRepair(build, output, blockers); repaired {
+		appliedSummaries = append(appliedSummaries, summary)
+	}
+
+	if len(appliedSummaries) == 0 {
 		return false, ""
 	}
 
-	targetSet := make(map[string]bool, len(targets))
-	for _, target := range targets {
-		targetSet[strings.ToLower(target)] = true
+	summary := strings.Join(appliedSummaries, "; ")
+	output.Messages = append(output.Messages, "Applied deterministic provider-blocked test repair: "+summary)
+	return true, summary
+}
+
+func parseProviderBlockedTestingDependencyNames(blockers []string) []string {
+	if len(blockers) == 0 {
+		return nil
 	}
 
-	applied := make([]string, 0, len(targets))
-	for i := range output.Files {
-		path := sanitizeFilePath(strings.TrimSpace(output.Files[i].Path))
-		if path == "" || !targetSet[strings.ToLower(path)] {
+	known := []string{
+		"@testing-library/jest-dom",
+		"@testing-library/react",
+		"@types/jest",
+		"jest-environment-jsdom",
+		"identity-obj-proxy",
+		"ts-jest",
+		"vitest",
+		"jest",
+		"jsdom",
+	}
+
+	found := make([]string, 0, len(known))
+	for _, blocker := range blockers {
+		lower := strings.ToLower(blocker)
+		if !strings.Contains(lower, "package.json") {
 			continue
 		}
-		output.Files[i].Content = placeholderGeneratedTestFileContent(path)
-		output.Files[i].Size = int64(len(output.Files[i].Content))
-		if strings.TrimSpace(output.Files[i].Language) == "" {
-			output.Files[i].Language = am.detectLanguage(path)
+		for _, pkg := range known {
+			if strings.Contains(lower, strings.ToLower(pkg)) {
+				found = append(found, pkg)
+			}
 		}
-		applied = append(applied, path)
 	}
-	if len(applied) == 0 {
+
+	return dedupeStrings(found)
+}
+
+func upsertGeneratedFile(files *[]GeneratedFile, path, content, language string) {
+	if files == nil {
+		return
+	}
+	path = sanitizeFilePath(path)
+	if path == "" {
+		return
+	}
+	content = normalizeGeneratedFileContent(path, content)
+	for i := range *files {
+		if sanitizeFilePath((*files)[i].Path) != path {
+			continue
+		}
+		(*files)[i].Path = path
+		(*files)[i].Content = content
+		(*files)[i].Size = int64(len(content))
+		if strings.TrimSpace(language) != "" {
+			(*files)[i].Language = language
+		}
+		return
+	}
+	*files = append(*files, GeneratedFile{
+		Path:     path,
+		Content:  content,
+		Language: language,
+		Size:     int64(len(content)),
+	})
+}
+
+func (am *AgentManager) applyDeterministicProviderBlockedTestingManifestRepair(build *Build, output *TaskOutput, blockers []string) (bool, string) {
+	if am == nil || output == nil {
 		return false, ""
 	}
 
-	if len(output.TruncatedFiles) > 0 {
-		filtered := make([]string, 0, len(output.TruncatedFiles))
-		for _, path := range output.TruncatedFiles {
-			if !targetSet[strings.ToLower(strings.TrimSpace(path))] {
-				filtered = append(filtered, path)
-			}
-		}
-		output.TruncatedFiles = filtered
+	missingPkgs := parseProviderBlockedTestingDependencyNames(blockers)
+	if len(missingPkgs) == 0 {
+		return false, ""
 	}
 
-	sort.Strings(applied)
-	summary := strings.Join(applied, ", ")
-	output.Messages = append(output.Messages, "Applied deterministic truncated generated test repair for: "+summary)
-	return true, summary
+	currentFiles := output.Files
+	if build != nil {
+		currentFiles = mergeGeneratedFiles(am.collectGeneratedFiles(build), output.Files)
+	}
+	if len(currentFiles) == 0 {
+		return false, ""
+	}
+
+	manifestByPath := make(map[string]string)
+	changed := make([]string, 0, 2)
+	for _, manifestPath := range generatedManifestCandidates(currentFiles) {
+		content := ""
+		for _, file := range currentFiles {
+			if sanitizeFilePath(file.Path) == manifestPath {
+				content = file.Content
+				break
+			}
+		}
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+
+		var manifest previewManifest
+		if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+			continue
+		}
+
+		prefix := strings.TrimSuffix(filepath.ToSlash(manifestPath), "package.json")
+		signals := inspectGeneratedPackageSignals(currentFiles, prefix)
+		if !signals.hasNodeTests {
+			continue
+		}
+
+		pkgs := append([]string(nil), missingPkgs...)
+		if signals.usesJestGlobals && !manifestDeclaresDependency(manifest, "jest") {
+			pkgs = append(pkgs, "jest")
+		}
+		if signals.usesTestingLibrary && !manifestDeclaresDependency(manifest, "@testing-library/react") {
+			pkgs = append(pkgs, "@testing-library/react")
+		}
+		if signals.usesJestDOM && !manifestDeclaresDependency(manifest, "@testing-library/jest-dom") {
+			pkgs = append(pkgs, "@testing-library/jest-dom")
+		}
+		pkgs = dedupeStrings(pkgs)
+		if len(pkgs) == 0 {
+			continue
+		}
+
+		patched, added := patchManifestDependenciesJSON(content, pkgs)
+		if len(added) == 0 {
+			continue
+		}
+		manifestByPath[manifestPath] = patched
+		changed = append(changed, fmt.Sprintf("%s (%s)", manifestPath, strings.Join(added, ", ")))
+	}
+
+	if len(changed) == 0 {
+		return false, ""
+	}
+
+	for manifestPath, content := range manifestByPath {
+		upsertGeneratedFile(&output.Files, manifestPath, content, "json")
+	}
+	sort.Strings(changed)
+	return true, "manifest deps: " + strings.Join(changed, "; ")
 }
 
 type missingLocalModuleRepairTarget struct {
@@ -7078,6 +7223,7 @@ type generatedPackageSignals struct {
 	hasNodeTests           bool
 	usesTestingLibrary     bool
 	usesJestDOM            bool
+	usesJestGlobals        bool
 	usesVitestConfigImport bool
 }
 
@@ -7117,6 +7263,9 @@ func inspectGeneratedPackageSignals(files []GeneratedFile, prefix string) genera
 		}
 		if strings.Contains(contentLower, "@testing-library/jest-dom") {
 			signals.usesJestDOM = true
+		}
+		if strings.Contains(contentLower, "@jest/globals") {
+			signals.usesJestGlobals = true
 		}
 		if strings.Contains(contentLower, "vitest/config") {
 			signals.usesVitestConfigImport = true
@@ -7323,6 +7472,9 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 		if signals.usesJestDOM && !manifestDeclaresDependency(manifest, "@testing-library/jest-dom") {
 			missingPkgs = append(missingPkgs, "@testing-library/jest-dom")
 		}
+		if signals.usesJestGlobals && !manifestDeclaresDependency(manifest, "jest") {
+			missingPkgs = append(missingPkgs, "jest")
+		}
 		missingPkgs = dedupeStrings(missingPkgs)
 
 		updatedContent := content
@@ -7348,6 +7500,9 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 			}
 			if signals.usesJestDOM && !manifestDeclaresDependency(manifest, "@testing-library/jest-dom") {
 				missingPkgs = append(missingPkgs, "@testing-library/jest-dom")
+			}
+			if signals.usesJestGlobals && !manifestDeclaresDependency(manifest, "jest") {
+				missingPkgs = append(missingPkgs, "jest")
 			}
 			missingPkgs = dedupeStrings(missingPkgs)
 		}

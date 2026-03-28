@@ -1106,6 +1106,41 @@ Commit hash if pushed:
 
 Date: 2026-03-28
 
+Change summary:
+
+- Ran a fresh paid full-stack production canary against the live backend with runtime preview proof enabled.
+- Confirmed the earlier preview-route false positive is fixed: the canary advanced through testing and review instead of failing at the old `server/index.ts defines no routes` check.
+- Found a new narrower blocker at `97%`: a late provider-verification repair task can fail the build when generated Jest-style tests exist but the root manifest does not yet declare the required test tooling.
+- Added deterministic self-healing for that failure path in orchestration:
+  - provider-blocked test repairs can now patch `package.json` with missing test-tooling dependencies instead of terminal-failing the task
+  - pre-validation normalization now also recognizes generated `@jest/globals` usage and adds `jest` before final readiness validation
+
+Latest live paid canary:
+
+- build id: `295e7be8-263c-40f1-94b0-e0e1c9a260e0`
+- terminal status: `failed`
+- terminal error:
+  - `Failed after 1 attempts: provider verification blocked task output: The 'AFTER' version of package.json does not add Jest to devDependencies, which is required for the test script to run and would cause build failures.`
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicProviderBlockedTestRepair|TestApplyDeterministicProviderBlockedTestRepairAddsMissingJestDependency|TestApplyDeterministicPreValidationNormalizationAddsJestDependencyForGeneratedJestTests'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
 Live canary status update:
 
 - Pushed `fix: sync seeded auth contracts into build plans` as `9c78b7d` and confirmed Render rolled the backend at `started_at=2026-03-28T18:51:28.564317981Z`.
