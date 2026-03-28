@@ -40,6 +40,7 @@ func TestDetermineRetryStrategyNonRetriable(t *testing.T) {
 		{"quota exhausted", "quota exhausted for this project", "non_retriable"},
 		{"rate limit is retriable", "429 rate limit exceeded", "backoff"},
 		{"timeout is retriable", "connection timeout after 30s", "switch_provider"},
+		{"deadline exceeded is retriable", "context deadline exceeded", "switch_provider"},
 		{"context length is retriable", "context length exceeded", "reduce_context"},
 	}
 

@@ -2498,7 +2498,7 @@ func normalizeFailureClass(message string) string {
 		return "truncation"
 	case strings.Contains(lower, "validation"):
 		return "final_validation_failure"
-	case strings.Contains(lower, "timeout"):
+	case strings.Contains(lower, "timeout"), strings.Contains(lower, "deadline exceeded"), strings.Contains(lower, "context canceled"):
 		return "timeout"
 	case strings.Contains(lower, "credit"):
 		return "budget"

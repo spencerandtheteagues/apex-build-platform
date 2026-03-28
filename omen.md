@@ -630,3 +630,41 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start a fresh paid full-stack canary
 4. If it clears architecture + contract critique cleanly, continue pushing toward the first fully green paid canary
+
+## Latest Reliability Slice: Stale In-Progress Task Recovery
+
+What changed after the latest live paid canary:
+
+- the newest deployed backend fixed phase handoff and actor-reference contract normalization
+- the next live paid canary advanced cleanly into `Frontend UI`
+- the remaining failure mode was narrower: `generate_ui` could stay `in_progress` for too long with no build updates, and the inactivity monitor would not recover it because it only knew how to recover `pending>0 && in_progress=0`
+
+Newest local fix:
+
+- task execution now uses a provider-aware timeout budget instead of the previous coarse `15m` per-task wrapper
+- the inactivity monitor can now detect a stale `in_progress` task, synthesize a timeout failure for that exact attempt, and hand control back to the existing retry/provider-switch logic
+- stale results from the cancelled older attempt are now ignored if a newer retry of the same task is already underway
+- `context deadline exceeded` / `context canceled` are normalized into the transient timeout class so retry strategy stays truthful
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/reliability_helpers_test.go`
+- `backend/internal/agents/preflight_test.go`
+- `backend/internal/agents/provider_failure_matrix_test.go`
+- `backend/internal/agents/orchestration_contracts.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestRecoverStaleInProgressTasksQueuesSyntheticTimeoutFailure|TestProcessResultDropsStaleTaskAttemptResult|TestDetermineRetryStrategyNonRetriable|TestDetermineRetryStrategyFullMatrix'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the stale-task recovery fix
+2. Wait for Render to deploy
+3. Start a fresh paid full-stack canary
+4. Watch specifically for any retry/provider-switch event on long `generate_ui` / `generate_api` attempts instead of a silent wedge
+5. If the canary completes, move immediately to repeated paid canaries across `fast`, `balanced`, and `max`

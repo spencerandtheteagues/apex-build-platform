@@ -1108,6 +1108,35 @@ Date: 2026-03-28
 
 Change summary:
 
+- Diagnosed the newest paid full-stack canary on the latest live backend: planning, contract critique, and phase handoff were all fixed, but the build could still wedge with `generate_ui` stuck `in_progress` and no new activity while the manager refused to intervene because something was still marked running.
+- Added task-level stale execution recovery to the orchestration core. The manager now computes a provider-aware per-task execution budget instead of relying on the old blanket `15m` deadline, and the inactivity monitor can synthesize a timeout failure for an overlong in-flight attempt so the normal retry/provider-switch path takes over before the whole build times out.
+- Added stale-attempt protection in result handling so a late result from an older cancelled/timed-out attempt cannot overwrite a newer retry of the same task.
+- Normalized `context deadline exceeded` / `context canceled` into the transient-timeout retry lane so timed-out cloud attempts consistently follow provider fallback instead of defaulting to generic retry.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/reliability_helpers_test.go`
+- `backend/internal/agents/preflight_test.go`
+- `backend/internal/agents/provider_failure_matrix_test.go`
+- `backend/internal/agents/orchestration_contracts.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestRecoverStaleInProgressTasksQueuesSyntheticTimeoutFailure|TestProcessResultDropsStaleTaskAttemptResult|TestDetermineRetryStrategyNonRetriable|TestDetermineRetryStrategyFullMatrix'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Live paid canary `f149c461-cce3-4f5d-a3ad-b5aeccc9de75` exposed the next contract-normalization gap after the phased-gap recovery push: actor-style foreign keys like `created_by`, `recorded_by`, and `assigned_to` were still reaching provider critique without explicit `references User(id)`.
 - Extended FK inference so actor-reference fields now map to common identity models (`User`, `Member`, `Agent`, `Admin`, `Profile`) instead of only handling `_id` suffixes.
 - Hardened relation-target normalization as well: if the planner emits raw targets like `Manager` or `Assignee` but the actual schema only has `User`, the compiler now rewrites those role aliases onto the real identity model instead of preserving a broken references clause.

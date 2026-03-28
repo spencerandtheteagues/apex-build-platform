@@ -141,6 +141,7 @@ type AgentManager struct {
 	ctxSelector     *ContextSelector     // smart file context selection for LLM prompts
 	chunkedEditor   *ChunkedEditor       // splits/reassembles large-file edits to stay within output token limits
 	previewVerifier BuildPreviewVerifier // optional preview readiness verifier (wired in main.go)
+	taskCancels     map[string]context.CancelFunc
 	mu              sync.RWMutex
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -176,6 +177,7 @@ type Message struct {
 type TaskResult struct {
 	TaskID  string
 	AgentID string
+	Attempt int
 	Success bool
 	Output  *TaskOutput
 	Error   error
@@ -198,6 +200,7 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 		errorAnalyzer: NewErrorAnalyzer(aiRouter, ""),
 		ctxSelector:   NewContextSelector(),
 		chunkedEditor: NewChunkedEditor(),
+		taskCancels:   make(map[string]context.CancelFunc),
 		ctx:           ctx,
 		cancel:        cancel,
 	}
@@ -932,6 +935,17 @@ func (am *AgentManager) runInactivityMonitor(buildID string) (normalExit bool) {
 			continue
 		}
 
+		// Recover task-level stalls before the whole build times out. If an
+		// in-progress task has exceeded its provider-aware execution window, synthesize
+		// a timeout failure for that attempt and let the normal retry/provider-fallback
+		// path take over.
+		if inProgressTasks > 0 &&
+			(status == BuildPlanning || status == BuildInProgress || status == BuildTesting || status == BuildReviewing) &&
+			am.recoverStaleInProgressTasks(build, timeSinceUpdate) {
+			warningCount = 0
+			continue
+		}
+
 		// Hard-stop builds that are stuck in an active state beyond a stall threshold.
 		// Only fire when there is genuinely nothing running — if tasks are in_progress
 		// they are actively making an AI call (which can legitimately take minutes for
@@ -1017,6 +1031,187 @@ func (am *AgentManager) buildStallTimeoutForBuild(build *Build) time.Duration {
 		seconds = maxAllowed
 	}
 	return time.Duration(seconds) * time.Second
+}
+
+func (am *AgentManager) taskExecutionTimeoutForTask(build *Build, task *Task, agent *Agent) time.Duration {
+	mode := PowerFast
+	if build != nil && build.PowerMode != "" {
+		mode = build.PowerMode
+	}
+
+	provider := ai.AIProvider("")
+	if agent != nil {
+		agent.mu.RLock()
+		provider = agent.Provider
+		agent.mu.RUnlock()
+	}
+
+	base := defaultGenerateTimeout(provider, mode)
+	candidatePasses := 1
+	if build != nil && task != nil && effectiveTaskRoutingMode(build, task) == RoutingModeDualCandidate {
+		candidatePasses = 2
+	}
+
+	timeout := time.Duration(candidatePasses) * base
+	timeout += 45 * time.Second
+
+	if build != nil && build.Mode == ModeFull {
+		timeout += 30 * time.Second
+	}
+	if task != nil {
+		switch task.Type {
+		case TaskFix, TaskTest, TaskReview:
+			timeout += 30 * time.Second
+		}
+		if task.RetryCount > 0 {
+			timeout += 15 * time.Second
+		}
+	}
+
+	return timeout
+}
+
+func (am *AgentManager) registerTaskExecutionCancel(taskID string, cancel context.CancelFunc) {
+	if strings.TrimSpace(taskID) == "" || cancel == nil {
+		return
+	}
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if am.taskCancels == nil {
+		am.taskCancels = make(map[string]context.CancelFunc)
+	}
+	am.taskCancels[taskID] = cancel
+}
+
+func (am *AgentManager) clearTaskExecutionCancel(taskID string) {
+	if strings.TrimSpace(taskID) == "" {
+		return
+	}
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if am.taskCancels == nil {
+		return
+	}
+	delete(am.taskCancels, taskID)
+}
+
+func (am *AgentManager) cancelTaskExecution(taskID string) bool {
+	if strings.TrimSpace(taskID) == "" {
+		return false
+	}
+	am.mu.Lock()
+	cancel := am.taskCancels[taskID]
+	if cancel != nil {
+		delete(am.taskCancels, taskID)
+	}
+	am.mu.Unlock()
+	if cancel == nil {
+		return false
+	}
+	cancel()
+	return true
+}
+
+type staleTaskRecovery struct {
+	taskID      string
+	agentID     string
+	attempt     int
+	timeout     time.Duration
+	staleFor    time.Duration
+	description string
+}
+
+func (am *AgentManager) recoverStaleInProgressTasks(build *Build, idleFor time.Duration) bool {
+	if build == nil {
+		return false
+	}
+
+	now := time.Now()
+	recoveries := make([]staleTaskRecovery, 0)
+
+	build.mu.Lock()
+	if build.Status == BuildFailed || build.Status == BuildCompleted || build.Status == BuildCancelled ||
+		build.Interaction.Paused || build.Interaction.WaitingForUser {
+		build.mu.Unlock()
+		return false
+	}
+	for _, task := range build.Tasks {
+		if task == nil || task.Status != TaskInProgress || task.StartedAt == nil {
+			continue
+		}
+
+		var agent *Agent
+		if assignedID := strings.TrimSpace(task.AssignedTo); assignedID != "" {
+			if existing := build.Agents[assignedID]; existing != nil {
+				agent = existing
+			} else {
+				am.mu.RLock()
+				agent = am.agents[assignedID]
+				am.mu.RUnlock()
+			}
+		}
+
+		timeout := am.taskExecutionTimeoutForTask(build, task, agent)
+		staleFor := now.Sub(*task.StartedAt)
+		if staleFor < timeout {
+			continue
+		}
+		if task.Input != nil {
+			if _, marked := task.Input["stale_recovery_attempt"]; marked && taskInputInt(task.Input, "stale_recovery_attempt") == task.RetryCount {
+				continue
+			}
+		}
+		if task.Input == nil {
+			task.Input = map[string]any{}
+		}
+		task.Input["stale_recovery_attempt"] = task.RetryCount
+		build.UpdatedAt = now
+		recoveries = append(recoveries, staleTaskRecovery{
+			taskID:      task.ID,
+			agentID:     task.AssignedTo,
+			attempt:     task.RetryCount,
+			timeout:     timeout,
+			staleFor:    staleFor,
+			description: task.Description,
+		})
+	}
+	build.mu.Unlock()
+
+	for _, recovery := range recoveries {
+		timeoutMessage := fmt.Sprintf(
+			"task execution timeout after %s without build activity (task stalled for %s)",
+			recovery.timeout.Round(time.Second),
+			recovery.staleFor.Round(time.Second),
+		)
+
+		am.broadcast(build.ID, &WSMessage{
+			Type:      WSBuildProgress,
+			BuildID:   build.ID,
+			Timestamp: now,
+			Data: map[string]any{
+				"phase":              "auto_recovery",
+				"status":             "warning",
+				"task_id":            recovery.taskID,
+				"agent_id":           recovery.agentID,
+				"timeout_seconds":    int(recovery.timeout.Seconds()),
+				"stale_seconds":      int(recovery.staleFor.Seconds()),
+				"inactivity_seconds": int(idleFor.Seconds()),
+				"message":            fmt.Sprintf("Task stalled while %s. Retrying with recovery guardrails...", firstNonEmptyString(strings.TrimSpace(recovery.description), "waiting for AI output")),
+			},
+		})
+
+		am.resultQueue <- &TaskResult{
+			TaskID:  recovery.taskID,
+			AgentID: recovery.agentID,
+			Attempt: recovery.attempt,
+			Success: false,
+			Error:   errors.New(timeoutMessage),
+		}
+		am.cancelTaskExecution(recovery.taskID)
+		log.Printf("Build %s: recovered stale task %s (attempt=%d idle=%s timeout=%s)", build.ID, recovery.taskID, recovery.attempt, recovery.staleFor.Round(time.Second), recovery.timeout.Round(time.Second))
+	}
+
+	return len(recoveries) > 0
 }
 
 // failBuildOnTimeout marks a timed-out build as failed and preserves partial artifacts.
@@ -3399,6 +3594,7 @@ func (am *AgentManager) markQueuedTaskExecutionStarted(agent *Agent, task *Task)
 // executeTask runs a task using the appropriate AI agent
 func (am *AgentManager) executeTask(task *Task) {
 	log.Printf("executeTask called for task %s (type: %s, assignedTo: %s)", task.ID, task.Type, task.AssignedTo)
+	attempt := task.RetryCount
 
 	am.mu.RLock()
 	agent, exists := am.agents[task.AssignedTo]
@@ -3408,6 +3604,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		log.Printf("Agent %s not found for task %s", task.AssignedTo, task.ID)
 		am.resultQueue <- &TaskResult{
 			TaskID:  task.ID,
+			Attempt: attempt,
 			Success: false,
 			Error:   fmt.Errorf("agent %s not found", task.AssignedTo),
 		}
@@ -3425,6 +3622,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		am.resultQueue <- &TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
+			Attempt: attempt,
 			Success: false,
 			Error:   fmt.Errorf("build %s not found", agent.BuildID),
 		}
@@ -3455,6 +3653,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		am.resultQueue <- &TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
+			Attempt: attempt,
 			Success: false,
 			Error:   err,
 		}
@@ -3519,6 +3718,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		am.resultQueue <- &TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
+			Attempt: attempt,
 			Success: false,
 			Error:   errBuildNotActive,
 		}
@@ -3553,6 +3753,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		am.resultQueue <- &TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
+			Attempt: attempt,
 			Success: false,
 			Error:   errBuildBudgetExceeded,
 		}
@@ -3623,6 +3824,7 @@ func (am *AgentManager) executeTask(task *Task) {
 			am.resultQueue <- &TaskResult{
 				TaskID:  task.ID,
 				AgentID: agent.ID,
+				Attempt: attempt,
 				Success: false,
 				Error:   err,
 			}
@@ -3632,6 +3834,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		am.resultQueue <- &TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
+			Attempt: attempt,
 			Success: true,
 			Output:  output,
 		}
@@ -3642,11 +3845,6 @@ func (am *AgentManager) executeTask(task *Task) {
 	prompt := am.buildTaskPrompt(task, build, agent)
 	systemPrompt := am.getSystemPrompt(agent.Role, build)
 	log.Printf("Built prompt for task (prompt_length: %d, system_prompt_length: %d)", len(prompt), len(systemPrompt))
-
-	// Execute using AI router — local Ollama inference can be slow for large models,
-	// so use a generous 15-minute timeout per task.
-	ctx, cancel := context.WithTimeout(am.ctx, 15*time.Minute)
-	defer cancel()
 
 	log.Printf("Preparing generation for task %s with provider %s", task.ID, agent.Provider)
 
@@ -3687,6 +3885,13 @@ func (am *AgentManager) executeTask(task *Task) {
 			candidateProviders = append(candidateProviders, alternate)
 		}
 	}
+	taskTimeout := am.taskExecutionTimeoutForTask(build, task, agent)
+	ctx, cancel := context.WithTimeout(am.ctx, taskTimeout)
+	am.registerTaskExecutionCancel(task.ID, cancel)
+	defer func() {
+		am.clearTaskExecutionCancel(task.ID)
+		cancel()
+	}()
 	generationMessage := fmt.Sprintf("%s agent is generating code with %s...", agent.Role, agent.Provider)
 	if len(candidateProviders) > 1 {
 		names := make([]string, 0, len(candidateProviders))
@@ -3797,6 +4002,7 @@ func (am *AgentManager) executeTask(task *Task) {
 		am.resultQueue <- &TaskResult{
 			TaskID:  task.ID,
 			AgentID: agent.ID,
+			Attempt: attempt,
 			Success: false,
 			Error:   finalErr,
 		}
@@ -3842,6 +4048,7 @@ func (am *AgentManager) executeTask(task *Task) {
 					am.resultQueue <- &TaskResult{
 						TaskID:  task.ID,
 						AgentID: agent.ID,
+						Attempt: attempt,
 						Success: false,
 						Error:   err,
 					}
@@ -3940,6 +4147,7 @@ func (am *AgentManager) executeTask(task *Task) {
 	am.resultQueue <- &TaskResult{
 		TaskID:  task.ID,
 		AgentID: agent.ID,
+		Attempt: attempt,
 		Success: true,
 		Output:  output,
 	}
@@ -3978,6 +4186,11 @@ func (am *AgentManager) processResult(result *TaskResult) {
 
 	agent.mu.Lock()
 	task := agent.CurrentTask
+	if task != nil && task.ID == result.TaskID && result.Attempt != task.RetryCount {
+		agent.mu.Unlock()
+		log.Printf("Dropping stale task attempt result for agent %s: task=%s result attempt=%d current attempt=%d", result.AgentID, result.TaskID, result.Attempt, task.RetryCount)
+		return
+	}
 	if task == nil || task.ID != result.TaskID {
 		// Stale/out-of-order result for a task this agent is no longer executing.
 		// This happens after backend restarts when multiple tasks are re-queued to
@@ -18096,7 +18309,8 @@ func (am *AgentManager) determineRetryStrategy(errorMsg string, task *Task) stri
 
 	// Provider issues - try different provider
 	if strings.Contains(errorLower, "service unavailable") || strings.Contains(errorLower, "503") ||
-		strings.Contains(errorLower, "timeout") || strings.Contains(errorLower, "connection") {
+		strings.Contains(errorLower, "timeout") || strings.Contains(errorLower, "deadline exceeded") ||
+		strings.Contains(errorLower, "context canceled") || strings.Contains(errorLower, "connection") {
 		return "switch_provider"
 	}
 
