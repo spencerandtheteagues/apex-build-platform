@@ -1058,3 +1058,53 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start the next paid full-stack canary
 4. If it clears this constructor-typing issue, continue on the next remaining late-stage generated-project blocker until the paid path is green
+
+## Latest Live Paid Canary After Sequelize Constructor Repair
+
+Production backend during run:
+
+- `started_at = 2026-03-28T23:57:24.389322457Z`
+
+Live canary:
+
+- build id: `a34bca8f-8d79-4d4c-aaf9-151d29e02adc`
+
+What improved:
+
+- the earlier Sequelize constructor typing failure is cleared
+- the run advanced through:
+  - `0 -> 19 -> 44 -> 79 -> 89 -> 96 -> 97`
+- this confirms the constructor normalization repair is working on production
+
+Current blocker:
+
+- provider-assisted task verification blocked a late-stage candidate at `97%`
+- exact failure:
+  - `tsconfig.json contains comments, which are not allowed in JSON, causing a compilation error`
+- the persisted root `tsconfig.json` fetched from the live build was already strict JSON, so this looks like a task-output verification false positive rather than a real final artifact defect
+
+Newest local fix after that canary:
+
+- deterministic normalization now canonicalizes generated `tsconfig.json` files from JSONC-style content into strict JSON before downstream validation
+- provider-blocked repair now specifically handles the `tsconfig.json contains comments` blocker by:
+  - canonicalizing commented `tsconfig.json` content into strict JSON when needed
+  - accepting already-canonical `tsconfig.json` output so this false positive does not kill the candidate
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestNormalizeGeneratedFileContent|TestApplyDeterministicProviderBlockedTestRepair'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the `tsconfig` normalization / provider-blocked repair
+2. Wait for Render to deploy
+3. Start the next paid full-stack canary
+4. If it clears this verifier false positive, continue on the next remaining late-stage generated-project blocker until the paid path is green

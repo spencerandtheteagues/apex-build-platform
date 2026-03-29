@@ -1323,6 +1323,30 @@ export async function query<T extends QueryResultRow>(text: string, params?: any
 			t.Fatalf("expected frontend moduleResolution normalization, got %s", got)
 		}
 	})
+
+	t.Run("canonicalizes_tsconfig_jsonc_comments_before_verification", func(t *testing.T) {
+		t.Parallel()
+
+		in := `{
+  // compiler target
+  "compilerOptions": {
+    "target": "ES2020", // supported target
+    "module": "ESNext",
+    "jsx": "react-jsx",
+  },
+  "include": ["src"],
+}`
+		got := normalizeGeneratedFileContent("tsconfig.json", in)
+		if strings.Contains(got, "// compiler target") || strings.Contains(got, "// supported target") {
+			t.Fatalf("expected tsconfig comments to be stripped, got %s", got)
+		}
+		if strings.Contains(got, ",\n  }") || strings.Contains(got, ",\n}") {
+			t.Fatalf("expected trailing commas to be removed, got %s", got)
+		}
+		if !strings.Contains(got, `"moduleResolution": "Node"`) {
+			t.Fatalf("expected downstream tsconfig normalization to still run, got %s", got)
+		}
+	})
 }
 
 func canBindLocalhostPort() bool {
@@ -2986,6 +3010,72 @@ describe("health", () => {
 	}
 	if !strings.Contains(manifest, `"jest"`) {
 		t.Fatalf("expected repaired manifest to include jest dependency, got %s", manifest)
+	}
+}
+
+func TestApplyDeterministicProviderBlockedTestRepairCanonicalizesTSConfigJSON(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	output := &TaskOutput{
+		Files: []GeneratedFile{
+			{
+				Path: "tsconfig.json",
+				Content: `{
+  // valid for tsconfig, but not strict JSON
+  "compilerOptions": {
+    "target": "ES2020",
+  }
+}`,
+			},
+		},
+	}
+
+	repaired, summary := am.applyDeterministicProviderBlockedTestRepair(nil, output, []string{
+		`tsconfig.json contains comments, which are not allowed in JSON, causing a compilation error.`,
+	})
+	if !repaired {
+		t.Fatal("expected deterministic tsconfig repair to apply")
+	}
+	if !strings.Contains(summary, "tsconfig.json") {
+		t.Fatalf("unexpected repair summary: %q", summary)
+	}
+	if strings.Contains(output.Files[0].Content, "// valid for tsconfig") {
+		t.Fatalf("expected tsconfig comments to be stripped, got %q", output.Files[0].Content)
+	}
+	if strings.Contains(output.Files[0].Content, "\"target\": \"ES2020\",\n  }") {
+		t.Fatalf("expected trailing comma to be stripped, got %q", output.Files[0].Content)
+	}
+}
+
+func TestApplyDeterministicProviderBlockedTestRepairAcceptsAlreadyCanonicalTSConfig(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	output := &TaskOutput{
+		Files: []GeneratedFile{
+			{
+				Path: "tsconfig.json",
+				Content: `{
+  "compilerOptions": {
+    "target": "ES2020"
+  }
+}`,
+			},
+		},
+	}
+
+	repaired, summary := am.applyDeterministicProviderBlockedTestRepair(nil, output, []string{
+		`tsconfig.json contains comments, which are not allowed in JSON, causing a compilation error.`,
+	})
+	if !repaired {
+		t.Fatal("expected already-canonical tsconfig to bypass false-positive blocker")
+	}
+	if !strings.Contains(summary, "tsconfig.json") {
+		t.Fatalf("unexpected repair summary: %q", summary)
+	}
+	if strings.Contains(output.Files[0].Content, "//") {
+		t.Fatalf("expected canonical tsconfig to remain clean, got %q", output.Files[0].Content)
 	}
 }
 

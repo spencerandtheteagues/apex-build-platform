@@ -6804,6 +6804,9 @@ func (am *AgentManager) applyDeterministicProviderBlockedTestRepair(build *Build
 	if repaired, summary := am.applyDeterministicProviderBlockedTestingManifestRepair(build, output, blockers); repaired {
 		appliedSummaries = append(appliedSummaries, summary)
 	}
+	if repaired, summary := am.applyDeterministicProviderBlockedTSConfigRepair(output, blockers); repaired {
+		appliedSummaries = append(appliedSummaries, summary)
+	}
 
 	if len(appliedSummaries) == 0 {
 		return false, ""
@@ -6812,6 +6815,64 @@ func (am *AgentManager) applyDeterministicProviderBlockedTestRepair(build *Build
 	summary := strings.Join(appliedSummaries, "; ")
 	output.Messages = append(output.Messages, "Applied deterministic provider-blocked test repair: "+summary)
 	return true, summary
+}
+
+func parseProviderBlockedTSConfigTargets(blockers []string) []string {
+	if len(blockers) == 0 {
+		return nil
+	}
+
+	targets := make([]string, 0, 1)
+	for _, blocker := range blockers {
+		lower := strings.ToLower(blocker)
+		if strings.Contains(lower, "tsconfig") && strings.Contains(lower, "comments") && strings.Contains(lower, "json") {
+			targets = append(targets, "tsconfig.json")
+		}
+	}
+	return dedupeStrings(targets)
+}
+
+func (am *AgentManager) applyDeterministicProviderBlockedTSConfigRepair(output *TaskOutput, blockers []string) (bool, string) {
+	if output == nil || len(output.Files) == 0 || len(blockers) == 0 {
+		return false, ""
+	}
+
+	targets := parseProviderBlockedTSConfigTargets(blockers)
+	if len(targets) == 0 {
+		return false, ""
+	}
+
+	targetSet := make(map[string]bool, len(targets))
+	for _, target := range targets {
+		targetSet[strings.ToLower(strings.TrimSpace(target))] = true
+	}
+
+	applied := make([]string, 0, len(targets))
+	for i := range output.Files {
+		path := sanitizeFilePath(strings.TrimSpace(output.Files[i].Path))
+		if path == "" || !targetSet[strings.ToLower(path)] {
+			continue
+		}
+		canonical, ok := canonicalizeGeneratedTSConfigJSON(path, output.Files[i].Content)
+		if !ok {
+			continue
+		}
+		if canonical != output.Files[i].Content {
+			output.Files[i].Content = canonical
+		}
+		output.Files[i].Size = int64(len(output.Files[i].Content))
+		if strings.TrimSpace(output.Files[i].Language) == "" {
+			output.Files[i].Language = am.detectLanguage(path)
+		}
+		applied = append(applied, path)
+	}
+
+	if len(applied) == 0 {
+		return false, ""
+	}
+
+	sort.Strings(applied)
+	return true, "canonical tsconfig JSON: " + strings.Join(applied, ", ")
 }
 
 func parseProviderBlockedTestingDependencyNames(blockers []string) []string {
@@ -10705,6 +10766,166 @@ func normalizeGeneratedTypeScriptInteropPatterns(path, content string) string {
 	return content
 }
 
+func stripJSONLikeComments(content string) string {
+	if strings.TrimSpace(content) == "" {
+		return content
+	}
+
+	var out strings.Builder
+	out.Grow(len(content))
+
+	inString := false
+	inLineComment := false
+	inBlockComment := false
+	escapeNext := false
+
+	for i := 0; i < len(content); i++ {
+		ch := content[i]
+
+		switch {
+		case inLineComment:
+			if ch == '\n' {
+				inLineComment = false
+				out.WriteByte(ch)
+			}
+			continue
+		case inBlockComment:
+			if ch == '*' && i+1 < len(content) && content[i+1] == '/' {
+				inBlockComment = false
+				i++
+			}
+			continue
+		case inString:
+			out.WriteByte(ch)
+			if escapeNext {
+				escapeNext = false
+				continue
+			}
+			if ch == '\\' {
+				escapeNext = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		if ch == '"' {
+			inString = true
+			out.WriteByte(ch)
+			continue
+		}
+		if ch == '/' && i+1 < len(content) {
+			switch content[i+1] {
+			case '/':
+				inLineComment = true
+				i++
+				continue
+			case '*':
+				inBlockComment = true
+				i++
+				continue
+			}
+		}
+
+		out.WriteByte(ch)
+	}
+
+	return out.String()
+}
+
+func stripJSONTrailingCommas(content string) string {
+	if strings.TrimSpace(content) == "" {
+		return content
+	}
+
+	var out strings.Builder
+	out.Grow(len(content))
+
+	inString := false
+	escapeNext := false
+
+	for i := 0; i < len(content); i++ {
+		ch := content[i]
+
+		if inString {
+			out.WriteByte(ch)
+			if escapeNext {
+				escapeNext = false
+				continue
+			}
+			if ch == '\\' {
+				escapeNext = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		if ch == '"' {
+			inString = true
+			out.WriteByte(ch)
+			continue
+		}
+		if ch == ',' {
+			j := i + 1
+			for j < len(content) {
+				next := content[j]
+				if next == ' ' || next == '\t' || next == '\n' || next == '\r' {
+					j++
+					continue
+				}
+				break
+			}
+			if j < len(content) && (content[j] == '}' || content[j] == ']') {
+				continue
+			}
+		}
+
+		out.WriteByte(ch)
+	}
+
+	return out.String()
+}
+
+func canonicalizeGeneratedTSConfigJSON(path, content string) (string, bool) {
+	if strings.TrimSpace(content) == "" {
+		return content, false
+	}
+
+	normalizedPath := strings.ToLower(filepath.ToSlash(strings.TrimSpace(path)))
+	if filepath.Base(normalizedPath) != "tsconfig.json" {
+		return content, false
+	}
+
+	candidate := strings.TrimSpace(content)
+	if candidate == "" {
+		return content, false
+	}
+
+	var cfg any
+	if err := json.Unmarshal([]byte(candidate), &cfg); err == nil {
+		canonical, marshalErr := json.MarshalIndent(cfg, "", "  ")
+		if marshalErr != nil {
+			return content, false
+		}
+		return string(canonical), true
+	}
+
+	candidate = stripJSONTrailingCommas(stripJSONLikeComments(candidate))
+	if err := json.Unmarshal([]byte(candidate), &cfg); err != nil {
+		return content, false
+	}
+	canonical, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return content, false
+	}
+	return string(canonical), true
+}
+
 func normalizeGeneratedTSConfigBuildExcludes(path, content string) string {
 	if strings.TrimSpace(content) == "" {
 		return content
@@ -10713,6 +10934,9 @@ func normalizeGeneratedTSConfigBuildExcludes(path, content string) string {
 	normalizedPath := strings.ToLower(filepath.ToSlash(strings.TrimSpace(path)))
 	if filepath.Base(normalizedPath) != "tsconfig.json" {
 		return content
+	}
+	if canonical, ok := canonicalizeGeneratedTSConfigJSON(path, content); ok {
+		content = canonical
 	}
 	var cfg map[string]any
 	if err := json.Unmarshal([]byte(content), &cfg); err != nil {

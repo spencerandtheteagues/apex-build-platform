@@ -1108,6 +1108,33 @@ Date: 2026-03-28
 
 Change summary:
 
+- Investigated the next live paid full-stack canary after the Sequelize constructor repair. The build advanced to `97%` and then stalled in `reviewing` with a provider-assisted verification blocker: `tsconfig.json contains comments, which are not allowed in JSON, causing a compilation error.`
+- Confirmed the persisted root `tsconfig.json` from the live build was already strict JSON, which means this blocker can be a false positive at the task-output verification layer rather than a real final artifact failure.
+- Hardened deterministic normalization so generated `tsconfig.json` files are canonicalized from JSONC-style content into strict JSON before downstream checks run.
+- Added a targeted provider-blocked repair path that canonicalizes `tsconfig.json` when the verifier raises the JSON-comments blocker, and also accepts already-canonical `tsconfig.json` output so this specific false positive no longer kills the task candidate.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestNormalizeGeneratedFileContent|TestApplyDeterministicProviderBlockedTestRepair'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Confirmed the Sequelize `uniqueKeys` repair worked on live production. The next paid canary on backend `started_at=2026-03-28T23:42:40.795307181Z` advanced through:
   - `0 -> 19 -> 44 -> 79 -> 89 -> 95 -> 96`
 - The next blocker is another deterministic Sequelize typing issue:
