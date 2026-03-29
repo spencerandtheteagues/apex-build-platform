@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Zap, CreditCard, ExternalLink, Check, Loader2,
-  AlertCircle, RefreshCw, Star, Crown, Users, Rocket, ShieldCheck,
+  AlertCircle, RefreshCw, Star, Crown, Users, Rocket, ShieldCheck, X,
 } from 'lucide-react'
 import apiService from '@/services/api'
 import { BuyCreditsModal } from './BuyCreditsModal'
@@ -120,12 +120,12 @@ const PLAN_CONFIG: Record<string, {
   },
 }
 
-// Credit pack color tiers
+// Credit pack color tiers — matches live Stripe price IDs ($10/$25/$50/$100)
 const PACK_CONFIG = [
-  { amountUsd: 25,  color: '#22c55e', glow: 'rgba(34,197,94,0.3)',   border: 'rgba(34,197,94,0.35)',   bg: 'rgba(34,197,94,0.05)',   label: 'Starter' },
-  { amountUsd: 50,  color: '#00f5ff', glow: 'rgba(0,245,255,0.35)',  border: 'rgba(0,245,255,0.45)',   bg: 'rgba(0,245,255,0.06)',   label: 'Builder', popular: true },
-  { amountUsd: 100, color: '#f97316', glow: 'rgba(249,115,22,0.3)',  border: 'rgba(249,115,22,0.4)',   bg: 'rgba(249,115,22,0.05)',  label: 'Pro' },
-  { amountUsd: 250, color: '#a855f7', glow: 'rgba(168,85,247,0.3)',  border: 'rgba(168,85,247,0.4)',   bg: 'rgba(168,85,247,0.05)',  label: 'Power' },
+  { amountUsd: 10,  color: '#22c55e', glow: 'rgba(34,197,94,0.3)',   border: 'rgba(34,197,94,0.35)',   bg: 'rgba(34,197,94,0.05)',   label: 'Starter' },
+  { amountUsd: 25,  color: '#60a5fa', glow: 'rgba(96,165,250,0.3)',  border: 'rgba(96,165,250,0.4)',   bg: 'rgba(96,165,250,0.05)',  label: 'Builder' },
+  { amountUsd: 50,  color: '#00f5ff', glow: 'rgba(0,245,255,0.35)',  border: 'rgba(0,245,255,0.45)',   bg: 'rgba(0,245,255,0.06)',   label: 'Pro', popular: true },
+  { amountUsd: 100, color: '#f97316', glow: 'rgba(249,115,22,0.3)',  border: 'rgba(249,115,22,0.4)',   bg: 'rgba(249,115,22,0.05)',  label: 'Power' },
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -313,7 +313,7 @@ export function BillingSettings() {
         }}>
           <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
           <span style={{ flex: 1 }}>{notice.message}</span>
-          <button onClick={() => setNotice(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', opacity: 0.6 }}>✕</button>
+          <button onClick={() => setNotice(null)} aria-label="Dismiss" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', opacity: 0.6, padding: 4, display: 'flex', minWidth: 28, minHeight: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 4, transition: 'opacity 0.15s' }} onMouseEnter={e => e.currentTarget.style.opacity = '1'} onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}><X size={14} /></button>
         </div>
       )}
       {error && (
@@ -324,7 +324,7 @@ export function BillingSettings() {
         }}>
           <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
           <span style={{ flex: 1 }}>{error}</span>
-          <button onClick={() => setError(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', opacity: 0.6 }}>✕</button>
+          <button onClick={() => setError(null)} aria-label="Dismiss" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', opacity: 0.6, padding: 4, display: 'flex', minWidth: 28, minHeight: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 4, transition: 'opacity 0.15s' }} onMouseEnter={e => e.currentTarget.style.opacity = '1'} onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}><X size={14} /></button>
         </div>
       )}
 
@@ -335,10 +335,11 @@ export function BillingSettings() {
         background: `radial-gradient(circle at top left, ${planCfg.glow}, transparent 50%), #0a0a0a`,
         boxShadow: `0 0 60px ${planCfg.glow}, 0 16px 40px rgba(0,0,0,0.5)`,
         padding: '24px 28px',
-        display: 'grid',
-        gridTemplateColumns: '1fr auto',
+        display: 'flex',
+        flexWrap: 'wrap',
         gap: 24,
         alignItems: 'center',
+        justifyContent: 'space-between',
       }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -384,7 +385,7 @@ export function BillingSettings() {
           </div>
         </div>
 
-        <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end', flexShrink: 0 }}>
           <div>
             <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.18em', color: 'rgba(255,255,255,0.35)', marginBottom: 4 }}>
               Credit Balance
@@ -430,7 +431,7 @@ export function BillingSettings() {
                 Manage
               </button>
             )}
-            <button onClick={load} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '8px 10px', color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }}>
+            <button onClick={load} aria-label="Refresh billing" style={{ background: 'none', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '8px 10px', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'color 0.15s, border-color 0.15s' }} onMouseEnter={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.8)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)' }} onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.4)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)' }}>
               <RefreshCw size={13} />
             </button>
           </div>
@@ -446,7 +447,7 @@ export function BillingSettings() {
           </p>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: 14 }}>
           {(plans.length > 0 ? plans : [
             { type: 'free', name: 'Free', monthly_price_cents: 0, monthly_price_id: '', monthly_credits_usd: 0, is_popular: false, features: [] },
             { type: 'builder', name: 'Builder', monthly_price_cents: 2400, monthly_price_id: '', monthly_credits_usd: 12, is_popular: false, features: [] },
@@ -590,7 +591,7 @@ export function BillingSettings() {
           </p>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(160px, 100%), 1fr))', gap: 12 }}>
           {PACK_CONFIG.map(pack => (
             <button
               key={pack.amountUsd}

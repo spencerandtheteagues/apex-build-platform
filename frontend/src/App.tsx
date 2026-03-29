@@ -876,7 +876,7 @@ function App() {
                     required
                   />
                   <label className="auth-input-label absolute left-11 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none transition-all duration-200">
-                    {authData.username ? '' : 'Username or Email'}
+                    Username or Email
                   </label>
                 </div>
                 {authErrors.username && (
@@ -902,7 +902,7 @@ function App() {
                       required
                     />
                     <label className="auth-input-label absolute left-11 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none transition-all duration-200">
-                      {authData.email ? '' : 'Email'}
+                      Email
                     </label>
                   </div>
                   {authErrors.email && (
@@ -928,7 +928,7 @@ function App() {
                     required
                   />
                   <label className="auth-input-label absolute left-11 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none transition-all duration-200">
-                    {authData.password ? '' : 'Password'}
+                    Password
                   </label>
                   <button
                     type="button"
@@ -961,7 +961,7 @@ function App() {
                       required
                     />
                     <label className="auth-input-label absolute left-11 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none transition-all duration-200">
-                      {authData.confirmPassword ? '' : 'Confirm Password'}
+                      Confirm Password
                     </label>
                   </div>
                   {authErrors.confirmPassword && (

@@ -14,10 +14,10 @@ interface CreditPack {
 }
 
 const DEFAULT_PACKS: CreditPack[] = [
-  { amountUsd: 25, creditUsd: 25, label: '$25' },
-  { amountUsd: 50, creditUsd: 50, label: '$50', popular: true },
+  { amountUsd: 10,  creditUsd: 10,  label: '$10' },
+  { amountUsd: 25,  creditUsd: 25,  label: '$25' },
+  { amountUsd: 50,  creditUsd: 50,  label: '$50', popular: true },
   { amountUsd: 100, creditUsd: 100, label: '$100' },
-  { amountUsd: 250, creditUsd: 250, label: '$250' },
 ]
 
 interface Props {
@@ -148,7 +148,14 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason, defaultAmoun
           </div>
           <button
             onClick={onClose}
-            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: 4, borderRadius: 6, display: 'flex' }}
+            aria-label="Close"
+            style={{
+              background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer',
+              padding: 8, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              minWidth: 44, minHeight: 44, transition: 'color 0.15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = '#f0f0f0' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.4)' }}
           >
             <X size={18} />
           </button>
@@ -260,20 +267,20 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason, defaultAmoun
             padding: '12px 16px',
             background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)',
             borderRadius: 8, marginBottom: 16,
-            display: 'grid', gridTemplateColumns: '1fr auto 1fr auto', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+            display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12,
           }}>
-            <span style={{ fontSize: '0.83rem', color: 'rgba(255,255,255,0.5)' }}>
-              Total
-            </span>
-            <span style={{ fontFamily: '"Orbitron", sans-serif', fontWeight: 800, fontSize: '1.3rem', color: '#f0f0f0' }}>
-              ${selected}.00
-            </span>
-            <span style={{ fontSize: '0.83rem', color: 'rgba(255,255,255,0.5)' }}>
-              Added to balance
-            </span>
-            <span style={{ fontFamily: '"Orbitron", sans-serif', fontWeight: 800, fontSize: '1.3rem', color: '#34d399' }}>
-              ${pack.creditUsd.toFixed(0)}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: '0.83rem', color: 'rgba(255,255,255,0.5)' }}>Total</span>
+              <span style={{ fontFamily: '"Orbitron", sans-serif', fontWeight: 800, fontSize: '1.3rem', color: '#f0f0f0' }}>
+                ${selected}.00
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: '0.83rem', color: 'rgba(255,255,255,0.5)' }}>Added to balance</span>
+              <span style={{ fontFamily: '"Orbitron", sans-serif', fontWeight: 800, fontSize: '1.3rem', color: '#34d399' }}>
+                ${pack.creditUsd.toFixed(0)}
+              </span>
+            </div>
           </div>
 
           <div style={{
@@ -325,12 +332,23 @@ export const BuyCreditsModal: React.FC<Props> = ({ onClose, reason, defaultAmoun
               width: '100%',
               background: loading ? 'rgba(255,0,51,0.4)' : 'linear-gradient(135deg,#ff0033,#cc0029)',
               border: 'none', color: '#fff',
-              padding: '13px 20px', borderRadius: 9,
+              padding: '14px 20px', borderRadius: 9,
               cursor: loading ? 'not-allowed' : 'pointer',
               fontSize: '0.95rem', fontFamily: 'Inter, system-ui, sans-serif', fontWeight: 700,
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               boxShadow: loading ? 'none' : '0 0 30px rgba(255,0,51,0.35)',
               transition: 'all 0.2s',
+              minHeight: 48,
+            }}
+            onMouseEnter={e => {
+              if (!loading) {
+                e.currentTarget.style.boxShadow = '0 0 48px rgba(255,0,51,0.5)'
+                e.currentTarget.style.transform = 'translateY(-1px)'
+              }
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.boxShadow = loading ? 'none' : '0 0 30px rgba(255,0,51,0.35)'
+              e.currentTarget.style.transform = 'translateY(0)'
             }}
           >
             {loading ? (

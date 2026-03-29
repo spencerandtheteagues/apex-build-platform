@@ -8,7 +8,7 @@ import {
   Bot, DollarSign, Terminal, GitBranch, Shield, Users,
   Puzzle, Layers, Key, Zap, ArrowRight, Check, ChevronDown,
   Globe, BarChart3, Cpu, Lock, Eye, Code2, Database,
-  Package, Activity, TrendingDown, Sparkles, X,
+  Package, Activity, TrendingDown, Sparkles, X, Menu,
 } from 'lucide-react'
 import { getConfiguredApiUrl } from '../config/runtime'
 
@@ -306,7 +306,7 @@ function useActiveSection() {
 const SideNav: React.FC = () => {
   const active = useActiveSection()
   return (
-    <div style={{
+    <div className="landing-sidenav" style={{
       position: 'fixed', left: 20, top: '50%',
       transform: 'translateY(-50%)',
       zIndex: 50, display: 'flex', flexDirection: 'column', gap: 6,
@@ -333,20 +333,29 @@ const SideNav: React.FC = () => {
 
 const Nav: React.FC<LandingProps> = ({ onGetStarted }) => {
   const [scrolled, setScrolled] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
   useEffect(() => {
     const h = () => setScrolled(window.scrollY > 40)
     window.addEventListener('scroll', h)
     return () => window.removeEventListener('scroll', h)
   }, [])
 
+  const NAV_LINKS = [
+    { href: '#agents', label: 'AI Agents', color: '#b89eff', glow: 'rgba(167,139,250,0.9)' },
+    { href: '#cost',   label: 'Pricing',   color: '#4eedb0', glow: 'rgba(52,211,153,0.9)' },
+    { href: '#ide',    label: 'IDE',        color: '#7dc4ff', glow: 'rgba(96,165,250,0.9)' },
+    { href: '#byok',   label: 'BYOK',       color: '#ffd166', glow: 'rgba(251,191,36,0.9)' },
+  ]
+
   return (
+    <>
     <nav style={{
       position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
       background: scrolled ? 'rgba(0,0,0,0.95)' : 'transparent',
       backdropFilter: scrolled ? 'blur(16px)' : 'none',
       borderBottom: scrolled ? `1px solid ${C.borderDim}` : '1px solid transparent',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '0 36px', height: 56,
+      padding: '0 clamp(16px, 4vw, 36px)', height: 56,
       transition: 'all 0.3s ease',
     }}>
       <a href="#" style={{
@@ -362,14 +371,11 @@ const Nav: React.FC<LandingProps> = ({ onGetStarted }) => {
         />
       </a>
 
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        {[
-          { href: '#agents', label: 'AI Agents', color: '#b89eff', glow: 'rgba(167,139,250,0.9)' },
-          { href: '#cost',   label: 'Pricing',   color: '#4eedb0', glow: 'rgba(52,211,153,0.9)' },
-          { href: '#ide',    label: 'IDE',        color: '#7dc4ff', glow: 'rgba(96,165,250,0.9)' },
-          { href: '#byok',   label: 'BYOK',       color: '#ffd166', glow: 'rgba(251,191,36,0.9)' },
-        ].map(l => (
+      {/* Desktop nav links */}
+      <div className="landing-nav-links" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        {NAV_LINKS.map(l => (
           <a key={l.href} href={l.href}
+            onClick={() => setMobileOpen(false)}
             style={{
               fontFamily: fBody, fontSize: '0.88rem', color: l.color,
               textDecoration: 'none', fontWeight: 700, letterSpacing: '0.09em',
@@ -380,6 +386,8 @@ const Nav: React.FC<LandingProps> = ({ onGetStarted }) => {
               textShadow: `0 0 10px ${l.glow}, 0 0 22px ${l.glow.replace('0.9', '0.45')}`,
               boxShadow: `0 0 10px ${l.glow.replace('0.9', '0.12')}, inset 0 0 8px ${l.glow.replace('0.9', '0.05')}`,
               transition: 'all 0.18s ease',
+              minHeight: 44,
+              display: 'flex', alignItems: 'center',
             }}
             onMouseEnter={e => {
               const el = e.currentTarget as HTMLAnchorElement
@@ -403,18 +411,88 @@ const Nav: React.FC<LandingProps> = ({ onGetStarted }) => {
         ))}
       </div>
 
-      <button onClick={() => onGetStarted()} style={{
+      {/* Desktop CTA */}
+      <button onClick={() => onGetStarted()} className="landing-nav-cta" style={{
         background: `linear-gradient(135deg, ${C.accent} 0%, #cc0029 100%)`,
         color: '#fff', border: 'none', borderRadius: 8,
         padding: '8px 20px', fontFamily: fBody,
         fontWeight: 700, fontSize: '0.84rem', cursor: 'pointer',
         letterSpacing: '0.02em',
         boxShadow: `0 0 20px ${C.accentGlow}`,
-        transition: 'box-shadow 0.2s',
-      }}>
+        transition: 'box-shadow 0.2s, transform 0.15s',
+        minHeight: 44,
+      }}
+        onMouseEnter={e => { e.currentTarget.style.boxShadow = `0 0 32px rgba(255,0,51,0.4)`; e.currentTarget.style.transform = 'translateY(-1px)' }}
+        onMouseLeave={e => { e.currentTarget.style.boxShadow = `0 0 20px ${C.accentGlow}`; e.currentTarget.style.transform = 'translateY(0)' }}
+      >
         Get Started Free
       </button>
+
+      {/* Mobile hamburger */}
+      <button
+        className="landing-nav-hamburger"
+        onClick={() => setMobileOpen(o => !o)}
+        aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+        style={{
+          background: 'none', border: `1px solid ${C.borderDim}`,
+          borderRadius: 8, padding: '8px 10px', cursor: 'pointer',
+          color: C.textSub, display: 'none',
+          minWidth: 44, minHeight: 44,
+          alignItems: 'center', justifyContent: 'center',
+          transition: 'border-color 0.15s, color 0.15s',
+        }}
+      >
+        {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+      </button>
     </nav>
+
+    {/* Mobile dropdown menu */}
+    <AnimatePresence>
+      {mobileOpen && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.18 }}
+          style={{
+            position: 'fixed', top: 56, left: 0, right: 0, zIndex: 99,
+            background: 'rgba(0,0,0,0.97)',
+            backdropFilter: 'blur(16px)',
+            borderBottom: `1px solid ${C.borderDim}`,
+            padding: '16px clamp(16px,4vw,36px) 20px',
+            display: 'flex', flexDirection: 'column', gap: 8,
+          }}
+        >
+          {NAV_LINKS.map(l => (
+            <a
+              key={l.href}
+              href={l.href}
+              onClick={() => setMobileOpen(false)}
+              style={{
+                fontFamily: fBody, fontSize: '0.95rem', color: l.color,
+                textDecoration: 'none', fontWeight: 700,
+                padding: '12px 14px', borderRadius: 8,
+                border: `1px solid ${l.glow.replace('0.9', '0.18')}`,
+                background: l.glow.replace('0.9', '0.07'),
+                display: 'flex', alignItems: 'center', gap: 10,
+              }}
+            >
+              {l.label}
+            </a>
+          ))}
+          <button onClick={() => { setMobileOpen(false); onGetStarted() }} style={{
+            marginTop: 4,
+            background: `linear-gradient(135deg, ${C.accent} 0%, #cc0029 100%)`,
+            color: '#fff', border: 'none', borderRadius: 8,
+            padding: '13px 20px', fontFamily: fBody,
+            fontWeight: 700, fontSize: '0.95rem', cursor: 'pointer',
+          }}>
+            Get Started Free
+          </button>
+        </motion.div>
+      )}
+    </AnimatePresence>
+    </>
   )
 }
 
@@ -1288,7 +1366,7 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
       minHeight: '100vh', background: C.bg,
       display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
-      padding: 'clamp(48px, 6vh, 72px) clamp(20px, 4vw, 48px) 24px',
+      padding: 'clamp(80px, 10vh, 96px) clamp(20px, 4vw, 48px) 40px',
       position: 'relative', overflow: 'hidden',
     }}>
       {/* Background glow */}
@@ -1357,6 +1435,7 @@ const AboveFold: React.FC<LandingProps> = ({ onGetStarted }) => {
         initial={{ opacity: 0, y: 20 }}
         animate={mounted ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.6, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
+        className="landing-feature-bullets"
         style={{
           display: 'grid', gridTemplateColumns: '1fr 1fr',
           gap: '5px 20px',
@@ -1639,7 +1718,7 @@ const FeatureSection: React.FC<{
       padding: 'clamp(64px, 8vw, 96px) clamp(24px, 6vw, 80px)',
     }}>
       <div style={{ maxWidth: 1060, margin: '0 auto' }}>
-        <div style={{
+        <div className={visual ? 'landing-feature-grid' : undefined} style={{
           display: 'grid',
           gridTemplateColumns: visual ? `1fr 1fr` : '1fr',
           gap: '48px 60px',
@@ -1659,11 +1738,13 @@ const FeatureSection: React.FC<{
                 background: feature.color + '12',
                 border: `1px solid ${feature.color}30`,
                 borderRadius: 100, padding: '4px 13px', marginBottom: 18,
+                maxWidth: '100%', overflow: 'hidden',
               }}>
-                <Icon size={12} color={feature.color} />
+                <div style={{ flexShrink: 0 }}><Icon size={12} color={feature.color} /></div>
                 <span style={{
                   fontFamily: fBody, fontSize: '0.7rem', fontWeight: 700,
                   color: feature.color, letterSpacing: '0.09em', textTransform: 'uppercase',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 }}>
                   {feature.bullet}
                 </span>
@@ -1816,7 +1897,7 @@ const PricingSection: React.FC<LandingProps> = ({ onGetStarted }) => (
         </p>
       </motion.div>
 
-      <div style={{
+      <div className="landing-pricing-grid" style={{
         display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
         gap: 16, marginBottom: 32,
       }}>
@@ -1901,7 +1982,27 @@ const PricingSection: React.FC<LandingProps> = ({ onGetStarted }) => (
               borderRadius: 8, padding: '10px 0',
               fontFamily: fBody, fontWeight: 700, fontSize: '0.88rem',
               cursor: 'pointer', transition: 'all 0.2s',
-            }}>
+              minHeight: 44,
+            }}
+              onMouseEnter={e => {
+                if (plan.highlight) {
+                  e.currentTarget.style.boxShadow = `0 0 32px rgba(255,0,51,0.4)`
+                  e.currentTarget.style.transform = 'translateY(-1px)'
+                } else {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.06)'
+                  e.currentTarget.style.borderColor = C.borderDim.replace('0.06', '0.22')
+                }
+              }}
+              onMouseLeave={e => {
+                if (plan.highlight) {
+                  e.currentTarget.style.boxShadow = 'none'
+                  e.currentTarget.style.transform = 'translateY(0)'
+                } else {
+                  e.currentTarget.style.background = 'transparent'
+                  e.currentTarget.style.borderColor = C.borderBright
+                }
+              }}
+            >
               Get Started
             </button>
           </motion.div>
@@ -1931,24 +2032,27 @@ const PricingSection: React.FC<LandingProps> = ({ onGetStarted }) => (
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {[
-            { amount: '$25', credits: '$25 balance' },
-            { amount: '$50', credits: '$50 balance' },
+            { amount: '$10',  credits: '$10 balance' },
+            { amount: '$25',  credits: '$25 balance' },
+            { amount: '$50',  credits: '$50 balance' },
             { amount: '$100', credits: '$100 balance' },
-            { amount: '$250', credits: '$250 balance' },
           ].map(p => (
             <button key={p.amount} onClick={() => onGetStarted()} style={{
               background: C.surface, border: `1px solid ${C.borderBright}`,
               borderRadius: 8, padding: '9px 16px',
               fontFamily: fBody, cursor: 'pointer',
               transition: 'all 0.2s',
+              minHeight: 44,
             }}
               onMouseEnter={e => {
                 e.currentTarget.style.borderColor = C.accent
                 e.currentTarget.style.background = C.accentDim
+                e.currentTarget.style.transform = 'translateY(-1px)'
               }}
               onMouseLeave={e => {
                 e.currentTarget.style.borderColor = C.borderBright
                 e.currentTarget.style.background = C.surface
+                e.currentTarget.style.transform = 'translateY(0)'
               }}
             >
               <div style={{ fontFamily: fHero, fontWeight: 900, fontSize: '0.95rem', color: C.white }}>{p.amount}</div>
@@ -2208,7 +2312,7 @@ const ScreenshotSection: React.FC<LandingProps> = ({ onGetStarted }) => (
       </motion.div>
 
       {/* 3-column screenshot grid */}
-      <div style={{
+      <div className="landing-screenshot-grid" style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(3, 1fr)',
         gap: 20,
@@ -2395,10 +2499,54 @@ const ScreenshotSection: React.FC<LandingProps> = ({ onGetStarted }) => (
   </section>
 )
 
+// ─── Landing responsive styles ────────────────────────────────────────────────
+
+const LANDING_RESPONSIVE_CSS = `
+  /* Desktop: show links, hide hamburger */
+  .landing-nav-links { display: flex !important; }
+  .landing-nav-cta   { display: flex !important; }
+  .landing-nav-hamburger { display: none !important; }
+  .landing-sidenav   { display: flex !important; }
+
+  @media (max-width: 767px) {
+    .landing-nav-links    { display: none !important; }
+    .landing-nav-cta      { display: none !important; }
+    .landing-nav-hamburger { display: flex !important; }
+    .landing-sidenav      { display: none !important; }
+
+    .landing-feature-bullets {
+      grid-template-columns: 1fr !important;
+    }
+    .landing-screenshot-grid {
+      grid-template-columns: 1fr !important;
+    }
+    .landing-feature-grid {
+      grid-template-columns: 1fr !important;
+    }
+    .landing-pricing-grid {
+      grid-template-columns: 1fr !important;
+    }
+  }
+
+  @media (min-width: 768px) and (max-width: 1023px) {
+    .landing-sidenav      { display: none !important; }
+    .landing-screenshot-grid {
+      grid-template-columns: 1fr !important;
+    }
+    .landing-feature-grid {
+      grid-template-columns: 1fr !important;
+    }
+    .landing-pricing-grid {
+      grid-template-columns: repeat(2, 1fr) !important;
+    }
+  }
+`
+
 // ─── Landing page ─────────────────────────────────────────────────────────────
 
 const Landing: React.FC<LandingProps> = ({ onGetStarted }) => (
   <div style={{ background: C.bg, minHeight: '100vh', color: C.text }}>
+    <style>{LANDING_RESPONSIVE_CSS}</style>
     <Nav onGetStarted={onGetStarted} />
     <SideNav />
     <AboveFold onGetStarted={onGetStarted} />
