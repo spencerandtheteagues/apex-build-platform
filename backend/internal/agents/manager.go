@@ -7158,6 +7158,9 @@ func placeholderComponentIdentifier(targetPath string, binding generatedImportBi
 func missingLocalModulePlaceholderContent(targetPath string, binding generatedImportBinding) string {
 	targetPath = sanitizeFilePath(targetPath)
 	ext := strings.ToLower(filepath.Ext(targetPath))
+	if ext == ".cjs" {
+		return "module.exports = {};\n"
+	}
 	componentLike := strings.Contains(targetPath, "/components/") ||
 		ext == ".tsx" || ext == ".jsx" ||
 		isLikelyReactComponentName(binding.DefaultImport)
@@ -7215,6 +7218,29 @@ func missingLocalModulePlaceholderContent(targetPath string, binding generatedIm
 	return b.String()
 }
 
+func missingLocalModuleDeclarationContent(targetPath string, binding generatedImportBinding) string {
+	targetPath = sanitizeFilePath(targetPath)
+	ext := strings.ToLower(filepath.Ext(targetPath))
+	switch ext {
+	case ".cjs", ".js":
+		var b strings.Builder
+		if len(binding.NamedImports) > 0 {
+			for _, name := range binding.NamedImports {
+				name = sanitizeGeneratedIdentifier(name)
+				if name == "" {
+					continue
+				}
+				b.WriteString(fmt.Sprintf("export const %s: any;\n", name))
+			}
+		}
+		b.WriteString("declare const defaultExport: any;\n")
+		b.WriteString("export = defaultExport;\n")
+		return b.String()
+	default:
+		return ""
+	}
+}
+
 func (am *AgentManager) applyDeterministicMissingLocalModuleRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
 	if build == nil || len(readinessErrors) == 0 {
 		return nil, ""
@@ -7240,6 +7266,10 @@ func (am *AgentManager) applyDeterministicMissingLocalModuleRepair(build *Build,
 		language := am.detectLanguage(target.TargetPath)
 		if !plan.createFile(target.TargetPath, content, language) {
 			continue
+		}
+		if declContent := strings.TrimSpace(missingLocalModuleDeclarationContent(target.TargetPath, binding)); declContent != "" {
+			declPath := sanitizeFilePath(target.TargetPath + ".d.ts")
+			plan.createFile(declPath, declContent, am.detectLanguage(declPath))
 		}
 		applied = append(applied, fmt.Sprintf("%s (from %s)", target.TargetPath, target.SourcePath))
 	}
@@ -7499,6 +7529,147 @@ func (am *AgentManager) applyDeterministicSequelizeUniqueKeysRepair(build *Build
 
 	summary := "sequelize uniqueKeys removal on " + strings.Join(applied, ", ")
 	return am.bundleFromPatchPlan(build.ID, files, plan, "sequelize_unique_keys_repair: "+summary), summary
+}
+
+func (am *AgentManager) clearStaleSequelizeUniqueKeysValidationError(build *Build, readinessErrors []string) string {
+	if build == nil || len(readinessErrors) == 0 {
+		return ""
+	}
+
+	targets := parseSequelizeUniqueKeysRepairTargets(readinessErrors)
+	if len(targets) == 0 {
+		return ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 || plan == nil {
+		return ""
+	}
+
+	cleared := make([]string, 0, len(targets))
+	for _, target := range targets {
+		content := plan.content(target)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		if strings.Contains(content, "uniqueKeys:") {
+			continue
+		}
+		cleared = append(cleared, target)
+	}
+	if len(cleared) == 0 {
+		return ""
+	}
+
+	sort.Strings(cleared)
+	return "stale sequelize uniqueKeys validation on " + strings.Join(cleared, ", ")
+}
+
+type staleImportValidationTarget struct {
+	SourcePath string
+	Specifier  string
+}
+
+func parseStaleImportValidationTargets(errors []string) []staleImportValidationTarget {
+	if len(errors) == 0 {
+		return nil
+	}
+
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS2305: Module ['"]([^'"]+)['"] has no exported member`),
+		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS2307: Cannot find module ['"]([^'"]+)['"]`),
+	}
+
+	seen := map[string]bool{}
+	targets := make([]staleImportValidationTarget, 0)
+	for _, msg := range errors {
+		for _, pattern := range patterns {
+			for _, match := range pattern.FindAllStringSubmatch(msg, -1) {
+				if len(match) != 3 {
+					continue
+				}
+				sourcePath := sanitizeFilePath(strings.TrimSpace(match[1]))
+				specifier := strings.TrimSpace(match[2])
+				if sourcePath == "" || specifier == "" {
+					continue
+				}
+				key := strings.ToLower(sourcePath + "::" + specifier)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				targets = append(targets, staleImportValidationTarget{
+					SourcePath: sourcePath,
+					Specifier:  specifier,
+				})
+			}
+		}
+	}
+
+	sort.Slice(targets, func(i, j int) bool {
+		if targets[i].SourcePath == targets[j].SourcePath {
+			return targets[i].Specifier < targets[j].Specifier
+		}
+		return targets[i].SourcePath < targets[j].SourcePath
+	})
+	return targets
+}
+
+func sourceContentImportsSpecifier(content, specifier string) bool {
+	content = strings.TrimSpace(content)
+	specifier = strings.TrimSpace(specifier)
+	if content == "" || specifier == "" {
+		return false
+	}
+
+	needles := []string{
+		fmt.Sprintf("from '%s'", specifier),
+		fmt.Sprintf(`from "%s"`, specifier),
+		fmt.Sprintf("require('%s')", specifier),
+		fmt.Sprintf(`require("%s")`, specifier),
+		fmt.Sprintf("import('%s')", specifier),
+		fmt.Sprintf(`import("%s")`, specifier),
+	}
+	for _, needle := range needles {
+		if strings.Contains(content, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func (am *AgentManager) clearStaleImportValidationError(build *Build, readinessErrors []string) string {
+	if build == nil || len(readinessErrors) == 0 {
+		return ""
+	}
+
+	targets := parseStaleImportValidationTargets(readinessErrors)
+	if len(targets) == 0 {
+		return ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 || plan == nil {
+		return ""
+	}
+
+	cleared := make([]string, 0, len(targets))
+	for _, target := range targets {
+		sourceContent := plan.content(target.SourcePath)
+		if strings.TrimSpace(sourceContent) == "" {
+			continue
+		}
+		if sourceContentImportsSpecifier(sourceContent, target.Specifier) {
+			continue
+		}
+		cleared = append(cleared, fmt.Sprintf("%s -> %s", target.SourcePath, target.Specifier))
+	}
+	if len(cleared) == 0 {
+		return ""
+	}
+
+	sort.Strings(cleared)
+	return "stale import validation on " + strings.Join(cleared, ", ")
 }
 
 func parseSequelizeConstructorRepairTargets(errors []string) []string {
@@ -9567,6 +9738,35 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 	build.mu.Unlock()
 	if !canAttempt {
 		return false
+	}
+
+	if summary := am.clearStaleSequelizeUniqueKeysValidationError(build, readinessErrors); summary != "" {
+		progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf("Final output validation failed: %s (cleared stale Sequelize uniqueKeys validation: %s)", errorSummary, summary))
+		am.broadcastValidationRepair(
+			build.ID,
+			now,
+			progress,
+			readinessErrors,
+			"Cleared stale Sequelize uniqueKeys validation against current generated files. Re-running final validation before solver recovery.",
+			"sequelize_unique_keys_validation_reset",
+			summary,
+		)
+		am.checkBuildCompletion(build)
+		return true
+	}
+	if summary := am.clearStaleImportValidationError(build, readinessErrors); summary != "" {
+		progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf("Final output validation failed: %s (cleared stale import validation: %s)", errorSummary, summary))
+		am.broadcastValidationRepair(
+			build.ID,
+			now,
+			progress,
+			readinessErrors,
+			"Cleared stale import validation against current generated files. Re-running final validation before solver recovery.",
+			"stale_import_validation_reset",
+			summary,
+		)
+		am.checkBuildCompletion(build)
+		return true
 	}
 
 	repairs := []validationRepairSpec{

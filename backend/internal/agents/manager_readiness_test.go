@@ -2486,6 +2486,72 @@ func TestApplyDeterministicValidationRepairsCreatesMissingLocalModulePlaceholder
 	}
 }
 
+func TestApplyDeterministicValidationRepairsCreatesDeclarationForMissingCJSModulePlaceholder(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-missing-local-cjs-module-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/seed.ts",
+				Content: `import { sequelize } from './db/index';
+import * as models from './models.cjs';
+
+async function seed() {
+  await sequelize.authenticate();
+  console.log(models);
+}
+`,
+				IsNew: true,
+			},
+			{
+				Path:    "server/db/index.ts",
+				Content: "export const sequelize = {} as any;\n",
+				IsNew:   true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Preview verification local import check failed: source imports local module "./models.cjs" from "server/seed.ts" but generated file "server/models.cjs" is missing`},
+		"missing local CommonJS module",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected missing local CommonJS module repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]GeneratedFile{}
+	for _, file := range files {
+		byPath[file.Path] = file
+	}
+	cjs, ok := byPath["server/models.cjs"]
+	if !ok {
+		t.Fatalf("expected CommonJS placeholder file to be created, got %+v", files)
+	}
+	if !strings.Contains(cjs.Content, "module.exports") {
+		t.Fatalf("expected CommonJS placeholder content, got %q", cjs.Content)
+	}
+	decl, ok := byPath["server/models.cjs.d.ts"]
+	if !ok {
+		t.Fatalf("expected CommonJS declaration file to be created, got %+v", files)
+	}
+	if !strings.Contains(decl.Content, "export = defaultExport;") {
+		t.Fatalf("expected CommonJS declaration export assignment, got %q", decl.Content)
+	}
+}
+
 func TestExtractBrokenGeneratedTestPaths(t *testing.T) {
 	t.Parallel()
 
@@ -2699,6 +2765,123 @@ User.init({}, {
 	}
 	if !strings.Contains(repairedFile.Content, "indexes:") {
 		t.Fatalf("expected surrounding init options to remain intact, got %q", repairedFile.Content)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsClearsStaleSequelizeUniqueKeysError(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-unique-keys-stale",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/db/models.ts",
+				Content: `import { Sequelize, DataTypes, Model } from "sequelize";
+
+export class User extends Model {}
+User.init({}, {
+  sequelize,
+  tableName: "user",
+  indexes: [
+    { fields: ["email"] },
+  ],
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/db/models.ts(9,3): error TS2353: Object literal may only specify known properties, and 'uniqueKeys' does not exist in type 'InitOptions<User>'.`,
+		},
+		"stale sequelize uniqueKeys validation",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected stale sequelize uniqueKeys validation to be cleared")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/db/models.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected models file to remain present, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, "uniqueKeys:") {
+		t.Fatalf("expected stale validation path to keep clean file content, got %q", repairedFile.Content)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsClearsStaleImportValidationError(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-stale-import-validation",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/seed.ts",
+				Content: `import { sequelize } from './db/index';
+import * as models from './models.cjs';
+
+async function seed() {
+  await sequelize.authenticate();
+  console.log(models);
+}
+`,
+				IsNew: true,
+			},
+			{
+				Path: "server/db/index.ts",
+				Content: `export const sequelize = {} as any;
+`,
+				IsNew: true,
+			},
+			{
+				Path: "server/models.cjs",
+				Content: `module.exports = {};
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/seed.ts(1,10): error TS2305: Module '"./db"' has no exported member 'sequelize'.`,
+			`Preview verification build failed: server/seed.ts(2,25): error TS2307: Cannot find module './db/models' or its corresponding type declarations.`,
+		},
+		"stale seed import validation",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected stale import validation to be cleared")
 	}
 }
 

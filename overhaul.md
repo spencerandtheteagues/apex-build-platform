@@ -1108,6 +1108,43 @@ Date: 2026-03-28
 
 Change summary:
 
+- Ran a fresh paid full-stack canary against production after `3b8ec4e` deployed. The build reached `97%` and confirmed the earlier `tsconfig.json contains comments` provider-verification blocker is cleared on production.
+- The same live canary also proved the stale in-progress task recovery is working: the build briefly wedged at `44%` in `data_foundation`, then recovered and advanced to testing/review without manual intervention.
+- The next two late-stage issues were both in the final validation loop:
+  - stale validation errors persisted after generated files had already changed (`uniqueKeys` and later stale seed-import diagnostics)
+  - missing-local-module repair created `server/models.cjs` without a declaration file, causing `TS7016`
+- Added stale validation clearance for cleaned Sequelize `uniqueKeys` errors and for stale import diagnostics when current source files no longer import the complained-about specifiers.
+- Hardened missing-local-module repair for CommonJS placeholders so `.cjs` modules materialize as `module.exports = {}` plus a sibling `.d.ts` declaration file.
+
+Latest live paid canary:
+
+- build id: `0f405506-91a1-4871-b67e-5d68eba8d9f3`
+- terminal status: `failed`
+- final blocker:
+  - `server/seed.ts(2,25): error TS7016: Could not find a declaration file for module './models.cjs'.`
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairsCreatesMissingLocalModulePlaceholder|TestApplyDeterministicValidationRepairsCreatesDeclarationForMissingCJSModulePlaceholder|TestApplyDeterministicValidationRepairsClearsStaleImportValidationError|TestApplyDeterministicValidationRepairsClearsStaleSequelizeUniqueKeysError'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Investigated the next live paid full-stack canary after the Sequelize constructor repair. The build advanced to `97%` and then stalled in `reviewing` with a provider-assisted verification blocker: `tsconfig.json contains comments, which are not allowed in JSON, causing a compilation error.`
 - Confirmed the persisted root `tsconfig.json` from the live build was already strict JSON, which means this blocker can be a false positive at the task-output verification layer rather than a real final artifact failure.
 - Hardened deterministic normalization so generated `tsconfig.json` files are canonicalized from JSONC-style content into strict JSON before downstream checks run.

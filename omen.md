@@ -1108,3 +1108,63 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start the next paid full-stack canary
 4. If it clears this verifier false positive, continue on the next remaining late-stage generated-project blocker until the paid path is green
+
+## Latest Live Paid Canary After TSConfig Repair
+
+Production backend during run:
+
+- `started_at = 2026-03-29T00:37:57.178578867Z`
+
+Live canary:
+
+- build id: `0f405506-91a1-4871-b67e-5d68eba8d9f3`
+
+What improved:
+
+- the prior `tsconfig.json contains comments` verifier blocker is cleared on production
+- the build also proved stale in-progress task recovery works live:
+  - it paused at `44%` in `data_foundation`
+  - then auto-recovered and advanced through `79%`, `89%`, and into late review
+- this confirms both the `tsconfig` fix and the stale task recovery path are working in production
+
+Current blocker:
+
+- terminal failure still occurs late at `97%`
+- exact final blocker:
+  - `server/seed.ts(2,25): error TS7016: Could not find a declaration file for module './models.cjs'.`
+
+Important trace from the live run:
+
+- an older stale `uniqueKeys` error surfaced first, but the current generated `server/db/models.ts` was already clean
+- later, `server/seed.ts` had already been rewritten from stale `./db` / `./db/models` imports to:
+  - `import { sequelize } from './db/index';`
+  - `import * as models from './models.cjs';`
+- the repair loop then failed because the placeholder `server/models.cjs` existed without a declaration file
+
+Newest local fixes after that canary:
+
+- final validation now clears stale Sequelize `uniqueKeys` errors when the current generated file no longer contains `uniqueKeys:`
+- final validation now clears stale import diagnostics when the current source file no longer imports the complained-about specifier
+- missing-local-module repair now creates CommonJS placeholders as:
+  - `module.exports = {};`
+- and also materializes a sibling declaration file:
+  - `server/models.cjs.d.ts`
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairsCreatesMissingLocalModulePlaceholder|TestApplyDeterministicValidationRepairsCreatesDeclarationForMissingCJSModulePlaceholder|TestApplyDeterministicValidationRepairsClearsStaleImportValidationError|TestApplyDeterministicValidationRepairsClearsStaleSequelizeUniqueKeysError'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the stale-validation and `.cjs` declaration repair
+2. Wait for Render to deploy
+3. Start the next paid full-stack canary
+4. If it clears the `TS7016` blocker, continue on the next remaining late-stage generated-project blocker until the paid path is green
