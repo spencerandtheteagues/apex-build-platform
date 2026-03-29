@@ -3022,11 +3022,164 @@ Overload 1 of 4, '(database: string, username: string, password?: string | undef
 	if strings.Contains(repairedFile.Content, "new Sequelize(database, username, password") {
 		t.Fatalf("expected constructor call to be normalized, got %q", repairedFile.Content)
 	}
-	if !strings.Contains(repairedFile.Content, "new Sequelize({") {
-		t.Fatalf("expected object-form sequelize constructor, got %q", repairedFile.Content)
+	if !strings.Contains(repairedFile.Content, "new Sequelize(databaseUrl, {") {
+		t.Fatalf("expected databaseUrl-form sequelize constructor, got %q", repairedFile.Content)
 	}
-	if !strings.Contains(repairedFile.Content, "models: [path.resolve(__dirname, 'models')]") {
+	if strings.Contains(repairedFile.Content, "database,") || strings.Contains(repairedFile.Content, "username,") || strings.Contains(repairedFile.Content, "password,") {
+		t.Fatalf("expected positional credentials to be removed, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "models: [") || !strings.Contains(repairedFile.Content, "path.resolve(__dirname, 'models')") {
 		t.Fatalf("expected models option to remain intact, got %q", repairedFile.Content)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsNormalizesSequelizeTypescriptObjectConstructor(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-object-constructor-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/db/index.ts",
+				Content: `import { Sequelize } from 'sequelize-typescript';
+import { Tenant } from './models/Tenant';
+
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error('DATABASE_URL environment variable is required');
+}
+
+export const sequelize = new Sequelize({
+  database: process.env.DB_NAME || 'app',
+  username: process.env.DB_USER || 'postgres',
+  password: process.env.DB_PASS || 'postgres',
+  host: process.env.DB_HOST || 'localhost',
+  port: Number(process.env.DB_PORT) || 5432,
+  dialect: 'postgres',
+  models: [
+    Tenant,
+  ],
+  logging: false,
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/db/index.ts(16,30): error TS2769: No overload matches this call.
+Overload 1 of 4, '(database: string, username: string, password?: string | undefined, options?: SequelizeOptions | undefined): Sequelize', gave the following error.`,
+		},
+		"broken sequelize constructor",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected sequelize object constructor repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/db/index.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired sequelize db file to exist, got %+v", files)
+	}
+	if !strings.Contains(repairedFile.Content, "new Sequelize(databaseUrl, {") {
+		t.Fatalf("expected databaseUrl-form constructor, got %q", repairedFile.Content)
+	}
+	if strings.Contains(repairedFile.Content, "database: process.env.DB_NAME") ||
+		strings.Contains(repairedFile.Content, "username: process.env.DB_USER") ||
+		strings.Contains(repairedFile.Content, "password: process.env.DB_PASS") ||
+		strings.Contains(repairedFile.Content, "host: process.env.DB_HOST") ||
+		strings.Contains(repairedFile.Content, "port: Number(process.env.DB_PORT)") {
+		t.Fatalf("expected object-form credential fields to be removed, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "models: [") || !strings.Contains(repairedFile.Content, "Tenant") {
+		t.Fatalf("expected models option to remain intact, got %q", repairedFile.Content)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsStripsSequelizeTypescriptTableIndexes(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-table-options-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/db/models/ActivityLog.ts",
+				Content: `import { Table, Column, Model, DataType } from 'sequelize-typescript';
+
+@Table({
+  tableName: 'activity_logs',
+  indexes: [
+    { fields: ['tenant_id'] },
+    { fields: ['created_at'] },
+  ],
+})
+export class ActivityLog extends Model {
+  @Column(DataType.STRING)
+  action!: string;
+}
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/db/models/ActivityLog.ts(19,3): error TS2769: No overload matches this call.
+Overload 1 of 2, '(options: TableOptions<Model<any, any>>): Function', gave the following error.`,
+		},
+		"broken sequelize table options",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected sequelize table option repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/db/models/ActivityLog.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired model file to exist, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, "indexes:") {
+		t.Fatalf("expected invalid indexes block to be removed, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "tableName: 'activity_logs'") {
+		t.Fatalf("expected tableName to remain intact, got %q", repairedFile.Content)
 	}
 }
 

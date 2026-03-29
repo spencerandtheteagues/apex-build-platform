@@ -1500,3 +1500,51 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start a fresh paid full-stack canary immediately
 4. Verify the new canary either self-recovers the `79%` testing stall or surfaces the next real late-stage generator issue
+
+## Latest Live Result After Owner-Lease Takeover Fix
+
+Live canary:
+
+- build id: `f98cb239-3124-4b68-81e2-fa98f8b9cf3f`
+
+What this proved:
+
+- the autoscaling ownership bug is fixed enough to move forward
+- this canary did not die at `79% testing`
+- a non-owner instance restored the build from snapshot and the run advanced through testing into review
+- this is the strongest proof so far that the cross-instance active-session handoff is now working
+
+Next blockers surfaced by that same canary:
+
+1. `server/db/index.ts`
+   - `sequelize-typescript` constructor shape still invalid in some generated forms
+   - generated code used either:
+     - credential object form inside `new Sequelize({ ... })`
+     - or positional credentials that were normalized into the wrong target shape
+2. `server/db/models/ActivityLog.ts`
+   - `@Table({ ... indexes: [...] ... })` produced a `TableOptions<Model<any, any>>` overload error
+
+Newest local fix after that canary:
+
+- deterministic `sequelize-typescript` constructor normalization now rewrites generated DB entry files to:
+  - `new Sequelize(databaseUrl, { ... })`
+- deterministic `sequelize-typescript` table repair now strips invalid `indexes:` blocks from generated `@Table(...)` decorators when they trip `TS2769`
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairs(NormalizesSequelizeConstructor|NormalizesSequelizeTypescriptObjectConstructor|StripsSequelizeTypescriptTableIndexes|RewritesSequelizeTypescriptRuntimeImport)' -timeout=60s`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the Sequelize follow-up repairs
+2. Wait for Render to deploy
+3. Start the next paid full-stack canary immediately
+4. Keep iterating until the paid path completes cleanly end-to-end

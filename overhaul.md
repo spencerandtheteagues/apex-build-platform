@@ -1108,6 +1108,39 @@ Date: 2026-03-29
 
 Change summary:
 
+- Used the next live paid canary (`f98cb239-3124-4b68-81e2-fa98f8b9cf3f`) to confirm the owner-lease takeover path works in production. The build no longer froze permanently at `79%` on a dead-owner snapshot; a non-owner instance resumed it and the canary advanced through testing into review.
+- Added a deterministic `sequelize-typescript` constructor repair that rewrites generated PostgreSQL connection files from invalid credential-object or positional credential shapes into `new Sequelize(databaseUrl, { ... })`.
+- Added a deterministic `sequelize-typescript` table decorator repair that strips generated `indexes:` metadata from `@Table(...)` blocks when it triggers `TableOptions<Model<any, any>>` overload errors.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairs(NormalizesSequelizeConstructor|NormalizesSequelizeTypescriptObjectConstructor|StripsSequelizeTypescriptTableIndexes|RewritesSequelizeTypescriptRuntimeImport)' -timeout=60s`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Live canary result that drove this patch:
+
+- build id: `f98cb239-3124-4b68-81e2-fa98f8b9cf3f`
+- owner-lease recovery proved out: the build resumed after the old `79%` testing stall instead of hanging indefinitely
+- next surfaced blockers were:
+  - `server/db/index.ts` `TS2769` on `sequelize-typescript` constructor shape
+  - `server/db/models/ActivityLog.ts` `TS2769` on `@Table(...)` options
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-29
+
+Change summary:
+
 - Fixed the remaining autoscaling/session-ownership gap for live build polling. Active build snapshots now carry an owner-instance lease and heartbeat, refreshed from the inactivity monitor, so status/detail requests can distinguish a healthy remote owner from a dead one.
 - Read-only build endpoints keep serving fresh leased active snapshots without materializing a duplicate live session, but they now safely claim and restore a stale active snapshot when the persisted owner heartbeat expires.
 - This directly targets the live paid canary `79% testing` hang where status reads were hitting a non-owner instance and could only see a persisted active snapshot forever.

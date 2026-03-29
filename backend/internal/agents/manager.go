@@ -7882,7 +7882,37 @@ func parseSequelizeConstructorRepairTargets(errors []string) []string {
 	return targets
 }
 
+func parseSequelizeTypescriptTableRepairTargets(errors []string) []string {
+	if len(errors) == 0 {
+		return nil
+	}
+	re := regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS2769: No overload matches this call\.`)
+	seen := map[string]bool{}
+	targets := make([]string, 0)
+	for _, msg := range errors {
+		if !strings.Contains(msg, "TableOptions<Model<any, any>>") {
+			continue
+		}
+		for _, match := range re.FindAllStringSubmatch(msg, -1) {
+			if len(match) != 2 {
+				continue
+			}
+			path := sanitizeFilePath(strings.TrimSpace(match[1]))
+			if path == "" || seen[strings.ToLower(path)] {
+				continue
+			}
+			seen[strings.ToLower(path)] = true
+			targets = append(targets, path)
+		}
+	}
+	sort.Strings(targets)
+	return targets
+}
+
 func rewriteSequelizeConstructorToObjectForm(content string) (string, bool) {
+	if repaired, changed := rewriteSequelizeTypescriptConstructorToURLForm(content); changed {
+		return repaired, true
+	}
 	if !strings.Contains(content, "new Sequelize(") || !strings.Contains(content, "models:") {
 		return content, false
 	}
@@ -7895,6 +7925,64 @@ func rewriteSequelizeConstructorToObjectForm(content string) (string, bool) {
 	optionsBody := strings.TrimSpace(matches[1])
 	replacement := "export const sequelize = new Sequelize({\n  database,\n  username,\n  password,\n" + indentMultiline(optionsBody, "  ") + "\n});"
 	return re.ReplaceAllString(content, replacement), true
+}
+
+func detectDatabaseURLIdentifier(content string) string {
+	re := regexp.MustCompile(`(?m)^\s*const\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*process\.env\.DATABASE_URL\b`)
+	matches := re.FindStringSubmatch(content)
+	if len(matches) != 2 {
+		return ""
+	}
+	return strings.TrimSpace(matches[1])
+}
+
+func stripSequelizeCredentialOptionLines(body string) string {
+	lines := strings.Split(body, "\n")
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "database:"),
+			strings.HasPrefix(trimmed, "username:"),
+			strings.HasPrefix(trimmed, "password:"),
+			strings.HasPrefix(trimmed, "host:"),
+			strings.HasPrefix(trimmed, "port:"):
+			continue
+		default:
+			filtered = append(filtered, line)
+		}
+	}
+	return strings.TrimSpace(strings.Join(filtered, "\n"))
+}
+
+func rewriteSequelizeTypescriptConstructorToURLForm(content string) (string, bool) {
+	if !strings.Contains(content, "sequelize-typescript") || !strings.Contains(content, "new Sequelize(") {
+		return content, false
+	}
+	databaseURLIdentifier := detectDatabaseURLIdentifier(content)
+	if databaseURLIdentifier == "" {
+		return content, false
+	}
+
+	prefix := `((?:export\s+)?const\s+sequelize\s*=\s*new Sequelize)`
+	fourArg := regexp.MustCompile(`(?s)` + prefix + `\(\s*database\s*,\s*username\s*,\s*password\s*,\s*\{(.*?)\}\s*\);`)
+	if matches := fourArg.FindStringSubmatch(content); len(matches) == 3 {
+		optionsBody := strings.TrimSpace(matches[2])
+		replacement := matches[1] + "(" + databaseURLIdentifier + ", {\n" + indentMultiline(optionsBody, "  ") + "\n});"
+		return fourArg.ReplaceAllString(content, replacement), true
+	}
+
+	objectForm := regexp.MustCompile(`(?s)` + prefix + `\(\s*\{(.*?)\}\s*\);`)
+	matches := objectForm.FindStringSubmatch(content)
+	if len(matches) != 3 {
+		return content, false
+	}
+	optionsBody := stripSequelizeCredentialOptionLines(matches[2])
+	if optionsBody == strings.TrimSpace(matches[2]) {
+		return content, false
+	}
+	replacement := matches[1] + "(" + databaseURLIdentifier + ", {\n" + indentMultiline(optionsBody, "  ") + "\n});"
+	return objectForm.ReplaceAllString(content, replacement), true
 }
 
 func rewriteSequelizeTypescriptRuntimeImport(content string) (string, bool) {
@@ -7916,6 +8004,42 @@ func rewriteSequelizeTypescriptRuntimeImport(content string) (string, bool) {
 	}
 
 	return content, false
+}
+
+func stripSequelizeTableIndexes(content string) (string, bool) {
+	if !strings.Contains(content, "@Table({") || !strings.Contains(content, "indexes:") {
+		return content, false
+	}
+	lines := strings.Split(content, "\n")
+	filtered := make([]string, 0, len(lines))
+	skipping := false
+	bracketDepth := 0
+	changed := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !skipping && strings.HasPrefix(trimmed, "indexes:") {
+			skipping = true
+			bracketDepth = strings.Count(line, "[") - strings.Count(line, "]")
+			changed = true
+			if bracketDepth <= 0 {
+				skipping = false
+			}
+			continue
+		}
+		if skipping {
+			bracketDepth += strings.Count(line, "[")
+			bracketDepth -= strings.Count(line, "]")
+			if bracketDepth <= 0 {
+				skipping = false
+			}
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	if !changed {
+		return content, false
+	}
+	return strings.Join(filtered, "\n"), true
 }
 
 func indentMultiline(content string, prefix string) string {
@@ -7970,6 +8094,44 @@ func (am *AgentManager) applyDeterministicSequelizeConstructorRepair(build *Buil
 
 	summary := "sequelize constructor normalization on " + strings.Join(applied, ", ")
 	return am.bundleFromPatchPlan(build.ID, files, plan, "sequelize_constructor_repair: "+summary), summary
+}
+
+func (am *AgentManager) applyDeterministicSequelizeTypescriptTableRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+
+	targets := parseSequelizeTypescriptTableRepairTargets(readinessErrors)
+	if len(targets) == 0 {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 {
+		return nil, ""
+	}
+
+	applied := make([]string, 0, len(targets))
+	for _, target := range targets {
+		content := plan.content(target)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		repaired, changed := stripSequelizeTableIndexes(content)
+		if !changed {
+			continue
+		}
+		if !plan.patchFile(target, repaired, am.detectLanguage(target)) {
+			continue
+		}
+		applied = append(applied, target)
+	}
+	if len(applied) == 0 {
+		return nil, ""
+	}
+
+	summary := "sequelize table option normalization on " + strings.Join(applied, ", ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "sequelize_typescript_table_repair: "+summary), summary
 }
 
 func (am *AgentManager) applyDeterministicBrokenGeneratedTestRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
@@ -10014,6 +10176,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			errorFormat: "Final output validation failed: %s (applied Sequelize constructor repair: %s)",
 			message:     "Applied deterministic repair to generated Sequelize constructor calls that used an invalid argument shape. Re-running final validation before solver recovery.",
 			summaryKey:  "sequelize_constructor_repair",
+		},
+		{
+			apply:       am.applyDeterministicSequelizeTypescriptTableRepair,
+			errorFormat: "Final output validation failed: %s (applied Sequelize table option repair: %s)",
+			message:     "Applied deterministic repair to generated sequelize-typescript model decorators that used invalid table option metadata. Re-running final validation before solver recovery.",
+			summaryKey:  "sequelize_table_option_repair",
 		},
 		{
 			apply:       am.applyDeterministicQuoteSyntaxRepair,
