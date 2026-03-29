@@ -608,10 +608,15 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 	build, snapshot, restored, err := h.loadReadableBuild(buildID, uid)
 	if err == nil && build != nil {
 		// Verify ownership
-		if uid != build.UserID {
+		build.mu.RLock()
+		ownerID := build.UserID
+		build.mu.RUnlock()
+		if uid != ownerID {
 			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
 			return
 		}
+
+		h.manager.selfHealReadableActiveBuild(build)
 
 		build.mu.RLock()
 		defer build.mu.RUnlock()
@@ -979,10 +984,15 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 	build, snapshot, restored, err := h.loadReadableBuild(buildID, uid)
 	if err == nil && build != nil {
 		// Verify ownership
-		if uid != build.UserID {
+		build.mu.RLock()
+		ownerID := build.UserID
+		build.mu.RUnlock()
+		if uid != ownerID {
 			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
 			return
 		}
+
+		h.manager.selfHealReadableActiveBuild(build)
 
 		build.mu.RLock()
 		defer build.mu.RUnlock()

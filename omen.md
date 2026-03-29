@@ -1401,3 +1401,63 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start the next paid full-stack canary
 4. If it clears the `97%` stale-review hang, continue on the next remaining late-stage generator issue until the paid path is green
+
+## Latest Live Paid Canary After Superseded Recovery-Task Cancellation Fix
+
+Production backend during run:
+
+- `started_at = 2026-03-29T01:29:02.908575138Z`
+
+Live canary:
+
+- build id: `a8b7dfd3-2142-4846-a9a1-9414b8bcfa8f`
+
+What improved:
+
+- the previous `97%` stale-review hang is no longer the first failure signal
+- the build moved cleanly through planning, implementation, and into the test phase
+- this means the recovery-task cancellation fix did not regress the later review/finalization path
+
+Current blocker:
+
+- the build is stuck in `testing` at `79%`
+- there is no surfaced compiler/runtime blocker yet
+- the active `test` task remains `in_progress` far past the configured balanced full-stack timeout window
+
+Important trace from the live run:
+
+- active `test` task is assigned to the `testing` agent on `gemini`
+- task has a real `started_at`
+- task has no `stale_recovery_attempt` marker
+- the build status endpoint can see the stale active task, but the background watchdog did not recover it
+
+Newest local fix after that canary:
+
+- live read paths now self-heal active in-memory builds before returning status/details:
+  - `GetBuildStatus`
+  - `GetBuildDetails`
+- the read path now opportunistically:
+  - triggers stale in-progress task recovery
+  - then re-runs completion checks for active builds
+- this gives the frontend polling loop a recovery backstop when the background build monitor misses a stuck task
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestGetBuildStatus(SelfHealsStaleLiveTask|NormalizesLiveProgressWithinPhaseWindow)|TestApplyDeterministicValidationRepairs(CancelsSupersededRecoveryTasks|StripsSequelizeUniqueKeys|ClearsStaleSequelizeUniqueKeysError)|TestApplyDeterministicProviderBlockedTestRepair(ClearsStaleTruncatedGeneratedTestBlocker|AcceptsAlreadyCanonicalTSConfig|AcceptsCanonicalTSConfigForInvalidJSONSyntaxBlocker)|TestApplyDeterministicValidationRepairsRewritesSequelizeTypescriptRuntimeImport'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the live read-path self-heal for stale active builds
+2. Wait for Render to deploy
+3. Start the next paid full-stack canary
+4. If it clears the `79%` testing stall, continue on the next remaining late-stage generator issue until the paid path is green

@@ -1108,6 +1108,34 @@ Date: 2026-03-28
 
 Change summary:
 
+- A fresh paid canary on production backend `started_at = 2026-03-29T01:29:02.908575138Z` showed a new autoscaling-style failure mode: the build stayed in `testing` at `79%` with a real `test` task still marked `in_progress`, but the stale-task watchdog never fired even after the task exceeded the configured execution timeout.
+- The task had a valid `started_at` and no `stale_recovery_attempt` marker, which means the live build status endpoint could see a stale active build that the background monitor had not rescued.
+- Added a read-path self-heal for live builds: `GetBuildStatus` and `GetBuildDetails` now opportunistically trigger stale in-progress task recovery and re-run completion checks for active in-memory builds before serializing the response. This gives the frontend polling loop a recovery backstop when the background watchdog misses a stuck task.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/handlers.go internal/agents/handlers_test.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestGetBuildStatus(SelfHealsStaleLiveTask|NormalizesLiveProgressWithinPhaseWindow)|TestApplyDeterministicValidationRepairs(CancelsSupersededRecoveryTasks|StripsSequelizeUniqueKeys|ClearsStaleSequelizeUniqueKeysError)|TestApplyDeterministicProviderBlockedTestRepair(ClearsStaleTruncatedGeneratedTestBlocker|AcceptsAlreadyCanonicalTSConfig|AcceptsCanonicalTSConfigForInvalidJSONSyntaxBlocker)|TestApplyDeterministicValidationRepairsRewritesSequelizeTypescriptRuntimeImport'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - The next live paid full-stack canary on production backend `started_at = 2026-03-29T01:19:25.329095589Z` cleared the earlier stale provider-blocked branches and advanced to `97%`.
 - That run exposed a state-machine issue rather than a new generator defect: `server/db/models.ts` was already clean after the deterministic Sequelize `uniqueKeys` repair, but the build remained pinned in `reviewing` because an older automated `fix_review_issues` recovery task was still marked `in_progress`.
 - Updated deterministic final-validation repair handling so any successful deterministic repair first cancels superseded automated recovery tasks before re-running completion. This prevents stale solver recovery from holding a repaired build in `reviewing` when the file set is already ready for revalidation.

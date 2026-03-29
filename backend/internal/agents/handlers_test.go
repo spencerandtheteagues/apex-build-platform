@@ -377,6 +377,70 @@ func TestGetBuildStatusNormalizesLiveProgressWithinPhaseWindow(t *testing.T) {
 	}
 }
 
+func TestGetBuildStatusSelfHealsStaleLiveTask(t *testing.T) {
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		resultQueue: make(chan *TaskResult, 1),
+		ctx:         context.Background(),
+	}
+
+	startedAt := time.Now().Add(-10 * time.Minute)
+	build := &Build{
+		ID:          "live-stale-status-recovery",
+		UserID:      1,
+		Status:      BuildTesting,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Description: "Status polling should recover stale test tasks",
+		UpdatedAt:   time.Now().Add(-10 * time.Minute),
+		Agents: map[string]*Agent{
+			"testing-1": {
+				ID:       "testing-1",
+				BuildID:  "live-stale-status-recovery",
+				Role:     RoleTesting,
+				Provider: ai.ProviderGemini,
+				Status:   StatusWorking,
+			},
+		},
+		Tasks: []*Task{
+			{
+				ID:          "task-stale-test",
+				Type:        TaskTest,
+				Description: "Verify integration",
+				Status:      TaskInProgress,
+				AssignedTo:  "testing-1",
+				StartedAt:   &startedAt,
+				CreatedAt:   startedAt,
+			},
+		},
+	}
+	am.builds[build.ID] = build
+	am.agents["testing-1"] = build.Agents["testing-1"]
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/live-stale-status-recovery/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	select {
+	case result := <-am.resultQueue:
+		if result == nil || result.TaskID != "task-stale-test" || result.Success {
+			t.Fatalf("unexpected recovery result: %+v", result)
+		}
+	default:
+		t.Fatal("expected status read to enqueue stale task recovery")
+	}
+
+	if got := taskInputInt(build.Tasks[0].Input, "stale_recovery_attempt"); got != 0 {
+		t.Fatalf("expected stale recovery attempt marker 0, got %d", got)
+	}
+}
+
 func TestGetBuildDetailsNormalizesLiveProgressWithinPhaseWindow(t *testing.T) {
 	am := &AgentManager{
 		builds:      make(map[string]*Build),

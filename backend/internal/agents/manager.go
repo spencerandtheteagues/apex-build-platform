@@ -1214,6 +1214,38 @@ func (am *AgentManager) recoverStaleInProgressTasks(build *Build, idleFor time.D
 	return len(recoveries) > 0
 }
 
+func (am *AgentManager) selfHealReadableActiveBuild(build *Build) {
+	if build == nil {
+		return
+	}
+
+	build.mu.RLock()
+	status := build.Status
+	blockedByInteraction := buildInteractionBlocksExecution(build)
+	lastUpdate := build.UpdatedAt
+	build.mu.RUnlock()
+
+	if blockedByInteraction || !isActiveBuildStatus(string(status)) {
+		return
+	}
+
+	idleFor := time.Duration(0)
+	if !lastUpdate.IsZero() {
+		idleFor = time.Since(lastUpdate)
+		if idleFor < 0 {
+			idleFor = 0
+		}
+	}
+
+	if am.recoverStaleInProgressTasks(build, idleFor) {
+		return
+	}
+
+	if idleFor >= 30*time.Second {
+		am.checkBuildCompletion(build)
+	}
+}
+
 // failBuildOnTimeout marks a timed-out build as failed and preserves partial artifacts.
 func (am *AgentManager) failBuildOnTimeout(buildID string, timeout time.Duration) {
 	am.mu.RLock()
