@@ -2768,6 +2768,70 @@ User.init({}, {
 	}
 }
 
+func TestApplyDeterministicValidationRepairsCancelsSupersededRecoveryTasks(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-unique-keys-cancel-recovery",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		Tasks: []*Task{
+			{
+				ID:     "task-fix-review",
+				Type:   TaskFix,
+				Status: TaskInProgress,
+				Input: map[string]any{
+					"action": "fix_review_issues",
+				},
+			},
+		},
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/db/models.ts",
+				Content: `import { Sequelize, DataTypes, Model } from "sequelize";
+
+export class User extends Model {}
+User.init({}, {
+  sequelize,
+  tableName: "user",
+  indexes: [
+    { fields: ["email"] },
+  ],
+  uniqueKeys: {
+    unique_email_per_tenant: {
+      fields: ["tenant_id", "email"],
+    },
+  },
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/db/models.ts(9,3): error TS2353: Object literal may only specify known properties, and 'uniqueKeys' does not exist in type 'InitOptions<User>'.`,
+		},
+		"broken sequelize init options",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected sequelize uniqueKeys repair to apply")
+	}
+	if build.Tasks[0].Status != TaskCancelled {
+		t.Fatalf("expected superseded recovery task to be cancelled, got %s", build.Tasks[0].Status)
+	}
+}
+
 func TestApplyDeterministicValidationRepairsClearsStaleSequelizeUniqueKeysError(t *testing.T) {
 	t.Parallel()
 

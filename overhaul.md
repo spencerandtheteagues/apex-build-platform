@@ -1108,6 +1108,32 @@ Date: 2026-03-28
 
 Change summary:
 
+- The next live paid full-stack canary on production backend `started_at = 2026-03-29T01:19:25.329095589Z` cleared the earlier stale provider-blocked branches and advanced to `97%`.
+- That run exposed a state-machine issue rather than a new generator defect: `server/db/models.ts` was already clean after the deterministic Sequelize `uniqueKeys` repair, but the build remained pinned in `reviewing` because an older automated `fix_review_issues` recovery task was still marked `in_progress`.
+- Updated deterministic final-validation repair handling so any successful deterministic repair first cancels superseded automated recovery tasks before re-running completion. This prevents stale solver recovery from holding a repaired build in `reviewing` when the file set is already ready for revalidation.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairs(CancelsSupersededRecoveryTasks|StripsSequelizeUniqueKeys|ClearsStaleSequelizeUniqueKeysError)|TestApplyDeterministicProviderBlockedTestRepair(ClearsStaleTruncatedGeneratedTestBlocker|AcceptsAlreadyCanonicalTSConfig|AcceptsCanonicalTSConfigForInvalidJSONSyntaxBlocker)|TestApplyDeterministicValidationRepairsRewritesSequelizeTypescriptRuntimeImport'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - The next live paid full-stack canary on production backend `started_at = 2026-03-29T01:09:51.834888848Z` proved the widened `tsconfig invalid JSON syntax` bypass is working, but failed at `87%` on another stale provider-blocked test error: `Truncated source in tests/integration/fullstack.test.ts`.
 - Pulled the failed build detail and confirmed `tests/integration/fullstack.test.ts` was not present anywhere in the final generated file set, so the provider blocker was stale rather than a real current output defect.
 - Widened the truncated generated-test parser to recognize the exact live phrase `Truncated source in ...`, and taught the deterministic provider-blocked repair to clear stale truncated-test blockers when the complained-about test file is not in the current task output.

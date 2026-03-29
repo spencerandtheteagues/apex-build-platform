@@ -1341,3 +1341,63 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start the next paid full-stack canary
 4. If it clears this provider-blocked stale test error, continue on the next remaining late-stage generated-project blocker until the paid path is green
+
+## Latest Live Paid Canary After Stale Truncated Test Blocker Repair
+
+Production backend during run:
+
+- `started_at = 2026-03-29T01:19:25.329095589Z`
+
+Live canary:
+
+- build id: `3d2795ce-0589-4b0e-96d2-449c1f7af42a`
+
+What improved:
+
+- the stale truncated generated-test blocker is gone
+- the paid path advanced through review and into late final validation again
+- progress reached `97%`, which is the farthest live paid canary depth in this lane so far
+
+Current blocker:
+
+- the build does not fail terminally right away; it gets pinned in `reviewing` at `97%`
+- visible error:
+  - `server/db/models.ts(...): 'uniqueKeys' does not exist in type 'InitOptions<...>'`
+
+Important trace from the live run:
+
+- pulled the current generated `server/db/models.ts` from the live build
+- confirmed the file is already clean:
+  - no `uniqueKeys:` blocks remain
+  - only supported `indexes:` metadata remains
+- build detail also showed an automated recovery task still `in_progress`:
+  - `type: fix`
+  - `action: fix_review_issues`
+- that means the real issue is state, not file content:
+  - deterministic Sequelize repair already cleaned the file set
+  - but a superseded automated recovery task is still preventing completion from re-running cleanly
+
+Newest local fix after that canary:
+
+- deterministic final-validation repairs now cancel superseded automated recovery tasks before marking the build for validation re-check
+- this specifically covers cases where a stale `fix_review_issues` task would otherwise leave a repaired build stuck in `reviewing`
+- added a regression that asserts a successful deterministic validation repair cancels an `in_progress` recovery task
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairs(CancelsSupersededRecoveryTasks|StripsSequelizeUniqueKeys|ClearsStaleSequelizeUniqueKeysError)|TestApplyDeterministicProviderBlockedTestRepair(ClearsStaleTruncatedGeneratedTestBlocker|AcceptsAlreadyCanonicalTSConfig|AcceptsCanonicalTSConfigForInvalidJSONSyntaxBlocker)|TestApplyDeterministicValidationRepairsRewritesSequelizeTypescriptRuntimeImport'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the superseded recovery-task cancellation fix
+2. Wait for Render to deploy
+3. Start the next paid full-stack canary
+4. If it clears the `97%` stale-review hang, continue on the next remaining late-stage generator issue until the paid path is green

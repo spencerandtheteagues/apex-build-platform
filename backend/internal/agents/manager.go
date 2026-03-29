@@ -9783,6 +9783,7 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 	}
 
 	if summary := am.clearStaleSequelizeUniqueKeysValidationError(build, readinessErrors); summary != "" {
+		am.cancelAutomatedRecoveryTasksForLoopCap(build)
 		progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf("Final output validation failed: %s (cleared stale Sequelize uniqueKeys validation: %s)", errorSummary, summary))
 		am.broadcastValidationRepair(
 			build.ID,
@@ -9797,6 +9798,7 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 		return true
 	}
 	if summary := am.clearStaleImportValidationError(build, readinessErrors); summary != "" {
+		am.cancelAutomatedRecoveryTasksForLoopCap(build)
 		progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf("Final output validation failed: %s (cleared stale import validation: %s)", errorSummary, summary))
 		am.broadcastValidationRepair(
 			build.ID,
@@ -9896,6 +9898,7 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			appendPatchBundle(build, *bundle)
 		}
 
+		am.cancelAutomatedRecoveryTasksForLoopCap(build)
 		progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf(repair.errorFormat, errorSummary, summary))
 		message := repair.message
 		if strings.Contains(message, "%s") {
