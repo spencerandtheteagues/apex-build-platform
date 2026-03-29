@@ -6689,6 +6689,7 @@ func parseTruncatedGeneratedTestRepairTargets(errors []string) []string {
 
 	patterns := []*regexp.Regexp{
 		regexp.MustCompile(`(?i)(?:the file\s+)?([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx))\s+ends abruptly`),
+		regexp.MustCompile(`(?i)truncated source in\s+([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx))`),
 		regexp.MustCompile(`(?i)([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx)).*missing closing brace`),
 		regexp.MustCompile(`(?i)([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx)).*abrupt eof`),
 		regexp.MustCompile(`(?i)([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx)).*unterminated`),
@@ -6774,11 +6775,13 @@ func (am *AgentManager) applyDeterministicProviderBlockedTestRepair(build *Build
 		}
 
 		applied := make([]string, 0, len(targets))
+		presentTargets := make(map[string]bool, len(targets))
 		for i := range output.Files {
 			path := sanitizeFilePath(strings.TrimSpace(output.Files[i].Path))
 			if path == "" || !targetSet[strings.ToLower(path)] {
 				continue
 			}
+			presentTargets[strings.ToLower(path)] = true
 			output.Files[i].Content = placeholderGeneratedTestFileContent(path)
 			output.Files[i].Size = int64(len(output.Files[i].Content))
 			if strings.TrimSpace(output.Files[i].Language) == "" {
@@ -6798,6 +6801,16 @@ func (am *AgentManager) applyDeterministicProviderBlockedTestRepair(build *Build
 			}
 			sort.Strings(applied)
 			appliedSummaries = append(appliedSummaries, "placeholder tests: "+strings.Join(applied, ", "))
+		}
+		missingTargets := make([]string, 0, len(targets))
+		for _, target := range targets {
+			if !presentTargets[strings.ToLower(target)] {
+				missingTargets = append(missingTargets, target)
+			}
+		}
+		if len(missingTargets) > 0 {
+			sort.Strings(missingTargets)
+			appliedSummaries = append(appliedSummaries, "cleared stale truncated test blockers: "+strings.Join(missingTargets, ", "))
 		}
 	}
 

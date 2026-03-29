@@ -1284,3 +1284,60 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start the next paid full-stack canary
 4. If it clears this stale provider blocker, continue on the next remaining late-stage generated-project blocker until the paid path is green
+
+## Latest Live Paid Canary After TSConfig Invalid JSON Syntax False-Positive Repair
+
+Production backend during run:
+
+- `started_at = 2026-03-29T01:09:51.834888848Z`
+
+Live canary:
+
+- build id: `babdbae1-5e5a-4e87-af5e-5149943f4c83`
+
+What improved:
+
+- the previous stale `tsconfig.json contains invalid JSON syntax` blocker is gone
+- the paid path again advanced through planning, data, integration, and into late verification
+- this confirms the widened `tsconfig` false-positive bypass is working in production
+
+Current blocker:
+
+- terminal failure occurred at `87%`
+- exact final blocker:
+  - `Failed after 1 attempts: provider verification blocked task output: Truncated source in tests/integration/fullstack.test.ts, as it ends abruptly and would cause a compilation error due to incomplete code.`
+
+Important trace from the live run:
+
+- pulled the failed build detail and checked the final generated file set
+- `tests/integration/fullstack.test.ts` was not present in the current output at all
+- the final files were only the app/runtime files (`src/*`, `server/*`, config, migration, etc.)
+- that means this was another stale provider-blocked error attached to a missing prior-attempt test file, not a current generated-output defect
+
+Newest local fix after that canary:
+
+- widened the truncated generated-test parser to recognize:
+  - `Truncated source in tests/integration/fullstack.test.ts ...`
+- deterministic provider-blocked test repair now also clears stale truncated-test blockers when:
+  - the blocker names a test file
+  - but that file is not present in the current task output
+- existing placeholder repair for actually-present truncated generated test files remains intact
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicProviderBlockedTestRepair(ClearsStaleTruncatedGeneratedTestBlocker|AcceptsAlreadyCanonicalTSConfig|AcceptsCanonicalTSConfigForInvalidJSONSyntaxBlocker)|TestApplyDeterministicValidationRepairsRewritesSequelizeTypescriptRuntimeImport'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the stale truncated generated-test blocker repair
+2. Wait for Render to deploy
+3. Start the next paid full-stack canary
+4. If it clears this provider-blocked stale test error, continue on the next remaining late-stage generated-project blocker until the paid path is green

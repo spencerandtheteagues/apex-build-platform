@@ -3356,6 +3356,33 @@ func TestApplyDeterministicProviderBlockedTestRepairAcceptsCanonicalTSConfigForI
 	}
 }
 
+func TestApplyDeterministicProviderBlockedTestRepairClearsStaleTruncatedGeneratedTestBlocker(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	output := &TaskOutput{
+		Files: []GeneratedFile{
+			{
+				Path:    "src/App.tsx",
+				Content: `export default function App() { return <div>ok</div>; }`,
+			},
+		},
+	}
+
+	repaired, summary := am.applyDeterministicProviderBlockedTestRepair(nil, output, []string{
+		`Truncated source in tests/integration/fullstack.test.ts, as it ends abruptly and would cause a compilation error due to incomplete code.`,
+	})
+	if !repaired {
+		t.Fatal("expected stale truncated generated test blocker to be cleared")
+	}
+	if !strings.Contains(summary, "tests/integration/fullstack.test.ts") {
+		t.Fatalf("unexpected repair summary: %q", summary)
+	}
+	if len(output.Files) != 1 || output.Files[0].Path != "src/App.tsx" {
+		t.Fatalf("expected unrelated output files to remain unchanged, got %+v", output.Files)
+	}
+}
+
 func TestApplyDeterministicPreValidationNormalizationAddsJestDependencyForGeneratedJestTests(t *testing.T) {
 	t.Setenv("PATH", "")
 
