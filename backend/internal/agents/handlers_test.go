@@ -263,6 +263,102 @@ func TestGetBuildStatusServesActiveSnapshotReadOnlyWithoutRestoringSession(t *te
 	}
 }
 
+func TestGetBuildStatusFallsBackToSnapshotWhenLiveLookupTimesOut(t *testing.T) {
+	db := openBuildTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-status-timeout-fallback",
+		UserID:      1,
+		Description: "Serve snapshot when live lookup is blocked",
+		Status:      string(BuildInProgress),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    59,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"backend-1",
+			"role":"backend",
+			"provider":"gpt4",
+			"status":"working",
+			"progress":59
+		}]`,
+		TasksJSON: `[{
+			"id":"task-api",
+			"type":"generate_api",
+			"description":"Implement backend routes",
+			"assigned_to":"backend-1",
+			"status":"in_progress"
+		}]`,
+		StateJSON: `{
+			"current_phase":"backend_and_data",
+			"quality_gate_required":true
+		}`,
+		CreatedAt: now.Add(-2 * time.Minute),
+		UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+	am.builds["active-status-timeout-fallback"] = &Build{
+		ID:          "active-status-timeout-fallback",
+		UserID:      1,
+		Description: "Live build that is temporarily blocked",
+		Status:      BuildInProgress,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Progress:    59,
+	}
+
+	previousTimeout := readableBuildLookupTimeout
+	readableBuildLookupTimeout = 50 * time.Millisecond
+	defer func() { readableBuildLookupTimeout = previousTimeout }()
+
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1/build/active-status-timeout-fallback/status", nil)
+		testRouter(am).ServeHTTP(w, req)
+		done <- w
+	}()
+
+	select {
+	case w := <-done:
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+		if body["live"] != false {
+			t.Fatalf("expected timed-out live lookup to fall back to snapshot, got live=%v", body["live"])
+		}
+		if body["restored_from_snapshot"] != true {
+			t.Fatalf("expected snapshot fallback to mark restored_from_snapshot=true, got %v", body["restored_from_snapshot"])
+		}
+		if body["progress"] != float64(59) {
+			t.Fatalf("expected snapshot progress 59, got %v", body["progress"])
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected build status fallback to return promptly when live lookup blocks")
+	}
+}
+
 func TestGetBuildDetailsServesActiveSnapshotReadOnlyWithoutRestoringSession(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.CompletedBuild{

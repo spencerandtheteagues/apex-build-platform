@@ -26,7 +26,10 @@ import (
 var (
 	errBuildActionNotFound = errors.New("build not found")
 	errBuildAccessDenied   = errors.New("access denied")
+	errBuildLookupTimeout  = errors.New("live build lookup timed out")
 )
+
+var readableBuildLookupTimeout = 2 * time.Second
 
 // BuildHandler handles build-related HTTP requests
 type BuildHandler struct {
@@ -228,6 +231,13 @@ func writeBuildLookupError(c *gin.Context, err error, fallbackErr error) {
 	lookupErr := err
 	if lookupErr == nil {
 		lookupErr = fallbackErr
+	}
+	if errors.Is(lookupErr, errBuildLookupTimeout) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "build session unavailable",
+			"details": "The live build session did not respond in time. A saved snapshot may still be available.",
+		})
+		return
 	}
 	if buildPlatformIssueFromError(lookupErr) != nil {
 		c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(lookupErr, "build session unavailable", "The build state could not be loaded because a platform service is temporarily unavailable."))
@@ -1085,16 +1095,23 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 }
 
 func (h *BuildHandler) loadReadableBuild(buildID string, userID uint) (*Build, *models.CompletedBuild, bool, error) {
-	build, err := h.manager.GetBuild(buildID)
+	build, err := h.getLiveBuildForRead(buildID)
 	if err == nil {
 		if build.UserID != userID {
 			return nil, nil, false, errBuildAccessDenied
 		}
 		return build, nil, false, nil
 	}
+	liveLookupTimedOut := errors.Is(err, errBuildLookupTimeout)
+	if liveLookupTimedOut {
+		log.Printf("Build %s: live readable lookup timed out after %s; falling back to snapshot", buildID, readableBuildLookupTimeout)
+	}
 
 	snapshot, snapErr := h.getBuildSnapshot(userID, buildID)
 	if snapErr != nil {
+		if liveLookupTimedOut {
+			return nil, nil, false, errBuildLookupTimeout
+		}
 		return nil, nil, false, snapErr
 	}
 
@@ -1120,6 +1137,33 @@ func (h *BuildHandler) loadReadableBuild(buildID string, userID uint) (*Build, *
 	// between the true live build and stale snapshot state. Execution resumption
 	// remains exclusive to write/control paths.
 	return nil, snapshot, false, nil
+}
+
+func (h *BuildHandler) getLiveBuildForRead(buildID string) (*Build, error) {
+	if readableBuildLookupTimeout <= 0 {
+		return h.manager.GetBuild(buildID)
+	}
+
+	type buildLookupResult struct {
+		build *Build
+		err   error
+	}
+
+	resultCh := make(chan buildLookupResult, 1)
+	go func() {
+		build, err := h.manager.GetBuild(buildID)
+		resultCh <- buildLookupResult{build: build, err: err}
+	}()
+
+	timer := time.NewTimer(readableBuildLookupTimeout)
+	defer timer.Stop()
+
+	select {
+	case result := <-resultCh:
+		return result.build, result.err
+	case <-timer.C:
+		return nil, errBuildLookupTimeout
+	}
 }
 
 // SendMessage sends a message to the build's lead agent

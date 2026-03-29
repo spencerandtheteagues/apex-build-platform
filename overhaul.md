@@ -1108,6 +1108,32 @@ Date: 2026-03-29
 
 Change summary:
 
+- Added a short timeout around live build lookup for readable endpoints so `/build/:id/status` and `/build/:id` fall back to the persisted snapshot instead of hanging when the live manager read path is blocked.
+- This directly addresses the live paid-canary failure mode where build status/detail requests stopped responding while the backend stayed healthy.
+- Kept control/write paths unchanged; only read surfaces degrade to snapshot mode.
+
+Files changed:
+
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/handlers.go internal/agents/handlers_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestGetBuildStatusFallsBackToSnapshotWhenLiveLookupTimesOut|TestGetBuildStatusServesActiveSnapshotReadOnlyWithoutRestoringSession|TestGetBuildStatusKeepsFreshLeasedActiveSnapshotReadOnly|TestGetBuildStatusRestoresStaleLeasedActiveSnapshot'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-29
+
+Change summary:
+
 - Extended runtime preview verification time budgets so paid full-stack previews get realistic dependency-install headroom instead of failing after a hardcoded `60s`.
 - Added deterministic repair and stale-error clearing for plain Sequelize `Model.init(..., { indexes: [...] })` metadata when TypeScript flags `indexes` as unsupported in generated `InitOptions<...>`.
 - Kept the fix narrow to backend reliability surfaces so the next live paid canary can spend less time rediscovering late-stage generator issues.

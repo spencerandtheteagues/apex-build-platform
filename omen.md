@@ -1591,3 +1591,44 @@ Next exact step:
 2. Wait for Render to deploy the new backend instance
 3. Start a fresh paid full-stack canary immediately
 4. If that canary still fails, inspect the exact late-stage generated-file/runtime error and keep iterating
+
+## Latest Read-Path Reliability Fix
+
+Problem observed live:
+
+- Active paid canary `0213057b-0d68-4d4d-acf4-6b1a7346de9d` kept building, but both:
+  - `GET /api/v1/build/:id/status`
+  - `GET /api/v1/build/:id`
+  started timing out even while `/health/features` stayed healthy.
+- That means the customer-facing build UI could hang even when the platform itself was still alive.
+
+Fix:
+
+- Added a short timeout around live build lookup for read-only build endpoints.
+- If the in-memory manager read path does not respond quickly, read endpoints now fall back to the persisted completed_build snapshot instead of hanging.
+- Control/write paths were left unchanged; only readable/status surfaces degrade to snapshot mode.
+
+Files:
+
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+
+Verification:
+
+- `cd backend && gofmt -w internal/agents/handlers.go internal/agents/handlers_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestGetBuildStatusFallsBackToSnapshotWhenLiveLookupTimesOut|TestGetBuildStatusServesActiveSnapshotReadOnlyWithoutRestoringSession|TestGetBuildStatusKeepsFreshLeasedActiveSnapshotReadOnly|TestGetBuildStatusRestoresStaleLeasedActiveSnapshot'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Operational note:
+
+- Claude’s frontend polish commit is local-only on top of the working branch.
+- Do not push that commit together with backend reliability fixes unless it is explicitly reviewed and intended.
+
+Next exact step:
+
+1. Publish the readable-build timeout fallback without bundling Claude’s frontend polish
+2. Wait for Render to deploy the backend fix
+3. Re-check the still-running paid canary, or start a fresh paid canary if the old one is no longer trustworthy
+4. If status/detail are responsive again, continue iterating on the next late-stage full-stack blocker
