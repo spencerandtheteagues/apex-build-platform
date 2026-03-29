@@ -311,6 +311,44 @@ func TestRuntimeVerifierFailsWhenBrowserProofEnabledButChromeUnavailable(t *test
 	}
 }
 
+func TestRuntimeVerifierDefaultTimeouts(t *testing.T) {
+	t.Parallel()
+
+	httpOnly := &RuntimeVerifier{}
+	if got := httpOnly.runtimeTotalTimeout(); got != 150*time.Second {
+		t.Fatalf("expected default HTTP-only total timeout to be 150s, got %s", got)
+	}
+	if got := httpOnly.runtimeInstallTimeout(httpOnly.runtimeTotalTimeout()); got != 90*time.Second {
+		t.Fatalf("expected default HTTP-only install timeout to be 90s, got %s", got)
+	}
+
+	withBrowser := &RuntimeVerifier{browser: &BrowserVerifier{chromePath: "/usr/bin/chromium-browser"}}
+	if got := withBrowser.runtimeTotalTimeout(); got != 180*time.Second {
+		t.Fatalf("expected browser total timeout to be 180s, got %s", got)
+	}
+	if got := withBrowser.runtimeInstallTimeout(withBrowser.runtimeTotalTimeout()); got != 120*time.Second {
+		t.Fatalf("expected browser install timeout to be 120s, got %s", got)
+	}
+}
+
+func TestRuntimeVerifierCustomTimeouts(t *testing.T) {
+	t.Parallel()
+
+	rv := &RuntimeVerifier{
+		totalTimeout:   42 * time.Second,
+		installTimeout: 17 * time.Second,
+	}
+	if got := rv.runtimeTotalTimeout(); got != 42*time.Second {
+		t.Fatalf("expected custom total timeout to be preserved, got %s", got)
+	}
+	if got := rv.runtimeInstallTimeout(rv.runtimeTotalTimeout()); got != 17*time.Second {
+		t.Fatalf("expected custom install timeout to be preserved, got %s", got)
+	}
+	if got := formatRuntimeTimeout(rv.runtimeInstallTimeout(rv.runtimeTotalTimeout())); got != "17s" {
+		t.Fatalf("expected formatted install timeout 17s, got %q", got)
+	}
+}
+
 func TestSanitizeRuntimeVerifyPath(t *testing.T) {
 	tests := []struct {
 		path string

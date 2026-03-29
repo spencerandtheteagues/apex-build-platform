@@ -40,15 +40,17 @@ import (
 // (when a BrowserVerifier is wired in) headless browser page-load proof
 // against generated Vite/React applications.
 type RuntimeVerifier struct {
-	browser *BrowserVerifier // nil = browser proof disabled
+	browser        *BrowserVerifier // nil = browser proof disabled
+	totalTimeout   time.Duration
+	installTimeout time.Duration
 }
 
 // NewRuntimeVerifier creates a RuntimeVerifier with HTTP checks only.
 func NewRuntimeVerifier() *RuntimeVerifier { return &RuntimeVerifier{} }
 
 // NewRuntimeVerifierWithBrowser creates a RuntimeVerifier that adds headless
-// Chrome page-load proof after HTTP checks pass (Chrome auto-detected;
-// if unavailable the browser step is silently skipped).
+// Chrome page-load proof after HTTP checks pass. Chrome is auto-detected; if
+// unavailable, verification fails honestly instead of silently downgrading.
 func NewRuntimeVerifierWithBrowser() *RuntimeVerifier {
 	return &RuntimeVerifier{browser: NewBrowserVerifier()}
 }
@@ -68,14 +70,11 @@ type RuntimeVerificationResult struct {
 // ── Public entry point ────────────────────────────────────────────────────────
 
 // VerifyViteApp proves the generated app boots and serves correctly.
-// Total bounded timeout is 90 s (120 s when headless browser proof is enabled).
+// Total bounded timeout is 150 s (180 s when headless browser proof is enabled).
 // Returns Skipped=true when npm/vite are absent.
 func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []VerifiableFile) *RuntimeVerificationResult {
 	start := time.Now()
-	totalTimeout := 90 * time.Second
-	if rv.browser != nil && rv.browser.Available() {
-		totalTimeout = 120 * time.Second // extra 30 s for Chrome launch + page load
-	}
+	totalTimeout := rv.runtimeTotalTimeout()
 	bootCtx, bootCancel := context.WithTimeout(ctx, totalTimeout)
 	defer bootCancel()
 
@@ -103,14 +102,15 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 	}
 
 	// ── 2. npm install ───────────────────────────────────────────────────
-	installCtx, installCancel := context.WithTimeout(bootCtx, 60*time.Second)
+	installTimeout := rv.runtimeInstallTimeout(totalTimeout)
+	installCtx, installCancel := context.WithTimeout(bootCtx, installTimeout)
 	defer installCancel()
 
 	installOut, installErr := rv.runNpmInstall(installCtx, dir, npmPath)
 	if installErr != nil {
 		if errors.Is(installCtx.Err(), context.DeadlineExceeded) {
 			return rv.rtFail("boot_failed",
-				"runtime verification timed out during dependency install after 60s",
+				fmt.Sprintf("runtime verification timed out during dependency install after %s", formatRuntimeTimeout(installTimeout)),
 				"Reduce dependency weight or ensure the generated app has a minimal, installable package.json before preview verification runs.",
 				start,
 			)
@@ -300,6 +300,39 @@ func (rv *RuntimeVerifier) runNpmInstall(ctx context.Context, dir, npmPath strin
 	cmd := exec.CommandContext(ctx, npmPath, args...)
 	cmd.Dir = dir
 	return cmd.CombinedOutput()
+}
+
+func (rv *RuntimeVerifier) runtimeTotalTimeout() time.Duration {
+	if rv.totalTimeout > 0 {
+		return rv.totalTimeout
+	}
+	if rv.browser != nil && rv.browser.Available() {
+		return 180 * time.Second
+	}
+	return 150 * time.Second
+}
+
+func (rv *RuntimeVerifier) runtimeInstallTimeout(total time.Duration) time.Duration {
+	if rv.installTimeout > 0 {
+		return rv.installTimeout
+	}
+	if total >= 180*time.Second {
+		return 120 * time.Second
+	}
+	if total >= 150*time.Second {
+		return 90 * time.Second
+	}
+	if total <= 30*time.Second {
+		return total
+	}
+	return total - 30*time.Second
+}
+
+func formatRuntimeTimeout(timeout time.Duration) string {
+	if timeout%time.Second == 0 {
+		return fmt.Sprintf("%ds", int(timeout/time.Second))
+	}
+	return timeout.String()
 }
 
 func (rv *RuntimeVerifier) viteBinary(dir string) string {

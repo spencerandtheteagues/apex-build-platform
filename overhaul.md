@@ -1108,6 +1108,34 @@ Date: 2026-03-29
 
 Change summary:
 
+- Extended runtime preview verification time budgets so paid full-stack previews get realistic dependency-install headroom instead of failing after a hardcoded `60s`.
+- Added deterministic repair and stale-error clearing for plain Sequelize `Model.init(..., { indexes: [...] })` metadata when TypeScript flags `indexes` as unsupported in generated `InitOptions<...>`.
+- Kept the fix narrow to backend reliability surfaces so the next live paid canary can spend less time rediscovering late-stage generator issues.
+
+Files changed:
+
+- `backend/internal/preview/runtime_verifier.go`
+- `backend/internal/preview/runtime_verifier_test.go`
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/preview/runtime_verifier.go internal/preview/runtime_verifier_test.go internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/preview ./internal/agents -run 'TestRuntimeVerifier(DefaultTimeouts|CustomTimeouts)|TestApplyDeterministicValidationRepairs(StripsSequelizeIndexes|ClearsStaleSequelizeIndexesError|StripsSequelizeUniqueKeys|ClearsStaleSequelizeUniqueKeysError)'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-29
+
+Change summary:
+
 - Used the next live paid canary (`f98cb239-3124-4b68-81e2-fa98f8b9cf3f`) to confirm the owner-lease takeover path works in production. The build no longer froze permanently at `79%` on a dead-owner snapshot; a non-owner instance resumed it and the canary advanced through testing into review.
 - Added a deterministic `sequelize-typescript` constructor repair that rewrites generated PostgreSQL connection files from invalid credential-object or positional credential shapes into `new Sequelize(databaseUrl, { ... })`.
 - Added a deterministic `sequelize-typescript` table decorator repair that strips generated `indexes:` metadata from `@Table(...)` blocks when it triggers `TableOptions<Model<any, any>>` overload errors.

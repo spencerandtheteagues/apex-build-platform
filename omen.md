@@ -1548,3 +1548,46 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start the next paid full-stack canary immediately
 4. Keep iterating until the paid path completes cleanly end-to-end
+
+## Latest Local Fix Before Next Paid Canary
+
+What changed:
+
+- Runtime preview verification no longer uses the old hardcoded `60s` dependency-install timeout.
+- Default runtime verifier budgets are now:
+  - `150s` total for HTTP/runtime proof
+  - `180s` total when browser proof is enabled
+  - `90s` install timeout for HTTP-only verification
+  - `120s` install timeout when browser proof is enabled
+- Added deterministic repair for plain Sequelize aggregate model files when TypeScript flags:
+  - `'indexes' does not exist in type 'InitOptions<...>'`
+- Added stale-error clearing for that same Sequelize indexes failure, so repaired files do not stay pinned by obsolete validation messages.
+
+Files:
+
+- `backend/internal/preview/runtime_verifier.go`
+- `backend/internal/preview/runtime_verifier_test.go`
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Why this matters:
+
+- One live paid canary evolved from an obsolete `uniqueKeys` complaint into the next real blocker:
+  - `runtime verification timed out during dependency install after 60s`
+- Generated aggregate Sequelize model files can also still fail late in review if `indexes:` is emitted inside `Model.init(..., { ... })` and TypeScript rejects it.
+- This pass closes both of those late-stage paid-path failure classes before the next live run.
+
+Verification:
+
+- `cd backend && gofmt -w internal/preview/runtime_verifier.go internal/preview/runtime_verifier_test.go internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/preview ./internal/agents -run 'TestRuntimeVerifier(DefaultTimeouts|CustomTimeouts)|TestApplyDeterministicValidationRepairs(StripsSequelizeIndexes|ClearsStaleSequelizeIndexesError|StripsSequelizeUniqueKeys|ClearsStaleSequelizeUniqueKeysError)'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Commit and push this timeout + Sequelize indexes repair slice
+2. Wait for Render to deploy the new backend instance
+3. Start a fresh paid full-stack canary immediately
+4. If that canary still fails, inspect the exact late-stage generated-file/runtime error and keep iterating

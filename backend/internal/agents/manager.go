@@ -7642,6 +7642,30 @@ func parseSequelizeUniqueKeysRepairTargets(errors []string) []string {
 	return targets
 }
 
+func parseSequelizeIndexesRepairTargets(errors []string) []string {
+	if len(errors) == 0 {
+		return nil
+	}
+	re := regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS2353: Object literal may only specify known properties, and 'indexes' does not exist in type 'InitOptions<`)
+	seen := map[string]bool{}
+	targets := make([]string, 0)
+	for _, msg := range errors {
+		for _, match := range re.FindAllStringSubmatch(msg, -1) {
+			if len(match) != 2 {
+				continue
+			}
+			path := sanitizeFilePath(strings.TrimSpace(match[1]))
+			if path == "" || seen[strings.ToLower(path)] {
+				continue
+			}
+			seen[strings.ToLower(path)] = true
+			targets = append(targets, path)
+		}
+	}
+	sort.Strings(targets)
+	return targets
+}
+
 func stripSequelizeUniqueKeysOptions(content string) (string, bool) {
 	if !strings.Contains(content, "uniqueKeys:") {
 		return content, false
@@ -7665,6 +7689,43 @@ func stripSequelizeUniqueKeysOptions(content string) (string, bool) {
 			next := lines[i]
 			braceDepth += strings.Count(next, "{") - strings.Count(next, "}")
 			if braceDepth <= 0 {
+				break
+			}
+		}
+	}
+
+	if !changed {
+		return content, false
+	}
+	return strings.Join(out, "\n"), true
+}
+
+func stripSequelizeIndexesOptions(content string) (string, bool) {
+	if !strings.Contains(content, "indexes:") {
+		return content, false
+	}
+
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
+	changed := false
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if !strings.Contains(line, "indexes:") {
+			out = append(out, line)
+			continue
+		}
+
+		bracketDepth := strings.Count(line, "[") - strings.Count(line, "]")
+		changed = true
+		if bracketDepth <= 0 {
+			continue
+		}
+		for i+1 < len(lines) {
+			i++
+			next := lines[i]
+			bracketDepth += strings.Count(next, "[") - strings.Count(next, "]")
+			if bracketDepth <= 0 {
 				break
 			}
 		}
@@ -7714,6 +7775,44 @@ func (am *AgentManager) applyDeterministicSequelizeUniqueKeysRepair(build *Build
 	return am.bundleFromPatchPlan(build.ID, files, plan, "sequelize_unique_keys_repair: "+summary), summary
 }
 
+func (am *AgentManager) applyDeterministicSequelizeIndexesRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+
+	targets := parseSequelizeIndexesRepairTargets(readinessErrors)
+	if len(targets) == 0 {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 {
+		return nil, ""
+	}
+
+	applied := make([]string, 0, len(targets))
+	for _, target := range targets {
+		content := plan.content(target)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		repaired, changed := stripSequelizeIndexesOptions(content)
+		if !changed {
+			continue
+		}
+		if !plan.patchFile(target, repaired, am.detectLanguage(target)) {
+			continue
+		}
+		applied = append(applied, target)
+	}
+	if len(applied) == 0 {
+		return nil, ""
+	}
+
+	summary := "sequelize indexes removal on " + strings.Join(applied, ", ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "sequelize_indexes_repair: "+summary), summary
+}
+
 func (am *AgentManager) clearStaleSequelizeUniqueKeysValidationError(build *Build, readinessErrors []string) string {
 	if build == nil || len(readinessErrors) == 0 {
 		return ""
@@ -7746,6 +7845,40 @@ func (am *AgentManager) clearStaleSequelizeUniqueKeysValidationError(build *Buil
 
 	sort.Strings(cleared)
 	return "stale sequelize uniqueKeys validation on " + strings.Join(cleared, ", ")
+}
+
+func (am *AgentManager) clearStaleSequelizeIndexesValidationError(build *Build, readinessErrors []string) string {
+	if build == nil || len(readinessErrors) == 0 {
+		return ""
+	}
+
+	targets := parseSequelizeIndexesRepairTargets(readinessErrors)
+	if len(targets) == 0 {
+		return ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 || plan == nil {
+		return ""
+	}
+
+	cleared := make([]string, 0, len(targets))
+	for _, target := range targets {
+		content := plan.content(target)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		if strings.Contains(content, "indexes:") {
+			continue
+		}
+		cleared = append(cleared, target)
+	}
+	if len(cleared) == 0 {
+		return ""
+	}
+
+	sort.Strings(cleared)
+	return "stale sequelize indexes validation on " + strings.Join(cleared, ", ")
 }
 
 type staleImportValidationTarget struct {
@@ -10124,6 +10257,21 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 		am.checkBuildCompletion(build)
 		return true
 	}
+	if summary := am.clearStaleSequelizeIndexesValidationError(build, readinessErrors); summary != "" {
+		am.cancelAutomatedRecoveryTasksForLoopCap(build)
+		progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf("Final output validation failed: %s (cleared stale Sequelize indexes validation: %s)", errorSummary, summary))
+		am.broadcastValidationRepair(
+			build.ID,
+			now,
+			progress,
+			readinessErrors,
+			"Cleared stale Sequelize indexes validation against current generated files. Re-running final validation before solver recovery.",
+			"sequelize_indexes_validation_reset",
+			summary,
+		)
+		am.checkBuildCompletion(build)
+		return true
+	}
 	if summary := am.clearStaleImportValidationError(build, readinessErrors); summary != "" {
 		am.cancelAutomatedRecoveryTasksForLoopCap(build)
 		progress := am.markBuildForValidationRepair(build, now, fmt.Sprintf("Final output validation failed: %s (cleared stale import validation: %s)", errorSummary, summary))
@@ -10170,6 +10318,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			errorFormat: "Final output validation failed: %s (applied Sequelize uniqueKeys repair: %s)",
 			message:     "Applied deterministic repair to generated Sequelize model options that used unsupported uniqueKeys metadata. Re-running final validation before solver recovery.",
 			summaryKey:  "sequelize_unique_keys_repair",
+		},
+		{
+			apply:       am.applyDeterministicSequelizeIndexesRepair,
+			errorFormat: "Final output validation failed: %s (applied Sequelize indexes repair: %s)",
+			message:     "Applied deterministic repair to generated Sequelize model options that used unsupported indexes metadata. Re-running final validation before solver recovery.",
+			summaryKey:  "sequelize_indexes_repair",
 		},
 		{
 			apply:       am.applyDeterministicSequelizeConstructorRepair,
