@@ -7714,6 +7714,27 @@ func rewriteSequelizeConstructorToObjectForm(content string) (string, bool) {
 	return re.ReplaceAllString(content, replacement), true
 }
 
+func rewriteSequelizeTypescriptRuntimeImport(content string) (string, bool) {
+	if !strings.Contains(content, "new Sequelize(") || strings.Contains(content, "models:") {
+		return content, false
+	}
+
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{"import { Sequelize } from 'sequelize-typescript';", "import { Sequelize } from 'sequelize';"},
+		{`import { Sequelize } from "sequelize-typescript";`, `import { Sequelize } from "sequelize";`},
+	}
+	for _, replacement := range replacements {
+		if strings.Contains(content, replacement.old) {
+			return strings.Replace(content, replacement.old, replacement.new, 1), true
+		}
+	}
+
+	return content, false
+}
+
 func indentMultiline(content string, prefix string) string {
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
@@ -7749,6 +7770,9 @@ func (am *AgentManager) applyDeterministicSequelizeConstructorRepair(build *Buil
 			continue
 		}
 		repaired, changed := rewriteSequelizeConstructorToObjectForm(content)
+		if !changed {
+			repaired, changed = rewriteSequelizeTypescriptRuntimeImport(content)
+		}
 		if !changed {
 			continue
 		}

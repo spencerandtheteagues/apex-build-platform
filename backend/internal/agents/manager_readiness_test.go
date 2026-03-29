@@ -2966,6 +2966,69 @@ Overload 1 of 4, '(database: string, username: string, password?: string | undef
 	}
 }
 
+func TestApplyDeterministicValidationRepairsRewritesSequelizeTypescriptRuntimeImport(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-runtime-import-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/seed.ts",
+				Content: `import { Sequelize } from 'sequelize-typescript';
+
+const databaseUrl = process.env.DATABASE_URL;
+
+const sequelize = new Sequelize(databaseUrl!, {
+  logging: false,
+  dialect: 'postgres',
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/seed.ts(4,19): error TS2769: No overload matches this call.
+Overload 1 of 4, '(database: string, username: string, password?: string | undefined, options?: SequelizeOptions | undefined): Sequelize', gave the following error.`,
+		},
+		"broken sequelize runtime import",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected runtime sequelize import repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/seed.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired seed file to exist, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, "sequelize-typescript") {
+		t.Fatalf("expected sequelize-typescript import to be rewritten, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "import { Sequelize } from 'sequelize';") {
+		t.Fatalf("expected sequelize runtime import, got %q", repairedFile.Content)
+	}
+}
+
 func TestParsePreviewSyntaxErrorTargetFiles(t *testing.T) {
 	t.Parallel()
 

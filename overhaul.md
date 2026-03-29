@@ -1108,6 +1108,32 @@ Date: 2026-03-28
 
 Change summary:
 
+- The latest live paid full-stack canary on production backend `started_at = 2026-03-29T00:41:38.821941652Z` cleared the earlier stale-validation and `.cjs` declaration branch entirely and advanced to `96%`.
+- That run failed only on a narrow generated-project bug in `server/seed.ts`: the file imported `Sequelize` from `sequelize-typescript` for a raw runtime connection and triggered `TS2769` during preview verification.
+- Added a deterministic repair that rewrites standalone runtime imports from `sequelize-typescript` to `sequelize` when the file is using `new Sequelize(...)` without `models:` metadata, which preserves the existing model-constructor repair while fixing runtime seed/bootstrap scripts.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairsNormalizesSequelizeConstructor|TestApplyDeterministicValidationRepairsRewritesSequelizeTypescriptRuntimeImport|TestApplyDeterministicValidationRepairsCreatesDeclarationForMissingCJSModulePlaceholder|TestApplyDeterministicValidationRepairsClearsStaleImportValidationError|TestApplyDeterministicValidationRepairsClearsStaleSequelizeUniqueKeysError'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - Ran a fresh paid full-stack canary against production after `3b8ec4e` deployed. The build reached `97%` and confirmed the earlier `tsconfig.json contains comments` provider-verification blocker is cleared on production.
 - The same live canary also proved the stale in-progress task recovery is working: the build briefly wedged at `44%` in `data_foundation`, then recovered and advanced to testing/review without manual intervention.
 - The next two late-stage issues were both in the final validation loop:

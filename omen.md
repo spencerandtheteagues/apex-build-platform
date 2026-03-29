@@ -1168,3 +1168,62 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start the next paid full-stack canary
 4. If it clears the `TS7016` blocker, continue on the next remaining late-stage generated-project blocker until the paid path is green
+
+## Latest Live Paid Canary After Stale Validation + CJS Declaration Repair
+
+Production backend during run:
+
+- `started_at = 2026-03-29T00:41:38.821941652Z`
+
+Live canary:
+
+- build id: `fa515687-48b9-43c3-b149-b0976665d397`
+
+What improved:
+
+- the previous `TS7016` blocker on `./models.cjs` is gone
+- the run cleared the older stale-validation / `.cjs` branch and advanced further into terminal review
+- progress reached `96%`, which confirms the platform is now failing on a narrower runtime-script issue rather than a broader orchestration or placeholder-module problem
+
+Current blocker:
+
+- terminal failure still occurs late at `96%`
+- exact final blocker:
+  - `Preview verification build failed: server/seed.ts(9,23): error TS2769: No overload matches this call.`
+
+Important trace from the live run:
+
+- current generated `server/seed.ts` used:
+  - `import { Sequelize } from 'sequelize-typescript';`
+  - `const sequelize = new Sequelize(databaseUrl, { logging: false, dialect: 'postgres' });`
+- this file is acting as a runtime seed/verification script, not a `sequelize-typescript` models container
+- the constructor is valid for `sequelize`, but not for the `sequelize-typescript` import being emitted by the generator
+
+Newest local fix after that canary:
+
+- deterministic validation repair now rewrites standalone runtime imports from:
+  - `import { Sequelize } from 'sequelize-typescript';`
+  - to `import { Sequelize } from 'sequelize';`
+- the rewrite is only applied when the file:
+  - uses `new Sequelize(...)`
+  - does not contain `models:`
+- existing object-form constructor normalization remains intact for true model-container files
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairsNormalizesSequelizeConstructor|TestApplyDeterministicValidationRepairsRewritesSequelizeTypescriptRuntimeImport|TestApplyDeterministicValidationRepairsCreatesDeclarationForMissingCJSModulePlaceholder|TestApplyDeterministicValidationRepairsClearsStaleImportValidationError|TestApplyDeterministicValidationRepairsClearsStaleSequelizeUniqueKeysError'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the runtime `seed.ts` sequelize import repair
+2. Wait for Render to deploy
+3. Start the next paid full-stack canary
+4. If it clears the `TS2769` blocker, continue on the next remaining late-stage generated-project blocker until the paid path is green
