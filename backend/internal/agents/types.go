@@ -453,6 +453,8 @@ type BuildSnapshotState struct {
 type BuildRestoreContext struct {
 	SubscriptionPlan            string            `json:"subscription_plan,omitempty"`
 	ProviderMode                string            `json:"provider_mode,omitempty"`
+	ActiveOwnerInstanceID       string            `json:"active_owner_instance_id,omitempty"`
+	ActiveOwnerHeartbeatAt      *time.Time        `json:"active_owner_heartbeat_at,omitempty"`
 	RequirePreviewReady         bool              `json:"require_preview_ready,omitempty"`
 	RequestsUsed                int               `json:"requests_used,omitempty"`
 	ReadinessRecoveryAttempts   int               `json:"readiness_recovery_attempts,omitempty"`

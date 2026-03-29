@@ -339,6 +339,170 @@ func TestGetBuildDetailsServesActiveSnapshotReadOnlyWithoutRestoringSession(t *t
 	}
 }
 
+func TestGetBuildStatusKeepsFreshLeasedActiveSnapshotReadOnly(t *testing.T) {
+	db := openBuildTestDB(t)
+	now := time.Now().UTC()
+	stateJSON := fmt.Sprintf(`{
+		"current_phase":"testing",
+		"restore_context":{
+			"active_owner_instance_id":"owner-instance",
+			"active_owner_heartbeat_at":%q
+		}
+	}`, now.Format(time.RFC3339Nano))
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-status-fresh-lease",
+		UserID:      1,
+		Description: "Fresh owner lease should stay read only",
+		Status:      string(BuildTesting),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    79,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"testing-1",
+			"role":"testing",
+			"provider":"gpt4",
+			"status":"working",
+			"progress":79
+		}]`,
+		TasksJSON: `[{
+			"id":"task-test",
+			"type":"test",
+			"description":"Run integration proof",
+			"assigned_to":"testing-1",
+			"status":"in_progress"
+		}]`,
+		StateJSON: stateJSON,
+		CreatedAt: now.Add(-3 * time.Minute),
+		UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		resultQueue: make(chan *TaskResult, 1),
+		ctx:         context.Background(),
+		instanceID:  "reader-instance",
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/active-status-fresh-lease/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body["live"] != false {
+		t.Fatalf("expected fresh leased snapshot read to stay non-live, got %v", body["live"])
+	}
+	if _, exists := am.builds["active-status-fresh-lease"]; exists {
+		t.Fatal("expected fresh leased snapshot not to materialize a live build")
+	}
+}
+
+func TestGetBuildStatusRestoresStaleLeasedActiveSnapshot(t *testing.T) {
+	db := openBuildTestDB(t)
+	staleHeartbeat := time.Now().UTC().Add(-2 * activeBuildLeaseStaleAfter())
+	stateJSON := fmt.Sprintf(`{
+		"current_phase":"testing",
+		"restore_context":{
+			"subscription_plan":"team",
+			"provider_mode":"platform",
+			"active_owner_instance_id":"owner-instance",
+			"active_owner_heartbeat_at":%q
+		}
+	}`, staleHeartbeat.Format(time.RFC3339Nano))
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-status-stale-lease",
+		UserID:      1,
+		Description: "Stale owner lease should be resumable",
+		Status:      string(BuildTesting),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    79,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"lead-1",
+			"role":"lead",
+			"provider":"claude",
+			"status":"working",
+			"build_id":"active-status-stale-lease",
+			"progress":79
+		}]`,
+		TasksJSON: `[{
+			"id":"task-test",
+			"type":"test",
+			"description":"Run integration proof",
+			"assigned_to":"lead-1",
+			"status":"in_progress",
+			"created_at":"2026-03-29T01:00:00Z",
+			"started_at":"2026-03-29T01:00:00Z"
+		}]`,
+		StateJSON: stateJSON,
+		CreatedAt: time.Now().UTC().Add(-10 * time.Minute),
+		UpdatedAt: time.Now().UTC().Add(-10 * time.Minute),
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		resultQueue: make(chan *TaskResult, 1),
+		ctx:         context.Background(),
+		instanceID:  "reader-instance",
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/active-status-stale-lease/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body["live"] != true {
+		t.Fatalf("expected stale leased snapshot to restore as live, got %v", body["live"])
+	}
+	if body["restored_from_snapshot"] != true {
+		t.Fatalf("expected restored_from_snapshot=true, got %v", body["restored_from_snapshot"])
+	}
+	build := am.builds["active-status-stale-lease"]
+	if build == nil {
+		t.Fatal("expected stale leased snapshot to materialize a live build")
+	}
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	if build.SnapshotState.RestoreContext == nil || build.SnapshotState.RestoreContext.ActiveOwnerInstanceID != "reader-instance" {
+		t.Fatalf("expected restored build lease owner to switch to reader-instance, got %+v", build.SnapshotState.RestoreContext)
+	}
+}
+
 func TestGetBuildStatusNormalizesLiveProgressWithinPhaseWindow(t *testing.T) {
 	am := &AgentManager{
 		builds:      make(map[string]*Build),

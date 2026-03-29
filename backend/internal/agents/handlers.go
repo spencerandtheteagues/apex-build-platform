@@ -1098,6 +1098,22 @@ func (h *BuildHandler) loadReadableBuild(buildID string, userID uint) (*Build, *
 		return nil, nil, false, snapErr
 	}
 
+	if claimedSnapshot, claimed, claimErr := h.manager.claimActiveSnapshotTakeover(snapshot); claimErr == nil && claimed {
+		build, restored, restoreErr := h.manager.restoreBuildSessionFromSnapshotWithOptions(claimedSnapshot, restoreBuildSessionOptions{
+			resumeExecution: true,
+		})
+		if restoreErr == nil {
+			if build.UserID != userID {
+				return nil, nil, false, errBuildAccessDenied
+			}
+			return build, nil, restored, nil
+		}
+	} else if claimErr != nil {
+		log.Printf("Build %s: failed to claim stale active snapshot for readable restore: %v", buildID, claimErr)
+	} else if claimedSnapshot != nil {
+		snapshot = claimedSnapshot
+	}
+
 	// Read-only build endpoints must never materialize active snapshots into a
 	// second in-memory session. In autoscaled production that creates a fake
 	// "live" copy on a non-owner instance, causing status polling to oscillate

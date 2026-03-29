@@ -142,6 +142,7 @@ type AgentManager struct {
 	chunkedEditor   *ChunkedEditor       // splits/reassembles large-file edits to stay within output token limits
 	previewVerifier BuildPreviewVerifier // optional preview readiness verifier (wired in main.go)
 	taskCancels     map[string]context.CancelFunc
+	instanceID      string
 	mu              sync.RWMutex
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -201,6 +202,7 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 		ctxSelector:   NewContextSelector(),
 		chunkedEditor: NewChunkedEditor(),
 		taskCancels:   make(map[string]context.CancelFunc),
+		instanceID:    resolveAgentManagerInstanceID(),
 		ctx:           ctx,
 		cancel:        cancel,
 	}
@@ -216,6 +218,24 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 
 	log.Println("Agent Manager initialized")
 	return am
+}
+
+func resolveAgentManagerInstanceID() string {
+	for _, candidate := range []string{
+		strings.TrimSpace(os.Getenv("RENDER_INSTANCE_ID")),
+		strings.TrimSpace(os.Getenv("RENDER_EXTERNAL_HOSTNAME")),
+		strings.TrimSpace(os.Getenv("HOSTNAME")),
+	} {
+		if candidate != "" {
+			return candidate
+		}
+	}
+	if hostname, err := os.Hostname(); err == nil {
+		if hostname = strings.TrimSpace(hostname); hostname != "" {
+			return hostname
+		}
+	}
+	return uuid.NewString()
 }
 
 // SetBudgetEnforcer wires a BudgetEnforcer into the manager so that each AI
@@ -872,6 +892,8 @@ func (am *AgentManager) runInactivityMonitor(buildID string) (normalExit bool) {
 			return true
 		}
 
+		am.refreshActiveBuildLease(build)
+
 		build.mu.RLock()
 		status := build.Status
 		lastUpdate := build.UpdatedAt
@@ -1031,6 +1053,117 @@ func (am *AgentManager) buildStallTimeoutForBuild(build *Build) time.Duration {
 		seconds = maxAllowed
 	}
 	return time.Duration(seconds) * time.Second
+}
+
+func activeBuildLeaseStaleAfter() time.Duration {
+	seconds := envInt("ACTIVE_BUILD_LEASE_STALE_SECONDS", 60)
+	if seconds < 30 {
+		seconds = 30
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func activeOwnerLeaseFromSnapshotState(state BuildSnapshotState) (string, time.Time) {
+	if state.RestoreContext == nil {
+		return "", time.Time{}
+	}
+	instanceID := strings.TrimSpace(state.RestoreContext.ActiveOwnerInstanceID)
+	heartbeat := time.Time{}
+	if state.RestoreContext.ActiveOwnerHeartbeatAt != nil {
+		heartbeat = state.RestoreContext.ActiveOwnerHeartbeatAt.UTC()
+	}
+	return instanceID, heartbeat
+}
+
+func (am *AgentManager) shouldAttemptActiveSnapshotTakeover(snapshot *models.CompletedBuild) bool {
+	if snapshot == nil {
+		return false
+	}
+	status := normalizeRestoredBuildStatus(snapshot)
+	if !isActiveBuildStatus(string(status)) {
+		return false
+	}
+
+	state := parseBuildSnapshotState(snapshot.StateJSON)
+	ownerInstanceID, heartbeat := activeOwnerLeaseFromSnapshotState(state)
+	now := time.Now().UTC()
+	staleAfter := activeBuildLeaseStaleAfter()
+
+	if !heartbeat.IsZero() {
+		return now.Sub(heartbeat) >= staleAfter
+	}
+
+	// Legacy active snapshots created before lease persistence should still be
+	// recoverable after they sit idle beyond the lease window.
+	if strings.TrimSpace(ownerInstanceID) == "" && !snapshot.UpdatedAt.IsZero() {
+		return now.Sub(snapshot.UpdatedAt.UTC()) >= staleAfter
+	}
+	return false
+}
+
+func (am *AgentManager) claimActiveSnapshotTakeover(snapshot *models.CompletedBuild) (*models.CompletedBuild, bool, error) {
+	if snapshot == nil || am.db == nil {
+		return snapshot, false, nil
+	}
+	if !am.shouldAttemptActiveSnapshotTakeover(snapshot) {
+		return snapshot, false, nil
+	}
+
+	state := parseBuildSnapshotState(snapshot.StateJSON)
+	if state.RestoreContext == nil {
+		state.RestoreContext = &BuildRestoreContext{}
+	}
+	now := time.Now().UTC()
+	state.RestoreContext.ActiveOwnerInstanceID = am.instanceID
+	state.RestoreContext.ActiveOwnerHeartbeatAt = &now
+
+	stateJSONBytes, err := json.Marshal(state)
+	if err != nil {
+		return nil, false, err
+	}
+	nextStateJSON := string(stateJSONBytes)
+
+	tx := am.db.Model(&models.CompletedBuild{}).
+		Where("build_id = ? AND state_json = ?", snapshot.BuildID, snapshot.StateJSON).
+		Where("status IN ?", []string{
+			string(BuildPending),
+			string(BuildPlanning),
+			string(BuildInProgress),
+			string(BuildTesting),
+			string(BuildReviewing),
+			string(BuildAwaitingReview),
+			"building",
+		}).
+		Update("state_json", nextStateJSON)
+	if tx.Error != nil {
+		return nil, false, tx.Error
+	}
+	if tx.RowsAffected == 0 {
+		var refreshed models.CompletedBuild
+		if err := am.db.Where("build_id = ?", snapshot.BuildID).First(&refreshed).Error; err == nil {
+			return &refreshed, false, nil
+		}
+		return snapshot, false, nil
+	}
+
+	claimed := *snapshot
+	claimed.StateJSON = nextStateJSON
+	return &claimed, true, nil
+}
+
+func (am *AgentManager) refreshActiveBuildLease(build *Build) {
+	if build == nil || am.db == nil {
+		return
+	}
+
+	build.mu.RLock()
+	status := build.Status
+	build.mu.RUnlock()
+	if !isActiveBuildStatus(string(status)) {
+		return
+	}
+
+	am.persistBuildSnapshot(build, nil)
 }
 
 func (am *AgentManager) taskExecutionTimeoutForTask(build *Build, task *Task, agent *Agent) time.Duration {
@@ -10345,7 +10478,19 @@ func (am *AgentManager) persistBuildSnapshotWithRetry(build *Build, files []Gene
 		checkpointsJSON = string(b)
 	}
 	stateJSON := "{}"
-	if b, err := json.Marshal(snapshotStateForPersistenceLocked(build)); err == nil {
+	state := snapshotStateForPersistenceLocked(build)
+	if state.RestoreContext == nil {
+		state.RestoreContext = &BuildRestoreContext{}
+	}
+	if isActiveBuildStatus(string(build.Status)) {
+		heartbeat := time.Now().UTC()
+		state.RestoreContext.ActiveOwnerInstanceID = am.instanceID
+		state.RestoreContext.ActiveOwnerHeartbeatAt = &heartbeat
+	} else {
+		state.RestoreContext.ActiveOwnerInstanceID = ""
+		state.RestoreContext.ActiveOwnerHeartbeatAt = nil
+	}
+	if b, err := json.Marshal(state); err == nil {
 		stateJSON = string(b)
 	}
 	activityJSON := "[]"

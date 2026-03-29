@@ -1461,3 +1461,42 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start the next paid full-stack canary
 4. If it clears the `79%` testing stall, continue on the next remaining late-stage generator issue until the paid path is green
+
+## Latest Autoscaling Ownership Fix
+
+Problem confirmed:
+
+- the `79% testing` paid-canary stall was not just a missed task timeout
+- under autoscaling, `GET /api/v1/build/:id/status` could hit a non-owner instance
+- that instance intentionally served the persisted active snapshot read-only, with `live=false`, so the stale-task watchdog and read-path self-heal could not touch the real session
+- result: the build looked active forever even though the owner session was effectively stranded
+
+Newest fix:
+
+- active build snapshots now persist a lightweight owner-instance lease:
+  - `active_owner_instance_id`
+  - `active_owner_heartbeat_at`
+- the inactivity monitor refreshes that lease on the owner instance
+- fresh leased active snapshots remain read-only on non-owner instances
+- stale leased active snapshots can now be claimed and restored safely by a different instance during status/detail reads
+
+Files:
+
+- `backend/internal/agents/types.go`
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestGetBuildStatus(ServesActiveSnapshotReadOnlyWithoutRestoringSession|KeepsFreshLeasedActiveSnapshotReadOnly|RestoresStaleLeasedActiveSnapshot|SelfHealsStaleLiveTask)' -timeout=60s`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the owner-lease takeover fix
+2. Wait for Render to deploy
+3. Start a fresh paid full-stack canary immediately
+4. Verify the new canary either self-recovers the `79%` testing stall or surfaces the next real late-stage generator issue

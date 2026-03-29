@@ -1104,6 +1104,33 @@ Commit hash if pushed:
 - Local: pending
 - Remote: pending
 
+Date: 2026-03-29
+
+Change summary:
+
+- Fixed the remaining autoscaling/session-ownership gap for live build polling. Active build snapshots now carry an owner-instance lease and heartbeat, refreshed from the inactivity monitor, so status/detail requests can distinguish a healthy remote owner from a dead one.
+- Read-only build endpoints keep serving fresh leased active snapshots without materializing a duplicate live session, but they now safely claim and restore a stale active snapshot when the persisted owner heartbeat expires.
+- This directly targets the live paid canary `79% testing` hang where status reads were hitting a non-owner instance and could only see a persisted active snapshot forever.
+
+Files changed:
+
+- `backend/internal/agents/types.go`
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestGetBuildStatus(ServesActiveSnapshotReadOnlyWithoutRestoringSession|KeepsFreshLeasedActiveSnapshotReadOnly|RestoresStaleLeasedActiveSnapshot|SelfHealsStaleLiveTask)' -timeout=60s`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
 Date: 2026-03-28
 
 Change summary:
