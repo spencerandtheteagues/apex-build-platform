@@ -1108,6 +1108,32 @@ Date: 2026-03-28
 
 Change summary:
 
+- The next live paid full-stack canary on production backend `started_at = 2026-03-29T00:59:01.64842446Z` proved the `seed.ts` Sequelize runtime-import repair held, but failed earlier at `87%` on a provider verification blocker claiming `tsconfig.json contains invalid JSON syntax`.
+- Pulled the generated `tsconfig.json` from the failed build and confirmed it was already strict JSON, so this was another stale/false-positive provider blocker rather than a real syntax failure.
+- Widened the deterministic provider-blocked tsconfig repair matcher to treat `invalid JSON syntax` on `tsconfig.json` the same way as the earlier `comments in JSON` false positive, allowing already-canonical `tsconfig.json` output to bypass this stale blocker.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicProviderBlockedTestRepair(AcceptsAlreadyCanonicalTSConfig|AcceptsCanonicalTSConfigForInvalidJSONSyntaxBlocker)|TestApplyDeterministicValidationRepairsRewritesSequelizeTypescriptRuntimeImport'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-28
+
+Change summary:
+
 - The latest live paid full-stack canary on production backend `started_at = 2026-03-29T00:41:38.821941652Z` cleared the earlier stale-validation and `.cjs` declaration branch entirely and advanced to `96%`.
 - That run failed only on a narrow generated-project bug in `server/seed.ts`: the file imported `Sequelize` from `sequelize-typescript` for a raw runtime connection and triggered `TS2769` during preview verification.
 - Added a deterministic repair that rewrites standalone runtime imports from `sequelize-typescript` to `sequelize` when the file is using `new Sequelize(...)` without `models:` metadata, which preserves the existing model-constructor repair while fixing runtime seed/bootstrap scripts.

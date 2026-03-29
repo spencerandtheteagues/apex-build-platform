@@ -6825,7 +6825,12 @@ func parseProviderBlockedTSConfigTargets(blockers []string) []string {
 	targets := make([]string, 0, 1)
 	for _, blocker := range blockers {
 		lower := strings.ToLower(blocker)
-		if strings.Contains(lower, "tsconfig") && strings.Contains(lower, "comments") && strings.Contains(lower, "json") {
+		if !strings.Contains(lower, "tsconfig") || !strings.Contains(lower, "json") {
+			continue
+		}
+		if strings.Contains(lower, "comments") ||
+			strings.Contains(lower, "invalid json syntax") ||
+			(strings.Contains(lower, "json syntax") && strings.Contains(lower, "compilation")) {
 			targets = append(targets, "tsconfig.json")
 		}
 	}

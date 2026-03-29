@@ -1227,3 +1227,60 @@ Next exact step:
 2. Wait for Render to deploy
 3. Start the next paid full-stack canary
 4. If it clears the `TS2769` blocker, continue on the next remaining late-stage generated-project blocker until the paid path is green
+
+## Latest Live Paid Canary After Seed Runtime Sequelize Repair
+
+Production backend during run:
+
+- `started_at = 2026-03-29T00:59:01.64842446Z`
+
+Live canary:
+
+- build id: `c4ce4295-3344-4946-b0c5-f1aed177adb9`
+
+What improved:
+
+- the previous `server/seed.ts` `TS2769` Sequelize runtime-import blocker is gone
+- the paid path again advanced through the earlier repair checkpoints and into late verification
+- this confirms the runtime import rewrite from `sequelize-typescript` to `sequelize` is working in production
+
+Current blocker:
+
+- terminal failure occurred at `87%`
+- exact final blocker:
+  - `Failed after 1 attempts: provider verification blocked task output: tsconfig.json contains invalid JSON syntax, as reported in deterministic verification errors, which would cause compilation failures.`
+
+Important trace from the live run:
+
+- pulled the generated `tsconfig.json` directly from the failed build and confirmed it was already strict JSON:
+  - no comments
+  - no trailing commas
+  - parseable root object
+- that means this failure is another stale/false-positive provider blocker, not an actual bad `tsconfig.json`
+
+Newest local fix after that canary:
+
+- widened the deterministic provider-blocked tsconfig repair matcher so these blocker variants now target `tsconfig.json`:
+  - `contains comments ... in JSON`
+  - `contains invalid JSON syntax`
+  - `json syntax ... compilation`
+- already-canonical `tsconfig.json` output now bypasses this stale blocker the same way the earlier comments-based false positive did
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicProviderBlockedTestRepair(AcceptsAlreadyCanonicalTSConfig|AcceptsCanonicalTSConfigForInvalidJSONSyntaxBlocker)|TestApplyDeterministicValidationRepairsRewritesSequelizeTypescriptRuntimeImport'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push the widened `tsconfig invalid JSON syntax` false-positive repair
+2. Wait for Render to deploy
+3. Start the next paid full-stack canary
+4. If it clears this stale provider blocker, continue on the next remaining late-stage generated-project blocker until the paid path is green

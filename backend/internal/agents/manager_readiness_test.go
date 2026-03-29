@@ -3325,6 +3325,37 @@ func TestApplyDeterministicProviderBlockedTestRepairAcceptsAlreadyCanonicalTSCon
 	}
 }
 
+func TestApplyDeterministicProviderBlockedTestRepairAcceptsCanonicalTSConfigForInvalidJSONSyntaxBlocker(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	output := &TaskOutput{
+		Files: []GeneratedFile{
+			{
+				Path: "tsconfig.json",
+				Content: `{
+  "compilerOptions": {
+    "target": "ES2020"
+  }
+}`,
+			},
+		},
+	}
+
+	repaired, summary := am.applyDeterministicProviderBlockedTestRepair(nil, output, []string{
+		`tsconfig.json contains invalid JSON syntax, as reported in deterministic verification errors, which would cause compilation failures.`,
+	})
+	if !repaired {
+		t.Fatal("expected canonical tsconfig to bypass invalid JSON syntax false-positive blocker")
+	}
+	if !strings.Contains(summary, "tsconfig.json") {
+		t.Fatalf("unexpected repair summary: %q", summary)
+	}
+	if strings.Contains(output.Files[0].Content, "//") {
+		t.Fatalf("expected canonical tsconfig to remain clean, got %q", output.Files[0].Content)
+	}
+}
+
 func TestApplyDeterministicPreValidationNormalizationAddsJestDependencyForGeneratedJestTests(t *testing.T) {
 	t.Setenv("PATH", "")
 
