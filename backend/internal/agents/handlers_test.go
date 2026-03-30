@@ -261,6 +261,29 @@ func TestGetBuildStatusRestoresActiveSnapshotOnRead(t *testing.T) {
 	if _, err := am.GetBuild("active-status-restore"); err != nil {
 		t.Fatalf("expected active build session to be restored into manager: %v", err)
 	}
+
+	select {
+	case resumed := <-am.taskQueue:
+		if resumed == nil || resumed.ID != "task-review" {
+			t.Fatalf("expected restored task-review to be requeued once, got %+v", resumed)
+		}
+	default:
+		t.Fatalf("expected restored active snapshot to resume execution")
+	}
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/v1/build/active-status-restore/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected second poll to return 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	select {
+	case duplicate := <-am.taskQueue:
+		t.Fatalf("expected no duplicate resume task on repeated read, got %+v", duplicate)
+	default:
+	}
 }
 
 func TestGetBuildStatusNormalizesLiveProgressWithinPhaseWindow(t *testing.T) {
