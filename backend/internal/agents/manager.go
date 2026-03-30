@@ -6361,31 +6361,92 @@ func (am *AgentManager) applyDeterministicManifestDependencyRepair(build *Build,
 	return am.bundleFromPatchPlan(build.ID, files, plan, "manifest_repair: "+summary), summary
 }
 
+func normalizePreviewSyntaxErrorPath(raw string) string {
+	cleaned := strings.TrimSpace(strings.Trim(raw, `"'`))
+	if cleaned == "" {
+		return ""
+	}
+	cleaned = strings.TrimPrefix(cleaned, "file://")
+	cleaned = strings.TrimPrefix(cleaned, "file:")
+	cleaned = strings.ReplaceAll(cleaned, "\\", "/")
+	cleaned = strings.TrimPrefix(cleaned, "./")
+	if path := sanitizeFilePath(cleaned); path != "" {
+		return path
+	}
+
+	roots := []string{
+		"src/",
+		"server/",
+		"backend/",
+		"frontend/",
+		"apps/",
+		"packages/",
+		"public/",
+	}
+	best := ""
+	for _, root := range roots {
+		candidate := ""
+		if strings.HasPrefix(cleaned, root) {
+			candidate = cleaned
+		} else if idx := strings.Index(cleaned, "/"+root); idx != -1 {
+			candidate = cleaned[idx+1:]
+		}
+		if candidate == "" {
+			continue
+		}
+		if path := sanitizeFilePath(candidate); path != "" && (best == "" || len(path) < len(best)) {
+			best = path
+		}
+	}
+	return best
+}
+
 func parsePreviewSyntaxErrorTargetFiles(errors []string) []string {
 	if len(errors) == 0 {
 		return nil
 	}
 	joined := strings.Join(errors, "\n")
-	if !strings.Contains(joined, "TS1002") && !strings.Contains(joined, "TS1005") {
+	syntaxSignals := []string{
+		"TS1002",
+		"TS1005",
+		"Transform failed",
+		"Unterminated string literal",
+		"Unexpected end of file",
+		"Syntax error",
+		"ERROR:",
+	}
+	hasSignal := false
+	for _, signal := range syntaxSignals {
+		if strings.Contains(joined, signal) {
+			hasSignal = true
+			break
+		}
+	}
+	if !hasSignal {
 		return nil
 	}
-	re := regexp.MustCompile(`(?m)([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx))\(\d+,\d+\): error TS(?:1002|1005)\b`)
-	matches := re.FindAllStringSubmatch(joined, -1)
-	if len(matches) == 0 {
-		return nil
+
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?m)([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx))\(\d+,\d+\): error TS(?:1002|1005)\b`),
+		regexp.MustCompile(`(?m)(?:^|[\s([])([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)):\d+:\d+:\s+ERROR:\s+(?:Unterminated string literal|Unexpected end of file|Unexpected .*|Expected .*|Syntax error.*)`),
+		regexp.MustCompile(`(?m)file:\s*([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)):\d+:\d+`),
 	}
+
 	seen := map[string]bool{}
-	paths := make([]string, 0, len(matches))
-	for _, m := range matches {
-		if len(m) != 2 {
-			continue
+	paths := make([]string, 0)
+	for _, re := range patterns {
+		matches := re.FindAllStringSubmatch(joined, -1)
+		for _, m := range matches {
+			if len(m) != 2 {
+				continue
+			}
+			path := normalizePreviewSyntaxErrorPath(m[1])
+			if path == "" || seen[path] {
+				continue
+			}
+			seen[path] = true
+			paths = append(paths, path)
 		}
-		p := sanitizeFilePath(strings.TrimSpace(m[1]))
-		if p == "" || seen[p] {
-			continue
-		}
-		seen[p] = true
-		paths = append(paths, p)
 	}
 	sort.Strings(paths)
 	return paths

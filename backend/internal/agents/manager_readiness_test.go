@@ -2494,6 +2494,24 @@ func TestParsePreviewSyntaxErrorTargetFiles(t *testing.T) {
 	}
 }
 
+func TestParsePreviewSyntaxErrorTargetFilesHandlesEsbuildErrors(t *testing.T) {
+	t.Parallel()
+
+	errs := []string{
+		"Preview verification build failed: [vite:esbuild] Transform failed with 2 errors:\n" +
+			"/tmp/apex-build-123/src/components/LoginForm.tsx:14:49: ERROR: Unterminated string literal\n" +
+			"file: /tmp/apex-build-123/src/components/LoginForm.tsx:14:49\n" +
+			"/tmp/apex-build-123/src/App.tsx:2:13: ERROR: Unexpected end of file",
+	}
+
+	targets := parsePreviewSyntaxErrorTargetFiles(errs)
+	got := strings.Join(targets, ",")
+	want := "src/App.tsx,src/components/LoginForm.tsx"
+	if got != want {
+		t.Fatalf("unexpected esbuild syntax target files: got %q want %q", got, want)
+	}
+}
+
 func TestRepairDoubleSingleQuoteCorruption(t *testing.T) {
 	t.Parallel()
 
@@ -2507,6 +2525,64 @@ func TestRepairDoubleSingleQuoteCorruption(t *testing.T) {
 	}
 	if !strings.Contains(out, "'react'") || !strings.Contains(out, "'hello'") {
 		t.Fatalf("expected normalized single-quoted strings, got %q", out)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsAppliesQuoteRepairForEsbuildErrors(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-esbuild-syntax-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:     "src/components/LoginForm.tsx",
+				Content:  "export default function LoginForm(){ return <button aria-label={''Login''}>Login</button> }\n",
+				Language: "typescript",
+				IsNew:    true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			"Preview verification build failed: [vite:esbuild] Transform failed with 1 error:\n" +
+				"/tmp/apex-build-123/src/components/LoginForm.tsx:14:49: ERROR: Unterminated string literal",
+		},
+		"preview build failed",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected deterministic esbuild syntax repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedContent string
+	for _, file := range files {
+		if file.Path == "src/components/LoginForm.tsx" {
+			repairedContent = file.Content
+			break
+		}
+	}
+	if repairedContent == "" {
+		t.Fatalf("expected repaired LoginForm file, got %+v", files)
+	}
+	if strings.Contains(repairedContent, "''Login''") {
+		t.Fatalf("expected quote corruption to be repaired, got %q", repairedContent)
+	}
+
+	state := build.SnapshotState.Orchestration
+	if state == nil || len(state.PatchBundles) == 0 {
+		t.Fatalf("expected patch bundle capture for esbuild syntax repair, got %+v", state)
 	}
 }
 
