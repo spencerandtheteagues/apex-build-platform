@@ -33,6 +33,9 @@ export interface MobileNavigationProps {
   onViewModeChange?: (mode: 'builder' | 'ide' | 'admin') => void
   user?: { username: string; avatar_url?: string; is_admin?: boolean }
   onLogout?: () => void
+  onSearch?: () => void
+  onGitOpen?: () => void
+  onProjectsOpen?: () => void
   className?: string
 }
 
@@ -44,6 +47,9 @@ export const MobileNavigation: React.FC<MobileNavigationProps> = ({
   onViewModeChange,
   user,
   onLogout,
+  onSearch,
+  onGitOpen,
+  onProjectsOpen,
   className,
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
@@ -200,16 +206,25 @@ export const MobileNavigation: React.FC<MobileNavigationProps> = ({
         <div className="p-4 border-b border-gray-800">
           <div className="text-xs uppercase text-gray-500 mb-2 font-medium">Quick Actions</div>
           <div className="space-y-1">
-            <button className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-gray-800 text-gray-300 transition-colors touch-target">
+            <button
+              onClick={() => { onSearch?.(); setIsMenuOpen(false); onMenuToggle?.(false) }}
+              className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-gray-800 text-gray-300 transition-colors touch-target"
+            >
               <Search className="w-5 h-5" />
               <span className="flex-1 text-left">Search</span>
               <span className="text-xs text-gray-500">Cmd+K</span>
             </button>
-            <button className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-gray-800 text-gray-300 transition-colors touch-target">
+            <button
+              onClick={() => { onGitOpen?.(); setIsMenuOpen(false); onMenuToggle?.(false) }}
+              className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-gray-800 text-gray-300 transition-colors touch-target"
+            >
               <GitBranch className="w-5 h-5" />
               <span className="flex-1 text-left">Git</span>
             </button>
-            <button className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-gray-800 text-gray-300 transition-colors touch-target">
+            <button
+              onClick={() => { onProjectsOpen?.(); setIsMenuOpen(false); onMenuToggle?.(false) }}
+              className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-gray-800 text-gray-300 transition-colors touch-target"
+            >
               <Layers className="w-5 h-5" />
               <span className="flex-1 text-left">Projects</span>
             </button>
