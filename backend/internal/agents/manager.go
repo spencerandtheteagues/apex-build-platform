@@ -8483,6 +8483,30 @@ func parseMissingTypePackagesFromBuildErrors(errors []string) []string {
 	return pkgs
 }
 
+func parseImplicitAnyParameterTargets(errors []string, parameter string) []string {
+	if len(errors) == 0 || strings.TrimSpace(parameter) == "" {
+		return nil
+	}
+	re := regexp.MustCompile(fmt.Sprintf(`([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx))\(\d+,\d+\): error TS7006: Parameter '%s' implicitly has an 'any' type\.`, regexp.QuoteMeta(parameter)))
+	seen := map[string]bool{}
+	paths := make([]string, 0, 2)
+	for _, msg := range errors {
+		for _, match := range re.FindAllStringSubmatch(msg, -1) {
+			if len(match) != 2 {
+				continue
+			}
+			path := normalizePreviewSyntaxErrorPath(match[1])
+			if path == "" || seen[path] {
+				continue
+			}
+			seen[path] = true
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	return paths
+}
+
 func typePackageForModule(module string) string {
 	module = strings.TrimSpace(module)
 	if module == "" {
@@ -8501,6 +8525,29 @@ func typePackageForModule(module string) string {
 		return ""
 	}
 	return ""
+}
+
+var generatedErrorEventCallbackPattern = regexp.MustCompile(`(\.on\(\s*['"]error['"]\s*,\s*\()([A-Za-z_][A-Za-z0-9_]*)(\)\s*=>)`)
+
+func annotateGeneratedErrorEventCallbackParameter(path, content string) (string, bool) {
+	if strings.TrimSpace(content) == "" {
+		return content, false
+	}
+	normalizedPath := strings.ToLower(strings.TrimSpace(filepath.ToSlash(path)))
+	if !strings.HasSuffix(normalizedPath, "/db/index.ts") &&
+		!strings.HasSuffix(normalizedPath, "/db/index.tsx") &&
+		!strings.HasSuffix(normalizedPath, "/db/index.js") &&
+		!strings.HasSuffix(normalizedPath, "/db/index.jsx") &&
+		!strings.HasSuffix(normalizedPath, "db/index.ts") &&
+		!strings.HasSuffix(normalizedPath, "db/index.js") {
+		return content, false
+	}
+
+	updated := generatedErrorEventCallbackPattern.ReplaceAllString(content, `${1}${2}: Error${3}`)
+	if updated == content {
+		return content, false
+	}
+	return updated, true
 }
 
 func requiresViteEnvTypeDeclarationRepair(files []GeneratedFile, errors []string) bool {
@@ -8584,12 +8631,13 @@ func (am *AgentManager) applyDeterministicTypeDeclarationRepair(build *Build, re
 		return nil, ""
 	}
 	typePkgs := parseMissingTypePackagesFromBuildErrors(readinessErrors)
+	implicitAnyTargets := parseImplicitAnyParameterTargets(readinessErrors, "err")
 	files, plan := am.buildGeneratedFilePatchPlan(build)
 	if len(files) == 0 {
 		return nil, ""
 	}
 	needsViteEnvDeclaration := requiresViteEnvTypeDeclarationRepair(files, readinessErrors)
-	if len(typePkgs) == 0 && !needsViteEnvDeclaration {
+	if len(typePkgs) == 0 && !needsViteEnvDeclaration && len(implicitAnyTargets) == 0 {
 		return nil, ""
 	}
 
@@ -8626,6 +8674,19 @@ func (am *AgentManager) applyDeterministicTypeDeclarationRepair(build *Build, re
 	if needsViteEnvDeclaration {
 		if repaired, summary := am.ensureGeneratedViteEnvDeclaration(plan, manifestPath); repaired {
 			applied = append(applied, summary)
+		}
+	}
+	for _, target := range implicitAnyTargets {
+		current := plan.content(target)
+		if strings.TrimSpace(current) == "" {
+			continue
+		}
+		updated, changed := annotateGeneratedErrorEventCallbackParameter(target, current)
+		if !changed {
+			continue
+		}
+		if plan.patchFile(target, updated, am.detectLanguage(target)) {
+			applied = append(applied, fmt.Sprintf("%s (typed error callback)", target))
 		}
 	}
 
