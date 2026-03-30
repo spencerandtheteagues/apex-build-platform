@@ -2,12 +2,36 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"apex-build/internal/ai"
 )
+
+type consensusRetryRouter struct {
+	providers []ai.AIProvider
+}
+
+func (s *consensusRetryRouter) Generate(context.Context, ai.AIProvider, string, GenerateOptions) (*ai.AIResponse, error) {
+	return &ai.AIResponse{
+		Content: "VOTE: switch_provider\nRATIONALE: transient timeout, retry on another provider",
+	}, nil
+}
+
+func (s *consensusRetryRouter) GetAvailableProviders() []ai.AIProvider {
+	return append([]ai.AIProvider(nil), s.providers...)
+}
+
+func (s *consensusRetryRouter) GetAvailableProvidersForUser(userID uint) []ai.AIProvider {
+	_ = userID
+	return s.GetAvailableProviders()
+}
+
+func (s *consensusRetryRouter) HasConfiguredProviders() bool {
+	return len(s.providers) > 0
+}
 
 func TestIsNonRetriableAIErrorMessageAuthQuotaBilling(t *testing.T) {
 	am := &AgentManager{}
@@ -319,6 +343,98 @@ func TestWaitForPhaseCompletionRecoversStaleInProgressTaskWithoutMonitor(t *test
 	case <-cancelled:
 	default:
 		t.Fatal("expected stale task cancel func to be invoked")
+	}
+}
+
+func TestWaitForPhaseCompletionSurvivesRecoverableProviderTimeoutRetry(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	task := &Task{
+		ID:          "phase-timeout-task",
+		Type:        TaskGenerateAPI,
+		Description: "Implement backend services",
+		Status:      TaskInProgress,
+		AssignedTo:  "backend-1",
+		MaxRetries:  3,
+		Input:       map[string]any{},
+		CreatedAt:   time.Now(),
+	}
+	build := &Build{
+		ID:        "phase-timeout-build",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		UpdatedAt: time.Now(),
+		Agents:    make(map[string]*Agent),
+		Tasks:     []*Task{task},
+	}
+	agent := &Agent{
+		ID:          "backend-1",
+		BuildID:     build.ID,
+		Role:        RoleBackend,
+		Provider:    ai.ProviderGPT4,
+		Status:      StatusWorking,
+		CurrentTask: task,
+	}
+	build.Agents[agent.ID] = agent
+
+	manager := &AgentManager{
+		ctx:         ctx,
+		builds:      map[string]*Build{build.ID: build},
+		agents:      map[string]*Agent{agent.ID: agent},
+		aiRouter:    &consensusRetryRouter{providers: []ai.AIProvider{ai.ProviderGPT4, ai.ProviderClaude}},
+		taskQueue:   make(chan *Task, 1),
+		subscribers: map[string][]chan *WSMessage{},
+	}
+
+	done := make(chan bool, 1)
+	go func() {
+		done <- manager.waitForPhaseCompletion(build, []string{task.ID})
+	}()
+
+	manager.processResult(&TaskResult{
+		TaskID:  task.ID,
+		AgentID: agent.ID,
+		Attempt: 0,
+		Success: false,
+		Error:   errors.New("context deadline exceeded"),
+	})
+
+	if task.Status != TaskPending {
+		t.Fatalf("expected timed-out task to be requeued pending, got %s", task.Status)
+	}
+	if task.RetryCount != 1 {
+		t.Fatalf("expected retry count to advance to 1, got %d", task.RetryCount)
+	}
+	if task.RetryStrategy != RetryStrategy("switch_provider") {
+		t.Fatalf("expected switch_provider retry strategy, got %s", task.RetryStrategy)
+	}
+
+	select {
+	case queued := <-manager.taskQueue:
+		if queued.ID != task.ID {
+			t.Fatalf("expected retried task %s, got %s", task.ID, queued.ID)
+		}
+		build.mu.Lock()
+		task.Status = TaskCompleted
+		now := time.Now()
+		task.CompletedAt = &now
+		build.UpdatedAt = now
+		build.mu.Unlock()
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("expected timed-out phase task to be requeued")
+	}
+
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Fatal("expected phase waiter to tolerate retry and finish cleanly")
+		}
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("expected phase waiter to complete after retry handoff")
 	}
 }
 
