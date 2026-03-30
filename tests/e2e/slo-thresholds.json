@@ -1,7 +1,7 @@
 {
   "$comment": "SLO thresholds enforced by nightly CI. Any threshold miss fails the pipeline.",
   "global": {
-    "min_pass_rate": 0.95,
+    "min_pass_rate": 1.0,
     "min_total_tests": 15
   },
   "per_suite": {
