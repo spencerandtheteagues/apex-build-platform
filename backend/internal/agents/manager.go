@@ -4846,10 +4846,10 @@ func (am *AgentManager) handleTaskCompletion(buildID string, task *Task, output 
 		am.handleFileGeneration(build, output)
 	case TaskTest:
 		// Tests completed - check results
-		am.handleTestCompletion(build, output)
+		am.handleTestCompletion(build, task, output)
 	case TaskReview:
 		// Review completed - apply fixes if needed
-		am.handleReviewCompletion(build, output)
+		am.handleReviewCompletion(build, task, output)
 	case TaskFix:
 		// Integration-preflight fixes stay inside the phased pipeline and should not
 		// spawn duplicate validation tasks before the dedicated integration/review phases.
@@ -5421,7 +5421,7 @@ func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task
 }
 
 // handleTestCompletion processes test results and creates fix tasks for failures
-func (am *AgentManager) handleTestCompletion(build *Build, output *TaskOutput) {
+func (am *AgentManager) handleTestCompletion(build *Build, sourceTask *Task, output *TaskOutput) {
 	// Parse test output for failures
 	hasFailures := false
 	if output != nil {
@@ -5485,6 +5485,9 @@ func (am *AgentManager) handleTestCompletion(build *Build, output *TaskOutput) {
 			},
 			CreatedAt: time.Now(),
 		}
+		if sourceTask != nil {
+			fixTask.Input["trigger_task"] = sourceTask.ID
+		}
 
 		build.mu.Lock()
 		build.Tasks = append(build.Tasks, fixTask)
@@ -5522,7 +5525,7 @@ func (am *AgentManager) handleTestCompletion(build *Build, output *TaskOutput) {
 }
 
 // handleReviewCompletion processes code review results and creates fix tasks for critical issues
-func (am *AgentManager) handleReviewCompletion(build *Build, output *TaskOutput) {
+func (am *AgentManager) handleReviewCompletion(build *Build, sourceTask *Task, output *TaskOutput) {
 	if output == nil {
 		return
 	}
@@ -5631,6 +5634,9 @@ func (am *AgentManager) handleReviewCompletion(build *Build, output *TaskOutput)
 				"retry_strategy":  "fix_and_retry",
 			},
 			CreatedAt: time.Now(),
+		}
+		if sourceTask != nil {
+			fixTask.Input["trigger_task"] = sourceTask.ID
 		}
 
 		build.mu.Lock()

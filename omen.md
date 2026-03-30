@@ -1876,3 +1876,41 @@ Next step:
 - push this follow-up claim-retry fix
 - wait for Render
 - rerun the paid canary immediately
+
+New local fix after the latest live run:
+
+- Live signal from `Apex Build <apexbuildai@gmail.com>`:
+  - planning cleared in about 20 seconds
+  - build ran through all phases to `95%`
+  - failed in `Review` with:
+    - `Build phase Review aborted before task completion (pending=0, in_progress=0)`
+  - testing and reviewer agents still showed `working`
+- Root cause:
+  - `handleReviewCompletion` and `handleTestCompletion` were creating follow-on repair tasks without `trigger_task`
+  - `relatedPhaseTaskIDs` only follows `superseded_by_recovery`, `failed_task_id`, and `trigger_task`
+  - those fix tasks were invisible to the phase lineage, so the review phase could appear empty and abort while repair work was still in flight
+
+Files changed locally:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/reliability_helpers_test.go`
+
+What changed:
+
+- `TaskTest` and `TaskReview` completion handlers now receive the source task
+- follow-on `fix_tests` and `fix_review_issues` tasks now record `trigger_task = <source task id>`
+- this keeps review/test repair tasks in the same phase lineage so the phase manager can wait on them truthfully
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./internal/agents -run 'TestHandleReviewCompletionLinksFixTaskToTriggerTask|TestHandleTestCompletionLinksFixTaskToTriggerTask|TestClaimActiveSnapshotTakeoverRetriesAfterLeaseHeartbeatRace|TestGetBuildStatusRestoresFreshLeaseSnapshotWhenTaskTimedOut'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./... -timeout=120s`
+
+Next step:
+
+- commit this review-phase lineage fix on `publish-phase-self-heal`
+- push it
+- wait for Render
+- rerun the paid canary immediately

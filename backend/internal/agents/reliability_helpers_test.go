@@ -252,6 +252,56 @@ func TestWaitForPhaseCompletionFailsOnUnresolvedLineageFailure(t *testing.T) {
 	}
 }
 
+func TestHandleReviewCompletionLinksFixTaskToTriggerTask(t *testing.T) {
+	manager := &AgentManager{}
+	sourceTask := &Task{ID: "review-root", Type: TaskReview, Status: TaskCompleted}
+	build := &Build{
+		ID:          "review-link-build",
+		Description: "Review lineage should keep follow-on fix tasks in phase scope",
+		Tasks:       []*Task{sourceTask},
+	}
+
+	manager.handleReviewCompletion(build, sourceTask, &TaskOutput{
+		Messages: []string{"Critical security vulnerability found in auth middleware"},
+	})
+
+	if len(build.Tasks) != 2 {
+		t.Fatalf("expected follow-on fix task to be appended, got %d tasks", len(build.Tasks))
+	}
+	fixTask := build.Tasks[1]
+	if fixTask == nil || fixTask.Type != TaskFix {
+		t.Fatalf("expected appended task to be a fix task, got %+v", fixTask)
+	}
+	if got := taskInputStringValue(fixTask.Input, "trigger_task"); got != sourceTask.ID {
+		t.Fatalf("expected fix task trigger_task=%q, got %q", sourceTask.ID, got)
+	}
+}
+
+func TestHandleTestCompletionLinksFixTaskToTriggerTask(t *testing.T) {
+	manager := &AgentManager{}
+	sourceTask := &Task{ID: "test-root", Type: TaskTest, Status: TaskCompleted}
+	build := &Build{
+		ID:          "test-link-build",
+		Description: "Test lineage should keep follow-on fix tasks in phase scope",
+		Tasks:       []*Task{sourceTask},
+	}
+
+	manager.handleTestCompletion(build, sourceTask, &TaskOutput{
+		Messages: []string{"test failed: expected 200 got 500"},
+	})
+
+	if len(build.Tasks) != 2 {
+		t.Fatalf("expected follow-on fix task to be appended, got %d tasks", len(build.Tasks))
+	}
+	fixTask := build.Tasks[1]
+	if fixTask == nil || fixTask.Type != TaskFix {
+		t.Fatalf("expected appended task to be a fix task, got %+v", fixTask)
+	}
+	if got := taskInputStringValue(fixTask.Input, "trigger_task"); got != sourceTask.ID {
+		t.Fatalf("expected fix task trigger_task=%q, got %q", sourceTask.ID, got)
+	}
+}
+
 func TestWaitForPhaseCompletionRecoversStaleInProgressTaskWithoutMonitor(t *testing.T) {
 	t.Parallel()
 

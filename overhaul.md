@@ -1108,6 +1108,31 @@ Date: 2026-03-30
 
 Change summary:
 
+- Fixed the latest paid full-stack late-stage abort at `95%` in `Review`, where the phase manager concluded `pending=0, in_progress=0` even while reviewer/testing follow-on work was still running.
+- Root cause was phase-lineage blindness: `handleReviewCompletion` and `handleTestCompletion` were spawning `fix_review_issues` and `fix_tests` tasks without `trigger_task`, so `relatedPhaseTaskIDs` could not see those tasks as descendants of the active review/test phase task.
+- The phase could therefore look complete or abortable while agents were still legitimately working on downstream repair tasks.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/reliability_helpers_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./internal/agents -run 'TestHandleReviewCompletionLinksFixTaskToTriggerTask|TestHandleTestCompletionLinksFixTaskToTriggerTask|TestClaimActiveSnapshotTakeoverRetriesAfterLeaseHeartbeatRace|TestGetBuildStatusRestoresFreshLeaseSnapshotWhenTaskTimedOut'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-30
+
+Change summary:
+
 - Investigated the live paid canary build `4b58653d-296a-4047-a6da-382c9c559df7`, which appeared stuck at `59%` in `generate_api`.
 - Confirmed the build detail/status endpoints were returning `live: false` and `restored_from_snapshot: true`, which meant autoscaled non-owner instances were serving a stale active snapshot instead of taking over the dead session.
 - Isolated the real defect: fresh active-build lease heartbeats could keep a stale owner "alive" forever even when the snapshot itself contained an `in_progress` task that had already exceeded the same provider-aware execution timeout used by live stale-task recovery.
