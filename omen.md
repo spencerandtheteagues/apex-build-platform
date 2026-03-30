@@ -1704,3 +1704,52 @@ Next exact step:
 4. If the canary still fails, inspect whether the next blocker is:
    - another late-phase live-session contention path
    - or an actual generated-project/runtime failure after `generate_api`
+
+## Latest Fix: Missing Frontend Shell Recovery
+
+Problem observed live:
+
+- Paid full-stack canary `b88c0e15-3852-4cc4-8d11-2a1c51e0de2d` no longer failed in planning, schema, provider retry, or live-read paths.
+- It reached final preview validation and failed because the generated project contained only backend runtime files:
+  - `src/server.ts`
+  - backend-oriented root `package.json`
+  - no `index.html`
+  - no `src/main.tsx`
+  - no `src/App.tsx`
+- The failure string was:
+  - `Preview verification failed: No recognized frontend entry point found (index.html, src/main.tsx, src/index.tsx, etc.).`
+
+What was implemented:
+
+- Added a deterministic repair in `backend/internal/agents/manager.go` that:
+  - only triggers for builds that actually requested a frontend surface
+  - does **not** trigger for backend-only API builds
+  - patches or creates the root `package.json` into a previewable Vite/React setup
+  - preserves prior backend `build` / `dev` scripts under `build:backend` and `dev:backend`
+  - adds a truthful frontend shell:
+    - `index.html`
+    - `src/main.tsx`
+    - `src/App.tsx`
+    - `vite.config.ts`
+    - root `tsconfig.json` if missing
+  - keeps the backend runtime path visible inside the recovered preview shell
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairsCreatesFrontendShellForBackendOnlyFullStackBuild|TestApplyDeterministicValidationRepairsDoesNotInventFrontendForBackendOnlyAPIBuild'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push this backend-only fix without Claude’s frontend polish commit
+2. Wait for Render to deploy it
+3. Run a fresh paid full-stack canary immediately
+4. If the canary still fails, inspect the next late-stage generated-project defect instead of revisiting orchestration

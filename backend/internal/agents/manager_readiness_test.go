@@ -2486,6 +2486,166 @@ func TestApplyDeterministicValidationRepairsCreatesMissingLocalModulePlaceholder
 	}
 }
 
+func TestApplyDeterministicValidationRepairsCreatesFrontendShellForBackendOnlyFullStackBuild(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:                  "build-missing-frontend-shell-repair",
+		Status:              BuildInProgress,
+		Mode:                ModeFull,
+		PowerMode:           PowerBalanced,
+		RequirePreviewReady: true,
+		Description:         "Build a full-stack app called ClientPulse with a dashboard, auth, projects, and client management.",
+		TechStack: &TechStack{
+			Frontend: "react",
+			Backend:  "express",
+		},
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "clientpulse",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}`,
+				IsNew: true,
+			},
+			{
+				Path: "src/server.ts",
+				Content: `import express from "express";
+
+const app = express();
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
+app.listen(process.env.PORT || 3001, () => {
+  console.log("ready");
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{"Preview verification failed: No recognized frontend entry point found (index.html, src/main.tsx, src/index.tsx, etc.)."},
+		"missing frontend entrypoint",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected missing frontend shell repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+
+	for _, required := range []string{"index.html", "src/main.tsx", "src/App.tsx", "vite.config.ts", "package.json"} {
+		if strings.TrimSpace(byPath[required]) == "" {
+			t.Fatalf("expected %s to exist after repair, got files %+v", required, files)
+		}
+	}
+	if !strings.Contains(byPath["package.json"], `"build": "vite build"`) {
+		t.Fatalf("expected repaired manifest to run vite build, got %q", byPath["package.json"])
+	}
+	if !strings.Contains(byPath["package.json"], `"build:backend": "tsc"`) {
+		t.Fatalf("expected original backend build script to be preserved, got %q", byPath["package.json"])
+	}
+	if !strings.Contains(byPath["package.json"], `"dev": "vite"`) {
+		t.Fatalf("expected repaired manifest to expose vite dev, got %q", byPath["package.json"])
+	}
+	if !strings.Contains(byPath["package.json"], `"dev:backend": "tsx watch src/server.ts"`) {
+		t.Fatalf("expected original backend dev script to be preserved, got %q", byPath["package.json"])
+	}
+	if !strings.Contains(byPath["package.json"], `"react"`) || !strings.Contains(byPath["package.json"], `"@vitejs/plugin-react"`) {
+		t.Fatalf("expected repaired manifest to include frontend deps, got %q", byPath["package.json"])
+	}
+	if !strings.Contains(byPath["src/App.tsx"], "src/server.ts") {
+		t.Fatalf("expected recovered App shell to mention backend runtime, got %q", byPath["src/App.tsx"])
+	}
+	if !strings.Contains(byPath["vite.config.ts"], "http://localhost:3001") {
+		t.Fatalf("expected vite proxy target to use backend port, got %q", byPath["vite.config.ts"])
+	}
+
+	state := build.SnapshotState.Orchestration
+	if state == nil || len(state.PatchBundles) == 0 {
+		t.Fatalf("expected captured patch bundle, got %+v", state)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsDoesNotInventFrontendForBackendOnlyAPIBuild(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-api-only-no-frontend-shell",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		TechStack: &TechStack{
+			Backend: "express",
+		},
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "api-only",
+  "scripts": {
+    "build": "tsc"
+  }
+}`,
+				IsNew: true,
+			},
+			{
+				Path: "src/server.ts",
+				Content: `import express from "express";
+const app = express();
+app.get("/health", (_req, res) => res.send("ok"));
+app.listen(3001);
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{"Preview verification failed: No recognized frontend entry point found (index.html, src/main.tsx, src/index.tsx, etc.)."},
+		"missing frontend entrypoint",
+		time.Now(),
+	)
+	if repaired {
+		t.Fatal("did not expect frontend shell repair for backend-only API build")
+	}
+}
+
 func TestApplyDeterministicValidationRepairsCreatesDeclarationForMissingCJSModulePlaceholder(t *testing.T) {
 	t.Parallel()
 

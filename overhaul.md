@@ -1104,6 +1104,51 @@ Commit hash if pushed:
 - Local: pending
 - Remote: pending
 
+## Latest Paid Canary Fix: Missing Frontend Shell Recovery
+
+Date: 2026-03-30
+
+Live blocker observed:
+
+- Paid full-stack canary `b88c0e15-3852-4cc4-8d11-2a1c51e0de2d` progressed into final preview validation and failed at `95%`.
+- The generated output contained a backend runtime (`src/server.ts`) and root backend package, but no frontend entrypoint at all:
+  - no `index.html`
+  - no `src/main.tsx`
+  - no `src/App.tsx`
+- Preview verification failed correctly with:
+  - `Preview verification failed: No recognized frontend entry point found (index.html, src/main.tsx, src/index.tsx, etc.).`
+
+Fix:
+
+- Added a deterministic validation repair that detects preview-required builds which generated backend-only output and synthesizes a minimal Vite/React shell instead of terminal-failing.
+- The repair now:
+  - patches or creates the root `package.json` into a dual-purpose frontend/backend setup
+  - preserves old backend `build` / `dev` scripts under explicit aliases
+  - creates `index.html`, `src/main.tsx`, `src/App.tsx`, and `vite.config.ts`
+  - creates a minimal root `tsconfig.json` when none exists
+  - keeps the backend runtime visible in the synthesized preview shell so the fallback stays truthful
+- Backend-only API builds do **not** get this repair; it only applies when the build actually requested a frontend surface.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/manager_readiness_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/manager_readiness_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestApplyDeterministicValidationRepairsCreatesFrontendShellForBackendOnlyFullStackBuild|TestApplyDeterministicValidationRepairsDoesNotInventFrontendForBackendOnlyAPIBuild'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push this backend-only repair without Claude’s separate frontend polish commit
+2. Wait for Render to deploy the new backend instance
+3. Launch a fresh paid full-stack canary immediately
+4. Confirm the repaired build reaches `100%` or inspect the next truly narrow late-stage generator defect
+
 Date: 2026-03-29
 
 Change summary:

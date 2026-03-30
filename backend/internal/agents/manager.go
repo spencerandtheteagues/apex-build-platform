@@ -9498,6 +9498,581 @@ func (am *AgentManager) applyDeterministicMissingDeliverableRepair(build *Build,
 	return am.bundleFromPatchPlan(build.ID, existingFiles, plan, "deliverable_repair: "+summary), summary
 }
 
+func buildRequestsFrontendSurface(build *Build) bool {
+	if build == nil {
+		return false
+	}
+	if buildUsesFrontendPreviewOnlyDelivery(build) {
+		return true
+	}
+	if build.TechStack != nil && strings.TrimSpace(build.TechStack.Frontend) != "" {
+		return true
+	}
+	if build.Plan != nil && strings.TrimSpace(build.Plan.TechStack.Frontend) != "" {
+		return true
+	}
+	if restore := build.SnapshotState.RestoreContext; restore != nil && restore.Plan != nil && strings.TrimSpace(restore.Plan.TechStack.Frontend) != "" {
+		return true
+	}
+	return false
+}
+
+func generatedFilesContainFrontendPreviewEntrypoint(files []GeneratedFile) bool {
+	if len(files) == 0 {
+		return false
+	}
+	candidates := map[string]bool{
+		"index.html":        true,
+		"public/index.html": true,
+		"src/main.tsx":      true,
+		"src/main.ts":       true,
+		"src/main.jsx":      true,
+		"src/main.js":       true,
+		"src/index.tsx":     true,
+		"src/index.ts":      true,
+		"src/index.jsx":     true,
+		"src/index.js":      true,
+		"app/page.tsx":      true,
+		"app/page.jsx":      true,
+		"pages/index.tsx":   true,
+		"pages/index.jsx":   true,
+	}
+	for _, file := range files {
+		path := sanitizeFilePath(file.Path)
+		if path == "" || !candidates[path] {
+			continue
+		}
+		if strings.TrimSpace(file.Content) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func generatedBackendFileLooksRunnableServer(path string, content string) bool {
+	if strings.TrimSpace(path) == "" || strings.TrimSpace(content) == "" {
+		return false
+	}
+	lowerPath := strings.ToLower(strings.TrimSpace(path))
+	lowerContent := strings.ToLower(content)
+	switch filepath.Ext(lowerPath) {
+	case ".ts", ".js", ".tsx", ".jsx":
+		return strings.Contains(lowerContent, "express") ||
+			strings.Contains(lowerContent, "fastify") ||
+			strings.Contains(lowerContent, "koa") ||
+			strings.Contains(lowerContent, "hapi") ||
+			strings.Contains(lowerContent, ".listen(") ||
+			strings.Contains(lowerContent, "app.listen(") ||
+			strings.Contains(lowerContent, "server.listen(")
+	case ".go":
+		return strings.Contains(lowerContent, "func main(") &&
+			(strings.Contains(lowerContent, "listenandserve") || strings.Contains(lowerContent, "net/http"))
+	case ".py":
+		return strings.Contains(lowerContent, "fastapi") ||
+			strings.Contains(lowerContent, "flask") ||
+			strings.Contains(lowerContent, "uvicorn.run(") ||
+			strings.Contains(lowerContent, "app.run(")
+	default:
+		return false
+	}
+}
+
+func detectGeneratedBackendEntryForFrontendShell(files []GeneratedFile) string {
+	if len(files) == 0 {
+		return ""
+	}
+	candidates := []string{
+		"server/index.ts", "server/index.js",
+		"server/main.ts", "server/main.js",
+		"server.ts", "server.js",
+		"src/server.ts", "src/server.js",
+		"src/app.ts", "src/app.js",
+		"app.ts", "app.js",
+		"index.ts", "index.js",
+		"main.go", "main.py", "app.py", "server.py",
+	}
+	contentByPath := make(map[string]string, len(files))
+	for _, file := range files {
+		path := sanitizeFilePath(file.Path)
+		if path == "" {
+			continue
+		}
+		contentByPath[path] = file.Content
+	}
+	for _, candidate := range candidates {
+		if content, ok := contentByPath[candidate]; ok && generatedBackendFileLooksRunnableServer(candidate, content) {
+			return candidate
+		}
+	}
+	for _, file := range files {
+		path := sanitizeFilePath(file.Path)
+		if path == "" || !pathLooksLikeGeneratedBackendCode(path) {
+			continue
+		}
+		if generatedBackendFileLooksRunnableServer(path, file.Content) {
+			return path
+		}
+	}
+	return ""
+}
+
+func repairNeedsFrontendShell(readinessErrors []string) bool {
+	for _, msg := range readinessErrors {
+		lower := strings.ToLower(strings.TrimSpace(msg))
+		if strings.Contains(lower, "no recognized frontend entry point found") ||
+			strings.Contains(lower, "missing entry point file for this frontend application") {
+			return true
+		}
+	}
+	return false
+}
+
+func synthesizedFrontendShellAppName(description string) string {
+	desc := strings.TrimSpace(description)
+	if desc == "" {
+		return "Generated App"
+	}
+	reCalled := regexp.MustCompile(`(?i)\bcalled\s+([A-Za-z0-9][A-Za-z0-9 _-]{1,48})`)
+	if match := reCalled.FindStringSubmatch(desc); len(match) == 2 {
+		name := strings.TrimSpace(match[1])
+		name = strings.Trim(name, `"'.,;:()[]{} `)
+		if name != "" {
+			return name
+		}
+	}
+	fields := strings.Fields(desc)
+	if len(fields) == 0 {
+		return "Generated App"
+	}
+	if len(fields) > 4 {
+		fields = fields[:4]
+	}
+	name := strings.Join(fields, " ")
+	name = strings.Trim(name, `"'.,;:()[]{} `)
+	if name == "" {
+		return "Generated App"
+	}
+	return name
+}
+
+func synthesizedFrontendShellSummary(description string) string {
+	desc := strings.TrimSpace(description)
+	if desc == "" {
+		return "A preview-ready frontend shell was synthesized because the generated output only contained backend runtime files."
+	}
+	if len(desc) > 220 {
+		desc = strings.TrimSpace(desc[:220]) + "..."
+	}
+	return desc
+}
+
+func syntheticBackendRuntimeCommand(entry string) string {
+	entry = sanitizeFilePath(entry)
+	if entry == "" {
+		return ""
+	}
+	switch strings.ToLower(filepath.Ext(entry)) {
+	case ".ts", ".tsx":
+		return "tsx " + entry
+	case ".js", ".jsx", ".mjs", ".cjs":
+		return "node " + entry
+	case ".go":
+		dir := filepath.Dir(entry)
+		if dir == "." || dir == "" {
+			return "go run ."
+		}
+		return "go run ./" + filepath.ToSlash(dir)
+	case ".py":
+		return "python3 " + entry
+	default:
+		return ""
+	}
+}
+
+func ensureManifestObjectSection(manifest map[string]any, key string) map[string]any {
+	if manifest == nil {
+		return nil
+	}
+	if existing, ok := manifest[key].(map[string]any); ok && existing != nil {
+		return existing
+	}
+	section := map[string]any{}
+	manifest[key] = section
+	return section
+}
+
+func pathLooksLikeGeneratedBackendCode(path string) bool {
+	path = strings.ToLower(filepath.ToSlash(strings.TrimSpace(path)))
+	if path == "" {
+		return false
+	}
+	if strings.HasPrefix(path, "server/") ||
+		strings.HasPrefix(path, "api/") ||
+		strings.HasPrefix(path, "backend/") ||
+		strings.HasPrefix(path, "apps/api/") ||
+		strings.HasPrefix(path, "apps/server/") {
+		return true
+	}
+	switch path {
+	case "server.ts", "server.js", "app.ts", "app.js", "index.ts", "index.js", "main.go", "main.py", "server.py", "app.py":
+		return true
+	}
+	return strings.Contains(path, "/server.") || strings.Contains(path, "/api.")
+}
+
+func patchManifestForSyntheticFrontendShell(content string, backendEntry string) (string, []string, bool) {
+	manifest := map[string]any{}
+	if strings.TrimSpace(content) != "" {
+		if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+			return content, nil, false
+		}
+		if manifest == nil {
+			manifest = map[string]any{}
+		}
+	}
+
+	changes := make([]string, 0, 12)
+	if _, ok := manifest["private"]; !ok {
+		manifest["private"] = true
+		changes = append(changes, "set private=true")
+	}
+	if name, _ := manifest["name"].(string); strings.TrimSpace(name) == "" {
+		manifest["name"] = "apex-build-preview"
+		changes = append(changes, `set name="apex-build-preview"`)
+	}
+
+	deps := ensureManifestObjectSection(manifest, "dependencies")
+	devDeps := ensureManifestObjectSection(manifest, "devDependencies")
+	scripts := ensureManifestObjectSection(manifest, "scripts")
+
+	ensureDep := func(section map[string]any, pkg string) {
+		if section == nil {
+			return
+		}
+		if _, exists := section[pkg]; exists {
+			return
+		}
+		section[pkg] = dependencyVersionHint(pkg)
+		target := "dependencies"
+		if dependencyShouldBeDev(pkg) {
+			target = "devDependencies"
+		}
+		changes = append(changes, fmt.Sprintf("added %s to %s", pkg, target))
+	}
+
+	for _, pkg := range []string{"react", "react-dom"} {
+		ensureDep(deps, pkg)
+	}
+	for _, pkg := range []string{"typescript", "vite", "@vitejs/plugin-react", "@types/react", "@types/react-dom"} {
+		ensureDep(devDeps, pkg)
+	}
+
+	preserveAndSetScript := func(name, desired, preserveAlias string, preserveWhen func(string) bool) {
+		existing, _ := scripts[name].(string)
+		trimmed := strings.TrimSpace(existing)
+		if trimmed != "" && preserveWhen(trimmed) {
+			if preserveAlias != "" {
+				if alias, _ := scripts[preserveAlias].(string); strings.TrimSpace(alias) == "" {
+					scripts[preserveAlias] = trimmed
+					changes = append(changes, fmt.Sprintf("preserved %s as %s", name, preserveAlias))
+				}
+			}
+		}
+		if trimmed != desired {
+			scripts[name] = desired
+			changes = append(changes, fmt.Sprintf("set %s=%q", name, desired))
+		}
+	}
+
+	usesViteScript := func(script string) bool {
+		return strings.Contains(strings.ToLower(strings.TrimSpace(script)), "vite")
+	}
+	preserveAndSetScript("build", "vite build", "build:backend", func(script string) bool {
+		return script != "" && !usesViteScript(script)
+	})
+	preserveAndSetScript("dev", "vite", "dev:backend", func(script string) bool {
+		return script != "" && !usesViteScript(script)
+	})
+	if previewScript, _ := scripts["preview"].(string); strings.TrimSpace(previewScript) == "" {
+		scripts["preview"] = "vite preview"
+		changes = append(changes, `set preview="vite preview"`)
+	}
+
+	backendCmd := syntheticBackendRuntimeCommand(backendEntry)
+	if backendCmd != "" {
+		switch strings.ToLower(filepath.Ext(backendEntry)) {
+		case ".ts", ".tsx":
+			ensureDep(devDeps, "tsx")
+		}
+		if startScript, _ := scripts["start"].(string); strings.TrimSpace(startScript) == "" {
+			scripts["start"] = backendCmd
+			changes = append(changes, fmt.Sprintf("set start=%q", backendCmd))
+		}
+		if backendScript, _ := scripts["start:backend"].(string); strings.TrimSpace(backendScript) == "" {
+			scripts["start:backend"] = backendCmd
+			changes = append(changes, fmt.Sprintf("set start:backend=%q", backendCmd))
+		}
+	}
+
+	if len(changes) == 0 {
+		return content, nil, false
+	}
+	updated, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return content, nil, false
+	}
+	return string(updated), dedupeStrings(changes), true
+}
+
+func syntheticFrontendIndexHTML(title string) string {
+	return fmt.Sprintf(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>%s</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+`, title)
+}
+
+func syntheticFrontendMainTSX() string {
+	return `import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+`
+}
+
+func syntheticFrontendAppTSX(title string, summary string, backendEntry string, backendPort int) string {
+	backendNote := "Backend runtime files were generated separately and can be launched alongside this preview."
+	if backendEntry != "" {
+		backendNote = fmt.Sprintf("Backend runtime detected at %s. Start it separately to enable live API calls in local development.", backendEntry)
+	}
+	return fmt.Sprintf(`export default function App() {
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "radial-gradient(circle at top, #172554 0%%, #0f172a 45%%, #020617 100%%)",
+        color: "#e2e8f0",
+        fontFamily: "Inter, system-ui, sans-serif",
+        padding: "48px 24px"
+      }}
+    >
+      <div style={{ maxWidth: 980, margin: "0 auto", display: "grid", gap: 24 }}>
+        <section
+          style={{
+            border: "1px solid rgba(148, 163, 184, 0.18)",
+            background: "rgba(15, 23, 42, 0.76)",
+            borderRadius: 28,
+            padding: 32,
+            boxShadow: "0 30px 80px rgba(2, 6, 23, 0.45)"
+          }}
+        >
+          <div
+            style={{
+              display: "inline-flex",
+              padding: "8px 14px",
+              borderRadius: 999,
+              background: "rgba(59, 130, 246, 0.16)",
+              color: "#93c5fd",
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase"
+            }}
+          >
+            APEX Recovered Preview
+          </div>
+          <h1 style={{ fontSize: "clamp(2rem, 5vw, 3.5rem)", lineHeight: 1.05, margin: "18px 0 16px" }}>
+            %s
+          </h1>
+          <p style={{ margin: 0, maxWidth: 760, color: "#cbd5e1", fontSize: "1.05rem", lineHeight: 1.7 }}>
+            %s
+          </p>
+        </section>
+
+        <section
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 16
+          }}
+        >
+          {[
+            { label: "Frontend Shell", value: "Recovered", hint: "Vite + React preview entry recreated automatically" },
+            { label: "Backend Runtime", value: %q, hint: %q },
+            { label: "Suggested API Base", value: %q, hint: "Set VITE_API_URL if your backend runs elsewhere" }
+          ].map((item) => (
+            <article
+              key={item.label}
+              style={{
+                border: "1px solid rgba(148, 163, 184, 0.14)",
+                borderRadius: 22,
+                padding: 22,
+                background: "rgba(15, 23, 42, 0.62)"
+              }}
+            >
+              <p style={{ margin: 0, color: "#94a3b8", fontSize: 13, textTransform: "uppercase", letterSpacing: "0.12em" }}>
+                {item.label}
+              </p>
+              <h2 style={{ margin: "12px 0 8px", fontSize: "1.35rem" }}>{item.value}</h2>
+              <p style={{ margin: 0, color: "#cbd5e1", lineHeight: 1.6 }}>{item.hint}</p>
+            </article>
+          ))}
+        </section>
+
+        <section
+          style={{
+            border: "1px solid rgba(148, 163, 184, 0.14)",
+            borderRadius: 24,
+            padding: 28,
+            background: "rgba(15, 23, 42, 0.58)"
+          }}
+        >
+          <h2 style={{ marginTop: 0, fontSize: "1.4rem" }}>What happened</h2>
+          <p style={{ color: "#cbd5e1", lineHeight: 1.7, marginBottom: 16 }}>
+            The generated project produced a backend runtime without a frontend entrypoint, so APEX synthesized a stable preview shell to keep this build interactive instead of failing terminally.
+          </p>
+          <ul style={{ margin: 0, paddingLeft: 20, color: "#cbd5e1", lineHeight: 1.8 }}>
+            <li>React + Vite entry files were restored deterministically.</li>
+            <li>Existing backend code was preserved untouched.</li>
+            <li>Preview can now boot while backend services continue through the normal validation path.</li>
+          </ul>
+        </section>
+      </div>
+    </main>
+  );
+}
+`, title, summary, backendEntry, backendNote, fmt.Sprintf("http://localhost:%d", backendPort))
+}
+
+func syntheticFrontendViteConfig(backendPort int) string {
+	return fmt.Sprintf(`import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: "0.0.0.0",
+    port: 4173,
+    proxy: {
+      "/api": {
+        target: process.env.VITE_API_URL || process.env.VITE_API_BASE_URL || "http://localhost:%d",
+        changeOrigin: true
+      }
+    }
+  }
+});
+`, backendPort)
+}
+
+func syntheticFrontendTSConfig() string {
+	return `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": ["src/main.tsx", "src/App.tsx", "vite.config.ts"]
+}
+`
+}
+
+func (am *AgentManager) applyDeterministicMissingFrontendShellRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 || !buildRequestsFrontendSurface(build) || !repairNeedsFrontendShell(readinessErrors) {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 || generatedFilesContainFrontendPreviewEntrypoint(files) {
+		return nil, ""
+	}
+
+	build.mu.RLock()
+	description := build.Description
+	backendName := ""
+	if build.TechStack != nil {
+		backendName = build.TechStack.Backend
+	}
+	build.mu.RUnlock()
+	if backendName == "" && build.Plan != nil {
+		backendName = build.Plan.TechStack.Backend
+	}
+
+	backendEntry := detectGeneratedBackendEntryForFrontendShell(files)
+	backendPort := canonicalBackendPort(backendName)
+	if backendPort == 0 {
+		backendPort = 3001
+	}
+
+	manifestPath := "package.json"
+	manifestContent := plan.content(manifestPath)
+	if updatedManifest, manifestChanges, ok := patchManifestForSyntheticFrontendShell(manifestContent, backendEntry); ok {
+		if strings.TrimSpace(manifestContent) == "" {
+			if !plan.createFile(manifestPath, updatedManifest, "json") {
+				return nil, ""
+			}
+		} else if !plan.patchFile(manifestPath, updatedManifest, "json") {
+			return nil, ""
+		}
+		_ = manifestChanges
+	} else if strings.TrimSpace(manifestContent) == "" {
+		return nil, ""
+	}
+
+	title := synthesizedFrontendShellAppName(description)
+	summary := synthesizedFrontendShellSummary(description)
+	created := make([]string, 0, 6)
+	createIfMissing := func(path string, content string, language string) {
+		if strings.TrimSpace(plan.content(path)) != "" {
+			return
+		}
+		if plan.createFile(path, content, language) {
+			created = append(created, path)
+		}
+	}
+
+	createIfMissing("index.html", syntheticFrontendIndexHTML(title), "html")
+	createIfMissing("src/main.tsx", syntheticFrontendMainTSX(), "typescript")
+	createIfMissing("src/App.tsx", syntheticFrontendAppTSX(title, summary, backendEntry, backendPort), "typescript")
+	createIfMissing("vite.config.ts", syntheticFrontendViteConfig(backendPort), "typescript")
+	if strings.TrimSpace(plan.content("tsconfig.json")) == "" {
+		createIfMissing("tsconfig.json", syntheticFrontendTSConfig(), "json")
+	}
+
+	if len(created) == 0 && strings.TrimSpace(manifestContent) == strings.TrimSpace(plan.content(manifestPath)) {
+		return nil, ""
+	}
+
+	summaryParts := []string{"generated previewable frontend shell"}
+	if len(created) > 0 {
+		summaryParts = append(summaryParts, strings.Join(created, ", "))
+	}
+	if backendEntry != "" {
+		summaryParts = append(summaryParts, "preserved backend runtime at "+backendEntry)
+	}
+	summaryText := strings.Join(summaryParts, "; ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "missing_frontend_shell_repair: "+summaryText), summaryText
+}
+
 type expressIntegrationRepairRequirements struct {
 	MissingCORS           bool
 	MissingPort           bool
@@ -10289,6 +10864,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 	}
 
 	repairs := []validationRepairSpec{
+		{
+			apply:       am.applyDeterministicMissingFrontendShellRepair,
+			errorFormat: "Final output validation failed: %s (applied missing frontend shell repair: %s)",
+			message:     "Applied deterministic frontend shell recovery for a preview-required build that generated backend-only output. Re-running final validation before solver recovery.",
+			summaryKey:  "missing_frontend_shell_repair",
+		},
 		{
 			apply:       am.applyDeterministicMissingLocalModuleRepair,
 			errorFormat: "Final output validation failed: %s (applied missing local module repair: %s)",
