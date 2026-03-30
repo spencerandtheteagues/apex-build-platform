@@ -224,13 +224,14 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 		errStr := genErr.Error()
 		log.Printf("Error from provider %s (after retries): %v", provider, genErr)
 
-		// Mark provider as temporarily unhealthy for quota/rate limit errors
-		if strings.Contains(errStr, "RATE_LIMIT") || strings.Contains(errStr, "QUOTA_EXCEEDED") {
+		// Mark provider unhealthy for any definitive billing/quota/auth failure
+		// so subsequent selectProvider calls skip it immediately.
+		if errClass := classifyProviderError(genErr); errClass == "no_credits" || errClass == "auth_error" {
 			r.mu.Lock()
 			r.healthCheck[provider] = false
-			r.healthStatus[provider] = "no_credits"
+			r.healthStatus[provider] = errClass
 			r.mu.Unlock()
-			log.Printf("Marked provider %s as temporarily unhealthy due to quota/rate limit", provider)
+			log.Printf("Marked provider %s as unhealthy (%s) after generate error", provider, errClass)
 		}
 
 		// Collect all errors for better reporting
@@ -251,11 +252,11 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 					log.Printf("Fallback provider %s also failed: %v", fallbackProvider, fallbackErr)
 					failedProviders = append(failedProviders, fmt.Sprintf("%s: %s", fallbackProvider, fallbackErrStr))
 
-					// Mark fallback as unhealthy too if quota/rate limited
-					if strings.Contains(fallbackErrStr, "RATE_LIMIT") || strings.Contains(fallbackErrStr, "QUOTA_EXCEEDED") {
+					// Mark fallback unhealthy for definitive billing/quota/auth failures
+					if fbClass := classifyProviderError(fallbackErr); fbClass == "no_credits" || fbClass == "auth_error" {
 						r.mu.Lock()
 						r.healthCheck[fallbackProvider] = false
-						r.healthStatus[fallbackProvider] = "no_credits"
+						r.healthStatus[fallbackProvider] = fbClass
 						r.mu.Unlock()
 					}
 				} else {
@@ -330,10 +331,22 @@ func (r *AIRouter) selectProvider(req *AIRequest) (AIProvider, error) {
 				}
 			}
 		}
-		// Last resort: try requested provider if it's configured at all
+		// Last resort: try the requested provider only if it is not definitively
+		// known-bad (no_credits, auth_error). Unknown / transient states are
+		// acceptable here because the provider may recover mid-request.
 		if r.isAvailable(requested) {
-			return requested, nil
+			knownBad := false
+			if status, ok := r.healthStatus[requested]; ok {
+				knownBad = status == "no_credits" || status == "auth_error"
+			}
+			if !knownBad {
+				return requested, nil
+			}
 		}
+		// Requested provider is definitively unhealthy and no fallback worked —
+		// let load balancing pick a healthy alternative rather than forcing a
+		// provider that will immediately fail.
+		return r.selectByLoadBalancing()
 	}
 
 	// Start with the default provider for this capability
