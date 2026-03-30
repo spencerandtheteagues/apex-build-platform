@@ -12341,10 +12341,16 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 			allDone := true
 			pendingCount := 0
 			inProgressCount := 0
+			now := time.Now()
+			lastBuildUpdate := now
+			staleInProgressTask := false
 
 			build.mu.RLock()
 			buildFailed := build.Status == BuildFailed
 			buildBlocked := build.Interaction.Paused || build.Interaction.WaitingForUser
+			if !build.UpdatedAt.IsZero() {
+				lastBuildUpdate = build.UpdatedAt
+			}
 			relatedTaskSet := relatedPhaseTaskIDs(build.Tasks, taskSet)
 			completed := 0
 			unresolvedFailure := false
@@ -12369,6 +12375,9 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 				case TaskInProgress:
 					inProgressCount++
 					allDone = false
+					if !staleInProgressTask && t.StartedAt != nil && now.Sub(*t.StartedAt) >= am.taskExecutionTimeoutForTask(build, t, am.lookupTaskAgent(build, t)) {
+						staleInProgressTask = true
+					}
 				default:
 					allDone = false
 				}
@@ -12384,6 +12393,12 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 			if buildBlocked {
 				stallTicks = 0
 				continue
+			}
+			if staleInProgressTask {
+				if am.recoverStaleInProgressTasks(build, now.Sub(lastBuildUpdate)) {
+					stallTicks = 0
+					continue
+				}
 			}
 			if unresolvedFailure {
 				log.Printf("Build %s: Phase has unresolved failed task in lineage, aborting", build.ID)
@@ -12480,6 +12495,26 @@ func relatedPhaseTaskHasChild(tasks []*Task, related map[string]struct{}, taskID
 		}
 	}
 	return false
+}
+
+func (am *AgentManager) lookupTaskAgent(build *Build, task *Task) *Agent {
+	if task == nil {
+		return nil
+	}
+	if build != nil {
+		if assignedID := strings.TrimSpace(task.AssignedTo); assignedID != "" {
+			if existing := build.Agents[assignedID]; existing != nil {
+				return existing
+			}
+		}
+	}
+	if assignedID := strings.TrimSpace(task.AssignedTo); assignedID != "" {
+		am.mu.RLock()
+		agent := am.agents[assignedID]
+		am.mu.RUnlock()
+		return agent
+	}
+	return nil
 }
 
 // GetBuild retrieves a build by ID

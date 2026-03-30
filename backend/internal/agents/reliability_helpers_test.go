@@ -228,6 +228,100 @@ func TestWaitForPhaseCompletionFailsOnUnresolvedLineageFailure(t *testing.T) {
 	}
 }
 
+func TestWaitForPhaseCompletionRecoversStaleInProgressTaskWithoutMonitor(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cancelled := make(chan struct{}, 1)
+	manager := &AgentManager{
+		ctx:         ctx,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		resultQueue: make(chan *TaskResult, 1),
+		subscribers: make(map[string][]chan *WSMessage),
+		taskCancels: map[string]context.CancelFunc{
+			"phase-task": func() {
+				select {
+				case cancelled <- struct{}{}:
+				default:
+				}
+			},
+		},
+	}
+
+	startedAt := time.Now().Add(-6 * time.Minute).UTC()
+	build := &Build{
+		ID:        "phase-stale-recovery",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		UpdatedAt: time.Now().Add(-5 * time.Minute).UTC(),
+		Agents:    make(map[string]*Agent),
+		Tasks: []*Task{
+			{
+				ID:          "phase-task",
+				Type:        TaskGenerateAPI,
+				Description: "Implement backend services",
+				AssignedTo:  "backend-1",
+				Status:      TaskInProgress,
+				StartedAt:   &startedAt,
+				MaxRetries:  3,
+				Input:       map[string]any{},
+			},
+		},
+	}
+	agent := &Agent{
+		ID:       "backend-1",
+		BuildID:  build.ID,
+		Role:     RoleBackend,
+		Provider: ai.ProviderGPT4,
+		Status:   StatusWorking,
+	}
+	build.Agents[agent.ID] = agent
+	manager.builds[build.ID] = build
+	manager.agents[agent.ID] = agent
+
+	done := make(chan bool, 1)
+	go func() {
+		done <- manager.waitForPhaseCompletion(build, []string{"phase-task"})
+	}()
+
+	select {
+	case result := <-manager.resultQueue:
+		if result.TaskID != "phase-task" {
+			t.Fatalf("unexpected recovered task id %q", result.TaskID)
+		}
+		if result.Error == nil || !strings.Contains(result.Error.Error(), "timeout") {
+			t.Fatalf("expected timeout recovery error, got %+v", result.Error)
+		}
+		build.mu.Lock()
+		build.Tasks[0].Status = TaskCompleted
+		now := time.Now()
+		build.Tasks[0].CompletedAt = &now
+		build.UpdatedAt = now
+		build.mu.Unlock()
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("expected phase waiter to trigger stale-task recovery")
+	}
+
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Fatal("expected recovered phase to complete successfully")
+		}
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("expected phase waiter to exit after recovery")
+	}
+
+	select {
+	case <-cancelled:
+	default:
+		t.Fatal("expected stale task cancel func to be invoked")
+	}
+}
+
 func TestRecoverStaleInProgressTasksQueuesSyntheticTimeoutFailure(t *testing.T) {
 	t.Parallel()
 

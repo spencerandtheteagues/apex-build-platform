@@ -1632,3 +1632,36 @@ Next exact step:
 2. Wait for Render to deploy the backend fix
 3. Re-check the still-running paid canary, or start a fresh paid canary if the old one is no longer trustworthy
 4. If status/detail are responsive again, continue iterating on the next late-stage full-stack blocker
+
+## Latest Phase Self-Heal Reliability Fix
+
+Problem observed live:
+
+- A paid full-stack canary advanced into `Backend Services`, then `generate_api` exhausted its provider attempt window with `ALL_PROVIDERS_FAILED` and the phase aborted while the task still appeared `in_progress`.
+- The build-wide stall monitor already had stale-task recovery, but the phase waiter itself had no direct self-heal path if the recovery handoff had not materialized yet.
+
+Fix:
+
+- `waitForPhaseCompletion` now detects timed-out related in-progress tasks using the same provider-aware execution timeout logic as the stale-task monitor.
+- When it finds one, it triggers `recoverStaleInProgressTasks(...)` directly instead of waiting for an external monitor tick.
+- This keeps the phase alive while the retry/recovery handoff happens and closes the race where a recoverable provider timeout could collapse into a phase abort.
+
+Files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/reliability_helpers_test.go`
+
+Verification:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/reliability_helpers_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestWaitForPhaseCompletionRecoversStaleInProgressTaskWithoutMonitor|TestRecoverStaleInProgressTasksQueuesSyntheticTimeoutFailure|TestWaitForPhaseCompletionWaitsForRecoveryLineage|TestWaitForPhaseCompletionFailsOnUnresolvedLineageFailure'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push this backend-only reliability fix without Claude’s frontend polish commit
+2. Wait for Render to deploy the new backend instance
+3. Launch a fresh paid full-stack canary immediately
+4. If the canary still fails, inspect the next late-stage generated-project/runtime error and keep iterating

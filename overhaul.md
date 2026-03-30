@@ -1108,6 +1108,32 @@ Date: 2026-03-29
 
 Change summary:
 
+- Hardened phased execution so the phase waiter can recover its own stale in-progress lineage instead of depending entirely on the background build monitor.
+- If a related phase task has exceeded its provider-aware execution timeout, `waitForPhaseCompletion` now triggers the same stale-task recovery path directly and keeps the phase alive while the retry handoff happens.
+- This specifically targets the paid full-stack `generate_api` failure mode where provider-wide timeout/rate-limit collapse could leave the backend-services phase aborting before recovery had a chance to claim the task.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/reliability_helpers_test.go`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/manager.go internal/agents/reliability_helpers_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestWaitForPhaseCompletionRecoversStaleInProgressTaskWithoutMonitor|TestRecoverStaleInProgressTasksQueuesSyntheticTimeoutFailure|TestWaitForPhaseCompletionWaitsForRecoveryLineage|TestWaitForPhaseCompletionFailsOnUnresolvedLineageFailure'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-29
+
+Change summary:
+
 - Added a short timeout around live build lookup for readable endpoints so `/build/:id/status` and `/build/:id` fall back to the persisted snapshot instead of hanging when the live manager read path is blocked.
 - This directly addresses the live paid-canary failure mode where build status/detail requests stopped responding while the backend stayed healthy.
 - Kept control/write paths unchanged; only read surfaces degrade to snapshot mode.
