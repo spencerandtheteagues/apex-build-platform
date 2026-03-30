@@ -1108,6 +1108,40 @@ Date: 2026-03-29
 
 Change summary:
 
+- Added a second-stage timeout guard for live build reads after reproducing a late paid-canary hang at `99%` with `generate_api` still active.
+- The earlier readable-build fallback only wrapped `GetBuild(...)`; the handlers could still block inside `selfHealReadableActiveBuild(build)` or a direct `build.mu` read after the live build pointer had already been loaded.
+- `GetBuildStatus` and `GetBuildDetails` now capture live state inside a timed read window and fall back to the persisted snapshot if that late read path stalls.
+
+Live canary evidence behind this fix:
+
+- Paid canary `723a91bb-b9d4-4568-9abb-ba42583fed0e` recovered its planning stall and advanced through `generate_schema` into `backend_services`.
+- `generate_schema` completed after one retry and `generate_api` no longer triggered the old immediate phase-abort bug.
+- The next real failure was live-read responsiveness: `/build/:id/status` and `/build/:id` could hang again near `99%` while `generate_api` was still `in_progress`.
+
+Files changed:
+
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+- `overhaul.md`
+- `omen.md`
+
+Verification completed:
+
+- `cd backend && gofmt -w internal/agents/handlers.go internal/agents/handlers_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestGetBuildStatusFallsBackToSnapshotWhenLiveReadStalls|TestGetBuildDetailsFallsBackToSnapshotWhenLiveReadStalls|TestGetBuildStatusFallsBackToSnapshotWhenLiveLookupTimesOut'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Commit hash if pushed:
+
+- Local: pending
+- Remote: pending
+
+Date: 2026-03-29
+
+Change summary:
+
 - Hardened phased execution so the phase waiter can recover its own stale in-progress lineage instead of depending entirely on the background build monitor.
 - If a related phase task has exceeded its provider-aware execution timeout, `waitForPhaseCompletion` now triggers the same stale-task recovery path directly and keeps the phase alive while the retry handoff happens.
 - This specifically targets the paid full-stack `generate_api` failure mode where provider-wide timeout/rate-limit collapse could leave the backend-services phase aborting before recovery had a chance to claim the task.

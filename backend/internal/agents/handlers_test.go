@@ -359,6 +359,85 @@ func TestGetBuildStatusFallsBackToSnapshotWhenLiveLookupTimesOut(t *testing.T) {
 	}
 }
 
+func TestGetBuildStatusFallsBackToSnapshotWhenLiveReadStalls(t *testing.T) {
+	db := openBuildTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-status-read-stall",
+		UserID:      1,
+		Description: "Serve snapshot when live status read blocks",
+		Status:      string(BuildInProgress),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    99,
+		FilesJSON:   "[]",
+		AgentsJSON:  `[{"id":"backend-1","role":"backend","provider":"gpt4","status":"working","progress":99}]`,
+		TasksJSON:   `[{"id":"task-api","type":"generate_api","description":"Implement backend routes","assigned_to":"backend-1","status":"in_progress"}]`,
+		StateJSON:   `{"current_phase":"backend_services","quality_gate_required":true}`,
+		CreatedAt:   now.Add(-4 * time.Minute),
+		UpdatedAt:   now,
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+	build := &Build{
+		ID:          "active-status-read-stall",
+		UserID:      1,
+		Description: "Live build with blocked status read",
+		Status:      BuildInProgress,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Progress:    99,
+	}
+	am.builds[build.ID] = build
+
+	previousTimeout := readableBuildStateTimeout
+	readableBuildStateTimeout = 50 * time.Millisecond
+	defer func() { readableBuildStateTimeout = previousTimeout }()
+
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1/build/active-status-read-stall/status", nil)
+		testRouter(am).ServeHTTP(w, req)
+		done <- w
+	}()
+
+	select {
+	case w := <-done:
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+		if body["live"] != false {
+			t.Fatalf("expected stalled live read to fall back to snapshot, got live=%v", body["live"])
+		}
+		if body["progress"] != float64(99) {
+			t.Fatalf("expected snapshot progress 99, got %v", body["progress"])
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected build status fallback to return promptly when live state read blocks")
+	}
+}
+
 func TestGetBuildDetailsServesActiveSnapshotReadOnlyWithoutRestoringSession(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.CompletedBuild{
@@ -432,6 +511,86 @@ func TestGetBuildDetailsServesActiveSnapshotReadOnlyWithoutRestoringSession(t *t
 	}
 	if _, exists := am.builds["active-details-restore"]; exists {
 		t.Fatal("expected read-only details request not to restore build session into memory")
+	}
+}
+
+func TestGetBuildDetailsFallsBackToSnapshotWhenLiveReadStalls(t *testing.T) {
+	db := openBuildTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-details-read-stall",
+		UserID:      1,
+		Description: "Serve snapshot when live details read blocks",
+		Status:      string(BuildInProgress),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    99,
+		FilesJSON:   `[{"path":"src/App.tsx","content":"export default function App(){return null}","language":"typescript"}]`,
+		AgentsJSON:  `[{"id":"backend-1","role":"backend","provider":"gpt4","status":"working","progress":99}]`,
+		TasksJSON:   `[{"id":"task-api","type":"generate_api","description":"Implement backend routes","assigned_to":"backend-1","status":"in_progress"}]`,
+		StateJSON:   `{"current_phase":"backend_services","quality_gate_required":true}`,
+		CreatedAt:   now.Add(-4 * time.Minute),
+		UpdatedAt:   now,
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+	build := &Build{
+		ID:          "active-details-read-stall",
+		UserID:      1,
+		Description: "Live build with blocked details read",
+		Status:      BuildInProgress,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Progress:    99,
+	}
+	am.builds[build.ID] = build
+
+	previousTimeout := readableBuildStateTimeout
+	readableBuildStateTimeout = 50 * time.Millisecond
+	defer func() { readableBuildStateTimeout = previousTimeout }()
+
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1/build/active-details-read-stall", nil)
+		testRouter(am).ServeHTTP(w, req)
+		done <- w
+	}()
+
+	select {
+	case w := <-done:
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+		if body["live"] != false {
+			t.Fatalf("expected stalled live details read to fall back to snapshot, got live=%v", body["live"])
+		}
+		files, ok := body["files"].([]any)
+		if !ok || len(files) != 1 {
+			t.Fatalf("expected snapshot files in fallback response, got %T %#v", body["files"], body["files"])
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected build details fallback to return promptly when live state read blocks")
 	}
 }
 

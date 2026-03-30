@@ -1665,3 +1665,42 @@ Next exact step:
 2. Wait for Render to deploy the new backend instance
 3. Launch a fresh paid full-stack canary immediately
 4. If the canary still fails, inspect the next late-stage generated-project/runtime error and keep iterating
+
+## Latest Live-Read Timeout Fallback
+
+Problem observed live:
+
+- Paid canary `723a91bb-b9d4-4568-9abb-ba42583fed0e` proved that planning and schema recovery are working: it recovered from an early planning stall, completed `generate_schema` after one retry, and advanced into `generate_api`.
+- Near `99%`, while `generate_api` was still `in_progress`, both:
+  - `GET /api/v1/build/:id/status`
+  - `GET /api/v1/build/:id`
+  could hang again.
+- The original readable-build fallback only protected `GetBuild(...)`; once the build pointer was loaded, the handlers could still stall inside `selfHealReadableActiveBuild(build)` or while waiting on `build.mu`.
+
+Fix:
+
+- Added a timed live-state capture window for both status and detail reads.
+- If the live build state cannot be read promptly after the build pointer has been loaded, the handlers now fall back to the saved snapshot instead of hanging the user request.
+- This keeps late-phase build UI polling responsive even when the live session is contended.
+
+Files:
+
+- `backend/internal/agents/handlers.go`
+- `backend/internal/agents/handlers_test.go`
+
+Verification:
+
+- `cd backend && gofmt -w internal/agents/handlers.go internal/agents/handlers_test.go`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents -run 'TestGetBuildStatusFallsBackToSnapshotWhenLiveReadStalls|TestGetBuildDetailsFallsBackToSnapshotWhenLiveReadStalls|TestGetBuildStatusFallsBackToSnapshotWhenLiveLookupTimesOut'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp go test ./... -timeout=120s`
+
+Next exact step:
+
+1. Push this live-read fallback slice without bundling Claude’s frontend polish commit
+2. Wait for Render to deploy the new backend instance
+3. Re-run the paid full-stack canary immediately
+4. If the canary still fails, inspect whether the next blocker is:
+   - another late-phase live-session contention path
+   - or an actual generated-project/runtime failure after `generate_api`
