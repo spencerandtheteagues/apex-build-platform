@@ -202,7 +202,7 @@ The user avatar in the top-right shows your username. Your session persists acro
 **Weak example:**
 "Make me an app" — This is too vague. The AI won't know what to build.
 
-**Character limit:** 2,000 characters. The progress bar below the text box shows how much you've used.`,
+**Character limit:** Fast Build supports up to 2,000 characters. Full Build supports up to 50,000 characters. The progress bar below the text box shows how much you've used for the selected mode.`,
       },
       {
         id: 'build-modes',
