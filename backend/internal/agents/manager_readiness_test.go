@@ -4185,6 +4185,86 @@ func TestApplyDeterministicTypeDeclarationRepairAddsPgTypes(t *testing.T) {
 	}
 }
 
+func TestApplyDeterministicTypeDeclarationRepairAnnotatesGeneratedDbErrorHandler(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-pg-db-error-handler-repair",
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-api",
+				Type:   TaskGenerateAPI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "api-test",
+  "private": true,
+  "dependencies": {
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}`,
+						},
+						{
+							Path: "server/db/index.ts",
+							Content: `import { Pool } from 'pg';
+
+const pool = new Pool();
+
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle client', err);
+});
+
+export default pool;
+`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	bundle, summary := am.applyDeterministicTypeDeclarationRepair(build, []string{
+		"Final output validation failed: Preview verification build failed: server/db/index.ts(1,22): error TS7016: Could not find a declaration file for module 'pg'. '/tmp/apex-preview-verify-1346717894/node_modules/pg/esm/index.mjs' implicitly has an 'any' type.",
+		"Final output validation failed: Preview verification build failed: server/db/index.ts(4,19): error TS7006: Parameter 'err' implicitly has an 'any' type.",
+	})
+	if bundle == nil {
+		t.Fatalf("expected pg type declaration repair to trigger")
+	}
+	if !am.applyPatchBundleToBuild(build, bundle) {
+		t.Fatalf("expected patch bundle to apply")
+	}
+	if !strings.Contains(summary, "@types/pg") {
+		t.Fatalf("expected summary to mention @types/pg, got %q", summary)
+	}
+	if !strings.Contains(summary, "server/db/index.ts") {
+		t.Fatalf("expected summary to mention server/db/index.ts, got %q", summary)
+	}
+
+	var manifest string
+	var dbFile string
+	for _, file := range am.collectGeneratedFiles(build) {
+		switch file.Path {
+		case "package.json":
+			manifest = file.Content
+		case "server/db/index.ts":
+			dbFile = file.Content
+		}
+	}
+	if !strings.Contains(manifest, `"@types/pg"`) {
+		t.Fatalf("expected package.json to include @types/pg, got %s", manifest)
+	}
+	if !strings.Contains(dbFile, "pool.on('error', (err: Error) =>") {
+		t.Fatalf("expected db error callback to be typed, got %q", dbFile)
+	}
+}
+
 func TestApplyDeterministicTypeDeclarationRepairAddsViteEnvDeclaration(t *testing.T) {
 	t.Parallel()
 
