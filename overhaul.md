@@ -1132,6 +1132,40 @@ Next exact step:
 - Rerun the paid full-stack canary immediately
 - If it still does not terminate, inspect the next live blocker from `/api/v1/build/:id` and keep the fix scoped to the reliability lane
 
+Date: 2026-03-30
+
+Change summary:
+
+- Reran the paid full-stack canary after `dc6333c` deployed.
+- New live canary build: `b3c523ea-14bc-479f-a085-ddf0ec69edef`
+- The previous stale-session illusion is partially fixed:
+  - the build now reaches `59%` as a true live build first (`live: true`, `restored_from_snapshot: false`)
+  - then later some reads still fall back to `live: false` snapshot state while the same stale `generate_api` task remains in progress
+- Isolated the remaining race:
+  - `claimActiveSnapshotTakeover` uses an optimistic `state_json` compare-and-swap
+  - if another instance refreshed only the lease heartbeat, the compare fails, the code reloads the snapshot, and then gives up instead of retrying the claim
+  - result: non-owner readers can still serve stale non-live responses on a build that should be stealable
+- Fixed `claimActiveSnapshotTakeover` to retry against the refreshed snapshot up to three times before giving up.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/handlers_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./internal/agents -run 'TestClaimActiveSnapshotTakeoverRetriesAfterLeaseHeartbeatRace|TestGetBuildStatusRestoresFreshLeaseSnapshotWhenTaskTimedOut|TestGetBuildStatusRestoresStaleLeasedActiveSnapshot'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./... -timeout=120s`
+
+Next exact step:
+
+- Push this follow-up claim-retry fix to `main`
+- Wait for Render to deploy
+- Rerun the paid full-stack canary immediately
+- If the canary still sticks at `59%`, inspect whether stale in-progress task recovery itself is failing after the claim succeeds
+
 ## Claude Pickup
 
 Use this section if Claude needs to resume without reconstructing context from chat.

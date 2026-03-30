@@ -841,6 +841,96 @@ func TestGetBuildStatusRestoresFreshLeaseSnapshotWhenTaskTimedOut(t *testing.T) 
 	}
 }
 
+func TestClaimActiveSnapshotTakeoverRetriesAfterLeaseHeartbeatRace(t *testing.T) {
+	db := openBuildTestDB(t)
+	olderHeartbeat := time.Now().UTC().Add(-30 * time.Second)
+	newerHeartbeat := time.Now().UTC()
+
+	staleTaskJSON := `[{
+		"id":"task-api",
+		"type":"generate_api",
+		"description":"Implement backend API",
+		"assigned_to":"backend-1",
+		"status":"in_progress",
+		"created_at":"2026-03-30T07:00:00Z",
+		"started_at":"2026-03-30T07:00:00Z"
+	}]`
+
+	oldStateJSON := fmt.Sprintf(`{
+		"current_phase":"backend_services",
+		"restore_context":{
+			"subscription_plan":"team",
+			"provider_mode":"platform",
+			"active_owner_instance_id":"owner-instance",
+			"active_owner_heartbeat_at":%q
+		}
+	}`, olderHeartbeat.Format(time.RFC3339Nano))
+	newStateJSON := fmt.Sprintf(`{
+		"current_phase":"backend_services",
+		"restore_context":{
+			"subscription_plan":"team",
+			"provider_mode":"platform",
+			"active_owner_instance_id":"owner-instance",
+			"active_owner_heartbeat_at":%q
+		}
+	}`, newerHeartbeat.Format(time.RFC3339Nano))
+
+	row := &models.CompletedBuild{
+		BuildID:     "active-status-claim-race",
+		UserID:      1,
+		Description: "Concurrent heartbeat refresh should not block takeover",
+		Status:      string(BuildInProgress),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    59,
+		AgentsJSON: `[{
+			"id":"backend-1",
+			"role":"backend",
+			"provider":"gpt4",
+			"status":"working",
+			"build_id":"active-status-claim-race",
+			"progress":59
+		}]`,
+		TasksJSON:  staleTaskJSON,
+		StateJSON:  newStateJSON,
+		CreatedAt:  time.Now().UTC().Add(-20 * time.Minute),
+		UpdatedAt:  time.Now().UTC(),
+	}
+	if err := db.Create(row).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		resultQueue: make(chan *TaskResult, 1),
+		ctx:         context.Background(),
+		instanceID:  "reader-instance",
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	staleSnapshot := *row
+	staleSnapshot.StateJSON = oldStateJSON
+
+	claimed, ok, err := am.claimActiveSnapshotTakeover(&staleSnapshot)
+	if err != nil {
+		t.Fatalf("claimActiveSnapshotTakeover returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected takeover to succeed after refreshing snapshot state")
+	}
+	state := parseBuildSnapshotState(claimed.StateJSON)
+	if state.RestoreContext == nil || state.RestoreContext.ActiveOwnerInstanceID != "reader-instance" {
+		t.Fatalf("expected claimed snapshot owner to switch to reader-instance, got %+v", state.RestoreContext)
+	}
+}
+
 func TestGetBuildStatusNormalizesLiveProgressWithinPhaseWindow(t *testing.T) {
 	am := &AgentManager{
 		builds:      make(map[string]*Build),

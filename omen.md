@@ -1839,3 +1839,40 @@ Next step:
 - push this fix to `main`
 - wait for Render to deploy
 - rerun the paid canary immediately
+
+Latest live result after `dc6333c` deployed:
+
+- Live paid canary build: `b3c523ea-14bc-479f-a085-ddf0ec69edef`
+- It now behaves better than before:
+  - it reaches `59%` as a true live build first
+  - `live: true`
+  - `restored_from_snapshot: false`
+  - `current_phase: backend_services`
+- But the run still exposed one more autoscaling race:
+  - later reads can fall back to `live: false`
+  - stale `generate_api` remains `in_progress`
+  - `updated_at` stays pinned to task start
+- Root cause:
+  - `claimActiveSnapshotTakeover` was doing a one-shot `state_json` compare-and-swap
+  - if another instance refreshed only the lease heartbeat, that compare failed
+  - the reader reloaded the snapshot and returned stale non-live state instead of retrying the claim
+
+Latest local fix:
+
+- `backend/internal/agents/manager.go`
+  - retry active snapshot claim up to 3 times against the refreshed snapshot
+- `backend/internal/agents/handlers_test.go`
+  - added `TestClaimActiveSnapshotTakeoverRetriesAfterLeaseHeartbeatRace`
+
+Verification:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./internal/agents -run 'TestClaimActiveSnapshotTakeoverRetriesAfterLeaseHeartbeatRace|TestGetBuildStatusRestoresFreshLeaseSnapshotWhenTaskTimedOut|TestGetBuildStatusRestoresStaleLeasedActiveSnapshot'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./... -timeout=120s`
+
+Next step:
+
+- push this follow-up claim-retry fix
+- wait for Render
+- rerun the paid canary immediately

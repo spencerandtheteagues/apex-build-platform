@@ -1141,50 +1141,55 @@ func (am *AgentManager) claimActiveSnapshotTakeover(snapshot *models.CompletedBu
 	if snapshot == nil || am.db == nil {
 		return snapshot, false, nil
 	}
-	if !am.shouldAttemptActiveSnapshotTakeover(snapshot) {
-		return snapshot, false, nil
-	}
-
-	state := parseBuildSnapshotState(snapshot.StateJSON)
-	if state.RestoreContext == nil {
-		state.RestoreContext = &BuildRestoreContext{}
-	}
-	now := time.Now().UTC()
-	state.RestoreContext.ActiveOwnerInstanceID = am.instanceID
-	state.RestoreContext.ActiveOwnerHeartbeatAt = &now
-
-	stateJSONBytes, err := json.Marshal(state)
-	if err != nil {
-		return nil, false, err
-	}
-	nextStateJSON := string(stateJSONBytes)
-
-	tx := am.db.Model(&models.CompletedBuild{}).
-		Where("build_id = ? AND state_json = ?", snapshot.BuildID, snapshot.StateJSON).
-		Where("status IN ?", []string{
-			string(BuildPending),
-			string(BuildPlanning),
-			string(BuildInProgress),
-			string(BuildTesting),
-			string(BuildReviewing),
-			string(BuildAwaitingReview),
-			"building",
-		}).
-		Update("state_json", nextStateJSON)
-	if tx.Error != nil {
-		return nil, false, tx.Error
-	}
-	if tx.RowsAffected == 0 {
-		var refreshed models.CompletedBuild
-		if err := am.db.Where("build_id = ?", snapshot.BuildID).First(&refreshed).Error; err == nil {
-			return &refreshed, false, nil
+	current := snapshot
+	for attempt := 0; attempt < 3; attempt++ {
+		if !am.shouldAttemptActiveSnapshotTakeover(current) {
+			return current, false, nil
 		}
-		return snapshot, false, nil
+
+		state := parseBuildSnapshotState(current.StateJSON)
+		if state.RestoreContext == nil {
+			state.RestoreContext = &BuildRestoreContext{}
+		}
+		now := time.Now().UTC()
+		state.RestoreContext.ActiveOwnerInstanceID = am.instanceID
+		state.RestoreContext.ActiveOwnerHeartbeatAt = &now
+
+		stateJSONBytes, err := json.Marshal(state)
+		if err != nil {
+			return nil, false, err
+		}
+		nextStateJSON := string(stateJSONBytes)
+
+		tx := am.db.Model(&models.CompletedBuild{}).
+			Where("build_id = ? AND state_json = ?", current.BuildID, current.StateJSON).
+			Where("status IN ?", []string{
+				string(BuildPending),
+				string(BuildPlanning),
+				string(BuildInProgress),
+				string(BuildTesting),
+				string(BuildReviewing),
+				string(BuildAwaitingReview),
+				"building",
+			}).
+			Update("state_json", nextStateJSON)
+		if tx.Error != nil {
+			return nil, false, tx.Error
+		}
+		if tx.RowsAffected > 0 {
+			claimed := *current
+			claimed.StateJSON = nextStateJSON
+			return &claimed, true, nil
+		}
+
+		var refreshed models.CompletedBuild
+		if err := am.db.Where("build_id = ?", current.BuildID).First(&refreshed).Error; err != nil {
+			return current, false, nil
+		}
+		current = &refreshed
 	}
 
-	claimed := *snapshot
-	claimed.StateJSON = nextStateJSON
-	return &claimed, true, nil
+	return current, false, nil
 }
 
 func (am *AgentManager) refreshActiveBuildLease(build *Build) {
