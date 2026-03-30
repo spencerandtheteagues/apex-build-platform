@@ -82,7 +82,6 @@ jobs:
     name: Trigger Render Backend Deploy
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: []
     env:
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
       RENDER_BACKEND_SERVICE_ID: ${{ secrets.RENDER_BACKEND_SERVICE_ID }}
