@@ -1104,6 +1104,34 @@ Commit hash if pushed:
 - Local: pending
 - Remote: pending
 
+Date: 2026-03-30
+
+Change summary:
+
+- Investigated the live paid canary build `4b58653d-296a-4047-a6da-382c9c559df7`, which appeared stuck at `59%` in `generate_api`.
+- Confirmed the build detail/status endpoints were returning `live: false` and `restored_from_snapshot: true`, which meant autoscaled non-owner instances were serving a stale active snapshot instead of taking over the dead session.
+- Isolated the real defect: fresh active-build lease heartbeats could keep a stale owner "alive" forever even when the snapshot itself contained an `in_progress` task that had already exceeded the same provider-aware execution timeout used by live stale-task recovery.
+- Fixed takeover policy so a non-owner instance will now claim and restore an active snapshot when the snapshot shows an in-progress task that has timed out, even if the lease heartbeat is still fresh.
+
+Files changed:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/handlers_test.go`
+
+Verification completed:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./internal/agents -run 'TestGetBuildStatusRestoresFreshLeaseSnapshotWhenTaskTimedOut|TestGetBuildStatusRestoresStaleLeasedActiveSnapshot'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./... -timeout=120s`
+
+Next exact step:
+
+- Push this fix to `main`
+- Wait for Render to deploy the new backend
+- Rerun the paid full-stack canary immediately
+- If it still does not terminate, inspect the next live blocker from `/api/v1/build/:id` and keep the fix scoped to the reliability lane
+
 ## Claude Pickup
 
 Use this section if Claude needs to resume without reconstructing context from chat.

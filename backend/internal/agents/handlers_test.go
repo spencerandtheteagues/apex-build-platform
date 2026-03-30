@@ -758,6 +758,89 @@ func TestGetBuildStatusRestoresStaleLeasedActiveSnapshot(t *testing.T) {
 	}
 }
 
+func TestGetBuildStatusRestoresFreshLeaseSnapshotWhenTaskTimedOut(t *testing.T) {
+	db := openBuildTestDB(t)
+	freshHeartbeat := time.Now().UTC()
+	stateJSON := fmt.Sprintf(`{
+		"current_phase":"backend_services",
+		"restore_context":{
+			"subscription_plan":"team",
+			"provider_mode":"platform",
+			"active_owner_instance_id":"owner-instance",
+			"active_owner_heartbeat_at":%q
+		}
+	}`, freshHeartbeat.Format(time.RFC3339Nano))
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-status-fresh-lease-stale-task",
+		UserID:      1,
+		Description: "Fresh lease should still restore if the active task has timed out",
+		Status:      string(BuildInProgress),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    59,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"backend-1",
+			"role":"backend",
+			"provider":"gpt4",
+			"status":"working",
+			"build_id":"active-status-fresh-lease-stale-task",
+			"progress":59
+		}]`,
+		TasksJSON: `[{
+			"id":"task-api",
+			"type":"generate_api",
+			"description":"Implement backend API",
+			"assigned_to":"backend-1",
+			"status":"in_progress",
+			"created_at":"2026-03-30T07:00:00Z",
+			"started_at":"2026-03-30T07:00:00Z"
+		}]`,
+		StateJSON: stateJSON,
+		CreatedAt: time.Now().UTC().Add(-20 * time.Minute),
+		UpdatedAt: time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		resultQueue: make(chan *TaskResult, 1),
+		ctx:         context.Background(),
+		instanceID:  "reader-instance",
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/active-status-fresh-lease-stale-task/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body["live"] != true {
+		t.Fatalf("expected timed-out task snapshot to restore as live, got %v", body["live"])
+	}
+	if body["restored_from_snapshot"] != true {
+		t.Fatalf("expected restored_from_snapshot=true, got %v", body["restored_from_snapshot"])
+	}
+	if _, exists := am.builds["active-status-fresh-lease-stale-task"]; !exists {
+		t.Fatal("expected timed-out task snapshot to materialize a live build")
+	}
+}
+
 func TestGetBuildStatusNormalizesLiveProgressWithinPhaseWindow(t *testing.T) {
 	am := &AgentManager{
 		builds:      make(map[string]*Build),

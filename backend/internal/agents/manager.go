@@ -1075,6 +1075,41 @@ func activeOwnerLeaseFromSnapshotState(state BuildSnapshotState) (string, time.T
 	return instanceID, heartbeat
 }
 
+func (am *AgentManager) snapshotHasTimedOutInProgressTask(snapshot *models.CompletedBuild) bool {
+	if snapshot == nil {
+		return false
+	}
+
+	tasks := parseBuildTasks(snapshot.TasksJSON)
+	if len(tasks) == 0 {
+		return false
+	}
+
+	build := &Build{
+		Mode:      normalizeRestoredBuildMode(snapshot.Mode),
+		PowerMode: normalizeRestoredPowerMode(snapshot.PowerMode),
+		Agents:    parseBuildAgents(snapshot.AgentsJSON),
+	}
+	now := time.Now()
+
+	for _, task := range tasks {
+		if task == nil || task.Status != TaskInProgress || task.StartedAt == nil {
+			continue
+		}
+
+		var agent *Agent
+		if assignedID := strings.TrimSpace(task.AssignedTo); assignedID != "" && build.Agents != nil {
+			agent = build.Agents[assignedID]
+		}
+
+		if now.Sub(task.StartedAt.UTC()) >= am.taskExecutionTimeoutForTask(build, task, agent) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (am *AgentManager) shouldAttemptActiveSnapshotTakeover(snapshot *models.CompletedBuild) bool {
 	if snapshot == nil {
 		return false
@@ -1088,17 +1123,18 @@ func (am *AgentManager) shouldAttemptActiveSnapshotTakeover(snapshot *models.Com
 	ownerInstanceID, heartbeat := activeOwnerLeaseFromSnapshotState(state)
 	now := time.Now().UTC()
 	staleAfter := activeBuildLeaseStaleAfter()
+	hasTimedOutTask := am.snapshotHasTimedOutInProgressTask(snapshot)
 
 	if !heartbeat.IsZero() {
-		return now.Sub(heartbeat) >= staleAfter
+		return now.Sub(heartbeat) >= staleAfter || hasTimedOutTask
 	}
 
 	// Legacy active snapshots created before lease persistence should still be
 	// recoverable after they sit idle beyond the lease window.
 	if strings.TrimSpace(ownerInstanceID) == "" && !snapshot.UpdatedAt.IsZero() {
-		return now.Sub(snapshot.UpdatedAt.UTC()) >= staleAfter
+		return now.Sub(snapshot.UpdatedAt.UTC()) >= staleAfter || hasTimedOutTask
 	}
-	return false
+	return hasTimedOutTask
 }
 
 func (am *AgentManager) claimActiveSnapshotTakeover(snapshot *models.CompletedBuild) (*models.CompletedBuild, bool, error) {

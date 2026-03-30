@@ -1810,3 +1810,32 @@ Best file to read first:
 Second file to read:
 
 - `omen.md`
+
+Latest live blocker and fix:
+
+- Live paid canary `4b58653d-296a-4047-a6da-382c9c559df7` stalled at `59%` with `generate_api` in progress.
+- The important discovery was that build reads were returning:
+  - `live: false`
+  - `restored_from_snapshot: true`
+- So the request was landing on a non-owner autoscaled instance and serving a stale active snapshot instead of claiming it.
+- Root cause:
+  - active-build lease heartbeats could stay fresh even while the snapshot itself contained an `in_progress` task that had already exceeded the provider-aware execution timeout
+  - that prevented takeover and masked a dead owner session forever
+- Fix now implemented locally:
+  - `backend/internal/agents/manager.go`
+  - non-owner takeover is now allowed when the snapshot shows a timed-out in-progress task, even if the lease heartbeat is still fresh
+- Regression added:
+  - `TestGetBuildStatusRestoresFreshLeaseSnapshotWhenTaskTimedOut`
+
+Verification completed for this fix:
+
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./internal/agents -run 'TestGetBuildStatusRestoresFreshLeaseSnapshotWhenTaskTimedOut|TestGetBuildStatusRestoresStaleLeasedActiveSnapshot'`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./internal/agents`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go build ./...`
+- `cd backend && TMPDIR=/tmp GOCACHE=/tmp/go-build GOTMPDIR=/tmp/go-tmp GOMODCACHE=/tmp/go-mod go test ./... -timeout=120s`
+
+Next step:
+
+- push this fix to `main`
+- wait for Render to deploy
+- rerun the paid canary immediately
