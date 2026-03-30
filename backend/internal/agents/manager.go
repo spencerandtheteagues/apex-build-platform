@@ -5571,14 +5571,14 @@ func (am *AgentManager) handleReviewCompletion(build *Build, sourceTask *Task, o
 		existingBuildError := strings.ToLower(strings.TrimSpace(build.Error))
 		build.mu.RUnlock()
 
-		if readinessRecoveryAttempts > 0 && strings.Contains(existingBuildError, "final output validation failed") {
-			log.Printf("Critical review issues found in build %s during readiness recovery; skipping review-fix loop and proceeding to final validation", build.ID)
+		if strings.Contains(existingBuildError, "final output validation failed") {
+			log.Printf("Critical review issues found in build %s during validation recovery (attempts=%d); skipping review-fix loop and proceeding to final validation", build.ID, readinessRecoveryAttempts)
 			am.broadcast(build.ID, &WSMessage{
 				Type:      WSBuildProgress,
 				BuildID:   build.ID,
 				Timestamp: time.Now(),
 				Data: map[string]any{
-					"message":               "Readiness recovery is already active. Skipping additional review-fix loops and finalizing with current validation errors if they persist.",
+					"message":               "Validation recovery is already active. Skipping additional review-fix loops and finalizing with current validation errors if they persist.",
 					"phase":                 "reviewing",
 					"status":                string(BuildReviewing),
 					"quality_gate_required": true,

@@ -277,6 +277,28 @@ func TestHandleReviewCompletionLinksFixTaskToTriggerTask(t *testing.T) {
 	}
 }
 
+func TestHandleReviewCompletionSkipsFixTaskWhileValidationRecoveryActive(t *testing.T) {
+	manager := &AgentManager{
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+	sourceTask := &Task{ID: "review-validation", Type: TaskReview, Status: TaskCompleted}
+	build := &Build{
+		ID:          "review-validation-build",
+		Description: "Validation recovery should not spawn review-fix loops",
+		Status:      BuildReviewing,
+		Error:       "Final output validation failed: server/db/index.ts(1,22): error TS7016: Could not find a declaration file for module 'pg'.",
+		Tasks:       []*Task{sourceTask},
+	}
+
+	manager.handleReviewCompletion(build, sourceTask, &TaskOutput{
+		Messages: []string{"Critical security vulnerability found in generated route test harness"},
+	})
+
+	if len(build.Tasks) != 1 {
+		t.Fatalf("expected no follow-on fix task during validation recovery, got %d tasks", len(build.Tasks))
+	}
+}
+
 func TestHandleTestCompletionLinksFixTaskToTriggerTask(t *testing.T) {
 	manager := &AgentManager{}
 	sourceTask := &Task{ID: "test-root", Type: TaskTest, Status: TaskCompleted}
