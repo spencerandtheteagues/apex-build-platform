@@ -89,7 +89,7 @@ const PROVIDERS: ProviderConfig[] = [
     activeBorder: 'border-purple-500',
     placeholder: 'xai-...',
     models: [
-      { id: 'grok-code-fast-1', name: 'Grok Code Fast 1', speed: 'medium', cost: 'high', description: 'Max tier — latest coding model' },
+      { id: 'grok-4.20-0309-reasoning', name: 'Grok 4.20', speed: 'medium', cost: 'high', description: 'Max tier — frontier reasoning model' },
       { id: 'grok-3', name: 'Grok 3', speed: 'medium', cost: 'medium', description: 'Balanced tier — stronger reasoning' },
       { id: 'grok-3-mini', name: 'Grok 3 Mini', speed: 'fast', cost: 'low', description: 'Fast mini tier' },
     ],

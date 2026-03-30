@@ -349,8 +349,8 @@ func (g *GrokClient) calculateCost(inputTokens, outputTokens int, model string) 
 	var inputCostPer1M, outputCostPer1M float64
 
 	switch model {
-	case "grok-code-fast-1":
-		inputCostPer1M = 2.00
+	case "grok-code-fast-1": // legacy alias
+		inputCostPer1M = 3.00
 		outputCostPer1M = 15.00
 	case "grok-3":
 		inputCostPer1M = 3.00

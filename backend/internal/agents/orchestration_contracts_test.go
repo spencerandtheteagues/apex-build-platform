@@ -151,6 +151,253 @@ func TestCompileBuildContractFromPlanSeedsTruthAndVerification(t *testing.T) {
 	}
 }
 
+func TestCompileBuildContractFromPlanNormalizesUniqueTypeQualifiers(t *testing.T) {
+	t.Parallel()
+
+	plan := &BuildPlan{
+		ID:      "plan-qualifiers",
+		BuildID: "build-qualifiers",
+		AppType: "fullstack",
+		TechStack: TechStack{
+			Frontend: "react",
+			Backend:  "node",
+			Database: "postgres",
+		},
+		DataModels: []DataModel{
+			{
+				Name: "Tenant",
+				Fields: []ModelField{
+					{Name: "slug", Type: "string unique"},
+				},
+			},
+			{
+				Name: "User",
+				Fields: []ModelField{
+					{Name: "email", Type: "string unique"},
+				},
+			},
+		},
+	}
+
+	contract := compileBuildContractFromPlan("build-qualifiers", &IntentBrief{AppType: "fullstack"}, plan)
+	if contract == nil {
+		t.Fatal("expected contract")
+	}
+	if len(contract.DBSchemaContract) != 2 {
+		t.Fatalf("expected normalized schema models, got %+v", contract.DBSchemaContract)
+	}
+
+	tenantField := contract.DBSchemaContract[0].Fields[0]
+	userField := contract.DBSchemaContract[1].Fields[0]
+	if tenantField.Type != "string" || !tenantField.Unique {
+		t.Fatalf("expected tenant slug field to normalize unique qualifier, got %+v", tenantField)
+	}
+	if userField.Type != "string" || !userField.Unique {
+		t.Fatalf("expected user email field to normalize unique qualifier, got %+v", userField)
+	}
+}
+
+func TestCompileBuildContractFromPlanInfersForeignKeyReferences(t *testing.T) {
+	t.Parallel()
+
+	plan := &BuildPlan{
+		ID:      "plan-fk-refs",
+		BuildID: "build-fk-refs",
+		AppType: "fullstack",
+		TechStack: TechStack{
+			Frontend: "react",
+			Backend:  "node",
+			Database: "postgres",
+		},
+		DataModels: []DataModel{
+			{
+				Name: "Tenant",
+				Fields: []ModelField{
+					{Name: "id", Type: "uuid primary key"},
+				},
+			},
+			{
+				Name: "User",
+				Fields: []ModelField{
+					{Name: "tenant_id", Type: "uuid foreign key"},
+				},
+			},
+		},
+	}
+
+	contract := compileBuildContractFromPlan("build-fk-refs", &IntentBrief{AppType: "fullstack"}, plan)
+	if contract == nil {
+		t.Fatal("expected contract")
+	}
+	if len(contract.DBSchemaContract) != 2 {
+		t.Fatalf("expected normalized schema models, got %+v", contract.DBSchemaContract)
+	}
+
+	userField := contract.DBSchemaContract[1].Fields[0]
+	if userField.Type != "uuid foreign key references Tenant(id)" {
+		t.Fatalf("expected tenant_id foreign key reference to be inferred, got %+v", userField)
+	}
+}
+
+func TestCompileBuildContractFromPlanInfersActorForeignKeyReferences(t *testing.T) {
+	t.Parallel()
+
+	plan := &BuildPlan{
+		ID:      "plan-actor-fk-refs",
+		BuildID: "build-actor-fk-refs",
+		AppType: "fullstack",
+		TechStack: TechStack{
+			Frontend: "react",
+			Backend:  "node",
+			Database: "postgres",
+		},
+		DataModels: []DataModel{
+			{
+				Name: "User",
+				Fields: []ModelField{
+					{Name: "id", Type: "uuid primary key"},
+				},
+			},
+			{
+				Name: "Task",
+				Fields: []ModelField{
+					{Name: "created_by", Type: "uuid foreign key"},
+					{Name: "assigned_to", Type: "uuid foreign key"},
+				},
+			},
+		},
+	}
+
+	contract := compileBuildContractFromPlan("build-actor-fk-refs", &IntentBrief{AppType: "fullstack"}, plan)
+	if contract == nil {
+		t.Fatal("expected contract")
+	}
+	if len(contract.DBSchemaContract) != 2 {
+		t.Fatalf("expected normalized schema models, got %+v", contract.DBSchemaContract)
+	}
+
+	taskFields := contract.DBSchemaContract[1].Fields
+	if taskFields[0].Type != "uuid foreign key references User(id)" {
+		t.Fatalf("expected created_by foreign key reference to be inferred, got %+v", taskFields[0])
+	}
+	if taskFields[1].Type != "uuid foreign key references User(id)" {
+		t.Fatalf("expected assigned_to foreign key reference to be inferred, got %+v", taskFields[1])
+	}
+}
+
+func TestCompileBuildContractFromPlanNormalizesActorRelationTargetsToIdentityModel(t *testing.T) {
+	t.Parallel()
+
+	plan := &BuildPlan{
+		ID:      "plan-actor-relation-targets",
+		BuildID: "build-actor-relation-targets",
+		AppType: "fullstack",
+		TechStack: TechStack{
+			Frontend: "react",
+			Backend:  "node",
+			Database: "postgres",
+		},
+		DataModels: []DataModel{
+			{
+				Name: "User",
+				Fields: []ModelField{
+					{Name: "id", Type: "uuid primary key"},
+				},
+			},
+			{
+				Name: "Project",
+				Fields: []ModelField{
+					{Name: "manager_id", Type: "uuid foreign key"},
+				},
+				Relations: []Relation{
+					{Field: "manager_id", Target: "Manager"},
+				},
+			},
+		},
+	}
+
+	contract := compileBuildContractFromPlan("build-actor-relation-targets", &IntentBrief{AppType: "fullstack"}, plan)
+	if contract == nil {
+		t.Fatal("expected contract")
+	}
+	if len(contract.DBSchemaContract) != 2 {
+		t.Fatalf("expected normalized schema models, got %+v", contract.DBSchemaContract)
+	}
+
+	managerField := contract.DBSchemaContract[1].Fields[0]
+	if managerField.Type != "uuid foreign key references User(id)" {
+		t.Fatalf("expected manager_id foreign key relation target to normalize to User(id), got %+v", managerField)
+	}
+}
+
+func TestCompileBuildContractFromPlanSeedsAuthEndpointsFromIntent(t *testing.T) {
+	t.Parallel()
+
+	plan := &BuildPlan{
+		ID:      "plan-auth-seed",
+		BuildID: "build-auth-seed",
+		AppType: "fullstack",
+		TechStack: TechStack{
+			Frontend: "React",
+			Backend:  "Express",
+			Database: "SQLite",
+		},
+		EnvVars: []BuildEnvVar{
+			{Name: "JWT_SECRET", Required: true},
+		},
+	}
+
+	intent := &IntentBrief{
+		AppType:              "fullstack",
+		NormalizedRequest:    "Build a CRM where users can create an account, log in, and manage clients from a dashboard.",
+		RequiredCapabilities: []CapabilityRequirement{CapabilityAPI, CapabilityAuth},
+	}
+
+	contract := compileBuildContractFromPlan("build-auth-seed", intent, plan)
+	if contract == nil {
+		t.Fatal("expected contract")
+	}
+	if contract.APIContract == nil {
+		t.Fatal("expected API contract to be seeded")
+	}
+	if contract.APIContract.BackendPort != 3001 {
+		t.Fatalf("expected backend port 3001, got %+v", contract.APIContract)
+	}
+	if contract.APIContract.APIBaseURL != "/api" {
+		t.Fatalf("expected API base URL /api, got %+v", contract.APIContract)
+	}
+	if contract.AuthContract == nil || !contract.AuthContract.Required || contract.AuthContract.TokenStrategy != "token" {
+		t.Fatalf("expected auth contract with token strategy, got %+v", contract.AuthContract)
+	}
+
+	endpoints := make(map[string]bool)
+	for _, endpoint := range contract.APIContract.Endpoints {
+		endpoints[strings.ToUpper(strings.TrimSpace(endpoint.Method))+" "+strings.TrimSpace(endpoint.Path)] = true
+	}
+	for _, key := range []string{
+		"GET /api/health",
+		"POST /api/auth/login",
+		"GET /api/auth/me",
+		"POST /api/auth/register",
+	} {
+		if !endpoints[key] {
+			t.Fatalf("expected seeded API endpoint %q, got %+v", key, contract.APIContract.Endpoints)
+		}
+	}
+
+	backendDeps := make(map[string]bool)
+	for _, resource := range contract.BackendResourceMap {
+		for _, dep := range resource.DependsOn {
+			backendDeps[dep] = true
+		}
+	}
+	for _, dep := range []string{"POST /api/auth/login", "GET /api/auth/me", "POST /api/auth/register"} {
+		if !backendDeps[dep] {
+			t.Fatalf("expected backend resource dependency %q, got %+v", dep, contract.BackendResourceMap)
+		}
+	}
+}
+
 func TestVerifyAndNormalizeBuildContractBlocksMissingAuthAndWarnsOnMissingSchema(t *testing.T) {
 	intent := &IntentBrief{
 		AppType:              "fullstack",

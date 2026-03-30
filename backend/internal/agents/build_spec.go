@@ -693,7 +693,177 @@ func normalizeDataModels(models []DataModel) []DataModel {
 		})
 	}
 
+	decorateForeignKeyReferences(out)
 	return out
+}
+
+func decorateForeignKeyReferences(models []DataModel) {
+	if len(models) == 0 {
+		return
+	}
+
+	modelNames := make([]string, 0, len(models))
+	for _, model := range models {
+		if strings.TrimSpace(model.Name) != "" {
+			modelNames = append(modelNames, strings.TrimSpace(model.Name))
+		}
+	}
+
+	for mi := range models {
+		model := &models[mi]
+		relationTargets := make(map[string]string, len(model.Relations))
+		for _, relation := range model.Relations {
+			field := strings.TrimSpace(relation.Field)
+			target := strings.TrimSpace(relation.Target)
+			if field != "" && target != "" {
+				relationTargets[strings.ToLower(field)] = target
+			}
+		}
+
+		for fi := range model.Fields {
+			field := &model.Fields[fi]
+			if !strings.Contains(strings.ToLower(field.Type), "foreign key") ||
+				strings.Contains(strings.ToLower(field.Type), "references") {
+				continue
+			}
+
+			target := resolveForeignKeyTargetModel(field.Name, relationTargets[strings.ToLower(field.Name)], modelNames)
+			if target == "" {
+				continue
+			}
+			field.Type = strings.TrimSpace(field.Type) + " references " + target + "(id)"
+		}
+	}
+}
+
+func resolveForeignKeyTargetModel(fieldName string, relationTarget string, modelNames []string) string {
+	if target := canonicalDataModelName(relationTarget, modelNames); target != "" {
+		return target
+	}
+	if target := inferForeignKeyTargetModel(fieldName, modelNames); target != "" {
+		return target
+	}
+	if target := inferForeignKeyTargetModel(relationTarget, modelNames); target != "" {
+		return target
+	}
+	return ""
+}
+
+func inferForeignKeyTargetModel(fieldName string, modelNames []string) string {
+	field := strings.TrimSpace(strings.ToLower(fieldName))
+	if field == "" {
+		return ""
+	}
+
+	candidates := make([]string, 0, 3)
+	if strings.HasSuffix(field, "_id") {
+		base := strings.TrimSuffix(field, "_id")
+		if base != "" {
+			candidates = append(candidates, base)
+			if strings.HasSuffix(base, "s") {
+				candidates = append(candidates, strings.TrimSuffix(base, "s"))
+			} else {
+				candidates = append(candidates, base+"s")
+			}
+		}
+	}
+	if strings.HasSuffix(field, "id") && !strings.HasSuffix(field, "_id") {
+		base := strings.TrimSuffix(field, "id")
+		base = strings.TrimSuffix(base, "_")
+		if base != "" {
+			candidates = append(candidates, base)
+		}
+	}
+
+	for _, candidate := range dedupeStrings(candidates) {
+		if target := canonicalDataModelName(candidate, modelNames); target != "" {
+			return target
+		}
+		if looksLikeIdentityRoleCandidate(candidate) {
+			if target := preferredIdentityModelName(modelNames); target != "" {
+				return target
+			}
+		}
+	}
+	if looksLikeActorReferenceField(field) {
+		if target := preferredIdentityModelName(modelNames); target != "" {
+			return target
+		}
+	}
+	return ""
+}
+
+func looksLikeActorReferenceField(field string) bool {
+	field = strings.TrimSpace(strings.ToLower(field))
+	if field == "" {
+		return false
+	}
+
+	switch field {
+	case "assigned_to", "assignee", "assignee_id", "owner", "owner_id", "manager", "manager_id", "creator_id", "author_id", "reviewer_id":
+		return true
+	}
+
+	for _, suffix := range []string{
+		"_by",
+		"by",
+	} {
+		if strings.HasSuffix(field, suffix) {
+			base := strings.TrimSuffix(field, suffix)
+			base = strings.TrimSuffix(base, "_")
+			switch base {
+			case "created", "updated", "deleted", "recorded", "approved", "submitted", "requested", "modified", "assigned":
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func looksLikeIdentityRoleCandidate(candidate string) bool {
+	switch strings.TrimSpace(strings.ToLower(candidate)) {
+	case "user", "member", "agent", "admin", "profile", "manager", "assignee", "owner", "creator", "author", "reviewer", "editor", "approver", "operator":
+		return true
+	default:
+		return false
+	}
+}
+
+func preferredIdentityModelName(modelNames []string) string {
+	for _, preferred := range []string{"User", "Member", "Agent", "Admin", "Profile"} {
+		if target := canonicalDataModelName(preferred, modelNames); target != "" {
+			return target
+		}
+	}
+	return ""
+}
+
+func canonicalDataModelName(candidate string, modelNames []string) string {
+	candidateNorm := normalizeDataModelIdentifier(candidate)
+	if candidateNorm == "" {
+		return ""
+	}
+	for _, modelName := range modelNames {
+		if normalizeDataModelIdentifier(modelName) == candidateNorm {
+			return modelName
+		}
+	}
+	return ""
+}
+
+func normalizeDataModelIdentifier(name string) string {
+	trimmed := strings.TrimSpace(strings.ToLower(name))
+	if trimmed == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range trimmed {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func normalizeModelFields(fields []ModelField) []ModelField {
@@ -711,8 +881,15 @@ func normalizeModelFields(fields []ModelField) []ModelField {
 
 		normalized := field
 		normalized.Name = name
-		normalized.Type = fieldType
-		if isNullableModelFieldType(fieldType) {
+		normalizedType, qualifiers := normalizeModelFieldTypeDescriptor(fieldType)
+		normalized.Type = normalizedType
+		if qualifiers.requiredSet {
+			normalized.Required = qualifiers.required
+		}
+		if qualifiers.unique {
+			normalized.Unique = true
+		}
+		if isNullableModelFieldType(normalized.Type) {
 			normalized.Required = false
 		}
 		if isCanonicalPrimaryKeyField(name) {
@@ -723,6 +900,64 @@ func normalizeModelFields(fields []ModelField) []ModelField {
 	}
 
 	return out
+}
+
+type modelFieldQualifierFlags struct {
+	requiredSet bool
+	required    bool
+	unique      bool
+}
+
+func normalizeModelFieldTypeDescriptor(fieldType string) (string, modelFieldQualifierFlags) {
+	trimmed := strings.TrimSpace(fieldType)
+	if trimmed == "" {
+		return "", modelFieldQualifierFlags{}
+	}
+
+	flags := modelFieldQualifierFlags{}
+	tokens := strings.Fields(trimmed)
+	baseTokens := make([]string, 0, len(tokens))
+
+	for i := 0; i < len(tokens); i++ {
+		token := strings.TrimSpace(tokens[i])
+		lower := strings.ToLower(strings.Trim(token, ","))
+		switch lower {
+		case "|", "&", ",":
+			continue
+		case "unique":
+			flags.unique = true
+			continue
+		case "required":
+			flags.requiredSet = true
+			flags.required = true
+			continue
+		case "optional", "nullable":
+			flags.requiredSet = true
+			flags.required = false
+			continue
+		case "null":
+			flags.requiredSet = true
+			flags.required = false
+			continue
+		case "index", "indexed":
+			continue
+		case "not":
+			if i+1 < len(tokens) && strings.EqualFold(strings.Trim(tokens[i+1], ","), "null") {
+				flags.requiredSet = true
+				flags.required = true
+				i++
+				continue
+			}
+		}
+		baseTokens = append(baseTokens, token)
+	}
+
+	normalized := strings.TrimSpace(strings.Join(baseTokens, " "))
+	if normalized == "" {
+		normalized = trimmed
+	}
+
+	return normalized, flags
 }
 
 func isCanonicalPrimaryKeyField(name string) bool {

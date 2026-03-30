@@ -21,6 +21,7 @@ fi
 prompt_file=""
 cookie_jar=""
 TOKEN=""
+CSRF_TOKEN=""
 cleanup() {
   if [[ -n "${prompt_file}" && -f "${prompt_file}" ]]; then
     rm -f "${prompt_file}"
@@ -49,7 +50,7 @@ refresh_auth_args() {
   if [[ -n "${TOKEN}" && "${TOKEN}" != "null" ]]; then
     auth_args+=(-H "Authorization: Bearer $TOKEN")
   fi
-  if [[ -n "${CSRF_TOKEN}" ]]; then
+  if [[ -n "${CSRF_TOKEN}" && "${CSRF_TOKEN}" != "null" ]]; then
     auth_args+=(-H "X-CSRF-Token: $CSRF_TOKEN")
   fi
 }

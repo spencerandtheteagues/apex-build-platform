@@ -479,6 +479,10 @@ func compileBuildContractFromPlan(buildID string, intent *IntentBrief, plan *Bui
 	if plan == nil {
 		return nil
 	}
+	apiContract := seedIntentAPIContract(cloneAPIContract(plan.APIContract), intent)
+	normalizedPlan := *plan
+	normalizedPlan.APIContract = apiContract
+	normalizedPlan.APIEndpoints = apiEndpointsFromContract(apiContract)
 	contract := &BuildContract{
 		ID:                  uuid.New().String(),
 		BuildID:             buildID,
@@ -486,10 +490,10 @@ func compileBuildContractFromPlan(buildID string, intent *IntentBrief, plan *Bui
 		AppType:             firstNonEmpty(plan.AppType, intentAppType(intent)),
 		DeliveryMode:        strings.TrimSpace(plan.DeliveryMode),
 		RoutePageMap:        deriveContractRoutes(plan),
-		BackendResourceMap:  deriveBackendResources(plan),
-		APIContract:         cloneAPIContract(plan.APIContract),
+		BackendResourceMap:  deriveBackendResources(&normalizedPlan),
+		APIContract:         apiContract,
 		DBSchemaContract:    normalizeDataModels(plan.DataModels),
-		AuthContract:        deriveAuthContract(plan, intent),
+		AuthContract:        deriveAuthContract(&normalizedPlan, intent),
 		EnvVarContract:      append([]BuildEnvVar(nil), plan.EnvVars...),
 		DependencySkeleton:  deriveDependencySkeleton(plan),
 		FileOwnershipPlan:   append([]BuildOwnership(nil), plan.Ownership...),
@@ -499,6 +503,64 @@ func compileBuildContractFromPlan(buildID string, intent *IntentBrief, plan *Bui
 		TruthBySurface:      deriveInitialTruthBySurface(plan, intent),
 	}
 	return contract
+}
+
+func seedIntentAPIContract(contract *BuildAPIContract, intent *IntentBrief) *BuildAPIContract {
+	needsRuntimeContract := contract != nil || capabilityRequired(intent, CapabilityAPI) || capabilityRequired(intent, CapabilityAuth)
+	if !needsRuntimeContract {
+		return nil
+	}
+	if contract == nil {
+		contract = &BuildAPIContract{}
+	}
+	if contract.BackendPort == 0 && capabilityRequired(intent, CapabilityAPI) {
+		contract.BackendPort = 3001
+	}
+	if strings.TrimSpace(contract.APIBaseURL) == "" && (capabilityRequired(intent, CapabilityAPI) || capabilityRequired(intent, CapabilityAuth)) {
+		contract.APIBaseURL = "/api"
+	}
+
+	addEndpoint := func(method, path, description string, auth bool, output string) {
+		for _, existing := range contract.Endpoints {
+			if strings.EqualFold(strings.TrimSpace(existing.Method), method) && strings.EqualFold(strings.TrimSpace(existing.Path), path) {
+				return
+			}
+		}
+		contract.Endpoints = append(contract.Endpoints, APIEndpoint{
+			Method:      method,
+			Path:        path,
+			Description: description,
+			Auth:        auth,
+			Output:      output,
+		})
+	}
+
+	addEndpoint("GET", "/api/health", "Health check", false, `{ status: "ok" }`)
+
+	if capabilityRequired(intent, CapabilityAuth) {
+		addEndpoint("POST", "/api/auth/login", "Authenticate a user and start a session", false, `{ token: string, user: object }`)
+		addEndpoint("GET", "/api/auth/me", "Return the current authenticated user", true, `{ user: object }`)
+		if intentSuggestsAccountRegistration(intent) {
+			addEndpoint("POST", "/api/auth/register", "Create a new account", false, `{ user: object }`)
+		}
+	}
+
+	return contract
+}
+
+func intentSuggestsAccountRegistration(intent *IntentBrief) bool {
+	if intent == nil {
+		return false
+	}
+	normalized := strings.ToLower(strings.TrimSpace(intent.NormalizedRequest))
+	if normalized == "" {
+		return false
+	}
+	return strings.Contains(normalized, "sign up") ||
+		strings.Contains(normalized, "signup") ||
+		strings.Contains(normalized, "register") ||
+		strings.Contains(normalized, "create an account") ||
+		strings.Contains(normalized, "create account")
 }
 
 func verifyAndNormalizeBuildContract(intent *IntentBrief, contract *BuildContract) (*BuildContract, VerificationReport) {
@@ -2149,17 +2211,18 @@ func missingAcceptanceSurfaces(acceptance []SurfaceAcceptanceContract, contract 
 	if len(acceptance) == 0 {
 		return true
 	}
+	frontendPreviewOnly := strings.EqualFold(strings.TrimSpace(contract.DeliveryMode), "frontend_preview_only")
 	required := []ContractSurface{SurfaceDeployment}
 	if len(contract.RoutePageMap) > 0 {
 		required = append(required, SurfaceFrontend)
 	}
-	if contract.APIContract != nil && len(contract.APIContract.Endpoints) > 0 {
+	if !frontendPreviewOnly && contract.APIContract != nil && len(contract.APIContract.Endpoints) > 0 {
 		required = append(required, SurfaceBackend)
 	}
-	if len(contract.DBSchemaContract) > 0 {
+	if !frontendPreviewOnly && len(contract.DBSchemaContract) > 0 {
 		required = append(required, SurfaceData)
 	}
-	if requiresIntegrationSurface(contract) {
+	if !frontendPreviewOnly && requiresIntegrationSurface(contract) {
 		required = append(required, SurfaceIntegration)
 	}
 	for _, surface := range required {
@@ -2171,10 +2234,11 @@ func missingAcceptanceSurfaces(acceptance []SurfaceAcceptanceContract, contract 
 }
 
 func runtimeCommandMismatch(runtime RuntimeCommandContract, contract BuildContract) bool {
+	frontendPreviewOnly := strings.EqualFold(strings.TrimSpace(contract.DeliveryMode), "frontend_preview_only")
 	if len(contract.RoutePageMap) > 0 && (runtime.FrontendBuild == "" || runtime.FrontendPreview == "") {
 		return true
 	}
-	if contract.APIContract != nil && len(contract.APIContract.Endpoints) > 0 && runtime.BackendStart == "" {
+	if !frontendPreviewOnly && contract.APIContract != nil && len(contract.APIContract.Endpoints) > 0 && runtime.BackendStart == "" {
 		return true
 	}
 	return false
@@ -2434,7 +2498,7 @@ func normalizeFailureClass(message string) string {
 		return "truncation"
 	case strings.Contains(lower, "validation"):
 		return "final_validation_failure"
-	case strings.Contains(lower, "timeout"):
+	case strings.Contains(lower, "timeout"), strings.Contains(lower, "deadline exceeded"), strings.Contains(lower, "context canceled"):
 		return "timeout"
 	case strings.Contains(lower, "credit"):
 		return "budget"

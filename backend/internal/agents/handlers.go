@@ -26,7 +26,12 @@ import (
 var (
 	errBuildActionNotFound = errors.New("build not found")
 	errBuildAccessDenied   = errors.New("access denied")
+	errBuildLookupTimeout  = errors.New("live build lookup timed out")
+	errBuildReadTimeout    = errors.New("live build read timed out")
 )
+
+var readableBuildLookupTimeout = 2 * time.Second
+var readableBuildStateTimeout = 2 * time.Second
 
 // BuildHandler handles build-related HTTP requests
 type BuildHandler struct {
@@ -228,6 +233,13 @@ func writeBuildLookupError(c *gin.Context, err error, fallbackErr error) {
 	lookupErr := err
 	if lookupErr == nil {
 		lookupErr = fallbackErr
+	}
+	if errors.Is(lookupErr, errBuildLookupTimeout) || errors.Is(lookupErr, errBuildReadTimeout) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "build session unavailable",
+			"details": "The live build session did not respond in time. A saved snapshot may still be available.",
+		})
+		return
 	}
 	if buildPlatformIssueFromError(lookupErr) != nil {
 		c.JSON(http.StatusServiceUnavailable, buildPlatformIssueResponse(lookupErr, "build session unavailable", "The build state could not be loaded because a platform service is temporarily unavailable."))
@@ -607,48 +619,22 @@ func (h *BuildHandler) GetBuildStatus(c *gin.Context) {
 	userPlan := h.currentSubscriptionType(c, uid)
 	build, snapshot, restored, err := h.loadReadableBuild(buildID, uid)
 	if err == nil && build != nil {
-		// Verify ownership
-		if uid != build.UserID {
-			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		payload, readErr := h.readLiveBuildStatusPayload(build, userPlan, restored)
+		if readErr == nil {
+			if uid != payload.ownerID {
+				c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+				return
+			}
+			c.JSON(http.StatusOK, payload.response)
 			return
 		}
-
-		build.mu.RLock()
-		defer build.mu.RUnlock()
-
-		errorMessage := build.Error
-		if strings.TrimSpace(errorMessage) == "" && build.Status == BuildFailed {
-			errorMessage = latestFailedTaskErrorLocked(build)
+		if snapshot == nil {
+			snapshot, _ = h.getBuildSnapshot(uid, buildID)
 		}
-		interaction := copyBuildInteractionStateLocked(build)
-		snapshotState := copyBuildSnapshotStateLocked(build)
-		displayProgress := presentedLiveBuildProgress(build.Progress, snapshotState, build.Status)
-
-		response := gin.H{
-			"id":                     build.ID,
-			"status":                 string(build.Status),
-			"mode":                   string(build.Mode),
-			"power_mode":             string(build.PowerMode),
-			"provider_mode":          build.ProviderMode,
-			"require_preview_ready":  build.RequirePreviewReady,
-			"description":            build.Description,
-			"progress":               displayProgress,
-			"agents_count":           len(build.Agents),
-			"tasks_count":            len(build.Tasks),
-			"checkpoints":            len(build.Checkpoints),
-			"created_at":             build.CreatedAt,
-			"updated_at":             build.UpdatedAt,
-			"completed_at":           build.CompletedAt,
-			"error":                  errorMessage,
-			"interaction":            interaction,
-			"live":                   true,
-			"restored_from_snapshot": restored,
+		if snapshot == nil {
+			writeBuildLookupError(c, readErr, readErr)
+			return
 		}
-		for key, value := range buildSnapshotStateResponseFields(snapshotState, string(build.Status), userPlan) {
-			response[key] = value
-		}
-		c.JSON(http.StatusOK, response)
-		return
 	}
 
 	if err != nil {
@@ -978,51 +964,22 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 	userPlan := h.currentSubscriptionType(c, uid)
 	build, snapshot, restored, err := h.loadReadableBuild(buildID, uid)
 	if err == nil && build != nil {
-		// Verify ownership
-		if uid != build.UserID {
-			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		payload, readErr := h.readLiveBuildDetailsPayload(build, userPlan, restored)
+		if readErr == nil {
+			if uid != payload.ownerID {
+				c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+				return
+			}
+			c.JSON(http.StatusOK, payload.response)
 			return
 		}
-
-		build.mu.RLock()
-		defer build.mu.RUnlock()
-
-		agents := orderedBuildAgents(build.Agents)
-		interaction := copyBuildInteractionStateLocked(build)
-		snapshotState := copyBuildSnapshotStateLocked(build)
-		displayProgress := presentedLiveBuildProgress(build.Progress, snapshotState, build.Status)
-
-		response := gin.H{
-			"id":                     build.ID,
-			"user_id":                build.UserID,
-			"project_id":             build.ProjectID,
-			"status":                 string(build.Status),
-			"mode":                   string(build.Mode),
-			"power_mode":             string(build.PowerMode),
-			"provider_mode":          build.ProviderMode,
-			"require_preview_ready":  build.RequirePreviewReady,
-			"description":            build.Description,
-			"plan":                   build.Plan,
-			"agents":                 agents,
-			"tasks":                  build.Tasks,
-			"checkpoints":            build.Checkpoints,
-			"progress":               displayProgress,
-			"created_at":             build.CreatedAt,
-			"updated_at":             build.UpdatedAt,
-			"completed_at":           build.CompletedAt,
-			"error":                  build.Error,
-			"files":                  h.manager.collectGeneratedFiles(build),
-			"messages":               interaction.Messages,
-			"interaction":            interaction,
-			"activity_timeline":      copyBuildActivityTimelineLocked(build),
-			"live":                   isActiveBuildStatus(string(build.Status)),
-			"restored_from_snapshot": restored,
+		if snapshot == nil {
+			snapshot, _ = h.getBuildSnapshot(uid, buildID)
 		}
-		for key, value := range buildSnapshotStateResponseFields(snapshotState, string(build.Status), userPlan) {
-			response[key] = value
+		if snapshot == nil {
+			writeBuildLookupError(c, readErr, readErr)
+			return
 		}
-		c.JSON(http.StatusOK, response)
-		return
 	}
 
 	if err != nil {
@@ -1075,40 +1032,195 @@ func (h *BuildHandler) GetBuildDetails(c *gin.Context) {
 }
 
 func (h *BuildHandler) loadReadableBuild(buildID string, userID uint) (*Build, *models.CompletedBuild, bool, error) {
-	build, err := h.manager.GetBuild(buildID)
+	build, err := h.getLiveBuildForRead(buildID)
 	if err == nil {
 		if build.UserID != userID {
 			return nil, nil, false, errBuildAccessDenied
 		}
 		return build, nil, false, nil
 	}
+	liveLookupTimedOut := errors.Is(err, errBuildLookupTimeout)
+	if liveLookupTimedOut {
+		log.Printf("Build %s: live readable lookup timed out after %s; falling back to snapshot", buildID, readableBuildLookupTimeout)
+	}
 
 	snapshot, snapErr := h.getBuildSnapshot(userID, buildID)
 	if snapErr != nil {
+		if liveLookupTimedOut {
+			return nil, nil, false, errBuildLookupTimeout
+		}
 		return nil, nil, false, snapErr
 	}
 
-	if isActiveBuildStatus(string(normalizeRestoredBuildStatus(snapshot))) {
-		// Restore the build session without immediate execution so repeated
-		// polling does not blindly duplicate work. If this call actually had to
-		// recreate a missing live session, resume execution exactly once after
-		// the build has been re-registered in memory.
-		restoredBuild, restored, restoreErr := h.manager.restoreBuildSessionFromSnapshotWithOptions(snapshot, restoreBuildSessionOptions{
-			resumeExecution: false,
+	if claimedSnapshot, claimed, claimErr := h.manager.claimActiveSnapshotTakeover(snapshot); claimErr == nil && claimed {
+		build, restored, restoreErr := h.manager.restoreBuildSessionFromSnapshotWithOptions(claimedSnapshot, restoreBuildSessionOptions{
+			resumeExecution: true,
 		})
 		if restoreErr == nil {
-			if restoredBuild.UserID != userID {
+			if build.UserID != userID {
 				return nil, nil, false, errBuildAccessDenied
 			}
-			if restored {
-				h.manager.resumeBuildExecution(restoredBuild, true)
-			}
-			return restoredBuild, nil, restored, nil
+			return build, nil, restored, nil
 		}
-		log.Printf("Build %s: snapshot found but restore-on-read failed, serving persisted snapshot: %v", buildID, restoreErr)
+	} else if claimErr != nil {
+		log.Printf("Build %s: failed to claim stale active snapshot for readable restore: %v", buildID, claimErr)
+	} else if claimedSnapshot != nil {
+		snapshot = claimedSnapshot
 	}
 
+	// Read-only build endpoints must never materialize active snapshots into a
+	// second in-memory session. In autoscaled production that creates a fake
+	// "live" copy on a non-owner instance, causing status polling to oscillate
+	// between the true live build and stale snapshot state. Execution resumption
+	// remains exclusive to write/control paths.
 	return nil, snapshot, false, nil
+}
+
+type liveBuildReadPayload struct {
+	ownerID  uint
+	response gin.H
+}
+
+func captureTimedLiveBuildRead[T any](timeout time.Duration, fn func() T) (T, error) {
+	var zero T
+	if timeout <= 0 {
+		return fn(), nil
+	}
+
+	resultCh := make(chan T, 1)
+	go func() {
+		resultCh <- fn()
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case result := <-resultCh:
+		return result, nil
+	case <-timer.C:
+		return zero, errBuildReadTimeout
+	}
+}
+
+func (h *BuildHandler) readLiveBuildStatusPayload(build *Build, userPlan string, restored bool) (liveBuildReadPayload, error) {
+	return captureTimedLiveBuildRead(readableBuildStateTimeout, func() liveBuildReadPayload {
+		h.manager.selfHealReadableActiveBuild(build)
+
+		build.mu.RLock()
+		defer build.mu.RUnlock()
+
+		errorMessage := build.Error
+		if strings.TrimSpace(errorMessage) == "" && build.Status == BuildFailed {
+			errorMessage = latestFailedTaskErrorLocked(build)
+		}
+		interaction := copyBuildInteractionStateLocked(build)
+		snapshotState := copyBuildSnapshotStateLocked(build)
+		displayProgress := presentedLiveBuildProgress(build.Progress, snapshotState, build.Status)
+
+		response := gin.H{
+			"id":                     build.ID,
+			"status":                 string(build.Status),
+			"mode":                   string(build.Mode),
+			"power_mode":             string(build.PowerMode),
+			"provider_mode":          build.ProviderMode,
+			"require_preview_ready":  build.RequirePreviewReady,
+			"description":            build.Description,
+			"progress":               displayProgress,
+			"agents_count":           len(build.Agents),
+			"tasks_count":            len(build.Tasks),
+			"checkpoints":            len(build.Checkpoints),
+			"created_at":             build.CreatedAt,
+			"updated_at":             build.UpdatedAt,
+			"completed_at":           build.CompletedAt,
+			"error":                  errorMessage,
+			"interaction":            interaction,
+			"live":                   true,
+			"restored_from_snapshot": restored,
+		}
+		for key, value := range buildSnapshotStateResponseFields(snapshotState, string(build.Status), userPlan) {
+			response[key] = value
+		}
+		return liveBuildReadPayload{
+			ownerID:  build.UserID,
+			response: response,
+		}
+	})
+}
+
+func (h *BuildHandler) readLiveBuildDetailsPayload(build *Build, userPlan string, restored bool) (liveBuildReadPayload, error) {
+	return captureTimedLiveBuildRead(readableBuildStateTimeout, func() liveBuildReadPayload {
+		h.manager.selfHealReadableActiveBuild(build)
+
+		build.mu.RLock()
+		defer build.mu.RUnlock()
+
+		agents := orderedBuildAgents(build.Agents)
+		interaction := copyBuildInteractionStateLocked(build)
+		snapshotState := copyBuildSnapshotStateLocked(build)
+		displayProgress := presentedLiveBuildProgress(build.Progress, snapshotState, build.Status)
+
+		response := gin.H{
+			"id":                     build.ID,
+			"user_id":                build.UserID,
+			"project_id":             build.ProjectID,
+			"status":                 string(build.Status),
+			"mode":                   string(build.Mode),
+			"power_mode":             string(build.PowerMode),
+			"provider_mode":          build.ProviderMode,
+			"require_preview_ready":  build.RequirePreviewReady,
+			"description":            build.Description,
+			"plan":                   build.Plan,
+			"agents":                 agents,
+			"tasks":                  build.Tasks,
+			"checkpoints":            build.Checkpoints,
+			"progress":               displayProgress,
+			"created_at":             build.CreatedAt,
+			"updated_at":             build.UpdatedAt,
+			"completed_at":           build.CompletedAt,
+			"error":                  build.Error,
+			"files":                  h.manager.collectGeneratedFiles(build),
+			"messages":               interaction.Messages,
+			"interaction":            interaction,
+			"activity_timeline":      copyBuildActivityTimelineLocked(build),
+			"live":                   isActiveBuildStatus(string(build.Status)),
+			"restored_from_snapshot": restored,
+		}
+		for key, value := range buildSnapshotStateResponseFields(snapshotState, string(build.Status), userPlan) {
+			response[key] = value
+		}
+		return liveBuildReadPayload{
+			ownerID:  build.UserID,
+			response: response,
+		}
+	})
+}
+
+func (h *BuildHandler) getLiveBuildForRead(buildID string) (*Build, error) {
+	if readableBuildLookupTimeout <= 0 {
+		return h.manager.GetBuild(buildID)
+	}
+
+	type buildLookupResult struct {
+		build *Build
+		err   error
+	}
+
+	resultCh := make(chan buildLookupResult, 1)
+	go func() {
+		build, err := h.manager.GetBuild(buildID)
+		resultCh <- buildLookupResult{build: build, err: err}
+	}()
+
+	timer := time.NewTimer(readableBuildLookupTimeout)
+	defer timer.Stop()
+
+	select {
+	case result := <-resultCh:
+		return result.build, result.err
+	case <-timer.C:
+		return nil, errBuildLookupTimeout
+	}
 }
 
 // SendMessage sends a message to the build's lead agent

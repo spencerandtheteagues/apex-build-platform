@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"apex-build/internal/ai"
 )
@@ -21,6 +22,17 @@ func (r *contractCritiqueRouter) Generate(_ context.Context, _ ai.AIProvider, _ 
 		return nil, r.err
 	}
 	return &ai.AIResponse{Content: r.content}, nil
+}
+
+type blockingContractCritiqueRouter struct {
+	stubAIRouter
+	calls int
+}
+
+func (r *blockingContractCritiqueRouter) Generate(ctx context.Context, _ ai.AIProvider, _ string, _ GenerateOptions) (*ai.AIResponse, error) {
+	r.calls++
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 func TestProviderAssistedContractCritiqueReturnsVerificationReport(t *testing.T) {
@@ -58,6 +70,42 @@ func TestProviderAssistedContractCritiqueReturnsVerificationReport(t *testing.T)
 	}
 	if len(report.Blockers) != 1 || !strings.Contains(report.Blockers[0], "auth capability requested") {
 		t.Fatalf("expected parsed blocker, got %+v", report)
+	}
+}
+
+func TestProviderAssistedContractCritiqueTimesOutAndReturnsNil(t *testing.T) {
+	router := &blockingContractCritiqueRouter{
+		stubAIRouter: stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderClaude},
+			hasConfiguredProvider: true,
+		},
+	}
+	am := &AgentManager{
+		aiRouter: router,
+		ctx:      context.Background(),
+	}
+
+	build := &Build{
+		ID:           "build-contract-critique-timeout",
+		UserID:       8,
+		ProviderMode: "platform",
+	}
+	contract := &BuildContract{
+		ID:      "contract-critique-timeout",
+		BuildID: build.ID,
+		AppType: "fullstack",
+	}
+
+	start := time.Now()
+	report := am.providerAssistedContractCritique(build, contract)
+	if report != nil {
+		t.Fatalf("expected timeout critique to return nil, got %+v", report)
+	}
+	if router.calls != 1 {
+		t.Fatalf("expected one critique call, got %d", router.calls)
+	}
+	if elapsed := time.Since(start); elapsed > 25*time.Second {
+		t.Fatalf("expected critique timeout to stop within 25s, took %s", elapsed)
 	}
 }
 
@@ -132,6 +180,96 @@ func TestHandlePlanCompletionBlocksOnProviderAssistedContractCritique(t *testing
 	}
 	if !foundCritique {
 		t.Fatalf("expected provider critique report, got %+v", state.VerificationReports)
+	}
+}
+
+func TestHandlePlanCompletionSyncsSeededAPIContractBackIntoPlan(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderGPT4},
+			hasConfiguredProvider: true,
+		},
+		agents:      map[string]*Agent{},
+		builds:      map[string]*Build{},
+		taskQueue:   make(chan *Task, 16),
+		resultQueue: make(chan *TaskResult, 16),
+		subscribers: map[string][]chan *WSMessage{},
+		ctx:         context.Background(),
+	}
+
+	build := &Build{
+		ID:           "build-plan-sync",
+		UserID:       101,
+		Status:       BuildPlanning,
+		Mode:         ModeFull,
+		Description:  "Build a fullstack CRM where users can create an account, log in, and manage clients from a dashboard.",
+		ProviderMode: "platform",
+		Agents:       map[string]*Agent{},
+		Tasks:        []*Task{},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: func() BuildOrchestrationFlags {
+					flags := defaultBuildOrchestrationFlags()
+					flags.EnableSelectiveEscalation = false
+					return flags
+				}(),
+				IntentBrief: &IntentBrief{
+					ID:                "intent-plan-sync",
+					NormalizedRequest: "Build a fullstack CRM where users can create an account, log in, and manage clients from a dashboard.",
+					AppType:           "fullstack",
+					RequiredCapabilities: []CapabilityRequirement{
+						CapabilityAPI,
+						CapabilityAuth,
+					},
+				},
+			},
+		},
+	}
+	am.builds[build.ID] = build
+
+	plan := createBuildPlanFromPlanningBundle(build.ID, build.Description, &TechStack{
+		Frontend: "React",
+		Backend:  "Express",
+		Database: "SQLite",
+	}, nil)
+	if plan == nil {
+		t.Fatal("expected build plan")
+	}
+	plan.APIContract = &BuildAPIContract{
+		BackendPort: 3001,
+		Endpoints: []APIEndpoint{
+			{Method: "GET", Path: "/api/health", Description: "health"},
+		},
+	}
+	plan.APIEndpoints = apiEndpointsFromContract(plan.APIContract)
+	plan.EnvVars = append(plan.EnvVars, BuildEnvVar{Name: "JWT_SECRET", Required: true})
+
+	am.handlePlanCompletion(build, &TaskOutput{Plan: plan})
+
+	if build.Status == BuildFailed {
+		t.Fatalf("expected plan completion to proceed, got failed build error=%q", build.Error)
+	}
+	if build.Plan == nil || build.Plan.APIContract == nil {
+		t.Fatalf("expected seeded API contract on build plan, got %+v", build.Plan)
+	}
+
+	endpoints := make(map[string]bool)
+	for _, endpoint := range build.Plan.APIContract.Endpoints {
+		endpoints[strings.ToUpper(strings.TrimSpace(endpoint.Method))+" "+strings.TrimSpace(endpoint.Path)] = true
+	}
+	for _, key := range []string{
+		"GET /api/health",
+		"POST /api/auth/login",
+		"GET /api/auth/me",
+		"POST /api/auth/register",
+	} {
+		if !endpoints[key] {
+			t.Fatalf("expected seeded API endpoint %q on build plan, got %+v", key, build.Plan.APIContract.Endpoints)
+		}
+	}
+
+	if len(build.Plan.APIEndpoints) != len(build.Plan.APIContract.Endpoints) {
+		t.Fatalf("expected APIEndpoints to sync from APIContract, got endpoints=%d contract=%d", len(build.Plan.APIEndpoints), len(build.Plan.APIContract.Endpoints))
 	}
 }
 

@@ -132,6 +132,7 @@ func TestDetermineRetryStrategyFullMatrix(t *testing.T) {
 		// Transient → switch_provider
 		{"transient: 503", "service unavailable 503", "switch_provider"},
 		{"transient: timeout", "connection timeout after 30s", "switch_provider"},
+		{"transient: deadline exceeded", "context deadline exceeded", "switch_provider"},
 		{"transient: connection", "connection refused by upstream", "switch_provider"},
 
 		// Context → reduce_context

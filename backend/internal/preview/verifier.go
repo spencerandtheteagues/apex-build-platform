@@ -281,11 +281,11 @@ func (v *Verifier) verifyBackendStatic(fileMap map[string]string) *VerificationR
 		)
 	}
 
-	if !hasRouteDefinition(content, beEntry) {
+	if !backendHasRouteDefinitions(fileMap, beEntry) {
 		res := &VerificationResult{Passed: false}
 		return res.fail("backend_no_routes",
 			fmt.Sprintf("Backend entry %q defines no routes.", beEntry),
-			fmt.Sprintf("Define at least one GET or POST route handler in %q.", beEntry),
+			fmt.Sprintf("Define or mount at least one GET or POST route handler in %q or an imported backend route module.", beEntry),
 			check("backend_has_routes", false, "no route definitions found"),
 		)
 	}
@@ -441,11 +441,19 @@ func findRootComponent(fileMap map[string]string) string {
 func findBackendEntry(fileMap map[string]string) string {
 	candidates := []string{
 		"server.js", "server.ts",
+		"server/index.js", "server/index.ts",
+		"server/main.js", "server/main.ts",
 		"app.js", "app.ts",
 		"index.js", "index.ts",
 		"src/server.js", "src/server.ts",
 		"src/app.js", "src/app.ts",
 		"src/index.js", "src/index.ts",
+		"backend/index.js", "backend/index.ts",
+		"backend/server.js", "backend/server.ts",
+		"api/index.js", "api/index.ts",
+		"api/server.js", "api/server.ts",
+		"apps/api/src/index.js", "apps/api/src/index.ts",
+		"apps/api/src/server.js", "apps/api/src/server.ts",
 		"main.go",
 		"main.py", "app.py",
 		"server.py",
@@ -507,6 +515,61 @@ func hasRouteDefinition(content, path string) bool {
 			strings.Contains(lower, "router.") || strings.Contains(lower, "app.get") ||
 			strings.Contains(lower, "app.post")
 	}
+}
+
+func backendHasRouteDefinitions(fileMap map[string]string, entryPath string) bool {
+	if content, ok := fileMap[entryPath]; ok && hasRouteDefinition(content, entryPath) {
+		return true
+	}
+	for path, content := range fileMap {
+		if path == entryPath || !isBackendRouteCandidate(path) {
+			continue
+		}
+		if hasRouteDefinition(content, path) {
+			return true
+		}
+	}
+	return false
+}
+
+func isBackendRouteCandidate(path string) bool {
+	clean := strings.ToLower(strings.TrimSpace(strings.ReplaceAll(path, "\\", "/")))
+	if clean == "" {
+		return false
+	}
+	if strings.Contains(clean, "/__tests__/") || strings.Contains(clean, "/tests/") || strings.Contains(clean, "/test/") {
+		return false
+	}
+	base := filepath.Base(clean)
+	if strings.Contains(base, ".test.") || strings.Contains(base, ".spec.") || strings.HasSuffix(base, "_test.go") {
+		return false
+	}
+	ext := filepath.Ext(clean)
+	switch ext {
+	case ".js", ".jsx", ".ts", ".tsx", ".go", ".py":
+	default:
+		return false
+	}
+
+	backendPrefixes := []string{
+		"server/",
+		"backend/",
+		"api/",
+		"src/server/",
+		"src/api/",
+		"apps/api/",
+	}
+	for _, prefix := range backendPrefixes {
+		if strings.HasPrefix(clean, prefix) {
+			return true
+		}
+	}
+
+	switch clean {
+	case "server.js", "server.ts", "app.js", "app.ts", "index.js", "index.ts", "main.go", "main.py", "app.py", "server.py":
+		return true
+	}
+	return false
 }
 
 func hasServerFrameworkImport(content, path string) bool {

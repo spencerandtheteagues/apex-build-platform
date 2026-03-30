@@ -453,6 +453,8 @@ type BuildSnapshotState struct {
 type BuildRestoreContext struct {
 	SubscriptionPlan            string            `json:"subscription_plan,omitempty"`
 	ProviderMode                string            `json:"provider_mode,omitempty"`
+	ActiveOwnerInstanceID       string            `json:"active_owner_instance_id,omitempty"`
+	ActiveOwnerHeartbeatAt      *time.Time        `json:"active_owner_heartbeat_at,omitempty"`
 	RequirePreviewReady         bool              `json:"require_preview_ready,omitempty"`
 	RequestsUsed                int               `json:"requests_used,omitempty"`
 	ReadinessRecoveryAttempts   int               `json:"readiness_recovery_attempts,omitempty"`
@@ -536,7 +538,7 @@ const (
 type PowerMode string
 
 const (
-	PowerMax      PowerMode = "max"      // Latest frontier tier (Opus 4.6, GPT-5.4, Gemini 3.1 Pro Preview, Grok Code Fast 1)
+	PowerMax      PowerMode = "max"      // Latest frontier tier (Opus 4.6, GPT-5.4, Gemini 3.1 Pro Preview, Grok 4.20)
 	PowerBalanced PowerMode = "balanced" // Mid-tier quality/speed balance (Sonnet 4.6, GPT-4.1, Gemini 3 Flash, Grok 3)
 	PowerFast     PowerMode = "fast"     // Cheapest mini tier (Haiku 4.5, GPT-4o-mini, Gemini 2.5 Flash Lite, Grok 3 Mini)
 )

@@ -189,12 +189,20 @@
 
 .auth-input-label {
   transition: all 0.2s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: calc(100% - 3rem);
 }
 
 .auth-input-wrapper.focused .auth-input-label,
 .auth-input-wrapper.has-value .auth-input-label {
-  transform: translateY(-24px) scale(0.85);
+  transform: translateY(-26px) translateX(-2px) scale(0.82);
   color: #ef4444;
+  background: rgba(0, 0, 0, 0.75);
+  padding: 0 4px;
+  border-radius: 3px;
+  letter-spacing: 0.01em;
 }
 
 .auth-button {

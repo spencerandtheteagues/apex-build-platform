@@ -148,6 +148,30 @@ func TestCreateBuildPlanFromPlanningBundle(t *testing.T) {
 	}
 }
 
+func TestNormalizeModelFieldsPromotesTypeQualifiersToFlags(t *testing.T) {
+	t.Parallel()
+
+	fields := normalizeModelFields([]ModelField{
+		{Name: "slug", Type: "string unique"},
+		{Name: "email", Type: "TEXT NOT NULL UNIQUE"},
+		{Name: "completedAt", Type: "datetime | null", Required: true},
+	})
+
+	if len(fields) != 3 {
+		t.Fatalf("expected 3 normalized fields, got %+v", fields)
+	}
+
+	if fields[0].Type != "string" || !fields[0].Unique {
+		t.Fatalf("expected slug field to normalize unique qualifier, got %+v", fields[0])
+	}
+	if fields[1].Type != "TEXT" || !fields[1].Unique || !fields[1].Required {
+		t.Fatalf("expected SQL qualifiers to normalize into flags, got %+v", fields[1])
+	}
+	if fields[2].Type != "datetime" || fields[2].Required {
+		t.Fatalf("expected nullable qualifier to clear required flag, got %+v", fields[2])
+	}
+}
+
 func TestCreateBuildPlanFromPlanningBundleHonorsStaticFrontendIntent(t *testing.T) {
 	t.Parallel()
 
@@ -843,6 +867,32 @@ func TestValidateTaskCoordinationOutputRejectsOutOfScopeFiles(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(errs, "\n"), "outside work order ownership") {
 		t.Fatalf("unexpected coordination errors: %v", errs)
+	}
+}
+
+func TestPathAllowedByWorkOrderSpecificOwnedPathOverridesBroadForbiddenPattern(t *testing.T) {
+	t.Parallel()
+
+	workOrder := &BuildWorkOrder{
+		Role: RoleDatabase,
+		OwnedFiles: []string{
+			"server/db/**",
+			"server/migrate.ts",
+			"server/seed.ts",
+		},
+		ForbiddenFiles: []string{
+			"server/**",
+			"src/**",
+		},
+	}
+
+	for _, path := range []string{"server/migrate.ts", "server/seed.ts", "server/db/index.ts"} {
+		if !pathAllowedByWorkOrder(path, workOrder) {
+			t.Fatalf("expected %s to be allowed by specific database ownership override", path)
+		}
+	}
+	if pathAllowedByWorkOrder("server/routes/api.ts", workOrder) {
+		t.Fatal("did not expect unrelated server path to bypass broad forbidden pattern")
 	}
 }
 

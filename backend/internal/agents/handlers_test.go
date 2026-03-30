@@ -187,7 +187,7 @@ func TestGetBuildSnapshotFallsBackToUnscopedLookup(t *testing.T) {
 	}
 }
 
-func TestGetBuildStatusRestoresActiveSnapshotOnRead(t *testing.T) {
+func TestGetBuildStatusServesActiveSnapshotReadOnlyWithoutRestoringSession(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.CompletedBuild{
 		BuildID:     "active-status-restore",
@@ -249,8 +249,8 @@ func TestGetBuildStatusRestoresActiveSnapshotOnRead(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if body["live"] != true {
-		t.Fatalf("expected restored active session to be live, got %v", body["live"])
+	if body["live"] != false {
+		t.Fatalf("expected active snapshot read to stay non-live, got %v", body["live"])
 	}
 	if body["restored_from_snapshot"] != true {
 		t.Fatalf("expected restored_from_snapshot=true, got %v", body["restored_from_snapshot"])
@@ -258,8 +258,757 @@ func TestGetBuildStatusRestoresActiveSnapshotOnRead(t *testing.T) {
 	if body["status"] != string(BuildReviewing) {
 		t.Fatalf("expected reviewing status, got %v", body["status"])
 	}
-	if _, err := am.GetBuild("active-status-restore"); err != nil {
-		t.Fatalf("expected active build session to be restored into manager: %v", err)
+	if _, exists := am.builds["active-status-restore"]; exists {
+		t.Fatal("expected read-only status request not to restore build session into memory")
+	}
+}
+
+func TestGetBuildStatusFallsBackToSnapshotWhenLiveLookupTimesOut(t *testing.T) {
+	db := openBuildTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-status-timeout-fallback",
+		UserID:      1,
+		Description: "Serve snapshot when live lookup is blocked",
+		Status:      string(BuildInProgress),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    59,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"backend-1",
+			"role":"backend",
+			"provider":"gpt4",
+			"status":"working",
+			"progress":59
+		}]`,
+		TasksJSON: `[{
+			"id":"task-api",
+			"type":"generate_api",
+			"description":"Implement backend routes",
+			"assigned_to":"backend-1",
+			"status":"in_progress"
+		}]`,
+		StateJSON: `{
+			"current_phase":"backend_and_data",
+			"quality_gate_required":true
+		}`,
+		CreatedAt: now.Add(-2 * time.Minute),
+		UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+	am.builds["active-status-timeout-fallback"] = &Build{
+		ID:          "active-status-timeout-fallback",
+		UserID:      1,
+		Description: "Live build that is temporarily blocked",
+		Status:      BuildInProgress,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Progress:    59,
+	}
+
+	previousTimeout := readableBuildLookupTimeout
+	readableBuildLookupTimeout = 50 * time.Millisecond
+	defer func() { readableBuildLookupTimeout = previousTimeout }()
+
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1/build/active-status-timeout-fallback/status", nil)
+		testRouter(am).ServeHTTP(w, req)
+		done <- w
+	}()
+
+	select {
+	case w := <-done:
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+		if body["live"] != false {
+			t.Fatalf("expected timed-out live lookup to fall back to snapshot, got live=%v", body["live"])
+		}
+		if body["restored_from_snapshot"] != true {
+			t.Fatalf("expected snapshot fallback to mark restored_from_snapshot=true, got %v", body["restored_from_snapshot"])
+		}
+		if body["progress"] != float64(59) {
+			t.Fatalf("expected snapshot progress 59, got %v", body["progress"])
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected build status fallback to return promptly when live lookup blocks")
+	}
+}
+
+func TestGetBuildStatusFallsBackToSnapshotWhenLiveReadStalls(t *testing.T) {
+	db := openBuildTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-status-read-stall",
+		UserID:      1,
+		Description: "Serve snapshot when live status read blocks",
+		Status:      string(BuildInProgress),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    99,
+		FilesJSON:   "[]",
+		AgentsJSON:  `[{"id":"backend-1","role":"backend","provider":"gpt4","status":"working","progress":99}]`,
+		TasksJSON:   `[{"id":"task-api","type":"generate_api","description":"Implement backend routes","assigned_to":"backend-1","status":"in_progress"}]`,
+		StateJSON:   `{"current_phase":"backend_services","quality_gate_required":true}`,
+		CreatedAt:   now.Add(-4 * time.Minute),
+		UpdatedAt:   now,
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+	build := &Build{
+		ID:          "active-status-read-stall",
+		UserID:      1,
+		Description: "Live build with blocked status read",
+		Status:      BuildInProgress,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Progress:    99,
+	}
+	am.builds[build.ID] = build
+
+	previousTimeout := readableBuildStateTimeout
+	readableBuildStateTimeout = 50 * time.Millisecond
+	defer func() { readableBuildStateTimeout = previousTimeout }()
+
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1/build/active-status-read-stall/status", nil)
+		testRouter(am).ServeHTTP(w, req)
+		done <- w
+	}()
+
+	select {
+	case w := <-done:
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+		if body["live"] != false {
+			t.Fatalf("expected stalled live read to fall back to snapshot, got live=%v", body["live"])
+		}
+		if body["progress"] != float64(99) {
+			t.Fatalf("expected snapshot progress 99, got %v", body["progress"])
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected build status fallback to return promptly when live state read blocks")
+	}
+}
+
+func TestGetBuildDetailsServesActiveSnapshotReadOnlyWithoutRestoringSession(t *testing.T) {
+	db := openBuildTestDB(t)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-details-restore",
+		UserID:      1,
+		Description: "Continue building a full-stack dashboard",
+		Status:      string(BuildInProgress),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    44,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"frontend-1",
+			"role":"frontend",
+			"provider":"gpt4",
+			"status":"working",
+			"progress":55
+		}]`,
+		TasksJSON: `[{
+			"id":"task-ui",
+			"type":"generate_ui",
+			"description":"Build the dashboard shell",
+			"assigned_to":"frontend-1",
+			"status":"in_progress"
+		}]`,
+		StateJSON: `{
+			"current_phase":"frontend_ui",
+			"quality_gate_required":true
+		}`,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+		taskQueue:   make(chan *Task, 8),
+		resultQueue: make(chan *TaskResult, 8),
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/active-details-restore", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body["live"] != false {
+		t.Fatalf("expected details endpoint to serve snapshot as non-live, got %v", body["live"])
+	}
+	if body["restored_from_snapshot"] != true {
+		t.Fatalf("expected restored_from_snapshot=true, got %v", body["restored_from_snapshot"])
+	}
+	if body["status"] != string(BuildInProgress) {
+		t.Fatalf("expected in_progress status, got %v", body["status"])
+	}
+	if _, exists := am.builds["active-details-restore"]; exists {
+		t.Fatal("expected read-only details request not to restore build session into memory")
+	}
+}
+
+func TestGetBuildDetailsFallsBackToSnapshotWhenLiveReadStalls(t *testing.T) {
+	db := openBuildTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-details-read-stall",
+		UserID:      1,
+		Description: "Serve snapshot when live details read blocks",
+		Status:      string(BuildInProgress),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    99,
+		FilesJSON:   `[{"path":"src/App.tsx","content":"export default function App(){return null}","language":"typescript"}]`,
+		AgentsJSON:  `[{"id":"backend-1","role":"backend","provider":"gpt4","status":"working","progress":99}]`,
+		TasksJSON:   `[{"id":"task-api","type":"generate_api","description":"Implement backend routes","assigned_to":"backend-1","status":"in_progress"}]`,
+		StateJSON:   `{"current_phase":"backend_services","quality_gate_required":true}`,
+		CreatedAt:   now.Add(-4 * time.Minute),
+		UpdatedAt:   now,
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+	build := &Build{
+		ID:          "active-details-read-stall",
+		UserID:      1,
+		Description: "Live build with blocked details read",
+		Status:      BuildInProgress,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Progress:    99,
+	}
+	am.builds[build.ID] = build
+
+	previousTimeout := readableBuildStateTimeout
+	readableBuildStateTimeout = 50 * time.Millisecond
+	defer func() { readableBuildStateTimeout = previousTimeout }()
+
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1/build/active-details-read-stall", nil)
+		testRouter(am).ServeHTTP(w, req)
+		done <- w
+	}()
+
+	select {
+	case w := <-done:
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+		if body["live"] != false {
+			t.Fatalf("expected stalled live details read to fall back to snapshot, got live=%v", body["live"])
+		}
+		files, ok := body["files"].([]any)
+		if !ok || len(files) != 1 {
+			t.Fatalf("expected snapshot files in fallback response, got %T %#v", body["files"], body["files"])
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected build details fallback to return promptly when live state read blocks")
+	}
+}
+
+func TestGetBuildStatusKeepsFreshLeasedActiveSnapshotReadOnly(t *testing.T) {
+	db := openBuildTestDB(t)
+	now := time.Now().UTC()
+	stateJSON := fmt.Sprintf(`{
+		"current_phase":"testing",
+		"restore_context":{
+			"active_owner_instance_id":"owner-instance",
+			"active_owner_heartbeat_at":%q
+		}
+	}`, now.Format(time.RFC3339Nano))
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-status-fresh-lease",
+		UserID:      1,
+		Description: "Fresh owner lease should stay read only",
+		Status:      string(BuildTesting),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    79,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"testing-1",
+			"role":"testing",
+			"provider":"gpt4",
+			"status":"working",
+			"progress":79
+		}]`,
+		TasksJSON: `[{
+			"id":"task-test",
+			"type":"test",
+			"description":"Run integration proof",
+			"assigned_to":"testing-1",
+			"status":"in_progress"
+		}]`,
+		StateJSON: stateJSON,
+		CreatedAt: now.Add(-3 * time.Minute),
+		UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		resultQueue: make(chan *TaskResult, 1),
+		ctx:         context.Background(),
+		instanceID:  "reader-instance",
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/active-status-fresh-lease/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body["live"] != false {
+		t.Fatalf("expected fresh leased snapshot read to stay non-live, got %v", body["live"])
+	}
+	if _, exists := am.builds["active-status-fresh-lease"]; exists {
+		t.Fatal("expected fresh leased snapshot not to materialize a live build")
+	}
+}
+
+func TestGetBuildStatusRestoresStaleLeasedActiveSnapshot(t *testing.T) {
+	db := openBuildTestDB(t)
+	staleHeartbeat := time.Now().UTC().Add(-2 * activeBuildLeaseStaleAfter())
+	stateJSON := fmt.Sprintf(`{
+		"current_phase":"testing",
+		"restore_context":{
+			"subscription_plan":"team",
+			"provider_mode":"platform",
+			"active_owner_instance_id":"owner-instance",
+			"active_owner_heartbeat_at":%q
+		}
+	}`, staleHeartbeat.Format(time.RFC3339Nano))
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-status-stale-lease",
+		UserID:      1,
+		Description: "Stale owner lease should be resumable",
+		Status:      string(BuildTesting),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    79,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"lead-1",
+			"role":"lead",
+			"provider":"claude",
+			"status":"working",
+			"build_id":"active-status-stale-lease",
+			"progress":79
+		}]`,
+		TasksJSON: `[{
+			"id":"task-test",
+			"type":"test",
+			"description":"Run integration proof",
+			"assigned_to":"lead-1",
+			"status":"in_progress",
+			"created_at":"2026-03-29T01:00:00Z",
+			"started_at":"2026-03-29T01:00:00Z"
+		}]`,
+		StateJSON: stateJSON,
+		CreatedAt: time.Now().UTC().Add(-10 * time.Minute),
+		UpdatedAt: time.Now().UTC().Add(-10 * time.Minute),
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		resultQueue: make(chan *TaskResult, 1),
+		ctx:         context.Background(),
+		instanceID:  "reader-instance",
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/active-status-stale-lease/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body["live"] != true {
+		t.Fatalf("expected stale leased snapshot to restore as live, got %v", body["live"])
+	}
+	if body["restored_from_snapshot"] != true {
+		t.Fatalf("expected restored_from_snapshot=true, got %v", body["restored_from_snapshot"])
+	}
+	build := am.builds["active-status-stale-lease"]
+	if build == nil {
+		t.Fatal("expected stale leased snapshot to materialize a live build")
+	}
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	if build.SnapshotState.RestoreContext == nil || build.SnapshotState.RestoreContext.ActiveOwnerInstanceID != "reader-instance" {
+		t.Fatalf("expected restored build lease owner to switch to reader-instance, got %+v", build.SnapshotState.RestoreContext)
+	}
+}
+
+func TestGetBuildStatusRestoresFreshLeaseSnapshotWhenTaskTimedOut(t *testing.T) {
+	db := openBuildTestDB(t)
+	freshHeartbeat := time.Now().UTC()
+	stateJSON := fmt.Sprintf(`{
+		"current_phase":"backend_services",
+		"restore_context":{
+			"subscription_plan":"team",
+			"provider_mode":"platform",
+			"active_owner_instance_id":"owner-instance",
+			"active_owner_heartbeat_at":%q
+		}
+	}`, freshHeartbeat.Format(time.RFC3339Nano))
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-status-fresh-lease-stale-task",
+		UserID:      1,
+		Description: "Fresh lease should still restore if the active task has timed out",
+		Status:      string(BuildInProgress),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    59,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"backend-1",
+			"role":"backend",
+			"provider":"gpt4",
+			"status":"working",
+			"build_id":"active-status-fresh-lease-stale-task",
+			"progress":59
+		}]`,
+		TasksJSON: `[{
+			"id":"task-api",
+			"type":"generate_api",
+			"description":"Implement backend API",
+			"assigned_to":"backend-1",
+			"status":"in_progress",
+			"created_at":"2026-03-30T07:00:00Z",
+			"started_at":"2026-03-30T07:00:00Z"
+		}]`,
+		StateJSON: stateJSON,
+		CreatedAt: time.Now().UTC().Add(-20 * time.Minute),
+		UpdatedAt: time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		resultQueue: make(chan *TaskResult, 1),
+		ctx:         context.Background(),
+		instanceID:  "reader-instance",
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/active-status-fresh-lease-stale-task/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body["live"] != true {
+		t.Fatalf("expected timed-out task snapshot to restore as live, got %v", body["live"])
+	}
+	if body["restored_from_snapshot"] != true {
+		t.Fatalf("expected restored_from_snapshot=true, got %v", body["restored_from_snapshot"])
+	}
+	if _, exists := am.builds["active-status-fresh-lease-stale-task"]; !exists {
+		t.Fatal("expected timed-out task snapshot to materialize a live build")
+	}
+}
+
+func TestClaimActiveSnapshotTakeoverRetriesAfterLeaseHeartbeatRace(t *testing.T) {
+	db := openBuildTestDB(t)
+	olderHeartbeat := time.Now().UTC().Add(-30 * time.Second)
+	newerHeartbeat := time.Now().UTC()
+
+	staleTaskJSON := `[{
+		"id":"task-api",
+		"type":"generate_api",
+		"description":"Implement backend API",
+		"assigned_to":"backend-1",
+		"status":"in_progress",
+		"created_at":"2026-03-30T07:00:00Z",
+		"started_at":"2026-03-30T07:00:00Z"
+	}]`
+
+	oldStateJSON := fmt.Sprintf(`{
+		"current_phase":"backend_services",
+		"restore_context":{
+			"subscription_plan":"team",
+			"provider_mode":"platform",
+			"active_owner_instance_id":"owner-instance",
+			"active_owner_heartbeat_at":%q
+		}
+	}`, olderHeartbeat.Format(time.RFC3339Nano))
+	newStateJSON := fmt.Sprintf(`{
+		"current_phase":"backend_services",
+		"restore_context":{
+			"subscription_plan":"team",
+			"provider_mode":"platform",
+			"active_owner_instance_id":"owner-instance",
+			"active_owner_heartbeat_at":%q
+		}
+	}`, newerHeartbeat.Format(time.RFC3339Nano))
+
+	row := &models.CompletedBuild{
+		BuildID:     "active-status-claim-race",
+		UserID:      1,
+		Description: "Concurrent heartbeat refresh should not block takeover",
+		Status:      string(BuildInProgress),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    59,
+		AgentsJSON: `[{
+			"id":"backend-1",
+			"role":"backend",
+			"provider":"gpt4",
+			"status":"working",
+			"build_id":"active-status-claim-race",
+			"progress":59
+		}]`,
+		TasksJSON: staleTaskJSON,
+		StateJSON: newStateJSON,
+		CreatedAt: time.Now().UTC().Add(-20 * time.Minute),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := db.Create(row).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		resultQueue: make(chan *TaskResult, 1),
+		ctx:         context.Background(),
+		instanceID:  "reader-instance",
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	staleSnapshot := *row
+	staleSnapshot.StateJSON = oldStateJSON
+
+	claimed, ok, err := am.claimActiveSnapshotTakeover(&staleSnapshot)
+	if err != nil {
+		t.Fatalf("claimActiveSnapshotTakeover returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected takeover to succeed after refreshing snapshot state")
+	}
+	state := parseBuildSnapshotState(claimed.StateJSON)
+	if state.RestoreContext == nil || state.RestoreContext.ActiveOwnerInstanceID != "reader-instance" {
+		t.Fatalf("expected claimed snapshot owner to switch to reader-instance, got %+v", state.RestoreContext)
+	}
+}
+
+func TestGetBuildStatusRestoresClaimedSnapshotOnlyOnce(t *testing.T) {
+	db := openBuildTestDB(t)
+	staleHeartbeat := time.Now().UTC().Add(-2 * time.Minute)
+	stateJSON := fmt.Sprintf(`{
+		"current_phase":"review",
+		"restore_context":{
+			"subscription_plan":"team",
+			"provider_mode":"platform",
+			"active_owner_instance_id":"owner-instance",
+			"active_owner_heartbeat_at":%q
+		}
+	}`, staleHeartbeat.Format(time.RFC3339Nano))
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-status-restore-once",
+		UserID:      1,
+		Description: "Restore a claimed snapshot exactly once on status read",
+		Status:      string(BuildReviewing),
+		Mode:        string(ModeFast),
+		PowerMode:   string(PowerFast),
+		Progress:    92,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"lead-1",
+			"role":"lead",
+			"provider":"claude",
+			"status":"working",
+			"build_id":"active-status-restore-once",
+			"progress":80
+		}]`,
+		TasksJSON: `[{
+			"id":"task-review",
+			"type":"review",
+			"description":"Review the generated frontend",
+			"assigned_to":"lead-1",
+			"status":"in_progress",
+			"created_at":"2026-03-29T01:00:00Z",
+			"started_at":"2026-03-29T01:00:00Z"
+		}]`,
+		StateJSON: stateJSON,
+		CreatedAt: time.Now().UTC().Add(-10 * time.Minute),
+		UpdatedAt: time.Now().UTC().Add(-10 * time.Minute),
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		taskQueue:   make(chan *Task, 8),
+		resultQueue: make(chan *TaskResult, 1),
+		ctx:         context.Background(),
+		instanceID:  "reader-instance",
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/active-status-restore-once/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body["live"] != true {
+		t.Fatalf("expected restored claimed snapshot to be live, got %v", body["live"])
+	}
+	if body["restored_from_snapshot"] != true {
+		t.Fatalf("expected restored_from_snapshot=true, got %v", body["restored_from_snapshot"])
 	}
 
 	select {
@@ -272,7 +1021,7 @@ func TestGetBuildStatusRestoresActiveSnapshotOnRead(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("GET", "/api/v1/build/active-status-restore/status", nil)
+	req, _ = http.NewRequest("GET", "/api/v1/build/active-status-restore-once/status", nil)
 	testRouter(am).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -321,6 +1070,70 @@ func TestGetBuildStatusNormalizesLiveProgressWithinPhaseWindow(t *testing.T) {
 	}
 	if got := int(body["progress"].(float64)); got != 19 {
 		t.Fatalf("expected architecture progress to be capped at 19, got %d", got)
+	}
+}
+
+func TestGetBuildStatusSelfHealsStaleLiveTask(t *testing.T) {
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		resultQueue: make(chan *TaskResult, 1),
+		ctx:         context.Background(),
+	}
+
+	startedAt := time.Now().Add(-10 * time.Minute)
+	build := &Build{
+		ID:          "live-stale-status-recovery",
+		UserID:      1,
+		Status:      BuildTesting,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Description: "Status polling should recover stale test tasks",
+		UpdatedAt:   time.Now().Add(-10 * time.Minute),
+		Agents: map[string]*Agent{
+			"testing-1": {
+				ID:       "testing-1",
+				BuildID:  "live-stale-status-recovery",
+				Role:     RoleTesting,
+				Provider: ai.ProviderGemini,
+				Status:   StatusWorking,
+			},
+		},
+		Tasks: []*Task{
+			{
+				ID:          "task-stale-test",
+				Type:        TaskTest,
+				Description: "Verify integration",
+				Status:      TaskInProgress,
+				AssignedTo:  "testing-1",
+				StartedAt:   &startedAt,
+				CreatedAt:   startedAt,
+			},
+		},
+	}
+	am.builds[build.ID] = build
+	am.agents["testing-1"] = build.Agents["testing-1"]
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/live-stale-status-recovery/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	select {
+	case result := <-am.resultQueue:
+		if result == nil || result.TaskID != "task-stale-test" || result.Success {
+			t.Fatalf("unexpected recovery result: %+v", result)
+		}
+	default:
+		t.Fatal("expected status read to enqueue stale task recovery")
+	}
+
+	if got := taskInputInt(build.Tasks[0].Input, "stale_recovery_attempt"); got != 0 {
+		t.Fatalf("expected stale recovery attempt marker 0, got %d", got)
 	}
 }
 

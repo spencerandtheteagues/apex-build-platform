@@ -1323,6 +1323,30 @@ export async function query<T extends QueryResultRow>(text: string, params?: any
 			t.Fatalf("expected frontend moduleResolution normalization, got %s", got)
 		}
 	})
+
+	t.Run("canonicalizes_tsconfig_jsonc_comments_before_verification", func(t *testing.T) {
+		t.Parallel()
+
+		in := `{
+  // compiler target
+  "compilerOptions": {
+    "target": "ES2020", // supported target
+    "module": "ESNext",
+    "jsx": "react-jsx",
+  },
+  "include": ["src"],
+}`
+		got := normalizeGeneratedFileContent("tsconfig.json", in)
+		if strings.Contains(got, "// compiler target") || strings.Contains(got, "// supported target") {
+			t.Fatalf("expected tsconfig comments to be stripped, got %s", got)
+		}
+		if strings.Contains(got, ",\n  }") || strings.Contains(got, ",\n}") {
+			t.Fatalf("expected trailing commas to be removed, got %s", got)
+		}
+		if !strings.Contains(got, `"moduleResolution": "Node"`) {
+			t.Fatalf("expected downstream tsconfig normalization to still run, got %s", got)
+		}
+	})
 }
 
 func canBindLocalhostPort() bool {
@@ -2141,11 +2165,81 @@ app.listen(process.env.PORT || 3001);`,
 
 	errs := am.checkIntegrationCoherence(build, files)
 	joined := strings.Join(errs, "\n")
-	if !strings.Contains(joined, "backend does not expose required contract endpoint /api/health") {
-		t.Fatalf("expected missing contract health route, got %v", errs)
-	}
 	if !strings.Contains(joined, "frontend calls /api/transcribe/:param/progress but backend has no matching route") {
 		t.Fatalf("expected missing progress route integration error, got %v", errs)
+	}
+	if strings.Contains(joined, "backend does not expose required contract endpoint /api/health") {
+		t.Fatalf("expected nested mount route resolution to satisfy /api/health, got %v", errs)
+	}
+}
+
+func TestExtractExpressResolvedRoutesResolvesNestedMountedRouters(t *testing.T) {
+	t.Parallel()
+
+	files := []GeneratedFile{
+		{
+			Path: "server/index.ts",
+			Content: `import apiRouter from "./routes/api";
+app.use("/api", apiRouter);`,
+		},
+		{
+			Path: "server/routes/api.ts",
+			Content: `import authRouter from "./auth";
+router.use("/auth", authRouter);`,
+		},
+		{
+			Path: "server/routes/auth.ts",
+			Content: `router.post("/login", handler);
+router.get("/me", handler);`,
+		},
+	}
+
+	resolved := extractExpressResolvedRoutes(files)
+	for _, route := range []string{"/auth/login", "/auth/me", "/api/auth/login", "/api/auth/me"} {
+		if !resolved[route] {
+			t.Fatalf("expected resolved routes to include %s, got %+v", route, resolved)
+		}
+	}
+}
+
+func TestCheckIntegrationCoherenceAcceptsNestedMountedExpressRoutes(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		TechStack: &TechStack{Frontend: "React", Backend: "Node"},
+	}
+
+	files := []GeneratedFile{
+		{
+			Path: "src/App.tsx",
+			Content: "fetch(`${API_BASE}/api/auth/login`);\n" +
+				"fetch(`${API_BASE}/api/auth/me`);",
+		},
+		{
+			Path: "server/index.ts",
+			Content: `import cors from "cors";
+import apiRouter from "./routes/api";
+app.use(cors());
+app.use("/api", apiRouter);
+app.listen(process.env.PORT || 3001);`,
+		},
+		{
+			Path: "server/routes/api.ts",
+			Content: `import authRouter from "./auth";
+router.use("/auth", authRouter);`,
+		},
+		{
+			Path: "server/routes/auth.ts",
+			Content: `router.post("/login", handler);
+router.get("/me", handler);`,
+		},
+	}
+
+	errs := am.checkIntegrationCoherence(build, files)
+	joined := strings.Join(errs, "\n")
+	if strings.Contains(joined, "/api/auth/login") || strings.Contains(joined, "/api/auth/me") {
+		t.Fatalf("expected nested mounted routes to satisfy integration check, got %v", errs)
 	}
 }
 
@@ -2477,6 +2571,1034 @@ func TestApplyDeterministicValidationRepairsCreatesMissingLocalModulePlaceholder
 	}
 }
 
+func TestApplyDeterministicValidationRepairsCreatesFrontendShellForBackendOnlyFullStackBuild(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:                  "build-missing-frontend-shell-repair",
+		Status:              BuildInProgress,
+		Mode:                ModeFull,
+		PowerMode:           PowerBalanced,
+		RequirePreviewReady: true,
+		Description:         "Build a full-stack app called ClientPulse with a dashboard, auth, projects, and client management.",
+		TechStack: &TechStack{
+			Frontend: "react",
+			Backend:  "express",
+		},
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "clientpulse",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}`,
+				IsNew: true,
+			},
+			{
+				Path: "src/server.ts",
+				Content: `import express from "express";
+
+const app = express();
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
+app.listen(process.env.PORT || 3001, () => {
+  console.log("ready");
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{"Preview verification failed: No recognized frontend entry point found (index.html, src/main.tsx, src/index.tsx, etc.)."},
+		"missing frontend entrypoint",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected missing frontend shell repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+
+	for _, required := range []string{"index.html", "src/main.tsx", "src/App.tsx", "vite.config.ts", "package.json"} {
+		if strings.TrimSpace(byPath[required]) == "" {
+			t.Fatalf("expected %s to exist after repair, got files %+v", required, files)
+		}
+	}
+	if !strings.Contains(byPath["package.json"], `"build": "vite build"`) {
+		t.Fatalf("expected repaired manifest to run vite build, got %q", byPath["package.json"])
+	}
+	if !strings.Contains(byPath["package.json"], `"build:backend": "tsc"`) {
+		t.Fatalf("expected original backend build script to be preserved, got %q", byPath["package.json"])
+	}
+	if !strings.Contains(byPath["package.json"], `"dev": "vite"`) {
+		t.Fatalf("expected repaired manifest to expose vite dev, got %q", byPath["package.json"])
+	}
+	if !strings.Contains(byPath["package.json"], `"dev:backend": "tsx watch src/server.ts"`) {
+		t.Fatalf("expected original backend dev script to be preserved, got %q", byPath["package.json"])
+	}
+	if !strings.Contains(byPath["package.json"], `"react"`) || !strings.Contains(byPath["package.json"], `"@vitejs/plugin-react"`) {
+		t.Fatalf("expected repaired manifest to include frontend deps, got %q", byPath["package.json"])
+	}
+	if !strings.Contains(byPath["src/App.tsx"], "src/server.ts") {
+		t.Fatalf("expected recovered App shell to mention backend runtime, got %q", byPath["src/App.tsx"])
+	}
+	if !strings.Contains(byPath["vite.config.ts"], "http://localhost:3001") {
+		t.Fatalf("expected vite proxy target to use backend port, got %q", byPath["vite.config.ts"])
+	}
+
+	state := build.SnapshotState.Orchestration
+	if state == nil || len(state.PatchBundles) == 0 {
+		t.Fatalf("expected captured patch bundle, got %+v", state)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsDoesNotInventFrontendForBackendOnlyAPIBuild(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-api-only-no-frontend-shell",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		TechStack: &TechStack{
+			Backend: "express",
+		},
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "api-only",
+  "scripts": {
+    "build": "tsc"
+  }
+}`,
+				IsNew: true,
+			},
+			{
+				Path: "src/server.ts",
+				Content: `import express from "express";
+const app = express();
+app.get("/health", (_req, res) => res.send("ok"));
+app.listen(3001);
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{"Preview verification failed: No recognized frontend entry point found (index.html, src/main.tsx, src/index.tsx, etc.)."},
+		"missing frontend entrypoint",
+		time.Now(),
+	)
+	if repaired {
+		t.Fatal("did not expect frontend shell repair for backend-only API build")
+	}
+}
+
+func TestApplyDeterministicValidationRepairsCreatesDeclarationForMissingCJSModulePlaceholder(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-missing-local-cjs-module-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/seed.ts",
+				Content: `import { sequelize } from './db/index';
+import * as models from './models.cjs';
+
+async function seed() {
+  await sequelize.authenticate();
+  console.log(models);
+}
+`,
+				IsNew: true,
+			},
+			{
+				Path:    "server/db/index.ts",
+				Content: "export const sequelize = {} as any;\n",
+				IsNew:   true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Preview verification local import check failed: source imports local module "./models.cjs" from "server/seed.ts" but generated file "server/models.cjs" is missing`},
+		"missing local CommonJS module",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected missing local CommonJS module repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]GeneratedFile{}
+	for _, file := range files {
+		byPath[file.Path] = file
+	}
+	cjs, ok := byPath["server/models.cjs"]
+	if !ok {
+		t.Fatalf("expected CommonJS placeholder file to be created, got %+v", files)
+	}
+	if !strings.Contains(cjs.Content, "module.exports") {
+		t.Fatalf("expected CommonJS placeholder content, got %q", cjs.Content)
+	}
+	decl, ok := byPath["server/models.cjs.d.ts"]
+	if !ok {
+		t.Fatalf("expected CommonJS declaration file to be created, got %+v", files)
+	}
+	if !strings.Contains(decl.Content, "export = defaultExport;") {
+		t.Fatalf("expected CommonJS declaration export assignment, got %q", decl.Content)
+	}
+}
+
+func TestExtractBrokenGeneratedTestPaths(t *testing.T) {
+	t.Parallel()
+
+	errs := []string{
+		`Preview verification build failed: src/__tests__/AppShell.test.tsx(2,18): error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.`,
+		`Preview verification build failed: src/components/AppShell.tsx(11,7): error TS2322: Type '"x"' is not assignable to type '"y"'.`,
+	}
+
+	targets := ExtractBrokenTestPaths(strings.Join(errs, "\n"))
+	if len(targets) != 1 || targets[0] != "src/__tests__/AppShell.test.tsx" {
+		t.Fatalf("unexpected generated test targets: %+v", targets)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsReplacesBrokenGeneratedTestFile(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-generated-test-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "package.json",
+				Content: "{\"name\":\"preview-test\",\"private\":true}\n",
+				IsNew:   true,
+			},
+			{
+				Path: "src/__tests__/AppShell.test.tsx",
+				Content: `import { render, screen } from "@testing-library/react";
+import { AppShell } from "../components/AppShell";
+test("renders", () => {
+  render(<AppShell />);
+  expect(screen.getByText("Dashboard")).toBeInTheDocument();
+});`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Preview verification build failed: src/__tests__/AppShell.test.tsx(2,18): error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.`},
+		"broken generated test",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected broken generated test repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "src/__tests__/AppShell.test.tsx" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired test file to exist, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, `render, screen } from "@testing-library/react"`) {
+		t.Fatalf("expected broken RTL screen import to be repaired, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "generated verification placeholder") &&
+		!strings.Contains(repairedFile.Content, `from '@testing-library/dom'`) {
+		t.Fatalf("expected placeholder fallback or patched screen import, got %q", repairedFile.Content)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsReplacesBrokenBackendGeneratedTestFileWithPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-generated-backend-test-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "package.json",
+				Content: "{\"name\":\"agency-ops\",\"private\":true}\n",
+				IsNew:   true,
+			},
+			{
+				Path: "server/__tests__/api.test.ts",
+				Content: `import request from "supertest";
+import { describe, it, expect } from "@jest/globals";
+import { apiRouter } from "../routes/api";
+
+describe("api", () => {
+  it("responds", async () => {
+    expect(apiRouter).toBeTruthy();
+    expect(request).toBeTruthy();
+  });
+});`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/__tests__/api.test.ts(1,21): error TS2307: Cannot find module 'supertest' or its corresponding type declarations.`,
+			`server/__tests__/api.test.ts(4,10): error TS2614: Module '"../routes/api"' has no exported member 'apiRouter'. Did you mean to use 'import apiRouter from "../routes/api"' instead?`,
+			`server/__tests__/api.test.ts(6,1): error TS2582: Cannot find name 'describe'.`,
+		},
+		"broken generated backend test",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected broken backend generated test repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/__tests__/api.test.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired backend test file to exist, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, "supertest") || strings.Contains(repairedFile.Content, "apiRouter") {
+		t.Fatalf("expected backend placeholder repair to strip brittle imports, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "generated verification placeholder") {
+		t.Fatalf("expected backend placeholder repair content, got %q", repairedFile.Content)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsStripsSequelizeUniqueKeys(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-unique-keys-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/db/models.ts",
+				Content: `import { Sequelize, DataTypes, Model } from "sequelize";
+
+export class User extends Model {}
+User.init({}, {
+  sequelize,
+  tableName: "user",
+  indexes: [
+    { fields: ["email"] },
+  ],
+  uniqueKeys: {
+    unique_email_per_tenant: {
+      fields: ["tenant_id", "email"],
+    },
+  },
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/db/models.ts(9,3): error TS2353: Object literal may only specify known properties, and 'uniqueKeys' does not exist in type 'InitOptions<User>'.`,
+		},
+		"broken sequelize init options",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected sequelize uniqueKeys repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/db/models.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired sequelize models file to exist, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, "uniqueKeys:") {
+		t.Fatalf("expected uniqueKeys block to be removed, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "indexes:") {
+		t.Fatalf("expected surrounding init options to remain intact, got %q", repairedFile.Content)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsCancelsSupersededRecoveryTasks(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-unique-keys-cancel-recovery",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		Tasks: []*Task{
+			{
+				ID:     "task-fix-review",
+				Type:   TaskFix,
+				Status: TaskInProgress,
+				Input: map[string]any{
+					"action": "fix_review_issues",
+				},
+			},
+		},
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/db/models.ts",
+				Content: `import { Sequelize, DataTypes, Model } from "sequelize";
+
+export class User extends Model {}
+User.init({}, {
+  sequelize,
+  tableName: "user",
+  indexes: [
+    { fields: ["email"] },
+  ],
+  uniqueKeys: {
+    unique_email_per_tenant: {
+      fields: ["tenant_id", "email"],
+    },
+  },
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/db/models.ts(9,3): error TS2353: Object literal may only specify known properties, and 'uniqueKeys' does not exist in type 'InitOptions<User>'.`,
+		},
+		"broken sequelize init options",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected sequelize uniqueKeys repair to apply")
+	}
+	if build.Tasks[0].Status != TaskCancelled {
+		t.Fatalf("expected superseded recovery task to be cancelled, got %s", build.Tasks[0].Status)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsClearsStaleSequelizeUniqueKeysError(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-unique-keys-stale",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/db/models.ts",
+				Content: `import { Sequelize, DataTypes, Model } from "sequelize";
+
+export class User extends Model {}
+User.init({}, {
+  sequelize,
+  tableName: "user",
+  indexes: [
+    { fields: ["email"] },
+  ],
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/db/models.ts(9,3): error TS2353: Object literal may only specify known properties, and 'uniqueKeys' does not exist in type 'InitOptions<User>'.`,
+		},
+		"stale sequelize uniqueKeys validation",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected stale sequelize uniqueKeys validation to be cleared")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/db/models.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected models file to remain present, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, "uniqueKeys:") {
+		t.Fatalf("expected stale validation path to keep clean file content, got %q", repairedFile.Content)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsStripsSequelizeIndexes(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-indexes-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/db/models.ts",
+				Content: `import { Sequelize, DataTypes, Model } from "sequelize";
+
+export class User extends Model {}
+User.init({}, {
+  sequelize,
+  tableName: "user",
+  indexes: [
+    { fields: ["email"] },
+    { fields: ["tenant_id", "slug"] },
+  ],
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/db/models.ts(7,3): error TS2353: Object literal may only specify known properties, and 'indexes' does not exist in type 'InitOptions<User>'.`,
+		},
+		"broken sequelize init options",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected sequelize indexes repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/db/models.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired sequelize models file to exist, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, "indexes:") {
+		t.Fatalf("expected indexes block to be removed, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, `tableName: "user"`) {
+		t.Fatalf("expected surrounding init options to remain intact, got %q", repairedFile.Content)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsClearsStaleSequelizeIndexesError(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-indexes-stale",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/db/models.ts",
+				Content: `import { Sequelize, DataTypes, Model } from "sequelize";
+
+export class User extends Model {}
+User.init({}, {
+  sequelize,
+  tableName: "user",
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/db/models.ts(7,3): error TS2353: Object literal may only specify known properties, and 'indexes' does not exist in type 'InitOptions<User>'.`,
+		},
+		"stale sequelize indexes validation",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected stale sequelize indexes validation to be cleared")
+	}
+}
+
+func TestApplyDeterministicValidationRepairsClearsStaleImportValidationError(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-stale-import-validation",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/seed.ts",
+				Content: `import { sequelize } from './db/index';
+import * as models from './models.cjs';
+
+async function seed() {
+  await sequelize.authenticate();
+  console.log(models);
+}
+`,
+				IsNew: true,
+			},
+			{
+				Path: "server/db/index.ts",
+				Content: `export const sequelize = {} as any;
+`,
+				IsNew: true,
+			},
+			{
+				Path: "server/models.cjs",
+				Content: `module.exports = {};
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/seed.ts(1,10): error TS2305: Module '"./db"' has no exported member 'sequelize'.`,
+			`Preview verification build failed: server/seed.ts(2,25): error TS2307: Cannot find module './db/models' or its corresponding type declarations.`,
+		},
+		"stale seed import validation",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected stale import validation to be cleared")
+	}
+}
+
+func TestApplyDeterministicValidationRepairsNormalizesSequelizeConstructor(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-constructor-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/db/index.ts",
+				Content: `import { Sequelize } from 'sequelize-typescript';
+import path from 'path';
+
+const databaseUrl = process.env.DATABASE_URL;
+const urlParts = new URL(databaseUrl!);
+const username = urlParts.username;
+const password = urlParts.password;
+const host = urlParts.hostname;
+const port = urlParts.port;
+const database = urlParts.pathname.slice(1);
+
+export const sequelize = new Sequelize(database, username, password, {
+  host,
+  port: Number(port),
+  dialect: 'postgres',
+  logging: false,
+  models: [path.resolve(__dirname, 'models')],
+  define: {
+    underscored: true,
+    freezeTableName: true,
+    timestamps: false
+  }
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/db/index.ts(9,30): error TS2769: No overload matches this call.
+Overload 1 of 4, '(database: string, username: string, password?: string | undefined, options?: SequelizeOptions | undefined): Sequelize', gave the following error.`,
+		},
+		"broken sequelize constructor",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected sequelize constructor repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/db/index.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired sequelize db file to exist, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, "new Sequelize(database, username, password") {
+		t.Fatalf("expected constructor call to be normalized, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "new Sequelize(databaseUrl, {") {
+		t.Fatalf("expected databaseUrl-form sequelize constructor, got %q", repairedFile.Content)
+	}
+	if strings.Contains(repairedFile.Content, "database,") || strings.Contains(repairedFile.Content, "username,") || strings.Contains(repairedFile.Content, "password,") {
+		t.Fatalf("expected positional credentials to be removed, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "models: [") || !strings.Contains(repairedFile.Content, "path.resolve(__dirname, 'models')") {
+		t.Fatalf("expected models option to remain intact, got %q", repairedFile.Content)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsNormalizesSequelizeTypescriptObjectConstructor(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-object-constructor-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/db/index.ts",
+				Content: `import { Sequelize } from 'sequelize-typescript';
+import { Tenant } from './models/Tenant';
+
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error('DATABASE_URL environment variable is required');
+}
+
+export const sequelize = new Sequelize({
+  database: process.env.DB_NAME || 'app',
+  username: process.env.DB_USER || 'postgres',
+  password: process.env.DB_PASS || 'postgres',
+  host: process.env.DB_HOST || 'localhost',
+  port: Number(process.env.DB_PORT) || 5432,
+  dialect: 'postgres',
+  models: [
+    Tenant,
+  ],
+  logging: false,
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/db/index.ts(16,30): error TS2769: No overload matches this call.
+Overload 1 of 4, '(database: string, username: string, password?: string | undefined, options?: SequelizeOptions | undefined): Sequelize', gave the following error.`,
+		},
+		"broken sequelize constructor",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected sequelize object constructor repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/db/index.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired sequelize db file to exist, got %+v", files)
+	}
+	if !strings.Contains(repairedFile.Content, "new Sequelize(databaseUrl, {") {
+		t.Fatalf("expected databaseUrl-form constructor, got %q", repairedFile.Content)
+	}
+	if strings.Contains(repairedFile.Content, "database: process.env.DB_NAME") ||
+		strings.Contains(repairedFile.Content, "username: process.env.DB_USER") ||
+		strings.Contains(repairedFile.Content, "password: process.env.DB_PASS") ||
+		strings.Contains(repairedFile.Content, "host: process.env.DB_HOST") ||
+		strings.Contains(repairedFile.Content, "port: Number(process.env.DB_PORT)") {
+		t.Fatalf("expected object-form credential fields to be removed, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "models: [") || !strings.Contains(repairedFile.Content, "Tenant") {
+		t.Fatalf("expected models option to remain intact, got %q", repairedFile.Content)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsStripsSequelizeTypescriptTableIndexes(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-table-options-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/db/models/ActivityLog.ts",
+				Content: `import { Table, Column, Model, DataType } from 'sequelize-typescript';
+
+@Table({
+  tableName: 'activity_logs',
+  indexes: [
+    { fields: ['tenant_id'] },
+    { fields: ['created_at'] },
+  ],
+})
+export class ActivityLog extends Model {
+  @Column(DataType.STRING)
+  action!: string;
+}
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/db/models/ActivityLog.ts(19,3): error TS2769: No overload matches this call.
+Overload 1 of 2, '(options: TableOptions<Model<any, any>>): Function', gave the following error.`,
+		},
+		"broken sequelize table options",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected sequelize table option repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/db/models/ActivityLog.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired model file to exist, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, "indexes:") {
+		t.Fatalf("expected invalid indexes block to be removed, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "tableName: 'activity_logs'") {
+		t.Fatalf("expected tableName to remain intact, got %q", repairedFile.Content)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsRewritesSequelizeTypescriptRuntimeImport(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-sequelize-runtime-import-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "server/seed.ts",
+				Content: `import { Sequelize } from 'sequelize-typescript';
+
+const databaseUrl = process.env.DATABASE_URL;
+
+const sequelize = new Sequelize(databaseUrl!, {
+  logging: false,
+  dialect: 'postgres',
+});
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/seed.ts(4,19): error TS2769: No overload matches this call.
+Overload 1 of 4, '(database: string, username: string, password?: string | undefined, options?: SequelizeOptions | undefined): Sequelize', gave the following error.`,
+		},
+		"broken sequelize runtime import",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected runtime sequelize import repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/seed.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired seed file to exist, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, "sequelize-typescript") {
+		t.Fatalf("expected sequelize-typescript import to be rewritten, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "import { Sequelize } from 'sequelize';") {
+		t.Fatalf("expected sequelize runtime import, got %q", repairedFile.Content)
+	}
+}
+
 func TestParsePreviewSyntaxErrorTargetFiles(t *testing.T) {
 	t.Parallel()
 
@@ -2509,6 +3631,400 @@ func TestParsePreviewSyntaxErrorTargetFilesHandlesEsbuildErrors(t *testing.T) {
 	want := "src/App.tsx,src/components/LoginForm.tsx"
 	if got != want {
 		t.Fatalf("unexpected esbuild syntax target files: got %q want %q", got, want)
+	}
+}
+
+func TestParsePreviewSyntaxErrorTargetFilesIncludesAbruptEOFMessages(t *testing.T) {
+	t.Parallel()
+
+	errs := []string{
+		`provider verification blocked task output: The file tests/verify-integration.ts ends abruptly without completing the function, resulting in a missing closing brace and compilation failure.`,
+	}
+
+	targets := parsePreviewSyntaxErrorTargetFiles(errs)
+	if len(targets) != 1 || targets[0] != "tests/verify-integration.ts" {
+		t.Fatalf("unexpected syntax target files: %+v", targets)
+	}
+}
+
+func TestParsePreviewJSXInTSRepairTargets(t *testing.T) {
+	t.Parallel()
+
+	errs := []string{
+		`Final output validation failed: Preview verification build failed: [vite:esbuild] Transform failed with 1 error:
+/tmp/apex-preview-verify-1861641592/src/hooks/useAuth.ts:90:6: ERROR: Expected ">" but found "value"`,
+	}
+
+	targets := parsePreviewJSXInTSRepairTargets(errs)
+	if len(targets) != 1 || targets[0] != "src/hooks/useAuth.ts" {
+		t.Fatalf("unexpected JSX-in-TS target files: %+v", targets)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsConvertsJSXInTSProviderFile(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-jsx-in-ts-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "package.json",
+				Content: "{\"name\":\"preview-test\",\"private\":true}\n",
+				IsNew:   true,
+			},
+			{
+				Path: "src/hooks/useAuth.ts",
+				Content: `import { useState, createContext } from "react";
+
+const AuthContext = createContext<any>(undefined);
+
+export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+  const [user] = useState(null);
+
+  return (
+    <AuthContext.Provider
+      value={{ user }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+};`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Final output validation failed: Preview verification build failed: [vite:esbuild] Transform failed with 1 error:
+/tmp/apex-preview-verify-1861641592/src/hooks/useAuth.ts:90:6: ERROR: Expected ">" but found "value"`},
+		"jsx in .ts provider",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected JSX-in-TS provider repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "src/hooks/useAuth.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired auth hook file to exist, got %+v", files)
+	}
+	if !strings.Contains(repairedFile.Content, "React.createElement(AuthContext.Provider") {
+		t.Fatalf("expected provider JSX to be normalized with React.createElement, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, `import React, { useState, createContext } from "react";`) {
+		t.Fatalf("expected React default import to be injected, got %q", repairedFile.Content)
+	}
+}
+
+func TestApplyDeterministicProviderBlockedTestRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	output := &TaskOutput{
+		Files: []GeneratedFile{
+			{
+				Path:     "tests/verify-integration.ts",
+				Language: "typescript",
+				Content:  "export async function verifyIntegration() {\n  const result = await",
+			},
+		},
+		TruncatedFiles: []string{"tests/verify-integration.ts"},
+	}
+
+	repaired, summary := am.applyDeterministicProviderBlockedTestRepair(nil, output, []string{
+		`The file tests/verify-integration.ts ends abruptly without completing the function, resulting in a missing closing brace and compilation failure.`,
+	})
+	if !repaired {
+		t.Fatal("expected deterministic provider-blocked test repair to apply")
+	}
+	if !strings.Contains(summary, "tests/verify-integration.ts") {
+		t.Fatalf("unexpected repair summary: %q", summary)
+	}
+	if strings.Contains(output.Files[0].Content, "await") {
+		t.Fatalf("expected truncated content to be replaced, got %q", output.Files[0].Content)
+	}
+	if !strings.Contains(output.Files[0].Content, "generated verification placeholder") {
+		t.Fatalf("expected placeholder verification content, got %q", output.Files[0].Content)
+	}
+	if len(output.TruncatedFiles) != 0 {
+		t.Fatalf("expected repaired file to be removed from truncated files, got %+v", output.TruncatedFiles)
+	}
+}
+
+func TestApplyDeterministicProviderBlockedTestRepairAddsMissingJestDependency(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-provider-test-tooling",
+		Tasks: []*Task{
+			{
+				ID:     "task-testing",
+				Type:   TaskTest,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "agency-ops",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}`,
+						},
+						{
+							Path: "server/__tests__/api.test.ts",
+							Content: `import { describe, it, expect } from "@jest/globals";
+
+describe("health", () => {
+  it("works", () => {
+    expect(true).toBe(true);
+  });
+});`,
+						},
+					},
+				},
+			},
+		},
+	}
+	output := &TaskOutput{
+		Files: []GeneratedFile{
+			{
+				Path:    "server/index.ts",
+				Content: `console.log("backend fix");`,
+			},
+		},
+	}
+
+	repaired, summary := am.applyDeterministicProviderBlockedTestRepair(build, output, []string{
+		`The 'AFTER' version of package.json does not add Jest to devDependencies, which is required for the test script to run and would cause build failures.`,
+	})
+	if !repaired {
+		t.Fatal("expected deterministic provider-blocked manifest repair to apply")
+	}
+	if !strings.Contains(summary, "package.json") || !strings.Contains(summary, "jest") {
+		t.Fatalf("unexpected repair summary: %q", summary)
+	}
+
+	var manifest string
+	for _, file := range output.Files {
+		if file.Path == "package.json" {
+			manifest = file.Content
+			break
+		}
+	}
+	if manifest == "" {
+		t.Fatal("expected repaired output to include package.json")
+	}
+	if !strings.Contains(manifest, `"jest"`) {
+		t.Fatalf("expected repaired manifest to include jest dependency, got %s", manifest)
+	}
+}
+
+func TestApplyDeterministicProviderBlockedTestRepairCanonicalizesTSConfigJSON(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	output := &TaskOutput{
+		Files: []GeneratedFile{
+			{
+				Path: "tsconfig.json",
+				Content: `{
+  // valid for tsconfig, but not strict JSON
+  "compilerOptions": {
+    "target": "ES2020",
+  }
+}`,
+			},
+		},
+	}
+
+	repaired, summary := am.applyDeterministicProviderBlockedTestRepair(nil, output, []string{
+		`tsconfig.json contains comments, which are not allowed in JSON, causing a compilation error.`,
+	})
+	if !repaired {
+		t.Fatal("expected deterministic tsconfig repair to apply")
+	}
+	if !strings.Contains(summary, "tsconfig.json") {
+		t.Fatalf("unexpected repair summary: %q", summary)
+	}
+	if strings.Contains(output.Files[0].Content, "// valid for tsconfig") {
+		t.Fatalf("expected tsconfig comments to be stripped, got %q", output.Files[0].Content)
+	}
+	if strings.Contains(output.Files[0].Content, "\"target\": \"ES2020\",\n  }") {
+		t.Fatalf("expected trailing comma to be stripped, got %q", output.Files[0].Content)
+	}
+}
+
+func TestApplyDeterministicProviderBlockedTestRepairAcceptsAlreadyCanonicalTSConfig(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	output := &TaskOutput{
+		Files: []GeneratedFile{
+			{
+				Path: "tsconfig.json",
+				Content: `{
+  "compilerOptions": {
+    "target": "ES2020"
+  }
+}`,
+			},
+		},
+	}
+
+	repaired, summary := am.applyDeterministicProviderBlockedTestRepair(nil, output, []string{
+		`tsconfig.json contains comments, which are not allowed in JSON, causing a compilation error.`,
+	})
+	if !repaired {
+		t.Fatal("expected already-canonical tsconfig to bypass false-positive blocker")
+	}
+	if !strings.Contains(summary, "tsconfig.json") {
+		t.Fatalf("unexpected repair summary: %q", summary)
+	}
+	if strings.Contains(output.Files[0].Content, "//") {
+		t.Fatalf("expected canonical tsconfig to remain clean, got %q", output.Files[0].Content)
+	}
+}
+
+func TestApplyDeterministicProviderBlockedTestRepairAcceptsCanonicalTSConfigForInvalidJSONSyntaxBlocker(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	output := &TaskOutput{
+		Files: []GeneratedFile{
+			{
+				Path: "tsconfig.json",
+				Content: `{
+  "compilerOptions": {
+    "target": "ES2020"
+  }
+}`,
+			},
+		},
+	}
+
+	repaired, summary := am.applyDeterministicProviderBlockedTestRepair(nil, output, []string{
+		`tsconfig.json contains invalid JSON syntax, as reported in deterministic verification errors, which would cause compilation failures.`,
+	})
+	if !repaired {
+		t.Fatal("expected canonical tsconfig to bypass invalid JSON syntax false-positive blocker")
+	}
+	if !strings.Contains(summary, "tsconfig.json") {
+		t.Fatalf("unexpected repair summary: %q", summary)
+	}
+	if strings.Contains(output.Files[0].Content, "//") {
+		t.Fatalf("expected canonical tsconfig to remain clean, got %q", output.Files[0].Content)
+	}
+}
+
+func TestApplyDeterministicProviderBlockedTestRepairClearsStaleTruncatedGeneratedTestBlocker(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	output := &TaskOutput{
+		Files: []GeneratedFile{
+			{
+				Path:    "src/App.tsx",
+				Content: `export default function App() { return <div>ok</div>; }`,
+			},
+		},
+	}
+
+	repaired, summary := am.applyDeterministicProviderBlockedTestRepair(nil, output, []string{
+		`Truncated source in tests/integration/fullstack.test.ts, as it ends abruptly and would cause a compilation error due to incomplete code.`,
+	})
+	if !repaired {
+		t.Fatal("expected stale truncated generated test blocker to be cleared")
+	}
+	if !strings.Contains(summary, "tests/integration/fullstack.test.ts") {
+		t.Fatalf("unexpected repair summary: %q", summary)
+	}
+	if len(output.Files) != 1 || output.Files[0].Path != "src/App.tsx" {
+		t.Fatalf("expected unrelated output files to remain unchanged, got %+v", output.Files)
+	}
+}
+
+func TestApplyDeterministicPreValidationNormalizationAddsJestDependencyForGeneratedJestTests(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:   "build-prevalidation-jest-tests",
+		Mode: ModeFast,
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-ui",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "agency-ops",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}`,
+						},
+						{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+						{Path: "src/main.tsx", Content: `import React from "react"; import ReactDOM from "react-dom/client"; ReactDOM.createRoot(document.getElementById("root")!).render(<div />);`},
+						{Path: "src/App.tsx", Content: `export default function App(){ return <div>ok</div>; }`},
+						{Path: "src/__tests__/app.test.tsx", Content: `import { describe, it, expect } from "@jest/globals"; describe("App", () => { it("renders", () => { expect(true).toBe(true); }); });`},
+					},
+				},
+			},
+		},
+	}
+
+	if !am.applyDeterministicPreValidationNormalization(build) {
+		t.Fatalf("expected pre-validation normalization to trigger for generated jest tests")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+
+	manifest := byPath["package.json"]
+	if !strings.Contains(manifest, `"jest"`) {
+		t.Fatalf("expected jest dependency to be added, got %s", manifest)
 	}
 }
 
@@ -2594,13 +4110,78 @@ func TestParseMissingTypePackagesFromBuildErrors(t *testing.T) {
 			"src/api/server.ts(2,18): error TS7016: Could not find a declaration file for module 'cors'.\n" +
 			"src/App.tsx(1,19): error TS7016: Could not find a declaration file for module 'react'.\n" +
 			"src/main.tsx(2,22): error TS7016: Could not find a declaration file for module 'react-dom/client'.\n" +
+			"server/migrate.ts(1,22): error TS7016: Could not find a declaration file for module 'pg'.\n" +
 			"src/lib/x.ts(3,1): error TS7016: Could not find a declaration file for module '@scoped/pkg'.",
 	}
 
 	got := strings.Join(parseMissingTypePackagesFromBuildErrors(errs), ",")
-	want := "@types/cors,@types/express,@types/react,@types/react-dom"
+	want := "@types/cors,@types/express,@types/pg,@types/react,@types/react-dom"
 	if got != want {
 		t.Fatalf("unexpected parsed type packages: got %q want %q", got, want)
+	}
+}
+
+func TestApplyDeterministicTypeDeclarationRepairAddsPgTypes(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-pg-types-repair",
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-api",
+				Type:   TaskGenerateAPI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "api-test",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p server/tsconfig.json"
+  },
+  "dependencies": {
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}`,
+						},
+						{Path: "server/migrate.ts", Content: `import { Pool } from 'pg'; const pool = new Pool(); export default pool;`},
+					},
+				},
+			},
+		},
+	}
+
+	bundle, summary := am.applyDeterministicTypeDeclarationRepair(build, []string{
+		"Preview verification build failed: server/migrate.ts(1,22): error TS7016: Could not find a declaration file for module 'pg'.",
+	})
+	if bundle == nil {
+		t.Fatalf("expected pg type declaration repair to trigger")
+	}
+	if !am.applyPatchBundleToBuild(build, bundle) {
+		t.Fatalf("expected patch bundle to apply")
+	}
+	if !strings.Contains(summary, "@types/pg") {
+		t.Fatalf("expected summary to mention @types/pg, got %q", summary)
+	}
+
+	var manifest string
+	for _, file := range am.collectGeneratedFiles(build) {
+		if file.Path == "package.json" {
+			manifest = file.Content
+			break
+		}
+	}
+	if manifest == "" {
+		t.Fatal("expected patched package.json to remain present")
+	}
+	if !strings.Contains(manifest, `"@types/pg"`) {
+		t.Fatalf("expected package.json to include @types/pg, got %s", manifest)
 	}
 }
 
@@ -3759,5 +5340,75 @@ func TestHandleTaskCompletionSkipsPostFixValidationForIntegrationPreflightFix(t 
 
 	if len(build.Tasks) != 0 {
 		t.Fatalf("expected no follow-up validation tasks for integration preflight fix, got %+v", build.Tasks)
+	}
+}
+
+func TestApplyDeterministicExpressIntegrationRepairAddsAPIPrefixAlias(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-express-api-alias-repair",
+		TechStack: &TechStack{
+			Frontend: "React",
+			Backend:  "Express",
+		},
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-api",
+				Type:   TaskGenerateAPI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "server/index.ts",
+							Content: `import express from "express";
+import authRouter from "./routes/auth";
+
+const app = express();
+app.use(express.json());
+app.use("/auth", authRouter);
+app.listen(process.env.PORT || 3001);`,
+						},
+						{
+							Path: "server/routes/auth.ts",
+							Content: `import { Router } from "express";
+const router = Router();
+router.post("/login", (_req, res) => res.json({ ok: true }));
+router.get("/me", (_req, res) => res.json({ ok: true }));
+export default router;`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	bundle, summary := am.applyDeterministicExpressIntegrationRepair(build, []string{
+		`integration: frontend calls /api/auth/login but backend has no matching route`,
+		`integration: frontend calls /api/auth/me but backend has no matching route`,
+	})
+	if bundle == nil {
+		t.Fatal("expected express integration repair to produce a patch bundle")
+	}
+	if !strings.Contains(summary, "api route alias") {
+		t.Fatalf("expected summary to mention api route alias, got %q", summary)
+	}
+	if !am.applyPatchBundleToBuild(build, bundle) {
+		t.Fatal("expected patch bundle to apply")
+	}
+
+	var entry string
+	for _, file := range am.collectGeneratedFiles(build) {
+		if file.Path == "server/index.ts" {
+			entry = file.Content
+			break
+		}
+	}
+	if entry == "" {
+		t.Fatal("expected patched server/index.ts to remain present")
+	}
+	if !strings.Contains(entry, `req.url.startsWith("/api/")`) {
+		t.Fatalf("expected Express /api alias middleware to be added, got %s", entry)
 	}
 }

@@ -260,3 +260,98 @@ func TestFailBuildOnPhaseAbortMarksBuildFailed(t *testing.T) {
 		t.Fatalf("expected explicit phase-abort error, got %q", build.Error)
 	}
 }
+
+func TestRecoverStalledPhasedExecutionStartsNextPhaseAfterFrontend(t *testing.T) {
+	oldUpdatedAt := time.Now().Add(-2 * time.Minute).UTC()
+	build := &Build{
+		ID:          "build-stalled-frontend-phase",
+		Description: "Build a multi-tenant agency operations platform",
+		Status:      BuildInProgress,
+		UpdatedAt:   oldUpdatedAt,
+		Agents: map[string]*Agent{
+			"architect-1": {ID: "architect-1", BuildID: "build-stalled-frontend-phase", Role: RoleArchitect, Status: StatusCompleted},
+			"frontend-1":  {ID: "frontend-1", BuildID: "build-stalled-frontend-phase", Role: RoleFrontend, Status: StatusCompleted},
+			"database-1":  {ID: "database-1", BuildID: "build-stalled-frontend-phase", Role: RoleDatabase, Status: StatusIdle},
+			"backend-1":   {ID: "backend-1", BuildID: "build-stalled-frontend-phase", Role: RoleBackend, Status: StatusIdle},
+			"testing-1":   {ID: "testing-1", BuildID: "build-stalled-frontend-phase", Role: RoleTesting, Status: StatusIdle},
+			"review-1":    {ID: "review-1", BuildID: "build-stalled-frontend-phase", Role: RoleReviewer, Status: StatusIdle},
+		},
+		Tasks: []*Task{
+			{
+				ID:          "task-architecture",
+				Type:        TaskArchitecture,
+				Description: "Lock the contract",
+				AssignedTo:  "architect-1",
+				Status:      TaskCompleted,
+				CreatedAt:   oldUpdatedAt.Add(-2 * time.Minute),
+				CompletedAt: ptrTimeSpawn(oldUpdatedAt.Add(-90 * time.Second)),
+			},
+			{
+				ID:          "task-frontend",
+				Type:        TaskGenerateUI,
+				Description: "Build the frontend UI",
+				AssignedTo:  "frontend-1",
+				Status:      TaskCompleted,
+				CreatedAt:   oldUpdatedAt.Add(-90 * time.Second),
+				CompletedAt: ptrTimeSpawn(oldUpdatedAt.Add(-60 * time.Second)),
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			CurrentPhase: "frontend_ui",
+		},
+	}
+
+	am := &AgentManager{
+		builds:      map[string]*Build{build.ID: build},
+		agents:      map[string]*Agent{},
+		taskQueue:   make(chan *Task, 4),
+		resultQueue: make(chan *TaskResult, 1),
+		subscribers: map[string][]chan *WSMessage{},
+	}
+	for id, agent := range build.Agents {
+		am.agents[id] = agent
+	}
+
+	if ok := am.recoverStalledPhasedExecution(build); !ok {
+		t.Fatal("expected stalled phased execution to recover")
+	}
+	if build.SnapshotState.CurrentPhase != "data_foundation" {
+		t.Fatalf("expected build to move to data_foundation, got %q", build.SnapshotState.CurrentPhase)
+	}
+	if build.Status != BuildInProgress {
+		t.Fatalf("expected build to remain in progress, got %s", build.Status)
+	}
+	if !build.UpdatedAt.After(oldUpdatedAt) {
+		t.Fatalf("expected updated_at to advance, old=%s new=%s", oldUpdatedAt, build.UpdatedAt)
+	}
+	if len(build.Tasks) != 3 {
+		t.Fatalf("expected recovery to append the data foundation task, got %d tasks", len(build.Tasks))
+	}
+
+	nextTask := build.Tasks[len(build.Tasks)-1]
+	if nextTask.Type != TaskGenerateSchema {
+		t.Fatalf("expected next task type %s, got %s", TaskGenerateSchema, nextTask.Type)
+	}
+	if nextTask.AssignedTo != "database-1" {
+		t.Fatalf("expected next phase task to be assigned to database-1, got %q", nextTask.AssignedTo)
+	}
+	if nextTask.Status != TaskInProgress {
+		t.Fatalf("expected next phase task to be in progress, got %s", nextTask.Status)
+	}
+	if build.Agents["database-1"].Status != StatusWorking {
+		t.Fatalf("expected database agent to be working, got %s", build.Agents["database-1"].Status)
+	}
+
+	select {
+	case queued := <-am.taskQueue:
+		if queued.ID != nextTask.ID {
+			t.Fatalf("expected queued task %s, got %s", nextTask.ID, queued.ID)
+		}
+	default:
+		t.Fatal("expected recovered phase task to be queued")
+	}
+}
+
+func ptrTimeSpawn(t time.Time) *time.Time {
+	return &t
+}

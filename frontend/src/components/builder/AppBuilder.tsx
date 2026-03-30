@@ -350,7 +350,7 @@ const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<Suppo
     claude: { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
     gpt4: { id: 'gpt-5.4', name: 'GPT-5.4' },
     gemini: { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview' },
-    grok: { id: 'grok-code-fast-1', name: 'Grok Code Fast 1' },
+    grok: { id: 'grok-4.20-0309-reasoning', name: 'Grok 4.20' },
   },
 }
 
@@ -425,7 +425,7 @@ const canonicalizeModelId = (model?: string) => {
   if (value.startsWith('gemini-3-flash-preview')) return 'gemini-3-flash-preview'
   if (value.startsWith('gemini-2.5-flash-lite')) return 'gemini-2.5-flash-lite'
 
-  if (value.startsWith('grok-code-fast-1')) return 'grok-code-fast-1'
+  if (value.startsWith('grok-4.20')) return 'grok-4.20-0309-reasoning'
   if (value.startsWith('grok-3-mini')) return 'grok-3-mini'
   if (value.startsWith('grok-3')) return 'grok-3'
 
