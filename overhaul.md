@@ -1104,6 +1104,52 @@ Commit hash if pushed:
 - Local: pending
 - Remote: pending
 
+## Claude Pickup
+
+Use this section if Claude needs to resume without reconstructing context from chat.
+
+Current remote state:
+
+- `origin/main` includes backend reliability through `793dc21`:
+  - `fix: recover missing frontend shell in paid builds`
+- Production had not yet rolled that backend at last check:
+  - `/health/features.started_at = 2026-03-30T03:45:45.999919917Z`
+- Claude’s safe frontend polish lane is verified locally and ready to ship:
+  - commit `95eef17`
+  - scope: landing, billing, buy-credits modal, auth labels, mobile responsiveness
+  - intentionally untouched: `frontend/src/components/builder/*`, backend, e2e build canaries
+
+Most important live blocker:
+
+- The paid full-stack canary is now failing only on narrow late-stage generated-project defects.
+- The newest backend fix on `main` deterministically repairs a backend-only full-stack output by synthesizing a minimal Vite/React shell so preview validation can continue instead of failing at `95%`.
+
+Exact next steps:
+
+1. Wait for Render to deploy backend commit `793dc21`
+2. Confirm `/health/features.started_at` changes from `2026-03-30T03:45:45.999919917Z`
+3. Launch a fresh paid canary:
+   - `BASE_URL=https://api.apex-build.dev/api/v1 SMOKE_PROFILE=paid_fullstack MODE=full POWER_MODE=balanced LOGIN_EMAIL='admin@apex.build' LOGIN_PASSWORD='TheStarsh1pKEY!' POLL_SECONDS=10 MAX_POLLS=120 scripts/run_platform_build_smoke.sh`
+4. If the canary reaches `100%`, move to repeated paid canaries across `fast`, `balanced`, and `max`
+5. If it still fails, inspect the exact generated-project/runtime defect and keep iterating in `backend/internal/agents/manager.go`
+
+Safe Claude lane right now:
+
+- ship or extend non-builder frontend polish
+- continue roadmap/strategy docs
+- do not edit:
+  - `backend/internal/agents/*`
+  - `backend/internal/preview/*`
+  - `frontend/src/components/builder/*`
+  - `tests/e2e/specs/*` build canaries
+
+Latest frontend polish verification:
+
+- `cd frontend && npm run lint`
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run build`
+- `cd frontend && npm run test -- --run`
+
 ## Latest Paid Canary Fix: Missing Frontend Shell Recovery
 
 Date: 2026-03-30

@@ -1753,3 +1753,60 @@ Next exact step:
 2. Wait for Render to deploy it
 3. Run a fresh paid full-stack canary immediately
 4. If the canary still fails, inspect the next late-stage generated-project defect instead of revisiting orchestration
+
+## Claude Resume Notes
+
+Use this as the quickest pickup point on a new machine.
+
+Remote / deployment truth:
+
+- `origin/main` includes backend reliability through commit `793dc21`
+- That commit adds deterministic recovery for a paid/full-stack build that generated only backend files and no frontend preview shell
+- Last production poll still showed the older backend process:
+  - `started_at = 2026-03-30T03:45:45.999919917Z`
+
+Frontend polish truth:
+
+- Claude’s separate safe frontend polish commit is `95eef17`
+- Verified locally:
+  - `cd frontend && npm run lint`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run build`
+  - `cd frontend && npm run test -- --run`
+- Scope of that commit:
+  - landing mobile nav + responsive grids
+  - pricing/credit-pack accuracy
+  - billing layout overflow fixes
+  - buy credits modal touch targets / hover polish
+  - auth floating label fix
+- It intentionally leaves builder/orchestration surfaces untouched
+
+What Claude should do next if resuming the reliability lane:
+
+1. Confirm Render has deployed backend `793dc21`
+2. Run the paid canary command:
+   - `BASE_URL=https://api.apex-build.dev/api/v1 SMOKE_PROFILE=paid_fullstack MODE=full POWER_MODE=balanced LOGIN_EMAIL='admin@apex.build' LOGIN_PASSWORD='TheStarsh1pKEY!' POLL_SECONDS=10 MAX_POLLS=120 scripts/run_platform_build_smoke.sh`
+3. If it fails, inspect the exact late-stage error from:
+   - `/api/v1/build/:id`
+   - `tasks`
+   - `files`
+   - `error`
+4. Keep the fix scoped to:
+   - `backend/internal/agents/manager.go`
+   - `backend/internal/agents/*_test.go`
+   - `overhaul.md`
+   - `omen.md`
+
+What Claude should avoid touching while the canary is still red:
+
+- `frontend/src/components/builder/*`
+- `backend/internal/preview/*` unless the canary points directly at preview proof logic
+- `tests/e2e/specs/*` unless the canary harness itself is wrong
+
+Best file to read first:
+
+- `overhaul.md`
+
+Second file to read:
+
+- `omen.md`
