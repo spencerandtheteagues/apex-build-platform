@@ -19928,6 +19928,18 @@ func (am *AgentManager) quickSyntaxCheck(file GeneratedFile) []string {
 	return errors
 }
 
+type jstsScanMode int
+
+const (
+	jstsScanModeCode jstsScanMode = iota
+	jstsScanModeSingleQuote
+	jstsScanModeDoubleQuote
+	jstsScanModeTemplate
+	jstsScanModeLineComment
+	jstsScanModeBlockComment
+	jstsScanModeRegex
+)
+
 func detectLikelyTruncatedJSTSFile(path, content string) string {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
@@ -19959,7 +19971,231 @@ func detectLikelyTruncatedJSTSFile(path, content string) string {
 		return fmt.Sprintf("%s: Likely truncated source file (abrupt EOF near '%s')", path, last)
 	}
 
+	if structureErr := detectLikelyUnbalancedJSTSStructure(trimmed); structureErr != "" {
+		return fmt.Sprintf("%s: Likely truncated source file (%s)", path, structureErr)
+	}
+
 	return ""
+}
+
+func detectLikelyUnbalancedJSTSStructure(content string) string {
+	modeStack := []jstsScanMode{jstsScanModeCode}
+	templateBraceTargets := make([]int, 0)
+	braceDepth := 0
+	lastSignificant := byte(0)
+	regexEscaped := false
+	regexCharClass := false
+
+	pushMode := func(mode jstsScanMode) {
+		modeStack = append(modeStack, mode)
+	}
+	popMode := func() {
+		if len(modeStack) > 1 {
+			modeStack = modeStack[:len(modeStack)-1]
+		}
+	}
+	currentMode := func() jstsScanMode {
+		return modeStack[len(modeStack)-1]
+	}
+
+	for i := 0; i < len(content); i++ {
+		ch := content[i]
+		next := byte(0)
+		if i+1 < len(content) {
+			next = content[i+1]
+		}
+
+		switch currentMode() {
+		case jstsScanModeLineComment:
+			if ch == '\n' {
+				popMode()
+				lastSignificant = '\n'
+			}
+			continue
+		case jstsScanModeBlockComment:
+			if ch == '*' && next == '/' {
+				popMode()
+				i++
+			}
+			continue
+		case jstsScanModeSingleQuote:
+			if ch == '\\' {
+				i++
+				continue
+			}
+			if ch == '\'' {
+				popMode()
+				lastSignificant = '\''
+			}
+			continue
+		case jstsScanModeDoubleQuote:
+			if ch == '\\' {
+				i++
+				continue
+			}
+			if ch == '"' {
+				popMode()
+				lastSignificant = '"'
+			}
+			continue
+		case jstsScanModeTemplate:
+			if ch == '\\' {
+				i++
+				continue
+			}
+			if ch == '`' {
+				popMode()
+				lastSignificant = '`'
+				continue
+			}
+			if ch == '$' && next == '{' {
+				templateBraceTargets = append(templateBraceTargets, braceDepth)
+				braceDepth++
+				pushMode(jstsScanModeCode)
+				lastSignificant = '{'
+				i++
+			}
+			continue
+		case jstsScanModeRegex:
+			if regexEscaped {
+				regexEscaped = false
+				continue
+			}
+			switch ch {
+			case '\\':
+				regexEscaped = true
+			case '[':
+				if !regexCharClass {
+					regexCharClass = true
+				}
+			case ']':
+				if regexCharClass {
+					regexCharClass = false
+				}
+			case '/':
+				if !regexCharClass {
+					popMode()
+					lastSignificant = '/'
+				}
+			}
+			continue
+		}
+
+		if ch == ' ' || ch == '\t' || ch == '\r' {
+			continue
+		}
+		if ch == '\n' {
+			lastSignificant = '\n'
+			continue
+		}
+		if ch == '/' && next == '/' {
+			pushMode(jstsScanModeLineComment)
+			i++
+			continue
+		}
+		if ch == '/' && next == '*' {
+			pushMode(jstsScanModeBlockComment)
+			i++
+			continue
+		}
+		if ch == '/' && next != 0 && next != '/' && next != '*' && shouldStartJSTSRegex(lastSignificant) {
+			pushMode(jstsScanModeRegex)
+			regexEscaped = false
+			regexCharClass = false
+			continue
+		}
+
+		switch ch {
+		case '\'':
+			pushMode(jstsScanModeSingleQuote)
+		case '"':
+			pushMode(jstsScanModeDoubleQuote)
+		case '`':
+			pushMode(jstsScanModeTemplate)
+		case '{':
+			braceDepth++
+		case '}':
+			if braceDepth == 0 {
+				lastSignificant = '}'
+				continue
+			}
+			braceDepth--
+			if len(templateBraceTargets) > 0 && braceDepth == templateBraceTargets[len(templateBraceTargets)-1] {
+				templateBraceTargets = templateBraceTargets[:len(templateBraceTargets)-1]
+				popMode()
+			}
+		}
+
+		lastSignificant = ch
+	}
+
+	for len(modeStack) > 1 && currentMode() == jstsScanModeLineComment {
+		popMode()
+	}
+
+	switch currentMode() {
+	case jstsScanModeSingleQuote, jstsScanModeDoubleQuote:
+		return "unterminated string literal before EOF"
+	case jstsScanModeTemplate:
+		return "unterminated template literal before EOF"
+	case jstsScanModeBlockComment:
+		return "unterminated block comment before EOF"
+	case jstsScanModeRegex:
+		return "unterminated regular expression literal before EOF"
+	}
+
+	if braceDepth > 0 {
+		return "missing closing '}' before EOF"
+	}
+
+	return ""
+}
+
+func shouldStartJSTSRegex(lastSignificant byte) bool {
+	switch lastSignificant {
+	case 0, '\n', '(', '[', '{', '=', ':', ',', ';', '!', '?':
+		return true
+	default:
+		return false
+	}
+}
+
+func isLikelyTruncatableJSTSFile(file GeneratedFile) bool {
+	switch strings.ToLower(strings.TrimSpace(file.Language)) {
+	case "javascript", "typescript":
+		return true
+	}
+
+	lowerPath := strings.ToLower(strings.TrimSpace(file.Path))
+	return strings.HasSuffix(lowerPath, ".js") ||
+		strings.HasSuffix(lowerPath, ".jsx") ||
+		strings.HasSuffix(lowerPath, ".ts") ||
+		strings.HasSuffix(lowerPath, ".tsx")
+}
+
+func trackLikelyTruncatedSourceFiles(output *TaskOutput) {
+	if output == nil || len(output.Files) == 0 {
+		return
+	}
+
+	known := make(map[string]struct{}, len(output.TruncatedFiles))
+	for _, path := range output.TruncatedFiles {
+		known[path] = struct{}{}
+	}
+
+	for _, file := range output.Files {
+		if !isLikelyTruncatableJSTSFile(file) {
+			continue
+		}
+		if detectLikelyTruncatedJSTSFile(file.Path, file.Content) == "" {
+			continue
+		}
+		if _, exists := known[file.Path]; exists {
+			continue
+		}
+		output.TruncatedFiles = append(output.TruncatedFiles, file.Path)
+		known[file.Path] = struct{}{}
+	}
 }
 
 func taskHasRecentTruncationError(task *Task) bool {
@@ -20794,6 +21030,13 @@ func (am *AgentManager) completeTruncatedFiles(
 
 		target.Content = target.Content + "\n" + continuation
 		target.Size = int64(len(target.Content))
+		if isLikelyTruncatableJSTSFile(*target) {
+			if truncationErr := detectLikelyTruncatedJSTSFile(target.Path, target.Content); truncationErr != "" {
+				log.Printf("[chunked] continuation for %s still appears truncated: %s", target.Path, truncationErr)
+				remainingTruncated = append(remainingTruncated, path)
+				continue
+			}
+		}
 		log.Printf("[chunked] completed truncated file %s (+%d bytes)", path, len(continuation))
 	}
 
