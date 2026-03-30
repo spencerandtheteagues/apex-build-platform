@@ -3,7 +3,7 @@
 > **The cloud IDE that puts every major AI model in one place, gives you total cost transparency, and actually lets you own your code.**
 
 [![License: APEX Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](#license)
-[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://golang.org)
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://golang.org)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript)](https://typescriptlang.org)
 
@@ -15,7 +15,7 @@
 
 APEX.BUILD is a full-stack cloud development platform where you describe what you want to build in plain English and a coordinated team of AI agents writes the code, reviews it, fixes it, tests it, and deploys it — while you watch in real time and stay in complete control of every decision.
 
-This is not a toy. It runs production-grade multi-agent orchestration backed by six AI providers (Claude, OpenAI, Gemini, Grok, Ollama, and your own keys), a Monaco-powered IDE identical to VS Code, live preview with hot reload, one-click deployment to Vercel / Netlify / Render, real-time multiplayer collaboration, a full Git workflow, and a billing system with per-token cost tracking, hard budget caps, and an immutable transaction ledger so you always know exactly what you spent and why.
+This is not a toy. It runs multi-agent orchestration backed by five managed AI providers (Claude, OpenAI, Gemini, Grok, and Ollama) plus BYOK, a Monaco-powered IDE, live preview with hot reload, one-click deployment to Vercel / Netlify / Render, real-time multiplayer collaboration, a full Git workflow, and a billing system with per-token cost tracking, hard budget caps, and an append-only credit ledger model so you can audit spend over time.
 
 ---
 
@@ -47,8 +47,8 @@ If you have used Replit, Bolt, v0, or any AI coding platform, you have hit the s
 
 | Pain Point | Replit / Bolt / v0 | APEX.BUILD |
 |---|---|---|
-| **Locked into one AI** | Replit uses its own model. Bolt uses Claude only. v0 uses GPT-4o only. Zero choice. | Six providers: Claude, OpenAI, Gemini, Grok, Ollama, or your own keys. Switch per task. Mix mid-build. |
-| **Opaque, unpredictable bills** | Credits vanish with no explanation. No per-request visibility. | Real-time per-token cost ticker on every request. Immutable credit ledger. Budget cap enforcement before anything expensive runs. |
+| **Locked into one AI** | Replit uses its own model. Bolt uses Claude only. v0 uses GPT-4o only. Zero choice. | Five managed providers plus BYOK: Claude, OpenAI, Gemini, Grok, Ollama, or your own keys. Switch per task. Mix mid-build. |
+| **Opaque, unpredictable bills** | Credits vanish with no explanation. No per-request visibility. | Real-time per-token cost ticker on every request. Append-only credit ledger model. Budget cap enforcement before anything expensive runs. |
 | **Always-on pricing gouges you** | Replit charges extra monthly per app to stay awake. Free apps spin down. | Deploy once to Vercel, Netlify, or Render. Your app lives on your account. Hosting cost is between you and the host, not APEX. |
 | **Your code is trapped** | Replit makes leaving awkward. Bolt has no export. Code lives on their servers. | Full GitHub export any time. Git push to your own repo. Your code is yours. Always. |
 | **One AI doing everything** | A single model writes, reviews, and debugs — so the reviewer always agrees with the writer. | Ten specialized agents with distinct roles. The Reviewer is deliberately separate from the writers. The Solver specializes in failures no other agent could fix. |
@@ -117,7 +117,7 @@ APEX.BUILD treats AI providers as interchangeable infrastructure. The AI router 
 
 **Cost ceiling enforcement** — Maximum spend per request enforced per provider. Requests that would exceed the ceiling are rerouted to a cheaper model in the same chain.
 
-### All Six Providers
+### Managed Providers + BYOK
 
 | Provider | Best For | Available Models |
 |---|---|---|
@@ -267,7 +267,7 @@ All plans: all 10 agent roles, live preview, deployment integrations, full Git, 
 
 ## Technical Stack
 
-**Backend:** Go 1.23, Gin, GORM, PostgreSQL 15, Redis 7, Stripe Go SDK, Docker
+**Backend:** Go 1.26, Gin, GORM, PostgreSQL 15, Redis 7, Stripe Go SDK, Docker
 
 **Frontend:** React 18, TypeScript, Vite 5, TailwindCSS, Monaco Editor, xterm.js, Framer Motion, Zustand
 
@@ -306,12 +306,20 @@ apex-build/
 └── docker-compose.yml                 # Local development stack
 ```
 
+Canonical runtime entrypoints:
+
+- `backend/cmd/main.go` is the production server entrypoint.
+- `backend/main.go` is a build-ignored legacy snapshot kept for reference only.
+- `investor-demo/` and `my-new-project/` are non-runtime demo/scratch directories and are not part of the product deploy path.
+
+See [docs/architecture.md](docs/architecture.md) for request flow, agent orchestration, billing, preview, collaboration, and deployment maps.
+
 ---
 
 ## Running Locally
 
 ### Prerequisites
-Go 1.23+, Node.js 18+, PostgreSQL 15+, Docker
+Go 1.26+, Node.js 18+, PostgreSQL 15+, Docker
 
 ### Setup
 

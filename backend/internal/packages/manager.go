@@ -288,7 +288,7 @@ func CreateDependencyFile(db *gorm.DB, projectID uint, pkgType PackageType) (*mo
 	case PackageTypeGo:
 		fileName = "go.mod"
 		mimeType = "text/plain"
-		content = "module main\n\ngo 1.23\n"
+		content = "module main\n\ngo 1.26\n"
 	default:
 		return nil, fmt.Errorf("unsupported package type: %s", pkgType)
 	}

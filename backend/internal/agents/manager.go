@@ -5972,7 +5972,7 @@ func extractDependencyRepairHintsFromReadinessErrors(errors []string) []string {
 		} else if strings.HasPrefix(msg, "missing_manifest: go.mod") {
 			manifestHints = append(manifestHints,
 				"MISSING REQUIRED FILE: go.mod\n"+
-					"You MUST create a go.mod file with the module name and Go version (e.g. module app\\n\\ngo 1.23), "+
+					"You MUST create a go.mod file with the module name and Go version (e.g. module app\\n\\ngo 1.26), "+
 					"plus require entries for all third-party packages imported in the .go files.")
 		} else if strings.HasPrefix(msg, "missing_manifest: requirements.txt") {
 			manifestHints = append(manifestHints,
@@ -9197,7 +9197,7 @@ func (am *AgentManager) applyDeterministicMissingManifestRepair(build *Build, re
 			}
 		}
 		var sb strings.Builder
-		sb.WriteString("module app\n\ngo 1.23\n")
+		sb.WriteString("module app\n\ngo 1.26\n")
 		if len(thirdPartyPkgs) > 0 {
 			sb.WriteString("\nrequire (\n")
 			for pkg := range thirdPartyPkgs {
@@ -15990,7 +15990,7 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 		case "go", "golang":
 			lines = append(lines, "  Use Go with net/http or chi router. Entry: main.go. Module: go.mod required.")
 			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
-			lines = append(lines, "  □ go.mod — Go module manifest (module name + go 1.23)")
+			lines = append(lines, "  □ go.mod — Go module manifest (module name + go 1.26)")
 			lines = append(lines, "  □ main.go (or cmd/main.go) — main() function entry point")
 			if stack.Frontend != "" {
 				fePort := canonicalFrontendPort(stack.Frontend)

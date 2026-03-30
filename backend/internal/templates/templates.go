@@ -1298,7 +1298,7 @@ func deleteItem(c *fiber.Ctx) error {
 			Path: "go.mod",
 			Content: `module myapi
 
-go 1.23
+go 1.26
 
 require github.com/gofiber/fiber/v2 v2.52.0
 `,

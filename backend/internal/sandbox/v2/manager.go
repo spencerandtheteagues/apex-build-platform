@@ -361,7 +361,7 @@ func DefaultLanguageTemplates() map[string]LanguageTemplate {
 		"go": {
 			Language: "go",
 			FileName: "main.go",
-			Image:    "golang:1.23-bookworm",
+			Image:    "golang:1.26-bookworm",
 			WorkDir:  "/workspace",
 			CommandTemplate: []string{
 				"sh", "-lc", "go run {{file}}",

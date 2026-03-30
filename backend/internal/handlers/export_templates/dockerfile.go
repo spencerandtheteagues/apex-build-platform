@@ -22,7 +22,7 @@ EXPOSE 3000
 CMD ["node", "dist/index.js"]
 `
 	case "go", "golang":
-		return `FROM golang:1.23-alpine AS builder
+		return `FROM golang:1.26-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download

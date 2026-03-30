@@ -315,7 +315,7 @@ func (s *BuildService) GenerateBuildConfig(projectType ProjectType, files []Proj
 		config.BuildCommand = "go build -o app ."
 		config.InstallCommand = "go mod download"
 		config.StartCommand = "./app"
-		config.GoVersion = "1.23"
+		config.GoVersion = "1.26"
 		config.Procfile = "web: ./app"
 		config.Dockerfile = s.generateGoDockerfile()
 
@@ -515,7 +515,7 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]`
 }
 
 func (s *BuildService) generateGoDockerfile() string {
-	return `FROM golang:1.23-alpine AS builder
+	return `FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 

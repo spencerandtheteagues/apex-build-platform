@@ -69,7 +69,7 @@ type NativeDeployment struct {
 	Framework      string `json:"framework,omitempty" gorm:"type:varchar(50)"`
 	NodeVersion    string `json:"node_version,omitempty" gorm:"default:'18'"`
 	PythonVersion  string `json:"python_version,omitempty" gorm:"default:'3.11'"`
-	GoVersion      string `json:"go_version,omitempty" gorm:"default:'1.23'"`
+	GoVersion      string `json:"go_version,omitempty" gorm:"default:'1.26'"`
 
 	// Resource limits
 	MemoryLimit   int64 `json:"memory_limit" gorm:"default:512"`   // MB

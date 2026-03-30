@@ -2100,7 +2100,7 @@ body {
 	case "api/go-http":
 		add(".env.example", "PORT=8080\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
 		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this Go API scaffold.\n\n## Run\n\n1. Copy `.env.example`\n2. Run `go run .`\n3. Open `http://localhost:8080/health`\n", displayName))
-		add("go.mod", fmt.Sprintf("module %s\n\ngo 1.23.0\n", strings.ReplaceAll(packageName, "-", "")))
+		add("go.mod", fmt.Sprintf("module %s\n\ngo 1.26.0\n", strings.ReplaceAll(packageName, "-", "")))
 		add("main.go", fmt.Sprintf(`package main
 
 import (
@@ -2133,7 +2133,7 @@ func main() {
 	case "fullstack/react-vite-go":
 		add(".env.example", "PORT=8080\nVITE_API_URL=http://localhost:8080\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
 		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this React + Vite + Go scaffold.\n\n## Run\n\n1. Install frontend deps: `npm install`\n2. Start Go backend: `go run .`\n3. Start frontend: `npm run dev`\n4. Open `http://localhost:5173`\n", displayName))
-		add("go.mod", fmt.Sprintf("module %s\n\ngo 1.23.0\n", strings.ReplaceAll(packageName, "-", "")))
+		add("go.mod", fmt.Sprintf("module %s\n\ngo 1.26.0\n", strings.ReplaceAll(packageName, "-", "")))
 		add("main.go", fmt.Sprintf(`package main
 
 import (

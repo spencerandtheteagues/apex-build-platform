@@ -1,7 +1,7 @@
 # APEX.BUILD Go Sandbox Image
 # Minimal, secure Go execution environment
 
-FROM golang:1.23-bookworm
+FROM golang:1.26-bookworm
 
 # Security: Create unprivileged user
 RUN groupadd -r sandbox && useradd -r -g sandbox -d /home/sandbox -s /bin/false sandbox

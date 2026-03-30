@@ -63,7 +63,7 @@ func (h *EnvironmentHandler) RegisterEnvironmentRoutes(rg *gin.RouterGroup) {
 type EnvironmentConfig struct {
 	// Language runtime configuration
 	Language string `json:"language"` // node, python, go, rust, java, ruby, php
-	Version  string `json:"version"`  // Runtime version (e.g., "20", "3.11", "1.23")
+	Version  string `json:"version"`  // Runtime version (e.g., "20", "3.11", "1.26")
 
 	// Package dependencies
 	Packages    []PackageDependency `json:"packages"`     // Language-specific packages
@@ -313,8 +313,8 @@ func (h *EnvironmentHandler) GetAvailableRuntimes(c *gin.Context) {
 			ID:             "go",
 			Name:           "Go",
 			Description:    "Fast, efficient compiled language by Google",
-			Versions:       []string{"1.23", "1.22", "1.21"},
-			Default:        "1.23",
+			Versions:       []string{"1.26", "1.25", "1.24"},
+			Default:        "1.26",
 			PackageManager: "go",
 			Icon:           "go",
 		},
@@ -489,7 +489,7 @@ func (h *EnvironmentHandler) GetEnvironmentPresets(c *gin.Context) {
 			Name:        "Gin REST API",
 			Description: "High-performance Go web framework",
 			Language:    "go",
-			Version:     "1.23",
+			Version:     "1.26",
 			Packages: []PackageDependency{
 				{Name: "github.com/gin-gonic/gin", Version: "v1.9.1"},
 				{Name: "gorm.io/gorm", Version: "v1.25.0"},
@@ -717,7 +717,7 @@ func getDefaultEnvironmentConfig(language string) *EnvironmentConfig {
 		},
 		"go": {
 			Language: "go",
-			Version:  "1.23",
+			Version:  "1.26",
 			Packages: []PackageDependency{},
 			System:   []string{"git"},
 		},
@@ -806,7 +806,7 @@ func detectEnvironmentFromFiles(files []models.File, project *models.Project) *E
 		case "go.mod":
 			hasGoMod = true
 			config.Language = "go"
-			config.Version = "1.23"
+			config.Version = "1.26"
 		case "Cargo.toml":
 			hasCargoToml = true
 			config.Language = "rust"
@@ -925,7 +925,7 @@ func getDefaultVersionForLanguage(language string) string {
 		"javascript": "20",
 		"typescript": "20",
 		"python":     "3.11",
-		"go":         "1.23",
+		"go":         "1.26",
 		"rust":       "1.75",
 		"java":       "17",
 		"ruby":       "3.2",
@@ -1095,7 +1095,7 @@ func getPresetByID(presetID string) *EnvironmentPreset {
 			ID:       "gin-api",
 			Name:     "Gin REST API",
 			Language: "go",
-			Version:  "1.23",
+			Version:  "1.26",
 			Packages: []PackageDependency{
 				{Name: "github.com/gin-gonic/gin", Version: "v1.9.1"},
 				{Name: "gorm.io/gorm", Version: "v1.25.0"},

@@ -1,8 +1,8 @@
 //go:build ignore
 // +build ignore
 
-// APEX.BUILD Production Server
-// Real cloud development platform to beat Replit
+// Legacy ignored entrypoint kept for historical reference.
+// The canonical backend server entrypoint is ./cmd/main.go.
 
 package main
 

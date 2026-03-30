@@ -470,7 +470,7 @@ WORKDIR /work
 ENV NODE_ENV=production
 `
 	case "go":
-		return `FROM golang:1.23-bookworm
+		return `FROM golang:1.26-bookworm
 RUN useradd -m -s /bin/false sandbox && \
     mkdir -p /work /tmp /tmp/go-cache /tmp/go-mod && \
     chown -R sandbox:sandbox /work /tmp /go
@@ -1047,7 +1047,7 @@ func (s *ContainerSandbox) getImageName(language string) string {
 	case "javascript":
 		return "node:20-slim"
 	case "go":
-		return "golang:1.23"
+		return "golang:1.26"
 	case "rust":
 		return "rust:1.75-slim"
 	case "java":
