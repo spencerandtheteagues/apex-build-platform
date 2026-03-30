@@ -2944,6 +2944,76 @@ describe("api", () => {
 	}
 }
 
+func TestApplyDeterministicValidationRepairsReplacesNestedBackendGeneratedTestFileWithPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-generated-nested-backend-test-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:    "package.json",
+				Content: "{\"name\":\"agency-ops\",\"private\":true}\n",
+				IsNew:   true,
+			},
+			{
+				Path: "server/__tests__/routes/api.test.ts",
+				Content: `import request from "supertest";
+import { describe, it, expect } from "@jest/globals";
+import api from "../../index";
+
+describe("api", () => {
+  it("responds", async () => {
+    expect(api).toBeTruthy();
+    expect(request).toBeTruthy();
+  });
+});`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			`Preview verification build failed: server/__tests__/routes/api.test.ts(1,21): error TS2307: Cannot find module 'supertest' or its corresponding type declarations.`,
+			`server/__tests__/routes/api.test.ts(3,8): error TS1192: Module '"../../index"' has no default export.`,
+			`server/__tests__/routes/api.test.ts(5,1): error TS2582: Cannot find name 'describe'.`,
+		},
+		"broken nested generated backend test",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected nested broken backend generated test repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedFile *GeneratedFile
+	for i := range files {
+		if files[i].Path == "server/__tests__/routes/api.test.ts" {
+			repairedFile = &files[i]
+			break
+		}
+	}
+	if repairedFile == nil {
+		t.Fatalf("expected repaired nested backend test file to exist, got %+v", files)
+	}
+	if strings.Contains(repairedFile.Content, "supertest") || strings.Contains(repairedFile.Content, "../../index") {
+		t.Fatalf("expected nested backend placeholder repair to strip brittle imports, got %q", repairedFile.Content)
+	}
+	if !strings.Contains(repairedFile.Content, "generated verification placeholder") {
+		t.Fatalf("expected nested backend placeholder repair content, got %q", repairedFile.Content)
+	}
+}
+
 func TestApplyDeterministicValidationRepairsStripsSequelizeUniqueKeys(t *testing.T) {
 	t.Parallel()
 
