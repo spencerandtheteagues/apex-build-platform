@@ -30,7 +30,6 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
 
 jobs:
   # ============================================
@@ -148,8 +147,8 @@ jobs:
           tags: ${{ steps.meta-frontend.outputs.tags }}
           labels: ${{ steps.meta-frontend.outputs.labels }}
           build-args: |
-            VITE_API_URL=${{ secrets.VITE_API_URL || 'https://api.apex.build/api/v1' }}
-            VITE_WS_URL=${{ secrets.VITE_WS_URL || 'wss://api.apex.build/ws' }}
+            VITE_API_URL=${{ secrets.VITE_API_URL || 'https://api.apex-build.dev/api/v1' }}
+            VITE_WS_URL=${{ secrets.VITE_WS_URL || 'wss://api.apex-build.dev/ws' }}
             VERSION=${{ needs.validate.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -192,7 +191,7 @@ jobs:
     needs: [validate, build-images, migrate-database]
     environment:
       name: ${{ needs.validate.outputs.deploy_env }}
-      url: https://api.apex.build
+      url: https://api.apex-build.dev
     steps:
       - name: Deploy backend service
         env:
@@ -229,7 +228,7 @@ jobs:
           ATTEMPT=0
 
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            HEALTH_JSON=$(curl -fsS https://api.apex.build/ready || true)
+            HEALTH_JSON=$(curl -fsS https://api.apex-build.dev/ready || true)
             STATUS=$(printf '%s' "$HEALTH_JSON" | jq -r '.status // "unavailable"' 2>/dev/null || echo "unavailable")
             READY=$(printf '%s' "$HEALTH_JSON" | jq -r '.ready // "false"' 2>/dev/null || echo "false")
 
@@ -253,7 +252,7 @@ jobs:
     needs: [validate, build-images, deploy-backend]
     environment:
       name: ${{ needs.validate.outputs.deploy_env }}
-      url: https://apex.build
+      url: https://apex-build.dev
     steps:
       - name: Deploy frontend service
         env:
@@ -288,7 +287,7 @@ jobs:
           ATTEMPT=0
 
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            HEALTH=$(curl -s -o /dev/null -w "%{http_code}" https://apex.build/health || echo "000")
+            HEALTH=$(curl -s -o /dev/null -w "%{http_code}" https://apex-build.dev/health || echo "000")
 
             if [ "$HEALTH" = "200" ]; then
               echo "Frontend is healthy!"
@@ -321,7 +320,7 @@ jobs:
 
           # Test backend health endpoint
           echo "Testing backend health..."
-          BACKEND_HEALTH=$(curl -fsS https://api.apex.build/ready)
+          BACKEND_HEALTH=$(curl -fsS https://api.apex-build.dev/ready)
           echo "Backend health: $BACKEND_HEALTH"
 
           if printf '%s' "$BACKEND_HEALTH" | jq -e '.status == "healthy"' >/dev/null; then
@@ -333,7 +332,7 @@ jobs:
 
           # Test frontend is serving
           echo "Testing frontend..."
-          FRONTEND_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://apex.build)
+          FRONTEND_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://apex-build.dev)
 
           if [ "$FRONTEND_STATUS" = "200" ]; then
             echo "Frontend is accessible"
@@ -344,7 +343,7 @@ jobs:
 
           # Test API endpoint
           echo "Testing API endpoint..."
-          API_DOCS=$(curl -s -o /dev/null -w "%{http_code}" https://api.apex.build/docs)
+          API_DOCS=$(curl -s -o /dev/null -w "%{http_code}" https://api.apex-build.dev/docs)
 
           if [ "$API_DOCS" = "200" ]; then
             echo "API docs endpoint accessible"
@@ -377,12 +376,12 @@ jobs:
           echo "| Status | ${{ needs.smoke-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### URLs" >> $GITHUB_STEP_SUMMARY
-          echo "- Frontend: https://apex.build" >> $GITHUB_STEP_SUMMARY
-          echo "- Backend API: https://api.apex.build" >> $GITHUB_STEP_SUMMARY
-          echo "- API Docs: https://api.apex.build/docs" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend: https://apex-build.dev" >> $GITHUB_STEP_SUMMARY
+          echo "- Backend API: https://api.apex-build.dev" >> $GITHUB_STEP_SUMMARY
+          echo "- API Docs: https://api.apex-build.dev/docs" >> $GITHUB_STEP_SUMMARY
 
       - name: Send Slack notification (if configured)
-        if: secrets.SLACK_WEBHOOK_URL != ''
+        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
