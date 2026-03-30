@@ -689,7 +689,20 @@ interface PremiumTextareaProps {
   maxLength?: number
 }
 
-const PremiumTextarea: React.FC<PremiumTextareaProps> = ({ value, onChange, maxLength = 2000 }) => {
+const FAST_BUILD_PROMPT_MAX_LENGTH = 2000
+const BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH = 25000
+const FULL_BUILD_PROMPT_MAX_LENGTH = 50000
+
+const getBuildPromptMaxLength = (mode: BuildMode, powerMode: 'fast' | 'balanced' | 'max') =>
+  mode !== 'full'
+    ? FAST_BUILD_PROMPT_MAX_LENGTH
+    : powerMode === 'max'
+      ? FULL_BUILD_PROMPT_MAX_LENGTH
+      : powerMode === 'balanced'
+        ? BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH
+        : FAST_BUILD_PROMPT_MAX_LENGTH
+
+const PremiumTextarea: React.FC<PremiumTextareaProps> = ({ value, onChange, maxLength = FAST_BUILD_PROMPT_MAX_LENGTH }) => {
   const [isFocused, setIsFocused] = useState(false)
   const isEmpty = value.length === 0
   const progressPercent = (value.length / maxLength) * 100
@@ -743,7 +756,7 @@ For example:
               "h-full rounded-full transition-all duration-500 relative overflow-hidden",
               progressPercent > 80 ? "bg-orange-500" : progressPercent > 50 ? "bg-yellow-500" : "bg-red-500"
             )}
-            style={{ width: `${progressPercent}%` }}
+            style={{ width: `${Math.min(progressPercent, 100)}%` }}
           >
             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent" style={{ animation: 'shimmer 1.5s infinite' }} />
           </div>
@@ -1351,6 +1364,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const AUTO_STACK_ID = 'auto'
   const [selectedStack, setSelectedStack] = useState<Set<string>>(new Set([AUTO_STACK_ID]))
   const [powerMode, setPowerMode] = useState<'fast' | 'balanced' | 'max'>('fast')
+  const promptMaxLength = getBuildPromptMaxLength(buildMode, powerMode)
+  const maxPowerPromptLimitEnabled = buildMode === 'full' && powerMode === 'max'
+  const balancedPromptLimitEnabled = buildMode === 'full' && powerMode === 'balanced'
 
   // Model role assignment state
   const [roleConfigMode, setRoleConfigMode] = useState<'auto' | 'manual'>('auto')
@@ -4233,6 +4249,18 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   // Start build
   const startBuild = async () => {
     if (!appDescription.trim()) return
+    if (appDescription.length > promptMaxLength) {
+      addSystemMessage(
+        buildMode === 'fast'
+          ? `Fast Build prompts are capped at ${FAST_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters. Switch to Full Build with Balanced for ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} or Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
+          : powerMode === 'max'
+            ? `Full Build Max Power prompts are capped at ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters.`
+            : powerMode === 'balanced'
+              ? `Full Build Balanced prompts are capped at ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters. Switch AI Power to Max for up to ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
+              : `Full Build prompts stay capped at ${FAST_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters on Fast power. Switch AI Power to Balanced for ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} or Max for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
+      )
+      return
+    }
 
     setIsBuilding(true)
     setGeneratedFiles([])
@@ -4884,8 +4912,17 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   <PremiumTextarea
                     value={appDescription}
                     onChange={setAppDescription}
-                    maxLength={2000}
+                    maxLength={promptMaxLength}
                   />
+                  <p className="mt-3 text-xs text-gray-500">
+                    {maxPowerPromptLimitEnabled
+                      ? `Full Build with Max Power supports up to ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters.`
+                      : balancedPromptLimitEnabled
+                        ? `Full Build with Balanced supports up to ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters. Switch to Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
+                      : buildMode === 'full'
+                        ? `Full Build stays at ${FAST_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters on Fast power. Switch to Balanced for ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} or Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`
+                        : `Fast Build stays at ${FAST_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} characters. Switch to Full Build with Balanced for ${BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()} or Max Power for ${FULL_BUILD_PROMPT_MAX_LENGTH.toLocaleString()}.`}
+                  </p>
                 </div>
 
                 {/* Asset Uploader — upload files for AI agents to use */}

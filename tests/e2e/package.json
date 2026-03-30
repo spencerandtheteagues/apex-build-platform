@@ -8,7 +8,8 @@
     "test": "npm run generate && playwright test",
     "test:headed": "npm run generate && playwright test --headed",
     "test:smoke": "npm run generate && playwright test specs/generated",
-    "test:launch": "playwright test specs/launch.prod.smoke.spec.ts"
+    "test:launch": "playwright test specs/launch.prod.smoke.spec.ts",
+    "test:preview-verify": "playwright test specs/preview-verification.spec.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",

@@ -1,0 +1,32 @@
+{
+  "id": "benchmark-runtime-verify",
+  "name": "Benchmark: Preview Runtime Verify Service",
+  "sharedAuth": true,
+  "healthChecks": [
+    {
+      "name": "backend-health",
+      "url": "${PLAYWRIGHT_API_URL:-http://localhost:8080}/health",
+      "expectStatus": 200
+    },
+    {
+      "name": "features-endpoint-available",
+      "url": "${PLAYWRIGHT_API_URL:-http://localhost:8080}/health/features",
+      "expectStatus": 200
+    }
+  ],
+  "authFlows": [
+    {
+      "name": "bench-rv-auth",
+      "register": true,
+      "login": true,
+      "usernamePrefix": "pw_bench_rv_",
+      "password": "BenchRV123!"
+    }
+  ],
+  "preflightScenarios": [
+    {
+      "name": "preflight-runtime-verify-context",
+      "expectReady": true
+    }
+  ]
+}

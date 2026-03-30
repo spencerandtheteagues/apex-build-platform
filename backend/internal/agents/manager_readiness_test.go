@@ -1668,6 +1668,43 @@ func TestCompleteTruncatedFilesKeepsUnresolvedParserWarning(t *testing.T) {
 	}
 }
 
+func TestCompleteTruncatedFilesKeepsStructurallyIncompleteContinuationTracked(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{
+		aiRouter: &truncationRouterStub{
+			response: &ai.AIResponse{
+				Content: "await seedUsers()\n",
+			},
+		},
+	}
+
+	resp := "// File: tests/verify-integration.ts\n" +
+		"```typescript\n" +
+		"export async function verifyIntegration() {\n" +
+		"  await setupApp()\n"
+	out := am.parseTaskOutput(TaskTest, resp)
+
+	am.completeTruncatedFiles(
+		context.Background(),
+		&Task{ID: "task-2b"},
+		&Build{UserID: 1, PowerMode: PowerFast},
+		&Agent{Provider: ai.ProviderClaude},
+		out,
+	)
+
+	if len(out.TruncatedFiles) != 1 || out.TruncatedFiles[0] != "tests/verify-integration.ts" {
+		t.Fatalf("expected structurally incomplete continuation to remain tracked, got %v", out.TruncatedFiles)
+	}
+	ok, errs := am.verifyGeneratedCode("build-test", out)
+	if ok {
+		t.Fatalf("expected verification to fail while JS/TS truncation remains unresolved")
+	}
+	if !containsError(errs, "Likely truncated source file") {
+		t.Fatalf("expected truncation error surfaced after incomplete continuation, got %v", errs)
+	}
+}
+
 func TestQuickSyntaxCheckDetectsLikelyTruncatedTypeScriptEOF(t *testing.T) {
 	t.Parallel()
 
@@ -1679,6 +1716,54 @@ func TestQuickSyntaxCheckDetectsLikelyTruncatedTypeScriptEOF(t *testing.T) {
 	})
 	if !containsError(errs, "Likely truncated source file") {
 		t.Fatalf("expected truncation error, got %v", errs)
+	}
+}
+
+func TestQuickSyntaxCheckDetectsMissingClosingBraceAtEOF(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	errs := am.quickSyntaxCheck(GeneratedFile{
+		Path:     "tests/verify-integration.ts",
+		Language: "typescript",
+		Content:  "export async function verifyIntegration() {\n  await page.goto('/')\n",
+	})
+	if !containsError(errs, "missing closing '}' before EOF") {
+		t.Fatalf("expected missing brace truncation error, got %v", errs)
+	}
+}
+
+func TestQuickSyntaxCheckAllowsRegexLiteralWithEscapedBrace(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	errs := am.quickSyntaxCheck(GeneratedFile{
+		Path:     "src/lib/pattern.ts",
+		Language: "typescript",
+		Content:  "export const literalBrace = /\\{/;\nexport default literalBrace\n",
+	})
+	if containsError(errs, "Likely truncated source file") {
+		t.Fatalf("expected escaped-brace regex to avoid truncation false positive, got %v", errs)
+	}
+}
+
+func TestTrackLikelyTruncatedSourceFilesAddsAbruptEOFJSFiles(t *testing.T) {
+	t.Parallel()
+
+	out := &TaskOutput{
+		Files: []GeneratedFile{
+			{
+				Path:     "tests/verify-integration.ts",
+				Language: "typescript",
+				Content:  "export async function verifyIntegration() {\n  await page.goto('/')\n",
+			},
+		},
+	}
+
+	trackLikelyTruncatedSourceFiles(out)
+
+	if len(out.TruncatedFiles) != 1 || out.TruncatedFiles[0] != "tests/verify-integration.ts" {
+		t.Fatalf("expected abrupt EOF file to be tracked for continuation, got %v", out.TruncatedFiles)
 	}
 }
 
@@ -3531,6 +3616,24 @@ func TestParsePreviewSyntaxErrorTargetFiles(t *testing.T) {
 	}
 }
 
+func TestParsePreviewSyntaxErrorTargetFilesHandlesEsbuildErrors(t *testing.T) {
+	t.Parallel()
+
+	errs := []string{
+		"Preview verification build failed: [vite:esbuild] Transform failed with 2 errors:\n" +
+			"/tmp/apex-build-123/src/components/LoginForm.tsx:14:49: ERROR: Unterminated string literal\n" +
+			"file: /tmp/apex-build-123/src/components/LoginForm.tsx:14:49\n" +
+			"/tmp/apex-build-123/src/App.tsx:2:13: ERROR: Unexpected end of file",
+	}
+
+	targets := parsePreviewSyntaxErrorTargetFiles(errs)
+	got := strings.Join(targets, ",")
+	want := "src/App.tsx,src/components/LoginForm.tsx"
+	if got != want {
+		t.Fatalf("unexpected esbuild syntax target files: got %q want %q", got, want)
+	}
+}
+
 func TestParsePreviewSyntaxErrorTargetFilesIncludesAbruptEOFMessages(t *testing.T) {
 	t.Parallel()
 
@@ -3938,6 +4041,64 @@ func TestRepairDoubleSingleQuoteCorruption(t *testing.T) {
 	}
 	if !strings.Contains(out, "'react'") || !strings.Contains(out, "'hello'") {
 		t.Fatalf("expected normalized single-quoted strings, got %q", out)
+	}
+}
+
+func TestApplyDeterministicValidationRepairsAppliesQuoteRepairForEsbuildErrors(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-esbuild-syntax-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:     "src/components/LoginForm.tsx",
+				Content:  "export default function LoginForm(){ return <button aria-label={''Login''}>Login</button> }\n",
+				Language: "typescript",
+				IsNew:    true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{
+			"Preview verification build failed: [vite:esbuild] Transform failed with 1 error:\n" +
+				"/tmp/apex-build-123/src/components/LoginForm.tsx:14:49: ERROR: Unterminated string literal",
+		},
+		"preview build failed",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected deterministic esbuild syntax repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedContent string
+	for _, file := range files {
+		if file.Path == "src/components/LoginForm.tsx" {
+			repairedContent = file.Content
+			break
+		}
+	}
+	if repairedContent == "" {
+		t.Fatalf("expected repaired LoginForm file, got %+v", files)
+	}
+	if strings.Contains(repairedContent, "''Login''") {
+		t.Fatalf("expected quote corruption to be repaired, got %q", repairedContent)
+	}
+
+	state := build.SnapshotState.Orchestration
+	if state == nil || len(state.PatchBundles) == 0 {
+		t.Fatalf("expected patch bundle capture for esbuild syntax repair, got %+v", state)
 	}
 }
 

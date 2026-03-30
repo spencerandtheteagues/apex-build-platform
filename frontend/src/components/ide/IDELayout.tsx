@@ -1013,6 +1013,9 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
           onMenuToggle={setMobileMenuOpen}
           user={user || undefined}
           onLogout={logout}
+          onSearch={() => setActiveLeftTab('search')}
+          onGitOpen={() => setActiveLeftTab('git')}
+          onProjectsOpen={openProjectsView}
         />
 
         {/* Main content area with safe area padding */}

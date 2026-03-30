@@ -4690,7 +4690,7 @@ func (am *AgentManager) processResult(result *TaskResult) {
 		// Collaborative incident mode: providers discuss and vote on recovery strategy.
 		// Skip consensus entirely for auth/billing/credit failures — these are deterministic
 		// and no amount of retrying, provider switching, or solver spawning will fix them.
-		if !insufficientCredits && !nonRetriable && buildErr == nil && am.shouldRunFailureConsensus(build, task, errorMsg) {
+		if !insufficientCredits && !nonRetriable && buildErr == nil && am.shouldRunFailureConsensus(build, task, errorMsg, retryStrategy) {
 			decision, votes := am.runFailureConsensus(build, agent, task, result.Error, retryStrategy)
 			if task.Input == nil {
 				task.Input = map[string]any{}
@@ -6814,38 +6814,96 @@ func (am *AgentManager) applyDeterministicManifestDependencyRepair(build *Build,
 	return am.bundleFromPatchPlan(build.ID, files, plan, "manifest_repair: "+summary), summary
 }
 
+func normalizePreviewSyntaxErrorPath(raw string) string {
+	cleaned := strings.TrimSpace(strings.Trim(raw, `"'`))
+	if cleaned == "" {
+		return ""
+	}
+	cleaned = strings.TrimPrefix(cleaned, "file://")
+	cleaned = strings.TrimPrefix(cleaned, "file:")
+	cleaned = strings.ReplaceAll(cleaned, "\\", "/")
+	cleaned = strings.TrimPrefix(cleaned, "./")
+	if path := sanitizeFilePath(cleaned); path != "" {
+		return path
+	}
+
+	roots := []string{
+		"src/",
+		"server/",
+		"backend/",
+		"frontend/",
+		"apps/",
+		"packages/",
+		"public/",
+	}
+	best := ""
+	for _, root := range roots {
+		candidate := ""
+		if strings.HasPrefix(cleaned, root) {
+			candidate = cleaned
+		} else if idx := strings.Index(cleaned, "/"+root); idx != -1 {
+			candidate = cleaned[idx+1:]
+		}
+		if candidate == "" {
+			continue
+		}
+		if path := sanitizeFilePath(candidate); path != "" && (best == "" || len(path) < len(best)) {
+			best = path
+		}
+	}
+	return best
+}
+
 func parsePreviewSyntaxErrorTargetFiles(errors []string) []string {
 	if len(errors) == 0 {
 		return nil
 	}
 	joined := strings.Join(errors, "\n")
+	syntaxSignals := []string{
+		"TS1002",
+		"TS1005",
+		"Transform failed",
+		"Unterminated string literal",
+		"Unexpected end of file",
+		"Syntax error",
+		"ERROR:",
+	}
+	hasSignal := false
+	for _, signal := range syntaxSignals {
+		if strings.Contains(joined, signal) {
+			hasSignal = true
+			break
+		}
+	}
 	lower := strings.ToLower(joined)
-	if !strings.Contains(joined, "TS1002") &&
-		!strings.Contains(joined, "TS1005") &&
+	if !hasSignal &&
 		!strings.Contains(lower, "ends abruptly") &&
 		!strings.Contains(lower, "missing closing brace") &&
 		!strings.Contains(lower, "abrupt eof") {
 		return nil
 	}
+
 	seen := map[string]bool{}
 	paths := make([]string, 0, 4)
 	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`(?m)([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx))\(\d+,\d+\): error TS(?:1002|1005)\b`),
-		regexp.MustCompile(`(?i)(?:the file\s+)?([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx))\s+ends abruptly`),
-		regexp.MustCompile(`(?i)([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx)).*missing closing brace`),
-		regexp.MustCompile(`(?i)([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx)).*abrupt eof`),
+		regexp.MustCompile(`(?m)([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx))\(\d+,\d+\): error TS(?:1002|1005)\b`),
+		regexp.MustCompile(`(?m)(?:^|[\s([])([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)):\d+:\d+:\s+ERROR:\s+(?:Unterminated string literal|Unexpected end of file|Unexpected .*|Expected .*|Syntax error.*)`),
+		regexp.MustCompile(`(?m)file:\s*([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)):\d+:\d+`),
+		regexp.MustCompile(`(?i)(?:the file\s+)?([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx))\s+ends abruptly`),
+		regexp.MustCompile(`(?i)([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)).*missing closing brace`),
+		regexp.MustCompile(`(?i)([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)).*abrupt eof`),
 	}
-	for _, pattern := range patterns {
-		for _, m := range pattern.FindAllStringSubmatch(joined, -1) {
+	for _, re := range patterns {
+		for _, m := range re.FindAllStringSubmatch(joined, -1) {
 			if len(m) != 2 {
 				continue
 			}
-			p := sanitizeFilePath(strings.TrimSpace(m[1]))
-			if p == "" || seen[p] {
+			path := normalizePreviewSyntaxErrorPath(m[1])
+			if path == "" || seen[path] {
 				continue
 			}
-			seen[p] = true
-			paths = append(paths, p)
+			seen[path] = true
+			paths = append(paths, path)
 		}
 	}
 	sort.Strings(paths)
@@ -19975,6 +20033,18 @@ func (am *AgentManager) quickSyntaxCheck(file GeneratedFile) []string {
 	return errors
 }
 
+type jstsScanMode int
+
+const (
+	jstsScanModeCode jstsScanMode = iota
+	jstsScanModeSingleQuote
+	jstsScanModeDoubleQuote
+	jstsScanModeTemplate
+	jstsScanModeLineComment
+	jstsScanModeBlockComment
+	jstsScanModeRegex
+)
+
 func detectLikelyTruncatedJSTSFile(path, content string) string {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
@@ -20006,7 +20076,231 @@ func detectLikelyTruncatedJSTSFile(path, content string) string {
 		return fmt.Sprintf("%s: Likely truncated source file (abrupt EOF near '%s')", path, last)
 	}
 
+	if structureErr := detectLikelyUnbalancedJSTSStructure(trimmed); structureErr != "" {
+		return fmt.Sprintf("%s: Likely truncated source file (%s)", path, structureErr)
+	}
+
 	return ""
+}
+
+func detectLikelyUnbalancedJSTSStructure(content string) string {
+	modeStack := []jstsScanMode{jstsScanModeCode}
+	templateBraceTargets := make([]int, 0)
+	braceDepth := 0
+	lastSignificant := byte(0)
+	regexEscaped := false
+	regexCharClass := false
+
+	pushMode := func(mode jstsScanMode) {
+		modeStack = append(modeStack, mode)
+	}
+	popMode := func() {
+		if len(modeStack) > 1 {
+			modeStack = modeStack[:len(modeStack)-1]
+		}
+	}
+	currentMode := func() jstsScanMode {
+		return modeStack[len(modeStack)-1]
+	}
+
+	for i := 0; i < len(content); i++ {
+		ch := content[i]
+		next := byte(0)
+		if i+1 < len(content) {
+			next = content[i+1]
+		}
+
+		switch currentMode() {
+		case jstsScanModeLineComment:
+			if ch == '\n' {
+				popMode()
+				lastSignificant = '\n'
+			}
+			continue
+		case jstsScanModeBlockComment:
+			if ch == '*' && next == '/' {
+				popMode()
+				i++
+			}
+			continue
+		case jstsScanModeSingleQuote:
+			if ch == '\\' {
+				i++
+				continue
+			}
+			if ch == '\'' {
+				popMode()
+				lastSignificant = '\''
+			}
+			continue
+		case jstsScanModeDoubleQuote:
+			if ch == '\\' {
+				i++
+				continue
+			}
+			if ch == '"' {
+				popMode()
+				lastSignificant = '"'
+			}
+			continue
+		case jstsScanModeTemplate:
+			if ch == '\\' {
+				i++
+				continue
+			}
+			if ch == '`' {
+				popMode()
+				lastSignificant = '`'
+				continue
+			}
+			if ch == '$' && next == '{' {
+				templateBraceTargets = append(templateBraceTargets, braceDepth)
+				braceDepth++
+				pushMode(jstsScanModeCode)
+				lastSignificant = '{'
+				i++
+			}
+			continue
+		case jstsScanModeRegex:
+			if regexEscaped {
+				regexEscaped = false
+				continue
+			}
+			switch ch {
+			case '\\':
+				regexEscaped = true
+			case '[':
+				if !regexCharClass {
+					regexCharClass = true
+				}
+			case ']':
+				if regexCharClass {
+					regexCharClass = false
+				}
+			case '/':
+				if !regexCharClass {
+					popMode()
+					lastSignificant = '/'
+				}
+			}
+			continue
+		}
+
+		if ch == ' ' || ch == '\t' || ch == '\r' {
+			continue
+		}
+		if ch == '\n' {
+			lastSignificant = '\n'
+			continue
+		}
+		if ch == '/' && next == '/' {
+			pushMode(jstsScanModeLineComment)
+			i++
+			continue
+		}
+		if ch == '/' && next == '*' {
+			pushMode(jstsScanModeBlockComment)
+			i++
+			continue
+		}
+		if ch == '/' && next != 0 && next != '/' && next != '*' && shouldStartJSTSRegex(lastSignificant) {
+			pushMode(jstsScanModeRegex)
+			regexEscaped = false
+			regexCharClass = false
+			continue
+		}
+
+		switch ch {
+		case '\'':
+			pushMode(jstsScanModeSingleQuote)
+		case '"':
+			pushMode(jstsScanModeDoubleQuote)
+		case '`':
+			pushMode(jstsScanModeTemplate)
+		case '{':
+			braceDepth++
+		case '}':
+			if braceDepth == 0 {
+				lastSignificant = '}'
+				continue
+			}
+			braceDepth--
+			if len(templateBraceTargets) > 0 && braceDepth == templateBraceTargets[len(templateBraceTargets)-1] {
+				templateBraceTargets = templateBraceTargets[:len(templateBraceTargets)-1]
+				popMode()
+			}
+		}
+
+		lastSignificant = ch
+	}
+
+	for len(modeStack) > 1 && currentMode() == jstsScanModeLineComment {
+		popMode()
+	}
+
+	switch currentMode() {
+	case jstsScanModeSingleQuote, jstsScanModeDoubleQuote:
+		return "unterminated string literal before EOF"
+	case jstsScanModeTemplate:
+		return "unterminated template literal before EOF"
+	case jstsScanModeBlockComment:
+		return "unterminated block comment before EOF"
+	case jstsScanModeRegex:
+		return "unterminated regular expression literal before EOF"
+	}
+
+	if braceDepth > 0 {
+		return "missing closing '}' before EOF"
+	}
+
+	return ""
+}
+
+func shouldStartJSTSRegex(lastSignificant byte) bool {
+	switch lastSignificant {
+	case 0, '\n', '(', '[', '{', '=', ':', ',', ';', '!', '?':
+		return true
+	default:
+		return false
+	}
+}
+
+func isLikelyTruncatableJSTSFile(file GeneratedFile) bool {
+	switch strings.ToLower(strings.TrimSpace(file.Language)) {
+	case "javascript", "typescript":
+		return true
+	}
+
+	lowerPath := strings.ToLower(strings.TrimSpace(file.Path))
+	return strings.HasSuffix(lowerPath, ".js") ||
+		strings.HasSuffix(lowerPath, ".jsx") ||
+		strings.HasSuffix(lowerPath, ".ts") ||
+		strings.HasSuffix(lowerPath, ".tsx")
+}
+
+func trackLikelyTruncatedSourceFiles(output *TaskOutput) {
+	if output == nil || len(output.Files) == 0 {
+		return
+	}
+
+	known := make(map[string]struct{}, len(output.TruncatedFiles))
+	for _, path := range output.TruncatedFiles {
+		known[path] = struct{}{}
+	}
+
+	for _, file := range output.Files {
+		if !isLikelyTruncatableJSTSFile(file) {
+			continue
+		}
+		if detectLikelyTruncatedJSTSFile(file.Path, file.Content) == "" {
+			continue
+		}
+		if _, exists := known[file.Path]; exists {
+			continue
+		}
+		output.TruncatedFiles = append(output.TruncatedFiles, file.Path)
+		known[file.Path] = struct{}{}
+	}
 }
 
 func taskHasRecentTruncationError(task *Task) bool {
@@ -20370,6 +20664,14 @@ func (am *AgentManager) runFailureConsensus(
 
 	votes := make([]providerVote, 0, len(selected))
 	for _, provider := range selected {
+		build.mu.Lock()
+		if build.MaxRequests > 0 && build.RequestsUsed >= build.MaxRequests {
+			build.mu.Unlock()
+			log.Printf("Build %s: skipping remaining consensus votes; build request budget reached", build.ID)
+			break
+		}
+		build.mu.Unlock()
+
 		ctx, cancel := context.WithTimeout(am.ctx, 45*time.Second)
 		promptLines := []string{
 			"You are participating in a build recovery incident vote.",
@@ -20420,6 +20722,12 @@ func (am *AgentManager) runFailureConsensus(
 			}
 		}
 
+		build.mu.Lock()
+		build.RequestsUsed++
+		build.UpdatedAt = time.Now()
+		build.mu.Unlock()
+		am.persistBuildSnapshot(build, nil)
+
 		resp, err := am.aiRouter.Generate(ctx, provider, prompt, GenerateOptions{
 			UserID:          build.UserID,
 			MaxTokens:       180,
@@ -20437,6 +20745,26 @@ func (am *AgentManager) runFailureConsensus(
 		if err != nil {
 			vote.Rationale = fmt.Sprintf("fallback vote due to provider error: %v", err)
 		} else {
+			if am.spendTracker != nil && resp.Usage != nil {
+				projectID := build.ProjectID
+				if _, spendErr := am.spendTracker.RecordSpend(spend.RecordSpendInput{
+					UserID:       build.UserID,
+					ProjectID:    projectID,
+					BuildID:      build.ID,
+					AgentID:      agent.ID,
+					AgentRole:    string(agent.Role),
+					Provider:     string(provider),
+					Model:        ai.GetModelUsed(resp, nil),
+					Capability:   "failure_consensus",
+					IsBYOK:       !am.buildUsesPlatformKeys(build),
+					InputTokens:  resp.Usage.PromptTokens,
+					OutputTokens: resp.Usage.CompletionTokens,
+					PowerMode:    string(build.PowerMode),
+					Status:       "success",
+				}); spendErr != nil {
+					log.Printf("spend: failed to record failure consensus spend for build %s provider %s: %v", build.ID, provider, spendErr)
+				}
+			}
 			decision, rationale := am.parseConsensusVote(resp.Content, fallbackDecision)
 			vote.Decision = decision
 			vote.Rationale = rationale
@@ -20506,13 +20834,27 @@ func (am *AgentManager) runFailureConsensus(
 	return winning, votes
 }
 
-func (am *AgentManager) shouldRunFailureConsensus(build *Build, task *Task, errorMsg string) bool {
+func (am *AgentManager) shouldRunFailureConsensus(build *Build, task *Task, errorMsg string, retryStrategy string) bool {
 	if build == nil || task == nil {
 		return false
 	}
 	if strings.Contains(strings.ToLower(errorMsg), "all_providers_failed") {
 		return true
 	}
+
+	normalizedStrategy := strings.ToLower(strings.TrimSpace(retryStrategy))
+	switch normalizedStrategy {
+	case "switch_provider", "spawn_solver", "backoff", "reduce_context":
+		// These strategies indicate provider-side instability, context pressure, or
+		// repeated failures that already escalated beyond a normal code-fix retry.
+		// Consensus can still add value here.
+	default:
+		// Plain fix-and-retry / standard retry failures are usually code-repair
+		// work. Running extra provider votes on those paths adds credit burn
+		// without materially changing the recovery decision.
+		return false
+	}
+
 	// Code generation tasks get early consensus at first retry regardless of build mode,
 	// so we can switch providers before burning all retries on the wrong strategy.
 	// Exception: recovery tasks (TaskFix with action=solve_build_failure) already have
@@ -20841,6 +21183,13 @@ func (am *AgentManager) completeTruncatedFiles(
 
 		target.Content = target.Content + "\n" + continuation
 		target.Size = int64(len(target.Content))
+		if isLikelyTruncatableJSTSFile(*target) {
+			if truncationErr := detectLikelyTruncatedJSTSFile(target.Path, target.Content); truncationErr != "" {
+				log.Printf("[chunked] continuation for %s still appears truncated: %s", target.Path, truncationErr)
+				remainingTruncated = append(remainingTruncated, path)
+				continue
+			}
+		}
 		log.Printf("[chunked] completed truncated file %s (+%d bytes)", path, len(continuation))
 	}
 

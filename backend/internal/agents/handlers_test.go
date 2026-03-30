@@ -891,10 +891,10 @@ func TestClaimActiveSnapshotTakeoverRetriesAfterLeaseHeartbeatRace(t *testing.T)
 			"build_id":"active-status-claim-race",
 			"progress":59
 		}]`,
-		TasksJSON:  staleTaskJSON,
-		StateJSON:  newStateJSON,
-		CreatedAt:  time.Now().UTC().Add(-20 * time.Minute),
-		UpdatedAt:  time.Now().UTC(),
+		TasksJSON: staleTaskJSON,
+		StateJSON: newStateJSON,
+		CreatedAt: time.Now().UTC().Add(-20 * time.Minute),
+		UpdatedAt: time.Now().UTC(),
 	}
 	if err := db.Create(row).Error; err != nil {
 		t.Fatalf("create active snapshot: %v", err)
@@ -928,6 +928,110 @@ func TestClaimActiveSnapshotTakeoverRetriesAfterLeaseHeartbeatRace(t *testing.T)
 	state := parseBuildSnapshotState(claimed.StateJSON)
 	if state.RestoreContext == nil || state.RestoreContext.ActiveOwnerInstanceID != "reader-instance" {
 		t.Fatalf("expected claimed snapshot owner to switch to reader-instance, got %+v", state.RestoreContext)
+	}
+}
+
+func TestGetBuildStatusRestoresClaimedSnapshotOnlyOnce(t *testing.T) {
+	db := openBuildTestDB(t)
+	staleHeartbeat := time.Now().UTC().Add(-2 * time.Minute)
+	stateJSON := fmt.Sprintf(`{
+		"current_phase":"review",
+		"restore_context":{
+			"subscription_plan":"team",
+			"provider_mode":"platform",
+			"active_owner_instance_id":"owner-instance",
+			"active_owner_heartbeat_at":%q
+		}
+	}`, staleHeartbeat.Format(time.RFC3339Nano))
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "active-status-restore-once",
+		UserID:      1,
+		Description: "Restore a claimed snapshot exactly once on status read",
+		Status:      string(BuildReviewing),
+		Mode:        string(ModeFast),
+		PowerMode:   string(PowerFast),
+		Progress:    92,
+		FilesJSON:   "[]",
+		AgentsJSON: `[{
+			"id":"lead-1",
+			"role":"lead",
+			"provider":"claude",
+			"status":"working",
+			"build_id":"active-status-restore-once",
+			"progress":80
+		}]`,
+		TasksJSON: `[{
+			"id":"task-review",
+			"type":"review",
+			"description":"Review the generated frontend",
+			"assigned_to":"lead-1",
+			"status":"in_progress",
+			"created_at":"2026-03-29T01:00:00Z",
+			"started_at":"2026-03-29T01:00:00Z"
+		}]`,
+		StateJSON: stateJSON,
+		CreatedAt: time.Now().UTC().Add(-10 * time.Minute),
+		UpdatedAt: time.Now().UTC().Add(-10 * time.Minute),
+	}).Error; err != nil {
+		t.Fatalf("create active snapshot: %v", err)
+	}
+
+	am := &AgentManager{
+		db:          db,
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		taskQueue:   make(chan *Task, 8),
+		resultQueue: make(chan *TaskResult, 1),
+		ctx:         context.Background(),
+		instanceID:  "reader-instance",
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderClaude},
+			userProviders: []ai.AIProvider{ai.ProviderClaude},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/build/active-status-restore-once/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body["live"] != true {
+		t.Fatalf("expected restored claimed snapshot to be live, got %v", body["live"])
+	}
+	if body["restored_from_snapshot"] != true {
+		t.Fatalf("expected restored_from_snapshot=true, got %v", body["restored_from_snapshot"])
+	}
+
+	select {
+	case resumed := <-am.taskQueue:
+		if resumed == nil || resumed.ID != "task-review" {
+			t.Fatalf("expected restored task-review to be requeued once, got %+v", resumed)
+		}
+	default:
+		t.Fatalf("expected restored active snapshot to resume execution")
+	}
+
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/v1/build/active-status-restore-once/status", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected second poll to return 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	select {
+	case duplicate := <-am.taskQueue:
+		t.Fatalf("expected no duplicate resume task on repeated read, got %+v", duplicate)
+	default:
 	}
 }
 

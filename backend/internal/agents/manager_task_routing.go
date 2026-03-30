@@ -460,6 +460,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	output := am.parseTaskOutput(task.Type, response.Content)
 	attachAIResponseMetrics(output, provider, modelUsed, response)
 	am.materializeStructuredPatchOutput(build, task, output)
+	trackLikelyTruncatedSourceFiles(output)
 
 	candidateAgent := *agent
 	candidateAgent.Provider = provider

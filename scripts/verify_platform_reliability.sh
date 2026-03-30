@@ -53,6 +53,23 @@ echo "== Backend API health route (informational) =="
 api_health_status="$(curl -sS -o /dev/null -w '%{http_code}' "$API_BASE/health" || true)"
 echo "API /health status: $api_health_status"
 
+echo "== Preview runtime verify service state (informational) =="
+features_status="$(curl -sS -o "$tmpdir/features.json" -w '%{http_code}' "$BACKEND_URL/health/features" || true)"
+echo "health/features HTTP status: $features_status"
+if [[ "$features_status" == "200" ]]; then
+  rv_state="$(jq -r '
+    (.services // [])
+    | map(select(.name == "preview_runtime_verify"))
+    | if length > 0 then .[0].state else "not_registered" end
+  ' "$tmpdir/features.json" 2>/dev/null || echo "parse_error")"
+  echo "preview_runtime_verify state: $rv_state"
+  if [[ "$rv_state" == "not_registered" ]]; then
+    echo "WARNING: preview_runtime_verify not found in health/features services list"
+  elif [[ "$rv_state" != "ready" && "$rv_state" != "degraded" ]]; then
+    echo "WARNING: preview_runtime_verify in unexpected state: $rv_state"
+  fi
+fi
+
 suffix="$(date +%s)-$RANDOM"
 username="verify_${suffix}"
 email="${username}@example.com"

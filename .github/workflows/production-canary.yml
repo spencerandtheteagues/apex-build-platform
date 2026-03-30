@@ -41,6 +41,36 @@ jobs:
           PLAYWRIGHT_EXPECT_LIVE_STRIPE: '1'
         run: npm run test:launch -- --project=chromium
 
+  preview-verification-canary:
+    name: Preview Verification Canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: tests/e2e/package-lock.json
+
+      - name: Install E2E deps
+        working-directory: tests/e2e
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: tests/e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run preview verification canary
+        working-directory: tests/e2e
+        env:
+          PLAYWRIGHT_BASE_URL: https://apex-build.dev
+          PLAYWRIGHT_API_URL: https://api.apex-build.dev
+        run: npm run test:preview-verify -- --project=chromium
+
   free-frontend-build-canary:
     name: Free Frontend Build Canary
     runs-on: ubuntu-latest
