@@ -433,24 +433,26 @@ func main() {
 	// Wire preview verification gate into the agent manager.
 	// The bridge converts between agents.VerifiableFile and preview.VerifiableFile
 	// so neither package needs to import the other.
-	// APEX_PREVIEW_RUNTIME_VERIFY=true enables live Vite boot proof (+30-90 s per build).
-	runtimeVerifyEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("APEX_PREVIEW_RUNTIME_VERIFY")), "true")
+	// Runtime Vite boot proof defaults on in production when Chrome is available.
+	// Operators can still force it on/off with APEX_PREVIEW_RUNTIME_VERIFY.
+	chromePath := preview.FindChrome()
+	runtimeVerifyEnabled, runtimeVerifyMode := resolvePreviewRuntimeVerify(chromePath)
 	var pvVerifier *preview.Verifier
 	if runtimeVerifyEnabled {
 		pvVerifier = preview.NewVerifierWithRuntime(previewHandler.GetServerRunner())
 		log.Println("Preview verification gate enabled (runtime boot proof ON)")
 	} else {
 		pvVerifier = preview.NewVerifier(previewHandler.GetServerRunner())
-		log.Println("Preview verification gate enabled (static checks only; set APEX_PREVIEW_RUNTIME_VERIFY=true for live boot proof)")
+		log.Printf("Preview verification gate enabled (static checks only; mode=%s)", runtimeVerifyMode)
 	}
 	agentManager.SetPreviewVerifier(&previewVerifierBridge{verifier: pvVerifier})
 
 	// Surface runtime/browser verify capability in /health/features.
-	chromePath := preview.FindChrome()
 	pvRuntimeDetails := map[string]any{
 		"enabled":          runtimeVerifyEnabled,
 		"browser_proof":    runtimeVerifyEnabled && chromePath != "",
 		"chrome_available": chromePath != "",
+		"mode":             runtimeVerifyMode,
 	}
 	if runtimeVerifyEnabled {
 		if chromePath != "" {
@@ -463,8 +465,15 @@ func main() {
 				pvRuntimeDetails)
 		}
 	} else {
+		message := "Runtime Vite boot proof disabled by default outside production (set APEX_PREVIEW_RUNTIME_VERIFY=true)"
+		switch runtimeVerifyMode {
+		case "explicit_disabled":
+			message = "Runtime Vite boot proof explicitly disabled (APEX_PREVIEW_RUNTIME_VERIFY=false)"
+		case "production_no_chrome":
+			message = "Runtime Vite boot proof unavailable in production because Chrome was not found on PATH"
+		}
 		startupRegistry.MarkDegraded("preview_runtime_verify", startup.TierOptional,
-			"Runtime Vite boot proof disabled (set APEX_PREVIEW_RUNTIME_VERIFY=true)", pvRuntimeDetails)
+			message, pvRuntimeDetails)
 	}
 
 	log.Println("Live Preview Server initialized")
@@ -1109,6 +1118,24 @@ func loadConfig() *AppConfig {
 		Port:          getEnv("PORT", "8080"),
 		Environment:   environment,
 	}
+}
+
+func resolvePreviewRuntimeVerify(chromePath string) (bool, string) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("APEX_PREVIEW_RUNTIME_VERIFY"))) {
+	case "1", "true", "yes", "on":
+		return true, "explicit_enabled"
+	case "0", "false", "no", "off":
+		return false, "explicit_disabled"
+	}
+
+	if config.IsProductionEnvironment() {
+		if chromePath != "" {
+			return true, "production_default"
+		}
+		return false, "production_no_chrome"
+	}
+
+	return false, "non_production_default"
 }
 
 // parseDatabaseURL parses a DATABASE_URL into a db.Config

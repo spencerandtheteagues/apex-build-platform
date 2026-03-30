@@ -205,12 +205,12 @@ func TestShouldRunFailureConsensusDefersFirstFastRetryForMediumRisk(t *testing.T
 	build := &Build{PowerMode: PowerFast}
 	task := &Task{RetryCount: 1, Input: map[string]any{"risk_level": string(RiskMedium)}}
 
-	if am.shouldRunFailureConsensus(build, task, "verification failed") {
+	if am.shouldRunFailureConsensus(build, task, "verification failed", "fix_and_retry") {
 		t.Fatalf("expected first fast retry consensus to be skipped for medium-risk task")
 	}
 }
 
-func TestShouldRunFailureConsensusKeepsFastCriticalFailuresEscalated(t *testing.T) {
+func TestShouldRunFailureConsensusSkipsFirstFastCriticalCodeFailures(t *testing.T) {
 	am := &AgentManager{}
 	build := &Build{PowerMode: PowerFast}
 	task := &Task{
@@ -220,8 +220,23 @@ func TestShouldRunFailureConsensusKeepsFastCriticalFailuresEscalated(t *testing.
 		},
 	}
 
-	if !am.shouldRunFailureConsensus(build, task, "verification failed") {
-		t.Fatalf("expected fast critical task to retain first-retry consensus")
+	if am.shouldRunFailureConsensus(build, task, "verification failed", "fix_and_retry") {
+		t.Fatalf("expected direct code-fix retries to skip consensus even for critical tasks")
+	}
+}
+
+func TestShouldRunFailureConsensusKeepsFastCriticalProviderEscalations(t *testing.T) {
+	am := &AgentManager{}
+	build := &Build{PowerMode: PowerFast}
+	task := &Task{
+		RetryCount: 1,
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{RiskLevel: RiskCritical},
+		},
+	}
+
+	if !am.shouldRunFailureConsensus(build, task, "verification failed", "switch_provider") {
+		t.Fatalf("expected fast critical provider escalation to retain consensus")
 	}
 }
 
