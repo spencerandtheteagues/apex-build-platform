@@ -113,6 +113,7 @@ jobs:
           SMOKE_PROFILE: ${{ matrix.smoke_profile }}
           EXPECT_STATUS: completed
           LOGIN_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
+          LOGIN_USERNAME: ${{ secrets.APEX_CANARY_USERNAME }}
           LOGIN_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
           LOGIN_FULL_NAME: APEX Canary
           POLL_SECONDS: ${{ matrix.poll_seconds }}

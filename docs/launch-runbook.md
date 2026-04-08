@@ -89,6 +89,7 @@ BASE_URL=https://api.apex-build.dev/api/v1 \
 MODE=full \
 POWER_MODE=balanced \
 SMOKE_PROFILE=paid_fullstack \
+LOGIN_USERNAME='paid-canary-username' \
 LOGIN_EMAIL='paid-canary@example.com' \
 LOGIN_PASSWORD='replace-me' \
 ./scripts/run_platform_build_smoke.sh
@@ -104,6 +105,7 @@ Runs the production-critical matrix instead of a single build:
 
 ```bash
 BASE_URL=https://api.apex-build.dev/api/v1 \
+LOGIN_USERNAME='paid-canary-username' \
 LOGIN_EMAIL='paid-canary@example.com' \
 LOGIN_PASSWORD='replace-me' \
 ./scripts/run_platform_canary_matrix.sh
@@ -116,6 +118,7 @@ GitHub Actions now includes `.github/workflows/production-canary.yml`:
 - `Public Launch Smoke` runs the Playwright launch smoke against `apex-build.dev`
 - `Free Frontend Build Canary` runs the sacrificial free-tier preview build against production
 - `Platform Build Canary (free-fast / paid-balanced / paid-max)` runs the build matrix against production
+- set `APEX_CANARY_USERNAME` as well when the paid canary account authenticates more reliably by username than email
 
 Treat any failure in that workflow as a customer-facing reliability regression until explained.
 

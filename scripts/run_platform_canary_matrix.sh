@@ -11,6 +11,7 @@ RUN_PAID_BALANCED="${RUN_PAID_BALANCED:-1}"
 RUN_PAID_MAX="${RUN_PAID_MAX:-1}"
 REQUIRE_PAID_SCENARIOS="${REQUIRE_PAID_SCENARIOS:-0}"
 LOGIN_EMAIL="${LOGIN_EMAIL:-}"
+LOGIN_USERNAME="${LOGIN_USERNAME:-}"
 LOGIN_PASSWORD="${LOGIN_PASSWORD:-}"
 LOGIN_FULL_NAME="${LOGIN_FULL_NAME:-APEX Canary}"
 PROJECT_NAME_PREFIX="${PROJECT_NAME_PREFIX:-platform-canary}"
@@ -22,6 +23,17 @@ run_scenario() {
   local smoke_profile="$4"
   local poll_seconds="$5"
   local max_polls="$6"
+  local scenario_login_email=""
+  local scenario_login_username=""
+  local scenario_login_password=""
+  local scenario_login_full_name=""
+
+  if [[ "$smoke_profile" == "paid_fullstack" ]]; then
+    scenario_login_email="$LOGIN_EMAIL"
+    scenario_login_username="$LOGIN_USERNAME"
+    scenario_login_password="$LOGIN_PASSWORD"
+    scenario_login_full_name="$LOGIN_FULL_NAME"
+  fi
 
   echo
   echo "== Scenario: $name =="
@@ -32,9 +44,10 @@ run_scenario() {
   EXPECT_STATUS="completed" \
   POLL_SECONDS="$poll_seconds" \
   MAX_POLLS="$max_polls" \
-  LOGIN_EMAIL="$LOGIN_EMAIL" \
-  LOGIN_PASSWORD="$LOGIN_PASSWORD" \
-  LOGIN_FULL_NAME="$LOGIN_FULL_NAME" \
+  LOGIN_EMAIL="$scenario_login_email" \
+  LOGIN_USERNAME="$scenario_login_username" \
+  LOGIN_PASSWORD="$scenario_login_password" \
+  LOGIN_FULL_NAME="$scenario_login_full_name" \
   PROJECT_NAME="${PROJECT_NAME_PREFIX}-${name}" \
   ./scripts/run_platform_build_smoke.sh
 }

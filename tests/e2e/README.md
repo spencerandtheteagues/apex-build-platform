@@ -69,6 +69,7 @@ Example:
 
 ```bash
 BASE_URL=https://api.apex-build.dev/api/v1 \
+LOGIN_USERNAME='paid-canary-username' \
 LOGIN_EMAIL='paid-canary@example.com' \
 LOGIN_PASSWORD='replace-me' \
 ./scripts/run_platform_canary_matrix.sh

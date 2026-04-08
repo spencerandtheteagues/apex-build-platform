@@ -8,6 +8,7 @@ POLL_SECONDS="${POLL_SECONDS:-10}"
 MAX_POLLS="${MAX_POLLS:-120}"
 SMOKE_PROFILE="${SMOKE_PROFILE:-free_frontend}"
 LOGIN_EMAIL="${LOGIN_EMAIL:-}"
+LOGIN_USERNAME="${LOGIN_USERNAME:-}"
 LOGIN_PASSWORD="${LOGIN_PASSWORD:-}"
 LOGIN_FULL_NAME="${LOGIN_FULL_NAME:-Platform Test}"
 EXPECT_STATUS="${EXPECT_STATUS:-completed}"
@@ -207,7 +208,7 @@ assert_completed_build_contract() {
 
 login_or_exit() {
   local login_payload
-  login_payload="$(jq -n --arg u "$USER" --arg e "$EMAIL" --arg p "$PASS" '{username:($e // $u),email:$e,password:$p}')"
+  login_payload="$(jq -n --arg u "$USER" --arg e "$EMAIL" --arg p "$PASS" '{username:$u,email:$e,password:$p}')"
   curl -sS -c "$cookie_jar" -b "$cookie_jar" -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" -d "$login_payload" >/tmp/apex_login.json
 
   TOKEN="$(jq -r '.access_token // .token // .data.access_token // .tokens.access_token // empty' /tmp/apex_login.json)"
@@ -259,7 +260,7 @@ fi
 
 PROMPT="$(cat "$prompt_file")"
 SUFFIX="$(date +%s)"
-USER="platform${SUFFIX}"
+USER="${LOGIN_USERNAME:-platform${SUFFIX}}"
 EMAIL="${LOGIN_EMAIL:-${USER}@example.com}"
 PASS="${LOGIN_PASSWORD:-Passw0rd!Passw0rd!}"
 
