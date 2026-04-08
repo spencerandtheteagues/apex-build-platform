@@ -13,6 +13,9 @@ vi.mock('@/services/api', () => ({
     getCompletedBuild: vi.fn(),
     listBuilds: vi.fn(),
     sendBuildMessage: vi.fn(),
+    startBuild: vi.fn(),
+    getPlans: vi.fn(),
+    createCheckoutSession: vi.fn(),
   },
 }))
 
@@ -251,6 +254,9 @@ describe('AppBuilder control surface', () => {
     ;(apiService.getCompletedBuild as any).mockReset()
     ;(apiService.listBuilds as any).mockReset()
     ;(apiService.sendBuildMessage as any).mockReset()
+    ;(apiService.startBuild as any).mockReset()
+    ;(apiService.getPlans as any).mockReset()
+    ;(apiService.createCheckoutSession as any).mockReset()
 
     ;(apiService.buildPreflight as any).mockResolvedValue({
       provider_statuses: {
@@ -275,6 +281,7 @@ describe('AppBuilder control surface', () => {
       degraded_features: [],
       services: [],
     })
+    window.history.replaceState({}, '', '/')
   })
 
   it('routes planner broadcasts and direct agent messages with the expected targets', async () => {
@@ -334,6 +341,43 @@ describe('AppBuilder control surface', () => {
         })
       )
     })
+  })
+
+  it('shows the upgrade modal when a free-plan follow-up asks for backend work', async () => {
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+    }))
+    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+    }))
+    ;(apiService.sendBuildMessage as any).mockRejectedValue({
+      response: {
+        status: 402,
+        data: {
+          error_code: 'BACKEND_SUBSCRIPTION_REQUIRED',
+          required_plan: 'builder',
+          blocked_reason: 'backend services',
+          suggestion: 'The frontend preview can keep iterating on the current free plan. Upgrade to Builder or higher to unlock backend services on this same app.',
+        },
+      },
+    })
+
+    render(<AppBuilder />)
+
+    await openMockedBuild()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Steer Build$/i }))
+    await screen.findByText(/Planner Console/i)
+
+    const plannerInput = await screen.findByPlaceholderText('Message the planner...')
+    fireEvent.change(plannerInput, { target: { value: 'Make it fully functional with real auth and persistence.' } })
+    fireEvent.keyDown(plannerInput, { key: 'Enter', code: 'Enter' })
+
+    await screen.findByText(/UPGRADE TO CONTINUE BACKEND WORK/i)
+    expect(screen.getByText(/frontend preview stays available now/i)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Upgrade to Builder/i })).toBeTruthy()
   })
 
   it('shows only live agent and task boxes while a build is active', async () => {
@@ -719,5 +763,21 @@ describe('AppBuilder control surface', () => {
 
     await screen.findByRole('button', { name: /restart failed build/i })
     expect(apiService.getCompletedBuild).toHaveBeenCalledWith(MOCK_HISTORY_BUILD_ID)
+  })
+
+  it('restores the same build after returning from upgrade checkout', async () => {
+    window.history.replaceState({}, '', `/?upgrade=success&resume_build=${MOCK_HISTORY_BUILD_ID}`)
+    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+      status: 'in_progress',
+      live: false,
+    }))
+
+    render(<AppBuilder />)
+
+    await waitFor(() => {
+      expect(apiService.getBuildDetails).toHaveBeenCalledWith(MOCK_HISTORY_BUILD_ID)
+    })
   })
 })

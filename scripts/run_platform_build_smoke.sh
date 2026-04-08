@@ -3,7 +3,6 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080/api/v1}"
 MODE="${MODE:-fast}"
-POWER_MODE="${POWER_MODE:-balanced}"
 PROJECT_NAME="${PROJECT_NAME:-agency-ops-platform}"
 POLL_SECONDS="${POLL_SECONDS:-10}"
 MAX_POLLS="${MAX_POLLS:-120}"
@@ -12,6 +11,14 @@ LOGIN_EMAIL="${LOGIN_EMAIL:-}"
 LOGIN_PASSWORD="${LOGIN_PASSWORD:-}"
 LOGIN_FULL_NAME="${LOGIN_FULL_NAME:-Platform Test}"
 EXPECT_STATUS="${EXPECT_STATUS:-completed}"
+
+if [[ -n "${POWER_MODE:-}" ]]; then
+  EFFECTIVE_POWER_MODE="$POWER_MODE"
+elif [[ "$SMOKE_PROFILE" == "paid_fullstack" ]]; then
+  EFFECTIVE_POWER_MODE="balanced"
+else
+  EFFECTIVE_POWER_MODE="fast"
+fi
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required" >&2
@@ -132,7 +139,7 @@ login_or_exit
 build_payload="$(jq -n \
   --arg d "$PROMPT" \
   --arg mode "$MODE" \
-  --arg power "$POWER_MODE" \
+  --arg power "$EFFECTIVE_POWER_MODE" \
   --arg project "$PROJECT_NAME" \
   '{description:$d,prompt:$d,mode:$mode,power_mode:$power,provider_mode:"platform",require_preview_ready:true,project_name:$project}')"
 

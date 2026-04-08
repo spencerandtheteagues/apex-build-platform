@@ -286,6 +286,41 @@ func TestValidateFinalBuildReadiness(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects_untouched_deterministic_scaffold_placeholder", func(t *testing.T) {
+		t.Parallel()
+
+		build := &Build{
+			Mode: "fast",
+			TechStack: &TechStack{
+				Frontend: "React",
+			},
+		}
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "pulseboard",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  }
+}`,
+			},
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "src/main.tsx", Content: "import React from 'react';"},
+			{Path: "src/App.tsx", Content: "export default function App(){ return <main><p>Bootstrapped by APEX.BUILD</p><p>The deterministic scaffold is live. Replace this shell with the real experience.</p></main> }"},
+		}
+
+		errs := am.validateFinalBuildReadiness(build, files)
+		if !containsError(errs, "deterministic scaffold placeholder content") {
+			t.Fatalf("expected scaffold placeholder error, got %v", errs)
+		}
+	})
+
 	t.Run("accepts_monorepo_apps_web_frontend_entry", func(t *testing.T) {
 		t.Parallel()
 
@@ -439,6 +474,20 @@ func TestValidateFinalBuildReadinessEmitsSurfaceVerificationReports(t *testing.T
 	}
 	if !containsTruthTag(state.BuildContract.TruthBySurface[string(SurfaceFrontend)], TruthVerified) {
 		t.Fatalf("expected verified tag after verification, got %+v", state.BuildContract.TruthBySurface[string(SurfaceFrontend)])
+	}
+}
+
+func TestFinalValidationRepairHintsIncludesScaffoldReplacementGuidance(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+
+	hints := am.finalValidationRepairHints([]string{
+		"src/App.tsx still contains deterministic scaffold placeholder content; replace the starter UI with the requested app",
+	}, nil, 0)
+
+	if !containsError(hints, "Replace the untouched deterministic scaffold with the requested product UI") {
+		t.Fatalf("expected scaffold replacement hint, got %v", hints)
 	}
 }
 
@@ -4671,6 +4720,93 @@ func TestApplyDeterministicPreValidationNormalizationAddsMissingBackendRuntimeSc
 	}
 }
 
+func TestApplyDeterministicPreValidationNormalizationSplitsRootServerTSConfig(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:   "build-prevalidation-root-server-tsconfig",
+		Mode: ModeFull,
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-fullstack-runtime",
+				Type:   TaskGenerateAPI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "agency-ops",
+  "private": true,
+  "scripts": {
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "vite build",
+    "build:server": "tsc -p tsconfig.json",
+    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
+    "dev:client": "vite",
+    "dev:server": "tsx watch server/index.ts"
+  },
+  "dependencies": {
+    "pg": "^8.11.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.1"
+  }
+}`,
+						},
+						{
+							Path: "tsconfig.json",
+							Content: `{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2020",
+    "noEmit": false,
+    "outDir": "dist"
+  },
+  "include": ["src", "server"]
+}`,
+						},
+						{Path: "src/main.tsx", Content: `console.log("app");`},
+						{Path: "server/index.ts", Content: `import express from "express"; import { Pool } from "pg"; const app = express(); const pool = new Pool(); app.listen(3001); void pool;`},
+					},
+				},
+			},
+		},
+	}
+
+	if !am.applyDeterministicPreValidationNormalization(build) {
+		t.Fatalf("expected mixed root tsconfig normalization to trigger")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+
+	manifest := byPath["package.json"]
+	if !strings.Contains(manifest, `"build:server": "tsc -p server/tsconfig.json"`) {
+		t.Fatalf("expected root manifest to compile backend with server/tsconfig.json, got %s", manifest)
+	}
+	serverTSConfig := byPath["server/tsconfig.json"]
+	if serverTSConfig == "" {
+		t.Fatal("expected server/tsconfig.json to be created")
+	}
+	if !strings.Contains(serverTSConfig, `"moduleResolution": "NodeNext"`) {
+		t.Fatalf("expected server tsconfig to use NodeNext module resolution, got %s", serverTSConfig)
+	}
+	if !strings.Contains(serverTSConfig, `"outDir": "../dist/server"`) {
+		t.Fatalf("expected server tsconfig to emit into dist/server, got %s", serverTSConfig)
+	}
+}
+
 func TestNodeVerificationSkipsWhenNPMUnavailable(t *testing.T) {
 	t.Setenv("PATH", "")
 
@@ -4954,6 +5090,62 @@ func TestCollectGeneratedFilesHonorsDeletedFilesFromTaskOutput(t *testing.T) {
 	}
 	if files[0].Path != "src/App.tsx" {
 		t.Fatalf("expected surviving generated file to be src/App.tsx, got %+v", files)
+	}
+}
+
+func TestCollectGeneratedFilesPrefersLaterTaskPatchOverLongerEarlierContent(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path:     "src/App.tsx",
+				Content:  "export default function App(){ return <main>Bootstrapped by APEX.BUILD. The deterministic scaffold is live.</main> }\n",
+				Language: "typescript",
+			},
+		},
+		Tasks: []*Task{
+			{
+				ID:     "task-front-1",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path:     "src/App.tsx",
+							Content:  "export default function App(){ return <main>Bootstrapped by APEX.BUILD. The deterministic scaffold is live.</main> }\n",
+							Language: "typescript",
+						},
+					},
+				},
+			},
+			{
+				ID:     "task-fix-1",
+				Type:   TaskFix,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path:     "src/App.tsx",
+							Content:  "import AppShell from './components/AppShell'\nexport default function App(){ return <AppShell /> }\n",
+							Language: "typescript",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	files := am.collectGeneratedFiles(build)
+	if len(files) != 1 {
+		t.Fatalf("expected one collected file, got %+v", files)
+	}
+	if !strings.Contains(files[0].Content, "AppShell") {
+		t.Fatalf("expected later repair content to win, got %q", files[0].Content)
+	}
+	if strings.Contains(files[0].Content, "deterministic scaffold is live") {
+		t.Fatalf("expected scaffold placeholder content to be replaced, got %q", files[0].Content)
 	}
 }
 

@@ -2504,6 +2504,145 @@ func TestClassifyBuildMessageErrorTreatsRestartAvailabilityAsConflict(t *testing
 	}
 }
 
+func TestClassifyBuildMessageErrorTreatsUpgradeRequirementAsPaymentRequired(t *testing.T) {
+	if got := classifyBuildMessageError(newBuildSubscriptionRequiredError("free", "backend services")); got != http.StatusPaymentRequired {
+		t.Fatalf("expected upgrade requirement to map to 402, got %d", got)
+	}
+}
+
+func TestSendMessageReturnsPaymentRequiredForFreePlanRuntimeFollowup(t *testing.T) {
+	now := time.Now().UTC()
+	lead := &Agent{
+		ID:        "lead-1",
+		Role:      RoleLead,
+		Provider:  ai.ProviderClaude,
+		Model:     "claude-sonnet-4-6",
+		Status:    StatusWorking,
+		BuildID:   "preview-only-build",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	build := &Build{
+		ID:               "preview-only-build",
+		UserID:           1,
+		Status:           BuildInProgress,
+		Mode:             ModeFull,
+		PowerMode:        PowerFast,
+		SubscriptionPlan: "free",
+		Description:      "Build the frontend preview first and defer runtime scope honestly.",
+		Agents:           map[string]*Agent{lead.ID: lead},
+		Tasks:            []*Task{},
+		Checkpoints:      []*Checkpoint{},
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	am := &AgentManager{
+		ctx:         context.Background(),
+		cancel:      func() {},
+		builds:      map[string]*Build{build.ID: build},
+		agents:      map[string]*Agent{lead.ID: lead},
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"content": "Make it fully functional with real auth and persistence.",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/preview-only-build/message", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusPaymentRequired {
+		t.Fatalf("expected 402, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response["error_code"] != backendSubscriptionRequiredCode {
+		t.Fatalf("expected error_code %s, got %v", backendSubscriptionRequiredCode, response["error_code"])
+	}
+	if response["required_plan"] != "builder" {
+		t.Fatalf("expected required_plan=builder, got %v", response["required_plan"])
+	}
+	if response["blocked_reason"] == "" {
+		t.Fatalf("expected blocked_reason to be populated, got %v", response["blocked_reason"])
+	}
+
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	if !build.Interaction.WaitingForUser {
+		t.Fatal("expected build to wait for user after upgrade gate")
+	}
+	if strings.TrimSpace(build.Interaction.PendingQuestion) == "" {
+		t.Fatal("expected upgrade prompt to be recorded in interaction state")
+	}
+}
+
+func TestSendMessageAllowsFrontendOnlyFollowupOnFreePlan(t *testing.T) {
+	now := time.Now().UTC()
+	lead := &Agent{
+		ID:        "lead-1",
+		Role:      RoleLead,
+		Provider:  ai.ProviderClaude,
+		Model:     "claude-sonnet-4-6",
+		Status:    StatusWorking,
+		BuildID:   "preview-ui-build",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	frontend := &Agent{
+		ID:        "frontend-1",
+		Role:      RoleFrontend,
+		Provider:  ai.ProviderGPT4,
+		Model:     "gpt-4.1",
+		Status:    StatusWorking,
+		BuildID:   "preview-ui-build",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	build := &Build{
+		ID:               "preview-ui-build",
+		UserID:           1,
+		Status:           BuildInProgress,
+		Mode:             ModeFull,
+		PowerMode:        PowerFast,
+		SubscriptionPlan: "free",
+		Description:      "Build the frontend preview first and defer runtime scope honestly.",
+		Agents: map[string]*Agent{
+			lead.ID:     lead,
+			frontend.ID: frontend,
+		},
+		Tasks:       []*Task{},
+		Checkpoints: []*Checkpoint{},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	am := &AgentManager{
+		ctx:         context.Background(),
+		cancel:      func() {},
+		builds:      map[string]*Build{build.ID: build},
+		agents:      map[string]*Agent{lead.ID: lead, frontend.ID: frontend},
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"content":           "Polish the card spacing and strengthen the mobile navigation states.",
+		"target_mode":       "agent",
+		"target_agent_id":   frontend.ID,
+		"target_agent_role": "frontend",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/preview-ui-build/message", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestSendMessageReturnsConflictForDirectMessageToTerminalBuild(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.CompletedBuild{

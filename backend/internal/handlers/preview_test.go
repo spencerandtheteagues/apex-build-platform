@@ -133,3 +133,54 @@ func TestPreviewHandlerGetDockerStatusIncludesSecureModeFlags(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"sandbox_degraded":true`)
 	require.Contains(t, recorder.Body.String(), `"backend_preview_available":true`)
 }
+
+func TestPreviewHandlerBuildProxyURLUsesForwardedPublicOrigin(t *testing.T) {
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/preview/proxy", nil)
+	context.Request.Host = "internal-preview:8080"
+	context.Request.Header.Set("X-Forwarded-Host", "preview.apex-build.dev, internal-preview:8080")
+	context.Request.Header.Set("X-Forwarded-Proto", "https, http")
+
+	url := handler.buildProxyURL(context, projectID)
+	require.Equal(t, "https://preview.apex-build.dev/api/v1/preview/proxy/"+strconv.FormatUint(uint64(projectID), 10), url)
+}
+
+func TestPreviewHandlerBuildBackendProxyURLUsesForwardedPublicOrigin(t *testing.T) {
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/preview/backend-proxy", nil)
+	context.Request.Host = "internal-backend:8080"
+	context.Request.Header.Set("X-Forwarded-Host", "preview.apex-build.dev, internal-backend:8080")
+	context.Request.Header.Set("X-Forwarded-Proto", "https, http")
+
+	url := handler.buildBackendProxyURL(context, projectID)
+	require.Equal(t, "https://preview.apex-build.dev/api/v1/preview/backend-proxy/"+strconv.FormatUint(uint64(projectID), 10), url)
+}
+
+func TestRewritePreviewHTMLForProxyWithBackendAppendsPreviewTokenToAssets(t *testing.T) {
+	handler, projectID := newPreviewHandlerTestFixture(t, false)
+
+	html := `
+<html>
+  <head>
+    <link rel="stylesheet" href="/__apex_bundle.css">
+  </head>
+  <body>
+    <img src="/logo.svg">
+    <script src="/__apex_bundle.js"></script>
+  </body>
+</html>`
+
+	rewritten := handler.rewritePreviewHTMLForProxyWithBackend(html, projectID, "", "preview-token-123")
+	prefix := "/api/v1/preview/proxy/" + strconv.FormatUint(uint64(projectID), 10)
+
+	require.Contains(t, rewritten, `href="`+prefix+`/__apex_bundle.css?preview_token=preview-token-123"`)
+	require.Contains(t, rewritten, `src="`+prefix+`/__apex_bundle.js?preview_token=preview-token-123"`)
+	require.Contains(t, rewritten, `src="`+prefix+`/logo.svg?preview_token=preview-token-123"`)
+	require.NotContains(t, rewritten, "history.replaceState")
+}

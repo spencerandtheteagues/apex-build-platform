@@ -45,7 +45,7 @@ func TestReactBundleConfig(t *testing.T) {
 
 func TestComputeFileHash(t *testing.T) {
 	files := map[string]string{
-		"index.js": "console.log('hello');",
+		"index.js":  "console.log('hello');",
 		"style.css": "body { color: red; }",
 	}
 
@@ -352,6 +352,88 @@ root.render(<App />);
 
 	t.Logf("Bundle successful: %d bytes JS, %d bytes CSS, duration: %v",
 		len(result.OutputJS), len(result.OutputCSS), result.Duration)
+}
+
+func TestESBuildBundlerSupportsViteReactPreviewWithoutNodeModules(t *testing.T) {
+	cache := NewBundleCache(DefaultCacheConfig())
+	defer cache.Close()
+
+	bundler := NewESBuildBundler(cache)
+	if !bundler.IsAvailable() {
+		t.Skip("esbuild not available, skipping integration test")
+	}
+
+	files := ProjectFiles{
+		ProjectID: 2,
+		Files: map[string]string{
+			"package.json": `{
+  "name": "pulseboard",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}`,
+			"src/App.tsx": `export default function App() {
+  return (
+    <main>
+      <h1>PulseBoard</h1>
+      <p>Preview ready</p>
+    </main>
+  );
+}`,
+			"src/main.tsx": `import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);`,
+		},
+		PackageJSON: &PackageJSON{
+			Name: "pulseboard",
+			Type: "module",
+			Dependencies: map[string]string{
+				"react":     "^18.3.1",
+				"react-dom": "^18.3.1",
+			},
+		},
+	}
+
+	config := BundleConfig{
+		EntryPoint: "src/main.tsx",
+		Format:     "iife",
+		Minify:     false,
+		SourceMap:  false,
+		Target:     []string{"es2020"},
+		Framework:  "react",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, err := bundler.BundleFromFiles(ctx, files.ProjectID, files, config)
+	if err != nil {
+		t.Fatalf("Bundle failed: %v", err)
+	}
+
+	if !result.Success {
+		for _, e := range result.Errors {
+			t.Logf("Bundle error: %s (file: %s, line: %d)", e.Message, e.File, e.Line)
+		}
+		t.Fatal("expected Vite React preview bundle to succeed without node_modules")
+	}
+
+	if len(result.OutputJS) == 0 {
+		t.Fatal("expected bundled JS output")
+	}
+
+	if !containsStr(string(result.OutputJS), "PulseBoard") {
+		t.Fatal("expected bundled output to contain app content")
+	}
 }
 
 func TestGenerateHTML(t *testing.T) {

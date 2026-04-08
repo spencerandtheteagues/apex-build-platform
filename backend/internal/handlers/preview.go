@@ -10,6 +10,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -927,19 +928,24 @@ func (h *PreviewHandler) applyPreviewResponseHeaders(headers http.Header, origin
 	}
 }
 
-func (h *PreviewHandler) buildProxyURL(c *gin.Context, projectID uint) string {
+func previewPublicBase(c *gin.Context) (string, string) {
 	host := c.Request.Host
 	if forwardedHost := c.GetHeader("X-Forwarded-Host"); forwardedHost != "" {
-		host = strings.Split(forwardedHost, ",")[0]
+		host = strings.TrimSpace(strings.Split(forwardedHost, ",")[0])
 	}
 
 	scheme := "http"
 	if forwardedProto := c.GetHeader("X-Forwarded-Proto"); forwardedProto != "" {
-		scheme = strings.Split(forwardedProto, ",")[0]
+		scheme = strings.TrimSpace(strings.Split(forwardedProto, ",")[0])
 	} else if c.Request.TLS != nil {
 		scheme = "https"
 	}
 
+	return scheme, host
+}
+
+func (h *PreviewHandler) buildProxyURL(c *gin.Context, projectID uint) string {
+	scheme, host := previewPublicBase(c)
 	base := fmt.Sprintf("%s://%s/api/v1/preview/proxy/%d", scheme, host, projectID)
 	token := h.issuePreviewAccessToken(c, projectID)
 	if token == "" {
@@ -1021,11 +1027,7 @@ func (h *PreviewHandler) ProxyBackend(c *gin.Context) {
 
 // buildBackendProxyURL returns the public URL for the backend proxy for a given project.
 func (h *PreviewHandler) buildBackendProxyURL(c *gin.Context, projectID uint) string {
-	scheme := "https"
-	host := c.Request.Host
-	if c.Request.Header.Get("X-Forwarded-Proto") == "" && c.Request.TLS == nil {
-		scheme = "http"
-	}
+	scheme, host := previewPublicBase(c)
 	return fmt.Sprintf("%s://%s/api/v1/preview/backend-proxy/%d", scheme, host, projectID)
 }
 
@@ -1057,6 +1059,7 @@ func (h *PreviewHandler) rewritePreviewHTMLForProxyWithBackend(html string, proj
 	replaced = strings.ReplaceAll(replaced, `url("`+prefix+`//`, `url("//`)
 	replaced = strings.ReplaceAll(replaced, `url('`+prefix+`//`, `url('//`)
 	replaced = strings.ReplaceAll(replaced, `url(`+prefix+`//`, `url(//`)
+	replaced = appendPreviewTokenToProxyAssets(replaced, prefix, previewToken)
 
 	// Inject a script that patches fetch() / XHR to route localhost API calls through
 	// the backend proxy. This makes full-stack preview work without requiring the
@@ -1111,11 +1114,6 @@ func (h *PreviewHandler) rewritePreviewHTMLForProxyWithBackend(html string, proj
   window.__APEX_BACKEND_URL__=_bp;
   if(!window.import)window.import={meta:{env:{}}};
   window.import.meta={env:{VITE_API_URL:_bp,VITE_API_BASE_URL:_bp,REACT_APP_API_URL:_bp}};
-  try{
-    if(window.location.search.indexOf('preview_token=')!==-1){
-      window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
-    }
-  }catch(_e){}
 })();
 </script>`, backendProxyURL, previewToken, prefix)
 		// Inject before </head> or at top of <body>
@@ -1133,6 +1131,44 @@ func (h *PreviewHandler) rewritePreviewHTMLForProxyWithBackend(html string, proj
 	}
 
 	return replaced
+}
+
+func appendPreviewTokenToProxyAssets(html string, prefix string, previewToken string) string {
+	if previewToken == "" || prefix == "" || html == "" {
+		return html
+	}
+
+	escapedToken := url.QueryEscape(previewToken)
+	appendToken := func(target string) string {
+		if target == "" || strings.Contains(target, "preview_token=") || !strings.HasPrefix(target, prefix) {
+			return target
+		}
+		separator := "?"
+		if strings.Contains(target, "?") {
+			separator = "&"
+		}
+		return target + separator + "preview_token=" + escapedToken
+	}
+
+	attributePattern := regexp.MustCompile(`(?i)(\b(?:src|href|action)=["'])([^"']+)(["'])`)
+	html = attributePattern.ReplaceAllStringFunc(html, func(match string) string {
+		parts := attributePattern.FindStringSubmatch(match)
+		if len(parts) != 4 {
+			return match
+		}
+		return parts[1] + appendToken(parts[2]) + parts[3]
+	})
+
+	cssURLPattern := regexp.MustCompile(`(?i)(\burl\()(["']?)([^)"']+)(["']?\))`)
+	html = cssURLPattern.ReplaceAllStringFunc(html, func(match string) string {
+		parts := cssURLPattern.FindStringSubmatch(match)
+		if len(parts) != 5 {
+			return match
+		}
+		return parts[1] + parts[2] + appendToken(parts[3]) + parts[4]
+	})
+
+	return html
 }
 
 // GetDockerStatus returns Docker availability and container statistics

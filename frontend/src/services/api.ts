@@ -475,17 +475,33 @@ export class ApiService {
 
   // Build endpoints (Agent Orchestration System)
 
-  async buildPreflight(): Promise<{
+  async buildPreflight(data?: {
+    description?: string
+    prompt?: string
+    provider_mode?: 'platform' | 'byok'
+    require_preview_ready?: boolean
+    tech_stack?: {
+      frontend?: string
+      backend?: string
+      database?: string
+      styling?: string
+      extras?: string[]
+    }
+  }): Promise<{
     ready: boolean
     providers_available: number
     provider_names?: string[]
     provider_statuses?: Record<string, 'available' | 'unavailable'>
     has_byok?: boolean
+    capability_detector?: BuildCapabilityState
+    policy?: BuildPolicyState
+    classification?: BuildClassificationState
+    upgrade_required?: boolean
     error_code?: string
     error?: string
     suggestion?: string
   }> {
-    const response = await this.client.post('/build/preflight')
+    const response = await this.client.post('/build/preflight', data ?? {})
     return response.data
   }
 

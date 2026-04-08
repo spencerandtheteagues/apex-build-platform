@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -824,6 +825,9 @@ func (am *AgentManager) userHasActiveBYOKKey(userID uint) bool {
 }
 
 func (am *AgentManager) getAvailableProvidersWithGracePeriodForBuild(build *Build) []ai.AIProvider {
+	if am == nil || am.aiRouter == nil {
+		return nil
+	}
 	if build != nil && !am.buildUsesPlatformKeys(build) {
 		providers := am.aiRouter.GetAvailableProvidersForUser(build.UserID)
 		if len(providers) == 0 {
@@ -835,6 +839,9 @@ func (am *AgentManager) getAvailableProvidersWithGracePeriodForBuild(build *Buil
 }
 
 func (am *AgentManager) getCurrentlyAvailableProvidersForBuild(build *Build) []ai.AIProvider {
+	if am == nil || am.aiRouter == nil {
+		return nil
+	}
 	if build != nil && !am.buildUsesPlatformKeys(build) {
 		return am.aiRouter.GetAvailableProvidersForUser(build.UserID)
 	}
@@ -3756,6 +3763,16 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
+func ensureTaskInputMap(task *Task) map[string]any {
+	if task == nil {
+		return nil
+	}
+	if task.Input == nil {
+		task.Input = map[string]any{}
+	}
+	return task.Input
+}
+
 // taskDispatcher processes tasks from the queue
 func (am *AgentManager) taskDispatcher() {
 	for {
@@ -4370,9 +4387,120 @@ func (am *AgentManager) resultProcessor() {
 			if !ok {
 				return
 			}
-			am.processResult(result)
+			am.processResultSafely(result)
 		}
 	}
+}
+
+func (am *AgentManager) processResultSafely(result *TaskResult) {
+	if result != nil && !result.Success && result.Error == nil {
+		result.Error = errors.New("task failed without error details")
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("CRITICAL: recovered panic in resultProcessor for task %q agent %q: %v\n%s",
+				func() string {
+					if result == nil {
+						return ""
+					}
+					return result.TaskID
+				}(),
+				func() string {
+					if result == nil {
+						return ""
+					}
+					return result.AgentID
+				}(),
+				r,
+				debug.Stack(),
+			)
+			am.failBuildForRecoveredResultPanic(result, r)
+		}
+	}()
+
+	am.processResult(result)
+}
+
+func (am *AgentManager) failBuildForRecoveredResultPanic(result *TaskResult, recovered any) {
+	if result == nil {
+		return
+	}
+
+	am.mu.RLock()
+	agent := am.agents[result.AgentID]
+	am.mu.RUnlock()
+	if agent == nil {
+		return
+	}
+
+	build, err := am.GetBuild(agent.BuildID)
+	if err != nil || build == nil {
+		return
+	}
+
+	now := time.Now()
+	publicError := fmt.Sprintf("Internal build pipeline error while processing task %s", firstNonEmptyString(strings.TrimSpace(result.TaskID), "result"))
+	if recovered != nil {
+		publicError = fmt.Sprintf("%s: %v", publicError, recovered)
+	}
+
+	agent.mu.Lock()
+	if agent.CurrentTask != nil && agent.CurrentTask.ID == result.TaskID && agent.CurrentTask.Status != TaskCompleted {
+		agent.CurrentTask.Status = TaskFailed
+		agent.CurrentTask.Error = publicError
+	}
+	agent.Status = StatusError
+	agent.Error = publicError
+	agent.UpdatedAt = now
+	agent.mu.Unlock()
+
+	build.mu.Lock()
+	if build.Status == BuildCompleted || build.Status == BuildFailed || build.Status == BuildCancelled {
+		build.mu.Unlock()
+		return
+	}
+	for _, task := range build.Tasks {
+		if task == nil || task.ID != result.TaskID {
+			continue
+		}
+		if task.Status != TaskCompleted {
+			task.Status = TaskFailed
+			task.Error = publicError
+		}
+		break
+	}
+	build.Status = BuildFailed
+	build.Error = publicError
+	build.UpdatedAt = now
+	build.CompletedAt = &now
+	progress := build.Progress
+	mode := string(build.Mode)
+	build.mu.Unlock()
+
+	am.createCheckpoint(build, "Build Internal Error", "Build stopped after an internal result-processing panic")
+
+	allFiles := am.collectGeneratedFiles(build)
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildError,
+		BuildID:   build.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"status":                string(BuildFailed),
+			"error":                 "Internal build pipeline error",
+			"details":               publicError,
+			"progress":              progress,
+			"files_count":           len(allFiles),
+			"files":                 allFiles,
+			"recoverable":           false,
+			"quality_gate_required": true,
+			"quality_gate_passed":   false,
+			"quality_gate_stage":    "validation",
+		},
+	})
+
+	metrics.RecordBuildFinalization(string(BuildFailed), mode, "result_processor_panic")
+	am.persistCompletedBuild(build, allFiles)
 }
 
 // processResult handles a task result with retry logic and build verification
@@ -4507,8 +4635,9 @@ func (am *AgentManager) processResult(result *TaskResult) {
 					}
 					task.RetryCount++
 					task.Status = TaskPending
-					task.Input["coordination_errors"] = coordinationErrors
-					task.Input["retry_guidance"] = "Previous output violated the frozen scaffold or check-in protocol. Fix the coordination issues first."
+					taskInput := ensureTaskInputMap(task)
+					taskInput["coordination_errors"] = coordinationErrors
+					taskInput["retry_guidance"] = "Previous output violated the frozen scaffold or check-in protocol. Fix the coordination issues first."
 
 					agent.Status = StatusWorking
 					agent.mu.Unlock()
@@ -4571,8 +4700,9 @@ func (am *AgentManager) processResult(result *TaskResult) {
 					}
 					task.RetryCount++
 					task.Status = TaskPending
-					task.Input["verification_errors"] = verifyErrors
-					task.Input["retry_guidance"] = "Previous code failed build verification. Fix the following errors:"
+					taskInput := ensureTaskInputMap(task)
+					taskInput["verification_errors"] = verifyErrors
+					taskInput["retry_guidance"] = "Previous code failed build verification. Fix the following errors:"
 
 					agent.Status = StatusWorking
 					agent.mu.Unlock()
@@ -4765,8 +4895,9 @@ func (am *AgentManager) processResult(result *TaskResult) {
 			})
 
 			// Re-queue the task with error context for learning
-			task.Input["previous_errors"] = task.ErrorHistory
-			task.Input["retry_guidance"] = "Previous attempt failed. Analyze the error and try a different approach."
+			taskInput := ensureTaskInputMap(task)
+			taskInput["previous_errors"] = task.ErrorHistory
+			taskInput["retry_guidance"] = "Previous attempt failed. Analyze the error and try a different approach."
 
 			// Put task back in queue
 			am.taskQueue <- task
@@ -6213,6 +6344,8 @@ func dependencyVersionHint(pkg string) string {
 		return "^4.19.2"
 	case "concurrently":
 		return "^9.0.1"
+	case "@tanstack/react-query":
+		return "^5.13.4"
 	default:
 		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(pkg)), "@radix-ui/react-") {
 			return "^1.1.2"
@@ -8845,6 +8978,185 @@ func patchManifestScriptsJSON(content string, additions map[string]string) (stri
 	return string(updated), added
 }
 
+func patchManifestDependencyVersionsJSON(content string, pkgs []string) (string, []string) {
+	if strings.TrimSpace(content) == "" || len(pkgs) == 0 {
+		return content, nil
+	}
+
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+		return content, nil
+	}
+	if manifest == nil {
+		return content, nil
+	}
+
+	changed := make([]string, 0, len(pkgs))
+	for _, sectionName := range []string{"dependencies", "devDependencies"} {
+		section, _ := manifest[sectionName].(map[string]any)
+		if section == nil {
+			continue
+		}
+		for _, pkg := range pkgs {
+			pkg = canonicalGeneratedDependencyName(pkg)
+			if pkg == "" {
+				continue
+			}
+			existing, ok := section[pkg]
+			if !ok {
+				continue
+			}
+			hint := dependencyVersionHint(pkg)
+			if hint == "" || hint == "*" {
+				continue
+			}
+			existingString, _ := existing.(string)
+			if strings.TrimSpace(existingString) == hint {
+				continue
+			}
+			section[pkg] = hint
+			changed = append(changed, fmt.Sprintf("%s: %s -> %s", sectionName, pkg, hint))
+		}
+	}
+
+	if len(changed) == 0 {
+		return content, nil
+	}
+
+	updated, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return content, nil
+	}
+	sort.Strings(changed)
+	return string(updated), changed
+}
+
+func parseInvalidDependencyVersionsFromInstallErrors(errors []string) []string {
+	if len(errors) == 0 {
+		return nil
+	}
+	const prefix = "No matching version found for "
+	seen := map[string]bool{}
+	pkgs := make([]string, 0, len(errors))
+	for _, msg := range errors {
+		for _, line := range strings.Split(msg, "\n") {
+			idx := strings.Index(line, prefix)
+			if idx == -1 {
+				continue
+			}
+			rest := strings.TrimSpace(line[idx+len(prefix):])
+			if rest == "" {
+				continue
+			}
+			if dot := strings.Index(rest, "."); dot != -1 {
+				rest = rest[:dot]
+			}
+			at := strings.LastIndex(rest, "@")
+			if at <= 0 {
+				continue
+			}
+			pkg := canonicalGeneratedDependencyName(strings.TrimSpace(rest[:at]))
+			if pkg == "" || seen[pkg] {
+				continue
+			}
+			if dependencyVersionHint(pkg) == "*" {
+				continue
+			}
+			seen[pkg] = true
+			pkgs = append(pkgs, pkg)
+		}
+	}
+	sort.Strings(pkgs)
+	return pkgs
+}
+
+func (am *AgentManager) applyDeterministicInvalidDependencyVersionRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+	pkgs := parseInvalidDependencyVersionsFromInstallErrors(readinessErrors)
+	if len(pkgs) == 0 {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 {
+		return nil, ""
+	}
+
+	manifestPaths := generatedManifestCandidates(files)
+	if len(manifestPaths) == 0 {
+		return nil, ""
+	}
+
+	applied := make([]string, 0, len(manifestPaths))
+	for _, manifestPath := range manifestPaths {
+		content := plan.content(manifestPath)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		updated, changed := patchManifestDependencyVersionsJSON(content, pkgs)
+		if len(changed) == 0 {
+			continue
+		}
+		if !plan.patchFile(manifestPath, updated, "json") {
+			continue
+		}
+		applied = append(applied, fmt.Sprintf("%s (%s)", manifestPath, strings.Join(changed, ", ")))
+	}
+
+	if len(applied) == 0 {
+		return nil, ""
+	}
+	summary := strings.Join(applied, "; ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "manifest_version_repair: "+summary), summary
+}
+
+func rewriteManifestScriptsJSON(content string, replacements map[string]string) (string, []string) {
+	if strings.TrimSpace(content) == "" || len(replacements) == 0 {
+		return content, nil
+	}
+
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+		return content, nil
+	}
+	if manifest == nil {
+		return content, nil
+	}
+
+	scripts, _ := manifest["scripts"].(map[string]any)
+	if scripts == nil {
+		scripts = map[string]any{}
+		manifest["scripts"] = scripts
+	}
+
+	changed := make([]string, 0, len(replacements))
+	for name, value := range replacements {
+		name = strings.TrimSpace(name)
+		value = strings.TrimSpace(value)
+		if name == "" || value == "" {
+			continue
+		}
+		existing, _ := scripts[name].(string)
+		if strings.TrimSpace(existing) == value {
+			continue
+		}
+		scripts[name] = value
+		changed = append(changed, fmt.Sprintf("%s -> %s", name, value))
+	}
+	if len(changed) == 0 {
+		return content, nil
+	}
+
+	updated, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return content, nil
+	}
+	sort.Strings(changed)
+	return string(updated), changed
+}
+
 func generatedTSConfigPathFromManifest(manifestPath string) string {
 	sanitized := sanitizeFilePath(manifestPath)
 	if sanitized == "" {
@@ -8909,6 +9221,96 @@ func (am *AgentManager) ensureGeneratedTypeScriptConfig(plan *generatedFilePatch
 		return false, ""
 	}
 	return true, targetPath
+}
+
+func generatedServerTSConfigContent() string {
+	return `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": ".",
+    "outDir": "../dist/server",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts"],
+  "exclude": ["../src", "../node_modules", "../dist", "../tests", "../**/*.test.ts", "../**/*.spec.ts"]
+}
+`
+}
+
+func generatedFilesContainServerTypeScript(files []GeneratedFile) bool {
+	for _, file := range files {
+		path := sanitizeFilePath(file.Path)
+		if path == "" {
+			continue
+		}
+		if !strings.HasPrefix(path, "server/") {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == ".ts" || ext == ".tsx" {
+			return true
+		}
+	}
+	return false
+}
+
+func (am *AgentManager) ensureGeneratedRootBackendTSConfig(plan *generatedFilePatchPlan, files []GeneratedFile, manifestPath string, manifest previewManifest) (bool, string) {
+	if sanitizeFilePath(manifestPath) != "package.json" || !generatedFilesContainServerTypeScript(files) {
+		return false, ""
+	}
+
+	buildServer := strings.TrimSpace(manifest.Scripts["build:server"])
+	buildAll := strings.TrimSpace(manifest.Scripts["build"])
+	usesRootTSConfig := (strings.Contains(buildServer, "tsc") && strings.Contains(buildServer, "tsconfig.json") && !strings.Contains(buildServer, "server/tsconfig.json")) ||
+		(strings.Contains(buildAll, "tsc") && strings.Contains(buildAll, "tsconfig.json") && !strings.Contains(buildAll, "server/tsconfig.json"))
+	if !usesRootTSConfig {
+		return false, ""
+	}
+
+	rootTSConfig := strings.TrimSpace(plan.content("tsconfig.json"))
+	if rootTSConfig == "" {
+		return false, ""
+	}
+	rootTSConfigLower := strings.ToLower(rootTSConfig)
+	if !strings.Contains(rootTSConfigLower, `"moduleresolution": "bundler"`) || !strings.Contains(rootTSConfigLower, `"server"`) {
+		return false, ""
+	}
+
+	summaryParts := make([]string, 0, 2)
+	if strings.TrimSpace(plan.content("server/tsconfig.json")) == "" {
+		if !plan.createFile("server/tsconfig.json", generatedServerTSConfigContent(), "json") {
+			return false, ""
+		}
+		summaryParts = append(summaryParts, "server/tsconfig.json")
+	}
+
+	replacements := map[string]string{}
+	if strings.Contains(buildServer, "tsconfig.json") && !strings.Contains(buildServer, "server/tsconfig.json") {
+		replacements["build:server"] = "tsc -p server/tsconfig.json"
+	}
+	if strings.TrimSpace(buildServer) == "" && strings.Contains(buildAll, "tsc") && strings.Contains(buildAll, "tsconfig.json") && !strings.Contains(buildAll, "server/tsconfig.json") {
+		replacements["build"] = strings.Replace(buildAll, "tsconfig.json", "server/tsconfig.json", 1)
+	}
+	if len(replacements) > 0 {
+		updatedManifest, changed := rewriteManifestScriptsJSON(plan.content(manifestPath), replacements)
+		if len(changed) > 0 {
+			if !plan.patchFile(manifestPath, updatedManifest, "json") {
+				return false, ""
+			}
+			summaryParts = append(summaryParts, strings.Join(changed, ", "))
+		}
+	}
+
+	if len(summaryParts) == 0 {
+		return false, ""
+	}
+	return true, strings.Join(summaryParts, "; ")
 }
 
 func generatedManifestCandidates(files []GeneratedFile) []string {
@@ -9067,6 +9469,12 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 		if signals.hasImportMetaEnv && manifestUsesVite(manifest) {
 			if repaired, summary := am.ensureGeneratedViteEnvDeclaration(plan, manifestPath); repaired {
 				summaries = append(summaries, summary)
+			}
+		}
+		if repaired, summary := am.ensureGeneratedRootBackendTSConfig(plan, files, manifestPath, manifest); repaired {
+			summaries = append(summaries, summary)
+			if err := json.Unmarshal([]byte(plan.content(manifestPath)), &manifest); err == nil && manifest.Scripts == nil {
+				manifest.Scripts = map[string]string{}
 			}
 		}
 		if repaired, summary := am.ensureGeneratedTypeScriptConfig(plan, manifestPath, manifest); repaired {
@@ -9787,6 +10195,15 @@ func repairNeedsFrontendShell(readinessErrors []string) bool {
 		lower := strings.ToLower(strings.TrimSpace(msg))
 		if strings.Contains(lower, "no recognized frontend entry point found") ||
 			strings.Contains(lower, "missing entry point file for this frontend application") {
+			return true
+		}
+	}
+	return false
+}
+
+func repairNeedsScaffoldReplacement(readinessErrors []string) bool {
+	for _, msg := range readinessErrors {
+		if strings.Contains(strings.ToLower(msg), "deterministic scaffold placeholder content") {
 			return true
 		}
 	}
@@ -11152,8 +11569,11 @@ func (am *AgentManager) finalValidationRepairHints(
 	userID uint,
 ) []string {
 	heuristicHints := extractDependencyRepairHintsFromReadinessErrors(readinessErrors)
+	if repairNeedsScaffoldReplacement(readinessErrors) {
+		heuristicHints = append(heuristicHints, "CRITICAL: Replace the untouched deterministic scaffold with the requested product UI. Remove starter copy such as 'The deterministic scaffold is live', 'Replace this shell...', and 'Next.js App Router scaffold — ready to build.'")
+	}
 	if am.ctxSelector == nil || am.errorAnalyzer == nil {
-		return heuristicHints
+		return dedupeStringsPreserveOrder(heuristicHints)
 	}
 
 	contentByPath := make(map[string]string, len(allFiles))
@@ -11168,12 +11588,26 @@ func (am *AgentManager) finalValidationRepairHints(
 	relevantFiles := am.ctxSelector.Select(contentByPath, readinessErrors, nil)
 	plan, analyzeErr := am.errorAnalyzer.Analyze(am.ctx, readinessErrors, relevantFiles, userID)
 	if analyzeErr != nil || plan == nil {
-		return heuristicHints
+		return dedupeStringsPreserveOrder(heuristicHints)
 	}
 	if aiHints := plan.RepairHints(); len(aiHints) > 0 {
-		return aiHints
+		return dedupeStringsPreserveOrder(append(heuristicHints, aiHints...))
 	}
-	return heuristicHints
+	return dedupeStringsPreserveOrder(heuristicHints)
+}
+
+func dedupeStringsPreserveOrder(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]bool)
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func (am *AgentManager) launchFinalValidationSolverRecovery(
@@ -11993,7 +12427,15 @@ func (am *AgentManager) collectGeneratedFiles(build *Build) []GeneratedFile {
 			return
 		}
 
-		// Between files from the same class, prefer fuller content to avoid preserving truncated output.
+		// When multiple tasks touch the same file, the later task is the recovery/edit layer
+		// and must win even if it makes a small targeted change.
+		if source == "task" && sourceByPath[sanitized] == "task" {
+			filesByPath[sanitized] = file
+			sourceByPath[sanitized] = source
+			return
+		}
+
+		// Between snapshot files, prefer fuller content to avoid preserving truncated output.
 		if len(strings.TrimSpace(file.Content)) > len(strings.TrimSpace(existing.Content)) {
 			filesByPath[sanitized] = file
 			sourceByPath[sanitized] = source
@@ -13952,7 +14394,9 @@ func (am *AgentManager) sendTargetedMessageWithClientToken(
 
 	now := time.Now().UTC()
 	var leadAgent *Agent
+	var matchedAgents []*Agent
 	var userMessage BuildConversationMessage
+	var gatedLeadMessage BuildConversationMessage
 	var interaction BuildInteractionState
 	var broadcasts []agentMessageBroadcast
 
@@ -13969,10 +14413,74 @@ func (am *AgentManager) sendTargetedMessageWithClientToken(
 			build.mu.Unlock()
 			return fmt.Errorf("direct agent messages require an active build")
 		}
-		if len(buildAgentsForMessageTargetLocked(build, target)) == 0 {
+		matchedAgents = buildAgentsForMessageTargetLocked(build, target)
+		if len(matchedAgents) == 0 {
 			build.mu.Unlock()
 			return fmt.Errorf("no agents matched the selected target")
 		}
+	}
+	if requiresUpgrade, reason := buildFollowupRequiresPaidRuntime(build, trimmedMessage, target, matchedAgents); requiresUpgrade {
+		upgradeErr := newBuildSubscriptionRequiredError(buildSubscriptionPlan(build), reason)
+		question := upgradeErr.Suggestion
+		build.Interaction.PendingQuestion = question
+		build.Interaction.WaitingForUser = question != ""
+		if question != "" {
+			appendBuildApprovalEventLocked(build, BuildApprovalEvent{
+				Kind:       "plan_upgrade_acknowledgement",
+				Title:      "Upgrade required for backend/runtime work",
+				Status:     ApprovalEventPending,
+				Summary:    question,
+				SourceType: "plan_gate",
+				SourceID:   "plan-upgrade-required",
+				Actor:      "system",
+				Timestamp:  now,
+			})
+		}
+		gatedLeadMessage = appendBuildConversationMessageLocked(build, BuildConversationMessage{
+			Role:             ConversationRoleLead,
+			Kind:             ConversationKindQuestion,
+			Content:          question,
+			AgentID:          leadAgent.ID,
+			AgentRole:        string(leadAgent.Role),
+			RequiresResponse: true,
+			Blocking:         true,
+			Timestamp:        now,
+		})
+		build.UpdatedAt = now
+		resolveWaitingStateLocked(build)
+		if build.Interaction.WaitingForUser {
+			refreshInteractionAttentionLocked(build)
+		}
+		interaction = copyBuildInteractionStateLocked(build)
+		build.mu.Unlock()
+
+		am.persistBuildSnapshot(build, nil)
+		am.broadcast(buildID, &WSMessage{
+			Type:      WSLeadResponse,
+			BuildID:   buildID,
+			AgentID:   leadAgent.ID,
+			Timestamp: now,
+			Data: map[string]any{
+				"content":           gatedLeadMessage.Content,
+				"provider":          leadAgent.Provider,
+				"model":             leadAgent.Model,
+				"requires_response": true,
+				"question":          gatedLeadMessage.Content,
+				"interaction":       interaction,
+			},
+		})
+		am.broadcast(buildID, &WSMessage{
+			Type:      WSBuildUserInputRequired,
+			BuildID:   buildID,
+			AgentID:   leadAgent.ID,
+			Timestamp: now,
+			Data: map[string]any{
+				"question":    gatedLeadMessage.Content,
+				"interaction": interaction,
+			},
+		})
+		am.broadcastInteractionUpdate(buildID, interaction)
+		return upgradeErr
 	}
 
 	kind := ConversationKindDirective
@@ -15238,12 +15746,43 @@ func (am *AgentManager) broadcast(buildID string, msg *WSMessage) {
 	copy(subs, am.subscribers[buildID])
 	am.mu.RUnlock()
 
+	closedSubs := make([]chan *WSMessage, 0)
 	for _, ch := range subs {
-		select {
-		case ch <- msg:
-		default:
-			// Channel full, skip
+		func(sub chan *WSMessage) {
+			defer func() {
+				if r := recover(); r != nil {
+					closedSubs = append(closedSubs, sub)
+				}
+			}()
+			select {
+			case sub <- msg:
+			default:
+				// Channel full, skip
+			}
+		}(ch)
+	}
+
+	if len(closedSubs) > 0 {
+		closedSet := make(map[chan *WSMessage]struct{}, len(closedSubs))
+		for _, ch := range closedSubs {
+			closedSet[ch] = struct{}{}
 		}
+
+		am.mu.Lock()
+		current := am.subscribers[buildID]
+		filtered := current[:0]
+		for _, ch := range current {
+			if _, remove := closedSet[ch]; remove {
+				continue
+			}
+			filtered = append(filtered, ch)
+		}
+		if len(filtered) == 0 {
+			delete(am.subscribers, buildID)
+		} else {
+			am.subscribers[buildID] = filtered
+		}
+		am.mu.Unlock()
 	}
 
 	if shouldPersist && build != nil {
@@ -17488,6 +18027,9 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 
 		if hasUnresolvedPatchOrMergeMarkers(file.Content) {
 			addError(fmt.Sprintf("%s contains unresolved patch/merge markers", file.Path), &globalErrors)
+		}
+		if msg := scaffoldPlaceholderValidationError(file.Path, file.Content); msg != "" {
+			addError(msg, &frontendErrors)
 		}
 
 		ext := strings.ToLower(filepath.Ext(path))
@@ -19830,6 +20372,32 @@ func detectSourceArtifactAnomalies(path string, content string, ext string) []st
 	return errors
 }
 
+func scaffoldPlaceholderValidationError(path string, content string) string {
+	lowerPath := strings.ToLower(strings.TrimSpace(path))
+	if lowerPath == "" || isTestFile(lowerPath) {
+		return ""
+	}
+
+	switch strings.ToLower(filepath.Ext(lowerPath)) {
+	case ".ts", ".tsx", ".js", ".jsx", ".html":
+	default:
+		return ""
+	}
+
+	contentLower := strings.ToLower(content)
+	switch {
+	case strings.Contains(contentLower, "the deterministic scaffold is live"):
+		return fmt.Sprintf("%s still contains deterministic scaffold placeholder content; replace the starter UI with the requested app", path)
+	case strings.Contains(contentLower, "replace this shell with the real experience"),
+		strings.Contains(contentLower, "replace this shell with the product-specific experience"):
+		return fmt.Sprintf("%s still contains deterministic scaffold placeholder content; replace the starter UI with the requested app", path)
+	case strings.Contains(contentLower, "next.js app router scaffold") && strings.Contains(contentLower, "ready to build"):
+		return fmt.Sprintf("%s still contains deterministic scaffold placeholder content; replace the starter UI with the requested app", path)
+	default:
+		return ""
+	}
+}
+
 func detectBackendPersistenceStacks(path string, content string) []string {
 	pathLower := strings.ToLower(path)
 	contentLower := strings.ToLower(content)
@@ -20019,6 +20587,10 @@ func (am *AgentManager) verifyGeneratedCode(buildID string, output *TaskOutput) 
 			"[complete file content here]",
 			"[complete code here]",
 			"your implementation here",
+			"The deterministic scaffold is live",
+			"Replace this shell with the real experience",
+			"Replace this shell with the product-specific experience",
+			"Next.js App Router scaffold",
 		}
 		for _, p := range placeholders {
 			if strings.Contains(content, p) {
@@ -20460,8 +21032,9 @@ func (am *AgentManager) handleTaskFailure(agent *Agent, task *Task, result *Task
 		task.Status = TaskPending
 		task.Error = ""
 		task.RetryStrategy = RetryStrategy(retryStrategy)
-		task.Input["previous_errors"] = task.ErrorHistory
-		task.Input["retry_strategy"] = retryStrategy
+		taskInput := ensureTaskInputMap(task)
+		taskInput["previous_errors"] = task.ErrorHistory
+		taskInput["retry_strategy"] = retryStrategy
 
 		agent.Status = StatusWorking
 		agent.Error = ""

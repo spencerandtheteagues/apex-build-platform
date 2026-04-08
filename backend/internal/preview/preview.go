@@ -165,8 +165,8 @@ func NewPreviewServer(db *gorm.DB) *PreviewServer {
 		basePort: 9000, // Preview ports start at 9000
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
-				origin := r.Header.Get("Origin")
-				if origin == "" {
+				origin := strings.TrimSpace(r.Header.Get("Origin"))
+				if origin == "" || strings.EqualFold(origin, "null") {
 					return true
 				}
 				if origins.IsAllowedOrigin(origin) {
@@ -176,6 +176,7 @@ func NewPreviewServer(db *gorm.DB) *PreviewServer {
 				if strings.HasPrefix(origin, "http://localhost:") {
 					return true
 				}
+				log.Printf("[preview] rejecting websocket origin=%q host=%q uri=%q x_forwarded_host=%q x_forwarded_proto=%q", origin, r.Host, r.RequestURI, r.Header.Get("X-Forwarded-Host"), r.Header.Get("X-Forwarded-Proto"))
 				return false
 			},
 			ReadBufferSize:  1024,
@@ -677,6 +678,14 @@ func (ps *PreviewServer) generateBundledHTML(session *PreviewSession, config *Pr
 
 // injectBundleReferences injects bundle script/style tags into existing HTML
 func (ps *PreviewServer) injectBundleReferences(html string, session *PreviewSession) string {
+	if frameworkHead := ps.frameworkRuntimePrelude(session); frameworkHead != "" && !strings.Contains(html, frameworkHead) {
+		if strings.Contains(html, "</head>") {
+			html = strings.Replace(html, "</head>", frameworkHead+"\n</head>", 1)
+		} else {
+			html = frameworkHead + html
+		}
+	}
+
 	// Add CSS link before </head>
 	if session.BundleResult != nil && len(session.BundleResult.OutputCSS) > 0 {
 		cssTag := `<link rel="stylesheet" href="/__apex_bundle.css">`
@@ -723,22 +732,7 @@ func removeSourceScriptTags(html string) string {
 
 // generateBundleHTML generates a complete HTML file for a bundled project
 func (ps *PreviewServer) generateBundleHTML(session *PreviewSession, config *PreviewConfig) string {
-	framework := "app"
-	if session.BundleConfig != nil {
-		framework = session.BundleConfig.Framework
-	}
-
-	var frameworkHead string
-	switch strings.ToLower(framework) {
-	case "react":
-		// React 18+ uses createRoot, which is in the bundle
-		frameworkHead = ""
-	case "vue":
-		// Vue is bundled
-		frameworkHead = ""
-	case "preact":
-		frameworkHead = ""
-	}
+	frameworkHead := ps.frameworkRuntimePrelude(session)
 
 	var cssLink string
 	if session.BundleResult != nil && len(session.BundleResult.OutputCSS) > 0 {
@@ -764,6 +758,25 @@ func (ps *PreviewServer) generateBundleHTML(session *PreviewSession, config *Pre
   <script src="/__apex_bundle.js"></script>
 </body>
 </html>`, frameworkHead, cssLink)
+}
+
+func (ps *PreviewServer) frameworkRuntimePrelude(session *PreviewSession) string {
+	framework := ""
+	if session != nil && session.BundleConfig != nil {
+		framework = strings.ToLower(strings.TrimSpace(session.BundleConfig.Framework))
+	}
+
+	switch framework {
+	case "react":
+		return `<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>`
+	case "vue":
+		return `<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>`
+	case "preact":
+		return `<script src="https://unpkg.com/preact@10/dist/preact.umd.js"></script>`
+	default:
+		return ""
+	}
 }
 
 func (ps *PreviewServer) processFile(file *models.File, config *PreviewConfig) string {
@@ -998,15 +1011,18 @@ func (ps *PreviewServer) createFileHandler(session *PreviewSession, config *Prev
 			}
 		}
 
-		path := r.URL.Path
-		if path == "/" {
-			entryPoint := config.EntryPoint
-			if entryPoint == "" {
-				entryPoint = "index.html"
+		path := normalizePreviewPath(r.URL.Path)
+		if path == "" {
+			if session.IsBundled {
+				path = "index.html"
+			} else {
+				entryPoint := config.EntryPoint
+				if entryPoint == "" {
+					entryPoint = "index.html"
+				}
+				path = normalizePreviewPath(entryPoint)
 			}
-			path = entryPoint
 		}
-		path = normalizePreviewPath(path)
 
 		session.mu.RLock()
 		cached, exists := session.FileCache[path]
@@ -1024,6 +1040,14 @@ func (ps *PreviewServer) createFileHandler(session *PreviewSession, config *Prev
 		}
 
 		if !exists {
+			if session.IsBundled && shouldServeBundledSPAIndex(r, path) {
+				session.mu.RLock()
+				cached, exists = session.FileCache["index.html"]
+				session.mu.RUnlock()
+			}
+		}
+
+		if !exists {
 			// Return 404 page
 			w.WriteHeader(http.StatusNotFound)
 			w.Write([]byte(ps.generate404Page(path)))
@@ -1035,6 +1059,28 @@ func (ps *PreviewServer) createFileHandler(session *PreviewSession, config *Prev
 		w.Header().Set("X-APEX-Preview", "true")
 		w.Write([]byte(cached.Content))
 	}
+}
+
+func shouldServeBundledSPAIndex(r *http.Request, path string) bool {
+	if r == nil {
+		return false
+	}
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+	default:
+		return false
+	}
+	if path == "" {
+		return true
+	}
+	if strings.HasPrefix(path, "__apex_") {
+		return false
+	}
+	if filepath.Ext(path) != "" {
+		return false
+	}
+	accept := strings.ToLower(strings.TrimSpace(r.Header.Get("Accept")))
+	return accept == "" || strings.Contains(accept, "text/html") || strings.Contains(accept, "*/*")
 }
 
 func (ps *PreviewServer) createReloadHandler(session *PreviewSession) http.HandlerFunc {

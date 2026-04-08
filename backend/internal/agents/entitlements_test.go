@@ -141,3 +141,44 @@ func TestUserHasActiveBYOKKeyRequiresPaidPlan(t *testing.T) {
 		t.Fatal("builder users with active keys should retain BYOK access")
 	}
 }
+
+func TestBuildFollowupRequiresPaidRuntime(t *testing.T) {
+	build := &Build{
+		ID:               "free-preview-build",
+		UserID:           1,
+		SubscriptionPlan: "free",
+		Description:      "Build a polished frontend preview first and defer runtime scope honestly.",
+		TechStack:        &TechStack{Frontend: "React"},
+	}
+
+	t.Run("ambiguous functional request is gated", func(t *testing.T) {
+		requiresUpgrade, reason := buildFollowupRequiresPaidRuntime(build, "Make it fully functional now.", buildMessageTarget{Mode: BuildMessageTargetLead}, nil)
+		if !requiresUpgrade {
+			t.Fatal("expected follow-up runtime request to require upgrade")
+		}
+		if reason != "backend/runtime implementation" {
+			t.Fatalf("expected backend/runtime implementation reason, got %q", reason)
+		}
+	})
+
+	t.Run("explicit backend target is gated", func(t *testing.T) {
+		requiresUpgrade, reason := buildFollowupRequiresPaidRuntime(build, "Continue on the backend implementation.", buildMessageTarget{
+			Mode:      BuildMessageTargetAgent,
+			AgentID:   "backend-1",
+			AgentRole: "backend",
+		}, []*Agent{{ID: "backend-1", Role: RoleBackend}})
+		if !requiresUpgrade {
+			t.Fatal("expected backend-targeted follow-up to require upgrade")
+		}
+		if reason != "backend services" {
+			t.Fatalf("expected backend services reason, got %q", reason)
+		}
+	})
+
+	t.Run("ui polish remains allowed", func(t *testing.T) {
+		requiresUpgrade, reason := buildFollowupRequiresPaidRuntime(build, "Polish the hero spacing and improve the mobile navigation states.", buildMessageTarget{Mode: BuildMessageTargetLead}, nil)
+		if requiresUpgrade {
+			t.Fatalf("expected ui-only follow-up to stay allowed, got %q", reason)
+		}
+	})
+}

@@ -1,6 +1,8 @@
 package origins
 
 import (
+	"net"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -12,6 +14,7 @@ var defaultAllowedOrigins = []string{
 	"http://localhost:8080",
 	"http://127.0.0.1:3000",
 	"http://127.0.0.1:5173",
+	"http://127.0.0.1:8080",
 	"https://apex-build.dev",
 	"https://www.apex-build.dev",
 	"https://apex.build",
@@ -31,13 +34,30 @@ func AllowedOrigins() []string {
 }
 
 func IsAllowedOrigin(origin string) bool {
-	origin = strings.TrimSpace(origin)
+	origin = normalizeOrigin(origin)
+	if origin == "" {
+		return false
+	}
+
+	if IsConfiguredOrigin(origin) {
+		return true
+	}
+
+	if !IsProductionEnvironment() && isLoopbackOrigin(origin) {
+		return true
+	}
+
+	return false
+}
+
+func IsConfiguredOrigin(origin string) bool {
+	origin = normalizeOrigin(origin)
 	if origin == "" {
 		return false
 	}
 
 	for _, allowed := range AllowedOrigins() {
-		if origin == allowed {
+		if origin == normalizeOrigin(allowed) {
 			return true
 		}
 	}
@@ -91,4 +111,43 @@ func splitAndTrim(raw string) []string {
 		}
 	}
 	return values
+}
+
+func normalizeOrigin(origin string) string {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	parsed.Host = strings.ToLower(parsed.Host)
+	parsed.Path = ""
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+
+	return parsed.String()
+}
+
+func isLoopbackOrigin(origin string) bool {
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

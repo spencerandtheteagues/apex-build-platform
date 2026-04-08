@@ -93,6 +93,7 @@ import { AssetUploader } from '@/components/project/AssetUploader'
 import DiffReviewPanel from '@/components/diff/DiffReviewPanel'
 import OrchestrationOverview from './OrchestrationOverview'
 import BuildPieProgress from './BuildPieProgress'
+import BuildScreen from './BuildScreen'
 
 // ============================================================================
 // TYPES
@@ -208,6 +209,14 @@ interface BuildState {
   truthBySurface?: Record<string, string[]>
   interaction?: ApiBuildInteractionState
   platformIssue?: BuildPlatformIssueContext
+}
+
+interface UpgradePromptState {
+  reason: string
+  suggestion: string
+  requiredPlan: string
+  buildId?: string
+  source: 'start' | 'message'
 }
 
 type BuildWorkspaceView = 'overview' | 'activity' | 'files' | 'timeline' | 'issues' | 'diagnostics' | 'console'
@@ -958,6 +967,137 @@ const EpicBuildButton: React.FC<EpicBuildButtonProps> = ({ onClick, disabled, is
   )
 }
 
+interface PlanUpgradeModalProps {
+  currentPlan?: string
+  upgrade: UpgradePromptState
+  loading?: boolean
+  onClose: () => void
+  onUpgrade: () => void
+}
+
+const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({ currentPlan, upgrade, loading, onClose, onUpgrade }) => {
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        background: 'rgba(0,0,0,0.75)',
+        backdropFilter: 'blur(8px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1rem',
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose()
+        }
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 520,
+          borderRadius: 18,
+          border: '1px solid rgba(239,68,68,0.26)',
+          background: 'linear-gradient(180deg, rgba(13,13,13,0.98), rgba(6,6,6,0.98))',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.72), 0 0 80px rgba(239,68,68,0.12)',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            padding: '20px 24px 16px',
+            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}
+        >
+          <div>
+            <div style={{ fontFamily: '"Orbitron", sans-serif', fontWeight: 800, fontSize: '0.95rem', letterSpacing: '0.08em', color: '#f8fafc' }}>
+              UPGRADE TO CONTINUE BACKEND WORK
+            </div>
+            <div style={{ marginTop: 6, fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)' }}>
+              The frontend preview stays available now. Runtime implementation unlocks after payment.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close upgrade prompt"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'rgba(255,255,255,0.55)',
+              cursor: 'pointer',
+              fontSize: '1.4rem',
+              lineHeight: 1,
+              minWidth: 40,
+              minHeight: 40,
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        <div style={{ padding: '22px 24px 24px', display: 'grid', gap: 16 }}>
+          <div
+            style={{
+              borderRadius: 14,
+              border: '1px solid rgba(248,113,113,0.2)',
+              background: 'rgba(127,29,29,0.18)',
+              padding: '14px 16px',
+            }}
+          >
+            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#fca5a5' }}>
+              Current Plan
+            </div>
+            <div style={{ marginTop: 4, fontSize: '1rem', fontWeight: 700, color: '#fff' }}>
+              {(currentPlan || 'free').toUpperCase()} {'->'} {(upgrade.requiredPlan || 'builder').toUpperCase()}
+            </div>
+            <div style={{ marginTop: 10, fontSize: '0.92rem', lineHeight: 1.55, color: 'rgba(255,255,255,0.78)' }}>
+              {upgrade.suggestion}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gap: 10, color: 'rgba(255,255,255,0.72)', fontSize: '0.9rem', lineHeight: 1.55 }}>
+            <div>What you keep right now: the preview-first frontend build continues so the app stays visible in the interactive preview pane.</div>
+            <div>What payment unlocks: {upgrade.reason || 'backend/runtime implementation'} on this same app without starting over.</div>
+            <div>
+              {upgrade.source === 'start'
+                ? 'This request crossed into paid capability territory during planning, so the system is preserving the frontend preview and deferring runtime work honestly.'
+                : 'This follow-up request crossed into paid capability territory, so the system stopped before pretending the backend work happened.'}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <Button
+              type="button"
+              onClick={onUpgrade}
+              disabled={loading}
+              className="min-h-[48px] flex-1 border border-red-500/60 bg-red-500/15 text-red-100 hover:bg-red-500/20"
+            >
+              {loading ? 'Opening Checkout...' : `Upgrade to ${(upgrade.requiredPlan || 'builder').replace(/\b\w/g, (match) => match.toUpperCase())}`}
+            </Button>
+            <Button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              variant="outline"
+              className="min-h-[48px] flex-1 border border-gray-700 text-gray-300 hover:bg-gray-900"
+            >
+              Keep Preview Only
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ============================================================================
 // AGENT CARD COMPONENT (Animated)
 // ============================================================================
@@ -1399,6 +1539,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const previewPreparedRef = useRef(false)
   const [showBuyCredits, setShowBuyCredits] = useState(false)
   const [buyCreditsReason, setBuyCreditsReason] = useState<string | undefined>(undefined)
+  const [upgradePrompt, setUpgradePrompt] = useState<UpgradePromptState | null>(null)
+  const [upgradeCheckoutPending, setUpgradeCheckoutPending] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
   const [showGitHubImport, setShowGitHubImport] = useState(false)
   const [replitUrl, setReplitUrl] = useState('')
@@ -1406,6 +1548,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [rollbackCheckpointId, setRollbackCheckpointId] = useState<string | null>(null)
   const [isStartingOver, setIsStartingOver] = useState(false)
   const plannerInputRef = useRef<HTMLInputElement | null>(null)
+  const { user, currentProject, createProject, setCurrentProject, addNotification } = useStore()
 
   // WebSocket
   const wsRef = useRef<WebSocket | null>(null)
@@ -1430,6 +1573,45 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   useEffect(() => {
     buildStateRef.current = buildState
   }, [buildState])
+
+  const dismissUpgradePrompt = useCallback(() => {
+    setUpgradePrompt(null)
+    setUpgradeCheckoutPending(false)
+  }, [])
+
+  const openUpgradePrompt = useCallback((payload: {
+    reason?: string
+    suggestion?: string
+    requiredPlan?: string
+    buildId?: string
+    source: 'start' | 'message'
+  }) => {
+    const requiredPlan = (payload.requiredPlan || 'builder').trim() || 'builder'
+    const reason = (payload.reason || 'backend/runtime implementation').trim() || 'backend/runtime implementation'
+    const suggestion = (payload.suggestion || `The frontend preview stays available right now. Upgrade to ${requiredPlan.replace(/\b\w/g, (match) => match.toUpperCase())} or higher to unlock ${reason} on this same app.`).trim()
+
+    setUpgradePrompt({
+      requiredPlan,
+      reason,
+      suggestion,
+      buildId: payload.buildId || buildStateRef.current?.id,
+      source: payload.source,
+    })
+    addNotification({
+      type: 'warning',
+      title: 'Upgrade Required',
+      message: suggestion,
+    })
+  }, [addNotification])
+
+  const addSystemMessage = useCallback((content: string) => {
+    setChatMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      role: 'system',
+      content,
+      timestamp: new Date(),
+    }])
+  }, [])
 
   useEffect(() => {
     setAgentMessageDrafts({})
@@ -1500,7 +1682,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     return 'architect' in roleAssignments && 'coder' in roleAssignments
   }, [roleConfigMode, roleAssignments])
 
-  const { user, currentProject, createProject, setCurrentProject, addNotification } = useStore()
   const builderRootRef = useRef<HTMLDivElement>(null)
   const startOverSignalRef = useRef<number | undefined>(undefined)
   const getScopedStorageKey = useCallback((baseKey: string) => {
@@ -1576,6 +1757,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const clearLastWorkflowBuildId = useCallback(() => {
     clearStoredValue(LAST_WORKFLOW_BUILD_STORAGE_KEY)
   }, [clearStoredValue])
+  const buildUpgradeReturnUrl = useCallback((status: 'success' | 'canceled', buildId?: string) => {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('upgrade')
+    url.searchParams.delete('resume_build')
+    url.searchParams.set('upgrade', status)
+    if (buildId) {
+      url.searchParams.set('resume_build', buildId)
+    }
+    return url.toString()
+  }, [])
   const serializeTelemetryThought = useCallback((thought: AIThought): PersistedAIThought => ({
     id: thought.id,
     agentId: thought.agentId,
@@ -2334,6 +2525,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     setRollbackCheckpointId(null)
     setShowBuyCredits(false)
     setBuyCreditsReason(undefined)
+    setUpgradePrompt(null)
+    setUpgradeCheckoutPending(false)
     setPlatformReadiness(null)
     if (options?.clearPrompt) {
       setAppDescription('')
@@ -2645,7 +2838,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
 
     wsRef.current = ws
-  }, [buildWebSocketUrl, hasUsableWebSocketConnection])
+  }, [addSystemMessage, buildWebSocketUrl, hasUsableWebSocketConnection])
 
   // Handle WebSocket messages
   const handleWebSocketMessage = async (message: any) => {
@@ -3630,16 +3823,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     })
   }
 
-  // Add system message
-  const addSystemMessage = (content: string) => {
-    setChatMessages(prev => [...prev, {
-      id: Date.now().toString(),
-      role: 'system',
-      content,
-      timestamp: new Date(),
-    }])
-  }
-
   const normalizeConversationMessages = useCallback((messages: unknown): ChatMessage[] => {
     if (!Array.isArray(messages)) return []
     return messages
@@ -3924,6 +4107,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       setIsCreatingProject(false)
     }
   }, [
+    addSystemMessage,
     appDescription,
     buildState?.description,
     buildState?.id,
@@ -3950,7 +4134,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     } finally {
       setIsPreparingPreview(false)
     }
-  }, [ensureProjectCreated])
+  }, [addSystemMessage, ensureProjectCreated])
 
   const openPreviewWorkspace = useCallback(async () => {
     const project = await preparePreview(false)
@@ -4157,6 +4341,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       void loadProposedEdits(buildId)
     }
   }, [
+    addSystemMessage,
     appDescription,
     clearActiveBuildId,
     connectWebSocket,
@@ -4171,6 +4356,106 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     restoreServerTelemetry,
     resolveGeneratedFiles,
   ])
+
+  const handleUpgradeCheckout = useCallback(async () => {
+    const requiredPlan = upgradePrompt?.requiredPlan || 'builder'
+    const normalizedRequiredPlan = requiredPlan.trim().toLowerCase()
+    const resumeBuildId = upgradePrompt?.buildId || buildStateRef.current?.id
+
+    setUpgradeCheckoutPending(true)
+    try {
+      const plans = await apiService.getPlans()
+      const availablePlans = plans.data?.plans || []
+      const targetPlan = availablePlans.find((plan) => String(plan.type || '').trim().toLowerCase() === normalizedRequiredPlan)
+
+      if (!targetPlan?.monthly_price_id) {
+        throw new Error(`Stripe is not configured for the ${requiredPlan} plan in this environment.`)
+      }
+
+      const result = await apiService.createCheckoutSession({
+        price_id: targetPlan.monthly_price_id,
+        success_url: buildUpgradeReturnUrl('success', resumeBuildId),
+        cancel_url: buildUpgradeReturnUrl('canceled', resumeBuildId),
+      })
+
+      if (!result.success || !result.data?.checkout_url) {
+        throw new Error(result.error || 'Failed to start checkout. Please try again.')
+      }
+
+      window.location.href = result.data.checkout_url
+    } catch (error: unknown) {
+      const message = (error as any)?.response?.data?.error || (error instanceof Error ? error.message : 'Failed to start checkout')
+      addSystemMessage(`Upgrade checkout failed: ${message}`)
+      addNotification({
+        type: 'error',
+        title: 'Checkout Failed',
+        message,
+      })
+    } finally {
+      setUpgradeCheckoutPending(false)
+    }
+  }, [addNotification, addSystemMessage, buildUpgradeReturnUrl, upgradePrompt])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !user?.id) return
+
+    const url = new URL(window.location.href)
+    const upgradeState = url.searchParams.get('upgrade')
+    const resumeBuildId = url.searchParams.get('resume_build')
+    if (!upgradeState && !resumeBuildId) {
+      return
+    }
+
+    const clearUpgradeParams = () => {
+      const nextUrl = new URL(window.location.href)
+      nextUrl.searchParams.delete('upgrade')
+      nextUrl.searchParams.delete('resume_build')
+      window.history.replaceState({}, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`)
+    }
+
+    let cancelled = false
+    const restoreBuildAfterUpgrade = async () => {
+      try {
+        if (resumeBuildId) {
+          await hydrateBuildContext(resumeBuildId, {
+            reconnectLive: true,
+            notify: false,
+          })
+        }
+        if (cancelled) return
+
+        if (upgradeState === 'success') {
+          dismissUpgradePrompt()
+          addSystemMessage('Upgrade confirmed. Resuming the same app with backend/runtime work unlocked.')
+          addNotification({
+            type: 'success',
+            title: 'Upgrade Confirmed',
+            message: 'Resumed the same app so backend/runtime work can continue.',
+          })
+        } else if (upgradeState === 'canceled') {
+          addSystemMessage('Upgrade canceled. The frontend preview remains available, and backend/runtime work stays gated on the free plan.')
+          addNotification({
+            type: 'info',
+            title: 'Upgrade Canceled',
+            message: 'Your frontend preview is still available. Upgrade later to continue backend/runtime work on this app.',
+          })
+        }
+      } catch {
+        if (!cancelled) {
+          addSystemMessage('Returned from checkout, but the previous build could not be restored automatically. You can reopen it from Recent Builds.')
+        }
+      } finally {
+        if (!cancelled) {
+          clearUpgradeParams()
+        }
+      }
+    }
+
+    void restoreBuildAfterUpgrade()
+    return () => {
+      cancelled = true
+    }
+  }, [addNotification, addSystemMessage, dismissUpgradePrompt, hydrateBuildContext, user?.id])
 
   const openBuildFilesInIDE = useCallback(async (buildId: string, detail?: CompletedBuildDetail) => {
     const completed = detail || await apiService.getCompletedBuild(buildId)
@@ -4210,6 +4495,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     })
     onNavigateToIDE?.({ target: 'editor', projectId: project.id })
   }, [
+    addSystemMessage,
     deriveProjectName,
     ensureProjectCreated,
     normalizeGeneratedFiles,
@@ -4282,8 +4568,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       // Always use the fresh preflight result for provider_mode to avoid stale state
       // (e.g. user added/removed BYOK keys in Settings since this component mounted).
       let freshProviderMode: 'platform' | 'byok' | undefined
+      let preflightCapabilityState: BuildCapabilityState | undefined
+      let preflightPolicyState: BuildPolicyState | undefined
+      const techStackOverride = buildTechStackOverride()
       try {
-        const preflight = await apiService.buildPreflight()
+        const preflight = await apiService.buildPreflight({
+          description: appDescription,
+          prompt: appDescription,
+          require_preview_ready: true,
+          tech_stack: techStackOverride || undefined,
+        })
         if (!preflight.ready) {
           const errorMsg = preflight.suggestion || preflight.error || 'AI providers unavailable'
           addSystemMessage(`Preflight failed: ${errorMsg}`)
@@ -4297,6 +4591,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         if (preflight.provider_statuses) {
           setProviderStatuses(preflight.provider_statuses)
         }
+        preflightCapabilityState = preflight.capability_detector
+        preflightPolicyState = preflight.policy
       } catch (preflightErr: any) {
         const errData = preflightErr?.response?.data
         if (errData?.error_code) {
@@ -4309,7 +4605,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         console.warn('Preflight check failed (non-fatal):', preflightErr)
       }
 
-      const techStackOverride = buildTechStackOverride()
       const response = await apiService.startBuild({
         description: appDescription,
         prompt: appDescription,
@@ -4343,12 +4638,27 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         qualityGateRequired: true,
         qualityGateStatus: 'pending',
         qualityGateStage: '',
+        capabilityState: preflightCapabilityState,
+        policyState: preflightPolicyState,
+        blockers: [],
+        approvals: [],
         websocketUrl: typeof response.websocket_url === 'string' ? response.websocket_url : undefined,
         liveSession: true,
       })
 
       connectWebSocket(buildId, response.websocket_url)
       addSystemMessage(`Build started! Build ID: ${buildId}`)
+      if (preflightPolicyState?.classification === 'upgrade_required' && preflightPolicyState.static_frontend_only) {
+        const suggestion = `The frontend preview is building now. Upgrade to ${(preflightPolicyState.required_plan || 'builder').replace(/\b\w/g, (match) => match.toUpperCase())} or higher to unlock ${preflightPolicyState.upgrade_reason || 'backend/runtime implementation'} on this same app.`
+        addSystemMessage(suggestion)
+        openUpgradePrompt({
+          source: 'start',
+          buildId,
+          requiredPlan: preflightPolicyState.required_plan,
+          reason: preflightPolicyState.upgrade_reason,
+          suggestion,
+        })
+      }
 
     } catch (error: unknown) {
       console.error('Build start failed:', error)
@@ -4376,10 +4686,11 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         if (errorCode === 'BACKEND_SUBSCRIPTION_REQUIRED') {
           const suggestion = (error.response?.data as any)?.suggestion || 'Upgrade to Builder or higher to unlock backend and full-stack app generation.'
           addSystemMessage(`Build blocked: ${suggestion}`)
-          addNotification({
-            type: 'warning',
-            title: 'Upgrade Required',
-            message: suggestion,
+          openUpgradePrompt({
+            source: 'start',
+            requiredPlan: (error.response?.data as any)?.required_plan,
+            reason: (error.response?.data as any)?.blocked_reason,
+            suggestion,
           })
           setIsBuilding(false)
           return
@@ -4546,10 +4857,29 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       if (optimisticContent) {
         setPendingConversationMessageStatus(clientToken, 'failed')
       }
+      const errorData = (error as any)?.response?.data
+      const errorCode = errorData?.error_code
+      if (errorCode === 'BACKEND_SUBSCRIPTION_REQUIRED') {
+        const suggestion = errorData?.suggestion || 'Upgrade to Builder or higher to continue backend/runtime work on this app.'
+        addSystemMessage(suggestion)
+        openUpgradePrompt({
+          source: 'message',
+          buildId: buildStateRef.current?.id,
+          requiredPlan: errorData?.required_plan,
+          reason: errorData?.blocked_reason,
+          suggestion,
+        })
+        return false
+      }
+      if ((error as any)?.response?.status === 402 || errorCode === 'INSUFFICIENT_CREDITS') {
+        setBuyCreditsReason(errorData?.suggestion || 'Your credit balance has run out. Purchase credits to continue building.')
+        setShowBuyCredits(true)
+        return false
+      }
       addSystemMessage('Message failed to send. Please try again.')
       return false
     }
-  }, [connectWebSocket, hasUsableWebSocketConnection, setPendingConversationMessageStatus, syncInteractionState])
+  }, [addSystemMessage, connectWebSocket, hasUsableWebSocketConnection, openUpgradePrompt, setPendingConversationMessageStatus, syncInteractionState])
 
   const sendChatMessage = async () => {
     const content = chatInput.trim()
@@ -4684,7 +5014,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     } finally {
       setShowGitHubImport(false)
     }
-  }, [onNavigateToIDE, setCurrentProject])
+  }, [addSystemMessage, onNavigateToIDE, setCurrentProject])
 
   const handleRollbackCheckpoint = async (checkpointId: string) => {
     if (!buildState?.id) return
@@ -4717,12 +5047,21 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   // ============================================================================
 
   return (
-    <div ref={builderRootRef} className="app-builder-root h-full min-h-0 overflow-y-auto overscroll-contain bg-black text-white relative">
+    <div ref={builderRootRef} className={cn("app-builder-root h-full min-h-0 bg-black text-white relative", buildState ? "overflow-hidden flex flex-col" : "overflow-y-auto overscroll-contain")}>
       {/* Buy Credits Modal */}
       {showBuyCredits && (
         <BuyCreditsModal
           reason={buyCreditsReason}
           onClose={() => setShowBuyCredits(false)}
+        />
+      )}
+      {upgradePrompt && (
+        <PlanUpgradeModal
+          currentPlan={buildState?.policyState?.plan_type || user?.subscription_type}
+          upgrade={upgradePrompt}
+          loading={upgradeCheckoutPending}
+          onClose={dismissUpgradePrompt}
+          onUpgrade={handleUpgradeCheckout}
         />
       )}
 
@@ -4797,7 +5136,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       </div>
 
       {/* Main content */}
-      <div className="relative z-10 p-6 pb-10 md:p-8 md:pb-12 lg:p-12 lg:pb-16">
+      <div className={buildState ? "relative z-10 flex-1 min-h-0 flex flex-col overflow-hidden" : "relative z-10 p-6 pb-10 md:p-8 md:pb-12 lg:p-12 lg:pb-16"}>
         {/* Replit Import Modal */}
         {showImportModal && (
           <div className="fixed inset-0 z-[100] overflow-y-auto bg-black/95 p-4 backdrop-blur-md">
@@ -4846,16 +5185,18 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           </div>
         )}
 
-        {/* Header Section */}
-        <div className="text-center mb-16 pt-8">
-          <div className="flex items-center justify-center gap-6 mb-10">
-            <AnimatedLogo />
+        {/* Header Section — hidden during active build */}
+        {!buildState && (
+          <div className="text-center mb-16 pt-8">
+            <div className="flex items-center justify-center gap-6 mb-10">
+              <AnimatedLogo />
+            </div>
+            <AnimatedTitle />
+            <div className="mt-6">
+              <TypewriterSubtitle text="Describe what you want to build, and our AI agents will create it for you" />
+            </div>
           </div>
-          <AnimatedTitle />
-          <div className="mt-6">
-            <TypewriterSubtitle text="Describe what you want to build, and our AI agents will create it for you" />
-          </div>
-        </div>
+        )}
 
         {/* Main Content */}
         {!buildState ? (
@@ -5166,1385 +5507,61 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             <BuildHistory userId={user?.id ?? null} onOpenBuild={openCompletedBuild} />
           </div>
         ) : (
-          // Build Progress View
-          <div className="max-w-7xl mx-auto space-y-6">
-            <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
-              <CardContent className="p-4">
-                <div className="flex flex-wrap gap-2">
-                  {buildWorkspaceViews.map((view) => (
-                    <Button
-                      key={view.id}
-                      size="sm"
-                      variant={buildWorkspaceView === view.id ? 'default' : 'outline'}
-                      onClick={() => setBuildWorkspaceView(view.id)}
-                      className={cn(
-                        'min-w-[8.5rem] justify-start',
-                        buildWorkspaceView === view.id
-                          ? 'bg-red-600 hover:bg-red-500'
-                          : 'border-gray-700 bg-gray-900/40 text-gray-200 hover:bg-gray-800'
-                      )}
-                    >
-                      <div className="text-left">
-                        <div className="text-xs font-semibold uppercase tracking-wide">{view.label}</div>
-                        <div className="text-[10px] text-inherit/70 normal-case tracking-normal">{view.hint}</div>
-                      </div>
-                    </Button>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-3">
-              {buildWorkspaceView === 'activity' && liveProviderPanels.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-4">
-                  {liveProviderPanels.map((panel) => {
-                  const ui = PROVIDER_UI[panel.provider]
-                  const isLive = panel.status === 'thinking' || panel.status === 'working'
-                  const statusBadgeClass =
-                    panel.status === 'error'
-                      ? 'border-red-500/50 bg-red-500/10 text-red-200'
-                      : panel.status === 'unavailable'
-                        ? 'border-gray-600 bg-gray-800/70 text-gray-300'
-                        : panel.status === 'completed'
-                          ? 'border-green-500/50 bg-green-500/10 text-green-200'
-                          : isLive
-                            ? 'border-white/20 bg-white/10 text-white'
-                            : 'border-gray-700 bg-gray-900/60 text-gray-300'
-
-                  return (
-                    <Card
-                      key={panel.provider}
-                      variant="cyberpunk"
-                      className={cn(
-                        'border-2 backdrop-blur-sm overflow-hidden',
-                        ui.cardClass,
-                        isLive && ui.activeClass,
-                        panel.status === 'error' && 'border-red-500/60 shadow-[0_0_24px_rgba(239,68,68,0.18)]',
-                        panel.mismatch && panel.status !== 'error' && 'border-amber-500/60 shadow-[0_0_24px_rgba(245,158,11,0.12)]'
-                      )}
-                    >
-                      <CardHeader className="pb-4 border-b border-white/10">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className={cn('h-2.5 w-2.5 rounded-full', isLive ? `${ui.dotClass} animate-pulse` : 'bg-gray-600')} />
-                              <CardTitle className={cn('text-lg', ui.titleClass)}>
-                                {ui.label}
-                              </CardTitle>
-                              <Badge variant="outline" className={cn('text-[10px] uppercase tracking-[0.22em]', ui.badgeClass)}>
-                                {activePowerMode === 'max' ? 'Max Power' : activePowerMode === 'balanced' ? 'Balanced' : 'Fast'}
-                              </Badge>
-                              <Badge variant="outline" className={cn('text-[10px]', statusBadgeClass)}>
-                                {panel.statusLabel}
-                              </Badge>
-                            </div>
-                            <div className="mt-2 text-xs text-gray-400">
-                              {panel.activeRoles.length > 0
-                                ? `Roles: ${panel.activeRoles.join(' • ')}`
-                                : `No ${ui.label} agent assigned yet`}
-                            </div>
-                          </div>
-                          <div className="text-right text-[11px] text-gray-500">
-                            <div>{panel.agentCount} agent{panel.agentCount === 1 ? '' : 's'}</div>
-                            <div>{panel.totalUpdates} updates</div>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="pt-4">
-                        <div className="grid grid-cols-1 gap-3">
-                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                            <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-3">
-                              <div className="text-[10px] uppercase tracking-[0.22em] text-gray-500">Expected Model</div>
-                              <div className="mt-1 text-sm font-semibold text-white">{panel.configuredModel.name}</div>
-                              <div className="mt-1 text-[11px] font-mono text-gray-500 break-all">{panel.configuredModel.id}</div>
-                            </div>
-                            <div className={cn(
-                              'rounded-xl border px-3 py-3',
-                              panel.mismatch ? 'border-amber-500/40 bg-amber-950/20' : 'border-white/10 bg-black/30'
-                            )}>
-                              <div className="flex items-center gap-2">
-                                <div className="text-[10px] uppercase tracking-[0.22em] text-gray-500">Live Model</div>
-                                {panel.mismatch && (
-                                  <Badge variant="outline" className="border-amber-500/50 bg-amber-500/10 text-[10px] text-amber-200">
-                                    Mismatch
-                                  </Badge>
-                                )}
-                                {panel.multipleLiveModels && (
-                                  <Badge variant="outline" className="border-red-500/50 bg-red-500/10 text-[10px] text-red-200">
-                                    Multiple
-                                  </Badge>
-                                )}
-                              </div>
-                              <div className="mt-1 text-sm font-semibold text-white">{panel.liveModelName}</div>
-                              <div className="mt-1 text-[11px] font-mono text-gray-500 break-all">{panel.liveModelId}</div>
-                            </div>
-                          </div>
-
-                          <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-[10px] uppercase tracking-[0.22em] text-gray-500">Live Telemetry</div>
-                              {panel.latestThought?.taskType && (
-                                <Badge variant="outline" className="border-white/10 bg-white/5 text-[10px] text-gray-300">
-                                  {humanizeIdentifier(panel.latestThought.taskType)}
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="mt-2 text-sm text-gray-200">
-                              {panel.currentTaskLabel || (panel.available ? 'Waiting for live model activity.' : 'Provider not available for this build.')}
-                            </div>
-                            {panel.status === 'thinking' && (
-                              <div className="mt-3 flex items-center gap-2 text-sm text-white">
-                                <span>Thinking internally</span>
-                                <ThinkingDots className={ui.titleClass} />
-                              </div>
-                            )}
-                          </div>
-
-                          <div
-                            ref={(node) => {
-                              providerActivityRefs.current[panel.provider] = node
-                            }}
-                            className="h-[26rem] overflow-y-auto pr-1 space-y-3 scrollbar-thin scrollbar-track-black scrollbar-thumb-white/10"
-                          >
-                            {panel.thoughts.length === 0 ? (
-                              <div className="rounded-xl border border-dashed border-white/10 bg-black/20 px-4 py-6 text-sm text-gray-400">
-                                {panel.available
-                                  ? 'No live activity yet. This card will stream every task, retry, generation step, and internal-thinking status for this provider.'
-                                  : 'This provider is currently unavailable, so no telemetry will appear here until it is enabled for the build.'}
-                              </div>
-                            ) : (
-                              panel.thoughts.map((thought) => (
-                                <div
-                                  key={thought.id}
-                                  className={cn(
-                                    'rounded-xl border px-3 py-3 transition-all',
-                                    thought.type === 'error' && 'border-red-500/40 bg-red-950/25',
-                                    thought.type === 'output' && 'border-green-500/30 bg-green-950/20',
-                                    thought.type === 'action' && 'border-cyan-500/30 bg-cyan-950/20',
-                                    thought.type === 'thinking' && !thought.isInternal && 'border-sky-500/20 bg-sky-950/15',
-                                    thought.isInternal && 'border-white/10 bg-white/[0.04]'
-                                  )}
-                                >
-                                  <div className="flex items-center gap-2 flex-wrap text-[10px]">
-                                    <span className="font-mono text-gray-500">
-                                      {thought.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                                    </span>
-                                    <Badge variant="outline" className="border-white/10 bg-white/5 text-[10px] text-gray-200">
-                                      {getThoughtEventLabel(thought)}
-                                    </Badge>
-                                    {thought.taskType && (
-                                      <Badge variant="outline" className="border-white/10 bg-white/5 text-[10px] text-gray-400">
-                                        {humanizeIdentifier(thought.taskType)}
-                                      </Badge>
-                                    )}
-                                    {thought.retryCount !== undefined && thought.maxRetries !== undefined && (
-                                      <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-200">
-                                        Attempt {thought.retryCount}/{thought.maxRetries}
-                                      </Badge>
-                                    )}
-                                    {thought.isInternal && (
-                                      <Badge variant="outline" className="border-white/15 bg-white/5 text-[10px] text-white">
-                                        Internal
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <div className="mt-2 text-sm leading-relaxed text-gray-100">
-                                    {thought.content}
-                                  </div>
-                                  {(thought.filesCount !== undefined || (thought.files && thought.files.length > 0)) && (
-                                    <div className="mt-2 text-xs text-gray-400">
-                                      {thought.filesCount !== undefined && (
-                                        <span>{thought.filesCount} file{thought.filesCount === 1 ? '' : 's'}</span>
-                                      )}
-                                      {thought.files && thought.files.length > 0 && (
-                                        <span>
-                                          {thought.filesCount !== undefined ? ' • ' : ''}
-                                          {thought.files.slice(0, 3).join(', ')}
-                                          {thought.files.length > 3 ? ` (+${thought.files.length - 3} more)` : ''}
-                                        </span>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )
-                })}
-                </div>
-              )}
-            </div>
-
-            {/* Left Column - Agents & Status */}
-            <div className="lg:col-span-1 space-y-6">
-              {/* Build Status */}
-              <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm overflow-hidden">
-                <CardHeader className="pb-4 border-b border-gray-800">
-                  <CardTitle className="text-xl flex items-center gap-3">
-                    <div className="relative">
-                      <Bot className="w-7 h-7 text-red-400" />
-                      {isBuildActive && (
-                        <div className="absolute inset-0">
-                          <Bot className="w-7 h-7 text-red-400 animate-ping opacity-50" />
-                        </div>
-                      )}
-                    </div>
-                    Build Status
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-5">
-                  {/* Pie Chart Progress */}
-                  <div className="flex justify-center mb-6">
-                    <BuildPieProgress
-                      progress={buildState.progress}
-                      status={buildState.status}
-                      phase={buildState.currentPhase}
-                      size={172}
-                    />
-                  </div>
-
-                  {/* Status Badge */}
-                  <div className="flex items-center gap-3">
-                    <Badge
-                      variant={buildState.status === 'completed' ? 'success' : buildState.status === 'failed' ? 'error' : 'primary'}
-                      className="capitalize text-sm px-4 py-1.5 font-semibold"
-                    >
-                      {isBuildActive && <Circle className="w-2 h-2 mr-2 fill-current animate-pulse" />}
-                      {buildState.status.replace('_', ' ')}
-                    </Badge>
-                    {isBuildActive && (
-                      <span className="text-xs text-gray-400">
-                        {buildState.agents.filter(a => a.status === 'working').length} agents working
-                      </span>
-                    )}
-                  </div>
-
-                  {(buildPaused || pendingQuestion || pendingPermissionRequests.length > 0) && (
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {buildPaused && (
-                        <Badge variant="outline" className="border-amber-500/50 bg-amber-500/10 text-amber-300">
-                          Paused
-                        </Badge>
-                      )}
-                      {pendingQuestion && (
-                        <Badge variant="outline" className="border-cyan-500/50 bg-cyan-500/10 text-cyan-300">
-                          Awaiting Reply
-                        </Badge>
-                      )}
-                      {pendingPermissionRequests.length > 0 && (
-                        <Badge variant="outline" className="border-violet-500/50 bg-violet-500/10 text-violet-300">
-                          {pendingPermissionRequests.length} Permission Request{pendingPermissionRequests.length === 1 ? '' : 's'}
-                        </Badge>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="mt-4 flex flex-wrap gap-3">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => openPlannerConsole('lead')}
-                      className="border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"
-                    >
-                      <MessageSquare className="w-4 h-4 mr-2" />
-                      Steer Build
-                    </Button>
-                    {buildState.status === 'failed' && (
-                      <Button
-                        size="sm"
-                        onClick={handleRestartFailedBuild}
-                        disabled={buildActionPending !== null}
-                        className="bg-cyan-600 hover:bg-cyan-500"
-                      >
-                        <RotateCcw className={cn("w-4 h-4 mr-2", buildActionPending === 'restart' && "animate-spin")} />
-                        {buildActionPending === 'restart' ? 'Restarting...' : 'Restart Failed Build'}
-                      </Button>
-                    )}
-                    {buildPaused ? (
-                      <Button
-                        size="sm"
-                        onClick={handleResumeBuild}
-                        disabled={buildActionPending !== null}
-                        className="bg-green-600 hover:bg-green-500"
-                      >
-                        <Play className="w-4 h-4 mr-2" />
-                        {buildActionPending === 'resume' ? 'Resuming...' : 'Resume Build'}
-                      </Button>
-                    ) : (
-                      isBuildActive && buildState.status !== 'awaiting_review' && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={handlePauseBuild}
-                          disabled={buildActionPending !== null}
-                          className="border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20"
-                        >
-                          <Pause className="w-4 h-4 mr-2" />
-                          {buildActionPending === 'pause' ? 'Pausing...' : 'Pause Build'}
-                        </Button>
-                      )
-                    )}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => { void handleStartOver() }}
-                      disabled={isStartingOver}
-                      className="border-gray-600 bg-gray-900/50 text-gray-200 hover:bg-gray-800/80"
-                    >
-                      <RotateCcw className={cn("w-4 h-4 mr-2", isStartingOver && "animate-spin")} />
-                      {isStartingOver
-                        ? 'Starting Fresh...'
-                        : isBuildActive
-                          ? 'Cancel & Start Fresh'
-                          : 'Start Fresh'}
-                    </Button>
-                  </div>
-
-                  <div className="mt-3 text-xs leading-relaxed text-gray-400">
-                    Need to change direction? Use <span className="text-cyan-200">Steer Build</span> to message the planner. For agent-specific changes, open <span className="text-cyan-200">Activity</span> and use <span className="text-cyan-200">Direct Control</span> on a live agent card.
-                  </div>
-
-                  {/* Pipeline telemetry */}
-                  <div className="mt-4 grid grid-cols-1 gap-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-500 uppercase tracking-wide">Pipeline</span>
-                      <Badge variant="outline" className="text-[11px] border-cyan-500/50 bg-cyan-500/10 text-cyan-300">
-                        {phaseLabel}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-500 uppercase tracking-wide">Quality Gate</span>
-                      <div className="flex items-center gap-2">
-                        {buildState.qualityGateStage && (
-                          <Badge variant="outline" className="text-[10px] border-gray-600 text-gray-300 bg-gray-900/60">
-                            {humanizePhase(buildState.qualityGateStage)}
-                          </Badge>
-                        )}
-                        <Badge variant="outline" className={cn('text-[11px]', qualityGateToneClass)}>
-                          {qualityGateLabel}
-                        </Badge>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    {statusRailMetrics.map((metric) => (
-                      <div
-                        key={metric.label}
-                        className="rounded-xl border border-gray-800 bg-gray-950/70 px-3 py-3"
-                      >
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">{metric.label}</div>
-                        <div className="mt-2 text-xl font-semibold text-white">{metric.value}</div>
-                        <div className="mt-1 text-xs text-gray-400">{metric.hint}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-5 pt-5 border-t border-gray-800 space-y-3">
-                    <div className="rounded-xl border border-gray-800 bg-gray-950/70 px-4 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Operations</div>
-                      <div className="mt-2 text-sm font-semibold text-white">
-                        {activePowerMode === 'max' ? 'Max Power' : activePowerMode === 'balanced' ? 'Balanced' : 'Fast'}
-                        {' '}mode
-                      </div>
-                      <div className="mt-1 text-xs text-gray-400">
-                        {telemetrySummary.activeProviders}/{providerPanels.length} providers live • {telemetrySummary.lastThoughtLabel}
-                      </div>
-                      <div className="mt-2 text-[10px] text-gray-500">
-                        {getPowerModeModelSummary(activePowerMode)}
-                      </div>
-                    </div>
-
-                    {(buildWorkspaceView === 'activity' || buildWorkspaceView === 'diagnostics') && buildState.availableProviders && buildState.availableProviders.length > 0 && (
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs text-gray-500 font-medium">AI Providers:</span>
-                        {buildState.availableProviders.map((provider) => {
-                          const normalizedProvider = normalizeProviderKey(provider)
-                          const ui = normalizedProvider ? PROVIDER_UI[normalizedProvider] : null
-                          return (
-                            <Badge
-                              key={provider}
-                              variant="outline"
-                              className={cn('text-xs', ui?.badgeClass)}
-                            >
-                              {ui?.label || humanizeIdentifier(provider)}
-                            </Badge>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Active Agents */}
-              {buildWorkspaceView === 'activity' && liveAgents.length > 0 && (
-                <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
-                  <CardHeader className="pb-4 border-b border-gray-800">
-                    <CardTitle className="text-xl flex items-center gap-3">
-                      <Cpu className="w-7 h-7 text-orange-500" />
-                      AI Agents Working ({liveAgents.length})
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-5">
-                    <div className="space-y-3">
-                      {liveAgents.map((agent, index) => (
-                        <AgentCard
-                          key={agent.id}
-                          agent={agent}
-                          index={index}
-                          canDirectMessage={isBuildActive}
-                          getAgentEmoji={getAgentEmoji}
-                          getStatusIcon={getStatusIcon}
-                          messageDraft={agentMessageDrafts[agent.id] || ''}
-                          onMessageDraftChange={(agentId, value) => {
-                            setAgentMessageDrafts(prev => ({ ...prev, [agentId]: value }))
-                          }}
-                          onSendMessage={sendDirectAgentMessage}
-                          recentThoughts={recentThoughtsByAgent.get(agent.id) || []}
-                          sendPending={agentMessagePendingId === agent.id}
-                        />
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Checkpoints */}
-              {buildWorkspaceView === 'issues' && buildState.checkpoints.length > 0 && (
-                <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
-                  <CardHeader className="pb-4 border-b border-gray-800">
-                    <CardTitle className="text-xl flex items-center gap-3">
-                      <CheckCircle2 className="w-7 h-7 text-green-400" />
-                      Checkpoints
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-5">
-                    <div className="space-y-3">
-                      {buildState.checkpoints.map((cp, index) => (
-                        <div
-                          key={cp.id}
-                          className="flex items-center gap-4 p-3 rounded-xl bg-gray-900/60 border border-gray-800"
-                          style={{ animation: 'fade-in-up 0.3s ease-out', animationDelay: `${index * 100}ms` }}
-                        >
-                          <div className="w-9 h-9 rounded-full bg-green-500/20 flex items-center justify-center text-sm font-bold text-green-400 border border-green-500/40">
-                            {cp.number}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-white">{cp.name}</p>
-                            <p className="text-xs text-gray-500">{cp.progress}% complete</p>
-                          </div>
-                          <Button
-                            size="xs"
-                            variant="ghost"
-                            className="shrink-0 hover:bg-gray-800"
-                            onClick={() => handleRollbackCheckpoint(cp.id)}
-                            disabled={rollbackCheckpointId === cp.id || cp.restorable === false}
-                            title={cp.restorable === false ? 'Historical checkpoint only' : 'Rollback to this checkpoint'}
-                          >
-                            <RotateCcw className={cn("w-4 h-4", rollbackCheckpointId === cp.id && "animate-spin")} />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-            </div>
-
-            {/* Middle/Right Column - Activity & Chat */}
-            <div className="lg:col-span-2 space-y-6">
-              {buildWorkspaceView === 'overview' && (
-                <>
-                  {/* App Description */}
-                  <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
-                    <CardContent className="p-5">
-                      <div className="flex items-start gap-4">
-                        <div className="w-14 h-14 bg-gradient-to-br from-red-500 to-orange-600 rounded-xl flex items-center justify-center shrink-0 shadow-lg shadow-red-900/40">
-                          <Code2 className="w-7 h-7 text-white" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm text-gray-400 mb-1 font-medium">Building</p>
-                          <p className="text-white font-bold text-xl">{buildState.description}</p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
-                    <CardHeader className="pb-4 border-b border-gray-800">
-                      <CardTitle className="text-xl flex items-center gap-3">
-                        <Sparkles className="w-7 h-7 text-cyan-400" />
-                        Build Flow
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-5 space-y-5">
-                      <div className={cn(
-                        'rounded-xl border px-4 py-4',
-                        buildState.status === 'failed'
-                          ? 'border-red-500/40 bg-red-950/20'
-                          : buildPaused || pendingPermissionRequests.length > 0 || pendingQuestion
-                            ? 'border-amber-500/40 bg-amber-950/20'
-                            : 'border-cyan-500/30 bg-cyan-950/20'
-                      )}>
-                        <div className="text-xs uppercase tracking-[0.18em] text-gray-400">Current Update</div>
-                        <div className="mt-2 text-base font-semibold text-white">{currentWorkflowStage?.label || 'Build in progress'}</div>
-                        <div className="mt-2 text-sm leading-relaxed text-gray-200">{primaryBuildUpdate}</div>
-                      </div>
-
-                      {buildFailureAttribution && (
-                        <div className={cn(
-                          'rounded-xl border px-4 py-4',
-                          buildFailureAttribution.isCritical
-                            ? 'border-red-500/35 bg-red-950/15'
-                            : 'border-amber-500/35 bg-amber-950/15'
-                        )}>
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="min-w-0">
-                              <div className="text-xs uppercase tracking-[0.18em] text-gray-400">Failure Context</div>
-                              <div className="mt-2 text-base font-semibold text-white">{buildFailureAttribution.title}</div>
-                              <div className="mt-2 text-sm leading-relaxed text-gray-200">{buildFailureAttribution.body}</div>
-                              <div className="mt-2 text-xs leading-relaxed text-gray-400">{buildFailureAttribution.detail}</div>
-                              {buildFailureAttribution.capturedError && (
-                                <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-3 text-xs leading-relaxed text-gray-300">
-                                  Captured build error: {buildFailureAttribution.capturedError}
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex shrink-0 gap-2">
-                              <Button
-                                variant="outline"
-                                onClick={() => setBuildWorkspaceView('issues')}
-                                className="border-gray-700 bg-black/20 text-gray-200 hover:border-gray-500 hover:bg-gray-900/70"
-                              >
-                                Open Issues
-                              </Button>
-                              <Button
-                                variant="outline"
-                                onClick={() => setBuildWorkspaceView('diagnostics')}
-                                className="border-gray-700 bg-black/20 text-gray-200 hover:border-gray-500 hover:bg-gray-900/70"
-                              >
-                                Diagnostics
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {platformReadinessNotice && (
-                        <div className={cn(
-                          'rounded-xl border px-4 py-4',
-                          platformReadinessNotice.isCritical
-                            ? 'border-red-500/35 bg-red-950/15'
-                            : 'border-amber-500/35 bg-amber-950/15'
-                        )}>
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="min-w-0">
-                              <div className="text-xs uppercase tracking-[0.18em] text-gray-400">Platform Status</div>
-                              <div className="mt-2 text-base font-semibold text-white">{platformReadinessNotice.title}</div>
-                              <div className="mt-2 text-sm leading-relaxed text-gray-200">{platformReadinessNotice.body}</div>
-                              <div className="mt-2 text-xs leading-relaxed text-gray-400">{platformReadinessNotice.detail}</div>
-                            </div>
-                            <div className="flex shrink-0 gap-2">
-                              <Button
-                                variant="outline"
-                                onClick={() => setBuildWorkspaceView('issues')}
-                                className="border-gray-700 bg-black/20 text-gray-200 hover:border-gray-500 hover:bg-gray-900/70"
-                              >
-                                Open Issues
-                              </Button>
-                              <Button
-                                variant="outline"
-                                onClick={() => setBuildWorkspaceView('diagnostics')}
-                                className="border-gray-700 bg-black/20 text-gray-200 hover:border-gray-500 hover:bg-gray-900/70"
-                              >
-                                Diagnostics
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {hasBackendDataStage && (
-                        <div className="rounded-xl border border-violet-500/25 bg-violet-950/15 px-4 py-4">
-                          <div className="text-xs uppercase tracking-[0.18em] text-violet-300">Execution Strategy</div>
-                          <div className="mt-2 text-sm leading-relaxed text-gray-200">
-                            The planner freezes the UI, API, data, and env contract first, then the frontend shell lands before backend work fills in behind that interface.
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
-                        {workflowStages.map((stage, index) => (
-                          <div
-                            key={stage.key}
-                            className={cn(
-                              'rounded-xl border px-4 py-4',
-                              stage.status === 'complete' && 'border-green-500/40 bg-green-500/10',
-                              stage.status === 'current' && 'border-cyan-500/40 bg-cyan-500/10',
-                              stage.status === 'blocked' && 'border-red-500/40 bg-red-500/10',
-                              stage.status === 'pending' && 'border-gray-800 bg-gray-950/60'
-                            )}
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Step {index + 1}</div>
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  stage.status === 'complete' && 'border-green-500/40 bg-green-500/10 text-green-300',
-                                  stage.status === 'current' && 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300',
-                                  stage.status === 'blocked' && 'border-red-500/40 bg-red-500/10 text-red-300',
-                                  stage.status === 'pending' && 'border-gray-700 bg-gray-900/60 text-gray-300'
-                                )}
-                              >
-                                {stage.status === 'complete'
-                                  ? 'Complete'
-                                  : stage.status === 'current'
-                                    ? 'Active'
-                                    : stage.status === 'blocked'
-                                      ? 'Blocked'
-                                      : 'Pending'}
-                              </Badge>
-                            </div>
-                            <div className="mt-3 text-sm font-semibold text-white">{stage.label}</div>
-                            <div className="mt-2 text-xs leading-relaxed text-gray-400">{stage.description}</div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="rounded-xl border border-gray-800 bg-gray-950/70 px-4 py-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Recent Updates</div>
-                          <Badge variant="outline" className="border-gray-700 bg-gray-900/60 text-gray-300">
-                            {workflowUpdates.length} visible
-                          </Badge>
-                        </div>
-                        <div className="mt-4 space-y-3">
-                          {workflowUpdates.length === 0 ? (
-                            <div className="rounded-lg border border-dashed border-gray-800 bg-black/20 px-4 py-4 text-sm text-gray-400">
-                              Section-by-section updates will appear here as the planner moves from scaffold to UI, backend, integration, and final ship checks.
-                            </div>
-                          ) : (
-                            workflowUpdates.map((message) => (
-                              <div
-                                key={message.id}
-                                className="flex items-start justify-between gap-4 rounded-lg border border-gray-800 bg-black/20 px-4 py-3"
-                              >
-                                <div className="min-w-0">
-                                  <div className="text-sm text-white">{message.content}</div>
-                                  <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-gray-500">
-                                    {message.role === 'lead' ? 'Planner update' : 'System update'}
-                                  </div>
-                                </div>
-                                <div className="shrink-0 text-[11px] text-gray-500">
-                                  {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </div>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div className="rounded-xl border border-gray-800 bg-gray-950/70 px-4 py-4">
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Phase</div>
-                          <div className="mt-2 text-base font-semibold text-white">{phaseLabel}</div>
-                          <div className="mt-1 text-xs text-gray-400">
-                            {currentWorkflowStageIndex + 1}/{workflowStages.length} sections active
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-gray-800 bg-gray-950/70 px-4 py-4">
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Quality Gate</div>
-                          <div className="mt-2 text-base font-semibold text-white">{qualityGateLabel}</div>
-                          <div className="mt-1 text-xs text-gray-400">{humanizePhase(buildState.qualityGateStage || 'validation')}</div>
-                        </div>
-                        <div className="rounded-xl border border-gray-800 bg-gray-950/70 px-4 py-4">
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Next Focus</div>
-                          <div className="mt-2 text-base font-semibold text-white">
-                            {buildState.status === 'completed'
-                              ? 'Open preview or editor'
-                              : telemetrySummary.blockerCount > 0
-                                ? 'Resolve blockers in Issues'
-                                : buildWorkspaceView === 'overview' && liveAgents.length > 0
-                                  ? 'Watch live work in Activity'
-                                  : 'Continue current section'}
-                          </div>
-                          <div className="mt-1 text-xs text-gray-400">
-                            {telemetrySummary.blockerCount > 0
-                              ? `${telemetrySummary.blockerCount} blocker${telemetrySummary.blockerCount === 1 ? '' : 's'} need attention`
-                              : `${generatedFiles.length} generated artifact${generatedFiles.length === 1 ? '' : 's'} so far`}
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </>
-              )}
-
-              {buildWorkspaceView === 'activity' && activityViewIsEmpty && (
-                <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
-                  <CardContent className="p-5">
-                    <div className="rounded-xl border border-dashed border-gray-800 bg-gray-950/60 px-5 py-6">
-                      <div className="flex items-center gap-3">
-                        <Clock className="h-5 w-5 text-cyan-400" />
-                        <div className="text-sm font-semibold text-white">No live work right now</div>
-                      </div>
-                      <div className="mt-2 text-sm leading-relaxed text-gray-400">
-                        Activity only shows currently running providers, agents, and tasks. Finished or failed work moves out of this tab so the live view stays compact.
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {buildWorkspaceView === 'files' && (
-                <>
-                  <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
-                    <CardHeader className="pb-4 border-b border-gray-800">
-                      <CardTitle className="text-xl flex items-center gap-3">
-                        <FileCode className="w-7 h-7 text-cyan-400" />
-                        Files
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-5 space-y-5">
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        {[
-                          { label: 'Frontend', value: artifactSummary.frontend },
-                          { label: 'Backend', value: artifactSummary.backend },
-                          { label: 'Data', value: artifactSummary.data },
-                          { label: 'Config', value: artifactSummary.config },
-                        ].map((metric) => (
-                          <div key={metric.label} className="rounded-xl border border-gray-800 bg-gray-950/70 px-4 py-4">
-                            <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">{metric.label}</div>
-                            <div className="mt-2 text-xl font-semibold text-white">{metric.value}</div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {generatedFiles.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-gray-800 bg-gray-950/60 px-5 py-6 text-sm text-gray-400">
-                          Generated files will appear here as the build writes real artifacts. Open this tab during or after a run to inspect what landed without scrolling through diagnostics.
-                        </div>
-                      ) : (
-                        <div className="space-y-4">
-                          {fileGroups.map((group) => (
-                            <div key={group.root} className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="text-sm font-semibold text-white">{group.root}</div>
-                                <Badge variant="outline" className="border-gray-700 bg-gray-900/60 text-gray-300">
-                                  {group.files.length} file{group.files.length === 1 ? '' : 's'}
-                                </Badge>
-                              </div>
-                              <div className="mt-3 space-y-3">
-                                {group.files.map((file) => (
-                                  <div key={file.path} className="rounded-lg border border-gray-800 bg-black/30 px-4 py-3">
-                                    <div className="flex items-center justify-between gap-3">
-                                      <div className="min-w-0">
-                                        <div className="truncate text-sm font-medium text-white">{file.path}</div>
-                                        <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-gray-500">{file.language}</div>
-                                      </div>
-                                      <Badge variant="outline" className="border-gray-700 bg-gray-900/60 text-gray-300">
-                                        {file.content.length} chars
-                                      </Badge>
-                                    </div>
-                                    <div className="mt-3 rounded-lg border border-white/5 bg-black/40 px-3 py-3 font-mono text-xs leading-6 text-gray-300">
-                                      {file.content.slice(0, 180) || 'File captured with empty content.'}
-                                      {file.content.length > 180 ? '…' : ''}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </>
-              )}
-
-              {buildWorkspaceView === 'timeline' && (
-                <>
-                  <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
-                    <CardHeader className="pb-4 border-b border-gray-800">
-                      <CardTitle className="text-xl flex items-center gap-3">
-                        <Clock className="w-7 h-7 text-cyan-400" />
-                        Build Timeline
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-5 space-y-5">
-                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
-                        {workflowStages.map((stage, index) => (
-                          <div
-                            key={`timeline-${stage.key}`}
-                            className={cn(
-                              'rounded-xl border px-4 py-4',
-                              stage.status === 'complete' && 'border-green-500/40 bg-green-500/10',
-                              stage.status === 'current' && 'border-cyan-500/40 bg-cyan-500/10',
-                              stage.status === 'blocked' && 'border-red-500/40 bg-red-500/10',
-                              stage.status === 'pending' && 'border-gray-800 bg-gray-950/60'
-                            )}
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Step {index + 1}</div>
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  stage.status === 'complete' && 'border-green-500/40 bg-green-500/10 text-green-300',
-                                  stage.status === 'current' && 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300',
-                                  stage.status === 'blocked' && 'border-red-500/40 bg-red-500/10 text-red-300',
-                                  stage.status === 'pending' && 'border-gray-700 bg-gray-900/60 text-gray-300'
-                                )}
-                              >
-                                {stage.status === 'complete'
-                                  ? 'Complete'
-                                  : stage.status === 'current'
-                                    ? 'Active'
-                                    : stage.status === 'blocked'
-                                      ? 'Blocked'
-                                      : 'Pending'}
-                              </Badge>
-                            </div>
-                            <div className="mt-3 text-sm font-semibold text-white">{stage.label}</div>
-                            <div className="mt-2 text-xs leading-relaxed text-gray-400">{stage.description}</div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="grid gap-4 xl:grid-cols-2">
-                        <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="text-sm font-semibold text-white">Planner And System Feed</div>
-                            <Badge variant="outline" className="border-gray-700 bg-gray-900/60 text-gray-300">
-                              {workflowUpdates.length} update{workflowUpdates.length === 1 ? '' : 's'}
-                            </Badge>
-                          </div>
-                          <div className="mt-3 space-y-3">
-                            {workflowUpdates.length === 0 ? (
-                              <div className="rounded-lg border border-dashed border-gray-800 bg-black/20 px-4 py-4 text-sm text-gray-400">
-                                Planner and system milestones will accumulate here as the build moves across sections.
-                              </div>
-                            ) : (
-                              workflowUpdates.map((message) => (
-                                <div key={`timeline-message-${message.id}`} className="rounded-lg border border-gray-800 bg-black/20 px-4 py-3">
-                                  <div className="text-sm text-white">{message.content}</div>
-                                  <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-gray-500">
-                                    {message.role === 'lead' ? 'Planner update' : 'System update'} • {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  </div>
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="space-y-4">
-                          <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-sm font-semibold text-white">Verification And Recovery</div>
-                              <Badge variant="outline" className="border-gray-700 bg-gray-900/60 text-gray-300">
-                                {(buildState.verificationReports?.length || 0) + buildState.checkpoints.length} items
-                              </Badge>
-                            </div>
-                            <div className="mt-3 space-y-3">
-                              {(buildState.verificationReports || []).slice(0, 4).map((report, index) => (
-                                <div key={`verification-${index}`} className="rounded-lg border border-gray-800 bg-black/20 px-4 py-3">
-                                  <div className="flex items-center justify-between gap-3">
-                                    <div className="text-sm font-medium text-white">{humanizeIdentifier(report.surface || 'surface')}</div>
-                                    <Badge
-                                      variant="outline"
-                                      className={cn(
-                                        report.status === 'passed'
-                                          ? 'border-green-500/40 bg-green-500/10 text-green-300'
-                                          : 'border-amber-500/40 bg-amber-500/10 text-amber-300'
-                                      )}
-                                    >
-                                      {humanizeIdentifier(report.status || 'pending')}
-                                    </Badge>
-                                  </div>
-                                  <div className="mt-2 text-xs text-gray-400">
-                                    {humanizeIdentifier(report.phase || 'verification')}
-                                    {report.generated_at ? ` • ${new Date(report.generated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
-                                  </div>
-                                </div>
-                              ))}
-                              {buildState.checkpoints.slice(0, 3).map((cp) => (
-                                <div key={`checkpoint-${cp.id}`} className="rounded-lg border border-gray-800 bg-black/20 px-4 py-3">
-                                  <div className="flex items-center justify-between gap-3">
-                                    <div className="text-sm font-medium text-white">{cp.name}</div>
-                                    <Badge variant="outline" className="border-gray-700 bg-gray-900/60 text-gray-300">
-                                      {cp.progress}%
-                                    </Badge>
-                                  </div>
-                                  <div className="mt-2 text-xs text-gray-400">Checkpoint {cp.number}</div>
-                                </div>
-                              ))}
-                              {(buildState.verificationReports?.length || 0) === 0 && buildState.checkpoints.length === 0 && (
-                                <div className="rounded-lg border border-dashed border-gray-800 bg-black/20 px-4 py-4 text-sm text-gray-400">
-                                  Verification reports and checkpoints will appear here as the build matures.
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {visibleBlockers.length > 0 && (
-                            <div className="rounded-xl border border-red-500/25 bg-red-950/10 p-4">
-                              <div className="text-sm font-semibold text-white">Active blocker</div>
-                              <div className="mt-2 text-sm text-gray-200">{visibleBlockers[0]?.summary || visibleBlockers[0]?.title}</div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </>
-              )}
-
-              {buildWorkspaceView === 'issues' && visibleBlockers.length > 0 && (
-                <Card variant="cyberpunk" className="border-2 border-red-900/40 bg-black/60 backdrop-blur-sm">
-                  <CardHeader className="pb-4 border-b border-red-900/20">
-                    <CardTitle className="text-xl flex items-center gap-3">
-                      <AlertCircle className="w-7 h-7 text-red-400" />
-                      Blockers
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-5 space-y-3">
-                    {visibleBlockers.map((blocker) => (
-                      <div
-                        key={blocker.id}
-                        className={cn(
-                          'rounded-xl border px-4 py-4',
-                          blocker.severity === 'blocking'
-                            ? 'border-red-500/30 bg-red-950/20'
-                            : 'border-amber-500/30 bg-amber-950/20'
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold text-white">{blocker.title}</div>
-                            {blocker.summary && (
-                              <div className="mt-2 text-sm text-gray-300">{blocker.summary}</div>
-                            )}
-                          </div>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              blocker.severity === 'blocking'
-                                ? 'border-red-500/40 bg-red-500/10 text-red-300'
-                                : 'border-amber-500/40 bg-amber-500/10 text-amber-300'
-                            )}
-                          >
-                            {blocker.severity === 'blocking' ? 'Blocking' : 'Warning'}
-                          </Badge>
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-400">
-                          <span>{humanizeIdentifier(blocker.category || blocker.type || 'issue')}</span>
-                          {blocker.who_must_act && <span>• Owner: {blocker.who_must_act}</span>}
-                        </div>
-                        {blocker.unblocks_with && (
-                          <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-3 text-sm text-gray-200">
-                            <span className="text-gray-400">Unblock:</span> {blocker.unblocks_with}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
-
-              {buildWorkspaceView === 'issues' && buildFailureAttribution && (
-                <Card variant="cyberpunk" className="border-2 border-amber-900/40 bg-black/60 backdrop-blur-sm">
-                  <CardHeader className="pb-4 border-b border-amber-900/20">
-                    <CardTitle className="text-xl flex items-center gap-3">
-                      <AlertCircle className="w-7 h-7 text-amber-300" />
-                      Failure Context
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-5">
-                    <div className={cn(
-                      'rounded-xl border px-4 py-4',
-                      buildFailureAttribution.isCritical
-                        ? 'border-red-500/30 bg-red-950/20'
-                        : 'border-amber-500/30 bg-amber-950/20'
-                    )}>
-                      <div className="text-sm font-semibold text-white">{buildFailureAttribution.title}</div>
-                      <div className="mt-2 text-sm leading-relaxed text-gray-200">{buildFailureAttribution.body}</div>
-                      <div className="mt-3 text-xs leading-relaxed text-gray-400">{buildFailureAttribution.detail}</div>
-                      {buildFailureAttribution.capturedError && (
-                        <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-3 text-xs leading-relaxed text-gray-300">
-                          Captured build error: {buildFailureAttribution.capturedError}
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {buildWorkspaceView === 'diagnostics' && (
-                <OrchestrationOverview
-                  buildStatus={buildState.status}
-                  currentPhase={buildState.currentPhase}
-                  qualityGateStatus={buildState.qualityGateStatus}
-                  capabilityState={buildState.capabilityState}
-                  policyState={buildState.policyState}
-                  blockers={buildState.blockers}
-                  approvals={buildState.approvals}
-                  checkpoints={buildState.checkpoints}
-                  interaction={buildState.interaction}
-                  intentBrief={buildState.intentBrief}
-                  buildContract={buildState.buildContract}
-                  workOrders={buildState.workOrders}
-                  patchBundles={buildState.patchBundles}
-                  verificationReports={buildState.verificationReports}
-                  promotionDecision={buildState.promotionDecision}
-                  providerScorecards={buildState.providerScorecards}
-                  failureFingerprints={buildState.failureFingerprints}
-                  truthBySurface={buildState.truthBySurface}
-                />
-              )}
-
-              {buildWorkspaceView === 'issues' && hasBuildControlsPanel && (
-                <Card variant="cyberpunk" className="border-2 border-violet-900/50 bg-black/60 backdrop-blur-sm">
-                  <CardHeader className="pb-4 border-b border-violet-900/30">
-                    <CardTitle className="text-xl flex items-center gap-3">
-                      <Shield className="w-7 h-7 text-violet-400" />
-                      Build Controls
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-5 space-y-4">
-                    {pendingQuestion && (
-                      <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-4">
-                        <div className="text-xs uppercase tracking-wide text-cyan-300">Awaiting Your Reply</div>
-                        <div className="mt-2 text-sm text-cyan-100">{pendingQuestion}</div>
-                      </div>
-                    )}
-
-                    {pendingRevisionRequests.length > 0 && (
-                      <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 p-4">
-                        <div className="text-xs uppercase tracking-wide text-amber-300">Queued Change Requests</div>
-                        <div className="mt-2 text-sm text-amber-100">
-                          {pendingRevisionRequests.length} user-requested change{pendingRevisionRequests.length === 1 ? '' : 's'} will be applied in the next implementation pass.
-                        </div>
-                      </div>
-                    )}
-
-                    {pendingPermissionRequests.length > 0 && (
-                      <div className="space-y-3">
-                        {pendingPermissionRequests.map((request) => (
-                          <div
-                            key={request.id}
-                            className="rounded-xl border border-violet-500/30 bg-violet-950/20 p-4"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-semibold text-violet-100">
-                                  {request.scope}: {request.target}
-                                </div>
-                                <div className="mt-1 text-sm text-gray-300">{request.reason}</div>
-                                {request.command_preview && (
-                                  <div className="mt-2 rounded bg-black/60 px-3 py-2 font-mono text-xs text-gray-300">
-                                    {request.command_preview}
-                                  </div>
-                                )}
-                              </div>
-                              <Badge variant="outline" className="border-violet-500/40 bg-violet-500/10 text-violet-300">
-                                {request.blocking ? 'Blocking' : 'Optional'}
-                              </Badge>
-                            </div>
-                            <div className="mt-4 flex flex-wrap gap-2">
-                              <Button
-                                size="sm"
-                                onClick={() => handleResolvePermissionRequest(request.id, 'allow', 'once')}
-                                disabled={permissionActionId === request.id}
-                                className="bg-cyan-600 hover:bg-cyan-500"
-                              >
-                                Allow Once
-                              </Button>
-                              <Button
-                                size="sm"
-                                onClick={() => handleResolvePermissionRequest(request.id, 'allow', 'build')}
-                                disabled={permissionActionId === request.id}
-                                className="bg-violet-600 hover:bg-violet-500"
-                              >
-                                Allow For Build
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleResolvePermissionRequest(request.id, 'deny', 'build')}
-                                disabled={permissionActionId === request.id}
-                                className="border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20"
-                              >
-                                Deny
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    <div>
-                      <div className="text-xs uppercase tracking-wide text-gray-500">Pre-Approve Common Local Tools</div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleSetPermissionPreset('program', 'docker', 'allow', 'build', 'User pre-approved Docker for this build')}
-                          disabled={permissionActionId === 'program:docker:allow'}
-                          className="border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
-                        >
-                          Allow Docker
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleSetPermissionPreset('program', 'git', 'allow', 'build', 'User pre-approved Git for this build')}
-                          disabled={permissionActionId === 'program:git:allow'}
-                          className="border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
-                        >
-                          Allow Git
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleSetPermissionPreset('network', 'localhost', 'allow', 'build', 'User pre-approved localhost network access for this build')}
-                          disabled={permissionActionId === 'network:localhost:allow'}
-                          className="border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
-                        >
-                          Allow Localhost
-                        </Button>
-                      </div>
-                      {grantedPermissionRules.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {grantedPermissionRules.map((rule) => (
-                            <Badge
-                              key={rule.id}
-                              variant="outline"
-                              className="border-green-500/40 bg-green-500/10 text-green-300"
-                            >
-                              {rule.scope}:{rule.target} ({rule.mode})
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {buildState.status === 'awaiting_review' && proposedEdits.length > 0 && !showDiffReview && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setShowDiffReview(true)}
-                        className="border-yellow-500/40 bg-yellow-500/10 text-yellow-300 hover:bg-yellow-500/20"
-                      >
-                        Reopen Diff Review
-                      </Button>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-
-              {buildWorkspaceView === 'activity' && liveTasks.length > 0 && (
-                <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
-                  <CardHeader className="pb-4 border-b border-gray-800">
-                    <CardTitle className="text-xl flex items-center gap-3">
-                      <Layers className="w-7 h-7 text-cyan-400" />
-                      Live Tasks
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-5">
-                    <div className="space-y-3 max-h-64 overflow-y-auto">
-                      {liveTasks.map((task) => (
-                        <div key={task.id} className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold text-white">{task.description}</div>
-                              <div className="mt-1 text-xs uppercase tracking-wide text-gray-500">
-                                {task.type}{task.assignedTo ? ` • ${task.assignedTo}` : ''}
-                              </div>
-                            </div>
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                task.status === 'completed' && 'border-green-500/40 bg-green-500/10 text-green-300',
-                                task.status === 'failed' && 'border-red-500/40 bg-red-500/10 text-red-300',
-                                task.status === 'in_progress' && 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300',
-                                task.status === 'cancelled' && 'border-amber-500/40 bg-amber-500/10 text-amber-300',
-                                task.status === 'pending' && 'border-gray-600 bg-gray-500/10 text-gray-300'
-                              )}
-                            >
-                              {task.status.replace('_', ' ')}
-                            </Badge>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {buildWorkspaceView === 'issues' && buildState.status === 'awaiting_review' && showDiffReview && proposedEdits.length > 0 && (
-                <Card variant="cyberpunk" className="border-2 border-yellow-700/40 bg-black/60 backdrop-blur-sm overflow-hidden">
-                  <DiffReviewPanel
-                    buildId={buildState.id}
-                    edits={proposedEdits}
-                    onEditsUpdated={() => {
-                      void loadProposedEdits(buildState.id)
-                    }}
-                    onClose={() => setShowDiffReview(false)}
-                  />
-                </Card>
-              )}
-
-              {buildWorkspaceView === 'issues' && !hasIssueViewContent && (
-                <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
-                  <CardContent className="p-5">
-                    <div className="rounded-xl border border-dashed border-gray-800 bg-gray-950/60 px-5 py-6">
-                      <div className="flex items-center gap-3">
-                        <CheckCircle2 className="h-5 w-5 text-green-400" />
-                        <div className="text-sm font-semibold text-white">No open issues right now</div>
-                      </div>
-                      <div className="mt-2 text-sm leading-relaxed text-gray-400">
-                        Blockers, approvals, checkpoints, and recovery controls will appear here only when the build needs user action.
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {buildWorkspaceView === 'console' && (
-              <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm flex flex-col">
-                <CardHeader className="pb-4 border-b border-gray-800 shrink-0">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-xl flex items-center gap-3">
-                      <Terminal className="w-7 h-7 text-red-400" />
-                      Planner Console
-                    </CardTitle>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setShowChat(!showChat)}
-                      className="hover:bg-gray-800"
-                    >
-                      {showChat ? 'Hide Chat' : 'Show Chat'}
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="flex-1 flex flex-col overflow-hidden p-5">
-                  {buildState.status === 'failed' && buildFailureAttribution && (
-                    <div className={cn(
-                      'mb-4 rounded-lg border px-4 py-3',
-                      buildFailureAttribution.isCritical
-                        ? 'border-red-500/40 bg-red-950/30 text-red-100'
-                        : 'border-amber-500/40 bg-amber-950/25 text-amber-100'
-                    )}>
-                      <div className="text-sm font-semibold">{buildFailureAttribution.title}</div>
-                      <div className="mt-2 text-sm leading-relaxed">{buildFailureAttribution.body}</div>
-                      <div className="mt-2 text-xs leading-relaxed text-gray-300">{buildFailureAttribution.detail}</div>
-                      {buildFailureAttribution.capturedError && (
-                        <div className="mt-3 text-xs text-gray-200">
-                          Captured build error: {buildFailureAttribution.capturedError}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {buildState.status === 'failed' && !buildFailureAttribution && buildState.errorMessage && (
-                    <div className="mb-4 rounded-lg border border-red-500/40 bg-red-950/30 px-4 py-3 text-sm text-red-200">
-                      Failure reason: {buildState.errorMessage}
-                    </div>
-                  )}
-                  {/* Terminal Output */}
-                  <TerminalOutput messages={chatMessages} isBuilding={isBuilding} />
-
-                  {/* Chat Input */}
-                  {showChat && (
-                    <div className="pt-4 mt-4 border-t border-gray-800 shrink-0">
-                      <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
-                        <div className="text-xs text-gray-500">
-                          Route this message to the planner or broadcast it to every active agent. Each agent card also accepts direct instructions.
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant={plannerSendMode === 'lead' ? 'default' : 'outline'}
-                            onClick={() => setPlannerSendMode('lead')}
-                            className={cn(
-                              plannerSendMode === 'lead'
-                                ? 'bg-red-600 hover:bg-red-500'
-                                : 'border-gray-700 bg-gray-900/50 text-gray-200 hover:bg-gray-800'
-                            )}
-                          >
-                            Planner
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant={plannerSendMode === 'all_agents' ? 'default' : 'outline'}
-                            onClick={() => setPlannerSendMode('all_agents')}
-                            disabled={!isBuildActive}
-                            className={cn(
-                              plannerSendMode === 'all_agents'
-                                ? 'bg-cyan-600 hover:bg-cyan-500'
-                                : 'border-gray-700 bg-gray-900/50 text-gray-200 hover:bg-gray-800'
-                            )}
-                          >
-                            All Agents
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="flex gap-3">
-                        <input
-                          ref={plannerInputRef}
-                          type="text"
-                          value={chatInput}
-                          onChange={(e) => setChatInput(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && sendChatMessage()}
-                          placeholder={
-                            pendingQuestion ||
-                            (buildPaused
-                              ? 'Build is paused. Tell the planner what to change or resume.'
-                              : plannerSendMode === 'all_agents' && isBuildActive
-                                ? 'Broadcast a directive to every active agent...'
-                                : 'Message the planner...'
-                            )
-                          }
-                          className="flex-1 bg-black border-2 border-gray-700 rounded-xl px-5 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-red-600 focus:ring-2 focus:ring-red-900/30 transition-all"
-                        />
-                        <Button
-                          onClick={sendChatMessage}
-                          disabled={!chatInput.trim() || !buildState?.id || plannerMessagePending}
-                          className="px-6 bg-red-600 hover:bg-red-500 font-semibold"
-                        >
-                          {plannerMessagePending ? <ThinkingDots className="text-white" /> : <Send className="w-5 h-5" />}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-              )}
-
-              {/* Actions and Preview */}
-              {buildState.status === 'completed' && buildWorkspaceView === 'overview' && (
-                <>
-                  <BuildCompleteCard
-                    filesCount={generatedFiles.length}
-                    onPreviewWorkspace={openPreviewWorkspace}
-                    onOpenIDE={openInIDE}
-                    onDownload={handleDownloadBuild}
-                    onStartOver={() => { void handleStartOver() }}
-                    isCreating={isCreatingProject}
-                    isPreparingPreview={isPreparingPreview}
-                    isResetting={isStartingOver}
-                    isPreviewReady={createdProjectId !== null}
-                  />
-                </>
-              )}
-            </div>
-          </div>
-          </div>
+          <BuildScreen
+            buildState={buildState}
+            providerPanels={providerPanels}
+            aiThoughts={aiThoughts}
+            chatMessages={chatMessages}
+            generatedFiles={generatedFiles}
+            proposedEdits={proposedEdits}
+            isBuildActive={isBuildActive}
+            buildPaused={buildPaused}
+            pendingQuestion={pendingQuestion}
+            pendingPermissionRequests={pendingPermissionRequests}
+            pendingRevisionRequests={pendingRevisionRequests}
+            buildActionPending={buildActionPending}
+            hasBYOK={hasBYOK}
+            phaseLabel={phaseLabel}
+            visibleBlockers={visibleBlockers}
+            buildFailureAttribution={buildFailureAttribution}
+            showDiffReview={showDiffReview}
+            userId={user?.id}
+            isPreparingPreview={isPreparingPreview}
+            isCreatingProject={isCreatingProject}
+            isStartingOver={isStartingOver}
+            createdProjectId={createdProjectId}
+            permissionActionId={permissionActionId}
+            rollbackCheckpointId={rollbackCheckpointId}
+            chatInput={chatInput}
+            setChatInput={setChatInput}
+            plannerSendMode={plannerSendMode}
+            setPlannerSendMode={setPlannerSendMode}
+            plannerMessagePending={plannerMessagePending}
+            agentMessageDrafts={agentMessageDrafts}
+            agentMessagePendingId={agentMessagePendingId}
+            onAgentMessageDraftChange={(agentId, value) => {
+              setAgentMessageDrafts((prev) => ({ ...prev, [agentId]: value }))
+            }}
+            onSendDirectAgentMessage={(agentId) => {
+              const agent = buildState?.agents.find((candidate) => candidate.id === agentId)
+              if (agent) {
+                void sendDirectAgentMessage(agent)
+              }
+            }}
+            onSendChatMessage={sendChatMessage}
+            onPause={handlePauseBuild}
+            onResume={handleResumeBuild}
+            onRestart={handleRestartFailedBuild}
+            onStartOver={() => { void handleStartOver() }}
+            onPreviewWorkspace={openPreviewWorkspace}
+            onOpenInIDE={openInIDE}
+            onDownload={handleDownloadBuild}
+            onRollbackCheckpoint={handleRollbackCheckpoint}
+            onResolvePermission={handleResolvePermissionRequest}
+            onSetShowDiffReview={setShowDiffReview}
+            onLoadProposedEdits={loadProposedEdits}
+            onOpenCompletedBuild={openCompletedBuild}
+          />
         )}
       </div>
 
