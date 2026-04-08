@@ -197,6 +197,7 @@ type AgentManager struct {
 	taskCancels     map[string]context.CancelFunc
 	instanceID      string
 	mu              sync.RWMutex
+	workerOnce      sync.Once
 	ctx             context.Context
 	cancel          context.CancelFunc
 }
@@ -265,12 +266,39 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 		am.editStore = NewProposedEditStoreWithDB(db[0])
 	}
 
-	// Start background workers
-	go am.taskDispatcher()
-	go am.resultProcessor()
+	am.ensureWorkerInfrastructure()
 
 	log.Println("Agent Manager initialized")
 	return am
+}
+
+func (am *AgentManager) ensureWorkerInfrastructure() {
+	if am == nil {
+		return
+	}
+
+	am.mu.Lock()
+	if am.ctx == nil || am.cancel == nil {
+		am.ctx, am.cancel = context.WithCancel(context.Background())
+	}
+	if am.taskQueue == nil {
+		am.taskQueue = make(chan *Task, 100)
+	}
+	if am.resultQueue == nil {
+		am.resultQueue = make(chan *TaskResult, 100)
+	}
+	if am.subscribers == nil {
+		am.subscribers = make(map[string][]chan *WSMessage)
+	}
+	if am.buildMonitors == nil {
+		am.buildMonitors = make(map[string]struct{})
+	}
+	am.mu.Unlock()
+
+	am.workerOnce.Do(func() {
+		go am.taskDispatcher()
+		go am.resultProcessor()
+	})
 }
 
 func resolveAgentManagerInstanceID() string {
@@ -375,6 +403,7 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 // StartBuild begins the build process
 func (am *AgentManager) StartBuild(buildID string) error {
 	log.Printf("StartBuild called for build %s", buildID)
+	am.ensureWorkerInfrastructure()
 
 	am.mu.Lock()
 	build, exists := am.builds[buildID]
