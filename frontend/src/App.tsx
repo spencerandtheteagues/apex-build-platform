@@ -234,6 +234,10 @@ function App() {
   const [isRestoringProject, setIsRestoringProject] = useState(false)
   const [ideLaunchTarget, setIdeLaunchTarget] = useState<IDELaunchTarget>('dashboard')
   const [isAuthMode, setIsAuthMode] = useState<'login' | 'register'>('login')
+  const [verifyCode, setVerifyCode] = useState('')
+  const [isVerifying, setIsVerifying] = useState(false)
+  const [verifyError, setVerifyError] = useState('')
+  const [resendCooldown, setResendCooldown] = useState(0)
   const [pendingPlanType, setPendingPlanType] = useState<string | null>(null)
   const [builderStartOverSignal, setBuilderStartOverSignal] = useState(0)
   const [authData, setAuthData] = useState({
@@ -279,6 +283,10 @@ function App() {
     setCurrentProject,
     updateProfile,
     logout,
+    verificationPending,
+    verifyEmail,
+    resendVerification,
+    clearVerificationPending,
   } = useStore()
 
   const navigateToView = useCallback((view: AppView, options?: { replace?: boolean; projectId?: number | null }) => {
@@ -708,6 +716,43 @@ function App() {
     })
   }
 
+  // Resend cooldown countdown
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const t = setTimeout(() => setResendCooldown((c) => c - 1), 1000)
+    return () => clearTimeout(t)
+  }, [resendCooldown])
+
+  const handleVerifyEmail = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const trimmed = verifyCode.trim()
+    if (trimmed.length !== 6) {
+      setVerifyError('Please enter the 6-digit code from your email.')
+      return
+    }
+    setIsVerifying(true)
+    setVerifyError('')
+    try {
+      await verifyEmail(trimmed)
+      setVerifyCode('')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Invalid or expired code.'
+      setVerifyError(msg)
+    } finally {
+      setIsVerifying(false)
+    }
+  }
+
+  const handleResendCode = async () => {
+    if (resendCooldown > 0) return
+    try {
+      await resendVerification()
+      setResendCooldown(60)
+    } catch {
+      // notification already shown in store
+    }
+  }
+
   // Lazy-load heavy views on first visit while preserving view state after they mount.
   useEffect(() => {
     setVisitedViews((prev) => {
@@ -816,6 +861,123 @@ function App() {
             setShowLanding(false)
           }} />
         </Suspense>
+        {legalDocumentModal}
+        {helpCenterModal}
+      </>
+    )
+  }
+
+  // Email verification screen — shown after register or when login is blocked by unverified email
+  if (verificationPending) {
+    const displayEmail = verificationPending.maskedEmail || verificationPending.email || 'your email'
+    return (
+      <>
+        <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+          <AnimatedBackground variant="full" intensity="high" interactive={true} />
+          <div className="auth-card w-full max-w-md relative z-10 rounded-2xl p-8">
+            <div className="hud-corner hud-corner-tl rounded-tl-2xl" />
+            <div className="hud-corner hud-corner-tr rounded-tr-2xl" />
+            <div className="hud-corner hud-corner-bl rounded-bl-2xl" />
+            <div className="hud-corner hud-corner-br rounded-br-2xl" />
+
+            {/* Logo */}
+            <div className="text-center mb-8">
+              <div className="flex flex-col items-center gap-4">
+                <img src={logoSrc} alt="APEX Logo" className="auth-logo" style={{ height: '7rem', width: 'auto' }} />
+                <div>
+                  <h1 className="auth-title text-3xl font-black tracking-wider">APEX<span style={{ color: '#6366f1' }}>.BUILD</span></h1>
+                </div>
+              </div>
+            </div>
+
+            {/* Verify header */}
+            <div className="text-center mb-8">
+              <div className="w-16 h-16 rounded-full bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center mx-auto mb-4">
+                <Mail size={28} className="text-indigo-400" />
+              </div>
+              <h2 className="text-xl font-bold text-white mb-2">Verify your email</h2>
+              <p className="text-sm text-gray-400">
+                We sent a 6-digit code to <span className="text-indigo-300 font-medium">{displayEmail}</span>.<br />
+                Enter it below to continue.
+              </p>
+            </div>
+
+            <form onSubmit={handleVerifyEmail} className="space-y-5">
+              {/* Code input */}
+              <div className="auth-input-wrapper">
+                <div className="relative">
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 z-10">
+                    <Shield size={18} />
+                  </div>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    value={verifyCode}
+                    onChange={(e) => {
+                      setVerifyCode(e.target.value.replace(/\D/g, ''))
+                      setVerifyError('')
+                    }}
+                    className="w-full bg-black/50 border border-gray-700/50 rounded-xl py-3.5 pl-11 pr-4 text-white text-center text-2xl tracking-[0.5em] font-mono focus:outline-none focus:border-indigo-500/60 transition-all duration-300"
+                    placeholder="000000"
+                    autoFocus
+                    autoComplete="one-time-code"
+                  />
+                </div>
+                {verifyError && (
+                  <p className="text-xs text-red-400 mt-1.5 pl-3">{verifyError}</p>
+                )}
+              </div>
+
+              {/* Submit */}
+              <button
+                type="submit"
+                disabled={isVerifying || verifyCode.length !== 6}
+                className="auth-button w-full py-4 rounded-xl text-white font-bold text-lg tracking-wide disabled:opacity-70 disabled:cursor-not-allowed relative overflow-hidden"
+                style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)' }}
+              >
+                {isVerifying ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Verifying…
+                  </span>
+                ) : (
+                  <span className="flex items-center justify-center gap-2">
+                    <Check size={18} />
+                    Verify Email
+                  </span>
+                )}
+              </button>
+
+              {/* Resend */}
+              <div className="text-center pt-2">
+                <p className="text-sm text-gray-400">
+                  Didn't receive it?{' '}
+                  <button
+                    type="button"
+                    onClick={handleResendCode}
+                    disabled={resendCooldown > 0}
+                    className="text-indigo-400 font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend code'}
+                  </button>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearVerificationPending()
+                    setVerifyCode('')
+                    setVerifyError('')
+                  }}
+                  className="mt-3 text-xs text-gray-600 hover:text-gray-400 transition-colors"
+                >
+                  Back to sign in
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
         {legalDocumentModal}
         {helpCenterModal}
       </>

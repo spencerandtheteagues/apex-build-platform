@@ -182,6 +182,8 @@ interface AuthState {
   isLoading: boolean  // Legacy - kept for backwards compatibility
   isAuthLoading: boolean  // Domain-specific loading state for auth operations
   error: string | null
+  // Email verification pending state
+  verificationPending: { email: string; maskedEmail: string } | null
 }
 
 interface AuthActions {
@@ -191,6 +193,9 @@ interface AuthActions {
   refreshUser: () => Promise<void>
   updateProfile: (data: Partial<User>) => Promise<void>
   clearError: () => void
+  verifyEmail: (code: string) => Promise<void>
+  resendVerification: () => Promise<void>
+  clearVerificationPending: () => void
 }
 
 // Projects slice
@@ -448,6 +453,7 @@ export const useStore = create<StoreState & StoreActions>()(
         isLoading: false,  // Legacy - kept for backwards compatibility
         isAuthLoading: false,  // Domain-specific loading state
         error: null,
+        verificationPending: null,
 
         // Projects
         projects: [],
@@ -523,6 +529,20 @@ export const useStore = create<StoreState & StoreActions>()(
             const response = await apiService.login(
               { username: usernameOrEmail, password }
             )
+
+            // Check if backend gated login due to unverified email
+            if ((response as any).error_code === 'email_not_verified') {
+              const maskedEmail = (response as any).email ?? ''
+              // Store the original email so we can pass it to verify-email (unauthenticated path)
+              const emailForVerify = usernameOrEmail.includes('@') ? usernameOrEmail : ''
+              set((state) => {
+                state.verificationPending = { email: emailForVerify, maskedEmail }
+                state.isLoading = false
+                state.isAuthLoading = false
+              })
+              return
+            }
+
             const user = response.user as User
 
             set((state) => {
@@ -538,6 +558,19 @@ export const useStore = create<StoreState & StoreActions>()(
               message: `Welcome back, ${user.username}!`,
             })
           } catch (error: unknown) {
+            // HTTP 403 with error_code: email_not_verified
+            const axiosErr = error as any
+            if (axiosErr?.response?.status === 403 && axiosErr?.response?.data?.error_code === 'email_not_verified') {
+              const maskedEmail = axiosErr.response.data.email ?? ''
+              const emailForVerify = usernameOrEmail.includes('@') ? usernameOrEmail : ''
+              set((state) => {
+                state.verificationPending = { email: emailForVerify, maskedEmail }
+                state.isLoading = false
+                state.isAuthLoading = false
+              })
+              return
+            }
+
             set((state) => {
               state.error = getErrorMessage(error)
               state.isLoading = false  // Legacy
@@ -564,18 +597,17 @@ export const useStore = create<StoreState & StoreActions>()(
             const response = await apiService.register(data)
             const user = response.user as User
 
+            // Mark as authenticated (tokens are issued) but show verification screen
             set((state) => {
               state.user = user
               state.isAuthenticated = true
               state.isLoading = false  // Legacy
               state.isAuthLoading = false
+              // Trigger verification screen (authenticated path — user has tokens)
+              state.verificationPending = { email: '', maskedEmail: data.email ?? '' }
             })
 
-            get().addNotification({
-              type: 'success',
-              title: 'Registration Successful',
-              message: `Welcome to APEX-BUILD, ${user.username}!`,
-            })
+            // No welcome notification — the verification screen IS the welcome
           } catch (error: unknown) {
             set((state) => {
               state.error = getErrorMessage(error)
@@ -590,6 +622,45 @@ export const useStore = create<StoreState & StoreActions>()(
             })
             throw error
           }
+        },
+
+        verifyEmail: async (code: string) => {
+          const { verificationPending, user } = get()
+          // Authenticated path (just registered): no email needed
+          // Unauthenticated path (failed login): pass stored email
+          const emailForVerify = user ? undefined : (verificationPending?.email || undefined)
+          const response = await apiService.verifyEmail(code, emailForVerify)
+
+          if (response.user) {
+            set((state) => {
+              state.user = response.user as User
+              state.isAuthenticated = true
+              state.verificationPending = null
+            })
+          } else {
+            set((state) => { state.verificationPending = null })
+          }
+
+          get().addNotification({
+            type: 'success',
+            title: 'Email Verified',
+            message: 'Your email has been verified. Welcome!',
+          })
+        },
+
+        resendVerification: async () => {
+          const { verificationPending, user } = get()
+          const email = user ? undefined : (verificationPending?.email || undefined)
+          await apiService.resendVerification(email)
+          get().addNotification({
+            type: 'info',
+            title: 'Code Resent',
+            message: 'A new verification code has been sent to your email.',
+          })
+        },
+
+        clearVerificationPending: () => {
+          set((state) => { state.verificationPending = null })
         },
 
         logout: async () => {
@@ -1521,6 +1592,10 @@ export const useAIHistory = () => useStore((state) => state.history)
 // Action selectors (these don't need shallow comparison since functions are stable)
 export const useLogin = () => useStore((state) => state.login)
 export const useRegister = () => useStore((state) => state.register)
+export const useVerificationPending = () => useStore((state) => state.verificationPending)
+export const useVerifyEmail = () => useStore((state) => state.verifyEmail)
+export const useResendVerification = () => useStore((state) => state.resendVerification)
+export const useClearVerificationPending = () => useStore((state) => state.clearVerificationPending)
 export const useLogout = () => useStore((state) => state.logout)
 export const useRefreshUser = () => useStore((state) => state.refreshUser)
 export const useUpdateProfile = () => useStore((state) => state.updateProfile)
@@ -1577,6 +1652,10 @@ export const useAuth = () => useStore(
     refreshUser: state.refreshUser,
     updateProfile: state.updateProfile,
     clearError: state.clearError,
+    verificationPending: state.verificationPending,
+    verifyEmail: state.verifyEmail,
+    resendVerification: state.resendVerification,
+    clearVerificationPending: state.clearVerificationPending,
   }))
 )
 

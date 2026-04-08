@@ -360,6 +360,18 @@ func (d *Database) Migrate() error {
 		return fmt.Errorf("migration failed: %w", err)
 	}
 
+	// Backfill: mark all existing active users as email-verified so they aren't locked out
+	// after the email verification feature is introduced. New users will go through the
+	// OTP flow; existing users get the benefit of the doubt via their account creation date.
+	if res := d.DB.Exec(
+		`UPDATE users SET email_verified_at = created_at, is_verified = true
+		 WHERE email_verified_at IS NULL AND is_active = true`,
+	); res.Error != nil {
+		log.Printf("⚠️ Email verification backfill failed (non-fatal): %v", res.Error)
+	} else if res.RowsAffected > 0 {
+		log.Printf("✅ Email verification backfill: marked %d existing users as verified", res.RowsAffected)
+	}
+
 	// Create indexes for performance
 	if err := d.createIndexes(); err != nil {
 		return fmt.Errorf("failed to create indexes: %w", err)

@@ -24,6 +24,11 @@ type User struct {
 	IsActive   bool `json:"is_active" gorm:"default:true"`
 	IsVerified bool `json:"is_verified" gorm:"default:false"`
 
+	// Email verification
+	EmailVerifiedAt           *time.Time `json:"email_verified_at,omitempty" gorm:"index"`
+	VerificationCode          string     `json:"-"` // bcrypt hash of the 6-digit OTP
+	VerificationCodeExpiresAt *time.Time `json:"-"`
+
 	// Admin and special privileges
 	IsAdmin             bool `json:"is_admin" gorm:"default:false"`
 	IsSuperAdmin        bool `json:"is_super_admin" gorm:"default:false"`

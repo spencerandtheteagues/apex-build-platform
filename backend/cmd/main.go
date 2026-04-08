@@ -32,6 +32,7 @@ import (
 	"apex-build/internal/deploy"
 	deployalwayson "apex-build/internal/deploy/alwayson"
 	"apex-build/internal/deploy/providers"
+	"apex-build/internal/email"
 	"apex-build/internal/enterprise"
 	"apex-build/internal/extensions"
 	"apex-build/internal/git"
@@ -917,6 +918,10 @@ func main() {
 	server.SetUsageTracker(usageTracker)
 	server.SetCacheStatusProvider(redisCache.Status)
 
+	// Initialize Email Service (SMTP transactional email for verification codes etc.)
+	emailSvc := email.NewService()
+	server.SetEmailService(emailSvc)
+
 	// Initialize Storage Provider (R2 or local fallback)
 	storageProvider := storage.NewFromEnv()
 	server.SetStorageProvider(storageProvider)
@@ -1311,6 +1316,9 @@ func setupRoutes(
 			auth.POST("/login", server.Login)
 			auth.POST("/refresh", server.RefreshToken)
 			auth.POST("/logout", server.Logout)
+			// Email verification (authenticated path requires Bearer/cookie; unauthenticated path uses body email)
+			auth.POST("/verify-email", server.VerifyEmail)
+			auth.POST("/resend-verification", server.ResendVerification)
 		}
 
 		// Community/Sharing Marketplace public endpoints (no auth required for viewing)

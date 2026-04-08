@@ -15,6 +15,7 @@ import (
 	"apex-build/internal/auth"
 	"apex-build/internal/cache"
 	"apex-build/internal/db"
+	"apex-build/internal/email"
 	appmiddleware "apex-build/internal/middleware"
 	"apex-build/internal/origins"
 	"apex-build/internal/payments"
@@ -39,6 +40,7 @@ type Server struct {
 	readiness *startup.Registry
 	storage   storage.Provider
 	cache     func() cache.Status
+	email     *email.Service
 }
 
 // NewServer creates a new API server
@@ -305,6 +307,14 @@ func (s *Server) Register(c *gin.Context) {
 		return
 	}
 
+	// Issue email verification code (best-effort, non-blocking)
+	go func() {
+		if err := s.issueVerificationCode(user); err != nil {
+			// Already logged inside issueVerificationCode
+			_ = err
+		}
+	}()
+
 	// Generate tokens
 	tokens, err := s.auth.GenerateTokens(user)
 	if err != nil {
@@ -317,6 +327,7 @@ func (s *Server) Register(c *gin.Context) {
 
 	response := cookieSessionPayload(tokens)
 	response["message"] = "User created successfully"
+	response["email_verification_required"] = true
 	response["user"] = gin.H{
 		"id":                    user.ID,
 		"username":              user.Username,
@@ -372,6 +383,18 @@ func (s *Server) Login(c *gin.Context) {
 	// Check if user is active
 	if !user.IsActive {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Account is deactivated"})
+		return
+	}
+
+	// Block unverified users — admin/super-admin bypass for convenience
+	if !user.IsVerified && user.EmailVerifiedAt == nil && !user.IsAdmin {
+		// Re-issue a fresh code so they can complete verification without extra steps
+		go func() { _ = s.issueVerificationCode(&user) }()
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":      "Email not verified. A new code has been sent to your email address.",
+			"error_code": "email_not_verified",
+			"email":      maskEmail(user.Email),
+		})
 		return
 	}
 
