@@ -1421,8 +1421,32 @@ export async function query<T extends QueryResultRow>(text: string, params?: any
   "include": ["src"]
 }`
 		got := normalizeGeneratedFileContent("frontend/tsconfig.json", in)
-		if !strings.Contains(got, `"moduleResolution": "Node"`) {
+		if !strings.Contains(got, `"moduleResolution": "Bundler"`) {
 			t.Fatalf("expected frontend moduleResolution normalization, got %s", got)
+		}
+	})
+
+	t.Run("rewrites_frontend_nodenext_module_pair_back_to_bundler", func(t *testing.T) {
+		t.Parallel()
+
+		in := `{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "jsx": "react-jsx"
+  },
+  "include": ["src"]
+}`
+		got := normalizeGeneratedFileContent("tsconfig.json", in)
+		if !strings.Contains(got, `"module": "ESNext"`) {
+			t.Fatalf("expected frontend module to normalize back to ESNext, got %s", got)
+		}
+		if !strings.Contains(got, `"moduleResolution": "Bundler"`) {
+			t.Fatalf("expected frontend moduleResolution to normalize back to Bundler, got %s", got)
+		}
+		if strings.Contains(got, `"module": "NodeNext"`) || strings.Contains(got, `"moduleResolution": "NodeNext"`) {
+			t.Fatalf("expected NodeNext frontend settings to be removed, got %s", got)
 		}
 	})
 
@@ -1445,7 +1469,7 @@ export async function query<T extends QueryResultRow>(text: string, params?: any
 		if strings.Contains(got, ",\n  }") || strings.Contains(got, ",\n}") {
 			t.Fatalf("expected trailing commas to be removed, got %s", got)
 		}
-		if !strings.Contains(got, `"moduleResolution": "Node"`) {
+		if !strings.Contains(got, `"moduleResolution": "Bundler"`) {
 			t.Fatalf("expected downstream tsconfig normalization to still run, got %s", got)
 		}
 	})

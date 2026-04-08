@@ -13701,18 +13701,33 @@ func normalizeGeneratedTSConfigBuildExcludes(path, content string) string {
 	compilerOptions, _ := cfg["compilerOptions"].(map[string]any)
 	changed := false
 
-	// Frontend TS/Vite apps frequently fail with TS2792 on package imports when the model
-	// emits `module: "ESNext"` but omits `moduleResolution`.
+	// Frontend TS/Vite apps should always stay on the bundler-safe module pair.
+	// Models occasionally drift into NodeNext/Node16, which then triggers:
+	// - TS5110 when moduleResolution=NodeNext but module stays ESNext
+	// - TS2835 on extensionless relative imports in React/Vite source files
+	// Normalize those configs back to the standard Vite-friendly shape early.
 	if compilerOptions != nil {
-		_, hasModuleResolution := compilerOptions["moduleResolution"]
 		moduleValue, _ := compilerOptions["module"].(string)
+		moduleResolution, _ := compilerOptions["moduleResolution"].(string)
 		jsxValue, _ := compilerOptions["jsx"].(string)
-		if !hasModuleResolution &&
-			strings.EqualFold(strings.TrimSpace(moduleValue), "ESNext") &&
-			strings.TrimSpace(jsxValue) != "" {
-			compilerOptions["moduleResolution"] = "Node"
-			cfg["compilerOptions"] = compilerOptions
-			changed = true
+		trimmedModule := strings.TrimSpace(moduleValue)
+		trimmedModuleResolution := strings.TrimSpace(moduleResolution)
+		if strings.TrimSpace(jsxValue) != "" {
+			if trimmedModuleResolution == "" && strings.EqualFold(trimmedModule, "ESNext") {
+				compilerOptions["moduleResolution"] = "Bundler"
+				cfg["compilerOptions"] = compilerOptions
+				changed = true
+			}
+			if strings.EqualFold(trimmedModuleResolution, "NodeNext") || strings.EqualFold(trimmedModuleResolution, "Node16") {
+				compilerOptions["moduleResolution"] = "Bundler"
+				cfg["compilerOptions"] = compilerOptions
+				changed = true
+			}
+			if strings.EqualFold(trimmedModule, "NodeNext") || strings.EqualFold(trimmedModule, "Node16") {
+				compilerOptions["module"] = "ESNext"
+				cfg["compilerOptions"] = compilerOptions
+				changed = true
+			}
 		}
 	}
 
