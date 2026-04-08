@@ -1,6 +1,14 @@
 package preview
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"apex-build/internal/bundler"
+)
 
 func TestNormalizePreviewPath(t *testing.T) {
 	tests := []struct {
@@ -60,5 +68,107 @@ func TestShouldProxyToBackendPathSupportsFullStackPrefixes(t *testing.T) {
 		if got := shouldProxyToBackendPath(tc.path); got != tc.want {
 			t.Fatalf("shouldProxyToBackendPath(%q) = %v, want %v", tc.path, got, tc.want)
 		}
+	}
+}
+
+func TestCreateFileHandlerServesIndexHTMLForBundledRootRequests(t *testing.T) {
+	ps := &PreviewServer{}
+	session := &PreviewSession{
+		ProjectID:  7,
+		IsBundled:  true,
+		StartedAt:  time.Now(),
+		LastAccess: time.Now(),
+		FileCache: map[string]*CachedFile{
+			"index.html": {
+				Content:     "<!doctype html><title>Bundled App</title><div id=\"root\"></div>",
+				ContentType: "text/html; charset=utf-8",
+			},
+			"src/main.tsx": {
+				Content:     "import React from \"react\";",
+				ContentType: "application/typescript; charset=utf-8",
+			},
+		},
+	}
+	handler := ps.createFileHandler(session, &PreviewConfig{EntryPoint: "src/main.tsx"})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept", "text/html")
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Fatalf("expected html content type, got %q", got)
+	}
+	if !strings.Contains(rec.Body.String(), "Bundled App") {
+		t.Fatalf("expected bundled index html, got %q", rec.Body.String())
+	}
+}
+
+func TestCreateFileHandlerFallsBackToIndexHTMLForBundledSPARoutes(t *testing.T) {
+	ps := &PreviewServer{}
+	session := &PreviewSession{
+		ProjectID:  8,
+		IsBundled:  true,
+		StartedAt:  time.Now(),
+		LastAccess: time.Now(),
+		FileCache: map[string]*CachedFile{
+			"index.html": {
+				Content:     "<!doctype html><title>SPA Shell</title><div id=\"root\"></div>",
+				ContentType: "text/html; charset=utf-8",
+			},
+		},
+	}
+	handler := ps.createFileHandler(session, &PreviewConfig{EntryPoint: "src/main.tsx"})
+
+	req := httptest.NewRequest(http.MethodGet, "/clients/active", nil)
+	req.Header.Set("Accept", "text/html")
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "SPA Shell") {
+		t.Fatalf("expected spa shell fallback, got %q", rec.Body.String())
+	}
+}
+
+func TestFrameworkRuntimePreludeIncludesReactCDNs(t *testing.T) {
+	ps := &PreviewServer{}
+	session := &PreviewSession{
+		BundleConfig: &bundler.BundleConfig{Framework: "react"},
+	}
+
+	prelude := ps.frameworkRuntimePrelude(session)
+	if !strings.Contains(prelude, "react.development.js") {
+		t.Fatalf("expected react runtime prelude, got %q", prelude)
+	}
+	if !strings.Contains(prelude, "react-dom.development.js") {
+		t.Fatalf("expected react-dom runtime prelude, got %q", prelude)
+	}
+}
+
+func TestPreviewWebSocketOriginAllowsLocalAPIProxyHost(t *testing.T) {
+	ps := NewPreviewServer(nil)
+	req := httptest.NewRequest(http.MethodGet, "/__apex_ws", nil)
+	req.Header.Set("Origin", "http://127.0.0.1:8080")
+
+	if !ps.upgrader.CheckOrigin(req) {
+		t.Fatal("expected preview websocket origin check to allow http://127.0.0.1:8080")
+	}
+}
+
+func TestPreviewWebSocketOriginAllowsSandboxedProxyOrigin(t *testing.T) {
+	ps := NewPreviewServer(nil)
+	req := httptest.NewRequest(http.MethodGet, "/__apex_ws", nil)
+	req.Header.Set("Origin", "null")
+
+	if !ps.upgrader.CheckOrigin(req) {
+		t.Fatal("expected preview websocket origin check to allow null origin from sandboxed preview iframes")
 	}
 }

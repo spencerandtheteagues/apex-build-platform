@@ -1,6 +1,8 @@
 package agents
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"strings"
 
@@ -26,6 +28,45 @@ var paidBuildCapabilityReasons = map[CapabilityRequirement]string{
 	CapabilityJobs:       "background jobs",
 	CapabilityRealtime:   "realtime features",
 	CapabilityFileUpload: "file uploads",
+}
+
+type buildSubscriptionRequiredError struct {
+	CurrentPlan   string
+	RequiredPlan  string
+	BlockedReason string
+	Suggestion    string
+}
+
+func (e *buildSubscriptionRequiredError) Error() string {
+	if e == nil {
+		return ""
+	}
+	currentPlan := firstNonEmptyString(strings.TrimSpace(e.CurrentPlan), "free")
+	requiredPlan := firstNonEmptyString(strings.TrimSpace(e.RequiredPlan), "builder")
+	blockedReason := firstNonEmptyString(strings.TrimSpace(e.BlockedReason), "backend/runtime implementation")
+	return fmt.Sprintf("%s requires %s or higher on the %s plan", blockedReason, requiredPlan, currentPlan)
+}
+
+func asBuildSubscriptionRequiredError(err error) (*buildSubscriptionRequiredError, bool) {
+	var target *buildSubscriptionRequiredError
+	if !errors.As(err, &target) || target == nil {
+		return nil, false
+	}
+	return target, true
+}
+
+func newBuildSubscriptionRequiredError(currentPlan string, blockedReason string) *buildSubscriptionRequiredError {
+	requiredPlan := "builder"
+	reason := strings.TrimSpace(blockedReason)
+	if reason == "" {
+		reason = "backend/runtime implementation"
+	}
+	return &buildSubscriptionRequiredError{
+		CurrentPlan:   strings.ToLower(strings.TrimSpace(currentPlan)),
+		RequiredPlan:  requiredPlan,
+		BlockedReason: reason,
+		Suggestion:    fmt.Sprintf("The frontend preview can keep iterating on the current free plan. Upgrade to Builder or higher to unlock %s on this same app.", reason),
+	}
 }
 
 func (h *BuildHandler) currentSubscriptionType(c *gin.Context, userID uint) string {
@@ -119,4 +160,90 @@ func buildSubscriptionRequirement(req *BuildRequest) (bool, string) {
 	}
 
 	return false, ""
+}
+
+func buildFollowupRequiresPaidRuntime(build *Build, message string, target buildMessageTarget, matchedAgents []*Agent) (bool, string) {
+	if build == nil {
+		return false, ""
+	}
+	if !buildRequiresStaticFrontendFallbackState(build) && !buildUsesFrontendPreviewOnlyDelivery(build) {
+		return false, ""
+	}
+
+	if roleReason := buildMessageTargetPaidRuntimeReason(target, matchedAgents); roleReason != "" {
+		return true, roleReason
+	}
+
+	if requiresPaid, reason := buildSubscriptionRequirement(&BuildRequest{
+		Description: message,
+		Prompt:      message,
+		TechStack:   build.TechStack,
+	}); requiresPaid {
+		return true, reason
+	}
+
+	normalized := normalizeDetectionText(message)
+	for _, phrase := range []struct {
+		term   string
+		reason string
+	}{
+		{"make it functional", "backend/runtime implementation"},
+		{"make it fully functional", "backend/runtime implementation"},
+		{"make this functional", "backend/runtime implementation"},
+		{"make it work", "backend/runtime implementation"},
+		{"make this work", "backend/runtime implementation"},
+		{"wire it up", "backend/runtime implementation"},
+		{"hook it up", "backend/runtime implementation"},
+		{"connect it for real", "backend/runtime implementation"},
+		{"real backend", "backend services"},
+		{"real auth", "authentication flows"},
+		{"real login", "authentication flows"},
+		{"save data", "database-backed apps"},
+		{"persist data", "database-backed apps"},
+		{"store user data", "database-backed apps"},
+		{"deploy it", "deployment"},
+		{"publish it", "deployment"},
+		{"go live", "deployment"},
+	} {
+		if containsAffirmedTerm(normalized, normalizeDetectionText(phrase.term)) {
+			return true, phrase.reason
+		}
+	}
+
+	return false, ""
+}
+
+func buildMessageTargetPaidRuntimeReason(target buildMessageTarget, matchedAgents []*Agent) string {
+	if buildRoleRequiresPaidRuntime(target.AgentRole) {
+		return buildRolePaidRuntimeReason(target.AgentRole)
+	}
+	for _, agent := range matchedAgents {
+		if agent == nil {
+			continue
+		}
+		if buildRoleRequiresPaidRuntime(string(agent.Role)) {
+			return buildRolePaidRuntimeReason(string(agent.Role))
+		}
+	}
+	return ""
+}
+
+func buildRoleRequiresPaidRuntime(role string) bool {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "backend", "database", "devops":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildRolePaidRuntimeReason(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "database":
+		return "database-backed apps"
+	case "devops":
+		return "deployment"
+	default:
+		return "backend services"
+	}
 }

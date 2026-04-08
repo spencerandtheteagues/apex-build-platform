@@ -20,6 +20,13 @@ func buildRequiresStaticFrontendFallback(build *Build) bool {
 	}
 	build.mu.RLock()
 	defer build.mu.RUnlock()
+	return buildRequiresStaticFrontendFallbackState(build)
+}
+
+func buildRequiresStaticFrontendFallbackState(build *Build) bool {
+	if build == nil {
+		return false
+	}
 	if build.SnapshotState.PolicyState != nil && build.SnapshotState.PolicyState.StaticFrontendOnly {
 		return !isPaidBuildPlan(build.SnapshotState.PolicyState.PlanType)
 	}

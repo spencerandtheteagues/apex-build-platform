@@ -61,10 +61,10 @@ func (b *ESBuildBundler) detectEsbuild() {
 
 	// Try multiple ways to find esbuild
 	paths := []string{
-		"./node_modules/.bin/esbuild",              // Local node_modules
-		"esbuild",                                    // In PATH
-		"npx --yes esbuild",                         // Via npx (may download)
-		"/usr/local/bin/esbuild",                   // Common global location
+		"./node_modules/.bin/esbuild", // Local node_modules
+		"esbuild",                     // In PATH
+		"npx --yes esbuild",           // Via npx (may download)
+		"/usr/local/bin/esbuild",      // Common global location
 	}
 
 	for _, path := range paths {
@@ -499,6 +499,9 @@ func (b *ESBuildBundler) BundleFromFiles(ctx context.Context, projectID uint, fi
 
 	// Update config to use the temp directory
 	config.ProjectPath = bundleDir
+	if err := b.prepareFrameworkShims(bundleDir, &config); err != nil {
+		return nil, fmt.Errorf("failed to prepare framework shims: %w", err)
+	}
 
 	// Build args with correct entry point
 	args, err := b.buildArgs(config, outputDir)
@@ -537,6 +540,137 @@ func (b *ESBuildBundler) BundleFromFiles(ctx context.Context, projectID uint, fi
 		projectID, result.Duration, result.Success, len(result.OutputJS), len(result.OutputCSS))
 
 	return result, nil
+}
+
+func (b *ESBuildBundler) prepareFrameworkShims(bundleDir string, config *BundleConfig) error {
+	if config == nil {
+		return nil
+	}
+
+	switch strings.ToLower(config.Framework) {
+	case "react":
+		return b.prepareReactShims(bundleDir, config)
+	default:
+		return nil
+	}
+}
+
+func (b *ESBuildBundler) prepareReactShims(bundleDir string, config *BundleConfig) error {
+	if config.Alias == nil {
+		config.Alias = make(map[string]string)
+	}
+
+	shimDir := filepath.Join(bundleDir, ".apex-shims")
+	if err := os.MkdirAll(shimDir, 0755); err != nil {
+		return err
+	}
+
+	shims := map[string]string{
+		"react.js": `const React = globalThis.React;
+if (!React) {
+  throw new Error("React global not found. The preview CDN dependency did not load.");
+}
+
+export default React;
+export const Children = React.Children;
+export const Component = React.Component;
+export const Fragment = React.Fragment;
+export const PureComponent = React.PureComponent;
+export const StrictMode = React.StrictMode;
+export const Suspense = React.Suspense;
+export const cloneElement = React.cloneElement;
+export const createContext = React.createContext;
+export const createElement = React.createElement;
+export const createRef = React.createRef;
+export const forwardRef = React.forwardRef;
+export const isValidElement = React.isValidElement;
+export const lazy = React.lazy;
+export const memo = React.memo;
+export const startTransition = React.startTransition;
+export const useCallback = React.useCallback;
+export const useContext = React.useContext;
+export const useDebugValue = React.useDebugValue;
+export const useDeferredValue = React.useDeferredValue;
+export const useEffect = React.useEffect;
+export const useId = React.useId;
+export const useImperativeHandle = React.useImperativeHandle;
+export const useInsertionEffect = React.useInsertionEffect;
+export const useLayoutEffect = React.useLayoutEffect;
+export const useMemo = React.useMemo;
+export const useReducer = React.useReducer;
+export const useRef = React.useRef;
+export const useState = React.useState;
+export const useSyncExternalStore = React.useSyncExternalStore;
+export const useTransition = React.useTransition;
+`,
+		"react-dom.js": `const ReactDOM = globalThis.ReactDOM;
+if (!ReactDOM) {
+  throw new Error("ReactDOM global not found. The preview CDN dependency did not load.");
+}
+
+export default ReactDOM;
+export const createPortal = ReactDOM.createPortal;
+export const findDOMNode = ReactDOM.findDOMNode;
+export const flushSync = ReactDOM.flushSync;
+export const hydrate = ReactDOM.hydrate;
+export const render = ReactDOM.render;
+export const unmountComponentAtNode = ReactDOM.unmountComponentAtNode;
+`,
+		"react-dom-client.js": `import ReactDOM from "./react-dom.js";
+
+export default ReactDOM;
+export const createRoot = ReactDOM.createRoot ? ReactDOM.createRoot.bind(ReactDOM) : undefined;
+export const hydrateRoot = ReactDOM.hydrateRoot ? ReactDOM.hydrateRoot.bind(ReactDOM) : undefined;
+`,
+		"react-jsx-runtime.js": `import React from "./react.js";
+
+export const Fragment = React.Fragment;
+
+function createElementWithChildren(type, props, key) {
+  const nextProps = props || {};
+  const { children, ...rest } = nextProps;
+  if (key !== undefined) {
+    rest.key = key;
+  }
+  if (children === undefined) {
+    return React.createElement(type, rest);
+  }
+  if (Array.isArray(children)) {
+    return React.createElement(type, rest, ...children);
+  }
+  return React.createElement(type, rest, children);
+}
+
+export function jsx(type, props, key) {
+  return createElementWithChildren(type, props, key);
+}
+
+export const jsxs = jsx;
+export const jsxDEV = jsx;
+`,
+	}
+
+	for name, content := range shims {
+		if err := os.WriteFile(filepath.Join(shimDir, name), []byte(content), 0644); err != nil {
+			return err
+		}
+	}
+
+	aliases := map[string]string{
+		"react":                 "./.apex-shims/react.js",
+		"react-dom":             "./.apex-shims/react-dom.js",
+		"react-dom/client":      "./.apex-shims/react-dom-client.js",
+		"react/jsx-runtime":     "./.apex-shims/react-jsx-runtime.js",
+		"react/jsx-dev-runtime": "./.apex-shims/react-jsx-runtime.js",
+	}
+
+	for from, to := range aliases {
+		if _, exists := config.Alias[from]; !exists {
+			config.Alias[from] = to
+		}
+	}
+
+	return nil
 }
 
 // GenerateHTML generates an HTML file that loads the bundled JavaScript and CSS

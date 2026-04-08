@@ -116,7 +116,9 @@ func (h *PaymentHandlers) CreateCheckoutSession(c *gin.Context) {
 	}
 
 	var req struct {
-		PriceID string `json:"price_id" binding:"required"`
+		PriceID    string `json:"price_id" binding:"required"`
+		SuccessURL string `json:"success_url"`
+		CancelURL  string `json:"cancel_url"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -150,6 +152,30 @@ func (h *PaymentHandlers) CreateCheckoutSession(c *gin.Context) {
 	appURL := configuredAppURL()
 	successURL := appURL + "/billing?success=true"
 	cancelURL := appURL + "/billing?canceled=true"
+	if strings.TrimSpace(req.SuccessURL) != "" {
+		sanitizedURL, err := sanitizeBillingPortalReturnURL(req.SuccessURL)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   err.Error(),
+				"code":    "INVALID_SUCCESS_URL",
+			})
+			return
+		}
+		successURL = sanitizedURL
+	}
+	if strings.TrimSpace(req.CancelURL) != "" {
+		sanitizedURL, err := sanitizeBillingPortalReturnURL(req.CancelURL)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   err.Error(),
+				"code":    "INVALID_CANCEL_URL",
+			})
+			return
+		}
+		cancelURL = sanitizedURL
+	}
 
 	// Get user from database
 	var user models.User

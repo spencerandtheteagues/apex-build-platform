@@ -610,3 +610,110 @@ func TestProcessResultDropsStaleTaskAttemptResult(t *testing.T) {
 		t.Fatal("expected stale attempt result to be ignored")
 	}
 }
+
+func TestProcessResultSafelyRequeuesFailureWithoutErrorDetails(t *testing.T) {
+	t.Parallel()
+
+	manager := &AgentManager{
+		ctx:         context.Background(),
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		taskQueue:   make(chan *Task, 1),
+	}
+
+	now := time.Now().UTC()
+	task := &Task{
+		ID:         "retry-without-error",
+		Type:       TaskTest,
+		Status:     TaskInProgress,
+		MaxRetries: 3,
+		StartedAt:  &now,
+	}
+	agent := &Agent{
+		ID:          "testing-1",
+		BuildID:     "retry-build",
+		Role:        RoleTesting,
+		Provider:    ai.ProviderGemini,
+		Status:      StatusWorking,
+		CurrentTask: task,
+	}
+	build := &Build{
+		ID:        "retry-build",
+		Status:    BuildInProgress,
+		Mode:      ModeFast,
+		PowerMode: PowerFast,
+		UpdatedAt: now,
+		Agents:    map[string]*Agent{agent.ID: agent},
+		Tasks:     []*Task{task},
+	}
+	manager.agents[agent.ID] = agent
+	manager.builds[build.ID] = build
+
+	manager.processResultSafely(&TaskResult{
+		TaskID:  task.ID,
+		AgentID: agent.ID,
+		Attempt: 0,
+		Success: false,
+	})
+
+	if task.Status != TaskPending {
+		t.Fatalf("expected task to be requeued, got %s", task.Status)
+	}
+	if task.RetryCount != 1 {
+		t.Fatalf("expected retry_count=1, got %d", task.RetryCount)
+	}
+	if task.Input == nil {
+		t.Fatal("expected processResultSafely to initialize task.Input")
+	}
+	if _, ok := task.Input["previous_errors"]; !ok {
+		t.Fatalf("expected previous_errors to be captured, got %+v", task.Input)
+	}
+	if _, ok := task.Input["retry_guidance"]; !ok {
+		t.Fatalf("expected retry_guidance to be set, got %+v", task.Input)
+	}
+	if agent.Status != StatusWorking {
+		t.Fatalf("expected agent to remain working after retry scheduling, got %s", agent.Status)
+	}
+
+	select {
+	case queued := <-manager.taskQueue:
+		if queued != task {
+			t.Fatalf("expected the same task to be requeued, got %+v", queued)
+		}
+	default:
+		t.Fatal("expected failed task to be requeued")
+	}
+}
+
+func TestBroadcastPrunesClosedSubscriberChannels(t *testing.T) {
+	t.Parallel()
+
+	manager := &AgentManager{
+		builds:      make(map[string]*Build),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+
+	closedCh := make(chan *WSMessage, 1)
+	openCh := make(chan *WSMessage, 1)
+	close(closedCh)
+
+	manager.Subscribe("build-broadcast", closedCh)
+	manager.Subscribe("build-broadcast", openCh)
+
+	manager.broadcast("build-broadcast", &WSMessage{
+		Type:    WSBuildProgress,
+		BuildID: "build-broadcast",
+	})
+
+	select {
+	case <-openCh:
+	default:
+		t.Fatal("expected open subscriber to receive the broadcast")
+	}
+
+	subs := manager.subscribers["build-broadcast"]
+	if len(subs) != 1 || subs[0] != openCh {
+		t.Fatalf("expected closed subscriber to be pruned, got %+v", subs)
+	}
+}

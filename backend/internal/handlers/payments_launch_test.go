@@ -89,3 +89,45 @@ func TestCreateCheckoutSessionRejectsUnknownPlanPriceID(t *testing.T) {
 		t.Fatalf("expected INVALID_PRICE_ID response, got %s", w.Body.String())
 	}
 }
+
+func TestCreateCheckoutSessionRejectsInvalidSuccessURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("STRIPE_PRICE_PRO_MONTHLY", "price_pro_monthly_live")
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/billing/checkout", strings.NewReader(`{"price_id":"price_pro_monthly_live","success_url":"https://evil.example/phish"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user_id", uint(42))
+
+	h := &PaymentHandlers{}
+	h.CreateCheckoutSession(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(w.Body.String(), `"code":"INVALID_SUCCESS_URL"`) {
+		t.Fatalf("expected INVALID_SUCCESS_URL response, got %s", w.Body.String())
+	}
+}
+
+func TestCreateCheckoutSessionRejectsInvalidCancelURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("STRIPE_PRICE_PRO_MONTHLY", "price_pro_monthly_live")
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/billing/checkout", strings.NewReader(`{"price_id":"price_pro_monthly_live","cancel_url":"https://evil.example/phish"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("user_id", uint(42))
+
+	h := &PaymentHandlers{}
+	h.CreateCheckoutSession(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(w.Body.String(), `"code":"INVALID_CANCEL_URL"`) {
+		t.Fatalf("expected INVALID_CANCEL_URL response, got %s", w.Body.String())
+	}
+}

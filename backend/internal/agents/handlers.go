@@ -52,6 +52,9 @@ func classifyBuildMessageError(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
+	if _, ok := asBuildSubscriptionRequiredError(err); ok {
+		return http.StatusPaymentRequired
+	}
 
 	message := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
@@ -65,6 +68,25 @@ func classifyBuildMessageError(err error) int {
 		return http.StatusConflict
 	default:
 		return http.StatusInternalServerError
+	}
+}
+
+func buildMessageErrorResponse(err error) gin.H {
+	if ent, ok := asBuildSubscriptionRequiredError(err); ok {
+		return gin.H{
+			"error":          ent.BlockedReason + " requires a paid subscription",
+			"details":        err.Error(),
+			"error_code":     backendSubscriptionRequiredCode,
+			"current_plan":   firstNonEmptyString(ent.CurrentPlan, "free"),
+			"required_plan":  firstNonEmptyString(ent.RequiredPlan, "builder"),
+			"blocked_reason": ent.BlockedReason,
+			"suggestion":     ent.Suggestion,
+		}
+	}
+
+	return gin.H{
+		"error":   "failed to send message",
+		"details": err.Error(),
 	}
 }
 
@@ -1305,10 +1327,7 @@ func (h *BuildHandler) SendMessage(c *gin.Context) {
 		return
 	}
 	if sendErr != nil {
-		c.JSON(classifyBuildMessageError(sendErr), gin.H{
-			"error":   "failed to send message",
-			"details": sendErr.Error(),
-		})
+		c.JSON(classifyBuildMessageError(sendErr), buildMessageErrorResponse(sendErr))
 		return
 	}
 
