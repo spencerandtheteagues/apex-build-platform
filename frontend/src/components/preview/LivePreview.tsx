@@ -1136,7 +1136,7 @@ export default function LivePreview({
                   src={previewSrc}
                   className="w-full h-full border-0"
                   title="Live Preview"
-                  sandbox="allow-scripts allow-forms allow-popups allow-modals"
+                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
                   onLoad={() => {
                     setIframeLoading(false)
                     setIframeError(null)

@@ -38,6 +38,33 @@ func NewService(db *gorm.DB) *Service {
 	return service
 }
 
+func applyPreviewRuntimeEnvDefines(config *BundleConfig) {
+	if config == nil {
+		return
+	}
+	if config.Define == nil {
+		config.Define = make(map[string]string)
+	}
+
+	previewEnvRef := "window.__APEX_IMPORT_META_ENV__"
+	defaultPreviewDefines := map[string]string{
+		"import.meta.env":                   previewEnvRef,
+		"import.meta.env.VITE_API_URL":      previewEnvRef + ".VITE_API_URL",
+		"import.meta.env.VITE_API_BASE_URL": previewEnvRef + ".VITE_API_BASE_URL",
+		"import.meta.env.REACT_APP_API_URL": previewEnvRef + ".REACT_APP_API_URL",
+		"import.meta.env.MODE":              previewEnvRef + ".MODE",
+		"import.meta.env.DEV":               previewEnvRef + ".DEV",
+		"import.meta.env.PROD":              previewEnvRef + ".PROD",
+		"import.meta.env.BASE_URL":          previewEnvRef + ".BASE_URL",
+		"import.meta.env.SSR":               previewEnvRef + ".SSR",
+	}
+	for key, value := range defaultPreviewDefines {
+		if _, exists := config.Define[key]; !exists {
+			config.Define[key] = value
+		}
+	}
+}
+
 // IsAvailable returns true if the bundler is available
 func (s *Service) IsAvailable() bool {
 	return s.bundler.IsAvailable()
@@ -307,39 +334,28 @@ func (s *Service) applyFrameworkDefaults(config BundleConfig) BundleConfig {
 			".eot":   "dataurl",
 		}
 	}
+	applyPreviewRuntimeEnvDefines(&config)
 
 	// Framework-specific defaults
 	switch strings.ToLower(config.Framework) {
 	case "react":
-		if config.Define == nil {
-			config.Define = make(map[string]string)
-		}
 		config.Define["process.env.NODE_ENV"] = `"development"`
 		if config.JSXImportSource == "" {
 			config.JSXImportSource = "react"
 		}
 
 	case "vue":
-		if config.Define == nil {
-			config.Define = make(map[string]string)
-		}
 		config.Define["process.env.NODE_ENV"] = `"development"`
 		config.Define["__VUE_OPTIONS_API__"] = "true"
 		config.Define["__VUE_PROD_DEVTOOLS__"] = "false"
 
 	case "preact":
-		if config.Define == nil {
-			config.Define = make(map[string]string)
-		}
 		config.Define["process.env.NODE_ENV"] = `"development"`
 		if config.JSXImportSource == "" {
 			config.JSXImportSource = "preact"
 		}
 
 	case "solid":
-		if config.Define == nil {
-			config.Define = make(map[string]string)
-		}
 		config.Define["process.env.NODE_ENV"] = `"development"`
 	}
 

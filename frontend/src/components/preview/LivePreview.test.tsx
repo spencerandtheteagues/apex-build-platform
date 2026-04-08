@@ -330,4 +330,60 @@ describe('LivePreview', () => {
     const startApiButton = within(view.container).getByRole('button', { name: /start api/i }) as HTMLButtonElement
     expect(startApiButton.disabled).toBe(true)
   })
+
+  it('renders the preview iframe with same-origin sandbox support', async () => {
+    const mockStartFullStack = (apiService as any).startFullStackPreview as any
+    const mockGet = apiService.client.get as any
+    let previewRunning = false
+
+    mockGet.mockImplementation(async (url: string) => {
+      if (url === '/preview/docker/status') return { data: { available: false } }
+      if (url === '/preview/bundler/status') return { data: { available: true } }
+      if (url.startsWith('/preview/status/')) {
+        return {
+          data: {
+            preview: previewRunning
+              ? {
+                project_id: 707,
+                active: true,
+                port: 3000,
+                url: 'http://localhost:3000/project-707',
+                started_at: new Date().toISOString(),
+                last_access: new Date().toISOString(),
+                connected_clients: 1,
+              }
+              : { active: false },
+          },
+        }
+      }
+      if (url.startsWith('/preview/server/detect/')) return { data: { has_backend: false } }
+      if (url.startsWith('/preview/server/status/')) return { data: { server: null } }
+      if (url.startsWith('/preview/server/logs/')) return { data: { stdout: '', stderr: '' } }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+    mockStartFullStack.mockImplementation(async (data: any) => {
+      previewRunning = true
+      return {
+        sandbox: false,
+        preview: {
+          project_id: data.project_id,
+          active: true,
+          port: 3000,
+          url: `http://localhost:3000/project-${data.project_id}`,
+          started_at: new Date().toISOString(),
+          last_access: new Date().toISOString(),
+          connected_clients: 1,
+        },
+      }
+    })
+
+    const view = render(<LivePreview projectId={707} autoStart className="h-96" />)
+
+    await waitFor(() => {
+      expect(mockStartFullStack).toHaveBeenCalledWith(expect.objectContaining({ project_id: 707 }))
+    })
+
+    const iframe = await within(view.container).findByTitle('Live Preview')
+    expect(iframe.getAttribute('sandbox')).toContain('allow-same-origin')
+  })
 })

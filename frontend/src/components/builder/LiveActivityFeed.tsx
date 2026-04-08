@@ -1,7 +1,7 @@
 // Live Activity Feed — scrolling real-time AI agent activity stream
 // with pinned User Communication section at the bottom
 
-import React, { useEffect, useRef, useState, useMemo } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { AlertTriangle, MessageSquare, Play, ChevronRight } from 'lucide-react'
 import type { BuildInteractionState } from '@/services/api'
@@ -86,6 +86,7 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
   isPreparingPreview,
 }) => {
   const feedRef = useRef<HTMLDivElement>(null)
+  const bottomAnchorRef = useRef<HTMLDivElement>(null)
   const [userScrolledUp, setUserScrolledUp] = useState(false)
 
   // Last 200 displayable thoughts
@@ -94,19 +95,42 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
     [aiThoughts]
   )
 
-  // Auto-scroll to bottom when new thoughts arrive (unless user scrolled up)
-  useEffect(() => {
-    if (userScrolledUp) return
+  const latestThoughtKey = useMemo(() => {
+    const latestThought = displayThoughts[displayThoughts.length - 1]
+    if (!latestThought) return 'empty'
+    return `${latestThought.id}:${latestThought.content}`
+  }, [displayThoughts])
+
+  const isNearBottom = useCallback((el: HTMLDivElement) => (
+    el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  ), [])
+
+  const scrollToLatest = useCallback((behavior: ScrollBehavior = 'auto') => {
+    if (bottomAnchorRef.current) {
+      bottomAnchorRef.current.scrollIntoView({ block: 'end', behavior })
+      return
+    }
     if (feedRef.current) {
       feedRef.current.scrollTop = feedRef.current.scrollHeight
     }
-  }, [displayThoughts.length, userScrolledUp])
+  }, [])
+
+  // Keep the feed pinned to the latest event unless the user intentionally scrolls away.
+  useLayoutEffect(() => {
+    if (userScrolledUp || displayThoughts.length === 0) return undefined
+    const frameId = window.requestAnimationFrame(() => {
+      scrollToLatest('auto')
+    })
+    return () => window.cancelAnimationFrame(frameId)
+  }, [displayThoughts.length, latestThoughtKey, scrollToLatest, userScrolledUp])
 
   const handleFeedScroll = () => {
     const el = feedRef.current
     if (!el) return
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60
-    setUserScrolledUp(!atBottom)
+    const shouldPinToLatest = isNearBottom(el)
+    setUserScrolledUp((prev) => (
+      prev === !shouldPinToLatest ? prev : !shouldPinToLatest
+    ))
   }
 
   // Last agent message for comms strip
@@ -145,6 +169,7 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
       <div
         ref={feedRef}
         onScroll={handleFeedScroll}
+        aria-label="Live activity feed"
         className="flex-1 overflow-y-auto px-4 py-3"
         style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.08) transparent' }}
       >
@@ -199,7 +224,7 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
         )}
 
         {/* Scroll anchor — not used directly but kept for layout */}
-        <div />
+        <div ref={bottomAnchorRef} aria-hidden="true" />
       </div>
 
       {/* Jump-to-bottom button when user has scrolled up */}
@@ -208,9 +233,7 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
           <button
             onClick={() => {
               setUserScrolledUp(false)
-              if (feedRef.current) {
-                feedRef.current.scrollTop = feedRef.current.scrollHeight
-              }
+              scrollToLatest('smooth')
             }}
             className="text-[10px] px-2.5 py-1.5 rounded-full bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 font-semibold flex items-center gap-1"
           >

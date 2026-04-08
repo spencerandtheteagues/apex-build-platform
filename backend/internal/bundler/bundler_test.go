@@ -436,6 +436,85 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 	}
 }
 
+func TestESBuildBundlerMapsImportMetaEnvForPreviewRuntime(t *testing.T) {
+	cache := NewBundleCache(DefaultCacheConfig())
+	defer cache.Close()
+
+	bundler := NewESBuildBundler(cache)
+	if !bundler.IsAvailable() {
+		t.Skip("esbuild not available, skipping integration test")
+	}
+
+	files := ProjectFiles{
+		ProjectID: 3,
+		Files: map[string]string{
+			"package.json": `{
+  "name": "preview-env-check",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}`,
+			"src/App.tsx": `export default function App() {
+  return <main>Preview Env Check</main>;
+}`,
+			"src/main.tsx": `import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+
+console.log(import.meta.env.VITE_API_URL, import.meta.env.MODE, import.meta.env.DEV);
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);`,
+		},
+		PackageJSON: &PackageJSON{
+			Name: "preview-env-check",
+			Type: "module",
+			Dependencies: map[string]string{
+				"react":     "^18.3.1",
+				"react-dom": "^18.3.1",
+			},
+		},
+	}
+
+	config := BundleConfig{
+		EntryPoint: "src/main.tsx",
+		Format:     "iife",
+		Minify:     false,
+		SourceMap:  false,
+		Target:     []string{"es2020"},
+		Framework:  "react",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, err := bundler.BundleFromFiles(ctx, files.ProjectID, files, config)
+	if err != nil {
+		t.Fatalf("Bundle failed: %v", err)
+	}
+
+	if !result.Success {
+		for _, e := range result.Errors {
+			t.Logf("Bundle error: %s (file: %s, line: %d)", e.Message, e.File, e.Line)
+		}
+		t.Fatal("expected preview env bundle to succeed")
+	}
+
+	output := string(result.OutputJS)
+	if !containsStr(output, "window.__APEX_IMPORT_META_ENV__") {
+		t.Fatalf("expected bundled output to reference the preview runtime env bridge, got %q", output)
+	}
+	if containsStr(output, "var import_meta = {};") || containsStr(output, "import_meta.env.VITE_API_URL") {
+		t.Fatalf("expected preview bundle to avoid broken import_meta env access, got %q", output)
+	}
+}
+
 func TestGenerateHTML(t *testing.T) {
 	result := &BundleResult{
 		OutputJS:  []byte("console.log('test');"),

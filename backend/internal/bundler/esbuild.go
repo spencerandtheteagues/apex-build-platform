@@ -128,6 +128,7 @@ func (b *ESBuildBundler) Bundle(ctx context.Context, projectID uint, config Bund
 	}
 
 	start := time.Now()
+	applyPreviewRuntimeEnvDefines(&config)
 
 	// Check cache first if available
 	if b.cache != nil {
@@ -460,6 +461,7 @@ func (b *ESBuildBundler) BundleFromFiles(ctx context.Context, projectID uint, fi
 	}
 
 	start := time.Now()
+	applyPreviewRuntimeEnvDefines(&config)
 
 	// Compute file hash for caching
 	fileHash := ComputeFileHash(files.Files)

@@ -182,5 +182,18 @@ func TestRewritePreviewHTMLForProxyWithBackendAppendsPreviewTokenToAssets(t *tes
 	require.Contains(t, rewritten, `href="`+prefix+`/__apex_bundle.css?preview_token=preview-token-123"`)
 	require.Contains(t, rewritten, `src="`+prefix+`/__apex_bundle.js?preview_token=preview-token-123"`)
 	require.Contains(t, rewritten, `src="`+prefix+`/logo.svg?preview_token=preview-token-123"`)
+	require.Contains(t, rewritten, `window.__APEX_IMPORT_META_ENV__=`)
+	require.Contains(t, rewritten, `window.import.meta={env:window.__APEX_IMPORT_META_ENV__};`)
 	require.NotContains(t, rewritten, "history.replaceState")
+}
+
+func TestApplyPreviewResponseHeadersAllowsSameOriginStorageForHTML(t *testing.T) {
+	handler, _ := newPreviewHandlerTestFixture(t, false)
+
+	headers := make(http.Header)
+	handler.applyPreviewResponseHeaders(headers, "null", true)
+
+	require.Equal(t, "null", headers.Get("Access-Control-Allow-Origin"))
+	require.Contains(t, headers.Get("Content-Security-Policy"), "sandbox")
+	require.Contains(t, headers.Get("Content-Security-Policy"), "allow-same-origin")
 }

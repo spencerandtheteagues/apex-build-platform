@@ -924,7 +924,7 @@ func (h *PreviewHandler) applyPreviewResponseHeaders(headers http.Header, origin
 		headers.Add("Vary", "Origin")
 	}
 	if htmlDocument {
-		headers.Set("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-popups allow-modals")
+		headers.Set("Content-Security-Policy", "sandbox allow-same-origin allow-scripts allow-forms allow-popups allow-modals")
 	}
 }
 
@@ -1112,8 +1112,18 @@ func (h *PreviewHandler) rewritePreviewHTMLForProxyWithBackend(html string, proj
     return _ox.apply(this,arguments);
   };
   window.__APEX_BACKEND_URL__=_bp;
+  window.__APEX_IMPORT_META_ENV__={
+    VITE_API_URL:_bp,
+    VITE_API_BASE_URL:_bp,
+    REACT_APP_API_URL:_bp,
+    MODE:'development',
+    DEV:true,
+    PROD:false,
+    BASE_URL:'/',
+    SSR:false
+  };
   if(!window.import)window.import={meta:{env:{}}};
-  window.import.meta={env:{VITE_API_URL:_bp,VITE_API_BASE_URL:_bp,REACT_APP_API_URL:_bp}};
+  window.import.meta={env:window.__APEX_IMPORT_META_ENV__};
 })();
 </script>`, backendProxyURL, previewToken, prefix)
 		// Inject before </head> or at top of <body>
