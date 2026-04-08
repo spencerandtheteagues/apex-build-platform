@@ -6,17 +6,92 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"apex-build/internal/agents/autonomous"
 	"apex-build/internal/ai"
 )
 
-var (
-	taskStartAckPattern         = regexp.MustCompile(`(?s)<task_start_ack>\s*(\{.*?\})\s*</task_start_ack>`)
-	taskCompletionReportPattern = regexp.MustCompile(`(?s)<task_completion_report>\s*(\{.*?\})\s*</task_completion_report>`)
+const (
+	taskStartAckOpenTag          = "<task_start_ack>"
+	taskStartAckCloseTag         = "</task_start_ack>"
+	taskCompletionReportOpenTag  = "<task_completion_report>"
+	taskCompletionReportCloseTag = "</task_completion_report>"
 )
+
+func extractBalancedJSONObjectAt(raw string, start int) (string, int) {
+	if start < 0 || start >= len(raw) || raw[start] != '{' {
+		return "", -1
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i := start; i < len(raw); i++ {
+		ch := raw[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch ch {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return raw[start : i+1], i + 1
+			}
+		}
+	}
+
+	return "", -1
+}
+
+func extractTaggedJSONObject(raw, openTag, closeTag string) (string, string, bool) {
+	idx := strings.Index(raw, openTag)
+	if idx == -1 {
+		return raw, "", false
+	}
+
+	start := idx + len(openTag)
+	for start < len(raw) {
+		switch raw[start] {
+		case ' ', '\t', '\r', '\n':
+			start++
+		default:
+			goto parseObject
+		}
+	}
+
+parseObject:
+	obj, end := extractBalancedJSONObjectAt(raw, start)
+	if obj == "" || end < 0 {
+		return raw, "", false
+	}
+
+	removeEnd := end
+	rest := raw[end:]
+	trimmedRest := strings.TrimLeft(rest, " \t\r\n")
+	if closeTag != "" && strings.HasPrefix(trimmedRest, closeTag) {
+		removeEnd = len(raw) - len(trimmedRest) + len(closeTag)
+	}
+
+	cleaned := raw[:idx] + raw[removeEnd:]
+	return cleaned, strings.TrimSpace(obj), true
+}
 
 func (am *AgentManager) executeStructuredPlanningTask(ctx context.Context, task *Task, build *Build, agent *Agent) (*TaskOutput, error) {
 	if build == nil {
@@ -84,20 +159,20 @@ func extractTaskCheckins(response string) (string, *TaskStartAck, *TaskCompletio
 	var startAck *TaskStartAck
 	var completion *TaskCompletionReport
 
-	if match := taskStartAckPattern.FindStringSubmatch(clean); len(match) == 2 {
+	if next, payload, ok := extractTaggedJSONObject(clean, taskStartAckOpenTag, taskStartAckCloseTag); ok {
 		var parsed TaskStartAck
-		if err := json.Unmarshal([]byte(strings.TrimSpace(match[1])), &parsed); err == nil {
+		if err := json.Unmarshal([]byte(payload), &parsed); err == nil {
 			startAck = &parsed
 		}
-		clean = strings.Replace(clean, match[0], "", 1)
+		clean = next
 	}
 
-	if match := taskCompletionReportPattern.FindStringSubmatch(clean); len(match) == 2 {
+	if next, payload, ok := extractTaggedJSONObject(clean, taskCompletionReportOpenTag, taskCompletionReportCloseTag); ok {
 		var parsed TaskCompletionReport
-		if err := json.Unmarshal([]byte(strings.TrimSpace(match[1])), &parsed); err == nil {
+		if err := json.Unmarshal([]byte(payload), &parsed); err == nil {
 			completion = &parsed
 		}
-		clean = strings.Replace(clean, match[0], "", 1)
+		clean = next
 	}
 
 	return strings.TrimSpace(clean), startAck, completion

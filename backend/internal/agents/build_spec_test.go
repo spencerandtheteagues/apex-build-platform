@@ -352,51 +352,59 @@ func TestApplyBuildAssurancePolicyToPlanDowngradesFreeFullStackToFrontendPreview
 func TestApplyBuildAssurancePolicyToPlanStagesPaidFullStackBehindFrontendApproval(t *testing.T) {
 	t.Parallel()
 
-	build := &Build{
-		ID:               "paid-build",
-		UserID:           22,
-		SubscriptionPlan: "builder",
-		Description:      "Build a full-stack CRM with auth, database-backed clients, projects, and reporting dashboards",
-	}
+	for _, mode := range []PowerMode{PowerBalanced, PowerMax} {
+		mode := mode
+		t.Run(string(mode), func(t *testing.T) {
+			t.Parallel()
 
-	plan := createBuildPlanFromPlanningBundle("build-paid-frontstage", build.Description, nil, &autonomous.PlanningBundle{
-		Analysis: &autonomous.RequirementAnalysis{
-			AppType: "fullstack",
-			TechStack: &autonomous.TechStack{
-				Frontend: "React",
-				Backend:  "Node",
-				Database: "PostgreSQL",
-				Styling:  "Tailwind",
-			},
-		},
-		Plan: &autonomous.ExecutionPlan{
-			ID:            "plan-paid-frontstage",
-			EstimatedTime: 25 * time.Minute,
-			CreatedAt:     time.Now().UTC(),
-		},
-	})
+			build := &Build{
+				ID:               "paid-build-" + string(mode),
+				UserID:           22,
+				SubscriptionPlan: "builder",
+				Description:      "Build a full-stack CRM with auth, database-backed clients, projects, and reporting dashboards",
+				PowerMode:        mode,
+			}
 
-	plan = applyBuildAssurancePolicyToPlan(build, plan)
-	if plan == nil {
-		t.Fatal("expected plan")
-	}
-	if plan.DeliveryMode != "frontend_preview_only" {
-		t.Fatalf("expected paid full-stack build to stage a frontend approval checkpoint, got %q", plan.DeliveryMode)
-	}
-	if plan.TechStack.Backend == "" || plan.TechStack.Database == "" {
-		t.Fatalf("expected paid build to retain backend/database contract, got %+v", plan.TechStack)
-	}
-	if plan.APIContract == nil {
-		t.Fatalf("expected API contract to remain available for later backend continuation")
-	}
-	if wo := getBuildWorkOrder(plan, RoleBackend); wo != nil {
-		t.Fatalf("expected backend work order to be deferred until frontend approval, got %+v", wo)
-	}
-	if wo := getBuildWorkOrder(plan, RoleDatabase); wo != nil {
-		t.Fatalf("expected database work order to be deferred until frontend approval, got %+v", wo)
-	}
-	if wo := getBuildWorkOrder(plan, RoleFrontend); wo == nil {
-		t.Fatalf("expected frontend work order to remain active, got %+v", plan.WorkOrders)
+			plan := createBuildPlanFromPlanningBundle("build-paid-frontstage-"+string(mode), build.Description, nil, &autonomous.PlanningBundle{
+				Analysis: &autonomous.RequirementAnalysis{
+					AppType: "fullstack",
+					TechStack: &autonomous.TechStack{
+						Frontend: "React",
+						Backend:  "Node",
+						Database: "PostgreSQL",
+						Styling:  "Tailwind",
+					},
+				},
+				Plan: &autonomous.ExecutionPlan{
+					ID:            "plan-paid-frontstage-" + string(mode),
+					EstimatedTime: 25 * time.Minute,
+					CreatedAt:     time.Now().UTC(),
+				},
+			})
+
+			plan = applyBuildAssurancePolicyToPlan(build, plan)
+			if plan == nil {
+				t.Fatal("expected plan")
+			}
+			if plan.DeliveryMode != "frontend_preview_only" {
+				t.Fatalf("expected paid full-stack build to stage a frontend approval checkpoint, got %q", plan.DeliveryMode)
+			}
+			if plan.TechStack.Backend == "" || plan.TechStack.Database == "" {
+				t.Fatalf("expected paid build to retain backend/database contract, got %+v", plan.TechStack)
+			}
+			if plan.APIContract == nil {
+				t.Fatalf("expected API contract to remain available for later backend continuation")
+			}
+			if wo := getBuildWorkOrder(plan, RoleBackend); wo != nil {
+				t.Fatalf("expected backend work order to be deferred until frontend approval, got %+v", wo)
+			}
+			if wo := getBuildWorkOrder(plan, RoleDatabase); wo != nil {
+				t.Fatalf("expected database work order to be deferred until frontend approval, got %+v", wo)
+			}
+			if wo := getBuildWorkOrder(plan, RoleFrontend); wo == nil {
+				t.Fatalf("expected frontend work order to remain active, got %+v", plan.WorkOrders)
+			}
+		})
 	}
 }
 

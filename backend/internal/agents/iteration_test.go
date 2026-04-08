@@ -974,91 +974,96 @@ func TestQueuedUserRevisionDispatchesBeforeFinalCompletion(t *testing.T) {
 }
 
 func TestSendMessageAffirmingFrontendApprovalQueuesBackendContinuation(t *testing.T) {
-	router := &stubPreflight{
-		configured:    true,
-		allProviders:  []ai.AIProvider{ai.ProviderClaude},
-		userProviders: []ai.AIProvider{ai.ProviderClaude},
-	}
-	manager := newTestIterationManager(router)
+	for _, mode := range []PowerMode{PowerBalanced, PowerMax} {
+		mode := mode
+		t.Run(string(mode), func(t *testing.T) {
+			router := &stubPreflight{
+				configured:    true,
+				allProviders:  []ai.AIProvider{ai.ProviderClaude},
+				userProviders: []ai.AIProvider{ai.ProviderClaude},
+			}
+			manager := newTestIterationManager(router)
 
-	build := &Build{
-		ID:               "frontend-approval-build",
-		UserID:           7,
-		Status:           BuildCompleted,
-		Mode:             ModeFull,
-		PowerMode:        PowerBalanced,
-		SubscriptionPlan: "builder",
-		Description:      "Build a full-stack CRM with a polished dashboard, auth, projects, and reporting.",
-		Agents:           make(map[string]*Agent),
-		Tasks:            []*Task{},
-		Plan: &BuildPlan{
-			AppType:      "fullstack",
-			DeliveryMode: "frontend_preview_only",
-			TechStack:    TechStack{Frontend: "React", Backend: "Express", Database: "PostgreSQL", Styling: "Tailwind"},
-		},
-		CreatedAt: time.Now().Add(-time.Minute).UTC(),
-		UpdatedAt: time.Now().Add(-time.Second).UTC(),
-		Interaction: BuildInteractionState{
-			PendingQuestion: frontendApprovalPrompt,
-			WaitingForUser:  true,
-		},
-	}
-	lead := &Agent{
-		ID:        "lead-approval",
-		Role:      RoleLead,
-		Provider:  ai.ProviderClaude,
-		Model:     "claude-sonnet",
-		Status:    StatusWorking,
-		BuildID:   build.ID,
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
-	}
-	solver := &Agent{
-		ID:        "solver-approval",
-		Role:      RoleSolver,
-		Provider:  ai.ProviderClaude,
-		Model:     "claude-sonnet",
-		Status:    StatusIdle,
-		BuildID:   build.ID,
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
-	}
-	build.Agents[lead.ID] = lead
-	build.Agents[solver.ID] = solver
-	manager.builds[build.ID] = build
-	manager.agents[lead.ID] = lead
-	manager.agents[solver.ID] = solver
+			build := &Build{
+				ID:               "frontend-approval-build-" + string(mode),
+				UserID:           7,
+				Status:           BuildCompleted,
+				Mode:             ModeFull,
+				PowerMode:        mode,
+				SubscriptionPlan: "builder",
+				Description:      "Build a full-stack CRM with a polished dashboard, auth, projects, and reporting.",
+				Agents:           make(map[string]*Agent),
+				Tasks:            []*Task{},
+				Plan: &BuildPlan{
+					AppType:      "fullstack",
+					DeliveryMode: "frontend_preview_only",
+					TechStack:    TechStack{Frontend: "React", Backend: "Express", Database: "PostgreSQL", Styling: "Tailwind"},
+				},
+				CreatedAt: time.Now().Add(-time.Minute).UTC(),
+				UpdatedAt: time.Now().Add(-time.Second).UTC(),
+				Interaction: BuildInteractionState{
+					PendingQuestion: frontendApprovalPrompt,
+					WaitingForUser:  true,
+				},
+			}
+			lead := &Agent{
+				ID:        "lead-approval-" + string(mode),
+				Role:      RoleLead,
+				Provider:  ai.ProviderClaude,
+				Model:     "claude-sonnet",
+				Status:    StatusWorking,
+				BuildID:   build.ID,
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+			}
+			solver := &Agent{
+				ID:        "solver-approval-" + string(mode),
+				Role:      RoleSolver,
+				Provider:  ai.ProviderClaude,
+				Model:     "claude-sonnet",
+				Status:    StatusIdle,
+				BuildID:   build.ID,
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+			}
+			build.Agents[lead.ID] = lead
+			build.Agents[solver.ID] = solver
+			manager.builds[build.ID] = build
+			manager.agents[lead.ID] = lead
+			manager.agents[solver.ID] = solver
 
-	if err := manager.SendMessageWithClientToken(build.ID, "Yes, continue with the backend now.", "token-1"); err != nil {
-		t.Fatalf("SendMessageWithClientToken returned error: %v", err)
-	}
+			if err := manager.SendMessageWithClientToken(build.ID, "Yes, continue with the backend now.", "token-1"); err != nil {
+				t.Fatalf("SendMessageWithClientToken returned error: %v", err)
+			}
 
-	if got := router.generateCalls.Load(); got != 0 {
-		t.Fatalf("expected deterministic approval path to skip AI intervention, got %d calls", got)
-	}
-	if build.Status != BuildInProgress {
-		t.Fatalf("expected build to re-open for backend continuation, got %s", build.Status)
-	}
-	if build.Plan == nil || build.Plan.DeliveryMode != "full_stack_preview" {
-		t.Fatalf("expected plan delivery mode to promote back to full_stack_preview, got %+v", build.Plan)
-	}
-	if build.Interaction.WaitingForUser || strings.TrimSpace(build.Interaction.PendingQuestion) != "" {
-		t.Fatalf("expected pending approval question to clear, got %+v", build.Interaction)
-	}
+			if got := router.generateCalls.Load(); got != 0 {
+				t.Fatalf("expected deterministic approval path to skip AI intervention, got %d calls", got)
+			}
+			if build.Status != BuildInProgress {
+				t.Fatalf("expected build to re-open for backend continuation, got %s", build.Status)
+			}
+			if build.Plan == nil || build.Plan.DeliveryMode != "full_stack_preview" {
+				t.Fatalf("expected plan delivery mode to promote back to full_stack_preview, got %+v", build.Plan)
+			}
+			if build.Interaction.WaitingForUser || strings.TrimSpace(build.Interaction.PendingQuestion) != "" {
+				t.Fatalf("expected pending approval question to clear, got %+v", build.Interaction)
+			}
 
-	var continuationTask *Task
-	select {
-	case continuationTask = <-manager.taskQueue:
-	default:
-		t.Fatal("expected backend continuation task to be queued")
-	}
-	if continuationTask == nil || continuationTask.Type != TaskFix {
-		t.Fatalf("expected follow-up fix task, got %+v", continuationTask)
-	}
-	if action, _ := continuationTask.Input["action"].(string); action != "user_change_request" {
-		t.Fatalf("expected user_change_request action, got %+v", continuationTask.Input["action"])
-	}
-	if request, _ := continuationTask.Input["user_request"].(string); !strings.Contains(strings.ToLower(request), "backend") {
-		t.Fatalf("expected backend continuation prompt, got %q", request)
+			var continuationTask *Task
+			select {
+			case continuationTask = <-manager.taskQueue:
+			default:
+				t.Fatal("expected backend continuation task to be queued")
+			}
+			if continuationTask == nil || continuationTask.Type != TaskFix {
+				t.Fatalf("expected follow-up fix task, got %+v", continuationTask)
+			}
+			if action, _ := continuationTask.Input["action"].(string); action != "user_change_request" {
+				t.Fatalf("expected user_change_request action, got %+v", continuationTask.Input["action"])
+			}
+			if request, _ := continuationTask.Input["user_request"].(string); !strings.Contains(strings.ToLower(request), "backend") {
+				t.Fatalf("expected backend continuation prompt, got %q", request)
+			}
+		})
 	}
 }
