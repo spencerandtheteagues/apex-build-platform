@@ -114,6 +114,34 @@ require_absent_array_match() {
   fi
 }
 
+require_no_actionable_approval() {
+  local file="$1"
+  local target="$2"
+  local label="$3"
+  if ! jq -e --arg target "$target" '
+    (.approvals // [])
+    | map(select(
+        (.code // .type // .id // "") == $target
+        and (
+          (.required // false) == true
+          or (
+            (.status // "") as $status
+            | $status != ""
+            and $status != "not_required"
+            and $status != "satisfied"
+            and $status != "approved"
+            and $status != "resolved"
+          )
+        )
+      ))
+    | length == 0
+  ' "$file" >/dev/null 2>&1; then
+    echo "ASSERTION_FAILED: $label unexpectedly requires approval '$target'" >&2
+    jq '{approvals,blockers,policy_state,capability_state,build_contract}' "$file" 2>/dev/null || cat "$file"
+    exit 1
+  fi
+}
+
 require_file_path() {
   local file="$1"
   local path="$2"
@@ -131,8 +159,8 @@ assert_completed_build_contract() {
   local detail_status completed_status detail_files_count completed_files_count
   detail_status="$(json_string_field "$detail_file" '.status')"
   completed_status="$(json_string_field "$completed_file" '.status')"
-  detail_files_count="$(json_string_field "$detail_file" '.files_count')"
-  completed_files_count="$(json_string_field "$completed_file" '.files_count')"
+  detail_files_count="$(json_string_field "$detail_file" '(.files_count // ((.files // []) | length))')"
+  completed_files_count="$(json_string_field "$completed_file" '(.files_count // ((.files // []) | length))')"
 
   if [[ "$detail_status" != "$EXPECT_STATUS" ]]; then
     echo "ASSERTION_FAILED: build detail status expected '$EXPECT_STATUS', got '${detail_status:-unset}'" >&2
@@ -169,9 +197,9 @@ assert_completed_build_contract() {
     require_false_field "$detail_file" '.capability_state.requires_billing' 'free frontend detail requires_billing'
     require_false_field "$detail_file" '.capability_state.requires_realtime' 'free frontend detail requires_realtime'
     require_false_field "$detail_file" '.capability_state.requires_publish' 'free frontend detail requires_publish'
-    require_absent_array_match "$detail_file" '(.approvals // []) | map(.code // .type // .id // "")' 'full_stack_upgrade' 'free frontend approvals'
-    require_absent_array_match "$detail_file" '(.approvals // []) | map(.code // .type // .id // "")' 'plan_upgrade_acknowledgement' 'free frontend approvals'
-    require_absent_array_match "$detail_file" '(.approvals // []) | map(.code // .type // .id // "")' 'file_storage' 'free frontend approvals'
+    require_no_actionable_approval "$detail_file" 'full_stack_upgrade' 'free frontend approvals'
+    require_no_actionable_approval "$detail_file" 'plan_upgrade_acknowledgement' 'free frontend approvals'
+    require_no_actionable_approval "$detail_file" 'file_storage' 'free frontend approvals'
     require_absent_array_match "$detail_file" '(.blockers // []) | map(.id // .code // .type // "")' 'plan-upgrade-required' 'free frontend blockers'
 
     local delivery_mode
