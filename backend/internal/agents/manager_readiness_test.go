@@ -2976,6 +2976,88 @@ test("renders", () => {
 	}
 }
 
+func TestApplyDeterministicValidationRepairsRepairsReactPropMismatch(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-react-prop-mismatch-repair",
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "src/components/Button.tsx",
+				Content: `export interface ButtonProps {
+  label: string
+}
+
+export function Button({ label }: ButtonProps) {
+  return <button className="rounded-lg bg-indigo-600 px-4 py-2 text-white">{label}</button>
+}
+`,
+				IsNew: true,
+			},
+			{
+				Path: "src/components/ClientCard.tsx",
+				Content: `import { Button } from "./Button"
+
+export function ClientCard({ onSelect }: { onSelect?: () => void }) {
+  return (
+    <div className="rounded-2xl border border-slate-700 p-4">
+      <Button className="w-full justify-center" onClick={onSelect}>
+        View Details
+      </Button>
+    </div>
+  )
+}
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Preview verification build failed: src/components/ClientCard.tsx(5,15): error TS2322: Type '{ children: string; className: string; onClick: (() => void) | undefined; }' is not assignable to type 'IntrinsicAttributes & ButtonProps'.`},
+		"react prop mismatch",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected react prop mismatch repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]GeneratedFile{}
+	for _, file := range files {
+		byPath[file.Path] = file
+	}
+	button, ok := byPath["src/components/Button.tsx"]
+	if !ok {
+		t.Fatalf("expected Button.tsx to remain in generated files, got %+v", files)
+	}
+	if !strings.Contains(button.Content, "extends React.ButtonHTMLAttributes<HTMLButtonElement>") {
+		t.Fatalf("expected ButtonProps to extend button HTML attributes, got %q", button.Content)
+	}
+	if !strings.Contains(button.Content, "children?: React.ReactNode") {
+		t.Fatalf("expected ButtonProps to accept children, got %q", button.Content)
+	}
+	if !strings.Contains(button.Content, "{ label, children, className, ...buttonProps }") {
+		t.Fatalf("expected Button destructure to accept passthrough props, got %q", button.Content)
+	}
+	if !strings.Contains(button.Content, "<button {...buttonProps}") {
+		t.Fatalf("expected Button to spread passthrough props onto root button, got %q", button.Content)
+	}
+	if !strings.Contains(button.Content, "{children ?? (label)}") {
+		t.Fatalf("expected Button to prefer children before label fallback, got %q", button.Content)
+	}
+}
+
 func TestApplyDeterministicValidationRepairsReplacesBrokenBackendGeneratedTestFileWithPlaceholder(t *testing.T) {
 	t.Parallel()
 

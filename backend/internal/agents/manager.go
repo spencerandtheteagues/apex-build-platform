@@ -12220,6 +12220,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			summaryKey:  "export_mismatch_repair",
 		},
 		{
+			apply:       am.applyDeterministicReactPropMismatchRepair,
+			errorFormat: "Final output validation failed: %s (applied React prop repair: %s)",
+			message:     "Applied deterministic React component prop passthrough repair for generated frontend modules. Re-running final validation before solver recovery.",
+			summaryKey:  "react_prop_mismatch_repair",
+		},
+		{
 			apply:       am.applyDeterministicManifestDependencyRepair,
 			errorFormat: "Final output validation failed: %s (applied deterministic manifest repair: %s)",
 			message:     "Applied deterministic package.json dependency repair. Re-running final validation before solver recovery.",

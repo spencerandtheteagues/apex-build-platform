@@ -405,6 +405,18 @@ func (am *AgentManager) cvRunInlineRepair(
 		return false
 	}
 
+	if build != nil && allFiles != nil {
+		if readinessErrors := cvReadinessErrorsFromParsedBuildErrors(errors); len(readinessErrors) > 0 {
+			if bundle, summary := am.applyDeterministicReactPropMismatchRepair(build, readinessErrors); bundle != nil {
+				if am.applyPatchBundleToBuild(build, bundle) {
+					*allFiles = am.collectGeneratedFiles(build)
+					log.Printf("[compile_validator] build %s: applied deterministic react prop mismatch repair: %s", build.ID, summary)
+					return true
+				}
+			}
+		}
+	}
+
 	// Select provider — prefer a fast model.
 	if am.aiRouter == nil {
 		log.Printf("[compile_validator] build %s: aiRouter not available for inline repair", build.ID)
@@ -474,6 +486,42 @@ func (am *AgentManager) cvRunInlineRepair(
 		*allFiles = am.collectGeneratedFiles(build)
 	}
 	return applied
+}
+
+func cvReadinessErrorsFromParsedBuildErrors(errors []ParsedBuildError) []string {
+	if len(errors) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(errors))
+	for _, parsed := range errors {
+		message := strings.TrimSpace(parsed.Message)
+		if message == "" {
+			continue
+		}
+
+		file := filepath.ToSlash(strings.TrimSpace(parsed.File))
+		switch {
+		case file != "" && parsed.Line > 0 && parsed.Code != "":
+			column := parsed.Column
+			if column <= 0 {
+				column = 1
+			}
+			out = append(out, fmt.Sprintf("Preview verification build failed: %s(%d,%d): error %s: %s", file, parsed.Line, column, parsed.Code, message))
+		case file != "" && parsed.Line > 0:
+			column := parsed.Column
+			if column > 0 {
+				out = append(out, fmt.Sprintf("Preview verification build failed: %s:%d:%d: %s", file, parsed.Line, column, message))
+			} else {
+				out = append(out, fmt.Sprintf("Preview verification build failed: %s:%d: %s", file, parsed.Line, message))
+			}
+		case file != "":
+			out = append(out, fmt.Sprintf("Preview verification build failed: %s: %s", file, message))
+		default:
+			out = append(out, "Preview verification build failed: "+message)
+		}
+	}
+	return out
 }
 
 // cvBuildRepairPrompt assembles the repair prompt with structured error context

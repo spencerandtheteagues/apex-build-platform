@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,5 +69,81 @@ func TestRunCompileValidationLoopSkipsWhenAIRouterNil(t *testing.T) {
 	}
 	if build.CompileValidationAttempts != 0 {
 		t.Fatalf("expected compile validation attempts to remain 0, got %d", build.CompileValidationAttempts)
+	}
+}
+
+func TestCVRunInlineRepairAppliesDeterministicReactPropMismatchRepairBeforeAI(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "compile-inline-react-prop-mismatch",
+		Status:    BuildInProgress,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "src/components/Button.tsx",
+				Content: `export interface ButtonProps {
+  label: string
+}
+
+export function Button({ label }: ButtonProps) {
+  return <button className="rounded-lg bg-indigo-600 px-4 py-2 text-white">{label}</button>
+}
+`,
+				IsNew: true,
+			},
+			{
+				Path: "src/components/ClientCard.tsx",
+				Content: `import { Button } from "./Button"
+
+export function ClientCard({ onSelect }: { onSelect?: () => void }) {
+  return (
+    <div className="rounded-2xl border border-slate-700 p-4">
+      <Button className="w-full justify-center" onClick={onSelect}>
+        View Details
+      </Button>
+    </div>
+  )
+}
+`,
+				IsNew: true,
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	allFiles := am.collectGeneratedFiles(build)
+	repaired := am.cvRunInlineRepair(nil, build, []ParsedBuildError{
+		{
+			File:    "src/components/ClientCard.tsx",
+			Line:    5,
+			Column:  15,
+			Code:    "TS2322",
+			Message: "Type '{ children: string; className: string; onClick: (() => void) | undefined; }' is not assignable to type 'IntrinsicAttributes & ButtonProps'.",
+			Source:  "tsc",
+		},
+	}, &allFiles, "")
+	if !repaired {
+		t.Fatal("expected deterministic inline repair to apply before AI fallback")
+	}
+
+	byPath := map[string]GeneratedFile{}
+	for _, file := range allFiles {
+		byPath[file.Path] = file
+	}
+	button, ok := byPath["src/components/Button.tsx"]
+	if !ok {
+		t.Fatalf("expected Button.tsx to remain available after repair, got %+v", allFiles)
+	}
+	if !strings.Contains(button.Content, "extends React.ButtonHTMLAttributes<HTMLButtonElement>") {
+		t.Fatalf("expected ButtonProps to extend button HTML attributes, got %q", button.Content)
+	}
+	if !strings.Contains(button.Content, "<button {...buttonProps}") {
+		t.Fatalf("expected Button to spread passthrough props onto root button, got %q", button.Content)
 	}
 }
