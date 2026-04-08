@@ -166,6 +166,9 @@ func buildFollowupRequiresPaidRuntime(build *Build, message string, target build
 	if build == nil {
 		return false, ""
 	}
+	if isPaidBuildPlan(buildSubscriptionPlan(build)) {
+		return false, ""
+	}
 	if !buildRequiresStaticFrontendFallbackState(build) && !buildUsesFrontendPreviewOnlyDelivery(build) {
 		return false, ""
 	}

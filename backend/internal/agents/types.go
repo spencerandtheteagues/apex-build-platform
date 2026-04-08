@@ -459,6 +459,8 @@ type BuildRestoreContext struct {
 	RequestsUsed                int               `json:"requests_used,omitempty"`
 	ReadinessRecoveryAttempts   int               `json:"readiness_recovery_attempts,omitempty"`
 	PreviewVerificationAttempts int               `json:"preview_verification_attempts,omitempty"`
+	CompileValidationPassed     bool              `json:"compile_validation_passed,omitempty"`
+	CompileValidationAttempts   int               `json:"compile_validation_attempts,omitempty"`
 	MaxAgents                   int               `json:"max_agents,omitempty"`
 	MaxRetries                  int               `json:"max_retries,omitempty"`
 	MaxRequests                 int               `json:"max_requests,omitempty"`
@@ -496,6 +498,8 @@ type Build struct {
 	RequestsUsed                int                   `json:"requests_used,omitempty"`
 	ReadinessRecoveryAttempts   int                   `json:"readiness_recovery_attempts,omitempty"`
 	PreviewVerificationAttempts int                   `json:"preview_verification_attempts,omitempty"`
+	CompileValidationPassed     bool                  `json:"compile_validation_passed,omitempty"`
+	CompileValidationAttempts   int                   `json:"compile_validation_attempts,omitempty"`
 	PhasedPipelineComplete      bool                  `json:"phased_pipeline_complete,omitempty"`
 	DiffMode                    bool                  `json:"diff_mode,omitempty"`        // When true, changes require user review before applying
 	RoleAssignments             map[string]string     `json:"role_assignments,omitempty"` // User-specified provider per role category

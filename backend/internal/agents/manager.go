@@ -44,6 +44,8 @@ var (
 const (
 	insufficientCreditsBuildMessage = "Build paused: Your account has insufficient credits. Please add credits in Settings or contact support."
 	defaultEstimatedRequestCostUSD  = 0.02
+	frontendApprovalCheckpointID    = "frontend-preview-approval"
+	frontendApprovalPrompt          = "The frontend preview is ready. Reply yes if you are happy with this UI and I should continue the backend/runtime implementation on the same app, or describe the changes you want first."
 )
 
 type consensusDecision string
@@ -79,6 +81,56 @@ func estimatedRequestCostUSDForBuild(build *Build) float64 {
 		return 0.06
 	}
 	return defaultEstimatedRequestCostUSD
+}
+
+func buildNeedsFrontendApprovalCheckpoint(build *Build) bool {
+	if build == nil || !isPaidBuildPlan(buildSubscriptionPlan(build)) || !buildUsesFrontendPreviewOnlyDelivery(build) {
+		return false
+	}
+	if build.Plan != nil && strings.EqualFold(strings.TrimSpace(build.Plan.AppType), "fullstack") {
+		return true
+	}
+	if orchestration := build.SnapshotState.Orchestration; orchestration != nil && orchestration.IntentBrief != nil {
+		return strings.EqualFold(strings.TrimSpace(orchestration.IntentBrief.AppType), "fullstack")
+	}
+	return false
+}
+
+func isFrontendApprovalCheckpointActiveLocked(build *Build) bool {
+	if build == nil {
+		return false
+	}
+	if !buildNeedsFrontendApprovalCheckpoint(build) {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(build.Interaction.PendingQuestion), frontendApprovalPrompt)
+}
+
+func looksLikeApprovedFrontendReply(message string) bool {
+	normalized := normalizeDetectionText(message)
+	if normalized == "" {
+		return false
+	}
+	return containsAnyAffirmedTerm(normalized, []string{
+		normalizeDetectionText("yes"),
+		normalizeDetectionText("yep"),
+		normalizeDetectionText("yeah"),
+		normalizeDetectionText("looks good"),
+		normalizeDetectionText("looks great"),
+		normalizeDetectionText("happy with it"),
+		normalizeDetectionText("happy with the ui"),
+		normalizeDetectionText("approved"),
+		normalizeDetectionText("ship it"),
+		normalizeDetectionText("continue"),
+		normalizeDetectionText("go ahead"),
+	})
+}
+
+func approvedFrontendBackendContinuationPrompt(build *Build) string {
+	if build == nil {
+		return "Continue from the approved frontend preview and implement the backend, data, and integration contract behind the existing UI. Keep the approved UI stable unless a small change is required for truthful runtime behavior."
+	}
+	return fmt.Sprintf("Continue the same app from the approved frontend preview. Implement the real backend, database, auth, and integration contract promised by this build request: %s. Preserve the approved UI and route structure unless a minimal change is required to make the runtime truthful and functional.", strings.TrimSpace(build.Description))
 }
 
 func initialAgentRolesForBuild(build *Build) []AgentRole {
@@ -2773,35 +2825,82 @@ func normalizeStructuredPatchBundle(bundle *PatchBundle) *PatchBundle {
 	return &normalized
 }
 
+func extractJSONObjectCandidates(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	candidates := make([]string, 0, 4)
+	seen := make(map[string]bool)
+	inString := false
+	escaped := false
+
+	for i := 0; i < len(raw); i++ {
+		ch := raw[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch ch {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+
+		if ch == '"' {
+			inString = true
+			continue
+		}
+		if ch != '{' {
+			continue
+		}
+
+		payload, end := extractBalancedJSONObjectAt(raw, i)
+		if payload == "" || end < 0 {
+			continue
+		}
+		payload = strings.TrimSpace(payload)
+		if !seen[payload] {
+			seen[payload] = true
+			candidates = append(candidates, payload)
+		}
+		i = end - 1
+	}
+
+	return candidates
+}
+
 func parseStructuredPatchBundleResponse(response string) *PatchBundle {
-	payload := extractJSONObjectBlock(response)
-	if payload == "" {
-		return nil
+	for _, payload := range extractJSONObjectCandidates(response) {
+		var envelope struct {
+			PatchBundle           *PatchBundle     `json:"patch_bundle"`
+			StructuredPatchBundle *PatchBundle     `json:"structured_patch_bundle"`
+			Operations            []PatchOperation `json:"operations"`
+			Justification         string           `json:"justification"`
+			WholeFileRewrite      bool             `json:"whole_file_rewrite"`
+		}
+		if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
+			continue
+		}
+		switch {
+		case envelope.PatchBundle != nil:
+			return normalizeStructuredPatchBundle(envelope.PatchBundle)
+		case envelope.StructuredPatchBundle != nil:
+			return normalizeStructuredPatchBundle(envelope.StructuredPatchBundle)
+		case len(envelope.Operations) > 0:
+			return normalizeStructuredPatchBundle(&PatchBundle{
+				Justification:    strings.TrimSpace(envelope.Justification),
+				WholeFileRewrite: envelope.WholeFileRewrite,
+				Operations:       envelope.Operations,
+			})
+		}
 	}
-	var envelope struct {
-		PatchBundle           *PatchBundle     `json:"patch_bundle"`
-		StructuredPatchBundle *PatchBundle     `json:"structured_patch_bundle"`
-		Operations            []PatchOperation `json:"operations"`
-		Justification         string           `json:"justification"`
-		WholeFileRewrite      bool             `json:"whole_file_rewrite"`
-	}
-	if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
-		return nil
-	}
-	switch {
-	case envelope.PatchBundle != nil:
-		return normalizeStructuredPatchBundle(envelope.PatchBundle)
-	case envelope.StructuredPatchBundle != nil:
-		return normalizeStructuredPatchBundle(envelope.StructuredPatchBundle)
-	case len(envelope.Operations) > 0:
-		return normalizeStructuredPatchBundle(&PatchBundle{
-			Justification:    strings.TrimSpace(envelope.Justification),
-			WholeFileRewrite: envelope.WholeFileRewrite,
-			Operations:       envelope.Operations,
-		})
-	default:
-		return nil
-	}
+	return nil
 }
 
 func (am *AgentManager) providerAssistedContractCritique(build *Build, contract *BuildContract) *VerificationReport {
@@ -7077,6 +7176,75 @@ func parsePreviewJSXInTSRepairTargets(errors []string) []string {
 	return paths
 }
 
+type duplicateDeclarationRepairTarget struct {
+	Path    string
+	Symbols []string
+}
+
+func parseDuplicateDeclarationRepairTargets(errors []string) []duplicateDeclarationRepairTarget {
+	if len(errors) == 0 {
+		return nil
+	}
+
+	joined := strings.Join(errors, "\n")
+	lower := strings.ToLower(joined)
+	if !strings.Contains(lower, "already been declared") &&
+		!strings.Contains(lower, "cannot redeclare block-scoped variable") &&
+		!strings.Contains(lower, "duplicate identifier") {
+		return nil
+	}
+
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?m)([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)):\d+:\d+:\s+ERROR:\s+The symbol "([^"]+)" has already been declared`),
+		regexp.MustCompile(`(?m)([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx))\(\d+,\d+\): error TS(?:2300|2451): (?:Duplicate identifier|Cannot redeclare block-scoped variable) ['"]?([^'"\n]+)['"]?`),
+	}
+
+	symbolsByPath := make(map[string]map[string]bool)
+	for _, pattern := range patterns {
+		for _, match := range pattern.FindAllStringSubmatch(joined, -1) {
+			if len(match) != 3 {
+				continue
+			}
+			path := normalizePreviewSyntaxErrorPath(match[1])
+			symbol := sanitizeGeneratedIdentifier(match[2])
+			if path == "" || symbol == "" {
+				continue
+			}
+			pathSymbols := symbolsByPath[path]
+			if pathSymbols == nil {
+				pathSymbols = make(map[string]bool)
+				symbolsByPath[path] = pathSymbols
+			}
+			pathSymbols[symbol] = true
+		}
+	}
+
+	if len(symbolsByPath) == 0 {
+		return nil
+	}
+
+	paths := make([]string, 0, len(symbolsByPath))
+	for path := range symbolsByPath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	targets := make([]duplicateDeclarationRepairTarget, 0, len(paths))
+	for _, path := range paths {
+		symbolSet := symbolsByPath[path]
+		symbols := make([]string, 0, len(symbolSet))
+		for symbol := range symbolSet {
+			symbols = append(symbols, symbol)
+		}
+		sort.Strings(symbols)
+		targets = append(targets, duplicateDeclarationRepairTarget{
+			Path:    path,
+			Symbols: symbols,
+		})
+	}
+	return targets
+}
+
 func parseTruncatedGeneratedTestRepairTargets(errors []string) []string {
 	if len(errors) == 0 {
 		return nil
@@ -9029,6 +9197,206 @@ func (am *AgentManager) ensureGeneratedViteEnvDeclaration(plan *generatedFilePat
 	return false, ""
 }
 
+// ensureGeneratedTailwindConfig inspects generated files and repairs the three
+// files that Tailwind CSS v3 requires: tailwind.config.js, postcss.config.js,
+// and src/index.css (the @tailwind directives). Returns the number of files
+// created or patched and a short summary string.
+//
+// It also removes @tailwindcss/vite from package.json when present (that is the
+// Tailwind v4 Vite plugin — it is incompatible with the tailwind.config.js
+// approach we use for v3).
+func ensureGeneratedTailwindConfig(plan *generatedFilePatchPlan, files []GeneratedFile) (int, string) {
+	// Detect whether this build uses Tailwind at all.
+	usesTailwind := false
+	hasTailwindPkg := false
+	for _, f := range files {
+		p := filepath.ToSlash(strings.TrimSpace(f.Path))
+		if (p == "package.json" || strings.HasSuffix(p, "/package.json")) &&
+			strings.Contains(f.Content, `"tailwindcss"`) {
+			hasTailwindPkg = true
+			usesTailwind = true
+		}
+		// Quick class-name heuristic: common Tailwind utility prefixes in JSX files.
+		if (strings.HasSuffix(p, ".tsx") || strings.HasSuffix(p, ".jsx")) &&
+			(strings.Contains(f.Content, `className="`) || strings.Contains(f.Content, "className={")) {
+			usesTailwind = true
+		}
+	}
+	if !usesTailwind {
+		return 0, ""
+	}
+
+	repaired := 0
+	var parts []string
+
+	// ── 1. tailwind.config.js ────────────────────────────────────────────────
+	twPath := ""
+	for _, f := range files {
+		p := filepath.ToSlash(strings.TrimSpace(f.Path))
+		if p == "tailwind.config.js" || p == "tailwind.config.ts" || p == "tailwind.config.cjs" {
+			twPath = p
+			break
+		}
+	}
+
+	canonical := syntheticFrontendTailwindConfig()
+	if twPath == "" {
+		// Missing entirely — create it.
+		if plan.createFile("tailwind.config.js", canonical, "javascript") {
+			repaired++
+			parts = append(parts, "created tailwind.config.js")
+		}
+		twPath = "tailwind.config.js"
+	} else {
+		existing := plan.content(twPath)
+		// Fix empty content array or missing content field.
+		needsRewrite := false
+		if strings.Contains(existing, "content: []") || strings.Contains(existing, "content:[]") {
+			needsRewrite = true
+		}
+		if !strings.Contains(existing, "index.html") || !strings.Contains(existing, "src/**") {
+			needsRewrite = true
+		}
+		// Fix v4 setup: @import "tailwindcss" or @tailwindcss/vite plugin reference.
+		if strings.Contains(existing, "@tailwindcss/vite") || strings.Contains(existing, `@import "tailwindcss"`) || strings.Contains(existing, `@import 'tailwindcss'`) {
+			needsRewrite = true
+		}
+		if needsRewrite {
+			if plan.patchFile(twPath, canonical, "javascript") {
+				repaired++
+				parts = append(parts, "fixed tailwind.config.js content paths")
+			}
+		}
+	}
+
+	// ── 2. postcss.config.js ─────────────────────────────────────────────────
+	hasPostCSS := false
+	for _, f := range files {
+		p := filepath.ToSlash(strings.TrimSpace(f.Path))
+		if p == "postcss.config.js" || p == "postcss.config.cjs" || p == "postcss.config.mjs" {
+			hasPostCSS = true
+			// Check it actually has the tailwindcss plugin.
+			if !strings.Contains(f.Content, "tailwindcss") {
+				if plan.patchFile(p, syntheticFrontendPostCSSConfig(), "javascript") {
+					repaired++
+					parts = append(parts, "fixed postcss.config.js plugins")
+				}
+			}
+			break
+		}
+	}
+	if !hasPostCSS {
+		if plan.createFile("postcss.config.js", syntheticFrontendPostCSSConfig(), "javascript") {
+			repaired++
+			parts = append(parts, "created postcss.config.js")
+		}
+	}
+
+	// ── 3. src/index.css ─────────────────────────────────────────────────────
+	cssPath := ""
+	for _, f := range files {
+		p := filepath.ToSlash(strings.TrimSpace(f.Path))
+		if p == "src/index.css" || p == "src/globals.css" || p == "src/main.css" || p == "src/styles.css" {
+			cssPath = p
+			break
+		}
+	}
+
+	twDirectives := "@tailwind base;\n@tailwind components;\n@tailwind utilities;"
+	if cssPath == "" {
+		if plan.createFile("src/index.css", syntheticFrontendIndexCSS(), "css") {
+			repaired++
+			parts = append(parts, "created src/index.css with @tailwind directives")
+		}
+	} else {
+		existing := plan.content(cssPath)
+		if !strings.Contains(existing, "@tailwind base") && !strings.Contains(existing, `@import "tailwindcss"`) && !strings.Contains(existing, `@import 'tailwindcss'`) {
+			patched := twDirectives + "\n\n" + existing
+			if plan.patchFile(cssPath, patched, "css") {
+				repaired++
+				parts = append(parts, "prepended @tailwind directives to "+cssPath)
+			}
+		} else if strings.Contains(existing, `@import "tailwindcss"`) || strings.Contains(existing, `@import 'tailwindcss'`) {
+			// v4 single-import syntax — convert to v3 directives.
+			lines := strings.Split(existing, "\n")
+			filtered := make([]string, 0, len(lines))
+			for _, l := range lines {
+				trimmed := strings.TrimSpace(l)
+				if trimmed == `@import "tailwindcss";` || trimmed == `@import 'tailwindcss';` {
+					continue
+				}
+				filtered = append(filtered, l)
+			}
+			patched := twDirectives + "\n\n" + strings.TrimSpace(strings.Join(filtered, "\n"))
+			if plan.patchFile(cssPath, patched, "css") {
+				repaired++
+				parts = append(parts, "converted v4 @import to v3 directives in "+cssPath)
+			}
+		}
+	}
+
+	// ── 4. Remove @tailwindcss/vite from package.json ────────────────────────
+	if hasTailwindPkg {
+		for _, f := range files {
+			p := filepath.ToSlash(strings.TrimSpace(f.Path))
+			if p != "package.json" && !strings.HasSuffix(p, "/package.json") {
+				continue
+			}
+			content := plan.content(p)
+			if !strings.Contains(content, "@tailwindcss/vite") {
+				break
+			}
+			// Remove the @tailwindcss/vite line from the JSON source.
+			cleaned := removeJSONDependencyLine(content, "@tailwindcss/vite")
+			if cleaned != content {
+				if plan.patchFile(p, cleaned, "json") {
+					repaired++
+					parts = append(parts, "removed @tailwindcss/vite from "+p+" (v4 plugin incompatible with v3 setup)")
+				}
+			}
+			break
+		}
+	}
+
+	if repaired == 0 {
+		return 0, ""
+	}
+	return repaired, strings.Join(parts, "; ")
+}
+
+// removeJSONDependencyLine removes a specific package entry from a JSON dependency
+// string without parsing it, to handle malformed JSON gracefully.
+func removeJSONDependencyLine(content, pkg string) string {
+	lines := strings.Split(content, "\n")
+	result := make([]string, 0, len(lines))
+	pkgQuoted := `"` + pkg + `"`
+	for i, line := range lines {
+		if strings.Contains(line, pkgQuoted) {
+			// Remove the line and fix any trailing comma on the previous non-empty line.
+			if i > 0 && len(result) > 0 {
+				prev := result[len(result)-1]
+				if strings.HasSuffix(strings.TrimSpace(prev), ",") {
+					// Check if the next non-empty line starts a closing brace/bracket.
+					nextIdx := i + 1
+					for nextIdx < len(lines) && strings.TrimSpace(lines[nextIdx]) == "" {
+						nextIdx++
+					}
+					if nextIdx < len(lines) {
+						nextTrimmed := strings.TrimSpace(lines[nextIdx])
+						if strings.HasPrefix(nextTrimmed, "}") || strings.HasPrefix(nextTrimmed, "]") {
+							result[len(result)-1] = strings.TrimRight(prev, ",") + strings.TrimRight(prev[len(strings.TrimRight(prev, ",")):], ",")
+							result[len(result)-1] = strings.Replace(prev, strings.TrimSpace(prev), strings.TrimRight(strings.TrimSpace(prev), ","), 1)
+						}
+					}
+				}
+			}
+			continue
+		}
+		result = append(result, line)
+	}
+	return strings.Join(result, "\n")
+}
+
 func (am *AgentManager) applyDeterministicTypeDeclarationRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
 	if build == nil || len(readinessErrors) == 0 {
 		return nil, ""
@@ -9753,6 +10121,12 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 		if repaired, summary := am.ensureGeneratedNodeNextImportExtensions(plan, files, manifestPath); repaired {
 			summaries = append(summaries, summary)
 		}
+	}
+
+	// Tailwind CSS v3 config repair — runs for every build that uses Tailwind,
+	// regardless of whether a manifest path was found.
+	if _, twSummary := ensureGeneratedTailwindConfig(plan, files); twSummary != "" {
+		summaries = append(summaries, twSummary)
 	}
 
 	if len(summaries) == 0 {
@@ -10814,23 +11188,98 @@ func syntheticFrontendAppTSX(title string, summary string, backendEntry string, 
 }
 
 func syntheticFrontendViteConfig(backendPort int) string {
-	return fmt.Sprintf(`import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    host: "0.0.0.0",
-    port: 4173,
+	proxyBlock := ""
+	if backendPort > 0 {
+		proxyBlock = fmt.Sprintf(`
     proxy: {
       "/api": {
         target: process.env.VITE_API_URL || process.env.VITE_API_BASE_URL || "http://localhost:%d",
         changeOrigin: true
       }
-    }
-  }
+    }`, backendPort)
+	}
+	return fmt.Sprintf(`import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import path from "path";
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: { "@": path.resolve(__dirname, "./src") },
+  },
+  server: {
+    host: "0.0.0.0",
+    port: 4173,%s
+  },
+  build: {
+    outDir: "dist",
+    sourcemap: false,
+  },
 });
-`, backendPort)
+`, proxyBlock)
+}
+
+// syntheticFrontendTailwindConfig returns a canonical Tailwind CSS v3 config file.
+func syntheticFrontendTailwindConfig() string {
+	return `/** @type {import('tailwindcss').Config} */
+export default {
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        primary: {
+          50:  '#f0f9ff',
+          100: '#e0f2fe',
+          500: '#0ea5e9',
+          600: '#0284c7',
+          700: '#0369a1',
+          900: '#0c4a6e',
+        },
+      },
+    },
+  },
+  plugins: [],
+}
+`
+}
+
+// syntheticFrontendPostCSSConfig returns a canonical PostCSS config for Tailwind v3.
+func syntheticFrontendPostCSSConfig() string {
+	return `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+`
+}
+
+// syntheticFrontendIndexCSS returns canonical src/index.css with Tailwind v3 directives.
+func syntheticFrontendIndexCSS() string {
+	return `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: #0ea5e9;
+  --color-surface: #0f172a;
+  --color-surface-alt: #1e293b;
+  --color-text: #f8fafc;
+  --color-text-muted: #94a3b8;
+  --color-border: #334155;
+  --color-accent: #6366f1;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+`
 }
 
 func syntheticFrontendTSConfig() string {
@@ -10910,6 +11359,9 @@ func (am *AgentManager) applyDeterministicMissingFrontendShellRepair(build *Buil
 	createIfMissing("src/main.tsx", syntheticFrontendMainTSX(), "typescript")
 	createIfMissing("src/App.tsx", syntheticFrontendAppTSX(title, summary, backendEntry, backendPort), "typescript")
 	createIfMissing("vite.config.ts", syntheticFrontendViteConfig(backendPort), "typescript")
+	createIfMissing("tailwind.config.js", syntheticFrontendTailwindConfig(), "javascript")
+	createIfMissing("postcss.config.js", syntheticFrontendPostCSSConfig(), "javascript")
+	createIfMissing("src/index.css", syntheticFrontendIndexCSS(), "css")
 	if strings.TrimSpace(plan.content("tsconfig.json")) == "" {
 		createIfMissing("tsconfig.json", syntheticFrontendTSConfig(), "json")
 	}
@@ -11995,6 +12447,15 @@ func (am *AgentManager) runBuildFinalization(build *Build, snapshot buildComplet
 		if am.applyDeterministicPreValidationNormalization(build) {
 			allFiles = am.collectGeneratedFiles(build)
 		}
+
+		// Compile validation loop: materialise the workspace, run tsc + vite build,
+		// and repair errors with the AI inline (synchronous, no task queue) up to
+		// maxCompileAttempts times. node_modules is reused across repair attempts.
+		// Updates allFiles in place and sets build.CompileValidationPassed on success,
+		// which lets shouldRunPreviewReadinessVerification skip the redundant build.
+		// Never fails the build — falls through gracefully if npm is unavailable.
+		am.runCompileValidationLoop(build, &allFiles, now)
+
 		readinessErrors := am.validateFinalBuildReadiness(build, allFiles)
 		if len(readinessErrors) > 0 {
 			promotionReadinessErrors = append([]string(nil), readinessErrors...)
@@ -12105,7 +12566,32 @@ completion_finalize:
 		})
 	}
 
+	var approvalInteraction BuildInteractionState
+	approvalPrompted := false
 	if status == BuildCompleted {
+		if buildNeedsFrontendApprovalCheckpoint(build) {
+			build.mu.Lock()
+			if !isFrontendApprovalCheckpointActiveLocked(build) {
+				build.Interaction.PendingQuestion = frontendApprovalPrompt
+				build.Interaction.WaitingForUser = true
+				appendBuildApprovalEventLocked(build, BuildApprovalEvent{
+					Kind:       frontendApprovalCheckpointID,
+					Title:      "Frontend preview approval requested",
+					Status:     ApprovalEventPending,
+					Summary:    frontendApprovalPrompt,
+					SourceType: "frontend_preview_checkpoint",
+					SourceID:   frontendApprovalCheckpointID,
+					Actor:      "system",
+					Timestamp:  now,
+				})
+				build.UpdatedAt = now
+				resolveWaitingStateLocked(build)
+				approvalPrompted = true
+			}
+			approvalInteraction = copyBuildInteractionStateLocked(build)
+			build.mu.Unlock()
+		}
+
 		// Persist completion first so a completed_build row exists before auto-linking a project.
 		am.persistCompletedBuild(build, allFiles)
 		if err := am.ensureProjectLinkedForCompletedBuild(build, allFiles); err != nil {
@@ -12128,6 +12614,18 @@ completion_finalize:
 			},
 		})
 		log.Printf("Build %s completed successfully (%d files)", build.ID, len(allFiles))
+		if approvalPrompted {
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSBuildUserInputRequired,
+				BuildID:   build.ID,
+				Timestamp: now,
+				Data: map[string]any{
+					"question":    frontendApprovalPrompt,
+					"interaction": approvalInteraction,
+				},
+			})
+			am.broadcastInteractionUpdate(build.ID, approvalInteraction)
+		}
 	} else {
 		checkpointName := "Build Failed"
 		checkpointDescription := "Build finished with errors"
@@ -14996,6 +15494,117 @@ func (am *AgentManager) sendTargetedMessageWithClientToken(
 			return fmt.Errorf("no agents matched the selected target")
 		}
 	}
+	if target.Mode == BuildMessageTargetLead &&
+		isFrontendApprovalCheckpointActiveLocked(build) &&
+		looksLikeApprovedFrontendReply(trimmedMessage) {
+		userMessage = appendBuildConversationMessageLocked(build, BuildConversationMessage{
+			Role:            ConversationRoleUser,
+			Kind:            ConversationKindMessage,
+			Content:         trimmedMessage,
+			ClientToken:     strings.TrimSpace(clientToken),
+			TargetMode:      target.Mode,
+			TargetAgentID:   target.AgentID,
+			TargetAgentRole: target.AgentRole,
+			Timestamp:       now,
+		})
+		appendBuildApprovalEventLocked(build, BuildApprovalEvent{
+			Kind:       frontendApprovalCheckpointID,
+			Title:      "Frontend preview approved",
+			Status:     ApprovalEventSatisfied,
+			Summary:    frontendApprovalPrompt,
+			SourceType: "frontend_preview_checkpoint",
+			SourceID:   frontendApprovalCheckpointID,
+			Actor:      "user",
+			Timestamp:  now,
+		})
+		build.Interaction.PendingQuestion = ""
+		build.Interaction.WaitingForUser = false
+		appendSteeringNoteLocked(build, "Frontend preview approved by the user. Continue with backend/runtime implementation on the same app without redesigning the UI first.")
+		if build.Plan != nil {
+			restoreFullStackDeliveryPolicyForPlan(build.Plan)
+		}
+		if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil {
+			if orchestration.BuildContract != nil {
+				orchestration.BuildContract.DeliveryMode = "full_stack_preview"
+				verifiedContract, report := verifyAndNormalizeBuildContract(orchestration.IntentBrief, orchestration.BuildContract)
+				orchestration.BuildContract = verifiedContract
+				orchestration.VerificationReports = append(orchestration.VerificationReports, report)
+				if build.Plan != nil && orchestration.BuildContract != nil {
+					build.Plan.APIContract = cloneAPIContract(orchestration.BuildContract.APIContract)
+					build.Plan.APIEndpoints = apiEndpointsFromContract(build.Plan.APIContract)
+					costSensitivity := CostSensitivityMedium
+					if orchestration.IntentBrief != nil && orchestration.IntentBrief.CostSensitivity != "" {
+						costSensitivity = orchestration.IntentBrief.CostSensitivity
+					}
+					orchestration.WorkOrders = compileWorkOrdersFromPlanWithCost(build.ID, orchestration.BuildContract, build.Plan, orchestration.ProviderScorecards, costSensitivity)
+				}
+			}
+		}
+		build.UpdatedAt = now
+		resolveWaitingStateLocked(build)
+		interaction = copyBuildInteractionStateLocked(build)
+		leadMessage := appendBuildConversationMessageLocked(build, BuildConversationMessage{
+			Role:             ConversationRoleLead,
+			Kind:             ConversationKindMessage,
+			Content:          "Frontend approved. Continuing with backend and runtime implementation on the same app.",
+			AgentID:          leadAgent.ID,
+			AgentRole:        string(leadAgent.Role),
+			RequiresResponse: false,
+			Blocking:         false,
+			Timestamp:        now,
+		})
+		build.mu.Unlock()
+
+		am.persistBuildSnapshot(build, nil)
+		am.broadcast(buildID, &WSMessage{
+			Type:      WSUserMessage,
+			BuildID:   buildID,
+			Timestamp: now,
+			Data: map[string]any{
+				"content":     trimmedMessage,
+				"message":     userMessage,
+				"interaction": interaction,
+			},
+		})
+		am.broadcast(buildID, &WSMessage{
+			Type:      WSLeadResponse,
+			BuildID:   buildID,
+			AgentID:   leadAgent.ID,
+			Timestamp: now,
+			Data: map[string]any{
+				"content":     leadMessage.Content,
+				"message":     leadMessage,
+				"provider":    leadAgent.Provider,
+				"model":       leadAgent.Model,
+				"interaction": interaction,
+			},
+		})
+		am.broadcastInteractionUpdate(buildID, interaction)
+		am.broadcast(buildID, &WSMessage{
+			Type:      WSBuildUserInputResolved,
+			BuildID:   buildID,
+			AgentID:   leadAgent.ID,
+			Timestamp: now,
+			Data: map[string]any{
+				"interaction": interaction,
+			},
+		})
+		if err := am.enqueueUserRevisionTask(build, approvedFrontendBackendContinuationPrompt(build)); err != nil {
+			log.Printf("Failed to enqueue approved backend continuation for build %s: %v", build.ID, err)
+			am.broadcast(buildID, &WSMessage{
+				Type:      "message:error",
+				BuildID:   buildID,
+				AgentID:   leadAgent.ID,
+				Timestamp: time.Now().UTC(),
+				Data: map[string]any{
+					"error":   err.Error(),
+					"message": "The frontend approval was recorded, but I could not schedule the backend continuation automatically.",
+				},
+			})
+			return err
+		}
+		return nil
+	}
 	if requiresUpgrade, reason := buildFollowupRequiresPaidRuntime(build, trimmedMessage, target, matchedAgents); requiresUpgrade {
 		upgradeErr := newBuildSubscriptionRequiredError(buildSubscriptionPlan(build), reason)
 		question := upgradeErr.Suggestion
@@ -17291,13 +17900,14 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 		// Stack-specific hints
 		switch normalizedFrontendFramework(fe) {
 		case "react":
-			lines = append(lines, "  Use Vite + TypeScript + Tailwind CSS for React. Entry: src/main.tsx. Root component: src/App.tsx.")
+			lines = append(lines, "  Use Vite + TypeScript + Tailwind CSS v3 for React. Entry: src/main.tsx. Root component: src/App.tsx.")
 			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
-			lines = append(lines, "  □ package.json (react, react-dom, vite, @vitejs/plugin-react, typescript, tailwindcss, @tailwindcss/vite), tsconfig.json, vite.config.ts, index.html")
+			lines = append(lines, "  □ package.json (react, react-dom, vite, @vitejs/plugin-react, typescript, tailwindcss, postcss, autoprefixer), tsconfig.json, vite.config.ts, index.html")
 			lines = append(lines, "  □ tailwind.config.js — REQUIRED: custom color palette matching the app domain")
-			lines = append(lines, "  □ src/main.tsx (entry), src/App.tsx (root component with layout), src/index.css (@tailwind directives + CSS custom properties)")
-			lines = append(lines, "  TAILWIND SETUP in vite.config.ts: import tailwindcss from '@tailwindcss/vite'; plugins: [react(), tailwindcss()]")
-			lines = append(lines, "  TAILWIND in src/index.css: @import 'tailwindcss'; (Tailwind v4) OR @tailwind base; @tailwind components; @tailwind utilities; (Tailwind v3)")
+			lines = append(lines, "  □ postcss.config.js — REQUIRED: tailwindcss + autoprefixer plugins")
+			lines = append(lines, "  □ src/main.tsx (entry), src/App.tsx (root component with layout), src/index.css (@tailwind base/components/utilities + CSS custom properties)")
+			lines = append(lines, "  TAILWIND SETUP: keep vite.config.ts limited to React plugin setup; configure Tailwind via postcss.config.js and tailwind.config.js")
+			lines = append(lines, "  TAILWIND in src/index.css: use @tailwind base; @tailwind components; @tailwind utilities; (Tailwind v3 only)")
 		case "nextjs":
 			lines = append(lines, "  Use Next.js with TypeScript + Tailwind CSS. App Router (app/ directory). Entry: app/page.tsx.")
 			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
@@ -17305,10 +17915,10 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 			lines = append(lines, "  □ tailwind.config.js — REQUIRED: custom color palette matching the app domain")
 			lines = append(lines, "  □ app/page.tsx (entry page), app/layout.tsx (root layout with tailwind classes), app/globals.css (@tailwind directives)")
 		case "vue":
-			lines = append(lines, "  Use Vue 3 + Vite + TypeScript + Tailwind CSS.")
+			lines = append(lines, "  Use Vue 3 + Vite + TypeScript + Tailwind CSS v3.")
 			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
-			lines = append(lines, "  □ package.json (vue, vite, typescript, tailwindcss, @tailwindcss/vite), tsconfig.json, vite.config.ts, index.html, tailwind.config.js")
-			lines = append(lines, "  □ src/main.ts (entry), src/App.vue (root component), src/style.css (@tailwind directives)")
+			lines = append(lines, "  □ package.json (vue, vite, typescript, tailwindcss, postcss, autoprefixer), tsconfig.json, vite.config.ts, index.html, tailwind.config.js, postcss.config.js")
+			lines = append(lines, "  □ src/main.ts (entry), src/App.vue (root component), src/style.css (@tailwind base/components/utilities)")
 		}
 		// For full-stack builds: frontend files MUST NOT import any backend/server frameworks.
 		// The frontend calls the backend via HTTP (fetch/axios).
@@ -17483,7 +18093,17 @@ ABSOLUTE RULES:
 12. Before finishing, self-check: no placeholder text, valid package.json scripts, and real runnable entry points
 13. VISUAL COMPLETENESS: Every UI element must be styled with Tailwind CSS classes. NEVER leave any HTML element unstyled. No bare <div>, <button>, <input>, or <p> tags without Tailwind.
 14. DESIGN UNIQUENESS: Design the app specifically for its domain. Never produce a generic layout. The color scheme, navigation, and component patterns must feel purpose-built for this app type.
-15. LOADING & ERROR STATES: Every async operation must show: (a) a skeleton/spinner while loading, (b) a styled error message with retry on failure, (c) a styled empty state with CTA when no data. Never just "Loading..." text.`
+15. LOADING & ERROR STATES: Every async operation must show: (a) a skeleton/spinner while loading, (b) a styled error message with retry on failure, (c) a styled empty state with CTA when no data. Never just "Loading..." text.
+16. TYPESCRIPT COMPILATION RULES — every generated file must pass tsc:
+    - Use 'as unknown as T' only when truly necessary; prefer proper generic types
+    - Do NOT use 'any' for event handlers — use React.ChangeEvent<HTMLInputElement>, React.FormEvent<HTMLFormElement>, etc.
+    - useState must be typed: useState<string>(''), useState<boolean>(false), useState<User | null>(null)
+    - async functions in React components that return JSX must NOT be async — use useEffect with an inner async function
+    - NEVER use JSX in a .ts file — only .tsx files may contain JSX
+    - NEVER import .tsx extensions explicitly in imports: write './App' not './App.tsx'
+17. PACKAGE.JSON SCRIPTS — every React/Vite project MUST have exactly:
+    "dev": "vite", "build": "tsc && vite build", "preview": "vite preview"
+    — NEVER omit any of these three scripts`
 
 	// Build tech stack context if available
 	techHint := ""
@@ -17514,12 +18134,13 @@ ABSOLUTE RULES:
 
 LOCAL STRICT BUILD STACK LOCK (cost-control mode):
 - Default to a SINGLE-REPO app (NO monorepo/workspaces) unless the user explicitly requires one
-- Frontend: React + Vite + TypeScript + Tailwind CSS (ALWAYS include Tailwind — do not omit it)
+- Frontend: React + Vite + TypeScript + Tailwind CSS v3 (ALWAYS include Tailwind — do not omit it; use v3 not v4)
 - Backend: Express + TypeScript
 - Database: PostgreSQL via pg only
 - Do NOT mix ORMs or data stacks (NO Prisma/Drizzle/TypeORM/Mongoose combinations)
 - Do NOT introduce extra test frameworks unless explicitly requested
-- VISUAL QUALITY: Even in strict/cost-control mode, the UI must be styled with Tailwind. No unstyled elements.`
+- VISUAL QUALITY: Even in strict/cost-control mode, the UI must be styled with Tailwind. No unstyled elements.
+- COMPILE-FIRST: Every file must compile cleanly. Use the tsconfig template from the frontend prompt. Include tailwind.config.js and postcss.config.js. Every component must have export default.`
 
 		localStrictScopeHint = `
 
@@ -17697,11 +18318,59 @@ FRONTEND CONTRACT RULE:
 MANDATORY FILES — always generate ALL of these for every React app:
 1. index.html — Vite entry HTML at project root (NOT inside src/)
 2. vite.config.ts — Vite config with React plugin
-3. package.json — with react, react-dom, vite, @vitejs/plugin-react, typescript, tailwindcss, @tailwindcss/vite (or postcss + autoprefixer)
-4. tsconfig.json — TypeScript config
-5. src/main.tsx — React entry point that renders <App />
-6. src/App.tsx — Root component with routing/layout
-7. src/index.css — Global styles with CSS custom properties (color palette)
+3. package.json — with react, react-dom, vite, @vitejs/plugin-react, typescript, tailwindcss, postcss, autoprefixer (use Tailwind v3, NOT v4 — v4 has breaking changes)
+4. tsconfig.json — TypeScript config (use the template below — do not invent your own)
+5. tailwind.config.js — content paths + theme (required for Tailwind v3)
+6. postcss.config.js — tailwindcss + autoprefixer plugins (required for Tailwind v3)
+7. src/main.tsx — React entry point that renders <App />
+8. src/App.tsx — Root component with routing/layout
+9. src/index.css — @tailwind base/components/utilities directives + CSS custom properties
+
+TSCONFIG.JSON TEMPLATE — use this exactly:
+` + "```" + `json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": ["src"]
+}
+` + "```" + `
+
+EXPORT RULES — CRITICAL FOR COMPILATION:
+- src/main.tsx MUST use a DEFAULT import for App — write: import App from './App'  (NOT import { App })
+- src/App.tsx MUST have exactly one "export default" — write: export default function App() or export default App at end of file
+- EVERY component file must have exactly one default export — never export a component ONLY as a named export
+- NEVER write "export { App }" without also writing "export default App"
+- If using react-router-dom, wrap in <BrowserRouter> in main.tsx NOT in App.tsx
+
+IMPORT PATH RULES — CRITICAL FOR COMPILATION:
+- Every import path must correspond to a file you actually output in this task or a real npm package
+- Writing "import X from './components/Foo'" requires that src/components/Foo.tsx (or .ts) exists in your output
+- NEVER import from a file you did not generate unless it is an npm package in package.json
+- The "@/" alias resolves to "src/" — so "@/components/Foo" requires src/components/Foo.tsx in your output
+- Add the "@" alias to vite.config.ts resolve.alias map pointing to path.resolve(__dirname, './src')
+- NEVER include file extensions in import paths for TypeScript files: write './App' not './App.tsx'
+
+PRE-OUTPUT SELF-CHECK (run mentally before returning your files):
+□ Does every local import correspond to a file I actually generated?
+□ Does src/App.tsx have "export default"?
+□ Does src/main.tsx use a default import for App (not a named import)?
+□ Does package.json list every npm package I import?
+□ Does tsconfig.json match the template above?
+□ Are tailwind.config.js and postcss.config.js present?
 
 REQUIREMENTS FOR EVERY COMPONENT:
 - Complete TypeScript types for all props, state, and events
@@ -18779,6 +19448,7 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	isNextFromStack := false
 	isFrontendOnlyFromStack := false
 	isBackendOnlyFromStack := false
+	frontendPreviewOnly := buildUsesFrontendPreviewOnlyDelivery(build)
 	if build != nil && build.TechStack != nil {
 		techStackFrontend = strings.TrimSpace(build.TechStack.Frontend)
 		techStackBackend = strings.TrimSpace(build.TechStack.Backend)
@@ -18978,13 +19648,13 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 	// Integration coherence: for full-stack builds, verify frontend and backend agree on
 	// ports, API routes, and CORS. Only checked after basic structural validation passes
 	// to avoid noisy errors on fundamentally broken output.
-	if build != nil && build.TechStack != nil && build.TechStack.Frontend != "" && build.TechStack.Backend != "" {
+	if !frontendPreviewOnly && build != nil && build.TechStack != nil && build.TechStack.Frontend != "" && build.TechStack.Backend != "" {
 		for _, msg := range am.checkIntegrationCoherence(build, files) {
 			addError(msg, &integrationErrors)
 		}
 	}
 
-	backendApplicable := hasGoFiles || hasPyFiles || hasBackendPackageJSON || techStackBackend != ""
+	backendApplicable := !frontendPreviewOnly && (hasGoFiles || hasPyFiles || hasBackendPackageJSON || techStackBackend != "")
 	deploymentApplicable := hasNodeFiles || hasGoFiles || hasPyFiles || hasReadme || hasEnvExample
 	am.emitReadinessVerificationReports(build,
 		readinessVerificationBucket{
@@ -19020,7 +19690,7 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 			phase:      "surface_local_verification",
 			checks:     []string{"frontend_backend_contract_coherence", "route_alignment", "cors_alignment"},
 			errors:     integrationErrors,
-			applicable: build != nil && build.TechStack != nil && build.TechStack.Frontend != "" && build.TechStack.Backend != "",
+			applicable: !frontendPreviewOnly && build != nil && build.TechStack != nil && build.TechStack.Frontend != "" && build.TechStack.Backend != "",
 		},
 	)
 
@@ -19028,6 +19698,18 @@ func (am *AgentManager) validateFinalBuildReadiness(build *Build, files []Genera
 }
 
 func (am *AgentManager) shouldRunPreviewReadinessVerification(build *Build) bool {
+	// Skip the npm build step if the compile validation loop already confirmed that
+	// the generated code builds cleanly. Running npm install + build a second time
+	// would add ~80s of overhead with no additional signal.
+	if build != nil {
+		build.mu.RLock()
+		compilePassed := build.CompileValidationPassed
+		build.mu.RUnlock()
+		if compilePassed {
+			return false
+		}
+	}
+
 	if build != nil && build.RequirePreviewReady {
 		return true
 	}
@@ -19049,7 +19731,7 @@ func (am *AgentManager) shouldRunPreviewReadinessVerification(build *Build) bool
 }
 
 func (am *AgentManager) shouldRequireBackendRuntimeProof(build *Build) bool {
-	if build == nil || !am.shouldRunPreviewReadinessVerification(build) || buildRequiresStaticFrontendFallback(build) {
+	if build == nil || !am.shouldRunPreviewReadinessVerification(build) || buildRequiresStaticFrontendFallback(build) || buildUsesFrontendPreviewOnlyDelivery(build) {
 		return false
 	}
 

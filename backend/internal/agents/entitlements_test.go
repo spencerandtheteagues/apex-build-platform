@@ -181,4 +181,23 @@ func TestBuildFollowupRequiresPaidRuntime(t *testing.T) {
 			t.Fatalf("expected ui-only follow-up to stay allowed, got %q", reason)
 		}
 	})
+
+	t.Run("paid preview-only builds can continue backend work", func(t *testing.T) {
+		paidBuild := &Build{
+			ID:               "paid-preview-build",
+			UserID:           2,
+			SubscriptionPlan: "builder",
+			Description:      "Build a full-stack CRM with frontend preview first.",
+			TechStack:        &TechStack{Frontend: "React", Backend: "Express", Database: "PostgreSQL"},
+			Plan: &BuildPlan{
+				AppType:      "fullstack",
+				DeliveryMode: "frontend_preview_only",
+			},
+		}
+
+		requiresUpgrade, reason := buildFollowupRequiresPaidRuntime(paidBuild, "Yes, continue with the backend implementation.", buildMessageTarget{Mode: BuildMessageTargetLead}, nil)
+		if requiresUpgrade {
+			t.Fatalf("expected paid preview-only build to continue without upgrade gate, got %q", reason)
+		}
+	})
 }

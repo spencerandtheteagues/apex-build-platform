@@ -591,21 +591,27 @@ func verifyAndNormalizeBuildContract(intent *IntentBrief, contract *BuildContrac
 	corrected := *contract
 	now := time.Now().UTC()
 
+	if strings.TrimSpace(corrected.DeliveryMode) == "" {
+		corrected.DeliveryMode = defaultDeliveryModeForAppType(corrected.AppType)
+		if strings.TrimSpace(corrected.DeliveryMode) != "" {
+			report.Warnings = append(report.Warnings, "filled missing delivery mode from app type default")
+		}
+	}
 	if corrected.APIContract != nil && corrected.APIContract.APIBaseURL == "" &&
 		hasSurface(corrected.AcceptanceBySurface, SurfaceIntegration) {
 		corrected.APIContract.APIBaseURL = "/api"
 		report.Warnings = append(report.Warnings, "filled missing API base URL from full-stack default")
 	}
-	if isEmptyRuntimeContract(corrected.RuntimeContract) {
-		corrected.RuntimeContract = deriveRuntimeContractFromAppType(corrected.AppType)
+	if mergedRuntime, changed := mergeRuntimeContractDefaults(corrected.RuntimeContract, deriveRuntimeContractFromAppType(corrected.AppType)); changed {
+		corrected.RuntimeContract = mergedRuntime
 		report.Warnings = append(report.Warnings, "filled missing runtime/build commands from stack defaults")
 	}
-	if len(corrected.AcceptanceBySurface) == 0 {
-		corrected.AcceptanceBySurface = deriveAcceptanceBySurfaceFromAppType(corrected.AppType)
+	if mergedAcceptance, changed := mergeAcceptanceContracts(corrected.AcceptanceBySurface, deriveAcceptanceBySurfaceFromAppType(corrected.AppType)); changed {
+		corrected.AcceptanceBySurface = mergedAcceptance
 		report.Warnings = append(report.Warnings, "generated fallback acceptance criteria by surface")
 	}
-	if len(corrected.VerificationGates) == 0 {
-		corrected.VerificationGates = deriveVerificationGatesFromAppType(corrected.AppType)
+	if mergedGates, changed := mergeVerificationGates(corrected.VerificationGates, deriveVerificationGatesFromAppType(corrected.AppType)); changed {
+		corrected.VerificationGates = mergedGates
 		report.Warnings = append(report.Warnings, "generated fallback verification gates by surface")
 	}
 
@@ -681,6 +687,96 @@ func verifyAndNormalizeBuildContract(intent *IntentBrief, contract *BuildContrac
 	corrected.VerificationBlockers = nil
 	report.ConfidenceScore = 0.88
 	return &corrected, report
+}
+
+func mergeRuntimeContractDefaults(runtime RuntimeCommandContract, defaults RuntimeCommandContract) (RuntimeCommandContract, bool) {
+	merged := runtime
+	changed := false
+	assign := func(current *string, fallback string) {
+		if strings.TrimSpace(*current) != "" || strings.TrimSpace(fallback) == "" {
+			return
+		}
+		*current = fallback
+		changed = true
+	}
+	assign(&merged.FrontendInstall, defaults.FrontendInstall)
+	assign(&merged.FrontendBuild, defaults.FrontendBuild)
+	assign(&merged.FrontendPreview, defaults.FrontendPreview)
+	assign(&merged.BackendInstall, defaults.BackendInstall)
+	assign(&merged.BackendBuild, defaults.BackendBuild)
+	assign(&merged.BackendStart, defaults.BackendStart)
+	assign(&merged.TestCommand, defaults.TestCommand)
+	return merged, changed
+}
+
+func mergeAcceptanceContracts(existing []SurfaceAcceptanceContract, defaults []SurfaceAcceptanceContract) ([]SurfaceAcceptanceContract, bool) {
+	if len(existing) == 0 {
+		if len(defaults) == 0 {
+			return nil, false
+		}
+		return append([]SurfaceAcceptanceContract(nil), defaults...), true
+	}
+
+	merged := append([]SurfaceAcceptanceContract(nil), existing...)
+	indexBySurface := make(map[ContractSurface]int, len(merged))
+	for i := range merged {
+		indexBySurface[merged[i].Surface] = i
+	}
+
+	changed := false
+	for _, fallback := range defaults {
+		if idx, exists := indexBySurface[fallback.Surface]; exists {
+			nextChecks := dedupeStrings(append([]string(nil), append(merged[idx].Checks, fallback.Checks...)...))
+			if len(nextChecks) != len(merged[idx].Checks) {
+				merged[idx].Checks = nextChecks
+				changed = true
+			}
+			if !merged[idx].Required && fallback.Required {
+				merged[idx].Required = true
+				changed = true
+			}
+			continue
+		}
+		merged = append(merged, fallback)
+		indexBySurface[fallback.Surface] = len(merged) - 1
+		changed = true
+	}
+
+	sort.SliceStable(merged, func(i, j int) bool { return merged[i].Surface < merged[j].Surface })
+	return merged, changed
+}
+
+func mergeVerificationGates(existing []SurfaceVerificationGate, defaults []SurfaceVerificationGate) ([]SurfaceVerificationGate, bool) {
+	if len(existing) == 0 {
+		if len(defaults) == 0 {
+			return nil, false
+		}
+		return append([]SurfaceVerificationGate(nil), defaults...), true
+	}
+
+	merged := append([]SurfaceVerificationGate(nil), existing...)
+	indexBySurface := make(map[ContractSurface]int, len(merged))
+	for i := range merged {
+		indexBySurface[merged[i].Surface] = i
+	}
+
+	changed := false
+	for _, fallback := range defaults {
+		if idx, exists := indexBySurface[fallback.Surface]; exists {
+			nextGates := dedupeStrings(append([]string(nil), append(merged[idx].Gates, fallback.Gates...)...))
+			if len(nextGates) != len(merged[idx].Gates) {
+				merged[idx].Gates = nextGates
+				changed = true
+			}
+			continue
+		}
+		merged = append(merged, fallback)
+		indexBySurface[fallback.Surface] = len(merged) - 1
+		changed = true
+	}
+
+	sort.SliceStable(merged, func(i, j int) bool { return merged[i].Surface < merged[j].Surface })
+	return merged, changed
 }
 
 func compileWorkOrdersFromPlan(buildID string, contract *BuildContract, plan *BuildPlan, scorecards []ProviderScorecard) []WorkOrder {

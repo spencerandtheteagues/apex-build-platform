@@ -349,6 +349,57 @@ func TestApplyBuildAssurancePolicyToPlanDowngradesFreeFullStackToFrontendPreview
 	}
 }
 
+func TestApplyBuildAssurancePolicyToPlanStagesPaidFullStackBehindFrontendApproval(t *testing.T) {
+	t.Parallel()
+
+	build := &Build{
+		ID:               "paid-build",
+		UserID:           22,
+		SubscriptionPlan: "builder",
+		Description:      "Build a full-stack CRM with auth, database-backed clients, projects, and reporting dashboards",
+	}
+
+	plan := createBuildPlanFromPlanningBundle("build-paid-frontstage", build.Description, nil, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "fullstack",
+			TechStack: &autonomous.TechStack{
+				Frontend: "React",
+				Backend:  "Node",
+				Database: "PostgreSQL",
+				Styling:  "Tailwind",
+			},
+		},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-paid-frontstage",
+			EstimatedTime: 25 * time.Minute,
+			CreatedAt:     time.Now().UTC(),
+		},
+	})
+
+	plan = applyBuildAssurancePolicyToPlan(build, plan)
+	if plan == nil {
+		t.Fatal("expected plan")
+	}
+	if plan.DeliveryMode != "frontend_preview_only" {
+		t.Fatalf("expected paid full-stack build to stage a frontend approval checkpoint, got %q", plan.DeliveryMode)
+	}
+	if plan.TechStack.Backend == "" || plan.TechStack.Database == "" {
+		t.Fatalf("expected paid build to retain backend/database contract, got %+v", plan.TechStack)
+	}
+	if plan.APIContract == nil {
+		t.Fatalf("expected API contract to remain available for later backend continuation")
+	}
+	if wo := getBuildWorkOrder(plan, RoleBackend); wo != nil {
+		t.Fatalf("expected backend work order to be deferred until frontend approval, got %+v", wo)
+	}
+	if wo := getBuildWorkOrder(plan, RoleDatabase); wo != nil {
+		t.Fatalf("expected database work order to be deferred until frontend approval, got %+v", wo)
+	}
+	if wo := getBuildWorkOrder(plan, RoleFrontend); wo == nil {
+		t.Fatalf("expected frontend work order to remain active, got %+v", plan.WorkOrders)
+	}
+}
+
 func TestCreateBuildPlanFromPlanningBundlePrefersStaticIntentOverPlannerFullstackAppType(t *testing.T) {
 	t.Parallel()
 
@@ -802,6 +853,65 @@ func TestParseTaskOutputExtractsCoordinationBlocks(t *testing.T) {
 	}
 	if len(out.Files) != 1 || out.Files[0].Path != "src/App.tsx" {
 		t.Fatalf("expected parsed file, got %+v", out.Files)
+	}
+}
+
+func TestExtractTaskCheckinsHandlesBareTagsWithoutClosingTags(t *testing.T) {
+	t.Parallel()
+
+	resp := "<task_start_ack>{\"summary\":\"working frontend shell\",\"owned_files\":[\"src/**\"],\"dependencies\":[\"api contract\"],\"acceptance_checks\":[\"render app\"],\"blockers\":[]}\n" +
+		"```json\n" +
+		"{\"patch_bundle\":{\"operations\":[{\"type\":\"replace_function\",\"path\":\"src/App.tsx\",\"content\":\"export default function App(){ return <div>ok</div>; }\"}]}}\n" +
+		"```\n" +
+		"<task_completion_report>{\"summary\":\"frontend shell completed\",\"created_files\":[],\"modified_files\":[\"src/App.tsx\"],\"completed_checks\":[\"render app\"],\"remaining_risks\":[],\"blockers\":[]}"
+
+	clean, startAck, completion := extractTaskCheckins(resp)
+	if startAck == nil || startAck.Summary != "working frontend shell" {
+		t.Fatalf("expected parsed start ack, got %+v", startAck)
+	}
+	if completion == nil || completion.Summary != "frontend shell completed" {
+		t.Fatalf("expected parsed completion report, got %+v", completion)
+	}
+	if strings.Contains(clean, "<task_start_ack>") || strings.Contains(clean, "<task_completion_report>") {
+		t.Fatalf("expected checkin tags to be removed, got %q", clean)
+	}
+	if !strings.Contains(clean, "\"patch_bundle\"") {
+		t.Fatalf("expected patch bundle body to remain after stripping checkins, got %q", clean)
+	}
+}
+
+func TestParseTaskOutputExtractsStructuredPatchBundleWithBareCheckins(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	resp := "<task_start_ack>{\"summary\":\"repairing frontend shell\",\"owned_files\":[\"src/App.tsx\",\"src/index.css\"],\"dependencies\":[\"design system\"],\"acceptance_checks\":[\"replace scaffold\"],\"blockers\":[]}\n" +
+		"```json\n" +
+		"{\n" +
+		"  \"patch_bundle\": {\n" +
+		"    \"operations\": [\n" +
+		"      {\"type\":\"replace_function\",\"path\":\"src/App.tsx\",\"content\":\"// File: src/App.tsx\\nexport default function App(){ return <div>real app</div>; }\"},\n" +
+		"      {\"type\":\"replace_function\",\"path\":\"src/index.css\",\"content\":\"// File: src/index.css\\nbody { margin: 0; }\"}\n" +
+		"    ]\n" +
+		"  }\n" +
+		"}\n" +
+		"```\n" +
+		"<task_completion_report>{\"summary\":\"frontend repair completed\",\"created_files\":[],\"modified_files\":[\"src/App.tsx\",\"src/index.css\"],\"completed_checks\":[\"replace scaffold\"],\"remaining_risks\":[],\"blockers\":[]}"
+
+	out := am.parseTaskOutput(TaskGenerateUI, resp)
+	if out.StartAck == nil || out.StartAck.Summary != "repairing frontend shell" {
+		t.Fatalf("expected parsed start ack, got %+v", out.StartAck)
+	}
+	if out.Completion == nil || out.Completion.Summary != "frontend repair completed" {
+		t.Fatalf("expected parsed completion report, got %+v", out.Completion)
+	}
+	if out.StructuredPatchBundle == nil {
+		t.Fatalf("expected structured patch bundle, got %+v", out)
+	}
+	if len(out.StructuredPatchBundle.Operations) != 2 {
+		t.Fatalf("expected 2 patch operations, got %+v", out.StructuredPatchBundle.Operations)
+	}
+	if len(out.Files) != 0 {
+		t.Fatalf("expected parseTaskOutput to avoid generated artifact fallback, got %+v", out.Files)
 	}
 }
 

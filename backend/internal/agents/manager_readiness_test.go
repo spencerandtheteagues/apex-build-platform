@@ -154,6 +154,59 @@ func TestValidateFinalBuildReadiness(t *testing.T) {
 		}
 	})
 
+	t.Run("frontend_preview_only_fullstack_skips_backend_runtime_proof", func(t *testing.T) {
+		t.Parallel()
+
+		build := &Build{
+			Mode:             ModeFull,
+			SubscriptionPlan: "builder",
+			Plan: &BuildPlan{
+				AppType:      "fullstack",
+				DeliveryMode: "frontend_preview_only",
+			},
+			TechStack: &TechStack{
+				Frontend: "React",
+				Backend:  "Express",
+				Database: "PostgreSQL",
+			},
+			Agents: map[string]*Agent{
+				"frontend-1": {ID: "frontend-1", Role: RoleFrontend, Provider: ai.ProviderClaude},
+			},
+		}
+		files := []GeneratedFile{
+			{
+				Path: "package.json",
+				Content: `{
+  "name": "preview-stage",
+  "scripts": {
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}`,
+			},
+			{Path: "index.html", Content: "<!doctype html><html><body><div id=\"root\"></div></body></html>"},
+			{Path: "src/main.tsx", Content: "import React from 'react'; import ReactDOM from 'react-dom/client';"},
+			{Path: "src/App.tsx", Content: "export default function App(){ return <div>ok</div> }"},
+			{Path: "README.md", Content: "# Preview stage\n"},
+			{Path: ".env.example", Content: "VITE_API_URL=http://localhost:3001\n"},
+		}
+
+		errs := am.validateFinalBuildReadiness(build, files)
+		for _, err := range errs {
+			lower := strings.ToLower(err)
+			if strings.Contains(lower, "backend") || strings.Contains(lower, "integration:") {
+				t.Fatalf("expected frontend preview checkpoint to skip backend/integration proof, got %v", errs)
+			}
+		}
+	})
+
 	t.Run("incomplete_frontend_output", func(t *testing.T) {
 		t.Parallel()
 

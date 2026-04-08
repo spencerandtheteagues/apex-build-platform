@@ -122,10 +122,19 @@ func createBuildPlanFromPlanningBundle(buildID string, description string, reque
 }
 
 func applyBuildAssurancePolicyToPlan(build *Build, plan *BuildPlan) *BuildPlan {
-	if build == nil || plan == nil || !buildRequiresStaticFrontendFallback(build) {
+	if build == nil || plan == nil {
 		return plan
 	}
+	if buildRequiresStaticFrontendFallback(build) {
+		return applyStaticFrontendFallbackPolicyToPlan(build, plan)
+	}
+	if shouldStageFrontendApprovalCheckpoint(build, plan) {
+		return applyFrontendApprovalCheckpointPolicyToPlan(plan)
+	}
+	return plan
+}
 
+func applyStaticFrontendFallbackPolicyToPlan(build *Build, plan *BuildPlan) *BuildPlan {
 	staticStack := plan.TechStack
 	if strings.TrimSpace(staticStack.Frontend) == "" {
 		staticStack.Frontend = "React"
@@ -171,6 +180,73 @@ func applyBuildAssurancePolicyToPlan(build *Build, plan *BuildPlan) *BuildPlan {
 	plan.SpecHash = hashBuildPlan(plan)
 
 	return plan
+}
+
+func shouldStageFrontendApprovalCheckpoint(build *Build, plan *BuildPlan) bool {
+	if build == nil || plan == nil {
+		return false
+	}
+	if !isPaidBuildPlan(buildSubscriptionPlan(build)) {
+		return false
+	}
+	if strings.TrimSpace(strings.ToLower(plan.AppType)) != "fullstack" {
+		return false
+	}
+	if strings.TrimSpace(plan.TechStack.Frontend) == "" || strings.TrimSpace(plan.TechStack.Backend) == "" {
+		return false
+	}
+	return true
+}
+
+func applyFrontendApprovalCheckpointPolicyToPlan(plan *BuildPlan) *BuildPlan {
+	if plan == nil {
+		return nil
+	}
+
+	plan.DeliveryMode = "frontend_preview_only"
+	plan.WorkOrders = filterFrontendApprovalCheckpointWorkOrders(plan.WorkOrders)
+	plan.SpecHash = hashBuildPlan(plan)
+	return plan
+}
+
+func restoreFullStackDeliveryPolicyForPlan(plan *BuildPlan) *BuildPlan {
+	if plan == nil {
+		return nil
+	}
+	if strings.TrimSpace(strings.ToLower(plan.AppType)) != "fullstack" {
+		return plan
+	}
+	if strings.TrimSpace(plan.TechStack.Frontend) == "" || strings.TrimSpace(plan.TechStack.Backend) == "" {
+		return plan
+	}
+
+	scaffold := selectBuildScaffold(plan.AppType, plan.TechStack)
+	plan.DeliveryMode = "full_stack_preview"
+	plan.WorkOrders = buildWorkOrders(plan.AppType, plan.TechStack, scaffold, plan.Ownership, plan.Acceptance)
+	plan.SpecHash = hashBuildPlan(plan)
+	return plan
+}
+
+func filterFrontendApprovalCheckpointWorkOrders(workOrders []BuildWorkOrder) []BuildWorkOrder {
+	if len(workOrders) == 0 {
+		return nil
+	}
+
+	allowed := map[AgentRole]bool{
+		RoleArchitect: true,
+		RoleFrontend:  true,
+		RoleTesting:   true,
+		RoleReviewer:  true,
+		RoleSolver:    true,
+	}
+
+	filtered := make([]BuildWorkOrder, 0, len(workOrders))
+	for _, order := range workOrders {
+		if allowed[order.Role] {
+			filtered = append(filtered, order)
+		}
+	}
+	return filtered
 }
 
 func defaultDeliveryModeForAppType(appType string) string {

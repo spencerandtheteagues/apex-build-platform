@@ -470,6 +470,55 @@ func TestVerifyAndNormalizeBuildContractAcceptsNextFullstackScaffoldContract(t *
 	}
 }
 
+func TestVerifyAndNormalizeBuildContractFillsPartialFrontendPreviewDefaults(t *testing.T) {
+	t.Parallel()
+
+	intent := &IntentBrief{
+		AppType:              "fullstack",
+		RequiredCapabilities: []CapabilityRequirement{CapabilityAPI},
+	}
+	contract := &BuildContract{
+		ID:           "contract-partial-preview",
+		BuildID:      "build-partial-preview",
+		AppType:      "fullstack",
+		DeliveryMode: "frontend_preview_only",
+		RoutePageMap: []ContractRoute{{Path: "/", Surface: SurfaceFrontend}},
+		APIContract: &BuildAPIContract{
+			BackendPort: 3001,
+			Endpoints:   []APIEndpoint{{Method: "GET", Path: "/api/health", Description: "health"}},
+		},
+		RuntimeContract: RuntimeCommandContract{
+			FrontendBuild: "npm run build",
+		},
+		AcceptanceBySurface: []SurfaceAcceptanceContract{
+			{Surface: SurfaceFrontend, Checks: []string{"frontend renders"}, Required: true},
+		},
+		VerificationGates: []SurfaceVerificationGate{
+			{Surface: SurfaceFrontend, Gates: []string{"syntax_or_type_pass"}},
+		},
+	}
+
+	verified, report := verifyAndNormalizeBuildContract(intent, contract)
+	if verified == nil {
+		t.Fatal("expected corrected contract")
+	}
+	if report.Status == VerificationBlocked {
+		t.Fatalf("expected partial preview contract to auto-heal, got blockers %v", report.Blockers)
+	}
+	if strings.TrimSpace(verified.RuntimeContract.FrontendPreview) == "" {
+		t.Fatalf("expected frontend preview command to be filled, got %+v", verified.RuntimeContract)
+	}
+	if !hasSurface(verified.AcceptanceBySurface, SurfaceDeployment) {
+		t.Fatalf("expected deployment acceptance surface to be added, got %+v", verified.AcceptanceBySurface)
+	}
+	if !hasSurface(verified.AcceptanceBySurface, SurfaceFrontend) {
+		t.Fatalf("expected frontend acceptance surface to remain, got %+v", verified.AcceptanceBySurface)
+	}
+	if len(verified.VerificationGates) < 2 {
+		t.Fatalf("expected verification gates to be merged with defaults, got %+v", verified.VerificationGates)
+	}
+}
+
 func TestGetAvailableProvidersWithGracePeriodForBuildFiltersOllamaForPlatform(t *testing.T) {
 	am := &AgentManager{
 		aiRouter: &stubAIRouter{
