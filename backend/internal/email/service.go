@@ -69,16 +69,16 @@ func (s *Service) Send(to, subject, htmlBody string) error {
 
 // SendPaymentFailed sends a payment failure notification
 func (s *Service) SendPaymentFailed(to, username, invoiceID string) error {
-	subject := "APEX.BUILD -- Payment Failed"
+	subject := "APEX-BUILD -- Payment Failed"
 	body := fmt.Sprintf(`<!DOCTYPE html>
 <html><body style="font-family: -apple-system, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
 <h2 style="color: #ef4444;">Payment Failed</h2>
 <p>Hi %s,</p>
 <p>We were unable to process your latest payment (Invoice: %s).</p>
-<p>Please update your payment method to continue using APEX.BUILD without interruption:</p>
+<p>Please update your payment method to continue using APEX-BUILD without interruption:</p>
 <p><a href="https://apex-build.dev/settings" style="background: #ef4444; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; display: inline-block;">Update Payment Method</a></p>
 <p>If your payment method is not updated within 7 days, your account will be downgraded to the Free tier.</p>
-<p>-- The APEX.BUILD Team</p>
+<p>-- The APEX-BUILD Team</p>
 </body></html>`, username, invoiceID)
 
 	return s.Send(to, subject, body)
@@ -86,7 +86,7 @@ func (s *Service) SendPaymentFailed(to, username, invoiceID string) error {
 
 // SendVerificationCode sends a 6-digit email verification code to the user.
 func (s *Service) SendVerificationCode(to, username, code string) error {
-	subject := "APEX.BUILD — Verify your email"
+	subject := "APEX-BUILD — Verify your email"
 	body := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -96,14 +96,14 @@ func (s *Service) SendVerificationCode(to, username, code string) error {
       <table width="560" cellpadding="0" cellspacing="0" style="background:#1e293b;border-radius:12px;border:1px solid #334155;overflow:hidden;">
         <tr>
           <td style="padding:32px 40px;border-bottom:1px solid #334155;text-align:center;">
-            <span style="font-size:24px;font-weight:700;color:#f8fafc;letter-spacing:-0.5px;">APEX<span style="color:#6366f1;">.BUILD</span></span>
+            <span style="font-size:24px;font-weight:700;color:#f8fafc;letter-spacing:-0.5px;">APEX<span style="color:#6366f1;">-BUILD</span></span>
           </td>
         </tr>
         <tr>
           <td style="padding:40px;">
             <h1 style="margin:0 0 8px;font-size:22px;font-weight:600;color:#f8fafc;">Verify your email</h1>
             <p style="margin:0 0 32px;color:#94a3b8;font-size:15px;line-height:1.6;">
-              Hey %s! Enter the code below in the APEX.BUILD app to verify your email address.
+              Hey %s! Enter the code below in the APEX-BUILD app to verify your email address.
             </p>
             <div style="background:#0f172a;border:1px solid #6366f1;border-radius:10px;padding:28px;text-align:center;margin-bottom:32px;">
               <div style="font-size:40px;font-weight:700;letter-spacing:12px;color:#f8fafc;font-variant-numeric:tabular-nums;">%s</div>
@@ -118,7 +118,7 @@ func (s *Service) SendVerificationCode(to, username, code string) error {
         </tr>
         <tr>
           <td style="padding:20px 40px;border-top:1px solid #334155;text-align:center;">
-            <p style="margin:0;color:#475569;font-size:12px;">APEX.BUILD — AI-powered app building</p>
+            <p style="margin:0;color:#475569;font-size:12px;">APEX-BUILD — AI-powered app building</p>
           </td>
         </tr>
       </table>
