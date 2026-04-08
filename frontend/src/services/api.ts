@@ -81,6 +81,11 @@ export const isAuthRefreshRequestUrl = (url?: string | null): boolean => {
   return /\/auth\/(?:token\/)?refresh(?:[/?#]|$)/.test(url)
 }
 
+const isPublicAuthRequestUrl = (url?: string | null): boolean => {
+  if (!url) return false
+  return /\/auth\/(?:login|register|verify-email|resend-verification|forgot-password|reset-password)(?:[/?#]|$)/.test(url)
+}
+
 export const reloadExpiredSession = (
   locationLike: Pick<Location, 'reload'> | null | undefined =
     typeof window !== 'undefined' ? window.location : undefined
@@ -228,7 +233,13 @@ export class ApiService {
         const originalRequest = error.config
         const originalUrl = typeof originalRequest?.url === 'string' ? originalRequest.url : ''
 
-        if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !isAuthRefreshRequestUrl(originalUrl)) {
+        if (
+          error.response?.status === 401
+          && originalRequest
+          && !originalRequest._retry
+          && !isAuthRefreshRequestUrl(originalUrl)
+          && !isPublicAuthRequestUrl(originalUrl)
+        ) {
           originalRequest._retry = true
 
           try {
@@ -305,6 +316,24 @@ export class ApiService {
     if (response.data.user) {
       localStorage.setItem('apex_user', JSON.stringify(response.data.user))
     }
+    return response.data
+  }
+
+  async verifyEmail(code: string, email?: string): Promise<AuthResponse> {
+    const payload: Record<string, string> = { code }
+    if (email) payload.email = email
+    const response = await this.client.post<AuthResponse>('/auth/verify-email', payload)
+    if (response.data.user) {
+      localStorage.setItem('apex_user', JSON.stringify(response.data.user))
+      const session = extractSessionMetadata(response.data)
+      markCookieSessionRefreshed(session?.access_token_expires_at)
+    }
+    return response.data
+  }
+
+  async resendVerification(email?: string): Promise<{ message: string }> {
+    const payload = email ? { email } : {}
+    const response = await this.client.post<{ message: string }>('/auth/resend-verification', payload)
     return response.data
   }
 

@@ -144,6 +144,22 @@ describe('cookie session compatibility', () => {
 
     expect(config.headers.Authorization).toBeUndefined()
   })
+
+  it('does not try to refresh the session when login itself returns 401', async () => {
+    const service = new ApiService('/api/v1')
+    const refreshSpy = vi.spyOn(service, 'refreshToken')
+    const responseRejected = (service.client.interceptors.response as any).handlers[0].rejected
+    const loginError = {
+      config: { url: '/auth/login' },
+      response: {
+        status: 401,
+        data: { error: 'Invalid credentials' },
+      },
+    }
+
+    await expect(responseRejected(loginError)).rejects.toBe(loginError)
+    expect(refreshSpy).not.toHaveBeenCalled()
+  })
 })
 
 describe('getDeploymentLogsWebSocketUrl', () => {
