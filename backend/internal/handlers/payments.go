@@ -575,6 +575,18 @@ func (h *PaymentHandlers) GetSubscription(c *gin.Context) {
 		planType = payments.PlanFree
 	}
 	plan := payments.GetPlanByType(planType)
+	if plan == nil {
+		planType = payments.PlanFree
+		plan = payments.GetPlanByType(planType)
+	}
+	if plan == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "billing plans are unavailable",
+			"code":    "BILLING_PLAN_UNAVAILABLE",
+		})
+		return
+	}
 
 	// Build subscription response
 	subscription := gin.H{
@@ -588,7 +600,7 @@ func (h *PaymentHandlers) GetSubscription(c *gin.Context) {
 	}
 
 	// If user has an active Stripe subscription, get more details
-	if user.SubscriptionID != "" && h.stripeService.IsConfigured() {
+	if user.SubscriptionID != "" && h.stripeService != nil && h.stripeService.IsConfigured() {
 		ctx := context.Background()
 		subInfo, err := h.stripeService.GetSubscription(ctx, user.SubscriptionID)
 		if err == nil {

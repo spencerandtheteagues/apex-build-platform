@@ -63,3 +63,19 @@ func TestGetPlanByPriceIDAcceptsConfiguredLivePrice(t *testing.T) {
 		t.Fatalf("plan.Type = %q, want %q", plan.Type, PlanBuilder)
 	}
 }
+
+func TestGetPlanByTypeSupportsOwnerPlan(t *testing.T) {
+	plan := GetPlanByType(PlanOwner)
+	if plan == nil {
+		t.Fatal("expected owner plan to be defined")
+	}
+	if plan.Name != "Owner" {
+		t.Fatalf("plan.Name = %q, want %q", plan.Name, "Owner")
+	}
+	if plan.Limits.AIRequestsPerMonth != -1 {
+		t.Fatalf("owner plan AIRequestsPerMonth = %d, want -1", plan.Limits.AIRequestsPerMonth)
+	}
+	if !plan.Limits.BYOKEnabled || !plan.Limits.GitHubExport {
+		t.Fatal("expected owner plan to keep elevated platform capabilities enabled")
+	}
+}

@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"apex-build/pkg/models"
 
 	"github.com/gin-gonic/gin"
 )
@@ -129,5 +132,60 @@ func TestCreateCheckoutSessionRejectsInvalidCancelURL(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"code":"INVALID_CANCEL_URL"`) {
 		t.Fatalf("expected INVALID_CANCEL_URL response, got %s", w.Body.String())
+	}
+}
+
+func TestGetSubscriptionSupportsOwnerPlan(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db := openTestDB(t)
+	user := models.User{
+		Username:            "owner-user",
+		Email:               "owner@example.com",
+		PasswordHash:        "hash",
+		IsActive:            true,
+		SubscriptionType:    "owner",
+		SubscriptionStatus:  "active",
+		HasUnlimitedCredits: true,
+		BypassBilling:       true,
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("failed to seed owner user: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/billing/subscription", nil)
+	c.Set("user_id", user.ID)
+
+	h := NewPaymentHandlers(db, "")
+	h.GetSubscription(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var body struct {
+		Success bool `json:"success"`
+		Data    struct {
+			PlanType string `json:"plan_type"`
+			PlanName string `json:"plan_name"`
+			Status   string `json:"status"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !body.Success {
+		t.Fatalf("expected success response, got %s", w.Body.String())
+	}
+	if body.Data.PlanType != "owner" {
+		t.Fatalf("plan_type = %q, want %q", body.Data.PlanType, "owner")
+	}
+	if body.Data.PlanName != "Owner" {
+		t.Fatalf("plan_name = %q, want %q", body.Data.PlanName, "Owner")
+	}
+	if body.Data.Status != "active" {
+		t.Fatalf("status = %q, want %q", body.Data.Status, "active")
 	}
 }

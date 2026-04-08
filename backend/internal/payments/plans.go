@@ -17,6 +17,7 @@ const (
 	PlanPro                   PlanType = "pro"
 	PlanTeam                  PlanType = "team"
 	PlanEnterprise            PlanType = "enterprise"
+	PlanOwner                 PlanType = "owner"
 	FreeSignupTrialCreditsUSD          = 5.0
 )
 
@@ -316,6 +317,43 @@ func GetAllPlans() []Plan {
 			IsEnterprise: true,
 			TrialDays:    30,
 		},
+
+		// Owner Plan - internal/admin account
+		{
+			Type:              PlanOwner,
+			Name:              "Owner",
+			Description:       "Internal owner account with unrestricted platform access",
+			MonthlyPriceCents: 0,
+			MonthlyPriceID:    "",
+			AnnualPriceCents:  0,
+			AnnualPriceID:     "",
+			MonthlyCreditsUSD: 0,
+			Limits: PlanLimits{
+				AIRequestsPerMonth:      -1,
+				BYOKEnabled:             true,
+				BYOKUnlimited:           true,
+				ProjectsLimit:           -1,
+				StorageGB:               -1,
+				CollaboratorsPerProject: -1,
+				CodeExecutionsPerDay:    -1,
+				GitHubExport:            true,
+				PriorityAI:              true,
+				TeamFeatures:            true,
+				DedicatedSupport:        true,
+				SLA:                     true,
+				CustomIntegrations:      true,
+			},
+			Features: []string{
+				"Unlimited platform access",
+				"Unlimited credits",
+				"Billing bypass",
+				"Admin dashboard access",
+				"All builder, BYOK, and team capabilities unlocked",
+			},
+			IsPopular:    false,
+			IsEnterprise: false,
+			TrialDays:    0,
+		},
 	}
 }
 
@@ -357,7 +395,7 @@ func GetPlanTypeByPriceID(priceID string) PlanType {
 // IsValidPlanType checks if a plan type is valid
 func IsValidPlanType(planType string) bool {
 	switch PlanType(planType) {
-	case PlanFree, PlanBuilder, PlanPro, PlanTeam, PlanEnterprise:
+	case PlanFree, PlanBuilder, PlanPro, PlanTeam, PlanEnterprise, PlanOwner:
 		return true
 	}
 	return false
