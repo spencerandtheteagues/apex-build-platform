@@ -327,11 +327,20 @@ function App() {
 
   const handleWorkspaceNavigation = useCallback((view: AppView) => {
     if (view === 'ide') {
-      navigateToIDEWorkspace({ target: 'dashboard' })
+      const fallbackProjectId =
+        currentProject?.id ??
+        pendingProjectIdRef.current ??
+        recoverableProjectId ??
+        null
+
+      navigateToIDEWorkspace({
+        target: 'dashboard',
+        projectId: fallbackProjectId,
+      })
       return
     }
     navigateToView(view)
-  }, [navigateToIDEWorkspace, navigateToView])
+  }, [currentProject?.id, navigateToIDEWorkspace, navigateToView, recoverableProjectId])
 
   const handleStartNewBuild = useCallback(() => {
     navigateToView('builder')
@@ -397,7 +406,7 @@ function App() {
       },
       {
         view: 'spending',
-        label: 'Spending',
+        label: 'Spend',
         icon: <Zap className="w-4 h-4" />,
         color: '#ffd166',
         glow: 'rgba(251,191,36,0.5)',
@@ -1275,7 +1284,8 @@ function App() {
                   <button
                     key={item.view}
                     onClick={() => handleWorkspaceNavigation(item.view)}
-                    className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md border px-4 py-1.5 text-sm font-bold tracking-wide transition-all duration-200 ${
+                    title={item.view === 'spending' ? 'Spending' : item.label}
+                    className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border px-3.5 py-1.5 text-sm font-bold tracking-wide transition-all duration-200 ${
                       currentView === item.view
                         ? item.activeClassName
                         : item.inactiveClassName

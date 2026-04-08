@@ -151,9 +151,11 @@ const installLocalStorageMock = () => {
 }
 
 describe('App IDE navigation', () => {
+  let storage: ReturnType<typeof installLocalStorageMock>
+
   beforeEach(() => {
     selectProjectMock.mockReset()
-    installLocalStorageMock()
+    storage = installLocalStorageMock()
     window.history.replaceState({}, '', '/')
   })
 
@@ -170,5 +172,21 @@ describe('App IDE navigation', () => {
       expect(window.location.pathname).toBe('/project/16')
     })
     expect(await screen.findByText('Mock IDE preview')).toBeTruthy()
+  })
+
+  it('restores the last project when the IDE tab is clicked without an active project', async () => {
+    storage.setItem('apex_last_project_id:7', '42')
+
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^ide$/i }))
+
+    await waitFor(() => {
+      expect(selectProjectMock).toHaveBeenCalledWith(42)
+    })
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/project/42')
+    })
+    expect(await screen.findByText('Mock IDE dashboard')).toBeTruthy()
   })
 })

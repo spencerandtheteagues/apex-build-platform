@@ -1,12 +1,12 @@
 // BuildScreen — New simplified build screen
 // Non-scrolling full-height layout: provider bar → activity feed → chat input → nav strip
 
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import {
   Pause, Play, RotateCcw, X, Send, FileCode, Terminal,
   Eye, AlertCircle, Cpu, History, ChevronLeft, Download, ExternalLink,
-  CheckCircle2, MessageSquare,
+  CheckCircle2, MessageSquare, Copy, Check,
 } from 'lucide-react'
 import { ProviderStatusBar } from './ProviderStatusBar'
 import { LiveActivityFeed } from './LiveActivityFeed'
@@ -164,6 +164,41 @@ interface BuildScreenProps {
 const humanize = (s?: string) =>
   (s || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 
+const copyTextToClipboard = async (value: string): Promise<boolean> => {
+  const text = String(value || '')
+  if (!text.trim()) return false
+
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // Fall through to the DOM-based copy path when clipboard permissions fail.
+    }
+  }
+
+  if (typeof document === 'undefined') return false
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.top = '0'
+  textarea.style.left = '0'
+  textarea.style.opacity = '0'
+  textarea.style.pointerEvents = 'none'
+  document.body.appendChild(textarea)
+  textarea.focus()
+  textarea.select()
+  textarea.setSelectionRange(0, text.length)
+
+  try {
+    return document.execCommand('copy')
+  } finally {
+    document.body.removeChild(textarea)
+  }
+}
+
 const PROVIDER_BADGE_CLS: Record<string, string> = {
   claude: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
   gpt4: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
@@ -204,6 +239,7 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
   isPreparingPreview, onPreviewWorkspace, onOpenInIDE, onDownload, onOpenPlannerConsole, createdProjectId,
 }) => {
   const { status, progress } = buildState
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
 
   const statusColor = status === 'completed' ? 'text-green-400 bg-green-500/10 border-green-500/30'
     : status === 'failed' ? 'text-red-400 bg-red-500/10 border-red-500/30'
@@ -217,6 +253,19 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
 
   const desc = buildState.description || 'Building your app...'
 
+  useEffect(() => {
+    if (copyState === 'idle') return undefined
+    const timeoutId = window.setTimeout(() => {
+      setCopyState('idle')
+    }, 1800)
+    return () => window.clearTimeout(timeoutId)
+  }, [copyState])
+
+  const handleCopyPrompt = useCallback(async () => {
+    const copied = await copyTextToClipboard(desc)
+    setCopyState(copied ? 'copied' : 'failed')
+  }, [desc])
+
   return (
     <div className="shrink-0 flex items-center gap-3 px-4 border-b border-gray-900 bg-black/60"
       style={{ height: '60px' }}>
@@ -224,7 +273,7 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
       {/* Title + status */}
       <div className="flex-1 min-w-0 flex items-center gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-gray-200 truncate" title={desc}>
+          <div className="text-sm font-semibold text-gray-200 truncate select-text" title={desc}>
             {desc}
           </div>
           <div className="text-[10px] text-gray-600 font-mono">{phaseLabel}</div>
@@ -252,6 +301,25 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
 
       {/* Build controls */}
       <div className="flex items-center gap-1.5 shrink-0">
+        <button
+          type="button"
+          onClick={handleCopyPrompt}
+          aria-label="Copy build prompt"
+          title={copyState === 'copied' ? 'Build prompt copied' : 'Copy the full build prompt'}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors',
+            copyState === 'copied'
+              ? 'border-emerald-700/60 bg-emerald-950/40 text-emerald-200'
+              : copyState === 'failed'
+                ? 'border-amber-700/60 bg-amber-950/30 text-amber-200'
+                : 'border-gray-700 text-gray-300 hover:border-gray-600 hover:text-white'
+          )}
+        >
+          {copyState === 'copied' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+          <span className="hidden md:inline">
+            {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Retry Copy' : 'Copy Prompt'}
+          </span>
+        </button>
         {(isBuildActive || status === 'awaiting_review') && (
           <button
             type="button"
