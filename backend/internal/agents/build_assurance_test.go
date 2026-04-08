@@ -104,15 +104,19 @@ func TestBuildTechStackDirectiveRecognizesVersionedSelections(t *testing.T) {
 	}, &Agent{Role: RoleFrontend})
 
 	for _, snippet := range []string{
-		"Use Vite + TypeScript + Tailwind CSS for React",
+		"Use Vite + TypeScript + Tailwind CSS v3 for React",
 		"tailwind.config.js — REQUIRED",
-		"TAILWIND SETUP in vite.config.ts",
+		"postcss.config.js — REQUIRED",
+		"Tailwind v3 only",
 		"Tailwind CSS is REQUIRED for all visual styling",
 		"API_BASE_URL: The backend API runs at http://localhost:3001.",
 	} {
 		if !strings.Contains(directive, snippet) {
 			t.Fatalf("expected directive to contain %q, got %q", snippet, directive)
 		}
+	}
+	if strings.Contains(directive, "@tailwindcss/vite") {
+		t.Fatalf("expected directive to avoid Tailwind v4 vite plugin guidance, got %q", directive)
 	}
 }
 
