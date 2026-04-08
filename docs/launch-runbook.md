@@ -61,7 +61,7 @@ npm run test:launch
 
 ### 2. Platform build smoke
 
-Runs a sacrificial end-to-end app build with preview readiness enforced.
+Runs a sacrificial end-to-end app build with preview readiness enforced and asserts the completed-build detail agrees with the live build status.
 
 ```bash
 BASE_URL=https://api.apex-build.dev/api/v1 \
@@ -76,6 +76,8 @@ Expected result:
 - starts a frontend-preview build by default (`SMOKE_PROFILE=free_frontend`)
 - polls until terminal state
 - exits non-zero unless the build reaches `completed`
+- asserts `quality_gate_passed=true`
+- asserts completed-build history agrees with the terminal build status
 - prints the final build summary
 
 Treat any `failed`, `cancelled`, or `BUILD_DID_NOT_TERMINATE_WITHIN_POLL_WINDOW` result as a launch blocker until explained.
@@ -92,13 +94,28 @@ LOGIN_PASSWORD='replace-me' \
 ./scripts/run_platform_build_smoke.sh
 ```
 
+### 3. Platform canary matrix
+
+Runs the production-critical matrix instead of a single build:
+
+- free fast frontend-preview canary
+- paid balanced full-stack canary
+- paid max full-stack canary
+
+```bash
+BASE_URL=https://api.apex-build.dev/api/v1 \
+LOGIN_EMAIL='paid-canary@example.com' \
+LOGIN_PASSWORD='replace-me' \
+./scripts/run_platform_canary_matrix.sh
+```
+
 ## Scheduled Production Canary
 
 GitHub Actions now includes `.github/workflows/production-canary.yml`:
 
 - `Public Launch Smoke` runs the Playwright launch smoke against `apex-build.dev`
 - `Free Frontend Build Canary` runs the sacrificial free-tier preview build against production
-- `Paid Full-Stack Build Canary` runs only when `APEX_CANARY_EMAIL` and `APEX_CANARY_PASSWORD` secrets are configured
+- `Platform Build Canary (free-fast / paid-balanced / paid-max)` runs the build matrix against production
 
 Treat any failure in that workflow as a customer-facing reliability regression until explained.
 

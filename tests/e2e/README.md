@@ -56,3 +56,20 @@ Optional profile:
 
 - `SMOKE_PROFILE=paid_fullstack`
 - use `LOGIN_EMAIL` and `LOGIN_PASSWORD` to exercise a paid full-stack canary account
+
+## Platform canary matrix
+
+`../scripts/run_platform_canary_matrix.sh` runs the production-critical build paths as a small matrix instead of a single smoke:
+
+- free fast frontend-preview canary
+- paid balanced full-stack canary
+- paid max full-stack canary
+
+Example:
+
+```bash
+BASE_URL=https://api.apex-build.dev/api/v1 \
+LOGIN_EMAIL='paid-canary@example.com' \
+LOGIN_PASSWORD='replace-me' \
+./scripts/run_platform_canary_matrix.sh
+```

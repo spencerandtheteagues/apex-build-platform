@@ -71,44 +71,51 @@ jobs:
           PLAYWRIGHT_API_URL: https://api.apex-build.dev
         run: npm run test:preview-verify -- --project=chromium
 
-  free-frontend-build-canary:
-    name: Free Frontend Build Canary
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Run free-tier frontend preview canary
-        env:
-          BASE_URL: https://api.apex-build.dev/api/v1
-          MODE: fast
-          POWER_MODE: balanced
-          SMOKE_PROFILE: free_frontend
-          EXPECT_STATUS: completed
-          POLL_SECONDS: 10
-          MAX_POLLS: 120
-        run: ./scripts/run_platform_build_smoke.sh
-
-  paid-fullstack-build-canary:
-    name: Paid Full-Stack Build Canary
-    if: ${{ secrets.APEX_CANARY_EMAIL != '' && secrets.APEX_CANARY_PASSWORD != '' }}
+  platform-build-canary-matrix:
+    name: Platform Build Canary (${{ matrix.name }})
+    if: ${{ !matrix.requires_paid || (secrets.APEX_CANARY_EMAIL != '' && secrets.APEX_CANARY_PASSWORD != '') }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: free-fast
+            mode: fast
+            power_mode: fast
+            smoke_profile: free_frontend
+            poll_seconds: 10
+            max_polls: 120
+            requires_paid: false
+          - name: paid-balanced
+            mode: full
+            power_mode: balanced
+            smoke_profile: paid_fullstack
+            poll_seconds: 15
+            max_polls: 160
+            requires_paid: true
+          - name: paid-max
+            mode: full
+            power_mode: max
+            smoke_profile: paid_fullstack
+            poll_seconds: 15
+            max_polls: 180
+            requires_paid: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run paid full-stack preview canary
+      - name: Run platform build canary
         env:
           BASE_URL: https://api.apex-build.dev/api/v1
-          MODE: full
-          POWER_MODE: balanced
-          SMOKE_PROFILE: paid_fullstack
+          MODE: ${{ matrix.mode }}
+          POWER_MODE: ${{ matrix.power_mode }}
+          SMOKE_PROFILE: ${{ matrix.smoke_profile }}
           EXPECT_STATUS: completed
           LOGIN_EMAIL: ${{ secrets.APEX_CANARY_EMAIL }}
           LOGIN_PASSWORD: ${{ secrets.APEX_CANARY_PASSWORD }}
           LOGIN_FULL_NAME: APEX Canary
-          POLL_SECONDS: 15
-          MAX_POLLS: 160
+          POLL_SECONDS: ${{ matrix.poll_seconds }}
+          MAX_POLLS: ${{ matrix.max_polls }}
+          PROJECT_NAME: canary-${{ matrix.name }}
         run: ./scripts/run_platform_build_smoke.sh

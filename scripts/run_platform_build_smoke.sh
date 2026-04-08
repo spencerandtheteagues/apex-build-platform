@@ -11,6 +11,7 @@ LOGIN_EMAIL="${LOGIN_EMAIL:-}"
 LOGIN_PASSWORD="${LOGIN_PASSWORD:-}"
 LOGIN_FULL_NAME="${LOGIN_FULL_NAME:-Platform Test}"
 EXPECT_STATUS="${EXPECT_STATUS:-completed}"
+ASSERT_FRONTEND_FILES="${ASSERT_FRONTEND_FILES:-}"
 
 if [[ -n "${POWER_MODE:-}" ]]; then
   EFFECTIVE_POWER_MODE="$POWER_MODE"
@@ -59,6 +60,148 @@ refresh_auth_args() {
   fi
   if [[ -n "${CSRF_TOKEN}" && "${CSRF_TOKEN}" != "null" ]]; then
     auth_args+=(-H "X-CSRF-Token: $CSRF_TOKEN")
+  fi
+}
+
+json_string_field() {
+  local file="$1"
+  local expr="$2"
+  jq -r "$expr // empty" "$file" 2>/dev/null || true
+}
+
+json_bool_field() {
+  local file="$1"
+  local expr="$2"
+  jq -r "if ($expr) == true then \"true\" elif ($expr) == false then \"false\" else \"\" end" "$file" 2>/dev/null || true
+}
+
+require_true_field() {
+  local file="$1"
+  local expr="$2"
+  local label="$3"
+  local actual
+  actual="$(json_bool_field "$file" "$expr")"
+  if [[ "$actual" != "true" ]]; then
+    echo "ASSERTION_FAILED: $label expected true, got '${actual:-unset}'" >&2
+    jq '{status,progress,error,quality_gate_passed,current_phase,policy_state,capability_state,build_contract,approvals,blockers,files_count}' "$file" 2>/dev/null || cat "$file"
+    exit 1
+  fi
+}
+
+require_false_field() {
+  local file="$1"
+  local expr="$2"
+  local label="$3"
+  local actual
+  actual="$(json_bool_field "$file" "$expr")"
+  if [[ "$actual" == "true" ]]; then
+    echo "ASSERTION_FAILED: $label expected false, got true" >&2
+    jq '{status,progress,error,quality_gate_passed,current_phase,policy_state,capability_state,build_contract,approvals,blockers,files_count}' "$file" 2>/dev/null || cat "$file"
+    exit 1
+  fi
+}
+
+require_absent_array_match() {
+  local file="$1"
+  local expr="$2"
+  local target="$3"
+  local label="$4"
+  if ! jq -e --arg target "$target" "$expr | index(\$target) | not" "$file" >/dev/null 2>&1; then
+    echo "ASSERTION_FAILED: $label unexpectedly contains '$target'" >&2
+    jq '{approvals,blockers,policy_state,capability_state,build_contract}' "$file" 2>/dev/null || cat "$file"
+    exit 1
+  fi
+}
+
+require_file_path() {
+  local file="$1"
+  local path="$2"
+  if ! jq -e --arg path "$path" '(.files // []) | map(.path // "") | index($path) != null' "$file" >/dev/null 2>&1; then
+    echo "ASSERTION_FAILED: expected generated file '$path'" >&2
+    jq '{status,files_count,files}' "$file" 2>/dev/null || cat "$file"
+    exit 1
+  fi
+}
+
+assert_completed_build_contract() {
+  local detail_file="$1"
+  local completed_file="$2"
+
+  local detail_status completed_status detail_files_count completed_files_count
+  detail_status="$(json_string_field "$detail_file" '.status')"
+  completed_status="$(json_string_field "$completed_file" '.status')"
+  detail_files_count="$(json_string_field "$detail_file" '.files_count')"
+  completed_files_count="$(json_string_field "$completed_file" '.files_count')"
+
+  if [[ "$detail_status" != "$EXPECT_STATUS" ]]; then
+    echo "ASSERTION_FAILED: build detail status expected '$EXPECT_STATUS', got '${detail_status:-unset}'" >&2
+    jq '{status,progress,error,current_phase,quality_gate_passed}' "$detail_file" 2>/dev/null || cat "$detail_file"
+    exit 1
+  fi
+  if [[ "$completed_status" != "$EXPECT_STATUS" ]]; then
+    echo "ASSERTION_FAILED: completed-build status expected '$EXPECT_STATUS', got '${completed_status:-unset}'" >&2
+    jq '{status,progress,error,current_phase,quality_gate_passed}' "$completed_file" 2>/dev/null || cat "$completed_file"
+    exit 1
+  fi
+
+  require_true_field "$detail_file" '.quality_gate_passed' 'build detail quality_gate_passed'
+  require_true_field "$completed_file" '.quality_gate_passed' 'completed build quality_gate_passed'
+
+  if [[ "${detail_files_count:-0}" -lt 1 ]]; then
+    echo "ASSERTION_FAILED: build detail files_count must be > 0, got '${detail_files_count:-unset}'" >&2
+    jq '{status,files_count,files}' "$detail_file" 2>/dev/null || cat "$detail_file"
+    exit 1
+  fi
+  if [[ "${completed_files_count:-0}" -lt 1 ]]; then
+    echo "ASSERTION_FAILED: completed build files_count must be > 0, got '${completed_files_count:-unset}'" >&2
+    jq '{status,files_count,files}' "$completed_file" 2>/dev/null || cat "$completed_file"
+    exit 1
+  fi
+
+  if [[ "$SMOKE_PROFILE" == "free_frontend" ]]; then
+    require_false_field "$detail_file" '.upgrade_required' 'free frontend detail upgrade_required'
+    require_false_field "$completed_file" '.upgrade_required' 'free frontend completed upgrade_required'
+    require_false_field "$detail_file" '.capability_state.requires_backend_runtime' 'free frontend detail requires_backend_runtime'
+    require_false_field "$detail_file" '.capability_state.requires_database' 'free frontend detail requires_database'
+    require_false_field "$detail_file" '.capability_state.requires_storage' 'free frontend detail requires_storage'
+    require_false_field "$detail_file" '.capability_state.requires_jobs' 'free frontend detail requires_jobs'
+    require_false_field "$detail_file" '.capability_state.requires_billing' 'free frontend detail requires_billing'
+    require_false_field "$detail_file" '.capability_state.requires_realtime' 'free frontend detail requires_realtime'
+    require_false_field "$detail_file" '.capability_state.requires_publish' 'free frontend detail requires_publish'
+    require_absent_array_match "$detail_file" '(.approvals // []) | map(.code // .type // .id // "")' 'full_stack_upgrade' 'free frontend approvals'
+    require_absent_array_match "$detail_file" '(.approvals // []) | map(.code // .type // .id // "")' 'plan_upgrade_acknowledgement' 'free frontend approvals'
+    require_absent_array_match "$detail_file" '(.approvals // []) | map(.code // .type // .id // "")' 'file_storage' 'free frontend approvals'
+    require_absent_array_match "$detail_file" '(.blockers // []) | map(.id // .code // .type // "")' 'plan-upgrade-required' 'free frontend blockers'
+
+    local delivery_mode
+    delivery_mode="$(json_string_field "$detail_file" '.build_contract.delivery_mode')"
+    if [[ -n "$delivery_mode" && "$delivery_mode" != "frontend_preview_only" ]]; then
+      echo "ASSERTION_FAILED: free frontend delivery mode expected frontend_preview_only, got '$delivery_mode'" >&2
+      jq '{build_contract,policy_state,capability_state}' "$detail_file" 2>/dev/null || cat "$detail_file"
+      exit 1
+    fi
+
+    local expect_frontend_files
+    expect_frontend_files="${ASSERT_FRONTEND_FILES:-1}"
+    if [[ "$expect_frontend_files" == "1" ]]; then
+      require_file_path "$detail_file" "index.html"
+      require_file_path "$detail_file" "package.json"
+      require_file_path "$detail_file" "src/main.tsx"
+      require_file_path "$detail_file" "src/App.tsx"
+    fi
+  fi
+
+  if [[ "$SMOKE_PROFILE" == "paid_fullstack" ]]; then
+    require_false_field "$detail_file" '.upgrade_required' 'paid fullstack detail upgrade_required'
+    require_false_field "$completed_file" '.upgrade_required' 'paid fullstack completed upgrade_required'
+
+    local paid_delivery_mode
+    paid_delivery_mode="$(json_string_field "$detail_file" '.build_contract.delivery_mode')"
+    if [[ "$paid_delivery_mode" == "frontend_preview_only" ]]; then
+      echo "ASSERTION_FAILED: paid full-stack canary should not finish in frontend_preview_only mode" >&2
+      jq '{build_contract,policy_state,capability_state}' "$detail_file" 2>/dev/null || cat "$detail_file"
+      exit 1
+    fi
   fi
 }
 
@@ -206,6 +349,9 @@ if [[ "$final_status" == "completed" ]]; then
     echo "COMPLETED_BUILD_STATUS_MISMATCH=$completed_status"
     exit 1
   fi
+
+  assert_completed_build_contract /tmp/apex_build_detail.json /tmp/apex_build_completed.json
+  echo "ASSERTIONS_PASSED profile=$SMOKE_PROFILE power_mode=$EFFECTIVE_POWER_MODE"
 fi
 
 if [[ "$final_status" == "$EXPECT_STATUS" ]]; then
