@@ -59,13 +59,13 @@ type compileLoopResult struct {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const (
-	cvTscTimeout     = 40 * time.Second
-	cvBuildTimeout   = 90 * time.Second
-	cvInstallTimeout = 2 * time.Minute
-	cvRepairTokens   = 4096
-	cvMaxErrorsPerFile = 3  // cap errors per file in the repair prompt
-	cvMaxFilesInPrompt = 5  // cap distinct files in the repair prompt
-	cvContextLines     = 8  // source lines to show around each error location
+	cvTscTimeout       = 40 * time.Second
+	cvBuildTimeout     = 90 * time.Second
+	cvInstallTimeout   = 2 * time.Minute
+	cvRepairTokens     = 4096
+	cvMaxErrorsPerFile = 3 // cap errors per file in the repair prompt
+	cvMaxFilesInPrompt = 5 // cap distinct files in the repair prompt
+	cvContextLines     = 8 // source lines to show around each error location
 )
 
 const compileRepairSystemPrompt = `You are a TypeScript/React build repair expert.
@@ -95,10 +95,22 @@ func maxCompileAttempts(mode PowerMode) int {
 // so the downstream structural validation can surface them via its own ladder.
 func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]GeneratedFile, now time.Time) compileLoopResult {
 	result := compileLoopResult{}
+	if build == nil || allFiles == nil {
+		result.SkipReason = "missing build context"
+		return result
+	}
 
 	// Guard: must have frontend files and package.json to attempt compilation.
 	if !cvHasFrontendBuildableFiles(*allFiles) {
 		result.SkipReason = "no frontend buildable files"
+		return result
+	}
+
+	// Guard: inline repair requires a configured AI router. Production managers
+	// always have one; unit tests and recovery helpers sometimes do not.
+	if am == nil || am.aiRouter == nil {
+		result.SkipReason = "ai router not configured"
+		log.Printf("[compile_validator] build %s: ai router not configured — skipping compile validation", build.ID)
 		return result
 	}
 
@@ -675,12 +687,12 @@ func (am *AgentManager) cvBroadcastResult(build *Build, passed bool, errors []Pa
 		BuildID:   build.ID,
 		Timestamp: time.Now(),
 		Data: map[string]any{
-			"phase":                      "compile_validation",
-			"status":                     string(BuildReviewing),
-			"progress":                   95,
-			"message":                    msg,
-			"compile_validation_passed":  passed,
-			"compile_validation_errors":  len(errors),
+			"phase":                     "compile_validation",
+			"status":                    string(BuildReviewing),
+			"progress":                  95,
+			"message":                   msg,
+			"compile_validation_passed": passed,
+			"compile_validation_errors": len(errors),
 		},
 	})
 }

@@ -1,6 +1,9 @@
 package agents
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestMaxCompileAttemptsByPowerMode(t *testing.T) {
 	t.Parallel()
@@ -25,5 +28,45 @@ func TestMaxCompileAttemptsByPowerMode(t *testing.T) {
 				t.Fatalf("maxCompileAttempts(%q) = %d, want %d", tt.mode, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRunCompileValidationLoopSkipsWhenAIRouterNil(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "compile-validator-nil-router",
+		PowerMode: PowerBalanced,
+	}
+	files := []GeneratedFile{
+		{
+			Path: "package.json",
+			Content: `{
+  "name": "compile-validator-nil-router",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  }
+}`,
+		},
+		{
+			Path:    "src/main.tsx",
+			Content: `console.log("preview");`,
+		},
+	}
+
+	result := am.runCompileValidationLoop(build, &files, time.Now())
+	if result.Passed {
+		t.Fatalf("expected compile loop to skip when aiRouter is nil")
+	}
+	if result.SkipReason != "ai router not configured" {
+		t.Fatalf("expected skip reason for nil aiRouter, got %q", result.SkipReason)
+	}
+	if build.CompileValidationPassed {
+		t.Fatalf("expected compile validation passed flag to remain false")
+	}
+	if build.CompileValidationAttempts != 0 {
+		t.Fatalf("expected compile validation attempts to remain 0, got %d", build.CompileValidationAttempts)
 	}
 }

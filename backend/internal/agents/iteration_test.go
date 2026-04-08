@@ -202,6 +202,134 @@ func TestPersistBuildSnapshotDoesNotOverwriteNewerTerminalSnapshot(t *testing.T)
 	}
 }
 
+func TestPersistBuildSnapshotDoesNotDowngradeTerminalSuccessWhenFailureUpdatedAtIsLater(t *testing.T) {
+	db := openBuildTestDB(t)
+	manager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	})
+	manager.db = db
+
+	now := time.Now().UTC()
+	completedAt := now.Add(-10 * time.Second)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "snapshot-success-lock-build",
+		UserID:      1,
+		Description: "Terminal success should not be downgraded",
+		Status:      string(BuildCompleted),
+		Mode:        string(ModeFull),
+		PowerMode:   string(PowerBalanced),
+		Progress:    100,
+		Error:       "",
+		CreatedAt:   now.Add(-2 * time.Minute),
+		UpdatedAt:   now,
+		CompletedAt: &completedAt,
+	}).Error; err != nil {
+		t.Fatalf("create completed snapshot: %v", err)
+	}
+
+	build := &Build{
+		ID:          "snapshot-success-lock-build",
+		UserID:      1,
+		Status:      BuildFailed,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Description: "Later failed write should lose to terminal success",
+		Progress:    97,
+		Error:       "preview verification failed after repair attempt",
+		Agents:      map[string]*Agent{},
+		Tasks:       []*Task{},
+		Checkpoints: []*Checkpoint{},
+		CreatedAt:   now.Add(-3 * time.Minute),
+		UpdatedAt:   now.Add(15 * time.Second),
+	}
+
+	manager.persistBuildSnapshot(build, nil)
+
+	var snapshot models.CompletedBuild
+	if err := db.Where("build_id = ?", build.ID).First(&snapshot).Error; err != nil {
+		t.Fatalf("fetch snapshot: %v", err)
+	}
+	if snapshot.Status != string(BuildCompleted) {
+		t.Fatalf("expected terminal success to survive, got %s", snapshot.Status)
+	}
+	if snapshot.Progress != 100 {
+		t.Fatalf("expected progress 100 to survive, got %d", snapshot.Progress)
+	}
+	if strings.TrimSpace(snapshot.Error) != "" {
+		t.Fatalf("expected terminal success error to remain empty, got %q", snapshot.Error)
+	}
+	if snapshot.CompletedAt == nil {
+		t.Fatalf("expected completed_at to remain populated")
+	}
+}
+
+func TestPersistBuildSnapshotAllowsTerminalSuccessToOverwriteStaleFailureEvenWhenSuccessUpdatedAtIsEarlier(t *testing.T) {
+	db := openBuildTestDB(t)
+	manager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	})
+	manager.db = db
+
+	now := time.Now().UTC()
+	failureCompletedAt := now.Add(-5 * time.Second)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "snapshot-self-heal-build",
+		UserID:      1,
+		Description: "Late stale failure should yield to live completion",
+		Status:      string(BuildFailed),
+		Mode:        string(ModeFast),
+		PowerMode:   string(PowerMax),
+		Progress:    97,
+		Error:       "preview verification failed after repair attempt",
+		CreatedAt:   now.Add(-2 * time.Minute),
+		UpdatedAt:   now.Add(15 * time.Second),
+		CompletedAt: &failureCompletedAt,
+	}).Error; err != nil {
+		t.Fatalf("create stale failure snapshot: %v", err)
+	}
+
+	successCompletedAt := now.Add(10 * time.Second)
+	build := &Build{
+		ID:          "snapshot-self-heal-build",
+		UserID:      1,
+		Status:      BuildCompleted,
+		Mode:        ModeFast,
+		PowerMode:   PowerMax,
+		Description: "Live terminal completion should win",
+		Progress:    100,
+		Error:       "",
+		Agents:      map[string]*Agent{},
+		Tasks:       []*Task{},
+		Checkpoints: []*Checkpoint{},
+		CreatedAt:   now.Add(-3 * time.Minute),
+		UpdatedAt:   now,
+		CompletedAt: &successCompletedAt,
+	}
+
+	manager.persistBuildSnapshot(build, nil)
+
+	var snapshot models.CompletedBuild
+	if err := db.Where("build_id = ?", build.ID).First(&snapshot).Error; err != nil {
+		t.Fatalf("fetch snapshot: %v", err)
+	}
+	if snapshot.Status != string(BuildCompleted) {
+		t.Fatalf("expected live success to overwrite stale failure, got %s", snapshot.Status)
+	}
+	if snapshot.Progress != 100 {
+		t.Fatalf("expected progress 100 after overwrite, got %d", snapshot.Progress)
+	}
+	if strings.TrimSpace(snapshot.Error) != "" {
+		t.Fatalf("expected stale failure error to clear, got %q", snapshot.Error)
+	}
+	if snapshot.CompletedAt == nil {
+		t.Fatalf("expected completed_at to be restored")
+	}
+}
+
 func TestRestoreBuildSessionFromSnapshotRequeuesInterruptedTasks(t *testing.T) {
 	db := openBuildTestDB(t)
 	manager := newTestIterationManager(&stubPreflight{

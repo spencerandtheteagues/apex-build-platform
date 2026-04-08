@@ -773,15 +773,26 @@ func writeBuildActionSessionError(c *gin.Context, err error) {
 	}
 }
 
+func completedBuildSnapshotRepresentsSuccess(snapshot *models.CompletedBuild) bool {
+	if snapshot == nil || snapshot.CompletedAt == nil {
+		return false
+	}
+	if strings.TrimSpace(snapshot.Error) != "" {
+		return false
+	}
+	return BuildStatus(strings.TrimSpace(snapshot.Status)) != BuildCancelled
+}
+
 func presentedSnapshotStatus(snapshot *models.CompletedBuild) BuildStatus {
 	if snapshot == nil {
 		return BuildCompleted
 	}
-	if snapshot.CompletedAt != nil && strings.TrimSpace(snapshot.Error) == "" {
-		if BuildStatus(strings.TrimSpace(snapshot.Status)) == BuildCancelled {
-			return BuildCancelled
-		}
+	if completedBuildSnapshotRepresentsSuccess(snapshot) {
 		return BuildCompleted
+	}
+	if snapshot.CompletedAt != nil && strings.TrimSpace(snapshot.Error) == "" &&
+		BuildStatus(strings.TrimSpace(snapshot.Status)) == BuildCancelled {
+		return BuildCancelled
 	}
 	return normalizeRestoredBuildStatus(snapshot)
 }
@@ -2299,6 +2310,7 @@ func (h *BuildHandler) shouldPreferLiveCompletedBuildResponse(snapshot *models.C
 	liveBuild.mu.RLock()
 	liveStatus := liveBuild.Status
 	liveUpdatedAt := liveBuild.UpdatedAt
+	liveError := strings.TrimSpace(liveBuild.Error)
 	liveBuild.mu.RUnlock()
 
 	if isActiveBuildStatus(string(liveStatus)) {
@@ -2308,6 +2320,15 @@ func (h *BuildHandler) shouldPreferLiveCompletedBuildResponse(snapshot *models.C
 	snapshotStatus := presentedSnapshotStatus(snapshot)
 	if isActiveBuildStatus(string(snapshotStatus)) {
 		return true
+	}
+
+	liveRepresentsSuccess := liveStatus == BuildCompleted && liveError == ""
+	snapshotRepresentsSuccess := completedBuildSnapshotRepresentsSuccess(snapshot)
+	if liveRepresentsSuccess && !snapshotRepresentsSuccess {
+		return true
+	}
+	if snapshotRepresentsSuccess && !liveRepresentsSuccess {
+		return false
 	}
 
 	return snapshot.UpdatedAt.Before(liveUpdatedAt)

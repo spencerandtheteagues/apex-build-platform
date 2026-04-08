@@ -12884,13 +12884,23 @@ func (am *AgentManager) persistBuildSnapshotWithRetry(build *Build, files []Gene
 		"updated_at":       snapshot.UpdatedAt,
 	}
 
+	excludedSuccessSQL := "(excluded.completed_at IS NOT NULL AND COALESCE(TRIM(excluded.error), '') = '' AND excluded.status <> 'cancelled')"
+	currentSuccessSQL := "(completed_builds.completed_at IS NOT NULL AND COALESCE(TRIM(completed_builds.error), '') = '' AND completed_builds.status <> 'cancelled')"
+	snapshotPrecedenceSQL := fmt.Sprintf(
+		"((%s AND NOT %s) OR (excluded.updated_at >= completed_builds.updated_at AND NOT (%s AND NOT %s)))",
+		excludedSuccessSQL,
+		currentSuccessSQL,
+		currentSuccessSQL,
+		excludedSuccessSQL,
+	)
+
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
 		lastErr = am.db.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "build_id"}},
 			DoUpdates: clause.Assignments(assignments),
 			Where: clause.Where{Exprs: []clause.Expression{
-				clause.Expr{SQL: "excluded.updated_at >= completed_builds.updated_at"},
+				clause.Expr{SQL: snapshotPrecedenceSQL},
 			}},
 		}).Create(snapshot).Error
 		if lastErr == nil {
