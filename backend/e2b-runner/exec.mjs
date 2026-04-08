@@ -69,6 +69,8 @@ async function runCommand(apiKey, request) {
 
   try {
     const result = await sandbox.commands.run(request.command, {
+      cwd: request.cwd,
+      envs: request.env,
       timeoutMs: request.timeoutMs ?? 30_000,
       requestTimeoutMs: Math.max((request.timeoutMs ?? 30_000) + 10_000, 60_000),
     })
@@ -88,6 +90,89 @@ async function runCommand(apiKey, request) {
     }
     throw error
   }
+}
+
+async function startCommand(apiKey, request) {
+  if (!request.sandboxId) {
+    throw new Error('sandboxId is required for start')
+  }
+  if (!request.command) {
+    throw new Error('command is required for start')
+  }
+
+  const sandbox = await Sandbox.connect(request.sandboxId, {
+    apiKey,
+    requestTimeoutMs: Math.max((request.timeoutMs ?? 30_000) + 10_000, 60_000),
+  })
+
+  const handle = await sandbox.commands.start(request.command, {
+    cwd: request.cwd,
+    envs: request.env,
+    timeoutMs: request.timeoutMs ?? 30_000,
+    requestTimeoutMs: Math.max((request.timeoutMs ?? 30_000) + 10_000, 60_000),
+  })
+
+  const host = request.port ? sandbox.getHost(request.port) : ''
+  respond({
+    pid: handle.pid,
+    host,
+    url: host ? `https://${host}` : '',
+  })
+}
+
+async function waitForCommand(apiKey, request) {
+  if (!request.sandboxId) {
+    throw new Error('sandboxId is required for wait')
+  }
+  if (!request.pid) {
+    throw new Error('pid is required for wait')
+  }
+
+  const sandbox = await Sandbox.connect(request.sandboxId, {
+    apiKey,
+    requestTimeoutMs: Math.max((request.timeoutMs ?? 30_000) + 10_000, 60_000),
+  })
+
+  try {
+    const handle = await sandbox.commands.connect(request.pid, {
+      timeoutMs: request.timeoutMs ?? 30_000,
+      requestTimeoutMs: Math.max((request.timeoutMs ?? 30_000) + 10_000, 60_000),
+    })
+    const result = await handle.wait()
+    respond({
+      exitCode: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    })
+  } catch (error) {
+    if (error instanceof CommandExitError) {
+      respond({
+        exitCode: error.exitCode,
+        stdout: error.stdout,
+        stderr: error.stderr,
+      })
+      return
+    }
+    throw error
+  }
+}
+
+async function killProcess(apiKey, request) {
+  if (!request.sandboxId) {
+    throw new Error('sandboxId is required for kill_process')
+  }
+  if (!request.pid) {
+    throw new Error('pid is required for kill_process')
+  }
+
+  const sandbox = await Sandbox.connect(request.sandboxId, {
+    apiKey,
+    requestTimeoutMs: 60_000,
+  })
+  const killed = await sandbox.commands.kill(request.pid, {
+    requestTimeoutMs: 60_000,
+  })
+  respond({ killed })
 }
 
 async function killSandbox(apiKey, request) {
@@ -115,6 +200,15 @@ async function main() {
       break
     case 'run':
       await runCommand(apiKey, request)
+      break
+    case 'start':
+      await startCommand(apiKey, request)
+      break
+    case 'wait':
+      await waitForCommand(apiKey, request)
+      break
+    case 'kill_process':
+      await killProcess(apiKey, request)
       break
     case 'kill':
       await killSandbox(apiKey, request)

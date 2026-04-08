@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -148,6 +149,7 @@ type ProcessHandle struct {
 	Pid        int
 	StdoutPipe io.ReadCloser
 	StderrPipe io.ReadCloser
+	ReadyURL   string
 	// Wait blocks until the process exits. Returns exit code and error.
 	Wait func() (exitCode int, err error)
 	// SignalStop sends a graceful termination signal (SIGTERM on host).
@@ -208,6 +210,22 @@ func (h *hostRuntime) StartProcess(cfg *ProcessStartConfig) (*ProcessHandle, err
 // NewServerRunner creates a new server runner manager with the default host runtime.
 func NewServerRunner(db *gorm.DB) *ServerRunner {
 	return NewServerRunnerWithRuntime(db, &hostRuntime{})
+}
+
+// NewServerRunnerFromEnv creates a ServerRunner using the best available runtime
+// for the current environment. When E2B is configured, backend preview processes
+// run in remote managed sandboxes instead of host-local processes.
+func NewServerRunnerFromEnv(db *gorm.DB) *ServerRunner {
+	rt, err := newRuntimeBackendFromEnv()
+	if err != nil {
+		log.Printf("[server_runner] remote preview runtime unavailable, falling back to host runtime: %v", err)
+		return NewServerRunner(db)
+	}
+	if rt == nil {
+		return NewServerRunner(db)
+	}
+	log.Printf("[server_runner] using %s runtime for backend preview", rt.Name())
+	return NewServerRunnerWithRuntime(db, rt)
 }
 
 // NewServerRunnerWithRuntime creates a ServerRunner with a custom RuntimeBackend.
@@ -469,9 +487,11 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		if err := sr.writeProjectFiles(ctx, config.ProjectID, workDir); err != nil {
 			return nil, fmt.Errorf("failed to write project files: %w", err)
 		}
-		// Install dependencies before starting the server — this is what makes
-		// `npm run start`, `python main.py`, and `go run .` actually work.
-		sr.installDependencies(workDir)
+		if sr.shouldInstallDependenciesLocally() {
+			// Install dependencies before starting the server — this is what makes
+			// `npm run start`, `python main.py`, and `go run .` actually work.
+			sr.installDependencies(workDir)
+		}
 	}
 
 	// Build command and args based on server type
@@ -574,6 +594,9 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		stopChan:    make(chan struct{}),
 		stoppedChan: make(chan struct{}),
 	}
+	if strings.TrimSpace(handle.ReadyURL) != "" {
+		proc.URL = strings.TrimSpace(handle.ReadyURL)
+	}
 
 	// Start output capture goroutines
 	go sr.captureOutput(handle.StdoutPipe, stdout, proc)
@@ -594,8 +617,14 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 		metrics.RecordPreviewBackendProcessExit(classifyPreviewBackendExitReason(waitErr, exitCode))
 	}()
 
-	// Wait for port to be ready — 90 seconds to allow for JIT compilation and slow starts
-	ready := sr.waitForPort(port, 90*time.Second, proc.stopChan)
+	// Wait for the runtime to become reachable — local ports for host runtime,
+	// remote URLs for managed runtimes such as E2B.
+	ready := false
+	if strings.TrimSpace(handle.ReadyURL) != "" {
+		ready = sr.waitForURL(handle.ReadyURL, 90*time.Second, proc.stopChan)
+	} else {
+		ready = sr.waitForPort(port, 90*time.Second, proc.stopChan)
+	}
 	proc.Ready = ready
 
 	if !ready {
@@ -610,6 +639,9 @@ func (sr *ServerRunner) Start(ctx context.Context, config *ServerConfig) (*Serve
 			sr.releasePort(config.ProjectID)
 			sr.killProcess(proc)
 			metrics.RecordPreviewBackendStart("not_ready_timeout")
+			if strings.TrimSpace(handle.ReadyURL) != "" {
+				return nil, fmt.Errorf("server did not become reachable at %s within 90 seconds", strings.TrimSpace(handle.ReadyURL))
+			}
 			return nil, fmt.Errorf("server did not start listening on port %d within 90 seconds", port)
 		}
 	}
@@ -877,6 +909,47 @@ func (sr *ServerRunner) waitForPort(port int, timeout time.Duration, stop <-chan
 		}
 	}
 	return false
+}
+
+func (sr *ServerRunner) waitForURL(target string, timeout time.Duration, stop <-chan struct{}) bool {
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 2 * time.Second}
+	for time.Now().Before(deadline) {
+		select {
+		case <-stop:
+			return false
+		default:
+		}
+
+		reqCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, target, nil)
+		if err == nil {
+			resp, err := client.Do(req)
+			if err == nil {
+				_ = resp.Body.Close()
+				cancel()
+				return true
+			}
+		}
+		cancel()
+
+		select {
+		case <-stop:
+			return false
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	return false
+}
+
+func (sr *ServerRunner) shouldInstallDependenciesLocally() bool {
+	type localInstallerPreference interface {
+		RequiresLocalDependencyInstall() bool
+	}
+	if pref, ok := sr.runtime.(localInstallerPreference); ok {
+		return pref.RequiresLocalDependencyInstall()
+	}
+	return true
 }
 
 func (sr *ServerRunner) captureOutput(pipe io.ReadCloser, buf *bytes.Buffer, proc *ServerProcess) {

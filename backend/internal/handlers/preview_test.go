@@ -3,10 +3,12 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"apex-build/internal/preview"
@@ -50,6 +52,48 @@ func newPreviewHandlerTestFixture(t *testing.T, requireSandbox bool) (*PreviewHa
 	}
 
 	return handler, project.ID
+}
+
+type fakePreviewRuntime struct {
+	name      string
+	readyURL  string
+	waitCh    chan struct{}
+	waitError error
+}
+
+func newFakePreviewRuntime(name, readyURL string) *fakePreviewRuntime {
+	return &fakePreviewRuntime{
+		name:     name,
+		readyURL: readyURL,
+		waitCh:   make(chan struct{}),
+	}
+}
+
+func (f *fakePreviewRuntime) Name() string { return f.name }
+
+func (f *fakePreviewRuntime) StartProcess(cfg *preview.ProcessStartConfig) (*preview.ProcessHandle, error) {
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() {
+			close(f.waitCh)
+		})
+	}
+
+	return &preview.ProcessHandle{
+		Pid:        4242,
+		StdoutPipe: io.NopCloser(strings.NewReader("")),
+		StderrPipe: io.NopCloser(strings.NewReader("")),
+		ReadyURL:   f.readyURL,
+		Wait: func() (int, error) {
+			<-f.waitCh
+			if f.waitError != nil {
+				return 1, f.waitError
+			}
+			return 0, nil
+		},
+		SignalStop: stop,
+		ForceKill:  stop,
+	}, nil
 }
 
 func TestPreviewHandlerRejectsExplicitSandboxWithoutDocker(t *testing.T) {
@@ -134,6 +178,21 @@ func TestPreviewHandlerGetDockerStatusIncludesSecureModeFlags(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"backend_preview_available":true`)
 }
 
+func TestPreviewHandlerGetDockerStatusTreatsE2BRuntimeAsBackendPreviewAvailable(t *testing.T) {
+	handler, _ := newPreviewHandlerTestFixture(t, true)
+	handler.serverRunner = preview.NewServerRunnerWithRuntime(handler.db, newFakePreviewRuntime("e2b", ""))
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/preview/docker/status", nil)
+
+	handler.GetDockerStatus(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"backend_preview_available":true`)
+	require.Contains(t, recorder.Body.String(), `"backend_preview_runtime":"e2b"`)
+}
+
 func TestPreviewHandlerBuildProxyURLUsesForwardedPublicOrigin(t *testing.T) {
 	handler, projectID := newPreviewHandlerTestFixture(t, false)
 
@@ -196,4 +255,25 @@ func TestApplyPreviewResponseHeadersAllowsSameOriginStorageForHTML(t *testing.T)
 	require.Equal(t, "null", headers.Get("Access-Control-Allow-Origin"))
 	require.Contains(t, headers.Get("Content-Security-Policy"), "sandbox")
 	require.Contains(t, headers.Get("Content-Security-Policy"), "allow-same-origin")
+}
+
+func TestBackendProxyTargetURLPrefersRemoteRuntimeURL(t *testing.T) {
+	target, err := backendProxyTargetURL(&preview.ServerStatus{
+		Running: true,
+		Port:    9100,
+		URL:     "https://abc123.preview.e2b.dev",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "https://abc123.preview.e2b.dev", target.String())
+}
+
+func TestBackendProxyTargetURLFallsBackToLocalhostPort(t *testing.T) {
+	target, err := backendProxyTargetURL(&preview.ServerStatus{
+		Running: true,
+		Port:    9100,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "http://127.0.0.1:9100", target.String())
 }

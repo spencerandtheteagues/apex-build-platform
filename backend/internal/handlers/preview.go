@@ -41,7 +41,7 @@ func NewPreviewHandler(db *gorm.DB, server *preview.PreviewServer, authService *
 	return &PreviewHandler{
 		db:             db,
 		server:         server,
-		serverRunner:   preview.NewServerRunner(db),
+		serverRunner:   preview.NewServerRunnerFromEnv(db),
 		bundlerService: bundler.NewService(db),
 		authService:    authService,
 		requireSandbox: previewSandboxRequired(),
@@ -54,7 +54,7 @@ func NewPreviewHandlerWithFactory(db *gorm.DB, factory *preview.PreviewServerFac
 		db:             db,
 		server:         factory.GetProcessServer(),
 		factory:        factory,
-		serverRunner:   preview.NewServerRunner(db),
+		serverRunner:   preview.NewServerRunnerFromEnv(db),
 		bundlerService: bundler.NewService(db),
 		authService:    authService,
 		requireSandbox: previewSandboxRequired(),
@@ -997,7 +997,7 @@ func (h *PreviewHandler) ProxyBackend(c *gin.Context) {
 		return
 	}
 
-	targetURL, parseErr := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", serverStatus.Port))
+	targetURL, parseErr := backendProxyTargetURL(serverStatus)
 	if parseErr != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build backend proxy"})
 		return
@@ -1029,6 +1029,17 @@ func (h *PreviewHandler) ProxyBackend(c *gin.Context) {
 func (h *PreviewHandler) buildBackendProxyURL(c *gin.Context, projectID uint) string {
 	scheme, host := previewPublicBase(c)
 	return fmt.Sprintf("%s://%s/api/v1/preview/backend-proxy/%d", scheme, host, projectID)
+}
+
+func backendProxyTargetURL(serverStatus *preview.ServerStatus) (*url.URL, error) {
+	if serverStatus == nil {
+		return nil, fmt.Errorf("backend server not running")
+	}
+	target := strings.TrimSpace(serverStatus.URL)
+	if target == "" {
+		target = fmt.Sprintf("http://127.0.0.1:%d", serverStatus.Port)
+	}
+	return url.Parse(target)
 }
 
 func (h *PreviewHandler) rewritePreviewHTMLForProxy(html string, projectID uint) string {
@@ -1193,6 +1204,7 @@ func (h *PreviewHandler) GetDockerStatus(c *gin.Context) {
 			"sandbox_degraded":          h.sandboxFallbackActive(),
 			"backend_preview_available": h.backendPreviewAvailable(),
 			"backend_preview_reason":    h.backendPreviewDisabledReason(),
+			"backend_preview_runtime":   h.backendPreviewRuntime(),
 		})
 		return
 	}
@@ -1212,6 +1224,7 @@ func (h *PreviewHandler) GetDockerStatus(c *gin.Context) {
 		"sandbox_degraded":          h.sandboxFallbackActive(),
 		"backend_preview_available": h.backendPreviewAvailable(),
 		"backend_preview_reason":    h.backendPreviewDisabledReason(),
+		"backend_preview_runtime":   h.backendPreviewRuntime(),
 	})
 }
 
@@ -1241,20 +1254,51 @@ func (h *PreviewHandler) resolveRequestedPreviewSandbox(requested bool) (bool, e
 }
 
 func (h *PreviewHandler) backendPreviewAvailable() bool {
-	return h.serverRunner != nil && (!h.requireSandbox || h.sandboxFallbackActive())
+	if h.serverRunner == nil {
+		return false
+	}
+	if !h.requireSandbox {
+		return true
+	}
+	if h.backendPreviewRuntimeSecure() {
+		return true
+	}
+	return h.sandboxFallbackActive()
 }
 
 func (h *PreviewHandler) backendPreviewDisabledReason() string {
+	if h.serverRunner == nil {
+		return "Backend runtime preview is not configured"
+	}
+	if !h.requireSandbox {
+		return ""
+	}
+	if h.backendPreviewRuntimeSecure() {
+		return ""
+	}
 	if h.requireSandbox && !h.sandboxFallbackActive() {
 		return "Backend runtime preview is disabled while secure sandbox preview is enforced"
 	}
 	if h.sandboxFallbackActive() {
 		return "Server Docker is unavailable, so preview is using process fallback mode"
 	}
-	if h.serverRunner == nil {
-		return "Backend runtime preview is not configured"
-	}
 	return ""
+}
+
+func (h *PreviewHandler) backendPreviewRuntime() string {
+	if h.serverRunner == nil {
+		return ""
+	}
+	return h.serverRunner.RuntimeName()
+}
+
+func (h *PreviewHandler) backendPreviewRuntimeSecure() bool {
+	switch strings.ToLower(strings.TrimSpace(h.backendPreviewRuntime())) {
+	case "container", "sandbox-v2", "e2b":
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *PreviewHandler) getPreviewStatus(projectID uint, preferredSandbox bool) (*preview.PreviewStatus, bool) {
