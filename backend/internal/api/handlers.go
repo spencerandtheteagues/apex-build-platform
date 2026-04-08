@@ -1165,21 +1165,9 @@ func (s *Server) AuthMiddleware() gin.HandlerFunc {
 // CORSMiddleware handles CORS with secure origin validation
 // SECURITY: No longer uses wildcard (*) - validates against allowed origins
 func (s *Server) CORSMiddleware() gin.HandlerFunc {
-	allowedOrigins := origins.AllowedOrigins()
-
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
-
-		// Check if origin is allowed
-		isAllowed := false
-		for _, allowed := range allowedOrigins {
-			if strings.TrimSpace(allowed) == origin {
-				isAllowed = true
-				break
-			}
-		}
-
-		if isAllowed {
+		if origins.IsAllowedOrigin(origin) {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Access-Control-Allow-Credentials", "true")
 		}

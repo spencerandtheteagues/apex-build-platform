@@ -1933,7 +1933,7 @@ body {
 }`)
 		add("server/index.ts", fmt.Sprintf(`import cors from "cors";
 import express from "express";
-import apiRouter from "./routes/api";
+import apiRouter from "./routes/api.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -2581,7 +2581,7 @@ export async function GET() {
 }`)
 		add("src/server.ts", fmt.Sprintf(`import cors from "cors";
 import express from "express";
-import routes from "./routes/index";
+import routes from "./routes/index.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);

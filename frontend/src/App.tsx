@@ -222,6 +222,7 @@ function App() {
   const initialRouteRef = useRef(getInitialRouteState())
   const initialProjectIdRef = useRef<number | null>(initialRouteRef.current.projectId)
   const pendingProjectIdRef = useRef<number | null>(initialProjectIdRef.current)
+  const pendingLaunchTargetRef = useRef<IDELaunchTarget | null>(initialProjectIdRef.current ? 'dashboard' : null)
   const workspaceMenuRef = useRef<HTMLDivElement | null>(null)
   const [currentView, setCurrentView] = useState<AppView>(initialRouteRef.current.currentView)
   const [visitedViews, setVisitedViews] = useState<Set<AppView>>(() => new Set([initialRouteRef.current.currentView]))
@@ -302,12 +303,19 @@ function App() {
     replace?: boolean
     projectId?: number | null
   }) => {
-    setIdeLaunchTarget(options?.target ?? 'dashboard')
+    const target = options?.target ?? 'dashboard'
+    const targetProjectId = options?.projectId ?? currentProject?.id ?? null
+    pendingProjectIdRef.current = targetProjectId
+    pendingLaunchTargetRef.current = target
+    setIdeLaunchTarget(target)
     navigateToView('ide', {
       replace: options?.replace,
-      projectId: options?.projectId,
+      projectId: targetProjectId,
     })
-  }, [navigateToView])
+    if (isAuthenticated && targetProjectId && currentProject?.id !== targetProjectId) {
+      void selectProject(targetProjectId)
+    }
+  }, [currentProject?.id, isAuthenticated, navigateToView, selectProject])
 
   const handleWorkspaceNavigation = useCallback((view: AppView) => {
     if (view === 'ide') {
@@ -530,10 +538,13 @@ function App() {
     const projectId = pendingProjectIdRef.current
     if (!projectId) return
 
+    const launchTarget = pendingLaunchTargetRef.current ?? 'dashboard'
     pendingProjectIdRef.current = null
-    navigateToIDEWorkspace({ target: 'dashboard', replace: true, projectId })
+    pendingLaunchTargetRef.current = null
+    setIdeLaunchTarget(launchTarget)
+    navigateToView('ide', { replace: true, projectId })
     void selectProject(projectId)
-  }, [isAuthenticated, navigateToIDEWorkspace, selectProject])
+  }, [isAuthenticated, navigateToView, selectProject])
 
   const restoreLastProject = useCallback(async (options?: { navigate?: boolean }) => {
     if (!user?.id) return false
@@ -716,6 +727,7 @@ function App() {
       setShowHelpCenter(shouldOpenHelpCenterFromLocation())
       if (routeState.currentView === 'ide') {
         setIdeLaunchTarget('dashboard')
+        pendingLaunchTargetRef.current = 'dashboard'
       }
       setVisitedViews((prev) => addVisitedView(prev, routeState.currentView))
       setShowSettingsDropdown(false)
@@ -734,7 +746,8 @@ function App() {
   useEffect(() => {
     if (typeof window === 'undefined' || currentView !== 'ide') return
 
-    const targetPath = getPathForView('ide', currentProject?.id ?? null)
+    const activeProjectId = currentProject?.id ?? pendingProjectIdRef.current ?? null
+    const targetPath = getPathForView('ide', activeProjectId)
     const currentPath = `${window.location.pathname}${window.location.search}`
     if (currentPath !== targetPath) {
       window.history.replaceState({}, '', targetPath)

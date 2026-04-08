@@ -7,7 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -27,6 +29,8 @@ type Bundler interface {
 type BundleConfig struct {
 	// ProjectPath is the root path where project files are located
 	ProjectPath string `json:"project_path"`
+	// Title is the preferred app title for generated preview HTML
+	Title string `json:"title,omitempty"`
 	// EntryPoint is the main entry file (e.g., "src/index.tsx", "src/main.js")
 	EntryPoint string `json:"entry_point"`
 	// Format specifies the output format: "esm" (ES modules) or "iife" (immediately invoked function expression)
@@ -59,6 +63,85 @@ type BundleConfig struct {
 	TreeShaking bool `json:"tree_shaking"`
 	// Splitting enables code splitting for ESM output
 	Splitting bool `json:"splitting"`
+}
+
+// DisplayTitle returns the best available human-readable app title for preview HTML.
+func (c BundleConfig) DisplayTitle() string {
+	if title := strings.TrimSpace(c.Title); title != "" {
+		return title
+	}
+
+	if projectPath := strings.TrimSpace(c.ProjectPath); projectPath != "" {
+		if derived := humanizeBundleTitle(strings.TrimSuffix(filepath.Base(projectPath), filepath.Ext(projectPath))); derived != "" {
+			return derived
+		}
+	}
+
+	if entryPoint := strings.TrimSpace(c.EntryPoint); entryPoint != "" {
+		base := strings.TrimSuffix(filepath.Base(entryPoint), filepath.Ext(entryPoint))
+		switch strings.ToLower(base) {
+		case "", "index", "main", "app", "page", "server":
+			// These are generic entrypoint names; fall through to framework-based fallback.
+		default:
+			if derived := humanizeBundleTitle(base); derived != "" {
+				return derived
+			}
+		}
+	}
+
+	switch strings.ToLower(strings.TrimSpace(c.Framework)) {
+	case "react":
+		return "React App"
+	case "vue":
+		return "Vue App"
+	case "preact":
+		return "Preact App"
+	case "solid":
+		return "Solid App"
+	default:
+		return "App"
+	}
+}
+
+// PreviewTitle returns the HTML <title> text for a generated preview page.
+func (c BundleConfig) PreviewTitle() string {
+	title := c.DisplayTitle()
+	if strings.HasSuffix(strings.ToLower(title), " preview") {
+		return title
+	}
+	return title + " Preview"
+}
+
+// BuildErrorTitle returns the HTML <title> text for a generated error page.
+func (c BundleConfig) BuildErrorTitle() string {
+	return "Build Error - " + c.DisplayTitle()
+}
+
+func humanizeBundleTitle(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+
+	replacer := strings.NewReplacer("-", " ", "_", " ", ".", " ", "/", " ")
+	fields := strings.Fields(replacer.Replace(trimmed))
+	if len(fields) == 0 {
+		return ""
+	}
+
+	for i, field := range fields {
+		runes := []rune(field)
+		if len(runes) == 0 {
+			continue
+		}
+		if field == strings.ToUpper(field) {
+			fields[i] = strings.ToUpper(string(runes[0])) + strings.ToLower(string(runes[1:]))
+			continue
+		}
+		fields[i] = strings.ToUpper(string(runes[0])) + string(runes[1:])
+	}
+
+	return strings.Join(fields, " ")
 }
 
 // BundleResult contains the result of a bundle operation
@@ -175,12 +258,12 @@ func DefaultBundleConfig() BundleConfig {
 		TreeShaking: true,
 		Splitting:   false,
 		Loader: map[string]string{
-			".png":  "dataurl",
-			".jpg":  "dataurl",
-			".jpeg": "dataurl",
-			".gif":  "dataurl",
-			".svg":  "dataurl",
-			".woff": "dataurl",
+			".png":   "dataurl",
+			".jpg":   "dataurl",
+			".jpeg":  "dataurl",
+			".gif":   "dataurl",
+			".svg":   "dataurl",
+			".woff":  "dataurl",
 			".woff2": "dataurl",
 			".ttf":   "dataurl",
 			".eot":   "dataurl",
@@ -204,7 +287,7 @@ func VueBundleConfig() BundleConfig {
 	config := DefaultBundleConfig()
 	config.Framework = "vue"
 	config.Define = map[string]string{
-		"process.env.NODE_ENV": `"development"`,
+		"process.env.NODE_ENV":  `"development"`,
 		"__VUE_OPTIONS_API__":   "true",
 		"__VUE_PROD_DEVTOOLS__": "false",
 	}

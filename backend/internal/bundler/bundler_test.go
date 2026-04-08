@@ -446,6 +446,7 @@ func TestGenerateHTML(t *testing.T) {
 	config := BundleConfig{
 		Framework: "react",
 		Format:    "esm",
+		Title:     "PulseBoard",
 	}
 
 	html := GenerateHTML(result, config)
@@ -465,6 +466,23 @@ func TestGenerateHTML(t *testing.T) {
 	}
 	if !containsStr(html, `type="module"`) {
 		t.Error("Expected module script type for ESM")
+	}
+	if !containsStr(html, "<title>PulseBoard Preview</title>") {
+		t.Fatalf("expected project-specific preview title, got %q", html)
+	}
+}
+
+func TestGeneratePreviewErrorHTMLUsesConfiguredTitle(t *testing.T) {
+	service := NewService(nil)
+	html := service.GeneratePreviewHTML(&BundleResult{
+		Success: false,
+		Errors: []BundleError{
+			{Message: "Unexpected token", File: "src/App.tsx", Line: 12, Column: 4},
+		},
+	}, BundleConfig{Title: "PulseBoard"}, "")
+
+	if !containsStr(html, "<title>Build Error - PulseBoard</title>") {
+		t.Fatalf("expected project-specific build error title, got %q", html)
 	}
 }
 

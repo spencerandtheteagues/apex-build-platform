@@ -153,6 +153,24 @@ func TestFrameworkRuntimePreludeIncludesReactCDNs(t *testing.T) {
 	}
 }
 
+func TestGenerateBundleHTMLUsesBundleConfigTitle(t *testing.T) {
+	ps := &PreviewServer{}
+	session := &PreviewSession{
+		BundleConfig: &bundler.BundleConfig{
+			Framework: "react",
+			Title:     "PulseBoard",
+		},
+		BundleResult: &bundler.BundleResult{
+			OutputJS: []byte("console.log('ready')"),
+		},
+	}
+
+	html := ps.generateBundleHTML(session, &PreviewConfig{ProjectID: 42, EntryPoint: "src/main.tsx"})
+	if !strings.Contains(html, "<title>PulseBoard Preview</title>") {
+		t.Fatalf("expected project-specific preview title, got %q", html)
+	}
+}
+
 func TestPreviewWebSocketOriginAllowsLocalAPIProxyHost(t *testing.T) {
 	ps := NewPreviewServer(nil)
 	req := httptest.NewRequest(http.MethodGet, "/__apex_ws", nil)

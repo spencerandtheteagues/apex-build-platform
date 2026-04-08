@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { getConfiguredApiUrl, normalizeConfiguredApiUrl, normalizeConfiguredWsUrl } from './runtime'
+import {
+  getConfiguredApiUrl,
+  getConfiguredWsUrl,
+  normalizeConfiguredApiUrl,
+  normalizeConfiguredWsUrl,
+} from './runtime'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -46,5 +51,25 @@ describe('getConfiguredApiUrl', () => {
     vi.stubEnv('VITE_API_BASE_URL', 'https://legacy.example.com')
 
     expect(getConfiguredApiUrl()).toBe('https://primary.example.com/api/v1')
+  })
+
+  it('prefers the imported local dev API target over runtime production config on localhost', () => {
+    vi.stubEnv('VITE_API_URL', 'http://127.0.0.1:8080/api/v1')
+    window.__APEX_CONFIG__ = {
+      API_URL: 'https://api.apex-build.dev/api/v1',
+    }
+
+    expect(getConfiguredApiUrl()).toBe('http://127.0.0.1:8080/api/v1')
+  })
+})
+
+describe('getConfiguredWsUrl', () => {
+  it('prefers the imported local dev websocket target over runtime production config on localhost', () => {
+    vi.stubEnv('VITE_WS_URL', 'ws://127.0.0.1:8080/ws')
+    window.__APEX_CONFIG__ = {
+      WS_URL: 'wss://api.apex-build.dev/ws',
+    }
+
+    expect(getConfiguredWsUrl()).toBe('ws://127.0.0.1:8080/ws')
   })
 })

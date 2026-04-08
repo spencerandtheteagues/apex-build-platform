@@ -236,14 +236,11 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     if (!currentProject) return
     setShowPreview(true)
     setViewMode('preview')
-    if (bottomPanelState === 'collapsed') {
-      setBottomPanelState('normal')
-    }
     if (isMobile) {
       setMobilePanel('editor')
       setMobileOverlayPanel(null)
     }
-  }, [bottomPanelState, currentProject, isMobile])
+  }, [currentProject, isMobile])
 
   useEffect(() => {
     if (!currentProject) {
@@ -1355,7 +1352,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
           </div>
 
           {/* Bottom panel */}
-          {bottomPanelState !== 'collapsed' && (
+          {(viewMode === 'dashboard' || viewMode === 'editor') && bottomPanelState !== 'collapsed' && (
             <div className={cn(
               'bg-gray-900/80 border-t border-gray-800',
               reducedMotion ? '' : 'transition-all duration-300',

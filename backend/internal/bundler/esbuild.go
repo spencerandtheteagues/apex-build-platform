@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"log"
 	"os"
@@ -676,13 +677,14 @@ export const jsxDEV = jsx;
 // GenerateHTML generates an HTML file that loads the bundled JavaScript and CSS
 func GenerateHTML(result *BundleResult, config BundleConfig) string {
 	var sb strings.Builder
+	title := template.HTMLEscapeString(config.PreviewTitle())
 
 	sb.WriteString(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>APEX Preview</title>
+  <title>` + title + `</title>
 `)
 
 	// Add CSS inline if present

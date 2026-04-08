@@ -8124,6 +8124,13 @@ type staleImportValidationTarget struct {
 	Specifier  string
 }
 
+type exportMismatchRepairTarget struct {
+	ImporterPath string
+	ExporterPath string
+	Specifier    string
+	ExportName   string
+}
+
 func parseStaleImportValidationTargets(errors []string) []staleImportValidationTarget {
 	if len(errors) == 0 {
 		return nil
@@ -8224,6 +8231,269 @@ func (am *AgentManager) clearStaleImportValidationError(build *Build, readinessE
 
 	sort.Strings(cleared)
 	return "stale import validation on " + strings.Join(cleared, ", ")
+}
+
+func parseExportMismatchRepairTargets(errors []string) []exportMismatchRepairTarget {
+	if len(errors) == 0 {
+		return nil
+	}
+
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?m)RollupError:\s+["']([^"']+)["'] is not exported by ["']([^"']+)["'], imported by ["']([^"']+)["']`),
+		regexp.MustCompile(`(?m)([^\s(:\n]+)\(\d+,\d+\): error TS(?:2305|2614): Module ['"]([^'"]+)['"] has no exported member ['"]([^'"]+)['"]`),
+	}
+
+	seen := map[string]bool{}
+	targets := make([]exportMismatchRepairTarget, 0)
+	for _, msg := range errors {
+		for idx, pattern := range patterns {
+			for _, match := range pattern.FindAllStringSubmatch(msg, -1) {
+				var target exportMismatchRepairTarget
+				switch idx {
+				case 0:
+					if len(match) != 4 {
+						continue
+					}
+					target = exportMismatchRepairTarget{
+						ExportName:   strings.TrimSpace(match[1]),
+						ExporterPath: sanitizeFilePath(strings.TrimSpace(match[2])),
+						ImporterPath: sanitizeFilePath(strings.TrimSpace(match[3])),
+					}
+				case 1:
+					if len(match) != 4 {
+						continue
+					}
+					target = exportMismatchRepairTarget{
+						ImporterPath: sanitizeFilePath(strings.TrimSpace(match[1])),
+						Specifier:    strings.TrimSpace(match[2]),
+						ExportName:   strings.TrimSpace(match[3]),
+					}
+				}
+				if target.ImporterPath == "" || target.ExportName == "" {
+					continue
+				}
+				key := strings.ToLower(target.ImporterPath + "::" + target.ExporterPath + "::" + target.Specifier + "::" + target.ExportName)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				targets = append(targets, target)
+			}
+		}
+	}
+
+	sort.Slice(targets, func(i, j int) bool {
+		if targets[i].ImporterPath == targets[j].ImporterPath {
+			if targets[i].ExporterPath == targets[j].ExporterPath {
+				return targets[i].ExportName < targets[j].ExportName
+			}
+			return targets[i].ExporterPath < targets[j].ExporterPath
+		}
+		return targets[i].ImporterPath < targets[j].ImporterPath
+	})
+	return targets
+}
+
+func generatedFileExportsNamedSymbol(content, name string) bool {
+	content = strings.TrimSpace(content)
+	name = sanitizeGeneratedIdentifier(name)
+	if content == "" || name == "" {
+		return false
+	}
+
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?m)\bexport\s+(?:const|function|class|let|var|type|interface|enum)\s+` + regexp.QuoteMeta(name) + `\b`),
+		regexp.MustCompile(`(?m)\bexport\s*\{[^}]*\b` + regexp.QuoteMeta(name) + `\b[^}]*\}`),
+	}
+	for _, pattern := range patterns {
+		if pattern.MatchString(content) {
+			return true
+		}
+	}
+	return false
+}
+
+func defaultExportIdentifier(content string) string {
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?m)export\s+default\s+function\s+([A-Za-z_][A-Za-z0-9_]*)\b`),
+		regexp.MustCompile(`(?m)export\s+default\s+class\s+([A-Za-z_][A-Za-z0-9_]*)\b`),
+		regexp.MustCompile(`(?m)export\s+default\s+([A-Za-z_][A-Za-z0-9_]*)\s*;`),
+	}
+	for _, pattern := range patterns {
+		matches := pattern.FindStringSubmatch(content)
+		if len(matches) == 2 {
+			return sanitizeGeneratedIdentifier(matches[1])
+		}
+	}
+	return ""
+}
+
+func resolveExportMismatchTargetPath(importerPath, specifier string, existing map[string]bool) string {
+	importerPath = sanitizeFilePath(importerPath)
+	specifier = strings.TrimSpace(specifier)
+	if importerPath == "" || specifier == "" {
+		return ""
+	}
+	for _, candidate := range localImportResolutionCandidates(importerPath, specifier) {
+		sanitized := sanitizeFilePath(candidate)
+		if sanitized != "" && existing[strings.ToLower(sanitized)] {
+			return sanitized
+		}
+	}
+	return ""
+}
+
+func rewriteNamedImportToDefaultImport(importerPath, content, exporterPath, exportName string) (string, bool) {
+	importerPath = sanitizeFilePath(importerPath)
+	exporterPath = sanitizeFilePath(exporterPath)
+	exportName = strings.TrimSpace(exportName)
+	if importerPath == "" || exporterPath == "" || exportName == "" || strings.TrimSpace(content) == "" {
+		return content, false
+	}
+
+	importRe := regexp.MustCompile(`(?m)^(\s*import\s+)(.+?)(\s+from\s+['"]([^'"]+)['"]\s*;?\s*)$`)
+	matches := importRe.FindAllStringSubmatchIndex(content, -1)
+	for _, match := range matches {
+		if len(match) < 10 {
+			continue
+		}
+		clause := content[match[4]:match[5]]
+		specifier := strings.TrimSpace(content[match[8]:match[9]])
+		resolved := resolveExportMismatchTargetPath(importerPath, specifier, map[string]bool{strings.ToLower(exporterPath): true})
+		if !strings.EqualFold(resolved, exporterPath) {
+			continue
+		}
+
+		trimmedClause := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(clause), "type "))
+		defaultImport := ""
+		namedSection := ""
+		switch {
+		case strings.Contains(trimmedClause, "{"):
+			parts := strings.SplitN(trimmedClause, "{", 2)
+			defaultImport = strings.TrimSpace(strings.TrimSuffix(parts[0], ","))
+			namedSection = strings.TrimSpace(parts[1])
+			namedSection = strings.TrimSuffix(namedSection, "}")
+		default:
+			continue
+		}
+
+		namedParts := strings.Split(namedSection, ",")
+		rewrittenParts := make([]string, 0, len(namedParts))
+		replacementDefault := defaultImport
+		changed := false
+		for _, part := range namedParts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			sourceName := part
+			localName := part
+			if strings.Contains(part, " as ") {
+				pieces := strings.SplitN(part, " as ", 2)
+				sourceName = strings.TrimSpace(pieces[0])
+				localName = strings.TrimSpace(pieces[1])
+			}
+			if sourceName == exportName {
+				if replacementDefault != "" {
+					return content, false
+				}
+				replacementDefault = localName
+				changed = true
+				continue
+			}
+			rewrittenParts = append(rewrittenParts, part)
+		}
+		if !changed || strings.TrimSpace(replacementDefault) == "" {
+			continue
+		}
+
+		newClause := replacementDefault
+		if len(rewrittenParts) > 0 {
+			newClause += ", { " + strings.Join(rewrittenParts, ", ") + " }"
+		}
+		replacement := content[match[2]:match[3]] + newClause + content[match[6]:match[7]]
+		return content[:match[0]] + replacement + content[match[1]:], true
+	}
+
+	return content, false
+}
+
+func addNamedAliasForDefaultExport(content, exportName string) (string, bool) {
+	exportName = sanitizeGeneratedIdentifier(exportName)
+	if exportName == "" || strings.TrimSpace(content) == "" || generatedFileExportsNamedSymbol(content, exportName) {
+		return content, false
+	}
+
+	defaultIdent := defaultExportIdentifier(content)
+	if defaultIdent == "" {
+		return content, false
+	}
+
+	trimmed := strings.TrimRight(content, " \n\t")
+	repaired := trimmed + "\nexport { " + defaultIdent + " as " + exportName + " };\n"
+	return repaired, true
+}
+
+func (am *AgentManager) applyDeterministicExportMismatchRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil || len(readinessErrors) == 0 {
+		return nil, ""
+	}
+
+	targets := parseExportMismatchRepairTargets(readinessErrors)
+	if len(targets) == 0 {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 {
+		return nil, ""
+	}
+
+	existing := make(map[string]bool, len(files))
+	for _, file := range files {
+		path := sanitizeFilePath(file.Path)
+		if path != "" {
+			existing[strings.ToLower(path)] = true
+		}
+	}
+
+	applied := make([]string, 0, len(targets))
+	for _, target := range targets {
+		exporterPath := sanitizeFilePath(target.ExporterPath)
+		if exporterPath == "" && target.Specifier != "" {
+			exporterPath = resolveExportMismatchTargetPath(target.ImporterPath, target.Specifier, existing)
+		}
+		if exporterPath == "" {
+			continue
+		}
+
+		importerContent := plan.content(target.ImporterPath)
+		if strings.TrimSpace(importerContent) != "" {
+			if repaired, changed := rewriteNamedImportToDefaultImport(target.ImporterPath, importerContent, exporterPath, target.ExportName); changed {
+				if plan.patchFile(target.ImporterPath, repaired, am.detectLanguage(target.ImporterPath)) {
+					applied = append(applied, fmt.Sprintf("%s imports %s from %s as default", target.ImporterPath, target.ExportName, exporterPath))
+					continue
+				}
+			}
+		}
+
+		exporterContent := plan.content(exporterPath)
+		if strings.TrimSpace(exporterContent) == "" {
+			continue
+		}
+		if repaired, changed := addNamedAliasForDefaultExport(exporterContent, target.ExportName); changed {
+			if plan.patchFile(exporterPath, repaired, am.detectLanguage(exporterPath)) {
+				applied = append(applied, fmt.Sprintf("%s re-exports default as %s", exporterPath, target.ExportName))
+			}
+		}
+	}
+
+	if len(applied) == 0 {
+		return nil, ""
+	}
+
+	summary := "export mismatch repair: " + strings.Join(applied, ", ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "export_mismatch_repair: "+summary), summary
 }
 
 func parseSequelizeConstructorRepairTargets(errors []string) []string {
@@ -9478,6 +9748,9 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 			}
 		}
 		if repaired, summary := am.ensureGeneratedTypeScriptConfig(plan, manifestPath, manifest); repaired {
+			summaries = append(summaries, summary)
+		}
+		if repaired, summary := am.ensureGeneratedNodeNextImportExtensions(plan, files, manifestPath); repaired {
 			summaries = append(summaries, summary)
 		}
 	}
@@ -11460,6 +11733,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			summaryKey:  "missing_local_module_repair",
 		},
 		{
+			apply:       am.applyDeterministicExportMismatchRepair,
+			errorFormat: "Final output validation failed: %s (applied export mismatch repair: %s)",
+			message:     "Applied deterministic import/export mismatch repair for generated frontend modules. Re-running final validation before solver recovery.",
+			summaryKey:  "export_mismatch_repair",
+		},
+		{
 			apply:       am.applyDeterministicManifestDependencyRepair,
 			errorFormat: "Final output validation failed: %s (applied deterministic manifest repair: %s)",
 			message:     "Applied deterministic package.json dependency repair. Re-running final validation before solver recovery.",
@@ -12959,6 +13238,304 @@ func normalizeGeneratedTSConfigBuildExcludes(path, content string) string {
 		return content
 	}
 	return string(b)
+}
+
+func generatedTSConfigRequiresExplicitRuntimeImportExtensions(content string) bool {
+	if strings.TrimSpace(content) == "" {
+		return false
+	}
+	if canonical, ok := canonicalizeGeneratedTSConfigJSON("tsconfig.json", content); ok {
+		content = canonical
+	}
+
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(content), &cfg); err != nil {
+		return false
+	}
+	compilerOptions, _ := cfg["compilerOptions"].(map[string]any)
+	if compilerOptions == nil {
+		return false
+	}
+
+	moduleResolution, _ := compilerOptions["moduleResolution"].(string)
+	moduleValue, _ := compilerOptions["module"].(string)
+	moduleResolution = strings.TrimSpace(moduleResolution)
+	moduleValue = strings.TrimSpace(moduleValue)
+
+	return strings.EqualFold(moduleResolution, "NodeNext") ||
+		strings.EqualFold(moduleResolution, "Node16") ||
+		strings.EqualFold(moduleValue, "NodeNext") ||
+		strings.EqualFold(moduleValue, "Node16")
+}
+
+func normalizeGeneratedTSConfigImportRoot(raw string) string {
+	raw = filepath.ToSlash(strings.TrimSpace(strings.TrimPrefix(raw, "./")))
+	if raw == "" {
+		return ""
+	}
+	if wildcard := strings.IndexAny(raw, "*?[{"); wildcard >= 0 {
+		raw = raw[:wildcard]
+	}
+	raw = strings.TrimSuffix(raw, "/")
+	if raw == "" {
+		return ""
+	}
+	switch strings.ToLower(filepath.Ext(raw)) {
+	case ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs":
+		raw = filepath.ToSlash(filepath.Dir(raw))
+	}
+	raw = strings.Trim(raw, "/")
+	if raw == "." {
+		return ""
+	}
+	return raw
+}
+
+func generatedNodeNextImportRootSupported(root string) bool {
+	root = strings.ToLower(strings.Trim(filepath.ToSlash(root), "/"))
+	if root == "" {
+		return false
+	}
+	return root == "server" || strings.HasPrefix(root, "server/") ||
+		root == "backend" || strings.HasPrefix(root, "backend/") ||
+		root == "api" || strings.HasPrefix(root, "api/")
+}
+
+func generatedNodeNextImportRootsForTSConfig(path, content string) []string {
+	if !generatedTSConfigRequiresExplicitRuntimeImportExtensions(content) {
+		return nil
+	}
+
+	if canonical, ok := canonicalizeGeneratedTSConfigJSON(path, content); ok {
+		content = canonical
+	}
+
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(content), &cfg); err != nil {
+		return nil
+	}
+
+	roots := make([]string, 0, 4)
+	dirRoot := normalizeGeneratedTSConfigImportRoot(filepath.Dir(filepath.ToSlash(strings.TrimSpace(path))))
+	if generatedNodeNextImportRootSupported(dirRoot) {
+		roots = append(roots, dirRoot)
+	}
+
+	if include, ok := cfg["include"].([]any); ok {
+		for _, entry := range include {
+			includePath, _ := entry.(string)
+			root := normalizeGeneratedTSConfigImportRoot(includePath)
+			if generatedNodeNextImportRootSupported(root) {
+				roots = append(roots, root)
+			}
+		}
+	}
+
+	return dedupeStrings(roots)
+}
+
+func generatedNodeNextSourcePathSet(files []GeneratedFile) map[string]struct{} {
+	paths := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		path := strings.ToLower(sanitizeFilePath(file.Path))
+		if path == "" {
+			continue
+		}
+		paths[path] = struct{}{}
+	}
+	return paths
+}
+
+func generatedPathWithinNodeNextImportRoots(path string, roots []string) bool {
+	path = strings.ToLower(strings.Trim(filepath.ToSlash(strings.TrimSpace(path)), "/"))
+	if path == "" {
+		return false
+	}
+	for _, root := range roots {
+		root = strings.ToLower(strings.Trim(filepath.ToSlash(strings.TrimSpace(root)), "/"))
+		if root == "" {
+			continue
+		}
+		if path == root || strings.HasPrefix(path, root+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveGeneratedNodeNextImportSpecifier(specifier string, currentPath string, sourcePaths map[string]struct{}) string {
+	base := specifier
+	suffix := ""
+	if marker := strings.IndexAny(specifier, "?#"); marker >= 0 {
+		base = specifier[:marker]
+		suffix = specifier[marker:]
+	}
+	if !strings.HasPrefix(base, "./") && !strings.HasPrefix(base, "../") {
+		return specifier
+	}
+	if strings.HasSuffix(base, "/") {
+		return specifier
+	}
+	if filepath.Ext(base) != "" {
+		return specifier
+	}
+
+	currentPath = filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(currentPath), "./"))
+	currentDir := filepath.ToSlash(filepath.Dir(currentPath))
+	if currentDir == "." {
+		currentDir = ""
+	}
+	targetBase := filepath.ToSlash(filepath.Clean(filepath.Join(currentDir, base)))
+	targetBase = strings.TrimPrefix(targetBase, "./")
+
+	candidates := []struct {
+		sourceSuffix  string
+		runtimeSuffix string
+		index         bool
+	}{
+		{sourceSuffix: ".ts", runtimeSuffix: ".js"},
+		{sourceSuffix: ".tsx", runtimeSuffix: ".js"},
+		{sourceSuffix: ".mts", runtimeSuffix: ".mjs"},
+		{sourceSuffix: ".cts", runtimeSuffix: ".cjs"},
+		{sourceSuffix: ".js", runtimeSuffix: ".js"},
+		{sourceSuffix: ".mjs", runtimeSuffix: ".mjs"},
+		{sourceSuffix: ".cjs", runtimeSuffix: ".cjs"},
+		{sourceSuffix: "/index.ts", runtimeSuffix: "/index.js", index: true},
+		{sourceSuffix: "/index.tsx", runtimeSuffix: "/index.js", index: true},
+		{sourceSuffix: "/index.mts", runtimeSuffix: "/index.mjs", index: true},
+		{sourceSuffix: "/index.cts", runtimeSuffix: "/index.cjs", index: true},
+		{sourceSuffix: "/index.js", runtimeSuffix: "/index.js", index: true},
+		{sourceSuffix: "/index.mjs", runtimeSuffix: "/index.mjs", index: true},
+		{sourceSuffix: "/index.cjs", runtimeSuffix: "/index.cjs", index: true},
+	}
+
+	for _, candidate := range candidates {
+		resolved := strings.ToLower(filepath.ToSlash(targetBase + candidate.sourceSuffix))
+		if _, ok := sourcePaths[resolved]; !ok {
+			continue
+		}
+		if candidate.index {
+			return strings.TrimSuffix(base, "/") + candidate.runtimeSuffix + suffix
+		}
+		return base + candidate.runtimeSuffix + suffix
+	}
+
+	return base + ".js" + suffix
+}
+
+func rewriteGeneratedNodeNextRelativeImportSpecifiers(content string, currentPath string, sourcePaths map[string]struct{}) (string, bool) {
+	matches := generatedImportPathPattern.FindAllStringSubmatchIndex(content, -1)
+	if len(matches) == 0 {
+		return content, false
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(content) + 16)
+	last := 0
+	changed := false
+
+	for _, match := range matches {
+		if len(match) < 4 {
+			continue
+		}
+		specStart, specEnd := match[2], match[3]
+		if specStart < 0 || specEnd < 0 || specStart < last {
+			continue
+		}
+		specifier := content[specStart:specEnd]
+		updatedSpecifier := resolveGeneratedNodeNextImportSpecifier(specifier, currentPath, sourcePaths)
+		builder.WriteString(content[last:specStart])
+		builder.WriteString(updatedSpecifier)
+		last = specEnd
+		if updatedSpecifier != specifier {
+			changed = true
+		}
+	}
+
+	if !changed {
+		return content, false
+	}
+
+	builder.WriteString(content[last:])
+	return builder.String(), true
+}
+
+func (am *AgentManager) ensureGeneratedNodeNextImportExtensions(
+	plan *generatedFilePatchPlan,
+	files []GeneratedFile,
+	manifestPath string,
+) (bool, string) {
+	if plan == nil {
+		return false, ""
+	}
+
+	prefix := generatedManifestPrefix(manifestPath)
+	candidates := make([]string, 0, 8)
+	appendCandidate := func(relative string) {
+		relative = filepath.ToSlash(strings.TrimSpace(relative))
+		if relative == "" {
+			return
+		}
+		if prefix != "" {
+			candidates = append(candidates, filepath.ToSlash(filepath.Join(prefix, relative)))
+			return
+		}
+		candidates = append(candidates, relative)
+	}
+
+	for _, candidate := range []string{
+		"server/tsconfig.json",
+		"backend/tsconfig.json",
+		"api/tsconfig.json",
+		"tsconfig.server.json",
+		"tsconfig.backend.json",
+		"tsconfig.api.json",
+		"tsconfig.json",
+	} {
+		appendCandidate(candidate)
+	}
+
+	importRoots := make([]string, 0, 6)
+	for _, candidate := range dedupeStrings(candidates) {
+		content := plan.content(candidate)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		importRoots = append(importRoots, generatedNodeNextImportRootsForTSConfig(candidate, content)...)
+	}
+	importRoots = dedupeStrings(importRoots)
+	if len(importRoots) == 0 {
+		return false, ""
+	}
+
+	sourcePaths := generatedNodeNextSourcePathSet(files)
+	patchedFiles := make([]string, 0, 4)
+	for _, file := range files {
+		path := sanitizeFilePath(file.Path)
+		if path == "" || !generatedPathWithinNodeNextImportRoots(path, importRoots) {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".ts", ".tsx", ".mts", ".cts":
+		default:
+			continue
+		}
+
+		updated, changed := rewriteGeneratedNodeNextRelativeImportSpecifiers(plan.content(path), path, sourcePaths)
+		if !changed {
+			continue
+		}
+		if !plan.patchFile(path, updated, am.detectLanguage(path)) {
+			continue
+		}
+		patchedFiles = append(patchedFiles, path)
+	}
+
+	if len(patchedFiles) == 0 {
+		return false, ""
+	}
+
+	return true, fmt.Sprintf("%s (explicit NodeNext runtime import extensions)", strings.Join(dedupeStrings(patchedFiles), ", "))
 }
 
 // agentPriority pairs an agent with its execution priority
@@ -16102,8 +16679,19 @@ export const App: React.FC = () => {
 // File: src/api/server.ts
 ` + "```" + `typescript
 import express from 'express';
+import cors from 'cors';
+
 const app = express();
-// complete implementation...
+const PORT = process.env.PORT || 3001;
+
+app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:3000'], credentials: true }));
+app.use(express.json());
+
+app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+
+app.listen(PORT, () => {
+  console.log('Server listening on port ' + PORT);
+});
 ` + "```" + `
 
 MANDATORY REQUIREMENTS:
@@ -16422,12 +17010,21 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 <delivery_constraints>
 - Optimize for first-pass preview-ready success and low retry cost.
 - Use a SINGLE-REPO layout (NO monorepo/workspaces/apps/packages split).
-- Frontend stack: React + Vite + TypeScript.
+- Frontend stack: React + Vite + TypeScript + Tailwind CSS (MANDATORY — always include Tailwind).
 - Backend stack: Express + TypeScript.
 - Database access: PostgreSQL via pg only (NO Prisma, Drizzle, TypeORM, Mongoose).
 - Avoid extra frameworks/tooling unless explicitly required by the user (no added test frameworks by default).
 - Prioritize a fully working vertical slice first: authentication + dashboard + exactly one CRUD resource with real backend persistence.
 - If the user requested broader scope, implement the core slice first and leave additional modules only if time/files budget clearly allows.
+
+VISUAL QUALITY CONSTRAINTS (apply to every build):
+- NEVER produce a plain white-background layout with default-styled elements.
+- Include tailwind.config.js with a custom color palette matching the app's domain.
+- Every page must have a styled navigation/header component.
+- Every data list/table must have a styled empty state with a call-to-action.
+- Every form input must have a label, focus state, and validation state styling.
+- Loading states: animate-pulse skeleton loaders, not text "Loading...".
+- The generated app must look like a polished, real product — not a coding exercise.
 </delivery_constraints>
 `
 		}
@@ -16440,17 +17037,35 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 		case PowerMax:
 			powerModeContext = `
 <quality_tier>POWER MODE: MAXIMUM — You are using a frontier-tier model. Output must be enterprise-grade.
-- Write comprehensive error handling with user-friendly error messages
-- Include input validation on all API endpoints and form inputs
-- Add loading states, error states, and empty states for ALL UI components
-- Implement proper TypeScript types — no 'any', no type assertions unless unavoidable
-- Use semantic HTML with ARIA attributes for accessibility
-- Add responsive design breakpoints (mobile, tablet, desktop)
-- Include meaningful comments ONLY for complex business logic
-- Structure code for maintainability: separate concerns, consistent naming, DRY
-- For full-stack: ensure frontend/backend error contracts match (error codes, shapes)
-- Every component must handle edge cases: empty lists, long text, missing data
-- Use modern patterns: React hooks, async/await, proper cleanup in useEffect
+
+CODE QUALITY:
+- Comprehensive error handling with user-friendly error messages (never expose raw stack traces)
+- Input validation on all API endpoints (server-side) and form inputs (client-side) with descriptive messages
+- Proper TypeScript types — no 'any', no unchecked type assertions
+- Semantic HTML with ARIA attributes (aria-label, aria-live, role, aria-describedby)
+- Modern patterns: React hooks, async/await, proper cleanup in useEffect, AbortController for fetch
+- Full-stack error contracts match: frontend catches the same error codes/shapes that backend emits
+
+VISUAL EXCELLENCE (required, not optional):
+- Design a distinctive visual identity for this specific app — not a generic template
+- Choose a deliberate color palette: 1 primary, 1-2 surface shades, text, border, 1 accent
+- Implement CSS custom properties (--color-primary etc.) in index.css for the design system
+- Navigation: polished sticky header or sidebar with active-state indicators
+- Cards: consistent border-radius (rounded-xl or rounded-2xl), shadow-sm or shadow-md, hover:shadow-lg
+- Buttons: clear primary/secondary/ghost hierarchy, consistent sizing (py-2.5 px-4 sm, py-3 px-6 lg)
+- Forms: labels above inputs, focus rings (ring-2 ring-primary/50), clear validation states
+- Tables: alternating row colors or hover highlight, sticky header, column alignment
+- Loading states: animated skeleton loaders (animate-pulse) for every async section
+- Empty states: icon or illustration + heading + descriptive text + primary CTA button
+- Transitions: hover:bg-* and focus:ring-* with transition-all duration-150 on all interactive elements
+- Typography: clear hierarchy (text-xs/sm for meta, text-sm/base for body, text-xl+ for headers)
+- Responsive: mobile-first, card stacking on mobile, sidebar collapse on sm: breakpoint
+- Dark/light compatibility: use CSS vars so a theme can be switched without component changes
+
+COMPLETENESS:
+- Every component handles: loading, error, empty, and populated states
+- Every function fully implemented — zero empty bodies, zero TODO comments
+- Include meaningful inline comments ONLY for non-obvious business logic
 </quality_tier>
 `
 		case PowerBalanced:
@@ -16562,13 +17177,51 @@ func formatTechStackSummary(stack *TechStack) string {
 // This overrides the model's defaults so it uses the stack the user explicitly selected.
 // canonicalBackendPort returns the standard port for a backend framework.
 // These are injected into prompts so frontend and backend agents agree without guessing.
+func normalizedFrontendFramework(frontend string) string {
+	normalized := strings.ToLower(strings.TrimSpace(frontend))
+	switch {
+	case strings.Contains(normalized, "next"):
+		return "nextjs"
+	case strings.Contains(normalized, "react"):
+		return "react"
+	case strings.Contains(normalized, "vue"):
+		return "vue"
+	default:
+		return normalized
+	}
+}
+
+func normalizedBackendFramework(backend string) string {
+	normalized := strings.ToLower(strings.TrimSpace(backend))
+	switch {
+	case strings.Contains(normalized, "express") || strings.Contains(normalized, "node"):
+		return "express"
+	case normalized == "go" || strings.Contains(normalized, "golang"):
+		return "go"
+	case strings.Contains(normalized, "fastapi") || strings.Contains(normalized, "python"):
+		return "python"
+	default:
+		return normalized
+	}
+}
+
+func normalizedStylingSystem(styling string) string {
+	normalized := strings.ToLower(strings.TrimSpace(styling))
+	switch {
+	case strings.Contains(normalized, "tailwind"):
+		return "tailwind"
+	default:
+		return normalized
+	}
+}
+
 func canonicalBackendPort(backend string) int {
-	switch strings.ToLower(strings.TrimSpace(backend)) {
-	case "express", "express.js", "node.js", "node":
+	switch normalizedBackendFramework(backend) {
+	case "express":
 		return 3001
-	case "go", "golang":
+	case "go":
 		return 8080
-	case "python", "fastapi":
+	case "python":
 		return 8000
 	default:
 		return 3001
@@ -16577,8 +17230,8 @@ func canonicalBackendPort(backend string) int {
 
 // canonicalFrontendPort returns the standard dev-server port for a frontend framework.
 func canonicalFrontendPort(frontend string) int {
-	switch strings.ToLower(strings.TrimSpace(frontend)) {
-	case "next.js", "nextjs":
+	switch normalizedFrontendFramework(frontend) {
+	case "nextjs":
 		return 3000
 	default:
 		return 5173 // Vite default
@@ -16636,22 +17289,26 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 		fe := stack.Frontend
 		lines = append(lines, fmt.Sprintf("- Frontend framework: %s (MANDATORY — do not substitute another framework)", fe))
 		// Stack-specific hints
-		switch strings.ToLower(strings.TrimSpace(fe)) {
-		case "react", "react/vite":
-			lines = append(lines, "  Use Vite + TypeScript for React. Entry: src/main.tsx. Root component: src/App.tsx.")
+		switch normalizedFrontendFramework(fe) {
+		case "react":
+			lines = append(lines, "  Use Vite + TypeScript + Tailwind CSS for React. Entry: src/main.tsx. Root component: src/App.tsx.")
 			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
-			lines = append(lines, "  □ package.json (react, react-dom, vite, typescript), tsconfig.json, vite.config.ts, index.html")
-			lines = append(lines, "  □ src/main.tsx (entry), src/App.tsx (root component), src/index.css")
-		case "next.js", "nextjs":
-			lines = append(lines, "  Use Next.js with TypeScript. App Router (app/ directory). Entry: app/page.tsx.")
+			lines = append(lines, "  □ package.json (react, react-dom, vite, @vitejs/plugin-react, typescript, tailwindcss, @tailwindcss/vite), tsconfig.json, vite.config.ts, index.html")
+			lines = append(lines, "  □ tailwind.config.js — REQUIRED: custom color palette matching the app domain")
+			lines = append(lines, "  □ src/main.tsx (entry), src/App.tsx (root component with layout), src/index.css (@tailwind directives + CSS custom properties)")
+			lines = append(lines, "  TAILWIND SETUP in vite.config.ts: import tailwindcss from '@tailwindcss/vite'; plugins: [react(), tailwindcss()]")
+			lines = append(lines, "  TAILWIND in src/index.css: @import 'tailwindcss'; (Tailwind v4) OR @tailwind base; @tailwind components; @tailwind utilities; (Tailwind v3)")
+		case "nextjs":
+			lines = append(lines, "  Use Next.js with TypeScript + Tailwind CSS. App Router (app/ directory). Entry: app/page.tsx.")
 			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
-			lines = append(lines, "  □ package.json (next, react, react-dom, typescript), tsconfig.json, next.config.js")
-			lines = append(lines, "  □ app/page.tsx (entry page), app/layout.tsx (root layout)")
-		case "vue", "vue.js":
-			lines = append(lines, "  Use Vue 3 + Vite + TypeScript.")
+			lines = append(lines, "  □ package.json (next, react, react-dom, typescript, tailwindcss, postcss, autoprefixer), tsconfig.json, next.config.js, postcss.config.js")
+			lines = append(lines, "  □ tailwind.config.js — REQUIRED: custom color palette matching the app domain")
+			lines = append(lines, "  □ app/page.tsx (entry page), app/layout.tsx (root layout with tailwind classes), app/globals.css (@tailwind directives)")
+		case "vue":
+			lines = append(lines, "  Use Vue 3 + Vite + TypeScript + Tailwind CSS.")
 			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
-			lines = append(lines, "  □ package.json (vue, vite, typescript), tsconfig.json, vite.config.ts, index.html")
-			lines = append(lines, "  □ src/main.ts (entry), src/App.vue (root component)")
+			lines = append(lines, "  □ package.json (vue, vite, typescript, tailwindcss, @tailwindcss/vite), tsconfig.json, vite.config.ts, index.html, tailwind.config.js")
+			lines = append(lines, "  □ src/main.ts (entry), src/App.vue (root component), src/style.css (@tailwind directives)")
 		}
 		// For full-stack builds: frontend files MUST NOT import any backend/server frameworks.
 		// The frontend calls the backend via HTTP (fetch/axios).
@@ -16672,13 +17329,18 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 
 	if stack.Styling != "" && isFrontend && stack.Frontend != "" {
 		lines = append(lines, fmt.Sprintf("- CSS/Styling: %s (MANDATORY)", stack.Styling))
+		switch normalizedStylingSystem(stack.Styling) {
+		case "tailwind":
+			lines = append(lines, "  Tailwind CSS is REQUIRED for all visual styling. Use utility classes for every element state instead of leaving raw HTML unstyled.")
+			lines = append(lines, "  Define a domain-specific theme with CSS variables and Tailwind tokens for primary, surface, text, border, and accent colors.")
+		}
 	}
 
 	if stack.Backend != "" && isBackend {
 		be := stack.Backend
 		lines = append(lines, fmt.Sprintf("- Backend framework: %s (MANDATORY — do not substitute another framework)", be))
-		switch strings.ToLower(strings.TrimSpace(be)) {
-		case "express", "express.js", "node.js", "node":
+		switch normalizedBackendFramework(be) {
+		case "express":
 			lines = append(lines, "  Use Express + TypeScript. Entry: src/server.ts or server.ts.")
 			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
 			lines = append(lines, "  □ package.json — manifest with all dependencies (express, cors, etc.) and scripts (start/dev)")
@@ -16692,7 +17354,7 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 			} else {
 				lines = append(lines, "  PORT: Backend MUST read process.env.PORT with fallback — const PORT = process.env.PORT || 3001; app.listen(PORT)")
 			}
-		case "go", "golang":
+		case "go":
 			lines = append(lines, "  Use Go with net/http or chi router. Entry: main.go. Module: go.mod required.")
 			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
 			lines = append(lines, "  □ go.mod — Go module manifest (module name + go 1.23)")
@@ -16704,7 +17366,7 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 			} else {
 				lines = append(lines, `  PORT: Backend MUST read PORT env var — port := os.Getenv("PORT"); if port == "" { port = "8080" }; http.ListenAndServe(":"+port, ...)`)
 			}
-		case "python", "fastapi":
+		case "python":
 			lines = append(lines, "  Use Python with FastAPI. Entry: main.py. Dependencies: requirements.txt.")
 			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
 			lines = append(lines, "  □ requirements.txt — all pip packages (fastapi, uvicorn, sqlalchemy, etc.)")
@@ -16818,7 +17480,10 @@ ABSOLUTE RULES:
 9. For React/Vite apps ALWAYS generate: index.html at project root AND vite.config.ts
 10. React apps MUST include both 'react' and 'react-dom' in package.json dependencies
 11. Return ONLY files you actually created or changed in this task. NEVER repeat unchanged context files from other roles.
-12. Before finishing, self-check: no placeholder text, valid package.json scripts, and real runnable entry points`
+12. Before finishing, self-check: no placeholder text, valid package.json scripts, and real runnable entry points
+13. VISUAL COMPLETENESS: Every UI element must be styled with Tailwind CSS classes. NEVER leave any HTML element unstyled. No bare <div>, <button>, <input>, or <p> tags without Tailwind.
+14. DESIGN UNIQUENESS: Design the app specifically for its domain. Never produce a generic layout. The color scheme, navigation, and component patterns must feel purpose-built for this app type.
+15. LOADING & ERROR STATES: Every async operation must show: (a) a skeleton/spinner while loading, (b) a styled error message with retry on failure, (c) a styled empty state with CTA when no data. Never just "Loading..." text.`
 
 	// Build tech stack context if available
 	techHint := ""
@@ -16849,11 +17514,12 @@ ABSOLUTE RULES:
 
 LOCAL STRICT BUILD STACK LOCK (cost-control mode):
 - Default to a SINGLE-REPO app (NO monorepo/workspaces) unless the user explicitly requires one
-- Frontend: React + Vite + TypeScript
+- Frontend: React + Vite + TypeScript + Tailwind CSS (ALWAYS include Tailwind — do not omit it)
 - Backend: Express + TypeScript
 - Database: PostgreSQL via pg only
 - Do NOT mix ORMs or data stacks (NO Prisma/Drizzle/TypeORM/Mongoose combinations)
-- Do NOT introduce extra test frameworks unless explicitly requested`
+- Do NOT introduce extra test frameworks unless explicitly requested
+- VISUAL QUALITY: Even in strict/cost-control mode, the UI must be styled with Tailwind. No unstyled elements.`
 
 		localStrictScopeHint = `
 
@@ -16876,8 +17542,8 @@ FULL-STACK DELIVERY RULE:
 - Keep user-facing updates in plain English.
 - At each major step, make it obvious what section is active now, what comes next, and whether anything is blocked.` + "\n\n" + assuranceContext + techHint + baseRules,
 
-		RolePlanner: `You are the Planning Agent — an expert software architect who creates detailed, actionable build plans.
-Your job: decompose the app into a precise file-by-file implementation plan.
+		RolePlanner: `You are the Planning Agent — an expert software architect and product designer who creates detailed, actionable build plans.
+Your job: decompose the app into a precise file-by-file implementation plan AND define the visual design direction.
 
 FRONTEND-FIRST PLANNING RULE:
 - For full-stack builds, think through backend, data, and integration deeply before any code is written.
@@ -16885,33 +17551,75 @@ FRONTEND-FIRST PLANNING RULE:
 - Then schedule execution so the frontend/UI shell lands before backend implementation work.
 - The backend pass should feel like filling in a known contract, not inventing the app shape from scratch.
 
-YOUR OUTPUT MUST INCLUDE:
-- A clear list of every file to create, with its path and purpose
-- Data models with all fields, types, and relationships
-- API endpoints with methods, paths, request/response schemas
-- UI components with their props, state, and user interactions
-- External dependencies and their exact versions
-- A recommended execution order (architecture/contract → frontend shell → data foundation → backend services → integration/tests → review)
+DESIGN DIRECTION — your plan MUST specify this upfront:
+Before listing files, decide and document the visual identity:
+1. App category: (e.g., SaaS dashboard / e-commerce / social / productivity / developer tool / landing page)
+2. Color palette: primary hex + surface hex + text hex + accent hex (choose colors matching the app purpose)
+3. Layout pattern: (e.g., sidebar nav + main content / top nav + hero + content sections / card grid)
+4. Key UI patterns: (e.g., data tables with pagination, modal dialogs for CRUD, toast notifications, skeleton loaders)
+5. Typography: (e.g., Inter for UI, monospace for code, font-size scale)
 
-EXAMPLE OUTPUT FORMAT:
+VISUAL DESIGN PRINCIPLES your plan must enforce:
+- NEVER plan a generic white-bg layout with unstyled inputs. Every screen must have a deliberate visual design.
+- Plan for a polished, distinctive app that looks like a real product a startup would ship
+- Specify Tailwind classes for the design system: bg-{surface}, text-{text}, border-{border}, ring-{primary}
+- Include loading skeleton screens for every async-fetched section
+- Plan empty states for every list/table (with illustration placeholder and call-to-action)
+
+YOUR OUTPUT MUST INCLUDE:
+1. ## Visual Design Spec (color palette, layout pattern, key UI patterns)
+2. ## Tech Stack (with exact versions)
+3. ## Screen Map (every route/page and its purpose)
+4. ## Files to Generate (every file with its path and precise purpose)
+5. ## Data Models (all fields, types, relationships)
+6. ## API Contract (endpoints with methods, paths, request/response schemas, auth requirements)
+7. ## Execution Order (architecture/contract → frontend shell → data foundation → backend services → integration/tests → review)
+
+EXAMPLE PLAN FOR A TASK MANAGER APP:
+## Visual Design Spec
+- Category: Productivity SaaS
+- Colors: primary #6366f1 (indigo), surface #0f172a (dark slate), text #f8fafc, border #1e293b, accent #10b981 (emerald)
+- Layout: Dark sidebar (w-64) with icon+label nav items, main content area with page-specific headers
+- UI Patterns: Drag-to-reorder tasks, status badge chips (todo/in-progress/done), modal for task creation, toast for actions
+- Typography: Inter font, text-sm for dense lists, text-base for content, text-xl+ for headers
+
 ## Tech Stack
-- Frontend: React 18 + TypeScript + Tailwind CSS
-- Backend: Express.js + TypeScript
-- Database: PostgreSQL with Prisma ORM
+- Frontend: React 18 + TypeScript + Tailwind CSS + @dnd-kit (drag/drop)
+- Backend: Express 4 + TypeScript + Zod (validation)
+- Database: PostgreSQL via pg
+- Auth: JWT (jsonwebtoken + bcryptjs)
 
 ## Files to Generate
-1. prisma/schema.prisma — Database schema with User, Post, Comment models
-2. src/server/index.ts — Express server setup with middleware
-3. src/server/routes/auth.ts — Authentication endpoints (register, login, refresh)
-4. src/components/App.tsx — Root component with routing
+1. index.html — Vite root HTML
+2. vite.config.ts — Vite + React + Tailwind
+3. package.json — all dependencies with exact versions
+4. src/main.tsx — React entry
+5. src/App.tsx — Router + auth guard
+6. src/components/Sidebar.tsx — Navigation sidebar
+7. src/components/TaskCard.tsx — Individual task with drag handle, status badge
+8. src/pages/Dashboard.tsx — Task board with columns and skeleton loading
 ...
 
 ## Data Models
-### User
-- id: UUID (primary key)
-- email: string (unique, indexed)
-- passwordHash: string
-- createdAt: DateTime` + "\n\n" + assuranceContext + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
+### User: id (UUID), email (unique), passwordHash, createdAt, updatedAt
+### Task: id (UUID), title, description?, status (todo|in_progress|done), userId (FK), priority (1-5), dueDate?, position (float), createdAt, updatedAt
+### Index: tasks.userId, tasks.status, tasks.position
+
+## API Contract
+- POST /api/auth/register — { email, password } → { token, user }
+- POST /api/auth/login — { email, password } → { token, user }
+- GET /api/tasks — auth required → { tasks: Task[] }
+- POST /api/tasks — { title, description?, priority?, dueDate? } → Task
+- PATCH /api/tasks/:id — partial Task fields → Task
+- DELETE /api/tasks/:id → 204
+
+## Execution Order
+1. Architect: freeze contract, ports, env vars
+2. Frontend: dashboard layout, sidebar, task cards, auth screens (uses mock/optimistic data initially)
+3. Database: tasks + users schema, seed data
+4. Backend: auth routes, task CRUD, validation
+5. Testing: API contract verification, frontend/backend integration check
+6. Reviewer: security, types, missing error states` + "\n\n" + assuranceContext + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
 
 		RoleArchitect: `You are the Architect Agent — a senior systems architect who designs production-grade software architectures.
 Your job: make concrete technology decisions and produce a concise implementation blueprint for the coding agents.
@@ -16959,40 +17667,57 @@ env_vars:
 </api_contract>
 This contract will be shared with Frontend and Backend agents to ensure they connect correctly.` + "\n\n" + assuranceContext + techHint + localStrictStackLock + localStrictScopeHint + baseRules,
 
-		RoleFrontend: `You are the Frontend Agent — an expert UI engineer who builds beautiful, responsive, production-ready interfaces.
+		RoleFrontend: `You are the Frontend Agent — an expert UI engineer who builds beautiful, distinctive, production-ready interfaces.
 You specialize in modern React with TypeScript, Vite, and Tailwind CSS.
+
+VISUAL DESIGN MANDATE — this is your highest priority alongside correctness:
+- Design each app to look SPECIFICALLY tailored to its domain. Never use a generic white-background layout.
+- Apply a deliberate color scheme in src/index.css or tailwind.config.js using CSS variables:
+  --color-primary, --color-surface, --color-text, --color-border, --color-accent
+- Every page needs a real header/navigation component. Every empty state has a helpful CTA.
+- Loading states use animated skeleton loaders (animate-pulse gray bars), NOT just a "Loading..." string.
+- Error states show a friendly message with a retry button, never a raw JS error string.
+- Hover states: add transition-all duration-200 to interactive elements.
+- Inputs, buttons, and cards must all be styled — zero unstyled browser-default elements.
+- App-type design guidance:
+  * SaaS dashboard: slate-900 bg, indigo/violet accents, sidebar nav, stat cards, data tables
+  * E-commerce: white/cream bg, product grids with hover zoom, badge components, cart UI
+  * Social: avatar components, activity feed, card posts, like/comment interactions
+  * Productivity: clean neutral theme, dense list views, drag handles, keyboard shortcut hints
+  * Developer tool: dark IDE-like theme, monospace code blocks, syntax-highlighted output
+  * Landing/marketing: bold hero with gradient, feature grid (3-col), testimonials, pricing table
+- Mobile-first: design at 375px, scale gracefully. Use responsive Tailwind breakpoints (sm: md: lg:).
 
 FRONTEND CONTRACT RULE:
 - The architecture blueprint already froze the route structure, user flows, and API assumptions.
 - Build the visible product shell first, but do not invent backend behavior outside that contract.
-- Use realistic loading, empty, and error states so the UI remains useful before every backend edge is wired.
 - Only call API routes that exist in the frozen API contract or in already-implemented backend-owned files.
-- If a backend endpoint is not part of the contract yet, keep the UI truthful with local state or staged placeholder behavior instead of inventing a dead fetch target.
+- If a backend endpoint is not part of the contract yet, keep the UI truthful with local state or optimistic UI.
 
 MANDATORY FILES — always generate ALL of these for every React app:
 1. index.html — Vite entry HTML at project root (NOT inside src/)
 2. vite.config.ts — Vite config with React plugin
-3. package.json — with react, react-dom, vite, @vitejs/plugin-react, typescript
+3. package.json — with react, react-dom, vite, @vitejs/plugin-react, typescript, tailwindcss, @tailwindcss/vite (or postcss + autoprefixer)
 4. tsconfig.json — TypeScript config
 5. src/main.tsx — React entry point that renders <App />
-6. src/App.tsx — Root component
-7. src/index.css — Global styles
+6. src/App.tsx — Root component with routing/layout
+7. src/index.css — Global styles with CSS custom properties (color palette)
 
 REQUIREMENTS FOR EVERY COMPONENT:
 - Complete TypeScript types for all props, state, and events
-- Full event handlers (onClick, onChange, onSubmit) — no empty handlers
-- Loading states, error states, and empty states
-- Responsive design with Tailwind CSS classes
+- Full event handlers (onClick, onChange, onSubmit) — no empty handlers, no placeholder comments
+- Loading states (skeleton loaders), error states (with retry), and empty states (with CTA)
+- Responsive Tailwind CSS — every element styled, no bare HTML
 - Proper form validation with user-friendly error messages
-- Keyboard navigation and accessibility attributes (aria-labels, roles)
+- Accessibility attributes (aria-labels, role, aria-live for async content)
 
-EXAMPLE COMPONENT PATTERN:
+EXAMPLE COMPONENT PATTERN — study this: every state handled, every element styled:
 // File: src/components/LoginForm.tsx
 ` + "```" + `typescript
 import React, { useState } from 'react';
 
 interface LoginFormProps {
-  onSuccess: (user: User) => void;
+  onSuccess: (token: string) => void;
 }
 
 export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
@@ -17003,6 +17728,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!email || !password) { setError('Email and password are required'); return; }
     setLoading(true);
     setError(null);
     try {
@@ -17011,20 +17737,62 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      if (!res.ok) throw new Error('Invalid credentials');
-      const user = await res.json();
-      onSuccess(user);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? 'Invalid credentials');
+      }
+      const { token } = await res.json();
+      onSuccess(token);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
   };
-  // ... complete JSX with all states
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {error && (
+        <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+      <div>
+        <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+        <input
+          id="email" type="email" value={email} onChange={e => setEmail(e.target.value)}
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-150"
+          placeholder="you@example.com" required disabled={loading}
+        />
+      </div>
+      <div>
+        <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+        <input
+          id="password" type="password" value={password} onChange={e => setPassword(e.target.value)}
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-150"
+          placeholder="••••••••" required disabled={loading}
+        />
+      </div>
+      <button
+        type="submit" disabled={loading}
+        className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150"
+      >
+        {loading ? (
+          <span className="flex items-center justify-center gap-2">
+            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+            </svg>
+            Signing in...
+          </span>
+        ) : 'Sign in'}
+      </button>
+    </form>
+  );
 };
 ` + "```" + `
 
-Follow this pattern: complete types, complete handlers, complete JSX.` + "\n\n" + assuranceContext + techHint + baseRules,
+This is the standard: complete types, complete handlers, complete styled JSX with all states. Every component must meet this bar.` + "\n\n" + assuranceContext + techHint + baseRules,
 
 		RoleBackend: `You are the Backend Agent — an expert API engineer who creates robust, secure server-side applications.
 You specialize in RESTful APIs, authentication, middleware, and data validation.
@@ -17035,6 +17803,7 @@ FRONTEND-FIRST CONTRACT RULE:
 - If the UI reveals a missing backend dependency, fill the gap in backend-owned files; do not push the problem back into frontend-owned files.
 - Implement every endpoint required by the frozen API contract and every endpoint actively called by the generated frontend.
 - Before finishing, compare the frontend fetch/EventSource URLs against the backend routes you registered and remove any drift.
+- If backend TypeScript runs as ESM ("type": "module" or NodeNext/Node16), every relative local import must use an explicit runtime extension like "./routes/api.js".
 
 REQUIREMENTS FOR EVERY ENDPOINT:
 - Input validation with descriptive error messages
@@ -17166,16 +17935,18 @@ describe('AuthService', () => {
 
 Follow this pattern: setup, happy path, error cases, edge cases, specific assertions.` + "\n\n" + assuranceContext + techHint + baseRules,
 
-		RoleReviewer: `You are the Reviewer Agent — a senior code reviewer focused on production-readiness, security, and quality.
+		RoleReviewer: `You are the Reviewer Agent — a senior code reviewer focused on production-readiness, security, visual quality, and UX completeness.
 You perform thorough code review and provide ACTIONABLE fixes, not just suggestions.
 
 YOUR REVIEW MUST CHECK:
 1. Security: SQL injection, XSS, auth bypass, exposed secrets, input validation
-2. Error handling: Missing try/catch, unhandled promises, generic error messages
+2. Error handling: Missing try/catch, unhandled promises, generic error messages displayed to users
 3. Performance: N+1 queries, missing indexes, unnecessary re-renders, memory leaks
 4. Completeness: Empty functions, TODO comments, placeholder data, missing imports
-5. Types: Missing TypeScript types, any usage, incorrect type assertions
+5. Types: Missing TypeScript types, 'any' usage, incorrect type assertions
 6. Full-stack contract truth: frontend API calls must match real backend routes, CORS, and ports
+7. Visual completeness: unstyled elements, missing loading states, missing empty states, missing error states
+8. UX quality: forms without labels, inputs without focus states, buttons without hover states, no mobile responsiveness
 
 FOR EACH ISSUE FOUND, output the fix as a complete corrected code block:
 
@@ -18997,7 +19768,7 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 	runPreviewProbe := buildUsesPreviewHTTPProbe(manifest.Scripts, forceHTTPProbe)
 	depCount := len(manifest.Dependencies) + len(manifest.DevDependencies)
 	if depCount > 0 && verificationNeedsNodeInstall(manifest, runTests, runPreviewProbe) {
-		if out, err := runPreviewCheckCommand(tmpDir, 2*time.Minute, "npm", "install", "--legacy-peer-deps", "--include=dev", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
+		if out, err := runPreviewCheckCommand(tmpDir, previewVerificationInstallTimeout, "npm", "install", "--legacy-peer-deps", "--include=dev", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
 			skip, summary := classifyNodeInstallFailure(out, err)
 			if skip {
 				log.Printf("Preview verification skipped: verifier host could not install dependencies (%s)", summary)
@@ -19008,7 +19779,7 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 		}
 	}
 
-	if out, err := runPreviewCheckCommand(tmpDir, 90*time.Second, "npm", "run", "build"); err != nil {
+	if out, err := runPreviewCheckCommand(tmpDir, previewVerificationBuildTimeout, "npm", "run", "build"); err != nil {
 		skip, summary := classifyNodeBuildFailure(out, err)
 		if skip {
 			log.Printf("Preview verification skipped: verifier host could not run build toolchain (%s)", summary)
@@ -19019,7 +19790,7 @@ func (am *AgentManager) verifyGeneratedFrontendPreviewReadiness(files []Generate
 	}
 	if runTests {
 		testName, testArgs := nodeTestCommandForManifest(manifest)
-		if out, err := runPreviewCheckCommand(tmpDir, 90*time.Second, testName, testArgs...); err != nil {
+		if out, err := runPreviewCheckCommand(tmpDir, previewVerificationNodeTestTimeout, testName, testArgs...); err != nil {
 			skip, summary := classifyNodeTestFailure(out, err)
 			if skip {
 				log.Printf("Preview verification skipped: verifier host could not run generated tests (%s)", summary)
@@ -19284,7 +20055,7 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 	runTests := shouldRunGeneratedNodeTests(files, prefix, manifest)
 	depCount := len(manifest.Dependencies) + len(manifest.DevDependencies)
 	if depCount > 0 && verificationNeedsNodeInstall(manifest, runTests, false) {
-		if out, err := runPreviewCheckCommand(tmpDir, 2*time.Minute, "npm", "install", "--legacy-peer-deps", "--include=dev", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
+		if out, err := runPreviewCheckCommand(tmpDir, previewVerificationInstallTimeout, "npm", "install", "--legacy-peer-deps", "--include=dev", "--no-audit", "--no-fund", "--prefer-offline"); err != nil {
 			skip, summary := classifyNodeInstallFailure(out, err)
 			if skip {
 				log.Printf("Backend verification skipped: verifier host could not install dependencies (%s)", summary)
@@ -19295,7 +20066,7 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 		}
 	}
 
-	if out, err := runPreviewCheckCommand(tmpDir, 90*time.Second, "npm", "run", "build"); err != nil {
+	if out, err := runPreviewCheckCommand(tmpDir, previewVerificationBuildTimeout, "npm", "run", "build"); err != nil {
 		skip, summary := classifyNodeBuildFailure(out, err)
 		if skip {
 			log.Printf("Backend verification skipped: verifier host could not run build toolchain (%s)", summary)
@@ -19306,7 +20077,7 @@ func (am *AgentManager) verifyGeneratedBackendBuildReadiness(files []GeneratedFi
 	}
 	if runTests {
 		testName, testArgs := nodeTestCommandForManifest(manifest)
-		if out, err := runPreviewCheckCommand(tmpDir, 90*time.Second, testName, testArgs...); err != nil {
+		if out, err := runPreviewCheckCommand(tmpDir, previewVerificationNodeTestTimeout, testName, testArgs...); err != nil {
 			skip, summary := classifyNodeTestFailure(out, err)
 			if skip {
 				log.Printf("Backend verification skipped: verifier host could not run generated tests (%s)", summary)
@@ -19999,6 +20770,12 @@ func buildUsesPreviewHTTPProbe(scripts map[string]string, force bool) bool {
 	return val == "1" || val == "true" || val == "yes"
 }
 
+var (
+	previewVerificationInstallTimeout  = 2 * time.Minute
+	previewVerificationBuildTimeout    = 90 * time.Second
+	previewVerificationNodeTestTimeout = 90 * time.Second
+)
+
 func verificationCommandTimedOut(err error) bool {
 	if err == nil {
 		return false
@@ -20097,17 +20874,33 @@ func runPreviewCheckCommand(workDir string, timeout time.Duration, name string, 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.Command(name, args...)
+	configurePreviewCheckCommand(cmd)
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(), "CI=1")
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
-	err := cmd.Run()
-	if ctx.Err() == context.DeadlineExceeded {
-		return buf.String(), fmt.Errorf("%s timed out after %s", name, timeout)
+	if err := cmd.Start(); err != nil {
+		return buf.String(), err
 	}
-	return buf.String(), err
+
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-waitCh:
+		return buf.String(), err
+	case <-ctx.Done():
+		terminatePreviewCheckCommand(cmd)
+		err := <-waitCh
+		if ctx.Err() == context.DeadlineExceeded {
+			return buf.String(), fmt.Errorf("%s timed out after %s", name, timeout)
+		}
+		return buf.String(), err
+	}
 }
 
 func previewProbeOutputShowsServerReady(output string) bool {

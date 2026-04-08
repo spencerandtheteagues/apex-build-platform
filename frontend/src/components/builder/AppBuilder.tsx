@@ -4174,29 +4174,34 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       reconnectLive?: boolean
       notify?: boolean
       fallbackDetail?: CompletedBuildDetail
+      payload?: any
     }
   ) => {
     let payload: any
     let loadPlatformIssue: BuildPlatformIssueContext | undefined
-    try {
-      payload = await apiService.getBuildDetails(buildId)
-    } catch (error) {
-      loadPlatformIssue = extractPlatformIssue(error)
-      const fallback = options?.fallbackDetail || await apiService.getCompletedBuild(buildId)
-      payload = {
-        id: fallback.build_id,
-        build_id: fallback.build_id,
-        project_id: fallback.project_id,
-        status: fallback.status,
-        mode: fallback.mode,
-        description: fallback.description,
-        progress: fallback.progress,
-        agents: [],
-        tasks: [],
-        checkpoints: [],
-        files: fallback.files || [],
-        power_mode: fallback.power_mode,
-        live: false,
+    if (options?.payload) {
+      payload = options.payload
+    } else {
+      try {
+        payload = await apiService.getBuildDetails(buildId)
+      } catch (error) {
+        loadPlatformIssue = extractPlatformIssue(error)
+        const fallback = options?.fallbackDetail || await apiService.getCompletedBuild(buildId)
+        payload = {
+          id: fallback.build_id,
+          build_id: fallback.build_id,
+          project_id: fallback.project_id,
+          status: fallback.status,
+          mode: fallback.mode,
+          description: fallback.description,
+          progress: fallback.progress,
+          agents: [],
+          tasks: [],
+          checkpoints: [],
+          files: fallback.files || [],
+          power_mode: fallback.power_mode,
+          live: false,
+        }
       }
     }
 
@@ -4356,6 +4361,71 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     restoreServerTelemetry,
     resolveGeneratedFiles,
   ])
+
+  const reconcileActiveBuildTerminalState = useCallback(async (buildId: string): Promise<boolean> => {
+    try {
+      const detail = await apiService.getBuildDetails(buildId)
+      const status = normalizeBuildStatus(detail.status)
+      if (status && isTerminalBuildStatus(status)) {
+        await hydrateBuildContext(buildId, {
+          reconnectLive: false,
+          notify: false,
+          payload: detail,
+        })
+        return true
+      }
+    } catch {
+      try {
+        const completed = await apiService.getCompletedBuild(buildId)
+        const status = normalizeBuildStatus(String(completed.status || ''))
+        if (status && isTerminalBuildStatus(status)) {
+          await hydrateBuildContext(buildId, {
+            reconnectLive: false,
+            notify: false,
+            payload: completed,
+            fallbackDetail: completed,
+          })
+          return true
+        }
+      } catch {
+        return false
+      }
+    }
+
+    return false
+  }, [hydrateBuildContext])
+
+  useEffect(() => {
+    if (!buildState?.id || !isBuildActive) {
+      return
+    }
+
+    let cancelled = false
+    const activeBuildId = buildState.id
+    const reconcile = async () => {
+      if (cancelled) {
+        return
+      }
+
+      const healed = await reconcileActiveBuildTerminalState(activeBuildId)
+      if (healed || cancelled) {
+        return
+      }
+    }
+
+    if (buildState.liveSession === false) {
+      void reconcile()
+    }
+
+    const intervalId = window.setInterval(() => {
+      void reconcile()
+    }, 2000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [buildState?.id, buildState?.liveSession, isBuildActive, reconcileActiveBuildTerminalState])
 
   const handleUpgradeCheckout = useCallback(async () => {
     const requiredPlan = upgradePrompt?.requiredPlan || 'builder'

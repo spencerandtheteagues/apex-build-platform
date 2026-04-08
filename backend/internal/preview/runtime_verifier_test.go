@@ -120,7 +120,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(
 		opt(mux)
 	}
 
-	return httptest.NewServer(mux)
+	return newBrowserTestServer(t, mux)
 }
 
 func TestCheckRootPage_OK(t *testing.T) {
@@ -139,7 +139,7 @@ func TestCheckRootPage_OK(t *testing.T) {
 }
 
 func TestCheckRootPage_BlankBody(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, "<html><body></body></html>")
 	}))
@@ -153,7 +153,7 @@ func TestCheckRootPage_BlankBody(t *testing.T) {
 }
 
 func TestCheckRootPage_Non200(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 	}))
 	defer srv.Close()
@@ -177,7 +177,7 @@ func TestCheckEntryModule_OK(t *testing.T) {
 }
 
 func TestCheckEntryModule_TransformError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/src/main.tsx" {
 			w.WriteHeader(500)
 			fmt.Fprint(w, "Transform failed\nSyntaxError: Unexpected token at line 5")
@@ -195,7 +195,7 @@ func TestCheckEntryModule_TransformError(t *testing.T) {
 }
 
 func TestCheckEntryModule_Missing(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
 	defer srv.Close()
@@ -222,7 +222,7 @@ func TestCheckViteClient_OK(t *testing.T) {
 }
 
 func TestCheckViteClient_Missing(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
 	defer srv.Close()
@@ -238,6 +238,9 @@ func TestCheckViteClient_Missing(t *testing.T) {
 func TestWaitForTCPPort_Ready(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "operation not permitted") {
+			t.Skipf("local listener unavailable in this environment: %v", err)
+		}
 		t.Fatal(err)
 	}
 	defer ln.Close()

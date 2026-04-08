@@ -1917,6 +1917,98 @@ func TestCompletedBuildEndpointsPresentCompletedTerminalSnapshot(t *testing.T) {
 	}
 }
 
+func TestGetCompletedBuildSelfHealsTerminalLiveSnapshotLag(t *testing.T) {
+	db := openBuildTestDB(t)
+	createdAt := time.Now().Add(-2 * time.Minute).UTC()
+	snapshotUpdatedAt := createdAt.Add(90 * time.Second)
+	if err := db.Create(&models.CompletedBuild{
+		BuildID:     "lagging-terminal-snapshot",
+		UserID:      1,
+		Description: "Completed build should not surface stale reviewing history",
+		Status:      string(BuildReviewing),
+		Mode:        string(ModeFast),
+		PowerMode:   string(PowerFast),
+		Progress:    98,
+		FilesJSON:   "[]",
+		CreatedAt:   createdAt,
+		UpdatedAt:   snapshotUpdatedAt,
+	}).Error; err != nil {
+		t.Fatalf("create stale snapshot: %v", err)
+	}
+
+	completedAt := snapshotUpdatedAt.Add(5 * time.Second)
+	liveBuild := &Build{
+		ID:          "lagging-terminal-snapshot",
+		UserID:      1,
+		Status:      BuildCompleted,
+		Mode:        ModeFast,
+		PowerMode:   PowerFast,
+		Description: "Completed build should not surface stale reviewing history",
+		Agents:      map[string]*Agent{},
+		Tasks:       []*Task{},
+		Checkpoints: []*Checkpoint{},
+		Progress:    100,
+		CreatedAt:   createdAt,
+		UpdatedAt:   completedAt,
+		CompletedAt: &completedAt,
+	}
+
+	am := &AgentManager{
+		builds:      map[string]*Build{liveBuild.ID: liveBuild},
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+		aiRouter: &stubPreflight{
+			configured:    true,
+			allProviders:  []ai.AIProvider{ai.ProviderGemini},
+			userProviders: []ai.AIProvider{ai.ProviderGemini},
+		},
+		db: db,
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/builds/lagging-terminal-snapshot", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected completed build 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal completed build response: %v", err)
+	}
+	if body["status"] != "completed" {
+		t.Fatalf("expected self-healed completed status, got %v", body["status"])
+	}
+	if body["progress"] != float64(100) {
+		t.Fatalf("expected self-healed progress 100, got %v", body["progress"])
+	}
+	if body["build_id"] != "lagging-terminal-snapshot" {
+		t.Fatalf("expected build_id preserved, got %v", body["build_id"])
+	}
+	if body["live"] != true {
+		t.Fatalf("expected live=true while terminal build is still in memory, got %v", body["live"])
+	}
+	if body["resumable"] != false {
+		t.Fatalf("expected resumable=false for terminal live build, got %v", body["resumable"])
+	}
+
+	var refreshed models.CompletedBuild
+	if err := db.Where("build_id = ?", "lagging-terminal-snapshot").
+		Order("updated_at DESC").
+		Order("id DESC").
+		First(&refreshed).Error; err != nil {
+		t.Fatalf("reload refreshed snapshot: %v", err)
+	}
+	if refreshed.Status != string(BuildCompleted) {
+		t.Fatalf("expected refreshed snapshot status=completed, got %s", refreshed.Status)
+	}
+	if refreshed.CompletedAt == nil {
+		t.Fatal("expected refreshed snapshot completed_at to be set")
+	}
+}
+
 func TestSnapshotReadEndpointsFallbackToPersistedState(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.CompletedBuild{

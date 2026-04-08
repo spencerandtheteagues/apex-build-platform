@@ -2199,6 +2199,17 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 		return
 	}
 
+	if refreshedSnapshot, liveBuild := h.refreshCompletedBuildFromLive(buildID, uid, &build); refreshedSnapshot != nil {
+		build = *refreshedSnapshot
+		if liveBuild != nil && h.shouldPreferLiveCompletedBuildResponse(&build, liveBuild) {
+			payload, readErr := h.readLiveCompletedBuildPayload(liveBuild, &build, userPlan)
+			if readErr == nil {
+				c.JSON(http.StatusOK, payload.response)
+				return
+			}
+		}
+	}
+
 	// Parse stored files JSON
 	files, _ := parseBuildFiles(build.FilesJSON)
 	agents := orderedBuildAgents(parseBuildAgents(build.AgentsJSON))
@@ -2250,6 +2261,122 @@ func (h *BuildHandler) GetCompletedBuild(c *gin.Context) {
 		response[key] = value
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+func (h *BuildHandler) refreshCompletedBuildFromLive(buildID string, userID uint, snapshot *models.CompletedBuild) (*models.CompletedBuild, *Build) {
+	if h == nil || h.manager == nil || snapshot == nil {
+		return snapshot, nil
+	}
+
+	liveBuild, err := h.manager.GetBuild(buildID)
+	if err != nil || liveBuild == nil || liveBuild.UserID != userID {
+		return snapshot, nil
+	}
+	if !h.shouldPreferLiveCompletedBuildResponse(snapshot, liveBuild) {
+		return snapshot, liveBuild
+	}
+
+	if syncErr := h.manager.persistBuildSnapshotCritical(liveBuild, nil); syncErr != nil {
+		log.Printf("GetCompletedBuild: failed to refresh stale snapshot for build %s: %v", buildID, syncErr)
+		return snapshot, liveBuild
+	}
+
+	refreshed, snapErr := h.getBuildSnapshot(userID, buildID)
+	if snapErr != nil || refreshed == nil {
+		if snapErr != nil {
+			log.Printf("GetCompletedBuild: failed to reload refreshed snapshot for build %s: %v", buildID, snapErr)
+		}
+		return snapshot, liveBuild
+	}
+	return refreshed, liveBuild
+}
+
+func (h *BuildHandler) shouldPreferLiveCompletedBuildResponse(snapshot *models.CompletedBuild, liveBuild *Build) bool {
+	if snapshot == nil || liveBuild == nil {
+		return false
+	}
+
+	liveBuild.mu.RLock()
+	liveStatus := liveBuild.Status
+	liveUpdatedAt := liveBuild.UpdatedAt
+	liveBuild.mu.RUnlock()
+
+	if isActiveBuildStatus(string(liveStatus)) {
+		return false
+	}
+
+	snapshotStatus := presentedSnapshotStatus(snapshot)
+	if isActiveBuildStatus(string(snapshotStatus)) {
+		return true
+	}
+
+	return snapshot.UpdatedAt.Before(liveUpdatedAt)
+}
+
+func (h *BuildHandler) readLiveCompletedBuildPayload(build *Build, snapshot *models.CompletedBuild, userPlan string) (liveBuildReadPayload, error) {
+	payload, err := h.readLiveBuildDetailsPayload(build, userPlan, false)
+	if err != nil {
+		return liveBuildReadPayload{}, err
+	}
+
+	response := payload.response
+	files, _ := response["files"].([]GeneratedFile)
+
+	var techStack any
+	if snapshot != nil && strings.TrimSpace(snapshot.TechStack) != "" {
+		_ = json.Unmarshal([]byte(snapshot.TechStack), &techStack)
+	}
+	if techStack == nil {
+		build.mu.RLock()
+		if build.TechStack != nil {
+			techStack = build.TechStack
+		}
+		build.mu.RUnlock()
+	}
+
+	projectName := ""
+	if snapshot != nil {
+		projectName = strings.TrimSpace(snapshot.ProjectName)
+	}
+
+	var (
+		projectID any
+		duration  int64
+	)
+	build.mu.RLock()
+	if build.ProjectID != nil {
+		projectID = *build.ProjectID
+	}
+	if projectName == "" && build.Plan != nil {
+		projectName = build.Plan.AppType
+	}
+	if build.CompletedAt != nil {
+		duration = build.CompletedAt.Sub(build.CreatedAt).Milliseconds()
+	}
+	build.mu.RUnlock()
+
+	if snapshot != nil && snapshot.DurationMs > 0 {
+		duration = snapshot.DurationMs
+	}
+
+	response["id"] = build.ID
+	if snapshot != nil && snapshot.ID != 0 {
+		response["id"] = snapshot.ID
+	}
+	response["build_id"] = build.ID
+	response["project_id"] = projectID
+	response["project_name"] = projectName
+	response["tech_stack"] = techStack
+	response["files_count"] = len(files)
+	response["total_cost"] = 0.0
+	if snapshot != nil {
+		response["total_cost"] = snapshot.TotalCost
+	}
+	response["duration_ms"] = duration
+	response["live"] = true
+	response["resumable"] = false
+
+	return payload, nil
 }
 
 // DownloadCompletedBuild streams a completed build as a ZIP archive

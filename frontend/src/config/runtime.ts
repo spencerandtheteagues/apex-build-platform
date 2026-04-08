@@ -66,20 +66,52 @@ const getImportedApiUrl = (): string | undefined => {
   return import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL
 }
 
+const isLocalDevelopmentHost = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  const host = window.location.hostname.trim().toLowerCase()
+  if (!host) {
+    return false
+  }
+
+  if (host === 'localhost' || host === '::1') {
+    return true
+  }
+
+  if (host.startsWith('127.') || host.startsWith('10.') || host.startsWith('192.168.')) {
+    return true
+  }
+
+  const private172Match = /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+  return private172Match
+}
+
 export const getConfiguredApiUrl = (): string => {
+  const importedValue = normalizeConfiguredApiUrl(getImportedApiUrl())
+  if (isLocalDevelopmentHost() && importedValue) {
+    return importedValue
+  }
+
   const runtimeValue = normalizeConfiguredApiUrl(readRuntimeConfig().API_URL)
   if (runtimeValue) {
     return runtimeValue
   }
 
-  return normalizeConfiguredApiUrl(getImportedApiUrl())
+  return importedValue
 }
 
 export const getConfiguredWsUrl = (): string => {
+  const importedValue = normalizeConfiguredWsUrl(import.meta.env.VITE_WS_URL)
+  if (isLocalDevelopmentHost() && importedValue) {
+    return importedValue
+  }
+
   const runtimeValue = normalizeConfiguredWsUrl(readRuntimeConfig().WS_URL)
   if (runtimeValue) {
     return runtimeValue
   }
 
-  return normalizeConfiguredWsUrl(import.meta.env.VITE_WS_URL)
+  return importedValue
 }

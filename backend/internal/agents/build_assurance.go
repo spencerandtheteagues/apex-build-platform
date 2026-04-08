@@ -12,6 +12,22 @@ APEX BUILD ASSURANCE MANDATE:
 - Free-plan builds must still ship a prompt-matching, preview-ready frontend UI. If the original request included paid-only backend/runtime scope, freeze that future contract honestly and defer the runtime implementation instead of failing the build.
 - Paid builds are not complete until the full stack works end-to-end in preview with real routes, real persistence/auth logic, and coherent frontend/backend integration.
 - Frontend-first remains mandatory: think through the backend deeply first, freeze the contract, land the UI shell early, then fill the runtime behind it.
+
+VISUAL QUALITY MANDATE — every build must produce an app that looks professionally designed:
+- NEVER produce a plain white page with unstyled text or default browser inputs. Every element must be styled.
+- Choose a visual identity specifically tailored to the app's domain and purpose — not a generic template.
+- Use Tailwind CSS (or the selected styling library) with a coherent color palette, typography scale, and spacing system.
+- Design patterns by app type:
+  * SaaS dashboards: dark or slate backgrounds, sidebar nav, card-based content, accent color for CTAs
+  * E-commerce: clean product grid, bold imagery placeholders, clear pricing, cart interactions
+  * Social/community: avatar-based layouts, activity feeds, notification patterns
+  * Productivity tools: focus-optimized layout, keyboard shortcuts, dense but readable information density
+  * Developer tools / APIs: dark terminal aesthetic or clean IDE-like light theme
+  * Landing pages: hero sections, feature grids, testimonials, clear pricing tiers
+- Every component needs: hover states, focus states, loading states (skeleton loaders), error states, and empty states
+- Mobile-first responsive design: works at 375px, scales gracefully to desktop
+- Typography hierarchy: clear h1/h2/h3/body distinction with appropriate font sizes and weights
+- The generated app must feel like a real product a startup would ship, not a coding exercise
 `
 
 func buildRequiresStaticFrontendFallback(build *Build) bool {

@@ -139,7 +139,7 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
   else if (lastAgentMsg) attentionMsg = lastAgentMsg.content
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
 
       {/* Scrollable activity feed */}
       <div

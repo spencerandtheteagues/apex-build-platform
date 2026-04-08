@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -155,6 +156,8 @@ func (am *AgentManager) applyPreviewDeterministicRepair(
 	switch result.FailureKind {
 	case "corrupt_content":
 		return am.applyPreviewFenceStripRepair(build, allFiles, result, now)
+	case "js_runtime_error":
+		return am.applyPreviewRouterContextRepair(build, result, now)
 	}
 	return false
 }
@@ -222,6 +225,144 @@ func (am *AgentManager) applyPreviewFenceStripRepair(
 	})
 	am.checkBuildCompletion(build)
 	return true
+}
+
+var reactRouterNamedImportPattern = regexp.MustCompile(`(?m)^import\s*\{([^}]*)\}\s*from\s*["']react-router-dom["'];?\s*$`)
+
+func previewFailureLooksLikeMissingRouterContext(result *PreviewVerificationResult) bool {
+	if result == nil || !strings.EqualFold(strings.TrimSpace(result.FailureKind), "js_runtime_error") {
+		return false
+	}
+	haystack := strings.ToLower(strings.TrimSpace(result.Details + "\n" + strings.Join(result.RepairHints, "\n")))
+	return strings.Contains(haystack, "linkwithref") ||
+		strings.Contains(haystack, "basename") ||
+		strings.Contains(haystack, "react-router-dom") ||
+		strings.Contains(haystack, "browserrouter") ||
+		strings.Contains(haystack, "router context")
+}
+
+func (am *AgentManager) applyPreviewRouterContextRepair(
+	build *Build,
+	result *PreviewVerificationResult,
+	now time.Time,
+) bool {
+	if build == nil || !previewFailureLooksLikeMissingRouterContext(result) {
+		return false
+	}
+
+	entryCandidates := map[string]bool{
+		"src/main.tsx": true,
+		"src/main.ts":  true,
+		"src/main.jsx": true,
+		"src/main.js":  true,
+	}
+
+	repaired := false
+	packagePatched := false
+
+	build.mu.Lock()
+	for _, task := range build.Tasks {
+		if task == nil || task.Output == nil {
+			continue
+		}
+		for i := range task.Output.Files {
+			path := strings.TrimSpace(task.Output.Files[i].Path)
+			switch {
+			case entryCandidates[path]:
+				updated, changed := wrapPreviewEntryWithBrowserRouter(task.Output.Files[i].Content)
+				if !changed {
+					continue
+				}
+				task.Output.Files[i].Content = updated
+				repaired = true
+			case path == "package.json":
+				updated, added := patchManifestDependenciesJSON(task.Output.Files[i].Content, []string{"react-router-dom"})
+				if len(added) == 0 {
+					continue
+				}
+				task.Output.Files[i].Content = updated
+				packagePatched = true
+			}
+		}
+	}
+	build.mu.Unlock()
+
+	if !repaired {
+		return false
+	}
+
+	build.mu.Lock()
+	build.PreviewVerificationAttempts++
+	build.Status = BuildTesting
+	build.CompletedAt = nil
+	build.UpdatedAt = now
+	build.Progress = 95
+	build.Error = fmt.Sprintf("Preview verification: wrapped the app entry with BrowserRouter after router-context runtime failure. Re-checking. (%s)", result.Details)
+	build.mu.Unlock()
+
+	log.Printf("Build %s: preview router-context repair applied (package patched=%t), re-checking", build.ID, packagePatched)
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: now,
+		Data: map[string]any{
+			"phase":   "preview_verification",
+			"status":  string(BuildTesting),
+			"message": "Preview verification: wrapped the entry in BrowserRouter after a router-context runtime failure. Re-checking preview readiness.",
+		},
+	})
+	am.checkBuildCompletion(build)
+	return true
+}
+
+func wrapPreviewEntryWithBrowserRouter(content string) (string, bool) {
+	content = strings.TrimSpace(content)
+	if content == "" || strings.Contains(content, "BrowserRouter") {
+		return content, false
+	}
+
+	appPatterns := []string{"<App />", "<App/>"}
+	replacement := "<BrowserRouter>\n      <App />\n    </BrowserRouter>"
+	replaced := false
+	for _, pattern := range appPatterns {
+		if strings.Contains(content, pattern) {
+			content = strings.Replace(content, pattern, replacement, 1)
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		return content, false
+	}
+
+	if reactRouterNamedImportPattern.MatchString(content) {
+		content = reactRouterNamedImportPattern.ReplaceAllStringFunc(content, func(match string) string {
+			submatches := reactRouterNamedImportPattern.FindStringSubmatch(match)
+			if len(submatches) < 2 {
+				return match
+			}
+			specs := strings.TrimSpace(submatches[1])
+			if strings.Contains(specs, "BrowserRouter") {
+				return match
+			}
+			if specs == "" {
+				return `import { BrowserRouter } from "react-router-dom";`
+			}
+			return fmt.Sprintf(`import { BrowserRouter, %s } from "react-router-dom";`, specs)
+		})
+		return content, true
+	}
+
+	importLine := `import { BrowserRouter } from "react-router-dom";`
+	if idx := strings.Index(content, "\nimport App"); idx != -1 {
+		content = content[:idx+1] + importLine + "\n" + content[idx+1:]
+		return content, true
+	}
+	if idx := strings.Index(content, "\n"); idx != -1 {
+		content = content[:idx+1] + importLine + "\n" + content[idx+1:]
+		return content, true
+	}
+	return importLine + "\n" + content, true
 }
 
 // launchPreviewRepairTask enqueues an AI-guided recovery task targeting the

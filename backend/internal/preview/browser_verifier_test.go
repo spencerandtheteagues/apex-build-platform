@@ -139,11 +139,26 @@ func TestClampMax(t *testing.T) {
 // These tests use a real Chrome instance if available, against an httptest
 // server that mimics the Vite dev server.  Skipped when Chrome is absent.
 
+func newBrowserTestServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if strings.Contains(fmt.Sprint(recovered), "failed to listen on a port") {
+				t.Skipf("local listener unavailable in this environment: %v", recovered)
+			}
+			panic(recovered)
+		}
+	}()
+
+	return httptest.NewServer(handler)
+}
+
 // mockAppServer creates a minimal HTML page that mounts a React-like div.
 // renderedContent controls whether #root has children (simulates JS execution).
 func mockAppServer(t *testing.T, renderedContent string) *httptest.Server {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<!DOCTYPE html>
 <html>
@@ -182,7 +197,7 @@ func TestBrowserVerifier_PassesWhenAppRendered(t *testing.T) {
 	}
 
 	// Serve a page with pre-rendered content in #root (no JS needed)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<!DOCTYPE html>
 <html>
@@ -217,7 +232,7 @@ func TestBrowserVerifier_FailsOnBlankMount(t *testing.T) {
 	}
 
 	// Serve a page with empty #root and no JS to populate it
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<!DOCTYPE html>
 <html>
@@ -251,7 +266,7 @@ func TestBrowserVerifier_PassesWhenJSPopulatesMount(t *testing.T) {
 	}
 
 	// Simulate React: JS runs synchronously and populates #root
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<!DOCTYPE html>
 <html>
@@ -289,7 +304,7 @@ func TestBrowserVerifier_DetectsUncaughtException(t *testing.T) {
 	}
 
 	// Page that throws but also leaves mount empty → should fail as js_runtime_error
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newBrowserTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<!DOCTYPE html>
 <html>

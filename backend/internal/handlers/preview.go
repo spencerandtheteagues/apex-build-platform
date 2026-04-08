@@ -1405,6 +1405,7 @@ func (h *PreviewHandler) BuildProject(c *gin.Context) {
 		Minify:     req.Minify,
 		SourceMap:  req.SourceMap,
 		Framework:  req.Framework,
+		Title:      strings.TrimSpace(project.Name),
 	}
 
 	// Auto-detect if not specified

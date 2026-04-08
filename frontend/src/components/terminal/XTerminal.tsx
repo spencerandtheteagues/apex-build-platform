@@ -2,7 +2,7 @@
 // Full xterm.js integration with all addons
 
 import React, { useEffect, useRef, useCallback, useState, forwardRef, useImperativeHandle } from 'react';
-import { Terminal } from 'xterm';
+import type { Terminal as XTermTerminal } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon } from '@xterm/addon-search';
@@ -28,11 +28,11 @@ export interface XTerminalProps {
   onSessionCreate?: (session: TerminalSession) => void;
   onSessionEnd?: () => void;
   onTitleChange?: (title: string) => void;
-  onReady?: (terminal: Terminal) => void;
+  onReady?: (terminal: XTermTerminal) => void;
 }
 
 export interface XTerminalRef {
-  terminal: Terminal | null;
+  terminal: XTermTerminal | null;
   fitAddon: FitAddon | null;
   searchAddon: SearchAddon | null;
   write: (data: string) => void;
@@ -64,7 +64,7 @@ export const XTerminal = forwardRef<XTerminalRef, XTerminalProps>(({
   onReady,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<Terminal | null>(null);
+  const terminalRef = useRef<XTermTerminal | null>(null);
   const serviceRef = useRef<TerminalService | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
@@ -74,6 +74,7 @@ export const XTerminal = forwardRef<XTerminalRef, XTerminalProps>(({
   const [currentSession, setCurrentSession] = useState<TerminalSession | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [bootError, setBootError] = useState<string | null>(null);
 
   // Merge settings
   const settings = { ...DEFAULT_TERMINAL_SETTINGS, ...userSettings };
@@ -82,104 +83,122 @@ export const XTerminal = forwardRef<XTerminalRef, XTerminalProps>(({
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // Create terminal instance
-    const terminal = new Terminal({
-      fontFamily: settings.fontFamily,
-      fontSize: settings.fontSize,
-      fontWeight: settings.fontWeight as any,
-      lineHeight: settings.lineHeight,
-      cursorStyle: settings.cursorStyle,
-      cursorBlink: settings.cursorBlink,
-      scrollback: settings.scrollback,
-      allowTransparency: settings.allowTransparency,
-      macOptionIsMeta: settings.macOptionIsMeta,
-      macOptionClickForcesSelection: settings.macOptionClickForcesSelection,
-      theme: getXtermTheme(theme),
-      allowProposedApi: true,
-      convertEol: true,
-      scrollOnUserInput: true,
-    });
+    let disposed = false;
+    let terminal: XTermTerminal | null = null;
 
-    // Initialize addons
-    const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
-    const searchAddon = new SearchAddon();
-    const unicode11Addon = new Unicode11Addon();
-    const serializeAddon = new SerializeAddon();
-
-    terminal.loadAddon(fitAddon);
-    terminal.loadAddon(webLinksAddon);
-    terminal.loadAddon(searchAddon);
-    terminal.loadAddon(unicode11Addon);
-    terminal.loadAddon(serializeAddon);
-
-    // Activate unicode11
-    terminal.unicode.activeVersion = '11';
-
-    // Open terminal in container
-    terminal.open(containerRef.current);
-
-    // Initial fit
-    try {
-      fitAddon.fit();
-    } catch (e) {
-      console.warn('Initial fit failed:', e);
-    }
-
-    // Store refs
-    terminalRef.current = terminal;
-    fitAddonRef.current = fitAddon;
-    searchAddonRef.current = searchAddon;
-    serializeAddonRef.current = serializeAddon;
-
-    // Handle copy on select
-    if (settings.copyOnSelect) {
-      terminal.onSelectionChange(() => {
-        const selection = terminal.getSelection();
-        if (selection) {
-          navigator.clipboard.writeText(selection).catch(() => {});
-        }
-      });
-    }
-
-    // Title change
-    terminal.onTitleChange((title) => {
-      onTitleChange?.(title);
-    });
-
-    // Handle bell
-    terminal.onBell(() => {
-      if (settings.bellStyle === 'visual' || settings.bellStyle === 'both') {
-        if (containerRef.current) {
-          containerRef.current.classList.add('terminal-bell');
-          setTimeout(() => {
-            containerRef.current?.classList.remove('terminal-bell');
-          }, 200);
-        }
-      }
-    });
-
-    // Setup resize observer
-    resizeObserverRef.current = new ResizeObserver(() => {
+    const initTerminal = async () => {
       try {
-        fitAddon.fit();
-        // Notify backend of resize
-        if (serviceRef.current && terminal.rows && terminal.cols) {
-          serviceRef.current.resize(terminal.rows, terminal.cols);
-        }
-      } catch (e) {
-        // Ignore resize errors during unmount
-      }
-    });
-    resizeObserverRef.current.observe(containerRef.current);
+        const xtermModule = await import('xterm');
+        const TerminalCtor = (
+          (xtermModule as any).Terminal
+          ?? (xtermModule as any).default?.Terminal
+          ?? (xtermModule as any).default
+          ?? (globalThis as any).Terminal
+        ) as typeof XTermTerminal | undefined;
 
-    // Notify ready
-    onReady?.(terminal);
+        if (!containerRef.current || disposed) return;
+        if (typeof TerminalCtor !== 'function') {
+          throw new Error('xterm terminal runtime is unavailable');
+        }
+
+        terminal = new TerminalCtor({
+          fontFamily: settings.fontFamily,
+          fontSize: settings.fontSize,
+          fontWeight: settings.fontWeight as any,
+          lineHeight: settings.lineHeight,
+          cursorStyle: settings.cursorStyle,
+          cursorBlink: settings.cursorBlink,
+          scrollback: settings.scrollback,
+          allowTransparency: settings.allowTransparency,
+          macOptionIsMeta: settings.macOptionIsMeta,
+          macOptionClickForcesSelection: settings.macOptionClickForcesSelection,
+          theme: getXtermTheme(theme),
+          allowProposedApi: true,
+          convertEol: true,
+          scrollOnUserInput: true,
+        });
+
+        const fitAddon = new FitAddon();
+        const webLinksAddon = new WebLinksAddon();
+        const searchAddon = new SearchAddon();
+        const unicode11Addon = new Unicode11Addon();
+        const serializeAddon = new SerializeAddon();
+
+        terminal.loadAddon(fitAddon);
+        terminal.loadAddon(webLinksAddon);
+        terminal.loadAddon(searchAddon);
+        terminal.loadAddon(unicode11Addon);
+        terminal.loadAddon(serializeAddon);
+
+        terminal.unicode.activeVersion = '11';
+        terminal.open(containerRef.current);
+
+        terminalRef.current = terminal;
+        fitAddonRef.current = fitAddon;
+        searchAddonRef.current = searchAddon;
+        serializeAddonRef.current = serializeAddon;
+        setBootError(null);
+
+        requestAnimationFrame(() => {
+          if (disposed) return;
+          try {
+            fitAddon.fit();
+          } catch (error) {
+            console.warn('Initial fit failed:', error);
+          }
+        });
+
+        if (settings.copyOnSelect) {
+          terminal.onSelectionChange(() => {
+            const selection = terminal?.getSelection();
+            if (selection) {
+              navigator.clipboard.writeText(selection).catch(() => {});
+            }
+          });
+        }
+
+        terminal.onTitleChange((title) => {
+          onTitleChange?.(title);
+        });
+
+        terminal.onBell(() => {
+          if (settings.bellStyle === 'visual' || settings.bellStyle === 'both') {
+            if (containerRef.current) {
+              containerRef.current.classList.add('terminal-bell');
+              setTimeout(() => {
+                containerRef.current?.classList.remove('terminal-bell');
+              }, 200);
+            }
+          }
+        });
+
+        resizeObserverRef.current = new ResizeObserver(() => {
+          try {
+            fitAddon.fit();
+            if (serviceRef.current && terminal?.rows && terminal?.cols) {
+              serviceRef.current.resize(terminal.rows, terminal.cols);
+            }
+          } catch {
+            // Ignore resize errors during bootstrap or unmount.
+          }
+        });
+        resizeObserverRef.current.observe(containerRef.current);
+
+        onReady?.(terminal);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to initialize browser terminal';
+        console.error('Failed to bootstrap XTerminal:', error);
+        setBootError(message);
+      }
+    };
+
+    void initTerminal();
 
     // Cleanup
     return () => {
+      disposed = true;
       resizeObserverRef.current?.disconnect();
-      terminal.dispose();
+      terminal?.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
       searchAddonRef.current = null;
@@ -335,6 +354,22 @@ export const XTerminal = forwardRef<XTerminalRef, XTerminalProps>(({
 
     getSession: () => currentSession,
   }), [currentSession]);
+
+  if (bootError) {
+    return (
+      <div
+        className={cn(
+          'flex h-full min-h-[200px] flex-col justify-center gap-3 rounded border border-amber-500/30 bg-black px-4 py-5 text-sm',
+          className
+        )}
+      >
+        <div className="font-medium text-amber-200">Interactive terminal unavailable</div>
+        <div className="text-amber-100/80">
+          {bootError}. Preview, editor, and deploy flows remain available.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

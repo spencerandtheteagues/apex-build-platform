@@ -1116,7 +1116,7 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
       />
 
       {/* Row 3: Live Activity Feed (flex-1) */}
-      <div className="relative flex-1 min-h-0">
+      <div className="relative flex-1 min-h-0 overflow-hidden">
         <LiveActivityFeed
           aiThoughts={aiThoughts}
           chatMessages={chatMessages}

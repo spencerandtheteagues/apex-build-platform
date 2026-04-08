@@ -3852,6 +3852,81 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 	}
 }
 
+func TestApplyDeterministicValidationRepairsFixesDefaultExportMismatch(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "build-export-mismatch",
+		Tasks: []*Task{
+			{
+				ID:   "frontend-task",
+				Type: TaskGenerateUI,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "src/components/Button.tsx",
+							Content: `import React from 'react'
+
+type ButtonProps = {
+  label: string
+}
+
+const Button: React.FC<ButtonProps> = ({ label }) => <button>{label}</button>
+
+export default Button
+`,
+							IsNew: true,
+						},
+						{
+							Path: "src/components/AppShell.tsx",
+							Content: `import React from 'react'
+import { Button } from './Button'
+
+export default function AppShell() {
+  return <Button label="Book now" />
+}
+`,
+							IsNew: true,
+						},
+					},
+				},
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	repaired := am.applyDeterministicValidationRepairs(
+		build,
+		[]string{`Preview verification build failed: error during build:
+RollupError: "Button" is not exported by "src/components/Button.tsx", imported by "src/components/AppShell.tsx".`},
+		"preview build failed",
+		time.Now(),
+	)
+	if !repaired {
+		t.Fatal("expected deterministic export mismatch repair to apply")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	var repairedImporter string
+	for _, file := range files {
+		if file.Path == "src/components/AppShell.tsx" {
+			repairedImporter = file.Content
+			break
+		}
+	}
+	if repairedImporter == "" {
+		t.Fatalf("expected repaired importer file, got %+v", files)
+	}
+	if !strings.Contains(repairedImporter, `import Button from './Button'`) {
+		t.Fatalf("expected named import to be rewritten to default import, got %q", repairedImporter)
+	}
+}
+
 func TestApplyDeterministicProviderBlockedTestRepair(t *testing.T) {
 	t.Parallel()
 
@@ -4804,6 +4879,98 @@ func TestApplyDeterministicPreValidationNormalizationSplitsRootServerTSConfig(t 
 	}
 	if !strings.Contains(serverTSConfig, `"outDir": "../dist/server"`) {
 		t.Fatalf("expected server tsconfig to emit into dist/server, got %s", serverTSConfig)
+	}
+}
+
+func TestApplyDeterministicPreValidationNormalizationAddsNodeNextJSImportExtensions(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:   "build-prevalidation-nodenext-import-extensions",
+		Mode: ModeFull,
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-backend-runtime",
+				Type:   TaskGenerateAPI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "agency-ops",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p server/tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}`,
+						},
+						{
+							Path: "server/tsconfig.json",
+							Content: `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "../dist/server"
+  },
+  "include": ["./**/*.ts"]
+}`,
+						},
+						{
+							Path: "server/index.ts",
+							Content: `import apiRouter from "./routes/api";
+import { pool } from "./db/models";
+
+void pool;
+export { apiRouter };`,
+						},
+						{
+							Path: "server/routes/api.ts",
+							Content: `import healthRouter from "./health";
+
+export default healthRouter;`,
+						},
+						{
+							Path:    "server/routes/health.ts",
+							Content: `export default function health() { return "ok"; }`,
+						},
+						{
+							Path:    "server/db/models.ts",
+							Content: `export const pool = {};`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if !am.applyDeterministicPreValidationNormalization(build) {
+		t.Fatalf("expected NodeNext import normalization to trigger")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+
+	indexFile := byPath["server/index.ts"]
+	if !strings.Contains(indexFile, `from "./routes/api.js"`) {
+		t.Fatalf("expected server/index.ts to use explicit .js runtime extension, got %s", indexFile)
+	}
+	if !strings.Contains(indexFile, `from "./db/models.js"`) {
+		t.Fatalf("expected server/index.ts to patch db import extension, got %s", indexFile)
+	}
+
+	routesFile := byPath["server/routes/api.ts"]
+	if !strings.Contains(routesFile, `from "./health.js"`) {
+		t.Fatalf("expected server/routes/api.ts to use explicit .js runtime extension, got %s", routesFile)
 	}
 }
 

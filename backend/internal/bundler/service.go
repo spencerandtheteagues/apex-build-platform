@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"log"
 	"path/filepath"
 	"strings"
@@ -49,6 +50,10 @@ func (s *Service) GetVersion() string {
 
 // BundleProject bundles a project from the database
 func (s *Service) BundleProject(ctx context.Context, projectID uint, config BundleConfig) (*BundleResult, error) {
+	if strings.TrimSpace(config.Title) == "" {
+		config.Title = s.projectTitle(ctx, projectID)
+	}
+
 	// Load project files from database
 	files, err := s.loadProjectFiles(ctx, projectID)
 	if err != nil {
@@ -176,6 +181,19 @@ func (s *Service) loadProjectFiles(ctx context.Context, projectID uint) (*Projec
 	}
 
 	return result, nil
+}
+
+func (s *Service) projectTitle(ctx context.Context, projectID uint) string {
+	if s == nil || s.db == nil || projectID == 0 {
+		return ""
+	}
+
+	var project models.Project
+	if err := s.db.WithContext(ctx).Select("name").First(&project, projectID).Error; err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(project.Name)
 }
 
 // detectEntryPoint finds the most likely entry point
@@ -331,7 +349,7 @@ func (s *Service) applyFrameworkDefaults(config BundleConfig) BundleConfig {
 // GeneratePreviewHTML generates an HTML file for preview with the bundled code
 func (s *Service) GeneratePreviewHTML(result *BundleResult, config BundleConfig, originalHTML string) string {
 	if !result.Success {
-		return s.generateErrorHTML(result.Errors)
+		return s.generateErrorHTML(result.Errors, config)
 	}
 
 	// If there's original HTML, inject the bundle into it
@@ -379,7 +397,7 @@ func (s *Service) injectBundleIntoHTML(html string, result *BundleResult, config
 }
 
 // generateErrorHTML generates an error page for bundle failures
-func (s *Service) generateErrorHTML(errors []BundleError) string {
+func (s *Service) generateErrorHTML(errors []BundleError, config BundleConfig) string {
 	var errorList strings.Builder
 	for _, err := range errors {
 		errorList.WriteString("<div class='error'>")
@@ -397,10 +415,12 @@ func (s *Service) generateErrorHTML(errors []BundleError) string {
 		errorList.WriteString("</div>")
 	}
 
+	title := template.HTMLEscapeString(config.BuildErrorTitle())
+
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
-  <title>Build Error - APEX Preview</title>
+  <title>%s</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
@@ -455,7 +475,7 @@ func (s *Service) generateErrorHTML(errors []BundleError) string {
     </ul>
   </div>
 </body>
-</html>`, errorList.String())
+</html>`, title, errorList.String())
 }
 
 // BuildRequest represents a build request from the API
@@ -521,10 +541,10 @@ func (s *Service) Shutdown() {
 
 // Status returns the current status of the bundler service
 type ServiceStatus struct {
-	Available   bool       `json:"available"`
-	Version     string     `json:"version"`
-	CacheStats  CacheStats `json:"cache_stats"`
-	LastError   string     `json:"last_error,omitempty"`
+	Available  bool       `json:"available"`
+	Version    string     `json:"version"`
+	CacheStats CacheStats `json:"cache_stats"`
+	LastError  string     `json:"last_error,omitempty"`
 }
 
 func (s *Service) Status() ServiceStatus {

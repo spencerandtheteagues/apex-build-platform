@@ -56,6 +56,19 @@ type PreviewSession struct {
 	BundleConfig *bundler.BundleConfig // Bundle configuration used
 }
 
+func (ps *PreviewServer) projectTitle(ctx context.Context, projectID uint) string {
+	if ps == nil || ps.db == nil || projectID == 0 {
+		return ""
+	}
+
+	var project models.Project
+	if err := ps.db.WithContext(ctx).Select("name").First(&project, projectID).Error; err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(project.Name)
+}
+
 // SafeClient wraps a WebSocket connection with a write mutex for thread-safe writes
 type SafeClient struct {
 	conn    *websocket.Conn
@@ -339,6 +352,11 @@ func (ps *PreviewServer) RefreshPreview(projectID uint, changedFiles []string) e
 
 		if wasBundled && bundleConfig != nil {
 			log.Printf("[preview] Rebundling project %d due to source file changes", projectID)
+			if strings.TrimSpace(bundleConfig.Title) == "" {
+				cfgCopy := *bundleConfig
+				cfgCopy.Title = ps.projectTitle(ctx, projectID)
+				bundleConfig = &cfgCopy
+			}
 
 			result, err := ps.bundler.BundleProject(ctx, projectID, *bundleConfig)
 			if err != nil {
@@ -530,6 +548,7 @@ func (ps *PreviewServer) loadProjectFiles(ctx context.Context, session *PreviewS
 				SourceMap:  true,
 				Target:     []string{"es2020"},
 				Framework:  bundleFramework,
+				Title:      ps.projectTitle(ctx, config.ProjectID),
 			}
 
 			// Bundle the project
@@ -733,6 +752,10 @@ func removeSourceScriptTags(html string) string {
 // generateBundleHTML generates a complete HTML file for a bundled project
 func (ps *PreviewServer) generateBundleHTML(session *PreviewSession, config *PreviewConfig) string {
 	frameworkHead := ps.frameworkRuntimePrelude(session)
+	title := bundler.BundleConfig{}
+	if session != nil && session.BundleConfig != nil {
+		title = *session.BundleConfig
+	}
 
 	var cssLink string
 	if session.BundleResult != nil && len(session.BundleResult.OutputCSS) > 0 {
@@ -744,7 +767,7 @@ func (ps *PreviewServer) generateBundleHTML(session *PreviewSession, config *Pre
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>APEX Preview</title>
+  <title>%s</title>
   %s
   %s
   <style>
@@ -757,7 +780,7 @@ func (ps *PreviewServer) generateBundleHTML(session *PreviewSession, config *Pre
   <div id="app"></div>
   <script src="/__apex_bundle.js"></script>
 </body>
-</html>`, frameworkHead, cssLink)
+</html>`, template.HTMLEscapeString(title.PreviewTitle()), frameworkHead, cssLink)
 }
 
 func (ps *PreviewServer) frameworkRuntimePrelude(session *PreviewSession) string {
