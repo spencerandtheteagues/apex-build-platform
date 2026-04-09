@@ -582,6 +582,7 @@ func refreshDerivedSnapshotStateLocked(build *Build, state *BuildSnapshotState) 
 
 	if orchestration := state.Orchestration; orchestration != nil {
 		refreshDerivedTruthLocked(orchestration, capabilityState, policyState, blockers, state.QualityGateStatus)
+		refreshDerivedReliabilitySummaryLocked(build, state, orchestration)
 	}
 }
 

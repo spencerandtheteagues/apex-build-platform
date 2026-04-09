@@ -346,6 +346,19 @@ type PromotionDecision struct {
 	GeneratedAt         time.Time             `json:"generated_at"`
 }
 
+type BuildReliabilitySummary struct {
+	Status                 string               `json:"status"`
+	CurrentFailureCategory BuildFailureCategory `json:"current_failure_category,omitempty"`
+	CurrentFailureClass    string               `json:"current_failure_class,omitempty"`
+	AdvisoryClasses        []string             `json:"advisory_classes,omitempty"`
+	RecurringFailureClass  []string             `json:"recurring_failure_classes,omitempty"`
+	TopIssues              []string             `json:"top_issues,omitempty"`
+	RecommendedFocus       []string             `json:"recommended_focus,omitempty"`
+	AcceptanceSurfaces     []string             `json:"acceptance_surfaces,omitempty"`
+	PrimaryUserFlows       []string             `json:"primary_user_flows,omitempty"`
+	GeneratedAt            time.Time            `json:"generated_at"`
+}
+
 type FailureFingerprint struct {
 	ID                  string        `json:"id"`
 	BuildID             string        `json:"build_id"`
@@ -390,16 +403,17 @@ type ProviderScorecard struct {
 }
 
 type BuildOrchestrationState struct {
-	Flags               BuildOrchestrationFlags `json:"flags"`
-	IntentBrief         *IntentBrief            `json:"intent_brief,omitempty"`
-	BuildContract       *BuildContract          `json:"build_contract,omitempty"`
-	ValidatedBuildSpec  *ValidatedBuildSpec     `json:"validated_build_spec,omitempty"`
-	WorkOrders          []WorkOrder             `json:"work_orders,omitempty"`
-	PatchBundles        []PatchBundle           `json:"patch_bundles,omitempty"`
-	VerificationReports []VerificationReport    `json:"verification_reports,omitempty"`
-	PromotionDecision   *PromotionDecision      `json:"promotion_decision,omitempty"`
-	FailureFingerprints []FailureFingerprint    `json:"failure_fingerprints,omitempty"`
-	ProviderScorecards  []ProviderScorecard     `json:"provider_scorecards,omitempty"`
+	Flags               BuildOrchestrationFlags  `json:"flags"`
+	IntentBrief         *IntentBrief             `json:"intent_brief,omitempty"`
+	BuildContract       *BuildContract           `json:"build_contract,omitempty"`
+	ValidatedBuildSpec  *ValidatedBuildSpec      `json:"validated_build_spec,omitempty"`
+	WorkOrders          []WorkOrder              `json:"work_orders,omitempty"`
+	PatchBundles        []PatchBundle            `json:"patch_bundles,omitempty"`
+	VerificationReports []VerificationReport     `json:"verification_reports,omitempty"`
+	ReliabilitySummary  *BuildReliabilitySummary `json:"reliability_summary,omitempty"`
+	PromotionDecision   *PromotionDecision       `json:"promotion_decision,omitempty"`
+	FailureFingerprints []FailureFingerprint     `json:"failure_fingerprints,omitempty"`
+	ProviderScorecards  []ProviderScorecard      `json:"provider_scorecards,omitempty"`
 }
 
 func defaultBuildOrchestrationFlags() BuildOrchestrationFlags {
