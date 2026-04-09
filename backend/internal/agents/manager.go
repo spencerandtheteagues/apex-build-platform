@@ -15096,6 +15096,12 @@ func (am *AgentManager) assignPhaseAgents(build *Build, agents []agentPriority, 
 		}
 		if orchestration := build.SnapshotState.Orchestration; orchestration != nil && orchestration.ValidatedBuildSpec != nil {
 			task.Input["validated_build_spec"] = orchestration.ValidatedBuildSpec
+			if security := limitBuildSpecAdvisoriesForRole(agent.Role, orchestration.ValidatedBuildSpec.SecurityAdvisories); len(security) > 0 {
+				task.Input["validated_security_advisories"] = append([]BuildSpecAdvisory(nil), security...)
+			}
+			if performance := limitBuildSpecAdvisoriesForRole(agent.Role, orchestration.ValidatedBuildSpec.PerformanceAdvisories); len(performance) > 0 {
+				task.Input["validated_performance_advisories"] = append([]BuildSpecAdvisory(nil), performance...)
+			}
 		}
 		if orchestration := build.SnapshotState.Orchestration; orchestration != nil && orchestration.ReliabilitySummary != nil {
 			task.Input["reliability_summary"] = orchestration.ReliabilitySummary

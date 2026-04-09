@@ -354,6 +354,20 @@ Key files:
 - `backend/internal/agents/build_spec.go`
 - `backend/internal/agents/build_spec_test.go`
 
+### 12.2. Role-scoped validated advisories now ride directly in task input
+
+Implemented:
+
+- task assignment now injects filtered advisory slices alongside the full `validated_build_spec`
+- downstream agents no longer need to parse the whole spec blob to find the two most relevant advisories for their role
+- frontend/backend roles receive only the advisories relevant to their owned surface; reviewer/planning roles still retain broader visibility through the full spec
+
+Key files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/build_spec.go`
+- `backend/internal/agents/build_spec_test.go`
+
 ### 13. Autonomous package manifests are now more runnable by default
 
 Implemented:
@@ -527,3 +541,4 @@ When ready to commit, keep the work scoped:
 10. reliability summary + retry/work-order/provider bias
 11. validated spec advisories -> work-order acceptance checks
 12. validated spec advisories -> provider fallback when scorecards are weak
+13. role-scoped validated advisories -> task input

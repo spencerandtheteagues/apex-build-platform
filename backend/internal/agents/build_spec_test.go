@@ -734,6 +734,114 @@ func TestApplyReliabilityWorkOrderBiasAddsFrontendAndRecurringChecks(t *testing.
 	}
 }
 
+func TestAssignPhaseAgentsIncludesRoleScopedValidatedAdvisories(t *testing.T) {
+	t.Parallel()
+
+	plan := createBuildPlanFromPlanningBundle("build-validated-advisories", "Build a multi-tenant analytics dashboard", nil, &autonomous.PlanningBundle{
+		Analysis: &autonomous.RequirementAnalysis{
+			AppType: "fullstack",
+			TechStack: &autonomous.TechStack{
+				Frontend: "React",
+				Backend:  "Node",
+				Database: "PostgreSQL",
+				Styling:  "Tailwind",
+			},
+		},
+		Plan: &autonomous.ExecutionPlan{
+			ID:            "plan-validated-advisories",
+			EstimatedTime: time.Hour,
+			CreatedAt:     time.Now(),
+		},
+	})
+
+	build := &Build{
+		ID:           "build-validated-advisories",
+		Description:  "Build a multi-tenant analytics dashboard",
+		Status:       BuildPlanning,
+		Plan:         plan,
+		ProviderMode: "platform",
+		Tasks:        []*Task{},
+		Agents:       map[string]*Agent{},
+	}
+	intent := &IntentBrief{AppType: plan.AppType}
+	contract := compileBuildContractFromPlan(build.ID, intent, plan)
+	build.SnapshotState.Orchestration = &BuildOrchestrationState{
+		Flags:              defaultBuildOrchestrationFlags(),
+		BuildContract:      contract,
+		WorkOrders:         compileWorkOrdersFromPlan(build.ID, contract, plan, defaultProviderScorecards(build.ProviderMode)),
+		ProviderScorecards: defaultProviderScorecards(build.ProviderMode),
+		ValidatedBuildSpec: &ValidatedBuildSpec{
+			PerformanceAdvisories: []BuildSpecAdvisory{
+				{
+					Code:    "progressive_dashboard_loading",
+					Surface: SurfaceFrontend,
+					Summary: "Dashboard-style apps should reveal value before every widget finishes loading.",
+				},
+			},
+			SecurityAdvisories: []BuildSpecAdvisory{
+				{
+					Code:    "tenant_isolation",
+					Surface: SurfaceBackend,
+					Summary: "Multi-tenant data models need explicit tenant isolation at query and mutation boundaries.",
+				},
+			},
+		},
+	}
+
+	frontendAgent := &Agent{ID: "front-validated", BuildID: build.ID, Role: RoleFrontend}
+	backendAgent := &Agent{ID: "back-validated", BuildID: build.ID, Role: RoleBackend}
+	build.Agents[frontendAgent.ID] = frontendAgent
+	build.Agents[backendAgent.ID] = backendAgent
+
+	am := &AgentManager{
+		agents:      map[string]*Agent{frontendAgent.ID: frontendAgent, backendAgent.ID: backendAgent},
+		builds:      map[string]*Build{build.ID: build},
+		taskQueue:   make(chan *Task, 2),
+		subscribers: map[string][]chan *WSMessage{},
+		ctx:         context.Background(),
+	}
+
+	taskIDs := am.assignPhaseAgents(build, []agentPriority{
+		{agent: frontendAgent, priority: 60},
+		{agent: backendAgent, priority: 60},
+	}, build.Description)
+	if len(taskIDs) != 2 {
+		t.Fatalf("expected two task ids, got %d", len(taskIDs))
+	}
+	if len(build.Tasks) != 2 {
+		t.Fatalf("expected two tasks, got %d", len(build.Tasks))
+	}
+
+	var frontendTask, backendTask *Task
+	for _, task := range build.Tasks {
+		if role, _ := task.Input["agent_role"].(string); role == string(RoleFrontend) {
+			frontendTask = task
+		}
+		if role, _ := task.Input["agent_role"].(string); role == string(RoleBackend) {
+			backendTask = task
+		}
+	}
+	if frontendTask == nil || backendTask == nil {
+		t.Fatalf("expected both frontend and backend tasks, got %+v", build.Tasks)
+	}
+
+	frontendPerformance, ok := frontendTask.Input["validated_performance_advisories"].([]BuildSpecAdvisory)
+	if !ok || len(frontendPerformance) != 1 || frontendPerformance[0].Code != "progressive_dashboard_loading" {
+		t.Fatalf("expected scoped frontend performance advisory, got %+v", frontendTask.Input["validated_performance_advisories"])
+	}
+	if _, exists := frontendTask.Input["validated_security_advisories"]; exists {
+		t.Fatalf("did not expect backend security advisories on frontend task, got %+v", frontendTask.Input["validated_security_advisories"])
+	}
+
+	backendSecurity, ok := backendTask.Input["validated_security_advisories"].([]BuildSpecAdvisory)
+	if !ok || len(backendSecurity) != 1 || backendSecurity[0].Code != "tenant_isolation" {
+		t.Fatalf("expected scoped backend security advisory, got %+v", backendTask.Input["validated_security_advisories"])
+	}
+	if _, exists := backendTask.Input["validated_performance_advisories"]; exists {
+		t.Fatalf("did not expect frontend performance advisories on backend task, got %+v", backendTask.Input["validated_performance_advisories"])
+	}
+}
+
 func TestApplyReliabilityWorkOrderBiasIncludesValidatedSpecAdvisories(t *testing.T) {
 	t.Parallel()
 
