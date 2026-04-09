@@ -3766,6 +3766,10 @@ func (am *AgentManager) determineRetryStrategyWithHistory(build *Build, agent *A
 		return base
 	}
 
+	if biased := retryStrategyBiasFromReliabilitySummary(build, failureClass, base, insight); biased != "" {
+		return biased
+	}
+
 	hasAltProvider := false
 	for _, provider := range am.getCurrentlyAvailableProvidersForBuild(build) {
 		if provider != agent.Provider {
@@ -3806,6 +3810,55 @@ func (am *AgentManager) determineRetryStrategyWithHistory(build *Build, agent *A
 	}
 
 	return base
+}
+
+func retryStrategyBiasFromReliabilitySummary(build *Build, failureClass, base string, insight failureFingerprintInsight) string {
+	if build == nil {
+		return ""
+	}
+
+	build.mu.RLock()
+	orchestration := cloneBuildOrchestrationState(build.SnapshotState.Orchestration)
+	build.mu.RUnlock()
+	if orchestration == nil || orchestration.ReliabilitySummary == nil {
+		return ""
+	}
+	summary := orchestration.ReliabilitySummary
+
+	compileRecurring := strings.TrimSpace(summary.CurrentFailureClass) == "compile_failure" || containsString(summary.RecurringFailureClass, "compile_failure")
+	visualRecurring := containsString(summary.AdvisoryClasses, "visual_layout") || containsString(summary.RecurringFailureClass, "visual_layout")
+	interactionRecurring := containsString(summary.AdvisoryClasses, "interaction_canary") || containsString(summary.RecurringFailureClass, "interaction_canary")
+	contractRecurring := strings.TrimSpace(summary.CurrentFailureClass) == "contract_violation" || strings.TrimSpace(summary.CurrentFailureClass) == "coordination_violation" ||
+		containsString(summary.RecurringFailureClass, "contract_violation") || containsString(summary.RecurringFailureClass, "coordination_violation")
+
+	switch failureClass {
+	case "verification_failure", "preview_verification", "final_validation_failure":
+		if visualRecurring || interactionRecurring || contractRecurring {
+			return "spawn_solver"
+		}
+		if compileRecurring {
+			if insight.FixPathFailures >= 1 || insight.SameFailureCount >= 2 {
+				return "spawn_solver"
+			}
+			if base == "standard_retry" || base == "switch_provider" {
+				return "fix_and_retry"
+			}
+		}
+	case "build_failure":
+		if visualRecurring || interactionRecurring {
+			return "spawn_solver"
+		}
+		if compileRecurring {
+			if insight.FixPathFailures >= 1 || insight.SameFailureCount >= 2 {
+				return "spawn_solver"
+			}
+			if base == "standard_retry" {
+				return "fix_and_retry"
+			}
+		}
+	}
+
+	return ""
 }
 
 func summarizeFailureFingerprintInsight(insight failureFingerprintInsight) string {

@@ -371,6 +371,78 @@ func TestDetermineRetryStrategyWithHistory_BiasesTruncationToReduceContext(t *te
 	}
 }
 
+func TestDetermineRetryStrategyWithHistory_RecurringVisualSummaryBiasesToSpawnSolver(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers: []ai.AIProvider{ai.ProviderGPT4, ai.ProviderGemini},
+		},
+	}
+
+	build := &Build{
+		ID:           "build-history-visual-summary",
+		ProviderMode: "platform",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				ReliabilitySummary: &BuildReliabilitySummary{
+					Status:                "advisory",
+					AdvisoryClasses:       []string{"visual_layout"},
+					RecurringFailureClass: []string{"visual_layout"},
+				},
+			},
+		},
+	}
+
+	agent := &Agent{Provider: ai.ProviderGPT4, Role: RoleFrontend}
+	task := &Task{
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{
+				TaskShape: TaskShapeFrontendPatch,
+			},
+		},
+	}
+
+	got := am.determineRetryStrategyWithHistory(build, agent, "verification failed: visual overlap in dashboard hero", task)
+	if got != "spawn_solver" {
+		t.Fatalf("determineRetryStrategyWithHistory() = %q, want spawn_solver", got)
+	}
+}
+
+func TestDetermineRetryStrategyWithHistory_CurrentCompileSummaryBiasesToFixAndRetry(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers: []ai.AIProvider{ai.ProviderGPT4, ai.ProviderGemini},
+		},
+	}
+
+	build := &Build{
+		ID:           "build-history-compile-summary",
+		ProviderMode: "platform",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				ReliabilitySummary: &BuildReliabilitySummary{
+					Status:                "degraded",
+					CurrentFailureClass:   "compile_failure",
+					RecurringFailureClass: []string{"compile_failure"},
+				},
+			},
+		},
+	}
+
+	agent := &Agent{Provider: ai.ProviderGPT4, Role: RoleFrontend}
+	task := &Task{
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{
+				TaskShape: TaskShapeFrontendPatch,
+			},
+		},
+	}
+
+	got := am.determineRetryStrategyWithHistory(build, agent, "cannot find name BrokenThing", task)
+	if got != "fix_and_retry" {
+		t.Fatalf("determineRetryStrategyWithHistory() = %q, want fix_and_retry", got)
+	}
+}
+
 // TestParseConsensusVoteMapping verifies vote parsing from AI provider responses.
 func TestParseConsensusVoteMapping(t *testing.T) {
 	am := &AgentManager{}

@@ -297,7 +297,21 @@ Key files:
 - `backend/internal/agents/compile_validator_test.go`
 - `backend/internal/agents/manager.go`
 
-### 11. Autonomous package manifests are now more runnable by default
+### 11. Reliability summary now biases retry strategy selection
+
+Implemented:
+
+- `determineRetryStrategyWithHistory(...)` now consults orchestration reliability state before falling back to pure provider-history heuristics
+- recurring/current `visual_layout` or `interaction_canary` signals now escalate repeated verification-style failures to solver recovery instead of wasting provider switches
+- recurring/current `compile_failure` now upgrades generic retries into `fix_and_retry`, and escalates to solver sooner once fix-path history shows the problem is repeating
+- this keeps the retry path aligned with the known build degradation class instead of reacting only to the latest error string
+
+Key files:
+
+- `backend/internal/agents/manager.go`
+- `backend/internal/agents/provider_failure_matrix_test.go`
+
+### 12. Autonomous package manifests are now more runnable by default
 
 Implemented:
 
