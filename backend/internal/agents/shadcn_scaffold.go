@@ -1,5 +1,42 @@
 package agents
 
+func shadcnScaffoldPaths() []string {
+	return []string{
+		"components.json",
+		"src/lib/utils.ts",
+		"src/components/ui/button.tsx",
+		"src/components/ui/card.tsx",
+		"src/components/ui/input.tsx",
+		"src/components/ui/badge.tsx",
+		"src/components/ui/dialog.tsx",
+	}
+}
+
+func shadcnRequiredFiles() []PlannedFile {
+	return []PlannedFile{
+		{Path: "components.json", Type: "config", Description: "shadcn/ui registry configuration"},
+		{Path: "src/lib/utils.ts", Type: "frontend", Description: "Shared cn() utility for shadcn/Tailwind composition"},
+		{Path: "src/components/ui/button.tsx", Type: "frontend", Description: "Primary shadcn-style button primitive"},
+		{Path: "src/components/ui/card.tsx", Type: "frontend", Description: "Primary shadcn-style card primitive"},
+		{Path: "src/components/ui/input.tsx", Type: "frontend", Description: "Primary shadcn-style input primitive"},
+		{Path: "src/components/ui/badge.tsx", Type: "frontend", Description: "Primary shadcn-style badge primitive"},
+		{Path: "src/components/ui/dialog.tsx", Type: "frontend", Description: "Primary shadcn-style dialog primitive"},
+	}
+}
+
+func addShadcnBootstrapFiles(add func(path, content string)) {
+	if add == nil {
+		return
+	}
+	for _, path := range shadcnScaffoldPaths() {
+		content, _, ok := shadcnScaffoldContent(path)
+		if !ok {
+			continue
+		}
+		add(path, content)
+	}
+}
+
 func shadcnCoreDeps() []string {
 	return []string{
 		"clsx",
@@ -20,14 +57,13 @@ func applyDeterministicShadcnScaffold(createIfMissing func(path, content, langua
 	if createIfMissing == nil {
 		return
 	}
-
-	createIfMissing("components.json", shadcnComponentsJSON(), "json")
-	createIfMissing("src/lib/utils.ts", shadcnUtilsTS(), "typescript")
-	createIfMissing("src/components/ui/button.tsx", shadcnButtonTSX(), "typescript")
-	createIfMissing("src/components/ui/card.tsx", shadcnCardTSX(), "typescript")
-	createIfMissing("src/components/ui/input.tsx", shadcnInputTSX(), "typescript")
-	createIfMissing("src/components/ui/badge.tsx", shadcnBadgeTSX(), "typescript")
-	createIfMissing("src/components/ui/dialog.tsx", shadcnDialogTSX(), "typescript")
+	for _, path := range shadcnScaffoldPaths() {
+		content, language, ok := shadcnScaffoldContent(path)
+		if !ok {
+			continue
+		}
+		createIfMissing(path, content, language)
+	}
 }
 
 func shadcnScaffoldContent(path string) (string, string, bool) {
@@ -54,20 +90,24 @@ func shadcnScaffoldContent(path string) (string, string, bool) {
 func shadcnComponentsJSON() string {
 	return `{
   "$schema": "https://ui.shadcn.com/schema.json",
-  "style": "default",
+  "style": "new-york",
   "rsc": false,
   "tsx": true,
   "tailwind": {
     "config": "tailwind.config.js",
     "css": "src/index.css",
-    "baseColor": "slate",
+    "baseColor": "zinc",
     "cssVariables": true,
     "prefix": ""
   },
   "aliases": {
     "components": "@/components",
-    "utils": "@/lib/utils"
-  }
+    "utils": "@/lib/utils",
+    "ui": "@/components/ui",
+    "lib": "@/lib",
+    "hooks": "@/hooks"
+  },
+  "iconLibrary": "lucide"
 }
 `
 }

@@ -1669,3 +1669,169 @@ func TestResolveBuildTechStackNormalizesPlannerNoneLiterals(t *testing.T) {
 		t.Fatalf("expected planner database 'none' to normalize to empty, got %q", stack.Database)
 	}
 }
+
+func TestSelectBuildScaffoldReactVariantsIncludeShadcnRequiredFiles(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		appType string
+		stack   TechStack
+	}{
+		{name: "spa", appType: "web", stack: TechStack{Frontend: "React"}},
+		{name: "express", appType: "fullstack", stack: TechStack{Frontend: "React", Backend: "Express"}},
+		{name: "go", appType: "fullstack", stack: TechStack{Frontend: "React", Backend: "Go"}},
+		{name: "fastapi", appType: "fullstack", stack: TechStack{Frontend: "React", Backend: "FastAPI"}},
+	}
+
+	requiredPaths := []string{
+		"components.json",
+		"src/lib/utils.ts",
+		"src/components/ui/button.tsx",
+		"src/components/ui/card.tsx",
+		"src/components/ui/input.tsx",
+		"src/components/ui/badge.tsx",
+		"src/components/ui/dialog.tsx",
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scaffold := selectBuildScaffold(tt.appType, tt.stack)
+			required := make([]string, 0, len(scaffold.Required))
+			for _, file := range scaffold.Required {
+				required = append(required, file.Path)
+			}
+			for _, path := range requiredPaths {
+				if !slices.Contains(required, path) {
+					t.Fatalf("expected scaffold %s to require %s, got %+v", scaffold.ID, path, required)
+				}
+			}
+		})
+	}
+}
+
+func TestScaffoldBootstrapFilesReactVariantsWireShadcnBaseline(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		appType           string
+		stack             TechStack
+		expectedScaffold  string
+		expectedBuildLine string
+	}{
+		{
+			name:              "spa",
+			appType:           "web",
+			stack:             TechStack{Frontend: "React"},
+			expectedScaffold:  "frontend/react-vite-spa",
+			expectedBuildLine: `"build": "tsc -b && vite build"`,
+		},
+		{
+			name:              "express",
+			appType:           "fullstack",
+			stack:             TechStack{Frontend: "React", Backend: "Express"},
+			expectedScaffold:  "fullstack/react-vite-express-ts",
+			expectedBuildLine: `"build:server": "tsc -p tsconfig.json"`,
+		},
+		{
+			name:              "go",
+			appType:           "fullstack",
+			stack:             TechStack{Frontend: "React", Backend: "Go"},
+			expectedScaffold:  "fullstack/react-vite-go",
+			expectedBuildLine: `"build": "tsc -b && vite build"`,
+		},
+		{
+			name:              "fastapi",
+			appType:           "fullstack",
+			stack:             TechStack{Frontend: "React", Backend: "FastAPI"},
+			expectedScaffold:  "fullstack/react-vite-fastapi",
+			expectedBuildLine: `"build": "tsc -b && vite build"`,
+		},
+	}
+
+	fileMap := func(files []GeneratedFile) map[string]string {
+		out := make(map[string]string, len(files))
+		for _, file := range files {
+			out[file.Path] = file.Content
+		}
+		return out
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scaffold := selectBuildScaffold(tt.appType, tt.stack)
+			if scaffold.ID != tt.expectedScaffold {
+				t.Fatalf("expected scaffold %s, got %s", tt.expectedScaffold, scaffold.ID)
+			}
+
+			files := fileMap(scaffoldBootstrapFiles(scaffold, "Build a reliable launch-ready dashboard", tt.stack))
+			for _, required := range []string{
+				"components.json",
+				"src/lib/utils.ts",
+				"src/components/ui/button.tsx",
+				"src/components/ui/dialog.tsx",
+				"package.json",
+				"tsconfig.json",
+				"vite.config.ts",
+				"tailwind.config.js",
+				"src/index.css",
+			} {
+				if strings.TrimSpace(files[required]) == "" {
+					t.Fatalf("expected generated scaffold file %s, got files %+v", required, keys(files))
+				}
+			}
+
+			packageJSON := files["package.json"]
+			for _, snippet := range []string{
+				`"@radix-ui/react-dialog"`,
+				`"@radix-ui/react-slot"`,
+				`"class-variance-authority"`,
+				`"clsx"`,
+				`"tailwind-merge"`,
+				`"tailwindcss-animate"`,
+				tt.expectedBuildLine,
+			} {
+				if !strings.Contains(packageJSON, snippet) {
+					t.Fatalf("expected package.json for %s to contain %q, got %s", scaffold.ID, snippet, packageJSON)
+				}
+			}
+
+			if !strings.Contains(files["components.json"], `"iconLibrary": "lucide"`) {
+				t.Fatalf("expected components.json to include lucide icon library, got %s", files["components.json"])
+			}
+			if !strings.Contains(files["src/lib/utils.ts"], "twMerge") {
+				t.Fatalf("expected src/lib/utils.ts to include twMerge helper, got %s", files["src/lib/utils.ts"])
+			}
+			if !strings.Contains(files["src/components/ui/dialog.tsx"], "@radix-ui/react-dialog") {
+				t.Fatalf("expected dialog primitive to reference radix dialog, got %s", files["src/components/ui/dialog.tsx"])
+			}
+			if !strings.Contains(files["tsconfig.json"], `"@/*": ["./src/*"]`) {
+				t.Fatalf("expected tsconfig alias wiring, got %s", files["tsconfig.json"])
+			}
+			if !strings.Contains(files["vite.config.ts"], `import path from "path";`) ||
+				!strings.Contains(files["vite.config.ts"], `alias: {`) ||
+				!strings.Contains(files["vite.config.ts"], `"@"`) {
+				t.Fatalf("expected vite alias wiring, got %s", files["vite.config.ts"])
+			}
+			if !strings.Contains(files["tailwind.config.js"], `tailwindcss-animate`) {
+				t.Fatalf("expected tailwind animate plugin, got %s", files["tailwind.config.js"])
+			}
+			if !strings.Contains(files["src/index.css"], "--background: 222 47% 7%;") {
+				t.Fatalf("expected shadcn theme tokens in src/index.css, got %s", files["src/index.css"])
+			}
+			if scaffold.ID == "frontend/react-vite-spa" && !strings.Contains(files["src/App.tsx"], `className="hero"`) {
+				t.Fatalf("expected frontend SPA scaffold to render through the hero shell, got %s", files["src/App.tsx"])
+			}
+		})
+	}
+}
+
+func keys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for key := range m {
+		out = append(out, key)
+	}
+	slices.Sort(out)
+	return out
+}

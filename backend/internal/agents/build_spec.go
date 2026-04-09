@@ -1554,7 +1554,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			ID:          "fullstack/react-vite-express-ts",
 			AppType:     "fullstack",
 			Description: "Single-repo React + Vite frontend with Express TypeScript backend",
-			Required: []PlannedFile{
+			Required: append([]PlannedFile{
 				{Path: ".env.example", Type: "config", Description: "Environment variable template"},
 				{Path: "README.md", Type: "docs", Description: "Run instructions and project overview"},
 				{Path: "index.html", Type: "frontend", Description: "Vite HTML entry point"},
@@ -1568,7 +1568,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 				{Path: "tailwind.config.js", Type: "config", Description: "Tailwind configuration"},
 				{Path: "tsconfig.json", Type: "config", Description: "Shared TypeScript config"},
 				{Path: "vite.config.ts", Type: "frontend", Description: "Vite config with proxy/API wiring"},
-			},
+			}, shadcnRequiredFiles()...),
 			Ownership: map[AgentRole][]string{
 				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
 				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "components.json", "index.html", "src/**", "public/**"},
@@ -1602,7 +1602,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			ID:          "fullstack/react-vite-go",
 			AppType:     "fullstack",
 			Description: "Single-repo React + Vite frontend with Go net/http backend",
-			Required: []PlannedFile{
+			Required: append([]PlannedFile{
 				{Path: ".env.example", Type: "config", Description: "Environment variable template"},
 				{Path: "README.md", Type: "docs", Description: "Run instructions and project overview"},
 				{Path: "go.mod", Type: "config", Description: "Go module definition"},
@@ -1616,7 +1616,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 				{Path: "tailwind.config.js", Type: "config", Description: "Tailwind configuration"},
 				{Path: "tsconfig.json", Type: "config", Description: "TypeScript config"},
 				{Path: "vite.config.ts", Type: "frontend", Description: "Vite config with API proxy"},
-			},
+			}, shadcnRequiredFiles()...),
 			Ownership: map[AgentRole][]string{
 				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
 				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "components.json", "index.html", "src/**", "public/**"},
@@ -1650,7 +1650,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			ID:          "fullstack/react-vite-fastapi",
 			AppType:     "fullstack",
 			Description: "Single-repo React + Vite frontend with Python FastAPI backend",
-			Required: []PlannedFile{
+			Required: append([]PlannedFile{
 				{Path: ".env.example", Type: "config", Description: "Environment variable template"},
 				{Path: "README.md", Type: "docs", Description: "Run instructions and project overview"},
 				{Path: "index.html", Type: "frontend", Description: "Vite HTML entry point"},
@@ -1664,7 +1664,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 				{Path: "tailwind.config.js", Type: "config", Description: "Tailwind configuration"},
 				{Path: "tsconfig.json", Type: "config", Description: "TypeScript config"},
 				{Path: "vite.config.ts", Type: "frontend", Description: "Vite config with API proxy"},
-			},
+			}, shadcnRequiredFiles()...),
 			Ownership: map[AgentRole][]string{
 				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
 				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "components.json", "index.html", "src/**", "public/**"},
@@ -1767,7 +1767,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			ID:          "frontend/react-vite-spa",
 			AppType:     "web",
 			Description: "React + Vite single-page app scaffold",
-			Required: []PlannedFile{
+			Required: append([]PlannedFile{
 				{Path: "index.html", Type: "frontend", Description: "Vite HTML entry point"},
 				{Path: "package.json", Type: "config", Description: "Frontend dependency manifest"},
 				{Path: "postcss.config.js", Type: "config", Description: "PostCSS config for Tailwind"},
@@ -1778,7 +1778,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 				{Path: "tailwind.config.js", Type: "config", Description: "Tailwind configuration"},
 				{Path: "tsconfig.json", Type: "config", Description: "TypeScript config"},
 				{Path: "vite.config.ts", Type: "frontend", Description: "Vite config"},
-			},
+			}, shadcnRequiredFiles()...),
 			Ownership: map[AgentRole][]string{
 				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
 				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "components.json", "index.html", "src/**", "public/**"},
@@ -1934,10 +1934,16 @@ func scaffoldBootstrapFiles(scaffold buildScaffold, description string, stack Te
     "start": "node dist/server/index.js"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.1",
+    "@radix-ui/react-slot": "^1.1.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
     "cors": "^2.8.5",
     "express": "^4.21.2",
+    "lucide-react": "^0.439.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^2.5.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
@@ -1950,6 +1956,7 @@ func scaffoldBootstrapFiles(scaffold buildScaffold, description string, stack Te
     "concurrently": "^9.1.2",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
+    "tailwindcss-animate": "^1.0.7",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
     "vite": "^6.2.1"
@@ -1972,15 +1979,25 @@ func scaffoldBootstrapFiles(scaffold buildScaffold, description string, stack Te
     "isolatedModules": true,
     "noEmit": false,
     "jsx": "react-jsx",
-    "outDir": "dist"
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["src", "server"]
 }`)
-		add("vite.config.ts", `import { defineConfig } from "vite";
+		add("vite.config.ts", `import path from "path";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src")
+    }
+  },
   server: {
     host: "0.0.0.0",
     port: 5173,
@@ -1992,14 +2009,7 @@ export default defineConfig({
     }
   }
 });`)
-		add("tailwind.config.js", `/** @type {import('tailwindcss').Config} */
-export default {
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
-  theme: {
-    extend: {}
-  },
-  plugins: []
-};`)
+		add("tailwind.config.js", reactViteShadcnTailwindConfig(`"./index.html", "./src/**/*.{ts,tsx}"`))
 		add("postcss.config.js", `export default {
   plugins: {
     tailwindcss: {},
@@ -2088,60 +2098,8 @@ export default function App() {
     </main>
   );
 }`, displayName))
-		add("src/index.css", `@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-:root {
-  color: #f3f4f6;
-  background: radial-gradient(circle at top, #1f2937, #020617 60%);
-  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
-}
-
-body {
-  margin: 0;
-  min-height: 100vh;
-}
-
-#root {
-  min-height: 100vh;
-}
-
-.app-shell {
-  min-height: 100vh;
-  padding: 4rem 1.5rem;
-  display: grid;
-  gap: 1.5rem;
-  align-content: center;
-  max-width: 72rem;
-  margin: 0 auto;
-}
-
-.hero, .status-card {
-  background: rgba(15, 23, 42, 0.78);
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 1.25rem;
-  padding: 1.5rem;
-  backdrop-filter: blur(12px);
-}
-
-.eyebrow {
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
-  font-size: 0.75rem;
-  color: #93c5fd;
-  margin: 0 0 0.75rem;
-}
-
-.hero h1 {
-  font-size: clamp(2.5rem, 6vw, 4.5rem);
-  margin: 0;
-}
-
-.lede {
-  color: #cbd5e1;
-  max-width: 48rem;
-}`)
+		add("src/index.css", reactViteShellIndexCSS())
+		addShadcnBootstrapFiles(add)
 		add("server/index.ts", fmt.Sprintf(`import cors from "cors";
 import express from "express";
 import apiRouter from "./routes/api.js";
@@ -2179,19 +2137,27 @@ export default router;`, displayName))
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "tsc -b && vite build"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.1",
+    "@radix-ui/react-slot": "^1.1.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.439.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^2.5.2"
   },
   "devDependencies": {
+    "@types/node": "^22.13.10",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
+    "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.8.2",
     "vite": "^6.2.1"
   }
@@ -2207,26 +2173,31 @@ export default router;`, displayName))
     "jsx": "react-jsx",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["src"]
 }`)
-		add("vite.config.ts", `import { defineConfig } from "vite";
+		add("vite.config.ts", `import path from "path";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src")
+    }
+  },
   server: {
     host: "0.0.0.0",
     port: 5173
   }
 });`)
-		add("tailwind.config.js", `/** @type {import('tailwindcss').Config} */
-export default {
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
-  theme: { extend: {} },
-  plugins: []
-};`)
+		add("tailwind.config.js", reactViteShadcnTailwindConfig(`"./index.html", "./src/**/*.{ts,tsx}"`))
 		add("postcss.config.js", `export default {
   plugins: {
     tailwindcss: {},
@@ -2270,44 +2241,18 @@ interface ImportMeta {
 		add("src/App.tsx", fmt.Sprintf(`export default function App() {
   return (
     <main className="app-shell">
-      <p className="eyebrow">Bootstrapped by APEX.BUILD</p>
-      <h1>%s</h1>
-      <p className="lede">
-        The deterministic scaffold is live. Replace this shell with the real experience.
-      </p>
+      <section className="hero">
+        <p className="eyebrow">Bootstrapped by APEX.BUILD</p>
+        <h1>%s</h1>
+        <p className="lede">
+          The deterministic scaffold is live. Replace this shell with the real experience.
+        </p>
+      </section>
     </main>
   );
 }`, displayName))
-		add("src/index.css", `@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-body {
-  margin: 0;
-  min-height: 100vh;
-  background: linear-gradient(180deg, #0f172a, #020617);
-  color: #f8fafc;
-  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
-}
-
-.app-shell {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 3rem 1.5rem;
-  text-align: center;
-}
-
-.eyebrow {
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  color: #38bdf8;
-}
-
-.lede {
-  max-width: 40rem;
-  color: #cbd5e1;
-}`)
+		add("src/index.css", reactViteShellIndexCSS())
+		addShadcnBootstrapFiles(add)
 	case "api/go-http":
 		add(".env.example", "PORT=8080\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
 		add("README.md", fmt.Sprintf("# %s\n\nAPEX.BUILD bootstrapped this Go API scaffold.\n\n## Run\n\n1. Copy `.env.example`\n2. Run `go run .`\n3. Open `http://localhost:8080/health`\n", displayName))
@@ -2395,16 +2340,24 @@ func main() {
     "preview": "vite preview"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.1",
+    "@radix-ui/react-slot": "^1.1.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.439.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "tailwind-merge": "^2.5.2"
   },
   "devDependencies": {
+    "@types/node": "^22.13.10",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
+    "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.8.2",
     "vite": "^6.3.2"
   }
@@ -2418,15 +2371,25 @@ func main() {
     "strict": true,
     "noEmit": true,
     "resolveJsonModule": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["src"]
 }`)
-		add("vite.config.ts", `import { defineConfig } from "vite";
+		add("vite.config.ts", `import path from "path";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src")
+    }
+  },
   server: {
     proxy: {
       "/api": { target: "http://localhost:8080", changeOrigin: true },
@@ -2434,12 +2397,7 @@ export default defineConfig({
     },
   },
 });`)
-		add("tailwind.config.js", `/** @type {import('tailwindcss').Config} */
-export default {
-  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
-  theme: { extend: {} },
-  plugins: [],
-};`)
+		add("tailwind.config.js", reactViteShadcnTailwindConfig(`"./index.html", "./src/**/*.{js,ts,jsx,tsx}"`))
 		add("postcss.config.js", `export default {
   plugins: {
     tailwindcss: {},
@@ -2492,9 +2450,8 @@ export default function App() {
     </div>
   );
 }`, displayName))
-		add("src/index.css", `@tailwind base;
-@tailwind components;
-@tailwind utilities;`)
+		add("src/index.css", reactViteBaseIndexCSS())
+		addShadcnBootstrapFiles(add)
 
 	case "fullstack/react-vite-fastapi":
 		add(".env.example", "PORT=8000\nVITE_API_URL=http://localhost:8000\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
@@ -2534,16 +2491,24 @@ if __name__ == "__main__":
     "preview": "vite preview"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.1",
+    "@radix-ui/react-slot": "^1.1.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.439.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "tailwind-merge": "^2.5.2"
   },
   "devDependencies": {
+    "@types/node": "^22.13.10",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
+    "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.8.2",
     "vite": "^6.3.2"
   }
@@ -2557,15 +2522,25 @@ if __name__ == "__main__":
     "strict": true,
     "noEmit": true,
     "resolveJsonModule": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["src"]
 }`)
-		add("vite.config.ts", `import { defineConfig } from "vite";
+		add("vite.config.ts", `import path from "path";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src")
+    }
+  },
   server: {
     proxy: {
       "/api": { target: "http://localhost:8000", changeOrigin: true },
@@ -2573,12 +2548,7 @@ export default defineConfig({
     },
   },
 });`)
-		add("tailwind.config.js", `/** @type {import('tailwindcss').Config} */
-export default {
-  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
-  theme: { extend: {} },
-  plugins: [],
-};`)
+		add("tailwind.config.js", reactViteShadcnTailwindConfig(`"./index.html", "./src/**/*.{js,ts,jsx,tsx}"`))
 		add("postcss.config.js", `export default {
   plugins: {
     tailwindcss: {},
@@ -2631,9 +2601,8 @@ export default function App() {
     </div>
   );
 }`, displayName))
-		add("src/index.css", `@tailwind base;
-@tailwind components;
-@tailwind utilities;`)
+		add("src/index.css", reactViteBaseIndexCSS())
+		addShadcnBootstrapFiles(add)
 
 	case "api/python-fastapi":
 		add(".env.example", "PORT=8000\nDATABASE_URL=postgresql://postgres:postgres@localhost:5432/app")
@@ -2822,6 +2791,192 @@ export default router;`, displayName))
 		}
 	}
 	return out
+}
+
+func reactViteShadcnTailwindConfig(contentGlobs string) string {
+	return fmt.Sprintf(`import animate from "tailwindcss-animate";
+
+/** @type {import('tailwindcss').Config} */
+export default {
+  darkMode: ["class"],
+  content: [%s],
+  theme: {
+    extend: {
+      colors: {
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        primary: {
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
+        },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+        },
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
+      },
+    },
+  },
+  plugins: [animate],
+};`, contentGlobs)
+}
+
+func reactViteBaseIndexCSS() string {
+	return `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 7%;
+    --foreground: 210 40% 98%;
+    --card: 224 39% 11%;
+    --card-foreground: 210 40% 98%;
+    --popover: 224 39% 11%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 199 89% 48%;
+    --primary-foreground: 222 47% 11%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 72%;
+    --accent: 262 56% 57%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 217 33% 22%;
+    --input: 217 33% 22%;
+    --ring: 199 89% 48%;
+    --radius: 1rem;
+  }
+
+  .dark {
+    --background: 222 47% 7%;
+    --foreground: 210 40% 98%;
+    --card: 224 39% 11%;
+    --card-foreground: 210 40% 98%;
+    --popover: 224 39% 11%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 199 89% 48%;
+    --primary-foreground: 222 47% 11%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 72%;
+    --accent: 262 56% 57%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 217 33% 22%;
+    --input: 217 33% 22%;
+    --ring: 199 89% 48%;
+  }
+
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    @apply bg-background text-foreground;
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+}
+`
+}
+
+func reactViteShellIndexCSS() string {
+	return strings.TrimSpace(reactViteBaseIndexCSS()+`
+.app-shell {
+  min-height: 100vh;
+  width: min(100%, 72rem);
+  margin: 0 auto;
+  padding: 4rem 1.5rem;
+  display: grid;
+  gap: 1.5rem;
+  align-content: center;
+}
+
+.hero,
+.status-card {
+  background:
+    radial-gradient(circle at top right, hsl(var(--primary) / 0.16), transparent 38%),
+    linear-gradient(180deg, hsl(var(--card) / 0.96), hsl(var(--card) / 0.82));
+  border: 1px solid hsl(var(--border) / 0.88);
+  border-radius: 1.5rem;
+  padding: 1.5rem;
+  box-shadow: 0 24px 60px -32px rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(16px);
+}
+
+.eyebrow {
+  margin: 0 0 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: hsl(var(--primary));
+}
+
+.hero h1,
+.app-shell h1 {
+  margin: 0;
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  line-height: 0.95;
+}
+
+.lede {
+  margin: 0;
+  max-width: 48rem;
+  color: hsl(var(--muted-foreground));
+  line-height: 1.7;
+}
+
+.status-card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.125rem;
+}
+
+.status-card p {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+}
+`) + "\n"
 }
 
 func deriveScaffoldNames(description string, appType string) (string, string) {
