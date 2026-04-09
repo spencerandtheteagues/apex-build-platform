@@ -128,6 +128,11 @@ Implemented:
 - sample-aware live scorecard detection
 - cost-sensitive scorecard routing by power mode
 - baseline policy preserved when scorecards only contain priors or too few live samples
+- reliability-aware provider fallback when live scorecards are weak:
+  - recurring/current `visual_layout` and `interaction_canary` bias frontend/reviewer/testing/solver roles toward stronger UI-verification providers
+  - recurring/current `compile_failure` biases frontend/backend/database/solver roles toward stronger compile-repair providers
+  - recurring/current `contract_violation` and `coordination_violation` bias planner/architect/reviewer roles toward stronger contract/planning providers
+- reliability bias now survives the later static role-policy fallback in provider assignment instead of being overwritten by default role preferences
 - explicit `RoleHint` added to `GenerateOptions`
 - role-aware capability mapping for planner/architect/reviewer/testing/solver/code roles
 - fallback prompt heuristics kept in place
@@ -455,6 +460,10 @@ These slices were verified locally with focused build/test runs during implement
   - validated build spec precompute/finalization/prompt injection
   - context-diet compile repair prompts
   - Hydra strategy gating by power mode
+  - reliability summary derivation and prompt injection
+  - retry-path bias from recurring reliability classes
+  - reliability-aware work-order enrichment for frontend-first acceptance surfaces
+  - reliability-aware provider fallback when scorecards are insufficient
 
 Broad verification checkpoint reached:
 
@@ -471,7 +480,8 @@ In order:
    - generate stronger default test file shapes
    - verify generated package scripts on more stacks
    - keep tests out of preview-proof gating.
-5. Decide whether to expose `wireframe_image` in the frontend request path now that backend support exists.
+5. Run an exact-branch-tip canary verification pass and only then promote the verified SHA to `main`.
+6. Decide whether to expose `wireframe_image` in the frontend request path now that backend support exists.
 
 ## Important Repository Context
 
@@ -495,3 +505,4 @@ When ready to commit, keep the work scoped:
 7. autonomous manifest runnable test scripts
 8. multi-modal wireframe intake
 9. validated build spec + context-diet repair prompts + Hydra compile repair
+10. reliability summary + retry/work-order/provider bias

@@ -1973,6 +1973,11 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 		if preferred := selectProviderByScorecard(build, role, taskShapeForRole(role), providers, scorecards); preferred != "" {
 			return preferred
 		}
+		for _, p := range reliabilityPreferredProviders(build, role) {
+			if available[p] {
+				return p
+			}
+		}
 		for _, p := range preferences {
 			if available[p] {
 				return p
@@ -2005,6 +2010,15 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 	// This only applies when each preferred provider is actually available.
 	if !scorecardRoutingActive {
 		for _, role := range roles {
+			biased := reliabilityPreferredProviders(build, role)
+			if len(biased) > 0 {
+				for _, provider := range biased {
+					if available[provider] {
+						assignments[role] = provider
+						goto nextRole
+					}
+				}
+			}
 			switch role {
 			case RolePlanner, RoleArchitect, RoleReviewer:
 				if available[ai.ProviderClaude] {
@@ -2019,6 +2033,7 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 					assignments[role] = ai.ProviderGemini
 				}
 			}
+		nextRole:
 		}
 	}
 	if scorecardRoutingActive {

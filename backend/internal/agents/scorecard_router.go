@@ -76,3 +76,38 @@ func selectProviderByScorecard(build *Build, role AgentRole, shape TaskShape, av
 	}
 	return ""
 }
+
+func reliabilityPreferredProviders(build *Build, role AgentRole) []ai.AIProvider {
+	if build == nil {
+		return nil
+	}
+	build.mu.RLock()
+	var summary *BuildReliabilitySummary
+	if build.SnapshotState.Orchestration != nil && build.SnapshotState.Orchestration.ReliabilitySummary != nil {
+		copied := *build.SnapshotState.Orchestration.ReliabilitySummary
+		copied.AdvisoryClasses = append([]string(nil), copied.AdvisoryClasses...)
+		copied.RecurringFailureClass = append([]string(nil), copied.RecurringFailureClass...)
+		summary = &copied
+	}
+	build.mu.RUnlock()
+	if summary == nil {
+		return nil
+	}
+
+	compileRecurring := summary.CurrentFailureClass == "compile_failure" || containsString(summary.RecurringFailureClass, "compile_failure")
+	visualRecurring := containsString(summary.AdvisoryClasses, "visual_layout") || containsString(summary.RecurringFailureClass, "visual_layout")
+	interactionRecurring := containsString(summary.AdvisoryClasses, "interaction_canary") || containsString(summary.RecurringFailureClass, "interaction_canary")
+	contractRecurring := summary.CurrentFailureClass == "contract_violation" || summary.CurrentFailureClass == "coordination_violation" ||
+		containsString(summary.RecurringFailureClass, "contract_violation") || containsString(summary.RecurringFailureClass, "coordination_violation")
+
+	switch {
+	case (visualRecurring || interactionRecurring) && (role == RoleFrontend || role == RoleReviewer || role == RoleTesting || role == RoleSolver):
+		return []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok}
+	case compileRecurring && (role == RoleFrontend || role == RoleBackend || role == RoleDatabase || role == RoleSolver):
+		return []ai.AIProvider{ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini, ai.ProviderGrok}
+	case contractRecurring && (role == RolePlanner || role == RoleArchitect || role == RoleReviewer):
+		return []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok}
+	default:
+		return nil
+	}
+}

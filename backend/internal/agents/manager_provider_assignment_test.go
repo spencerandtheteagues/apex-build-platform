@@ -137,6 +137,79 @@ func TestAssignProvidersToRolesForBuild_IgnoresLowSampleScorecards(t *testing.T)
 	}
 }
 
+func TestAssignProvidersToRolesForBuild_UsesReliabilityBiasWhenScorecardsAreInsufficient(t *testing.T) {
+	am := &AgentManager{}
+	build := &Build{
+		ID:           "build-reliability-bias",
+		ProviderMode: "platform",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				ReliabilitySummary: &BuildReliabilitySummary{
+					Status:                "advisory",
+					AdvisoryClasses:       []string{"visual_layout"},
+					RecurringFailureClass: []string{"visual_layout"},
+				},
+				ProviderScorecards: []ProviderScorecard{
+					{Provider: ai.ProviderGemini, TaskShape: TaskShapeFrontendPatch, SampleCount: 1, FirstPassSampleCount: 1, CompilePassRate: 0.99, FirstPassVerificationRate: 0.98},
+				},
+			},
+		},
+	}
+
+	assignments := am.assignProvidersToRolesForBuild(build, []ai.AIProvider{
+		ai.ProviderClaude,
+		ai.ProviderGPT4,
+		ai.ProviderGemini,
+	}, []AgentRole{RoleFrontend, RoleReviewer})
+
+	reliabilityPreferred := reliabilityPreferredProviders(build, RoleFrontend)
+	if len(reliabilityPreferred) == 0 || reliabilityPreferred[0] != ai.ProviderClaude {
+		t.Fatalf("frontend reliabilityPreferredProviders = %+v, want leading %s", reliabilityPreferred, ai.ProviderClaude)
+	}
+
+	if got := assignments[RoleFrontend]; got != ai.ProviderClaude {
+		t.Fatalf("frontend provider = %s, want reliability-bias provider %s", got, ai.ProviderClaude)
+	}
+	if got := assignments[RoleReviewer]; got != ai.ProviderClaude {
+		t.Fatalf("reviewer provider = %s, want reliability-bias provider %s", got, ai.ProviderClaude)
+	}
+}
+
+func TestAssignProvidersToRolesForBuild_CompileReliabilityBiasesTowardGPT(t *testing.T) {
+	am := &AgentManager{}
+	build := &Build{
+		ID:           "build-compile-reliability-bias",
+		ProviderMode: "platform",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				ReliabilitySummary: &BuildReliabilitySummary{
+					Status:                "degraded",
+					CurrentFailureClass:   "compile_failure",
+					RecurringFailureClass: []string{"compile_failure"},
+				},
+			},
+		},
+	}
+
+	assignments := am.assignProvidersToRolesForBuild(build, []ai.AIProvider{
+		ai.ProviderClaude,
+		ai.ProviderGPT4,
+		ai.ProviderGemini,
+	}, []AgentRole{RoleFrontend, RoleBackend, RoleSolver})
+
+	if got := assignments[RoleFrontend]; got != ai.ProviderGPT4 {
+		t.Fatalf("frontend provider = %s, want compile-bias provider %s", got, ai.ProviderGPT4)
+	}
+	if got := assignments[RoleBackend]; got != ai.ProviderGPT4 {
+		t.Fatalf("backend provider = %s, want compile-bias provider %s", got, ai.ProviderGPT4)
+	}
+	if got := assignments[RoleSolver]; got != ai.ProviderGPT4 {
+		t.Fatalf("solver provider = %s, want compile-bias provider %s", got, ai.ProviderGPT4)
+	}
+}
+
 func TestSelectProviderByScorecardUsesPowerModeCostSensitivity(t *testing.T) {
 	scorecards := []ProviderScorecard{
 		{Provider: ai.ProviderClaude, TaskShape: TaskShapeFrontendPatch, SampleCount: 5, FirstPassSampleCount: 5, CompilePassRate: 0.96, FirstPassVerificationRate: 0.95, RepairSuccessRate: 0.92, PromotionRate: 0.94, FailureClassRecurrence: 0.03, TruncationRate: 0.01, AverageCostPerSuccess: 0.45},
