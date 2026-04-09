@@ -29,6 +29,7 @@ Non-negotiables:
 - Failure taxonomy across planning, generation, compile, preview boot, visual, interaction, contract, runtime, deployment.
 - Canary corpus for `free-fast`, `paid-balanced`, and `paid-max`.
 - Per-build quality summaries and metrics.
+- Promotion canaries must reject builds that technically complete but remain `degraded` or `blocked` in orchestration-derived reliability state.
 - Rollback flags for every major feature.
 
 ### Phase 1: Guaranteed Frontend-First Preview Path
@@ -225,7 +226,39 @@ Key files:
 
 - `backend/internal/agents/preview_gate.go`
 
-### 8. Autonomous package manifests are now more runnable by default
+### 8. Derived reliability summary and canary enforcement
+
+Implemented:
+
+- `BuildReliabilitySummary` derived from:
+  - current failure taxonomy
+  - latest verification reports
+  - validated build spec surfaces/user flows
+  - historical failure fingerprints
+- per-build summary now classifies results as:
+  - `clean`
+  - `advisory`
+  - `degraded`
+  - `blocked`
+- summary carries:
+  - current failure category/class
+  - advisory classes
+  - recurring failure classes
+  - top issues
+  - recommended focus
+  - acceptance surfaces
+  - primary user flows
+- passing preview advisories are preserved in history without reactivating current failure state
+- platform smoke runner now rejects “completed” builds whose orchestration summary is still `degraded` or `blocked`
+
+Key files:
+
+- `backend/internal/agents/reliability_summary.go`
+- `backend/internal/agents/orchestration_contracts.go`
+- `backend/internal/agents/orchestration_semantics.go`
+- `scripts/run_platform_build_smoke.sh`
+
+### 9. Autonomous package manifests are now more runnable by default
 
 Implemented:
 

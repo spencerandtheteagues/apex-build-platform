@@ -77,6 +77,48 @@ json_bool_field() {
   jq -r "if ($expr) == true then \"true\" elif ($expr) == false then \"false\" else \"\" end" "$file" 2>/dev/null || true
 }
 
+print_build_debug() {
+  local file="$1"
+  jq '{
+    status,
+    progress,
+    error,
+    quality_gate_passed,
+    current_phase,
+    policy_state,
+    capability_state,
+    build_contract,
+    approvals,
+    blockers,
+    files_count,
+    reliability_summary: (.orchestration.reliability_summary // null)
+  }' "$file" 2>/dev/null || cat "$file"
+}
+
+assert_reliability_summary_ready() {
+  local file="$1"
+  local label="$2"
+  local reliability_status current_failure_class
+  reliability_status="$(json_string_field "$file" '.orchestration.reliability_summary.status')"
+  current_failure_class="$(json_string_field "$file" '.orchestration.reliability_summary.current_failure_class')"
+
+  if [[ -z "$reliability_status" ]]; then
+    echo "ASSERTION_FAILED: $label missing orchestration.reliability_summary.status" >&2
+    print_build_debug "$file"
+    exit 1
+  fi
+
+  case "$reliability_status" in
+    clean|advisory)
+      ;;
+    *)
+      echo "ASSERTION_FAILED: $label reliability status expected clean/advisory, got '$reliability_status'${current_failure_class:+ (class: $current_failure_class)}" >&2
+      print_build_debug "$file"
+      exit 1
+      ;;
+  esac
+}
+
 require_true_field() {
   local file="$1"
   local expr="$2"
@@ -85,7 +127,7 @@ require_true_field() {
   actual="$(json_bool_field "$file" "$expr")"
   if [[ "$actual" != "true" ]]; then
     echo "ASSERTION_FAILED: $label expected true, got '${actual:-unset}'" >&2
-    jq '{status,progress,error,quality_gate_passed,current_phase,policy_state,capability_state,build_contract,approvals,blockers,files_count}' "$file" 2>/dev/null || cat "$file"
+    print_build_debug "$file"
     exit 1
   fi
 }
@@ -98,7 +140,7 @@ require_false_field() {
   actual="$(json_bool_field "$file" "$expr")"
   if [[ "$actual" == "true" ]]; then
     echo "ASSERTION_FAILED: $label expected false, got true" >&2
-    jq '{status,progress,error,quality_gate_passed,current_phase,policy_state,capability_state,build_contract,approvals,blockers,files_count}' "$file" 2>/dev/null || cat "$file"
+    print_build_debug "$file"
     exit 1
   fi
 }
@@ -176,6 +218,8 @@ assert_completed_build_contract() {
 
   require_true_field "$detail_file" '.quality_gate_passed' 'build detail quality_gate_passed'
   require_true_field "$completed_file" '.quality_gate_passed' 'completed build quality_gate_passed'
+  assert_reliability_summary_ready "$detail_file" 'build detail'
+  assert_reliability_summary_ready "$completed_file" 'completed build'
 
   if [[ "${detail_files_count:-0}" -lt 1 ]]; then
     echo "ASSERTION_FAILED: build detail files_count must be > 0, got '${detail_files_count:-unset}'" >&2
@@ -386,7 +430,17 @@ if [[ "$detail_auth_error" == "authentication required" || "$detail_auth_error" 
   curl -sS "${auth_args[@]}" "$BASE_URL/build/$BUILD_ID" >/tmp/apex_build_detail.json || true
 fi
 echo "FINAL_DETAIL_SUMMARY"
-jq '{id,status,progress,error,provider_mode,power_mode,require_preview_ready,files_count:(.files|length)}' /tmp/apex_build_detail.json || cat /tmp/apex_build_detail.json
+jq '{
+  id,
+  status,
+  progress,
+  error,
+  provider_mode,
+  power_mode,
+  require_preview_ready,
+  files_count:(.files|length),
+  reliability_summary:(.orchestration.reliability_summary // null)
+}' /tmp/apex_build_detail.json || cat /tmp/apex_build_detail.json
 
 if [[ "$final_status" == "completed" ]]; then
   curl -sS "${auth_args[@]}" "$BASE_URL/builds/$BUILD_ID" >/tmp/apex_build_completed.json || true
@@ -396,7 +450,16 @@ if [[ "$final_status" == "completed" ]]; then
     curl -sS "${auth_args[@]}" "$BASE_URL/builds/$BUILD_ID" >/tmp/apex_build_completed.json || true
   fi
   echo "COMPLETED_BUILD_SUMMARY"
-  jq '{build_id,status,progress,error,files_count,live,resumable}' /tmp/apex_build_completed.json || cat /tmp/apex_build_completed.json
+  jq '{
+    build_id,
+    status,
+    progress,
+    error,
+    files_count,
+    live,
+    resumable,
+    reliability_summary:(.orchestration.reliability_summary // null)
+  }' /tmp/apex_build_completed.json || cat /tmp/apex_build_completed.json
   completed_status="$(jq -r '.status // empty' /tmp/apex_build_completed.json 2>/dev/null || true)"
   if [[ "$completed_status" != "completed" ]]; then
     echo "COMPLETED_BUILD_STATUS_MISMATCH=$completed_status"
