@@ -62,6 +62,7 @@ RUN apk --no-cache add \
     ca-certificates \
     tzdata \
     curl \
+    docker-cli \
     nodejs \
     npm \
     python3 \

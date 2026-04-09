@@ -70,6 +70,7 @@ services:
       args:
         VERSION: ${VERSION:-dev}
     container_name: apex-api
+    user: "0:0"
     restart: unless-stopped
     env_file:
       - .env
@@ -89,6 +90,11 @@ services:
       REDIS_URL: redis://redis:6379
 
       # AI API Keys
+      E2B_API_KEY: ${E2B_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       OLLAMA_MODEL_DEFAULT: ${OLLAMA_MODEL_DEFAULT:-}
       OLLAMA_MODEL_FAST: ${OLLAMA_MODEL_FAST:-}
@@ -103,6 +109,7 @@ services:
       ALLOW_DEFAULT_SEED_PASSWORDS: ${ALLOW_DEFAULT_SEED_PASSWORDS:-false}
 
       # Server
+      DOCKER_HOST: unix:///var/run/docker.sock
       PORT: 8080
       ENVIRONMENT: ${ENVIRONMENT:-development}
       GIN_MODE: ${GIN_MODE:-debug}
@@ -138,6 +145,7 @@ services:
       - api_uploads:/app/uploads
       - api_logs:/app/logs
       - projects_data:/tmp/apex-build-projects
+      - ${DOCKER_SOCKET_PATH:-/Users/spencerteague/.docker/run/docker.sock}:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/ready"]
       interval: 30s
