@@ -117,6 +117,18 @@ assert_reliability_summary_ready() {
       exit 1
       ;;
   esac
+
+  if ! jq -e '((.orchestration.reliability_summary.acceptance_surfaces // []) | length) > 0' "$file" >/dev/null 2>&1; then
+    echo "ASSERTION_FAILED: $label reliability summary missing acceptance_surfaces" >&2
+    print_build_debug "$file"
+    exit 1
+  fi
+
+  if ! jq -e '((.orchestration.reliability_summary.primary_user_flows // []) | length) > 0' "$file" >/dev/null 2>&1; then
+    echo "ASSERTION_FAILED: $label reliability summary missing primary_user_flows" >&2
+    print_build_debug "$file"
+    exit 1
+  fi
 }
 
 require_true_field() {

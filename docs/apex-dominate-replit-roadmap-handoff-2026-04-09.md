@@ -250,6 +250,7 @@ Implemented:
   - primary user flows
 - passing preview advisories are preserved in history without reactivating current failure state
 - platform smoke runner now rejects “completed” builds whose orchestration summary is still `degraded` or `blocked`
+- smoke runner also requires the summary to include acceptance surfaces and primary user flows so promotion checks verify preserved build intent, not just terminal status
 
 Key files:
 
