@@ -1950,6 +1950,45 @@ func appendVerificationReport(build *Build, report VerificationReport) {
 	if len(state.VerificationReports) > 32 {
 		state.VerificationReports = append([]VerificationReport(nil), state.VerificationReports[len(state.VerificationReports)-32:]...)
 	}
+	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
+}
+
+func verificationReportStreamKey(report VerificationReport) string {
+	phase := strings.TrimSpace(strings.ToLower(report.Phase))
+	surface := strings.TrimSpace(strings.ToLower(string(report.Surface)))
+	workOrderID := strings.TrimSpace(report.WorkOrderID)
+	if phase == "" && surface == "" && workOrderID == "" {
+		return strings.TrimSpace(report.ID)
+	}
+	return phase + "|" + surface + "|" + workOrderID
+}
+
+func latestVerificationReports(reports []VerificationReport) []VerificationReport {
+	if len(reports) == 0 {
+		return nil
+	}
+
+	orderedKeys := make([]string, 0, len(reports))
+	latestByKey := make(map[string]VerificationReport, len(reports))
+	fallbackCount := 0
+
+	for _, report := range reports {
+		key := verificationReportStreamKey(report)
+		if key == "" {
+			key = fmt.Sprintf("__report_%d", fallbackCount)
+			fallbackCount++
+		}
+		if _, exists := latestByKey[key]; !exists {
+			orderedKeys = append(orderedKeys, key)
+		}
+		latestByKey[key] = report
+	}
+
+	latest := make([]VerificationReport, 0, len(orderedKeys))
+	for _, key := range orderedKeys {
+		latest = append(latest, latestByKey[key])
+	}
+	return latest
 }
 
 func appendPatchBundle(build *Build, bundle PatchBundle) {

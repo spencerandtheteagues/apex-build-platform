@@ -179,3 +179,67 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 		t.Fatalf("expected react-router-dom dependency to be added, got %q", manifest)
 	}
 }
+
+func TestRunPreviewVerificationGatePassingReportSupersedesEarlierFailure(t *testing.T) {
+	manager := &AgentManager{
+		ctx: context.Background(),
+		previewVerifier: &stubPreviewVerifier{
+			result: &PreviewVerificationResult{Passed: true},
+		},
+	}
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:       "preview-pass-reconciles-history",
+		Status:   BuildCompleted,
+		Progress: 100,
+		Plan: &BuildPlan{
+			ID:           "plan-preview-pass",
+			BuildID:      "preview-pass-reconciles-history",
+			AppType:      "web",
+			DeliveryMode: "frontend_preview_only",
+			TechStack:    TechStack{Frontend: "React", Styling: "Tailwind"},
+		},
+	}
+	orchestration := ensureBuildOrchestrationStateLocked(build)
+	orchestration.BuildContract = &BuildContract{
+		BuildID:      build.ID,
+		AppType:      "web",
+		DeliveryMode: "frontend_preview_only",
+		TruthBySurface: map[string][]TruthTag{
+			string(SurfaceGlobal):   {},
+			string(SurfaceFrontend): {},
+		},
+	}
+	appendVerificationReport(build, VerificationReport{
+		ID:            "preview-failed",
+		BuildID:       build.ID,
+		Phase:         "preview_verification",
+		Surface:       SurfaceGlobal,
+		Status:        VerificationFailed,
+		Deterministic: true,
+		Blockers:      []string{"preview_verification_failed:blank_screen"},
+		GeneratedAt:   now.Add(-time.Minute),
+	})
+
+	status := BuildCompleted
+	buildError := ""
+	if manager.runPreviewVerificationGate(build, nil, &status, &buildError, now) {
+		t.Fatal("expected passing preview verification to continue without repair")
+	}
+	if status != BuildCompleted {
+		t.Fatalf("expected completed status to remain unchanged, got %s", status)
+	}
+	for _, blocker := range build.SnapshotState.Blockers {
+		if blocker.Type == "verification_blocker" {
+			t.Fatalf("expected stale preview blocker to be cleared after a passing verification report, got %+v", blocker)
+		}
+	}
+	reports := build.SnapshotState.Orchestration.VerificationReports
+	if len(reports) < 2 {
+		t.Fatalf("expected preview verification history to include pass after fail, got %+v", reports)
+	}
+	if reports[len(reports)-1].Status != VerificationPassed {
+		t.Fatalf("expected latest preview verification report to pass, got %+v", reports[len(reports)-1])
+	}
+}

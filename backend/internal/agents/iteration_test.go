@@ -142,6 +142,67 @@ func TestNormalizeRestoredBuildStatusTreatsLegacyBuildingAsResumable(t *testing.
 	}
 }
 
+func TestMarkBuildTerminalSuccessSnapshotSetsPassedQualityGateState(t *testing.T) {
+	manager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	})
+
+	build := &Build{
+		ID:               "terminal-success-snapshot",
+		UserID:           1,
+		Status:           BuildCompleted,
+		Mode:             ModeFull,
+		PowerMode:        PowerBalanced,
+		SubscriptionPlan: "builder",
+		ProviderMode:     "platform",
+		Description:      "Build a preview-first CRM app",
+		Plan: &BuildPlan{
+			ID:           "plan-terminal-success",
+			BuildID:      "terminal-success-snapshot",
+			AppType:      "web",
+			DeliveryMode: "frontend_preview_only",
+			TechStack:    TechStack{Frontend: "React", Styling: "Tailwind"},
+		},
+		Interaction: BuildInteractionState{
+			PendingQuestion: "Are you happy with this frontend preview?",
+			WaitingForUser:  true,
+		},
+		CreatedAt: time.Now().Add(-time.Minute).UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	ensureBuildOrchestrationStateLocked(build)
+
+	manager.markBuildTerminalSuccessSnapshot(build, "complete")
+
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+
+	if build.SnapshotState.CurrentPhase != "completed" {
+		t.Fatalf("expected current phase completed, got %q", build.SnapshotState.CurrentPhase)
+	}
+	if build.SnapshotState.QualityGateRequired == nil || !*build.SnapshotState.QualityGateRequired {
+		t.Fatalf("expected quality gate required=true, got %+v", build.SnapshotState.QualityGateRequired)
+	}
+	if build.SnapshotState.QualityGateStatus != "passed" {
+		t.Fatalf("expected quality gate status passed, got %q", build.SnapshotState.QualityGateStatus)
+	}
+	if build.SnapshotState.QualityGateStage != "complete" {
+		t.Fatalf("expected quality gate stage complete, got %q", build.SnapshotState.QualityGateStage)
+	}
+	foundUserReplyBlocker := false
+	for _, blocker := range build.SnapshotState.Blockers {
+		if blocker.ID == "pending-user-reply" {
+			foundUserReplyBlocker = true
+			break
+		}
+	}
+	if !foundUserReplyBlocker {
+		t.Fatalf("expected derived blockers to include the waiting user reply, got %+v", build.SnapshotState.Blockers)
+	}
+}
+
 func TestPersistBuildSnapshotDoesNotOverwriteNewerTerminalSnapshot(t *testing.T) {
 	db := openBuildTestDB(t)
 	manager := newTestIterationManager(&stubPreflight{

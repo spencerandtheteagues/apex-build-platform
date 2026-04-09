@@ -2923,6 +2923,135 @@ async function seed() {
 	}
 }
 
+func TestValidateGeneratedLocalModuleImportsResolvesAtAliasIntoSrcTree(t *testing.T) {
+	t.Parallel()
+
+	files := []GeneratedFile{
+		{
+			Path: "src/App.tsx",
+			Content: `import MainLayout from "@/components/Layout/MainLayout";
+
+export default function App() {
+  return <MainLayout />;
+}
+`,
+		},
+		{
+			Path: "src/components/Layout/MainLayout.tsx",
+			Content: `export default function MainLayout() {
+  return <div>ok</div>;
+}
+`,
+		},
+	}
+
+	if issues := validateGeneratedLocalModuleImports(files, ""); len(issues) != 0 {
+		t.Fatalf("expected @ alias to resolve into src tree, got %+v", issues)
+	}
+}
+
+func TestApplyDeterministicPreValidationNormalizationAddsFrontendSrcAliasSupport(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:   "build-prevalidation-src-alias-support",
+		Mode: ModeFast,
+		Tasks: []*Task{
+			{
+				ID:     "task-generate-ui",
+				Type:   TaskGenerateUI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "pulseboard",
+  "private": true,
+  "scripts": {
+    "build": "tsc && vite build",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.1"
+  }
+}`,
+						},
+						{
+							Path: "src/App.tsx",
+							Content: `import MainLayout from "@/components/Layout/MainLayout";
+
+export default function App() {
+  return <MainLayout />;
+}
+`,
+						},
+						{
+							Path: "src/components/Layout/MainLayout.tsx",
+							Content: `export default function MainLayout() {
+  return <div>ready</div>;
+}
+`,
+						},
+						{
+							Path: "tsconfig.json",
+							Content: `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx"
+  },
+  "include": ["src"]
+}`,
+						},
+						{
+							Path: "vite.config.ts",
+							Content: `import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+});
+`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if !am.applyDeterministicPreValidationNormalization(build) {
+		t.Fatalf("expected pre-validation normalization to add frontend path alias support")
+	}
+
+	files := am.collectGeneratedFiles(build)
+	byPath := map[string]string{}
+	for _, file := range files {
+		byPath[file.Path] = file.Content
+	}
+
+	if !strings.Contains(byPath["vite.config.ts"], `import path from "path";`) {
+		t.Fatalf("expected vite config to import path, got %q", byPath["vite.config.ts"])
+	}
+	if !strings.Contains(byPath["vite.config.ts"], `"@"`) || !strings.Contains(byPath["vite.config.ts"], `path.resolve(__dirname, "./src")`) {
+		t.Fatalf("expected vite config to declare @ src alias, got %q", byPath["vite.config.ts"])
+	}
+	if !strings.Contains(byPath["tsconfig.json"], `"baseUrl": "."`) {
+		t.Fatalf("expected tsconfig baseUrl to be set, got %q", byPath["tsconfig.json"])
+	}
+	if !strings.Contains(byPath["tsconfig.json"], `"@/*"`) || !strings.Contains(byPath["tsconfig.json"], `"src/*"`) {
+		t.Fatalf("expected tsconfig paths to declare @/* -> src/*, got %q", byPath["tsconfig.json"])
+	}
+}
+
 func TestExtractBrokenGeneratedTestPaths(t *testing.T) {
 	t.Parallel()
 

@@ -71,8 +71,19 @@ func (am *AgentManager) runPreviewVerificationGate(
 	ctx, cancel := context.WithTimeout(am.ctx, 30*time.Second)
 	defer cancel()
 
+	checksRun := []string{"preview_entrypoint", "preview_content", "preview_structure"}
 	result := am.previewVerifier.VerifyBuildFiles(ctx, vFiles, isFS)
 	if result == nil || result.Passed {
+		appendVerificationReport(build, VerificationReport{
+			ID:            uuid.New().String(),
+			BuildID:       build.ID,
+			Phase:         "preview_verification",
+			Surface:       SurfaceGlobal,
+			Status:        VerificationPassed,
+			Deterministic: true,
+			ChecksRun:     checksRun,
+			GeneratedAt:   now.UTC(),
+		})
 		return false // gate passed — caller continues normally
 	}
 
@@ -86,7 +97,7 @@ func (am *AgentManager) runPreviewVerificationGate(
 		Surface:       SurfaceGlobal,
 		Status:        VerificationFailed,
 		Deterministic: true,
-		ChecksRun:     []string{"preview_entrypoint", "preview_content", "preview_structure"},
+		ChecksRun:     checksRun,
 		Errors:        []string{result.Details},
 		Blockers:      []string{fmt.Sprintf("preview_verification_failed:%s", result.FailureKind)},
 		GeneratedAt:   now.UTC(),

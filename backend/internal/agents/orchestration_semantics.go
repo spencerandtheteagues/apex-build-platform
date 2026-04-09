@@ -339,7 +339,10 @@ func deriveBuildBlockers(build *Build, policy *BuildPolicyState) []BuildBlocker 
 				})
 			}
 		}
-		for _, report := range orchestration.VerificationReports {
+		for _, report := range latestVerificationReports(orchestration.VerificationReports) {
+			if report.Status == VerificationPassed {
+				continue
+			}
 			for index, blocker := range report.Blockers {
 				blocker = strings.TrimSpace(blocker)
 				if blocker == "" {

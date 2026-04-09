@@ -331,6 +331,75 @@ func TestRefreshDerivedSnapshotStateLockedFrontendPreviewOnlyClearsPaidRuntimeAp
 	}
 }
 
+func TestRefreshDerivedSnapshotStateLockedUsesLatestVerificationReportForBlockers(t *testing.T) {
+	build := &Build{
+		ID:               "verification-report-reconciliation",
+		UserID:           12,
+		Status:           BuildCompleted,
+		Mode:             ModeFull,
+		PowerMode:        PowerBalanced,
+		SubscriptionPlan: "builder",
+		ProviderMode:     "platform",
+		Description:      "Build a preview-first dashboard with frontend and backend surfaces.",
+		Plan: &BuildPlan{
+			ID:           "plan-reconcile",
+			BuildID:      "verification-report-reconciliation",
+			AppType:      "fullstack",
+			DeliveryMode: "full_stack",
+			TechStack:    TechStack{Frontend: "React", Backend: "Express"},
+		},
+		Agents:      map[string]*Agent{},
+		Tasks:       []*Task{},
+		Checkpoints: []*Checkpoint{},
+		CreatedAt:   time.Now().Add(-time.Minute).UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	orchestration := ensureBuildOrchestrationStateLocked(build)
+	orchestration.BuildContract = &BuildContract{
+		BuildID:      build.ID,
+		AppType:      "fullstack",
+		DeliveryMode: "full_stack",
+		TruthBySurface: map[string][]TruthTag{
+			string(SurfaceGlobal):      {},
+			string(SurfaceFrontend):    {},
+			string(SurfaceBackend):     {},
+			string(SurfaceIntegration): {},
+		},
+	}
+	orchestration.VerificationReports = []VerificationReport{
+		{
+			ID:          "preview-failed",
+			BuildID:     build.ID,
+			Phase:       "preview_verification",
+			Surface:     SurfaceGlobal,
+			Status:      VerificationFailed,
+			Blockers:    []string{"preview_verification_failed:blank_screen"},
+			GeneratedAt: time.Now().Add(-2 * time.Minute).UTC(),
+		},
+		{
+			ID:          "preview-passed",
+			BuildID:     build.ID,
+			Phase:       "preview_verification",
+			Surface:     SurfaceGlobal,
+			Status:      VerificationPassed,
+			GeneratedAt: time.Now().Add(-time.Minute).UTC(),
+		},
+	}
+	build.SnapshotState.QualityGateStatus = "passed"
+	build.SnapshotState.CurrentPhase = "completed"
+	required := true
+	build.SnapshotState.QualityGateRequired = &required
+	build.SnapshotState.QualityGateStage = "complete"
+
+	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
+
+	for _, blocker := range build.SnapshotState.Blockers {
+		if blocker.Type == "verification_blocker" {
+			t.Fatalf("expected stale failed verification report to be superseded, got blocker %+v", blocker)
+		}
+	}
+}
+
 func TestBroadcastBuildProgressIncludesDerivedSemanticState(t *testing.T) {
 	manager := newTestIterationManager(&stubPreflight{
 		configured:    true,
