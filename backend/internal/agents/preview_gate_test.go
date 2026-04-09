@@ -315,6 +315,19 @@ func TestRunPreviewVerificationGatePassingReportPreservesAdvisoryWarnings(t *tes
 	if len(report.Warnings) != 2 {
 		t.Fatalf("expected advisory warnings to be retained, got %+v", report.Warnings)
 	}
+	if len(build.SnapshotState.Orchestration.FailureFingerprints) != 2 {
+		t.Fatalf("expected advisory fingerprints to be recorded, got %+v", build.SnapshotState.Orchestration.FailureFingerprints)
+	}
+	fingerprints := build.SnapshotState.Orchestration.FailureFingerprints
+	if fingerprints[0].FailureClass != "visual_layout" || !fingerprints[0].RepairSucceeded {
+		t.Fatalf("expected visual advisory fingerprint, got %+v", fingerprints[0])
+	}
+	if fingerprints[1].FailureClass != "interaction_canary" || !fingerprints[1].RepairSucceeded {
+		t.Fatalf("expected interaction advisory fingerprint, got %+v", fingerprints[1])
+	}
+	if build.SnapshotState.FailureTaxonomy != nil && build.SnapshotState.FailureTaxonomy.CurrentClass != "" {
+		t.Fatalf("expected passed advisory verification not to set current failure taxonomy, got %+v", build.SnapshotState.FailureTaxonomy)
+	}
 }
 
 func TestBuildPreviewRepairTaskInputIncludesScreenshotForVisionHints(t *testing.T) {

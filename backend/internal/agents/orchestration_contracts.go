@@ -1974,7 +1974,64 @@ func appendVerificationReport(build *Build, report VerificationReport) {
 	if len(state.VerificationReports) > 32 {
 		state.VerificationReports = append([]VerificationReport(nil), state.VerificationReports[len(state.VerificationReports)-32:]...)
 	}
+	appendVerificationAdvisoryFingerprintsLocked(build, state, report)
 	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
+}
+
+func appendVerificationAdvisoryFingerprintsLocked(build *Build, state *BuildOrchestrationState, report VerificationReport) {
+	if build == nil || state == nil || report.Status != VerificationPassed || len(report.Warnings) == 0 {
+		return
+	}
+
+	visualWarnings := make([]string, 0, len(report.Warnings))
+	interactionWarnings := make([]string, 0, len(report.Warnings))
+	for _, warning := range report.Warnings {
+		trimmed := strings.TrimSpace(warning)
+		switch {
+		case strings.HasPrefix(trimmed, "visual:"):
+			visualWarnings = append(visualWarnings, strings.TrimSpace(strings.TrimPrefix(trimmed, "visual:")))
+		case strings.HasPrefix(trimmed, "interaction:"):
+			interactionWarnings = append(interactionWarnings, strings.TrimSpace(strings.TrimPrefix(trimmed, "interaction:")))
+		}
+	}
+
+	appendAdvisory := func(class string, warnings []string) {
+		if len(warnings) == 0 {
+			return
+		}
+		normalizedClass := normalizeFailureIdentifier(class)
+		if normalizedClass == "" {
+			return
+		}
+		for i := len(state.FailureFingerprints) - 1; i >= 0; i-- {
+			fp := state.FailureFingerprints[i]
+			if fp.FailureClass != normalizedClass || fp.TaskShape != TaskShapeVerification {
+				continue
+			}
+			if time.Since(fp.CreatedAt) <= buildFailureDedupInterval {
+				return
+			}
+			break
+		}
+		state.FailureFingerprints = append(state.FailureFingerprints, FailureFingerprint{
+			ID:               uuid.New().String(),
+			BuildID:          build.ID,
+			StackCombination: stackCombinationFromBuild(build),
+			TaskShape:        TaskShapeVerification,
+			Provider:         report.Provider,
+			FailureClass:     normalizedClass,
+			FilesInvolved:    nil,
+			RepairPathChosen: []string{"preview_verification_advisory"},
+			RepairSucceeded:  true,
+			CreatedAt:        time.Now().UTC(),
+		})
+		if len(state.FailureFingerprints) > 32 {
+			state.FailureFingerprints = append([]FailureFingerprint(nil), state.FailureFingerprints[len(state.FailureFingerprints)-32:]...)
+		}
+	}
+
+	appendAdvisory("visual_layout", visualWarnings)
+	appendAdvisory("interaction_canary", interactionWarnings)
 }
 
 func verificationReportStreamKey(report VerificationReport) string {
