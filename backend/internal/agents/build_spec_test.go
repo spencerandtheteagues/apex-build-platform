@@ -734,6 +734,76 @@ func TestApplyReliabilityWorkOrderBiasAddsFrontendAndRecurringChecks(t *testing.
 	}
 }
 
+func TestApplyReliabilityWorkOrderBiasIncludesValidatedSpecAdvisories(t *testing.T) {
+	t.Parallel()
+
+	plan := &BuildPlan{
+		WorkOrders: []BuildWorkOrder{
+			{Role: RoleFrontend, AcceptanceChecks: []string{"Render the main dashboard route"}},
+			{Role: RoleBackend, AcceptanceChecks: []string{"Serve the API contract"}},
+			{Role: RoleReviewer, AcceptanceChecks: []string{"Review for production readiness"}},
+		},
+	}
+	spec := &ValidatedBuildSpec{
+		DeliveryMode:       "full_stack_preview",
+		AcceptanceSurfaces: []string{"frontend", "backend", "integration"},
+		SecurityAdvisories: []BuildSpecAdvisory{
+			{
+				Code:           "tenant_isolation",
+				Surface:        SurfaceBackend,
+				Summary:        "Multi-tenant data models need explicit tenant isolation at query and mutation boundaries.",
+				Recommendation: "Freeze tenant/workspace ownership fields in the schema and require every backend read/write path to scope by tenant.",
+			},
+			{
+				Code:           "billing_webhook_verification",
+				Surface:        SurfaceIntegration,
+				Summary:        "Payment-capable apps need webhook verification and idempotent entitlement updates.",
+				Recommendation: "Specify the webhook source of truth up front and never grant access from client redirects alone.",
+			},
+		},
+		PerformanceAdvisories: []BuildSpecAdvisory{
+			{
+				Code:           "progressive_dashboard_loading",
+				Surface:        SurfaceFrontend,
+				Summary:        "Dashboard-style apps should reveal value before every widget finishes loading.",
+				Recommendation: "Prioritize hero KPIs, stagger secondary widgets, and avoid blocking first paint on full analytics hydration.",
+			},
+		},
+	}
+
+	applyReliabilityWorkOrderBias(plan, spec, nil)
+
+	frontend := getBuildWorkOrder(plan, RoleFrontend)
+	if frontend == nil {
+		t.Fatal("expected frontend work order")
+	}
+	if !containsString(frontend.AcceptanceChecks, "Honor validated performance advisory (progressive_dashboard_loading): Dashboard-style apps should reveal value before every widget finishes loading. Guardrail: Prioritize hero KPIs, stagger secondary widgets, and avoid blocking first paint on full analytics hydration.") {
+		t.Fatalf("expected frontend performance advisory check, got %+v", frontend.AcceptanceChecks)
+	}
+	if containsString(frontend.AcceptanceChecks, "Honor validated security advisory (tenant_isolation): Multi-tenant data models need explicit tenant isolation at query and mutation boundaries. Guardrail: Freeze tenant/workspace ownership fields in the schema and require every backend read/write path to scope by tenant.") {
+		t.Fatalf("did not expect backend security advisory on frontend work order, got %+v", frontend.AcceptanceChecks)
+	}
+
+	backend := getBuildWorkOrder(plan, RoleBackend)
+	if backend == nil {
+		t.Fatal("expected backend work order")
+	}
+	if !containsString(backend.AcceptanceChecks, "Honor validated security advisory (tenant_isolation): Multi-tenant data models need explicit tenant isolation at query and mutation boundaries. Guardrail: Freeze tenant/workspace ownership fields in the schema and require every backend read/write path to scope by tenant.") {
+		t.Fatalf("expected backend security advisory check, got %+v", backend.AcceptanceChecks)
+	}
+
+	reviewer := getBuildWorkOrder(plan, RoleReviewer)
+	if reviewer == nil {
+		t.Fatal("expected reviewer work order")
+	}
+	if !containsString(reviewer.AcceptanceChecks, "Honor validated security advisory (billing_webhook_verification): Payment-capable apps need webhook verification and idempotent entitlement updates. Guardrail: Specify the webhook source of truth up front and never grant access from client redirects alone.") {
+		t.Fatalf("expected reviewer integration security advisory check, got %+v", reviewer.AcceptanceChecks)
+	}
+	if !containsString(reviewer.AcceptanceChecks, "Honor validated performance advisory (progressive_dashboard_loading): Dashboard-style apps should reveal value before every widget finishes loading. Guardrail: Prioritize hero KPIs, stagger secondary widgets, and avoid blocking first paint on full analytics hydration.") {
+		t.Fatalf("expected reviewer performance advisory check, got %+v", reviewer.AcceptanceChecks)
+	}
+}
+
 func TestAssignTaskHydratesArtifactWorkOrderForAdHocTask(t *testing.T) {
 	t.Parallel()
 

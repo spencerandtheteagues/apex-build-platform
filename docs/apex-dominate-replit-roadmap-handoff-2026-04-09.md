@@ -336,6 +336,22 @@ Key files:
 - `backend/internal/agents/build_spec_test.go`
 - `backend/internal/agents/manager.go`
 
+### 12.1. Validated spec advisories now feed work-order acceptance checks
+
+Implemented:
+
+- validated security/performance advisories are no longer passive prompt context only
+- work-order acceptance checks now inherit relevant validated advisories by surface and role:
+  - frontend sees frontend performance advisories
+  - backend/database see backend/data/integration security advisories
+  - reviewer/planner/architect keep broad advisory visibility
+- this pushes precompute “war room” guidance directly into execution ownership before any solver loop is needed
+
+Key files:
+
+- `backend/internal/agents/build_spec.go`
+- `backend/internal/agents/build_spec_test.go`
+
 ### 13. Autonomous package manifests are now more runnable by default
 
 Implemented:
@@ -506,3 +522,4 @@ When ready to commit, keep the work scoped:
 8. multi-modal wireframe intake
 9. validated build spec + context-diet repair prompts + Hydra compile repair
 10. reliability summary + retry/work-order/provider bias
+11. validated spec advisories -> work-order acceptance checks

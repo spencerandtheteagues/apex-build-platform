@@ -1351,6 +1351,11 @@ func enrichWorkOrderAcceptanceChecks(order *BuildWorkOrder, spec *ValidatedBuild
 		}
 	}
 
+	if spec != nil {
+		checks = appendValidatedAdvisoryChecks(checks, order.Role, spec.SecurityAdvisories, "security")
+		checks = appendValidatedAdvisoryChecks(checks, order.Role, spec.PerformanceAdvisories, "performance")
+	}
+
 	if summary != nil {
 		compileRecurring := strings.TrimSpace(summary.CurrentFailureClass) == "compile_failure" || containsString(summary.RecurringFailureClass, "compile_failure")
 		visualRecurring := containsString(summary.AdvisoryClasses, "visual_layout") || containsString(summary.RecurringFailureClass, "visual_layout")
@@ -1385,6 +1390,54 @@ func enrichWorkOrderAcceptanceChecks(order *BuildWorkOrder, spec *ValidatedBuild
 	}
 
 	order.AcceptanceChecks = dedupeStrings(checks)
+}
+
+func appendValidatedAdvisoryChecks(checks []string, role AgentRole, advisories []BuildSpecAdvisory, label string) []string {
+	if len(advisories) == 0 {
+		return checks
+	}
+	for _, advisory := range limitBuildSpecAdvisoriesForRole(role, advisories) {
+		check := fmt.Sprintf("Honor validated %s advisory (%s): %s", label, advisory.Code, strings.TrimSpace(advisory.Summary))
+		if rec := strings.TrimSpace(advisory.Recommendation); rec != "" {
+			check += " Guardrail: " + rec
+		}
+		checks = append(checks, check)
+	}
+	return checks
+}
+
+func limitBuildSpecAdvisoriesForRole(role AgentRole, advisories []BuildSpecAdvisory) []BuildSpecAdvisory {
+	if len(advisories) == 0 {
+		return nil
+	}
+	out := make([]BuildSpecAdvisory, 0, minInt(len(advisories), 2))
+	for _, advisory := range advisories {
+		if !roleNeedsBuildSpecAdvisory(role, advisory.Surface) {
+			continue
+		}
+		out = append(out, advisory)
+		if len(out) >= 2 {
+			break
+		}
+	}
+	return out
+}
+
+func roleNeedsBuildSpecAdvisory(role AgentRole, surface ContractSurface) bool {
+	switch role {
+	case RolePlanner, RoleArchitect, RoleReviewer:
+		return true
+	case RoleFrontend:
+		return surface == SurfaceFrontend || surface == SurfaceGlobal
+	case RoleBackend:
+		return surface == SurfaceBackend || surface == SurfaceIntegration || surface == SurfaceData || surface == SurfaceGlobal
+	case RoleDatabase:
+		return surface == SurfaceData || surface == SurfaceBackend || surface == SurfaceIntegration || surface == SurfaceGlobal
+	case RoleTesting, RoleSolver:
+		return surface != SurfaceDeployment
+	default:
+		return surface == SurfaceGlobal
+	}
 }
 
 func sharedScaffoldFileAllowedForRole(path string, role AgentRole) bool {
