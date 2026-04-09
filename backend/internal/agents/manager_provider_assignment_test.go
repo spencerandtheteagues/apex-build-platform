@@ -210,6 +210,80 @@ func TestAssignProvidersToRolesForBuild_CompileReliabilityBiasesTowardGPT(t *tes
 	}
 }
 
+func TestAssignProvidersToRolesForBuild_UsesValidatedSpecPerformanceBiasWhenReliabilityAbsent(t *testing.T) {
+	am := &AgentManager{}
+	build := &Build{
+		ID:           "build-validated-spec-performance-bias",
+		ProviderMode: "platform",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				ValidatedBuildSpec: &ValidatedBuildSpec{
+					PerformanceAdvisories: []BuildSpecAdvisory{
+						{
+							Code:    "progressive_dashboard_loading",
+							Surface: SurfaceFrontend,
+							Summary: "Dashboard-style apps should reveal value before every widget finishes loading.",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	assignments := am.assignProvidersToRolesForBuild(build, []ai.AIProvider{
+		ai.ProviderClaude,
+		ai.ProviderGPT4,
+		ai.ProviderGemini,
+	}, []AgentRole{RoleFrontend, RoleTesting})
+
+	specPreferred := validatedSpecPreferredProviders(build, RoleFrontend)
+	if len(specPreferred) == 0 || specPreferred[0] != ai.ProviderClaude {
+		t.Fatalf("frontend validatedSpecPreferredProviders = %+v, want leading %s", specPreferred, ai.ProviderClaude)
+	}
+	if got := assignments[RoleFrontend]; got != ai.ProviderClaude {
+		t.Fatalf("frontend provider = %s, want validated-spec performance provider %s", got, ai.ProviderClaude)
+	}
+	if got := assignments[RoleTesting]; got != ai.ProviderClaude {
+		t.Fatalf("testing provider = %s, want validated-spec performance provider %s", got, ai.ProviderClaude)
+	}
+}
+
+func TestAssignProvidersToRolesForBuild_IgnoresIrrelevantValidatedSpecBiasForFrontend(t *testing.T) {
+	am := &AgentManager{}
+	build := &Build{
+		ID:           "build-validated-spec-irrelvant-bias",
+		ProviderMode: "platform",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				ValidatedBuildSpec: &ValidatedBuildSpec{
+					SecurityAdvisories: []BuildSpecAdvisory{
+						{
+							Code:    "tenant_isolation",
+							Surface: SurfaceBackend,
+							Summary: "Multi-tenant data models need explicit tenant isolation at query and mutation boundaries.",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	assignments := am.assignProvidersToRolesForBuild(build, []ai.AIProvider{
+		ai.ProviderClaude,
+		ai.ProviderGPT4,
+		ai.ProviderGemini,
+	}, []AgentRole{RoleFrontend, RoleTesting})
+
+	if got := assignments[RoleFrontend]; got != ai.ProviderGPT4 {
+		t.Fatalf("frontend provider = %s, want baseline provider %s when validated-spec bias is irrelevant", got, ai.ProviderGPT4)
+	}
+	if got := assignments[RoleTesting]; got != ai.ProviderGemini {
+		t.Fatalf("testing provider = %s, want baseline provider %s when validated-spec bias is irrelevant", got, ai.ProviderGemini)
+	}
+}
+
 func TestSelectProviderByScorecardUsesPowerModeCostSensitivity(t *testing.T) {
 	scorecards := []ProviderScorecard{
 		{Provider: ai.ProviderClaude, TaskShape: TaskShapeFrontendPatch, SampleCount: 5, FirstPassSampleCount: 5, CompilePassRate: 0.96, FirstPassVerificationRate: 0.95, RepairSuccessRate: 0.92, PromotionRate: 0.94, FailureClassRecurrence: 0.03, TruncationRate: 0.01, AverageCostPerSuccess: 0.45},

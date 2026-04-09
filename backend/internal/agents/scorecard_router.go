@@ -111,3 +111,50 @@ func reliabilityPreferredProviders(build *Build, role AgentRole) []ai.AIProvider
 		return nil
 	}
 }
+
+func validatedSpecPreferredProviders(build *Build, role AgentRole) []ai.AIProvider {
+	if build == nil {
+		return nil
+	}
+	build.mu.RLock()
+	var spec *ValidatedBuildSpec
+	if build.SnapshotState.Orchestration != nil && build.SnapshotState.Orchestration.ValidatedBuildSpec != nil {
+		copied := *build.SnapshotState.Orchestration.ValidatedBuildSpec
+		copied.SecurityAdvisories = append([]BuildSpecAdvisory(nil), copied.SecurityAdvisories...)
+		copied.PerformanceAdvisories = append([]BuildSpecAdvisory(nil), copied.PerformanceAdvisories...)
+		spec = &copied
+	}
+	build.mu.RUnlock()
+	if spec == nil {
+		return nil
+	}
+
+	frontendPerf := false
+	integrationPerf := false
+	backendSecurity := false
+	for _, advisory := range spec.PerformanceAdvisories {
+		switch advisory.Surface {
+		case SurfaceFrontend, SurfaceGlobal:
+			frontendPerf = true
+		case SurfaceIntegration:
+			integrationPerf = true
+		}
+	}
+	for _, advisory := range spec.SecurityAdvisories {
+		switch advisory.Surface {
+		case SurfaceBackend, SurfaceData, SurfaceIntegration, SurfaceGlobal:
+			backendSecurity = true
+		}
+	}
+
+	switch {
+	case frontendPerf && (role == RoleFrontend || role == RoleTesting || role == RoleReviewer):
+		return []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok}
+	case integrationPerf && (role == RoleBackend || role == RoleSolver || role == RoleReviewer):
+		return []ai.AIProvider{ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini, ai.ProviderGrok}
+	case backendSecurity && (role == RoleReviewer || role == RoleArchitect || role == RolePlanner):
+		return []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok}
+	default:
+		return nil
+	}
+}

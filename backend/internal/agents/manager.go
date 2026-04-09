@@ -1978,6 +1978,11 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 				return p
 			}
 		}
+		for _, p := range validatedSpecPreferredProviders(build, role) {
+			if available[p] {
+				return p
+			}
+		}
 		for _, p := range preferences {
 			if available[p] {
 				return p
@@ -2010,30 +2015,45 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 	// This only applies when each preferred provider is actually available.
 	if !scorecardRoutingActive {
 		for _, role := range roles {
+			assigned := false
 			biased := reliabilityPreferredProviders(build, role)
 			if len(biased) > 0 {
 				for _, provider := range biased {
 					if available[provider] {
 						assignments[role] = provider
-						goto nextRole
+						assigned = true
+						break
 					}
 				}
 			}
-			switch role {
-			case RolePlanner, RoleArchitect, RoleReviewer:
-				if available[ai.ProviderClaude] {
-					assignments[role] = ai.ProviderClaude
-				}
-			case RoleFrontend, RoleBackend, RoleDatabase, RoleSolver:
-				if available[ai.ProviderGPT4] {
-					assignments[role] = ai.ProviderGPT4
-				}
-			case RoleTesting:
-				if available[ai.ProviderGemini] {
-					assignments[role] = ai.ProviderGemini
+			if !assigned {
+				specBiased := validatedSpecPreferredProviders(build, role)
+				if len(specBiased) > 0 {
+					for _, provider := range specBiased {
+						if available[provider] {
+							assignments[role] = provider
+							assigned = true
+							break
+						}
+					}
 				}
 			}
-		nextRole:
+			if !assigned {
+				switch role {
+				case RolePlanner, RoleArchitect, RoleReviewer:
+					if available[ai.ProviderClaude] {
+						assignments[role] = ai.ProviderClaude
+					}
+				case RoleFrontend, RoleBackend, RoleDatabase, RoleSolver:
+					if available[ai.ProviderGPT4] {
+						assignments[role] = ai.ProviderGPT4
+					}
+				case RoleTesting:
+					if available[ai.ProviderGemini] {
+						assignments[role] = ai.ProviderGemini
+					}
+				}
+			}
 		}
 	}
 	if scorecardRoutingActive {

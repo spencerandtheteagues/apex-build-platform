@@ -132,6 +132,8 @@ Implemented:
   - recurring/current `visual_layout` and `interaction_canary` bias frontend/reviewer/testing/solver roles toward stronger UI-verification providers
   - recurring/current `compile_failure` biases frontend/backend/database/solver roles toward stronger compile-repair providers
   - recurring/current `contract_violation` and `coordination_violation` bias planner/architect/reviewer roles toward stronger contract/planning providers
+- validated-spec advisory fallback now also influences assignment when reliability is clean but the precomputed build spec flags frontend performance risk:
+  - frontend/testing/reviewer roles can shift toward stronger UI/performance providers on builds whose validated spec already signals preview/rendering risk
 - reliability bias now survives the later static role-policy fallback in provider assignment instead of being overwritten by default role preferences
 - explicit `RoleHint` added to `GenerateOptions`
 - role-aware capability mapping for planner/architect/reviewer/testing/solver/code roles
@@ -480,6 +482,7 @@ These slices were verified locally with focused build/test runs during implement
   - retry-path bias from recurring reliability classes
   - reliability-aware work-order enrichment for frontend-first acceptance surfaces
   - reliability-aware provider fallback when scorecards are insufficient
+  - validated-spec performance-advisory provider fallback
 
 Broad verification checkpoint reached:
 
@@ -523,3 +526,4 @@ When ready to commit, keep the work scoped:
 9. validated build spec + context-diet repair prompts + Hydra compile repair
 10. reliability summary + retry/work-order/provider bias
 11. validated spec advisories -> work-order acceptance checks
+12. validated spec advisories -> provider fallback when scorecards are weak
