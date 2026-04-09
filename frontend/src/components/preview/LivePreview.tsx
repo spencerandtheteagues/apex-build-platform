@@ -219,18 +219,21 @@ export default function LivePreview({
   // Listen for postMessage from preview iframe
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      // Security: Validate origin to prevent XSS from malicious iframes
-      // Allow same origin, 'null' (sandboxed iframes), and preview server origin
-      const allowedOrigins = [
-        window.location.origin,
-        'null', // Sandboxed iframes report null origin
-      ]
-      // Also allow any localhost/127.0.0.1 for preview server
+      // Security: Validate origin — only accept same origin or localhost preview servers.
+      // 'null' origin is NOT allowed: our preview iframes load real localhost URLs and
+      // should never report null origin. Accepting null would allow any sandboxed iframe
+      // on the page to inject console/network events.
       const isLocalhost = event.origin.startsWith('http://localhost:') ||
                           event.origin.startsWith('http://127.0.0.1:')
+      const isSameOrigin = event.origin === window.location.origin
 
-      if (!allowedOrigins.includes(event.origin) && !isLocalhost) {
+      if (!isSameOrigin && !isLocalhost) {
         return // Ignore messages from untrusted origins
+      }
+
+      // Validate payload shape before processing
+      if (!event.data || typeof event.data !== 'object' || typeof event.data.type !== 'string') {
+        return
       }
 
       // Console messages

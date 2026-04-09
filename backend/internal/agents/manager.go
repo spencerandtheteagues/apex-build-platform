@@ -7167,13 +7167,29 @@ func parsePreviewSyntaxErrorTargetFiles(errors []string) []string {
 	}
 	joined := strings.Join(errors, "\n")
 	syntaxSignals := []string{
+		// TypeScript compiler errors
 		"TS1002",
 		"TS1005",
+		"TS1003",
+		"TS1009",
+		"TS1128",
+		"TS1161",
+		// esbuild / Vite transform errors (Case E — previously missed)
 		"Transform failed",
 		"Unterminated string literal",
+		"Unterminated template literal",
 		"Unexpected end of file",
+		"Unexpected end of input",
+		"Unexpected token",
 		"Syntax error",
 		"ERROR:",
+		// Vite-specific
+		"[vite] Internal server error",
+		"Failed to parse source",
+		"Could not resolve",
+		// Rollup (used by Vite build)
+		"Parsing error",
+		"SyntaxError:",
 	}
 	hasSignal := false
 	for _, signal := range syntaxSignals {
@@ -7186,19 +7202,35 @@ func parsePreviewSyntaxErrorTargetFiles(errors []string) []string {
 	if !hasSignal &&
 		!strings.Contains(lower, "ends abruptly") &&
 		!strings.Contains(lower, "missing closing brace") &&
-		!strings.Contains(lower, "abrupt eof") {
+		!strings.Contains(lower, "abrupt eof") &&
+		!strings.Contains(lower, "unterminated") &&
+		!strings.Contains(lower, "unexpected token") {
 		return nil
 	}
 
 	seen := map[string]bool{}
 	paths := make([]string, 0, 4)
 	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`(?m)([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx))\(\d+,\d+\): error TS(?:1002|1005)\b`),
-		regexp.MustCompile(`(?m)(?:^|[\s([])([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)):\d+:\d+:\s+ERROR:\s+(?:Unterminated string literal|Unexpected end of file|Unexpected .*|Expected .*|Syntax error.*)`),
+		// TypeScript compiler: file(line,col): error TSxxxx
+		regexp.MustCompile(`(?m)([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx))\(\d+,\d+\): error TS\d+\b`),
+		// esbuild: file:line:col: ERROR: message
+		regexp.MustCompile(`(?m)(?:^|[\s([])([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)):\d+:\d+:\s+ERROR:\s+.+`),
+		// esbuild/Vite: x [ERROR] message \n\n    file:line:col:
+		regexp.MustCompile(`(?m)^\s{2,}([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)):\d+:\d+:`),
+		// Vite internal error: Plugin vite:xxx — file
+		regexp.MustCompile(`(?m)Plugin vite:\S+\s+\S.*?([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)):\d+`),
+		// Rollup/Vite: SyntaxError at file:line
+		regexp.MustCompile(`(?m)SyntaxError[^(]*\(([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)):\d+:\d+\)`),
+		// Generic: file: <pos>
 		regexp.MustCompile(`(?m)file:\s*([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)):\d+:\d+`),
+		// "file ends abruptly" variants
 		regexp.MustCompile(`(?i)(?:the file\s+)?([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx))\s+ends abruptly`),
 		regexp.MustCompile(`(?i)([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)).*missing closing brace`),
 		regexp.MustCompile(`(?i)([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)).*abrupt eof`),
+		// "Could not resolve" import errors — the importing file needs repair
+		regexp.MustCompile(`(?m)Could not resolve[^"]*"[^"]+"\s+from\s+"([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx))"`),
+		// Parsing error in file
+		regexp.MustCompile(`(?m)Parsing error.*?([A-Za-z0-9_./\\:-]+\.(?:ts|tsx|js|jsx)):\d+`),
 	}
 	for _, re := range patterns {
 		for _, m := range re.FindAllStringSubmatch(joined, -1) {
@@ -7921,6 +7953,13 @@ func (am *AgentManager) applyDeterministicMissingLocalModuleRepair(build *Build,
 
 	applied := make([]string, 0, len(targets))
 	for _, target := range targets {
+		if strings.HasPrefix(target.Specifier, "@/") || strings.HasPrefix(target.Specifier, "~/") {
+			srcCandidate := sanitizeFilePath(filepath.ToSlash(filepath.Join("src", strings.TrimPrefix(strings.TrimPrefix(target.Specifier, "@/"),
+				"~/"))))
+			if strings.TrimSpace(plan.content(srcCandidate)) != "" {
+				continue
+			}
+		}
 		if strings.TrimSpace(plan.content(target.TargetPath)) != "" {
 			continue
 		}
@@ -9936,6 +9975,234 @@ func (am *AgentManager) ensureGeneratedTypeScriptConfig(plan *generatedFilePatch
 	return true, targetPath
 }
 
+func generatedPathAliasesInUse(files []GeneratedFile, prefix string) []string {
+	if len(files) == 0 {
+		return nil
+	}
+
+	aliases := make([]string, 0, 2)
+	seen := map[string]bool{}
+	prefixLower := strings.ToLower(prefix)
+	for _, f := range files {
+		path := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(f.Path), "./"))
+		if path == "" || strings.TrimSpace(f.Content) == "" {
+			continue
+		}
+		if prefixLower != "" && !strings.HasPrefix(strings.ToLower(path), prefixLower) {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs":
+		default:
+			continue
+		}
+
+		for _, match := range generatedImportPathPattern.FindAllStringSubmatch(f.Content, -1) {
+			if len(match) != 2 {
+				continue
+			}
+			spec := strings.TrimSpace(match[1])
+			alias := ""
+			switch {
+			case strings.HasPrefix(spec, "@/"):
+				alias = "@"
+			case strings.HasPrefix(spec, "~/"):
+				alias = "~"
+			}
+			if alias == "" || seen[alias] {
+				continue
+			}
+			seen[alias] = true
+			aliases = append(aliases, alias)
+		}
+	}
+
+	sort.Strings(aliases)
+	return aliases
+}
+
+func generatedViteConfigPathFromManifest(manifestPath string) string {
+	prefix := strings.TrimSuffix(filepath.ToSlash(sanitizeFilePath(manifestPath)), "package.json")
+	for _, candidate := range []string{"vite.config.ts", "vite.config.js", "vite.config.mjs", "vite.config.cjs"} {
+		return sanitizeFilePath(prefix + candidate)
+	}
+	return ""
+}
+
+func viteConfigDeclaresSrcAlias(content, alias string) bool {
+	content = strings.TrimSpace(content)
+	alias = strings.TrimSpace(alias)
+	if content == "" || alias == "" {
+		return false
+	}
+	pattern := regexp.MustCompile(`(?s)['"]` + regexp.QuoteMeta(alias) + `['"]\s*:\s*(?:path\.resolve\(\s*__dirname\s*,\s*['"]\./src['"]\s*\)|['"](?:\./)?src['"])`)
+	return pattern.MatchString(content)
+}
+
+func insertAfterLastImportBlock(content, insertion string) string {
+	importRe := regexp.MustCompile(`(?m)^import .*?$`)
+	matches := importRe.FindAllStringIndex(content, -1)
+	if len(matches) == 0 {
+		return insertion + "\n" + content
+	}
+	last := matches[len(matches)-1]
+	return content[:last[1]] + "\n" + insertion + content[last[1]:]
+}
+
+func patchViteConfigWithSrcAliases(content string, aliases []string) (string, bool) {
+	aliases = dedupeStrings(aliases)
+	if len(aliases) == 0 {
+		return content, false
+	}
+
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return syntheticFrontendViteConfig(0), true
+	}
+
+	missing := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		if !viteConfigDeclaresSrcAlias(content, alias) {
+			missing = append(missing, alias)
+		}
+	}
+	if len(missing) == 0 {
+		return content, false
+	}
+
+	updated := content
+	changed := false
+	if !strings.Contains(updated, `from "path"`) && !strings.Contains(updated, `from 'path'`) {
+		updated = insertAfterLastImportBlock(updated, `import path from "path";`)
+		changed = true
+	}
+
+	aliasEntries := make([]string, 0, len(missing))
+	for _, alias := range missing {
+		aliasEntries = append(aliasEntries, fmt.Sprintf(`"%s": path.resolve(__dirname, "./src")`, alias))
+	}
+	entryBlock := strings.Join(aliasEntries, ",\n      ")
+
+	if loc := regexp.MustCompile(`(?s)alias\s*:\s*{`).FindStringIndex(updated); loc != nil {
+		updated = updated[:loc[1]] + "\n      " + entryBlock + "," + updated[loc[1]:]
+		return updated, true
+	}
+	if loc := regexp.MustCompile(`(?s)resolve\s*:\s*{`).FindStringIndex(updated); loc != nil {
+		updated = updated[:loc[1]] + "\n    alias: {\n      " + entryBlock + ",\n    }," + updated[loc[1]:]
+		return updated, true
+	}
+	if loc := regexp.MustCompile(`defineConfig\s*\(\s*{`).FindStringIndex(updated); loc != nil {
+		updated = updated[:loc[1]] + "\n  resolve: {\n    alias: {\n      " + entryBlock + ",\n    },\n  }," + updated[loc[1]:]
+		return updated, true
+	}
+	if loc := regexp.MustCompile(`export\s+default\s*{`).FindStringIndex(updated); loc != nil {
+		updated = updated[:loc[1]] + "\n  resolve: {\n    alias: {\n      " + entryBlock + ",\n    },\n  }," + updated[loc[1]:]
+		return updated, true
+	}
+
+	return updated, changed
+}
+
+func patchTSConfigWithSrcAliases(content string, aliases []string) (string, bool) {
+	aliases = dedupeStrings(aliases)
+	if len(aliases) == 0 || strings.TrimSpace(content) == "" {
+		return content, false
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(content), &doc); err != nil {
+		return content, false
+	}
+
+	compilerOptions, _ := doc["compilerOptions"].(map[string]any)
+	if compilerOptions == nil {
+		compilerOptions = map[string]any{}
+		doc["compilerOptions"] = compilerOptions
+	}
+
+	changed := false
+	if strings.TrimSpace(jsonStringValue(compilerOptions["baseUrl"])) == "" {
+		compilerOptions["baseUrl"] = "."
+		changed = true
+	}
+
+	paths, _ := compilerOptions["paths"].(map[string]any)
+	if paths == nil {
+		paths = map[string]any{}
+		compilerOptions["paths"] = paths
+	}
+
+	for _, alias := range aliases {
+		key := alias + "/*"
+		existing, _ := paths[key].([]any)
+		if len(existing) == 1 {
+			if candidate, ok := existing[0].(string); ok && strings.TrimSpace(candidate) == "src/*" {
+				continue
+			}
+		}
+		paths[key] = []any{"src/*"}
+		changed = true
+	}
+	if !changed {
+		return content, false
+	}
+
+	updated, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return content, false
+	}
+	return string(updated) + "\n", true
+}
+
+func jsonStringValue(value any) string {
+	text, _ := value.(string)
+	return text
+}
+
+func (am *AgentManager) ensureGeneratedFrontendPathAliases(plan *generatedFilePatchPlan, files []GeneratedFile, manifestPath string, manifest previewManifest) (bool, string) {
+	aliases := generatedPathAliasesInUse(files, strings.TrimSuffix(filepath.ToSlash(manifestPath), "package.json"))
+	if len(aliases) == 0 {
+		return false, ""
+	}
+
+	summaryParts := make([]string, 0, 2)
+	viteConfigPath := generatedViteConfigPathFromManifest(manifestPath)
+	if manifestUsesVite(manifest) {
+		viteContent := plan.content(viteConfigPath)
+		updatedVite, changed := patchViteConfigWithSrcAliases(viteContent, aliases)
+		if changed {
+			if strings.TrimSpace(viteContent) == "" {
+				if plan.createFile(viteConfigPath, updatedVite, "typescript") {
+					summaryParts = append(summaryParts, viteConfigPath)
+				}
+			} else if plan.patchFile(viteConfigPath, updatedVite, "typescript") {
+				summaryParts = append(summaryParts, viteConfigPath)
+			}
+		}
+	}
+
+	tsconfigPath := generatedTSConfigPathFromManifest(manifestPath)
+	tsconfigContent := plan.content(tsconfigPath)
+	if strings.TrimSpace(tsconfigContent) == "" && buildScriptUsesTypeScriptCompiler(manifest) {
+		tsconfigContent = minimalTypeScriptConfigContent(manifest, manifestPath)
+		if strings.TrimSpace(tsconfigContent) != "" {
+			plan.createFile(tsconfigPath, tsconfigContent, "json")
+		}
+	}
+	if strings.TrimSpace(tsconfigContent) != "" {
+		if updatedTSConfig, changed := patchTSConfigWithSrcAliases(plan.content(tsconfigPath), aliases); changed {
+			if plan.patchFile(tsconfigPath, updatedTSConfig, "json") {
+				summaryParts = append(summaryParts, tsconfigPath)
+			}
+		}
+	}
+
+	if len(summaryParts) == 0 {
+		return false, ""
+	}
+	return true, strings.Join(summaryParts, "; ")
+}
+
 func generatedServerTSConfigContent() string {
 	return `{
   "compilerOptions": {
@@ -10191,6 +10458,9 @@ func (am *AgentManager) applyDeterministicPreValidationNormalization(build *Buil
 			}
 		}
 		if repaired, summary := am.ensureGeneratedTypeScriptConfig(plan, manifestPath, manifest); repaired {
+			summaries = append(summaries, summary)
+		}
+		if repaired, summary := am.ensureGeneratedFrontendPathAliases(plan, files, manifestPath, manifest); repaired {
 			summaries = append(summaries, summary)
 		}
 		if repaired, summary := am.ensureGeneratedNodeNextImportExtensions(plan, files, manifestPath); repaired {
@@ -12122,6 +12392,21 @@ func (am *AgentManager) buildCompletionSnapshot(build *Build) buildCompletionSna
 	return snapshot
 }
 
+func (am *AgentManager) markBuildTerminalSuccessSnapshot(build *Build, qualityGateStage string) {
+	if build == nil {
+		return
+	}
+
+	build.mu.Lock()
+	required := true
+	build.SnapshotState.CurrentPhase = "completed"
+	build.SnapshotState.QualityGateRequired = &required
+	build.SnapshotState.QualityGateStage = firstNonEmptyString(strings.TrimSpace(qualityGateStage), "complete")
+	build.SnapshotState.QualityGateStatus = "passed"
+	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
+	build.mu.Unlock()
+}
+
 type validationRepairSpec struct {
 	apply       func(*Build, []string) (*PatchBundle, string)
 	errorFormat string
@@ -12672,6 +12957,7 @@ completion_finalize:
 			approvalInteraction = copyBuildInteractionStateLocked(build)
 			build.mu.Unlock()
 		}
+		am.markBuildTerminalSuccessSnapshot(build, "complete")
 
 		// Persist completion first so a completed_build row exists before auto-linking a project.
 		am.persistCompletedBuild(build, allFiles)
@@ -20195,13 +20481,17 @@ func localImportResolutionCandidates(importerPath string, spec string) []string 
 	}
 
 	var base string
+	bases := make([]string, 0, 2)
 	switch {
 	case strings.HasPrefix(spec, "@/"):
 		base = strings.TrimPrefix(spec, "@/")
+		bases = append(bases, filepath.ToSlash(filepath.Join("src", base)), base)
 	case strings.HasPrefix(spec, "~/"):
 		base = strings.TrimPrefix(spec, "~/")
+		bases = append(bases, filepath.ToSlash(filepath.Join("src", base)), base)
 	case strings.HasPrefix(spec, "."):
 		base = filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(importerPath), spec)))
+		bases = append(bases, base)
 	default:
 		return nil
 	}
@@ -20210,18 +20500,37 @@ func localImportResolutionCandidates(importerPath string, spec string) []string 
 	if base == "" || strings.HasPrefix(base, "../") {
 		return nil
 	}
+	if len(bases) == 0 {
+		bases = append(bases, base)
+	}
 
 	if ext := strings.ToLower(filepath.Ext(base)); ext != "" {
-		return []string{base}
+		candidates := make([]string, 0, len(bases))
+		for _, candidate := range bases {
+			candidate = strings.TrimPrefix(filepath.ToSlash(candidate), "./")
+			candidate = strings.TrimPrefix(candidate, "/")
+			if candidate == "" || strings.HasPrefix(candidate, "../") {
+				continue
+			}
+			candidates = append(candidates, candidate)
+		}
+		return dedupeStrings(candidates)
 	}
 
 	exts := []string{".tsx", ".ts", ".jsx", ".js", ".mts", ".cts", ".mjs", ".cjs", ".json"}
-	candidates := make([]string, 0, len(exts)*2)
-	for _, ext := range exts {
-		candidates = append(candidates, base+ext)
-	}
-	for _, ext := range exts {
-		candidates = append(candidates, filepath.ToSlash(filepath.Join(base, "index"+ext)))
+	candidates := make([]string, 0, len(bases)*len(exts)*2)
+	for _, candidateBase := range bases {
+		candidateBase = strings.TrimPrefix(filepath.ToSlash(candidateBase), "./")
+		candidateBase = strings.TrimPrefix(candidateBase, "/")
+		if candidateBase == "" || strings.HasPrefix(candidateBase, "../") {
+			continue
+		}
+		for _, ext := range exts {
+			candidates = append(candidates, candidateBase+ext)
+		}
+		for _, ext := range exts {
+			candidates = append(candidates, filepath.ToSlash(filepath.Join(candidateBase, "index"+ext)))
+		}
 	}
 	return dedupeStrings(candidates)
 }
