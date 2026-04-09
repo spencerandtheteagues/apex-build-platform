@@ -178,28 +178,29 @@ func filterAgentRoles(roles []AgentRole, allowed map[AgentRole]bool) []AgentRole
 
 // AgentManager handles the lifecycle and coordination of AI agents
 type AgentManager struct {
-	agents          map[string]*Agent
-	builds          map[string]*Build
-	taskQueue       chan *Task
-	resultQueue     chan *TaskResult
-	subscribers     map[string][]chan *WSMessage
-	buildMonitors   map[string]struct{}
-	aiRouter        AIRouter
-	db              *gorm.DB // Database connection for persisting completed builds
-	editStore       *ProposedEditStore
-	pathGuard       *PathGuard
-	spendTracker    *spend.SpendTracker
-	budgetEnforcer  *budget.BudgetEnforcer
-	errorAnalyzer   *ErrorAnalyzer       // LLM-powered build error analysis (falls back to heuristics if AI unavailable)
-	ctxSelector     *ContextSelector     // smart file context selection for LLM prompts
-	chunkedEditor   *ChunkedEditor       // splits/reassembles large-file edits to stay within output token limits
-	previewVerifier BuildPreviewVerifier // optional preview readiness verifier (wired in main.go)
-	taskCancels     map[string]context.CancelFunc
-	instanceID      string
-	mu              sync.RWMutex
-	workerOnce      sync.Once
-	ctx             context.Context
-	cancel          context.CancelFunc
+	agents                 map[string]*Agent
+	builds                 map[string]*Build
+	taskQueue              chan *Task
+	resultQueue            chan *TaskResult
+	subscribers            map[string][]chan *WSMessage
+	buildMonitors          map[string]struct{}
+	aiRouter               AIRouter
+	db                     *gorm.DB // Database connection for persisting completed builds
+	editStore              *ProposedEditStore
+	pathGuard              *PathGuard
+	spendTracker           *spend.SpendTracker
+	budgetEnforcer         *budget.BudgetEnforcer
+	errorAnalyzer          *ErrorAnalyzer       // LLM-powered build error analysis (falls back to heuristics if AI unavailable)
+	ctxSelector            *ContextSelector     // smart file context selection for LLM prompts
+	chunkedEditor          *ChunkedEditor       // splits/reassembles large-file edits to stay within output token limits
+	previewVerifier        BuildPreviewVerifier // optional preview readiness verifier (wired in main.go)
+	taskCancels            map[string]context.CancelFunc
+	instanceID             string
+	mu                     sync.RWMutex
+	taskDispatcherRunning  bool
+	resultProcessorRunning bool
+	ctx                    context.Context
+	cancel                 context.CancelFunc
 }
 
 // AIRouter interface for communicating with AI providers
@@ -277,9 +278,18 @@ func (am *AgentManager) ensureWorkerInfrastructure() {
 		return
 	}
 
+	var (
+		dispatcherCtx   context.Context
+		resultCtx       context.Context
+		startDispatcher bool
+		startResult     bool
+	)
+
 	am.mu.Lock()
-	if am.ctx == nil || am.cancel == nil {
+	if am.ctx == nil || am.cancel == nil || am.ctx.Err() != nil {
 		am.ctx, am.cancel = context.WithCancel(context.Background())
+		am.taskDispatcherRunning = false
+		am.resultProcessorRunning = false
 	}
 	if am.taskQueue == nil {
 		am.taskQueue = make(chan *Task, 100)
@@ -293,12 +303,24 @@ func (am *AgentManager) ensureWorkerInfrastructure() {
 	if am.buildMonitors == nil {
 		am.buildMonitors = make(map[string]struct{})
 	}
+	if !am.taskDispatcherRunning {
+		am.taskDispatcherRunning = true
+		dispatcherCtx = am.ctx
+		startDispatcher = true
+	}
+	if !am.resultProcessorRunning {
+		am.resultProcessorRunning = true
+		resultCtx = am.ctx
+		startResult = true
+	}
 	am.mu.Unlock()
 
-	am.workerOnce.Do(func() {
-		go am.taskDispatcher()
-		go am.resultProcessor()
-	})
+	if startDispatcher {
+		go am.taskDispatcher(dispatcherCtx)
+	}
+	if startResult {
+		go am.resultProcessor(resultCtx)
+	}
 }
 
 func resolveAgentManagerInstanceID() string {
@@ -3901,11 +3923,12 @@ func ensureTaskInputMap(task *Task) map[string]any {
 	return task.Input
 }
 
-// taskDispatcher processes tasks from the queue
-func (am *AgentManager) taskDispatcher() {
+// taskDispatcher processes tasks from the queue.
+func (am *AgentManager) taskDispatcher(ctx context.Context) {
+	defer am.markTaskDispatcherStopped(ctx)
 	for {
 		select {
-		case <-am.ctx.Done():
+		case <-ctx.Done():
 			return
 		case task, ok := <-am.taskQueue:
 			if !ok {
@@ -3916,6 +3939,17 @@ func (am *AgentManager) taskDispatcher() {
 			}
 			go am.executeTask(task)
 		}
+	}
+}
+
+func (am *AgentManager) markTaskDispatcherStopped(ctx context.Context) {
+	if am == nil {
+		return
+	}
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if am.ctx == ctx {
+		am.taskDispatcherRunning = false
 	}
 }
 
@@ -4505,11 +4539,12 @@ func (am *AgentManager) executeTask(task *Task) {
 	log.Printf("Task %s completed successfully with %d files generated", task.ID, len(output.Files))
 }
 
-// resultProcessor handles completed task results
-func (am *AgentManager) resultProcessor() {
+// resultProcessor handles completed task results.
+func (am *AgentManager) resultProcessor(ctx context.Context) {
+	defer am.markResultProcessorStopped(ctx)
 	for {
 		select {
-		case <-am.ctx.Done():
+		case <-ctx.Done():
 			return
 		case result, ok := <-am.resultQueue:
 			if !ok {
@@ -4517,6 +4552,17 @@ func (am *AgentManager) resultProcessor() {
 			}
 			am.processResultSafely(result)
 		}
+	}
+}
+
+func (am *AgentManager) markResultProcessorStopped(ctx context.Context) {
+	if am == nil {
+		return
+	}
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if am.ctx == ctx {
+		am.resultProcessorRunning = false
 	}
 }
 
@@ -17301,10 +17347,44 @@ func (am *AgentManager) resumeBuildAfterReview(build *Build) {
 
 // Shutdown gracefully stops the agent manager
 func (am *AgentManager) Shutdown() {
-	am.cancel()
-	close(am.taskQueue)
-	close(am.resultQueue)
+	if am == nil {
+		return
+	}
+
+	am.mu.Lock()
+	cancel := am.cancel
+	taskQueue := am.taskQueue
+	resultQueue := am.resultQueue
+	am.ctx = nil
+	am.cancel = nil
+	am.taskQueue = nil
+	am.resultQueue = nil
+	am.taskDispatcherRunning = false
+	am.resultProcessorRunning = false
+	am.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	safeCloseTaskQueue(taskQueue)
+	safeCloseResultQueue(resultQueue)
 	log.Println("Agent Manager shut down")
+}
+
+func safeCloseTaskQueue(ch chan *Task) {
+	if ch == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	close(ch)
+}
+
+func safeCloseResultQueue(ch chan *TaskResult) {
+	if ch == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	close(ch)
 }
 
 // Helper functions

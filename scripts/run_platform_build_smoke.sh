@@ -38,6 +38,7 @@ cleanup() {
   if [[ -n "${cookie_jar}" && -f "${cookie_jar}" ]]; then
     rm -f "${cookie_jar}"
   fi
+  rm -f /tmp/apex_refresh.json
 }
 trap cleanup EXIT
 
@@ -254,6 +255,32 @@ login_or_exit() {
   refresh_auth_args
 }
 
+refresh_or_relogin() {
+  fetch_csrf_token
+  refresh_auth_args
+
+  curl -sS "${auth_args[@]}" -X POST "$BASE_URL/auth/refresh" \
+    -H "Content-Type: application/json" \
+    -d '{}' >/tmp/apex_refresh.json || true
+
+  local refreshed_token refresh_error
+  refreshed_token="$(jq -r '.access_token // .token // .data.access_token // .tokens.access_token // empty' /tmp/apex_refresh.json 2>/dev/null || true)"
+  refresh_error="$(jq -r '.error // empty' /tmp/apex_refresh.json 2>/dev/null || true)"
+
+  if [[ -n "$refreshed_token" && "$refreshed_token" != "null" ]]; then
+    TOKEN="$refreshed_token"
+    refresh_auth_args
+    return 0
+  fi
+
+  if [[ -z "$refresh_error" ]]; then
+    refresh_auth_args
+    return 0
+  fi
+
+  login_or_exit
+}
+
 if [[ $# -gt 0 ]]; then
   prompt_file="$1"
 else
@@ -335,8 +362,7 @@ for _ in $(seq 1 "$MAX_POLLS"); do
   status_json="$(curl -sS "${auth_args[@]}" "$BASE_URL/build/$BUILD_ID/status" || true)"
   auth_error="$(jq -r '.error // empty' <<<"$status_json" 2>/dev/null || true)"
   if [[ "$auth_error" == "authentication required" || "$auth_error" == "invalid or expired token" ]]; then
-    fetch_csrf_token
-    login_or_exit
+    refresh_or_relogin
     status_json="$(curl -sS "${auth_args[@]}" "$BASE_URL/build/$BUILD_ID/status" || true)"
   fi
   status="$(jq -r '.status // empty' <<<"$status_json" 2>/dev/null || true)"
@@ -356,8 +382,7 @@ done
 curl -sS "${auth_args[@]}" "$BASE_URL/build/$BUILD_ID" >/tmp/apex_build_detail.json || true
 detail_auth_error="$(jq -r '.error // empty' /tmp/apex_build_detail.json 2>/dev/null || true)"
 if [[ "$detail_auth_error" == "authentication required" || "$detail_auth_error" == "invalid or expired token" ]]; then
-  fetch_csrf_token
-  login_or_exit
+  refresh_or_relogin
   curl -sS "${auth_args[@]}" "$BASE_URL/build/$BUILD_ID" >/tmp/apex_build_detail.json || true
 fi
 echo "FINAL_DETAIL_SUMMARY"
@@ -367,8 +392,7 @@ if [[ "$final_status" == "completed" ]]; then
   curl -sS "${auth_args[@]}" "$BASE_URL/builds/$BUILD_ID" >/tmp/apex_build_completed.json || true
   completed_auth_error="$(jq -r '.error // empty' /tmp/apex_build_completed.json 2>/dev/null || true)"
   if [[ "$completed_auth_error" == "authentication required" || "$completed_auth_error" == "invalid or expired token" ]]; then
-    fetch_csrf_token
-    login_or_exit
+    refresh_or_relogin
     curl -sS "${auth_args[@]}" "$BASE_URL/builds/$BUILD_ID" >/tmp/apex_build_completed.json || true
   fi
   echo "COMPLETED_BUILD_SUMMARY"
