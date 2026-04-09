@@ -68,6 +68,9 @@ func compilePrecomputedValidatedBuildSpec(req *BuildRequest, intent *IntentBrief
 	}
 
 	capabilities := detectRequiredCapabilities(normalized, nil)
+	if intent != nil && len(intent.RequiredCapabilities) > 0 {
+		capabilities = dedupeCapabilities(append(capabilities, intent.RequiredCapabilities...))
+	}
 	spec := &ValidatedBuildSpec{
 		ID:                    uuid.New().String(),
 		Source:                "precompute_request_v1",
@@ -182,8 +185,12 @@ func deriveValidatedSecurityAdvisories(capabilities []CapabilityRequirement, nor
 	}
 
 	intent := &IntentBrief{RequiredCapabilities: capabilities}
+	normalizedLower := strings.ToLower(normalized)
 	if capabilityRequired(intent, CapabilityAuth) {
 		add("auth_session_hardening", SurfaceBackend, "Auth-capable builds must define secure session boundaries before runtime code lands.", "Freeze the auth contract, include logout/session refresh routes, and prefer httpOnly cookie or clearly scoped bearer token handling.")
+	}
+	if capabilityRequired(intent, CapabilityAuth) && (strings.Contains(normalizedLower, "role") || strings.Contains(normalizedLower, "rbac") || strings.Contains(normalizedLower, "admin")) {
+		add("role_boundary_enforcement", SurfaceBackend, "Role-based surfaces need explicit authorization boundaries for every privileged action.", "Lock admin/manager/member permissions in the contract and require server-side enforcement for every write path.")
 	}
 	if capabilityRequired(intent, CapabilityFileUpload) {
 		add("upload_validation", SurfaceBackend, "Upload flows need strict MIME, size, and storage validation.", "Require client + server validation, sanitize filenames, and avoid trusting browser-provided content type.")
@@ -191,8 +198,17 @@ func deriveValidatedSecurityAdvisories(capabilities []CapabilityRequirement, nor
 	if capabilityRequired(intent, CapabilityExternalAPI) {
 		add("external_api_guardrails", SurfaceIntegration, "External API integrations need timeout, retry, and secret-isolation rules.", "Keep provider secrets server-side, define error budgets, and specify degraded states in the UI contract.")
 	}
-	if capabilityRequired(intent, CapabilityBilling) || strings.Contains(strings.ToLower(normalized), "payment") {
+	if capabilityRequired(intent, CapabilityBilling) || strings.Contains(normalizedLower, "payment") {
 		add("billing_truthfulness", SurfaceBackend, "Billing-related flows must be truthful about entitlement and payment status.", "Ensure the UI never implies successful purchase or upgraded capability until backend verification confirms it.")
+	}
+	if capabilityRequired(intent, CapabilityBilling) || strings.Contains(normalizedLower, "stripe") || strings.Contains(normalizedLower, "subscription") || strings.Contains(normalizedLower, "checkout") {
+		add("billing_webhook_verification", SurfaceIntegration, "Payment-capable apps need webhook verification and idempotent entitlement updates.", "Specify the webhook source of truth up front and never grant access from client redirects alone.")
+	}
+	if capabilityRequired(intent, CapabilityDatabase) && (strings.Contains(normalizedLower, "tenant") || strings.Contains(normalizedLower, "workspace") || strings.Contains(normalizedLower, "organization") || strings.Contains(normalizedLower, "multi-tenant")) {
+		add("tenant_isolation", SurfaceBackend, "Multi-tenant data models need explicit tenant isolation at query and mutation boundaries.", "Freeze tenant/workspace ownership fields in the schema and require every backend read/write path to scope by tenant.")
+	}
+	if strings.Contains(normalizedLower, "ai") || strings.Contains(normalizedLower, "llm") || strings.Contains(normalizedLower, "assistant") || strings.Contains(normalizedLower, "chat") {
+		add("ai_prompt_boundary", SurfaceIntegration, "AI-assisted features need prompt-injection and data-exfiltration boundaries.", "Keep system prompts and secrets server-side, sanitize retrieved context, and define what user content is allowed to reach model calls.")
 	}
 	return dedupeBuildSpecAdvisories(advisories)
 }
@@ -210,6 +226,7 @@ func deriveValidatedPerformanceAdvisories(appType string, capabilities []Capabil
 	}
 
 	intent := &IntentBrief{RequiredCapabilities: capabilities}
+	normalizedLower := strings.ToLower(normalized)
 	switch strings.TrimSpace(strings.ToLower(appType)) {
 	case "fullstack", "web":
 		add("preview_first_render", SurfaceFrontend, "First preview should render useful UI immediately without waiting on backend completion.", "Ship optimistic shell state first, then hydrate data surfaces behind truthful loading states.")
@@ -220,8 +237,17 @@ func deriveValidatedPerformanceAdvisories(appType string, capabilities []Capabil
 	if capabilityRequired(intent, CapabilityRealtime) {
 		add("realtime_backpressure", SurfaceIntegration, "Realtime surfaces need backpressure-aware state updates.", "Batch or throttle feed updates so the first preview remains smooth under event bursts.")
 	}
-	if strings.Contains(strings.ToLower(normalized), "dashboard") || strings.Contains(strings.ToLower(normalized), "table") {
+	if strings.Contains(normalizedLower, "dashboard") || strings.Contains(normalizedLower, "table") {
 		add("list_scaling", SurfaceFrontend, "Data-dense surfaces should avoid heavy first paint and jitter.", "Use pagination or list virtualization patterns once collection sizes grow beyond simple card grids.")
+	}
+	if strings.Contains(normalizedLower, "dashboard") || strings.Contains(normalizedLower, "analytics") || strings.Contains(normalizedLower, "chart") {
+		add("progressive_dashboard_loading", SurfaceFrontend, "Dashboard-style apps should reveal value before every widget finishes loading.", "Prioritize hero KPIs, stagger secondary widgets, and avoid blocking first paint on full analytics hydration.")
+	}
+	if strings.Contains(normalizedLower, "feed") || strings.Contains(normalizedLower, "activity") || capabilityRequired(intent, CapabilityRealtime) {
+		add("feed_windowing", SurfaceFrontend, "Feed-oriented surfaces need bounded rendering to keep preview smooth.", "Window long activity lists and append new events in batches instead of rerendering the full feed on every update.")
+	}
+	if capabilityRequired(intent, CapabilityExternalAPI) || strings.Contains(normalizedLower, "ai") || strings.Contains(normalizedLower, "assistant") {
+		add("upstream_latency_budget", SurfaceIntegration, "Apps that depend on remote providers need explicit latency budgets and graceful fallbacks.", "Cache stable responses, parallelize independent calls, and keep the first render useful when upstream providers are slow.")
 	}
 	return dedupeBuildSpecAdvisories(advisories)
 }

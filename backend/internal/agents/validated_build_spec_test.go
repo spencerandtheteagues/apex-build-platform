@@ -36,6 +36,53 @@ func TestCompilePrecomputedValidatedBuildSpecIncludesAdvisories(t *testing.T) {
 	}
 }
 
+func TestCompilePrecomputedValidatedBuildSpecExpandsSecurityAndPerformanceHeuristics(t *testing.T) {
+	t.Parallel()
+
+	prompt := "Build a multi-tenant AI support workspace with role-based admin controls, Stripe subscriptions, realtime activity feed, analytics dashboards, and assistant chat."
+	spec := compilePrecomputedValidatedBuildSpec(&BuildRequest{
+		Prompt:              prompt,
+		RequirePreviewReady: true,
+	}, &IntentBrief{
+		AppType:           "fullstack",
+		NormalizedRequest: prompt,
+		RequiredCapabilities: []CapabilityRequirement{
+			CapabilityAuth,
+			CapabilityDatabase,
+			CapabilityBilling,
+			CapabilityRealtime,
+			CapabilityExternalAPI,
+		},
+	})
+
+	if spec == nil {
+		t.Fatal("expected precomputed validated build spec")
+	}
+
+	wantSecurityCodes := []string{
+		"role_boundary_enforcement",
+		"billing_webhook_verification",
+		"tenant_isolation",
+		"ai_prompt_boundary",
+	}
+	for _, code := range wantSecurityCodes {
+		if !hasBuildSpecAdvisoryCode(spec.SecurityAdvisories, code) {
+			t.Fatalf("expected security advisory %q, got %+v", code, spec.SecurityAdvisories)
+		}
+	}
+
+	wantPerformanceCodes := []string{
+		"progressive_dashboard_loading",
+		"feed_windowing",
+		"upstream_latency_budget",
+	}
+	for _, code := range wantPerformanceCodes {
+		if !hasBuildSpecAdvisoryCode(spec.PerformanceAdvisories, code) {
+			t.Fatalf("expected performance advisory %q, got %+v", code, spec.PerformanceAdvisories)
+		}
+	}
+}
+
 func TestFinalizeValidatedBuildSpecLocksPlanDetails(t *testing.T) {
 	t.Parallel()
 
@@ -114,4 +161,13 @@ func TestBuildTaskPromptIncludesValidatedBuildSpecContext(t *testing.T) {
 	if !strings.Contains(prompt, "This spec is locked for generation") {
 		t.Fatalf("expected lock language in task prompt, got %q", prompt)
 	}
+}
+
+func hasBuildSpecAdvisoryCode(values []BuildSpecAdvisory, code string) bool {
+	for _, advisory := range values {
+		if advisory.Code == code {
+			return true
+		}
+	}
+	return false
 }

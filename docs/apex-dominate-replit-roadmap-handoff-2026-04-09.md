@@ -259,7 +259,28 @@ Key files:
 - `backend/internal/agents/orchestration_semantics.go`
 - `scripts/run_platform_build_smoke.sh`
 
-### 9. Autonomous package manifests are now more runnable by default
+### 9. Stronger precompute security/performance advisories
+
+Implemented:
+
+- precomputed validated specs now merge intent-brief capabilities instead of relying only on raw prompt re-detection
+- security advisories expanded for:
+  - role boundary enforcement
+  - billing webhook verification
+  - tenant isolation
+  - AI prompt/data boundary hardening
+- performance advisories expanded for:
+  - progressive dashboard loading
+  - feed windowing/bounded rendering
+  - upstream latency budgets for AI/external-provider features
+- this makes the “war room” spec materially more useful before planning and codegen begin
+
+Key files:
+
+- `backend/internal/agents/validated_build_spec.go`
+- `backend/internal/agents/validated_build_spec_test.go`
+
+### 10. Autonomous package manifests are now more runnable by default
 
 Implemented:
 
