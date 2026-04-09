@@ -147,3 +147,65 @@ export function ClientCard({ onSelect }: { onSelect?: () => void }) {
 		t.Fatalf("expected Button to spread passthrough props onto root button, got %q", button.Content)
 	}
 }
+
+func TestCVBuildRepairPromptUsesContextDiet(t *testing.T) {
+	t.Parallel()
+
+	prompt := cvBuildRepairPrompt([]ParsedBuildError{
+		{
+			File:    "src/App.tsx",
+			Line:    12,
+			Column:  8,
+			Code:    "TS2322",
+			Message: "Type mismatch",
+			Source:  "tsc",
+		},
+	}, []GeneratedFile{
+		{
+			Path: "src/App.tsx",
+			Content: `import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+
+export interface AppProps {
+  title: string
+}
+
+export function App({ title }: AppProps) {
+  const brokenValue: string = 42 as unknown as string
+  return (
+    <Card>
+      <Button>{title}</Button>
+    </Card>
+  )
+}
+`,
+		},
+	})
+
+	if strings.Contains(prompt, "**Full file content**") {
+		t.Fatalf("expected context-diet prompt, got full file dump: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Pruned file context") {
+		t.Fatalf("expected pruned context header, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "Public signatures:") {
+		t.Fatalf("expected public signatures section, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "Focused source windows:") {
+		t.Fatalf("expected focused source windows section, got %q", prompt)
+	}
+}
+
+func TestCVHydraStrategiesEnabledForBalancedAndMax(t *testing.T) {
+	t.Parallel()
+
+	if got := len(cvHydraStrategies(PowerFast)); got != 0 {
+		t.Fatalf("expected fast mode to skip hydra, got %d strategies", got)
+	}
+	if got := len(cvHydraStrategies(PowerBalanced)); got != 3 {
+		t.Fatalf("expected balanced mode hydra strategies, got %d", got)
+	}
+	if got := len(cvHydraStrategies(PowerMax)); got != 3 {
+		t.Fatalf("expected max mode hydra strategies, got %d", got)
+	}
+}

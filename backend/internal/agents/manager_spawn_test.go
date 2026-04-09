@@ -52,6 +52,8 @@ func TestInitialAgentRolesForBuildFallsBackToLegacyRolesWithoutPlan(t *testing.T
 }
 
 func TestBuildExecutionPhasesPrefersFrontendBeforeBackendAndData(t *testing.T) {
+	t.Setenv("APEX_PARALLEL_MID_PHASE", "false")
+
 	phases := buildExecutionPhases(
 		[]agentPriority{{agent: &Agent{Role: RoleArchitect}}},
 		[]agentPriority{{agent: &Agent{Role: RoleFrontend}}},
@@ -75,6 +77,49 @@ func TestBuildExecutionPhasesPrefersFrontendBeforeBackendAndData(t *testing.T) {
 	}
 	if phases[0].startMessage == "" || phases[0].completionMessage == "" {
 		t.Fatalf("expected architecture phase to narrate contract freeze, got %+v", phases[0])
+	}
+}
+
+func TestBuildExecutionPhasesParallelMidPhaseEnabledMergesCoreAgents(t *testing.T) {
+	t.Setenv("APEX_PARALLEL_MID_PHASE", "true")
+
+	frontend := agentPriority{agent: &Agent{Role: RoleFrontend}}
+	database := agentPriority{agent: &Agent{Role: RoleDatabase}}
+	backend := agentPriority{agent: &Agent{Role: RoleBackend}}
+
+	phases := buildExecutionPhases(
+		[]agentPriority{{agent: &Agent{Role: RoleArchitect}}},
+		[]agentPriority{frontend},
+		[]agentPriority{database},
+		[]agentPriority{backend},
+		[]agentPriority{{agent: &Agent{Role: RoleTesting}}},
+		[]agentPriority{{agent: &Agent{Role: RoleReviewer}}},
+	)
+
+	expectedKeys := []string{"architecture", "parallel_core", "integration", "review"}
+	if len(phases) != len(expectedKeys) {
+		t.Fatalf("expected %d phases, got %d", len(expectedKeys), len(phases))
+	}
+	for i, key := range expectedKeys {
+		if phases[i].key != key {
+			t.Fatalf("expected phase %d key %q, got %q", i, key, phases[i].key)
+		}
+	}
+	if len(phases[1].agents) != 3 {
+		t.Fatalf("expected parallel core to merge frontend/database/backend agents, got %+v", phases[1].agents)
+	}
+	if phases[1].startMessage == "" || phases[1].completionMessage == "" {
+		t.Fatalf("expected parallel_core user-facing messages, got %+v", phases[1])
+	}
+}
+
+func TestBuildPhaseProgressWindowIncludesParallelCore(t *testing.T) {
+	min, max, ok := buildPhaseProgressWindow("parallel_core", BuildInProgress)
+	if !ok {
+		t.Fatal("expected progress window for parallel_core")
+	}
+	if min != 20 || max != 79 {
+		t.Fatalf("expected parallel_core window 20-79, got %d-%d", min, max)
 	}
 }
 

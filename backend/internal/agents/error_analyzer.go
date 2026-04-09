@@ -33,24 +33,24 @@ import (
 type ErrorClass string
 
 const (
-	ErrorClassMissingDep    ErrorClass = "missing_dependency"    // package.json missing a required package
-	ErrorClassTypeScript    ErrorClass = "typescript_error"      // TS type / compile error
-	ErrorClassSyntax        ErrorClass = "syntax_error"          // generic syntax / parse error
-	ErrorClassCORS          ErrorClass = "cors_misconfiguration" // CORS origin mismatch
-	ErrorClassPortConflict  ErrorClass = "port_conflict"         // port already in use
-	ErrorClassImportPath    ErrorClass = "import_path_error"     // bad module path / alias
-	ErrorClassMissingFile   ErrorClass = "missing_file"          // referenced file not found
-	ErrorClassBuildScript   ErrorClass = "build_script_error"    // package.json script mis-config
-	ErrorClassIntegration   ErrorClass = "integration_error"     // frontend↔backend contract mismatch
-	ErrorClassUnknown       ErrorClass = "unknown"               // catch-all
+	ErrorClassMissingDep   ErrorClass = "missing_dependency"    // package.json missing a required package
+	ErrorClassTypeScript   ErrorClass = "typescript_error"      // TS type / compile error
+	ErrorClassSyntax       ErrorClass = "syntax_error"          // generic syntax / parse error
+	ErrorClassCORS         ErrorClass = "cors_misconfiguration" // CORS origin mismatch
+	ErrorClassPortConflict ErrorClass = "port_conflict"         // port already in use
+	ErrorClassImportPath   ErrorClass = "import_path_error"     // bad module path / alias
+	ErrorClassMissingFile  ErrorClass = "missing_file"          // referenced file not found
+	ErrorClassBuildScript  ErrorClass = "build_script_error"    // package.json script mis-config
+	ErrorClassIntegration  ErrorClass = "integration_error"     // frontend↔backend contract mismatch
+	ErrorClassUnknown      ErrorClass = "unknown"               // catch-all
 )
 
 // ClassifiedError pairs a raw error message with its semantic class and any
 // extracted metadata (e.g. the package name for a missing-dep error).
 type ClassifiedError struct {
-	Raw       string            `json:"raw"`
-	Class     ErrorClass        `json:"class"`
-	Meta      map[string]string `json:"meta,omitempty"`
+	Raw   string            `json:"raw"`
+	Class ErrorClass        `json:"class"`
+	Meta  map[string]string `json:"meta,omitempty"`
 }
 
 // FileRepair is a single actionable fix the AI recommends for one file.
@@ -63,11 +63,11 @@ type FileRepair struct {
 
 // RepairPlan is the structured output of an analysis run.
 type RepairPlan struct {
-	Repairs        []FileRepair `json:"repairs"`
-	Summary        string       `json:"summary"`         // one-sentence diagnosis
-	AnalyzedAt     time.Time    `json:"analyzed_at"`
-	TokensUsed     int          `json:"tokens_used"`
-	FallbackUsed   bool         `json:"fallback_used"`   // true when AI call failed and heuristics were used
+	Repairs      []FileRepair `json:"repairs"`
+	Summary      string       `json:"summary"` // one-sentence diagnosis
+	AnalyzedAt   time.Time    `json:"analyzed_at"`
+	TokensUsed   int          `json:"tokens_used"`
+	FallbackUsed bool         `json:"fallback_used"` // true when AI call failed and heuristics were used
 }
 
 // ─── Classifier ───────────────────────────────────────────────────────────────
@@ -209,6 +209,7 @@ func (a *ErrorAnalyzer) Analyze(
 		MaxTokens:    1200,
 		Temperature:  0.1, // low temperature for precise, deterministic repair instructions
 		SystemPrompt: errorAnalyzerSystemPrompt,
+		RoleHint:     string(RoleSolver),
 		PowerMode:    PowerFast, // cost-efficient; errors don't need frontier reasoning
 	})
 	if err != nil {

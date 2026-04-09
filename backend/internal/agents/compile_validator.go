@@ -33,7 +33,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"apex-build/internal/ai"
 )
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -73,6 +76,17 @@ You will receive structured build errors with file paths, line numbers, and sour
 Output ONLY file patches — no prose, no explanations, no markdown outside code blocks.
 Every patch must be the COMPLETE final file content after your fix.
 `
+
+type cvRepairStrategy struct {
+	Name        string
+	Temperature float64
+	Directive   string
+}
+
+type cvRepairCandidate struct {
+	Strategy cvRepairStrategy
+	Output   *TaskOutput
+}
 
 // maxCompileAttempts returns how many compile-repair cycles to allow based on power mode.
 func maxCompileAttempts(mode PowerMode) int {
@@ -417,75 +431,134 @@ func (am *AgentManager) cvRunInlineRepair(
 		}
 	}
 
-	// Select provider — prefer a fast model.
-	if am.aiRouter == nil {
-		log.Printf("[compile_validator] build %s: aiRouter not available for inline repair", build.ID)
+	if cvHydraRepairEnabled(build) && tmpDir != "" {
+		if repaired := am.cvRunHydraRepair(ctx, build, errors, allFiles, tmpDir); repaired {
+			return true
+		}
+	}
+
+	return am.cvRunSingleInlineRepair(ctx, build, errors, allFiles)
+}
+
+func cvHydraRepairEnabled(build *Build) bool {
+	if build == nil {
 		return false
 	}
-	providers := am.aiRouter.GetAvailableProvidersForUser(build.UserID)
-	if len(providers) == 0 {
-		providers = am.aiRouter.GetAvailableProviders()
-	}
-	if len(providers) == 0 || !am.aiRouter.HasConfiguredProviders() {
-		log.Printf("[compile_validator] build %s: no AI provider available for inline repair", build.ID)
+	if build.PowerMode == PowerFast {
 		return false
 	}
-	provider := providers[0]
+	return envBool("APEX_COMPILE_HYDRA_REPAIR", true)
+}
 
-	prompt := cvBuildRepairPrompt(errors, *allFiles)
+func cvHydraStrategies(mode PowerMode) []cvRepairStrategy {
+	if mode == PowerFast {
+		return nil
+	}
+	return []cvRepairStrategy{
+		{
+			Name:        "strict_ast_syntax_repair",
+			Temperature: 0.2,
+			Directive:   "Repair only the broken syntax/types around the reported error sites. Do not redesign components or alter control flow unless compilation strictly requires it.",
+		},
+		{
+			Name:        "type_constraint_relaxation",
+			Temperature: 0.5,
+			Directive:   "Prefer minimal type/interface/export/import fixes that preserve the visible UI and runtime contract. Relax type constraints only as much as needed to restore compilation truthfully.",
+		},
+		{
+			Name:        "targeted_node_rewrite",
+			Temperature: 0.7,
+			Directive:   "If the local node is structurally broken, rewrite only the faulty module or symbol completely while preserving the rest of the scaffold and design intent.",
+		},
+	}
+}
 
-	repairCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+func (am *AgentManager) cvRunHydraRepair(
+	ctx context.Context,
+	build *Build,
+	errors []ParsedBuildError,
+	allFiles *[]GeneratedFile,
+	baseDir string,
+) bool {
+	provider := am.cvSelectInlineRepairProvider(build)
+	if provider == "" {
+		return false
+	}
+
+	strategies := cvHydraStrategies(build.PowerMode)
+	if len(strategies) == 0 {
+		return false
+	}
+
+	hydraCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	resp, err := am.aiRouter.Generate(repairCtx, provider, prompt, GenerateOptions{
-		UserID:          build.UserID,
-		MaxTokens:       cvRepairTokens,
-		Temperature:     0.1,
-		SystemPrompt:    compileRepairSystemPrompt,
-		PowerMode:       PowerFast,
-		UsePlatformKeys: build.ProviderMode != "byok",
-	})
-	if err != nil {
-		log.Printf("[compile_validator] build %s: AI repair call failed: %v", build.ID, err)
-		return false
-	}
-	if resp == nil || strings.TrimSpace(resp.Content) == "" {
-		return false
+	results := make(chan cvRepairCandidate, len(strategies))
+	var wg sync.WaitGroup
+	for _, strategy := range strategies {
+		strategy := strategy
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			output := am.cvGenerateTaskOutput(hydraCtx, build, errors, *allFiles, provider, strategy)
+			if output == nil {
+				return
+			}
+			candidateFiles, changed := cvApplyTaskOutputToGeneratedFiles(*allFiles, output)
+			if !changed {
+				return
+			}
+			if !cvValidateCandidateWorkspace(hydraCtx, candidateFiles, baseDir) {
+				return
+			}
+			select {
+			case results <- cvRepairCandidate{Strategy: strategy, Output: output}:
+			case <-hydraCtx.Done():
+			}
+		}()
 	}
 
-	// Parse the response for file patches.
-	output := am.parseTaskOutput(TaskFix, resp.Content)
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	for candidate := range results {
+		cancel()
+		if am.cvApplyTaskOutputToBuild(build, candidate.Output) {
+			*allFiles = am.collectGeneratedFiles(build)
+			log.Printf("[compile_validator] build %s: hydra repair winner=%s", build.ID, candidate.Strategy.Name)
+			return true
+		}
+	}
+
+	return false
+}
+
+func (am *AgentManager) cvRunSingleInlineRepair(
+	ctx context.Context,
+	build *Build,
+	errors []ParsedBuildError,
+	allFiles *[]GeneratedFile,
+) bool {
+	// Select provider — prefer a fast model.
+	provider := am.cvSelectInlineRepairProvider(build)
+	if provider == "" {
+		return false
+	}
+	output := am.cvGenerateTaskOutput(ctx, build, errors, *allFiles, provider, cvRepairStrategy{
+		Name:        "single_inline_repair",
+		Temperature: 0.1,
+		Directive:   "Fix the listed build errors with the smallest truthful patch that restores compilation.",
+	})
 	if output == nil {
 		return false
 	}
-
-	applied := false
-
-	// Apply patch bundle if present.
-	if output.StructuredPatchBundle != nil && len(output.StructuredPatchBundle.Operations) > 0 {
-		if am.applyPatchBundleToBuild(build, output.StructuredPatchBundle) {
-			applied = true
-		}
-	}
-
-	// Apply any plain file outputs.
-	if len(output.Files) > 0 {
-		for _, f := range output.Files {
-			if strings.TrimSpace(f.Path) == "" || strings.TrimSpace(f.Content) == "" {
-				continue
-			}
-			if am.patchGeneratedFileContent(build, f.Path, f.Content) {
-				applied = true
-			} else if am.createGeneratedFile(build, f.Path, f.Content) {
-				applied = true
-			}
-		}
-	}
-
-	if applied {
+	if am.cvApplyTaskOutputToBuild(build, output) {
 		*allFiles = am.collectGeneratedFiles(build)
+		return true
 	}
-	return applied
+	return false
 }
 
 func cvReadinessErrorsFromParsedBuildErrors(errors []ParsedBuildError) []string {
@@ -522,6 +595,165 @@ func cvReadinessErrorsFromParsedBuildErrors(errors []ParsedBuildError) []string 
 		}
 	}
 	return out
+}
+
+func (am *AgentManager) cvSelectInlineRepairProvider(build *Build) ai.AIProvider {
+	if am == nil || am.aiRouter == nil || build == nil {
+		if build != nil {
+			log.Printf("[compile_validator] build %s: aiRouter not available for inline repair", build.ID)
+		}
+		return ""
+	}
+	providers := am.aiRouter.GetAvailableProvidersForUser(build.UserID)
+	if len(providers) == 0 {
+		providers = am.aiRouter.GetAvailableProviders()
+	}
+	if len(providers) == 0 || !am.aiRouter.HasConfiguredProviders() {
+		log.Printf("[compile_validator] build %s: no AI provider available for inline repair", build.ID)
+		return ""
+	}
+	return providers[0]
+}
+
+func (am *AgentManager) cvGenerateTaskOutput(
+	ctx context.Context,
+	build *Build,
+	errors []ParsedBuildError,
+	allFiles []GeneratedFile,
+	provider ai.AIProvider,
+	strategy cvRepairStrategy,
+) *TaskOutput {
+	if am == nil || am.aiRouter == nil || build == nil {
+		return nil
+	}
+	prompt := cvBuildRepairPrompt(errors, allFiles)
+	if directive := strings.TrimSpace(strategy.Directive); directive != "" {
+		prompt += "\n\n## Repair Strategy\n\n" + directive + "\n"
+	}
+
+	repairCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	resp, err := am.aiRouter.Generate(repairCtx, provider, prompt, GenerateOptions{
+		UserID:          build.UserID,
+		MaxTokens:       cvRepairTokens,
+		Temperature:     strategy.Temperature,
+		SystemPrompt:    compileRepairSystemPrompt,
+		RoleHint:        string(RoleSolver),
+		PowerMode:       PowerFast,
+		UsePlatformKeys: build.ProviderMode != "byok",
+	})
+	if err != nil {
+		log.Printf("[compile_validator] build %s: AI repair call failed (%s): %v", build.ID, strategy.Name, err)
+		return nil
+	}
+	if resp == nil || strings.TrimSpace(resp.Content) == "" {
+		return nil
+	}
+	return am.parseTaskOutput(TaskFix, resp.Content)
+}
+
+func (am *AgentManager) cvApplyTaskOutputToBuild(build *Build, output *TaskOutput) bool {
+	if am == nil || build == nil || output == nil {
+		return false
+	}
+	applied := false
+	if output.StructuredPatchBundle != nil && len(output.StructuredPatchBundle.Operations) > 0 {
+		if am.applyPatchBundleToBuild(build, output.StructuredPatchBundle) {
+			applied = true
+		}
+	}
+	for _, f := range output.Files {
+		if strings.TrimSpace(f.Path) == "" || strings.TrimSpace(f.Content) == "" {
+			continue
+		}
+		if am.patchGeneratedFileContent(build, f.Path, f.Content) {
+			applied = true
+		} else if am.createGeneratedFile(build, f.Path, f.Content) {
+			applied = true
+		}
+	}
+	return applied
+}
+
+func cvApplyTaskOutputToGeneratedFiles(files []GeneratedFile, output *TaskOutput) ([]GeneratedFile, bool) {
+	if output == nil {
+		return append([]GeneratedFile(nil), files...), false
+	}
+	next := append([]GeneratedFile(nil), files...)
+	applied := false
+
+	upsert := func(path, content string) {
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		if path == "" || strings.TrimSpace(content) == "" {
+			return
+		}
+		for idx := range next {
+			if filepath.ToSlash(strings.TrimSpace(next[idx].Path)) != path {
+				continue
+			}
+			if strings.TrimSpace(next[idx].Content) == strings.TrimSpace(content) {
+				return
+			}
+			next[idx].Content = content
+			next[idx].Size = int64(len(content))
+			next[idx].IsNew = false
+			applied = true
+			return
+		}
+		next = append(next, GeneratedFile{
+			Path:    path,
+			Content: content,
+			Size:    int64(len(content)),
+			IsNew:   true,
+		})
+		applied = true
+	}
+
+	if output.StructuredPatchBundle != nil {
+		for _, op := range output.StructuredPatchBundle.Operations {
+			if strings.TrimSpace(op.Path) == "" || strings.TrimSpace(op.Content) == "" {
+				continue
+			}
+			switch op.Type {
+			case PatchCreateFile, PatchReplaceFunction, PatchReplaceSymbol, PatchPatchJSONKey, PatchPatchEnvVar, PatchPatchRouteRegistration, PatchPatchDependency, PatchPatchSchemaEntity:
+				upsert(op.Path, op.Content)
+			}
+		}
+	}
+	for _, f := range output.Files {
+		upsert(f.Path, f.Content)
+	}
+	return next, applied
+}
+
+func cvValidateCandidateWorkspace(ctx context.Context, files []GeneratedFile, baseDir string) bool {
+	if strings.TrimSpace(baseDir) == "" {
+		return false
+	}
+	parentDir := filepath.Dir(baseDir)
+	candidateDir, err := os.MkdirTemp(parentDir, "apex-hydra-*")
+	if err != nil {
+		return false
+	}
+	defer os.RemoveAll(candidateDir)
+
+	if err := cvMaterializeFiles(files, candidateDir); err != nil {
+		return false
+	}
+
+	nodeModules := filepath.Join(baseDir, "node_modules")
+	if info, err := os.Stat(nodeModules); err == nil && info.IsDir() {
+		_ = os.Symlink(nodeModules, filepath.Join(candidateDir, "node_modules"))
+	}
+
+	if errs := cvRunTscCheck(ctx, candidateDir); len(errs) > 0 {
+		return false
+	}
+	if errs := cvRunViteBuild(ctx, candidateDir); len(errs) > 0 {
+		return false
+	}
+	return true
 }
 
 // cvBuildRepairPrompt assembles the repair prompt with structured error context
@@ -603,16 +835,15 @@ func cvBuildRepairPrompt(errors []ParsedBuildError, allFiles []GeneratedFile) st
 			}
 		}
 
-		// Include the full file content for context (truncated to 200 lines).
 		if content != "" {
-			truncated := fileLines
-			suffix := ""
-			if len(truncated) > 200 {
-				truncated = truncated[:200]
-				suffix = "\n// ... (truncated)"
+			focusLines := make([]int, 0, len(g.errors))
+			for _, err := range g.errors {
+				if err.Line > 0 {
+					focusLines = append(focusLines, err.Line)
+				}
 			}
-			sb.WriteString(fmt.Sprintf("**Full file content** (`%s`):\n```typescript\n%s%s\n```\n\n",
-				g.path, strings.Join(truncated, "\n"), suffix))
+			sb.WriteString(buildContextDietSection(g.path, content, focusLines, cvContextLines))
+			sb.WriteString("\n")
 		}
 	}
 

@@ -9,9 +9,11 @@ import (
 
 type stubPreviewVerifier struct {
 	result *PreviewVerificationResult
+	files  []VerifiableFile
 }
 
 func (s *stubPreviewVerifier) VerifyBuildFiles(ctx context.Context, files []VerifiableFile, isFullStack bool) *PreviewVerificationResult {
+	s.files = append([]VerifiableFile(nil), files...)
 	return s.result
 }
 
@@ -99,6 +101,41 @@ func TestRunPreviewVerificationGateTerminalFailureDropsProgressBelowCompletion(t
 	}
 	if buildError == "" {
 		t.Fatal("expected build error to be populated")
+	}
+}
+
+func TestRunPreviewVerificationGateSkipsGeneratedTestArtifacts(t *testing.T) {
+	verifier := &stubPreviewVerifier{
+		result: &PreviewVerificationResult{Passed: true},
+	}
+	manager := &AgentManager{
+		ctx:             context.Background(),
+		previewVerifier: verifier,
+	}
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:       "preview-skip-tests",
+		Status:   BuildCompleted,
+		Progress: 100,
+	}
+	status := BuildCompleted
+	buildError := ""
+	allFiles := []GeneratedFile{
+		{Path: "src/App.tsx", Content: "export default function App() { return <div>Hello</div>; }"},
+		{Path: "src/__tests__/App.test.tsx", Content: "test('works', () => {})"},
+		{Path: "e2e/smoke.spec.ts", Content: "test('smoke', async () => {})"},
+		{Path: "tests/integration/auth.spec.ts", Content: "test('auth', () => {})"},
+	}
+
+	if manager.runPreviewVerificationGate(build, allFiles, &status, &buildError, now) {
+		t.Fatal("expected passing preview verification to continue normally")
+	}
+	if len(verifier.files) != 1 {
+		t.Fatalf("expected only runtime-relevant files to reach preview verifier, got %+v", verifier.files)
+	}
+	if verifier.files[0].Path != "src/App.tsx" {
+		t.Fatalf("expected src/App.tsx to remain after filtering, got %+v", verifier.files)
 	}
 }
 
@@ -241,5 +278,91 @@ func TestRunPreviewVerificationGatePassingReportSupersedesEarlierFailure(t *test
 	}
 	if reports[len(reports)-1].Status != VerificationPassed {
 		t.Fatalf("expected latest preview verification report to pass, got %+v", reports[len(reports)-1])
+	}
+}
+
+func TestRunPreviewVerificationGatePassingReportPreservesAdvisoryWarnings(t *testing.T) {
+	manager := &AgentManager{
+		ctx: context.Background(),
+		previewVerifier: &stubPreviewVerifier{
+			result: &PreviewVerificationResult{
+				Passed:       true,
+				RepairHints:  []string{"visual: increase contrast on the primary CTA"},
+				CanaryErrors: []string{"interaction: TypeError: Cannot read properties of undefined"},
+			},
+		},
+	}
+
+	now := time.Now().UTC()
+	build := &Build{
+		ID:       "preview-pass-advisories",
+		Status:   BuildCompleted,
+		Progress: 100,
+	}
+	status := BuildCompleted
+	buildError := ""
+
+	if manager.runPreviewVerificationGate(build, nil, &status, &buildError, now) {
+		t.Fatal("expected passing preview verification not to early-return for repair")
+	}
+	if len(build.SnapshotState.Orchestration.VerificationReports) == 0 {
+		t.Fatal("expected a verification report to be recorded")
+	}
+	report := build.SnapshotState.Orchestration.VerificationReports[len(build.SnapshotState.Orchestration.VerificationReports)-1]
+	if report.Status != VerificationPassed {
+		t.Fatalf("expected passed verification report, got %+v", report)
+	}
+	if len(report.Warnings) != 2 {
+		t.Fatalf("expected advisory warnings to be retained, got %+v", report.Warnings)
+	}
+}
+
+func TestBuildPreviewRepairTaskInputIncludesScreenshotForVisionHints(t *testing.T) {
+	result := &PreviewVerificationResult{
+		FailureKind:      "blank_screen",
+		Details:          "preview mounted but appears visually broken",
+		ScreenshotBase64: "ZmFrZS1zY3JlZW5zaG90",
+	}
+	hints := []string{
+		"visual: add stronger contrast between the hero copy and the background",
+		"visual: style the primary CTA so it is clearly visible above the fold",
+	}
+
+	input := buildPreviewRepairTaskInput(result, hints)
+	if got, _ := input["screenshot_base64"].(string); got != result.ScreenshotBase64 {
+		t.Fatalf("expected screenshot_base64 to be included, got %v", input["screenshot_base64"])
+	}
+	if gotHints, _ := input["repair_hints"].([]string); len(gotHints) != len(hints) {
+		t.Fatalf("expected repair hints to be preserved, got %#v", input["repair_hints"])
+	}
+}
+
+func TestBuildPreviewRepairTaskInputOmitsScreenshotWithoutVisionHints(t *testing.T) {
+	result := &PreviewVerificationResult{
+		FailureKind:      "blank_screen",
+		Details:          "preview mounted but appears visually broken",
+		ScreenshotBase64: "ZmFrZS1zY3JlZW5zaG90",
+	}
+	hints := []string{"Fix the missing app shell so the preview can render."}
+
+	input := buildPreviewRepairTaskInput(result, hints)
+	if _, exists := input["screenshot_base64"]; exists {
+		t.Fatalf("expected screenshot_base64 to be omitted without vision hints: %#v", input)
+	}
+}
+
+func TestPreviewFailureClass(t *testing.T) {
+	cases := map[string]string{
+		"blank_screen":        "frontend_shell",
+		"js_runtime_error":    "runtime",
+		"boot_failed":         "preview_boot",
+		"browser_unavailable": "infrastructure",
+		"backend_no_routes":   "backend_contract",
+		"something_else":      "unknown",
+	}
+	for kind, want := range cases {
+		if got := previewFailureClass(kind); got != want {
+			t.Fatalf("previewFailureClass(%q) = %q, want %q", kind, got, want)
+		}
 	}
 }

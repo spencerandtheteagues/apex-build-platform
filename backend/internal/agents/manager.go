@@ -194,6 +194,7 @@ type AgentManager struct {
 	ctxSelector            *ContextSelector     // smart file context selection for LLM prompts
 	chunkedEditor          *ChunkedEditor       // splits/reassembles large-file edits to stay within output token limits
 	previewVerifier        BuildPreviewVerifier // optional preview readiness verifier (wired in main.go)
+	visionIntake           *VisionIntakeProcessor
 	taskCancels            map[string]context.CancelFunc
 	instanceID             string
 	mu                     sync.RWMutex
@@ -218,6 +219,7 @@ type GenerateOptions struct {
 	Temperature  float64
 	SystemPrompt string
 	Context      []Message
+	RoleHint     string
 	PowerMode    PowerMode // Controls which model tier is used (max/balanced/fast)
 	// Platform-key app builds should not route through user BYOK state.
 	UsePlatformKeys bool
@@ -256,6 +258,7 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 		errorAnalyzer: NewErrorAnalyzer(aiRouter, ""),
 		ctxSelector:   NewContextSelector(),
 		chunkedEditor: NewChunkedEditor(),
+		visionIntake:  NewVisionIntakeProcessorFromEnv(),
 		taskCancels:   make(map[string]context.CancelFunc),
 		instanceID:    resolveAgentManagerInstanceID(),
 		ctx:           ctx,
@@ -351,6 +354,11 @@ func (am *AgentManager) SetBudgetEnforcer(enforcer *budget.BudgetEnforcer) {
 
 // CreateBuild starts a new build session
 func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *BuildRequest) (*Build, error) {
+	if req == nil {
+		return nil, fmt.Errorf("build request is required")
+	}
+	req = am.prepareBuildRequestForCreation(req)
+
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
@@ -373,6 +381,10 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 	} else if providerMode != "byok" {
 		providerMode = "platform"
 	}
+	effectiveDescription := strings.TrimSpace(firstNonEmptyString(req.Prompt, req.Description))
+	if effectiveDescription == "" {
+		effectiveDescription = strings.TrimSpace(req.Description)
+	}
 
 	build := &Build{
 		ID:                  buildID,
@@ -383,7 +395,7 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 		SubscriptionPlan:    strings.ToLower(strings.TrimSpace(subscriptionPlan)),
 		ProviderMode:        providerMode,
 		RequirePreviewReady: req.RequirePreviewReady,
-		Description:         req.Description,
+		Description:         effectiveDescription,
 		TechStack:           req.TechStack,
 		RoleAssignments:     req.RoleAssignments,
 		Agents:              make(map[string]*Agent),
@@ -395,6 +407,9 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 	}
 	if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil && orchestration.Flags.EnableIntentBrief {
 		orchestration.IntentBrief = compileIntentBriefFromRequest(req, providerMode)
+		if orchestration.Flags.EnableValidatedBuildSpec {
+			orchestration.ValidatedBuildSpec = compilePrecomputedValidatedBuildSpec(req, orchestration.IntentBrief)
+		}
 	}
 	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
 
@@ -418,7 +433,7 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 		return nil, fmt.Errorf("persist initial build snapshot: %w", err)
 	}
 
-	log.Printf("Created build %s for user %d: %s", buildID, userID, truncate(req.Description, 50))
+	log.Printf("Created build %s for user %d: %s", buildID, userID, truncate(effectiveDescription, 50))
 	return build, nil
 }
 
@@ -1940,12 +1955,7 @@ func (am *AgentManager) providerScorecardsForBuild(build *Build, providers []ai.
 func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers []ai.AIProvider, roles []AgentRole) map[AgentRole]ai.AIProvider {
 	assignments := make(map[AgentRole]ai.AIProvider)
 	scorecards := am.providerScorecardsForBuild(build, providers)
-	hasLiveScorecards := false
-	if build != nil {
-		build.mu.RLock()
-		hasLiveScorecards = build.SnapshotState.Orchestration != nil && len(build.SnapshotState.Orchestration.ProviderScorecards) > 0
-		build.mu.RUnlock()
-	}
+	scorecardRoutingActive := hasSufficientLiveScorecards(scorecards)
 
 	// Build a quick lookup for availability
 	available := make(map[ai.AIProvider]bool)
@@ -1960,7 +1970,7 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 
 	// Helper to pick the first available provider in preference order
 	pick := func(role AgentRole, preferences ...ai.AIProvider) ai.AIProvider {
-		if preferred := preferredProviderForTaskShape(taskShapeForRole(role), scorecards); preferred != "" && available[preferred] {
+		if preferred := selectProviderByScorecard(build, role, taskShapeForRole(role), providers, scorecards); preferred != "" {
 			return preferred
 		}
 		for _, p := range preferences {
@@ -1993,7 +2003,7 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 	// - GPT owns coding/build roles
 	// - Gemini owns testing
 	// This only applies when each preferred provider is actually available.
-	if !hasLiveScorecards {
+	if !scorecardRoutingActive {
 		for _, role := range roles {
 			switch role {
 			case RolePlanner, RoleArchitect, RoleReviewer:
@@ -2010,6 +2020,13 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 				}
 			}
 		}
+	}
+	if scorecardRoutingActive {
+		buildID := ""
+		if build != nil {
+			buildID = build.ID
+		}
+		log.Printf("Provider scorecard routing active for build %s (cost_sensitivity=%s)", buildID, buildCostSensitivity(build))
 	}
 
 	if !available[ai.ProviderClaude] {
@@ -3005,6 +3022,7 @@ Contract:
 		MaxTokens:       600,
 		Temperature:     0.1,
 		SystemPrompt:    "You are a strict contract verifier. Output JSON only.",
+		RoleHint:        string(RoleArchitect),
 		PowerMode:       PowerFast,
 		UsePlatformKeys: am.buildUsesPlatformKeys(build),
 	})
@@ -5218,6 +5236,9 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 					contractBlocker = strings.Join(report.Blockers, "; ")
 				}
 			}
+			if orchestration.Flags.EnableValidatedBuildSpec {
+				orchestration.ValidatedBuildSpec = finalizeValidatedBuildSpec(build.ID, orchestration.ValidatedBuildSpec, output.Plan, orchestration.BuildContract)
+			}
 			if !contractBlocked && orchestration.Flags.EnableSelectiveEscalation && orchestration.BuildContract != nil &&
 				shouldRunProviderAssistedContractCritique(build, orchestration.BuildContract) {
 				runProviderCritique = true
@@ -6482,6 +6503,24 @@ func dependencyRepairPlacementHint(pkg string) string {
 
 func dependencyVersionHint(pkg string) string {
 	switch strings.ToLower(strings.TrimSpace(pkg)) {
+	case "tailwindcss":
+		return "^3.4.3"
+	case "postcss":
+		return "^8.4.38"
+	case "autoprefixer":
+		return "^10.4.19"
+	case "tailwindcss-animate":
+		return "^1.0.7"
+	case "clsx":
+		return "^2.1.1"
+	case "class-variance-authority":
+		return "^0.7.0"
+	case "tailwind-merge":
+		return "^2.5.2"
+	case "@radix-ui/react-slot":
+		return "^1.1.0"
+	case "@radix-ui/react-dialog":
+		return "^1.1.1"
 	case "zod":
 		return "^3.23.8"
 	case "body-parser":
@@ -6536,6 +6575,8 @@ func dependencyShouldBeDev(pkg string) bool {
 	case strings.HasPrefix(pkg, "@types/"):
 		return true
 	case pkg == "typescript" || pkg == "vite" || strings.HasPrefix(pkg, "@vitejs/"):
+		return true
+	case pkg == "tailwindcss" || pkg == "postcss" || pkg == "autoprefixer" || pkg == "tailwindcss-animate":
 		return true
 	case pkg == "vitest" || pkg == "jest" || pkg == "jsdom" || pkg == "tsx" || pkg == "concurrently":
 		return true
@@ -11338,7 +11379,13 @@ func patchManifestForSyntheticFrontendShell(content string, backendEntry string)
 	for _, pkg := range []string{"react", "react-dom"} {
 		ensureDep(deps, pkg)
 	}
-	for _, pkg := range []string{"typescript", "vite", "@vitejs/plugin-react", "@types/react", "@types/react-dom"} {
+	for _, pkg := range []string{"typescript", "vite", "@vitejs/plugin-react", "@types/react", "@types/react-dom", "tailwindcss", "postcss", "autoprefixer"} {
+		ensureDep(devDeps, pkg)
+	}
+	for _, pkg := range shadcnCoreDeps() {
+		ensureDep(deps, pkg)
+	}
+	for _, pkg := range shadcnPackageDeps() {
 		ensureDep(devDeps, pkg)
 	}
 
@@ -11416,7 +11463,8 @@ func syntheticFrontendIndexHTML(title string) string {
 }
 
 func syntheticFrontendMainTSX() string {
-	return `import React from "react";
+	return `import "./index.css";
+import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 
@@ -11433,103 +11481,85 @@ func syntheticFrontendAppTSX(title string, summary string, backendEntry string, 
 	if backendEntry != "" {
 		backendNote = fmt.Sprintf("Backend runtime detected at %s. Start it separately to enable live API calls in local development.", backendEntry)
 	}
-	return fmt.Sprintf(`export default function App() {
+	return fmt.Sprintf(`import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+
+const previewPillars = [
+  { label: "Frontend Shell", value: "Recovered", hint: "Vite + React preview entry recreated automatically" },
+  { label: "Backend Runtime", value: %q, hint: %q },
+  { label: "Suggested API Base", value: %q, hint: "Set VITE_API_URL if your backend runs elsewhere" },
+];
+
+export default function App() {
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: "radial-gradient(circle at top, #172554 0%%, #0f172a 45%%, #020617 100%%)",
-        color: "#e2e8f0",
-        fontFamily: "Inter, system-ui, sans-serif",
-        padding: "48px 24px"
-      }}
-    >
-      <div style={{ maxWidth: 980, margin: "0 auto", display: "grid", gap: 24 }}>
-        <section
-          style={{
-            border: "1px solid rgba(148, 163, 184, 0.18)",
-            background: "rgba(15, 23, 42, 0.76)",
-            borderRadius: 28,
-            padding: 32,
-            boxShadow: "0 30px 80px rgba(2, 6, 23, 0.45)"
-          }}
-        >
-          <div
-            style={{
-              display: "inline-flex",
-              padding: "8px 14px",
-              borderRadius: 999,
-              background: "rgba(59, 130, 246, 0.16)",
-              color: "#93c5fd",
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase"
-            }}
-          >
-            APEX Recovered Preview
+    <main className="min-h-screen bg-background text-foreground">
+      <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-6 py-10 md:px-10">
+        <section className="relative overflow-hidden rounded-[28px] border border-border/70 bg-card/90 p-8 shadow-2xl shadow-black/20">
+          <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-r from-primary/15 via-transparent to-secondary/15" />
+          <div className="relative flex flex-wrap items-center gap-3">
+            <Badge variant="secondary" className="bg-primary/15 text-primary hover:bg-primary/15">
+              APEX recovered preview
+            </Badge>
+            <Badge variant="outline" className="border-primary/40 text-muted-foreground">
+              Frontend-first recovery
+            </Badge>
           </div>
-          <h1 style={{ fontSize: "clamp(2rem, 5vw, 3.5rem)", lineHeight: 1.05, margin: "18px 0 16px" }}>
-            %s
-          </h1>
-          <p style={{ margin: 0, maxWidth: 760, color: "#cbd5e1", fontSize: "1.05rem", lineHeight: 1.7 }}>
-            %s
-          </p>
+          <div className="relative mt-6 max-w-3xl space-y-4">
+            <h1 className="text-4xl font-semibold tracking-tight md:text-6xl">%s</h1>
+            <p className="text-base leading-8 text-muted-foreground md:text-lg">%s</p>
+          </div>
+          <div className="relative mt-8 flex flex-col gap-4 rounded-2xl border border-border/60 bg-background/70 p-4 sm:flex-row sm:items-center">
+            <Input value=%q readOnly aria-label="Suggested backend API URL" className="h-11 bg-background/80" />
+            <div className="flex gap-3">
+              <Button className="min-w-[150px]">Open live preview</Button>
+              <Button variant="outline" className="min-w-[170px]">Continue backend work</Button>
+            </div>
+          </div>
         </section>
 
-        <section
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 16
-          }}
-        >
-          {[
-            { label: "Frontend Shell", value: "Recovered", hint: "Vite + React preview entry recreated automatically" },
-            { label: "Backend Runtime", value: %q, hint: %q },
-            { label: "Suggested API Base", value: %q, hint: "Set VITE_API_URL if your backend runs elsewhere" }
-          ].map((item) => (
-            <article
-              key={item.label}
-              style={{
-                border: "1px solid rgba(148, 163, 184, 0.14)",
-                borderRadius: 22,
-                padding: 22,
-                background: "rgba(15, 23, 42, 0.62)"
-              }}
-            >
-              <p style={{ margin: 0, color: "#94a3b8", fontSize: 13, textTransform: "uppercase", letterSpacing: "0.12em" }}>
-                {item.label}
-              </p>
-              <h2 style={{ margin: "12px 0 8px", fontSize: "1.35rem" }}>{item.value}</h2>
-              <p style={{ margin: 0, color: "#cbd5e1", lineHeight: 1.6 }}>{item.hint}</p>
-            </article>
+        <section className="grid gap-4 md:grid-cols-3">
+          {previewPillars.map((item) => (
+            <Card key={item.label} className="border-border/60 bg-card/80 backdrop-blur">
+              <CardHeader className="space-y-3">
+                <Badge variant="outline" className="w-fit border-primary/30 text-primary">
+                  {item.label}
+                </Badge>
+                <CardTitle className="text-2xl">{item.value}</CardTitle>
+                <CardDescription className="text-sm leading-6 text-muted-foreground">{item.hint}</CardDescription>
+              </CardHeader>
+            </Card>
           ))}
         </section>
 
-        <section
-          style={{
-            border: "1px solid rgba(148, 163, 184, 0.14)",
-            borderRadius: 24,
-            padding: 28,
-            background: "rgba(15, 23, 42, 0.58)"
-          }}
-        >
-          <h2 style={{ marginTop: 0, fontSize: "1.4rem" }}>What happened</h2>
-          <p style={{ color: "#cbd5e1", lineHeight: 1.7, marginBottom: 16 }}>
-            The generated project produced a backend runtime without a frontend entrypoint, so APEX synthesized a stable preview shell to keep this build interactive instead of failing terminally.
-          </p>
-          <ul style={{ margin: 0, paddingLeft: 20, color: "#cbd5e1", lineHeight: 1.8 }}>
-            <li>React + Vite entry files were restored deterministically.</li>
-            <li>Existing backend code was preserved untouched.</li>
-            <li>Preview can now boot while backend services continue through the normal validation path.</li>
-          </ul>
-        </section>
+        <Card className="border-border/60 bg-card/75">
+          <CardHeader>
+            <CardTitle>What happened</CardTitle>
+            <CardDescription>
+              The generated project produced a backend runtime without a frontend entrypoint, so APEX synthesized a stable preview shell instead of failing the build terminally.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
+            <div className="space-y-3 text-sm leading-7 text-muted-foreground">
+              <p>React + Vite entry files, Tailwind configuration, and a shadcn-compatible design system baseline were restored deterministically.</p>
+              <p>Existing backend code was preserved untouched, so preview can boot now while runtime work continues through the normal validation path.</p>
+            </div>
+            <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+              <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">Recovered baseline</p>
+              <ul className="mt-3 space-y-3 text-sm text-foreground">
+                <li>Previewable React entry shell</li>
+                <li>Tailwind + shadcn UI primitives</li>
+                <li>Backend runtime preserved for later continuation</li>
+              </ul>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </main>
   );
 }
-`, title, summary, backendEntry, backendNote, fmt.Sprintf("http://localhost:%d", backendPort))
+`, backendEntry, backendNote, fmt.Sprintf("http://localhost:%d", backendPort), title, summary, fmt.Sprintf("http://localhost:%d", backendPort))
 }
 
 func syntheticFrontendViteConfig(backendPort int) string {
@@ -11566,24 +11596,49 @@ export default defineConfig({
 
 // syntheticFrontendTailwindConfig returns a canonical Tailwind CSS v3 config file.
 func syntheticFrontendTailwindConfig() string {
-	return `/** @type {import('tailwindcss').Config} */
+	return `import animate from "tailwindcss-animate";
+
+/** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: ["class"],
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
       colors: {
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
         primary: {
-          50:  '#f0f9ff',
-          100: '#e0f2fe',
-          500: '#0ea5e9',
-          600: '#0284c7',
-          700: '#0369a1',
-          900: '#0c4a6e',
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
         },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
+        },
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
       },
     },
   },
-  plugins: [],
+  plugins: [animate],
 }
 `
 }
@@ -11606,23 +11661,55 @@ func syntheticFrontendIndexCSS() string {
 @tailwind utilities;
 
 :root {
-  --color-primary: #0ea5e9;
-  --color-surface: #0f172a;
-  --color-surface-alt: #1e293b;
+  --background: 222 47% 7%;
+  --foreground: 210 40% 98%;
+  --card: 222 47% 11%;
+  --card-foreground: 210 40% 98%;
+  --primary: 262 83% 66%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 199 89% 48%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 217 33% 17%;
+  --muted-foreground: 215 20% 72%;
+  --accent: 217 33% 17%;
+  --accent-foreground: 210 40% 98%;
+  --border: 217 33% 22%;
+  --input: 217 33% 22%;
+  --ring: 262 83% 66%;
+  --radius: 1rem;
+  --color-primary: #8b5cf6;
+  --color-surface: #0b1120;
+  --color-surface-alt: #111827;
   --color-text: #f8fafc;
   --color-text-muted: #94a3b8;
-  --color-border: #334155;
-  --color-accent: #6366f1;
+  --color-border: #273449;
+  --color-accent: #38bdf8;
 }
 
 * {
   box-sizing: border-box;
 }
 
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
 body {
   margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  min-height: 100vh;
 }
 `
 }
@@ -11639,7 +11726,11 @@ func syntheticFrontendTSConfig() string {
     "strict": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
   "include": ["src/main.tsx", "src/App.tsx", "vite.config.ts"]
 }
@@ -11707,6 +11798,7 @@ func (am *AgentManager) applyDeterministicMissingFrontendShellRepair(build *Buil
 	createIfMissing("tailwind.config.js", syntheticFrontendTailwindConfig(), "javascript")
 	createIfMissing("postcss.config.js", syntheticFrontendPostCSSConfig(), "javascript")
 	createIfMissing("src/index.css", syntheticFrontendIndexCSS(), "css")
+	applyDeterministicShadcnScaffold(createIfMissing)
 	if strings.TrimSpace(plan.content("tsconfig.json")) == "" {
 		createIfMissing("tsconfig.json", syntheticFrontendTSConfig(), "json")
 	}
@@ -12323,6 +12415,8 @@ func buildPhaseProgressWindow(currentPhase string, status BuildStatus) (int, int
 		return 10, 19, true
 	case "frontend_ui":
 		return 20, 44, true
+	case "parallel_core":
+		return 20, 79, true
 	case "data_foundation":
 		return 45, 59, true
 	case "backend_services":
@@ -14447,6 +14541,9 @@ type executionPhase struct {
 func buildExecutionPhases(
 	archAgents, frontendAgents, dbAgents, backendAgents, testAgents, reviewAgents []agentPriority,
 ) []executionPhase {
+	if envBool("APEX_PARALLEL_MID_PHASE", false) {
+		return buildExecutionPhasesParallel(archAgents, frontendAgents, dbAgents, backendAgents, testAgents, reviewAgents)
+	}
 	return []executionPhase{
 		{
 			name:              "Architecture",
@@ -14762,7 +14859,7 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string, pha
 			return
 		}
 
-		if phase.key == "backend_services" {
+		if phase.key == "backend_services" || phase.key == "parallel_core" {
 			if !am.runIntegrationPreflightRecovery(build) {
 				return
 			}
@@ -14908,12 +15005,23 @@ func (am *AgentManager) assignPhaseAgents(build *Build, agents []agentPriority, 
 			task.Input["build_plan"] = build.Plan
 			task.Input["api_contract"] = build.Plan.APIContract
 		}
+		if orchestration := build.SnapshotState.Orchestration; orchestration != nil && orchestration.ValidatedBuildSpec != nil {
+			task.Input["validated_build_spec"] = orchestration.ValidatedBuildSpec
+		}
 		if workOrder != nil {
 			task.Input["work_order"] = workOrder
 			task.Input["owned_files"] = append([]string(nil), workOrder.OwnedFiles...)
 			task.Input["required_files"] = append([]string(nil), workOrder.RequiredFiles...)
 			task.Input["acceptance_checks"] = append([]string(nil), workOrder.AcceptanceChecks...)
 			task.Input["forbidden_files"] = append([]string(nil), workOrder.ForbiddenFiles...)
+		}
+		if agent.Role == RoleTesting {
+			testContract := derivedTestContract(build.Plan)
+			if testContract != nil {
+				task.Input["test_frameworks"] = append([]string(nil), testContract.Frameworks...)
+				task.Input["owned_test_paths"] = append([]string(nil), testContract.OwnedTestPaths...)
+				task.Input["test_contract"] = testContract
+			}
 		}
 
 		build.mu.Lock()
@@ -16368,6 +16476,7 @@ Rules:
 		MaxTokens:       2000,
 		Temperature:     am.getTemperatureForRole(RoleLead),
 		SystemPrompt:    am.getSystemPrompt(RoleLead, build),
+		RoleHint:        string(RoleLead),
 		PowerMode:       build.PowerMode,
 		UsePlatformKeys: am.buildUsesPlatformKeys(build),
 	})
@@ -17000,6 +17109,8 @@ func updateBuildSnapshotStateLocked(build *Build, msg *WSMessage) bool {
 		setQualityGateStage(firstBuildActivityString(buildActivityString(data["quality_gate_stage"]), next.QualityGateStage, "validation"))
 		setQualityGateStatus("failed")
 	}
+
+	applyBuildMessageFailureTaxonomy(&next, msg, data)
 
 	refreshDerivedSnapshotStateLocked(build, &next)
 
@@ -17918,6 +18029,10 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 	if build != nil && build.Plan != nil {
 		buildSpecContext = buildSpecPromptContext(build.Plan, workOrder)
 	}
+	validatedBuildSpecContext := ""
+	if build != nil && build.SnapshotState.Orchestration != nil && build.SnapshotState.Orchestration.ValidatedBuildSpec != nil {
+		validatedBuildSpecContext = validatedBuildSpecPromptContext(build.SnapshotState.Orchestration.ValidatedBuildSpec)
+	}
 	workOrderArtifactContext := workOrderArtifactPromptContext(workOrderArtifact)
 	currentOwnedFilesContext := ""
 	if build != nil && workOrder != nil {
@@ -18160,6 +18275,7 @@ App being built: %s
 %s
 %s
 %s
+%s
 %s`,
 		task.Type,
 		task.Description,
@@ -18171,6 +18287,7 @@ App being built: %s
 		repairHintsContext,
 		coordinationErrorContext,
 		buildSpecContext,
+		validatedBuildSpecContext,
 		workOrderArtifactContext,
 		currentOwnedFilesContext,
 		coordinationProtocolContext,
@@ -18331,9 +18448,11 @@ func buildTechStackDirective(stack *TechStack, agent *Agent) string {
 			lines = append(lines, "  □ package.json (react, react-dom, vite, @vitejs/plugin-react, typescript, tailwindcss, postcss, autoprefixer), tsconfig.json, vite.config.ts, index.html")
 			lines = append(lines, "  □ tailwind.config.js — REQUIRED: custom color palette matching the app domain")
 			lines = append(lines, "  □ postcss.config.js — REQUIRED: tailwindcss + autoprefixer plugins")
+			lines = append(lines, "  □ components.json, src/lib/utils.ts, src/components/ui/button.tsx, card.tsx, input.tsx, badge.tsx, dialog.tsx — preferred shadcn-style design-system primitives")
 			lines = append(lines, "  □ src/main.tsx (entry), src/App.tsx (root component with layout), src/index.css (@tailwind base/components/utilities + CSS custom properties)")
 			lines = append(lines, "  TAILWIND SETUP: keep vite.config.ts limited to React plugin setup; configure Tailwind via postcss.config.js and tailwind.config.js")
 			lines = append(lines, "  TAILWIND in src/index.css: use @tailwind base; @tailwind components; @tailwind utilities; (Tailwind v3 only)")
+			lines = append(lines, "  UI BASELINE: Prefer the scaffolded primitives from @/components/ui and the shared cn() helper from @/lib/utils before hand-rolling equivalent controls")
 		case "nextjs":
 			lines = append(lines, "  Use Next.js with TypeScript + Tailwind CSS. App Router (app/ directory). Entry: app/page.tsx.")
 			lines = append(lines, "  REQUIRED FILES — you MUST generate ALL of these:")
@@ -18726,6 +18845,7 @@ VISUAL DESIGN MANDATE — this is your highest priority alongside correctness:
 - Error states show a friendly message with a retry button, never a raw JS error string.
 - Hover states: add transition-all duration-200 to interactive elements.
 - Inputs, buttons, and cards must all be styled — zero unstyled browser-default elements.
+- Prefer the scaffolded primitives from @/components/ui for buttons, cards, inputs, badges, and dialogs when those files exist or when you are creating a new design system baseline.
 - App-type design guidance:
   * SaaS dashboard: slate-900 bg, indigo/violet accents, sidebar nav, stat cards, data tables
   * E-commerce: white/cream bg, product grids with hover zoom, badge components, cart UI
@@ -18748,9 +18868,12 @@ MANDATORY FILES — always generate ALL of these for every React app:
 4. tsconfig.json — TypeScript config (use the template below — do not invent your own)
 5. tailwind.config.js — content paths + theme (required for Tailwind v3)
 6. postcss.config.js — tailwindcss + autoprefixer plugins (required for Tailwind v3)
-7. src/main.tsx — React entry point that renders <App />
-8. src/App.tsx — Root component with routing/layout
-9. src/index.css — @tailwind base/components/utilities directives + CSS custom properties
+7. components.json — shadcn/ui registry config
+8. src/lib/utils.ts — exports cn(...)
+9. src/components/ui/button.tsx, card.tsx, input.tsx, badge.tsx, dialog.tsx — reusable UI primitives
+10. src/main.tsx — React entry point that renders <App />
+11. src/App.tsx — Root component with routing/layout
+12. src/index.css — @tailwind base/components/utilities directives + CSS custom properties
 
 TSCONFIG.JSON TEMPLATE — use this exactly:
 ` + "```" + `json
@@ -18797,6 +18920,7 @@ PRE-OUTPUT SELF-CHECK (run mentally before returning your files):
 □ Does package.json list every npm package I import?
 □ Does tsconfig.json match the template above?
 □ Are tailwind.config.js and postcss.config.js present?
+□ Did I reuse @/components/ui primitives instead of rebuilding equivalent buttons/cards/inputs from scratch?
 
 REQUIREMENTS FOR EVERY COMPONENT:
 - Complete TypeScript types for all props, state, and events
@@ -18982,6 +19106,11 @@ enum Role {
 		RoleTesting: `You are the Testing Agent — an expert QA engineer who writes comprehensive, executable tests.
 You specialize in unit tests, integration tests, and edge case coverage.
 
+TEST DELIVERY CONTRACT:
+- Prefer Vitest for unit/integration coverage, Testing Library for React UI behavior, and Playwright for one smoke path when the app has a browser surface.
+- Read the task-provided test_contract, test_frameworks, and owned_test_paths inputs first and stay within those paths unless a compile fix requires a tiny import/config edit elsewhere.
+- Tests are delivery artifacts. They should strengthen confidence without blocking the frontend-first preview path just because a smoke file exists.
+
 FULL-STACK TESTING RULE:
 - For full-stack builds, explicitly compare frontend fetch/EventSource URLs, backend registered routes, CORS, and configured ports.
 - If the frontend calls /api paths that do not exist in the backend, fail with the exact missing route names.
@@ -18996,39 +19125,31 @@ REQUIREMENTS FOR EVERY TEST FILE:
 - Assert specific values, not just truthiness
 
 EXAMPLE TEST PATTERN:
-// File: src/__tests__/auth.test.ts
+// File: src/__tests__/login-form.test.tsx
 ` + "```" + `typescript
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
-import { AuthService } from '../services/auth';
+import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
-describe('AuthService', () => {
-  let authService: AuthService;
+import { LoginForm } from "../components/LoginForm";
 
-  beforeEach(() => {
-    authService = new AuthService(mockDb);
-  });
+describe("LoginForm", () => {
+  it("submits credentials and shows the loading state", async () => {
+    const onSuccess = vi.fn();
+    const user = userEvent.setup();
 
-  describe('login', () => {
-    it('should return a token for valid credentials', async () => {
-      const result = await authService.login('user@test.com', 'password123');
-      expect(result.token).toBeDefined();
-      expect(result.token).toMatch(/^eyJ/); // JWT format
-    });
+    render(<LoginForm onSuccess={onSuccess} />);
 
-    it('should throw for invalid email', async () => {
-      await expect(authService.login('nonexistent@test.com', 'pass'))
-        .rejects.toThrow('Invalid credentials');
-    });
+    await user.type(screen.getByLabelText(/email/i), "user@test.com");
+    await user.type(screen.getByLabelText(/password/i), "correct-horse-battery-staple");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
 
-    it('should throw for wrong password', async () => {
-      await expect(authService.login('user@test.com', 'wrongpass'))
-        .rejects.toThrow('Invalid credentials');
-    });
+    expect(onSuccess).toHaveBeenCalled();
   });
 });
 ` + "```" + `
 
-Follow this pattern: setup, happy path, error cases, edge cases, specific assertions.` + "\n\n" + assuranceContext + techHint + baseRules,
+Follow this pattern: setup, happy path, error cases, edge cases, specific assertions, and at least one real browser-smoke path when the app has a UI.` + "\n\n" + assuranceContext + techHint + baseRules,
 
 		RoleReviewer: `You are the Reviewer Agent — a senior code reviewer focused on production-readiness, security, visual quality, and UX completeness.
 You perform thorough code review and provide ACTIONABLE fixes, not just suggestions.
@@ -23291,6 +23412,7 @@ func (am *AgentManager) runFailureConsensus(
 			MaxTokens:       180,
 			Temperature:     0.2,
 			SystemPrompt:    "You are an incident commander. Vote for the safest path to complete the build.",
+			RoleHint:        string(RoleReviewer),
 			PowerMode:       PowerFast,
 			UsePlatformKeys: am.buildUsesPlatformKeys(build),
 		})
@@ -23710,6 +23832,7 @@ func (am *AgentManager) completeTruncatedFiles(
 			Temperature: 0.1,
 			SystemPrompt: "You are completing a source file that was truncated. " +
 				"Output only the remaining code, starting from exactly where the file was cut off.",
+			RoleHint:        string(RoleSolver),
 			PowerMode:       build.PowerMode,
 			UsePlatformKeys: am.buildUsesPlatformKeys(build),
 		})
@@ -23868,6 +23991,7 @@ func (am *AgentManager) executeChunkedFileRepair(
 			Temperature: 0.1,
 			SystemPrompt: "You are a precise code editor. Apply the given instruction to the " +
 				"code chunk and return ONLY the modified chunk. No explanation. No code fences.",
+			RoleHint:        string(RoleSolver),
 			PowerMode:       PowerFast, // cost-efficient; chunk repairs don't need frontier reasoning
 			UsePlatformKeys: am.buildUsesPlatformKeys(build),
 		})

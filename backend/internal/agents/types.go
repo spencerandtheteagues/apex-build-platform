@@ -441,6 +441,7 @@ type BuildSnapshotState struct {
 	QualityGateRequired *bool                    `json:"quality_gate_required,omitempty"`
 	QualityGateStatus   string                   `json:"quality_gate_status,omitempty"`
 	QualityGateStage    string                   `json:"quality_gate_stage,omitempty"`
+	FailureTaxonomy     *BuildFailureTaxonomy    `json:"failure_taxonomy,omitempty"`
 	AvailableProviders  []string                 `json:"available_providers,omitempty"`
 	CapabilityState     *BuildCapabilityState    `json:"capability_state,omitempty"`
 	PolicyState         *BuildPolicyState        `json:"policy_state,omitempty"`
@@ -801,16 +802,18 @@ type WSMessage struct {
 
 // BuildRequest is the input for starting a new build
 type BuildRequest struct {
-	Description         string            `json:"description"`
-	Prompt              string            `json:"prompt,omitempty"` // Detailed build prompt (falls back to Description)
-	Mode                BuildMode         `json:"mode"`
-	PowerMode           PowerMode         `json:"power_mode,omitempty"`    // max, balanced, fast — controls model quality
-	ProviderMode        string            `json:"provider_mode,omitempty"` // platform or byok
-	RequirePreviewReady bool              `json:"require_preview_ready,omitempty"`
-	ProjectName         string            `json:"project_name,omitempty"`
-	TechStack           *TechStack        `json:"tech_stack,omitempty"`       // Optional override
-	DiffMode            bool              `json:"diff_mode,omitempty"`        // When true, proposed changes require user approval
-	RoleAssignments     map[string]string `json:"role_assignments,omitempty"` // Optional: user-specified provider per role category (architect→claude, coder→gpt4, etc.)
+	Description          string            `json:"description"`
+	Prompt               string            `json:"prompt,omitempty"` // Detailed build prompt (falls back to Description)
+	WireframeImage       string            `json:"wireframe_image,omitempty"`
+	WireframeDescription string            `json:"wireframe_description,omitempty"`
+	Mode                 BuildMode         `json:"mode"`
+	PowerMode            PowerMode         `json:"power_mode,omitempty"`    // max, balanced, fast — controls model quality
+	ProviderMode         string            `json:"provider_mode,omitempty"` // platform or byok
+	RequirePreviewReady  bool              `json:"require_preview_ready,omitempty"`
+	ProjectName          string            `json:"project_name,omitempty"`
+	TechStack            *TechStack        `json:"tech_stack,omitempty"`       // Optional override
+	DiffMode             bool              `json:"diff_mode,omitempty"`        // When true, proposed changes require user approval
+	RoleAssignments      map[string]string `json:"role_assignments,omitempty"` // Optional: user-specified provider per role category (architect→claude, coder→gpt4, etc.)
 }
 
 // BuildResponse is returned when a build is created

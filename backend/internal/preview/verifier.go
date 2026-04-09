@@ -5,6 +5,7 @@ package preview
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,12 +26,15 @@ type VerifiableFile struct {
 
 // VerificationResult holds the outcome of a preview verification run.
 type VerificationResult struct {
-	Passed      bool
-	Checks      []CheckResult
-	FailureKind string   // "missing_entrypoint", "blank_screen", "corrupt_content", "invalid_html", "invalid_package_json", "backend_missing", "backend_no_listen", "backend_no_routes"
-	RepairHints []string // Actionable repair directives for the agent
-	Details     string   // Human-readable failure description
-	Duration    time.Duration
+	Passed           bool
+	Checks           []CheckResult
+	FailureKind      string   // "missing_entrypoint", "blank_screen", "corrupt_content", "invalid_html", "invalid_package_json", "backend_missing", "backend_no_listen", "backend_no_routes"
+	RepairHints      []string // Actionable repair directives for the agent
+	Details          string   // Human-readable failure description
+	Duration         time.Duration
+	ScreenshotBase64 string
+	CanaryErrors     []string
+	CanaryClickCount int
 }
 
 // CheckResult records the outcome of a single named check.
@@ -234,14 +238,34 @@ func (v *Verifier) VerifyFiles(ctx context.Context, files []VerifiableFile, isFu
 		rr := v.runtimeVerifier.VerifyViteApp(ctx, files)
 		if rr != nil && !rr.Skipped {
 			if rr.Passed {
+				res.RepairHints = appendUniqueStrings(res.RepairHints, rr.RepairHints...)
+				res.CanaryErrors = appendUniqueStrings(res.CanaryErrors, rr.CanaryErrors...)
+				res.CanaryClickCount = rr.CanaryClickCount
+				if len(rr.ScreenshotData) > 0 && len(rr.RepairHints) > 0 {
+					res.ScreenshotBase64 = base64.StdEncoding.EncodeToString(rr.ScreenshotData)
+				}
 				res.addCheck(check("vite_runtime_boot", true, fmt.Sprintf("dev server booted, HTTP checks passed in %s", rr.Duration.Round(time.Millisecond))))
+				if rr.CanaryClickCount > 0 || len(rr.CanaryErrors) > 0 {
+					detail := fmt.Sprintf("clicked %d control(s)", rr.CanaryClickCount)
+					if len(rr.CanaryErrors) > 0 {
+						detail += fmt.Sprintf("; advisory errors: %s", summarizeIssues(rr.CanaryErrors, 2))
+					}
+					res.addCheck(check("canary_interactions", true, detail))
+				}
 			} else {
 				hints := rr.RepairHints
 				if len(hints) == 0 {
 					hints = []string{"Fix the Vite/React app so the dev server boots and serves all assets correctly."}
 				}
-				return res.fail(rr.FailureKind, rr.Details, hints[0],
+				if len(rr.ScreenshotData) > 0 {
+					res.ScreenshotBase64 = base64.StdEncoding.EncodeToString(rr.ScreenshotData)
+				}
+				failed := res.fail(rr.FailureKind, rr.Details, hints[0],
 					check("vite_runtime_boot", false, rr.Details))
+				failed.RepairHints = appendUniqueStrings(failed.RepairHints, hints...)
+				failed.CanaryErrors = appendUniqueStrings(failed.CanaryErrors, rr.CanaryErrors...)
+				failed.CanaryClickCount = rr.CanaryClickCount
+				return failed
 			}
 		}
 	}

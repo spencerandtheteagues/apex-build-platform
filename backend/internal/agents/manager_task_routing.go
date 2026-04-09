@@ -210,6 +210,7 @@ Return JSON only:
 		MaxTokens:       300,
 		Temperature:     0.1,
 		SystemPrompt:    "You are a strict build verifier. Return concise JSON only.",
+		RoleHint:        string(RoleReviewer),
 		PowerMode:       PowerFast,
 		UsePlatformKeys: am.buildUsesPlatformKeys(build),
 	})
@@ -314,6 +315,7 @@ Return JSON only:
 		MaxTokens:       180,
 		Temperature:     0.1,
 		SystemPrompt:    "You are a strict build judge. Return concise JSON only.",
+		RoleHint:        string(RoleReviewer),
 		PowerMode:       PowerFast,
 		UsePlatformKeys: am.buildUsesPlatformKeys(build),
 	})
@@ -421,6 +423,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 		MaxTokens:       maxTokens,
 		Temperature:     temperature,
 		SystemPrompt:    systemPrompt,
+		RoleHint:        string(agent.Role),
 		PowerMode:       build.PowerMode,
 		UsePlatformKeys: am.buildUsesPlatformKeys(build),
 	})

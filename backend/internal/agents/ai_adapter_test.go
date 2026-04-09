@@ -35,3 +35,45 @@ func TestDefaultGenerateTimeout(t *testing.T) {
 		})
 	}
 }
+
+func TestMapProviderToCapabilityPrefersExplicitRoleHint(t *testing.T) {
+	t.Parallel()
+
+	adapter := &AIRouterAdapter{}
+
+	tests := []struct {
+		name string
+		opts GenerateOptions
+		want ai.AICapability
+	}{
+		{name: "planner", opts: GenerateOptions{RoleHint: string(RolePlanner)}, want: ai.CapabilityArchitecture},
+		{name: "architect", opts: GenerateOptions{RoleHint: string(RoleArchitect)}, want: ai.CapabilityArchitecture},
+		{name: "reviewer", opts: GenerateOptions{RoleHint: string(RoleReviewer)}, want: ai.CapabilityCodeReview},
+		{name: "testing", opts: GenerateOptions{RoleHint: string(RoleTesting)}, want: ai.CapabilityTesting},
+		{name: "solver", opts: GenerateOptions{RoleHint: string(RoleSolver)}, want: ai.CapabilityDebugging},
+		{name: "frontend", opts: GenerateOptions{RoleHint: string(RoleFrontend)}, want: ai.CapabilityCodeGeneration},
+		{name: "backend", opts: GenerateOptions{RoleHint: string(RoleBackend)}, want: ai.CapabilityCodeGeneration},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := adapter.mapProviderToCapability(ai.ProviderClaude, tt.opts); got != tt.want {
+				t.Fatalf("mapProviderToCapability(..., %+v) = %s, want %s", tt.opts, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMapProviderToCapabilityFallsBackToPromptHints(t *testing.T) {
+	t.Parallel()
+
+	adapter := &AIRouterAdapter{}
+
+	if got := adapter.mapProviderToCapability(ai.ProviderClaude, GenerateOptions{SystemPrompt: "You are a senior software architect."}); got != ai.CapabilityArchitecture {
+		t.Fatalf("expected architecture capability from prompt fallback, got %s", got)
+	}
+	if got := adapter.mapProviderToCapability(ai.ProviderClaude, GenerateOptions{SystemPrompt: "You are a strict code review assistant."}); got != ai.CapabilityCodeReview {
+		t.Fatalf("expected code review capability from review prompt, got %s", got)
+	}
+}

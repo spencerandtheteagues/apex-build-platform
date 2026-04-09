@@ -3,10 +3,12 @@ package ai
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -32,6 +34,31 @@ type claudeRequest struct {
 type claudeMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+}
+
+type claudeMessageContent struct {
+	Type   string             `json:"type"`
+	Text   string             `json:"text,omitempty"`
+	Source *claudeImageSource `json:"source,omitempty"`
+}
+
+type claudeImageSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
+}
+
+type claudeVisionMessage struct {
+	Role    string                 `json:"role"`
+	Content []claudeMessageContent `json:"content"`
+}
+
+type claudeVisionRequest struct {
+	Model       string                `json:"model"`
+	MaxTokens   int                   `json:"max_tokens"`
+	Messages    []claudeVisionMessage `json:"messages"`
+	Temperature float32               `json:"temperature,omitempty"`
+	System      string                `json:"system,omitempty"`
 }
 
 type claudeResponse struct {
@@ -139,6 +166,57 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	}, nil
 }
 
+// AnalyzeImage sends a screenshot/image prompt to Claude and returns the raw text response.
+// It is intentionally separate from Generate so vision usage never changes the normal
+// text-generation request path.
+func (c *ClaudeClient) AnalyzeImage(ctx context.Context, imageData []byte, prompt string) (string, error) {
+	if len(imageData) == 0 {
+		return "", fmt.Errorf("image analysis requires non-empty image data")
+	}
+
+	claudeReq := &claudeVisionRequest{
+		Model:     "claude-sonnet-4-6",
+		MaxTokens: 900,
+		Messages: []claudeVisionMessage{
+			{
+				Role: "user",
+				Content: []claudeMessageContent{
+					{
+						Type: "image",
+						Source: &claudeImageSource{
+							Type:      "base64",
+							MediaType: "image/png",
+							Data:      base64.StdEncoding.EncodeToString(imageData),
+						},
+					},
+					{
+						Type: "text",
+						Text: prompt,
+					},
+				},
+			},
+		},
+		System: "You are a strict UI quality reviewer. Return concise, implementation-ready feedback only.",
+	}
+
+	resp, err := c.makeRequest(ctx, claudeReq)
+	if err != nil {
+		c.incrementErrorCount()
+		return "", err
+	}
+
+	cost := c.calculateCost(resp.Usage.InputTokens, resp.Usage.OutputTokens, claudeReq.Model)
+	c.updateUsage(resp.Usage.InputTokens+resp.Usage.OutputTokens, cost, 0)
+
+	var parts []string
+	for _, block := range resp.Content {
+		if block.Type == "text" && block.Text != "" {
+			parts = append(parts, block.Text)
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n")), nil
+}
+
 // buildSystemPrompt creates capability-specific system prompts
 func (c *ClaudeClient) buildSystemPrompt(capability AICapability, language string) string {
 	basePrompt := `You are an expert software developer for APEX.BUILD, a professional cloud development platform.
@@ -192,7 +270,7 @@ func (c *ClaudeClient) buildUserPrompt(req *AIRequest) string {
 }
 
 // makeRequest sends HTTP request to Claude API
-func (c *ClaudeClient) makeRequest(ctx context.Context, req *claudeRequest) (*claudeResponse, error) {
+func (c *ClaudeClient) makeRequest(ctx context.Context, req any) (*claudeResponse, error) {
 	jsonData, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)

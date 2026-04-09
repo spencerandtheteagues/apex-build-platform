@@ -99,6 +99,8 @@ type BrowserPageLoadResult struct {
 	ConsoleErrors   []string // console.error() calls observed
 	MountRendered   bool
 	MountChildCount int
+	VisibleText     int // length of innerText visible to the user (0 = likely blank or CSS failure)
+	ScreenshotData  []byte
 }
 
 // ── earlyInjection is added via Page.addScriptToEvaluateOnNewDocument so it
@@ -120,26 +122,32 @@ const earlyInjection = `
 `
 
 // mountCheckJS returns a JSON string describing the mount point state.
+// visibleText uses innerText (not textContent) to capture only CSS-visible text,
+// which helps detect Tailwind failures where elements render but are invisible.
 const mountCheckJS = `JSON.stringify((function() {
   var selectors = ['#root','#app','#__next','#app-root','[data-reactroot]'];
   for (var i = 0; i < selectors.length; i++) {
     var el = document.querySelector(selectors[i]);
     if (el) {
       var text = (el.textContent || '').trim();
+      var visible = (el.innerText || '').trim();
       return {
         found: true,
         selector: selectors[i],
         childCount: el.childElementCount,
         textLength: text.length,
-        hasContent: el.childElementCount > 0 || text.length > 3,
+        visibleText: visible.length,
+        hasContent: el.childElementCount > 1 || visible.length >= 25,
         snippet: text.substring(0, 80)
       };
     }
   }
   // Fallback: any non-trivial body content counts
   var bodyText = (document.body && document.body.textContent || '').trim();
+  var bodyVisible = (document.body && document.body.innerText || '').trim();
   return {found: false, childCount: 0, textLength: bodyText.length,
-          hasContent: bodyText.length > 10, snippet: bodyText.substring(0, 80)};
+          visibleText: bodyVisible.length,
+          hasContent: bodyVisible.length > 20, snippet: bodyText.substring(0, 80)};
 })())`
 
 // VerifyPageLoad navigates to pageURL in an isolated headless browser, waits
@@ -227,7 +235,10 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 	})
 
 	// ── Navigate and check ───────────────────────────────────────────────────
-	var mountJSON string
+	var (
+		mountJSON      string
+		screenshotData []byte
+	)
 	navErr := chromedp.Run(tabCtx,
 		// Enable runtime events before any navigation
 		cdpruntime.Enable(),
@@ -240,6 +251,9 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 		chromedp.Navigate(pageURL),
 		// Brief pause for React/Vue synchronous mount and any micro-task flushing
 		chromedp.Sleep(800*time.Millisecond),
+		// Capture the fully rendered page before evaluating mount heuristics so
+		// downstream visual analysis can inspect the actual preview state.
+		chromedp.CaptureScreenshot(&screenshotData),
 		// Evaluate mount state
 		chromedp.Evaluate(mountCheckJS, &mountJSON),
 	)
@@ -254,24 +268,26 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 		// Distinguish a true navigation failure from a context deadline
 		detail := "browser failed to load page: " + navErr.Error()
 		return &BrowserPageLoadResult{
-			Passed:        false,
-			FailureKind:   "browser_load_failed",
-			Details:       detail,
-			RepairHints:   []string{"Ensure index.html is valid and the Vite dev server is running. Check for JS parse errors in the entry module."},
-			Duration:      time.Since(start),
-			JSErrors:      capturedJS,
-			ConsoleErrors: capturedConsole,
+			Passed:         false,
+			FailureKind:    "browser_load_failed",
+			Details:        detail,
+			RepairHints:    []string{"Ensure index.html is valid and the Vite dev server is running. Check for JS parse errors in the entry module."},
+			Duration:       time.Since(start),
+			JSErrors:       capturedJS,
+			ConsoleErrors:  capturedConsole,
+			ScreenshotData: screenshotData,
 		}
 	}
 
 	// ── Parse mount state ────────────────────────────────────────────────────
 	var mount struct {
-		Found      bool   `json:"found"`
-		Selector   string `json:"selector"`
-		ChildCount int    `json:"childCount"`
-		TextLength int    `json:"textLength"`
-		HasContent bool   `json:"hasContent"`
-		Snippet    string `json:"snippet"`
+		Found       bool   `json:"found"`
+		Selector    string `json:"selector"`
+		ChildCount  int    `json:"childCount"`
+		TextLength  int    `json:"textLength"`
+		VisibleText int    `json:"visibleText"`
+		HasContent  bool   `json:"hasContent"`
+		Snippet     string `json:"snippet"`
 	}
 	_ = json.Unmarshal([]byte(mountJSON), &mount)
 
@@ -297,14 +313,24 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 		if mount.Selector != "" {
 			hints[0] = fmt.Sprintf("Mount point %q exists but has no rendered children. Check that the root component returns JSX and is free of runtime errors.", mount.Selector)
 		}
+		// Blank content with no JS errors often means Tailwind CSS failed to load.
+		if mount.TextLength < 25 && mount.VisibleText < 10 && len(capturedJS) == 0 {
+			hints = append(hints,
+				"The page appears blank with no JS errors — this often means Tailwind CSS failed to load. "+
+					"Check that tailwind.config.js has content: ['./index.html', './src/**/*.{ts,tsx}'] and "+
+					"that src/index.css starts with @tailwind base; @tailwind components; @tailwind utilities;",
+			)
+		}
 		return &BrowserPageLoadResult{
-			Passed:        false,
-			FailureKind:   failKind,
-			Details:       details,
-			RepairHints:   hints,
-			Duration:      time.Since(start),
-			JSErrors:      capturedJS,
-			ConsoleErrors: capturedConsole,
+			Passed:         false,
+			FailureKind:    failKind,
+			Details:        details,
+			RepairHints:    hints,
+			Duration:       time.Since(start),
+			JSErrors:       capturedJS,
+			ConsoleErrors:  capturedConsole,
+			VisibleText:    mount.VisibleText,
+			ScreenshotData: screenshotData,
 		}
 	}
 
@@ -313,8 +339,10 @@ func (bv *BrowserVerifier) VerifyPageLoad(ctx context.Context, pageURL string) *
 		Duration:        time.Since(start),
 		MountRendered:   true,
 		MountChildCount: mount.ChildCount,
+		VisibleText:     mount.VisibleText,
 		JSErrors:        capturedJS,
 		ConsoleErrors:   capturedConsole,
+		ScreenshotData:  screenshotData,
 	}
 }
 

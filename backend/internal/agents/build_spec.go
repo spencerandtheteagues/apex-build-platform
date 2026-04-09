@@ -42,6 +42,7 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 		MaxTokens:       opts.MaxTokens,
 		Temperature:     opts.Temperature,
 		SystemPrompt:    opts.SystemPrompt,
+		RoleHint:        string(RolePlanner),
 		PowerMode:       a.powerMode,
 		UsePlatformKeys: a.usePlatformKeys,
 	})

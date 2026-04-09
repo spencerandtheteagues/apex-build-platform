@@ -84,8 +84,8 @@ func TestAssignProvidersToRolesForBuild_UsesLiveScorecards(t *testing.T) {
 			Orchestration: &BuildOrchestrationState{
 				Flags: defaultBuildOrchestrationFlags(),
 				ProviderScorecards: []ProviderScorecard{
-					{Provider: ai.ProviderGPT4, TaskShape: TaskShapeFrontendPatch, CompilePassRate: 0.40, FirstPassVerificationRate: 0.35, RepairSuccessRate: 0.50, PromotionRate: 0.42, FailureClassRecurrence: 0.40, TruncationRate: 0.12, AverageCostPerSuccess: 0.15},
-					{Provider: ai.ProviderGemini, TaskShape: TaskShapeFrontendPatch, CompilePassRate: 0.98, FirstPassVerificationRate: 0.97, RepairSuccessRate: 0.92, PromotionRate: 0.95, FailureClassRecurrence: 0.05, TruncationRate: 0.01, AverageCostPerSuccess: 0.05},
+					{Provider: ai.ProviderGPT4, TaskShape: TaskShapeFrontendPatch, SampleCount: 4, FirstPassSampleCount: 4, CompilePassRate: 0.40, FirstPassVerificationRate: 0.35, RepairSuccessRate: 0.50, PromotionRate: 0.42, FailureClassRecurrence: 0.40, TruncationRate: 0.12, AverageCostPerSuccess: 0.15},
+					{Provider: ai.ProviderGemini, TaskShape: TaskShapeFrontendPatch, SampleCount: 4, FirstPassSampleCount: 4, CompilePassRate: 0.98, FirstPassVerificationRate: 0.97, RepairSuccessRate: 0.92, PromotionRate: 0.95, FailureClassRecurrence: 0.05, TruncationRate: 0.01, AverageCostPerSuccess: 0.05},
 				},
 			},
 		},
@@ -105,6 +105,53 @@ func TestAssignProvidersToRolesForBuild_UsesLiveScorecards(t *testing.T) {
 	}
 	if got := assignments[RoleTesting]; got != ai.ProviderGemini {
 		t.Fatalf("testing provider = %s, want %s", got, ai.ProviderGemini)
+	}
+}
+
+func TestAssignProvidersToRolesForBuild_IgnoresLowSampleScorecards(t *testing.T) {
+	am := &AgentManager{}
+	build := &Build{
+		ID:           "build-low-sample-scorecards",
+		ProviderMode: "platform",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				ProviderScorecards: []ProviderScorecard{
+					{Provider: ai.ProviderGemini, TaskShape: TaskShapeFrontendPatch, SampleCount: 2, FirstPassSampleCount: 2, CompilePassRate: 0.99, FirstPassVerificationRate: 0.98, RepairSuccessRate: 0.95, PromotionRate: 0.94, FailureClassRecurrence: 0.01, TruncationRate: 0.01, AverageCostPerSuccess: 0.02},
+				},
+			},
+		},
+	}
+
+	assignments := am.assignProvidersToRolesForBuild(build, []ai.AIProvider{
+		ai.ProviderClaude,
+		ai.ProviderGPT4,
+		ai.ProviderGemini,
+	}, []AgentRole{RoleFrontend, RoleTesting})
+
+	if got := assignments[RoleFrontend]; got != ai.ProviderGPT4 {
+		t.Fatalf("frontend provider = %s, want baseline policy provider %s when samples are insufficient", got, ai.ProviderGPT4)
+	}
+	if got := assignments[RoleTesting]; got != ai.ProviderGemini {
+		t.Fatalf("testing provider = %s, want baseline policy provider %s", got, ai.ProviderGemini)
+	}
+}
+
+func TestSelectProviderByScorecardUsesPowerModeCostSensitivity(t *testing.T) {
+	scorecards := []ProviderScorecard{
+		{Provider: ai.ProviderClaude, TaskShape: TaskShapeFrontendPatch, SampleCount: 5, FirstPassSampleCount: 5, CompilePassRate: 0.96, FirstPassVerificationRate: 0.95, RepairSuccessRate: 0.92, PromotionRate: 0.94, FailureClassRecurrence: 0.03, TruncationRate: 0.01, AverageCostPerSuccess: 0.45},
+		{Provider: ai.ProviderGemini, TaskShape: TaskShapeFrontendPatch, SampleCount: 5, FirstPassSampleCount: 5, CompilePassRate: 0.88, FirstPassVerificationRate: 0.87, RepairSuccessRate: 0.84, PromotionRate: 0.85, FailureClassRecurrence: 0.05, TruncationRate: 0.02, AverageCostPerSuccess: 0.03},
+	}
+	available := []ai.AIProvider{ai.ProviderClaude, ai.ProviderGemini}
+
+	fastBuild := &Build{PowerMode: PowerFast}
+	if got := selectProviderByScorecard(fastBuild, RoleFrontend, TaskShapeFrontendPatch, available, scorecards); got != ai.ProviderGemini {
+		t.Fatalf("fast mode provider = %s, want cheaper provider %s", got, ai.ProviderGemini)
+	}
+
+	maxBuild := &Build{PowerMode: PowerMax}
+	if got := selectProviderByScorecard(maxBuild, RoleFrontend, TaskShapeFrontendPatch, available, scorecards); got != ai.ProviderClaude {
+		t.Fatalf("max mode provider = %s, want higher-quality provider %s", got, ai.ProviderClaude)
 	}
 }
 

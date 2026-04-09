@@ -77,6 +77,12 @@ func TestPlannerAndFrontendSystemPromptsIncludeVisualPlanningRequirements(t *tes
 	if !strings.Contains(frontendPrompt, "skeleton loaders") {
 		t.Fatalf("expected frontend prompt to mention skeleton loaders, got %q", frontendPrompt)
 	}
+	if !strings.Contains(frontendPrompt, "@/components/ui") {
+		t.Fatalf("expected frontend prompt to reference scaffolded ui primitives, got %q", frontendPrompt)
+	}
+	if !strings.Contains(frontendPrompt, "components.json") {
+		t.Fatalf("expected frontend prompt to require the shadcn registry scaffold, got %q", frontendPrompt)
+	}
 }
 
 func TestDefaultTaskOutputFormatPromptUsesRunnableExamples(t *testing.T) {
@@ -107,6 +113,7 @@ func TestBuildTechStackDirectiveRecognizesVersionedSelections(t *testing.T) {
 		"Use Vite + TypeScript + Tailwind CSS v3 for React",
 		"tailwind.config.js — REQUIRED",
 		"postcss.config.js — REQUIRED",
+		"components.json, src/lib/utils.ts",
 		"Tailwind v3 only",
 		"Tailwind CSS is REQUIRED for all visual styling",
 		"API_BASE_URL: The backend API runs at http://localhost:3001.",
@@ -117,6 +124,33 @@ func TestBuildTechStackDirectiveRecognizesVersionedSelections(t *testing.T) {
 	}
 	if strings.Contains(directive, "@tailwindcss/vite") {
 		t.Fatalf("expected directive to avoid Tailwind v4 vite plugin guidance, got %q", directive)
+	}
+}
+
+func TestTestingPromptIncludesModernFrameworkGuidance(t *testing.T) {
+	t.Parallel()
+
+	manager := &AgentManager{}
+	build := &Build{
+		SubscriptionPlan: "builder",
+		TechStack: &TechStack{
+			Frontend: "React 18",
+			Backend:  "Node.js + Express",
+			Styling:  "Tailwind CSS",
+		},
+	}
+
+	testingPrompt := manager.getSystemPrompt(RoleTesting, build)
+	for _, snippet := range []string{
+		"Vitest",
+		"Testing Library",
+		"Playwright",
+		"test_contract",
+		"owned_test_paths",
+	} {
+		if !strings.Contains(testingPrompt, snippet) {
+			t.Fatalf("expected testing prompt to contain %q, got %q", snippet, testingPrompt)
+		}
 	}
 }
 

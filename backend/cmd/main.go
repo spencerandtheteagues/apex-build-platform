@@ -1802,9 +1802,12 @@ func (b *previewVerifierBridge) VerifyBuildFiles(
 		return &agents.PreviewVerificationResult{Passed: true}
 	}
 	return &agents.PreviewVerificationResult{
-		Passed:      res.Passed,
-		FailureKind: res.FailureKind,
-		RepairHints: res.RepairHints,
-		Details:     res.Details,
+		Passed:           res.Passed,
+		FailureKind:      res.FailureKind,
+		RepairHints:      res.RepairHints,
+		Details:          res.Details,
+		ScreenshotBase64: res.ScreenshotBase64,
+		CanaryErrors:     res.CanaryErrors,
+		CanaryClickCount: res.CanaryClickCount,
 	}
 }

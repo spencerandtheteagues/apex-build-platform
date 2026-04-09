@@ -13,6 +13,27 @@ import (
 	"time"
 )
 
+type stubRuntimeVisionVerifier struct {
+	result *VisionRepairResult
+}
+
+func (s *stubRuntimeVisionVerifier) AnalyzeScreenshot(ctx context.Context, imageData []byte, description string) *VisionRepairResult {
+	return s.result
+}
+
+type stubRuntimeCanaryTester struct {
+	available bool
+	result    *CanaryResult
+}
+
+func (s *stubRuntimeCanaryTester) Available() bool {
+	return s.available
+}
+
+func (s *stubRuntimeCanaryTester) RunCanaryInteractions(ctx context.Context, pageURL string) *CanaryResult {
+	return s.result
+}
+
 // ── Unit tests (no npm/vite required) ────────────────────────────────────────
 
 func TestParseScriptSrcs(t *testing.T) {
@@ -350,6 +371,72 @@ func TestRuntimeVerifierCustomTimeouts(t *testing.T) {
 	if got := formatRuntimeTimeout(rv.runtimeInstallTimeout(rv.runtimeTotalTimeout())); got != "17s" {
 		t.Fatalf("expected formatted install timeout 17s, got %q", got)
 	}
+}
+
+func TestApplyAdvisoryBrowserSignalsAddsVisionAndCanaryMetadata(t *testing.T) {
+	rv := &RuntimeVerifier{
+		visionVerifier: &stubRuntimeVisionVerifier{
+			result: &VisionRepairResult{
+				Summary:     "UI loads but the CTA hierarchy is weak",
+				RepairHints: []string{"Increase contrast on the primary CTA"},
+			},
+		},
+		canary: &stubRuntimeCanaryTester{
+			available: true,
+			result: &CanaryResult{
+				Clicked:     3,
+				Errors:      []string{"TypeError: Cannot read properties of undefined (reading 'map')"},
+				RepairHints: []string{"Fix the click handler that assumes async data is already loaded"},
+			},
+		},
+	}
+	result := &RuntimeVerificationResult{}
+	br := &BrowserPageLoadResult{
+		Passed:         true,
+		ScreenshotData: []byte{0x89, 0x50, 0x4e, 0x47},
+	}
+
+	rv.applyAdvisoryBrowserSignals(context.Background(), result, "http://127.0.0.1:5173", br)
+
+	if len(result.ScreenshotData) == 0 {
+		t.Fatal("expected screenshot data to be preserved on the runtime result")
+	}
+	if result.CanaryClickCount != 3 {
+		t.Fatalf("expected canary click count 3, got %d", result.CanaryClickCount)
+	}
+	if len(result.CanaryErrors) != 1 {
+		t.Fatalf("expected 1 canary error, got %v", result.CanaryErrors)
+	}
+	if !containsStringWithPrefix(result.RepairHints, "visual:") {
+		t.Fatalf("expected visual repair hint prefix, got %v", result.RepairHints)
+	}
+	if !containsStringWithPrefix(result.RepairHints, "interaction:") {
+		t.Fatalf("expected interaction repair hint prefix, got %v", result.RepairHints)
+	}
+	if !containsStringWithPrefix(result.CanaryErrors, "interaction:") {
+		t.Fatalf("expected interaction canary error prefix, got %v", result.CanaryErrors)
+	}
+	if len(result.Checks) != 2 {
+		t.Fatalf("expected 2 advisory checks (vision + canary), got %#v", result.Checks)
+	}
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) == strings.TrimSpace(needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsStringWithPrefix(values []string, prefix string) bool {
+	for _, value := range values {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(value)), strings.ToLower(strings.TrimSpace(prefix))) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSanitizeRuntimeVerifyPath(t *testing.T) {

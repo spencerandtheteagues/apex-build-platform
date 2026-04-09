@@ -39,8 +39,19 @@ import (
 // RuntimeVerifier performs actual dev-server boot, HTTP-level checks, and
 // (when a BrowserVerifier is wired in) headless browser page-load proof
 // against generated Vite/React applications.
+type runtimeVisionVerifier interface {
+	AnalyzeScreenshot(ctx context.Context, imageData []byte, description string) *VisionRepairResult
+}
+
+type runtimeCanaryTester interface {
+	Available() bool
+	RunCanaryInteractions(ctx context.Context, pageURL string) *CanaryResult
+}
+
 type RuntimeVerifier struct {
-	browser        *BrowserVerifier // nil = browser proof disabled
+	browser        *BrowserVerifier      // nil = browser proof disabled
+	visionVerifier runtimeVisionVerifier // nil = screenshot vision review disabled
+	canary         runtimeCanaryTester   // nil = interaction canary disabled
 	totalTimeout   time.Duration
 	installTimeout time.Duration
 }
@@ -52,19 +63,26 @@ func NewRuntimeVerifier() *RuntimeVerifier { return &RuntimeVerifier{} }
 // Chrome page-load proof after HTTP checks pass. Chrome is auto-detected; if
 // unavailable, verification fails honestly instead of silently downgrading.
 func NewRuntimeVerifierWithBrowser() *RuntimeVerifier {
-	return &RuntimeVerifier{browser: NewBrowserVerifier()}
+	return &RuntimeVerifier{
+		browser:        NewBrowserVerifier(),
+		visionVerifier: NewVisionVerifierFromEnv(),
+		canary:         NewCanaryTester(),
+	}
 }
 
 // RuntimeVerificationResult is returned by VerifyViteApp.
 type RuntimeVerificationResult struct {
-	Passed      bool
-	Checks      []CheckResult
-	FailureKind string
-	RepairHints []string
-	Details     string
-	Duration    time.Duration
-	Skipped     bool   // true when prerequisites (npm/node) are absent
-	ServerLogs  string // truncated Vite stderr for debugging
+	Passed           bool
+	Checks           []CheckResult
+	FailureKind      string
+	RepairHints      []string
+	Details          string
+	Duration         time.Duration
+	Skipped          bool   // true when prerequisites (npm/node) are absent
+	ServerLogs       string // truncated Vite stderr for debugging
+	ScreenshotData   []byte
+	CanaryErrors     []string
+	CanaryClickCount int
 }
 
 // ── Public entry point ────────────────────────────────────────────────────────
@@ -247,13 +265,17 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 			if len(br.RepairHints) > 0 {
 				hint = br.RepairHints[0]
 			}
-			return rv.rtFailWithLogs(br.FailureKind, br.Details, hint, start, serverLogs)
+			failed := rv.rtFailWithLogs(br.FailureKind, br.Details, hint, start, serverLogs)
+			failed.ScreenshotData = br.ScreenshotData
+			failed.RepairHints = appendUniqueStrings(failed.RepairHints, br.RepairHints...)
+			return failed
 		} else {
 			detail := fmt.Sprintf("mount rendered in browser (children: %d)", br.MountChildCount)
 			if len(br.JSErrors) > 0 {
 				detail += fmt.Sprintf("; %d non-fatal JS error(s)", len(br.JSErrors))
 			}
 			result.Checks = append(result.Checks, check("browser_page_load", true, detail))
+			rv.applyAdvisoryBrowserSignals(bootCtx, result, baseURL, br)
 		}
 	}
 
@@ -261,6 +283,50 @@ func (rv *RuntimeVerifier) VerifyViteApp(ctx context.Context, files []Verifiable
 	result.ServerLogs = truncateLog(viteStderr.String(), 500)
 	log.Printf("[runtime_verifier] Vite boot checks passed in %s", result.Duration.Round(time.Millisecond))
 	return result
+}
+
+func (rv *RuntimeVerifier) applyAdvisoryBrowserSignals(ctx context.Context, result *RuntimeVerificationResult, baseURL string, br *BrowserPageLoadResult) {
+	if result == nil || br == nil || !br.Passed {
+		return
+	}
+
+	if len(br.ScreenshotData) > 0 {
+		result.ScreenshotData = br.ScreenshotData
+	}
+
+	if rv.visionVerifier != nil && len(br.ScreenshotData) > 0 {
+		visionCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		vision := rv.visionVerifier.AnalyzeScreenshot(visionCtx, br.ScreenshotData, "A generated app preview that already mounted successfully in the browser.")
+		cancel()
+		if vision != nil {
+			result.RepairHints = appendUniqueStrings(result.RepairHints, prefixAll("visual:", vision.RepairHints)...)
+			if len(vision.Issues) > 0 || vision.Summary != "" {
+				detail := firstNonEmptyString(
+					vision.Summary,
+					fmt.Sprintf("%d visual issue(s) detected", len(vision.Issues)),
+					"visual review completed",
+				)
+				result.Checks = append(result.Checks, check("vision_review", true, detail))
+			}
+		}
+	}
+
+	if rv.canary != nil && rv.canary.Available() {
+		canaryCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		canary := rv.canary.RunCanaryInteractions(canaryCtx, baseURL)
+		cancel()
+		if canary != nil && !canary.Skipped {
+			result.CanaryClickCount = canary.Clicked
+			result.CanaryErrors = appendUniqueStrings(result.CanaryErrors, prefixAll("interaction:", canary.Errors)...)
+			result.RepairHints = appendUniqueStrings(result.RepairHints, prefixAll("interaction:", canary.RepairHints)...)
+
+			detail := fmt.Sprintf("clicked %d interactive control(s)", canary.Clicked)
+			if len(canary.Errors) > 0 {
+				detail += fmt.Sprintf("; advisory errors: %s", summarizeIssues(canary.Errors, 2))
+			}
+			result.Checks = append(result.Checks, check("canary_interactions", true, detail))
+		}
+	}
 }
 
 // ── Private helpers ────────────────────────────────────────────────────────────
@@ -333,6 +399,76 @@ func formatRuntimeTimeout(timeout time.Duration) string {
 		return fmt.Sprintf("%ds", int(timeout/time.Second))
 	}
 	return timeout.String()
+}
+
+func appendUniqueStrings(existing []string, values ...string) []string {
+	if len(values) == 0 {
+		return existing
+	}
+	seen := make(map[string]struct{}, len(existing))
+	out := make([]string, 0, len(existing)+len(values))
+	for _, item := range existing {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	for _, item := range values {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func compactNonEmptyStrings(values []string) []string {
+	return appendUniqueStrings(nil, values...)
+}
+
+func prefixAll(prefix string, values []string) []string {
+	if prefix == "" || len(values) == 0 {
+		return compactNonEmptyStrings(values)
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, strings.TrimSpace(prefix+" "+trimmed))
+	}
+	return compactNonEmptyStrings(out)
+}
+
+func summarizeIssues(values []string, max int) string {
+	values = compactNonEmptyStrings(values)
+	if len(values) == 0 {
+		return ""
+	}
+	if max <= 0 || len(values) <= max {
+		return strings.Join(values, "; ")
+	}
+	return strings.Join(values[:max], "; ")
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (rv *RuntimeVerifier) viteBinary(dir string) string {

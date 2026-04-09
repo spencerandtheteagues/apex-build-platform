@@ -86,6 +86,26 @@ func TestCompileIntentBriefFromRequestDoesNotTreatCleanFileStructureAsUploadStor
 	}
 }
 
+func TestCompileIntentBriefFromRequestIncludesWireframeDescription(t *testing.T) {
+	req := &BuildRequest{
+		Description:          "Build a dashboard app",
+		WireframeDescription: "Reference UI shows a kanban workspace with a left sidebar, top metrics strip, and dark slate theme.",
+		Mode:                 ModeFull,
+		PowerMode:            PowerFast,
+	}
+
+	brief := compileIntentBriefFromRequest(req, "platform")
+	if brief == nil {
+		t.Fatal("expected intent brief")
+	}
+	if !strings.Contains(strings.ToLower(brief.NormalizedRequest), "kanban workspace") {
+		t.Fatalf("expected wireframe description to be merged into normalized request, got %q", brief.NormalizedRequest)
+	}
+	if brief.AppType == "" {
+		t.Fatalf("expected app type inference to remain populated, got %+v", brief)
+	}
+}
+
 func TestCompileBuildContractFromPlanSeedsTruthAndVerification(t *testing.T) {
 	plan := &BuildPlan{
 		ID:      "plan-1",

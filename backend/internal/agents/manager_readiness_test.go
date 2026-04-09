@@ -453,6 +453,104 @@ func TestValidateFinalBuildReadiness(t *testing.T) {
 	})
 }
 
+func TestApplyDeterministicMissingFrontendShellRepairAddsShadcnScaffold(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID: "missing-frontend-shell-shadcn",
+		TechStack: &TechStack{
+			Frontend: "React",
+			Backend:  "Express",
+			Styling:  "Tailwind CSS",
+		},
+		Tasks: []*Task{
+			{
+				ID:     "backend-only-output",
+				Type:   TaskGenerateAPI,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{
+							Path: "package.json",
+							Content: `{
+  "name": "backend-only-output",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}`,
+						},
+						{
+							Path: "server/index.js",
+							Content: `import express from "express";
+const app = express();
+app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
+app.listen(process.env.PORT || 3001);`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	bundle, summary := am.applyDeterministicMissingFrontendShellRepair(build, []string{
+		"No recognized frontend entry point found (index.html, src/main.tsx, src/index.tsx, etc.).",
+	})
+	if bundle == nil {
+		t.Fatal("expected deterministic frontend shell repair to produce a patch bundle")
+	}
+	if !strings.Contains(summary, "generated previewable frontend shell") {
+		t.Fatalf("expected summary to describe frontend shell repair, got %q", summary)
+	}
+
+	requiredCreates := map[string]bool{
+		"components.json":              false,
+		"src/lib/utils.ts":             false,
+		"src/components/ui/button.tsx": false,
+		"src/components/ui/card.tsx":   false,
+		"src/components/ui/input.tsx":  false,
+		"src/components/ui/badge.tsx":  false,
+		"src/components/ui/dialog.tsx": false,
+		"src/main.tsx":                 false,
+		"src/App.tsx":                  false,
+		"src/index.css":                false,
+		"tailwind.config.js":           false,
+	}
+
+	for _, op := range bundle.Operations {
+		if op.Type == PatchCreateFile {
+			if _, ok := requiredCreates[op.Path]; ok {
+				requiredCreates[op.Path] = true
+			}
+		}
+		if op.Path == "package.json" && strings.Contains(op.Content, `"tailwindcss-animate"`) && strings.Contains(op.Content, `"@radix-ui/react-dialog"`) {
+			requiredCreates["tailwind.config.js"] = requiredCreates["tailwind.config.js"]
+		}
+	}
+
+	for path, found := range requiredCreates {
+		if !found {
+			t.Fatalf("expected create_file operation for %s, got %+v", path, bundle.Operations)
+		}
+	}
+
+	var manifestPatched bool
+	for _, op := range bundle.Operations {
+		if op.Path == "package.json" && strings.Contains(op.Content, `"tailwindcss-animate"`) && strings.Contains(op.Content, `"@radix-ui/react-dialog"`) && strings.Contains(op.Content, `"clsx"`) {
+			manifestPatched = true
+			break
+		}
+	}
+	if !manifestPatched {
+		t.Fatalf("expected package.json patch to include shadcn dependencies, got %+v", bundle.Operations)
+	}
+}
+
 func TestValidateFinalBuildReadinessEmitsSurfaceVerificationReports(t *testing.T) {
 	t.Parallel()
 

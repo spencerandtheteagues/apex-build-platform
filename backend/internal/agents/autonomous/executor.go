@@ -881,15 +881,15 @@ For EVERY file, use this format:
 // Keep versions in sync with the versions validated in CI.
 var pinnedVersions = map[string]string{
 	// Runtime
-	"express":          "4.18.2",
-	"cors":             "2.8.5",
+	"express": "4.18.2",
+	"cors":    "2.8.5",
 	// React ecosystem
 	"react":            "18.2.0",
 	"react-dom":        "18.2.0",
 	"react-router-dom": "6.23.1",
 	// Vue ecosystem
-	"vue":              "3.4.21",
-	"vue-router":       "4.3.2",
+	"vue":        "3.4.21",
+	"vue-router": "4.3.2",
 	// TypeScript types
 	"typescript":       "5.4.5",
 	"@types/node":      "22.5.5",
@@ -898,15 +898,23 @@ var pinnedVersions = map[string]string{
 	"@types/express":   "4.17.21",
 	"@types/cors":      "2.8.17",
 	// Build tools
-	"vite":                   "5.2.8",
-	"@vitejs/plugin-react":   "4.2.1",
-	"@vitejs/plugin-vue":     "5.0.4",
+	"vite":                 "5.2.8",
+	"@vitejs/plugin-react": "4.2.1",
+	"@vitejs/plugin-vue":   "5.0.4",
+	"tsx":                  "4.19.2",
 	// Test
-	"vitest":          "1.5.0",
+	"vitest":                      "1.5.0",
+	"@vitest/coverage-v8":         "1.5.0",
+	"@playwright/test":            "1.47.0",
+	"@testing-library/react":      "16.0.0",
+	"@testing-library/user-event": "14.5.2",
+	"@testing-library/jest-dom":   "6.5.0",
+	"jsdom":                       "24.1.1",
 	// Styling
-	"tailwindcss":     "3.4.3",
-	"postcss":         "8.4.38",
-	"autoprefixer":    "10.4.19",
+	"tailwindcss":         "3.4.3",
+	"postcss":             "8.4.38",
+	"autoprefixer":        "10.4.19",
+	"tailwindcss-animate": "1.0.7",
 	// UI utilities (frequently hallucinated versions)
 	"clsx":                     "2.1.1",
 	"class-variance-authority": "0.7.0",
@@ -929,40 +937,40 @@ var pinnedVersions = map[string]string{
 	// Realtime
 	"socket.io-client": "4.7.5",
 	// Radix UI / shadcn (full component set)
-	"@radix-ui/react-accordion":      "1.2.0",
-	"@radix-ui/react-alert-dialog":   "1.1.1",
-	"@radix-ui/react-avatar":         "1.1.0",
-	"@radix-ui/react-checkbox":       "1.1.1",
-	"@radix-ui/react-collapsible":    "1.1.0",
-	"@radix-ui/react-context-menu":   "2.2.1",
-	"@radix-ui/react-dialog":         "1.1.1",
-	"@radix-ui/react-dropdown-menu":  "2.1.1",
-	"@radix-ui/react-hover-card":     "1.1.1",
-	"@radix-ui/react-label":          "2.1.0",
-	"@radix-ui/react-menubar":        "1.1.1",
+	"@radix-ui/react-accordion":       "1.2.0",
+	"@radix-ui/react-alert-dialog":    "1.1.1",
+	"@radix-ui/react-avatar":          "1.1.0",
+	"@radix-ui/react-checkbox":        "1.1.1",
+	"@radix-ui/react-collapsible":     "1.1.0",
+	"@radix-ui/react-context-menu":    "2.2.1",
+	"@radix-ui/react-dialog":          "1.1.1",
+	"@radix-ui/react-dropdown-menu":   "2.1.1",
+	"@radix-ui/react-hover-card":      "1.1.1",
+	"@radix-ui/react-label":           "2.1.0",
+	"@radix-ui/react-menubar":         "1.1.1",
 	"@radix-ui/react-navigation-menu": "1.2.0",
-	"@radix-ui/react-popover":        "1.1.1",
-	"@radix-ui/react-progress":       "1.1.0",
-	"@radix-ui/react-radio-group":    "1.2.0",
-	"@radix-ui/react-scroll-area":    "1.1.0",
-	"@radix-ui/react-select":         "2.1.1",
-	"@radix-ui/react-separator":      "1.1.0",
-	"@radix-ui/react-slider":         "1.2.0",
-	"@radix-ui/react-slot":           "1.1.0",
-	"@radix-ui/react-switch":         "1.1.0",
-	"@radix-ui/react-tabs":           "1.1.0",
-	"@radix-ui/react-toast":          "1.2.1",
-	"@radix-ui/react-toggle":         "1.1.0",
-	"@radix-ui/react-toggle-group":   "1.1.0",
-	"@radix-ui/react-tooltip":        "1.1.2",
+	"@radix-ui/react-popover":         "1.1.1",
+	"@radix-ui/react-progress":        "1.1.0",
+	"@radix-ui/react-radio-group":     "1.2.0",
+	"@radix-ui/react-scroll-area":     "1.1.0",
+	"@radix-ui/react-select":          "2.1.1",
+	"@radix-ui/react-separator":       "1.1.0",
+	"@radix-ui/react-slider":          "1.2.0",
+	"@radix-ui/react-slot":            "1.1.0",
+	"@radix-ui/react-switch":          "1.1.0",
+	"@radix-ui/react-tabs":            "1.1.0",
+	"@radix-ui/react-toast":           "1.2.1",
+	"@radix-ui/react-toggle":          "1.1.0",
+	"@radix-ui/react-toggle-group":    "1.1.0",
+	"@radix-ui/react-tooltip":         "1.1.2",
 	// shadcn/ui utilities
-	"cmdk":                    "1.0.0",
-	"vaul":                    "0.9.1",
-	"sonner":                  "1.5.0",
-	"embla-carousel-react":    "8.2.1",
-	"react-day-picker":        "8.10.1",
-	"react-resizable-panels":  "2.1.2",
-	"input-otp":               "1.2.4",
+	"cmdk":                   "1.0.0",
+	"vaul":                   "0.9.1",
+	"sonner":                 "1.5.0",
+	"embla-carousel-react":   "8.2.1",
+	"react-day-picker":       "8.10.1",
+	"react-resizable-panels": "2.1.2",
+	"input-otp":              "1.2.4",
 }
 
 // pinnedVersion returns the exact pinned version for a package, or a safe
@@ -991,6 +999,16 @@ func (e *Executor) generatePackageJSON(description string, stack *TechStack) str
 		pinnedDep("@types/express"),
 		pinnedDep("@types/cors"),
 		pinnedDep("vitest"),
+		pinnedDep("tsx"),
+	}
+	scripts := []string{
+		`"dev": "vite"`,
+		`"build": "tsc -b && vite build"`,
+		`"preview": "vite preview"`,
+		`"server": "tsx server/index.ts"`,
+		`"test": "vitest run"`,
+		`"test:coverage": "vitest run --coverage"`,
+		`"lint": "eslint . --ext .ts,.tsx"`,
 	}
 
 	if stack.Frontend == "React" {
@@ -998,13 +1016,25 @@ func (e *Executor) generatePackageJSON(description string, stack *TechStack) str
 			pinnedDep("react"),
 			pinnedDep("react-dom"),
 			pinnedDep("react-router-dom"),
+			pinnedDep("clsx"),
+			pinnedDep("class-variance-authority"),
+			pinnedDep("tailwind-merge"),
+			pinnedDep("@radix-ui/react-slot"),
+			pinnedDep("@radix-ui/react-dialog"),
 		)
 		devDeps = append(devDeps,
 			pinnedDep("@types/react"),
 			pinnedDep("@types/react-dom"),
 			pinnedDep("@vitejs/plugin-react"),
 			pinnedDep("vite"),
+			pinnedDep("@testing-library/react"),
+			pinnedDep("@testing-library/user-event"),
+			pinnedDep("@testing-library/jest-dom"),
+			pinnedDep("@playwright/test"),
+			pinnedDep("@vitest/coverage-v8"),
+			pinnedDep("jsdom"),
 		)
+		scripts = append(scripts, `"test:e2e": "playwright test"`)
 	}
 
 	if stack.Frontend == "Vue" {
@@ -1020,6 +1050,7 @@ func (e *Executor) generatePackageJSON(description string, stack *TechStack) str
 			pinnedDep("tailwindcss"),
 			pinnedDep("postcss"),
 			pinnedDep("autoprefixer"),
+			pinnedDep("tailwindcss-animate"),
 		)
 	}
 
@@ -1034,12 +1065,7 @@ func (e *Executor) generatePackageJSON(description string, stack *TechStack) str
     "npm": ">=9.0.0"
   },
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview",
-    "server": "ts-node server/index.ts",
-    "test": "vitest run",
-    "lint": "eslint . --ext .ts,.tsx"
+    %s
   },
   "dependencies": {
     %s
@@ -1047,7 +1073,7 @@ func (e *Executor) generatePackageJSON(description string, stack *TechStack) str
   "devDependencies": {
     %s
   }
-}`, strings.ReplaceAll(description, `"`, `\"`), strings.Join(deps, ",\n    "), strings.Join(devDeps, ",\n    "))
+}`, strings.ReplaceAll(description, `"`, `\"`), strings.Join(scripts, ",\n    "), strings.Join(deps, ",\n    "), strings.Join(devDeps, ",\n    "))
 }
 
 // generateViteConfig creates the Vite configuration file
@@ -1180,16 +1206,40 @@ coverage/
 }
 
 func (e *Executor) generateTailwindConfig() string {
-	return `/** @type {import('tailwindcss').Config} */
+	return `import animate from "tailwindcss-animate"
+
+/** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: ["class"],
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        primary: {
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
+        },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+        },
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
+      },
+    },
   },
-  plugins: [],
+  plugins: [animate],
 }`
 }
 

@@ -146,6 +146,7 @@ const (
 type BuildOrchestrationFlags struct {
 	EnableIntentBrief              bool `json:"enable_intent_brief"`
 	EnableBuildContract            bool `json:"enable_build_contract"`
+	EnableValidatedBuildSpec       bool `json:"enable_validated_build_spec"`
 	EnableContractVerification     bool `json:"enable_contract_verification"`
 	EnablePatchBundles             bool `json:"enable_patch_bundles"`
 	EnableSurfaceLocalVerification bool `json:"enable_surface_local_verification"`
@@ -392,6 +393,7 @@ type BuildOrchestrationState struct {
 	Flags               BuildOrchestrationFlags `json:"flags"`
 	IntentBrief         *IntentBrief            `json:"intent_brief,omitempty"`
 	BuildContract       *BuildContract          `json:"build_contract,omitempty"`
+	ValidatedBuildSpec  *ValidatedBuildSpec     `json:"validated_build_spec,omitempty"`
 	WorkOrders          []WorkOrder             `json:"work_orders,omitempty"`
 	PatchBundles        []PatchBundle           `json:"patch_bundles,omitempty"`
 	VerificationReports []VerificationReport    `json:"verification_reports,omitempty"`
@@ -404,6 +406,7 @@ func defaultBuildOrchestrationFlags() BuildOrchestrationFlags {
 	return BuildOrchestrationFlags{
 		EnableIntentBrief:              envBool("APEX_ENABLE_INTENT_BRIEF", true),
 		EnableBuildContract:            envBool("APEX_ENABLE_BUILD_CONTRACT", true),
+		EnableValidatedBuildSpec:       envBool("APEX_ENABLE_VALIDATED_BUILD_SPEC", true),
 		EnableContractVerification:     envBool("APEX_ENABLE_CONTRACT_VERIFICATION", true),
 		EnablePatchBundles:             envBool("APEX_ENABLE_PATCH_BUNDLES", true),
 		EnableSurfaceLocalVerification: envBool("APEX_ENABLE_SURFACE_LOCAL_VERIFICATION", true),
@@ -451,7 +454,11 @@ func compileIntentBriefFromRequest(req *BuildRequest, providerMode string) *Inte
 	if req == nil {
 		return nil
 	}
-	normalized := normalizeCompactText(firstNonEmpty(req.Prompt, req.Description))
+	parts := []string{
+		strings.TrimSpace(req.WireframeDescription),
+		firstNonEmpty(req.Prompt, req.Description),
+	}
+	normalized := normalizeCompactText(strings.Join(compactNonEmptyIntentParts(parts), "\n\n"))
 	if normalized == "" {
 		return nil
 	}
@@ -473,6 +480,22 @@ func compileIntentBriefFromRequest(req *BuildRequest, providerMode string) *Inte
 		AcceptanceSummarySeed: acceptance,
 		CreatedAt:             time.Now().UTC(),
 	}
+}
+
+func compactNonEmptyIntentParts(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func compileBuildContractFromPlan(buildID string, intent *IntentBrief, plan *BuildPlan) *BuildContract {
@@ -1946,6 +1969,7 @@ func appendVerificationReport(build *Build, report VerificationReport) {
 		return
 	}
 	applyVerificationReportTruth(state, report)
+	applyVerificationReportFailureTaxonomyLocked(&build.SnapshotState, report)
 	state.VerificationReports = append(state.VerificationReports, report)
 	if len(state.VerificationReports) > 32 {
 		state.VerificationReports = append([]VerificationReport(nil), state.VerificationReports[len(state.VerificationReports)-32:]...)

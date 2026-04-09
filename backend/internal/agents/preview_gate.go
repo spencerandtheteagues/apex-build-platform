@@ -23,16 +23,35 @@ type VerifiableFile struct {
 
 // PreviewVerificationResult is the result of a preview readiness check.
 type PreviewVerificationResult struct {
-	Passed      bool
-	FailureKind string   // e.g. "missing_entrypoint", "blank_screen", "corrupt_content"
-	RepairHints []string // Actionable directives for the repair agent
-	Details     string   // Human-readable failure description
+	Passed           bool
+	FailureKind      string   // e.g. "missing_entrypoint", "blank_screen", "corrupt_content"
+	RepairHints      []string // Actionable directives for the repair agent
+	Details          string   // Human-readable failure description
+	ScreenshotBase64 string
+	CanaryErrors     []string
+	CanaryClickCount int
 }
 
 // BuildPreviewVerifier is the interface the agent manager uses for preview verification.
 // Implemented in the preview package; wired via SetPreviewVerifier in main.go.
 type BuildPreviewVerifier interface {
 	VerifyBuildFiles(ctx context.Context, files []VerifiableFile, isFullStack bool) *PreviewVerificationResult
+}
+
+func includePreviewVerificationFile(path string) bool {
+	lower := strings.ToLower(sanitizeFilePath(path))
+	switch {
+	case lower == "":
+		return false
+	case strings.HasPrefix(lower, "e2e/"), strings.Contains(lower, "/e2e/"):
+		return false
+	case strings.HasPrefix(lower, "tests/"), strings.Contains(lower, "/__tests__/"), strings.HasPrefix(lower, "__tests__/"):
+		return false
+	case strings.Contains(lower, ".test."), strings.Contains(lower, ".spec."):
+		return false
+	default:
+		return true
+	}
 }
 
 // SetPreviewVerifier wires a BuildPreviewVerifier into the agent manager.
@@ -63,7 +82,7 @@ func (am *AgentManager) runPreviewVerificationGate(
 
 	vFiles := make([]VerifiableFile, 0, len(allFiles))
 	for _, f := range allFiles {
-		if strings.TrimSpace(f.Path) != "" {
+		if includePreviewVerificationFile(f.Path) {
 			vFiles = append(vFiles, VerifiableFile{Path: f.Path, Content: f.Content})
 		}
 	}
@@ -74,6 +93,10 @@ func (am *AgentManager) runPreviewVerificationGate(
 	checksRun := []string{"preview_entrypoint", "preview_content", "preview_structure"}
 	result := am.previewVerifier.VerifyBuildFiles(ctx, vFiles, isFS)
 	if result == nil || result.Passed {
+		passedWarnings := []string(nil)
+		if result != nil {
+			passedWarnings = appendUniquePreviewWarnings(result.RepairHints, result.CanaryErrors)
+		}
 		appendVerificationReport(build, VerificationReport{
 			ID:            uuid.New().String(),
 			BuildID:       build.ID,
@@ -82,6 +105,7 @@ func (am *AgentManager) runPreviewVerificationGate(
 			Status:        VerificationPassed,
 			Deterministic: true,
 			ChecksRun:     checksRun,
+			Warnings:      passedWarnings,
 			GeneratedAt:   now.UTC(),
 		})
 		return false // gate passed — caller continues normally
@@ -90,6 +114,8 @@ func (am *AgentManager) runPreviewVerificationGate(
 	log.Printf("Build %s: preview verification failed (%s): %s", build.ID, result.FailureKind, result.Details)
 
 	// Record as a verification report so the frontend can surface it.
+	failureChecks := append([]string(nil), checksRun...)
+	failureChecks = append(failureChecks, fmt.Sprintf("failure_class:%s", previewFailureClass(result.FailureKind)))
 	appendVerificationReport(build, VerificationReport{
 		ID:            uuid.New().String(),
 		BuildID:       build.ID,
@@ -97,7 +123,7 @@ func (am *AgentManager) runPreviewVerificationGate(
 		Surface:       SurfaceGlobal,
 		Status:        VerificationFailed,
 		Deterministic: true,
-		ChecksRun:     checksRun,
+		ChecksRun:     failureChecks,
 		Errors:        []string{result.Details},
 		Blockers:      []string{fmt.Sprintf("preview_verification_failed:%s", result.FailureKind)},
 		GeneratedAt:   now.UTC(),
@@ -399,6 +425,9 @@ func (am *AgentManager) launchPreviewRepairTask(
 	build.mu.Unlock()
 
 	hints := result.RepairHints
+	if len(result.CanaryErrors) > 0 {
+		hints = append([]string{fmt.Sprintf("canary_interaction: %s", strings.Join(result.CanaryErrors, "; "))}, hints...)
+	}
 	if len(hints) == 0 {
 		hints = []string{fmt.Sprintf("Fix the %s issue so the preview loads correctly.", result.FailureKind)}
 	}
@@ -408,12 +437,7 @@ func (am *AgentManager) launchPreviewRepairTask(
 		Type:        TaskReview,
 		Description: "Preview verification",
 		Status:      TaskFailed,
-		Input: map[string]any{
-			"failure_kind":    result.FailureKind,
-			"failure_details": result.Details,
-			"repair_hints":    hints,
-			"action":          "fix_preview_verification",
-		},
+		Input:       buildPreviewRepairTaskInput(result, hints),
 	}
 
 	am.broadcast(build.ID, &WSMessage{
@@ -437,4 +461,65 @@ func (am *AgentManager) launchPreviewRepairTask(
 
 	_ = allFiles // available for future context selection
 	return true
+}
+
+func previewHintsContainVisionAdvice(hints []string) bool {
+	for _, hint := range hints {
+		normalized := strings.ToLower(strings.TrimSpace(hint))
+		if strings.HasPrefix(normalized, "vision:") || strings.HasPrefix(normalized, "visual:") {
+			return true
+		}
+	}
+	return false
+}
+
+func buildPreviewRepairTaskInput(result *PreviewVerificationResult, hints []string) map[string]any {
+	input := map[string]any{
+		"failure_kind":    result.FailureKind,
+		"failure_details": result.Details,
+		"repair_hints":    hints,
+		"action":          "fix_preview_verification",
+	}
+	if result != nil && result.ScreenshotBase64 != "" && previewHintsContainVisionAdvice(hints) {
+		input["screenshot_base64"] = result.ScreenshotBase64
+	}
+	return input
+}
+
+func previewFailureClass(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "blank_screen", "missing_entrypoint", "corrupt_content", "invalid_html", "invalid_package_json":
+		return "frontend_shell"
+	case "js_runtime_error", "browser_load_failed":
+		return "runtime"
+	case "boot_failed":
+		return "preview_boot"
+	case "browser_unavailable":
+		return "infrastructure"
+	case "backend_missing", "backend_no_listen", "backend_no_routes":
+		return "backend_contract"
+	default:
+		return "unknown"
+	}
+}
+
+func appendUniquePreviewWarnings(groups ...[]string) []string {
+	var flattened []string
+	for _, group := range groups {
+		flattened = append(flattened, group...)
+	}
+	seen := make(map[string]struct{}, len(flattened))
+	out := make([]string, 0, len(flattened))
+	for _, item := range flattened {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
 }
