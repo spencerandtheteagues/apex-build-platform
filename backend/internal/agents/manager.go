@@ -4528,7 +4528,13 @@ func (am *AgentManager) executeTask(task *Task) {
 				selectedCandidate.Output.Messages = append(selectedCandidate.Output.Messages, report.Warnings...)
 			}
 			if report.Status == VerificationBlocked && len(report.Blockers) > 0 {
-				if repaired, summary := am.applyDeterministicProviderBlockedTestRepair(build, selectedCandidate.Output, report.Blockers); repaired {
+				if repaired, summary := am.applyDeterministicFrontendScaffoldTruncationRepair(build, selectedCandidate.Output, report.Blockers); repaired {
+					report.Status = VerificationPassed
+					report.Warnings = append(report.Warnings, "Applied deterministic frontend scaffold repair before task acceptance: "+summary)
+					report.Blockers = nil
+					selectedCandidate.Output.ProviderVerificationReport = report
+					selectedCandidate.Output.Messages = append(selectedCandidate.Output.Messages, report.Warnings...)
+				} else if repaired, summary := am.applyDeterministicProviderBlockedTestRepair(build, selectedCandidate.Output, report.Blockers); repaired {
 					report.Status = VerificationPassed
 					report.Warnings = append(report.Warnings, "Applied deterministic truncated generated test repair before task acceptance: "+summary)
 					report.Blockers = nil
@@ -4951,6 +4957,14 @@ func (am *AgentManager) processResult(result *TaskResult) {
 
 			// Run quick build verification on generated code
 			verificationPassed, verifyErrors := am.verifyGeneratedCode(agent.BuildID, result.Output)
+			if !verificationPassed {
+				if repaired, summary := am.applyDeterministicFrontendScaffoldTruncationRepair(build, result.Output, verifyErrors); repaired {
+					verificationPassed, verifyErrors = am.verifyGeneratedCode(agent.BuildID, result.Output)
+					if verificationPassed {
+						result.Output.Messages = append(result.Output.Messages, "Deterministic frontend scaffold repair restored build verification: "+summary)
+					}
+				}
+			}
 
 			agent.mu.Lock()
 			if buildErr == nil {
@@ -11824,6 +11838,204 @@ func syntheticFrontendTSConfig() string {
   "include": ["src/main.tsx", "src/App.tsx", "vite.config.ts"]
 }
 `
+}
+
+func isCanonicalFrontendScaffoldPath(path string) bool {
+	switch sanitizeFilePath(strings.TrimSpace(path)) {
+	case "index.html",
+		"src/main.tsx",
+		"src/App.tsx",
+		"vite.config.ts",
+		"tailwind.config.js",
+		"postcss.config.js",
+		"src/index.css",
+		"tsconfig.json":
+		return true
+	default:
+		_, _, ok := shadcnScaffoldContent(path)
+		return ok
+	}
+}
+
+func parseFrontendScaffoldRepairTargets(output *TaskOutput, errors []string) []string {
+	if output == nil && len(errors) == 0 {
+		return nil
+	}
+
+	seen := map[string]bool{}
+	targets := make([]string, 0, 4)
+	addPath := func(path string) {
+		path = sanitizeFilePath(strings.TrimSpace(path))
+		if path == "" || !isCanonicalFrontendScaffoldPath(path) || seen[path] {
+			return
+		}
+		seen[path] = true
+		targets = append(targets, path)
+	}
+
+	if output != nil {
+		for _, path := range output.TruncatedFiles {
+			addPath(path)
+		}
+	}
+
+	joined := strings.Join(errors, "\n")
+	lower := strings.ToLower(joined)
+	if !strings.Contains(lower, "truncated") &&
+		!strings.Contains(lower, "unterminated") &&
+		!strings.Contains(lower, "abrupt eof") &&
+		!strings.Contains(lower, "missing closing") &&
+		!strings.Contains(lower, "ends abruptly") {
+		sort.Strings(targets)
+		return targets
+	}
+
+	pathPatterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx|json|css|html))`),
+	}
+	for _, pattern := range pathPatterns {
+		for _, match := range pattern.FindAllStringSubmatch(joined, -1) {
+			if len(match) != 2 {
+				continue
+			}
+			addPath(match[1])
+		}
+	}
+
+	sort.Strings(targets)
+	return targets
+}
+
+func (am *AgentManager) canonicalFrontendScaffoldContent(build *Build, output *TaskOutput, path string) (string, string, bool) {
+	path = sanitizeFilePath(strings.TrimSpace(path))
+	if path == "" {
+		return "", "", false
+	}
+	if content, language, ok := shadcnScaffoldContent(path); ok {
+		return content, language, true
+	}
+
+	buildTitle := "Recovered Preview"
+	buildSummary := "A deterministic APEX frontend shell was restored to keep the preview usable."
+	backendEntry := ""
+	backendPort := 3001
+	backendName := ""
+
+	if build != nil {
+		build.mu.RLock()
+		if trimmed := strings.TrimSpace(build.Description); trimmed != "" {
+			buildTitle = synthesizedFrontendShellAppName(trimmed)
+			buildSummary = synthesizedFrontendShellSummary(trimmed)
+		}
+		if build.TechStack != nil {
+			backendName = strings.TrimSpace(build.TechStack.Backend)
+		}
+		build.mu.RUnlock()
+		if backendName == "" && build.Plan != nil {
+			backendName = strings.TrimSpace(build.Plan.TechStack.Backend)
+		}
+	}
+
+	if output != nil && len(output.Files) > 0 {
+		backendEntry = detectGeneratedBackendEntryForFrontendShell(output.Files)
+	}
+	if backendName != "" {
+		if port := canonicalBackendPort(backendName); port > 0 {
+			backendPort = port
+		}
+	}
+
+	switch path {
+	case "index.html":
+		return syntheticFrontendIndexHTML(buildTitle), "html", true
+	case "src/main.tsx":
+		return syntheticFrontendMainTSX(), "typescript", true
+	case "src/App.tsx":
+		return syntheticFrontendAppTSX(buildTitle, buildSummary, backendEntry, backendPort), "typescript", true
+	case "vite.config.ts":
+		return syntheticFrontendViteConfig(backendPort), "typescript", true
+	case "tailwind.config.js":
+		return syntheticFrontendTailwindConfig(), "javascript", true
+	case "postcss.config.js":
+		return syntheticFrontendPostCSSConfig(), "javascript", true
+	case "src/index.css":
+		return syntheticFrontendIndexCSS(), "css", true
+	case "tsconfig.json":
+		return syntheticFrontendTSConfig(), "json", true
+	default:
+		return "", "", false
+	}
+}
+
+func (am *AgentManager) applyDeterministicFrontendScaffoldTruncationRepair(build *Build, output *TaskOutput, errors []string) (bool, string) {
+	if output == nil || !buildRequestsFrontendSurface(build) {
+		return false, ""
+	}
+
+	targets := parseFrontendScaffoldRepairTargets(output, errors)
+	if len(targets) == 0 {
+		return false, ""
+	}
+
+	targetSet := make(map[string]bool, len(targets))
+	for _, target := range targets {
+		targetSet[target] = true
+	}
+
+	applied := make([]string, 0, len(targets))
+	presentTargets := make(map[string]bool, len(targets))
+	for i := range output.Files {
+		path := sanitizeFilePath(strings.TrimSpace(output.Files[i].Path))
+		if !targetSet[path] {
+			continue
+		}
+		content, language, ok := am.canonicalFrontendScaffoldContent(build, output, path)
+		if !ok {
+			continue
+		}
+		presentTargets[path] = true
+		output.Files[i].Content = content
+		output.Files[i].Size = int64(len(content))
+		if strings.TrimSpace(output.Files[i].Language) == "" {
+			output.Files[i].Language = language
+		}
+		applied = append(applied, path)
+	}
+
+	for _, target := range targets {
+		if presentTargets[target] {
+			continue
+		}
+		content, language, ok := am.canonicalFrontendScaffoldContent(build, output, target)
+		if !ok {
+			continue
+		}
+		output.Files = append(output.Files, GeneratedFile{
+			Path:     target,
+			Content:  content,
+			Language: language,
+			Size:     int64(len(content)),
+		})
+		applied = append(applied, target)
+	}
+
+	if len(applied) == 0 {
+		return false, ""
+	}
+
+	sort.Strings(applied)
+	if len(output.TruncatedFiles) > 0 {
+		filtered := make([]string, 0, len(output.TruncatedFiles))
+		for _, path := range output.TruncatedFiles {
+			path = sanitizeFilePath(strings.TrimSpace(path))
+			if !targetSet[path] {
+				filtered = append(filtered, path)
+			}
+		}
+		output.TruncatedFiles = filtered
+	}
+	output.Messages = append(output.Messages, "Applied deterministic frontend scaffold truncation repair: "+strings.Join(applied, ", "))
+	return true, strings.Join(applied, ", ")
 }
 
 func (am *AgentManager) applyDeterministicMissingFrontendShellRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
@@ -22835,6 +23047,8 @@ func detectLikelyTruncatedJSTSFile(path, content string) string {
 	if trimmed == "" {
 		return ""
 	}
+	lowerPath := strings.ToLower(strings.TrimSpace(path))
+	jsxLike := strings.HasSuffix(lowerPath, ".tsx") || strings.HasSuffix(lowerPath, ".jsx")
 
 	lines := strings.Split(trimmed, "\n")
 	last := strings.TrimSpace(lines[len(lines)-1])
@@ -22861,14 +23075,14 @@ func detectLikelyTruncatedJSTSFile(path, content string) string {
 		return fmt.Sprintf("%s: Likely truncated source file (abrupt EOF near '%s')", path, last)
 	}
 
-	if structureErr := detectLikelyUnbalancedJSTSStructure(trimmed); structureErr != "" {
+	if structureErr := detectLikelyUnbalancedJSTSStructure(trimmed, !jsxLike); structureErr != "" {
 		return fmt.Sprintf("%s: Likely truncated source file (%s)", path, structureErr)
 	}
 
 	return ""
 }
 
-func detectLikelyUnbalancedJSTSStructure(content string) string {
+func detectLikelyUnbalancedJSTSStructure(content string, allowRegex bool) string {
 	modeStack := []jstsScanMode{jstsScanModeCode}
 	templateBraceTargets := make([]int, 0)
 	braceDepth := 0
@@ -22988,7 +23202,7 @@ func detectLikelyUnbalancedJSTSStructure(content string) string {
 			i++
 			continue
 		}
-		if ch == '/' && next != 0 && next != '/' && next != '*' && shouldStartJSTSRegex(lastSignificant) {
+		if allowRegex && ch == '/' && next != 0 && next != '/' && next != '*' && shouldStartJSTSRegex(lastSignificant) {
 			pushMode(jstsScanModeRegex)
 			regexEscaped = false
 			regexCharClass = false

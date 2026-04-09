@@ -4348,6 +4348,98 @@ func TestApplyDeterministicProviderBlockedTestRepair(t *testing.T) {
 	}
 }
 
+func TestApplyDeterministicFrontendScaffoldTruncationRepair(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:          "build-frontend-repair",
+		Description: "Build a polished agency operations dashboard with project tracking and client management.",
+		TechStack: &TechStack{
+			Frontend: "React",
+			Backend:  "Express",
+		},
+		Plan: &BuildPlan{
+			AppType: "fullstack",
+			TechStack: TechStack{
+				Frontend: "React",
+				Backend:  "Express",
+			},
+		},
+	}
+	output := &TaskOutput{
+		Files: []GeneratedFile{
+			{
+				Path:     "src/components/ui/input.tsx",
+				Language: "typescript",
+				Content:  `import * as React from "react"; const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>((`,
+			},
+			{
+				Path:     "src/App.tsx",
+				Language: "typescript",
+				Content:  `export default function App() { return (`,
+			},
+		},
+		TruncatedFiles: []string{"src/components/ui/input.tsx", "src/App.tsx"},
+	}
+
+	repaired, summary := am.applyDeterministicFrontendScaffoldTruncationRepair(build, output, []string{
+		`src/components/ui/input.tsx: Likely truncated source file (unterminated regular expression literal before EOF)`,
+		`src/App.tsx: Likely truncated source file (missing closing '}' before EOF)`,
+	})
+	if !repaired {
+		t.Fatal("expected deterministic frontend scaffold repair to apply")
+	}
+	if !strings.Contains(summary, "src/components/ui/input.tsx") || !strings.Contains(summary, "src/App.tsx") {
+		t.Fatalf("unexpected repair summary: %q", summary)
+	}
+	if output.Files[0].Content == `import * as React from "react"; const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>((` {
+		t.Fatalf("expected truncated shadcn input to be replaced, got %q", output.Files[0].Content)
+	}
+	if !strings.Contains(output.Files[0].Content, `export { Input };`) {
+		t.Fatalf("expected canonical input scaffold content, got %q", output.Files[0].Content)
+	}
+	if !strings.Contains(output.Files[1].Content, `APEX recovered preview`) {
+		t.Fatalf("expected canonical App shell content, got %q", output.Files[1].Content)
+	}
+	if len(output.TruncatedFiles) != 0 {
+		t.Fatalf("expected repaired scaffold files to be removed from truncated files, got %+v", output.TruncatedFiles)
+	}
+}
+
+func TestApplyDeterministicFrontendScaffoldTruncationRepairSkipsNonFrontendBuilds(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:          "build-backend-only",
+		Description: "Build an internal API service only.",
+		TechStack: &TechStack{
+			Frontend: "",
+			Backend:  "Express",
+		},
+		Plan: &BuildPlan{
+			AppType: "api",
+			TechStack: TechStack{
+				Backend: "Express",
+			},
+		},
+	}
+	output := &TaskOutput{
+		Files: []GeneratedFile{
+			{Path: "src/components/ui/input.tsx", Language: "typescript", Content: "broken"},
+		},
+		TruncatedFiles: []string{"src/components/ui/input.tsx"},
+	}
+
+	repaired, _ := am.applyDeterministicFrontendScaffoldTruncationRepair(build, output, []string{
+		`src/components/ui/input.tsx: Likely truncated source file (unterminated regular expression literal before EOF)`,
+	})
+	if repaired {
+		t.Fatal("expected backend-only build to skip frontend scaffold repair")
+	}
+}
+
 func TestApplyDeterministicProviderBlockedTestRepairAddsMissingJestDependency(t *testing.T) {
 	t.Parallel()
 

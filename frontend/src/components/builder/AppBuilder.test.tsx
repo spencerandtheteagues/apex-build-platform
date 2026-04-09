@@ -1,16 +1,20 @@
 /* @vitest-environment jsdom */
 
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/services/api', () => ({
   default: {
+    applyBuildArtifacts: vi.fn(),
     buildPreflight: vi.fn(),
+    createFile: vi.fn(),
+    exportProject: vi.fn(),
     featureReadiness: vi.fn(),
     getBuildStatus: vi.fn(),
     getBuildDetails: vi.fn(),
     getCompletedBuild: vi.fn(),
+    getProject: vi.fn(),
     listBuilds: vi.fn(),
     sendBuildMessage: vi.fn(),
     startBuild: vi.fn(),
@@ -248,10 +252,14 @@ describe('AppBuilder control surface', () => {
       value: vi.fn(),
     })
     ;(apiService.buildPreflight as any).mockReset()
+    ;(apiService.applyBuildArtifacts as any).mockReset()
+    ;(apiService.createFile as any).mockReset()
+    ;(apiService.exportProject as any).mockReset()
     ;(apiService.featureReadiness as any).mockReset()
     ;(apiService.getBuildStatus as any).mockReset()
     ;(apiService.getBuildDetails as any).mockReset()
     ;(apiService.getCompletedBuild as any).mockReset()
+    ;(apiService.getProject as any).mockReset()
     ;(apiService.listBuilds as any).mockReset()
     ;(apiService.sendBuildMessage as any).mockReset()
     ;(apiService.startBuild as any).mockReset()
@@ -280,6 +288,19 @@ describe('AppBuilder control surface', () => {
       ready: true,
       degraded_features: [],
       services: [],
+    })
+    ;(apiService.applyBuildArtifacts as any).mockResolvedValue({
+      project_id: 42,
+      result: {
+        created_project: true,
+        total_files: 3,
+      },
+    })
+    ;(apiService.getProject as any).mockResolvedValue({
+      id: 42,
+      name: 'Preview Canary',
+      description: 'Preview-ready project',
+      language: 'typescript',
     })
     window.history.replaceState({}, '', '/')
   })
@@ -778,6 +799,60 @@ describe('AppBuilder control surface', () => {
 
     await waitFor(() => {
       expect(apiService.getBuildDetails).toHaveBeenCalledWith(MOCK_HISTORY_BUILD_ID)
+    })
+  })
+
+  it('auto-opens the preview workspace when a live build completes successfully', async () => {
+    const connections = installWebSocketMock()
+    const onNavigateToIDE = vi.fn()
+
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+      status: 'in_progress',
+      live: true,
+      websocket_url: 'wss://runtime.example/ws/build/history-build-1',
+    }))
+    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+      status: 'in_progress',
+      live: true,
+      websocket_url: 'wss://runtime.example/ws/build/history-build-1',
+    }))
+
+    render(<AppBuilder onNavigateToIDE={onNavigateToIDE} />)
+
+    await openMockedBuild()
+
+    await waitFor(() => {
+      expect(connections).toHaveLength(1)
+    })
+
+    await act(async () => {
+      connections[0]?.onopen?.()
+      connections[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: 'build:completed',
+          build_id: MOCK_HISTORY_BUILD_ID,
+          data: {
+            status: 'completed',
+            files_count: 3,
+            files: [
+              {
+                path: 'src/App.tsx',
+                content: 'export default function App(){return null}',
+                language: 'typescript',
+              },
+            ],
+          },
+        }),
+      } as MessageEvent)
+    })
+
+    await waitFor(() => {
+      expect(apiService.applyBuildArtifacts).toHaveBeenCalledWith(MOCK_HISTORY_BUILD_ID)
+      expect(onNavigateToIDE).toHaveBeenCalledWith({ target: 'preview', projectId: 42 })
     })
   })
 

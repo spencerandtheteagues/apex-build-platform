@@ -79,10 +79,29 @@ func PreviewFrameAncestors() string {
 	if extra := strings.TrimSpace(os.Getenv("FRAME_ANCESTORS_EXTRA")); extra != "" {
 		ancestors = append(ancestors, splitAndTrim(extra)...)
 	} else if !IsProductionEnvironment() {
-		ancestors = append(ancestors, "https://apex-frontend-gigq.onrender.com")
+		ancestors = append(
+			ancestors,
+			"https://apex-frontend-gigq.onrender.com",
+			"http://localhost:*",
+			"http://127.0.0.1:*",
+		)
 	}
 
-	return strings.Join(ancestors, " ")
+	seen := make(map[string]struct{}, len(ancestors))
+	unique := make([]string, 0, len(ancestors))
+	for _, ancestor := range ancestors {
+		normalized := strings.TrimSpace(ancestor)
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		unique = append(unique, normalized)
+	}
+
+	return strings.Join(unique, " ")
 }
 
 func IsProductionEnvironment() bool {

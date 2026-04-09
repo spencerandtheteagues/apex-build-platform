@@ -1,6 +1,9 @@
 package origins
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestIsAllowedOriginIncludesLocalAPIProxyOrigin(t *testing.T) {
 	if !IsAllowedOrigin("http://127.0.0.1:8080") {
@@ -38,5 +41,20 @@ func TestIsConfiguredOriginBlocksArbitraryDevelopmentLoopback(t *testing.T) {
 	}
 	if !IsConfiguredOrigin("http://localhost:3000") {
 		t.Fatal("expected explicitly configured localhost origin to remain allowed")
+	}
+}
+
+func TestPreviewFrameAncestorsAllowsLoopbackBuilderOriginsInDevelopment(t *testing.T) {
+	t.Setenv("ENVIRONMENT", "development")
+
+	ancestors := PreviewFrameAncestors()
+
+	for _, expected := range []string{
+		"http://localhost:*",
+		"http://127.0.0.1:*",
+	} {
+		if !strings.Contains(ancestors, expected) {
+			t.Fatalf("expected preview frame ancestors %q to include %q", ancestors, expected)
+		}
 	}
 }

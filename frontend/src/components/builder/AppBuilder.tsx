@@ -3209,7 +3209,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
         if (finalStatus === 'completed' && !previewPreparedRef.current) {
           previewPreparedRef.current = true
-          void preparePreview(true)
+          void (async () => {
+            const project = await preparePreview(true)
+            if (project) {
+              onNavigateToIDE?.({ target: 'preview', projectId: project.id })
+            }
+          })()
         }
         break
       }

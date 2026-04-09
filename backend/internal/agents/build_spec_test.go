@@ -1544,6 +1544,16 @@ func TestCreateBuildPlanFromPlanningBundlePulseBoardUsesFrontendScaffoldAndFront
 	if plan.TechStack.Frontend != "React" {
 		t.Fatalf("expected React frontend normalization, got %+v", plan.TechStack)
 	}
+	foundComponentsOwnership := false
+	for _, ownership := range plan.Ownership {
+		if ownership.Role == RoleFrontend && ownership.Path == "components.json" {
+			foundComponentsOwnership = true
+			break
+		}
+	}
+	if !foundComponentsOwnership {
+		t.Fatalf("expected frontend ownership to include components.json, got %+v", plan.Ownership)
+	}
 	if plan.TechStack.Styling != "Tailwind" {
 		t.Fatalf("expected Tailwind styling normalization, got %+v", plan.TechStack)
 	}

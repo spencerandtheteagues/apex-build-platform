@@ -1571,7 +1571,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			},
 			Ownership: map[AgentRole][]string{
 				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
-				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "index.html", "src/**", "public/**"},
+				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "components.json", "index.html", "src/**", "public/**"},
 				RoleBackend:   {"package.json", "tsconfig.json", ".env.example", "server/**"},
 				RoleDatabase:  {"migrations/**", "db/**", "prisma/**", "schema.sql", "server/db/**", "server/migrate.ts", "server/seed.ts"},
 				RoleTesting:   {"tests/**", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"},
@@ -1619,7 +1619,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			},
 			Ownership: map[AgentRole][]string{
 				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
-				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "index.html", "src/**", "public/**"},
+				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "components.json", "index.html", "src/**", "public/**"},
 				RoleBackend:   {"go.mod", "main.go", "cmd/**", "internal/**", "pkg/**", "handlers/**", "middleware/**", ".env.example"},
 				RoleDatabase:  {"migrations/**", "db/**", "internal/db/**", "schema.sql"},
 				RoleTesting:   {"tests/**", "**/*.test.ts", "**/*.test.tsx", "**/*_test.go"},
@@ -1667,7 +1667,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			},
 			Ownership: map[AgentRole][]string{
 				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
-				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "index.html", "src/**", "public/**"},
+				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "components.json", "index.html", "src/**", "public/**"},
 				RoleBackend:   {"requirements.txt", "main.py", "routers/**", "models/**", "services/**", "middleware/**", ".env.example"},
 				RoleDatabase:  {"migrations/**", "db/**", "alembic/**", "schema.sql"},
 				RoleTesting:   {"tests/**", "**/*.test.ts", "**/*.test.tsx", "**/*_test.py", "**/*.spec.ts"},
@@ -1781,7 +1781,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			},
 			Ownership: map[AgentRole][]string{
 				RoleArchitect: {"README.md", "ARCHITECTURE.md", "docs/**"},
-				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "index.html", "src/**", "public/**"},
+				RoleFrontend:  {"package.json", "tsconfig.json", "vite.config.ts", "tailwind.config.js", "postcss.config.js", "components.json", "index.html", "src/**", "public/**"},
 				RoleTesting:   {"tests/**", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"},
 				RoleReviewer:  {"**"},
 				RoleSolver:    {"**"},

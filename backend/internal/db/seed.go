@@ -64,6 +64,9 @@ func (d *Database) SeedAdminUser() error {
 		return nil
 	}
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("bcrypt admin password: %w", err)
+	}
 
 	if result.Error == nil {
 		log.Println("✅ Admin user already exists - updating privileges and password")
@@ -79,9 +82,6 @@ func (d *Database) SeedAdminUser() error {
 			"is_active":             true,
 		})
 		return nil
-	}
-	if err != nil {
-		return err
 	}
 
 	// Create admin user
@@ -128,6 +128,9 @@ func (d *Database) SeedSpencerUser() error {
 		return nil
 	}
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("bcrypt spencer password: %w", err)
+	}
 
 	if result.Error == nil {
 		log.Println("✅ Spencer user already exists - updating privileges and password")
@@ -143,9 +146,6 @@ func (d *Database) SeedSpencerUser() error {
 			"is_active":             true,
 		})
 		return nil
-	}
-	if err != nil {
-		return err
 	}
 
 	// Create Spencer's user

@@ -30,6 +30,27 @@ func applyDeterministicShadcnScaffold(createIfMissing func(path, content, langua
 	createIfMissing("src/components/ui/dialog.tsx", shadcnDialogTSX(), "typescript")
 }
 
+func shadcnScaffoldContent(path string) (string, string, bool) {
+	switch path {
+	case "components.json":
+		return shadcnComponentsJSON(), "json", true
+	case "src/lib/utils.ts":
+		return shadcnUtilsTS(), "typescript", true
+	case "src/components/ui/button.tsx":
+		return shadcnButtonTSX(), "typescript", true
+	case "src/components/ui/card.tsx":
+		return shadcnCardTSX(), "typescript", true
+	case "src/components/ui/input.tsx":
+		return shadcnInputTSX(), "typescript", true
+	case "src/components/ui/badge.tsx":
+		return shadcnBadgeTSX(), "typescript", true
+	case "src/components/ui/dialog.tsx":
+		return shadcnDialogTSX(), "typescript", true
+	default:
+		return "", "", false
+	}
+}
+
 func shadcnComponentsJSON() string {
 	return `{
   "$schema": "https://ui.shadcn.com/schema.json",
