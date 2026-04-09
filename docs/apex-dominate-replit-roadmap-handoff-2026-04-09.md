@@ -311,7 +311,27 @@ Key files:
 - `backend/internal/agents/manager.go`
 - `backend/internal/agents/provider_failure_matrix_test.go`
 
-### 12. Autonomous package manifests are now more runnable by default
+### 12. Plan work orders now absorb reliability and frontend-first intent
+
+Implemented:
+
+- plan-level work orders are now enriched before task assignment with:
+  - frontend-first preview acceptance checks
+  - preserved primary user-flow checks
+  - compile/visual/interaction recurring-risk checks
+  - reviewer/testing reliability focus items
+- the enrichment runs both:
+  - after plan completion
+  - after frontend approval when full-stack continuation rebuilds work orders
+- this pushes reliability guidance upstream into frontend/testing/reviewer/backend tasks instead of waiting for solver recovery
+
+Key files:
+
+- `backend/internal/agents/build_spec.go`
+- `backend/internal/agents/build_spec_test.go`
+- `backend/internal/agents/manager.go`
+
+### 13. Autonomous package manifests are now more runnable by default
 
 Implemented:
 

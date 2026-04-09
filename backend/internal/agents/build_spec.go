@@ -1306,6 +1306,87 @@ func buildWorkOrders(appType string, stack TechStack, scaffold buildScaffold, ow
 	return out
 }
 
+func applyReliabilityWorkOrderBias(plan *BuildPlan, spec *ValidatedBuildSpec, summary *BuildReliabilitySummary) {
+	if plan == nil || len(plan.WorkOrders) == 0 {
+		return
+	}
+	for i := range plan.WorkOrders {
+		enrichWorkOrderAcceptanceChecks(&plan.WorkOrders[i], spec, summary)
+	}
+}
+
+func enrichWorkOrderAcceptanceChecks(order *BuildWorkOrder, spec *ValidatedBuildSpec, summary *BuildReliabilitySummary) {
+	if order == nil {
+		return
+	}
+
+	checks := append([]string(nil), order.AcceptanceChecks...)
+	deliveryMode := ""
+	acceptanceSurfaces := []string(nil)
+	primaryFlows := []string(nil)
+	if spec != nil {
+		deliveryMode = strings.TrimSpace(strings.ToLower(spec.DeliveryMode))
+		acceptanceSurfaces = append([]string(nil), spec.AcceptanceSurfaces...)
+		primaryFlows = append([]string(nil), spec.PrimaryUserFlows...)
+	}
+
+	frontendCritical := containsString(acceptanceSurfaces, "frontend") || deliveryMode == "frontend_preview" || deliveryMode == "frontend_preview_only" || deliveryMode == "full_stack_preview"
+	if frontendCritical {
+		switch order.Role {
+		case RoleFrontend:
+			checks = append(checks, "Deliver a preview-visible frontend shell first and keep the accepted frontend surfaces truthful before backend/runtime follow-up.")
+		case RoleTesting, RoleReviewer:
+			checks = append(checks, "Verify the accepted frontend surfaces remain preview-visible and truthful on first load.")
+		case RoleBackend, RoleDatabase:
+			checks = append(checks, "Implement runtime work without regressing the already-approved frontend preview shell or route contract.")
+		}
+	}
+
+	if len(primaryFlows) > 0 {
+		switch order.Role {
+		case RoleFrontend, RoleTesting, RoleReviewer, RoleSolver:
+			for _, flow := range limitStrings(primaryFlows, 2) {
+				checks = append(checks, "Protect primary user flow: "+strings.TrimSpace(flow))
+			}
+		}
+	}
+
+	if summary != nil {
+		compileRecurring := strings.TrimSpace(summary.CurrentFailureClass) == "compile_failure" || containsString(summary.RecurringFailureClass, "compile_failure")
+		visualRecurring := containsString(summary.AdvisoryClasses, "visual_layout") || containsString(summary.RecurringFailureClass, "visual_layout")
+		interactionRecurring := containsString(summary.AdvisoryClasses, "interaction_canary") || containsString(summary.RecurringFailureClass, "interaction_canary")
+
+		if compileRecurring {
+			switch order.Role {
+			case RoleFrontend, RoleBackend, RoleDatabase, RoleTesting, RoleReviewer, RoleSolver:
+				checks = append(checks, "Guard against compile regressions in owned files: keep imports, exports, and types runnable without unresolved symbols.")
+			}
+		}
+		if visualRecurring {
+			switch order.Role {
+			case RoleFrontend, RoleTesting, RoleReviewer, RoleSolver:
+				checks = append(checks, "Check preview-critical screens for blank states, contrast issues, layout overlap, and unstyled surfaces before completion.")
+			}
+		}
+		if interactionRecurring {
+			switch order.Role {
+			case RoleFrontend, RoleTesting, RoleReviewer, RoleSolver:
+				checks = append(checks, "Verify first-click interactions on primary CTAs, buttons, links, and menus so preview canary checks stay clean.")
+			}
+		}
+		if len(summary.RecommendedFocus) > 0 {
+			switch order.Role {
+			case RoleReviewer, RoleTesting, RoleSolver:
+				for _, focus := range limitStrings(summary.RecommendedFocus, 2) {
+					checks = append(checks, "Reliability focus: "+strings.TrimSpace(focus))
+				}
+			}
+		}
+	}
+
+	order.AcceptanceChecks = dedupeStrings(checks)
+}
+
 func sharedScaffoldFileAllowedForRole(path string, role AgentRole) bool {
 	switch path {
 	case "package.json", "tsconfig.json":

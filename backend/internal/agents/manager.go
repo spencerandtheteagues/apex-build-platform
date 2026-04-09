@@ -5292,6 +5292,7 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 			if orchestration.Flags.EnableValidatedBuildSpec {
 				orchestration.ValidatedBuildSpec = finalizeValidatedBuildSpec(build.ID, orchestration.ValidatedBuildSpec, output.Plan, orchestration.BuildContract)
 			}
+			applyReliabilityWorkOrderBias(build.Plan, orchestration.ValidatedBuildSpec, orchestration.ReliabilitySummary)
 			if !contractBlocked && orchestration.Flags.EnableSelectiveEscalation && orchestration.BuildContract != nil &&
 				shouldRunProviderAssistedContractCritique(build, orchestration.BuildContract) {
 				runProviderCritique = true
@@ -16092,6 +16093,7 @@ func (am *AgentManager) sendTargetedMessageWithClientToken(
 					if orchestration.IntentBrief != nil && orchestration.IntentBrief.CostSensitivity != "" {
 						costSensitivity = orchestration.IntentBrief.CostSensitivity
 					}
+					applyReliabilityWorkOrderBias(build.Plan, orchestration.ValidatedBuildSpec, orchestration.ReliabilitySummary)
 					orchestration.WorkOrders = compileWorkOrdersFromPlanWithCost(build.ID, orchestration.BuildContract, build.Plan, orchestration.ProviderScorecards, costSensitivity)
 				}
 			}

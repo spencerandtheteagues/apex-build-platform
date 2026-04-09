@@ -672,6 +672,68 @@ func TestAssignPhaseAgentsUsesFrozenWorkOrder(t *testing.T) {
 	}
 }
 
+func TestApplyReliabilityWorkOrderBiasAddsFrontendAndRecurringChecks(t *testing.T) {
+	t.Parallel()
+
+	plan := &BuildPlan{
+		WorkOrders: []BuildWorkOrder{
+			{Role: RoleFrontend, AcceptanceChecks: []string{"Render the main dashboard route"}},
+			{Role: RoleTesting, AcceptanceChecks: []string{"Verify preview boot"}},
+			{Role: RoleBackend, AcceptanceChecks: []string{"Serve the API contract"}},
+		},
+	}
+	spec := &ValidatedBuildSpec{
+		DeliveryMode:       "full_stack_preview",
+		AcceptanceSurfaces: []string{"frontend", "backend"},
+		PrimaryUserFlows: []string{
+			"land in the product shell and reach an interactive preview on first pass",
+			"open the dashboard and inspect KPI cards",
+		},
+	}
+	summary := &BuildReliabilitySummary{
+		Status:                "degraded",
+		CurrentFailureClass:   "compile_failure",
+		AdvisoryClasses:       []string{"visual_layout", "interaction_canary"},
+		RecurringFailureClass: []string{"compile_failure", "visual_layout"},
+		RecommendedFocus:      []string{"expand deterministic compile repair coverage for the current failure class"},
+	}
+
+	applyReliabilityWorkOrderBias(plan, spec, summary)
+
+	frontend := getBuildWorkOrder(plan, RoleFrontend)
+	if frontend == nil {
+		t.Fatal("expected frontend work order")
+	}
+	if !containsString(frontend.AcceptanceChecks, "Deliver a preview-visible frontend shell first and keep the accepted frontend surfaces truthful before backend/runtime follow-up.") {
+		t.Fatalf("expected frontend preview-first check, got %+v", frontend.AcceptanceChecks)
+	}
+	if !containsString(frontend.AcceptanceChecks, "Guard against compile regressions in owned files: keep imports, exports, and types runnable without unresolved symbols.") {
+		t.Fatalf("expected frontend compile guard check, got %+v", frontend.AcceptanceChecks)
+	}
+	if !containsString(frontend.AcceptanceChecks, "Check preview-critical screens for blank states, contrast issues, layout overlap, and unstyled surfaces before completion.") {
+		t.Fatalf("expected frontend visual reliability check, got %+v", frontend.AcceptanceChecks)
+	}
+	if !containsString(frontend.AcceptanceChecks, "Verify first-click interactions on primary CTAs, buttons, links, and menus so preview canary checks stay clean.") {
+		t.Fatalf("expected frontend interaction reliability check, got %+v", frontend.AcceptanceChecks)
+	}
+
+	testing := getBuildWorkOrder(plan, RoleTesting)
+	if testing == nil {
+		t.Fatal("expected testing work order")
+	}
+	if !containsString(testing.AcceptanceChecks, "Reliability focus: expand deterministic compile repair coverage for the current failure class") {
+		t.Fatalf("expected testing reliability focus, got %+v", testing.AcceptanceChecks)
+	}
+
+	backend := getBuildWorkOrder(plan, RoleBackend)
+	if backend == nil {
+		t.Fatal("expected backend work order")
+	}
+	if !containsString(backend.AcceptanceChecks, "Implement runtime work without regressing the already-approved frontend preview shell or route contract.") {
+		t.Fatalf("expected backend preview-preservation check, got %+v", backend.AcceptanceChecks)
+	}
+}
+
 func TestAssignTaskHydratesArtifactWorkOrderForAdHocTask(t *testing.T) {
 	t.Parallel()
 
