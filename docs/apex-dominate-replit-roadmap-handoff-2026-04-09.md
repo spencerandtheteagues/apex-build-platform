@@ -280,7 +280,24 @@ Key files:
 - `backend/internal/agents/validated_build_spec.go`
 - `backend/internal/agents/validated_build_spec_test.go`
 
-### 10. Autonomous package manifests are now more runnable by default
+### 10. Reliability summary now steers prompts and repairs
+
+Implemented:
+
+- task prompts now include the derived `reliability_summary` context when present
+- compile-repair prompts now include the same summary before error windows/context-diet source excerpts
+- recurring failure classes, recommended focus, acceptance surfaces, and primary user flows now actively shape solver behavior
+- the summary is also copied into per-task input for downstream tooling/debugging
+
+Key files:
+
+- `backend/internal/agents/reliability_summary.go`
+- `backend/internal/agents/reliability_summary_test.go`
+- `backend/internal/agents/compile_validator.go`
+- `backend/internal/agents/compile_validator_test.go`
+- `backend/internal/agents/manager.go`
+
+### 11. Autonomous package manifests are now more runnable by default
 
 Implemented:
 

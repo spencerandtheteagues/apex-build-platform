@@ -180,7 +180,7 @@ export function App({ title }: AppProps) {
 }
 `,
 		},
-	})
+	}, "")
 
 	if strings.Contains(prompt, "**Full file content**") {
 		t.Fatalf("expected context-diet prompt, got full file dump: %q", prompt)
@@ -193,6 +193,46 @@ export function App({ title }: AppProps) {
 	}
 	if !strings.Contains(prompt, "Focused source windows:") {
 		t.Fatalf("expected focused source windows section, got %q", prompt)
+	}
+}
+
+func TestCVBuildRepairPromptIncludesReliabilitySummary(t *testing.T) {
+	t.Parallel()
+
+	prompt := cvBuildRepairPrompt([]ParsedBuildError{
+		{
+			File:    "src/App.tsx",
+			Line:    8,
+			Column:  4,
+			Code:    "TS2304",
+			Message: "Cannot find name 'BrokenThing'.",
+			Source:  "tsc",
+		},
+	}, []GeneratedFile{
+		{
+			Path: "src/App.tsx",
+			Content: `export function App() {
+  return <main>{BrokenThing}</main>
+}
+`,
+		},
+	}, reliabilitySummaryPromptContext(&BuildReliabilitySummary{
+		Status:                "degraded",
+		CurrentFailureClass:   "compile_failure",
+		AcceptanceSurfaces:    []string{"frontend"},
+		PrimaryUserFlows:      []string{"land in the product shell"},
+		RecurringFailureClass: []string{"compile_failure"},
+		RecommendedFocus:      []string{"expand deterministic compile repair coverage for the current failure class"},
+	}))
+
+	if !strings.Contains(prompt, "<reliability_summary>") {
+		t.Fatalf("expected reliability summary in repair prompt, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "compile_failure") {
+		t.Fatalf("expected recurring failure class in repair prompt, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "acceptance_surfaces:") {
+		t.Fatalf("expected acceptance surfaces in repair prompt, got %q", prompt)
 	}
 }
 

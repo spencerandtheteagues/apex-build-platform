@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -101,5 +102,42 @@ func TestRefreshDerivedReliabilitySummaryLockedMarksDegradedCurrentFailure(t *te
 	}
 	if len(summary.RecommendedFocus) == 0 {
 		t.Fatalf("expected recommended focus, got %+v", summary)
+	}
+}
+
+func TestBuildTaskPromptIncludesReliabilitySummaryContext(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		Description: "Build a preview-first workspace",
+		Plan: &BuildPlan{
+			SpecHash: "spec-reliability",
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				ReliabilitySummary: &BuildReliabilitySummary{
+					Status:                "degraded",
+					CurrentFailureClass:   "compile_failure",
+					AcceptanceSurfaces:    []string{"frontend"},
+					PrimaryUserFlows:      []string{"land in the product shell and reach an interactive preview on first pass"},
+					RecurringFailureClass: []string{"compile_failure"},
+					RecommendedFocus:      []string{"expand deterministic compile repair coverage for the current failure class"},
+				},
+			},
+		},
+	}
+	task := &Task{Type: TaskFix, Description: "Repair the current preview blocker"}
+	agent := &Agent{Role: RoleSolver}
+
+	prompt := am.buildTaskPrompt(task, build, agent)
+	if !strings.Contains(prompt, "<reliability_summary>") {
+		t.Fatalf("expected reliability summary context in task prompt, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "compile_failure") {
+		t.Fatalf("expected failure class in task prompt, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "Preserve the acceptance surfaces") {
+		t.Fatalf("expected acceptance-surface preservation guidance in task prompt, got %q", prompt)
 	}
 }

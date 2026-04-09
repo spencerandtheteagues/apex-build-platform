@@ -626,7 +626,11 @@ func (am *AgentManager) cvGenerateTaskOutput(
 	if am == nil || am.aiRouter == nil || build == nil {
 		return nil
 	}
-	prompt := cvBuildRepairPrompt(errors, allFiles)
+	reliabilityContext := ""
+	if build.SnapshotState.Orchestration != nil && build.SnapshotState.Orchestration.ReliabilitySummary != nil {
+		reliabilityContext = reliabilitySummaryPromptContext(build.SnapshotState.Orchestration.ReliabilitySummary)
+	}
+	prompt := cvBuildRepairPrompt(errors, allFiles, reliabilityContext)
 	if directive := strings.TrimSpace(strategy.Directive); directive != "" {
 		prompt += "\n\n## Repair Strategy\n\n" + directive + "\n"
 	}
@@ -758,7 +762,7 @@ func cvValidateCandidateWorkspace(ctx context.Context, files []GeneratedFile, ba
 
 // cvBuildRepairPrompt assembles the repair prompt with structured error context
 // and per-file source windows around each error location.
-func cvBuildRepairPrompt(errors []ParsedBuildError, allFiles []GeneratedFile) string {
+func cvBuildRepairPrompt(errors []ParsedBuildError, allFiles []GeneratedFile, reliabilityContext string) string {
 	// Build a file content index for quick lookup.
 	fileIndex := make(map[string]string, len(allFiles))
 	for _, f := range allFiles {
@@ -797,6 +801,10 @@ func cvBuildRepairPrompt(errors []ParsedBuildError, allFiles []GeneratedFile) st
 	var sb strings.Builder
 
 	sb.WriteString(patchFirstTaskOutputFormatPrompt())
+	if trimmed := strings.TrimSpace(reliabilityContext); trimmed != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(trimmed)
+	}
 	sb.WriteString("\n\n## Build Errors\n\n")
 	sb.WriteString(fmt.Sprintf("Source: %s\n\n", errors[0].Source))
 

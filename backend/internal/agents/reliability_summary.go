@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -188,4 +189,59 @@ func limitStrings(values []string, limit int) []string {
 		return append([]string(nil), values...)
 	}
 	return append([]string(nil), values[:limit]...)
+}
+
+func reliabilitySummaryPromptContext(summary *BuildReliabilitySummary) string {
+	if summary == nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("<reliability_summary>\n")
+	sb.WriteString(fmt.Sprintf("status: %s\n", strings.TrimSpace(summary.Status)))
+	if summary.CurrentFailureCategory != "" {
+		sb.WriteString(fmt.Sprintf("current_failure_category: %s\n", summary.CurrentFailureCategory))
+	}
+	if trimmed := strings.TrimSpace(summary.CurrentFailureClass); trimmed != "" {
+		sb.WriteString(fmt.Sprintf("current_failure_class: %s\n", trimmed))
+	}
+	if len(summary.AcceptanceSurfaces) > 0 {
+		sb.WriteString("acceptance_surfaces:\n")
+		for _, surface := range summary.AcceptanceSurfaces {
+			sb.WriteString("- " + strings.TrimSpace(surface) + "\n")
+		}
+	}
+	if len(summary.PrimaryUserFlows) > 0 {
+		sb.WriteString("primary_user_flows:\n")
+		for _, flow := range summary.PrimaryUserFlows {
+			sb.WriteString("- " + strings.TrimSpace(flow) + "\n")
+		}
+	}
+	if len(summary.AdvisoryClasses) > 0 {
+		sb.WriteString("advisory_classes:\n")
+		for _, advisory := range summary.AdvisoryClasses {
+			sb.WriteString("- " + strings.TrimSpace(advisory) + "\n")
+		}
+	}
+	if len(summary.RecurringFailureClass) > 0 {
+		sb.WriteString("recurring_failure_classes:\n")
+		for _, class := range summary.RecurringFailureClass {
+			sb.WriteString("- " + strings.TrimSpace(class) + "\n")
+		}
+	}
+	if len(summary.RecommendedFocus) > 0 {
+		sb.WriteString("recommended_focus:\n")
+		for _, focus := range summary.RecommendedFocus {
+			sb.WriteString("- " + strings.TrimSpace(focus) + "\n")
+		}
+	}
+	if len(summary.TopIssues) > 0 {
+		sb.WriteString("top_issues:\n")
+		for _, issue := range summary.TopIssues {
+			sb.WriteString("- " + strings.TrimSpace(issue) + "\n")
+		}
+	}
+	sb.WriteString("Preserve the acceptance surfaces and primary user flows above. Do not reintroduce recurring failure classes.\n")
+	sb.WriteString("</reliability_summary>\n")
+	return sb.String()
 }

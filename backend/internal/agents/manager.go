@@ -15008,6 +15008,9 @@ func (am *AgentManager) assignPhaseAgents(build *Build, agents []agentPriority, 
 		if orchestration := build.SnapshotState.Orchestration; orchestration != nil && orchestration.ValidatedBuildSpec != nil {
 			task.Input["validated_build_spec"] = orchestration.ValidatedBuildSpec
 		}
+		if orchestration := build.SnapshotState.Orchestration; orchestration != nil && orchestration.ReliabilitySummary != nil {
+			task.Input["reliability_summary"] = orchestration.ReliabilitySummary
+		}
 		if workOrder != nil {
 			task.Input["work_order"] = workOrder
 			task.Input["owned_files"] = append([]string(nil), workOrder.OwnedFiles...)
@@ -18030,8 +18033,14 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 		buildSpecContext = buildSpecPromptContext(build.Plan, workOrder)
 	}
 	validatedBuildSpecContext := ""
-	if build != nil && build.SnapshotState.Orchestration != nil && build.SnapshotState.Orchestration.ValidatedBuildSpec != nil {
-		validatedBuildSpecContext = validatedBuildSpecPromptContext(build.SnapshotState.Orchestration.ValidatedBuildSpec)
+	reliabilitySummaryContext := ""
+	if build != nil && build.SnapshotState.Orchestration != nil {
+		if build.SnapshotState.Orchestration.ValidatedBuildSpec != nil {
+			validatedBuildSpecContext = validatedBuildSpecPromptContext(build.SnapshotState.Orchestration.ValidatedBuildSpec)
+		}
+		if build.SnapshotState.Orchestration.ReliabilitySummary != nil {
+			reliabilitySummaryContext = reliabilitySummaryPromptContext(build.SnapshotState.Orchestration.ReliabilitySummary)
+		}
 	}
 	workOrderArtifactContext := workOrderArtifactPromptContext(workOrderArtifact)
 	currentOwnedFilesContext := ""
@@ -18276,6 +18285,7 @@ App being built: %s
 %s
 %s
 %s
+%s
 %s`,
 		task.Type,
 		task.Description,
@@ -18288,6 +18298,7 @@ App being built: %s
 		coordinationErrorContext,
 		buildSpecContext,
 		validatedBuildSpecContext,
+		reliabilitySummaryContext,
 		workOrderArtifactContext,
 		currentOwnedFilesContext,
 		coordinationProtocolContext,
