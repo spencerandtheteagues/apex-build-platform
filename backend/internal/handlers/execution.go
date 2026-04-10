@@ -1129,6 +1129,8 @@ func (h *ExecutionHandler) GetExecutionStats(c *gin.Context) {
 				"seccomp_enabled":     capabilities.SeccompEnabled,
 				"read_only_root":      capabilities.ReadOnlyRoot,
 				"resource_limits":     capabilities.ResourceLimits,
+				"available_clis":      capabilities.AvailableCLIs,
+				"language_toolchains": capabilities.LanguageToolchains,
 			},
 			"execution_enabled": h.SandboxFactory != nil,
 		},
@@ -1300,6 +1302,9 @@ func (h *ExecutionHandler) GetSandboxStatus() map[string]interface{} {
 		status["network_isolation"] = caps.NetworkIsolation
 		status["seccomp_enabled"] = caps.SeccompEnabled
 		status["supported_languages"] = caps.SupportedLanguages
+		status["available_clis"] = caps.AvailableCLIs
+		status["network_dependent_clis"] = caps.NetworkDependentCLI
+		status["language_toolchains"] = caps.LanguageToolchains
 	}
 
 	// Check Docker status directly

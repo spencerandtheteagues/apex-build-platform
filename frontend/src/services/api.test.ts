@@ -191,6 +191,88 @@ describe('getDeploymentLogsWebSocketUrl', () => {
   })
 })
 
+describe('external deployments', () => {
+  it('fetches the provider catalog from the deploy API', async () => {
+    const service = new ApiService('/api/v1')
+    const get = vi.spyOn(service.client, 'get').mockResolvedValue({
+      data: {
+        providers: [
+          { id: 'railway', name: 'Railway', description: 'Full-stack hosting', features: ['Domains'] },
+          { id: 'cloudflare_pages', name: 'Cloudflare Pages', description: 'Edge static hosting', features: ['CDN'] },
+        ],
+      },
+    } as any)
+
+    const providers = await service.getExternalDeploymentProviders()
+
+    expect(get).toHaveBeenCalledWith('/deploy/providers')
+    expect(providers.map((provider) => provider.id)).toEqual(['railway', 'cloudflare_pages'])
+  })
+
+  it('posts external deployment config including node version, root directory, and Neon database orchestration', async () => {
+    const service = new ApiService('/api/v1')
+    const post = vi.spyOn(service.client, 'post').mockResolvedValue({
+      data: {
+        success: true,
+        deployment: { id: 'dep-123' },
+        message: 'Deployment started',
+      },
+    } as any)
+
+    await service.startExternalDeployment({
+      project_id: 42,
+      provider: 'railway',
+      framework: 'react',
+      node_version: '20',
+      root_directory: 'apps/web',
+      build_command: 'npm run build',
+      start_command: 'npm start',
+      database: {
+        provider: 'neon',
+        project_name: 'apex-db',
+        database_name: 'app',
+        role_name: 'app_owner',
+        pooled: true,
+      },
+    })
+
+    expect(post).toHaveBeenCalledWith('/deploy', {
+      project_id: 42,
+      provider: 'railway',
+      framework: 'react',
+      node_version: '20',
+      root_directory: 'apps/web',
+      build_command: 'npm run build',
+      start_command: 'npm start',
+      database: {
+        provider: 'neon',
+        project_name: 'apex-db',
+        database_name: 'app',
+        role_name: 'app_owner',
+        pooled: true,
+      },
+    })
+  })
+
+  it('reads native deployment logs from the top-level envelope', async () => {
+    const service = new ApiService('/api/v1')
+    const get = vi.spyOn(service.client, 'get').mockResolvedValue({
+      data: {
+        success: true,
+        logs: [
+          { id: 1, deployment_id: 'native-1', timestamp: '2026-01-01T00:00:00Z', level: 'info', source: 'deploy', message: 'ready' },
+        ],
+      },
+    } as any)
+
+    const logs = await service.getDeploymentLogs(22, 'native-1')
+
+    expect(get).toHaveBeenCalledWith('/projects/22/deployments/native-1/logs?limit=100')
+    expect(logs).toHaveLength(1)
+    expect(logs[0].message).toBe('ready')
+  })
+})
+
 describe('sendBuildMessage', () => {
   it('posts targeted routing metadata for planner and agent controls', async () => {
     const service = new ApiService('/api/v1')

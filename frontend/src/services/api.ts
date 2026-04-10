@@ -1967,12 +1967,70 @@ export class ApiService {
 
   // ========== ALWAYS-ON DEPLOYMENT ENDPOINTS (Replit parity) ==========
 
+  async getExternalDeploymentProviders(): Promise<ExternalDeploymentProvider[]> {
+    const response = await this.client.get<{ success: boolean; providers: ExternalDeploymentProvider[] }>('/deploy/providers')
+    return response.data.providers || []
+  }
+
+  async startExternalDeployment(config: ExternalDeploymentConfig): Promise<{
+    success: boolean
+    deployment: ExternalDeployment
+    message: string
+  }> {
+    const response = await this.client.post('/deploy', config)
+    return response.data
+  }
+
+  async getExternalDeployment(deploymentId: string): Promise<ExternalDeployment> {
+    const response = await this.client.get<{ success: boolean; deployment: ExternalDeployment }>(`/deploy/${deploymentId}`)
+    return response.data.deployment
+  }
+
+  async getExternalDeploymentStatus(deploymentId: string): Promise<{
+    success: boolean
+    status: ExternalDeployment['status']
+    url?: string
+  }> {
+    const response = await this.client.get(`/deploy/${deploymentId}/status`)
+    return response.data
+  }
+
+  async getExternalDeploymentLogs(deploymentId: string, limit: number = 100): Promise<ExternalDeploymentLog[]> {
+    const response = await this.client.get<{ success: boolean; logs: ExternalDeploymentLog[] }>(
+      `/deploy/${deploymentId}/logs?limit=${limit}`
+    )
+    return response.data.logs || []
+  }
+
+  async cancelExternalDeployment(deploymentId: string): Promise<void> {
+    await this.client.delete(`/deploy/${deploymentId}`)
+  }
+
+  async redeployExternalDeployment(deploymentId: string): Promise<{
+    success: boolean
+    deployment: ExternalDeployment
+    message: string
+  }> {
+    const response = await this.client.post(`/deploy/${deploymentId}/redeploy`)
+    return response.data
+  }
+
+  async getExternalDeploymentHistory(projectId: number, page: number = 1, limit: number = 20): Promise<{
+    deployments: ExternalDeployment[]
+    total: number
+    page: number
+    limit: number
+  }> {
+    const response = await this.client.get(`/deploy/projects/${projectId}/history?page=${page}&limit=${limit}`)
+    return response.data
+  }
+
   // Get always-on status for a deployment
   async getAlwaysOnStatus(projectId: number, deploymentId: string): Promise<AlwaysOnStatus> {
-    const response = await this.client.get<ApiResponse<{ status: AlwaysOnStatus }>>(
+    const response = await this.client.get<{ success: boolean; status: AlwaysOnStatus }>(
       `/projects/${projectId}/deployments/${deploymentId}/always-on`
     )
-    return response.data.data!.status
+    return response.data.status
   }
 
   // Enable or disable always-on for a deployment
@@ -1982,15 +2040,15 @@ export class ApiService {
     enabled: boolean,
     keepAliveInterval?: number
   ): Promise<{ success: boolean; always_on: boolean; message: string }> {
-    const response = await this.client.put<ApiResponse<{
+    const response = await this.client.put<{
       success: boolean
       always_on: boolean
       message: string
-    }>>(`/projects/${projectId}/deployments/${deploymentId}/always-on`, {
+    }>(`/projects/${projectId}/deployments/${deploymentId}/always-on`, {
       always_on: enabled,
       keep_alive_interval: keepAliveInterval || 60,
     })
-    return response.data.data!
+    return response.data
   }
 
   // Start a native deployment with always-on option
@@ -2017,18 +2075,18 @@ export class ApiService {
 
   // Get a specific deployment
   async getNativeDeployment(projectId: number, deploymentId: string): Promise<NativeDeployment> {
-    const response = await this.client.get<ApiResponse<{ deployment: NativeDeployment }>>(
+    const response = await this.client.get<{ success: boolean; deployment: NativeDeployment }>(
       `/projects/${projectId}/deployments/${deploymentId}`
     )
-    return response.data.data!.deployment
+    return response.data.deployment
   }
 
   // Get deployment logs
   async getDeploymentLogs(projectId: number, deploymentId: string, limit: number = 100): Promise<DeploymentLog[]> {
-    const response = await this.client.get<ApiResponse<{ logs: DeploymentLog[] }>>(
+    const response = await this.client.get<{ success: boolean; logs: DeploymentLog[] }>(
       `/projects/${projectId}/deployments/${deploymentId}/logs?limit=${limit}`
     )
-    return response.data.data!.logs
+    return response.data.logs || []
   }
 
   // Stop a deployment
@@ -2043,10 +2101,10 @@ export class ApiService {
 
   // Get deployment metrics
   async getDeploymentMetrics(projectId: number, deploymentId: string): Promise<DeploymentMetrics> {
-    const response = await this.client.get<ApiResponse<{ metrics: DeploymentMetrics }>>(
+    const response = await this.client.get<{ success: boolean; metrics: DeploymentMetrics }>(
       `/projects/${projectId}/deployments/${deploymentId}/metrics`
     )
-    return response.data.data!.metrics
+    return response.data.metrics
   }
 
   // ========== CODE COMPLETIONS ENDPOINTS (Ghostwriter-equivalent) ==========
@@ -2716,6 +2774,82 @@ export interface AvailableShell {
 // ---------------------------------------------------------------------------
 // Always-On Deployment types (Replit parity feature)
 // ---------------------------------------------------------------------------
+
+export type ExternalDeploymentProviderId =
+  | 'vercel'
+  | 'netlify'
+  | 'render'
+  | 'railway'
+  | 'cloudflare_pages'
+
+export interface ExternalDeploymentProvider {
+  id: ExternalDeploymentProviderId
+  name: string
+  description: string
+  features: string[]
+}
+
+export interface ExternalDeploymentDatabaseConfig {
+  provider: 'neon'
+  project_name?: string
+  branch_name?: string
+  database_name?: string
+  role_name?: string
+  region_id?: string
+  org_id?: string
+  pg_version?: number
+  pooled?: boolean
+}
+
+export interface ExternalDeploymentConfig {
+  project_id: number
+  provider: ExternalDeploymentProviderId
+  environment?: string
+  branch?: string
+  env_vars?: Record<string, string>
+  build_command?: string
+  output_dir?: string
+  install_cmd?: string
+  start_command?: string
+  framework?: string
+  node_version?: string
+  root_directory?: string
+  database?: ExternalDeploymentDatabaseConfig
+}
+
+export interface ExternalDeployment {
+  id: string
+  project_id: number
+  user_id: number
+  provider: ExternalDeploymentProviderId
+  status: 'pending' | 'preparing' | 'building' | 'deploying' | 'live' | 'failed' | 'cancelled'
+  url?: string
+  preview_url?: string
+  environment: string
+  branch: string
+  commit_sha?: string
+  commit_msg?: string
+  build_time?: number
+  deploy_time?: number
+  total_time?: number
+  error_message?: string
+  config?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+  started_at?: string
+  completed_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ExternalDeploymentLog {
+  id: number
+  deployment_id: string
+  timestamp: string
+  level: 'debug' | 'info' | 'warn' | 'error'
+  message: string
+  phase?: string
+  metadata?: string
+}
 
 export interface AlwaysOnStatus {
   always_on: boolean

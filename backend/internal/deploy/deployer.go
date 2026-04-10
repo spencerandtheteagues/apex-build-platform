@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -19,22 +20,31 @@ import (
 type DeploymentStatus string
 
 const (
-	StatusPending    DeploymentStatus = "pending"
-	StatusPreparing  DeploymentStatus = "preparing"
-	StatusBuilding   DeploymentStatus = "building"
-	StatusDeploying  DeploymentStatus = "deploying"
-	StatusLive       DeploymentStatus = "live"
-	StatusFailed     DeploymentStatus = "failed"
-	StatusCancelled  DeploymentStatus = "cancelled"
+	StatusPending   DeploymentStatus = "pending"
+	StatusPreparing DeploymentStatus = "preparing"
+	StatusBuilding  DeploymentStatus = "building"
+	StatusDeploying DeploymentStatus = "deploying"
+	StatusLive      DeploymentStatus = "live"
+	StatusFailed    DeploymentStatus = "failed"
+	StatusCancelled DeploymentStatus = "cancelled"
 )
 
 // DeploymentProvider represents supported deployment providers
 type DeploymentProvider string
 
 const (
-	ProviderVercel  DeploymentProvider = "vercel"
-	ProviderNetlify DeploymentProvider = "netlify"
-	ProviderRender  DeploymentProvider = "render"
+	ProviderVercel          DeploymentProvider = "vercel"
+	ProviderNetlify         DeploymentProvider = "netlify"
+	ProviderRender          DeploymentProvider = "render"
+	ProviderRailway         DeploymentProvider = "railway"
+	ProviderCloudflarePages DeploymentProvider = "cloudflare_pages"
+)
+
+// DatabaseProvider represents supported managed database orchestration providers.
+type DatabaseProvider string
+
+const (
+	DatabaseProviderNeon DatabaseProvider = "neon"
 )
 
 // Deployment represents a single deployment instance
@@ -53,9 +63,9 @@ type Deployment struct {
 	Branch       string                 `json:"branch" gorm:"default:'main'"`
 	CommitSHA    string                 `json:"commit_sha,omitempty"`
 	CommitMsg    string                 `json:"commit_msg,omitempty"`
-	BuildTime    int64                  `json:"build_time,omitempty"`     // milliseconds
-	DeployTime   int64                  `json:"deploy_time,omitempty"`    // milliseconds
-	TotalTime    int64                  `json:"total_time,omitempty"`     // milliseconds
+	BuildTime    int64                  `json:"build_time,omitempty"`  // milliseconds
+	DeployTime   int64                  `json:"deploy_time,omitempty"` // milliseconds
+	TotalTime    int64                  `json:"total_time,omitempty"`  // milliseconds
 	ErrorMessage string                 `json:"error_message,omitempty"`
 	Config       map[string]interface{} `json:"config,omitempty" gorm:"serializer:json"`
 	Metadata     map[string]interface{} `json:"metadata,omitempty" gorm:"serializer:json"`
@@ -84,10 +94,26 @@ type DeploymentConfig struct {
 	BuildCommand  string                 `json:"build_command,omitempty"`
 	OutputDir     string                 `json:"output_dir,omitempty"`
 	InstallCmd    string                 `json:"install_cmd,omitempty"`
+	StartCommand  string                 `json:"start_command,omitempty"`
 	Framework     string                 `json:"framework,omitempty"`
 	NodeVersion   string                 `json:"node_version,omitempty"`
 	RootDirectory string                 `json:"root_directory,omitempty"`
+	Database      *DatabaseConfig        `json:"database,omitempty"`
 	Custom        map[string]interface{} `json:"custom,omitempty"`
+}
+
+// DatabaseConfig contains configuration for an optional managed database
+// provisioned alongside a deployment.
+type DatabaseConfig struct {
+	Provider     DatabaseProvider `json:"provider"`
+	ProjectName  string           `json:"project_name,omitempty"`
+	BranchName   string           `json:"branch_name,omitempty"`
+	DatabaseName string           `json:"database_name,omitempty"`
+	RoleName     string           `json:"role_name,omitempty"`
+	RegionID     string           `json:"region_id,omitempty"`
+	OrgID        string           `json:"org_id,omitempty"`
+	PGVersion    int              `json:"pg_version,omitempty"`
+	Pooled       bool             `json:"pooled,omitempty"`
 }
 
 // DeploymentResult contains the result of a deployment operation
@@ -118,6 +144,23 @@ type ProviderDeploymentResult struct {
 	PreviewURL   string           `json:"preview_url,omitempty"`
 	BuildLogs    []string         `json:"build_logs,omitempty"`
 	ErrorMessage string           `json:"error_message,omitempty"`
+	Metadata     map[string]any   `json:"metadata,omitempty"`
+}
+
+// DatabaseProvisioner provisions or reuses managed database infrastructure for
+// a deployment and returns runtime environment variables plus provider metadata.
+type DatabaseProvisioner interface {
+	Name() DatabaseProvider
+	ValidateConfig(config *DatabaseConfig) error
+	EnsureDatabase(ctx context.Context, config *DeploymentConfig) (*ProvisionedDatabaseResult, error)
+}
+
+// ProvisionedDatabaseResult contains the deployment-facing output of a managed
+// database orchestration step. Sensitive credentials live only in EnvVars.
+type ProvisionedDatabaseResult struct {
+	EnvVars  map[string]string `json:"env_vars,omitempty"`
+	Logs     []string          `json:"logs,omitempty"`
+	Metadata map[string]any    `json:"metadata,omitempty"`
 }
 
 // ProjectFile represents a file to be deployed
@@ -134,25 +177,32 @@ type DeploymentService struct {
 	db        *gorm.DB
 	builder   *BuildService
 	providers map[DeploymentProvider]Provider
-	tokens    map[DeploymentProvider]string  // API tokens for providers
+	databases map[DatabaseProvider]DatabaseProvisioner
+	tokens    map[DeploymentProvider]string // API tokens for providers
 	mu        sync.RWMutex
 	active    map[string]context.CancelFunc // active deployment cancellation functions
+
+	monitorPollInterval time.Duration
 }
 
 // NewDeploymentService creates a new deployment service
-func NewDeploymentService(db *gorm.DB, vercelToken, netlifyToken, renderToken string) *DeploymentService {
+func NewDeploymentService(db *gorm.DB, vercelToken, netlifyToken, renderToken, railwayToken, cloudflarePagesToken string) *DeploymentService {
 	svc := &DeploymentService{
-		db:        db,
-		builder:   NewBuildService(),
-		providers: make(map[DeploymentProvider]Provider),
-		active:    make(map[string]context.CancelFunc),
+		db:                  db,
+		builder:             NewBuildService(),
+		providers:           make(map[DeploymentProvider]Provider),
+		databases:           make(map[DatabaseProvider]DatabaseProvisioner),
+		active:              make(map[string]context.CancelFunc),
+		monitorPollInterval: 8 * time.Second,
 	}
 
 	// Store tokens for lazy provider initialization
 	svc.tokens = map[DeploymentProvider]string{
-		ProviderVercel:  vercelToken,
-		ProviderNetlify: netlifyToken,
-		ProviderRender:  renderToken,
+		ProviderVercel:          vercelToken,
+		ProviderNetlify:         netlifyToken,
+		ProviderRender:          renderToken,
+		ProviderRailway:         railwayToken,
+		ProviderCloudflarePages: cloudflarePagesToken,
 	}
 
 	return svc
@@ -163,6 +213,13 @@ func (s *DeploymentService) RegisterProvider(providerType DeploymentProvider, pr
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.providers[providerType] = provider
+}
+
+// RegisterDatabaseProvisioner registers a managed database provisioner.
+func (s *DeploymentService) RegisterDatabaseProvisioner(providerType DatabaseProvider, provisioner DatabaseProvisioner) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.databases[providerType] = provisioner
 }
 
 // StartDeployment initiates a new deployment
@@ -177,6 +234,9 @@ func (s *DeploymentService) StartDeployment(ctx context.Context, userID uint, co
 	if err := provider.ValidateConfig(config); err != nil {
 		return nil, fmt.Errorf("invalid deployment config: %w", err)
 	}
+	if err := s.validateDatabaseConfig(config); err != nil {
+		return nil, err
+	}
 
 	// Create deployment record
 	deployment := &Deployment{
@@ -188,11 +248,15 @@ func (s *DeploymentService) StartDeployment(ctx context.Context, userID uint, co
 		Environment: config.Environment,
 		Branch:      config.Branch,
 		Config: map[string]interface{}{
-			"build_command": config.BuildCommand,
-			"output_dir":    config.OutputDir,
-			"install_cmd":   config.InstallCmd,
-			"framework":     config.Framework,
-			"node_version":  config.NodeVersion,
+			"build_command":  config.BuildCommand,
+			"output_dir":     config.OutputDir,
+			"install_cmd":    config.InstallCmd,
+			"start_command":  config.StartCommand,
+			"framework":      config.Framework,
+			"node_version":   config.NodeVersion,
+			"root_directory": config.RootDirectory,
+			"database":       config.Database,
+			"custom":         config.Custom,
 		},
 		Metadata: make(map[string]interface{}),
 	}
@@ -259,21 +323,35 @@ func (s *DeploymentService) executeDeployment(deployment *Deployment, config *De
 	projectType := s.builder.DetectProjectType(projectFiles)
 	s.addLog(deployment.ID, "info", fmt.Sprintf("Detected project type: %s", projectType), "prepare")
 
-	// Generate deployment configuration if not provided
-	if config.BuildCommand == "" || config.OutputDir == "" {
-		buildConfig := s.builder.GenerateBuildConfig(projectType, projectFiles)
-		if config.BuildCommand == "" {
-			config.BuildCommand = buildConfig.BuildCommand
+	// Generate deployment configuration defaults when runtime/build fields are missing.
+	if config.BuildCommand == "" || config.OutputDir == "" || config.InstallCmd == "" ||
+		config.StartCommand == "" || config.Framework == "" || config.NodeVersion == "" {
+		applyGeneratedDeploymentDefaults(config, s.builder.GenerateBuildConfig(projectType, projectFiles))
+	}
+
+	if config.Database != nil {
+		provisioner, ok := s.databases[config.Database.Provider]
+		if !ok {
+			s.failDeployment(deployment, fmt.Sprintf("Managed database provider %s is not configured", config.Database.Provider))
+			return
 		}
-		if config.OutputDir == "" {
-			config.OutputDir = buildConfig.OutputDir
+		s.addLog(deployment.ID, "info", fmt.Sprintf("Provisioning %s database resources...", config.Database.Provider), "prepare")
+		dbResult, err := provisioner.EnsureDatabase(ctx, config)
+		if err != nil {
+			s.failDeployment(deployment, fmt.Sprintf("Failed to provision managed database: %v", err))
+			return
 		}
-		if config.InstallCmd == "" {
-			config.InstallCmd = buildConfig.InstallCommand
+		for key, value := range dbResult.EnvVars {
+			if config.EnvVars == nil {
+				config.EnvVars = make(map[string]string)
+			}
+			config.EnvVars[key] = value
 		}
-		if config.Framework == "" {
-			config.Framework = buildConfig.Framework
+		s.mergeDeploymentMetadata(deployment, dbResult.Metadata)
+		for _, line := range dbResult.Logs {
+			s.addLog(deployment.ID, "info", line, "prepare")
 		}
+		s.addLog(deployment.ID, "info", fmt.Sprintf("Managed %s database ready; runtime env updated", config.Database.Provider), "prepare")
 	}
 
 	s.addLog(deployment.ID, "info", fmt.Sprintf("Build command: %s", config.BuildCommand), "prepare")
@@ -312,21 +390,34 @@ func (s *DeploymentService) executeDeployment(deployment *Deployment, config *De
 		s.addLog(deployment.ID, "info", log, "deploy")
 	}
 
-	deployDuration := time.Since(deployStartTime).Milliseconds()
-	deployment.DeployTime = deployDuration
-	totalDuration := time.Since(startTime).Milliseconds()
-	deployment.TotalTime = totalDuration
-
-	// Update deployment with results
-	completedAt := time.Now()
-	deployment.CompletedAt = &completedAt
-	deployment.URL = result.URL
-	deployment.PreviewURL = result.PreviewURL
-	deployment.Metadata["provider_id"] = result.ProviderID
-
-	s.updateStatus(deployment, StatusLive, "")
-	s.addLog(deployment.ID, "info", fmt.Sprintf("Deployment live at: %s", result.URL), "deploy")
-	s.addLog(deployment.ID, "info", fmt.Sprintf("Total deployment time: %dms", totalDuration), "deploy")
+	s.applyProviderResult(deployment, result)
+	switch result.Status {
+	case StatusFailed:
+		s.failDeployment(deployment, firstNonEmpty(result.ErrorMessage, "Deployment failed"))
+		return
+	case StatusCancelled:
+		completedAt := time.Now()
+		deployment.CompletedAt = &completedAt
+		s.updateStatus(deployment, StatusCancelled, firstNonEmpty(result.ErrorMessage, "Deployment cancelled"))
+		s.addLog(deployment.ID, "warn", "Deployment cancelled by provider", "deploy")
+		return
+	case StatusLive:
+		s.completeSuccessfulDeployment(deployment, deployStartTime, startTime)
+		return
+	default:
+		status := result.Status
+		if status == "" {
+			status = StatusDeploying
+		}
+		s.updateStatus(deployment, status, "")
+		s.addLog(deployment.ID, "info", fmt.Sprintf("Provider reported %s; monitoring until terminal state", status), "deploy")
+		if err := s.monitorProviderDeployment(ctx, deployment, provider, result.ProviderID, deployStartTime, startTime, result.BuildLogs); err != nil {
+			if errors.Is(err, context.Canceled) && s.isDeploymentCancelled(deployment.ID) {
+				return
+			}
+			s.failDeployment(deployment, fmt.Sprintf("Deployment monitoring failed: %v", err))
+		}
+	}
 }
 
 // GetDeploymentStatus returns the current status of a deployment
@@ -415,6 +506,11 @@ func (s *DeploymentService) GetAvailableProviders() []map[string]interface{} {
 			"features":    getProviderFeatures(name),
 		})
 	}
+	sort.Slice(providers, func(i, j int) bool {
+		left, _ := providers[i]["id"].(string)
+		right, _ := providers[j]["id"].(string)
+		return left < right
+	})
 	return providers
 }
 
@@ -430,30 +526,7 @@ func (s *DeploymentService) Redeploy(ctx context.Context, deploymentID string, u
 		return nil, fmt.Errorf("unauthorized")
 	}
 
-	// Create new deployment config from original
-	config := &DeploymentConfig{
-		ProjectID:   original.ProjectID,
-		Provider:    original.Provider,
-		Environment: original.Environment,
-		Branch:      original.Branch,
-	}
-
-	if original.Config != nil {
-		if bc, ok := original.Config["build_command"].(string); ok {
-			config.BuildCommand = bc
-		}
-		if od, ok := original.Config["output_dir"].(string); ok {
-			config.OutputDir = od
-		}
-		if ic, ok := original.Config["install_cmd"].(string); ok {
-			config.InstallCmd = ic
-		}
-		if fw, ok := original.Config["framework"].(string); ok {
-			config.Framework = fw
-		}
-	}
-
-	return s.StartDeployment(ctx, userID, config)
+	return s.StartDeployment(ctx, userID, restoreDeploymentConfig(&original))
 }
 
 // Helper functions
@@ -484,6 +557,165 @@ func (s *DeploymentService) addLog(deploymentID, level, message, phase string) {
 	s.db.Create(&log)
 }
 
+func (s *DeploymentService) validateDatabaseConfig(config *DeploymentConfig) error {
+	if config == nil || config.Database == nil {
+		return nil
+	}
+	provisioner, ok := s.databases[config.Database.Provider]
+	if !ok {
+		return fmt.Errorf("database provider %s is not configured", config.Database.Provider)
+	}
+	if err := provisioner.ValidateConfig(config.Database); err != nil {
+		return fmt.Errorf("invalid database config: %w", err)
+	}
+	for _, key := range []string{"DATABASE_URL", "POSTGRES_URL", "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"} {
+		if _, exists := config.EnvVars[key]; exists {
+			return fmt.Errorf("environment variable %s cannot be set when managed database orchestration is enabled", key)
+		}
+	}
+	return nil
+}
+
+func (s *DeploymentService) mergeDeploymentMetadata(deployment *Deployment, metadata map[string]any) {
+	if deployment == nil || len(metadata) == 0 {
+		return
+	}
+	if deployment.Metadata == nil {
+		deployment.Metadata = make(map[string]interface{})
+	}
+	for key, value := range metadata {
+		deployment.Metadata[key] = value
+	}
+	custom := map[string]any{}
+	if deployment.Config == nil {
+		deployment.Config = make(map[string]interface{})
+	}
+	if existing, ok := deployment.Config["custom"].(map[string]any); ok {
+		for key, value := range existing {
+			custom[key] = value
+		}
+	} else if existing, ok := deployment.Config["custom"].(map[string]interface{}); ok {
+		for key, value := range existing {
+			custom[key] = value
+		}
+	}
+	for key, value := range metadata {
+		custom[key] = value
+	}
+	deployment.Config["custom"] = custom
+}
+
+func (s *DeploymentService) applyProviderResult(deployment *Deployment, result *ProviderDeploymentResult) {
+	if deployment == nil || result == nil {
+		return
+	}
+	deployment.URL = result.URL
+	deployment.PreviewURL = result.PreviewURL
+	s.mergeDeploymentMetadata(deployment, result.Metadata)
+	if deployment.Metadata == nil {
+		deployment.Metadata = make(map[string]interface{})
+	}
+	deployment.Metadata["provider_id"] = result.ProviderID
+	s.db.Save(deployment)
+}
+
+func (s *DeploymentService) completeSuccessfulDeployment(deployment *Deployment, deployStartTime, startTime time.Time) {
+	if deployment == nil {
+		return
+	}
+	deployDuration := time.Since(deployStartTime).Milliseconds()
+	deployment.DeployTime = deployDuration
+	totalDuration := time.Since(startTime).Milliseconds()
+	deployment.TotalTime = totalDuration
+	completedAt := time.Now()
+	deployment.CompletedAt = &completedAt
+	s.updateStatus(deployment, StatusLive, "")
+	if deployment.URL != "" {
+		s.addLog(deployment.ID, "info", fmt.Sprintf("Deployment live at: %s", deployment.URL), "deploy")
+	}
+	s.addLog(deployment.ID, "info", fmt.Sprintf("Total deployment time: %dms", totalDuration), "deploy")
+}
+
+func (s *DeploymentService) monitorProviderDeployment(ctx context.Context, deployment *Deployment, provider Provider, providerID string, deployStartTime, startTime time.Time, initialLogs []string) error {
+	if providerID == "" {
+		return fmt.Errorf("provider deployment reference is missing")
+	}
+	seenLogs := make(map[string]struct{}, len(initialLogs))
+	for _, line := range initialLogs {
+		if line == "" {
+			continue
+		}
+		seenLogs[line] = struct{}{}
+	}
+	lastStatus := deployment.Status
+	pollInterval := s.monitorPollInterval
+	if pollInterval <= 0 {
+		pollInterval = 8 * time.Second
+	}
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if logs, err := provider.GetLogs(ctx, providerID); err == nil {
+				for _, line := range logs {
+					if _, exists := seenLogs[line]; exists || line == "" {
+						continue
+					}
+					seenLogs[line] = struct{}{}
+					s.addLog(deployment.ID, "info", line, "deploy")
+				}
+			}
+
+			statusResult, err := provider.GetStatus(ctx, providerID)
+			if err != nil {
+				continue
+			}
+			s.applyProviderResult(deployment, statusResult)
+
+			if statusResult.Status != "" && statusResult.Status != lastStatus {
+				lastStatus = statusResult.Status
+				s.updateStatus(deployment, statusResult.Status, "")
+				s.addLog(deployment.ID, "info", fmt.Sprintf("Provider status changed to %s", statusResult.Status), "deploy")
+			}
+
+			switch statusResult.Status {
+			case StatusLive:
+				s.completeSuccessfulDeployment(deployment, deployStartTime, startTime)
+				return nil
+			case StatusFailed:
+				return fmt.Errorf("%s", firstNonEmpty(statusResult.ErrorMessage, "provider reported failed status"))
+			case StatusCancelled:
+				completedAt := time.Now()
+				deployment.CompletedAt = &completedAt
+				s.updateStatus(deployment, StatusCancelled, firstNonEmpty(statusResult.ErrorMessage, "Deployment cancelled"))
+				s.addLog(deployment.ID, "warn", "Deployment cancelled by provider", "deploy")
+				return nil
+			}
+		}
+	}
+}
+
+func (s *DeploymentService) isDeploymentCancelled(deploymentID string) bool {
+	var deployment Deployment
+	if err := s.db.Select("status").First(&deployment, "id = ?", deploymentID).Error; err != nil {
+		return false
+	}
+	return deployment.Status == StatusCancelled
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func getProviderDisplayName(provider DeploymentProvider) string {
 	switch provider {
 	case ProviderVercel:
@@ -492,6 +724,10 @@ func getProviderDisplayName(provider DeploymentProvider) string {
 		return "Netlify"
 	case ProviderRender:
 		return "Render"
+	case ProviderRailway:
+		return "Railway"
+	case ProviderCloudflarePages:
+		return "Cloudflare Pages"
 	default:
 		return string(provider)
 	}
@@ -505,6 +741,10 @@ func getProviderDescription(provider DeploymentProvider) string {
 		return "Deploy static sites and serverless functions with instant rollbacks"
 	case ProviderRender:
 		return "Deploy full-stack applications with managed databases and services"
+	case ProviderRailway:
+		return "Deploy full-stack applications with Railpack builds and managed service networking"
+	case ProviderCloudflarePages:
+		return "Deploy static frontends to Cloudflare's global edge with Pages projects"
 	default:
 		return ""
 	}
@@ -518,9 +758,89 @@ func getProviderFeatures(provider DeploymentProvider) []string {
 		return []string{"Serverless Functions", "Forms", "Identity", "Split Testing", "Large Media"}
 	case ProviderRender:
 		return []string{"Background Workers", "Cron Jobs", "Managed Databases", "Private Networking", "Auto-scaling"}
+	case ProviderRailway:
+		return []string{"Railpack Builds", "Generated Domains", "Service Variables", "Private Networking", "Managed Databases"}
+	case ProviderCloudflarePages:
+		return []string{"Global Edge CDN", "Preview Branches", "Static Assets", "Pages Functions", "Wrangler Deploys"}
 	default:
 		return []string{}
 	}
+}
+
+func applyGeneratedDeploymentDefaults(config *DeploymentConfig, buildConfig *BuildConfig) {
+	if config == nil || buildConfig == nil {
+		return
+	}
+	if config.BuildCommand == "" {
+		config.BuildCommand = buildConfig.BuildCommand
+	}
+	if config.OutputDir == "" {
+		config.OutputDir = buildConfig.OutputDir
+	}
+	if config.InstallCmd == "" {
+		config.InstallCmd = buildConfig.InstallCommand
+	}
+	if config.StartCommand == "" {
+		config.StartCommand = buildConfig.StartCommand
+	}
+	if config.Framework == "" {
+		config.Framework = buildConfig.Framework
+	}
+	if config.NodeVersion == "" {
+		config.NodeVersion = buildConfig.NodeVersion
+	}
+}
+
+func restoreDeploymentConfig(original *Deployment) *DeploymentConfig {
+	if original == nil {
+		return &DeploymentConfig{}
+	}
+	config := &DeploymentConfig{
+		ProjectID:   original.ProjectID,
+		Provider:    original.Provider,
+		Environment: original.Environment,
+		Branch:      original.Branch,
+	}
+
+	if original.Config == nil {
+		return config
+	}
+	if bc, ok := original.Config["build_command"].(string); ok {
+		config.BuildCommand = bc
+	}
+	if od, ok := original.Config["output_dir"].(string); ok {
+		config.OutputDir = od
+	}
+	if ic, ok := original.Config["install_cmd"].(string); ok {
+		config.InstallCmd = ic
+	}
+	if sc, ok := original.Config["start_command"].(string); ok {
+		config.StartCommand = sc
+	}
+	if fw, ok := original.Config["framework"].(string); ok {
+		config.Framework = fw
+	}
+	if nv, ok := original.Config["node_version"].(string); ok {
+		config.NodeVersion = nv
+	}
+	if rd, ok := original.Config["root_directory"].(string); ok {
+		config.RootDirectory = rd
+	}
+	if database, ok := original.Config["database"]; ok && database != nil {
+		data, err := json.Marshal(database)
+		if err == nil {
+			var databaseConfig DatabaseConfig
+			if err := json.Unmarshal(data, &databaseConfig); err == nil && databaseConfig.Provider != "" {
+				config.Database = &databaseConfig
+			}
+		}
+	}
+	if custom, ok := original.Config["custom"].(map[string]any); ok {
+		config.Custom = custom
+	} else if custom, ok := original.Config["custom"].(map[string]interface{}); ok {
+		config.Custom = custom
+	}
+	return config
 }
 
 // MarshalJSON custom marshaler for DeploymentConfig

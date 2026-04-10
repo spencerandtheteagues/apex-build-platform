@@ -65,3 +65,13 @@ func TestGenerateTailwindConfigIncludesAnimatePluginAndSemanticTokens(t *testing
 		}
 	}
 }
+
+func TestAllowedCommandsIncludesExpandedToolingCatalog(t *testing.T) {
+	t.Parallel()
+
+	for _, command := range []string{"pnpm", "vercel", "railway", "psql", "mysql", "redis-cli", "wrangler", "supabase"} {
+		if !allowedCommands[command] {
+			t.Fatalf("expected allowed commands to include %q", command)
+		}
+	}
+}

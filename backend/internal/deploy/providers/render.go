@@ -51,71 +51,71 @@ func (p *RenderProvider) Name() deploy.DeploymentProvider {
 type RenderServiceType string
 
 const (
-	ServiceTypeWebService    RenderServiceType = "web_service"
-	ServiceTypeStaticSite    RenderServiceType = "static_site"
-	ServiceTypePrivateService RenderServiceType = "private_service"
+	ServiceTypeWebService       RenderServiceType = "web_service"
+	ServiceTypeStaticSite       RenderServiceType = "static_site"
+	ServiceTypePrivateService   RenderServiceType = "private_service"
 	ServiceTypeBackgroundWorker RenderServiceType = "background_worker"
-	ServiceTypeCronJob       RenderServiceType = "cron_job"
+	ServiceTypeCronJob          RenderServiceType = "cron_job"
 )
 
 // RenderService represents a Render service
 type RenderService struct {
-	ID           string            `json:"id"`
-	Type         RenderServiceType `json:"type"`
-	Name         string            `json:"name"`
-	Slug         string            `json:"slug"`
-	Suspended    string            `json:"suspended"` // not_suspended, suspended
-	Suspenders   []string          `json:"suspenders,omitempty"`
-	AutoDeploy   string            `json:"autoDeploy"` // yes, no
-	Branch       string            `json:"branch,omitempty"`
-	BuildFilter  *RenderBuildFilter `json:"buildFilter,omitempty"`
-	CreatedAt    string            `json:"createdAt"`
-	UpdatedAt    string            `json:"updatedAt"`
-	NotifyOnFail string            `json:"notifyOnFail"`
-	OwnerID      string            `json:"ownerId"`
-	Repo         string            `json:"repo,omitempty"`
+	ID             string                `json:"id"`
+	Type           RenderServiceType     `json:"type"`
+	Name           string                `json:"name"`
+	Slug           string                `json:"slug"`
+	Suspended      string                `json:"suspended"` // not_suspended, suspended
+	Suspenders     []string              `json:"suspenders,omitempty"`
+	AutoDeploy     string                `json:"autoDeploy"` // yes, no
+	Branch         string                `json:"branch,omitempty"`
+	BuildFilter    *RenderBuildFilter    `json:"buildFilter,omitempty"`
+	CreatedAt      string                `json:"createdAt"`
+	UpdatedAt      string                `json:"updatedAt"`
+	NotifyOnFail   string                `json:"notifyOnFail"`
+	OwnerID        string                `json:"ownerId"`
+	Repo           string                `json:"repo,omitempty"`
 	ServiceDetails *RenderServiceDetails `json:"serviceDetails,omitempty"`
 }
 
 // RenderServiceDetails contains service-specific details
 type RenderServiceDetails struct {
-	Env            string                 `json:"env,omitempty"` // docker, elixir, go, node, python, ruby, rust, static
+	Env                string                 `json:"env,omitempty"` // docker, elixir, go, node, python, ruby, rust, static
 	EnvSpecificDetails map[string]interface{} `json:"envSpecificDetails,omitempty"`
-	BuildCommand   string                 `json:"buildCommand,omitempty"`
-	StartCommand   string                 `json:"startCommand,omitempty"`
-	PreDeployCommand string               `json:"preDeployCommand,omitempty"`
-	Plan           string                 `json:"plan,omitempty"` // free, starter, standard, pro, etc.
-	Region         string                 `json:"region,omitempty"` // oregon, frankfurt, ohio, singapore
-	NumInstances   int                    `json:"numInstances,omitempty"`
-	HealthCheckPath string                `json:"healthCheckPath,omitempty"`
-	PublishPath    string                 `json:"publishPath,omitempty"` // For static sites
-	URL            string                 `json:"url,omitempty"`
+	BuildCommand       string                 `json:"buildCommand,omitempty"`
+	StartCommand       string                 `json:"startCommand,omitempty"`
+	PreDeployCommand   string                 `json:"preDeployCommand,omitempty"`
+	Plan               string                 `json:"plan,omitempty"`   // free, starter, standard, pro, etc.
+	Region             string                 `json:"region,omitempty"` // oregon, frankfurt, ohio, singapore
+	NumInstances       int                    `json:"numInstances,omitempty"`
+	HealthCheckPath    string                 `json:"healthCheckPath,omitempty"`
+	PublishPath        string                 `json:"publishPath,omitempty"` // For static sites
+	URL                string                 `json:"url,omitempty"`
 }
 
 // RenderBuildFilter for selective builds
 type RenderBuildFilter struct {
-	Paths         []string `json:"paths,omitempty"`
-	IgnoredPaths  []string `json:"ignoredPaths,omitempty"`
+	Paths        []string `json:"paths,omitempty"`
+	IgnoredPaths []string `json:"ignoredPaths,omitempty"`
 }
 
 // RenderCreateServiceRequest for creating a new service
 type RenderCreateServiceRequest struct {
-	Type           RenderServiceType `json:"type"`
-	Name           string            `json:"name"`
-	OwnerID        string            `json:"ownerId"`
-	Repo           string            `json:"repo,omitempty"`
-	Branch         string            `json:"branch,omitempty"`
-	AutoDeploy     string            `json:"autoDeploy,omitempty"`
-	EnvVars        []RenderEnvVar    `json:"envVars,omitempty"`
-	SecretFiles    []RenderSecretFile `json:"secretFiles,omitempty"`
+	Type           RenderServiceType     `json:"type"`
+	Name           string                `json:"name"`
+	OwnerID        string                `json:"ownerId"`
+	Repo           string                `json:"repo,omitempty"`
+	Branch         string                `json:"branch,omitempty"`
+	AutoDeploy     string                `json:"autoDeploy,omitempty"`
+	EnvVars        []RenderEnvVar        `json:"envVars,omitempty"`
+	SecretFiles    []RenderSecretFile    `json:"secretFiles,omitempty"`
 	ServiceDetails *RenderServiceDetails `json:"serviceDetails,omitempty"`
 }
 
 // RenderEnvVar represents an environment variable
 type RenderEnvVar struct {
-	Key   string `json:"key"`
-	Value string `json:"value,omitempty"`
-	GenerateValue bool `json:"generateValue,omitempty"`
+	Key           string `json:"key"`
+	Value         string `json:"value,omitempty"`
+	GenerateValue bool   `json:"generateValue,omitempty"`
 }
 
 // RenderSecretFile represents a secret file
@@ -126,13 +126,13 @@ type RenderSecretFile struct {
 
 // RenderDeploy represents a deployment
 type RenderDeploy struct {
-	ID           string        `json:"id"`
-	Commit       *RenderCommit `json:"commit,omitempty"`
-	Status       string        `json:"status"` // created, build_in_progress, update_in_progress, live, deactivated, build_failed, update_failed, canceled, pre_deploy_in_progress, pre_deploy_failed
-	Trigger      string        `json:"trigger,omitempty"` // api, deploy_hook, git_push, manual, sync
-	FinishedAt   string        `json:"finishedAt,omitempty"`
-	CreatedAt    string        `json:"createdAt"`
-	UpdatedAt    string        `json:"updatedAt"`
+	ID         string        `json:"id"`
+	Commit     *RenderCommit `json:"commit,omitempty"`
+	Status     string        `json:"status"`            // created, build_in_progress, update_in_progress, live, deactivated, build_failed, update_failed, canceled, pre_deploy_in_progress, pre_deploy_failed
+	Trigger    string        `json:"trigger,omitempty"` // api, deploy_hook, git_push, manual, sync
+	FinishedAt string        `json:"finishedAt,omitempty"`
+	CreatedAt  string        `json:"createdAt"`
+	UpdatedAt  string        `json:"updatedAt"`
 }
 
 // RenderCommit represents commit information
@@ -320,6 +320,9 @@ func (p *RenderProvider) createService(ctx context.Context, name string, service
 
 	if config.BuildCommand != "" {
 		serviceDetails.BuildCommand = config.BuildCommand
+	}
+	if config.StartCommand != "" && serviceType != ServiceTypeStaticSite {
+		serviceDetails.StartCommand = config.StartCommand
 	}
 	if config.OutputDir != "" && serviceType == ServiceTypeStaticSite {
 		serviceDetails.PublishPath = config.OutputDir

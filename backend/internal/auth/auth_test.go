@@ -34,6 +34,10 @@ func TestNewAuthServiceUsesExplicitRefreshSecret(t *testing.T) {
 }
 
 func TestNewAuthServiceFallsBackWhenRefreshSecretUnset(t *testing.T) {
+	t.Setenv("ENV", "development")
+	t.Setenv("ENVIRONMENT", "development")
+	t.Setenv("APEX_ENV", "development")
+	
 	original, hadOriginal := os.LookupEnv("JWT_REFRESH_SECRET")
 	if hadOriginal {
 		defer os.Setenv("JWT_REFRESH_SECRET", original)

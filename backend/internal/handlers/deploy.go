@@ -35,15 +35,29 @@ func (h *DeployHandler) StartDeployment(c *gin.Context) {
 	}
 
 	var req struct {
-		ProjectID    uint              `json:"project_id" binding:"required"`
-		Provider     string            `json:"provider" binding:"required"`
-		Environment  string            `json:"environment"`
-		Branch       string            `json:"branch"`
-		EnvVars      map[string]string `json:"env_vars"`
-		BuildCommand string            `json:"build_command"`
-		OutputDir    string            `json:"output_dir"`
-		InstallCmd   string            `json:"install_cmd"`
-		Framework    string            `json:"framework"`
+		ProjectID     uint              `json:"project_id" binding:"required"`
+		Provider      string            `json:"provider" binding:"required"`
+		Environment   string            `json:"environment"`
+		Branch        string            `json:"branch"`
+		EnvVars       map[string]string `json:"env_vars"`
+		BuildCommand  string            `json:"build_command"`
+		OutputDir     string            `json:"output_dir"`
+		InstallCmd    string            `json:"install_cmd"`
+		StartCommand  string            `json:"start_command"`
+		Framework     string            `json:"framework"`
+		NodeVersion   string            `json:"node_version"`
+		RootDirectory string            `json:"root_directory"`
+		Database      *struct {
+			Provider     string `json:"provider"`
+			ProjectName  string `json:"project_name"`
+			BranchName   string `json:"branch_name"`
+			DatabaseName string `json:"database_name"`
+			RoleName     string `json:"role_name"`
+			RegionID     string `json:"region_id"`
+			OrgID        string `json:"org_id"`
+			PGVersion    int    `json:"pg_version"`
+			Pooled       bool   `json:"pooled"`
+		} `json:"database"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -73,15 +87,31 @@ func (h *DeployHandler) StartDeployment(c *gin.Context) {
 
 	// Create deployment config
 	config := &deploy.DeploymentConfig{
-		ProjectID:    req.ProjectID,
-		Provider:     deploy.DeploymentProvider(req.Provider),
-		Environment:  req.Environment,
-		Branch:       req.Branch,
-		EnvVars:      req.EnvVars,
-		BuildCommand: req.BuildCommand,
-		OutputDir:    req.OutputDir,
-		InstallCmd:   req.InstallCmd,
-		Framework:    req.Framework,
+		ProjectID:     req.ProjectID,
+		Provider:      deploy.DeploymentProvider(req.Provider),
+		Environment:   req.Environment,
+		Branch:        req.Branch,
+		EnvVars:       req.EnvVars,
+		BuildCommand:  req.BuildCommand,
+		OutputDir:     req.OutputDir,
+		InstallCmd:    req.InstallCmd,
+		StartCommand:  req.StartCommand,
+		Framework:     req.Framework,
+		NodeVersion:   req.NodeVersion,
+		RootDirectory: req.RootDirectory,
+	}
+	if req.Database != nil {
+		config.Database = &deploy.DatabaseConfig{
+			Provider:     deploy.DatabaseProvider(req.Database.Provider),
+			ProjectName:  req.Database.ProjectName,
+			BranchName:   req.Database.BranchName,
+			DatabaseName: req.Database.DatabaseName,
+			RoleName:     req.Database.RoleName,
+			RegionID:     req.Database.RegionID,
+			OrgID:        req.Database.OrgID,
+			PGVersion:    req.Database.PGVersion,
+			Pooled:       req.Database.Pooled,
+		}
 	}
 
 	// Start deployment

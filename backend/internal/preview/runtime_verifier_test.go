@@ -384,9 +384,13 @@ func TestApplyAdvisoryBrowserSignalsAddsVisionAndCanaryMetadata(t *testing.T) {
 		canary: &stubRuntimeCanaryTester{
 			available: true,
 			result: &CanaryResult{
-				Clicked:     3,
-				Errors:      []string{"TypeError: Cannot read properties of undefined (reading 'map')"},
-				RepairHints: []string{"Fix the click handler that assumes async data is already loaded"},
+				Clicked:                        3,
+				VisibleControls:                5,
+				PostInteractionVisibleControls: 4,
+				PostInteractionChecked:         true,
+				PostInteractionHealthy:         true,
+				Errors:                         []string{"TypeError: Cannot read properties of undefined (reading 'map')"},
+				RepairHints:                    []string{"Fix the click handler that assumes async data is already loaded"},
 			},
 		},
 	}
@@ -406,6 +410,15 @@ func TestApplyAdvisoryBrowserSignalsAddsVisionAndCanaryMetadata(t *testing.T) {
 	}
 	if len(result.CanaryErrors) != 1 {
 		t.Fatalf("expected 1 canary error, got %v", result.CanaryErrors)
+	}
+	if result.CanaryVisibleControls != 5 {
+		t.Fatalf("expected canary visible control count 5, got %d", result.CanaryVisibleControls)
+	}
+	if result.CanaryPostInteractionVisible != 4 {
+		t.Fatalf("expected post-interaction visible control count 4, got %d", result.CanaryPostInteractionVisible)
+	}
+	if !result.CanaryPostInteractionChecked || !result.CanaryPostInteractionHealthy {
+		t.Fatalf("expected canary post-interaction health metadata to be preserved, got %+v", result)
 	}
 	if !containsStringWithPrefix(result.RepairHints, "visual:") {
 		t.Fatalf("expected visual repair hint prefix, got %v", result.RepairHints)

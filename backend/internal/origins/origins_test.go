@@ -13,6 +13,9 @@ func TestIsAllowedOriginIncludesLocalAPIProxyOrigin(t *testing.T) {
 
 func TestIsAllowedOriginAllowsLoopbackDevelopmentOrigins(t *testing.T) {
 	t.Setenv("ENVIRONMENT", "development")
+	t.Setenv("ENV", "development")
+	t.Setenv("APEX_ENV", "development")
+	t.Setenv("GO_ENV", "development")
 
 	tests := []string{
 		"http://127.0.0.1:9000",
@@ -35,6 +38,9 @@ func TestIsAllowedOriginNormalizesFormatting(t *testing.T) {
 
 func TestIsConfiguredOriginBlocksArbitraryDevelopmentLoopback(t *testing.T) {
 	t.Setenv("ENVIRONMENT", "development")
+	t.Setenv("ENV", "development")
+	t.Setenv("APEX_ENV", "development")
+	t.Setenv("GO_ENV", "development")
 
 	if IsConfiguredOrigin("http://localhost:4000") {
 		t.Fatal("expected arbitrary loopback origin to require explicit configuration")
@@ -46,6 +52,9 @@ func TestIsConfiguredOriginBlocksArbitraryDevelopmentLoopback(t *testing.T) {
 
 func TestPreviewFrameAncestorsAllowsLoopbackBuilderOriginsInDevelopment(t *testing.T) {
 	t.Setenv("ENVIRONMENT", "development")
+	t.Setenv("ENV", "development")
+	t.Setenv("APEX_ENV", "development")
+	t.Setenv("GO_ENV", "development")
 
 	ancestors := PreviewFrameAncestors()
 

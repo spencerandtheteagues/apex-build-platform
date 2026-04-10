@@ -60,6 +60,36 @@ var (
 		},
 		[]string{"reason"},
 	)
+
+	verificationReportsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "apex",
+			Subsystem: "reliability",
+			Name:      "verification_reports_total",
+			Help:      "Total verification reports emitted by phase, surface, and status",
+		},
+		[]string{"phase", "surface", "status"},
+	)
+
+	verificationWarningsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "apex",
+			Subsystem: "reliability",
+			Name:      "verification_warnings_total",
+			Help:      "Total advisory verification warnings by class and phase",
+		},
+		[]string{"class", "phase"},
+	)
+
+	buildCanaryCohortsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "apex",
+			Subsystem: "reliability",
+			Name:      "build_canary_cohorts_total",
+			Help:      "Total finalized builds matching the platform canary cohorts",
+		},
+		[]string{"cohort", "status"},
+	)
 )
 
 func RecordBuildFinalization(status, mode, reason string) {
@@ -101,6 +131,30 @@ func RecordPreviewBackendProcessExit(reason string) {
 	).Inc()
 }
 
+func RecordVerificationReport(phase, surface, status string, warnings []string) {
+	phaseLabel := sanitizeReliabilityLabel(phase, "unknown")
+	verificationReportsTotal.WithLabelValues(
+		phaseLabel,
+		sanitizeReliabilityLabel(surface, "unknown"),
+		sanitizeReliabilityLabel(status, "unknown"),
+	).Inc()
+
+	for _, warning := range warnings {
+		class := classifyVerificationWarning(warning)
+		if class == "" {
+			continue
+		}
+		verificationWarningsTotal.WithLabelValues(class, phaseLabel).Inc()
+	}
+}
+
+func RecordBuildCanaryCohort(cohort, status string) {
+	buildCanaryCohortsTotal.WithLabelValues(
+		sanitizeReliabilityLabel(cohort, "unknown"),
+		sanitizeReliabilityLabel(status, "unknown"),
+	).Inc()
+}
+
 func sanitizeReliabilityLabel(raw, fallback string) string {
 	s := strings.ToLower(strings.TrimSpace(raw))
 	if s == "" {
@@ -115,4 +169,16 @@ func sanitizeReliabilityLabel(raw, fallback string) string {
 		s = s[:63]
 	}
 	return s
+}
+
+func classifyVerificationWarning(raw string) string {
+	warning := strings.ToLower(strings.TrimSpace(raw))
+	switch {
+	case strings.HasPrefix(warning, "visual:"):
+		return "visual_layout"
+	case strings.HasPrefix(warning, "interaction:"):
+		return "interaction_canary"
+	default:
+		return ""
+	}
 }

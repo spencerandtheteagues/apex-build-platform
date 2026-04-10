@@ -72,18 +72,22 @@ func NewRuntimeVerifierWithBrowser() *RuntimeVerifier {
 
 // RuntimeVerificationResult is returned by VerifyViteApp.
 type RuntimeVerificationResult struct {
-	Passed           bool
-	Checks           []CheckResult
-	FailureKind      string
-	RepairHints      []string
-	Details          string
-	Duration         time.Duration
-	Skipped          bool   // true when prerequisites (npm/node) are absent
-	ServerLogs       string // truncated Vite stderr for debugging
-	ScreenshotData   []byte
-	CanaryErrors     []string
-	CanaryClickCount int
-	VisionSeverity   string // "critical", "advisory", "clean", or "" when vision skipped
+	Passed                       bool
+	Checks                       []CheckResult
+	FailureKind                  string
+	RepairHints                  []string
+	Details                      string
+	Duration                     time.Duration
+	Skipped                      bool   // true when prerequisites (npm/node) are absent
+	ServerLogs                   string // truncated Vite stderr for debugging
+	ScreenshotData               []byte
+	CanaryErrors                 []string
+	CanaryClickCount             int
+	CanaryVisibleControls        int
+	CanaryPostInteractionVisible int
+	CanaryPostInteractionChecked bool
+	CanaryPostInteractionHealthy bool
+	VisionSeverity               string // "critical", "advisory", "clean", or "" when vision skipped
 }
 
 // ── Public entry point ────────────────────────────────────────────────────────
@@ -320,10 +324,21 @@ func (rv *RuntimeVerifier) applyAdvisoryBrowserSignals(ctx context.Context, resu
 		cancel()
 		if canary != nil && !canary.Skipped {
 			result.CanaryClickCount = canary.Clicked
+			result.CanaryVisibleControls = canary.VisibleControls
+			result.CanaryPostInteractionVisible = canary.PostInteractionVisibleControls
+			result.CanaryPostInteractionChecked = canary.PostInteractionChecked
+			result.CanaryPostInteractionHealthy = canary.PostInteractionHealthy
 			result.CanaryErrors = appendUniqueStrings(result.CanaryErrors, prefixAll("interaction:", canary.Errors)...)
 			result.RepairHints = appendUniqueStrings(result.RepairHints, prefixAll("interaction:", canary.RepairHints)...)
 
-			detail := fmt.Sprintf("clicked %d interactive control(s)", canary.Clicked)
+			detail := fmt.Sprintf("clicked %d of %d visible interactive control(s)", canary.Clicked, canary.VisibleControls)
+			if canary.PostInteractionChecked {
+				if canary.PostInteractionHealthy {
+					detail += fmt.Sprintf("; preview remained rendered after settle (%d control(s) still visible)", canary.PostInteractionVisibleControls)
+				} else {
+					detail += "; preview failed the post-click settle check"
+				}
+			}
 			if len(canary.Errors) > 0 {
 				detail += fmt.Sprintf("; advisory errors: %s", summarizeIssues(canary.Errors, 2))
 			}

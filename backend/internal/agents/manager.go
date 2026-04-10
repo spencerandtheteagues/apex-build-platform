@@ -412,6 +412,7 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 		}
 	}
 	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
+	am.refreshHistoricalBuildLearning(build, req)
 
 	// Apply guardrails for cost control
 	maxAgents, maxRetries, maxRequests, maxTokens := am.defaultBuildLimitsForBuild(build)
@@ -3991,7 +3992,8 @@ func (am *AgentManager) recordTaskExecutionOutcome(build *Build, agent *Agent, t
 	}
 
 	// Store fingerprints for actual failures and successful recoveries only.
-	if normalizedFailure == "" && (task.RetryCount == 0 || !success) {
+	isRepair := task.Type == TaskFix || shape == TaskShapeRepair
+	if normalizedFailure == "" && (task.RetryCount == 0 || !success) && !isRepair {
 		return
 	}
 	appendFailureFingerprint(build, FailureFingerprint{
@@ -4967,10 +4969,10 @@ func (am *AgentManager) processResult(result *TaskResult) {
 			agent.mu.Unlock() // Release lock during verification
 
 			// Run quick build verification on generated code
-			verificationPassed, verifyErrors := am.verifyGeneratedCode(agent.BuildID, result.Output)
+			verificationPassed, verifyErrors := am.verifyGeneratedCode(agent.BuildID, task, result.Output)
 			if !verificationPassed {
 				if repaired, summary := am.applyDeterministicFrontendScaffoldTruncationRepair(build, result.Output, verifyErrors); repaired {
-					verificationPassed, verifyErrors = am.verifyGeneratedCode(agent.BuildID, result.Output)
+					verificationPassed, verifyErrors = am.verifyGeneratedCode(agent.BuildID, task, result.Output)
 					if verificationPassed {
 						result.Output.Messages = append(result.Output.Messages, "Deterministic frontend scaffold repair restored build verification: "+summary)
 					}
@@ -5369,6 +5371,7 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 		}
 		refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
 		build.mu.Unlock()
+		am.refreshHistoricalBuildLearning(build, nil)
 		if runProviderCritique && critiqueContract != nil {
 			if critiqueReport := am.providerAssistedContractCritique(build, critiqueContract); critiqueReport != nil {
 				build.mu.Lock()
@@ -13475,6 +13478,9 @@ completion_finalize:
 			}
 		}
 		metrics.RecordBuildFinalization(string(status), snapshot.buildMode, reason)
+		if cohort := buildCanaryCohort(build); cohort != "" {
+			metrics.RecordBuildCanaryCohort(cohort, string(status))
+		}
 	}
 
 	// Emit structured quality telemetry and test artifact summary before persisting.
@@ -18458,12 +18464,16 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 	}
 	validatedBuildSpecContext := ""
 	reliabilitySummaryContext := ""
+	historicalBuildLearningContext := ""
 	if build != nil && build.SnapshotState.Orchestration != nil {
 		if build.SnapshotState.Orchestration.ValidatedBuildSpec != nil {
 			validatedBuildSpecContext = validatedBuildSpecPromptContext(build.SnapshotState.Orchestration.ValidatedBuildSpec)
 		}
 		if build.SnapshotState.Orchestration.ReliabilitySummary != nil {
 			reliabilitySummaryContext = reliabilitySummaryPromptContext(build.SnapshotState.Orchestration.ReliabilitySummary)
+		}
+		if build.SnapshotState.Orchestration.HistoricalLearning != nil {
+			historicalBuildLearningContext = buildLearningPromptContext(build.SnapshotState.Orchestration.HistoricalLearning)
 		}
 	}
 	workOrderArtifactContext := workOrderArtifactPromptContext(workOrderArtifact)
@@ -18710,6 +18720,7 @@ App being built: %s
 %s
 %s
 %s
+%s
 %s`,
 		task.Type,
 		task.Description,
@@ -18723,6 +18734,7 @@ App being built: %s
 		buildSpecContext,
 		validatedBuildSpecContext,
 		reliabilitySummaryContext,
+		historicalBuildLearningContext,
 		workOrderArtifactContext,
 		currentOwnedFilesContext,
 		coordinationProtocolContext,
@@ -23017,7 +23029,7 @@ func analyzeFrontendPackageJSON(content string) (hasReact bool, hasReactDOM bool
 }
 
 // verifyGeneratedCode performs quick build verification on generated code
-func (am *AgentManager) verifyGeneratedCode(buildID string, output *TaskOutput) (bool, []string) {
+func (am *AgentManager) verifyGeneratedCode(buildID string, task *Task, output *TaskOutput) (bool, []string) {
 	if output == nil {
 		return true, nil // Nothing to verify
 	}
@@ -23882,7 +23894,11 @@ func (am *AgentManager) runFailureConsensus(
 					log.Printf("spend: failed to record failure consensus spend for build %s provider %s: %v", build.ID, provider, spendErr)
 				}
 			}
-			decision, rationale := am.parseConsensusVote(resp.Content, fallbackDecision)
+			var decision consensusDecision = fallbackDecision
+			var rationale string
+			if resp != nil {
+				decision, rationale = am.parseConsensusVote(resp.Content, fallbackDecision)
+			}
 			vote.Decision = decision
 			vote.Rationale = rationale
 		}

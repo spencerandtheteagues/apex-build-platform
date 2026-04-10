@@ -20,6 +20,7 @@ import {
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { AlwaysOnToggle } from './AlwaysOnToggle'
+import { ExternalDeploymentPanel } from './ExternalDeploymentPanel'
 import {
   Rocket,
   Globe,
@@ -169,18 +170,21 @@ export const DeploymentPanel: React.FC<DeploymentPanelProps> = ({
     return `${(ms / 1000).toFixed(1)}s`
   }
 
-  if (loading) {
-    return (
-      <Card variant="cyberpunk" className={className}>
-        <CardContent className="flex items-center justify-center py-12">
-          <RefreshCw className="w-6 h-6 text-cyan-400 animate-spin" />
-        </CardContent>
-      </Card>
-    )
-  }
-
   return (
     <div className={cn('space-y-4', className)}>
+      <ExternalDeploymentPanel
+        projectId={projectId}
+        projectName={projectName}
+      />
+
+      {loading ? (
+        <Card variant="cyberpunk">
+          <CardContent className="flex items-center justify-center py-12">
+            <RefreshCw className="w-6 h-6 text-cyan-400 animate-spin" />
+          </CardContent>
+        </Card>
+      ) : (
+      <>
       {/* Main Deployment Card */}
       <Card variant="cyberpunk">
         <CardHeader>
@@ -472,6 +476,8 @@ export const DeploymentPanel: React.FC<DeploymentPanelProps> = ({
             setActiveDeployment({ ...activeDeployment, always_on: enabled })
           }}
         />
+      )}
+      </>
       )}
     </div>
   )

@@ -452,6 +452,7 @@ func main() {
 	pvRuntimeDetails := map[string]any{
 		"enabled":          runtimeVerifyEnabled,
 		"browser_proof":    runtimeVerifyEnabled && chromePath != "",
+		"canary_probes":    runtimeVerifyEnabled && chromePath != "" && preview.CanaryProbesEnabled(),
 		"chrome_available": chromePath != "",
 		"mode":             runtimeVerifyMode,
 	}
@@ -667,7 +668,13 @@ func main() {
 	vercelToken := os.Getenv("VERCEL_TOKEN")
 	netlifyToken := os.Getenv("NETLIFY_TOKEN")
 	renderToken := os.Getenv("RENDER_TOKEN")
-	deployService := deploy.NewDeploymentService(database.GetDB(), vercelToken, netlifyToken, renderToken)
+	railwayToken := os.Getenv("RAILWAY_TOKEN")
+	railwayWorkspace := os.Getenv("RAILWAY_WORKSPACE")
+	cloudflarePagesToken := os.Getenv("CLOUDFLARE_API_TOKEN")
+	cloudflareAccountID := os.Getenv("CLOUDFLARE_ACCOUNT_ID")
+	neonToken := os.Getenv("NEON_API_KEY")
+	neonOrgID := os.Getenv("NEON_ORG_ID")
+	deployService := deploy.NewDeploymentService(database.GetDB(), vercelToken, netlifyToken, renderToken, railwayToken, cloudflarePagesToken)
 
 	// Register deployment providers
 	if vercelToken != "" {
@@ -679,10 +686,19 @@ func main() {
 	if renderToken != "" {
 		deployService.RegisterProvider(deploy.ProviderRender, providers.NewRenderProvider(renderToken))
 	}
+	if railwayToken != "" && providers.BinaryAvailable("railway") {
+		deployService.RegisterProvider(deploy.ProviderRailway, providers.NewRailwayProvider(railwayToken, railwayWorkspace))
+	}
+	if cloudflarePagesToken != "" && cloudflareAccountID != "" && providers.BinaryAvailable("wrangler") {
+		deployService.RegisterProvider(deploy.ProviderCloudflarePages, providers.NewCloudflarePagesProvider(cloudflarePagesToken, cloudflareAccountID))
+	}
+	if neonToken != "" {
+		deployService.RegisterDatabaseProvisioner(deploy.DatabaseProviderNeon, deploy.NewNeonDatabaseProvisioner(neonToken, neonOrgID))
+	}
 
 	deployHandler := handlers.NewDeployHandler(database.GetDB(), deployService)
-	log.Println("One-Click Deployment initialized (Vercel, Netlify, Render)")
-	availableDeployProviders := make([]string, 0, 3)
+	log.Println("One-Click Deployment initialized (Vercel, Netlify, Render, Railway, Cloudflare Pages, Neon orchestration)")
+	availableDeployProviders := make([]string, 0, 5)
 	if vercelToken != "" {
 		availableDeployProviders = append(availableDeployProviders, string(deploy.ProviderVercel))
 	}
@@ -692,6 +708,12 @@ func main() {
 	if renderToken != "" {
 		availableDeployProviders = append(availableDeployProviders, string(deploy.ProviderRender))
 	}
+	if railwayToken != "" && providers.BinaryAvailable("railway") {
+		availableDeployProviders = append(availableDeployProviders, string(deploy.ProviderRailway))
+	}
+	if cloudflarePagesToken != "" && cloudflareAccountID != "" && providers.BinaryAvailable("wrangler") {
+		availableDeployProviders = append(availableDeployProviders, string(deploy.ProviderCloudflarePages))
+	}
 	if len(availableDeployProviders) == 0 {
 		startupRegistry.MarkDegraded("deployment_providers", startup.TierOptional, "No deployment providers configured", map[string]any{
 			"providers": availableDeployProviders,
@@ -699,6 +721,16 @@ func main() {
 	} else {
 		startupRegistry.MarkReady("deployment_providers", startup.TierOptional, "Deployment providers registered", map[string]any{
 			"providers": availableDeployProviders,
+		})
+	}
+	if neonToken == "" {
+		startupRegistry.MarkDegraded("deployment_databases", startup.TierOptional, "Neon orchestration is not configured", map[string]any{
+			"providers": []string{},
+		})
+	} else {
+		startupRegistry.MarkReady("deployment_databases", startup.TierOptional, "Managed deployment database orchestration initialized", map[string]any{
+			"providers": []string{string(deploy.DatabaseProviderNeon)},
+			"org_id":    neonOrgID != "",
 		})
 	}
 
@@ -1043,6 +1075,7 @@ func newStartupRegistry() *startup.Registry {
 	registry.Register("redis_cache", startup.TierOptional, "Waiting for cache backend", nil)
 	registry.Register("code_execution", startup.TierOptional, "Waiting for code execution sandbox", nil)
 	registry.Register("deployment_providers", startup.TierOptional, "Waiting for deployment provider registration", nil)
+	registry.Register("deployment_databases", startup.TierOptional, "Waiting for deployment database orchestration", nil)
 	registry.Register("package_management", startup.TierOptional, "Waiting for package management initialization", nil)
 	registry.Register("environment_configs", startup.TierOptional, "Waiting for environment configuration initialization", nil)
 	registry.Register("community_marketplace", startup.TierOptional, "Waiting for community marketplace initialization", nil)

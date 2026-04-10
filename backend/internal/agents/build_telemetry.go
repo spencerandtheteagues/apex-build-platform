@@ -22,12 +22,14 @@ import (
 // BuildQualityMetrics captures per-build quality signals emitted at terminal state.
 // All fields are omitempty so absent signals don't inflate log volume.
 type BuildQualityMetrics struct {
-	BuildID  string `json:"build_id"`
-	UserID   uint   `json:"user_id"`
-	Status   string `json:"status"`
-	Mode     string `json:"mode,omitempty"`
-	PowerMode string `json:"power_mode,omitempty"`
+	BuildID          string `json:"build_id"`
+	UserID           uint   `json:"user_id"`
+	Status           string `json:"status"`
+	Mode             string `json:"mode,omitempty"`
+	PowerMode        string `json:"power_mode,omitempty"`
 	SubscriptionPlan string `json:"subscription_plan,omitempty"`
+	DeliveryMode     string `json:"delivery_mode,omitempty"`
+	CanaryCohort     string `json:"canary_cohort,omitempty"`
 
 	// Repair attempt counts — each non-zero signals a first-pass failure.
 	FirstPassSuccess     bool `json:"first_pass_success"`
@@ -36,11 +38,18 @@ type BuildQualityMetrics struct {
 	PreviewRepairCount   int  `json:"preview_repair_count,omitempty"`
 
 	// Preview gate and canary signals.
-	PreviewGatePassed  *bool `json:"preview_gate_passed,omitempty"` // nil = skipped
-	PreviewGateSkipped bool  `json:"preview_gate_skipped,omitempty"`
-	CanaryClicked      int   `json:"canary_clicked,omitempty"`
-	CanaryErrorCount   int   `json:"canary_error_count,omitempty"`
-	VisionReviewed     bool  `json:"vision_reviewed,omitempty"`
+	PreviewGatePassed       *bool `json:"preview_gate_passed,omitempty"` // nil = skipped
+	PreviewGateSkipped      bool  `json:"preview_gate_skipped,omitempty"`
+	CanaryClicked           int   `json:"canary_clicked,omitempty"`
+	CanaryErrorCount        int   `json:"canary_error_count,omitempty"`
+	VisionReviewed          bool  `json:"vision_reviewed,omitempty"`
+	VisualWarningCount      int   `json:"visual_warning_count,omitempty"`
+	InteractionWarningCount int   `json:"interaction_warning_count,omitempty"`
+
+	// Latest verification state by phase/surface stream.
+	VerificationStatusByPhase map[string]string `json:"verification_status_by_phase,omitempty"`
+	AdvisoryClasses           []string          `json:"advisory_classes,omitempty"`
+	RecurringFailureClasses   []string          `json:"recurring_failure_classes,omitempty"`
 
 	// Failure classification (empty on success).
 	FailureCategory string `json:"failure_category,omitempty"`
@@ -95,6 +104,8 @@ func deriveBuildQualityMetrics(build *Build, allFiles []GeneratedFile, now time.
 		Mode:                 string(build.Mode),
 		PowerMode:            string(build.PowerMode),
 		SubscriptionPlan:     strings.TrimSpace(build.SubscriptionPlan),
+		DeliveryMode:         buildCurrentDeliveryMode(build),
+		CanaryCohort:         buildCanaryCohort(build),
 		CompileRepairCount:   build.CompileValidationAttempts,
 		ReadinessRepairCount: build.ReadinessRecoveryAttempts,
 		PreviewRepairCount:   build.PreviewVerificationAttempts,
@@ -133,8 +144,20 @@ func deriveBuildQualityMetrics(build *Build, allFiles []GeneratedFile, now time.
 	// Preview gate and canary from VerificationReports.
 	previewGateFound := false
 	if orch := build.SnapshotState.Orchestration; orch != nil {
+		latestReports := latestVerificationReports(orch.VerificationReports)
+		m.VerificationStatusByPhase = verificationStatusByPhase(latestReports)
+		m.AdvisoryClasses, _ = deriveReliabilityAdvisories(latestReports)
+		m.RecurringFailureClasses = deriveRecurringFailureClasses(orch.FailureFingerprints)
 		for _, report := range orch.VerificationReports {
 			if strings.TrimSpace(report.Phase) != "preview_verification" {
+				for _, warning := range report.Warnings {
+					switch {
+					case strings.HasPrefix(strings.TrimSpace(warning), "visual:"):
+						m.VisualWarningCount++
+					case strings.HasPrefix(strings.TrimSpace(warning), "interaction:"):
+						m.InteractionWarningCount++
+					}
+				}
 				continue
 			}
 			previewGateFound = true
@@ -151,6 +174,14 @@ func deriveBuildQualityMetrics(build *Build, allFiles []GeneratedFile, now time.
 			// Accumulate canary signals across all preview reports (repair retries may add more).
 			m.CanaryClicked += report.CanaryClickCount
 			m.CanaryErrorCount += report.CanaryErrorCount
+			for _, warning := range report.Warnings {
+				switch {
+				case strings.HasPrefix(strings.TrimSpace(warning), "visual:"):
+					m.VisualWarningCount++
+				case strings.HasPrefix(strings.TrimSpace(warning), "interaction:"):
+					m.InteractionWarningCount++
+				}
+			}
 			if report.VisionReviewed {
 				m.VisionReviewed = true
 			}
@@ -161,4 +192,53 @@ func deriveBuildQualityMetrics(build *Build, allFiles []GeneratedFile, now time.
 	}
 
 	return m
+}
+
+func buildCanaryCohort(build *Build) string {
+	if build == nil {
+		return ""
+	}
+
+	plan := buildSubscriptionPlan(build)
+	deliveryMode := buildCurrentDeliveryMode(build)
+	switch {
+	case plan == "free" && build.Mode == ModeFast && deliveryMode == "frontend_preview_only":
+		return "free_fast_frontend_preview"
+	case isPaidBuildPlan(plan) && build.PowerMode == PowerBalanced && deliveryMode != "frontend_preview_only":
+		return "paid_balanced_full_stack"
+	case isPaidBuildPlan(plan) && build.PowerMode == PowerMax && deliveryMode != "frontend_preview_only":
+		return "paid_max_full_stack"
+	default:
+		return ""
+	}
+}
+
+func verificationStatusByPhase(reports []VerificationReport) map[string]string {
+	if len(reports) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(reports))
+	for _, report := range reports {
+		key := verificationPhaseKey(report)
+		if key == "" {
+			continue
+		}
+		out[key] = string(report.Status)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func verificationPhaseKey(report VerificationReport) string {
+	phase := strings.TrimSpace(report.Phase)
+	if phase == "" {
+		return ""
+	}
+	surface := strings.TrimSpace(string(report.Surface))
+	if surface == "" || surface == string(SurfaceGlobal) {
+		return phase
+	}
+	return phase + ":" + surface
 }

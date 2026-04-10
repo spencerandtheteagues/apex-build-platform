@@ -246,6 +246,8 @@ func TestHandlePlanCompletionSyncsSeededAPIContractBackIntoPlan(t *testing.T) {
 
 	am.handlePlanCompletion(build, &TaskOutput{Plan: plan})
 
+	build.mu.RLock()
+	defer build.mu.RUnlock()
 	if build.Status == BuildFailed {
 		t.Fatalf("expected plan completion to proceed, got failed build error=%q", build.Error)
 	}

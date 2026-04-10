@@ -1638,7 +1638,7 @@ func TestParseTaskOutputFlagsUnterminatedCodeBlock(t *testing.T) {
 		t.Fatalf("expected parser warning, got %q", joined)
 	}
 
-	ok, errs := am.verifyGeneratedCode("build-test", out)
+	ok, errs := am.verifyGeneratedCode("build-test", nil, out)
 	if ok {
 		t.Fatalf("expected verification failure due to parser warning/truncation")
 	}
@@ -1789,7 +1789,7 @@ func TestVerifyGeneratedCodeAllowsDeleteOnlyStructuredPatchOutput(t *testing.T) 
 	t.Parallel()
 
 	am := &AgentManager{}
-	ok, errs := am.verifyGeneratedCode("build-delete-only", &TaskOutput{
+	ok, errs := am.verifyGeneratedCode("build-delete-only", nil, &TaskOutput{
 		DeletedFiles: []string{"src/legacy.ts"},
 	})
 	if !ok {
@@ -1851,7 +1851,7 @@ func TestCompleteTruncatedFilesClearsResolvedParserWarning(t *testing.T) {
 		t.Fatalf("expected parser warning to be removed after recovery, got %q", joined)
 	}
 
-	ok, errs := am.verifyGeneratedCode("build-test", out)
+	ok, errs := am.verifyGeneratedCode("build-test", nil, out)
 	if !ok {
 		t.Fatalf("expected verification success after recovery, got %v", errs)
 	}
@@ -1883,7 +1883,7 @@ func TestCompleteTruncatedFilesKeepsUnresolvedParserWarning(t *testing.T) {
 	if len(out.TruncatedFiles) != 1 {
 		t.Fatalf("expected unresolved truncated file to remain tracked, got %v", out.TruncatedFiles)
 	}
-	ok, errs := am.verifyGeneratedCode("build-test", out)
+	ok, errs := am.verifyGeneratedCode("build-test", nil, out)
 	if ok {
 		t.Fatalf("expected verification to fail while truncation remains unresolved")
 	}
@@ -1920,7 +1920,7 @@ func TestCompleteTruncatedFilesKeepsStructurallyIncompleteContinuationTracked(t 
 	if len(out.TruncatedFiles) != 1 || out.TruncatedFiles[0] != "tests/verify-integration.ts" {
 		t.Fatalf("expected structurally incomplete continuation to remain tracked, got %v", out.TruncatedFiles)
 	}
-	ok, errs := am.verifyGeneratedCode("build-test", out)
+	ok, errs := am.verifyGeneratedCode("build-test", nil, out)
 	if ok {
 		t.Fatalf("expected verification to fail while JS/TS truncation remains unresolved")
 	}

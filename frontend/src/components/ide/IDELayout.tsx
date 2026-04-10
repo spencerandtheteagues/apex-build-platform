@@ -33,6 +33,7 @@ import { MobileNavigation, MobilePanelSwitcher } from '@/components/mobile'
 import { CodeComments } from '@/components/ide/CodeComments'
 import { VersionHistoryPanel } from '@/components/ide/panels/VersionHistoryPanel'
 import { DatabasePanel } from '@/components/ide/panels/DatabasePanel'
+import { DeploymentPanel } from '@/components/deployment'
 import { SearchPanel } from '@/components/ide/SearchPanel'
 import { GitPanel } from '@/components/ide/GitPanel'
 import { SplitPaneEditor, SplitPaneEditorRef } from '@/components/ide/SplitPaneEditor'
@@ -65,6 +66,7 @@ import {
   Search,
   Monitor,
   GitBranch,
+  Rocket,
   Bell,
   User,
   LogOut,
@@ -135,7 +137,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   const [rightPanelState, setRightPanelState] = useState<PanelState>(isMobile ? 'collapsed' : 'normal')
   const [bottomPanelState, setBottomPanelState] = useState<PanelState>('collapsed')
   const [activeLeftTab, setActiveLeftTab] = useState<'explorer' | 'search' | 'git' | 'history'>('explorer')
-  const [activeRightTab, setActiveRightTab] = useState<'ai' | 'comments' | 'collab' | 'database' | 'settings'>('ai')
+  const [activeRightTab, setActiveRightTab] = useState<'ai' | 'comments' | 'collab' | 'database' | 'deploy' | 'settings'>('ai')
   const [activeBottomTab, setActiveBottomTab] = useState<'terminal' | 'output' | 'problems'>('terminal')
   const [showPreview, setShowPreview] = useState(false)
   const [previewAutoRefresh, setPreviewAutoRefresh] = useState(true)
@@ -728,6 +730,16 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
             projectId={currentProject.id}
             className="h-full border-0"
           />
+        ) : null
+      case 'deploy':
+        return currentProject ? (
+          <div className="h-full overflow-auto">
+            <DeploymentPanel
+              projectId={currentProject.id}
+              projectName={currentProject.name}
+              className="min-h-full"
+            />
+          </div>
         ) : null
       case 'settings':
         return (
@@ -1487,6 +1499,16 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
                       title="Database"
                     >
                       Database
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={activeRightTab === 'deploy' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveRightTab('deploy')}
+                      icon={<Rocket size={14} />}
+                      className={idePanelTabClass(activeRightTab === 'deploy')}
+                      title="Deploy"
+                    >
+                      Deploy
                     </Button>
                     <Button
                       size="sm"

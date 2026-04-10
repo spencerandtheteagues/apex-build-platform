@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"apex-build/internal/ai"
+	"apex-build/internal/metrics"
 
 	"github.com/google/uuid"
 )
@@ -330,10 +331,10 @@ type VerificationReport struct {
 	TruthTags       []TruthTag         `json:"truth_tags,omitempty"`
 	ConfidenceScore float64            `json:"confidence_score,omitempty"`
 	// Canary interaction signals (set only on preview_verification phase reports).
-	CanaryClickCount int `json:"canary_click_count,omitempty"`
-	CanaryErrorCount int `json:"canary_error_count,omitempty"`
-	VisionReviewed   bool `json:"vision_reviewed,omitempty"`
-	GeneratedAt     time.Time          `json:"generated_at"`
+	CanaryClickCount int       `json:"canary_click_count,omitempty"`
+	CanaryErrorCount int       `json:"canary_error_count,omitempty"`
+	VisionReviewed   bool      `json:"vision_reviewed,omitempty"`
+	GeneratedAt      time.Time `json:"generated_at"`
 }
 
 type PromotionDecision struct {
@@ -354,6 +355,7 @@ type BuildReliabilitySummary struct {
 	Status                 string               `json:"status"`
 	CurrentFailureCategory BuildFailureCategory `json:"current_failure_category,omitempty"`
 	CurrentFailureClass    string               `json:"current_failure_class,omitempty"`
+	ActiveRepairPath       []string             `json:"active_repair_path,omitempty"`
 	AdvisoryClasses        []string             `json:"advisory_classes,omitempty"`
 	RecurringFailureClass  []string             `json:"recurring_failure_classes,omitempty"`
 	TopIssues              []string             `json:"top_issues,omitempty"`
@@ -361,6 +363,19 @@ type BuildReliabilitySummary struct {
 	AcceptanceSurfaces     []string             `json:"acceptance_surfaces,omitempty"`
 	PrimaryUserFlows       []string             `json:"primary_user_flows,omitempty"`
 	GeneratedAt            time.Time            `json:"generated_at"`
+}
+
+type BuildLearningSummary struct {
+	Scope                   string    `json:"scope"`
+	ObservedBuilds          int       `json:"observed_builds"`
+	SourceBuildIDs          []string  `json:"source_build_ids,omitempty"`
+	RecurringFailureClasses []string  `json:"recurring_failure_classes,omitempty"`
+	SuccessfulRepairPaths   []string  `json:"successful_repair_paths,omitempty"`
+	FrequentWarnings        []string  `json:"frequent_warnings,omitempty"`
+	HotspotFiles            []string  `json:"hotspot_files,omitempty"`
+	RecommendedAvoidance    []string  `json:"recommended_avoidance,omitempty"`
+	CleanPassSignals        []string  `json:"clean_pass_signals,omitempty"`
+	GeneratedAt             time.Time `json:"generated_at"`
 }
 
 type FailureFingerprint struct {
@@ -415,6 +430,7 @@ type BuildOrchestrationState struct {
 	PatchBundles        []PatchBundle            `json:"patch_bundles,omitempty"`
 	VerificationReports []VerificationReport     `json:"verification_reports,omitempty"`
 	ReliabilitySummary  *BuildReliabilitySummary `json:"reliability_summary,omitempty"`
+	HistoricalLearning  *BuildLearningSummary    `json:"historical_learning,omitempty"`
 	PromotionDecision   *PromotionDecision       `json:"promotion_decision,omitempty"`
 	FailureFingerprints []FailureFingerprint     `json:"failure_fingerprints,omitempty"`
 	ProviderScorecards  []ProviderScorecard      `json:"provider_scorecards,omitempty"`
@@ -1994,6 +2010,7 @@ func appendVerificationReport(build *Build, report VerificationReport) {
 	}
 	appendVerificationAdvisoryFingerprintsLocked(build, state, report)
 	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
+	metrics.RecordVerificationReport(report.Phase, string(report.Surface), string(report.Status), report.Warnings)
 }
 
 func appendVerificationAdvisoryFingerprintsLocked(build *Build, state *BuildOrchestrationState, report VerificationReport) {
@@ -2134,6 +2151,7 @@ func appendFailureFingerprint(build *Build, fingerprint FailureFingerprint) {
 	if len(state.FailureFingerprints) > 32 {
 		state.FailureFingerprints = append([]FailureFingerprint(nil), state.FailureFingerprints[len(state.FailureFingerprints)-32:]...)
 	}
+	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
 }
 
 type providerTaskOutcome struct {

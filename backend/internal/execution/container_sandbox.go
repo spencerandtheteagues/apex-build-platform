@@ -447,70 +447,95 @@ func (s *ContainerSandbox) ensureImages() error {
 
 // generateDockerfile creates a minimal, secure Dockerfile for a language
 func (s *ContainerSandbox) generateDockerfile(language string) string {
+	aptPackages := strings.Join(sandboxAptPackages(language), " \\\n    ")
+	globalInstalls := strings.Join(sandboxGlobalInstallCommands(language), " && \\\n    ")
+	postInstall := ""
+	if strings.TrimSpace(globalInstalls) != "" {
+		postInstall = " && \\\n    " + globalInstalls
+	}
+
 	switch language {
 	case "python":
-		return `FROM python:3.12-slim-bookworm
-RUN useradd -m -s /bin/false sandbox && \
-    apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates && \
+		return fmt.Sprintf(`FROM python:3.12-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    %s%s && \
     rm -rf /var/lib/apt/lists/* && \
+    useradd -m -s /bin/bash sandbox && \
     mkdir -p /work /tmp && \
     chown -R sandbox:sandbox /work /tmp
 USER sandbox
 WORKDIR /work
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-`
+`, aptPackages, postInstall)
 	case "javascript":
-		return `FROM node:20-slim
-RUN useradd -m -s /bin/false sandbox && \
+		return fmt.Sprintf(`FROM node:20-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    %s%s && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -m -s /bin/bash sandbox && \
     mkdir -p /work /tmp && \
     chown -R sandbox:sandbox /work /tmp
 USER sandbox
 WORKDIR /work
 ENV NODE_ENV=production
-`
+`, aptPackages, postInstall)
 	case "go":
-		return `FROM golang:1.23-bookworm
-RUN useradd -m -s /bin/false sandbox && \
+		return fmt.Sprintf(`FROM golang:1.23-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    %s%s && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -m -s /bin/bash sandbox && \
     mkdir -p /work /tmp /tmp/go-cache /tmp/go-mod && \
     chown -R sandbox:sandbox /work /tmp /go
 USER sandbox
 WORKDIR /work
 ENV GOCACHE=/tmp/go-cache GOMODCACHE=/tmp/go-mod TMPDIR=/tmp CGO_ENABLED=0
-`
+`, aptPackages, postInstall)
 	case "rust":
-		return `FROM rust:1.75-slim-bookworm
-RUN useradd -m -s /bin/false sandbox && \
+		return fmt.Sprintf(`FROM rust:1.75-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    %s%s && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -m -s /bin/bash sandbox && \
     mkdir -p /work /tmp && \
     chown -R sandbox:sandbox /work /tmp
 USER sandbox
 WORKDIR /work
 ENV CARGO_HOME=/tmp/.cargo
-`
+`, aptPackages, postInstall)
 	case "java":
-		return `FROM eclipse-temurin:21-jdk-jammy
-RUN useradd -m -s /bin/false sandbox && \
+		return fmt.Sprintf(`FROM eclipse-temurin:21-jdk-jammy
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    %s%s && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -m -s /bin/bash sandbox && \
     mkdir -p /work /tmp && \
     chown -R sandbox:sandbox /work /tmp
 USER sandbox
 WORKDIR /work
-`
+`, aptPackages, postInstall)
 	case "c", "cpp":
-		return `FROM gcc:13-bookworm
-RUN useradd -m -s /bin/false sandbox && \
+		return fmt.Sprintf(`FROM gcc:13-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    %s%s && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -m -s /bin/bash sandbox && \
     mkdir -p /work /tmp && \
     chown -R sandbox:sandbox /work /tmp
 USER sandbox
 WORKDIR /work
-`
+`, aptPackages, postInstall)
 	default:
-		return `FROM debian:bookworm-slim
-RUN useradd -m -s /bin/false sandbox && \
+		return fmt.Sprintf(`FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    %s%s && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -m -s /bin/bash sandbox && \
     mkdir -p /work /tmp && \
     chown -R sandbox:sandbox /work /tmp
 USER sandbox
 WORKDIR /work
-`
+`, aptPackages, postInstall)
 	}
 }
 

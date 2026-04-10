@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"apex-build/internal/execution"
 )
 
 // Executor handles action execution
@@ -350,16 +352,14 @@ func (e *Executor) executeDeleteFile(ctx context.Context, step *PlanStep, task *
 }
 
 // allowedCommands is a whitelist of safe commands the executor can run
-var allowedCommands = map[string]bool{
-	"npm":    true,
-	"npx":    true,
-	"node":   true,
-	"go":     true,
-	"python": true,
-	"pip":    true,
-	"cargo":  true,
-	"tsc":    true,
-	"git":    true,
+var allowedCommands = buildAllowedCommandSet()
+
+func buildAllowedCommandSet() map[string]bool {
+	allowed := make(map[string]bool)
+	for _, command := range execution.DefaultAgentCommandCatalog() {
+		allowed[command] = true
+	}
+	return allowed
 }
 
 // executeRunCommand runs a terminal command (whitelisted only)
@@ -378,6 +378,9 @@ func (e *Executor) executeRunCommand(ctx context.Context, step *PlanStep, task *
 	// Validate command against whitelist to prevent command injection
 	if !allowedCommands[parts[0]] {
 		return nil, fmt.Errorf("command %q is not allowed", parts[0])
+	}
+	if _, err := exec.LookPath(parts[0]); err != nil {
+		return nil, fmt.Errorf("command %q is allowed but not installed", parts[0])
 	}
 
 	// Validate every argument to prevent path-traversal and shell-metacharacter injection.
@@ -484,7 +487,11 @@ func (e *Executor) executeInstallDeps(ctx context.Context, step *PlanStep, task 
 		if _, err := os.Stat(filepath.Join(e.workDir, "package.json")); err == nil {
 			installCmd = "npm install"
 		} else {
-			installCmd = "npm init -y && npm install " + strings.Join(deps, " ")
+			step.Input["command"] = "npm init -y"
+			if _, err := e.executeRunCommand(ctx, step, task); err != nil {
+				return nil, err
+			}
+			installCmd = "npm install " + strings.Join(deps, " ")
 		}
 	}
 

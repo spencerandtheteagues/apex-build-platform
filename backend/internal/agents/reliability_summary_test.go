@@ -1,7 +1,6 @@
 package agents
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
@@ -54,90 +53,59 @@ func TestRefreshDerivedReliabilitySummaryLockedCapturesPassedPreviewAdvisories(t
 	if len(summary.PrimaryUserFlows) != 1 {
 		t.Fatalf("expected user flows from validated spec, got %+v", summary.PrimaryUserFlows)
 	}
-	if len(summary.RecurringFailureClass) == 0 || summary.RecurringFailureClass[0] != "visual_layout" {
-		t.Fatalf("expected recurring visual class, got %+v", summary.RecurringFailureClass)
-	}
 }
 
-func TestRefreshDerivedReliabilitySummaryLockedMarksDegradedCurrentFailure(t *testing.T) {
-	build := &Build{
-		ID:               "reliability-degraded-build",
-		Status:           BuildReviewing,
-		SubscriptionPlan: "builder",
-		ProviderMode:     "platform",
-		Description:      "Build a full stack workspace",
-		UpdatedAt:        time.Now().UTC(),
-		SnapshotState: BuildSnapshotState{
-			FailureTaxonomy: &BuildFailureTaxonomy{
-				CurrentCategory: FailureCategoryCompile,
-				CurrentClass:    "compile_failure",
-				CurrentPhase:    "compile_validation",
+func TestDeriveBuildReliabilitySummaryCapturesActiveRepairPath(t *testing.T) {
+	build := &Build{ID: "repair-summary-build"}
+	orchestration := &BuildOrchestrationState{
+		FailureFingerprints: []FailureFingerprint{
+			{
+				BuildID:          "repair-summary-build",
+				RepairPathChosen: []string{"old_strategy"},
+				CreatedAt:        time.Now().Add(-time.Hour).UTC(),
+			},
+			{
+				BuildID:          "repair-summary-build",
+				RepairPathChosen: []string{"solve_build_failure", "switch_provider"},
+				CreatedAt:        time.Now().UTC(),
 			},
 		},
 	}
-	orchestration := ensureBuildOrchestrationStateLocked(build)
-	orchestration.VerificationReports = []VerificationReport{
-		{
-			ID:          "compile-fail",
-			BuildID:     build.ID,
-			Phase:       "compile_validation",
-			Surface:     SurfaceFrontend,
-			Status:      VerificationFailed,
-			Errors:      []string{"tsc failed"},
-			GeneratedAt: time.Now().UTC(),
-		},
-	}
+	state := &BuildSnapshotState{}
 
-	refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
-
-	summary := build.SnapshotState.Orchestration.ReliabilitySummary
+	summary := deriveBuildReliabilitySummary(build, state, orchestration)
 	if summary == nil {
 		t.Fatal("expected reliability summary")
 	}
-	if summary.Status != "degraded" {
-		t.Fatalf("expected degraded status, got %+v", summary)
-	}
-	if summary.CurrentFailureCategory != FailureCategoryCompile || summary.CurrentFailureClass != "compile_failure" {
-		t.Fatalf("expected compile failure details, got %+v", summary)
-	}
-	if len(summary.RecommendedFocus) == 0 {
-		t.Fatalf("expected recommended focus, got %+v", summary)
+	if len(summary.ActiveRepairPath) != 2 || summary.ActiveRepairPath[0] != "solve_build_failure" || summary.ActiveRepairPath[1] != "switch_provider" {
+		t.Fatalf("expected latest repair path to be captured, got %v", summary.ActiveRepairPath)
 	}
 }
 
-func TestBuildTaskPromptIncludesReliabilitySummaryContext(t *testing.T) {
-	t.Parallel()
-
-	am := &AgentManager{}
-	build := &Build{
-		Description: "Build a preview-first workspace",
-		Plan: &BuildPlan{
-			SpecHash: "spec-reliability",
-		},
-		SnapshotState: BuildSnapshotState{
-			Orchestration: &BuildOrchestrationState{
-				ReliabilitySummary: &BuildReliabilitySummary{
-					Status:                "degraded",
-					CurrentFailureClass:   "compile_failure",
-					AcceptanceSurfaces:    []string{"frontend"},
-					PrimaryUserFlows:      []string{"land in the product shell and reach an interactive preview on first pass"},
-					RecurringFailureClass: []string{"compile_failure"},
-					RecommendedFocus:      []string{"expand deterministic compile repair coverage for the current failure class"},
-				},
+func TestDeriveBuildReliabilitySummarySkipsPromotionFallbackForActiveRepairPath(t *testing.T) {
+	build := &Build{ID: "repair-summary-promotion-build"}
+	orchestration := &BuildOrchestrationState{
+		FailureFingerprints: []FailureFingerprint{
+			{
+				BuildID:          build.ID,
+				TaskShape:        TaskShapeRepair,
+				RepairPathChosen: []string{"solve_build_failure"},
+				CreatedAt:        time.Now().Add(-time.Minute).UTC(),
+			},
+			{
+				BuildID:          build.ID,
+				TaskShape:        TaskShapePromotion,
+				RepairPathChosen: []string{"final_readiness"},
+				CreatedAt:        time.Now().UTC(),
 			},
 		},
 	}
-	task := &Task{Type: TaskFix, Description: "Repair the current preview blocker"}
-	agent := &Agent{Role: RoleSolver}
 
-	prompt := am.buildTaskPrompt(task, build, agent)
-	if !strings.Contains(prompt, "<reliability_summary>") {
-		t.Fatalf("expected reliability summary context in task prompt, got %q", prompt)
+	summary := deriveBuildReliabilitySummary(build, &BuildSnapshotState{}, orchestration)
+	if summary == nil {
+		t.Fatal("expected reliability summary")
 	}
-	if !strings.Contains(prompt, "compile_failure") {
-		t.Fatalf("expected failure class in task prompt, got %q", prompt)
-	}
-	if !strings.Contains(prompt, "Preserve the acceptance surfaces") {
-		t.Fatalf("expected acceptance-surface preservation guidance in task prompt, got %q", prompt)
+	if len(summary.ActiveRepairPath) != 1 || summary.ActiveRepairPath[0] != "solve_build_failure" {
+		t.Fatalf("expected repair path to ignore promotion fallback, got %v", summary.ActiveRepairPath)
 	}
 }

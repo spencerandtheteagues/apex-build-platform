@@ -343,7 +343,7 @@ func (am *AgentManager) scoreTaskGenerationCandidate(buildID string, candidate *
 	if am == nil || candidate == nil {
 		return
 	}
-	passed, errs := am.verifyGeneratedCode(buildID, candidate.Output)
+	passed, errs := am.verifyGeneratedCode(buildID, nil, candidate.Output)
 	score := 100
 	if !passed {
 		score -= 40 + len(errs)*5

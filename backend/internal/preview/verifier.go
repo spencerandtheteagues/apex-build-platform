@@ -247,8 +247,15 @@ func (v *Verifier) VerifyFiles(ctx context.Context, files []VerifiableFile, isFu
 					res.ScreenshotBase64 = base64.StdEncoding.EncodeToString(rr.ScreenshotData)
 				}
 				res.addCheck(check("vite_runtime_boot", true, fmt.Sprintf("dev server booted, HTTP checks passed in %s", rr.Duration.Round(time.Millisecond))))
-				if rr.CanaryClickCount > 0 || len(rr.CanaryErrors) > 0 {
-					detail := fmt.Sprintf("clicked %d control(s)", rr.CanaryClickCount)
+				if rr.CanaryPostInteractionChecked || rr.CanaryVisibleControls > 0 || rr.CanaryClickCount > 0 || len(rr.CanaryErrors) > 0 {
+					detail := fmt.Sprintf("clicked %d of %d visible control(s)", rr.CanaryClickCount, rr.CanaryVisibleControls)
+					if rr.CanaryPostInteractionChecked {
+						if rr.CanaryPostInteractionHealthy {
+							detail += fmt.Sprintf("; preview remained rendered after settle (%d control(s) still visible)", rr.CanaryPostInteractionVisible)
+						} else {
+							detail += "; preview failed the post-click settle check"
+						}
+					}
 					if len(rr.CanaryErrors) > 0 {
 						detail += fmt.Sprintf("; advisory errors: %s", summarizeIssues(rr.CanaryErrors, 2))
 					}

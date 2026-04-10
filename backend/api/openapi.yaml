@@ -938,7 +938,7 @@ paths:
     post:
       tags: [Deploy]
       summary: Start deployment
-      description: Deploy project to cloud provider (Vercel, Netlify, Render)
+      description: Deploy project to cloud provider (Vercel, Netlify, Render, Railway, Cloudflare Pages)
       operationId: startDeployment
       requestBody:
         required: true
@@ -1084,8 +1084,19 @@ paths:
                   providers:
                     type: array
                     items:
-                      type: string
-                      enum: [vercel, netlify, render]
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          enum: [vercel, netlify, render, railway, cloudflare_pages]
+                        name:
+                          type: string
+                        description:
+                          type: string
+                        features:
+                          type: array
+                          items:
+                            type: string
 
   /deploy/projects/{projectId}/history:
     get:
@@ -2534,6 +2545,24 @@ components:
               type: object
             sandbox_capabilities:
               type: object
+              properties:
+                container_isolation:
+                  type: boolean
+                network_isolation:
+                  type: boolean
+                seccomp_enabled:
+                  type: boolean
+                read_only_root:
+                  type: boolean
+                resource_limits:
+                  type: boolean
+                available_clis:
+                  type: array
+                  items:
+                    type: string
+                language_toolchains:
+                  type: object
+                  additionalProperties: true
             execution_enabled:
               type: boolean
 
@@ -2557,6 +2586,21 @@ components:
               type: boolean
             seccomp_enabled:
               type: boolean
+            supported_languages:
+              type: array
+              items:
+                type: string
+            available_clis:
+              type: array
+              items:
+                type: string
+            network_dependent_clis:
+              type: array
+              items:
+                type: string
+            language_toolchains:
+              type: object
+              additionalProperties: true
             docker:
               type: object
 
@@ -2646,7 +2690,7 @@ components:
           type: integer
         provider:
           type: string
-          enum: [vercel, netlify, render]
+          enum: [vercel, netlify, render, railway, cloudflare_pages]
         environment:
           type: string
           default: production
@@ -2663,8 +2707,37 @@ components:
           type: string
         install_cmd:
           type: string
+        start_command:
+          type: string
         framework:
           type: string
+        node_version:
+          type: string
+        root_directory:
+          type: string
+        database:
+          type: object
+          properties:
+            provider:
+              type: string
+              enum: [neon]
+            project_name:
+              type: string
+            branch_name:
+              type: string
+            database_name:
+              type: string
+            role_name:
+              type: string
+            region_id:
+              type: string
+            org_id:
+              type: string
+            pg_version:
+              type: integer
+              enum: [14, 15, 16, 17]
+            pooled:
+              type: boolean
 
     Deployment:
       type: object
@@ -2679,7 +2752,7 @@ components:
           type: string
         status:
           type: string
-          enum: [pending, building, deploying, running, failed, stopped]
+          enum: [pending, preparing, building, deploying, live, failed, cancelled]
         url:
           type: string
         error_message:

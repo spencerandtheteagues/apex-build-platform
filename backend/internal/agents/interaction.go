@@ -921,6 +921,26 @@ func (am *AgentManager) enqueueRevisionTask(build *Build, userRequest string, op
 	build.mu.RLock()
 	previousStatus = build.Status
 	build.mu.RUnlock()
+
+	// Compute semantic diff hint before acquiring write lock — collectGeneratedFiles
+	// takes its own read lock internally so this is safe.
+	taskInput := map[string]any{
+		"action":                   "user_change_request",
+		"user_request":             trimmed,
+		"app_description":          build.Description,
+		"requires_regression_test": true,
+	}
+	if !opts.restartRecovery {
+		allFiles := am.collectGeneratedFiles(build)
+		hint := computeSemanticDiffHint(build, allFiles, trimmed)
+		if !hint.Uncertainty && len(hint.AffectedFiles) > 0 {
+			taskInput["affected_files"] = hint.AffectedFiles
+			taskInput["scope_hint"] = "targeted"
+		} else {
+			taskInput["scope_hint"] = "full"
+		}
+	}
+
 	task := &Task{
 		ID:          uuid.New().String(),
 		Type:        TaskFix,
@@ -928,13 +948,8 @@ func (am *AgentManager) enqueueRevisionTask(build *Build, userRequest string, op
 		Priority:    98,
 		Status:      TaskPending,
 		MaxRetries:  build.MaxRetries,
-		Input: map[string]any{
-			"action":                   "user_change_request",
-			"user_request":             trimmed,
-			"app_description":          build.Description,
-			"requires_regression_test": true,
-		},
-		CreatedAt: now,
+		Input:       taskInput,
+		CreatedAt:   now,
 	}
 
 	// Enrich explicit restart tasks with build failure context so the solver

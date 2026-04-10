@@ -54,4 +54,8 @@ func TestExecutionHandlerGetSandboxStatusIncludesE2BStats(t *testing.T) {
 	require.Equal(t, true, status["e2b_available"])
 	require.Equal(t, true, status["prefer_e2b"])
 	require.Equal(t, true, status["container_isolation"])
+	availableCLIs, ok := status["available_clis"].([]string)
+	require.True(t, ok)
+	require.Contains(t, availableCLIs, "node")
+	require.Contains(t, availableCLIs, "python3")
 }

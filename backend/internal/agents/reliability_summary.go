@@ -23,6 +23,8 @@ func deriveBuildReliabilitySummary(build *Build, state *BuildSnapshotState, orch
 	advisoryClasses, issues := deriveReliabilityAdvisories(latestReports)
 	recurring := deriveRecurringFailureClasses(orchestration.FailureFingerprints)
 
+	activeRepairPath := latestMeaningfulRepairPath(orchestration.FailureFingerprints)
+
 	status := "clean"
 	currentCategory := BuildFailureCategory("")
 	currentClass := ""
@@ -67,6 +69,7 @@ func deriveBuildReliabilitySummary(build *Build, state *BuildSnapshotState, orch
 		Status:                 status,
 		CurrentFailureCategory: currentCategory,
 		CurrentFailureClass:    currentClass,
+		ActiveRepairPath:       activeRepairPath,
 		AdvisoryClasses:        advisoryClasses,
 		RecurringFailureClass:  recurring,
 		TopIssues:              limitStrings(issues, 6),
@@ -141,6 +144,23 @@ func deriveRecurringFailureClasses(fingerprints []FailureFingerprint) []string {
 		}
 	}
 	return out
+}
+
+func latestMeaningfulRepairPath(fingerprints []FailureFingerprint) []string {
+	if len(fingerprints) == 0 {
+		return nil
+	}
+	for i := len(fingerprints) - 1; i >= 0; i-- {
+		path := append([]string(nil), fingerprints[i].RepairPathChosen...)
+		if len(path) == 0 {
+			continue
+		}
+		if fingerprints[i].TaskShape == TaskShapePromotion && len(path) == 1 && path[0] == "final_readiness" {
+			continue
+		}
+		return path
+	}
+	return append([]string(nil), fingerprints[len(fingerprints)-1].RepairPathChosen...)
 }
 
 func deriveReliabilityRecommendedFocus(status string, category BuildFailureCategory, class string, advisoryClasses, recurring []string) []string {

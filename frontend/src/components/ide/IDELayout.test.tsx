@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import React from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const connectMock = vi.fn()
@@ -122,6 +122,10 @@ vi.mock('@/components/ide/panels/DatabasePanel', () => ({
   DatabasePanel: () => <div>Database Panel</div>,
 }))
 
+vi.mock('@/components/deployment', () => ({
+  DeploymentPanel: () => <div>Deployment Panel</div>,
+}))
+
 vi.mock('@/components/ide/SearchPanel', () => ({
   SearchPanel: () => <div>Search Panel</div>,
 }))
@@ -172,5 +176,14 @@ describe('IDELayout preview workspace', () => {
 
     expect(screen.queryByText('Mock Terminal')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Terminal' })).toBeNull()
+  })
+
+  it('renders the deployment panel from the right sidebar', async () => {
+    render(<IDELayout launchTarget="editor" />)
+
+    const deployTab = await screen.findByRole('button', { name: /deploy/i })
+    fireEvent.click(deployTab)
+
+    expect(await screen.findByText('Deployment Panel')).toBeTruthy()
   })
 })

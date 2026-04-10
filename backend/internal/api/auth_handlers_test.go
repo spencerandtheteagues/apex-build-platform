@@ -37,6 +37,7 @@ func newLogoutTestServer(t *testing.T) (*Server, *auth.AuthService, *models.User
 		Email:            "logout@example.com",
 		PasswordHash:     passwordHash,
 		IsActive:         true,
+		IsVerified:       true,
 		SubscriptionType: "free",
 	}
 	require.NoError(t, gormDB.Create(user).Error)

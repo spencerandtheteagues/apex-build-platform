@@ -45,39 +45,39 @@ func (p *NetlifyProvider) Name() deploy.DeploymentProvider {
 
 // NetlifySite represents a Netlify site
 type NetlifySite struct {
-	ID                string            `json:"id"`
-	SiteID            string            `json:"site_id"`
-	Name              string            `json:"name"`
-	URL               string            `json:"url"`
-	SslURL            string            `json:"ssl_url"`
-	AdminURL          string            `json:"admin_url"`
-	CustomDomain      string            `json:"custom_domain,omitempty"`
-	DomainAliases     []string          `json:"domain_aliases,omitempty"`
-	State             string            `json:"state"`
-	CreatedAt         string            `json:"created_at"`
-	UpdatedAt         string            `json:"updated_at"`
-	DeployURL         string            `json:"deploy_url,omitempty"`
-	DeployID          string            `json:"deploy_id,omitempty"`
-	BuildSettings     *NetlifyBuildSettings `json:"build_settings,omitempty"`
+	ID            string                `json:"id"`
+	SiteID        string                `json:"site_id"`
+	Name          string                `json:"name"`
+	URL           string                `json:"url"`
+	SslURL        string                `json:"ssl_url"`
+	AdminURL      string                `json:"admin_url"`
+	CustomDomain  string                `json:"custom_domain,omitempty"`
+	DomainAliases []string              `json:"domain_aliases,omitempty"`
+	State         string                `json:"state"`
+	CreatedAt     string                `json:"created_at"`
+	UpdatedAt     string                `json:"updated_at"`
+	DeployURL     string                `json:"deploy_url,omitempty"`
+	DeployID      string                `json:"deploy_id,omitempty"`
+	BuildSettings *NetlifyBuildSettings `json:"build_settings,omitempty"`
 }
 
 // NetlifyBuildSettings contains build configuration
 type NetlifyBuildSettings struct {
-	Cmd              string            `json:"cmd,omitempty"`
-	Dir              string            `json:"dir,omitempty"`
-	EnvVars          map[string]string `json:"env,omitempty"`
-	InstallCmd       string            `json:"install_cmd,omitempty"`
-	FunctionsDir     string            `json:"functions_dir,omitempty"`
-	BaseRelDir       bool              `json:"base_rel_dir,omitempty"`
+	Cmd          string            `json:"cmd,omitempty"`
+	Dir          string            `json:"dir,omitempty"`
+	EnvVars      map[string]string `json:"env,omitempty"`
+	InstallCmd   string            `json:"install_cmd,omitempty"`
+	FunctionsDir string            `json:"functions_dir,omitempty"`
+	BaseRelDir   bool              `json:"base_rel_dir,omitempty"`
 }
 
 // NetlifyDeployRequest represents a deployment request
 type NetlifyDeployRequest struct {
-	Files       map[string]string `json:"files"`
-	Async       bool              `json:"async,omitempty"`
-	Draft       bool              `json:"draft,omitempty"`
-	Title       string            `json:"title,omitempty"`
-	Branch      string            `json:"branch,omitempty"`
+	Files             map[string]string         `json:"files"`
+	Async             bool                      `json:"async,omitempty"`
+	Draft             bool                      `json:"draft,omitempty"`
+	Title             string                    `json:"title,omitempty"`
+	Branch            string                    `json:"branch,omitempty"`
 	FunctionSchedules []NetlifyFunctionSchedule `json:"function_schedules,omitempty"`
 }
 
@@ -89,26 +89,26 @@ type NetlifyFunctionSchedule struct {
 
 // NetlifyDeployResponse represents the deployment response
 type NetlifyDeployResponse struct {
-	ID            string   `json:"id"`
-	SiteID        string   `json:"site_id"`
-	BuildID       string   `json:"build_id,omitempty"`
-	State         string   `json:"state"` // new, pending_review, accepted, rejected, enqueued, building, ready, error
-	Name          string   `json:"name"`
-	URL           string   `json:"url"`
-	SslURL        string   `json:"ssl_url"`
-	AdminURL      string   `json:"admin_url"`
-	DeployURL     string   `json:"deploy_url"`
-	DeploySslURL  string   `json:"deploy_ssl_url"`
-	CreatedAt     string   `json:"created_at"`
-	UpdatedAt     string   `json:"updated_at"`
-	PublishedAt   string   `json:"published_at,omitempty"`
-	Title         string   `json:"title,omitempty"`
-	Branch        string   `json:"branch,omitempty"`
-	CommitRef     string   `json:"commit_ref,omitempty"`
-	ReviewURL     string   `json:"review_url,omitempty"`
-	Framework     string   `json:"framework,omitempty"`
-	ErrorMessage  string   `json:"error_message,omitempty"`
-	Required      []string `json:"required,omitempty"` // Files that need to be uploaded
+	ID                string   `json:"id"`
+	SiteID            string   `json:"site_id"`
+	BuildID           string   `json:"build_id,omitempty"`
+	State             string   `json:"state"` // new, pending_review, accepted, rejected, enqueued, building, ready, error
+	Name              string   `json:"name"`
+	URL               string   `json:"url"`
+	SslURL            string   `json:"ssl_url"`
+	AdminURL          string   `json:"admin_url"`
+	DeployURL         string   `json:"deploy_url"`
+	DeploySslURL      string   `json:"deploy_ssl_url"`
+	CreatedAt         string   `json:"created_at"`
+	UpdatedAt         string   `json:"updated_at"`
+	PublishedAt       string   `json:"published_at,omitempty"`
+	Title             string   `json:"title,omitempty"`
+	Branch            string   `json:"branch,omitempty"`
+	CommitRef         string   `json:"commit_ref,omitempty"`
+	ReviewURL         string   `json:"review_url,omitempty"`
+	Framework         string   `json:"framework,omitempty"`
+	ErrorMessage      string   `json:"error_message,omitempty"`
+	Required          []string `json:"required,omitempty"` // Files that need to be uploaded
 	RequiredFunctions []string `json:"required_functions,omitempty"`
 }
 
@@ -126,6 +126,11 @@ func (p *NetlifyProvider) Deploy(ctx context.Context, config *deploy.DeploymentC
 	site, err := p.getOrCreateSite(ctx, siteName, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get/create site: %w", err)
+	}
+	if len(config.EnvVars) > 0 {
+		if err := p.SetEnvironmentVariables(ctx, site.ID, config.EnvVars); err != nil {
+			return nil, fmt.Errorf("failed to sync environment variables: %w", err)
+		}
 	}
 
 	// Calculate file digests
@@ -150,10 +155,10 @@ func (p *NetlifyProvider) Deploy(ctx context.Context, config *deploy.DeploymentC
 
 	// Create deployment with file digests
 	deployReq := NetlifyDeployRequest{
-		Files: fileDigests,
-		Async: true,
-		Draft: config.Environment != "production",
-		Title: fmt.Sprintf("APEX.BUILD deployment - %s", time.Now().Format(time.RFC3339)),
+		Files:  fileDigests,
+		Async:  true,
+		Draft:  config.Environment != "production",
+		Title:  fmt.Sprintf("APEX.BUILD deployment - %s", time.Now().Format(time.RFC3339)),
 		Branch: config.Branch,
 	}
 

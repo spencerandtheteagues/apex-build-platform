@@ -131,13 +131,19 @@ const mountCheckJS = `JSON.stringify((function() {
     if (el) {
       var text = (el.textContent || '').trim();
       var visible = (el.innerText || '').trim();
+      var hasStructuralContent =
+        el.childElementCount > 0 && (
+          text.length > 0 ||
+          visible.length > 0 ||
+          !!el.querySelector('img,svg,canvas,video,iframe,button,input,select,textarea,nav,main,section,article,aside,header,footer,form,table,ul,ol,[role],[aria-label],[data-testid]')
+        );
       return {
         found: true,
         selector: selectors[i],
         childCount: el.childElementCount,
         textLength: text.length,
         visibleText: visible.length,
-        hasContent: el.childElementCount > 1 || visible.length >= 25,
+        hasContent: hasStructuralContent || visible.length >= 25,
         snippet: text.substring(0, 80)
       };
     }

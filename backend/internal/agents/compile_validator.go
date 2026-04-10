@@ -630,6 +630,12 @@ func (am *AgentManager) cvGenerateTaskOutput(
 	if build.SnapshotState.Orchestration != nil && build.SnapshotState.Orchestration.ReliabilitySummary != nil {
 		reliabilityContext = reliabilitySummaryPromptContext(build.SnapshotState.Orchestration.ReliabilitySummary)
 	}
+	if build.SnapshotState.Orchestration != nil && build.SnapshotState.Orchestration.HistoricalLearning != nil {
+		reliabilityContext = strings.TrimSpace(strings.Join([]string{
+			reliabilityContext,
+			buildLearningPromptContext(build.SnapshotState.Orchestration.HistoricalLearning),
+		}, "\n"))
+	}
 	prompt := cvBuildRepairPrompt(errors, allFiles, reliabilityContext)
 	if directive := strings.TrimSpace(strategy.Directive); directive != "" {
 		prompt += "\n\n## Repair Strategy\n\n" + directive + "\n"

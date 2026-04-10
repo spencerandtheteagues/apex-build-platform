@@ -616,12 +616,15 @@ func CheckDockerStatus() DockerStatus {
 
 // SandboxCapabilities describes what the sandbox can do
 type SandboxCapabilities struct {
-	ContainerIsolation bool     `json:"container_isolation"`
-	NetworkIsolation   bool     `json:"network_isolation"`
-	SeccompEnabled     bool     `json:"seccomp_enabled"`
-	ReadOnlyRoot       bool     `json:"read_only_root"`
-	ResourceLimits     bool     `json:"resource_limits"`
-	SupportedLanguages []string `json:"supported_languages"`
+	ContainerIsolation  bool                               `json:"container_isolation"`
+	NetworkIsolation    bool                               `json:"network_isolation"`
+	SeccompEnabled      bool                               `json:"seccomp_enabled"`
+	ReadOnlyRoot        bool                               `json:"read_only_root"`
+	ResourceLimits      bool                               `json:"resource_limits"`
+	SupportedLanguages  []string                           `json:"supported_languages"`
+	AvailableCLIs       []string                           `json:"available_clis,omitempty"`
+	NetworkDependentCLI []string                           `json:"network_dependent_clis,omitempty"`
+	LanguageToolchains  map[string]SandboxToolchainProfile `json:"language_toolchains,omitempty"`
 }
 
 // GetCapabilities returns the current sandbox capabilities
@@ -642,16 +645,26 @@ func (f *SandboxFactory) GetCapabilities() SandboxCapabilities {
 		caps.NetworkIsolation = f.containerSandbox.config.DisableNetwork
 		caps.SeccompEnabled = f.containerSandbox.config.EnableSeccomp
 		caps.ReadOnlyRoot = f.containerSandbox.config.EnableReadOnlyRoot
+		caps.LanguageToolchains = f.containerSandbox.ToolchainProfiles()
+		summary := f.containerSandbox.ToolchainSummary()
+		caps.AvailableCLIs = summary.AvailableCLIs
+		caps.NetworkDependentCLI = summary.NetworkDependentCLI
 	} else if f.v2Sandbox != nil {
 		cfg := f.v2Sandbox.manager.Config()
 		caps.ContainerIsolation = true
 		caps.NetworkIsolation = !cfg.NetworkEnabled
 		caps.SeccompEnabled = true // runtime default seccomp in Docker/gVisor mode
 		caps.ReadOnlyRoot = cfg.ReadOnlyRootFS
+		caps.AvailableCLIs = detectHostCLIInventory(DefaultAgentCommandCatalog())
 	} else if f.e2bSandbox != nil {
 		// E2B runs code inside managed remote microVMs, so execution remains isolated
 		// even when a local Docker daemon is unavailable.
 		caps.ContainerIsolation = true
+		summary := e2bToolchainSummary()
+		caps.AvailableCLIs = summary.AvailableCLIs
+		caps.NetworkDependentCLI = summary.NetworkDependentCLI
+	} else {
+		caps.AvailableCLIs = detectHostCLIInventory(DefaultAgentCommandCatalog())
 	}
 
 	return caps
