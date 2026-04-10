@@ -4641,6 +4641,17 @@ func (am *AgentManager) executeTask(task *Task) {
 		},
 	})
 
+	// Observe outcome for adaptive scorecard routing. This increments sample counts
+	// so that hasSufficientLiveScorecards returns true after minLiveScorecardSamples
+	// tasks complete, enabling scorecard-driven provider selection on subsequent tasks.
+	completionTime := time.Now()
+	observeScorecardOutcome(build, selectedCandidate.Provider, taskShapeForRole(agent.Role), ScorecardOutcome{
+		CompilePassed:      selectedCandidate.VerifyPassed,
+		FirstPassVerified:  selectedCandidate.VerifyPassed && attempt == 0,
+		TruncationOccurred: len(selectedCandidate.Output.TruncatedFiles) > 0,
+		LatencySeconds:     taskGenerationLatency(task, completionTime),
+	})
+
 	am.resultQueue <- &TaskResult{
 		TaskID:  task.ID,
 		AgentID: agent.ID,
