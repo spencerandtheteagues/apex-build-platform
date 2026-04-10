@@ -15166,6 +15166,21 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string, pha
 			}
 		}
 
+		// Mid-build frontend approval gate: paid fullstack builds pause after the
+		// frontend_ui phase so the user can review the UI before backend generation starts.
+		if phase.key == "frontend_ui" && os.Getenv("APEX_FRONTEND_APPROVAL_GATE") == "true" {
+			build.mu.RLock()
+			needsGate := isPaidBuildPlan(buildSubscriptionPlan(build)) &&
+				buildRequestsFrontendSurface(build) &&
+				!buildUsesFrontendPreviewOnlyDelivery(build)
+			build.mu.RUnlock()
+			if needsGate {
+				if !am.waitForFrontendUIApproval(build) {
+					return
+				}
+			}
+		}
+
 		log.Printf("Build %s: Phase %s complete", build.ID, phase.name)
 		am.broadcast(build.ID, &WSMessage{
 			Type:      WSBuildProgress,
@@ -15183,6 +15198,84 @@ func (am *AgentManager) executePhasedTasks(build *Build, description string, pha
 	}
 
 	am.finalizePhasedPipeline(build)
+}
+
+// waitForFrontendUIApproval blocks executePhasedTasks after the frontend_ui phase
+// completes for paid fullstack builds. It sets WaitingForUser, broadcasts the
+// approval prompt, then polls until the user sends any message (which clears
+// WaitingForUser via the message handler) or until the build fails/cancels.
+// Returns true to continue, false to abort the phase loop.
+func (am *AgentManager) waitForFrontendUIApproval(build *Build) bool {
+	const approvalKey = "frontend_ui_approval_pending"
+	const timeout = 15 * time.Minute
+
+	build.mu.Lock()
+	if build.Status == BuildFailed || build.Status == BuildCancelled {
+		build.mu.Unlock()
+		return false
+	}
+	build.Interaction.PendingQuestion = approvalKey
+	build.Interaction.WaitingForUser = true
+	appendBuildApprovalEventLocked(build, BuildApprovalEvent{
+		Kind:       "frontend_ui_approved",
+		Title:      "Frontend preview ready for review",
+		Status:     ApprovalEventPending,
+		Summary:    "The frontend preview is ready. Review the UI and send any message to continue generating the backend.",
+		SourceType: "frontend_approval_gate",
+		SourceID:   "frontend_ui_approved",
+		Actor:      "user",
+		Timestamp:  time.Now(),
+	})
+	resolveWaitingStateLocked(build)
+	interaction := copyBuildInteractionStateLocked(build)
+	build.mu.Unlock()
+
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildUserInputRequired,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"question":    "The frontend preview is ready. Review the UI and send any message to continue generating the backend.",
+			"interaction": interaction,
+		},
+	})
+	am.broadcastInteractionUpdate(build.ID, interaction)
+	log.Printf("Build %s: frontend approval gate — waiting for user response", build.ID)
+
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-am.ctx.Done():
+			return false
+		case <-ticker.C:
+			build.mu.RLock()
+			status := build.Status
+			pendingQ := build.Interaction.PendingQuestion
+			build.mu.RUnlock()
+
+			if status == BuildFailed || status == BuildCancelled {
+				return false
+			}
+			// Any message clears PendingQuestion via the message handler — that's our exit signal.
+			if pendingQ != approvalKey {
+				log.Printf("Build %s: frontend approval received — resuming backend phases", build.ID)
+				return true
+			}
+			if time.Now().After(deadline) {
+				// Auto-continue after timeout so the build isn't stuck forever.
+				build.mu.Lock()
+				build.Interaction.PendingQuestion = ""
+				build.Interaction.WaitingForUser = false
+				resolveWaitingStateLocked(build)
+				build.mu.Unlock()
+				log.Printf("Build %s: frontend approval gate timed out after %v — auto-continuing", build.ID, timeout)
+				return true
+			}
+		}
+	}
 }
 
 func (am *AgentManager) failBuildOnPhaseAbort(build *Build, phaseName string, phaseStatus BuildStatus, taskIDs []string) {
