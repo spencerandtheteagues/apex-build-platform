@@ -18,6 +18,11 @@ type screenshotAnalyzer interface {
 // VisionRepairResult is a structured, advisory UI review from a screenshot.
 type VisionRepairResult struct {
 	Summary     string   `json:"summary"`
+	// Severity classifies the overall visual quality:
+	//   "critical" — app is visually broken (blank screen, invisible text, zero CSS)
+	//   "advisory" — usable but has polish gaps
+	//   "clean"    — looks good, no actionable issues
+	Severity    string   `json:"severity,omitempty"`
 	Issues      []string `json:"issues"`
 	RepairHints []string `json:"repair_hints"`
 	Raw         string   `json:"raw,omitempty"`
@@ -60,19 +65,25 @@ Context: %s
 
 Return ONLY JSON with this shape:
 {
-  "summary": "short visual assessment",
+  "summary": "one sentence visual assessment",
+  "severity": "critical|advisory|clean",
   "issues": ["specific user-visible problems"],
   "repair_hints": ["implementation-ready fixes for the frontend agent"]
 }
 
-Focus on visual launch blockers and polish gaps:
-- blank or nearly blank screen
-- unreadable text or dark-on-dark / light-on-light contrast
-- broken layout hierarchy or overflow
-- missing spacing, missing navigation, unstyled form controls
-- obvious Tailwind/CSS failures
+Severity rules:
+- "critical": app is visually broken in a way that impairs usability — blank or white screen, invisible/unreadable text due to contrast failure, zero visible CSS styling, no content rendered
+- "advisory": app is usable but has quality gaps — layout overflow, missing spacing, minor hierarchy issues, unstyled controls, could be improved
+- "clean": looks good, no actionable visual issues
 
-If the screen looks acceptable, return empty arrays for issues and repair_hints.`, strings.TrimSpace(description)))
+Focus on:
+- blank or nearly blank screen
+- unreadable text (dark-on-dark, light-on-light contrast failures)
+- completely unstyled content (raw browser defaults, no Tailwind/CSS applied)
+- broken layout hierarchy or severe overflow
+- missing navigation or unstyled form controls
+
+If the screen looks acceptable, set severity to "clean" and return empty arrays.`, strings.TrimSpace(description)))
 
 	raw, err := vv.analyzer.AnalyzeImage(ctx, imageData, prompt)
 	if err != nil {
@@ -122,8 +133,61 @@ func normalizeVisionRepairResult(result *VisionRepairResult) {
 		return
 	}
 	result.Summary = strings.TrimSpace(result.Summary)
+	result.Severity = normalizeVisionSeverity(result.Severity, result.Issues)
 	result.Issues = compactNonEmptyStrings(result.Issues)
 	result.RepairHints = compactNonEmptyStrings(result.RepairHints)
+}
+
+// normalizeVisionSeverity validates and canonicalizes the severity field.
+// When Claude doesn't return a severity (or returns an unrecognized value),
+// it is inferred from the issue text using keyword matching.
+func normalizeVisionSeverity(raw string, issues []string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "critical":
+		return "critical"
+	case "advisory":
+		return "advisory"
+	case "clean":
+		return "clean"
+	}
+	// Infer from issues when not set.
+	if len(issues) == 0 {
+		return "clean"
+	}
+	combined := strings.ToLower(strings.Join(issues, " "))
+	if isVisionCriticalText(combined) {
+		return "critical"
+	}
+	return "advisory"
+}
+
+// isVisionCriticalText returns true when the text describes a visually broken
+// state that impairs usability (blank screen, invisible text, zero CSS).
+func isVisionCriticalText(lower string) bool {
+	criticalPhrases := []string{
+		"blank screen", "white screen", "empty screen",
+		"blank page", "white page",
+		"invisible text", "unreadable", "no visible text",
+		"dark-on-dark", "light-on-light", "zero contrast",
+		"no styling", "no css", "missing css", "unstyled",
+		"browser defaults", "no tailwind",
+		"nothing rendered", "nothing visible", "no content",
+		"completely blank", "completely empty", "completely white",
+	}
+	for _, phrase := range criticalPhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsCritical reports whether this vision result represents a visually broken UI.
+func (r *VisionRepairResult) IsCritical() bool {
+	if r == nil {
+		return false
+	}
+	return r.Severity == "critical"
 }
 
 func extractVisionJSONObject(raw string) string {

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ type PreviewVerificationResult struct {
 	ScreenshotBase64 string
 	CanaryErrors     []string
 	CanaryClickCount int
+	VisionSeverity   string // "critical", "advisory", "clean", or "" when vision skipped
 }
 
 // BuildPreviewVerifier is the interface the agent manager uses for preview verification.
@@ -122,6 +124,37 @@ func (am *AgentManager) runPreviewVerificationGate(
 			VisionReviewed:   visionReviewed,
 			GeneratedAt:      now.UTC(),
 		})
+
+		// Vision repair gate: when vision found critical visual issues and the
+		// feature flag is enabled, launch a targeted repair pass before the build
+		// is declared complete. This is best-effort — never a hard blocker.
+		// Guarded by PreviewVerificationAttempts so we only attempt once.
+		if result != nil && result.VisionSeverity == "critical" &&
+			result.ScreenshotBase64 != "" &&
+			os.Getenv("APEX_VISION_REPAIR") == "true" {
+			build.mu.RLock()
+			alreadyAttempted := build.PreviewVerificationAttempts >= 1
+			build.mu.RUnlock()
+			if !alreadyAttempted {
+				criticalHints := filterVisualCriticalHints(result.RepairHints)
+				if len(criticalHints) > 0 {
+					visionFailResult := &PreviewVerificationResult{
+						Passed:           false,
+						FailureKind:      "visual_critical",
+						Details:          "Vision analysis detected critical visual issues: " + summarizeHints(criticalHints, 2),
+						RepairHints:      criticalHints,
+						ScreenshotBase64: result.ScreenshotBase64,
+						CanaryClickCount: result.CanaryClickCount,
+						CanaryErrors:     result.CanaryErrors,
+					}
+					if am.launchPreviewRepairTask(build, allFiles, visionFailResult, now) {
+						log.Printf("Build %s: vision critical repair task launched (%d hints)", build.ID, len(criticalHints))
+						return true
+					}
+				}
+			}
+		}
+
 		return false // gate passed — caller continues normally
 	}
 
@@ -515,6 +548,54 @@ func previewFailureClass(kind string) string {
 	default:
 		return "unknown"
 	}
+}
+
+// filterVisualCriticalHints returns hints that describe critical visual issues
+// (blank screen, invisible text, zero CSS) deserving an automated repair attempt.
+func filterVisualCriticalHints(hints []string) []string {
+	var out []string
+	for _, hint := range hints {
+		lower := strings.ToLower(strings.TrimSpace(hint))
+		// Strip "visual:" prefix before matching.
+		lower = strings.TrimPrefix(lower, "visual:")
+		lower = strings.TrimSpace(lower)
+		if isVisualCriticalHintText(lower) {
+			out = append(out, hint)
+		}
+	}
+	return out
+}
+
+// isVisualCriticalHintText returns true for hint text describing a visually
+// broken state that impairs usability (blank screen, invisible text, zero CSS).
+func isVisualCriticalHintText(lower string) bool {
+	criticalPhrases := []string{
+		"blank screen", "white screen", "empty screen",
+		"blank page", "white page",
+		"invisible text", "unreadable", "no visible text",
+		"dark-on-dark", "light-on-light", "zero contrast",
+		"no styling", "no css", "missing css", "unstyled",
+		"browser defaults", "no tailwind",
+		"nothing rendered", "nothing visible", "no content visible",
+		"completely blank", "completely empty", "completely white",
+	}
+	for _, phrase := range criticalPhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// summarizeHints returns the first n hints joined with "; ".
+func summarizeHints(hints []string, n int) string {
+	if len(hints) == 0 {
+		return ""
+	}
+	if n <= 0 || n >= len(hints) {
+		return strings.Join(hints, "; ")
+	}
+	return strings.Join(hints[:n], "; ")
 }
 
 func appendUniquePreviewWarnings(groups ...[]string) []string {

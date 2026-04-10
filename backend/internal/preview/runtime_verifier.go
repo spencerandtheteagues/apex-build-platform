@@ -83,6 +83,7 @@ type RuntimeVerificationResult struct {
 	ScreenshotData   []byte
 	CanaryErrors     []string
 	CanaryClickCount int
+	VisionSeverity   string // "critical", "advisory", "clean", or "" when vision skipped
 }
 
 // ── Public entry point ────────────────────────────────────────────────────────
@@ -300,13 +301,15 @@ func (rv *RuntimeVerifier) applyAdvisoryBrowserSignals(ctx context.Context, resu
 		cancel()
 		if vision != nil {
 			result.RepairHints = appendUniqueStrings(result.RepairHints, prefixAll("visual:", vision.RepairHints)...)
+			result.VisionSeverity = vision.Severity
+			severity := firstNonEmptyString(vision.Severity, "advisory")
+			detail := firstNonEmptyString(
+				vision.Summary,
+				fmt.Sprintf("%d visual issue(s) detected", len(vision.Issues)),
+				"visual review completed",
+			)
 			if len(vision.Issues) > 0 || vision.Summary != "" {
-				detail := firstNonEmptyString(
-					vision.Summary,
-					fmt.Sprintf("%d visual issue(s) detected", len(vision.Issues)),
-					"visual review completed",
-				)
-				result.Checks = append(result.Checks, check("vision_review", true, detail))
+				result.Checks = append(result.Checks, check("vision_review:"+severity, true, detail))
 			}
 		}
 	}

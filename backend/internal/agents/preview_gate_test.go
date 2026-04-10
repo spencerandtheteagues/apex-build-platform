@@ -364,6 +364,58 @@ func TestBuildPreviewRepairTaskInputOmitsScreenshotWithoutVisionHints(t *testing
 	}
 }
 
+func TestFilterVisualCriticalHints(t *testing.T) {
+	criticalHints := []string{
+		"visual: Fix Tailwind CSS — blank screen detected",
+		"visual: Address dark-on-dark contrast failure",
+		"visual: App shows no styling, browser defaults only",
+		"visual: completely blank screen — no content visible",
+	}
+	advisoryHints := []string{
+		"visual: Increase spacing between cards",
+		"visual: Navigation bar could be more prominent",
+		"interaction: button click throws JS error",
+		"Fix TypeScript error in App.tsx",
+	}
+	all := append(criticalHints, advisoryHints...)
+
+	got := filterVisualCriticalHints(all)
+	if len(got) != len(criticalHints) {
+		t.Errorf("filterVisualCriticalHints returned %d hints, want %d\ngot: %v", len(got), len(criticalHints), got)
+	}
+	for _, h := range got {
+		lower := strings.ToLower(h)
+		lower = strings.TrimPrefix(lower, "visual:")
+		if !isVisualCriticalHintText(strings.TrimSpace(lower)) {
+			t.Errorf("unexpected non-critical hint in result: %q", h)
+		}
+	}
+}
+
+func TestFilterVisualCriticalHintsEmpty(t *testing.T) {
+	advisoryOnly := []string{
+		"visual: spacing could be improved",
+		"interaction: click error",
+	}
+	got := filterVisualCriticalHints(advisoryOnly)
+	if len(got) != 0 {
+		t.Errorf("expected empty result for advisory-only hints, got %v", got)
+	}
+}
+
+func TestSummarizeHints(t *testing.T) {
+	hints := []string{"A", "B", "C"}
+	if got := summarizeHints(hints, 2); got != "A; B" {
+		t.Errorf("summarizeHints(2) = %q, want %q", got, "A; B")
+	}
+	if got := summarizeHints(hints, 0); got != "A; B; C" {
+		t.Errorf("summarizeHints(0) = %q, want %q", got, "A; B; C")
+	}
+	if got := summarizeHints(nil, 2); got != "" {
+		t.Errorf("summarizeHints(nil) = %q, want empty", got)
+	}
+}
+
 func TestPreviewFailureClass(t *testing.T) {
 	cases := map[string]string{
 		"blank_screen":        "frontend_shell",

@@ -35,6 +35,7 @@ type VerificationResult struct {
 	ScreenshotBase64 string
 	CanaryErrors     []string
 	CanaryClickCount int
+	VisionSeverity   string // "critical", "advisory", "clean", or "" when vision skipped
 }
 
 // CheckResult records the outcome of a single named check.
@@ -241,7 +242,8 @@ func (v *Verifier) VerifyFiles(ctx context.Context, files []VerifiableFile, isFu
 				res.RepairHints = appendUniqueStrings(res.RepairHints, rr.RepairHints...)
 				res.CanaryErrors = appendUniqueStrings(res.CanaryErrors, rr.CanaryErrors...)
 				res.CanaryClickCount = rr.CanaryClickCount
-				if len(rr.ScreenshotData) > 0 && len(rr.RepairHints) > 0 {
+				res.VisionSeverity = rr.VisionSeverity
+				if len(rr.ScreenshotData) > 0 {
 					res.ScreenshotBase64 = base64.StdEncoding.EncodeToString(rr.ScreenshotData)
 				}
 				res.addCheck(check("vite_runtime_boot", true, fmt.Sprintf("dev server booted, HTTP checks passed in %s", rr.Duration.Round(time.Millisecond))))

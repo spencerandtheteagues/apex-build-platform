@@ -1809,5 +1809,6 @@ func (b *previewVerifierBridge) VerifyBuildFiles(
 		ScreenshotBase64: res.ScreenshotBase64,
 		CanaryErrors:     res.CanaryErrors,
 		CanaryClickCount: res.CanaryClickCount,
+		VisionSeverity:   res.VisionSeverity,
 	}
 }
