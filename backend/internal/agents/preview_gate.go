@@ -94,19 +94,33 @@ func (am *AgentManager) runPreviewVerificationGate(
 	result := am.previewVerifier.VerifyBuildFiles(ctx, vFiles, isFS)
 	if result == nil || result.Passed {
 		passedWarnings := []string(nil)
+		canaryClicked := 0
+		canaryErrors := 0
+		visionReviewed := false
 		if result != nil {
 			passedWarnings = appendUniquePreviewWarnings(result.RepairHints, result.CanaryErrors)
+			canaryClicked = result.CanaryClickCount
+			canaryErrors = len(result.CanaryErrors)
+			for _, w := range passedWarnings {
+				if strings.HasPrefix(strings.TrimSpace(w), "visual:") {
+					visionReviewed = true
+					break
+				}
+			}
 		}
 		appendVerificationReport(build, VerificationReport{
-			ID:            uuid.New().String(),
-			BuildID:       build.ID,
-			Phase:         "preview_verification",
-			Surface:       SurfaceGlobal,
-			Status:        VerificationPassed,
-			Deterministic: true,
-			ChecksRun:     checksRun,
-			Warnings:      passedWarnings,
-			GeneratedAt:   now.UTC(),
+			ID:               uuid.New().String(),
+			BuildID:          build.ID,
+			Phase:            "preview_verification",
+			Surface:          SurfaceGlobal,
+			Status:           VerificationPassed,
+			Deterministic:    true,
+			ChecksRun:        checksRun,
+			Warnings:         passedWarnings,
+			CanaryClickCount: canaryClicked,
+			CanaryErrorCount: canaryErrors,
+			VisionReviewed:   visionReviewed,
+			GeneratedAt:      now.UTC(),
 		})
 		return false // gate passed — caller continues normally
 	}

@@ -13466,6 +13466,9 @@ completion_finalize:
 		metrics.RecordBuildFinalization(string(status), snapshot.buildMode, reason)
 	}
 
+	// Emit structured quality telemetry before persisting.
+	emitBuildQualityTelemetry(build, allFiles, now)
+
 	// Persist to database
 	am.persistCompletedBuild(build, allFiles)
 }

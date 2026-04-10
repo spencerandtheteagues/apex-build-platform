@@ -329,6 +329,10 @@ type VerificationReport struct {
 	Blockers        []string           `json:"blockers,omitempty"`
 	TruthTags       []TruthTag         `json:"truth_tags,omitempty"`
 	ConfidenceScore float64            `json:"confidence_score,omitempty"`
+	// Canary interaction signals (set only on preview_verification phase reports).
+	CanaryClickCount int `json:"canary_click_count,omitempty"`
+	CanaryErrorCount int `json:"canary_error_count,omitempty"`
+	VisionReviewed   bool `json:"vision_reviewed,omitempty"`
 	GeneratedAt     time.Time          `json:"generated_at"`
 }
 

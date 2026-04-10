@@ -39,6 +39,11 @@ func NewVisionVerifier(analyzer screenshotAnalyzer) *VisionVerifier {
 func NewVisionVerifierFromEnv() *VisionVerifier {
 	apiKey := strings.TrimSpace(os.Getenv("APEX_CLAUDE_VISION_KEY"))
 	if apiKey == "" {
+		// Fall back to the platform Anthropic key so vision review works without
+		// a separate dedicated key. APEX_CLAUDE_VISION_KEY takes precedence when set.
+		apiKey = strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
+	}
+	if apiKey == "" {
 		return nil
 	}
 	return NewVisionVerifier(ai.NewClaudeClient(apiKey))
