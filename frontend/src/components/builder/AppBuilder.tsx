@@ -1493,6 +1493,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   // Build state
   const [buildMode, setBuildMode] = useState<BuildMode>('full')
   const [appDescription, setAppDescription] = useState('')
+  const [wireframeImage, setWireframeImage] = useState<string>('')
+  const wireframeInputRef = useRef<HTMLInputElement>(null)
   const [buildState, setBuildState] = useState<BuildState | null>(null)
   const [isBuilding, setIsBuilding] = useState(false)
   const [showChat, setShowChat] = useState(true)
@@ -4690,6 +4692,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         tech_stack: techStackOverride || undefined,
         diff_mode: false,
         role_assignments: roleConfigMode === 'manual' ? roleAssignments : undefined,
+        wireframe_image: wireframeImage || undefined,
       })
 
       if (!response || !response.build_id) {
@@ -4699,6 +4702,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       const buildId = response.build_id
       persistActiveBuildId(buildId)
       persistLastWorkflowBuildId(buildId)
+      setWireframeImage('')
 
       setBuildState({
         id: buildId,
@@ -5442,6 +5446,50 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                       <span className="text-gray-500"> BYOK uses your own keys plus a small routing fee ($0.25 per MTok).</span>
                     </p>
                   </div>
+                </div>
+
+                {/* Wireframe / Screenshot Attach */}
+                <div className="rounded-xl border border-gray-800 bg-gray-950/40 p-3">
+                  <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">Visual Reference (optional)</div>
+                  <input
+                    ref={wireframeInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      const reader = new FileReader()
+                      reader.onload = (ev) => {
+                        const result = ev.target?.result as string
+                        if (result) setWireframeImage(result)
+                      }
+                      reader.readAsDataURL(file)
+                      e.target.value = ''
+                    }}
+                  />
+                  {wireframeImage ? (
+                    <div className="flex items-center gap-3">
+                      <img src={wireframeImage} alt="Wireframe preview" className="h-12 w-12 rounded object-cover border border-gray-700" />
+                      <div className="flex-1 text-xs text-gray-400">Wireframe attached — vision analysis will extract layout intent.</div>
+                      <button
+                        type="button"
+                        onClick={() => setWireframeImage('')}
+                        className="text-xs text-gray-500 hover:text-red-400 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => wireframeInputRef.current?.click()}
+                      className="flex items-center gap-2 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      Attach wireframe or screenshot
+                    </button>
+                  )}
                 </div>
 
                 {/* Epic Build Button */}

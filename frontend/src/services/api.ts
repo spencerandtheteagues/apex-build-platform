@@ -550,6 +550,7 @@ export class ApiService {
     }
     diff_mode?: boolean
     role_assignments?: Record<string, string>
+    wireframe_image?: string
   }): Promise<{
     build_id: string
     websocket_url: string

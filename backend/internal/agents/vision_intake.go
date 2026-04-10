@@ -39,11 +39,26 @@ func NewVisionIntakeProcessor(analyzer visionSpecAnalyzer) *VisionIntakeProcesso
 }
 
 func NewVisionIntakeProcessorFromEnv() *VisionIntakeProcessor {
+	// APEX_CLAUDE_VISION_KEY takes precedence; fall back to the shared ANTHROPIC_API_KEY
+	// so vision intake works immediately without a dedicated env var.
 	apiKey := strings.TrimSpace(os.Getenv("APEX_CLAUDE_VISION_KEY"))
+	if apiKey == "" {
+		apiKey = strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
+	}
 	if apiKey == "" {
 		return nil
 	}
 	return NewVisionIntakeProcessor(ai.NewClaudeClient(apiKey))
+}
+
+// multiModalInputEnabled returns true unless APEX_MULTI_MODAL_INPUT is
+// explicitly set to a falsy value. Default is enabled.
+func multiModalInputEnabled() bool {
+	val := strings.TrimSpace(strings.ToLower(os.Getenv("APEX_MULTI_MODAL_INPUT")))
+	if val == "" {
+		return true
+	}
+	return val == "1" || val == "true" || val == "yes" || val == "on"
 }
 
 func (p *VisionIntakeProcessor) ExtractSpec(ctx context.Context, imageData []byte) *ComponentSpec {
@@ -221,6 +236,10 @@ func (am *AgentManager) prepareBuildRequestForCreation(req *BuildRequest) *Build
 	if am == nil || am.visionIntake == nil || strings.TrimSpace(cloned.WireframeImage) == "" {
 		return cloned
 	}
+	if !multiModalInputEnabled() {
+		log.Printf("[vision_intake] skipped: APEX_MULTI_MODAL_INPUT=false")
+		return cloned
+	}
 
 	imageData, err := decodeVisionIntakeImage(cloned.WireframeImage)
 	if err != nil {
@@ -233,9 +252,13 @@ func (am *AgentManager) prepareBuildRequestForCreation(req *BuildRequest) *Build
 		baseCtx = am.ctx
 	}
 	ctx, cancel := context.WithTimeout(baseCtx, 30*time.Second)
+	start := time.Now()
 	spec := am.visionIntake.ExtractSpec(ctx, imageData)
+	elapsed := time.Since(start)
 	cancel()
+
 	if spec == nil {
+		log.Printf("[vision_intake] {\"outcome\":\"no_spec\",\"image_bytes\":%d,\"elapsed_ms\":%d}", len(imageData), elapsed.Milliseconds())
 		return cloned
 	}
 
@@ -247,6 +270,10 @@ func (am *AgentManager) prepareBuildRequestForCreation(req *BuildRequest) *Build
 	if augmented != "" {
 		cloned.Prompt = augmented
 	}
+
+	log.Printf("[vision_intake] {\"outcome\":\"ok\",\"app_type\":%q,\"components\":%d,\"confidence\":%.2f,\"image_bytes\":%d,\"elapsed_ms\":%d}",
+		spec.AppType, len(spec.Components), spec.Confidence, len(imageData), elapsed.Milliseconds())
+
 	return cloned
 }
 
