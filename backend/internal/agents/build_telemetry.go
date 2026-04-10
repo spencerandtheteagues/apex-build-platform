@@ -47,8 +47,9 @@ type BuildQualityMetrics struct {
 	FailureClass    string `json:"failure_class,omitempty"`
 
 	// Volume and duration.
-	FileCount  int   `json:"file_count"`
-	DurationMS int64 `json:"duration_ms,omitempty"`
+	FileCount     int   `json:"file_count"`
+	TestFileCount int   `json:"test_file_count,omitempty"`
+	DurationMS    int64 `json:"duration_ms,omitempty"`
 
 	GeneratedAt time.Time `json:"generated_at"`
 }
@@ -70,6 +71,16 @@ func emitBuildQualityTelemetry(build *Build, allFiles []GeneratedFile, now time.
 	log.Printf("[quality_telemetry] %s", string(data))
 }
 
+func countTestFiles(files []GeneratedFile) int {
+	n := 0
+	for _, f := range files {
+		if isTestFile(f.Path) {
+			n++
+		}
+	}
+	return n
+}
+
 func deriveBuildQualityMetrics(build *Build, allFiles []GeneratedFile, now time.Time) *BuildQualityMetrics {
 	if build == nil {
 		return nil
@@ -88,6 +99,7 @@ func deriveBuildQualityMetrics(build *Build, allFiles []GeneratedFile, now time.
 		ReadinessRepairCount: build.ReadinessRecoveryAttempts,
 		PreviewRepairCount:   build.PreviewVerificationAttempts,
 		FileCount:            len(allFiles),
+		TestFileCount:        countTestFiles(allFiles),
 		GeneratedAt:          now.UTC(),
 	}
 

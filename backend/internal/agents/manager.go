@@ -13477,8 +13477,9 @@ completion_finalize:
 		metrics.RecordBuildFinalization(string(status), snapshot.buildMode, reason)
 	}
 
-	// Emit structured quality telemetry before persisting.
+	// Emit structured quality telemetry and test artifact summary before persisting.
 	emitBuildQualityTelemetry(build, allFiles, now)
+	emitTestArtifactSummary(build, allFiles, now)
 
 	// Persist to database
 	am.persistCompletedBuild(build, allFiles)
@@ -14920,6 +14921,7 @@ func (am *AgentManager) buildExecutionPhasesForBuild(build *Build) (string, []ex
 
 	build.mu.RLock()
 	description := build.Description
+	isPreviewOnly := buildUsesFrontendPreviewOnlyDeliveryLocked(build)
 	allAgents := make([]agentPriority, 0, len(build.Agents))
 	for _, agent := range build.Agents {
 		if agent == nil {
@@ -14936,6 +14938,11 @@ func (am *AgentManager) buildExecutionPhasesForBuild(build *Build) (string, []ex
 	}
 	build.mu.RUnlock()
 
+	// Skip the testing phase for frontend-preview-only builds (no backend contract
+	// to verify, and tests would just slow the preview path).
+	// Skip when APEX_TEST_GENERATION=false (kill-switch for the entire testing phase).
+	includeTests := !isPreviewOnly && testGenerationEnabled()
+
 	var archAgents, frontendAgents, dbAgents, backendAgents, testAgents, reviewAgents []agentPriority
 	for _, ap := range allAgents {
 		switch ap.agent.Role {
@@ -14948,7 +14955,9 @@ func (am *AgentManager) buildExecutionPhasesForBuild(build *Build) (string, []ex
 		case RoleBackend:
 			backendAgents = append(backendAgents, ap)
 		case RoleTesting:
-			testAgents = append(testAgents, ap)
+			if includeTests {
+				testAgents = append(testAgents, ap)
+			}
 		case RoleReviewer:
 			reviewAgents = append(reviewAgents, ap)
 		}
