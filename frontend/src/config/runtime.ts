@@ -115,3 +115,7 @@ export const getConfiguredWsUrl = (): string => {
 
   return importedValue
 }
+
+export const getRuntimeConfiguredWsUrl = (): string => {
+  return normalizeConfiguredWsUrl(readRuntimeConfig().WS_URL)
+}

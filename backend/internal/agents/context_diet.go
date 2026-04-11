@@ -14,6 +14,19 @@ var (
 )
 
 func buildContextDietSection(path, content string, focusLines []int, contextLines int) string {
+	return buildContextDietSectionWithSymbols(path, content, focusLines, contextLines, nil, false)
+}
+
+func buildContextDietSectionWithSymbols(path, content string, focusLines []int, contextLines int, targetSymbols []string, useAST bool) string {
+	if useAST {
+		ctx, err := BuildPrunedSymbolContext(path, content, targetSymbols, focusLines, PrunedSymbolContextOptions{
+			ContextLines: contextLines,
+		})
+		if err == nil && ctx.ParseSucceeded {
+			return renderPrunedSymbolContext(path, ctx)
+		}
+	}
+
 	lines := strings.Split(content, "\n")
 	imports := extractContextDietImports(lines)
 	signatures := extractContextDietSignatures(lines)

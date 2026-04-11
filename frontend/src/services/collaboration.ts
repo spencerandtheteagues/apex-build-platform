@@ -1,7 +1,7 @@
 // APEX-BUILD Real-Time Collaboration Service
 // Yjs-inspired CRDT with OT fallback for concurrent editing
 
-import { getConfiguredWsUrl } from '@/config/runtime'
+import { getConfiguredWsUrl, getRuntimeConfiguredWsUrl } from '@/config/runtime'
 import { buildAuthenticatedWebSocketUrl } from './authSession'
 
 // Browser-compatible EventEmitter implementation
@@ -129,7 +129,7 @@ export const getCollaborationWebSocketUrl = (): string => {
     ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
     : 'ws://localhost:8080'
 
-  const configuredBaseUrl = getConfiguredWsUrl()
+  const configuredBaseUrl = getRuntimeConfiguredWsUrl() || getConfiguredWsUrl()
   const baseUrl = (configuredBaseUrl || fallbackBaseUrl)
     .replace(/\/+$/, '')
     .replace(/\/ws$/, '')

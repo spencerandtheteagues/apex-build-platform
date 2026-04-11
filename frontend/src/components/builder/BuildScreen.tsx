@@ -51,6 +51,13 @@ interface BuildBlocker {
   who_must_act?: string
 }
 
+interface PlatformReadinessNotice {
+  title: string
+  body: string
+  detail: string
+  isCritical: boolean
+}
+
 interface BSBuildState {
   id: string
   status: BuildStatus
@@ -126,6 +133,7 @@ interface BuildScreenProps {
   hasBYOK: boolean
   phaseLabel: string
   visibleBlockers: BuildBlocker[]
+  platformReadinessNotice: PlatformReadinessNotice | null
   buildFailureAttribution: { title: string; body: string; detail: string; capturedError?: string } | null
   showDiffReview: boolean
   userId: number | null | undefined
@@ -582,6 +590,7 @@ interface PanelOverlayProps {
   isBuildActive: boolean
   providerPanels: ProviderPanelItem[]
   visibleBlockers: BuildBlocker[]
+  platformReadinessNotice: PlatformReadinessNotice | null
   agentMessageDrafts: Record<string, string>
   agentMessagePendingId: string | null
   pendingPermissionRequests: BuildPermissionRequest[]
@@ -614,7 +623,7 @@ const OVERLAY_TITLES: Record<NonNullable<OverlayId>, string> = {
 const PanelOverlay: React.FC<PanelOverlayProps> = ({
   overlay, onClose,
   buildState, generatedFiles, chatMessages, isBuildActive,
-  providerPanels, visibleBlockers, agentMessageDrafts, agentMessagePendingId, pendingPermissionRequests,
+  providerPanels, visibleBlockers, platformReadinessNotice, agentMessageDrafts, agentMessagePendingId, pendingPermissionRequests,
   pendingRevisionRequests, buildFailureAttribution,
   proposedEdits, showDiffReview, permissionActionId, rollbackCheckpointId,
   userId, onAgentMessageDraftChange, onSendDirectAgentMessage, onResolvePermission, onSetShowDiffReview, onLoadProposedEdits,
@@ -850,6 +859,37 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
         {/* ── ISSUES ─────────────────────────────────────────── */}
         {overlay === 'issues' && (
           <div className="space-y-4">
+            {/* Platform readiness notice */}
+            {platformReadinessNotice && (
+              <div
+                className={cn(
+                  'rounded-xl border p-4',
+                  platformReadinessNotice.isCritical
+                    ? 'border-amber-700/40 bg-amber-950/20'
+                    : 'border-sky-700/35 bg-sky-950/15'
+                )}
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <AlertCircle
+                    className={cn(
+                      'w-5 h-5',
+                      platformReadinessNotice.isCritical ? 'text-amber-400' : 'text-sky-400'
+                    )}
+                  />
+                  <h3
+                    className={cn(
+                      'font-semibold',
+                      platformReadinessNotice.isCritical ? 'text-amber-300' : 'text-sky-300'
+                    )}
+                  >
+                    {platformReadinessNotice.title}
+                  </h3>
+                </div>
+                <p className="text-sm text-gray-300 mb-2">{platformReadinessNotice.body}</p>
+                <p className="text-xs text-gray-500">{platformReadinessNotice.detail}</p>
+              </div>
+            )}
+
             {/* Build failure attribution */}
             {buildFailureAttribution && (
               <div className="rounded-xl border border-amber-700/40 bg-amber-950/20 p-4">
@@ -1028,7 +1068,8 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
             )}
 
             {/* Empty state */}
-            {!buildFailureAttribution && visibleBlockers.length === 0 &&
+            {!platformReadinessNotice &&
+              !buildFailureAttribution && visibleBlockers.length === 0 &&
               pendingPermissionRequests.length === 0 && pendingRevisionRequests.length === 0 &&
               buildState.status !== 'awaiting_review' &&
               (buildState.checkpoints || []).length === 0 && (
@@ -1114,7 +1155,7 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
     generatedFiles, proposedEdits, isBuildActive, buildPaused,
     pendingQuestion, pendingPermissionRequests, pendingRevisionRequests,
     buildActionPending, hasBYOK, phaseLabel, visibleBlockers,
-    buildFailureAttribution, showDiffReview, userId,
+    platformReadinessNotice, buildFailureAttribution, showDiffReview, userId,
     isPreparingPreview, isCreatingProject, isStartingOver, createdProjectId,
     permissionActionId, rollbackCheckpointId, chatInput, setChatInput,
     plannerSendMode, setPlannerSendMode, plannerMessagePending,
@@ -1148,10 +1189,14 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
     pendingQuestion ||
     buildPaused ||
     pendingPermissionRequests.length > 0 ||
+    platformReadinessNotice?.isCritical ||
+    buildFailureAttribution ||
     buildState.status === 'awaiting_review' ||
     visibleBlockers.some((b) => b.severity === 'blocking')
   )
   const issueCount = visibleBlockers.length + pendingPermissionRequests.length +
+    (platformReadinessNotice ? 1 : 0) +
+    (buildFailureAttribution ? 1 : 0) +
     (buildState.status === 'awaiting_review' ? 1 : 0)
 
   return (
@@ -1242,6 +1287,7 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
           isBuildActive={isBuildActive}
           providerPanels={providerPanels}
           visibleBlockers={visibleBlockers}
+          platformReadinessNotice={platformReadinessNotice}
           agentMessageDrafts={agentMessageDrafts}
           agentMessagePendingId={agentMessagePendingId}
           pendingPermissionRequests={pendingPermissionRequests}

@@ -89,6 +89,10 @@ type taskGenerationCandidate struct {
 	DeterministicScore int
 	VerifyPassed       bool
 	VerifyErrors       []string
+	Triage             TaskTriageResult
+	WaterfallStage     string
+	WaterfallReason    string
+	WaterfallPowerMode PowerMode
 }
 
 func summarizeTaskOutputForJudge(output *TaskOutput, limit int) string {
@@ -173,6 +177,29 @@ func (am *AgentManager) providerAssistedTaskVerification(build *Build, task *Tas
 		report.TruthTags = append([]TruthTag(nil), artifact.ContractSlice.TruthTags...)
 	}
 
+	if deterministicTaskGatesEnabledForBuild(build) {
+		deterministic := am.evaluateDeterministicVerification(build, task, candidate)
+		report.Deterministic = deterministic.Ran
+		report.DeterministicStatus = deterministic.DeterministicStatus
+		report.ProviderCritiqueStatus = deterministic.ProviderCritiqueStatus
+		report.ChecksRun = dedupeStrings(append(report.ChecksRun, deterministic.Checks...))
+		report.Warnings = dedupeStrings(append(report.Warnings, deterministic.Warnings...))
+
+		if deterministic.DeterministicStatus == verificationReasonDeterministicFailed {
+			report.Status = VerificationBlocked
+			report.Provider = ""
+			report.Errors = dedupeStrings(append(report.Errors, deterministic.Errors...))
+			report.Blockers = dedupeStrings(append(report.Blockers, deterministic.Errors...))
+			report.ChecksRun = dedupeStrings(append(report.ChecksRun, verificationReasonDeterministicFailed, verificationReasonProviderCritiqueSkip))
+			report.ProviderCritiqueStatus = verificationReasonProviderCritiqueSkip
+			report.ConfidenceScore = 0.99
+			return report
+		}
+
+		report.ChecksRun = dedupeStrings(append(report.ChecksRun, verificationReasonDeterministicPassed, verificationReasonProviderCritiqueNeed))
+		report.ProviderCritiqueStatus = verificationReasonProviderCritiqueNeed
+	}
+
 	prompt := fmt.Sprintf(`Review this AI-generated task result for concrete correctness issues only.
 
 Task type: %s
@@ -246,7 +273,16 @@ Return JSON only:
 
 	// Low-confidence critique remains advisory so the verifier does not create a
 	// new source of false-positive build failures.
-	report.Warnings = dedupeStrings(append(critique.Warnings, critique.Blockers...))
+	warnings := append([]string(nil), report.Warnings...)
+	warnings = append(warnings, critique.Warnings...)
+	warnings = append(warnings, critique.Blockers...)
+	report.Warnings = dedupeStrings(warnings)
+	if report.ProviderCritiqueStatus == "" {
+		report.ProviderCritiqueStatus = verificationReasonProviderCritiqueNeed
+	}
+	if report.DeterministicStatus == "" {
+		report.DeterministicStatus = verificationReasonDeterministicPassed
+	}
 	return report
 }
 
@@ -395,9 +431,27 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	if am == nil || build == nil || agent == nil || task == nil {
 		return nil, fmt.Errorf("missing generation context")
 	}
-	model := agent.Model
+	triage := triageTaskForWaterfall(task)
+	callPowerMode := build.PowerMode
+	waterfallStage := "static_fallback"
+	waterfallReason := "routing_waterfall_disabled"
+	model := strings.TrimSpace(agent.Model)
+
+	if routingWaterfallEnabledForBuild(build) {
+		decision := planRoutingWaterfall(build, task, provider)
+		triage = decision.Triage
+		if decision.PowerMode != "" {
+			callPowerMode = decision.PowerMode
+		}
+		if strings.TrimSpace(decision.Model) != "" {
+			model = strings.TrimSpace(decision.Model)
+		}
+		waterfallStage = decision.Stage
+		waterfallReason = decision.Reason
+	}
+
 	if provider != agent.Provider || strings.TrimSpace(model) == "" {
-		model = selectModelForPowerMode(provider, build.PowerMode)
+		model = selectModelForPowerMode(provider, callPowerMode)
 	}
 
 	if am.budgetEnforcer != nil {
@@ -424,7 +478,8 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 		Temperature:     temperature,
 		SystemPrompt:    systemPrompt,
 		RoleHint:        string(agent.Role),
-		PowerMode:       build.PowerMode,
+		ModelOverride:   model,
+		PowerMode:       callPowerMode,
 		UsePlatformKeys: am.buildUsesPlatformKeys(build),
 	})
 	if err != nil {
@@ -461,6 +516,15 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	}
 
 	output := am.parseTaskOutput(task.Type, response.Content)
+	if output.Metrics == nil {
+		output.Metrics = map[string]any{}
+	}
+	output.Metrics["triage_task_shape"] = string(triage.TaskShape)
+	output.Metrics["triage_risk_level"] = string(triage.RiskLevel)
+	output.Metrics["triage_scope"] = triage.Scope
+	output.Metrics["routing_waterfall_stage"] = waterfallStage
+	output.Metrics["routing_waterfall_reason"] = waterfallReason
+	output.Metrics["routing_waterfall_power_mode"] = string(callPowerMode)
 	attachAIResponseMetrics(output, provider, modelUsed, response)
 	am.materializeStructuredPatchOutput(build, task, output)
 	trackLikelyTruncatedSourceFiles(output)
@@ -478,10 +542,14 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	}
 
 	candidate := &taskGenerationCandidate{
-		Provider:   provider,
-		Model:      modelUsed,
-		Output:     output,
-		RawContent: response.Content,
+		Provider:           provider,
+		Model:              modelUsed,
+		Output:             output,
+		RawContent:         response.Content,
+		Triage:             triage,
+		WaterfallStage:     waterfallStage,
+		WaterfallReason:    waterfallReason,
+		WaterfallPowerMode: callPowerMode,
 	}
 	am.scoreTaskGenerationCandidate(agent.BuildID, candidate)
 	return candidate, nil

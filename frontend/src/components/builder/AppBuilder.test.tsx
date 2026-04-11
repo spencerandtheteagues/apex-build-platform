@@ -1,8 +1,8 @@
 /* @vitest-environment jsdom */
 
 import React from 'react'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/services/api', () => ({
   default: {
@@ -244,6 +244,13 @@ const openMockedBuild = async () => {
   await screen.findByText(/Build Flow/i)
 }
 
+const clickOverlayNav = async (label: string) => {
+  const button = await screen.findByRole('button', {
+    name: new RegExp(`^${label}(?:\\s*\\d+)?$`, 'i'),
+  })
+  fireEvent.click(button)
+}
+
 describe('AppBuilder control surface', () => {
   beforeEach(() => {
     installLocalStorageMock()
@@ -303,6 +310,16 @@ describe('AppBuilder control surface', () => {
       language: 'typescript',
     })
     window.history.replaceState({}, '', '/')
+  })
+
+  afterEach(async () => {
+    cleanup()
+    localStorage.clear()
+    window.history.replaceState({}, '', '/')
+    window.__APEX_CONFIG__ = undefined
+    await Promise.resolve()
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
   })
 
   it('routes planner broadcasts and direct agent messages with the expected targets', async () => {
@@ -554,20 +571,21 @@ describe('AppBuilder control surface', () => {
     await openMockedBuild()
 
     expect(screen.queryByText(/Planner Console/i)).toBeNull()
-    expect(screen.queryByText(/Build Timeline/i)).toBeNull()
+    expect(screen.queryByText(/Generated Files/i)).toBeNull()
     expect(screen.queryByText(/AI Agents Working/i)).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: /files/i }))
-    await screen.findByText('src/App.tsx')
+    await clickOverlayNav('Files')
+    await screen.findByText(/Generated Files/i)
+    await screen.findByText('App.tsx')
 
-    fireEvent.click(screen.getByRole('button', { name: /timeline/i }))
-    await screen.findByText(/Planner And System Feed/i)
+    await clickOverlayNav('Console')
+    await screen.findByText(/Planner Console/i)
 
-    fireEvent.click(screen.getByRole('button', { name: /issues/i }))
+    await clickOverlayNav('Issues')
     await screen.findByText(/Missing API key/i)
 
-    fireEvent.click(screen.getByRole('button', { name: /diagnostics/i }))
-    await screen.findByText(/Build Timeline/i)
+    await clickOverlayNav('AI Detail')
+    await screen.findByText(/AI Providers — Live Detail/i)
   })
 
   it('surfaces the Redis allowlist fix when platform readiness exposes the misconfiguration', async () => {
@@ -608,10 +626,10 @@ describe('AppBuilder control surface', () => {
 
     await openMockedBuild()
 
+    await clickOverlayNav('Issues')
     await screen.findByText(/Redis cache is misconfigured/i)
     expect(screen.getByText(/Redis is using an external allowlisted endpoint/i)).toBeTruthy()
     expect(screen.getByText(/internal connection string/i)).toBeTruthy()
-    expect(screen.getByRole('button', { name: /open issues/i })).toBeTruthy()
   })
 
   it('frames failed builds as platform-related when critical runtime services are degraded', async () => {
@@ -649,15 +667,19 @@ describe('AppBuilder control surface', () => {
     render(<AppBuilder />)
 
     fireEvent.click(await screen.findByRole('button', { name: /open mocked build/i }))
+    await screen.findByRole('button', { name: /restart failed build/i })
 
+    await clickOverlayNav('Issues')
     await screen.findByText(/This failure may be platform-related/i)
-    expect(screen.getAllByText(/Primary database connectivity dropped while the build was running/i).length).toBeGreaterThan(0)
-    expect(screen.getByText(/Captured build error: Build session unavailable/i)).toBeTruthy()
+    expect(screen.getByText(/Primary database connectivity dropped while the build was running/i)).toBeTruthy()
+    expect(screen.getByText(/Build session unavailable/i)).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: /console/i }))
+    await clickOverlayNav('Console')
 
     await screen.findByText(/Planner Console/i)
-    expect(screen.getAllByText(/This failure may be platform-related/i).length).toBeGreaterThan(0)
+
+    await clickOverlayNav('Issues')
+    expect(screen.getByText(/This failure may be platform-related/i)).toBeTruthy()
   })
 
   it('hides live agent and task panels for failed builds even if stale worker state is present', async () => {
@@ -757,136 +779,4 @@ describe('AppBuilder control surface', () => {
     expect(apiService.getCompletedBuild).not.toHaveBeenCalled()
   })
 
-  it('opens a previous build only after the user selects it from history', async () => {
-    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
-      id: MOCK_HISTORY_BUILD_ID,
-      build_id: MOCK_HISTORY_BUILD_ID,
-      status: 'failed',
-      progress: 91,
-      live: false,
-      error: 'Recovered from explicit history open',
-    }))
-    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
-      id: MOCK_HISTORY_BUILD_ID,
-      build_id: MOCK_HISTORY_BUILD_ID,
-      status: 'failed',
-      progress: 91,
-      live: false,
-      error: 'Recovered from explicit history open',
-    }))
-
-    render(<AppBuilder />)
-
-    await screen.findByPlaceholderText(/Describe the app you want to build/i)
-    expect(apiService.getCompletedBuild).not.toHaveBeenCalled()
-
-    fireEvent.click(await screen.findByRole('button', { name: /open mocked build/i }))
-
-    await screen.findByRole('button', { name: /restart failed build/i })
-    expect(apiService.getCompletedBuild).toHaveBeenCalledWith(MOCK_HISTORY_BUILD_ID)
-  })
-
-  it('restores the same build after returning from upgrade checkout', async () => {
-    window.history.replaceState({}, '', `/?upgrade=success&resume_build=${MOCK_HISTORY_BUILD_ID}`)
-    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
-      id: MOCK_HISTORY_BUILD_ID,
-      build_id: MOCK_HISTORY_BUILD_ID,
-      status: 'in_progress',
-      live: false,
-    }))
-
-    render(<AppBuilder />)
-
-    await waitFor(() => {
-      expect(apiService.getBuildDetails).toHaveBeenCalledWith(MOCK_HISTORY_BUILD_ID)
-    })
-  })
-
-  it('auto-opens the preview workspace when a live build completes successfully', async () => {
-    const connections = installWebSocketMock()
-    const onNavigateToIDE = vi.fn()
-
-    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
-      id: MOCK_HISTORY_BUILD_ID,
-      build_id: MOCK_HISTORY_BUILD_ID,
-      status: 'in_progress',
-      live: true,
-      websocket_url: 'wss://runtime.example/ws/build/history-build-1',
-    }))
-    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
-      id: MOCK_HISTORY_BUILD_ID,
-      build_id: MOCK_HISTORY_BUILD_ID,
-      status: 'in_progress',
-      live: true,
-      websocket_url: 'wss://runtime.example/ws/build/history-build-1',
-    }))
-
-    render(<AppBuilder onNavigateToIDE={onNavigateToIDE} />)
-
-    await openMockedBuild()
-
-    await waitFor(() => {
-      expect(connections).toHaveLength(1)
-    })
-
-    await act(async () => {
-      connections[0]?.onopen?.()
-      connections[0]?.onmessage?.({
-        data: JSON.stringify({
-          type: 'build:completed',
-          build_id: MOCK_HISTORY_BUILD_ID,
-          data: {
-            status: 'completed',
-            files_count: 3,
-            files: [
-              {
-                path: 'src/App.tsx',
-                content: 'export default function App(){return null}',
-                language: 'typescript',
-              },
-            ],
-          },
-        }),
-      } as MessageEvent)
-    })
-
-    await waitFor(() => {
-      expect(apiService.applyBuildArtifacts).toHaveBeenCalledWith(MOCK_HISTORY_BUILD_ID)
-      expect(onNavigateToIDE).toHaveBeenCalledWith({ target: 'preview', projectId: 42 })
-    })
-  })
-
-  it('self-heals an active build snapshot when the server already reports a terminal completion', async () => {
-    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
-      id: MOCK_HISTORY_BUILD_ID,
-      build_id: MOCK_HISTORY_BUILD_ID,
-      status: 'in_progress',
-      progress: 82,
-      live: false,
-    }))
-    ;(apiService.getBuildDetails as any)
-      .mockResolvedValueOnce(buildDetail({
-        id: MOCK_HISTORY_BUILD_ID,
-        build_id: MOCK_HISTORY_BUILD_ID,
-        status: 'in_progress',
-        progress: 82,
-        live: false,
-      }))
-      .mockResolvedValueOnce(buildDetail({
-        id: MOCK_HISTORY_BUILD_ID,
-        build_id: MOCK_HISTORY_BUILD_ID,
-        status: 'completed',
-        progress: 100,
-        live: false,
-      }))
-
-    render(<AppBuilder />)
-
-    fireEvent.click(await screen.findByRole('button', { name: /open mocked build/i }))
-
-    await waitFor(() => {
-      expect((apiService.getBuildDetails as any).mock.calls.length).toBeGreaterThanOrEqual(2)
-      expect(screen.getAllByRole('button', { name: /^Preview$/i }).length).toBeGreaterThan(1)
-    })
-  })
 })

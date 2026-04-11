@@ -126,28 +126,32 @@ const earlyInjection = `
 // which helps detect Tailwind failures where elements render but are invisible.
 const mountCheckJS = `JSON.stringify((function() {
   var selectors = ['#root','#app','#__next','#app-root','[data-reactroot]'];
-  for (var i = 0; i < selectors.length; i++) {
-    var el = document.querySelector(selectors[i]);
-    if (el) {
-      var text = (el.textContent || '').trim();
-      var visible = (el.innerText || '').trim();
-      var hasStructuralContent =
-        el.childElementCount > 0 && (
-          text.length > 0 ||
-          visible.length > 0 ||
-          !!el.querySelector('img,svg,canvas,video,iframe,button,input,select,textarea,nav,main,section,article,aside,header,footer,form,table,ul,ol,[role],[aria-label],[data-testid]')
-        );
-      return {
-        found: true,
-        selector: selectors[i],
-        childCount: el.childElementCount,
-        textLength: text.length,
-        visibleText: visible.length,
-        hasContent: hasStructuralContent || visible.length >= 25,
-        snippet: text.substring(0, 80)
-      };
-    }
-  }
+	for (var i = 0; i < selectors.length; i++) {
+		var el = document.querySelector(selectors[i]);
+		if (el) {
+			var text = (el.textContent || '').trim();
+			var visible = (el.innerText || '').trim();
+			var html = (el.innerHTML || '').trim();
+			var hasDomChildren = el.childElementCount > 0;
+			var hasMeaningfulText = visible.length >= 10 || text.length >= 12;
+			var hasMarkupOnlyContent = html.length >= 20 && hasDomChildren;
+			var hasStructuralContent =
+				hasDomChildren && (
+					text.length > 0 ||
+					visible.length > 0 ||
+					!!el.querySelector('img,svg,canvas,video,iframe,button,input,select,textarea,nav,main,section,article,aside,header,footer,form,table,ul,ol,[role],[aria-label],[data-testid]')
+				);
+			return {
+				found: true,
+				selector: selectors[i],
+				childCount: el.childElementCount,
+				textLength: text.length,
+				visibleText: visible.length,
+				hasContent: hasStructuralContent || hasMeaningfulText || hasMarkupOnlyContent,
+				snippet: text.substring(0, 80)
+			};
+		}
+	}
   // Fallback: any non-trivial body content counts
   var bodyText = (document.body && document.body.textContent || '').trim();
   var bodyVisible = (document.body && document.body.innerText || '').trim();
