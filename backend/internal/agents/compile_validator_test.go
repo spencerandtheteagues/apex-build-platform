@@ -180,7 +180,7 @@ export function App({ title }: AppProps) {
 }
 `,
 		},
-	}, "")
+	}, "", false)
 
 	if strings.Contains(prompt, "**Full file content**") {
 		t.Fatalf("expected context-diet prompt, got full file dump: %q", prompt)
@@ -223,7 +223,7 @@ func TestCVBuildRepairPromptIncludesReliabilitySummary(t *testing.T) {
 		PrimaryUserFlows:      []string{"land in the product shell"},
 		RecurringFailureClass: []string{"compile_failure"},
 		RecommendedFocus:      []string{"expand deterministic compile repair coverage for the current failure class"},
-	}))
+	}), false)
 
 	if !strings.Contains(prompt, "<reliability_summary>") {
 		t.Fatalf("expected reliability summary in repair prompt, got %q", prompt)

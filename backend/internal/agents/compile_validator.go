@@ -301,6 +301,7 @@ func cvRunViteBuild(ctx context.Context, workDir string) []ParsedBuildError {
 //
 //	src/App.tsx(15,3): error TS2345: Argument of type 'string' is not assignable to...
 var tscErrorRe = regexp.MustCompile(`^(.+?)\((\d+),(\d+)\): error (TS\d+): (.+)$`)
+var cvQuotedSymbolRe = regexp.MustCompile(`['"]([A-Za-z_][A-Za-z0-9_]*)['"]`)
 
 func parseTscOutput(output string) []ParsedBuildError {
 	var errors []ParsedBuildError
@@ -630,7 +631,7 @@ func (am *AgentManager) cvGenerateTaskOutput(
 	if build.SnapshotState.Orchestration != nil && build.SnapshotState.Orchestration.ReliabilitySummary != nil {
 		reliabilityContext = reliabilitySummaryPromptContext(build.SnapshotState.Orchestration.ReliabilitySummary)
 	}
-	prompt := cvBuildRepairPrompt(errors, allFiles, reliabilityContext)
+	prompt := cvBuildRepairPrompt(errors, allFiles, reliabilityContext, astContextDietEnabledForBuild(build))
 	if directive := strings.TrimSpace(strategy.Directive); directive != "" {
 		prompt += "\n\n## Repair Strategy\n\n" + directive + "\n"
 	}
@@ -762,7 +763,7 @@ func cvValidateCandidateWorkspace(ctx context.Context, files []GeneratedFile, ba
 
 // cvBuildRepairPrompt assembles the repair prompt with structured error context
 // and per-file source windows around each error location.
-func cvBuildRepairPrompt(errors []ParsedBuildError, allFiles []GeneratedFile, reliabilityContext string) string {
+func cvBuildRepairPrompt(errors []ParsedBuildError, allFiles []GeneratedFile, reliabilityContext string, useASTContext bool) string {
 	// Build a file content index for quick lookup.
 	fileIndex := make(map[string]string, len(allFiles))
 	for _, f := range allFiles {
@@ -850,7 +851,8 @@ func cvBuildRepairPrompt(errors []ParsedBuildError, allFiles []GeneratedFile, re
 					focusLines = append(focusLines, err.Line)
 				}
 			}
-			sb.WriteString(buildContextDietSection(g.path, content, focusLines, cvContextLines))
+			targetSymbols := cvTargetSymbolsForFileErrors(g.errors)
+			sb.WriteString(buildContextDietSectionWithSymbols(g.path, content, focusLines, cvContextLines, targetSymbols, useASTContext))
 			sb.WriteString("\n")
 		}
 	}
@@ -860,6 +862,36 @@ func cvBuildRepairPrompt(errors []ParsedBuildError, allFiles []GeneratedFile, re
 	sb.WriteString("Do not change any files not mentioned above. Do not add comments about what you changed.\n")
 
 	return sb.String()
+}
+
+func cvTargetSymbolsForFileErrors(errors []ParsedBuildError) []string {
+	if len(errors) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(errors)*2)
+	seen := map[string]struct{}{}
+	for _, parsed := range errors {
+		message := strings.TrimSpace(parsed.Message)
+		if message == "" {
+			continue
+		}
+		for _, match := range cvQuotedSymbolRe.FindAllStringSubmatch(message, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			symbol := strings.TrimSpace(match[1])
+			if symbol == "" {
+				continue
+			}
+			key := strings.ToLower(symbol)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, symbol)
+		}
+	}
+	return out
 }
 
 // ─── Workspace Helpers ────────────────────────────────────────────────────────

@@ -214,13 +214,14 @@ type AIRouter interface {
 
 // GenerateOptions for AI generation requests
 type GenerateOptions struct {
-	UserID       uint
-	MaxTokens    int
-	Temperature  float64
-	SystemPrompt string
-	Context      []Message
-	RoleHint     string
-	PowerMode    PowerMode // Controls which model tier is used (max/balanced/fast)
+	UserID        uint
+	MaxTokens     int
+	Temperature   float64
+	SystemPrompt  string
+	Context       []Message
+	RoleHint      string
+	ModelOverride string
+	PowerMode     PowerMode // Controls which model tier is used (max/balanced/fast)
 	// Platform-key app builds should not route through user BYOK state.
 	UsePlatformKeys bool
 }
@@ -4524,6 +4525,11 @@ func (am *AgentManager) executeTask(task *Task) {
 		report := am.providerAssistedTaskVerification(build, task, selectedCandidate)
 		if report != nil {
 			selectedCandidate.Output.ProviderVerificationReport = report
+			if selectedCandidate.Output.Metrics == nil {
+				selectedCandidate.Output.Metrics = map[string]any{}
+			}
+			selectedCandidate.Output.Metrics["deterministic_reason"] = report.DeterministicStatus
+			selectedCandidate.Output.Metrics["provider_critique_reason"] = report.ProviderCritiqueStatus
 			if len(report.Warnings) > 0 {
 				selectedCandidate.Output.Messages = append(selectedCandidate.Output.Messages, report.Warnings...)
 			}

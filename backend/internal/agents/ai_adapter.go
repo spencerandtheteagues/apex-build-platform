@@ -226,8 +226,12 @@ For code files, use this exact format:
 		temperature = 1.5
 	}
 
-	// Select model based on power mode
-	model := selectModelForPowerMode(aiProvider, opts.PowerMode)
+	// Select model using the explicit override when provided; static power-mode
+	// mapping remains a deterministic fallback policy.
+	model := strings.TrimSpace(opts.ModelOverride)
+	if model == "" {
+		model = selectModelForPowerMode(aiProvider, opts.PowerMode)
+	}
 
 	// Create AI request
 	request := &ai.AIRequest{

@@ -147,6 +147,9 @@ type BuildOrchestrationFlags struct {
 	EnableIntentBrief              bool `json:"enable_intent_brief"`
 	EnableBuildContract            bool `json:"enable_build_contract"`
 	EnableValidatedBuildSpec       bool `json:"enable_validated_build_spec"`
+	EnableASTContextDiet           bool `json:"enable_ast_context_diet"`
+	EnableRoutingWaterfall         bool `json:"enable_routing_waterfall"`
+	EnableDeterministicTaskGates   bool `json:"enable_deterministic_task_gates"`
 	EnableContractVerification     bool `json:"enable_contract_verification"`
 	EnablePatchBundles             bool `json:"enable_patch_bundles"`
 	EnableSurfaceLocalVerification bool `json:"enable_surface_local_verification"`
@@ -315,25 +318,27 @@ type PatchBundle struct {
 }
 
 type VerificationReport struct {
-	ID              string             `json:"id"`
-	BuildID         string             `json:"build_id"`
-	WorkOrderID     string             `json:"work_order_id,omitempty"`
-	Phase           string             `json:"phase"`
-	Surface         ContractSurface    `json:"surface"`
-	Status          VerificationStatus `json:"status"`
-	Deterministic   bool               `json:"deterministic"`
-	Provider        ai.AIProvider      `json:"provider,omitempty"`
-	ChecksRun       []string           `json:"checks_run,omitempty"`
-	Warnings        []string           `json:"warnings,omitempty"`
-	Errors          []string           `json:"errors,omitempty"`
-	Blockers        []string           `json:"blockers,omitempty"`
-	TruthTags       []TruthTag         `json:"truth_tags,omitempty"`
-	ConfidenceScore float64            `json:"confidence_score,omitempty"`
+	ID                     string             `json:"id"`
+	BuildID                string             `json:"build_id"`
+	WorkOrderID            string             `json:"work_order_id,omitempty"`
+	Phase                  string             `json:"phase"`
+	Surface                ContractSurface    `json:"surface"`
+	Status                 VerificationStatus `json:"status"`
+	Deterministic          bool               `json:"deterministic"`
+	DeterministicStatus    string             `json:"deterministic_status,omitempty"`
+	ProviderCritiqueStatus string             `json:"provider_critique_status,omitempty"`
+	Provider               ai.AIProvider      `json:"provider,omitempty"`
+	ChecksRun              []string           `json:"checks_run,omitempty"`
+	Warnings               []string           `json:"warnings,omitempty"`
+	Errors                 []string           `json:"errors,omitempty"`
+	Blockers               []string           `json:"blockers,omitempty"`
+	TruthTags              []TruthTag         `json:"truth_tags,omitempty"`
+	ConfidenceScore        float64            `json:"confidence_score,omitempty"`
 	// Canary interaction signals (set only on preview_verification phase reports).
-	CanaryClickCount int `json:"canary_click_count,omitempty"`
-	CanaryErrorCount int `json:"canary_error_count,omitempty"`
-	VisionReviewed   bool `json:"vision_reviewed,omitempty"`
-	GeneratedAt     time.Time          `json:"generated_at"`
+	CanaryClickCount int       `json:"canary_click_count,omitempty"`
+	CanaryErrorCount int       `json:"canary_error_count,omitempty"`
+	VisionReviewed   bool      `json:"vision_reviewed,omitempty"`
+	GeneratedAt      time.Time `json:"generated_at"`
 }
 
 type PromotionDecision struct {
@@ -425,6 +430,9 @@ func defaultBuildOrchestrationFlags() BuildOrchestrationFlags {
 		EnableIntentBrief:              envBool("APEX_ENABLE_INTENT_BRIEF", true),
 		EnableBuildContract:            envBool("APEX_ENABLE_BUILD_CONTRACT", true),
 		EnableValidatedBuildSpec:       envBool("APEX_ENABLE_VALIDATED_BUILD_SPEC", true),
+		EnableASTContextDiet:           envBool("APEX_AST_CONTEXT_DIET", false),
+		EnableRoutingWaterfall:         envBool("APEX_ROUTING_WATERFALL", false),
+		EnableDeterministicTaskGates:   envBool("APEX_DETERMINISTIC_TASK_GATES", false),
 		EnableContractVerification:     envBool("APEX_ENABLE_CONTRACT_VERIFICATION", true),
 		EnablePatchBundles:             envBool("APEX_ENABLE_PATCH_BUNDLES", true),
 		EnableSurfaceLocalVerification: envBool("APEX_ENABLE_SURFACE_LOCAL_VERIFICATION", true),
