@@ -5646,6 +5646,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             hasBYOK={hasBYOK}
             phaseLabel={phaseLabel}
             visibleBlockers={visibleBlockers}
+            platformReadinessNotice={platformReadinessNotice}
             buildFailureAttribution={buildFailureAttribution}
             showDiffReview={showDiffReview}
             userId={user?.id}

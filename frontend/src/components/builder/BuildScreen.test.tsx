@@ -34,6 +34,7 @@ const baseProps = () => ({
   hasBYOK: false,
   phaseLabel: 'Planning',
   visibleBlockers: [],
+  platformReadinessNotice: null,
   buildFailureAttribution: null,
   showDiffReview: false,
   userId: 7,
