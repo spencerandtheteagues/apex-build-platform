@@ -106,6 +106,8 @@ describe('BuildScreen header prompt actions', () => {
         provider: 'gpt4',
         merge_policy: 'review_required',
         review_required: true,
+        review_branch: 'ai-repair/20260412-compile-validator-bundle-1',
+        suggested_commit_title: 'AI repair: Compile validator Hydra winner (strict_ast_syntax_repair)',
         risk_reasons: ['dependency_changes_require_review'],
       },
     ]
@@ -115,8 +117,10 @@ describe('BuildScreen header prompt actions', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Issues(?:\s*\d+)?$/i }))
 
     expect(await screen.findByText(/Repair Patch Review/i)).toBeTruthy()
-    expect(screen.getByText(/Compile validator Hydra winner/i)).toBeTruthy()
+    expect(screen.getAllByText(/Compile validator Hydra winner/i).length).toBeGreaterThan(0)
     expect(screen.getByText(/merge policy: review required/i)).toBeTruthy()
+    expect(screen.getByText(/review branch: ai-repair\/20260412-compile-validator-bundle-1/i)).toBeTruthy()
+    expect(screen.getByText(/suggested commit: AI repair:/i)).toBeTruthy()
     expect(screen.getByText(/dependency changes require review/i)).toBeTruthy()
   })
 

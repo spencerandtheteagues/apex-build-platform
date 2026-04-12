@@ -78,7 +78,9 @@ vi.mock('@/components/ui', () => {
     </button>
   )
   const Badge = ({ children, ...props }: any) => <div {...props}>{children}</div>
-  const Avatar = (props: any) => <div {...props}>Avatar</div>
+  const Avatar = ({ showStatus: _showStatus, status: _status, children, ...props }: any) => (
+    <div {...props}>{children || 'Avatar'}</div>
+  )
   return {
     Button,
     Badge,

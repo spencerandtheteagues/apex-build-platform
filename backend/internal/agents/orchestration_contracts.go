@@ -322,6 +322,8 @@ type PatchBundle struct {
 	WholeFileRewrite bool                   `json:"whole_file_rewrite,omitempty"`
 	MergePolicy      RepairPatchMergePolicy `json:"merge_policy,omitempty"`
 	ReviewRequired   bool                   `json:"review_required,omitempty"`
+	ReviewBranch     string                 `json:"review_branch,omitempty"`
+	SuggestedCommit  string                 `json:"suggested_commit_title,omitempty"`
 	RiskReasons      []string               `json:"risk_reasons,omitempty"`
 	Justification    string                 `json:"justification,omitempty"`
 	Operations       []PatchOperation       `json:"operations,omitempty"`
@@ -2135,6 +2137,14 @@ func appendPatchBundle(build *Build, bundle PatchBundle) {
 	if state == nil {
 		return
 	}
+	if flow := buildRepairCommitFlow(&bundle); flow != nil {
+		if strings.TrimSpace(bundle.ReviewBranch) == "" {
+			bundle.ReviewBranch = flow.ReviewBranch
+		}
+		if strings.TrimSpace(bundle.SuggestedCommit) == "" {
+			bundle.SuggestedCommit = flow.SuggestedCommitTitle
+		}
+	}
 	applyPatchBundleTruth(state, bundle)
 	state.PatchBundles = append(state.PatchBundles, bundle)
 	if len(state.PatchBundles) > 32 {
@@ -2144,6 +2154,9 @@ func appendPatchBundle(build *Build, bundle PatchBundle) {
 		summary := strings.TrimSpace(bundle.Justification)
 		if summary == "" {
 			summary = "Patch bundle requires review before merge."
+		}
+		if reviewBranch := strings.TrimSpace(bundle.ReviewBranch); reviewBranch != "" {
+			summary = fmt.Sprintf("%s (review branch: %s)", summary, reviewBranch)
 		}
 		appendPendingRevisionLocked(build, summary)
 	}

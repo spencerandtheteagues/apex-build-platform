@@ -3602,6 +3602,8 @@ export interface BuildPatchBundleState {
   whole_file_rewrite?: boolean
   merge_policy?: 'auto_merge_safe' | 'review_required'
   review_required?: boolean
+  review_branch?: string
+  suggested_commit_title?: string
   risk_reasons?: string[]
   justification?: string
   created_at?: string

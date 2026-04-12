@@ -63,6 +63,8 @@ interface BuildPatchBundle {
   provider?: string
   merge_policy?: 'auto_merge_safe' | 'review_required'
   review_required?: boolean
+  review_branch?: string
+  suggested_commit_title?: string
   risk_reasons?: string[]
   justification?: string
   created_at?: string
@@ -939,6 +941,16 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
                           <div className="mt-1 text-xs text-gray-400">
                             {bundle.provider ? `${bundle.provider} · ` : ''}merge policy: review required
                           </div>
+                          {bundle.review_branch && (
+                            <div className="mt-1 text-[11px] font-mono text-cyan-300">
+                              review branch: {bundle.review_branch}
+                            </div>
+                          )}
+                          {bundle.suggested_commit_title && (
+                            <div className="mt-1 text-[11px] text-gray-400">
+                              suggested commit: {bundle.suggested_commit_title}
+                            </div>
+                          )}
                         </div>
                         <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border border-violet-500/40 text-violet-300 bg-violet-500/10 shrink-0">
                           Review

@@ -3,6 +3,7 @@ package agents
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"apex-build/internal/ai"
 )
@@ -678,6 +679,7 @@ func TestAppendPatchBundleQueuesPendingRevisionWhenReviewRequired(t *testing.T) 
 		MergePolicy:    RepairPatchMergeReviewRequired,
 		ReviewRequired: true,
 		Justification:  "Compile validator Hydra winner (targeted_node_rewrite)",
+		CreatedAt:      time.Date(2026, time.April, 12, 18, 0, 0, 0, time.UTC),
 		Operations: []PatchOperation{
 			{Type: PatchReplaceFunction, Path: "src/App.tsx", Content: "export default function App(){ return <main>review</main> }\n"},
 		},
@@ -686,8 +688,16 @@ func TestAppendPatchBundleQueuesPendingRevisionWhenReviewRequired(t *testing.T) 
 	if len(build.Interaction.PendingRevisions) != 1 {
 		t.Fatalf("expected one pending revision note, got %+v", build.Interaction.PendingRevisions)
 	}
-	if got := build.Interaction.PendingRevisions[0]; got != "Compile validator Hydra winner (targeted_node_rewrite)" {
-		t.Fatalf("expected pending revision note to match bundle justification, got %q", got)
+	if got := build.Interaction.PendingRevisions[0]; !strings.Contains(got, "Compile validator Hydra winner (targeted_node_rewrite)") {
+		t.Fatalf("expected pending revision note to include bundle justification, got %q", got)
+	}
+	if got := build.Interaction.PendingRevisions[0]; !strings.Contains(got, "review branch: ai-repair/20260412-") || !strings.Contains(got, "bundle-rev") {
+		t.Fatalf("expected pending revision note to include repair review branch, got %q", got)
+	}
+	if state := build.SnapshotState.Orchestration; state == nil || len(state.PatchBundles) == 0 {
+		t.Fatalf("expected patch bundle to be recorded with commit flow metadata")
+	} else if strings.TrimSpace(state.PatchBundles[0].ReviewBranch) == "" || strings.TrimSpace(state.PatchBundles[0].SuggestedCommit) == "" {
+		t.Fatalf("expected review branch and suggested commit metadata on patch bundle, got %+v", state.PatchBundles[0])
 	}
 }
 

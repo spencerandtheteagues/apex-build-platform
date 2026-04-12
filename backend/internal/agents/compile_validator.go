@@ -789,6 +789,10 @@ func cvHydraWinnerPatchBundle(build *Build, candidate cvRepairCandidate, baselin
 	bundle.MergePolicy = classification.MergePolicy
 	bundle.ReviewRequired = classification.ReviewRequired
 	bundle.RiskReasons = append([]string(nil), classification.Reasons...)
+	if flow := buildRepairCommitFlow(bundle); flow != nil {
+		bundle.ReviewBranch = flow.ReviewBranch
+		bundle.SuggestedCommit = flow.SuggestedCommitTitle
+	}
 
 	if candidate.Output.Metrics == nil {
 		candidate.Output.Metrics = map[string]any{}
@@ -801,6 +805,12 @@ func cvHydraWinnerPatchBundle(build *Build, candidate cvRepairCandidate, baselin
 	candidate.Output.Metrics["repair_review_required"] = classification.ReviewRequired
 	if len(classification.Reasons) > 0 {
 		candidate.Output.Metrics["repair_risk_reasons"] = append([]string(nil), classification.Reasons...)
+	}
+	if strings.TrimSpace(bundle.ReviewBranch) != "" {
+		candidate.Output.Metrics["repair_review_branch"] = bundle.ReviewBranch
+	}
+	if strings.TrimSpace(bundle.SuggestedCommit) != "" {
+		candidate.Output.Metrics["repair_suggested_commit_title"] = bundle.SuggestedCommit
 	}
 
 	return bundle

@@ -350,3 +350,51 @@ func TestCVHydraWinnerPatchBundleAnnotatesMetadataAndMetrics(t *testing.T) {
 		t.Fatalf("expected hydra_winner_provider metric, got %+v", output.Metrics["hydra_winner_provider"])
 	}
 }
+
+func TestCVHydraWinnerPatchBundleAddsReviewCommitFlowForRiskyPatch(t *testing.T) {
+	t.Parallel()
+
+	output := &TaskOutput{
+		StructuredPatchBundle: &PatchBundle{
+			ID:            "bundle-risky-1",
+			CreatedAt:     time.Date(2026, time.April, 12, 16, 30, 0, 0, time.UTC),
+			Justification: "Compile validator Hydra winner (targeted_node_rewrite)",
+			Operations: []PatchOperation{
+				{
+					Type:    PatchPatchEnvVar,
+					Path:    ".env.production",
+					Content: "API_KEY=secret",
+				},
+			},
+		},
+	}
+
+	candidate := cvRepairCandidate{
+		Strategy: cvRepairStrategy{
+			Name: "targeted_node_rewrite",
+		},
+		Provider: ai.ProviderClaude,
+		Output:   output,
+	}
+
+	bundle := cvHydraWinnerPatchBundle(&Build{ID: "build-hydra-risky"}, candidate, nil)
+	if bundle == nil {
+		t.Fatal("expected hydra winner patch bundle")
+	}
+	if !bundle.ReviewRequired || bundle.MergePolicy != RepairPatchMergeReviewRequired {
+		t.Fatalf("expected risky patch to require review, got %+v", bundle)
+	}
+	if strings.TrimSpace(bundle.ReviewBranch) == "" {
+		t.Fatalf("expected review branch annotation, got %+v", bundle)
+	}
+	if strings.TrimSpace(bundle.SuggestedCommit) == "" {
+		t.Fatalf("expected suggested commit title annotation, got %+v", bundle)
+	}
+
+	if got, ok := output.Metrics["repair_review_branch"].(string); !ok || strings.TrimSpace(got) == "" {
+		t.Fatalf("expected repair_review_branch metric, got %+v", output.Metrics["repair_review_branch"])
+	}
+	if got, ok := output.Metrics["repair_suggested_commit_title"].(string); !ok || strings.TrimSpace(got) == "" {
+		t.Fatalf("expected repair_suggested_commit_title metric, got %+v", output.Metrics["repair_suggested_commit_title"])
+	}
+}
