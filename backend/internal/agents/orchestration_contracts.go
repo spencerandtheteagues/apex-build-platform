@@ -307,15 +307,25 @@ type PatchOperation struct {
 	ConflictPolicy string             `json:"conflict_policy,omitempty"`
 }
 
+type RepairPatchMergePolicy string
+
+const (
+	RepairPatchMergeAutoSafe       RepairPatchMergePolicy = "auto_merge_safe"
+	RepairPatchMergeReviewRequired RepairPatchMergePolicy = "review_required"
+)
+
 type PatchBundle struct {
-	ID               string           `json:"id"`
-	BuildID          string           `json:"build_id"`
-	WorkOrderID      string           `json:"work_order_id,omitempty"`
-	Provider         ai.AIProvider    `json:"provider,omitempty"`
-	WholeFileRewrite bool             `json:"whole_file_rewrite,omitempty"`
-	Justification    string           `json:"justification,omitempty"`
-	Operations       []PatchOperation `json:"operations,omitempty"`
-	CreatedAt        time.Time        `json:"created_at"`
+	ID               string                 `json:"id"`
+	BuildID          string                 `json:"build_id"`
+	WorkOrderID      string                 `json:"work_order_id,omitempty"`
+	Provider         ai.AIProvider          `json:"provider,omitempty"`
+	WholeFileRewrite bool                   `json:"whole_file_rewrite,omitempty"`
+	MergePolicy      RepairPatchMergePolicy `json:"merge_policy,omitempty"`
+	ReviewRequired   bool                   `json:"review_required,omitempty"`
+	RiskReasons      []string               `json:"risk_reasons,omitempty"`
+	Justification    string                 `json:"justification,omitempty"`
+	Operations       []PatchOperation       `json:"operations,omitempty"`
+	CreatedAt        time.Time              `json:"created_at"`
 }
 
 type VerificationReport struct {

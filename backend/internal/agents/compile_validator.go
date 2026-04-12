@@ -84,8 +84,10 @@ type cvRepairStrategy struct {
 }
 
 type cvRepairCandidate struct {
-	Strategy cvRepairStrategy
-	Output   *TaskOutput
+	Strategy       cvRepairStrategy
+	Provider       ai.AIProvider
+	Output         *TaskOutput
+	CandidateFiles []GeneratedFile
 }
 
 // maxCompileAttempts returns how many compile-repair cycles to allow based on power mode.
@@ -513,7 +515,12 @@ func (am *AgentManager) cvRunHydraRepair(
 				return
 			}
 			select {
-			case results <- cvRepairCandidate{Strategy: strategy, Output: output}:
+			case results <- cvRepairCandidate{
+				Strategy:       strategy,
+				Provider:       provider,
+				Output:         output,
+				CandidateFiles: candidateFiles,
+			}:
 			case <-hydraCtx.Done():
 			}
 		}()
@@ -526,8 +533,12 @@ func (am *AgentManager) cvRunHydraRepair(
 
 	for candidate := range results {
 		cancel()
+		baselineFiles := append([]GeneratedFile(nil), (*allFiles)...)
 		if am.cvApplyTaskOutputToBuild(build, candidate.Output) {
 			*allFiles = am.collectGeneratedFiles(build)
+			if bundle := cvHydraWinnerPatchBundle(build, candidate, baselineFiles); bundle != nil && cvPatchBundleRecordingEnabled(build) {
+				appendPatchBundle(build, *bundle)
+			}
 			log.Printf("[compile_validator] build %s: hydra repair winner=%s", build.ID, candidate.Strategy.Name)
 			return true
 		}
@@ -736,6 +747,72 @@ func cvApplyTaskOutputToGeneratedFiles(files []GeneratedFile, output *TaskOutput
 		upsert(f.Path, f.Content)
 	}
 	return next, applied
+}
+
+func cvHydraWinnerPatchBundle(build *Build, candidate cvRepairCandidate, baselineFiles []GeneratedFile) *PatchBundle {
+	if build == nil || candidate.Output == nil {
+		return nil
+	}
+
+	var bundle *PatchBundle
+	if candidate.Output.StructuredPatchBundle != nil && len(candidate.Output.StructuredPatchBundle.Operations) > 0 {
+		bundle = clonePatchBundle(candidate.Output.StructuredPatchBundle)
+	} else if len(candidate.CandidateFiles) > 0 {
+		bundle = buildPatchBundleFromFileDiff(
+			build.ID,
+			fmt.Sprintf("Compile validator Hydra winner (%s)", candidate.Strategy.Name),
+			baselineFiles,
+			candidate.CandidateFiles,
+		)
+	}
+	if bundle == nil {
+		return nil
+	}
+
+	if strings.TrimSpace(bundle.ID) == "" {
+		bundle.ID = fmt.Sprintf("hydra-%d", time.Now().UTC().UnixNano())
+	}
+	if strings.TrimSpace(bundle.BuildID) == "" {
+		bundle.BuildID = build.ID
+	}
+	if bundle.Provider == "" {
+		bundle.Provider = candidate.Provider
+	}
+	if bundle.CreatedAt.IsZero() {
+		bundle.CreatedAt = time.Now().UTC()
+	}
+	if strings.TrimSpace(bundle.Justification) == "" {
+		bundle.Justification = fmt.Sprintf("Compile validator Hydra winner (%s)", candidate.Strategy.Name)
+	}
+
+	classification := classifyRepairPatchBundle(bundle)
+	bundle.MergePolicy = classification.MergePolicy
+	bundle.ReviewRequired = classification.ReviewRequired
+	bundle.RiskReasons = append([]string(nil), classification.Reasons...)
+
+	if candidate.Output.Metrics == nil {
+		candidate.Output.Metrics = map[string]any{}
+	}
+	candidate.Output.Metrics["hydra_winner_strategy"] = candidate.Strategy.Name
+	if candidate.Provider != "" {
+		candidate.Output.Metrics["hydra_winner_provider"] = string(candidate.Provider)
+	}
+	candidate.Output.Metrics["repair_merge_policy"] = string(classification.MergePolicy)
+	candidate.Output.Metrics["repair_review_required"] = classification.ReviewRequired
+	if len(classification.Reasons) > 0 {
+		candidate.Output.Metrics["repair_risk_reasons"] = append([]string(nil), classification.Reasons...)
+	}
+
+	return bundle
+}
+
+func cvPatchBundleRecordingEnabled(build *Build) bool {
+	if build == nil {
+		return false
+	}
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	return build.SnapshotState.Orchestration != nil && build.SnapshotState.Orchestration.Flags.EnablePatchBundles
 }
 
 func cvValidateCandidateWorkspace(ctx context.Context, files []GeneratedFile, baseDir string) bool {

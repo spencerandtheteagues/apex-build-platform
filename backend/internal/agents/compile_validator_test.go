@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"apex-build/internal/ai"
 )
 
 func TestMaxCompileAttemptsByPowerMode(t *testing.T) {
@@ -247,5 +249,104 @@ func TestCVHydraStrategiesEnabledForBalancedAndMax(t *testing.T) {
 	}
 	if got := len(cvHydraStrategies(PowerMax)); got != 3 {
 		t.Fatalf("expected max mode hydra strategies, got %d", got)
+	}
+}
+
+func TestClassifyRepairPatchBundleMarksSmallPatchAutoMergeSafe(t *testing.T) {
+	t.Parallel()
+
+	classification := classifyRepairPatchBundle(&PatchBundle{
+		Operations: []PatchOperation{
+			{
+				Type:    PatchReplaceFunction,
+				Path:    "src/components/Card.tsx",
+				Content: "export function Card(){ return <div /> }",
+			},
+		},
+	})
+
+	if classification.MergePolicy != RepairPatchMergeAutoSafe {
+		t.Fatalf("expected auto-merge-safe classification, got %q", classification.MergePolicy)
+	}
+	if classification.ReviewRequired {
+		t.Fatalf("expected review_required=false for small local patch, got %+v", classification)
+	}
+	if len(classification.Reasons) > 0 {
+		t.Fatalf("expected no risk reasons for small local patch, got %+v", classification.Reasons)
+	}
+}
+
+func TestClassifyRepairPatchBundleMarksRiskyPatchReviewRequired(t *testing.T) {
+	t.Parallel()
+
+	classification := classifyRepairPatchBundle(&PatchBundle{
+		Operations: []PatchOperation{
+			{
+				Type:    PatchPatchEnvVar,
+				Path:    ".env.production",
+				Content: "API_KEY=secret",
+			},
+		},
+	})
+
+	if classification.MergePolicy != RepairPatchMergeReviewRequired {
+		t.Fatalf("expected review-required classification, got %q", classification.MergePolicy)
+	}
+	if !classification.ReviewRequired {
+		t.Fatalf("expected review_required=true for env changes, got %+v", classification)
+	}
+	if !strings.Contains(strings.Join(classification.Reasons, ","), "env_changes_require_review") {
+		t.Fatalf("expected env review reason, got %+v", classification.Reasons)
+	}
+}
+
+func TestCVHydraWinnerPatchBundleAnnotatesMetadataAndMetrics(t *testing.T) {
+	t.Parallel()
+
+	output := &TaskOutput{
+		StructuredPatchBundle: &PatchBundle{
+			Operations: []PatchOperation{
+				{
+					Type:    PatchCreateFile,
+					Path:    "src/newFile.ts",
+					Content: "export const ready = true",
+				},
+			},
+		},
+	}
+
+	candidate := cvRepairCandidate{
+		Strategy: cvRepairStrategy{
+			Name: "strict_ast_syntax_repair",
+		},
+		Provider: ai.ProviderGPT4,
+		Output:   output,
+	}
+
+	bundle := cvHydraWinnerPatchBundle(&Build{ID: "build-hydra-1"}, candidate, nil)
+	if bundle == nil {
+		t.Fatal("expected hydra winner patch bundle")
+	}
+	if bundle.BuildID != "build-hydra-1" {
+		t.Fatalf("expected build id to be backfilled, got %q", bundle.BuildID)
+	}
+	if bundle.Provider != ai.ProviderGPT4 {
+		t.Fatalf("expected provider metadata to be attached, got %q", bundle.Provider)
+	}
+	if bundle.MergePolicy != RepairPatchMergeAutoSafe {
+		t.Fatalf("expected auto-safe merge policy for simple create-file patch, got %q", bundle.MergePolicy)
+	}
+	if strings.TrimSpace(bundle.Justification) == "" || !strings.Contains(bundle.Justification, "strict_ast_syntax_repair") {
+		t.Fatalf("expected hydra strategy in justification, got %q", bundle.Justification)
+	}
+
+	if output.Metrics == nil {
+		t.Fatal("expected output metrics to be initialized")
+	}
+	if got, ok := output.Metrics["repair_merge_policy"].(string); !ok || got != string(RepairPatchMergeAutoSafe) {
+		t.Fatalf("expected repair_merge_policy metric, got %+v", output.Metrics["repair_merge_policy"])
+	}
+	if got, ok := output.Metrics["hydra_winner_provider"].(string); !ok || got != string(ai.ProviderGPT4) {
+		t.Fatalf("expected hydra_winner_provider metric, got %+v", output.Metrics["hydra_winner_provider"])
 	}
 }

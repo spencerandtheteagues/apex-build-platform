@@ -3,10 +3,11 @@ package deploy
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNeonDatabaseProvisionerEnsureDatabaseCreatesProjectAndInjectsEnv(t *testing.T) {
@@ -14,7 +15,7 @@ func TestNeonDatabaseProvisionerEnsureDatabaseCreatesProjectAndInjectsEnv(t *tes
 
 	var createRequest map[string]any
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client, baseURL := newIPv4LoopbackTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/projects":
 			if err := json.NewDecoder(r.Body).Decode(&createRequest); err != nil {
@@ -46,11 +47,10 @@ func TestNeonDatabaseProvisionerEnsureDatabaseCreatesProjectAndInjectsEnv(t *tes
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
 	}))
-	defer server.Close()
 
 	provisioner := NewNeonDatabaseProvisioner("neon-token", "org_123")
-	provisioner.baseURL = server.URL
-	provisioner.httpClient = server.Client()
+	provisioner.baseURL = baseURL
+	provisioner.httpClient = client
 
 	result, err := provisioner.EnsureDatabase(context.Background(), &DeploymentConfig{
 		ProjectID: 7,
@@ -93,7 +93,7 @@ func TestNeonDatabaseProvisionerEnsureDatabaseReusesExistingProject(t *testing.T
 	t.Parallel()
 
 	var requestCount int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client, baseURL := newIPv4LoopbackTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
 		if r.Method != http.MethodGet || r.URL.Path != "/projects/proj_123/connection_uri" {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
@@ -105,11 +105,10 @@ func TestNeonDatabaseProvisionerEnsureDatabaseReusesExistingProject(t *testing.T
 			"uri": "postgresql://app_owner:secret@ep-main.us-east-2.aws.neon.tech:5432/app?sslmode=require",
 		})
 	}))
-	defer server.Close()
 
 	provisioner := NewNeonDatabaseProvisioner("neon-token", "")
-	provisioner.baseURL = server.URL
-	provisioner.httpClient = server.Client()
+	provisioner.baseURL = baseURL
+	provisioner.httpClient = client
 
 	result, err := provisioner.EnsureDatabase(context.Background(), &DeploymentConfig{
 		ProjectID: 7,
@@ -138,4 +137,28 @@ func TestNeonDatabaseProvisionerEnsureDatabaseReusesExistingProject(t *testing.T
 	if result.Metadata["neon_project_id"] != "proj_123" {
 		t.Fatalf("expected reused project metadata, got %+v", result.Metadata)
 	}
+}
+
+func newIPv4LoopbackTestServer(t *testing.T, handler http.Handler) (*http.Client, string) {
+	t.Helper()
+
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "operation not permitted") {
+			t.Skipf("sandbox does not permit loopback listeners: %v", err)
+		}
+		t.Fatalf("failed to open ipv4 loopback listener: %v", err)
+	}
+	server := &http.Server{Handler: handler}
+	go func() {
+		_ = server.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	})
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	return client, "http://" + listener.Addr().String()
 }
