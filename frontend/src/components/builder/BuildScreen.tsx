@@ -12,6 +12,7 @@ import { ProviderStatusBar } from './ProviderStatusBar'
 import { LiveActivityFeed } from './LiveActivityFeed'
 import { BuildHistory } from './BuildHistory'
 import DiffReviewPanel from '@/components/diff/DiffReviewPanel'
+import AITelemetryOverlay from '@/components/ide/AITelemetryOverlay'
 import type { BuildMessageTargetMode, BuildPermissionRequest, BuildInteractionState } from '@/services/api'
 
 // ─── Minimal local types matching AppBuilder.tsx structures ──────────────────
@@ -70,6 +71,42 @@ interface BuildPatchBundle {
   created_at?: string
 }
 
+interface BuildWorkOrder {
+  id: string
+  role: string
+  category: string
+  task_shape: string
+  summary?: string
+  preferred_provider?: string
+  contract_slice?: {
+    surface?: string
+    truth_tags?: string[]
+  }
+}
+
+interface BuildVerificationReport {
+  id: string
+  phase: string
+  surface: string
+  status: 'passed' | 'failed' | 'blocked'
+  warnings?: string[]
+  errors?: string[]
+  blockers?: string[]
+  truth_tags?: string[]
+  confidence_score?: number
+  generated_at?: string
+}
+
+interface BuildProviderScorecard {
+  provider: string
+  task_shape: string
+  compile_pass_rate?: number
+  first_pass_verification_pass_rate?: number
+  repair_success_rate?: number
+  average_latency_seconds?: number
+  average_cost_per_success?: number
+}
+
 interface BSBuildState {
   id: string
   status: BuildStatus
@@ -88,6 +125,11 @@ interface BSBuildState {
   blockers?: BuildBlocker[]
   patchBundles?: BuildPatchBundle[]
   powerMode?: 'fast' | 'balanced' | 'max'
+  qualityGateStatus?: 'pending' | 'running' | 'passed' | 'failed'
+  qualityGateStage?: string
+  workOrders?: BuildWorkOrder[]
+  verificationReports?: BuildVerificationReport[]
+  providerScorecards?: BuildProviderScorecard[]
 }
 
 interface AIThoughtItem {
@@ -97,6 +139,12 @@ interface AIThoughtItem {
   content: string
   timestamp: Date
   isInternal?: boolean
+  eventType?: string
+  taskType?: string
+  files?: string[]
+  filesCount?: number
+  retryCount?: number
+  maxRetries?: number
 }
 
 interface ChatMsgItem {
@@ -218,21 +266,6 @@ const copyTextToClipboard = async (value: string): Promise<boolean> => {
   } finally {
     document.body.removeChild(textarea)
   }
-}
-
-const PROVIDER_BADGE_CLS: Record<string, string> = {
-  claude: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
-  gpt4: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
-  gemini: 'bg-sky-500/20 text-sky-300 border-sky-500/30',
-  grok: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30',
-  ollama: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
-}
-const PROVIDER_TEXT: Record<string, string> = {
-  claude: 'text-orange-300', gpt4: 'text-emerald-300',
-  gemini: 'text-sky-300', grok: 'text-fuchsia-300', ollama: 'text-gray-400',
-}
-const PROVIDER_LABEL: Record<string, string> = {
-  claude: 'Claude', gpt4: 'ChatGPT', gemini: 'Gemini', grok: 'Grok', ollama: 'Local',
 }
 
 // ─── Build Header ─────────────────────────────────────────────────────────────
@@ -599,6 +632,7 @@ interface PanelOverlayProps {
   // Data
   buildState: BSBuildState
   generatedFiles: GeneratedFile[]
+  aiThoughts: AIThoughtItem[]
   chatMessages: ChatMsgItem[]
   isBuildActive: boolean
   providerPanels: ProviderPanelItem[]
@@ -635,7 +669,7 @@ const OVERLAY_TITLES: Record<NonNullable<OverlayId>, string> = {
 
 const PanelOverlay: React.FC<PanelOverlayProps> = ({
   overlay, onClose,
-  buildState, generatedFiles, chatMessages, isBuildActive,
+  buildState, generatedFiles, aiThoughts, chatMessages, isBuildActive,
   providerPanels, visibleBlockers, platformReadinessNotice, agentMessageDrafts, agentMessagePendingId, pendingPermissionRequests,
   pendingRevisionRequests, buildFailureAttribution,
   proposedEdits, showDiffReview, permissionActionId, rollbackCheckpointId,
@@ -1153,56 +1187,18 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
 
         {/* ── AI DETAIL ─────────────────────────────────────── */}
         {overlay === 'detail' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {providerPanels.map((panel) => {
-              const provKey = panel.provider
-              const badgeCls = PROVIDER_BADGE_CLS[provKey] || 'bg-gray-500/20 text-gray-400 border-gray-500/30'
-              const textCls = PROVIDER_TEXT[provKey] || 'text-gray-400'
-              const label = PROVIDER_LABEL[provKey] || panel.provider
-              const isActive = panel.status === 'working' || panel.status === 'thinking'
-
-              return (
-                <div
-                  key={panel.provider}
-                  className={cn(
-                    'rounded-xl border flex flex-col',
-                    isActive ? `border-${provKey === 'claude' ? 'orange' : provKey === 'gpt4' ? 'emerald' : provKey === 'gemini' ? 'sky' : 'fuchsia'}-500/30 bg-black/60` : 'border-gray-800 bg-gray-950/40'
-                  )}
-                  style={{ minHeight: '200px', maxHeight: '320px' }}
-                >
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800/60">
-                    <span className={cn('text-sm font-bold', textCls)}>{label}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-gray-600 font-mono">{panel.liveModelName}</span>
-                      <span className={cn('text-[9px] font-bold uppercase border rounded px-1.5 py-0.5', badgeCls)}>
-                        {panel.statusLabel}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-3 space-y-1 font-mono text-xs">
-                    {panel.thoughts.length === 0 ? (
-                      <div className="text-gray-700 text-center py-4">No activity</div>
-                    ) : (
-                      panel.thoughts.slice(-20).map((t, i) => (
-                        <div key={t.id || i} className={cn(
-                          'text-gray-400 leading-relaxed',
-                          t.type === 'error' && 'text-red-400',
-                          t.isInternal && 'text-gray-600 italic'
-                        )}>
-                          <span className="text-gray-700 mr-2">
-                            {t.timestamp instanceof Date
-                              ? t.timestamp.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-                              : ''}
-                          </span>
-                          {t.content}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+          <AITelemetryOverlay
+            buildStatus={buildState.status}
+            currentPhase={buildState.currentPhase}
+            qualityGateStatus={buildState.qualityGateStatus}
+            qualityGateStage={buildState.qualityGateStage}
+            aiThoughts={aiThoughts}
+            providerPanels={providerPanels}
+            workOrders={buildState.workOrders}
+            verificationReports={buildState.verificationReports}
+            patchBundles={buildState.patchBundles}
+            providerScorecards={buildState.providerScorecards}
+          />
         )}
 
         {/* ── HISTORY ───────────────────────────────────────── */}
@@ -1355,6 +1351,7 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
           onClose={() => setActiveOverlay(null)}
           buildState={buildState}
           generatedFiles={generatedFiles}
+          aiThoughts={aiThoughts}
           chatMessages={chatMessages}
           isBuildActive={isBuildActive}
           providerPanels={providerPanels}
