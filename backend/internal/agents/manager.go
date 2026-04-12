@@ -5358,7 +5358,7 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 				}
 			}
 			if orchestration.Flags.EnableValidatedBuildSpec {
-				orchestration.ValidatedBuildSpec = finalizeValidatedBuildSpec(build.ID, orchestration.ValidatedBuildSpec, output.Plan, orchestration.BuildContract)
+				orchestration.ValidatedBuildSpec = compileWarRoomValidatedBuildSpec(build.ID, orchestration.ValidatedBuildSpec, output.Plan, orchestration.BuildContract)
 			}
 			applyReliabilityWorkOrderBias(build.Plan, orchestration.ValidatedBuildSpec, orchestration.ReliabilitySummary)
 			if !contractBlocked && orchestration.Flags.EnableSelectiveEscalation && orchestration.BuildContract != nil &&
