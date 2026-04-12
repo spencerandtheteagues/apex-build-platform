@@ -18,6 +18,7 @@ const baseProps = () => ({
     interaction: undefined,
     currentPhase: 'planning',
     blockers: [],
+    patchBundles: [] as any[],
     powerMode: 'balanced' as const,
   },
   providerPanels: [],
@@ -94,5 +95,28 @@ describe('BuildScreen header prompt actions', () => {
     })
 
     expect(await screen.findByText('Copied')).toBeTruthy()
+  })
+
+  it('surfaces review-required patch bundles in the issues overlay', async () => {
+    const props = baseProps()
+    props.buildState.patchBundles = [
+      {
+        id: 'patch-1',
+        justification: 'Compile validator Hydra winner (strict_ast_syntax_repair)',
+        provider: 'gpt4',
+        merge_policy: 'review_required',
+        review_required: true,
+        risk_reasons: ['dependency_changes_require_review'],
+      },
+    ]
+
+    render(<BuildScreen {...props} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Issues(?:\s*\d+)?$/i }))
+
+    expect(await screen.findByText(/Repair Patch Review/i)).toBeTruthy()
+    expect(screen.getByText(/Compile validator Hydra winner/i)).toBeTruthy()
+    expect(screen.getByText(/merge policy: review required/i)).toBeTruthy()
+    expect(screen.getByText(/dependency changes require review/i)).toBeTruthy()
   })
 })

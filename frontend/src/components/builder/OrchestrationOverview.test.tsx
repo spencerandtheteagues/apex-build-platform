@@ -334,4 +334,29 @@ describe('OrchestrationOverview', () => {
     expect(screen.getByText('skipped')).toBeTruthy()
     expect(screen.getByText('No repair ladder was needed because verification completed without recurring failure fingerprints.')).toBeTruthy()
   })
+
+  it('highlights review-required patch bundles in the build journal', () => {
+    render(
+      <OrchestrationOverview
+        buildStatus="in_progress"
+        currentPhase="patch"
+        patchBundles={[
+          {
+            id: 'patch-review-1',
+            build_id: 'build-7',
+            provider: 'claude',
+            justification: 'Compile validator Hydra winner (targeted_node_rewrite)',
+            merge_policy: 'review_required',
+            review_required: true,
+            risk_reasons: ['dependency_changes_require_review'],
+            created_at: '2026-04-12T15:00:00Z',
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText('Patch bundles generated')).toBeTruthy()
+    expect(screen.getByText(/require review before merge/i)).toBeTruthy()
+    expect(screen.getByText(/Review required before merge/i)).toBeTruthy()
+  })
 })

@@ -192,6 +192,10 @@ const humanize = (value: string | undefined) =>
     .replace(/_/g, ' ')
     .trim()
 
+const patchBundleNeedsReview = (bundle: BuildPatchBundleState): boolean => {
+  return bundle.review_required === true || bundle.merge_policy === 'review_required'
+}
+
 const formatTimestamp = (value?: string) => {
   if (!value) return null
   const parsed = new Date(value)
@@ -338,7 +342,10 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
           break
         case 'patch':
           timestamp = formatTimestamp((props.patchBundles || []).slice().sort((left, right) => String(right.created_at || '').localeCompare(String(left.created_at || '')))[0]?.created_at)
-          substeps = (props.patchBundles || []).slice(0, 3).map((bundle) => bundle.justification || `Patch bundle recorded${bundle.provider ? ` via ${bundle.provider}` : ''}.`)
+          substeps = (props.patchBundles || []).slice(0, 3).map((bundle) => {
+            const summary = bundle.justification || `Patch bundle recorded${bundle.provider ? ` via ${bundle.provider}` : ''}.`
+            return patchBundleNeedsReview(bundle) ? `${summary} Review required before merge.` : summary
+          })
           if (substeps.length === 0 && status !== 'pending') {
             substeps.push('Patch generation or repair is active.')
           }
@@ -512,12 +519,15 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
     }
     if ((props.patchBundles || []).length > 0) {
       const latestPatchTime = props.patchBundles?.map((bundle) => formatTimestamp(bundle.created_at || '')).find(Boolean) || null
+      const reviewRequiredCount = (props.patchBundles || []).filter(patchBundleNeedsReview).length
       items.push({
         id: 'patches',
         title: 'Patch bundles generated',
-        detail: `${props.patchBundles?.length || 0} patch bundle${(props.patchBundles?.length || 0) === 1 ? '' : 's'} recorded for implementation or repair.`,
+        detail: reviewRequiredCount > 0
+          ? `${props.patchBundles?.length || 0} patch bundle${(props.patchBundles?.length || 0) === 1 ? '' : 's'} recorded; ${reviewRequiredCount} require review before merge.`
+          : `${props.patchBundles?.length || 0} patch bundle${(props.patchBundles?.length || 0) === 1 ? '' : 's'} recorded for implementation or repair.`,
         timestamp: latestPatchTime,
-        tone: 'info',
+        tone: reviewRequiredCount > 0 ? 'warning' : 'info',
       })
     }
     if (checkpoints.length > 0) {

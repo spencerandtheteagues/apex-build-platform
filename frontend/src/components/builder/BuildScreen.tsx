@@ -58,6 +58,16 @@ interface PlatformReadinessNotice {
   isCritical: boolean
 }
 
+interface BuildPatchBundle {
+  id: string
+  provider?: string
+  merge_policy?: 'auto_merge_safe' | 'review_required'
+  review_required?: boolean
+  risk_reasons?: string[]
+  justification?: string
+  created_at?: string
+}
+
 interface BSBuildState {
   id: string
   status: BuildStatus
@@ -74,6 +84,7 @@ interface BSBuildState {
   interaction?: BuildInteractionState
   currentPhase?: string
   blockers?: BuildBlocker[]
+  patchBundles?: BuildPatchBundle[]
   powerMode?: 'fast' | 'balanced' | 'max'
 }
 
@@ -632,6 +643,10 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
   const [selectedFile, setSelectedFile] = useState<GeneratedFile | null>(null)
   const liveAgents = (buildState.agents || []).filter((agent) => agent.status === 'working')
   const liveTasks = (buildState.tasks || []).filter((task) => task.status === 'in_progress')
+  const reviewRequiredPatchBundles = React.useMemo(
+    () => (buildState.patchBundles || []).filter((bundle) => bundle.review_required || bundle.merge_policy === 'review_required'),
+    [buildState.patchBundles]
+  )
 
   // Group files by root folder
   const fileGroups = React.useMemo(() => {
@@ -907,6 +922,48 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
               </div>
             )}
 
+            {/* Repair patch review */}
+            {reviewRequiredPatchBundles.length > 0 && (
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">
+                  Repair Patch Review ({reviewRequiredPatchBundles.length})
+                </h3>
+                <div className="space-y-2">
+                  {reviewRequiredPatchBundles.slice(0, 3).map((bundle) => (
+                    <div key={bundle.id} className="rounded-xl border border-violet-500/30 bg-violet-950/15 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-white">
+                            {bundle.justification || 'Patch bundle requires review before merge.'}
+                          </div>
+                          <div className="mt-1 text-xs text-gray-400">
+                            {bundle.provider ? `${bundle.provider} · ` : ''}merge policy: review required
+                          </div>
+                        </div>
+                        <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border border-violet-500/40 text-violet-300 bg-violet-500/10 shrink-0">
+                          Review
+                        </span>
+                      </div>
+                      {Array.isArray(bundle.risk_reasons) && bundle.risk_reasons.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {bundle.risk_reasons.slice(0, 3).map((reason) => (
+                            <span key={`${bundle.id}-${reason}`} className="text-[10px] border border-gray-700 bg-black/35 text-gray-300 rounded px-1.5 py-0.5">
+                              {humanize(reason)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {reviewRequiredPatchBundles.length > 3 && (
+                    <div className="text-xs text-gray-500">
+                      +{reviewRequiredPatchBundles.length - 3} more review-required patch bundles recorded in this build.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Blockers */}
             {visibleBlockers.length > 0 && (
               <div>
@@ -1070,6 +1127,7 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
             {/* Empty state */}
             {!platformReadinessNotice &&
               !buildFailureAttribution && visibleBlockers.length === 0 &&
+              reviewRequiredPatchBundles.length === 0 &&
               pendingPermissionRequests.length === 0 && pendingRevisionRequests.length === 0 &&
               buildState.status !== 'awaiting_review' &&
               (buildState.checkpoints || []).length === 0 && (
@@ -1189,12 +1247,14 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
     pendingQuestion ||
     buildPaused ||
     pendingPermissionRequests.length > 0 ||
+    (buildState.patchBundles || []).some((bundle) => bundle.review_required || bundle.merge_policy === 'review_required') ||
     platformReadinessNotice?.isCritical ||
     buildFailureAttribution ||
     buildState.status === 'awaiting_review' ||
     visibleBlockers.some((b) => b.severity === 'blocking')
   )
   const issueCount = visibleBlockers.length + pendingPermissionRequests.length +
+    (buildState.patchBundles || []).filter((bundle) => bundle.review_required || bundle.merge_policy === 'review_required').length +
     (platformReadinessNotice ? 1 : 0) +
     (buildFailureAttribution ? 1 : 0) +
     (buildState.status === 'awaiting_review' ? 1 : 0)

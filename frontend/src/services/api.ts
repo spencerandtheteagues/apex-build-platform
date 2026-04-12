@@ -3600,6 +3600,9 @@ export interface BuildPatchBundleState {
   work_order_id?: string
   provider?: string
   whole_file_rewrite?: boolean
+  merge_policy?: 'auto_merge_safe' | 'review_required'
+  review_required?: boolean
+  risk_reasons?: string[]
   justification?: string
   created_at?: string
 }
