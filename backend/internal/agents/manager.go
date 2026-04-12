@@ -3806,6 +3806,9 @@ func (am *AgentManager) determineRetryStrategyWithHistory(build *Build, agent *A
 	if biased := retryStrategyBiasFromReliabilitySummary(build, failureClass, base, insight); biased != "" {
 		return biased
 	}
+	if cached := am.repairFingerprintCacheLookup(build, agent, task, failureClass, base, insight); cached.SuggestedRetry != "" {
+		return cached.SuggestedRetry
+	}
 
 	hasAltProvider := false
 	for _, provider := range am.getCurrentlyAvailableProvidersForBuild(build) {
@@ -18603,6 +18606,7 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 	validatedBuildSpecContext := ""
 	reliabilitySummaryContext := ""
 	historicalBuildLearningContext := ""
+	repairFingerprintCacheContext := ""
 	if build != nil && build.SnapshotState.Orchestration != nil {
 		if build.SnapshotState.Orchestration.ValidatedBuildSpec != nil {
 			validatedBuildSpecContext = validatedBuildSpecPromptContext(build.SnapshotState.Orchestration.ValidatedBuildSpec)
@@ -18612,6 +18616,13 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 		}
 		if build.SnapshotState.Orchestration.HistoricalLearning != nil {
 			historicalBuildLearningContext = buildLearningPromptContext(build.SnapshotState.Orchestration.HistoricalLearning)
+		}
+	}
+	if build != nil && agent != nil {
+		if failureClass := repairFingerprintFailureClassForTask(task); failureClass != "" {
+			insight := am.recentFailureFingerprintInsight(build, agent, task, failureClass)
+			cacheEntry := am.repairFingerprintCacheLookup(build, agent, task, failureClass, repairFingerprintRetryStrategyForTask(task), insight)
+			repairFingerprintCacheContext = repairFingerprintCachePromptContext(cacheEntry)
 		}
 	}
 	workOrderArtifactContext := workOrderArtifactPromptContext(workOrderArtifact)
@@ -18859,6 +18870,7 @@ App being built: %s
 %s
 %s
 %s
+%s
 %s`,
 		task.Type,
 		task.Description,
@@ -18873,6 +18885,7 @@ App being built: %s
 		validatedBuildSpecContext,
 		reliabilitySummaryContext,
 		historicalBuildLearningContext,
+		repairFingerprintCacheContext,
 		workOrderArtifactContext,
 		currentOwnedFilesContext,
 		coordinationProtocolContext,
