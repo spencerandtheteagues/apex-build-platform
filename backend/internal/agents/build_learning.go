@@ -214,6 +214,7 @@ func summarizeHistoricalBuildLearning(scope string, snapshots []models.Completed
 	failureCounts := make(map[string]int)
 	repairPathCounts := make(map[string]int)
 	repairStrategyStats := make(map[string]*repairStrategyWinRate)
+	semanticRepairHintCounts := make(map[string]int)
 	warningCounts := make(map[string]int)
 	hotspotCounts := make(map[string]int)
 	cleanPassCounts := make(map[string]int)
@@ -250,6 +251,9 @@ func summarizeHistoricalBuildLearning(scope string, snapshots []models.Completed
 				if fp.RepairSucceeded {
 					stats.Successes++
 				}
+			}
+			if hint := semanticRepairCacheHintFromFingerprint(fp); hint != "" {
+				semanticRepairHintCounts[hint]++
 			}
 			for _, path := range fp.FilesInvolved {
 				if trimmed := strings.TrimSpace(path); trimmed != "" {
@@ -295,6 +299,7 @@ func summarizeHistoricalBuildLearning(scope string, snapshots []models.Completed
 		RecurringFailureClasses: recurringFailures,
 		SuccessfulRepairPaths:   topCountedStrings(repairPathCounts, 4),
 		RepairStrategyWinRates:  topRepairStrategyWinRates(repairStrategyStats, 4),
+		SemanticRepairHints:     topCountedStrings(semanticRepairHintCounts, 4),
 		FrequentWarnings:        frequentWarnings,
 		HotspotFiles:            topCountedStrings(hotspotCounts, 5),
 		RecommendedAvoidance:    recommendedAvoidance,
@@ -572,6 +577,12 @@ func buildLearningPromptContext(summary *BuildLearningSummary) string {
 		sb.WriteString("repair_strategy_win_rates:\n")
 		for _, strategy := range summary.RepairStrategyWinRates {
 			sb.WriteString("- " + strings.TrimSpace(strategy) + "\n")
+		}
+	}
+	if len(summary.SemanticRepairHints) > 0 {
+		sb.WriteString("semantic_repair_hints:\n")
+		for _, hint := range summary.SemanticRepairHints {
+			sb.WriteString("- " + strings.TrimSpace(hint) + "\n")
 		}
 	}
 	if len(summary.FrequentWarnings) > 0 {

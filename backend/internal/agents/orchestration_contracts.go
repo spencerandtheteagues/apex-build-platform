@@ -389,6 +389,7 @@ type BuildLearningSummary struct {
 	RecurringFailureClasses []string  `json:"recurring_failure_classes,omitempty"`
 	SuccessfulRepairPaths   []string  `json:"successful_repair_paths,omitempty"`
 	RepairStrategyWinRates  []string  `json:"repair_strategy_win_rates,omitempty"`
+	SemanticRepairHints     []string  `json:"semantic_repair_hints,omitempty"`
 	FrequentWarnings        []string  `json:"frequent_warnings,omitempty"`
 	HotspotFiles            []string  `json:"hotspot_files,omitempty"`
 	RecommendedAvoidance    []string  `json:"recommended_avoidance,omitempty"`

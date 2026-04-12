@@ -38,7 +38,7 @@ func TestCreateBuildLoadsHistoricalLearningFromCompletedBuilds(t *testing.T) {
 					FilesInvolved:    []string{"src/App.tsx", "src/components/Hero.tsx"},
 					RepairPathChosen: []string{"semantic_diff", "targeted_retry"},
 					RepairStrategy:   "semantic_diff",
-					PatchClass:       "targeted_patch",
+					PatchClass:       "import_export_mismatch",
 					RepairSucceeded:  true,
 					CreatedAt:        time.Now().UTC(),
 				},
@@ -146,8 +146,11 @@ func TestCreateBuildLoadsHistoricalLearningFromCompletedBuilds(t *testing.T) {
 	if !containsString(learning.SuccessfulRepairPaths, "semantic_diff -> targeted_retry") {
 		t.Fatalf("expected successful repair path to be captured, got %+v", learning.SuccessfulRepairPaths)
 	}
-	if !containsString(learning.RepairStrategyWinRates, "semantic_diff/targeted_patch: 1/1 success") {
+	if !containsString(learning.RepairStrategyWinRates, "semantic_diff/import_export_mismatch: 1/1 success") {
 		t.Fatalf("expected repair strategy win rate to be captured, got %+v", learning.RepairStrategyWinRates)
+	}
+	if len(learning.SemanticRepairHints) == 0 || !strings.Contains(learning.SemanticRepairHints[0], "patch=import_export_mismatch") {
+		t.Fatalf("expected semantic repair hint to be captured, got %+v", learning.SemanticRepairHints)
 	}
 	if !containsString(learning.HotspotFiles, "src/App.tsx") {
 		t.Fatalf("expected hotspot file to be captured, got %+v", learning.HotspotFiles)
@@ -221,7 +224,8 @@ func TestBuildTaskPromptIncludesHistoricalLearningContext(t *testing.T) {
 					Scope:                   "same_stack",
 					ObservedBuilds:          2,
 					RecurringFailureClasses: []string{"preview_verification"},
-					RepairStrategyWinRates:  []string{"semantic_diff/targeted_patch: 1/1 success"},
+					RepairStrategyWinRates:  []string{"semantic_diff/import_export_mismatch: 1/1 success"},
+					SemanticRepairHints:     []string{"failure=compile_failure patch=import_export_mismatch strategy=semantic_diff files=src/App.tsx"},
 					RecommendedAvoidance:    []string{"Keep the preview entrypoint, ports, and boot path deterministic before adding surface polish."},
 				},
 			},
@@ -246,7 +250,10 @@ func TestBuildTaskPromptIncludesHistoricalLearningContext(t *testing.T) {
 	if !strings.Contains(prompt, "preview_verification") {
 		t.Fatalf("expected recurring failure class in prompt, got %q", prompt)
 	}
-	if !strings.Contains(prompt, "repair_strategy_win_rates") || !strings.Contains(prompt, "semantic_diff/targeted_patch") {
+	if !strings.Contains(prompt, "repair_strategy_win_rates") || !strings.Contains(prompt, "semantic_diff/import_export_mismatch") {
 		t.Fatalf("expected repair strategy win rates in prompt, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "semantic_repair_hints") || !strings.Contains(prompt, "patch=import_export_mismatch") {
+		t.Fatalf("expected semantic repair hints in prompt, got %q", prompt)
 	}
 }
