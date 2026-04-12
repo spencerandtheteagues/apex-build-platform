@@ -4,6 +4,92 @@ import (
 	"strings"
 )
 
+const maxSemanticRepairCacheHints = 3
+
+func semanticRepairCachePromptContext(build *Build, errors []ParsedBuildError) string {
+	patchClass := semanticRepairPatchClassForErrors(errors)
+	if patchClass == "" || build == nil {
+		return ""
+	}
+
+	var hints []string
+	if build.SnapshotState.Orchestration != nil && build.SnapshotState.Orchestration.HistoricalLearning != nil {
+		hints = append(hints, filterSemanticRepairHintsByPatchClass(build.SnapshotState.Orchestration.HistoricalLearning.SemanticRepairHints, patchClass)...)
+	}
+	for _, fp := range recentSuccessfulRepairFingerprints(build, "compile_failure", parsedBuildErrorFiles(errors), maxSemanticRepairCacheHints) {
+		if hint := semanticRepairCacheHintFromFingerprint(fp); hint != "" && strings.Contains(hint, "patch="+patchClass) {
+			hints = append(hints, hint)
+		}
+	}
+	hints = limitStrings(dedupeStrings(hints), maxSemanticRepairCacheHints)
+	if len(hints) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("<semantic_repair_cache>\n")
+	sb.WriteString("current_patch_class: " + patchClass + "\n")
+	sb.WriteString("matching_repair_hints:\n")
+	for _, hint := range hints {
+		sb.WriteString("- " + strings.TrimSpace(hint) + "\n")
+	}
+	sb.WriteString("Use these as narrow technical priors only; do not replay old patches without validating the current files and errors.\n")
+	sb.WriteString("</semantic_repair_cache>\n")
+	return sb.String()
+}
+
+func semanticRepairPatchClassForErrors(errors []ParsedBuildError) string {
+	for _, parsed := range errors {
+		code := strings.ToUpper(strings.TrimSpace(parsed.Code))
+		message := strings.ToLower(strings.TrimSpace(parsed.Message))
+		switch {
+		case code == "TS2305" || strings.Contains(message, "has no exported member"):
+			return "import_export_mismatch"
+		case code == "TS2307" || strings.Contains(message, "cannot find module"):
+			if missing := semanticRepairMissingModuleName(parsed.Message); strings.HasPrefix(missing, ".") || strings.HasPrefix(missing, "/") {
+				return "missing_file"
+			}
+			return "dependency_manifest"
+		case code == "TS2322" || strings.Contains(message, "is not assignable to type") || strings.Contains(message, "property ") && strings.Contains(message, " does not exist on type"):
+			return "symbol_patch"
+		case code == "TS2304" || strings.Contains(message, "cannot find name"):
+			return "symbol_patch"
+		}
+	}
+	return ""
+}
+
+func semanticRepairMissingModuleName(message string) string {
+	trimmed := strings.TrimSpace(message)
+	for _, quote := range []string{"'", "\""} {
+		start := strings.Index(trimmed, quote)
+		if start < 0 {
+			continue
+		}
+		rest := trimmed[start+1:]
+		end := strings.Index(rest, quote)
+		if end < 0 {
+			continue
+		}
+		return strings.TrimSpace(rest[:end])
+	}
+	return ""
+}
+
+func filterSemanticRepairHintsByPatchClass(hints []string, patchClass string) []string {
+	if len(hints) == 0 || strings.TrimSpace(patchClass) == "" {
+		return nil
+	}
+	needle := "patch=" + strings.TrimSpace(patchClass)
+	out := make([]string, 0, len(hints))
+	for _, hint := range hints {
+		if strings.Contains(strings.TrimSpace(hint), needle) {
+			out = append(out, strings.TrimSpace(hint))
+		}
+	}
+	return out
+}
+
 func semanticRepairCacheHintFromFingerprint(fingerprint FailureFingerprint) string {
 	if !fingerprint.RepairSucceeded {
 		return ""

@@ -759,6 +759,12 @@ func (am *AgentManager) cvGenerateTaskOutput(
 			repairMemoryContext,
 		}, "\n"))
 	}
+	if semanticRepairContext := semanticRepairCachePromptContext(build, errors); semanticRepairContext != "" {
+		reliabilityContext = strings.TrimSpace(strings.Join([]string{
+			reliabilityContext,
+			semanticRepairContext,
+		}, "\n"))
+	}
 	prompt := cvBuildRepairPrompt(errors, allFiles, reliabilityContext, astContextDietEnabledForBuild(build))
 	if directive := strings.TrimSpace(strategy.Directive); directive != "" {
 		prompt += "\n\n## Repair Strategy\n\n" + directive + "\n"

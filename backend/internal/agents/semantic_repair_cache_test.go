@@ -36,3 +36,83 @@ func TestSemanticRepairCacheHintFromFingerprintRejectsBroadRewrite(t *testing.T)
 		t.Fatalf("expected broad rewrite to be omitted from semantic repair cache, got %q", hint)
 	}
 }
+
+func TestSemanticRepairPatchClassForErrorsClassifiesNarrowCompileFailures(t *testing.T) {
+	tests := []struct {
+		name   string
+		errors []ParsedBuildError
+		want   string
+	}{
+		{
+			name: "export mismatch",
+			errors: []ParsedBuildError{{
+				Code:    "TS2305",
+				Message: `Module '"./api"' has no exported member 'client'.`,
+			}},
+			want: "import_export_mismatch",
+		},
+		{
+			name: "local missing module",
+			errors: []ParsedBuildError{{
+				Code:    "TS2307",
+				Message: `Cannot find module './Widget' or its corresponding type declarations.`,
+			}},
+			want: "missing_file",
+		},
+		{
+			name: "package missing module",
+			errors: []ParsedBuildError{{
+				Code:    "TS2307",
+				Message: `Cannot find module 'zod' or its corresponding type declarations.`,
+			}},
+			want: "dependency_manifest",
+		},
+		{
+			name: "type mismatch",
+			errors: []ParsedBuildError{{
+				Code:    "TS2322",
+				Message: `Type 'string' is not assignable to type 'number'.`,
+			}},
+			want: "symbol_patch",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := semanticRepairPatchClassForErrors(tt.errors); got != tt.want {
+				t.Fatalf("semanticRepairPatchClassForErrors = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSemanticRepairCachePromptContextFiltersByCurrentPatchClass(t *testing.T) {
+	build := &Build{
+		ID: "semantic-cache-context-build",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				HistoricalLearning: &BuildLearningSummary{
+					SemanticRepairHints: []string{
+						"failure=compile_failure patch=import_export_mismatch strategy=strict_ast_syntax_repair files=src/App.tsx",
+						"failure=compile_failure patch=dependency_manifest strategy=manifest_repair files=package.json",
+					},
+				},
+			},
+		},
+	}
+
+	context := semanticRepairCachePromptContext(build, []ParsedBuildError{{
+		Code:    "TS2305",
+		File:    "src/App.tsx",
+		Message: `Module '"./api"' has no exported member 'client'.`,
+	}})
+	if !strings.Contains(context, "<semantic_repair_cache>") {
+		t.Fatalf("expected semantic repair cache context, got %q", context)
+	}
+	if !strings.Contains(context, "patch=import_export_mismatch") {
+		t.Fatalf("expected matching import/export hint, got %q", context)
+	}
+	if strings.Contains(context, "dependency_manifest") {
+		t.Fatalf("expected unrelated semantic hint to be filtered, got %q", context)
+	}
+}
