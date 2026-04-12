@@ -121,19 +121,25 @@ describe('BuildScreen header prompt actions', () => {
   })
 
   it('keeps platform and failed-build notices visible after switching overlays', async () => {
-    const props: any = baseProps()
-    props.buildState.status = 'failed'
-    props.platformReadinessNotice = {
-      title: 'Redis cache is misconfigured',
-      body: 'Redis is using an external allowlisted endpoint.',
-      detail: 'Update REDIS_URL to the apex-redis internal connection string and redeploy.',
-      isCritical: false,
-    }
-    props.buildFailureAttribution = {
-      title: 'This failure may be platform-related',
-      body: 'Primary database connectivity dropped while the build was running.',
-      detail: 'Retry after database connectivity returns.',
-      capturedError: 'Build session unavailable',
+    const baseline = baseProps()
+    const props = {
+      ...baseline,
+      buildState: {
+        ...baseline.buildState,
+        status: 'failed' as const,
+      },
+      platformReadinessNotice: {
+        title: 'Redis cache is misconfigured',
+        body: 'Redis is using an external allowlisted endpoint.',
+        detail: 'Update REDIS_URL to the apex-redis internal connection string and redeploy.',
+        isCritical: false,
+      },
+      buildFailureAttribution: {
+        title: 'This failure may be platform-related',
+        body: 'Primary database connectivity dropped while the build was running.',
+        detail: 'Retry after database connectivity returns.',
+        capturedError: 'Build session unavailable',
+      },
     }
 
     render(<BuildScreen {...props} />)
