@@ -2140,6 +2140,14 @@ func appendPatchBundle(build *Build, bundle PatchBundle) {
 	if len(state.PatchBundles) > 32 {
 		state.PatchBundles = append([]PatchBundle(nil), state.PatchBundles[len(state.PatchBundles)-32:]...)
 	}
+	if bundle.ReviewRequired || bundle.MergePolicy == RepairPatchMergeReviewRequired {
+		summary := strings.TrimSpace(bundle.Justification)
+		if summary == "" {
+			summary = "Patch bundle requires review before merge."
+		}
+		appendPendingRevisionLocked(build, summary)
+	}
+	refreshInteractionAttentionLocked(build)
 }
 
 func setPromotionDecision(build *Build, decision *PromotionDecision) {

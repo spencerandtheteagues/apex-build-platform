@@ -662,6 +662,35 @@ func TestAppendPatchBundleUpdatesTruthBySurface(t *testing.T) {
 	}
 }
 
+func TestAppendPatchBundleQueuesPendingRevisionWhenReviewRequired(t *testing.T) {
+	build := &Build{
+		ID: "build-review-required",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	appendPatchBundle(build, PatchBundle{
+		ID:             "bundle-review-required",
+		BuildID:        build.ID,
+		MergePolicy:    RepairPatchMergeReviewRequired,
+		ReviewRequired: true,
+		Justification:  "Compile validator Hydra winner (targeted_node_rewrite)",
+		Operations: []PatchOperation{
+			{Type: PatchReplaceFunction, Path: "src/App.tsx", Content: "export default function App(){ return <main>review</main> }\n"},
+		},
+	})
+
+	if len(build.Interaction.PendingRevisions) != 1 {
+		t.Fatalf("expected one pending revision note, got %+v", build.Interaction.PendingRevisions)
+	}
+	if got := build.Interaction.PendingRevisions[0]; got != "Compile validator Hydra winner (targeted_node_rewrite)" {
+		t.Fatalf("expected pending revision note to match bundle justification, got %q", got)
+	}
+}
+
 func containsTruthTag(tags []TruthTag, want TruthTag) bool {
 	for _, tag := range tags {
 		if tag == want {
