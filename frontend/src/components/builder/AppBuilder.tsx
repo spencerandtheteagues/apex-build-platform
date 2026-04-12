@@ -485,6 +485,28 @@ const getThoughtEventLabel = (thought: AIThought) => {
       return 'Files Generated'
     case 'spend:update':
       return 'Spend'
+    case 'glassbox:war_room_critique_started':
+      return 'War Room Critique Started'
+    case 'glassbox:war_room_critique_resolved':
+      return 'War Room Critique Resolved'
+    case 'glassbox:work_order_compiled':
+      return 'Work Orders Compiled'
+    case 'glassbox:provider_route_selected':
+      return 'Provider Route Selected'
+    case 'glassbox:deterministic_gate_passed':
+      return 'Deterministic Gate Passed'
+    case 'glassbox:deterministic_gate_failed':
+      return 'Deterministic Gate Failed'
+    case 'glassbox:hydra_candidate_started':
+      return 'Hydra Candidate Started'
+    case 'glassbox:hydra_candidate_passed':
+      return 'Hydra Candidate Passed'
+    case 'glassbox:hydra_candidate_failed':
+      return 'Hydra Candidate Failed'
+    case 'glassbox:hydra_winner_selected':
+      return 'Hydra Winner Selected'
+    case 'glassbox:patch_review_required':
+      return 'Patch Review Required'
     default:
       return humanizeIdentifier(thought.type)
   }
@@ -3657,6 +3679,63 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           )
         }
         break
+
+      case 'glassbox:war_room_critique_started':
+      case 'glassbox:war_room_critique_resolved':
+      case 'glassbox:work_order_compiled':
+      case 'glassbox:provider_route_selected':
+      case 'glassbox:deterministic_gate_passed':
+      case 'glassbox:deterministic_gate_failed':
+      case 'glassbox:hydra_candidate_started':
+      case 'glassbox:hydra_candidate_passed':
+      case 'glassbox:hydra_candidate_failed':
+      case 'glassbox:hydra_winner_selected':
+      case 'glassbox:patch_review_required': {
+        const eventType = String(type)
+        const thoughtType: AIThought['type'] = eventType.includes('_failed') || eventType.includes('gate_failed')
+          ? 'error'
+          : eventType.includes('_passed') || eventType.includes('_resolved') || eventType.includes('winner_selected')
+            ? 'output'
+            : 'action'
+        const fallbackContent = humanizeIdentifier(eventType.replace(/^glassbox:/, ''))
+        addAiThought(
+          message.agent_id || `glassbox-${eventType}`,
+          data.agent_role || 'orchestrator',
+          data.provider || 'orchestrator',
+          data.model,
+          thoughtType,
+          data.content || data.error || fallbackContent,
+          {
+            eventType,
+            taskId: data.task_id,
+            taskType: data.task_type,
+            files: Array.isArray(data.files) ? data.files : undefined,
+            filesCount: typeof data.files_count === 'number' ? data.files_count : undefined,
+          }
+        )
+        setBuildState(prev => {
+          if (!prev) return prev
+          const updates: Partial<BuildState> = {}
+          if (Array.isArray(data.work_orders)) {
+            updates.workOrders = data.work_orders
+          }
+          if (Array.isArray(data.verification_reports)) {
+            updates.verificationReports = data.verification_reports
+          }
+          if (Array.isArray(data.patch_bundles)) {
+            updates.patchBundles = data.patch_bundles
+          } else if (data.patch_bundle && typeof data.patch_bundle === 'object') {
+            const patchBundle = data.patch_bundle as BuildPatchBundleState
+            const existing = prev.patchBundles || []
+            const existingIndex = patchBundle?.id ? existing.findIndex((bundle) => bundle.id === patchBundle.id) : -1
+            updates.patchBundles = existingIndex >= 0
+              ? existing.map((bundle, index) => index === existingIndex ? patchBundle : bundle)
+              : [...existing, patchBundle]
+          }
+          return Object.keys(updates).length > 0 ? { ...prev, ...updates } : prev
+        })
+        break
+      }
 
       case 'budget:exceeded':
         addSystemMessage(`BUDGET EXCEEDED: ${data.message || 'Spending cap reached. Build stopped.'}`)

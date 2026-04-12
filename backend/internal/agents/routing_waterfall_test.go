@@ -66,6 +66,7 @@ func TestGenerateTaskOutputWithProviderUsesRoutingWaterfallWhenEnabled(t *testin
 	router := &waterfallProbeRouter{}
 	am := &AgentManager{
 		aiRouter: router,
+		builds:   map[string]*Build{},
 	}
 
 	flags := defaultBuildOrchestrationFlags()
@@ -78,6 +79,7 @@ func TestGenerateTaskOutputWithProviderUsesRoutingWaterfallWhenEnabled(t *testin
 		SnapshotState: BuildSnapshotState{
 			Orchestration: &BuildOrchestrationState{Flags: flags},
 		},
+		Agents: map[string]*Agent{},
 	}
 	agent := &Agent{
 		ID:       "agent-waterfall-enabled",
@@ -98,6 +100,8 @@ func TestGenerateTaskOutputWithProviderUsesRoutingWaterfallWhenEnabled(t *testin
 			},
 		},
 	}
+	build.Agents[agent.ID] = agent
+	am.builds[build.ID] = build
 
 	candidate, err := am.generateTaskOutputWithProvider(context.Background(), build, agent, task, "prompt", "system", ai.ProviderGPT4, 1200, 0.1)
 	if err != nil {
@@ -117,6 +121,14 @@ func TestGenerateTaskOutputWithProviderUsesRoutingWaterfallWhenEnabled(t *testin
 	}
 	if got := taskOutputMetricString(candidate.Output, "routing_waterfall_stage"); got != routingWaterfallStageExpensive {
 		t.Fatalf("expected routing waterfall stage metric, got %q", got)
+	}
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	if len(build.ActivityTimeline) != 1 {
+		t.Fatalf("expected provider route telemetry entry, got %d", len(build.ActivityTimeline))
+	}
+	if entry := build.ActivityTimeline[0]; entry.EventType != string(WSGlassProviderRouteSelected) || entry.TaskID != task.ID || entry.Provider != string(ai.ProviderGPT4) {
+		t.Fatalf("unexpected provider route telemetry entry: %+v", entry)
 	}
 }
 

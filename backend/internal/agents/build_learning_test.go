@@ -37,6 +37,8 @@ func TestCreateBuildLoadsHistoricalLearningFromCompletedBuilds(t *testing.T) {
 					FailureClass:     "preview_verification",
 					FilesInvolved:    []string{"src/App.tsx", "src/components/Hero.tsx"},
 					RepairPathChosen: []string{"semantic_diff", "targeted_retry"},
+					RepairStrategy:   "semantic_diff",
+					PatchClass:       "targeted_patch",
 					RepairSucceeded:  true,
 					CreatedAt:        time.Now().UTC(),
 				},
@@ -66,6 +68,32 @@ func TestCreateBuildLoadsHistoricalLearningFromCompletedBuilds(t *testing.T) {
 					Surface:     SurfaceIntegration,
 					Status:      VerificationPassed,
 					GeneratedAt: time.Now().UTC(),
+				},
+			},
+			ProviderScorecards: []ProviderScorecard{
+				{
+					Provider:                  ai.ProviderGPT4,
+					TaskShape:                 TaskShapeFrontendPatch,
+					CompilePassRate:           1,
+					FirstPassVerificationRate: 1,
+					RepairSuccessRate:         1,
+					TruncationRate:            0,
+					PromotionRate:             1,
+					HostedEligible:            true,
+					SampleCount:               4,
+					SuccessCount:              4,
+					FirstPassSampleCount:      4,
+					FirstPassSuccessCount:     4,
+					RepairAttemptCount:        2,
+					RepairSuccessCount:        2,
+					PromotionAttemptCount:     3,
+					PromotionSuccessCount:     3,
+					TokenSampleCount:          2,
+					AverageAcceptedTokens:     5400,
+					CostSampleCount:           2,
+					AverageCostPerSuccess:     0.07,
+					LatencySampleCount:        2,
+					AverageLatencySeconds:     4.2,
 				},
 			},
 		},
@@ -118,6 +146,9 @@ func TestCreateBuildLoadsHistoricalLearningFromCompletedBuilds(t *testing.T) {
 	if !containsString(learning.SuccessfulRepairPaths, "semantic_diff -> targeted_retry") {
 		t.Fatalf("expected successful repair path to be captured, got %+v", learning.SuccessfulRepairPaths)
 	}
+	if !containsString(learning.RepairStrategyWinRates, "semantic_diff/targeted_patch: 1/1 success") {
+		t.Fatalf("expected repair strategy win rate to be captured, got %+v", learning.RepairStrategyWinRates)
+	}
 	if !containsString(learning.HotspotFiles, "src/App.tsx") {
 		t.Fatalf("expected hotspot file to be captured, got %+v", learning.HotspotFiles)
 	}
@@ -126,6 +157,23 @@ func TestCreateBuildLoadsHistoricalLearningFromCompletedBuilds(t *testing.T) {
 	}
 	if !containsString(learning.CleanPassSignals, "runtime_verification/integration clean") {
 		t.Fatalf("expected clean pass signal to be captured, got %+v", learning.CleanPassSignals)
+	}
+	var imported *ProviderScorecard
+	for i := range build.SnapshotState.Orchestration.ProviderScorecards {
+		scorecard := &build.SnapshotState.Orchestration.ProviderScorecards[i]
+		if scorecard.Provider == ai.ProviderGPT4 && scorecard.TaskShape == TaskShapeFrontendPatch {
+			imported = scorecard
+			break
+		}
+	}
+	if imported == nil {
+		t.Fatal("expected historical GPT4 frontend scorecard to be imported")
+	}
+	if imported.SampleCount < 4 || imported.SuccessCount < 4 {
+		t.Fatalf("expected historical observed scorecard counts, got %+v", imported)
+	}
+	if !hasSufficientLiveScorecards(build.SnapshotState.Orchestration.ProviderScorecards) {
+		t.Fatalf("expected historical scorecards to activate live scorecard routing")
 	}
 }
 
@@ -173,6 +221,7 @@ func TestBuildTaskPromptIncludesHistoricalLearningContext(t *testing.T) {
 					Scope:                   "same_stack",
 					ObservedBuilds:          2,
 					RecurringFailureClasses: []string{"preview_verification"},
+					RepairStrategyWinRates:  []string{"semantic_diff/targeted_patch: 1/1 success"},
 					RecommendedAvoidance:    []string{"Keep the preview entrypoint, ports, and boot path deterministic before adding surface polish."},
 				},
 			},
@@ -196,5 +245,8 @@ func TestBuildTaskPromptIncludesHistoricalLearningContext(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "preview_verification") {
 		t.Fatalf("expected recurring failure class in prompt, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "repair_strategy_win_rates") || !strings.Contains(prompt, "semantic_diff/targeted_patch") {
+		t.Fatalf("expected repair strategy win rates in prompt, got %q", prompt)
 	}
 }

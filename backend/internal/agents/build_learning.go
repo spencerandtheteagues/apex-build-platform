@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"apex-build/internal/ai"
 	"apex-build/pkg/models"
 )
 
@@ -23,6 +24,11 @@ type historicalBuildScope struct {
 	StackFingerprint string
 }
 
+type historicalBuildLearningResult struct {
+	Summary            *BuildLearningSummary
+	ProviderScorecards []ProviderScorecard
+}
+
 func historicalBuildLearningEnabled() bool {
 	return envBool("APEX_BUILD_LEARNING_MEMORY", true)
 }
@@ -32,7 +38,7 @@ func (am *AgentManager) refreshHistoricalBuildLearning(build *Build, req *BuildR
 		return
 	}
 
-	summary := am.deriveHistoricalBuildLearning(build, req)
+	result := am.deriveHistoricalBuildLearningResult(build, req)
 
 	build.mu.Lock()
 	defer build.mu.Unlock()
@@ -41,16 +47,28 @@ func (am *AgentManager) refreshHistoricalBuildLearning(build *Build, req *BuildR
 	if state == nil {
 		return
 	}
-	if summary != nil {
-		state.HistoricalLearning = summary
+	updated := false
+	if result.Summary != nil {
+		state.HistoricalLearning = result.Summary
+		updated = true
+		log.Printf("[build_learning] {\"build_id\":%q,\"scope\":%q,\"observed_builds\":%d}", build.ID, result.Summary.Scope, result.Summary.ObservedBuilds)
+	}
+	if state.Flags.EnableProviderScorecards && len(result.ProviderScorecards) > 0 {
+		state.ProviderScorecards = mergeHistoricalProviderScorecards(state.ProviderScorecards, result.ProviderScorecards, build.ProviderMode)
+		updated = true
+	}
+	if updated {
 		refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
-		log.Printf("[build_learning] {\"build_id\":%q,\"scope\":%q,\"observed_builds\":%d}", build.ID, summary.Scope, summary.ObservedBuilds)
 	}
 }
 
 func (am *AgentManager) deriveHistoricalBuildLearning(build *Build, req *BuildRequest) *BuildLearningSummary {
+	return am.deriveHistoricalBuildLearningResult(build, req).Summary
+}
+
+func (am *AgentManager) deriveHistoricalBuildLearningResult(build *Build, req *BuildRequest) historicalBuildLearningResult {
 	if am == nil || am.db == nil || build == nil {
-		return nil
+		return historicalBuildLearningResult{}
 	}
 
 	build.mu.RLock()
@@ -60,7 +78,7 @@ func (am *AgentManager) deriveHistoricalBuildLearning(build *Build, req *BuildRe
 	build.mu.RUnlock()
 
 	if userID == 0 || scope.Name == "" {
-		return nil
+		return historicalBuildLearningResult{}
 	}
 
 	var snapshots []models.CompletedBuild
@@ -73,7 +91,7 @@ func (am *AgentManager) deriveHistoricalBuildLearning(build *Build, req *BuildRe
 	}
 	if err := query.Find(&snapshots).Error; err != nil {
 		log.Printf("build learning query failed for build %s: %v", buildID, err)
-		return nil
+		return historicalBuildLearningResult{}
 	}
 
 	matches := make([]models.CompletedBuild, 0, maxHistoricalBuildSamples)
@@ -90,10 +108,13 @@ func (am *AgentManager) deriveHistoricalBuildLearning(build *Build, req *BuildRe
 		}
 	}
 	if len(matches) == 0 {
-		return nil
+		return historicalBuildLearningResult{}
 	}
 
-	return summarizeHistoricalBuildLearning(scope.Name, matches)
+	return historicalBuildLearningResult{
+		Summary:            summarizeHistoricalBuildLearning(scope.Name, matches),
+		ProviderScorecards: summarizeHistoricalProviderScorecards(matches, build.ProviderMode),
+	}
 }
 
 func resolveHistoricalBuildScopeLocked(build *Build, req *BuildRequest) historicalBuildScope {
@@ -192,6 +213,7 @@ func summarizeHistoricalBuildLearning(scope string, snapshots []models.Completed
 
 	failureCounts := make(map[string]int)
 	repairPathCounts := make(map[string]int)
+	repairStrategyStats := make(map[string]*repairStrategyWinRate)
 	warningCounts := make(map[string]int)
 	hotspotCounts := make(map[string]int)
 	cleanPassCounts := make(map[string]int)
@@ -217,6 +239,17 @@ func summarizeHistoricalBuildLearning(scope string, snapshots []models.Completed
 			}
 			if fp.RepairSucceeded && len(fp.RepairPathChosen) > 0 {
 				repairPathCounts[strings.Join(fp.RepairPathChosen, " -> ")]++
+			}
+			if strategyKey := repairStrategyLearningKey(fp); strategyKey != "" {
+				stats := repairStrategyStats[strategyKey]
+				if stats == nil {
+					stats = &repairStrategyWinRate{Key: strategyKey}
+					repairStrategyStats[strategyKey] = stats
+				}
+				stats.Attempts++
+				if fp.RepairSucceeded {
+					stats.Successes++
+				}
 			}
 			for _, path := range fp.FilesInvolved {
 				if trimmed := strings.TrimSpace(path); trimmed != "" {
@@ -261,12 +294,184 @@ func summarizeHistoricalBuildLearning(scope string, snapshots []models.Completed
 		SourceBuildIDs:          limitStrings(sourceIDs, 6),
 		RecurringFailureClasses: recurringFailures,
 		SuccessfulRepairPaths:   topCountedStrings(repairPathCounts, 4),
+		RepairStrategyWinRates:  topRepairStrategyWinRates(repairStrategyStats, 4),
 		FrequentWarnings:        frequentWarnings,
 		HotspotFiles:            topCountedStrings(hotspotCounts, 5),
 		RecommendedAvoidance:    recommendedAvoidance,
 		CleanPassSignals:        topCountedStrings(cleanPassCounts, 4),
 		GeneratedAt:             time.Now().UTC(),
 	}
+}
+
+type repairStrategyWinRate struct {
+	Key       string
+	Attempts  int
+	Successes int
+}
+
+func repairStrategyLearningKey(fingerprint FailureFingerprint) string {
+	strategy := strings.TrimSpace(fingerprint.RepairStrategy)
+	if strategy == "" {
+		return ""
+	}
+	patchClass := normalizeRepairMemoryIdentifier(fingerprint.PatchClass)
+	if patchClass == "" {
+		return strategy
+	}
+	return strategy + "/" + patchClass
+}
+
+func topRepairStrategyWinRates(stats map[string]*repairStrategyWinRate, limit int) []string {
+	if len(stats) == 0 {
+		return nil
+	}
+	ordered := make([]*repairStrategyWinRate, 0, len(stats))
+	for _, item := range stats {
+		if item == nil || strings.TrimSpace(item.Key) == "" || item.Attempts <= 0 {
+			continue
+		}
+		ordered = append(ordered, item)
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		leftRate := float64(ordered[i].Successes) / float64(ordered[i].Attempts)
+		rightRate := float64(ordered[j].Successes) / float64(ordered[j].Attempts)
+		if leftRate != rightRate {
+			return leftRate > rightRate
+		}
+		if ordered[i].Attempts != ordered[j].Attempts {
+			return ordered[i].Attempts > ordered[j].Attempts
+		}
+		return ordered[i].Key < ordered[j].Key
+	})
+	out := make([]string, 0, min(len(ordered), limit))
+	for _, item := range ordered {
+		out = append(out, fmt.Sprintf("%s: %d/%d success", item.Key, item.Successes, item.Attempts))
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func summarizeHistoricalProviderScorecards(snapshots []models.CompletedBuild, providerMode string) []ProviderScorecard {
+	if len(snapshots) == 0 {
+		return nil
+	}
+
+	scorecardsByKey := map[string]*ProviderScorecard{}
+	for _, snapshot := range snapshots {
+		state := parseBuildSnapshotState(snapshot.StateJSON)
+		if state.Orchestration == nil {
+			continue
+		}
+		for _, scorecard := range state.Orchestration.ProviderScorecards {
+			if scorecard.Provider == "" || scorecard.TaskShape == "" || !scorecardHasObservedSamples(scorecard) {
+				continue
+			}
+			key := providerScorecardKey(scorecard.Provider, scorecard.TaskShape)
+			merged := scorecardsByKey[key]
+			if merged == nil {
+				scorecard.HostedEligible = !hostedProviderMode(providerMode) || scorecard.Provider != ai.ProviderOllama
+				scorecard = normalizeProviderScorecardRates(scorecard)
+				scorecardsByKey[key] = &scorecard
+				continue
+			}
+			mergeProviderScorecardSample(merged, scorecard)
+		}
+	}
+	if len(scorecardsByKey) == 0 {
+		return nil
+	}
+
+	scorecards := make([]ProviderScorecard, 0, len(scorecardsByKey))
+	for _, scorecard := range scorecardsByKey {
+		scorecards = append(scorecards, normalizeProviderScorecardRates(*scorecard))
+	}
+	sort.SliceStable(scorecards, func(i, j int) bool {
+		if scorecards[i].TaskShape != scorecards[j].TaskShape {
+			return scorecards[i].TaskShape < scorecards[j].TaskShape
+		}
+		return scorecards[i].Provider < scorecards[j].Provider
+	})
+	return scorecards
+}
+
+func mergeHistoricalProviderScorecards(base []ProviderScorecard, historical []ProviderScorecard, providerMode string) []ProviderScorecard {
+	if len(historical) == 0 {
+		return base
+	}
+	if len(base) == 0 {
+		base = defaultProviderScorecards(providerMode)
+	}
+	merged := append([]ProviderScorecard(nil), base...)
+	for _, historicalScorecard := range historical {
+		if historicalScorecard.Provider == "" || historicalScorecard.TaskShape == "" {
+			continue
+		}
+		idx := -1
+		for i := range merged {
+			if merged[i].Provider == historicalScorecard.Provider && merged[i].TaskShape == historicalScorecard.TaskShape {
+				idx = i
+				break
+			}
+		}
+		if idx == -1 {
+			historicalScorecard.HostedEligible = !hostedProviderMode(providerMode) || historicalScorecard.Provider != ai.ProviderOllama
+			merged = append(merged, normalizeProviderScorecardRates(historicalScorecard))
+			continue
+		}
+		mergeProviderScorecardSample(&merged[idx], historicalScorecard)
+	}
+	return merged
+}
+
+func providerScorecardKey(provider ai.AIProvider, shape TaskShape) string {
+	return string(provider) + "|" + string(shape)
+}
+
+func mergeProviderScorecardSample(target *ProviderScorecard, sample ProviderScorecard) {
+	if target == nil || sample.Provider == "" || sample.TaskShape == "" {
+		return
+	}
+	target.AverageAcceptedTokens = mergeAveragedMetric(target.AverageAcceptedTokens, target.TokenSampleCount, sample.AverageAcceptedTokens, sample.TokenSampleCount)
+	target.AverageCostPerSuccess = mergeAveragedMetric(target.AverageCostPerSuccess, target.CostSampleCount, sample.AverageCostPerSuccess, sample.CostSampleCount)
+	target.AverageLatencySeconds = mergeAveragedMetric(target.AverageLatencySeconds, target.LatencySampleCount, sample.AverageLatencySeconds, sample.LatencySampleCount)
+
+	target.SampleCount += sample.SampleCount
+	target.SuccessCount += sample.SuccessCount
+	target.FirstPassSampleCount += sample.FirstPassSampleCount
+	target.FirstPassSuccessCount += sample.FirstPassSuccessCount
+	target.RepairAttemptCount += sample.RepairAttemptCount
+	target.RepairSuccessCount += sample.RepairSuccessCount
+	target.TruncationEventCount += sample.TruncationEventCount
+	target.FailureEventCount += sample.FailureEventCount
+	target.PromotionAttemptCount += sample.PromotionAttemptCount
+	target.PromotionSuccessCount += sample.PromotionSuccessCount
+	target.TokenSampleCount += sample.TokenSampleCount
+	target.CostSampleCount += sample.CostSampleCount
+	target.LatencySampleCount += sample.LatencySampleCount
+
+	*target = normalizeProviderScorecardRates(*target)
+}
+
+func mergeAveragedMetric(current float64, currentCount int, sample float64, sampleCount int) float64 {
+	if sample <= 0 || sampleCount <= 0 {
+		return current
+	}
+	if current <= 0 || currentCount <= 0 {
+		return sample
+	}
+	return ((current * float64(currentCount)) + (sample * float64(sampleCount))) / float64(currentCount+sampleCount)
+}
+
+func normalizeProviderScorecardRates(scorecard ProviderScorecard) ProviderScorecard {
+	scorecard.CompilePassRate = safeRatio(scorecard.SuccessCount, scorecard.SampleCount, scorecard.CompilePassRate)
+	scorecard.FirstPassVerificationRate = safeRatio(scorecard.FirstPassSuccessCount, scorecard.FirstPassSampleCount, scorecard.FirstPassVerificationRate)
+	scorecard.RepairSuccessRate = safeRatio(scorecard.RepairSuccessCount, scorecard.RepairAttemptCount, scorecard.RepairSuccessRate)
+	scorecard.TruncationRate = safeRatio(scorecard.TruncationEventCount, scorecard.SampleCount, scorecard.TruncationRate)
+	scorecard.FailureClassRecurrence = safeRatio(scorecard.FailureEventCount, scorecard.SampleCount, scorecard.FailureClassRecurrence)
+	scorecard.PromotionRate = safeRatio(scorecard.PromotionSuccessCount, scorecard.PromotionAttemptCount, scorecard.PromotionRate)
+	return scorecard
 }
 
 func topCountedStrings(counts map[string]int, limit int) []string {
@@ -361,6 +566,12 @@ func buildLearningPromptContext(summary *BuildLearningSummary) string {
 		sb.WriteString("successful_repair_paths:\n")
 		for _, path := range summary.SuccessfulRepairPaths {
 			sb.WriteString("- " + strings.TrimSpace(path) + "\n")
+		}
+	}
+	if len(summary.RepairStrategyWinRates) > 0 {
+		sb.WriteString("repair_strategy_win_rates:\n")
+		for _, strategy := range summary.RepairStrategyWinRates {
+			sb.WriteString("- " + strings.TrimSpace(strategy) + "\n")
 		}
 	}
 	if len(summary.FrequentWarnings) > 0 {

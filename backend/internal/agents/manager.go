@@ -4007,10 +4007,19 @@ func (am *AgentManager) recordTaskExecutionOutcome(build *Build, agent *Agent, t
 		FailureClass:        normalizedFailure,
 		FilesInvolved:       taskFingerprintFiles(task, output),
 		RepairPathChosen:    taskRepairPath(task, verificationObserved),
+		RepairStrategy:      firstNonEmptyString(taskOutputMetricString(output, "hydra_winner_strategy"), taskOutputMetricString(output, "repair_strategy"), taskOutputMetricString(output, "strategy")),
+		PatchClass:          repairPatchClassFromBundle(outputStructuredPatchBundle(output)),
 		RepairSucceeded:     success,
 		TokenCostToRecovery: recoveryTokens,
 		CreatedAt:           time.Now().UTC(),
 	})
+}
+
+func outputStructuredPatchBundle(output *TaskOutput) *PatchBundle {
+	if output == nil {
+		return nil
+	}
+	return output.StructuredPatchBundle
 }
 
 func firstNonEmptyString(values ...string) string {
@@ -4647,17 +4656,6 @@ func (am *AgentManager) executeTask(task *Task) {
 			"files_count": len(output.Files),
 			"files":       output.Files,
 		},
-	})
-
-	// Observe outcome for adaptive scorecard routing. This increments sample counts
-	// so that hasSufficientLiveScorecards returns true after minLiveScorecardSamples
-	// tasks complete, enabling scorecard-driven provider selection on subsequent tasks.
-	completionTime := time.Now()
-	observeScorecardOutcome(build, selectedCandidate.Provider, taskShapeForRole(agent.Role), ScorecardOutcome{
-		CompilePassed:      selectedCandidate.VerifyPassed,
-		FirstPassVerified:  selectedCandidate.VerifyPassed && attempt == 0,
-		TruncationOccurred: len(selectedCandidate.Output.TruncatedFiles) > 0,
-		LatencySeconds:     taskGenerationLatency(task, completionTime),
 	})
 
 	am.resultQueue <- &TaskResult{
@@ -5315,6 +5313,9 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 	log.Printf("handlePlanCompletion called for build %s", build.ID)
 	contractBlocked := false
 	contractBlocker := ""
+	warRoomTelemetry := false
+	warRoomIssueCount := 0
+	var compiledWorkOrders []WorkOrder
 
 	// Broadcast planning phase completion
 	am.broadcast(build.ID, &WSMessage{
@@ -5358,7 +5359,9 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 				}
 			}
 			if orchestration.Flags.EnableValidatedBuildSpec {
+				warRoomTelemetry = true
 				orchestration.ValidatedBuildSpec = compileWarRoomValidatedBuildSpec(build.ID, orchestration.ValidatedBuildSpec, output.Plan, orchestration.BuildContract)
+				warRoomIssueCount = countWarRoomBuildSpecAdvisories(orchestration.ValidatedBuildSpec)
 			}
 			applyReliabilityWorkOrderBias(build.Plan, orchestration.ValidatedBuildSpec, orchestration.ReliabilitySummary)
 			if !contractBlocked && orchestration.Flags.EnableSelectiveEscalation && orchestration.BuildContract != nil &&
@@ -5373,10 +5376,48 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 					costSensitivity = orchestration.IntentBrief.CostSensitivity
 				}
 				orchestration.WorkOrders = compileWorkOrdersFromPlanWithCost(build.ID, orchestration.BuildContract, output.Plan, orchestration.ProviderScorecards, costSensitivity)
+				compiledWorkOrders = append([]WorkOrder(nil), orchestration.WorkOrders...)
 			}
 		}
 		refreshDerivedSnapshotStateLocked(build, &build.SnapshotState)
 		build.mu.Unlock()
+		if warRoomTelemetry {
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSGlassWarRoomCritiqueStarted,
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"agent_role": "architect",
+					"provider":   "war_room",
+					"content":    "War Room critique started against the frozen plan and contract.",
+				},
+			})
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSGlassWarRoomCritiqueResolved,
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"agent_role":  "architect",
+					"provider":    "war_room",
+					"issue_count": warRoomIssueCount,
+					"content":     fmt.Sprintf("War Room critique resolved with %d advisory issue(s).", warRoomIssueCount),
+				},
+			})
+		}
+		if len(compiledWorkOrders) > 0 {
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSGlassWorkOrderCompiled,
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"agent_role":       "planner",
+					"provider":         "orchestrator",
+					"work_order_count": len(compiledWorkOrders),
+					"work_orders":      compiledWorkOrders,
+					"content":          fmt.Sprintf("%d work order(s) compiled for execution.", len(compiledWorkOrders)),
+				},
+			})
+		}
 		am.refreshHistoricalBuildLearning(build, nil)
 		if runProviderCritique && critiqueContract != nil {
 			if critiqueReport := am.providerAssistedContractCritique(build, critiqueContract); critiqueReport != nil {
@@ -17781,6 +17822,97 @@ func buildActivityEntryForMessageLocked(build *Build, msg *WSMessage) (BuildActi
 		} else {
 			entry.Content = firstBuildActivityString(buildActivityString(data["content"]), "Spend recorded")
 		}
+	case WSGlassWarRoomCritiqueStarted:
+		entry.Type = "action"
+		entry.Provider = firstBuildActivityString(provider, "war_room")
+		entry.AgentRole = firstBuildActivityString(agentRole, "architect")
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			"War Room critique started",
+		)
+	case WSGlassWarRoomCritiqueResolved:
+		entry.Type = "output"
+		entry.Provider = firstBuildActivityString(provider, "war_room")
+		entry.AgentRole = firstBuildActivityString(agentRole, "architect")
+		issueCount, _ := buildActivityInt(data["issue_count"])
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			fmt.Sprintf("War Room critique resolved with %d advisory issue(s)", issueCount),
+		)
+	case WSGlassWorkOrderCompiled:
+		entry.Type = "action"
+		entry.Provider = firstBuildActivityString(provider, "orchestrator")
+		entry.AgentRole = firstBuildActivityString(agentRole, "planner")
+		orderCount, _ := buildActivityInt(data["work_order_count"])
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			fmt.Sprintf("%d work order(s) compiled for execution", orderCount),
+		)
+	case WSGlassProviderRouteSelected:
+		entry.Type = "action"
+		entry.Provider = firstBuildActivityString(provider, buildActivityString(data["selected_provider"]), "orchestrator")
+		entry.AgentRole = firstBuildActivityString(agentRole, "router")
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			fmt.Sprintf(
+				"Provider route selected: %s via %s",
+				firstBuildActivityString(buildActivityString(data["selected_provider"]), provider, "provider"),
+				firstBuildActivityString(buildActivityString(data["routing_reason"]), "routing policy"),
+			),
+		)
+	case WSGlassDeterministicGatePassed:
+		entry.Type = "output"
+		entry.Provider = firstBuildActivityString(provider, "deterministic_gate")
+		entry.AgentRole = firstBuildActivityString(agentRole, "verifier")
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			"Deterministic gate passed",
+		)
+	case WSGlassDeterministicGateFailed:
+		entry.Type = "error"
+		entry.Provider = firstBuildActivityString(provider, "deterministic_gate")
+		entry.AgentRole = firstBuildActivityString(agentRole, "verifier")
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			buildActivityString(data["error"]),
+			"Deterministic gate failed",
+		)
+	case WSGlassHydraCandidateStarted:
+		entry.Type = "action"
+		entry.AgentRole = firstBuildActivityString(agentRole, "repair")
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			fmt.Sprintf("Hydra candidate started: %s", firstBuildActivityString(buildActivityString(data["strategy"]), "repair strategy")),
+		)
+	case WSGlassHydraCandidatePassed:
+		entry.Type = "output"
+		entry.AgentRole = firstBuildActivityString(agentRole, "repair")
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			fmt.Sprintf("Hydra candidate passed: %s", firstBuildActivityString(buildActivityString(data["strategy"]), "repair strategy")),
+		)
+	case WSGlassHydraCandidateFailed:
+		entry.Type = "error"
+		entry.AgentRole = firstBuildActivityString(agentRole, "repair")
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			buildActivityString(data["error"]),
+			fmt.Sprintf("Hydra candidate failed: %s", firstBuildActivityString(buildActivityString(data["strategy"]), "repair strategy")),
+		)
+	case WSGlassHydraWinnerSelected:
+		entry.Type = "output"
+		entry.AgentRole = firstBuildActivityString(agentRole, "repair")
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			fmt.Sprintf("Hydra winner selected: %s", firstBuildActivityString(buildActivityString(data["strategy"]), "repair strategy")),
+		)
+	case WSGlassPatchReviewRequired:
+		entry.Type = "action"
+		entry.AgentRole = firstBuildActivityString(agentRole, "reviewer")
+		entry.Content = firstBuildActivityString(
+			buildActivityString(data["content"]),
+			"Patch review required before merge",
+		)
 	default:
 		return BuildActivityEntry{}, false
 	}

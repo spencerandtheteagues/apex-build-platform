@@ -388,6 +388,7 @@ type BuildLearningSummary struct {
 	SourceBuildIDs          []string  `json:"source_build_ids,omitempty"`
 	RecurringFailureClasses []string  `json:"recurring_failure_classes,omitempty"`
 	SuccessfulRepairPaths   []string  `json:"successful_repair_paths,omitempty"`
+	RepairStrategyWinRates  []string  `json:"repair_strategy_win_rates,omitempty"`
 	FrequentWarnings        []string  `json:"frequent_warnings,omitempty"`
 	HotspotFiles            []string  `json:"hotspot_files,omitempty"`
 	RecommendedAvoidance    []string  `json:"recommended_avoidance,omitempty"`
@@ -398,6 +399,7 @@ type BuildLearningSummary struct {
 type FailureFingerprint struct {
 	ID                  string        `json:"id"`
 	BuildID             string        `json:"build_id"`
+	FingerprintKey      string        `json:"fingerprint_key,omitempty"`
 	StackCombination    string        `json:"stack_combination,omitempty"`
 	TaskShape           TaskShape     `json:"task_shape"`
 	Provider            ai.AIProvider `json:"provider,omitempty"`
@@ -405,6 +407,8 @@ type FailureFingerprint struct {
 	FailureClass        string        `json:"failure_class"`
 	FilesInvolved       []string      `json:"files_involved,omitempty"`
 	RepairPathChosen    []string      `json:"repair_path_chosen,omitempty"`
+	RepairStrategy      string        `json:"repair_strategy,omitempty"`
+	PatchClass          string        `json:"patch_class,omitempty"`
 	RepairSucceeded     bool          `json:"repair_success"`
 	TokenCostToRecovery int           `json:"token_cost_to_recovery,omitempty"`
 	CreatedAt           time.Time     `json:"created_at"`
@@ -2068,7 +2072,7 @@ func appendVerificationAdvisoryFingerprintsLocked(build *Build, state *BuildOrch
 			}
 			break
 		}
-		state.FailureFingerprints = append(state.FailureFingerprints, FailureFingerprint{
+		state.FailureFingerprints = append(state.FailureFingerprints, prepareFailureFingerprint(build, FailureFingerprint{
 			ID:               uuid.New().String(),
 			BuildID:          build.ID,
 			StackCombination: stackCombinationFromBuild(build),
@@ -2079,7 +2083,7 @@ func appendVerificationAdvisoryFingerprintsLocked(build *Build, state *BuildOrch
 			RepairPathChosen: []string{"preview_verification_advisory"},
 			RepairSucceeded:  true,
 			CreatedAt:        time.Now().UTC(),
-		})
+		}))
 		if len(state.FailureFingerprints) > 32 {
 			state.FailureFingerprints = append([]FailureFingerprint(nil), state.FailureFingerprints[len(state.FailureFingerprints)-32:]...)
 		}
@@ -2186,6 +2190,7 @@ func appendFailureFingerprint(build *Build, fingerprint FailureFingerprint) {
 	if state == nil {
 		return
 	}
+	fingerprint = prepareFailureFingerprint(build, fingerprint)
 	state.FailureFingerprints = append(state.FailureFingerprints, fingerprint)
 	if len(state.FailureFingerprints) > 32 {
 		state.FailureFingerprints = append([]FailureFingerprint(nil), state.FailureFingerprints[len(state.FailureFingerprints)-32:]...)

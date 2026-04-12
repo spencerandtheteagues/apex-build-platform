@@ -789,6 +789,21 @@ const (
 	WSBuildUserInputResolved WSMessageType = "build:user-input-resolved"
 	WSBuildPermissionRequest WSMessageType = "build:permission-request"
 	WSBuildPermissionUpdate  WSMessageType = "build:permission-update"
+
+	// Glass-box orchestration telemetry events. These are additive visibility
+	// events derived from real orchestration artifacts; existing clients may
+	// safely ignore them.
+	WSGlassWarRoomCritiqueStarted  WSMessageType = "glassbox:war_room_critique_started"
+	WSGlassWarRoomCritiqueResolved WSMessageType = "glassbox:war_room_critique_resolved"
+	WSGlassWorkOrderCompiled       WSMessageType = "glassbox:work_order_compiled"
+	WSGlassProviderRouteSelected   WSMessageType = "glassbox:provider_route_selected"
+	WSGlassDeterministicGatePassed WSMessageType = "glassbox:deterministic_gate_passed"
+	WSGlassDeterministicGateFailed WSMessageType = "glassbox:deterministic_gate_failed"
+	WSGlassHydraCandidateStarted   WSMessageType = "glassbox:hydra_candidate_started"
+	WSGlassHydraCandidatePassed    WSMessageType = "glassbox:hydra_candidate_passed"
+	WSGlassHydraCandidateFailed    WSMessageType = "glassbox:hydra_candidate_failed"
+	WSGlassHydraWinnerSelected     WSMessageType = "glassbox:hydra_winner_selected"
+	WSGlassPatchReviewRequired     WSMessageType = "glassbox:patch_review_required"
 )
 
 // WSMessage is the structure for WebSocket messages

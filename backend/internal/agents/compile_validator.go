@@ -503,17 +503,87 @@ func (am *AgentManager) cvRunHydraRepair(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			if hydraCtx.Err() != nil {
+				return
+			}
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSGlassHydraCandidateStarted,
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"agent_role": "repair",
+					"provider":   string(provider),
+					"strategy":   strategy.Name,
+					"content":    fmt.Sprintf("Hydra repair candidate started: %s.", strategy.Name),
+				},
+			})
 			output := am.cvGenerateTaskOutput(hydraCtx, build, errors, *allFiles, provider, strategy)
 			if output == nil {
+				if hydraCtx.Err() != nil {
+					return
+				}
+				am.broadcast(build.ID, &WSMessage{
+					Type:      WSGlassHydraCandidateFailed,
+					BuildID:   build.ID,
+					Timestamp: time.Now(),
+					Data: map[string]any{
+						"agent_role": "repair",
+						"provider":   string(provider),
+						"strategy":   strategy.Name,
+						"error":      "provider returned no repair output",
+						"content":    fmt.Sprintf("Hydra repair candidate failed: %s returned no output.", strategy.Name),
+					},
+				})
 				return
 			}
 			candidateFiles, changed := cvApplyTaskOutputToGeneratedFiles(*allFiles, output)
 			if !changed {
+				if hydraCtx.Err() != nil {
+					return
+				}
+				am.broadcast(build.ID, &WSMessage{
+					Type:      WSGlassHydraCandidateFailed,
+					BuildID:   build.ID,
+					Timestamp: time.Now(),
+					Data: map[string]any{
+						"agent_role": "repair",
+						"provider":   string(provider),
+						"strategy":   strategy.Name,
+						"error":      "candidate produced no file changes",
+						"content":    fmt.Sprintf("Hydra repair candidate failed: %s produced no file changes.", strategy.Name),
+					},
+				})
 				return
 			}
 			if !cvValidateCandidateWorkspace(hydraCtx, candidateFiles, baseDir) {
+				if hydraCtx.Err() != nil {
+					return
+				}
+				am.broadcast(build.ID, &WSMessage{
+					Type:      WSGlassHydraCandidateFailed,
+					BuildID:   build.ID,
+					Timestamp: time.Now(),
+					Data: map[string]any{
+						"agent_role": "repair",
+						"provider":   string(provider),
+						"strategy":   strategy.Name,
+						"error":      "candidate workspace failed validation",
+						"content":    fmt.Sprintf("Hydra repair candidate failed validation: %s.", strategy.Name),
+					},
+				})
 				return
 			}
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSGlassHydraCandidatePassed,
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"agent_role": "repair",
+					"provider":   string(provider),
+					"strategy":   strategy.Name,
+					"content":    fmt.Sprintf("Hydra repair candidate passed validation: %s.", strategy.Name),
+				},
+			})
 			select {
 			case results <- cvRepairCandidate{
 				Strategy:       strategy,
@@ -538,6 +608,41 @@ func (am *AgentManager) cvRunHydraRepair(
 			*allFiles = am.collectGeneratedFiles(build)
 			if bundle := cvHydraWinnerPatchBundle(build, candidate, baselineFiles); bundle != nil && cvPatchBundleRecordingEnabled(build) {
 				appendPatchBundle(build, *bundle)
+				appendRepairMemoryFingerprint(build, repairMemoryObservation{
+					TaskShape:        TaskShapeRepair,
+					Provider:         candidate.Provider,
+					FailureClass:     "compile_failure",
+					FilesInvolved:    repairMemoryFilesFromPatchBundle(bundle),
+					RepairPathChosen: []string{"compile_validator", "hydra_repair", candidate.Strategy.Name},
+					RepairStrategy:   candidate.Strategy.Name,
+					PatchClass:       repairPatchClassFromBundle(bundle),
+					RepairSucceeded:  true,
+				})
+				am.broadcast(build.ID, &WSMessage{
+					Type:      WSGlassHydraWinnerSelected,
+					BuildID:   build.ID,
+					Timestamp: time.Now(),
+					Data: map[string]any{
+						"agent_role":   "repair",
+						"provider":     string(candidate.Provider),
+						"strategy":     candidate.Strategy.Name,
+						"patch_bundle": bundle,
+						"content":      fmt.Sprintf("Hydra winner selected: %s.", candidate.Strategy.Name),
+					},
+				})
+				if bundle.ReviewRequired || bundle.MergePolicy == RepairPatchMergeReviewRequired {
+					am.broadcast(build.ID, &WSMessage{
+						Type:      WSGlassPatchReviewRequired,
+						BuildID:   build.ID,
+						Timestamp: time.Now(),
+						Data: map[string]any{
+							"agent_role":   "reviewer",
+							"provider":     string(candidate.Provider),
+							"patch_bundle": bundle,
+							"content":      "Hydra winner patch requires review before merge.",
+						},
+					})
+				}
 			}
 			log.Printf("[compile_validator] build %s: hydra repair winner=%s", build.ID, candidate.Strategy.Name)
 			return true
@@ -646,6 +751,12 @@ func (am *AgentManager) cvGenerateTaskOutput(
 		reliabilityContext = strings.TrimSpace(strings.Join([]string{
 			reliabilityContext,
 			buildLearningPromptContext(build.SnapshotState.Orchestration.HistoricalLearning),
+		}, "\n"))
+	}
+	if repairMemoryContext := repairMemoryPromptContextForBuild(build, "compile_failure", parsedBuildErrorFiles(errors)); repairMemoryContext != "" {
+		reliabilityContext = strings.TrimSpace(strings.Join([]string{
+			reliabilityContext,
+			repairMemoryContext,
 		}, "\n"))
 	}
 	prompt := cvBuildRepairPrompt(errors, allFiles, reliabilityContext, astContextDietEnabledForBuild(build))

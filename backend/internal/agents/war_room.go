@@ -50,3 +50,20 @@ func compileWarRoomValidatedBuildSpec(buildID string, existing *ValidatedBuildSp
 	}
 	return draft.Spec
 }
+
+func countWarRoomBuildSpecAdvisories(spec *ValidatedBuildSpec) int {
+	if spec == nil {
+		return 0
+	}
+	count := 0
+	countAdvisories := func(values []BuildSpecAdvisory) {
+		for _, value := range values {
+			if strings.HasPrefix(strings.TrimSpace(value.Code), "war_room_") {
+				count++
+			}
+		}
+	}
+	countAdvisories(spec.SecurityAdvisories)
+	countAdvisories(spec.PerformanceAdvisories)
+	return count
+}

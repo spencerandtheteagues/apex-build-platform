@@ -920,6 +920,88 @@ func TestBroadcastCapturesBuildActivityTimeline(t *testing.T) {
 	}
 }
 
+func TestBroadcastCapturesGlassBoxActivityEvents(t *testing.T) {
+	manager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	})
+
+	build := &Build{
+		ID:        "capture-glassbox-build",
+		UserID:    1,
+		Status:    BuildInProgress,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		Agents:    map[string]*Agent{},
+		Tasks: []*Task{
+			{
+				ID:     "task-1",
+				Type:   TaskGenerateAPI,
+				Status: TaskInProgress,
+			},
+		},
+		CreatedAt: time.Now().Add(-time.Minute),
+		UpdatedAt: time.Now(),
+	}
+	manager.builds[build.ID] = build
+
+	manager.broadcast(build.ID, &WSMessage{
+		Type:      WSGlassWorkOrderCompiled,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"agent_role":       "planner",
+			"provider":         "orchestrator",
+			"work_order_count": 2,
+			"content":          "2 work order(s) compiled for execution.",
+		},
+	})
+	manager.broadcast(build.ID, &WSMessage{
+		Type:      WSGlassDeterministicGateFailed,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"agent_role": "verifier",
+			"provider":   "deterministic_gate",
+			"task_id":    "task-1",
+			"task_type":  string(TaskGenerateAPI),
+			"content":    "Deterministic gate failed for backend generation.",
+		},
+	})
+	manager.broadcast(build.ID, &WSMessage{
+		Type:      WSGlassHydraWinnerSelected,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"agent_role": "repair",
+			"provider":   string(ai.ProviderClaude),
+			"strategy":   "strict_ast_syntax_repair",
+		},
+	})
+
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	if len(build.ActivityTimeline) != 3 {
+		t.Fatalf("expected 3 captured glass-box entries, got %d", len(build.ActivityTimeline))
+	}
+	if build.ActivityTimeline[0].EventType != string(WSGlassWorkOrderCompiled) || build.ActivityTimeline[0].Type != "action" {
+		t.Fatalf("expected work-order action event, got %+v", build.ActivityTimeline[0])
+	}
+	if build.ActivityTimeline[1].EventType != string(WSGlassDeterministicGateFailed) || build.ActivityTimeline[1].Type != "error" {
+		t.Fatalf("expected deterministic gate error event, got %+v", build.ActivityTimeline[1])
+	}
+	if build.ActivityTimeline[1].TaskType != string(TaskGenerateAPI) {
+		t.Fatalf("expected task type on deterministic event, got %s", build.ActivityTimeline[1].TaskType)
+	}
+	if build.ActivityTimeline[2].EventType != string(WSGlassHydraWinnerSelected) || build.ActivityTimeline[2].Type != "output" {
+		t.Fatalf("expected hydra winner output event, got %+v", build.ActivityTimeline[2])
+	}
+	if build.ActivityTimeline[2].Content == "" {
+		t.Fatalf("expected hydra winner content")
+	}
+}
+
 func TestRollbackToCheckpointRejectsHistoricalCheckpoint(t *testing.T) {
 	manager := newTestIterationManager(&stubPreflight{
 		configured:    true,

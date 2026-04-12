@@ -97,6 +97,17 @@ const thoughtLabel = (thought: GlassBoxThought): string => {
     'agent:completed': 'Task completed',
     'agent:error': 'Task failed',
     'code:generated': 'Candidate output generated',
+    'glassbox:war_room_critique_started': 'War Room critique started',
+    'glassbox:war_room_critique_resolved': 'War Room critique resolved',
+    'glassbox:work_order_compiled': 'Work order compiled',
+    'glassbox:provider_route_selected': 'Provider route selected',
+    'glassbox:deterministic_gate_passed': 'Deterministic gate passed',
+    'glassbox:deterministic_gate_failed': 'Deterministic gate failed',
+    'glassbox:hydra_candidate_started': 'Hydra candidate started',
+    'glassbox:hydra_candidate_passed': 'Hydra candidate passed',
+    'glassbox:hydra_candidate_failed': 'Hydra candidate failed',
+    'glassbox:hydra_winner_selected': 'Hydra winner selected',
+    'glassbox:patch_review_required': 'Patch review required',
   }
   const key = String(thought.eventType || '').trim().toLowerCase()
   if (key && mapped[key]) return mapped[key]
@@ -116,6 +127,9 @@ const artifactToneClass: Record<ArtifactTone, string> = {
 
 const telemetryToneClass = (thought: GlassBoxThought): string => {
   if (thought.type === 'error') return 'border-red-500/30 bg-red-500/10 text-red-300'
+  if (thought.eventType === 'glassbox:patch_review_required') return 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+  if (thought.eventType === 'glassbox:hydra_winner_selected') return 'border-green-500/30 bg-green-500/10 text-green-300'
+  if (thought.eventType?.startsWith('glassbox:')) return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'
   if (thought.eventType === 'agent:retrying') return 'border-amber-500/30 bg-amber-500/10 text-amber-300'
   if (thought.eventType === 'agent:generating') return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'
   if (thought.type === 'output') return 'border-green-500/30 bg-green-500/10 text-green-300'

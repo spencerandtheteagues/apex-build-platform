@@ -3640,12 +3640,18 @@ export interface BuildPromotionDecisionState {
 export interface BuildFailureFingerprintState {
   id: string
   build_id: string
+  fingerprint_key?: string
+  stack_combination?: string
   task_shape?: string
   provider?: string
+  model?: string
   failure_class?: string
   files_involved?: string[]
   repair_path_chosen?: string[]
+  repair_strategy?: string
+  patch_class?: string
   repair_success?: boolean
+  token_cost_to_recovery?: number
   created_at?: string
 }
 

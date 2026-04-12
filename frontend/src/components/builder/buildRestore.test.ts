@@ -274,7 +274,7 @@ describe('build telemetry snapshot helpers', () => {
         provider: 'gemini',
         model: 'gemini-2.5-pro',
         type: 'error',
-        event_type: 'agent:generation_failed',
+        event_type: 'glassbox:deterministic_gate_failed',
         task_id: 'task-1',
         task_type: 'verify',
         retry_count: 1,
@@ -288,7 +288,7 @@ describe('build telemetry snapshot helpers', () => {
     expect(thoughts).toHaveLength(1)
     expect(thoughts[0].agentId).toBe('agent-server-1')
     expect(thoughts[0].agentRole).toBe('verifier')
-    expect(thoughts[0].eventType).toBe('agent:generation_failed')
+    expect(thoughts[0].eventType).toBe('glassbox:deterministic_gate_failed')
     expect(thoughts[0].retryCount).toBe(1)
     expect(thoughts[0].isInternal).toBe(true)
   })

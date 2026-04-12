@@ -193,11 +193,41 @@ func (am *AgentManager) providerAssistedTaskVerification(build *Build, task *Tas
 			report.ChecksRun = dedupeStrings(append(report.ChecksRun, verificationReasonDeterministicFailed, verificationReasonProviderCritiqueSkip))
 			report.ProviderCritiqueStatus = verificationReasonProviderCritiqueSkip
 			report.ConfidenceScore = 0.99
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSGlassDeterministicGateFailed,
+				BuildID:   build.ID,
+				AgentID:   task.AssignedTo,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"agent_role": "verifier",
+					"provider":   "deterministic_gate",
+					"task_id":    task.ID,
+					"task_type":  string(task.Type),
+					"errors":     deterministic.Errors,
+					"content":    fmt.Sprintf("Deterministic gate failed for %s.", task.Type),
+				},
+			})
 			return report
 		}
 
 		report.ChecksRun = dedupeStrings(append(report.ChecksRun, verificationReasonDeterministicPassed, verificationReasonProviderCritiqueNeed))
 		report.ProviderCritiqueStatus = verificationReasonProviderCritiqueNeed
+		if deterministic.Ran {
+			am.broadcast(build.ID, &WSMessage{
+				Type:      WSGlassDeterministicGatePassed,
+				BuildID:   build.ID,
+				AgentID:   task.AssignedTo,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"agent_role": "verifier",
+					"provider":   "deterministic_gate",
+					"task_id":    task.ID,
+					"task_type":  string(task.Type),
+					"checks":     deterministic.Checks,
+					"content":    fmt.Sprintf("Deterministic gate passed for %s.", task.Type),
+				},
+			})
+		}
 	}
 
 	prompt := fmt.Sprintf(`Review this AI-generated task result for concrete correctness issues only.
@@ -471,6 +501,24 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 			return nil, fmt.Errorf("budget cap exceeded: %s", preAuth.Reason)
 		}
 	}
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSGlassProviderRouteSelected,
+		BuildID:   build.ID,
+		AgentID:   agent.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"agent_role":         string(agent.Role),
+			"provider":           string(provider),
+			"selected_provider":  string(provider),
+			"model":              model,
+			"task_id":            task.ID,
+			"task_type":          string(task.Type),
+			"routing_stage":      waterfallStage,
+			"routing_reason":     waterfallReason,
+			"routing_power_mode": string(callPowerMode),
+			"content":            fmt.Sprintf("%s routed %s to %s with %s (%s).", agent.Role, task.Type, provider, firstNonEmptyString(model, "default model"), waterfallReason),
+		},
+	})
 
 	response, err := am.aiRouter.Generate(ctx, provider, prompt, GenerateOptions{
 		UserID:          build.UserID,

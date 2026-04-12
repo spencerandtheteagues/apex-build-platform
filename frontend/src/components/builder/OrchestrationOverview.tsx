@@ -1337,6 +1337,14 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
                       ))}
                     </div>
                   )}
+                  {(fingerprint.repair_strategy || fingerprint.patch_class) && (
+                    <div className="mt-3 text-xs text-gray-400">
+                      {[
+                        fingerprint.repair_strategy && `Strategy: ${humanize(fingerprint.repair_strategy)}`,
+                        fingerprint.patch_class && `Patch: ${humanize(fingerprint.patch_class)}`,
+                      ].filter(Boolean).join(' | ')}
+                    </div>
+                  )}
                 </div>
               ))
             )}
