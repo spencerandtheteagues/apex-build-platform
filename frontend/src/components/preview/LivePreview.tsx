@@ -1,64 +1,14 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
-import {
-  Play,
-  Square,
-  RefreshCw,
-  ExternalLink,
-  Smartphone,
-  Tablet,
-  Monitor,
-  Maximize2,
-  Minimize2,
-  Loader2,
-  AlertCircle,
-  CheckCircle,
-  Wifi,
-  WifiOff,
-  Settings,
-  Terminal,
-  Globe,
-  Server,
-  Power,
-  PowerOff,
-  FileText,
-  Shield,
-  ShieldOff
-} from 'lucide-react'
-import apiService from '@/services/api'
-import ConsolePanel, { ConsoleEntry } from './ConsolePanel'
-import NetworkPanel, { NetworkRequest } from './NetworkPanel'
-
-interface PreviewStatus {
-  project_id: number
-  active: boolean
-  port: number
-  url: string
-  started_at: string
-  last_access: string
-  connected_clients: number
-}
-
-interface ServerStatus {
-  running: boolean
-  port?: number
-  pid?: number
-  uptime_seconds?: number
-  command?: string
-  entry_file?: string
-  url?: string
-  ready?: boolean
-  exited_at?: string
-  exit_code?: number
-  last_error?: string
-}
-
-interface ServerDetection {
-  has_backend: boolean
-  server_type?: string
-  entry_file?: string
-  command?: string
-  framework?: string
-}
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { AlertCircle, CheckCircle, RefreshCw, Server, Square } from 'lucide-react'
+import ConsolePanel from './ConsolePanel'
+import NetworkPanel from './NetworkPanel'
+import PreviewRuntimePane from './PreviewRuntimePane'
+import PreviewStatusCards from './PreviewStatusCards'
+import PreviewToolbar from './PreviewToolbar'
+import type { ActiveTab, ViewportSize } from './types'
+import { usePreviewDevtools } from '@/hooks/usePreviewDevtools'
+import { usePreviewRuntime } from '@/hooks/usePreviewRuntime'
+import { usePreviewServer } from '@/hooks/usePreviewServer'
 
 interface LivePreviewProps {
   projectId: number
@@ -69,67 +19,31 @@ interface LivePreviewProps {
   onAutoRefreshChange?: (enabled: boolean) => void
 }
 
-type ViewportSize = 'mobile' | 'tablet' | 'desktop' | 'full'
-type ActiveTab = 'preview' | 'console' | 'network'
-
-const viewportSizes: Record<ViewportSize, { width: number; height: number; label: string }> = {
-  mobile: { width: 375, height: 667, label: 'Mobile' },
-  tablet: { width: 768, height: 1024, label: 'Tablet' },
-  desktop: { width: 1280, height: 800, label: 'Desktop' },
-  full: { width: 0, height: 0, label: 'Full' }
+const viewportSizes: Record<ViewportSize, { width: number; height: number }> = {
+  mobile: { width: 375, height: 667 },
+  tablet: { width: 768, height: 1024 },
+  desktop: { width: 1280, height: 800 },
+  full: { width: 0, height: 0 },
 }
-
-const MAX_CONSOLE_ENTRIES = 1000
-const MAX_NETWORK_REQUESTS = 500
 
 export default function LivePreview({
   projectId,
-  onFileChange,
+  onFileChange: _onFileChange,
   className = '',
   autoStart = false,
   autoRefreshOnSave,
-  onAutoRefreshChange
+  onAutoRefreshChange,
 }: LivePreviewProps) {
-  const [status, setStatus] = useState<PreviewStatus | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [viewport, setViewport] = useState<ViewportSize>('full')
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState<string>('')
-  const [iframeLoading, setIframeLoading] = useState(false)
-  const [iframeError, setIframeError] = useState<string | null>(null)
-  const [connected, setConnected] = useState(false)
-  const [refreshKey, setRefreshKey] = useState(0)
   const [activeTab, setActiveTab] = useState<ActiveTab>('preview')
-
-  // Console and Network state
-  const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([])
-  const [networkRequests, setNetworkRequests] = useState<NetworkRequest[]>([])
-
-  // Backend server state
-  const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
-  const [serverDetection, setServerDetection] = useState<ServerDetection | null>(null)
-  const [serverLoading, setServerLoading] = useState(false)
-  const [serverLogs, setServerLogs] = useState<{ stdout: string; stderr: string }>({ stdout: '', stderr: '' })
-  const [showServerLogs, setShowServerLogs] = useState(false)
-
-  // Docker sandbox state
-  const [useSandbox, setUseSandbox] = useState(false)
-  const [activeSandbox, setActiveSandbox] = useState(false)
-  const [dockerAvailable, setDockerAvailable] = useState(false)
-  const [sandboxRequired, setSandboxRequired] = useState(false)
-  const [sandboxDegraded, setSandboxDegraded] = useState(false)
-  const [backendPreviewAvailable, setBackendPreviewAvailable] = useState(true)
-  const [backendPreviewReason, setBackendPreviewReason] = useState('')
-
-  // Bundler state
-  const [bundlerAvailable, setBundlerAvailable] = useState(false)
-
-  // Settings state
-  const [internalAutoRefresh, setInternalAutoRefresh] = useState(true)
   const [showDevTools, setShowDevTools] = useState(true)
   const [customPath, setCustomPath] = useState('')
+  const [internalAutoRefresh, setInternalAutoRefresh] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
 
   const autoRefreshEnabled = typeof autoRefreshOnSave === 'boolean' ? autoRefreshOnSave : internalAutoRefresh
   const setAutoRefreshEnabled = (value: boolean) => {
@@ -141,39 +55,67 @@ export default function LivePreview({
     onAutoRefreshChange?.(value)
   }
 
-  const iframeRef = useRef<HTMLIFrameElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const activeProjectIdRef = useRef(projectId)
-  const lastAutoStartedProjectRef = useRef<number | null>(null)
+  const {
+    consoleEntries,
+    setConsoleEntries,
+    networkRequests,
+    setNetworkRequests,
+    clearDevTools,
+    errorCount,
+    warnCount,
+    networkErrorCount,
+  } = usePreviewDevtools()
 
-  useEffect(() => {
-    activeProjectIdRef.current = projectId
-  }, [projectId])
+  const {
+    serverStatus,
+    setServerStatus,
+    serverDetection,
+    serverLoading,
+    serverLogs,
+    showServerLogs,
+    setShowServerLogs,
+    startServer,
+    stopServer,
+    fetchServerLogs,
+    toggleServerLogs,
+  } = usePreviewServer({ projectId, setError })
+
+  const runtime = usePreviewRuntime({
+    projectId,
+    autoStart,
+    clearDevTools,
+    setError,
+    serverDetection,
+    onServerStatusHint: setServerStatus,
+  })
+  const runtimeStatusActive = runtime.status?.active
+  const setRuntimeIframeLoading = runtime.setIframeLoading
+  const setRuntimeIframeError = runtime.setIframeError
 
   useEffect(() => {
     if (!showDevTools && activeTab !== 'preview') {
       setActiveTab('preview')
     }
-  }, [showDevTools, activeTab])
+  }, [activeTab, showDevTools])
 
-  const previewSrc = React.useMemo(() => {
-    if (!previewUrl) return ''
+  const previewSrc = useMemo(() => {
+    if (!runtime.previewUrl) return ''
+
     const trimmed = customPath.trim()
-    if (!trimmed) return previewUrl
-    if (/^https?:\/\//i.test(trimmed)) {
-      return trimmed
-    }
+    if (!trimmed) return runtime.previewUrl
+    if (/^https?:\/\//i.test(trimmed)) return trimmed
+
     const normalized = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
     try {
-      const url = new URL(previewUrl)
+      const url = new URL(runtime.previewUrl)
       url.pathname = url.pathname.replace(/\/$/, '') + normalized
       return url.toString()
     } catch {
-      return previewUrl
+      return runtime.previewUrl
     }
-  }, [previewUrl, customPath])
+  }, [customPath, runtime.previewUrl])
 
-  const displayUrl = React.useMemo(() => {
+  const displayUrl = useMemo(() => {
     if (!previewSrc) return ''
     try {
       const url = new URL(previewSrc)
@@ -181,462 +123,23 @@ export default function LivePreview({
       url.searchParams.delete('preview_token')
       return url.toString()
     } catch {
-      return previewSrc
-        .replace(/([?&]token=)[^&]+/, '$1•••')
-        .replace(/([?&]preview_token=)[^&]+/, '$1•••')
+      return previewSrc.replace(/([?&]token=)[^&]+/, '$1•••').replace(/([?&]preview_token=)[^&]+/, '$1•••')
     }
   }, [previewSrc])
 
-  // Check Docker and bundler availability on mount
   useEffect(() => {
-    const checkCapabilities = async () => {
-      try {
-        const response = await apiService.client.get('/preview/docker/status')
-        const previewDockerAvailable = response.data.available === true
-        const previewSandboxRequired = response.data.sandbox_required === true
-        const previewSandboxDegraded = response.data.sandbox_degraded === true
-        setDockerAvailable(previewDockerAvailable)
-        setSandboxRequired(previewSandboxRequired)
-        setSandboxDegraded(previewSandboxDegraded)
-        setBackendPreviewAvailable(response.data.backend_preview_available !== false)
-        setBackendPreviewReason(response.data.backend_preview_reason || '')
-        if (previewSandboxRequired) {
-          setUseSandbox(true)
-        }
-      } catch {
-        setDockerAvailable(false)
-      }
-      try {
-        const response = await apiService.client.get('/preview/bundler/status')
-        setBundlerAvailable(response.data.available === true)
-      } catch {
-        setBundlerAvailable(false)
-      }
-    }
-    checkCapabilities()
-  }, [])
-
-  // Listen for postMessage from preview iframe
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      // Security: Validate origin — only accept same origin or localhost preview servers.
-      // 'null' origin is NOT allowed: our preview iframes load real localhost URLs and
-      // should never report null origin. Accepting null would allow any sandboxed iframe
-      // on the page to inject console/network events.
-      const isLocalhost = event.origin.startsWith('http://localhost:') ||
-                          event.origin.startsWith('http://127.0.0.1:')
-      const isSameOrigin = event.origin === window.location.origin
-
-      if (!isSameOrigin && !isLocalhost) {
-        return // Ignore messages from untrusted origins
-      }
-
-      // Validate payload shape before processing
-      if (!event.data || typeof event.data !== 'object' || typeof event.data.type !== 'string') {
-        return
-      }
-
-      // Console messages
-      if (event.data?.type === 'apex-console') {
-        const entry: ConsoleEntry = {
-          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          level: event.data.level,
-          message: event.data.message,
-          stack: event.data.stack,
-          timestamp: event.data.timestamp
-        }
-        setConsoleEntries(prev => {
-          const newEntries = [...prev, entry]
-          // Limit entries to prevent memory issues
-          if (newEntries.length > MAX_CONSOLE_ENTRIES) {
-            return newEntries.slice(-MAX_CONSOLE_ENTRIES)
-          }
-          return newEntries
-        })
-      }
-
-      // Network messages
-      if (event.data?.type === 'apex-network') {
-        const request: NetworkRequest = {
-          id: event.data.id,
-          method: event.data.method,
-          url: event.data.url,
-          status: event.data.status,
-          statusText: event.data.statusText,
-          duration: event.data.duration,
-          error: event.data.error,
-          timestamp: event.data.timestamp
-        }
-        setNetworkRequests(prev => {
-          const newRequests = [...prev, request]
-          if (newRequests.length > MAX_NETWORK_REQUESTS) {
-            return newRequests.slice(-MAX_NETWORK_REQUESTS)
-          }
-          return newRequests
-        })
-      }
-    }
-
-    window.addEventListener('message', handleMessage)
-    return () => window.removeEventListener('message', handleMessage)
-  }, [])
-
-  // Clear console/network on preview restart
-  const clearDevTools = useCallback(() => {
-    setConsoleEntries([])
-    setNetworkRequests([])
-  }, [])
-
-  // Reset per-project preview state when switching projects so stale iframes/status do not bleed across IDE sessions.
-  useEffect(() => {
-    setStatus(null)
-    setError(null)
-    setLoading(false)
-    setPreviewUrl('')
-    setIframeLoading(false)
-    setIframeError(null)
-    setConnected(false)
-    setActiveSandbox(false)
-    clearDevTools()
-    lastAutoStartedProjectRef.current = null
-  }, [projectId, clearDevTools])
-
-  useEffect(() => {
-    if (status?.active && previewSrc) {
-      setIframeLoading(true)
-      setIframeError(null)
+    if (runtimeStatusActive && previewSrc) {
+      setRuntimeIframeLoading(true)
+      setRuntimeIframeError(null)
       return
     }
-    if (!status?.active) {
-      setIframeLoading(false)
-      setIframeError(null)
+    if (!runtimeStatusActive) {
+      setRuntimeIframeLoading(false)
+      setRuntimeIframeError(null)
     }
-  }, [status?.active, previewSrc])
+  }, [previewSrc, runtimeStatusActive, setRuntimeIframeError, setRuntimeIframeLoading])
 
-  // Fetch preview status
-  const fetchStatus = useCallback(async () => {
-    const requestProjectId = projectId
-    const statusRequestSandbox = status?.active ? activeSandbox : useSandbox
-    try {
-      const response = await apiService.client.get(`/preview/status/${projectId}`, {
-        params: { sandbox: statusRequestSandbox ? '1' : '0' }
-      })
-      if (activeProjectIdRef.current !== requestProjectId) return
-      setSandboxDegraded(response.data.sandbox_degraded === true)
-      setStatus(response.data.preview)
-      if (response.data.preview?.active) {
-        if (typeof response.data.sandbox === 'boolean') {
-          setActiveSandbox(response.data.sandbox)
-        }
-        if (response.data.server !== undefined) {
-          setServerStatus(response.data.server)
-        }
-        setPreviewUrl(response.data.preview.url)
-        setConnected(true)
-      } else {
-        if (response.data.server !== undefined) {
-          setServerStatus(response.data.server)
-        } else {
-          setServerStatus(null)
-        }
-        setPreviewUrl('')
-        setIframeLoading(false)
-        setIframeError(null)
-        setConnected(false)
-      }
-    } catch (err: any) {
-      if (activeProjectIdRef.current !== requestProjectId) return
-      const statusCode = err?.response?.status
-      const previewMissing = statusCode === 404 || statusCode === 410
-      if (previewMissing) {
-        // Preview not running - that's OK
-        setStatus(null)
-        setPreviewUrl('')
-        setIframeLoading(false)
-        setIframeError(null)
-      }
-      setConnected(false)
-    }
-  }, [projectId, activeSandbox, useSandbox, status?.active])
-
-  useEffect(() => {
-    fetchStatus()
-    // Poll for status updates
-    const interval = setInterval(fetchStatus, 5000)
-    return () => clearInterval(interval)
-  }, [fetchStatus])
-
-  // Start preview with retry logic for rate limiting (429)
-  const startPreview = useCallback(async () => {
-    const requestProjectId = projectId
-    setLoading(true)
-    setError(null)
-    clearDevTools() // Clear old console/network data
-
-    const maxRetries = 3
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        let data: any
-        try {
-          data = await apiService.startFullStackPreview({
-            project_id: projectId,
-            sandbox: useSandbox,
-            start_backend: Boolean(serverDetection?.has_backend),
-            require_backend: false,
-            backend_entry_file: serverDetection?.entry_file,
-            backend_command: serverDetection?.command,
-          })
-        } catch (fullstackErr: any) {
-          const status = fullstackErr?.response?.status
-          if (status !== 404 && status !== 405) {
-            throw fullstackErr
-          }
-          // Backward compatibility with older deployments.
-          const response = await apiService.client.post('/preview/start', {
-            project_id: projectId,
-            sandbox: useSandbox
-          })
-          data = response.data
-        }
-        if (activeProjectIdRef.current !== requestProjectId) return
-        const actualSandbox = typeof data.sandbox === 'boolean' ? data.sandbox : useSandbox
-        setStatus(data.preview)
-        setPreviewUrl(data.proxy_url || data.preview?.url || data.url || '')
-        setIframeLoading(true)
-        setIframeError(null)
-        setConnected(true)
-        setActiveSandbox(actualSandbox)
-        setUseSandbox(actualSandbox)
-        setSandboxDegraded(data.sandbox_degraded === true)
-        if (data.server) {
-          setServerStatus(data.server)
-        } else {
-          setServerStatus(null)
-        }
-        if (data.degraded && data.diagnostics?.backend_error) {
-          setError(`Preview degraded: ${data.diagnostics.backend_error}`)
-        }
-        setRefreshKey(prev => prev + 1)
-        setLoading(false)
-        return
-      } catch (err: any) {
-        if (activeProjectIdRef.current !== requestProjectId) return
-        const status = err.response?.status
-        if (status === 429 && attempt < maxRetries) {
-          // Rate limited — wait with exponential backoff before retry
-          await new Promise(r => setTimeout(r, (attempt + 1) * 2000))
-          continue
-        }
-        setError(err.response?.data?.error || 'Failed to start preview')
-        break
-      }
-    }
-    if (activeProjectIdRef.current === requestProjectId) {
-      setLoading(false)
-    }
-  }, [projectId, clearDevTools, useSandbox, serverDetection])
-
-  // Auto-start preview when autoStart prop is true
-  useEffect(() => {
-    const activeForCurrentProject = status?.active && status.project_id === projectId
-    if (!autoStart || !projectId || activeForCurrentProject || loading) return
-    if (lastAutoStartedProjectRef.current === projectId) return
-    lastAutoStartedProjectRef.current = projectId
-    void startPreview()
-  }, [autoStart, projectId, status?.active, status?.project_id, loading, startPreview])
-
-  useEffect(() => {
-    if (!autoStart && lastAutoStartedProjectRef.current === projectId) {
-      lastAutoStartedProjectRef.current = null
-    }
-  }, [autoStart, projectId])
-
-  // Stop preview
-  const stopPreview = useCallback(async (options?: { silent?: boolean }) => {
-    setLoading(true)
-    try {
-      await apiService.client.post('/preview/stop', {
-        project_id: projectId,
-        sandbox: activeSandbox
-      })
-      setStatus(null)
-      setPreviewUrl('')
-      setIframeLoading(false)
-      setIframeError(null)
-      setConnected(false)
-      setActiveSandbox(false)
-      setServerStatus(null)
-      return true
-    } catch (err: any) {
-      if (!options?.silent) {
-        setError(err.response?.data?.error || 'Failed to stop preview')
-      }
-      return false
-    } finally {
-      setLoading(false)
-    }
-  }, [activeSandbox, projectId])
-
-  const restartPreview = useCallback(async () => {
-    if (loading) return
-    setError(null)
-    setIframeError(null)
-    if (status?.active) {
-      await stopPreview({ silent: true })
-    }
-    await startPreview()
-  }, [loading, startPreview, status?.active, stopPreview])
-
-  // Refresh preview
-  const refreshPreview = async () => {
-    try {
-      setIframeLoading(true)
-      setIframeError(null)
-      await apiService.client.post('/preview/refresh', {
-        project_id: projectId,
-        sandbox: activeSandbox
-      })
-      setRefreshKey(prev => prev + 1)
-    } catch (err) {
-      // Just reload the iframe
-      setRefreshKey(prev => prev + 1)
-    }
-  }
-
-  // ========== Backend Server Functions ==========
-
-  // Detect backend server on mount
-  useEffect(() => {
-    const detectBackend = async () => {
-      try {
-        const response = await apiService.client.get(`/preview/server/detect/${projectId}`)
-        setServerDetection(response.data)
-      } catch (err) {
-        // No backend detected or error - that's fine
-        setServerDetection({ has_backend: false })
-      }
-    }
-    detectBackend()
-  }, [projectId])
-
-  // Fetch server status
-  const fetchServerStatus = useCallback(async () => {
-    try {
-      const response = await apiService.client.get(`/preview/server/status/${projectId}`)
-      setServerStatus(response.data.server)
-    } catch (err) {
-      setServerStatus(null)
-    }
-  }, [projectId])
-
-  // Poll server status
-  useEffect(() => {
-    if (serverDetection?.has_backend) {
-      fetchServerStatus()
-      const interval = setInterval(fetchServerStatus, 5000)
-      return () => clearInterval(interval)
-    }
-  }, [serverDetection?.has_backend, fetchServerStatus])
-
-  // Start backend server
-  const startServer = async () => {
-    setServerLoading(true)
-    try {
-      const response = await apiService.client.post('/preview/server/start', {
-        project_id: projectId,
-        entry_file: serverDetection?.entry_file,
-        command: serverDetection?.command
-      })
-      setServerStatus({
-        running: true,
-        port: response.data.port,
-        pid: response.data.pid,
-        command: response.data.command,
-        entry_file: response.data.entry_file,
-        url: response.data.url,
-        ready: true
-      })
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to start backend server')
-    } finally {
-      setServerLoading(false)
-    }
-  }
-
-  // Stop backend server
-  const stopServer = async () => {
-    setServerLoading(true)
-    try {
-      await apiService.client.post('/preview/server/stop', {
-        project_id: projectId
-      })
-      setServerStatus(null)
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to stop backend server')
-    } finally {
-      setServerLoading(false)
-    }
-  }
-
-  // Fetch server logs
-  const fetchServerLogs = useCallback(async () => {
-    try {
-      const response = await apiService.client.get(`/preview/server/logs/${projectId}`)
-      setServerLogs({
-        stdout: response.data.stdout || '',
-        stderr: response.data.stderr || ''
-      })
-    } catch (err) {
-      // Ignore errors
-    }
-  }, [projectId])
-
-  // Fetch logs when showing server logs panel
-  const toggleServerLogs = useCallback(async () => {
-    const next = !showServerLogs
-    setShowServerLogs(next)
-    if (next) {
-      await fetchServerLogs()
-    }
-  }, [fetchServerLogs, showServerLogs])
-
-  useEffect(() => {
-    if (!showServerLogs || !serverDetection?.has_backend) return
-    fetchServerLogs()
-    if (!serverStatus?.running) return
-    const interval = setInterval(fetchServerLogs, 2000)
-    return () => clearInterval(interval)
-  }, [fetchServerLogs, serverDetection?.has_backend, serverStatus?.running, showServerLogs])
-
-  // Toggle fullscreen
-  const toggleFullscreen = () => {
-    if (!containerRef.current) return
-
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen()
-    } else {
-      document.exitFullscreen()
-    }
-  }
-
-  // Sync fullscreen state with browser (handles Escape key exit)
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement)
-    }
-    document.addEventListener('fullscreenchange', handleFullscreenChange)
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
-  }, [])
-
-  // Open in new tab
-  const openInNewTab = () => {
-    if (previewSrc) {
-      window.open(previewSrc, '_blank')
-    }
-  }
-
-  // Get viewport style
-  const getViewportStyle = () => {
+  const viewportStyle = useMemo(() => {
     if (viewport === 'full') {
       return { width: '100%', height: '100%' }
     }
@@ -645,381 +148,106 @@ export default function LivePreview({
       width: `${size.width}px`,
       height: `${size.height}px`,
       maxWidth: '100%',
-      maxHeight: '100%'
+      maxHeight: '100%',
+    }
+  }, [viewport])
+
+  const toggleFullscreen = () => {
+    if (!containerRef.current) return
+    if (!document.fullscreenElement) {
+      void containerRef.current.requestFullscreen()
+    } else {
+      void document.exitFullscreen()
     }
   }
 
-  // Count unread console errors
-  const errorCount = consoleEntries.filter(e => e.level === 'error').length
-  const warnCount = consoleEntries.filter(e => e.level === 'warn').length
-  const networkErrorCount = networkRequests.filter(r => r.status === 0 || r.status >= 400).length
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement))
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  }, [])
+
+  const openInNewTab = () => {
+    if (!previewSrc) return
+    window.open(previewSrc, '_blank')
+  }
 
   return (
     <div
       ref={containerRef}
       className={`min-h-0 flex flex-col bg-gray-900 border border-gray-700 rounded-lg overflow-hidden ${className}`}
     >
-      {sandboxDegraded && (
+      {runtime.sandboxDegraded && (
         <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-200 text-xs">
           <AlertCircle className="w-3.5 h-3.5 text-amber-300" />
           <span>Platform Docker is unavailable. Preview is using process fallback mode.</span>
         </div>
       )}
 
-      {/* Toolbar */}
-      <div className="flex items-center justify-between px-3 py-2 bg-gray-800/50 border-b border-gray-700">
-        <div className="flex items-center gap-2">
-          {/* Health-driven status indicator */}
-          <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs ${
-            loading ? 'bg-yellow-500/20 text-yellow-400' :
-            connected && status?.active && (!serverDetection?.has_backend || serverStatus?.running) ? 'bg-green-500/20 text-green-400' :
-            connected && status?.active && serverDetection?.has_backend && !serverStatus?.running ? 'bg-orange-500/20 text-orange-400' :
-            error || iframeError ? 'bg-red-500/20 text-red-400' :
-            'bg-gray-700 text-gray-400'
-          }`}
-            title={
-              loading ? 'Starting preview...' :
-              error ? `Error: ${error}` :
-              serverStatus?.last_error ? `Backend error: ${serverStatus.last_error}` :
-              serverStatus?.exit_code !== undefined && serverStatus.exit_code !== 0 ? `Backend exited with code ${serverStatus.exit_code}` :
-              undefined
-            }
-          >
-            {loading ? (
-              <>
-                <Loader2 className="w-3 h-3 animate-spin" />
-                <span>Starting</span>
-              </>
-            ) : connected && status?.active && (!serverDetection?.has_backend || serverStatus?.running) ? (
-              <>
-                <Wifi className="w-3 h-3" />
-                <span>Running</span>
-              </>
-            ) : connected && status?.active && serverDetection?.has_backend && !serverStatus?.running ? (
-              <>
-                <AlertCircle className="w-3 h-3" />
-                <span>Backend Down</span>
-              </>
-            ) : error || iframeError ? (
-              <>
-                <ShieldOff className="w-3 h-3" />
-                <span>Failed</span>
-              </>
-            ) : (
-              <>
-                <WifiOff className="w-3 h-3" />
-                <span>Not Running</span>
-              </>
-            )}
-          </div>
+      <PreviewToolbar
+        loading={runtime.loading}
+        connected={runtime.connected}
+        status={runtime.status}
+        error={error}
+        iframeError={runtime.iframeError}
+        onStartPreview={() => {
+          void runtime.startPreview()
+        }}
+        onStopPreview={() => {
+          void runtime.stopPreview()
+        }}
+        onRestartPreview={() => {
+          void runtime.restartPreview()
+        }}
+        onRefreshPreview={() => {
+          void runtime.refreshPreview()
+        }}
+        serverDetection={serverDetection}
+        serverStatus={serverStatus}
+        backendPreviewAvailable={runtime.backendPreviewAvailable}
+        backendPreviewReason={runtime.backendPreviewReason}
+        serverLoading={serverLoading}
+        showServerLogs={showServerLogs}
+        onStartServer={() => {
+          void startServer()
+        }}
+        onStopServer={() => {
+          void stopServer()
+        }}
+        onToggleServerLogs={() => {
+          void toggleServerLogs()
+        }}
+        activeTab={activeTab}
+        onActiveTabChange={setActiveTab}
+        showDevTools={showDevTools}
+        errorCount={errorCount}
+        warnCount={warnCount}
+        networkErrorCount={networkErrorCount}
+        viewport={viewport}
+        onViewportChange={setViewport}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={toggleFullscreen}
+        onOpenInNewTab={openInNewTab}
+        hasPreviewSource={Boolean(previewSrc)}
+        autoRefreshEnabled={autoRefreshEnabled}
+        onAutoRefreshChange={setAutoRefreshEnabled}
+        dockerAvailable={runtime.dockerAvailable}
+        useSandbox={runtime.useSandbox}
+        onUseSandboxChange={runtime.setUseSandbox}
+        sandboxRequired={runtime.sandboxRequired}
+        sandboxDegraded={runtime.sandboxDegraded}
+        bundlerAvailable={runtime.bundlerAvailable}
+        customPath={customPath}
+        onCustomPathChange={setCustomPath}
+        onShowDevToolsChange={setShowDevTools}
+      />
 
-          {/* Play/Stop button */}
-          {status?.active ? (
-            <button
-              onClick={() => { void stopPreview() }}
-              disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-md text-sm transition-colors disabled:opacity-50"
-            >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Square className="w-4 h-4" />}
-              Stop
-            </button>
-          ) : (
-            <button
-              onClick={startPreview}
-              disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600/20 hover:bg-green-600/30 text-green-400 rounded-md text-sm transition-colors disabled:opacity-50"
-            >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-              Start Preview
-            </button>
-          )}
-
-          {status?.active && (
-            <button
-              onClick={() => { void restartPreview() }}
-              disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 rounded-md text-sm transition-colors disabled:opacity-50"
-              title="Restart preview runtime"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              Restart
-            </button>
-          )}
-
-          {/* Refresh button */}
-          <button
-            onClick={refreshPreview}
-            disabled={!status?.active || loading}
-            className="p-1.5 hover:bg-gray-700 rounded-md text-gray-400 hover:text-white transition-colors disabled:opacity-50"
-            title="Reload frame"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
-
-          {/* Backend Server Controls - only show if backend detected */}
-          {serverDetection?.has_backend && (
-            <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-gray-600">
-              {/* Server status indicator */}
-              <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs ${
-                !backendPreviewAvailable
-                  ? 'bg-gray-700 text-gray-400'
-                  :
-                serverStatus?.running
-                  ? 'bg-purple-500/20 text-purple-400'
-                  : 'bg-gray-700 text-gray-400'
-              }`}
-                title={!backendPreviewAvailable && backendPreviewReason ? backendPreviewReason : undefined}
-              >
-                <Server className="w-3 h-3" />
-                <span>
-                  {!backendPreviewAvailable ? 'API Disabled' : serverStatus?.running ? `API :${serverStatus.port}` : 'API Off'}
-                </span>
-              </div>
-
-              {/* Server start/stop button */}
-              {serverStatus?.running ? (
-                <button
-                  onClick={stopServer}
-                  disabled={serverLoading}
-                  className="flex items-center gap-1 px-2 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-md text-xs transition-colors disabled:opacity-50"
-                  title="Stop Backend Server"
-                >
-                  {serverLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <PowerOff className="w-3 h-3" />}
-                  Stop
-                </button>
-              ) : (
-                <button
-                  onClick={startServer}
-                  disabled={serverLoading || !backendPreviewAvailable}
-                  className="flex items-center gap-1 px-2 py-1 bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 rounded-md text-xs transition-colors disabled:opacity-50"
-                  title={backendPreviewAvailable ? `Start ${serverDetection.framework || serverDetection.server_type} Server` : (backendPreviewReason || 'Backend preview is unavailable')}
-                >
-                  {serverLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Power className="w-3 h-3" />}
-                  Start API
-                </button>
-              )}
-
-              {/* Server logs button */}
-              {(serverStatus?.running || serverDetection?.entry_file || serverStatus?.last_error || serverStatus?.exit_code !== undefined) && (
-                <button
-                  onClick={() => { void toggleServerLogs() }}
-                  className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
-                    showServerLogs
-                      ? 'bg-purple-600 text-white'
-                      : 'hover:bg-gray-700 text-gray-400 hover:text-white'
-                  }`}
-                  title="Server Logs"
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>{showServerLogs ? 'Hide Logs' : 'Logs'}</span>
-                </button>
-              )}
-            </div>
-          )}
-          {serverDetection?.has_backend && !backendPreviewAvailable && backendPreviewReason && (
-            <div className="ml-2 text-[11px] text-gray-500">
-              {backendPreviewReason}
-            </div>
-          )}
-
-          {/* Tab buttons */}
-          <div className="flex items-center bg-gray-800 rounded-md p-0.5 ml-2">
-            <button
-              onClick={() => setActiveTab('preview')}
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                activeTab === 'preview' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Preview
-            </button>
-            {showDevTools && (
-              <>
-                <button
-                  onClick={() => setActiveTab('console')}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors ${
-                    activeTab === 'console' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <Terminal className="w-3 h-3" />
-                  Console
-                  {(errorCount > 0 || warnCount > 0) && (
-                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
-                      errorCount > 0 ? 'bg-red-500 text-white' : 'bg-yellow-500 text-black'
-                    }`}>
-                      {errorCount > 0 ? errorCount : warnCount}
-                    </span>
-                  )}
-                </button>
-                <button
-                  onClick={() => setActiveTab('network')}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors ${
-                    activeTab === 'network' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <Globe className="w-3 h-3" />
-                  Network
-                  {networkErrorCount > 0 && (
-                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white">
-                      {networkErrorCount}
-                    </span>
-                  )}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1">
-          {/* Viewport size buttons */}
-          <div className="flex items-center bg-gray-800 rounded-md p-0.5 mr-2">
-            <button
-              onClick={() => setViewport('mobile')}
-              className={`p-1.5 rounded ${viewport === 'mobile' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'}`}
-              title="Mobile (375x667)"
-            >
-              <Smartphone className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setViewport('tablet')}
-              className={`p-1.5 rounded ${viewport === 'tablet' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'}`}
-              title="Tablet (768x1024)"
-            >
-              <Tablet className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setViewport('desktop')}
-              className={`p-1.5 rounded ${viewport === 'desktop' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'}`}
-              title="Desktop (1280x800)"
-            >
-              <Monitor className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setViewport('full')}
-              className={`p-1.5 rounded ${viewport === 'full' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'}`}
-              title="Full Width"
-            >
-              <Maximize2 className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Fullscreen toggle */}
-          <button
-            onClick={toggleFullscreen}
-            className="p-1.5 hover:bg-gray-700 rounded-md text-gray-400 hover:text-white transition-colors"
-            title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-          >
-            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-          </button>
-
-          {/* Open in new tab */}
-          <button
-            onClick={openInNewTab}
-            disabled={!status?.active}
-            className="p-1.5 hover:bg-gray-700 rounded-md text-gray-400 hover:text-white transition-colors disabled:opacity-50"
-            title="Open in New Tab"
-          >
-            <ExternalLink className="w-4 h-4" />
-          </button>
-
-          {/* Settings */}
-          <div className="relative">
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="p-1.5 hover:bg-gray-700 rounded-md text-gray-400 hover:text-white transition-colors"
-              title="Settings"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-
-            {showSettings && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowSettings(false)} />
-              <div className="absolute right-0 top-full mt-1 w-64 bg-gray-800/95 backdrop-blur-md border border-gray-700/80 rounded-xl shadow-2xl shadow-black/60 z-50">
-                <div className="p-3">
-                  <h4 className="text-sm font-medium text-white mb-3">Preview Settings</h4>
-                  <div className="space-y-3">
-                    <label className="flex items-center justify-between">
-                      <span className="text-sm text-gray-400">Auto-refresh on save</span>
-                      <input
-                        type="checkbox"
-                        checked={autoRefreshEnabled}
-                        onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
-                        className="rounded bg-gray-700 border-gray-600 text-cyan-500"
-                      />
-                    </label>
-                    <label className="flex items-center justify-between">
-                      <span className="text-sm text-gray-400">Show dev tools</span>
-                      <input
-                        type="checkbox"
-                        checked={showDevTools}
-                        onChange={(e) => setShowDevTools(e.target.checked)}
-                        className="rounded bg-gray-700 border-gray-600 text-cyan-500"
-                      />
-                    </label>
-
-                    {/* Docker Sandbox Toggle */}
-                    <label className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        {dockerAvailable ? <Shield className="w-3.5 h-3.5 text-green-400" /> : <ShieldOff className="w-3.5 h-3.5 text-gray-500" />}
-                        <span className="text-sm text-gray-400">Docker Sandbox</span>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={useSandbox}
-                        onChange={(e) => setUseSandbox(e.target.checked)}
-                        disabled={!dockerAvailable || sandboxRequired}
-                        className="rounded bg-gray-700 border-gray-600 text-cyan-500 disabled:opacity-40"
-                      />
-                    </label>
-                    {sandboxRequired && sandboxDegraded ? (
-                      <p className="text-[10px] text-amber-300 -mt-1">
-                        Secure sandbox is unavailable, so preview will fall back to process mode
-                      </p>
-                    ) : sandboxRequired ? (
-                      <p className="text-[10px] text-cyan-500 -mt-1">
-                        Secure preview is enforced by the server
-                      </p>
-                    ) : !dockerAvailable ? (
-                      <p className="text-[10px] text-gray-600 -mt-1">Docker not available on server</p>
-                    ) : null}
-                    {sandboxRequired && !dockerAvailable && (
-                      <p className="text-[10px] text-amber-400 -mt-1">
-                        Secure preview is required, but Docker is currently unavailable
-                      </p>
-                    )}
-
-                    {/* Bundler Status */}
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-400">esbuild Bundler</span>
-                      <span className={`text-xs px-1.5 py-0.5 rounded ${bundlerAvailable ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-500'}`}>
-                        {bundlerAvailable ? 'Available' : 'Not Found'}
-                      </span>
-                    </div>
-
-                    <div>
-                      <span className="text-sm text-gray-400">Custom URL</span>
-                      <input
-                        type="text"
-                        placeholder="/custom-path"
-                        value={customPath}
-                        onChange={(e) => setCustomPath(e.target.value)}
-                        className="w-full mt-1 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm text-white"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* URL Bar - only show on preview tab */}
-      {status?.active && activeTab === 'preview' && (
+      {runtime.status?.active && activeTab === 'preview' && (
         <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-900/50 border-b border-gray-700/60">
           <div className="flex-1 flex items-center gap-2 bg-gray-800/60 rounded-lg px-3 py-1.5 border border-gray-700/40">
-            {connected ? (
+            {runtime.connected ? (
               <CheckCircle className="w-3 h-3 text-green-400 shrink-0" />
             ) : (
               <AlertCircle className="w-3 h-3 text-yellow-400 shrink-0" />
@@ -1036,138 +264,49 @@ export default function LivePreview({
       )}
 
       {activeTab === 'preview' && (
-        <div className="grid grid-cols-1 gap-2 border-b border-gray-800 bg-gray-950/70 px-3 py-3 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-3">
-            <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Preview Runtime</div>
-            <div className="mt-2 text-sm font-semibold text-white">
-              {status?.active ? `Port ${status.port}` : 'Stopped'}
-            </div>
-            <div className="mt-1 text-xs text-gray-400">
-              {activeSandbox ? 'Docker sandbox' : sandboxRequired && sandboxDegraded ? 'Process fallback mode' : 'Process mode'}
-            </div>
-          </div>
-          <div className="rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-3">
-            <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Backend API</div>
-            <div className="mt-2 text-sm font-semibold text-white">
-              {!serverDetection?.has_backend
-                ? 'Not detected'
-                : !backendPreviewAvailable
-                  ? 'Preview disabled'
-                  : serverStatus?.running
-                    ? `Running on :${serverStatus.port}`
-                    : 'Detected, stopped'}
-            </div>
-            <div className="mt-1 text-xs text-gray-400">
-              {serverDetection?.framework || serverDetection?.server_type || backendPreviewReason || 'No backend runtime'}
-            </div>
-          </div>
-          <div className="rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-3">
-            <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Environment</div>
-            <div className="mt-2 text-sm font-semibold text-white">
-              {bundlerAvailable ? 'Bundler ready' : 'Bundler unavailable'}
-            </div>
-            <div className="mt-1 text-xs text-gray-400">
-              Auto-refresh {autoRefreshEnabled ? 'on' : 'off'} · DevTools {showDevTools ? 'on' : 'off'}
-            </div>
-          </div>
-          <div className="rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-3">
-            <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Route</div>
-            <div className="mt-2 truncate text-sm font-semibold text-white">
-              {customPath.trim() || '/'}
-            </div>
-            <div className="mt-1 truncate text-xs text-gray-400">
-              {status?.started_at ? `Started ${new Date(status.started_at).toLocaleTimeString()}` : 'Not started yet'}
-            </div>
-          </div>
-        </div>
+        <PreviewStatusCards
+          status={runtime.status}
+          activeSandbox={runtime.activeSandbox}
+          sandboxRequired={runtime.sandboxRequired}
+          sandboxDegraded={runtime.sandboxDegraded}
+          serverDetection={serverDetection}
+          serverStatus={serverStatus}
+          backendPreviewAvailable={runtime.backendPreviewAvailable}
+          backendPreviewReason={runtime.backendPreviewReason}
+          bundlerAvailable={runtime.bundlerAvailable}
+          autoRefreshEnabled={autoRefreshEnabled}
+          showDevTools={showDevTools}
+          customPath={customPath}
+        />
       )}
 
-      {/* Tab Content */}
       <div className="flex-1 overflow-hidden">
-        {/* Preview Tab */}
         {activeTab === 'preview' && (
-          <div className="relative h-full flex items-center justify-center bg-gray-950 overflow-auto p-4">
-            {error && (
-              <div className="flex flex-col items-center justify-center text-red-400">
-                <AlertCircle className="w-12 h-12 mb-3" />
-                <p className="text-sm">{error}</p>
-                <button
-                  onClick={() => setError(null)}
-                  className="mt-3 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-md text-sm"
-                >
-                  Dismiss
-                </button>
-              </div>
-            )}
-
-            {!status?.active && !error && (
-              <div className="flex flex-col items-center justify-center text-gray-500 gap-4">
-                <div className="w-16 h-16 rounded-2xl bg-gray-800/60 border border-gray-700/50 flex items-center justify-center">
-                  <Monitor className="w-8 h-8 text-gray-600" />
-                </div>
-                <div className="text-center">
-                  <p className="text-sm font-medium text-gray-300 mb-1">Preview not running</p>
-                  <p className="text-xs text-gray-600">Start the preview server to see your app</p>
-                </div>
-                <button
-                  onClick={startPreview}
-                  disabled={loading}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-green-600/20 hover:bg-green-600/30 border border-green-600/30 hover:border-green-500/40 text-green-400 rounded-xl text-sm font-medium transition-all duration-150 disabled:opacity-50"
-                >
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                  Start Preview
-                </button>
-              </div>
-            )}
-
-            {status?.active && previewSrc && (
-              <div
-                className="relative bg-white rounded-lg shadow-2xl overflow-hidden transition-all duration-300"
-                style={getViewportStyle()}
-              >
-                {iframeLoading && (
-                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/90 text-gray-700 pointer-events-none">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Loading app preview...</span>
-                    </div>
-                  </div>
-                )}
-                <iframe
-                  ref={iframeRef}
-                  key={`${refreshKey}-${previewSrc}`}
-                  src={previewSrc}
-                  className="w-full h-full border-0"
-                  title="Live Preview"
-                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
-                  onLoad={() => {
-                    setIframeLoading(false)
-                    setIframeError(null)
-                  }}
-                  onError={() => {
-                    setIframeLoading(false)
-                    setIframeError('Preview frame failed to load. Try Refresh or restart preview.')
-                  }}
-                />
-              </div>
-            )}
-
-            {status?.active && !previewSrc && !error && (
-              <div className="flex flex-col items-center justify-center text-gray-400">
-                <Loader2 className="w-8 h-8 animate-spin mb-3" />
-                <p className="text-sm">Starting preview server...</p>
-              </div>
-            )}
-
-            {status?.active && iframeError && !error && (
-              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 px-4 py-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 text-yellow-200 text-sm">
-                {iframeError}
-              </div>
-            )}
-          </div>
+          <PreviewRuntimePane
+            status={runtime.status}
+            previewSrc={previewSrc}
+            viewportStyle={viewportStyle}
+            refreshKey={runtime.refreshKey}
+            iframeRef={iframeRef}
+            loading={runtime.loading}
+            error={error}
+            iframeLoading={runtime.iframeLoading}
+            iframeError={runtime.iframeError}
+            onStartPreview={() => {
+              void runtime.startPreview()
+            }}
+            onDismissError={() => setError(null)}
+            onIframeLoad={() => {
+              runtime.setIframeLoading(false)
+              runtime.setIframeError(null)
+            }}
+            onIframeError={() => {
+              runtime.setIframeLoading(false)
+              runtime.setIframeError('Preview frame failed to load. Try Refresh or restart preview.')
+            }}
+          />
         )}
 
-        {/* Console Tab */}
         {showDevTools && activeTab === 'console' && (
           <ConsolePanel
             entries={consoleEntries}
@@ -1176,7 +315,6 @@ export default function LivePreview({
           />
         )}
 
-        {/* Network Tab */}
         {showDevTools && activeTab === 'network' && (
           <NetworkPanel
             requests={networkRequests}
@@ -1186,7 +324,6 @@ export default function LivePreview({
         )}
       </div>
 
-      {/* Server Logs Panel - slides up from bottom */}
       {showServerLogs && serverDetection?.has_backend && (
         <div className="border-t border-gray-700 bg-gray-900 max-h-64 overflow-hidden flex flex-col">
           <div className="flex items-center justify-between px-3 py-2 bg-gray-800/50 border-b border-gray-700">
@@ -1194,12 +331,14 @@ export default function LivePreview({
               <Server className="w-4 h-4 text-purple-400" />
               <span className="text-sm font-medium text-white">Backend Server Logs</span>
               <span className="text-xs text-gray-500">
-                {serverDetection?.framework || serverDetection?.server_type || 'runtime'} | Port {serverStatus?.port ?? 'n/a'}
+                {serverDetection.framework || serverDetection.server_type || 'runtime'} | Port {serverStatus?.port ?? 'n/a'}
               </span>
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={fetchServerLogs}
+                onClick={() => {
+                  void fetchServerLogs()
+                }}
                 className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white"
                 title="Refresh Logs"
               >
@@ -1234,12 +373,11 @@ export default function LivePreview({
         </div>
       )}
 
-      {/* Status bar */}
-      {status?.active && (
+      {runtime.status?.active && (
         <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800/30 border-t border-gray-700 text-xs text-gray-500">
           <div className="flex items-center gap-4">
-            <span>Port: {status.port}</span>
-            <span>Clients: {status.connected_clients}</span>
+            <span>Port: {runtime.status.port}</span>
+            <span>Clients: {runtime.status.connected_clients}</span>
             <span className="text-gray-600">|</span>
             <span>Console: {consoleEntries.length}</span>
             <span>Network: {networkRequests.length}</span>
