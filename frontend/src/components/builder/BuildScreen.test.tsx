@@ -119,4 +119,38 @@ describe('BuildScreen header prompt actions', () => {
     expect(screen.getByText(/merge policy: review required/i)).toBeTruthy()
     expect(screen.getByText(/dependency changes require review/i)).toBeTruthy()
   })
+
+  it('keeps platform and failed-build notices visible after switching overlays', async () => {
+    const props: any = baseProps()
+    props.buildState.status = 'failed'
+    props.platformReadinessNotice = {
+      title: 'Redis cache is misconfigured',
+      body: 'Redis is using an external allowlisted endpoint.',
+      detail: 'Update REDIS_URL to the apex-redis internal connection string and redeploy.',
+      isCritical: false,
+    }
+    props.buildFailureAttribution = {
+      title: 'This failure may be platform-related',
+      body: 'Primary database connectivity dropped while the build was running.',
+      detail: 'Retry after database connectivity returns.',
+      capturedError: 'Build session unavailable',
+    }
+
+    render(<BuildScreen {...props} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Issues(?:\s*\d+)?$/i }))
+
+    expect(await screen.findByText(/Redis cache is misconfigured/i)).toBeTruthy()
+    expect(screen.getByText(/This failure may be platform-related/i)).toBeTruthy()
+    expect(screen.getByText(/Build session unavailable/i)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Console$/i }))
+    await screen.findByText(/Planner Console/i)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Issues(?:\s*\d+)?$/i }))
+
+    expect(await screen.findByText(/Redis cache is misconfigured/i)).toBeTruthy()
+    expect(screen.getByText(/This failure may be platform-related/i)).toBeTruthy()
+    expect(screen.getByText(/Build session unavailable/i)).toBeTruthy()
+  })
 })
