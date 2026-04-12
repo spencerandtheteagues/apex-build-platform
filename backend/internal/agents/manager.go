@@ -17951,7 +17951,8 @@ func shouldPersistBuildSnapshotMessage(msgType WSMessageType) bool {
 		WSBuildFSMStarted, WSBuildFSMInitialized, WSBuildFSMPlanReady,
 		WSBuildFSMAllSteps, WSBuildFSMValidationPass, WSBuildFSMValidationFail,
 		WSBuildFSMRetryExhausted, WSBuildFSMRollbackDone, WSBuildFSMRollbackFail,
-		WSBuildFSMFatalError, WSBuildFSMCancelled:
+		WSBuildFSMFatalError, WSBuildFSMCancelled,
+		"agent:retrying", "agent:verification_failed", "agent:coordination_failed", WSAgentError:
 		return true
 	default:
 		return false

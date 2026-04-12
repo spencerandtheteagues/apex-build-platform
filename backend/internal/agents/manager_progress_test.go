@@ -64,3 +64,18 @@ func TestUpdateBuildProgressKeepsReviewPhaseBelowCompletion(t *testing.T) {
 		t.Fatalf("expected review progress in 90-98 range, got %d", build.Progress)
 	}
 }
+
+func TestShouldPersistBuildSnapshotMessageIncludesRetryLearningEvents(t *testing.T) {
+	for _, msgType := range []WSMessageType{
+		"agent:retrying",
+		"agent:verification_failed",
+		"agent:coordination_failed",
+		WSAgentError,
+	} {
+		t.Run(string(msgType), func(t *testing.T) {
+			if !shouldPersistBuildSnapshotMessage(msgType) {
+				t.Fatalf("expected %s to trigger snapshot persistence", msgType)
+			}
+		})
+	}
+}
