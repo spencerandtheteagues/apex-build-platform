@@ -1210,6 +1210,7 @@ func (am *AgentManager) cvBroadcastResult(build *Build, passed bool, errors []Pa
 		} else {
 			msg = "Compile validation exhausted repair attempts."
 		}
+		cvRecordCompileFailureFingerprint(build, errors)
 	}
 	am.broadcast(build.ID, &WSMessage{
 		Type:      WSBuildProgress,
@@ -1223,5 +1224,21 @@ func (am *AgentManager) cvBroadcastResult(build *Build, passed bool, errors []Pa
 			"compile_validation_passed": passed,
 			"compile_validation_errors": len(errors),
 		},
+	})
+}
+
+func cvRecordCompileFailureFingerprint(build *Build, errors []ParsedBuildError) {
+	if build == nil {
+		return
+	}
+	appendFailureFingerprint(build, FailureFingerprint{
+		BuildID:          build.ID,
+		StackCombination: stackCombinationFromBuild(build),
+		TaskShape:        TaskShapeVerification,
+		FailureClass:     "compile_failure",
+		FilesInvolved:    parsedBuildErrorFiles(errors),
+		RepairPathChosen: []string{"compile_validator"},
+		RepairSucceeded:  false,
+		CreatedAt:        time.Now().UTC(),
 	})
 }

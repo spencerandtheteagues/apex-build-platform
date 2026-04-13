@@ -74,6 +74,48 @@ func TestRunCompileValidationLoopSkipsWhenAIRouterNil(t *testing.T) {
 	}
 }
 
+func TestCVBroadcastResultRecordsCompileFailureFingerprint(t *testing.T) {
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+	build := &Build{
+		ID: "compile-failure-fingerprint",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+	am.builds[build.ID] = build
+
+	am.cvBroadcastResult(build, false, []ParsedBuildError{
+		{
+			File:    "src/App.tsx",
+			Line:    4,
+			Column:  12,
+			Code:    "TS2304",
+			Message: "Cannot find name 'MissingThing'.",
+			Source:  "tsc",
+		},
+	})
+
+	state := build.SnapshotState.Orchestration
+	if state == nil || len(state.FailureFingerprints) != 1 {
+		t.Fatalf("expected compile failure fingerprint, got %+v", state)
+	}
+	fp := state.FailureFingerprints[0]
+	if fp.FailureClass != "compile_failure" || fp.TaskShape != TaskShapeVerification || fp.RepairSucceeded {
+		t.Fatalf("expected terminal compile verification fingerprint, got %+v", fp)
+	}
+	if !containsString(fp.FilesInvolved, "src/App.tsx") {
+		t.Fatalf("expected compile error file to be captured, got %+v", fp.FilesInvolved)
+	}
+	if !containsString(fp.RepairPathChosen, "compile_validator") {
+		t.Fatalf("expected compile validator repair path, got %+v", fp.RepairPathChosen)
+	}
+}
+
 func TestCVRunInlineRepairAppliesDeterministicReactPropMismatchRepairBeforeAI(t *testing.T) {
 	t.Parallel()
 
