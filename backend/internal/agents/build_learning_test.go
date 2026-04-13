@@ -180,6 +180,152 @@ func TestCreateBuildLoadsHistoricalLearningFromCompletedBuilds(t *testing.T) {
 	}
 }
 
+func TestCreateBuildLoadsHistoricalLearningFromPersistedRealOutcomes(t *testing.T) {
+	db := openBuildTestDB(t)
+	persistManager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderGPT4, ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderGPT4},
+	})
+	persistManager.db = db
+
+	techStack := &TechStack{
+		Frontend: "React",
+		Backend:  "Express",
+		Database: "PostgreSQL",
+		Styling:  "Tailwind",
+	}
+	completedAt := time.Now().UTC()
+	previous := &Build{
+		ID:           "persisted-learning-source",
+		UserID:       1,
+		Status:       BuildCompleted,
+		Mode:         ModeFull,
+		PowerMode:    PowerBalanced,
+		ProviderMode: "platform",
+		Description:  "Build a runtime CRM dashboard",
+		TechStack:    techStack,
+		Plan: &BuildPlan{
+			AppType:   "Runtime CRM",
+			TechStack: *techStack,
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags:              defaultBuildOrchestrationFlags(),
+				ProviderScorecards: defaultProviderScorecards("platform"),
+			},
+		},
+		Agents:      map[string]*Agent{},
+		Tasks:       []*Task{},
+		Checkpoints: []*Checkpoint{},
+		Progress:    100,
+		CreatedAt:   completedAt.Add(-10 * time.Minute),
+		UpdatedAt:   completedAt,
+		CompletedAt: &completedAt,
+	}
+	agent := &Agent{
+		ID:       "source-frontend-agent",
+		Role:     RoleFrontend,
+		Provider: ai.ProviderGPT4,
+		Model:    "gpt-5",
+		BuildID:  previous.ID,
+		Status:   StatusCompleted,
+	}
+	task := &Task{
+		ID:          "source-frontend-task",
+		Type:        TaskGenerateUI,
+		Description: "Repair the frontend dashboard",
+		Status:      TaskCompleted,
+		AssignedTo:  agent.ID,
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{TaskShape: TaskShapeFrontendPatch},
+		},
+		ErrorHistory: []ErrorAttempt{
+			{
+				AttemptNumber: 1,
+				Error:         "verification failed: missing exported Dashboard symbol",
+				Timestamp:     completedAt.Add(-3 * time.Minute),
+				Context:       "build_verification",
+			},
+		},
+		RetryCount: 1,
+		MaxRetries: 2,
+		CreatedAt:  completedAt.Add(-5 * time.Minute),
+	}
+	previous.Agents[agent.ID] = agent
+	previous.Tasks = append(previous.Tasks, task)
+
+	persistManager.recordTaskExecutionOutcome(previous, agent, task, &TaskOutput{
+		Metrics: map[string]any{
+			"total_tokens":    120,
+			"model":           "gpt-5",
+			"billed_cost":     0.03,
+			"latency_seconds": 2.4,
+		},
+	}, false, true, false, "verification_failure")
+	persistManager.recordTaskExecutionOutcome(previous, agent, task, &TaskOutput{
+		Files: []GeneratedFile{
+			{Path: "src/App.tsx", Content: "export function Dashboard(){ return null }\n", Language: "typescript", Size: 41, IsNew: false},
+		},
+		Metrics: map[string]any{
+			"total_tokens":    80,
+			"model":           "gpt-5",
+			"repair_strategy": "targeted_symbol_repair",
+			"billed_cost":     0.02,
+			"latency_seconds": 1.8,
+		},
+		StructuredPatchBundle: &PatchBundle{
+			Operations: []PatchOperation{
+				{Type: PatchReplaceSymbol, Path: "src/App.tsx", Content: "function Dashboard(){ return null }\n"},
+			},
+		},
+	}, true, true, true, "")
+	persistManager.persistBuildSnapshot(previous, nil)
+
+	nextManager := NewAgentManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	}, db)
+	next, err := nextManager.CreateBuild(1, "pro", &BuildRequest{
+		Description: "Build a follow-up CRM dashboard",
+		ProjectName: "Runtime CRM",
+		TechStack:   techStack,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuild returned error: %v", err)
+	}
+
+	learning := next.SnapshotState.Orchestration.HistoricalLearning
+	if learning == nil {
+		t.Fatal("expected persisted outcome learning to be imported")
+	}
+	if !containsString(learning.RecurringFailureClasses, "verification_failure") {
+		t.Fatalf("expected persisted failure fingerprint class, got %+v", learning.RecurringFailureClasses)
+	}
+	if !containsString(learning.RepairStrategyWinRates, "targeted_symbol_repair/symbol_patch: 1/1 success") {
+		t.Fatalf("expected persisted repair strategy win rate, got %+v", learning.RepairStrategyWinRates)
+	}
+
+	var imported *ProviderScorecard
+	for i := range next.SnapshotState.Orchestration.ProviderScorecards {
+		scorecard := &next.SnapshotState.Orchestration.ProviderScorecards[i]
+		if scorecard.Provider == ai.ProviderGPT4 && scorecard.TaskShape == TaskShapeFrontendPatch {
+			imported = scorecard
+			break
+		}
+	}
+	if imported == nil {
+		t.Fatal("expected persisted GPT4 frontend scorecard to be imported")
+	}
+	if imported.SampleCount < 2 || imported.SuccessCount < 1 || imported.FirstPassSampleCount < 2 || imported.RepairSuccessCount < 1 {
+		t.Fatalf("expected persisted scorecard outcome counts, got %+v", imported)
+	}
+	if imported.TokenSampleCount == 0 || imported.CostSampleCount == 0 || imported.LatencySampleCount == 0 {
+		t.Fatalf("expected persisted scorecard metrics, got %+v", imported)
+	}
+}
+
 func TestAppendFailureFingerprintRefreshesReliabilitySummary(t *testing.T) {
 	build := &Build{
 		ID:          "refresh-learning-build",
