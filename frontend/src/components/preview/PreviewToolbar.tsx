@@ -24,10 +24,11 @@ import {
   WifiOff,
 } from 'lucide-react'
 import type { ActiveTab, PreviewStatus, ServerDetection, ServerStatus, ViewportSize } from './types'
+import { previewRuntimeStateLabels, type PreviewRuntimeState } from './previewState'
 
 interface PreviewToolbarProps {
   loading: boolean
-  connected: boolean
+  runtimeState: PreviewRuntimeState
   status: PreviewStatus | null
   error: string | null
   iframeError: string | null
@@ -76,9 +77,18 @@ const viewportLabels: Record<ViewportSize, string> = {
   full: 'Full Width',
 }
 
+const runtimeStateClasses: Record<PreviewRuntimeState, string> = {
+  starting: 'bg-yellow-500/20 text-yellow-400',
+  running: 'bg-green-500/20 text-green-400',
+  degraded: 'bg-amber-500/20 text-amber-300',
+  backend_down: 'bg-orange-500/20 text-orange-400',
+  failed: 'bg-red-500/20 text-red-400',
+  stopped: 'bg-gray-700 text-gray-400',
+}
+
 export default function PreviewToolbar({
   loading,
-  connected,
+  runtimeState,
   status,
   error,
   iframeError,
@@ -120,24 +130,15 @@ export default function PreviewToolbar({
   onShowDevToolsChange,
 }: PreviewToolbarProps) {
   const [showSettings, setShowSettings] = useState(false)
+  const runtimeLabel = previewRuntimeStateLabels[runtimeState]
 
   return (
     <div className="flex items-center justify-between px-3 py-2 bg-gray-800/50 border-b border-gray-700">
       <div className="flex items-center gap-2">
         <div
-          className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs ${
-            loading
-              ? 'bg-yellow-500/20 text-yellow-400'
-              : connected && status?.active && (!serverDetection?.has_backend || serverStatus?.running)
-                ? 'bg-green-500/20 text-green-400'
-                : connected && status?.active && serverDetection?.has_backend && !serverStatus?.running
-                  ? 'bg-orange-500/20 text-orange-400'
-                  : error || iframeError
-                    ? 'bg-red-500/20 text-red-400'
-                    : 'bg-gray-700 text-gray-400'
-          }`}
+          className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs ${runtimeStateClasses[runtimeState]}`}
           title={
-            loading
+            runtimeState === 'starting'
               ? 'Starting preview...'
               : error
                 ? `Error: ${error}`
@@ -148,30 +149,30 @@ export default function PreviewToolbar({
                     : undefined
           }
         >
-          {loading ? (
+          {runtimeState === 'starting' ? (
             <>
               <Loader2 className="w-3 h-3 animate-spin" />
-              <span>Starting</span>
+              <span>{runtimeLabel}</span>
             </>
-          ) : connected && status?.active && (!serverDetection?.has_backend || serverStatus?.running) ? (
+          ) : runtimeState === 'running' ? (
             <>
               <Wifi className="w-3 h-3" />
-              <span>Running</span>
+              <span>{runtimeLabel}</span>
             </>
-          ) : connected && status?.active && serverDetection?.has_backend && !serverStatus?.running ? (
+          ) : runtimeState === 'degraded' || runtimeState === 'backend_down' ? (
             <>
               <AlertCircle className="w-3 h-3" />
-              <span>Backend Down</span>
+              <span>{runtimeLabel}</span>
             </>
-          ) : error || iframeError ? (
+          ) : runtimeState === 'failed' ? (
             <>
               <ShieldOff className="w-3 h-3" />
-              <span>Failed</span>
+              <span>{runtimeLabel}</span>
             </>
           ) : (
             <>
               <WifiOff className="w-3 h-3" />
-              <span>Not Running</span>
+              <span>{runtimeLabel}</span>
             </>
           )}
         </div>

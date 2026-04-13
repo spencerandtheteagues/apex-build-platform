@@ -1,7 +1,9 @@
 import type { PreviewStatus, ServerDetection, ServerStatus } from './types'
+import { previewRuntimeStateLabels, type PreviewRuntimeState } from './previewState'
 
 interface PreviewStatusCardsProps {
   status: PreviewStatus | null
+  runtimeState: PreviewRuntimeState
   activeSandbox: boolean
   sandboxRequired: boolean
   sandboxDegraded: boolean
@@ -17,6 +19,7 @@ interface PreviewStatusCardsProps {
 
 export default function PreviewStatusCards({
   status,
+  runtimeState,
   activeSandbox,
   sandboxRequired,
   sandboxDegraded,
@@ -29,11 +32,18 @@ export default function PreviewStatusCards({
   showDevTools,
   customPath,
 }: PreviewStatusCardsProps) {
+  const runtimeLabel = previewRuntimeStateLabels[runtimeState]
+  const runtimeSummary = status?.active
+    ? runtimeState === 'running'
+      ? `Running on :${status.port}`
+      : `${runtimeLabel} · :${status.port}`
+    : runtimeLabel
+
   return (
     <div className="grid grid-cols-1 gap-2 border-b border-gray-800 bg-gray-950/70 px-3 py-3 md:grid-cols-2 xl:grid-cols-4">
       <div className="rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-3">
         <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Preview Runtime</div>
-        <div className="mt-2 text-sm font-semibold text-white">{status?.active ? `Port ${status.port}` : 'Stopped'}</div>
+        <div className="mt-2 text-sm font-semibold text-white">{runtimeSummary}</div>
         <div className="mt-1 text-xs text-gray-400">
           {activeSandbox ? 'Docker sandbox' : sandboxRequired && sandboxDegraded ? 'Process fallback mode' : 'Process mode'}
         </div>

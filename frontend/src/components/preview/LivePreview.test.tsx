@@ -195,10 +195,10 @@ describe('LivePreview', () => {
     })
 
     // After a transient poll failure, the iframe should still be present
-    // and the status should show "Not Running" (since connected becomes false)
+    // and the status should show a degraded runtime instead of a hard stop.
     await waitFor(() => {
       expect(within(view.container).getAllByTitle('Live Preview').length).toBeGreaterThan(0)
-      expect(within(view.container).getByText('Not Running')).toBeTruthy()
+      expect(within(view.container).getByText('Degraded')).toBeTruthy()
     })
 
     setIntervalSpy.mockRestore()

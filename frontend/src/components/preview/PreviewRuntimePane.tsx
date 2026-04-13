@@ -1,9 +1,11 @@
 import type { CSSProperties, Ref } from 'react'
 import { AlertCircle, Loader2, Monitor, Play } from 'lucide-react'
 import type { PreviewStatus } from './types'
+import { previewRuntimeStateLabels, type PreviewRuntimeState } from './previewState'
 
 interface PreviewRuntimePaneProps {
   status: PreviewStatus | null
+  runtimeState: PreviewRuntimeState
   previewSrc: string
   viewportStyle: CSSProperties
   refreshKey: number
@@ -20,6 +22,7 @@ interface PreviewRuntimePaneProps {
 
 export default function PreviewRuntimePane({
   status,
+  runtimeState,
   previewSrc,
   viewportStyle,
   refreshKey,
@@ -33,6 +36,8 @@ export default function PreviewRuntimePane({
   onIframeLoad,
   onIframeError,
 }: PreviewRuntimePaneProps) {
+  const runtimeLabel = previewRuntimeStateLabels[runtimeState]
+
   return (
     <div className="relative h-full flex items-center justify-center bg-gray-950 overflow-auto p-4">
       {error && (
@@ -97,7 +102,7 @@ export default function PreviewRuntimePane({
       {status?.active && !previewSrc && !error && (
         <div className="flex flex-col items-center justify-center text-gray-400">
           <Loader2 className="w-8 h-8 animate-spin mb-3" />
-          <p className="text-sm">Starting preview server...</p>
+          <p className="text-sm">{runtimeLabel} preview runtime...</p>
         </div>
       )}
 

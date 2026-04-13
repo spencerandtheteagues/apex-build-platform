@@ -5,6 +5,7 @@ import NetworkPanel from './NetworkPanel'
 import PreviewRuntimePane from './PreviewRuntimePane'
 import PreviewStatusCards from './PreviewStatusCards'
 import PreviewToolbar from './PreviewToolbar'
+import { derivePreviewRuntimeState } from './previewState'
 import type { ActiveTab, ViewportSize } from './types'
 import { usePreviewDevtools } from '@/hooks/usePreviewDevtools'
 import { usePreviewRuntime } from '@/hooks/usePreviewRuntime'
@@ -127,6 +128,32 @@ export default function LivePreview({
     }
   }, [previewSrc])
 
+  const runtimeState = useMemo(
+    () =>
+      derivePreviewRuntimeState({
+        loading: runtime.loading,
+        status: runtime.status,
+        connected: runtime.connected,
+        error,
+        iframeError: runtime.iframeError,
+        sandboxDegraded: runtime.sandboxDegraded,
+        serverDetection,
+        serverStatus,
+        backendPreviewAvailable: runtime.backendPreviewAvailable,
+      }),
+    [
+      error,
+      runtime.backendPreviewAvailable,
+      runtime.connected,
+      runtime.iframeError,
+      runtime.loading,
+      runtime.sandboxDegraded,
+      runtime.status,
+      serverDetection,
+      serverStatus,
+    ],
+  )
+
   useEffect(() => {
     if (runtimeStatusActive && previewSrc) {
       setRuntimeIframeLoading(true)
@@ -188,7 +215,7 @@ export default function LivePreview({
 
       <PreviewToolbar
         loading={runtime.loading}
-        connected={runtime.connected}
+        runtimeState={runtimeState}
         status={runtime.status}
         error={error}
         iframeError={runtime.iframeError}
@@ -266,6 +293,7 @@ export default function LivePreview({
       {activeTab === 'preview' && (
         <PreviewStatusCards
           status={runtime.status}
+          runtimeState={runtimeState}
           activeSandbox={runtime.activeSandbox}
           sandboxRequired={runtime.sandboxRequired}
           sandboxDegraded={runtime.sandboxDegraded}
@@ -284,6 +312,7 @@ export default function LivePreview({
         {activeTab === 'preview' && (
           <PreviewRuntimePane
             status={runtime.status}
+            runtimeState={runtimeState}
             previewSrc={previewSrc}
             viewportStyle={viewportStyle}
             refreshKey={runtime.refreshKey}
