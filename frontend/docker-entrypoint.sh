@@ -59,6 +59,17 @@ sed -i "s/__PORT__/${PORT}/g" /etc/nginx/nginx.conf
 sed -i "s|__API_PROXY_PASS__|${API_PROXY_PASS}|g" /etc/nginx/nginx.conf
 sed -i "s|__WS_PROXY_PASS__|${WS_PROXY_PASS}|g" /etc/nginx/nginx.conf
 
+case "$(printf '%s' "${APEX_ENABLE_CROSS_ORIGIN_ISOLATION:-false}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on)
+        sed -i 's/# __APEX_CROSS_ORIGIN_ISOLATION_HEADERS__/add_header Cross-Origin-Opener-Policy "same-origin" always;/' /etc/nginx/nginx.conf
+        sed -i '/Cross-Origin-Opener-Policy/a\    add_header Cross-Origin-Embedder-Policy "require-corp" always;' /etc/nginx/nginx.conf
+        echo "🧪 Cross-origin isolation headers enabled"
+        ;;
+    *)
+        sed -i '/__APEX_CROSS_ORIGIN_ISOLATION_HEADERS__/d' /etc/nginx/nginx.conf
+        ;;
+esac
+
 # nginx warns if a "user" directive is present while the master process is not root.
 # Keep root-based behavior intact, but strip the directive for non-root containers.
 if [ "$(id -u)" != "0" ]; then

@@ -140,6 +140,8 @@ services:
         value: wss://api.apex-build.dev/ws
       - key: NODE_ENV
         value: production
+      - key: APEX_ENABLE_CROSS_ORIGIN_ISOLATION
+        value: "false"  # Keep disabled until every frontend asset/iframe path is COEP-compatible.
     autoDeploy: true
     headers:
       - path: /*
