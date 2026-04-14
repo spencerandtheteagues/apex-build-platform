@@ -139,12 +139,25 @@ describe('deriveBrowserLocalPreviewRoute', () => {
     ).toBe('browser_local_eligible')
   })
 
-  it('marks frontend-only projects as browser-local active only when the runtime is enabled', () => {
+  it('keeps frontend-only projects eligible when the runtime flag is enabled but no adapter is bundled', () => {
     const route = deriveBrowserLocalPreviewRoute({
       serverDetection: { has_backend: false },
       bundlerAvailable: true,
       capability: readyCapability,
       browserLocalRuntimeEnabled: true,
+    })
+
+    expect(route.state).toBe('browser_local_eligible')
+    expect(route.reason).toContain('no browser-local runtime adapter is bundled')
+  })
+
+  it('marks frontend-only projects as browser-local active only when the runtime is enabled and available', () => {
+    const route = deriveBrowserLocalPreviewRoute({
+      serverDetection: { has_backend: false },
+      bundlerAvailable: true,
+      capability: readyCapability,
+      browserLocalRuntimeEnabled: true,
+      browserLocalRuntimeAvailable: true,
     })
 
     expect(route.state).toBe('browser_local_active')

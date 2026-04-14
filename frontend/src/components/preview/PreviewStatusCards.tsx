@@ -19,6 +19,7 @@ interface PreviewStatusCardsProps {
   bundlerAvailable: boolean
   browserLocalPreviewCapability: BrowserLocalPreviewCapability
   browserLocalPreviewRuntimeEnabled?: boolean
+  browserLocalPreviewRuntimeAvailable?: boolean
   autoRefreshEnabled: boolean
   showDevTools: boolean
   customPath: string
@@ -37,6 +38,7 @@ export default function PreviewStatusCards({
   bundlerAvailable,
   browserLocalPreviewCapability,
   browserLocalPreviewRuntimeEnabled = false,
+  browserLocalPreviewRuntimeAvailable = false,
   autoRefreshEnabled,
   showDevTools,
   customPath,
@@ -55,6 +57,7 @@ export default function PreviewStatusCards({
     bundlerAvailable,
     capability: browserLocalPreviewCapability,
     browserLocalRuntimeEnabled: browserLocalPreviewRuntimeEnabled,
+    browserLocalRuntimeAvailable: browserLocalPreviewRuntimeAvailable,
   })
 
   return (

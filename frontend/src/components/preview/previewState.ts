@@ -39,6 +39,7 @@ export interface BrowserLocalPreviewRouteInput {
   bundlerAvailable: boolean
   capability: BrowserLocalPreviewCapability
   browserLocalRuntimeEnabled?: boolean
+  browserLocalRuntimeAvailable?: boolean
 }
 
 export interface BrowserLocalPreviewRoute {
@@ -141,6 +142,7 @@ export function deriveBrowserLocalPreviewRoute({
   bundlerAvailable,
   capability,
   browserLocalRuntimeEnabled = false,
+  browserLocalRuntimeAvailable = false,
 }: BrowserLocalPreviewRouteInput): BrowserLocalPreviewRoute {
   if (serverDetection == null) {
     return {
@@ -164,11 +166,13 @@ export function deriveBrowserLocalPreviewRoute({
     }
   }
   if (capability.state === 'ready') {
-    if (!browserLocalRuntimeEnabled) {
+    if (!browserLocalRuntimeEnabled || !browserLocalRuntimeAvailable) {
       return {
         state: 'browser_local_eligible',
         label: browserLocalPreviewRouteLabels.browser_local_eligible,
-        reason: 'Frontend-only project is eligible for browser-local preview evaluation, but the runtime adapter is not enabled.',
+        reason: !browserLocalRuntimeEnabled
+          ? 'Frontend-only project is eligible for browser-local preview evaluation, but the runtime adapter is not enabled.'
+          : 'Frontend-only project is eligible for browser-local preview evaluation, but no browser-local runtime adapter is bundled.',
       }
     }
     return {

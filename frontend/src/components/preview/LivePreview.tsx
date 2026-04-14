@@ -156,6 +156,8 @@ export default function LivePreview({
   const browserLocalPreviewCapability = useMemo(() => detectBrowserLocalPreviewCapability(), [])
   const browserLocalPreviewRuntimeEnabled = import.meta.env.VITE_ENABLE_BROWSER_LOCAL_PREVIEW === 'true'
     || import.meta.env.VITE_ENABLE_WEBCONTAINER_PREVIEW === 'true'
+  // No browser-local runtime adapter is bundled yet; env enablement is only an evaluation signal.
+  const browserLocalPreviewRuntimeAvailable = false
 
   useEffect(() => {
     if (runtimeStatusActive && previewSrc) {
@@ -307,6 +309,7 @@ export default function LivePreview({
           bundlerAvailable={runtime.bundlerAvailable}
           browserLocalPreviewCapability={browserLocalPreviewCapability}
           browserLocalPreviewRuntimeEnabled={browserLocalPreviewRuntimeEnabled}
+          browserLocalPreviewRuntimeAvailable={browserLocalPreviewRuntimeAvailable}
           autoRefreshEnabled={autoRefreshEnabled}
           showDevTools={showDevTools}
           customPath={customPath}
