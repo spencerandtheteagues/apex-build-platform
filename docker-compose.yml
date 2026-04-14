@@ -73,7 +73,13 @@ services:
     user: "0:0"
     restart: unless-stopped
     env_file:
-      - .env
+      # Local Docker should pick up developer provider keys from backend/.env
+      # without requiring shell exports. Explicit service env below still owns
+      # container-specific values such as DATABASE_URL and REDIS_URL.
+      - path: .env
+        required: false
+      - path: backend/.env
+        required: false
     ports:
       - "127.0.0.1:8080:8080"
     environment:
@@ -85,16 +91,12 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:-apex_local_pg_L9m3Q2v7X5k8N1r4}
       DB_NAME: ${POSTGRES_DB:-apex_build}
       DB_SSL_MODE: disable
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apex_local_pg_L9m3Q2v7X5k8N1r4}
 
       # Redis
       REDIS_URL: redis://redis:6379
 
       # AI API Keys
-      E2B_API_KEY: ${E2B_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      XAI_API_KEY: ${XAI_API_KEY:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       OLLAMA_MODEL_DEFAULT: ${OLLAMA_MODEL_DEFAULT:-}
       OLLAMA_MODEL_FAST: ${OLLAMA_MODEL_FAST:-}
@@ -122,6 +124,9 @@ services:
       SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY:-}
 
       # External services
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       VERCEL_TOKEN: ${VERCEL_TOKEN:-}
