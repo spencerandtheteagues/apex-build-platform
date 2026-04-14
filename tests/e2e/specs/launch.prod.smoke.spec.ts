@@ -96,12 +96,14 @@ test.describe('Launch readiness smoke', () => {
     })
     expect(registerResponse.ok()).toBeTruthy()
 
-    const loginResponse = await request.post(`${apiV1Base}/auth/login`, {
-      data: { email, password },
-    })
-    expect(loginResponse.ok()).toBeTruthy()
+    const registerCookie = registerResponse.headersArray()
+      .filter((header) => header.name.toLowerCase() === 'set-cookie')
+      .map((header) => header.value.split(';')[0])
+      .join('; ')
 
-    const response = await request.get(`${apiV1Base}/billing/plans`)
+    const response = await request.get(`${apiV1Base}/billing/plans`, {
+      headers: registerCookie ? { cookie: registerCookie } : undefined,
+    })
     expect(response.status()).toBe(200)
 
     const body = await response.json()
