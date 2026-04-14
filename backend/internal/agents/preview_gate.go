@@ -254,6 +254,10 @@ func (am *AgentManager) applyPreviewFenceStripRepair(
 	result *PreviewVerificationResult,
 	now time.Time,
 ) bool {
+	beforeFiles := am.collectGeneratedFiles(build)
+	if len(beforeFiles) == 0 && len(allFiles) > 0 {
+		beforeFiles = append([]GeneratedFile(nil), allFiles...)
+	}
 	frontendEntries := []string{
 		"index.html", "public/index.html",
 		"src/main.tsx", "src/main.ts", "src/main.jsx", "src/main.js",
@@ -286,6 +290,12 @@ func (am *AgentManager) applyPreviewFenceStripRepair(
 	if !repaired {
 		return false
 	}
+	am.recordPreviewDeterministicRepairPatchBundle(
+		build,
+		beforeFiles,
+		am.collectGeneratedFiles(build),
+		"Preview deterministic repair: stripped markdown fence artifacts from entry files",
+	)
 
 	build.mu.Lock()
 	build.PreviewVerificationAttempts++
@@ -334,6 +344,7 @@ func (am *AgentManager) applyPreviewRouterContextRepair(
 		return false
 	}
 
+	beforeFiles := am.collectGeneratedFiles(build)
 	entryCandidates := map[string]bool{
 		"src/main.tsx": true,
 		"src/main.ts":  true,
@@ -374,6 +385,12 @@ func (am *AgentManager) applyPreviewRouterContextRepair(
 	if !repaired {
 		return false
 	}
+	am.recordPreviewDeterministicRepairPatchBundle(
+		build,
+		beforeFiles,
+		am.collectGeneratedFiles(build),
+		"Preview deterministic repair: wrapped preview entry with BrowserRouter",
+	)
 
 	build.mu.Lock()
 	build.PreviewVerificationAttempts++
@@ -397,6 +414,32 @@ func (am *AgentManager) applyPreviewRouterContextRepair(
 	})
 	am.checkBuildCompletion(build)
 	return true
+}
+
+func (am *AgentManager) recordPreviewDeterministicRepairPatchBundle(build *Build, beforeFiles, afterFiles []GeneratedFile, justification string) {
+	if build == nil || !previewPatchBundleRecordingEnabled(build) {
+		return
+	}
+	bundle := buildPatchBundleFromFileDiff(build.ID, justification, beforeFiles, afterFiles)
+	if bundle == nil {
+		return
+	}
+	appendPatchBundle(build, *bundle)
+}
+
+func previewPatchBundleRecordingEnabled(build *Build) bool {
+	if build == nil {
+		return false
+	}
+	build.mu.RLock()
+	orchestration := build.SnapshotState.Orchestration
+	if orchestration != nil {
+		enabled := orchestration.Flags.EnablePatchBundles
+		build.mu.RUnlock()
+		return enabled
+	}
+	build.mu.RUnlock()
+	return defaultBuildOrchestrationFlags().EnablePatchBundles
 }
 
 func wrapPreviewEntryWithBrowserRouter(content string) (string, bool) {

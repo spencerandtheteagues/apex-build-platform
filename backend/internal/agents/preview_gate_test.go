@@ -32,7 +32,8 @@ func TestApplyPreviewFenceStripRepairResetsProgressAndAttempts(t *testing.T) {
 		UpdatedAt: now,
 		Tasks: []*Task{
 			{
-				ID: "gen-1",
+				ID:   "gen-1",
+				Type: TaskGenerateUI,
 				Output: &TaskOutput{
 					Files: []GeneratedFile{
 						{Path: "src/main.tsx", Content: "```tsx\ncreateRoot(document.getElementById('root')).render(<App />)\n"},
@@ -61,6 +62,17 @@ func TestApplyPreviewFenceStripRepairResetsProgressAndAttempts(t *testing.T) {
 	got := build.Tasks[0].Output.Files[0].Content
 	if got == "" || got == "```tsx\ncreateRoot(document.getElementById('root')).render(<App />)\n" {
 		t.Fatalf("expected markdown fences to be stripped, got %q", got)
+	}
+	state := build.SnapshotState.Orchestration
+	if state == nil || len(state.PatchBundles) == 0 {
+		t.Fatalf("expected preview repair patch bundle, got %+v", state)
+	}
+	bundle := state.PatchBundles[len(state.PatchBundles)-1]
+	if !strings.Contains(bundle.Justification, "stripped markdown fence") {
+		t.Fatalf("expected fence-strip patch justification, got %+v", bundle)
+	}
+	if len(bundle.Operations) != 1 || bundle.Operations[0].Path != "src/main.tsx" {
+		t.Fatalf("expected patch operation for repaired entry file, got %+v", bundle.Operations)
 	}
 }
 
@@ -154,7 +166,8 @@ func TestApplyPreviewRouterContextRepairWrapsEntryAndAddsDependency(t *testing.T
 		UpdatedAt: now,
 		Tasks: []*Task{
 			{
-				ID: "gen-entry",
+				ID:   "gen-entry",
+				Type: TaskGenerateUI,
 				Output: &TaskOutput{
 					Files: []GeneratedFile{
 						{
@@ -214,6 +227,27 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 	manifest := build.Tasks[0].Output.Files[1].Content
 	if !strings.Contains(manifest, `"react-router-dom"`) {
 		t.Fatalf("expected react-router-dom dependency to be added, got %q", manifest)
+	}
+	state := build.SnapshotState.Orchestration
+	if state == nil || len(state.PatchBundles) == 0 {
+		t.Fatalf("expected preview repair patch bundle, got %+v", state)
+	}
+	bundle := state.PatchBundles[len(state.PatchBundles)-1]
+	if !strings.Contains(bundle.Justification, "BrowserRouter") {
+		t.Fatalf("expected router-context patch justification, got %+v", bundle)
+	}
+	foundEntry := false
+	foundManifest := false
+	for _, op := range bundle.Operations {
+		if op.Path == "src/main.tsx" {
+			foundEntry = true
+		}
+		if op.Path == "package.json" {
+			foundManifest = true
+		}
+	}
+	if !foundEntry || !foundManifest {
+		t.Fatalf("expected patch operations for entry and package manifest, got %+v", bundle.Operations)
 	}
 }
 
