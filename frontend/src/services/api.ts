@@ -3668,6 +3668,19 @@ export interface BuildProviderScorecardState {
   failure_class_recurrence?: number
   promotion_rate?: number
   hosted_eligible?: boolean
+  sample_count?: number
+  success_count?: number
+  first_pass_sample_count?: number
+  first_pass_success_count?: number
+  repair_attempt_count?: number
+  repair_success_count?: number
+  truncation_event_count?: number
+  failure_event_count?: number
+  promotion_attempt_count?: number
+  promotion_success_count?: number
+  token_sample_count?: number
+  cost_sample_count?: number
+  latency_sample_count?: number
 }
 
 export interface BuildLearningSummaryState {

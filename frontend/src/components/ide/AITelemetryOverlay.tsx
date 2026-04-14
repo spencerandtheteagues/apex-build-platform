@@ -18,6 +18,10 @@ export interface GlassBoxProviderScorecard {
   repair_success_rate?: number
   average_latency_seconds?: number
   average_cost_per_success?: number
+  sample_count?: number
+  first_pass_sample_count?: number
+  repair_attempt_count?: number
+  promotion_attempt_count?: number
 }
 
 interface AITelemetryOverlayProps {
@@ -46,6 +50,14 @@ const humanize = (value?: string): string =>
     .trim()
     .replace(/\b\w/g, (part) => part.toUpperCase())
 
+const observedScorecardSamples = (scorecard: GlassBoxProviderScorecard): number =>
+  Math.max(
+    scorecard.sample_count || 0,
+    scorecard.first_pass_sample_count || 0,
+    scorecard.repair_attempt_count || 0,
+    scorecard.promotion_attempt_count || 0,
+  )
+
 export default function AITelemetryOverlay({
   buildStatus,
   currentPhase,
@@ -65,7 +77,8 @@ export default function AITelemetryOverlay({
     const failedVerification = verificationReports.filter(
       (report) => report.status === 'failed' || report.status === 'blocked'
     ).length
-    const compileRates = providerScorecards
+    const observedScorecards = providerScorecards.filter((scorecard) => observedScorecardSamples(scorecard) > 0)
+    const compileRates = observedScorecards
       .map((scorecard) => scorecard.compile_pass_rate)
       .filter((value): value is number => typeof value === 'number')
     const averageCompile = compileRates.length > 0
@@ -77,6 +90,7 @@ export default function AITelemetryOverlay({
       reviewRequired,
       failedVerification,
       averageCompile,
+      observedScorecards,
     }
   }, [patchBundles, providerPanels, providerScorecards, verificationReports])
 
@@ -117,7 +131,7 @@ export default function AITelemetryOverlay({
           <div className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Provider Compile Avg</div>
           <div className="mt-2 text-sm font-semibold text-white">{percent(summary.averageCompile)}</div>
           <div className="mt-1 text-xs text-gray-400">
-            {providerScorecards.length} scorecard{providerScorecards.length === 1 ? '' : 's'} tracked
+            {summary.observedScorecards.length} weighted scorecard{summary.observedScorecards.length === 1 ? '' : 's'}
           </div>
         </div>
       </div>

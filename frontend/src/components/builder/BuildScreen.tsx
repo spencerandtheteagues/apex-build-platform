@@ -105,6 +105,10 @@ interface BuildProviderScorecard {
   repair_success_rate?: number
   average_latency_seconds?: number
   average_cost_per_success?: number
+  sample_count?: number
+  first_pass_sample_count?: number
+  repair_attempt_count?: number
+  promotion_attempt_count?: number
 }
 
 interface BSBuildState {

@@ -193,6 +193,16 @@ describe('OrchestrationOverview', () => {
             average_latency_seconds: 4.2,
             average_cost_per_success: 1.8,
             hosted_eligible: true,
+            sample_count: 4,
+          },
+          {
+            provider: 'gemini',
+            task_shape: 'verification',
+            first_pass_verification_pass_rate: 93,
+            repair_success_rate: 79,
+            average_latency_seconds: 5.8,
+            average_cost_per_success: 0.06,
+            hosted_eligible: true,
           },
         ]}
         failureFingerprints={[
@@ -239,6 +249,8 @@ describe('OrchestrationOverview', () => {
     expect(screen.getByText('User acknowledgement requested')).toBeTruthy()
     expect(screen.getByText('Ack required')).toBeTruthy()
     expect(screen.getByText('Provider Scorecards')).toBeTruthy()
+    expect(screen.getByText('4 sample weight')).toBeTruthy()
+    expect(screen.getByText('Routing prior')).toBeTruthy()
     expect(screen.getByText('Repair Signals')).toBeTruthy()
     expect(screen.getByText('Learning Priors')).toBeTruthy()
     expect(screen.getByText('semantic_diff/import_export_mismatch strategy=targeted_symbol_repair win_rate=1/1')).toBeTruthy()

@@ -194,6 +194,14 @@ const humanize = (value: string | undefined) =>
     .replace(/_/g, ' ')
     .trim()
 
+const observedScorecardSamples = (scorecard: BuildProviderScorecardState): number =>
+  Math.max(
+    scorecard.sample_count || 0,
+    scorecard.first_pass_sample_count || 0,
+    scorecard.repair_attempt_count || 0,
+    scorecard.promotion_attempt_count || 0,
+  )
+
 const patchBundleNeedsReview = (bundle: BuildPatchBundleState): boolean => {
   return bundle.review_required === true || bundle.merge_policy === 'review_required'
 }
@@ -1316,9 +1324,14 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
                       <div className="text-sm font-semibold text-white">{scorecard.provider}</div>
                       <div className="mt-1 text-xs text-gray-400">{humanize(scorecard.task_shape)}</div>
                     </div>
-                    <Badge variant="outline" className={cn('text-[11px]', scorecard.hosted_eligible ? 'border-green-500/40 bg-green-500/10 text-green-300' : 'border-gray-700 bg-black/40 text-gray-300')}>
-                      {scorecard.hosted_eligible ? 'Hosted eligible' : 'BYOK only'}
-                    </Badge>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Badge variant="outline" className={cn('text-[11px]', observedScorecardSamples(scorecard) > 0 ? 'border-green-500/40 bg-green-500/10 text-green-300' : 'border-gray-700 bg-black/40 text-gray-300')}>
+                        {observedScorecardSamples(scorecard) > 0 ? `${observedScorecardSamples(scorecard)} sample weight` : 'Routing prior'}
+                      </Badge>
+                      <Badge variant="outline" className={cn('text-[11px]', scorecard.hosted_eligible ? 'border-green-500/40 bg-green-500/10 text-green-300' : 'border-gray-700 bg-black/40 text-gray-300')}>
+                        {scorecard.hosted_eligible ? 'Hosted eligible' : 'BYOK only'}
+                      </Badge>
+                    </div>
                   </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     <div className="rounded-lg border border-gray-800 bg-black/30 px-3 py-2">
