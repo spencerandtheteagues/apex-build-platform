@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { deriveBrowserLocalPreviewCapability, derivePreviewRuntimeState } from './previewState'
+import {
+  deriveBrowserLocalPreviewCapability,
+  deriveBrowserLocalPreviewRoute,
+  derivePreviewRuntimeState,
+} from './previewState'
 
 const activePreview = {
   project_id: 1,
@@ -98,5 +102,51 @@ describe('deriveBrowserLocalPreviewCapability', () => {
 
     expect(capability.state).toBe('unsupported')
     expect(capability.blockers).toContain('Secure context unavailable')
+  })
+})
+
+describe('deriveBrowserLocalPreviewRoute', () => {
+  const readyCapability = deriveBrowserLocalPreviewCapability({
+    secureContext: true,
+    crossOriginIsolated: true,
+    sharedArrayBufferAvailable: true,
+    webAssemblyAvailable: true,
+  })
+  const blockedCapability = deriveBrowserLocalPreviewCapability({
+    secureContext: true,
+    crossOriginIsolated: false,
+    sharedArrayBufferAvailable: false,
+    webAssemblyAvailable: true,
+  })
+
+  it('keeps backend projects on the platform runtime', () => {
+    expect(
+      deriveBrowserLocalPreviewRoute({
+        serverDetection: { has_backend: true, framework: 'express' },
+        bundlerAvailable: true,
+        capability: readyCapability,
+      }).state,
+    ).toBe('platform_runtime')
+  })
+
+  it('marks frontend-only projects as browser-local candidates when prerequisites are ready', () => {
+    expect(
+      deriveBrowserLocalPreviewRoute({
+        serverDetection: { has_backend: false },
+        bundlerAvailable: true,
+        capability: readyCapability,
+      }).state,
+    ).toBe('browser_local_candidate')
+  })
+
+  it('blocks frontend-only browser-local routing when isolation is missing', () => {
+    const route = deriveBrowserLocalPreviewRoute({
+      serverDetection: { has_backend: false },
+      bundlerAvailable: true,
+      capability: blockedCapability,
+    })
+
+    expect(route.state).toBe('browser_local_blocked')
+    expect(route.reason).toContain('cross-origin isolation')
   })
 })

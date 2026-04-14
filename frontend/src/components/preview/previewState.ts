@@ -2,6 +2,7 @@ import type { PreviewStatus, ServerDetection, ServerStatus } from './types'
 
 export type PreviewRuntimeState = 'starting' | 'running' | 'degraded' | 'backend_down' | 'failed' | 'stopped'
 export type BrowserLocalPreviewCapabilityState = 'ready' | 'needs_isolation' | 'unsupported'
+export type BrowserLocalPreviewRouteState = 'platform_runtime' | 'browser_local_candidate' | 'browser_local_blocked'
 
 export interface PreviewRuntimeStateInput {
   loading: boolean
@@ -29,6 +30,18 @@ export interface BrowserLocalPreviewCapability {
   blockers: string[]
 }
 
+export interface BrowserLocalPreviewRouteInput {
+  serverDetection: ServerDetection | null
+  bundlerAvailable: boolean
+  capability: BrowserLocalPreviewCapability
+}
+
+export interface BrowserLocalPreviewRoute {
+  state: BrowserLocalPreviewRouteState
+  label: string
+  reason: string
+}
+
 export const previewRuntimeStateLabels: Record<PreviewRuntimeState, string> = {
   starting: 'Starting',
   running: 'Running',
@@ -42,6 +55,12 @@ export const browserLocalPreviewCapabilityLabels: Record<BrowserLocalPreviewCapa
   ready: 'Ready',
   needs_isolation: 'Needs Isolation',
   unsupported: 'Unsupported',
+}
+
+export const browserLocalPreviewRouteLabels: Record<BrowserLocalPreviewRouteState, string> = {
+  platform_runtime: 'Platform Runtime',
+  browser_local_candidate: 'Browser-Local Candidate',
+  browser_local_blocked: 'Browser-Local Blocked',
 }
 
 export function derivePreviewRuntimeState({
@@ -109,4 +128,44 @@ export function detectBrowserLocalPreviewCapability(): BrowserLocalPreviewCapabi
     sharedArrayBufferAvailable: typeof runtime.SharedArrayBuffer === 'function',
     webAssemblyAvailable: typeof runtime.WebAssembly === 'object',
   })
+}
+
+export function deriveBrowserLocalPreviewRoute({
+  serverDetection,
+  bundlerAvailable,
+  capability,
+}: BrowserLocalPreviewRouteInput): BrowserLocalPreviewRoute {
+  if (serverDetection == null) {
+    return {
+      state: 'platform_runtime',
+      label: browserLocalPreviewRouteLabels.platform_runtime,
+      reason: 'Waiting for project runtime detection.',
+    }
+  }
+  if (serverDetection.has_backend) {
+    return {
+      state: 'platform_runtime',
+      label: browserLocalPreviewRouteLabels.platform_runtime,
+      reason: 'Backend runtime detected; keep API and database execution on the platform preview path.',
+    }
+  }
+  if (!bundlerAvailable) {
+    return {
+      state: 'platform_runtime',
+      label: browserLocalPreviewRouteLabels.platform_runtime,
+      reason: 'Project bundler support is unavailable, so keep using platform preview startup.',
+    }
+  }
+  if (capability.state === 'ready') {
+    return {
+      state: 'browser_local_candidate',
+      label: browserLocalPreviewRouteLabels.browser_local_candidate,
+      reason: 'Frontend-only project with browser-local prerequisites available.',
+    }
+  }
+  return {
+    state: 'browser_local_blocked',
+    label: browserLocalPreviewRouteLabels.browser_local_blocked,
+    reason: capability.reason,
+  }
 }

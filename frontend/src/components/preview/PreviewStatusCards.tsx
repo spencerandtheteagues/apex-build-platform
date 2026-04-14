@@ -1,5 +1,10 @@
 import type { PreviewStatus, ServerDetection, ServerStatus } from './types'
-import { previewRuntimeStateLabels, type BrowserLocalPreviewCapability, type PreviewRuntimeState } from './previewState'
+import {
+  deriveBrowserLocalPreviewRoute,
+  previewRuntimeStateLabels,
+  type BrowserLocalPreviewCapability,
+  type PreviewRuntimeState,
+} from './previewState'
 
 interface PreviewStatusCardsProps {
   status: PreviewStatus | null
@@ -43,6 +48,11 @@ export default function PreviewStatusCards({
   const browserLocalDetail = browserLocalPreviewCapability.blockers.length > 0
     ? browserLocalPreviewCapability.blockers.slice(0, 2).join(' · ')
     : browserLocalPreviewCapability.reason
+  const browserLocalRoute = deriveBrowserLocalPreviewRoute({
+    serverDetection,
+    bundlerAvailable,
+    capability: browserLocalPreviewCapability,
+  })
 
   return (
     <div className="grid grid-cols-1 gap-2 border-b border-gray-800 bg-gray-950/70 px-3 py-3 md:grid-cols-2 xl:grid-cols-4">
@@ -76,6 +86,9 @@ export default function PreviewStatusCards({
         </div>
         <div className="mt-1 truncate text-xs text-gray-500" title={browserLocalDetail}>
           Browser-local {browserLocalPreviewCapability.label.toLowerCase()}: {browserLocalDetail}
+        </div>
+        <div className="mt-1 truncate text-xs text-gray-500" title={browserLocalRoute.reason}>
+          Candidate route: {browserLocalRoute.label}
         </div>
       </div>
       <div className="rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-3">
