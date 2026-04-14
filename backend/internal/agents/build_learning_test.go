@@ -180,6 +180,50 @@ func TestCreateBuildLoadsHistoricalLearningFromCompletedBuilds(t *testing.T) {
 	}
 }
 
+func TestSummarizeHistoricalBuildLearningCountsFailedRepairStrategyAttempts(t *testing.T) {
+	stateJSON := mustMarshalBuildState(t, BuildSnapshotState{
+		Orchestration: &BuildOrchestrationState{
+			FailureFingerprints: []FailureFingerprint{
+				{
+					ID:               "failed-attempt",
+					BuildID:          "prior-repair",
+					TaskShape:        TaskShapeRepair,
+					FailureClass:     "compile_failure",
+					FilesInvolved:    []string{"src/App.tsx"},
+					RepairPathChosen: []string{"compile_validator", "hydra_repair", "targeted_node_rewrite"},
+					RepairStrategy:   "targeted_node_rewrite",
+					PatchClass:       "symbol_patch",
+					RepairSucceeded:  false,
+					CreatedAt:        time.Now().UTC(),
+				},
+				{
+					ID:               "successful-attempt",
+					BuildID:          "prior-repair",
+					TaskShape:        TaskShapeRepair,
+					FailureClass:     "compile_failure",
+					FilesInvolved:    []string{"src/App.tsx"},
+					RepairPathChosen: []string{"compile_validator", "hydra_repair", "targeted_node_rewrite"},
+					RepairStrategy:   "targeted_node_rewrite",
+					PatchClass:       "symbol_patch",
+					RepairSucceeded:  true,
+					CreatedAt:        time.Now().UTC(),
+				},
+			},
+		},
+	})
+
+	learning := summarizeHistoricalBuildLearning("same_project", []models.CompletedBuild{{
+		BuildID:   "prior-repair",
+		StateJSON: stateJSON,
+	}})
+	if learning == nil {
+		t.Fatal("expected learning summary")
+	}
+	if !containsString(learning.RepairStrategyWinRates, "targeted_node_rewrite/symbol_patch: 1/2 success") {
+		t.Fatalf("expected failed hydra attempt in strategy denominator, got %+v", learning.RepairStrategyWinRates)
+	}
+}
+
 func TestCreateBuildLoadsHistoricalLearningFromPersistedRealOutcomes(t *testing.T) {
 	db := openBuildTestDB(t)
 	persistManager := newTestIterationManager(&stubPreflight{

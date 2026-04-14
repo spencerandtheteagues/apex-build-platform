@@ -476,6 +476,47 @@ func cvHydraStrategies(mode PowerMode) []cvRepairStrategy {
 	}
 }
 
+func cvRecordHydraRepairAttemptFingerprint(
+	build *Build,
+	provider ai.AIProvider,
+	strategy cvRepairStrategy,
+	errors []ParsedBuildError,
+	output *TaskOutput,
+	bundle *PatchBundle,
+	succeeded bool,
+) {
+	if build == nil || strings.TrimSpace(strategy.Name) == "" {
+		return
+	}
+
+	files := parsedBuildErrorFiles(errors)
+	patchClass := semanticRepairPatchClassForErrors(errors)
+	if bundle == nil {
+		bundle = outputStructuredPatchBundle(output)
+	}
+	if bundle != nil {
+		if bundleFiles := repairMemoryFilesFromPatchBundle(bundle); len(bundleFiles) > 0 {
+			files = bundleFiles
+		}
+		if bundlePatchClass := repairPatchClassFromBundle(bundle); bundlePatchClass != "" {
+			patchClass = bundlePatchClass
+		}
+	} else if len(files) == 0 && output != nil && len(output.Files) > 0 {
+		files = fingerprintFiles(output.Files)
+	}
+
+	appendRepairMemoryFingerprint(build, repairMemoryObservation{
+		TaskShape:        TaskShapeRepair,
+		Provider:         provider,
+		FailureClass:     "compile_failure",
+		FilesInvolved:    files,
+		RepairPathChosen: []string{"compile_validator", "hydra_repair", strategy.Name},
+		RepairStrategy:   strategy.Name,
+		PatchClass:       patchClass,
+		RepairSucceeded:  succeeded,
+	})
+}
+
 func (am *AgentManager) cvRunHydraRepair(
 	ctx context.Context,
 	build *Build,
@@ -522,6 +563,7 @@ func (am *AgentManager) cvRunHydraRepair(
 				if hydraCtx.Err() != nil {
 					return
 				}
+				cvRecordHydraRepairAttemptFingerprint(build, provider, strategy, errors, nil, nil, false)
 				am.broadcast(build.ID, &WSMessage{
 					Type:      WSGlassHydraCandidateFailed,
 					BuildID:   build.ID,
@@ -541,6 +583,7 @@ func (am *AgentManager) cvRunHydraRepair(
 				if hydraCtx.Err() != nil {
 					return
 				}
+				cvRecordHydraRepairAttemptFingerprint(build, provider, strategy, errors, output, nil, false)
 				am.broadcast(build.ID, &WSMessage{
 					Type:      WSGlassHydraCandidateFailed,
 					BuildID:   build.ID,
@@ -559,6 +602,7 @@ func (am *AgentManager) cvRunHydraRepair(
 				if hydraCtx.Err() != nil {
 					return
 				}
+				cvRecordHydraRepairAttemptFingerprint(build, provider, strategy, errors, output, nil, false)
 				am.broadcast(build.ID, &WSMessage{
 					Type:      WSGlassHydraCandidateFailed,
 					BuildID:   build.ID,
@@ -608,16 +652,7 @@ func (am *AgentManager) cvRunHydraRepair(
 			*allFiles = am.collectGeneratedFiles(build)
 			if bundle := cvHydraWinnerPatchBundle(build, candidate, baselineFiles); bundle != nil && cvPatchBundleRecordingEnabled(build) {
 				appendPatchBundle(build, *bundle)
-				appendRepairMemoryFingerprint(build, repairMemoryObservation{
-					TaskShape:        TaskShapeRepair,
-					Provider:         candidate.Provider,
-					FailureClass:     "compile_failure",
-					FilesInvolved:    repairMemoryFilesFromPatchBundle(bundle),
-					RepairPathChosen: []string{"compile_validator", "hydra_repair", candidate.Strategy.Name},
-					RepairStrategy:   candidate.Strategy.Name,
-					PatchClass:       repairPatchClassFromBundle(bundle),
-					RepairSucceeded:  true,
-				})
+				cvRecordHydraRepairAttemptFingerprint(build, candidate.Provider, candidate.Strategy, errors, candidate.Output, bundle, true)
 				am.broadcast(build.ID, &WSMessage{
 					Type:      WSGlassHydraWinnerSelected,
 					BuildID:   build.ID,

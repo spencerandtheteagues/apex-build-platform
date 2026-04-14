@@ -393,6 +393,51 @@ func TestCVHydraWinnerPatchBundleAnnotatesMetadataAndMetrics(t *testing.T) {
 	}
 }
 
+func TestCVRecordHydraRepairAttemptFingerprintCapturesFailedStrategy(t *testing.T) {
+	t.Parallel()
+
+	build := &Build{
+		ID: "hydra-failed-attempt-fingerprint",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+	}
+
+	cvRecordHydraRepairAttemptFingerprint(
+		build,
+		ai.ProviderGPT4,
+		cvRepairStrategy{Name: "targeted_node_rewrite"},
+		[]ParsedBuildError{{
+			File:    "src/App.tsx",
+			Code:    "TS2339",
+			Message: "Property 'total' does not exist on type 'InvoiceSummary'.",
+		}},
+		&TaskOutput{Files: []GeneratedFile{{Path: "src/App.tsx", Content: "export default function App(){return null}"}}},
+		nil,
+		false,
+	)
+
+	state := build.SnapshotState.Orchestration
+	if state == nil || len(state.FailureFingerprints) != 1 {
+		t.Fatalf("expected failed hydra attempt fingerprint, got %+v", state)
+	}
+	fp := state.FailureFingerprints[0]
+	if fp.RepairSucceeded {
+		t.Fatalf("expected failed repair attempt, got %+v", fp)
+	}
+	if fp.RepairStrategy != "targeted_node_rewrite" {
+		t.Fatalf("expected hydra strategy metadata, got %+v", fp)
+	}
+	if fp.PatchClass != "symbol_patch" {
+		t.Fatalf("expected semantic patch class from compile error, got %+v", fp)
+	}
+	if !containsString(fp.RepairPathChosen, "hydra_repair") || !containsString(fp.RepairPathChosen, "targeted_node_rewrite") {
+		t.Fatalf("expected hydra repair path, got %+v", fp.RepairPathChosen)
+	}
+}
+
 func TestCVHydraWinnerPatchBundleAddsReviewCommitFlowForRiskyPatch(t *testing.T) {
 	t.Parallel()
 
