@@ -121,7 +121,51 @@ describe('BuildScreen header prompt actions', () => {
     expect(screen.getByText(/merge policy: review required/i)).toBeTruthy()
     expect(screen.getByText(/review branch: ai-repair\/20260412-compile-validator-bundle-1/i)).toBeTruthy()
     expect(screen.getByText(/suggested commit: AI repair:/i)).toBeTruthy()
+    expect(screen.getByText(/no proposed-edit diff is attached yet/i)).toBeTruthy()
     expect(screen.getByText(/dependency changes require review/i)).toBeTruthy()
+  })
+
+  it('opens proposed edit review from review-required repair bundles', async () => {
+    const baseline = baseProps()
+    const props = {
+      ...baseline,
+      buildState: {
+        ...baseline.buildState,
+        status: 'awaiting_review' as const,
+        patchBundles: [
+          {
+            id: 'patch-1',
+            justification: 'Compile validator Hydra winner (strict_ast_syntax_repair)',
+            provider: 'gpt4',
+            merge_policy: 'review_required' as const,
+            review_required: true,
+            review_branch: 'ai-repair/20260412-compile-validator-bundle-1',
+            suggested_commit_title: 'AI repair: Compile validator Hydra winner (strict_ast_syntax_repair)',
+            risk_reasons: ['dependency_changes_require_review'],
+          },
+        ],
+      },
+      proposedEdits: [
+        {
+          id: 'edit-1',
+          build_id: 'build-1',
+          agent_id: 'agent-1',
+          agent_role: 'frontend',
+          file_path: 'src/App.tsx',
+          original_content: 'export default function App() { return null }',
+          proposed_content: 'export default function App() { return <main /> }',
+          language: 'tsx',
+          status: 'pending' as const,
+        },
+      ],
+    }
+
+    render(<BuildScreen {...props} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Issues(?:\s*\d+)?$/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /open diff review/i }))
+
+    expect(props.onSetShowDiffReview).toHaveBeenCalledWith(true)
   })
 
   it('keeps platform and failed-build notices visible after switching overlays', async () => {

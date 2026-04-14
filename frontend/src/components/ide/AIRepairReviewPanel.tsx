@@ -14,6 +14,8 @@ export interface AIRepairReviewBundle {
 
 interface AIRepairReviewPanelProps {
   bundles: AIRepairReviewBundle[]
+  proposedEditsCount?: number
+  onOpenProposedEdits?: () => void
   maxVisible?: number
 }
 
@@ -25,6 +27,8 @@ const humanize = (value?: string): string =>
 
 export default function AIRepairReviewPanel({
   bundles,
+  proposedEditsCount = 0,
+  onOpenProposedEdits,
   maxVisible = 3,
 }: AIRepairReviewPanelProps) {
   const reviewBundles = bundles.filter((bundle) => bundle.review_required || bundle.merge_policy === 'review_required')
@@ -34,6 +38,12 @@ export default function AIRepairReviewPanel({
 
   const visibleBundles = reviewBundles.slice(0, maxVisible)
   const hiddenCount = Math.max(reviewBundles.length - visibleBundles.length, 0)
+  const hasProposedEdits = proposedEditsCount > 0 && Boolean(onOpenProposedEdits)
+  const proposedEditsMessage = hasProposedEdits
+    ? `${proposedEditsCount} proposed edit${proposedEditsCount === 1 ? '' : 's'} available for approve/reject review.`
+    : proposedEditsCount > 0
+      ? `${proposedEditsCount} proposed edit${proposedEditsCount === 1 ? '' : 's'} recorded; code review opens when the build reaches review state.`
+      : 'Patch metadata is recorded; no proposed-edit diff is attached yet.'
 
   return (
     <div>
@@ -61,10 +71,23 @@ export default function AIRepairReviewPanel({
                     suggested commit: {bundle.suggested_commit_title}
                   </div>
                 )}
+                <div className="mt-2 text-[11px] text-gray-500">
+                  {proposedEditsMessage}
+                </div>
               </div>
-              <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border border-violet-500/40 text-violet-300 bg-violet-500/10 shrink-0">
-                Review
-              </span>
+              {hasProposedEdits ? (
+                <button
+                  type="button"
+                  onClick={onOpenProposedEdits}
+                  className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded border border-violet-500/40 text-violet-200 bg-violet-500/10 hover:bg-violet-500/20 shrink-0"
+                >
+                  Open Diff Review
+                </button>
+              ) : (
+                <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border border-violet-500/40 text-violet-300 bg-violet-500/10 shrink-0">
+                  Review
+                </span>
+              )}
             </div>
             {Array.isArray(bundle.risk_reasons) && bundle.risk_reasons.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-1.5">

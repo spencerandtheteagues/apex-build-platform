@@ -689,6 +689,11 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
     () => (buildState.patchBundles || []).filter((bundle) => bundle.review_required || bundle.merge_policy === 'review_required'),
     [buildState.patchBundles]
   )
+  const pendingProposedEditCount = React.useMemo(
+    () => proposedEdits.filter((edit) => edit?.status === 'pending').length,
+    [proposedEdits]
+  )
+  const canOpenProposedEditReview = buildState.status === 'awaiting_review' && pendingProposedEditCount > 0
 
   // Group files by root folder
   const fileGroups = React.useMemo(() => {
@@ -965,7 +970,11 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
             )}
 
             {/* Repair patch review */}
-            <AIRepairReviewPanel bundles={reviewRequiredPatchBundles} />
+            <AIRepairReviewPanel
+              bundles={reviewRequiredPatchBundles}
+              proposedEditsCount={pendingProposedEditCount}
+              onOpenProposedEdits={canOpenProposedEditReview ? () => onSetShowDiffReview(true) : undefined}
+            />
 
             {/* Blockers */}
             {visibleBlockers.length > 0 && (
