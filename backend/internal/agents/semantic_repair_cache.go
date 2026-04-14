@@ -43,14 +43,26 @@ func semanticRepairPatchClassForErrors(errors []ParsedBuildError) string {
 		code := strings.ToUpper(strings.TrimSpace(parsed.Code))
 		message := strings.ToLower(strings.TrimSpace(parsed.Message))
 		switch {
-		case code == "TS2305" || strings.Contains(message, "has no exported member"):
+		case code == "TS2305" || code == "TS2306" || code == "TS1192" || code == "TS2613" || code == "TS2614" ||
+			strings.Contains(message, "has no exported member") ||
+			strings.Contains(message, "has no default export") ||
+			strings.Contains(message, "is not a module"):
 			return "import_export_mismatch"
 		case code == "TS2307" || strings.Contains(message, "cannot find module"):
 			if missing := semanticRepairMissingModuleName(parsed.Message); strings.HasPrefix(missing, ".") || strings.HasPrefix(missing, "/") {
 				return "missing_file"
 			}
 			return "dependency_manifest"
-		case code == "TS2322" || strings.Contains(message, "is not assignable to type") || strings.Contains(message, "property ") && strings.Contains(message, " does not exist on type"):
+		case code == "TS7016" || strings.Contains(message, "could not find a declaration file for module"):
+			if missing := semanticRepairMissingModuleName(parsed.Message); strings.HasPrefix(missing, ".") || strings.HasPrefix(missing, "/") {
+				return "missing_file"
+			}
+			return "dependency_manifest"
+		case code == "TS2322" || code == "TS2339" || code == "TS2345" || code == "TS2554" || code == "TS2741" ||
+			strings.Contains(message, "is not assignable to type") ||
+			strings.Contains(message, "property ") && strings.Contains(message, " does not exist on type") ||
+			strings.Contains(message, "is missing in type") ||
+			strings.Contains(message, "expected ") && strings.Contains(message, " arguments"):
 			return "symbol_patch"
 		case code == "TS2304" || strings.Contains(message, "cannot find name"):
 			return "symbol_patch"

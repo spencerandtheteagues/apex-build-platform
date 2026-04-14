@@ -75,6 +75,62 @@ func TestSemanticRepairPatchClassForErrorsClassifiesNarrowCompileFailures(t *tes
 			}},
 			want: "symbol_patch",
 		},
+		{
+			name: "property access mismatch",
+			errors: []ParsedBuildError{{
+				Code:    "TS2339",
+				Message: `Property 'total' does not exist on type 'InvoiceSummary'.`,
+			}},
+			want: "symbol_patch",
+		},
+		{
+			name: "argument type mismatch",
+			errors: []ParsedBuildError{{
+				Code:    "TS2345",
+				Message: `Argument of type 'string' is not assignable to parameter of type 'number'.`,
+			}},
+			want: "symbol_patch",
+		},
+		{
+			name: "missing required prop",
+			errors: []ParsedBuildError{{
+				Code:    "TS2741",
+				Message: `Property 'onSave' is missing in type '{ title: string; }' but required in type 'EditorProps'.`,
+			}},
+			want: "symbol_patch",
+		},
+		{
+			name: "wrong argument count",
+			errors: []ParsedBuildError{{
+				Code:    "TS2554",
+				Message: `Expected 2 arguments, but got 1.`,
+			}},
+			want: "symbol_patch",
+		},
+		{
+			name: "default export mismatch",
+			errors: []ParsedBuildError{{
+				Code:    "TS1192",
+				Message: `Module '"/src/api"' has no default export.`,
+			}},
+			want: "import_export_mismatch",
+		},
+		{
+			name: "not a module",
+			errors: []ParsedBuildError{{
+				Code:    "TS2306",
+				Message: `File '/src/config.ts' is not a module.`,
+			}},
+			want: "import_export_mismatch",
+		},
+		{
+			name: "package type declaration missing",
+			errors: []ParsedBuildError{{
+				Code:    "TS7016",
+				Message: `Could not find a declaration file for module 'date-fns'.`,
+			}},
+			want: "dependency_manifest",
+		},
 	}
 
 	for _, tt := range tests {
