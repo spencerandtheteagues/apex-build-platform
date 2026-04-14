@@ -58,11 +58,18 @@ func semanticRepairPatchClassForErrors(errors []ParsedBuildError) string {
 				return "missing_file"
 			}
 			return "dependency_manifest"
-		case code == "TS2322" || code == "TS2339" || code == "TS2345" || code == "TS2554" || code == "TS2741" ||
+		case code == "TS2322" || code == "TS2339" || code == "TS2345" || code == "TS2353" || code == "TS2554" ||
+			code == "TS2604" || code == "TS2739" || code == "TS2741" || code == "TS2769" ||
+			code == "TS7006" || code == "TS7031" || code == "TS7053" ||
 			strings.Contains(message, "is not assignable to type") ||
 			strings.Contains(message, "property ") && strings.Contains(message, " does not exist on type") ||
 			strings.Contains(message, "is missing in type") ||
-			strings.Contains(message, "expected ") && strings.Contains(message, " arguments"):
+			strings.Contains(message, "expected ") && strings.Contains(message, " arguments") ||
+			strings.Contains(message, "object literal may only specify known properties") ||
+			strings.Contains(message, "no overload matches this call") ||
+			strings.Contains(message, "implicitly has an 'any' type") ||
+			strings.Contains(message, "element implicitly has an 'any' type") ||
+			strings.Contains(message, "does not have any construct or call signatures"):
 			return "symbol_patch"
 		case code == "TS2304" || strings.Contains(message, "cannot find name"):
 			return "symbol_patch"

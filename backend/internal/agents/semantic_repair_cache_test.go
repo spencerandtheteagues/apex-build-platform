@@ -108,6 +108,46 @@ func TestSemanticRepairPatchClassForErrorsClassifiesNarrowCompileFailures(t *tes
 			want: "symbol_patch",
 		},
 		{
+			name: "unknown object literal property",
+			errors: []ParsedBuildError{{
+				Code:    "TS2353",
+				Message: `Object literal may only specify known properties, and 'indexes' does not exist in type 'InitOptions<User>'.`,
+			}},
+			want: "symbol_patch",
+		},
+		{
+			name: "overload mismatch",
+			errors: []ParsedBuildError{{
+				Code:    "TS2769",
+				Message: `No overload matches this call.`,
+			}},
+			want: "symbol_patch",
+		},
+		{
+			name: "implicit any parameter",
+			errors: []ParsedBuildError{{
+				Code:    "TS7006",
+				Message: `Parameter 'err' implicitly has an 'any' type.`,
+			}},
+			want: "symbol_patch",
+		},
+		{
+			name: "implicit any index",
+			errors: []ParsedBuildError{{
+				Code:    "TS7053",
+				Message: `Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{}'.`,
+			}},
+			want: "symbol_patch",
+		},
+		{
+			name: "jsx construct signature",
+			errors: []ParsedBuildError{{
+				Code:    "TS2604",
+				Message: `JSX element type 'Widget' does not have any construct or call signatures.`,
+			}},
+			want: "symbol_patch",
+		},
+		{
 			name: "default export mismatch",
 			errors: []ParsedBuildError{{
 				Code:    "TS1192",
