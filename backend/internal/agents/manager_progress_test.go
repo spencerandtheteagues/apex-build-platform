@@ -71,6 +71,9 @@ func TestShouldPersistBuildSnapshotMessageIncludesRetryLearningEvents(t *testing
 		"agent:verification_failed",
 		"agent:coordination_failed",
 		WSAgentError,
+		WSGlassHydraCandidateFailed,
+		WSGlassHydraWinnerSelected,
+		WSGlassPatchReviewRequired,
 	} {
 		t.Run(string(msgType), func(t *testing.T) {
 			if !shouldPersistBuildSnapshotMessage(msgType) {

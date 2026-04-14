@@ -1002,6 +1002,78 @@ func TestBroadcastCapturesGlassBoxActivityEvents(t *testing.T) {
 	}
 }
 
+func TestBroadcastPersistsGlassBoxRepairMemoryMutation(t *testing.T) {
+	db := openBuildTestDB(t)
+	manager := newTestIterationManager(&stubPreflight{
+		configured:    true,
+		allProviders:  []ai.AIProvider{ai.ProviderClaude},
+		userProviders: []ai.AIProvider{ai.ProviderClaude},
+	})
+	manager.db = db
+
+	build := &Build{
+		ID:          "persist-glassbox-repair-memory",
+		UserID:      1,
+		Status:      BuildInProgress,
+		Mode:        ModeFull,
+		PowerMode:   PowerBalanced,
+		Description: "Persist glass-box repair attempt",
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+			},
+		},
+		CreatedAt: time.Now().Add(-time.Minute).UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	manager.builds[build.ID] = build
+
+	appendFailureFingerprint(build, FailureFingerprint{
+		BuildID:             build.ID,
+		TaskShape:           TaskShapeRepair,
+		Provider:            ai.ProviderGPT4,
+		FailureClass:        "compile_failure",
+		FilesInvolved:       []string{"src/App.tsx"},
+		RepairPathChosen:    []string{"compile_validator", "hydra_repair", "targeted_node_rewrite"},
+		RepairStrategy:      "targeted_node_rewrite",
+		PatchClass:          "symbol_patch",
+		RepairSucceeded:     false,
+		TokenCostToRecovery: 900,
+		CreatedAt:           time.Now().UTC(),
+	})
+
+	manager.broadcast(build.ID, &WSMessage{
+		Type:      WSGlassHydraCandidateFailed,
+		BuildID:   build.ID,
+		Timestamp: time.Now().UTC(),
+		Data: map[string]any{
+			"agent_role": "repair",
+			"provider":   string(ai.ProviderGPT4),
+			"strategy":   "targeted_node_rewrite",
+			"error":      "candidate workspace failed validation",
+			"content":    "Hydra repair candidate failed validation: targeted_node_rewrite.",
+		},
+	})
+
+	var snapshot models.CompletedBuild
+	if err := db.Where("build_id = ?", build.ID).First(&snapshot).Error; err != nil {
+		t.Fatalf("fetch persisted build snapshot: %v", err)
+	}
+	state := parseBuildSnapshotState(snapshot.StateJSON)
+	if state.Orchestration == nil || len(state.Orchestration.FailureFingerprints) != 1 {
+		t.Fatalf("expected persisted repair fingerprint, got %+v", state.Orchestration)
+	}
+	fp := state.Orchestration.FailureFingerprints[0]
+	if fp.RepairStrategy != "targeted_node_rewrite" || fp.PatchClass != "symbol_patch" || fp.RepairSucceeded {
+		t.Fatalf("expected persisted failed hydra strategy fingerprint, got %+v", fp)
+	}
+
+	activity := parseBuildActivityTimeline(snapshot.ActivityJSON)
+	if len(activity) != 1 || activity[0].EventType != string(WSGlassHydraCandidateFailed) {
+		t.Fatalf("expected persisted hydra candidate activity, got %+v", activity)
+	}
+}
+
 func TestRollbackToCheckpointRejectsHistoricalCheckpoint(t *testing.T) {
 	manager := newTestIterationManager(&stubPreflight{
 		configured:    true,

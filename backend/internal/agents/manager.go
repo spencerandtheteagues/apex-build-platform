@@ -17952,7 +17952,13 @@ func shouldPersistBuildSnapshotMessage(msgType WSMessageType) bool {
 		WSBuildFSMAllSteps, WSBuildFSMValidationPass, WSBuildFSMValidationFail,
 		WSBuildFSMRetryExhausted, WSBuildFSMRollbackDone, WSBuildFSMRollbackFail,
 		WSBuildFSMFatalError, WSBuildFSMCancelled,
-		"agent:retrying", "agent:verification_failed", "agent:coordination_failed", WSAgentError:
+		"agent:retrying", "agent:verification_failed", "agent:coordination_failed", WSAgentError,
+		WSGlassWarRoomCritiqueStarted, WSGlassWarRoomCritiqueResolved,
+		WSGlassWorkOrderCompiled, WSGlassProviderRouteSelected,
+		WSGlassDeterministicGatePassed, WSGlassDeterministicGateFailed,
+		WSGlassHydraCandidateStarted, WSGlassHydraCandidatePassed,
+		WSGlassHydraCandidateFailed, WSGlassHydraWinnerSelected,
+		WSGlassPatchReviewRequired:
 		return true
 	default:
 		return false
@@ -17992,15 +17998,19 @@ func (am *AgentManager) broadcast(buildID string, msg *WSMessage) {
 	build = am.builds[buildID]
 	am.mu.RUnlock()
 	if build != nil {
+		shouldPersistMessage := shouldPersistBuildSnapshotMessage(msg.Type)
 		build.mu.Lock()
-		if updateBuildSnapshotStateLocked(build, msg) {
-			shouldPersist = shouldPersistBuildSnapshotMessage(msg.Type)
+		if updateBuildSnapshotStateLocked(build, msg) && shouldPersistMessage {
+			shouldPersist = true
 		}
 		enrichBuildMessageSnapshotStateLocked(build, msg)
 		normalizeBuildMessageProgress(msg, copyBuildSnapshotStateLocked(build), build.Status)
 		entry, ok := buildActivityEntryForMessageLocked(build, msg)
 		if ok {
 			appendBuildActivityEntryLocked(build, entry)
+			if shouldPersistMessage {
+				shouldPersist = true
+			}
 		}
 		build.mu.Unlock()
 	}
