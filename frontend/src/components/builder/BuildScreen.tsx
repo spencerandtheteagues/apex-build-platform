@@ -69,6 +69,9 @@ interface BuildPatchBundle {
   suggested_commit_title?: string
   risk_reasons?: string[]
   justification?: string
+  review_status?: 'pending' | 'approved' | 'rejected'
+  reviewed_at?: string
+  review_message?: string
   created_at?: string
 }
 
@@ -210,6 +213,7 @@ interface BuildScreenProps {
   createdProjectId: number | null
   permissionActionId: string | null
   rollbackCheckpointId: string | null
+  patchBundleActionId?: string | null
   chatInput: string
   setChatInput: (v: string) => void
   plannerSendMode: BuildMessageTargetMode
@@ -229,6 +233,8 @@ interface BuildScreenProps {
   onDownload: () => void
   onRollbackCheckpoint: (id: string) => void
   onResolvePermission: (id: string, decision: 'allow' | 'deny', mode: 'once' | 'build') => void
+  onApprovePatchBundle: (id: string) => void
+  onRejectPatchBundle: (id: string) => void
   onSetShowDiffReview: (v: boolean) => void
   onLoadProposedEdits: (buildId?: string) => void
   onOpenCompletedBuild: (buildId: string, action?: 'resume' | 'open_files') => void
@@ -238,6 +244,12 @@ interface BuildScreenProps {
 
 const humanize = (s?: string) =>
   (s || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+
+const patchBundleNeedsReview = (bundle: BuildPatchBundle): boolean =>
+  Boolean(bundle.review_required || bundle.merge_policy === 'review_required')
+
+const patchBundlePendingReview = (bundle: BuildPatchBundle): boolean =>
+  patchBundleNeedsReview(bundle) && bundle.review_status !== 'approved' && bundle.review_status !== 'rejected'
 
 const copyTextToClipboard = async (value: string): Promise<boolean> => {
   const text = String(value || '')
@@ -653,11 +665,14 @@ interface PanelOverlayProps {
   showDiffReview: boolean
   permissionActionId: string | null
   rollbackCheckpointId: string | null
+  patchBundleActionId?: string | null
   userId: number | null | undefined
   // Callbacks
   onAgentMessageDraftChange: (agentId: string, value: string) => void
   onSendDirectAgentMessage: (agentId: string) => void
   onResolvePermission: (id: string, decision: 'allow' | 'deny', mode: 'once' | 'build') => void
+  onApprovePatchBundle: (id: string) => void
+  onRejectPatchBundle: (id: string) => void
   onSetShowDiffReview: (v: boolean) => void
   onLoadProposedEdits: (buildId?: string) => void
   onRollbackCheckpoint: (id: string) => void
@@ -679,14 +694,16 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
   providerPanels, visibleBlockers, platformReadinessNotice, agentMessageDrafts, agentMessagePendingId, pendingPermissionRequests,
   pendingRevisionRequests, buildFailureAttribution,
   proposedEdits, showDiffReview, permissionActionId, rollbackCheckpointId,
+  patchBundleActionId,
   userId, onAgentMessageDraftChange, onSendDirectAgentMessage, onResolvePermission, onSetShowDiffReview, onLoadProposedEdits,
+  onApprovePatchBundle, onRejectPatchBundle,
   onRollbackCheckpoint, onOpenCompletedBuild,
 }) => {
   const [selectedFile, setSelectedFile] = useState<GeneratedFile | null>(null)
   const liveAgents = (buildState.agents || []).filter((agent) => agent.status === 'working')
   const liveTasks = (buildState.tasks || []).filter((task) => task.status === 'in_progress')
   const reviewRequiredPatchBundles = React.useMemo(
-    () => (buildState.patchBundles || []).filter((bundle) => bundle.review_required || bundle.merge_policy === 'review_required'),
+    () => (buildState.patchBundles || []).filter(patchBundlePendingReview),
     [buildState.patchBundles]
   )
   const pendingProposedEditCount = React.useMemo(
@@ -974,6 +991,9 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
               bundles={reviewRequiredPatchBundles}
               proposedEditsCount={pendingProposedEditCount}
               onOpenProposedEdits={canOpenProposedEditReview ? () => onSetShowDiffReview(true) : undefined}
+              onApproveBundle={onApprovePatchBundle}
+              onRejectBundle={onRejectPatchBundle}
+              reviewActionId={patchBundleActionId}
             />
 
             {/* Blockers */}
@@ -1190,12 +1210,12 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
     buildActionPending, hasBYOK, phaseLabel, visibleBlockers,
     platformReadinessNotice, buildFailureAttribution, showDiffReview, userId,
     isPreparingPreview, isCreatingProject, isStartingOver, createdProjectId,
-    permissionActionId, rollbackCheckpointId, chatInput, setChatInput,
+    permissionActionId, rollbackCheckpointId, patchBundleActionId, chatInput, setChatInput,
     plannerSendMode, setPlannerSendMode, plannerMessagePending,
     agentMessageDrafts, agentMessagePendingId, onAgentMessageDraftChange, onSendDirectAgentMessage,
     onSendChatMessage, onPause, onResume, onRestart, onStartOver,
     onPreviewWorkspace, onOpenInIDE, onDownload, onRollbackCheckpoint,
-    onResolvePermission, onSetShowDiffReview, onLoadProposedEdits,
+    onResolvePermission, onApprovePatchBundle, onRejectPatchBundle, onSetShowDiffReview, onLoadProposedEdits,
     onOpenCompletedBuild,
   } = props
 
@@ -1222,14 +1242,14 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
     pendingQuestion ||
     buildPaused ||
     pendingPermissionRequests.length > 0 ||
-    (buildState.patchBundles || []).some((bundle) => bundle.review_required || bundle.merge_policy === 'review_required') ||
+    (buildState.patchBundles || []).some(patchBundlePendingReview) ||
     platformReadinessNotice?.isCritical ||
     buildFailureAttribution ||
     buildState.status === 'awaiting_review' ||
     visibleBlockers.some((b) => b.severity === 'blocking')
   )
   const issueCount = visibleBlockers.length + pendingPermissionRequests.length +
-    (buildState.patchBundles || []).filter((bundle) => bundle.review_required || bundle.merge_policy === 'review_required').length +
+    (buildState.patchBundles || []).filter(patchBundlePendingReview).length +
     (platformReadinessNotice ? 1 : 0) +
     (buildFailureAttribution ? 1 : 0) +
     (buildState.status === 'awaiting_review' ? 1 : 0)
@@ -1333,10 +1353,13 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
           showDiffReview={showDiffReview}
           permissionActionId={permissionActionId}
           rollbackCheckpointId={rollbackCheckpointId}
+          patchBundleActionId={patchBundleActionId}
           userId={userId}
           onAgentMessageDraftChange={onAgentMessageDraftChange}
           onSendDirectAgentMessage={onSendDirectAgentMessage}
           onResolvePermission={onResolvePermission}
+          onApprovePatchBundle={onApprovePatchBundle}
+          onRejectPatchBundle={onRejectPatchBundle}
           onSetShowDiffReview={onSetShowDiffReview}
           onLoadProposedEdits={onLoadProposedEdits}
           onRollbackCheckpoint={onRollbackCheckpoint}

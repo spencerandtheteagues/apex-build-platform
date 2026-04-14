@@ -7200,6 +7200,51 @@ func (am *AgentManager) createGeneratedFile(build *Build, path, content string) 
 	return true
 }
 
+func (am *AgentManager) deleteGeneratedFile(build *Build, path string) bool {
+	if build == nil || strings.TrimSpace(path) == "" {
+		return false
+	}
+	sanitized := sanitizeFilePath(path)
+	if sanitized == "" {
+		return false
+	}
+
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	deleted := false
+	for i := len(build.Tasks) - 1; i >= 0; i-- {
+		task := build.Tasks[i]
+		if task == nil || task.Output == nil || !am.isCodeGenerationTask(task.Type) {
+			continue
+		}
+		next := task.Output.Files[:0]
+		for _, file := range task.Output.Files {
+			if sanitizeFilePath(file.Path) == sanitized {
+				deleted = true
+				continue
+			}
+			next = append(next, file)
+		}
+		task.Output.Files = next
+	}
+
+	nextSnapshot := build.SnapshotFiles[:0]
+	for _, file := range build.SnapshotFiles {
+		if sanitizeFilePath(file.Path) == sanitized {
+			deleted = true
+			continue
+		}
+		nextSnapshot = append(nextSnapshot, file)
+	}
+	build.SnapshotFiles = nextSnapshot
+
+	if deleted {
+		build.UpdatedAt = time.Now()
+	}
+	return deleted
+}
+
 func (am *AgentManager) applyPatchBundleToBuild(build *Build, bundle *PatchBundle) bool {
 	if build == nil || bundle == nil || len(bundle.Operations) == 0 {
 		return false
@@ -7212,10 +7257,23 @@ func (am *AgentManager) applyPatchBundleToBuild(build *Build, bundle *PatchBundl
 			if am.createGeneratedFile(build, op.Path, op.Content) {
 				applied = true
 			}
+		case PatchDeleteBlock:
+			targetPath := firstBuildActivityString(op.Path, op.Anchor)
+			if strings.TrimSpace(op.Content) == "" {
+				if am.deleteGeneratedFile(build, targetPath) {
+					applied = true
+				}
+				continue
+			}
+			if strings.TrimSpace(targetPath) == "" {
+				continue
+			}
+			if am.patchGeneratedFileContent(build, targetPath, op.Content) {
+				applied = true
+			}
 		case PatchReplaceSymbol, PatchReplaceFunction, PatchInsertAfterSymbol,
 			PatchPatchJSONKey, PatchPatchEnvVar, PatchPatchRouteRegistration,
-			PatchPatchDependency, PatchPatchSchemaEntity, PatchDeleteBlock,
-			PatchRenameSymbol:
+			PatchPatchDependency, PatchPatchSchemaEntity, PatchRenameSymbol:
 			if strings.TrimSpace(op.Path) == "" || strings.TrimSpace(op.Content) == "" {
 				continue
 			}
@@ -7225,6 +7283,205 @@ func (am *AgentManager) applyPatchBundleToBuild(build *Build, bundle *PatchBundl
 		}
 	}
 	return applied
+}
+
+type patchBundleReviewResult struct {
+	Bundle  PatchBundle
+	Applied bool
+	Status  BuildStatus
+}
+
+func (am *AgentManager) approvePatchBundle(build *Build, bundleID, reason string) (*patchBundleReviewResult, error) {
+	if build == nil {
+		return nil, fmt.Errorf("build not found")
+	}
+	bundleID = strings.TrimSpace(bundleID)
+	if bundleID == "" {
+		return nil, fmt.Errorf("patch bundle id is required")
+	}
+
+	bundle, err := patchBundleForReview(build, bundleID)
+	if err != nil {
+		return nil, err
+	}
+
+	applied := am.applyPatchBundleToBuild(build, &bundle)
+	reviewed := markPatchBundleReviewed(build, bundleID, PatchBundleReviewApproved, reason, applied)
+	am.resumeBuildIfReviewComplete(build)
+	status := currentBuildStatus(build)
+
+	go am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"status":          string(status),
+			"patch_bundle_id": bundleID,
+			"patch_bundle":    reviewed,
+			"review_status":   string(PatchBundleReviewApproved),
+			"applied":         applied,
+			"message":         "Patch bundle approved",
+		},
+	})
+
+	return &patchBundleReviewResult{Bundle: reviewed, Applied: applied, Status: status}, nil
+}
+
+func (am *AgentManager) rejectPatchBundle(build *Build, bundleID, reason string) (*patchBundleReviewResult, error) {
+	if build == nil {
+		return nil, fmt.Errorf("build not found")
+	}
+	bundleID = strings.TrimSpace(bundleID)
+	if bundleID == "" {
+		return nil, fmt.Errorf("patch bundle id is required")
+	}
+
+	if _, err := patchBundleForReview(build, bundleID); err != nil {
+		return nil, err
+	}
+
+	reviewed := markPatchBundleReviewed(build, bundleID, PatchBundleReviewRejected, reason, false)
+	am.resumeBuildIfReviewComplete(build)
+	status := currentBuildStatus(build)
+
+	go am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"status":          string(status),
+			"patch_bundle_id": bundleID,
+			"patch_bundle":    reviewed,
+			"review_status":   string(PatchBundleReviewRejected),
+			"message":         "Patch bundle rejected",
+		},
+	})
+
+	return &patchBundleReviewResult{Bundle: reviewed, Applied: false, Status: status}, nil
+}
+
+func currentBuildStatus(build *Build) BuildStatus {
+	if build == nil {
+		return ""
+	}
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	return build.Status
+}
+
+func patchBundleForReview(build *Build, bundleID string) (PatchBundle, error) {
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	state := ensureBuildOrchestrationStateLocked(build)
+	if state == nil {
+		return PatchBundle{}, fmt.Errorf("patch bundle not found")
+	}
+	for _, bundle := range state.PatchBundles {
+		if strings.TrimSpace(bundle.ID) != bundleID {
+			continue
+		}
+		if !patchBundleNeedsReview(bundle) {
+			return PatchBundle{}, fmt.Errorf("patch bundle does not require review")
+		}
+		switch bundle.ReviewStatus {
+		case PatchBundleReviewApproved:
+			return PatchBundle{}, fmt.Errorf("patch bundle is already approved")
+		case PatchBundleReviewRejected:
+			return PatchBundle{}, fmt.Errorf("patch bundle is already rejected")
+		}
+		return bundle, nil
+	}
+	return PatchBundle{}, fmt.Errorf("patch bundle not found")
+}
+
+func markPatchBundleReviewed(build *Build, bundleID string, status PatchBundleReviewStatus, reason string, applied bool) PatchBundle {
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	now := time.Now().UTC()
+	state := ensureBuildOrchestrationStateLocked(build)
+	if state == nil {
+		return PatchBundle{}
+	}
+
+	for i := range state.PatchBundles {
+		if strings.TrimSpace(state.PatchBundles[i].ID) != bundleID {
+			continue
+		}
+		state.PatchBundles[i].ReviewStatus = status
+		state.PatchBundles[i].ReviewedAt = &now
+		message := strings.TrimSpace(reason)
+		if message == "" {
+			switch status {
+			case PatchBundleReviewApproved:
+				if applied {
+					message = "Approved and applied by user review."
+				} else {
+					message = "Approved by user review; patch was already reflected in the build output."
+				}
+			case PatchBundleReviewRejected:
+				message = "Rejected by user review."
+			}
+		}
+		state.PatchBundles[i].ReviewMessage = message
+		removePatchBundlePendingRevisionLocked(build, state.PatchBundles[i])
+		appendSteeringNoteLocked(build, fmt.Sprintf("Patch bundle %s %s by user review.", bundleID, status))
+		refreshInteractionAttentionLocked(build)
+		build.UpdatedAt = now
+		return state.PatchBundles[i]
+	}
+	return PatchBundle{}
+}
+
+func removePatchBundlePendingRevisionLocked(build *Build, bundle PatchBundle) {
+	if build == nil || len(build.Interaction.PendingRevisions) == 0 {
+		return
+	}
+	reviewBranch := strings.TrimSpace(bundle.ReviewBranch)
+	justification := strings.TrimSpace(bundle.Justification)
+	filtered := build.Interaction.PendingRevisions[:0]
+	for _, note := range build.Interaction.PendingRevisions {
+		trimmed := strings.TrimSpace(note)
+		if trimmed == "" {
+			continue
+		}
+		if reviewBranch != "" && strings.Contains(trimmed, reviewBranch) {
+			continue
+		}
+		if justification != "" && strings.Contains(trimmed, justification) {
+			continue
+		}
+		filtered = append(filtered, note)
+	}
+	build.Interaction.PendingRevisions = filtered
+}
+
+func (am *AgentManager) resumeBuildIfReviewComplete(build *Build) {
+	if build == nil {
+		return
+	}
+	build.mu.Lock()
+	state := ensureBuildOrchestrationStateLocked(build)
+	hasPendingPatchReview := false
+	if state != nil {
+		for _, bundle := range state.PatchBundles {
+			if patchBundleReviewPending(bundle) {
+				hasPendingPatchReview = true
+				break
+			}
+		}
+	}
+	status := build.Status
+	build.mu.Unlock()
+
+	hasPendingEdits := false
+	if am != nil && am.editStore != nil {
+		hasPendingEdits = len(am.editStore.GetPendingEdits(build.ID)) > 0
+	}
+	if status == BuildAwaitingReview && !hasPendingPatchReview && !hasPendingEdits {
+		am.resumeBuildAfterReview(build)
+	}
 }
 
 func (am *AgentManager) bundleFromPatchPlan(buildID string, before []GeneratedFile, plan *generatedFilePatchPlan, justification string) *PatchBundle {

@@ -206,6 +206,17 @@ const patchBundleNeedsReview = (bundle: BuildPatchBundleState): boolean => {
   return bundle.review_required === true || bundle.merge_policy === 'review_required'
 }
 
+const patchBundlePendingReview = (bundle: BuildPatchBundleState): boolean => {
+  return patchBundleNeedsReview(bundle) && bundle.review_status !== 'approved' && bundle.review_status !== 'rejected'
+}
+
+const patchBundleReviewSummary = (bundle: BuildPatchBundleState): string | null => {
+  if (patchBundlePendingReview(bundle)) return 'Review required before merge.'
+  if (patchBundleNeedsReview(bundle) && bundle.review_status === 'approved') return 'Review approved.'
+  if (patchBundleNeedsReview(bundle) && bundle.review_status === 'rejected') return 'Review rejected.'
+  return null
+}
+
 const formatTimestamp = (value?: string) => {
   if (!value) return null
   const parsed = new Date(value)
@@ -354,7 +365,8 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
           timestamp = formatTimestamp((props.patchBundles || []).slice().sort((left, right) => String(right.created_at || '').localeCompare(String(left.created_at || '')))[0]?.created_at)
           substeps = (props.patchBundles || []).slice(0, 3).map((bundle) => {
             const summary = bundle.justification || `Patch bundle recorded${bundle.provider ? ` via ${bundle.provider}` : ''}.`
-            return patchBundleNeedsReview(bundle) ? `${summary} Review required before merge.` : summary
+            const reviewSummary = patchBundleReviewSummary(bundle)
+            return reviewSummary ? `${summary} ${reviewSummary}` : summary
           })
           if (substeps.length === 0 && status !== 'pending') {
             substeps.push('Patch generation or repair is active.')
@@ -529,7 +541,7 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
     }
     if ((props.patchBundles || []).length > 0) {
       const latestPatchTime = props.patchBundles?.map((bundle) => formatTimestamp(bundle.created_at || '')).find(Boolean) || null
-      const reviewRequiredCount = (props.patchBundles || []).filter(patchBundleNeedsReview).length
+      const reviewRequiredCount = (props.patchBundles || []).filter(patchBundlePendingReview).length
       items.push({
         id: 'patches',
         title: 'Patch bundles generated',

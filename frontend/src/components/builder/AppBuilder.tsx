@@ -1553,6 +1553,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [platformReadiness, setPlatformReadiness] = useState<FeatureReadinessSummary | null>(null)
   const [proposedEdits, setProposedEdits] = useState<ProposedEdit[]>([])
   const [showDiffReview, setShowDiffReview] = useState(true)
+  const [patchBundleActionId, setPatchBundleActionId] = useState<string | null>(null)
 
   // AI Activity state
   const [aiThoughts, setAiThoughts] = useState<AIThought[]>([])
@@ -4012,6 +4013,62 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
   }, [])
 
+  const updateReviewedPatchBundle = useCallback((bundle: BuildPatchBundleState) => {
+    if (!bundle?.id) return
+    setBuildState(prev => {
+      if (!prev) return prev
+      const existing = prev.patchBundles || []
+      const index = existing.findIndex(candidate => candidate.id === bundle.id)
+      const patchBundles = index >= 0
+        ? existing.map(candidate => candidate.id === bundle.id ? { ...candidate, ...bundle } : candidate)
+        : [...existing, bundle]
+      return { ...prev, patchBundles }
+    })
+  }, [])
+
+  const markPatchBundleReviewStatus = useCallback((bundleId: string, reviewStatus: 'approved' | 'rejected') => {
+    setBuildState(prev => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        patchBundles: (prev.patchBundles || []).map(bundle => bundle.id === bundleId
+          ? {
+              ...bundle,
+              review_status: reviewStatus,
+              reviewed_at: bundle.reviewed_at || new Date().toISOString(),
+            }
+          : bundle
+        ),
+      }
+    })
+  }, [])
+
+  const reviewPatchBundle = useCallback(async (bundleId: string, decision: 'approve' | 'reject') => {
+    const buildId = buildStateRef.current?.id
+    if (!buildId || !bundleId || patchBundleActionId) return
+
+    setPatchBundleActionId(bundleId)
+    try {
+      const response = decision === 'approve'
+        ? await apiService.approveBuildPatchBundle(buildId, bundleId)
+        : await apiService.rejectBuildPatchBundle(buildId, bundleId)
+      if (response.patch_bundle) {
+        updateReviewedPatchBundle(response.patch_bundle)
+      } else {
+        markPatchBundleReviewStatus(bundleId, decision === 'approve' ? 'approved' : 'rejected')
+      }
+      const nextStatus = normalizeBuildStatus(response.status)
+      if (nextStatus) {
+        setBuildState(prev => prev ? { ...prev, status: nextStatus as BuildState['status'] } : prev)
+      }
+      addSystemMessage(response.message || (decision === 'approve' ? 'Patch bundle approved' : 'Patch bundle rejected'))
+    } catch (error) {
+      addSystemMessage(`Patch bundle review failed: ${error instanceof Error ? error.message : 'Unable to update patch bundle'}`)
+    } finally {
+      setPatchBundleActionId(null)
+    }
+  }, [addSystemMessage, markPatchBundleReviewStatus, patchBundleActionId, updateReviewedPatchBundle])
+
   const normalizeGeneratedFiles = useCallback((files: Array<any>) => {
     if (!Array.isArray(files)) return []
     return files
@@ -5742,6 +5799,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             createdProjectId={createdProjectId}
             permissionActionId={permissionActionId}
             rollbackCheckpointId={rollbackCheckpointId}
+            patchBundleActionId={patchBundleActionId}
             chatInput={chatInput}
             setChatInput={setChatInput}
             plannerSendMode={plannerSendMode}
@@ -5768,6 +5826,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             onDownload={handleDownloadBuild}
             onRollbackCheckpoint={handleRollbackCheckpoint}
             onResolvePermission={handleResolvePermissionRequest}
+            onApprovePatchBundle={(bundleId) => { void reviewPatchBundle(bundleId, 'approve') }}
+            onRejectPatchBundle={(bundleId) => { void reviewPatchBundle(bundleId, 'reject') }}
             onSetShowDiffReview={setShowDiffReview}
             onLoadProposedEdits={loadProposedEdits}
             onOpenCompletedBuild={openCompletedBuild}

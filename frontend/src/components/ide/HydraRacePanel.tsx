@@ -2,6 +2,7 @@ import React, { useMemo } from 'react'
 import { CheckCircle2, Clock3, GitBranch, Layers3, Trophy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { GlassBoxPatchBundle, GlassBoxThought, GlassBoxVerificationReport } from './BuildActivityTimeline'
+import { patchBundleNeedsReview, patchBundlePendingReview } from './patchBundleReview'
 
 export interface HydraProviderPanel {
   provider: string
@@ -49,13 +50,26 @@ const formatTime = (value?: Date | string): string | null => {
   return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+const patchBundleOutcome = (bundle: GlassBoxPatchBundle): { label: string; className: string } => {
+  if (patchBundlePendingReview(bundle)) {
+    return { label: 'Review required', className: 'border-amber-500/40 text-amber-200 bg-amber-500/15' }
+  }
+  if (patchBundleNeedsReview(bundle) && bundle.review_status === 'approved') {
+    return { label: 'Approved', className: 'border-green-500/40 text-green-200 bg-green-500/15' }
+  }
+  if (patchBundleNeedsReview(bundle) && bundle.review_status === 'rejected') {
+    return { label: 'Rejected', className: 'border-red-500/40 text-red-200 bg-red-500/15' }
+  }
+  return { label: 'Auto merge safe', className: 'border-green-500/40 text-green-200 bg-green-500/15' }
+}
+
 export default function HydraRacePanel({
   providerPanels,
   patchBundles = [],
   verificationReports = [],
 }: HydraRacePanelProps) {
   const reviewRequiredCount = useMemo(
-    () => patchBundles.filter((bundle) => bundle.review_required || bundle.merge_policy === 'review_required').length,
+    () => patchBundles.filter(patchBundlePendingReview).length,
     [patchBundles]
   )
   const failedVerifications = useMemo(
@@ -116,13 +130,19 @@ export default function HydraRacePanel({
             </div>
           ) : (
             patchBundles.slice(0, 10).map((bundle) => {
-              const reviewRequired = bundle.review_required || bundle.merge_policy === 'review_required'
+              const outcome = patchBundleOutcome(bundle)
+              const rejected = patchBundleNeedsReview(bundle) && bundle.review_status === 'rejected'
+              const pendingReview = patchBundlePendingReview(bundle)
               return (
                 <div
                   key={bundle.id}
                   className={cn(
                     'rounded-lg border px-3 py-2.5',
-                    reviewRequired ? 'border-amber-500/30 bg-amber-500/10' : 'border-green-500/30 bg-green-500/10'
+                    rejected
+                      ? 'border-red-500/30 bg-red-500/10'
+                      : pendingReview
+                        ? 'border-amber-500/30 bg-amber-500/10'
+                        : 'border-green-500/30 bg-green-500/10'
                   )}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -131,11 +151,9 @@ export default function HydraRacePanel({
                     </div>
                     <span className={cn(
                       'text-[10px] uppercase tracking-[0.14em] px-2 py-0.5 rounded border',
-                      reviewRequired
-                        ? 'border-amber-500/40 text-amber-200 bg-amber-500/15'
-                        : 'border-green-500/40 text-green-200 bg-green-500/15'
+                      outcome.className
                     )}>
-                      {reviewRequired ? 'Review required' : 'Auto merge safe'}
+                      {outcome.label}
                     </span>
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-400">
@@ -156,6 +174,11 @@ export default function HydraRacePanel({
                   {bundle.suggested_commit_title && (
                     <div className="mt-1 text-[11px] text-gray-400">
                       Suggested commit: {bundle.suggested_commit_title}
+                    </div>
+                  )}
+                  {bundle.review_message && (
+                    <div className="mt-1 text-[11px] text-gray-400">
+                      Review note: {bundle.review_message}
                     </div>
                   )}
                   {Array.isArray(bundle.risk_reasons) && bundle.risk_reasons.length > 0 && (

@@ -2914,6 +2914,89 @@ func (h *BuildHandler) RejectAllEdits(c *gin.Context) {
 	})
 }
 
+func patchBundleReviewReason(c *gin.Context) string {
+	if c == nil || c.Request == nil || c.Request.Body == nil || c.Request.ContentLength == 0 {
+		return ""
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(req.Reason)
+}
+
+// ApprovePatchBundle approves a review-required patch bundle and applies it if needed.
+// POST /api/v1/build/:id/patch-bundles/:bundleId/approve
+func (h *BuildHandler) ApprovePatchBundle(c *gin.Context) {
+	buildID := c.Param("id")
+	bundleID := c.Param("bundleId")
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
+
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID, true)
+	if err != nil {
+		writeBuildActionSessionError(c, err)
+		return
+	}
+
+	result, err := h.manager.approvePatchBundle(build, bundleID, patchBundleReviewReason(c))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"build_id":         buildID,
+		"bundle_id":        bundleID,
+		"status":           string(result.Status),
+		"review_status":    string(PatchBundleReviewApproved),
+		"applied":          result.Applied,
+		"patch_bundle":     result.Bundle,
+		"message":          "Patch bundle approved",
+		"live":             true,
+		"restored_session": restoredSession,
+	})
+}
+
+// RejectPatchBundle rejects a review-required patch bundle.
+// POST /api/v1/build/:id/patch-bundles/:bundleId/reject
+func (h *BuildHandler) RejectPatchBundle(c *gin.Context) {
+	buildID := c.Param("id")
+	bundleID := c.Param("bundleId")
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
+
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID, true)
+	if err != nil {
+		writeBuildActionSessionError(c, err)
+		return
+	}
+
+	result, err := h.manager.rejectPatchBundle(build, bundleID, patchBundleReviewReason(c))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"build_id":         buildID,
+		"bundle_id":        bundleID,
+		"status":           string(result.Status),
+		"review_status":    string(PatchBundleReviewRejected),
+		"applied":          false,
+		"patch_bundle":     result.Bundle,
+		"message":          "Patch bundle rejected",
+		"live":             true,
+		"restored_session": restoredSession,
+	})
+}
+
 // RegisterRoutes registers all build routes on the router
 func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	build := rg.Group("/build")
@@ -2945,6 +3028,8 @@ func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		build.POST("/:id/reject-edits", h.RejectEdits)
 		build.POST("/:id/approve-all", h.ApproveAllEdits)
 		build.POST("/:id/reject-all", h.RejectAllEdits)
+		build.POST("/:id/patch-bundles/:bundleId/approve", h.ApprovePatchBundle)
+		build.POST("/:id/patch-bundles/:bundleId/reject", h.RejectPatchBundle)
 	}
 
 	// Build history endpoints

@@ -8,6 +8,7 @@ import BuildActivityTimeline, {
   type GlassBoxWorkOrder,
 } from './BuildActivityTimeline'
 import HydraRacePanel, { type HydraProviderPanel } from './HydraRacePanel'
+import { patchBundlePendingReview } from './patchBundleReview'
 import type { BuildLearningSummaryState } from '@/services/api'
 
 export interface GlassBoxProviderScorecard {
@@ -73,7 +74,7 @@ export default function AITelemetryOverlay({
 }: AITelemetryOverlayProps) {
   const summary = useMemo(() => {
     const activeProviders = providerPanels.filter((panel) => panel.status === 'working' || panel.status === 'thinking').length
-    const reviewRequired = patchBundles.filter((bundle) => bundle.review_required || bundle.merge_policy === 'review_required').length
+    const reviewRequired = patchBundles.filter(patchBundlePendingReview).length
     const failedVerification = verificationReports.filter(
       (report) => report.status === 'failed' || report.status === 'blocked'
     ).length

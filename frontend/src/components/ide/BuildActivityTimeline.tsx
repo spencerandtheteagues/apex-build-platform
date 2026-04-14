@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react'
 import { Clock3, FileClock, ShieldCheck, Workflow } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { patchBundleNeedsReview, patchBundlePendingReview } from './patchBundleReview'
 
 export interface GlassBoxThought {
   id: string
@@ -47,6 +48,9 @@ export interface GlassBoxPatchBundle {
   provider?: string
   merge_policy?: 'auto_merge_safe' | 'review_required'
   review_required?: boolean
+  review_status?: 'pending' | 'approved' | 'rejected'
+  reviewed_at?: string
+  review_message?: string
   review_branch?: string
   suggested_commit_title?: string
   risk_reasons?: string[]
@@ -123,6 +127,35 @@ const artifactToneClass: Record<ArtifactTone, string> = {
   success: 'border-green-500/30 bg-green-500/10 text-green-300',
   warning: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
   danger: 'border-red-500/30 bg-red-500/10 text-red-300',
+}
+
+const patchBundleArtifact = (bundle: GlassBoxPatchBundle): Pick<ArtifactEvent, 'label' | 'tone' | 'timestamp'> => {
+  if (patchBundlePendingReview(bundle)) {
+    return {
+      label: 'Patch review required',
+      tone: 'warning',
+      timestamp: formatTimestamp(bundle.created_at),
+    }
+  }
+  if (patchBundleNeedsReview(bundle) && bundle.review_status === 'approved') {
+    return {
+      label: 'Patch approved',
+      tone: 'success',
+      timestamp: formatTimestamp(bundle.reviewed_at || bundle.created_at),
+    }
+  }
+  if (patchBundleNeedsReview(bundle) && bundle.review_status === 'rejected') {
+    return {
+      label: 'Patch rejected',
+      tone: 'danger',
+      timestamp: formatTimestamp(bundle.reviewed_at || bundle.created_at),
+    }
+  }
+  return {
+    label: 'Hydra winner selected',
+    tone: 'success',
+    timestamp: formatTimestamp(bundle.created_at),
+  }
 }
 
 const telemetryToneClass = (thought: GlassBoxThought): string => {
@@ -202,14 +235,14 @@ export default function BuildActivityTimeline({
     }
 
     for (const bundle of patchBundles) {
-      const reviewRequired = bundle.review_required || bundle.merge_policy === 'review_required'
+      const artifact = patchBundleArtifact(bundle)
       events.push({
         id: `pb-${bundle.id}`,
-        label: reviewRequired ? 'Patch review required' : 'Hydra winner selected',
-        detail: bundle.justification || `${bundle.provider || 'provider unknown'} patch bundle`,
+        label: artifact.label,
+        detail: bundle.review_message || bundle.justification || `${bundle.provider || 'provider unknown'} patch bundle`,
         source: 'patch_bundles',
-        tone: reviewRequired ? 'warning' : 'success',
-        timestamp: formatTimestamp(bundle.created_at),
+        tone: artifact.tone,
+        timestamp: artifact.timestamp,
       })
     }
 

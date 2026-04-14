@@ -9,6 +9,9 @@ export interface AIRepairReviewBundle {
   suggested_commit_title?: string
   risk_reasons?: string[]
   justification?: string
+  review_status?: 'pending' | 'approved' | 'rejected'
+  reviewed_at?: string
+  review_message?: string
   created_at?: string
 }
 
@@ -16,6 +19,9 @@ interface AIRepairReviewPanelProps {
   bundles: AIRepairReviewBundle[]
   proposedEditsCount?: number
   onOpenProposedEdits?: () => void
+  onApproveBundle?: (bundleId: string) => void
+  onRejectBundle?: (bundleId: string) => void
+  reviewActionId?: string | null
   maxVisible?: number
 }
 
@@ -25,13 +31,22 @@ const humanize = (value?: string): string =>
     .trim()
     .replace(/\b\w/g, (part) => part.toUpperCase())
 
+const bundleNeedsReview = (bundle: AIRepairReviewBundle): boolean =>
+  Boolean(bundle.review_required || bundle.merge_policy === 'review_required')
+
+const bundlePendingReview = (bundle: AIRepairReviewBundle): boolean =>
+  bundleNeedsReview(bundle) && bundle.review_status !== 'approved' && bundle.review_status !== 'rejected'
+
 export default function AIRepairReviewPanel({
   bundles,
   proposedEditsCount = 0,
   onOpenProposedEdits,
+  onApproveBundle,
+  onRejectBundle,
+  reviewActionId = null,
   maxVisible = 3,
 }: AIRepairReviewPanelProps) {
-  const reviewBundles = bundles.filter((bundle) => bundle.review_required || bundle.merge_policy === 'review_required')
+  const reviewBundles = bundles.filter(bundlePendingReview)
   if (reviewBundles.length === 0) {
     return null
   }
@@ -75,19 +90,35 @@ export default function AIRepairReviewPanel({
                   {proposedEditsMessage}
                 </div>
               </div>
-              {hasProposedEdits ? (
-                <button
-                  type="button"
-                  onClick={onOpenProposedEdits}
-                  className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded border border-violet-500/40 text-violet-200 bg-violet-500/10 hover:bg-violet-500/20 shrink-0"
-                >
-                  Open Diff Review
-                </button>
-              ) : (
-                <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border border-violet-500/40 text-violet-300 bg-violet-500/10 shrink-0">
-                  Review
-                </span>
-              )}
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                {hasProposedEdits && (
+                  <button
+                    type="button"
+                    onClick={onOpenProposedEdits}
+                    className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded border border-violet-500/40 text-violet-200 bg-violet-500/10 hover:bg-violet-500/20"
+                  >
+                    Open Diff Review
+                  </button>
+                )}
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onRejectBundle?.(bundle.id)}
+                    disabled={!onRejectBundle || reviewActionId === bundle.id}
+                    className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded border border-red-500/35 text-red-200 bg-red-500/10 hover:bg-red-500/20 disabled:opacity-50"
+                  >
+                    Reject
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onApproveBundle?.(bundle.id)}
+                    disabled={!onApproveBundle || reviewActionId === bundle.id}
+                    className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded border border-emerald-500/35 text-emerald-100 bg-emerald-500/15 hover:bg-emerald-500/25 disabled:opacity-50"
+                  >
+                    {reviewActionId === bundle.id ? 'Saving' : 'Approve'}
+                  </button>
+                </div>
+              </div>
             </div>
             {Array.isArray(bundle.risk_reasons) && bundle.risk_reasons.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-1.5">

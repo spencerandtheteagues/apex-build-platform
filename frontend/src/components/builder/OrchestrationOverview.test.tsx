@@ -379,4 +379,31 @@ describe('OrchestrationOverview', () => {
     expect(screen.getByText(/require review before merge/i)).toBeTruthy()
     expect(screen.getByText(/Review required before merge/i)).toBeTruthy()
   })
+
+  it('does not count approved patch bundles as requiring review in the build journal', () => {
+    render(
+      <OrchestrationOverview
+        buildStatus="in_progress"
+        currentPhase="patch"
+        patchBundles={[
+          {
+            id: 'patch-review-approved',
+            build_id: 'build-8',
+            provider: 'claude',
+            justification: 'Compile validator Hydra winner',
+            merge_policy: 'review_required',
+            review_required: true,
+            review_status: 'approved',
+            reviewed_at: '2026-04-12T15:05:00Z',
+            created_at: '2026-04-12T15:00:00Z',
+          },
+        ]}
+      />
+    )
+
+    expect(screen.getByText('Patch bundles generated')).toBeTruthy()
+    expect(screen.getByText(/recorded for implementation or repair/i)).toBeTruthy()
+    expect(screen.getByText(/Review approved/i)).toBeTruthy()
+    expect(screen.queryByText(/require review before merge/i)).toBeNull()
+  })
 })

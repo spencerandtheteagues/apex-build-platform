@@ -48,6 +48,8 @@ func testRouter(am *AgentManager) *gin.Engine {
 	build.POST("/:id/reject-edits", h.RejectEdits)
 	build.POST("/:id/approve-all", h.ApproveAllEdits)
 	build.POST("/:id/reject-all", h.RejectAllEdits)
+	build.POST("/:id/patch-bundles/:bundleId/approve", h.ApprovePatchBundle)
+	build.POST("/:id/patch-bundles/:bundleId/reject", h.RejectPatchBundle)
 	build.GET("/:id", h.GetBuildDetails)
 	build.GET("/:id/status", h.GetBuildStatus)
 	rg := r.Group("/api/v1", auth)
@@ -2292,6 +2294,158 @@ func TestApproveAllEditsRestoresAwaitingReviewSnapshot(t *testing.T) {
 	}
 	if pending := am.editStore.GetPendingEdits("review-build"); len(pending) != 0 {
 		t.Fatalf("expected pending edits to be cleared, got %d", len(pending))
+	}
+}
+
+func TestApprovePatchBundleAppliesAndMarksReviewed(t *testing.T) {
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+	build := &Build{
+		ID:     "patch-review-build",
+		UserID: 1,
+		Status: BuildAwaitingReview,
+		Tasks: []*Task{
+			{
+				ID:     "task-1",
+				Type:   TaskGenerateFile,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{Path: "src/App.tsx", Content: "export default function App(){return <main>Old</main>}\n", Language: "typescript"},
+					},
+				},
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				PatchBundles: []PatchBundle{
+					{
+						ID:             "bundle-approve",
+						BuildID:        "patch-review-build",
+						MergePolicy:    RepairPatchMergeReviewRequired,
+						ReviewRequired: true,
+						ReviewStatus:   PatchBundleReviewPending,
+						ReviewBranch:   "ai-repair/20260414-bundle-approve",
+						Justification:  "Review required App patch",
+						CreatedAt:      time.Now().UTC(),
+						Operations: []PatchOperation{
+							{Type: PatchReplaceFunction, Path: "src/App.tsx", Content: "export default function App(){return <main>New</main>}\n"},
+						},
+					},
+				},
+			},
+		},
+	}
+	build.Interaction.PendingRevisions = []string{"Review required App patch (review branch: ai-repair/20260414-bundle-approve)"}
+	am.builds[build.ID] = build
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/patch-review-build/patch-bundles/bundle-approve/approve", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected approve patch bundle 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal approve patch bundle response: %v", err)
+	}
+	if body["review_status"] != string(PatchBundleReviewApproved) {
+		t.Fatalf("expected review_status approved, got %v", body["review_status"])
+	}
+	if body["applied"] != true {
+		t.Fatalf("expected approved patch to apply, got %v", body["applied"])
+	}
+	if build.Status != BuildInProgress {
+		t.Fatalf("expected build to resume in_progress, got %s", build.Status)
+	}
+	files := am.collectGeneratedFiles(build)
+	if len(files) != 1 || !strings.Contains(files[0].Content, "New") {
+		t.Fatalf("expected patch bundle content to apply, got %+v", files)
+	}
+	bundle := build.SnapshotState.Orchestration.PatchBundles[0]
+	if bundle.ReviewStatus != PatchBundleReviewApproved || bundle.ReviewedAt == nil {
+		t.Fatalf("expected bundle approved with reviewed_at, got %+v", bundle)
+	}
+	if len(build.Interaction.PendingRevisions) != 0 {
+		t.Fatalf("expected pending revision to be cleared, got %+v", build.Interaction.PendingRevisions)
+	}
+}
+
+func TestRejectPatchBundleMarksReviewedWithoutApplying(t *testing.T) {
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+	build := &Build{
+		ID:     "patch-reject-build",
+		UserID: 1,
+		Status: BuildAwaitingReview,
+		Tasks: []*Task{
+			{
+				ID:     "task-1",
+				Type:   TaskGenerateFile,
+				Status: TaskCompleted,
+				Output: &TaskOutput{
+					Files: []GeneratedFile{
+						{Path: "src/App.tsx", Content: "export default function App(){return <main>Keep</main>}\n", Language: "typescript"},
+					},
+				},
+			},
+		},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				PatchBundles: []PatchBundle{
+					{
+						ID:             "bundle-reject",
+						BuildID:        "patch-reject-build",
+						MergePolicy:    RepairPatchMergeReviewRequired,
+						ReviewRequired: true,
+						ReviewStatus:   PatchBundleReviewPending,
+						Justification:  "Risky App patch",
+						CreatedAt:      time.Now().UTC(),
+						Operations: []PatchOperation{
+							{Type: PatchReplaceFunction, Path: "src/App.tsx", Content: "export default function App(){return <main>Rejected</main>}\n"},
+						},
+					},
+				},
+			},
+		},
+	}
+	am.builds[build.ID] = build
+
+	body, _ := json.Marshal(map[string]string{"reason": "Changes are too risky"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/patch-reject-build/patch-bundles/bundle-reject/reject", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected reject patch bundle 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal reject patch bundle response: %v", err)
+	}
+	if response["review_status"] != string(PatchBundleReviewRejected) {
+		t.Fatalf("expected review_status rejected, got %v", response["review_status"])
+	}
+	files := am.collectGeneratedFiles(build)
+	if len(files) != 1 || !strings.Contains(files[0].Content, "Keep") {
+		t.Fatalf("expected rejected patch to leave files unchanged, got %+v", files)
+	}
+	bundle := build.SnapshotState.Orchestration.PatchBundles[0]
+	if bundle.ReviewStatus != PatchBundleReviewRejected || bundle.ReviewedAt == nil || !strings.Contains(bundle.ReviewMessage, "too risky") {
+		t.Fatalf("expected bundle rejected with review message, got %+v", bundle)
+	}
+	if build.Status != BuildInProgress {
+		t.Fatalf("expected build to resume in_progress, got %s", build.Status)
 	}
 }
 

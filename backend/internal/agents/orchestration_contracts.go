@@ -314,20 +314,31 @@ const (
 	RepairPatchMergeReviewRequired RepairPatchMergePolicy = "review_required"
 )
 
+type PatchBundleReviewStatus string
+
+const (
+	PatchBundleReviewPending  PatchBundleReviewStatus = "pending"
+	PatchBundleReviewApproved PatchBundleReviewStatus = "approved"
+	PatchBundleReviewRejected PatchBundleReviewStatus = "rejected"
+)
+
 type PatchBundle struct {
-	ID               string                 `json:"id"`
-	BuildID          string                 `json:"build_id"`
-	WorkOrderID      string                 `json:"work_order_id,omitempty"`
-	Provider         ai.AIProvider          `json:"provider,omitempty"`
-	WholeFileRewrite bool                   `json:"whole_file_rewrite,omitempty"`
-	MergePolicy      RepairPatchMergePolicy `json:"merge_policy,omitempty"`
-	ReviewRequired   bool                   `json:"review_required,omitempty"`
-	ReviewBranch     string                 `json:"review_branch,omitempty"`
-	SuggestedCommit  string                 `json:"suggested_commit_title,omitempty"`
-	RiskReasons      []string               `json:"risk_reasons,omitempty"`
-	Justification    string                 `json:"justification,omitempty"`
-	Operations       []PatchOperation       `json:"operations,omitempty"`
-	CreatedAt        time.Time              `json:"created_at"`
+	ID               string                  `json:"id"`
+	BuildID          string                  `json:"build_id"`
+	WorkOrderID      string                  `json:"work_order_id,omitempty"`
+	Provider         ai.AIProvider           `json:"provider,omitempty"`
+	WholeFileRewrite bool                    `json:"whole_file_rewrite,omitempty"`
+	MergePolicy      RepairPatchMergePolicy  `json:"merge_policy,omitempty"`
+	ReviewRequired   bool                    `json:"review_required,omitempty"`
+	ReviewBranch     string                  `json:"review_branch,omitempty"`
+	SuggestedCommit  string                  `json:"suggested_commit_title,omitempty"`
+	RiskReasons      []string                `json:"risk_reasons,omitempty"`
+	Justification    string                  `json:"justification,omitempty"`
+	Operations       []PatchOperation        `json:"operations,omitempty"`
+	ReviewStatus     PatchBundleReviewStatus `json:"review_status,omitempty"`
+	ReviewedAt       *time.Time              `json:"reviewed_at,omitempty"`
+	ReviewMessage    string                  `json:"review_message,omitempty"`
+	CreatedAt        time.Time               `json:"created_at"`
 }
 
 type VerificationReport struct {
@@ -2150,6 +2161,9 @@ func appendPatchBundle(build *Build, bundle PatchBundle) {
 			bundle.SuggestedCommit = flow.SuggestedCommitTitle
 		}
 	}
+	if patchBundleNeedsReview(bundle) && bundle.ReviewStatus == "" {
+		bundle.ReviewStatus = PatchBundleReviewPending
+	}
 	applyPatchBundleTruth(state, bundle)
 	state.PatchBundles = append(state.PatchBundles, bundle)
 	if len(state.PatchBundles) > 32 {
@@ -2166,6 +2180,22 @@ func appendPatchBundle(build *Build, bundle PatchBundle) {
 		appendPendingRevisionLocked(build, summary)
 	}
 	refreshInteractionAttentionLocked(build)
+}
+
+func patchBundleNeedsReview(bundle PatchBundle) bool {
+	return bundle.ReviewRequired || bundle.MergePolicy == RepairPatchMergeReviewRequired
+}
+
+func patchBundleReviewPending(bundle PatchBundle) bool {
+	if !patchBundleNeedsReview(bundle) {
+		return false
+	}
+	switch bundle.ReviewStatus {
+	case "", PatchBundleReviewPending:
+		return true
+	default:
+		return false
+	}
 }
 
 func setPromotionDecision(build *Build, decision *PromotionDecision) {

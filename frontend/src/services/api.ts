@@ -678,6 +678,16 @@ export class ApiService {
     await this.client.post(`/build/${buildId}/reject-all`)
   }
 
+  async approveBuildPatchBundle(buildId: string, bundleId: string, reason?: string): Promise<BuildPatchBundleReviewResponse> {
+    const response = await this.client.post(`/build/${buildId}/patch-bundles/${bundleId}/approve`, reason ? { reason } : {})
+    return response.data
+  }
+
+  async rejectBuildPatchBundle(buildId: string, bundleId: string, reason?: string): Promise<BuildPatchBundleReviewResponse> {
+    const response = await this.client.post(`/build/${buildId}/patch-bundles/${bundleId}/reject`, reason ? { reason } : {})
+    return response.data
+  }
+
   async getBuildCheckpoints(buildId: string): Promise<any[]> {
     const response = await this.client.get(`/build/${buildId}/checkpoints`)
     return response.data.checkpoints || []
@@ -3606,7 +3616,23 @@ export interface BuildPatchBundleState {
   suggested_commit_title?: string
   risk_reasons?: string[]
   justification?: string
+  review_status?: 'pending' | 'approved' | 'rejected'
+  reviewed_at?: string
+  review_message?: string
   created_at?: string
+}
+
+export interface BuildPatchBundleReviewResponse {
+  build_id: string
+  bundle_id: string
+  status?: string
+  review_status: 'pending' | 'approved' | 'rejected'
+  applied?: boolean
+  patch_bundle?: BuildPatchBundleState
+  patch_bundles?: BuildPatchBundleState[]
+  message?: string
+  live?: boolean
+  restored_session?: boolean
 }
 
 export interface BuildVerificationReportState {

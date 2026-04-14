@@ -45,6 +45,7 @@ const baseProps = () => ({
   createdProjectId: 22,
   permissionActionId: null,
   rollbackCheckpointId: null,
+  patchBundleActionId: null,
   chatInput: '',
   setChatInput: vi.fn(),
   plannerSendMode: 'lead' as const,
@@ -64,6 +65,8 @@ const baseProps = () => ({
   onDownload: vi.fn(),
   onRollbackCheckpoint: vi.fn(),
   onResolvePermission: vi.fn(),
+  onApprovePatchBundle: vi.fn(),
+  onRejectPatchBundle: vi.fn(),
   onSetShowDiffReview: vi.fn(),
   onLoadProposedEdits: vi.fn(),
   onOpenCompletedBuild: vi.fn(),
@@ -123,6 +126,51 @@ describe('BuildScreen header prompt actions', () => {
     expect(screen.getByText(/suggested commit: AI repair:/i)).toBeTruthy()
     expect(screen.getByText(/no proposed-edit diff is attached yet/i)).toBeTruthy()
     expect(screen.getByText(/dependency changes require review/i)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /approve/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /reject/i })).toBeTruthy()
+  })
+
+  it('approves and rejects review-required patch bundles from the issues overlay', async () => {
+    const props = baseProps()
+    props.buildState.patchBundles = [
+      {
+        id: 'patch-1',
+        justification: 'Compile validator Hydra winner (strict_ast_syntax_repair)',
+        provider: 'gpt4',
+        merge_policy: 'review_required',
+        review_required: true,
+        risk_reasons: ['dependency_changes_require_review'],
+      },
+    ]
+
+    render(<BuildScreen {...props} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Issues(?:\s*\d+)?$/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /approve/i }))
+    expect(props.onApprovePatchBundle).toHaveBeenCalledWith('patch-1')
+
+    fireEvent.click(screen.getByRole('button', { name: /reject/i }))
+    expect(props.onRejectPatchBundle).toHaveBeenCalledWith('patch-1')
+  })
+
+  it('does not show approved patch bundles as pending review work', async () => {
+    const props = baseProps()
+    props.buildState.patchBundles = [
+      {
+        id: 'patch-1',
+        justification: 'Already approved repair',
+        merge_policy: 'review_required',
+        review_required: true,
+        review_status: 'approved',
+      },
+    ]
+
+    render(<BuildScreen {...props} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Issues(?:\s*\d+)?$/i }))
+
+    expect(screen.queryByText(/Repair Patch Review/i)).toBeNull()
+    expect(screen.queryByText(/Already approved repair/i)).toBeNull()
   })
 
   it('opens proposed edit review from review-required repair bundles', async () => {
