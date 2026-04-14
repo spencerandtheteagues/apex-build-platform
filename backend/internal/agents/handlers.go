@@ -947,6 +947,9 @@ func buildSnapshotStateResponseFields(state BuildSnapshotState, fallbackStatus s
 		if orchestration.BuildContract != nil {
 			fields["build_contract"] = orchestration.BuildContract
 		}
+		if orchestration.HistoricalLearning != nil {
+			fields["historical_learning"] = orchestration.HistoricalLearning
+		}
 		if len(orchestration.WorkOrders) > 0 {
 			fields["work_orders"] = orchestration.WorkOrders
 		}

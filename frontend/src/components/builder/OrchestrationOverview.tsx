@@ -9,6 +9,7 @@ import type {
   BuildFailureFingerprintState,
   BuildIntentBrief,
   BuildInteractionState,
+  BuildLearningSummaryState,
   BuildPatchBundleState,
   BuildPolicyState,
   BuildPromotionDecisionState,
@@ -37,6 +38,7 @@ type OrchestrationOverviewProps = {
   promotionDecision?: BuildPromotionDecisionState
   providerScorecards?: BuildProviderScorecardState[]
   failureFingerprints?: BuildFailureFingerprintState[]
+  historicalLearning?: BuildLearningSummaryState
   truthBySurface?: Record<string, string[]>
 }
 
@@ -649,6 +651,11 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
     .slice(0, 8)
   const topProviderScorecards = (props.providerScorecards || []).slice(0, 4)
   const recentFingerprints = (props.failureFingerprints || []).slice(0, 4)
+  const historicalLearningSignals = [
+    ...(props.historicalLearning?.repair_strategy_win_rates || []),
+    ...(props.historicalLearning?.semantic_repair_hints || []),
+    ...(props.historicalLearning?.recurring_failure_classes || []),
+  ].slice(0, 5)
   const verifiedSurfaceCount = Object.values(truthBySurface).filter((tags) => truthHasAny(tags, ['verified', 'production_candidate', 'production_ready'])).length
   const activeBlockerCount = blockers.length
   const unresolvedVerificationCount = (props.verificationReports || []).filter((report) => report.status !== 'passed').length
@@ -811,7 +818,7 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 xl:grid-cols-3">
         <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
           <CardHeader className="pb-4 border-b border-gray-800">
             <CardTitle className="text-xl flex items-center gap-3">
@@ -896,6 +903,39 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
                   </div>
                 </div>
               ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card variant="cyberpunk" className="border-2 border-gray-800 bg-black/60 backdrop-blur-sm">
+          <CardHeader className="pb-4 border-b border-gray-800">
+            <CardTitle className="text-xl flex items-center gap-3">
+              <Workflow className="w-7 h-7 text-violet-400" />
+              Learning Priors
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-5 space-y-3">
+            {!props.historicalLearning || props.historicalLearning.observed_builds <= 0 ? (
+              <div className="text-sm text-gray-500">Historical repair priors will appear after similar builds record reusable outcomes.</div>
+            ) : (
+              <>
+                <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
+                  <div className="text-xs uppercase tracking-wide text-gray-500">Scope</div>
+                  <div className="mt-1 text-sm font-semibold text-white">{props.historicalLearning.scope || 'Current stack'}</div>
+                  <div className="mt-2 text-xs text-gray-400">
+                    {props.historicalLearning.observed_builds} observed build{props.historicalLearning.observed_builds === 1 ? '' : 's'}
+                  </div>
+                </div>
+                {historicalLearningSignals.length === 0 ? (
+                  <div className="text-sm text-gray-500">No reusable repair signals have crossed the summary threshold yet.</div>
+                ) : (
+                  historicalLearningSignals.map((signal) => (
+                    <div key={signal} className="break-words rounded-lg border border-violet-500/20 bg-violet-500/10 px-3 py-2 text-xs leading-5 text-violet-100">
+                      {signal}
+                    </div>
+                  ))
+                )}
+              </>
             )}
           </CardContent>
         </Card>

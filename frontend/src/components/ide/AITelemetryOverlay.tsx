@@ -8,6 +8,7 @@ import BuildActivityTimeline, {
   type GlassBoxWorkOrder,
 } from './BuildActivityTimeline'
 import HydraRacePanel, { type HydraProviderPanel } from './HydraRacePanel'
+import type { BuildLearningSummaryState } from '@/services/api'
 
 export interface GlassBoxProviderScorecard {
   provider: string
@@ -30,6 +31,7 @@ interface AITelemetryOverlayProps {
   verificationReports?: GlassBoxVerificationReport[]
   patchBundles?: GlassBoxPatchBundle[]
   providerScorecards?: GlassBoxProviderScorecard[]
+  historicalLearning?: BuildLearningSummaryState
 }
 
 const percent = (value?: number): string => {
@@ -55,6 +57,7 @@ export default function AITelemetryOverlay({
   verificationReports = [],
   patchBundles = [],
   providerScorecards = [],
+  historicalLearning,
 }: AITelemetryOverlayProps) {
   const summary = useMemo(() => {
     const activeProviders = providerPanels.filter((panel) => panel.status === 'working' || panel.status === 'thinking').length
@@ -76,6 +79,12 @@ export default function AITelemetryOverlay({
       averageCompile,
     }
   }, [patchBundles, providerPanels, providerScorecards, verificationReports])
+
+  const learningSignals = [
+    ...(historicalLearning?.repair_strategy_win_rates || []),
+    ...(historicalLearning?.semantic_repair_hints || []),
+    ...(historicalLearning?.recurring_failure_classes || []),
+  ].slice(0, 5)
 
   return (
     <div className="space-y-4">
@@ -150,6 +159,29 @@ export default function AITelemetryOverlay({
         patchBundles={patchBundles}
         verificationReports={verificationReports}
       />
+
+      {(historicalLearning && historicalLearning.observed_builds > 0) && (
+        <div className="rounded-lg border border-gray-800 bg-gray-950/50 px-3 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.2em] text-gray-500">Learning Priors</div>
+              <div className="mt-1 text-xs text-gray-400">
+                {historicalLearning.observed_builds} observed build{historicalLearning.observed_builds === 1 ? '' : 's'} in {historicalLearning.scope || 'this scope'}
+              </div>
+            </div>
+            <div className="text-xs font-semibold text-cyan-200">{learningSignals.length} signal{learningSignals.length === 1 ? '' : 's'}</div>
+          </div>
+          {learningSignals.length > 0 && (
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {learningSignals.map((signal) => (
+                <div key={signal} className="break-words rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs leading-5 text-cyan-100">
+                  {signal}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <BuildActivityTimeline
         currentPhase={currentPhase}

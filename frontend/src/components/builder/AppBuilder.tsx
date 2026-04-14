@@ -19,6 +19,7 @@ import apiService, {
   BuildPromotionDecisionState,
   BuildProviderScorecardState,
   BuildFailureFingerprintState,
+  BuildLearningSummaryState,
   BuildVerificationReportState,
   BuildWorkOrderState,
   BuildConversationMessage as ApiBuildConversationMessage,
@@ -206,6 +207,7 @@ interface BuildState {
   promotionDecision?: BuildPromotionDecisionState
   providerScorecards?: BuildProviderScorecardState[]
   failureFingerprints?: BuildFailureFingerprintState[]
+  historicalLearning?: BuildLearningSummaryState
   truthBySurface?: Record<string, string[]>
   interaction?: ApiBuildInteractionState
   platformIssue?: BuildPlatformIssueContext
@@ -2897,6 +2899,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             promotionDecision: data.promotion_decision || prev?.promotionDecision,
             providerScorecards: Array.isArray(data.provider_scorecards) ? data.provider_scorecards : prev?.providerScorecards,
             failureFingerprints: Array.isArray(data.failure_fingerprints) ? data.failure_fingerprints : prev?.failureFingerprints,
+            historicalLearning: data.historical_learning || prev?.historicalLearning,
             truthBySurface: data.truth_by_surface || prev?.truthBySurface,
             qualityGateStatus:
               typeof data.quality_gate_passed === 'boolean'
@@ -2980,6 +2983,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           }
           if (Array.isArray(data.failure_fingerprints)) {
             updates.failureFingerprints = data.failure_fingerprints
+          }
+          if (data.historical_learning) {
+            updates.historicalLearning = data.historical_learning
           }
           if (data.truth_by_surface) {
             updates.truthBySurface = data.truth_by_surface
@@ -4390,6 +4396,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       promotionDecision: payload.promotion_decision,
       providerScorecards: Array.isArray(payload.provider_scorecards) ? payload.provider_scorecards : [],
       failureFingerprints: Array.isArray(payload.failure_fingerprints) ? payload.failure_fingerprints : [],
+      historicalLearning: payload.historical_learning,
       truthBySurface: payload.truth_by_surface || payload.promotion_decision?.truth_by_surface || payload.build_contract?.truth_by_surface,
       errorMessage: extractBuildFailureReason(payload),
       platformIssue: extractPlatformIssue(payload) || loadPlatformIssue,

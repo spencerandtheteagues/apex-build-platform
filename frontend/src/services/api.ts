@@ -3670,6 +3670,21 @@ export interface BuildProviderScorecardState {
   hosted_eligible?: boolean
 }
 
+export interface BuildLearningSummaryState {
+  scope: string
+  observed_builds: number
+  source_build_ids?: string[]
+  recurring_failure_classes?: string[]
+  successful_repair_paths?: string[]
+  repair_strategy_win_rates?: string[]
+  semantic_repair_hints?: string[]
+  frequent_warnings?: string[]
+  hotspot_files?: string[]
+  recommended_avoidance?: string[]
+  clean_pass_signals?: string[]
+  generated_at?: string
+}
+
 export interface ProposedBuildEdit {
   id: string
   build_id: string
@@ -3713,6 +3728,7 @@ export interface CompletedBuildDetail extends CompletedBuildSummary {
   promotion_decision?: BuildPromotionDecisionState
   provider_scorecards?: BuildProviderScorecardState[]
   failure_fingerprints?: BuildFailureFingerprintState[]
+  historical_learning?: BuildLearningSummaryState
   truth_by_surface?: Record<string, string[]>
 }
 

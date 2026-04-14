@@ -359,6 +359,9 @@ export const reconcileBuildPayloadWithCompletedDetail = (
   if ((!Array.isArray(next.failure_fingerprints) || next.failure_fingerprints.length === 0) && Array.isArray(completed.failure_fingerprints) && completed.failure_fingerprints.length > 0) {
     next.failure_fingerprints = completed.failure_fingerprints
   }
+  if (!next.historical_learning && completed.historical_learning) {
+    next.historical_learning = completed.historical_learning
+  }
   if (!next.truth_by_surface && completed.truth_by_surface) {
     next.truth_by_surface = completed.truth_by_surface
   }

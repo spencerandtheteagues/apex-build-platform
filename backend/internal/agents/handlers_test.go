@@ -1294,6 +1294,13 @@ func TestBuildSnapshotStateResponseFieldsIncludesSemanticAliases(t *testing.T) {
 			UpgradeRequired:    false,
 			StaticFrontendOnly: true,
 		},
+		Orchestration: &BuildOrchestrationState{
+			HistoricalLearning: &BuildLearningSummary{
+				Scope:                  "stack:react+go",
+				ObservedBuilds:         2,
+				RepairStrategyWinRates: []string{"semantic_diff/import_export_mismatch strategy=targeted_symbol_repair win_rate=1/1"},
+			},
+		},
 	}
 
 	fields := buildSnapshotStateResponseFields(state, "completed")
@@ -1305,6 +1312,13 @@ func TestBuildSnapshotStateResponseFieldsIncludesSemanticAliases(t *testing.T) {
 	}
 	if _, ok := fields["capability_detector"]; !ok {
 		t.Fatalf("expected capability_detector alias in response fields")
+	}
+	learning, ok := fields["historical_learning"].(*BuildLearningSummary)
+	if !ok {
+		t.Fatalf("expected historical_learning summary in response fields, got %T", fields["historical_learning"])
+	}
+	if learning.ObservedBuilds != 2 || len(learning.RepairStrategyWinRates) != 1 {
+		t.Fatalf("expected historical learning payload, got %+v", learning)
 	}
 }
 

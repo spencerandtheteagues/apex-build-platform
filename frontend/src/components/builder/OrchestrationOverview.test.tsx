@@ -207,6 +207,12 @@ describe('OrchestrationOverview', () => {
             created_at: '2026-03-21T20:11:00Z',
           },
         ]}
+        historicalLearning={{
+          scope: 'stack:react+go',
+          observed_builds: 2,
+          repair_strategy_win_rates: ['semantic_diff/import_export_mismatch strategy=targeted_symbol_repair win_rate=1/1'],
+          semantic_repair_hints: ['patch=import_export_mismatch files=src/App.tsx'],
+        }}
         truthBySurface={{
           frontend: ['partially_wired'],
           backend: ['verified'],
@@ -234,6 +240,8 @@ describe('OrchestrationOverview', () => {
     expect(screen.getByText('Ack required')).toBeTruthy()
     expect(screen.getByText('Provider Scorecards')).toBeTruthy()
     expect(screen.getByText('Repair Signals')).toBeTruthy()
+    expect(screen.getByText('Learning Priors')).toBeTruthy()
+    expect(screen.getByText('semantic_diff/import_export_mismatch strategy=targeted_symbol_repair win_rate=1/1')).toBeTruthy()
   })
 
   it('renders paused orchestration phases truthfully', () => {

@@ -13,7 +13,7 @@ import { LiveActivityFeed } from './LiveActivityFeed'
 import { BuildHistory } from './BuildHistory'
 import DiffReviewPanel from '@/components/diff/DiffReviewPanel'
 import AITelemetryOverlay from '@/components/ide/AITelemetryOverlay'
-import type { BuildMessageTargetMode, BuildPermissionRequest, BuildInteractionState } from '@/services/api'
+import type { BuildLearningSummaryState, BuildMessageTargetMode, BuildPermissionRequest, BuildInteractionState } from '@/services/api'
 
 // ─── Minimal local types matching AppBuilder.tsx structures ──────────────────
 
@@ -130,6 +130,7 @@ interface BSBuildState {
   workOrders?: BuildWorkOrder[]
   verificationReports?: BuildVerificationReport[]
   providerScorecards?: BuildProviderScorecard[]
+  historicalLearning?: BuildLearningSummaryState
 }
 
 interface AIThoughtItem {
@@ -1198,6 +1199,7 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
             verificationReports={buildState.verificationReports}
             patchBundles={buildState.patchBundles}
             providerScorecards={buildState.providerScorecards}
+            historicalLearning={buildState.historicalLearning}
           />
         )}
 

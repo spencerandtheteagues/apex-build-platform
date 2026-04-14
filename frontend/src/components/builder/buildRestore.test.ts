@@ -159,6 +159,12 @@ describe('reconcileBuildPayloadWithCompletedDetail', () => {
       truth_by_surface: {
         frontend: ['prototype_ui_only'],
       },
+      historical_learning: {
+        scope: 'stack:react+go',
+        observed_builds: 2,
+        repair_strategy_win_rates: ['semantic_diff/import_export_mismatch strategy=targeted_symbol_repair win_rate=1/1'],
+        semantic_repair_hints: ['patch=import_export_mismatch files=src/App.tsx'],
+      },
     }
 
     const result = reconcileBuildPayloadWithCompletedDetail(payload, detail as any)
@@ -179,6 +185,8 @@ describe('reconcileBuildPayloadWithCompletedDetail', () => {
     expect(result.blockers).toHaveLength(1)
     expect(result.approvals).toHaveLength(1)
     expect(result.truth_by_surface?.frontend).toEqual(['prototype_ui_only'])
+    expect(result.historical_learning?.observed_builds).toBe(2)
+    expect(result.historical_learning?.repair_strategy_win_rates?.[0]).toContain('targeted_symbol_repair')
   })
 })
 
