@@ -66,6 +66,30 @@ func TestBuildTaskPromptIncludesRepairFingerprintCacheContext(t *testing.T) {
 	}
 }
 
+func TestRepairFingerprintCachePromptSkipsUnmatchedSuccessfulRecovery(t *testing.T) {
+	am := &AgentManager{}
+	build := repairFingerprintCacheTestBuild()
+	agent := &Agent{Provider: ai.ProviderGPT4, Role: RoleFrontend}
+	task := repairFingerprintCacheTestTask()
+	task.Input["target_file"] = "src/Unrelated.tsx"
+
+	insight := am.recentFailureFingerprintInsight(build, agent, task, "build_failure")
+	if insight.SuccessfulRecoveries != 1 {
+		t.Fatalf("expected history insight to see a prior successful recovery, got %+v", insight)
+	}
+
+	entry := am.repairFingerprintCacheLookup(build, agent, task, "build_failure", "standard_retry", insight)
+	if entry.SuccessfulRecoveries != 0 {
+		t.Fatalf("expected cache entry to ignore unmatched successful recovery, got %+v", entry)
+	}
+	if entry.SuggestedRetry != "" {
+		t.Fatalf("expected no retry suggestion from unmatched recovery, got %+v", entry)
+	}
+	if context := repairFingerprintCachePromptContext(entry); context != "" {
+		t.Fatalf("expected no prompt context from unmatched recovery, got %q", context)
+	}
+}
+
 func repairFingerprintCacheTestBuild() *Build {
 	return &Build{
 		ID:           "repair-fingerprint-cache-build",

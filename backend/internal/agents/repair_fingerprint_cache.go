@@ -27,7 +27,6 @@ func (am *AgentManager) repairFingerprintCacheLookup(build *Build, agent *Agent,
 		SameFailureCount:      insight.SameFailureCount,
 		SameProviderFailures:  insight.SameProviderFailures,
 		CrossProviderFailures: insight.CrossProviderFailures,
-		SuccessfulRecoveries:  insight.SuccessfulRecoveries,
 	}
 	if build == nil || task == nil || entry.FailureClass == "" {
 		return entry
@@ -44,12 +43,14 @@ func (am *AgentManager) repairFingerprintCacheLookup(build *Build, agent *Agent,
 	recentFiles := make([]string, 0, len(matches)*2)
 	successfulSolverPath := false
 	successfulNarrowPatch := false
+	matchedSuccessfulRecoveries := 0
 	matched := false
 	for _, match := range matches {
 		if entry.TaskShape != "" && match.TaskShape != "" && match.TaskShape != entry.TaskShape {
 			continue
 		}
 		matched = true
+		matchedSuccessfulRecoveries++
 		if strategy := strings.TrimSpace(match.RepairStrategy); strategy != "" {
 			strategies = append(strategies, strategy)
 		}
@@ -67,6 +68,7 @@ func (am *AgentManager) repairFingerprintCacheLookup(build *Build, agent *Agent,
 	if !matched {
 		return entry
 	}
+	entry.SuccessfulRecoveries = matchedSuccessfulRecoveries
 	entry.RecentStrategies = limitStrings(dedupeStrings(strategies), maxRepairFingerprintCacheMatches)
 	entry.RecentPatchClasses = limitStrings(dedupeStrings(patchClasses), maxRepairFingerprintCacheMatches)
 	entry.RecentFiles = limitStrings(normalizeRepairMemoryFiles(recentFiles), 6)
