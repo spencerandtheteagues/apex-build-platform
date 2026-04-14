@@ -1,5 +1,5 @@
 import type { PreviewStatus, ServerDetection, ServerStatus } from './types'
-import { previewRuntimeStateLabels, type PreviewRuntimeState } from './previewState'
+import { previewRuntimeStateLabels, type BrowserLocalPreviewCapability, type PreviewRuntimeState } from './previewState'
 
 interface PreviewStatusCardsProps {
   status: PreviewStatus | null
@@ -12,6 +12,7 @@ interface PreviewStatusCardsProps {
   backendPreviewAvailable: boolean
   backendPreviewReason: string
   bundlerAvailable: boolean
+  browserLocalPreviewCapability: BrowserLocalPreviewCapability
   autoRefreshEnabled: boolean
   showDevTools: boolean
   customPath: string
@@ -28,6 +29,7 @@ export default function PreviewStatusCards({
   backendPreviewAvailable,
   backendPreviewReason,
   bundlerAvailable,
+  browserLocalPreviewCapability,
   autoRefreshEnabled,
   showDevTools,
   customPath,
@@ -38,6 +40,9 @@ export default function PreviewStatusCards({
       ? `Running on :${status.port}`
       : `${runtimeLabel} · :${status.port}`
     : runtimeLabel
+  const browserLocalDetail = browserLocalPreviewCapability.blockers.length > 0
+    ? browserLocalPreviewCapability.blockers.slice(0, 2).join(' · ')
+    : browserLocalPreviewCapability.reason
 
   return (
     <div className="grid grid-cols-1 gap-2 border-b border-gray-800 bg-gray-950/70 px-3 py-3 md:grid-cols-2 xl:grid-cols-4">
@@ -68,6 +73,9 @@ export default function PreviewStatusCards({
         <div className="mt-2 text-sm font-semibold text-white">{bundlerAvailable ? 'Bundler ready' : 'Bundler unavailable'}</div>
         <div className="mt-1 text-xs text-gray-400">
           Auto-refresh {autoRefreshEnabled ? 'on' : 'off'} · DevTools {showDevTools ? 'on' : 'off'}
+        </div>
+        <div className="mt-1 truncate text-xs text-gray-500" title={browserLocalDetail}>
+          Browser-local {browserLocalPreviewCapability.label.toLowerCase()}: {browserLocalDetail}
         </div>
       </div>
       <div className="rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-3">

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { derivePreviewRuntimeState } from './previewState'
+import { deriveBrowserLocalPreviewCapability, derivePreviewRuntimeState } from './previewState'
 
 const activePreview = {
   project_id: 1,
@@ -60,5 +60,43 @@ describe('derivePreviewRuntimeState', () => {
         error: 'Preview failed',
       }),
     ).toBe('failed')
+  })
+})
+
+describe('deriveBrowserLocalPreviewCapability', () => {
+  it('marks browser-local preview ready when isolation primitives are present', () => {
+    expect(
+      deriveBrowserLocalPreviewCapability({
+        secureContext: true,
+        crossOriginIsolated: true,
+        sharedArrayBufferAvailable: true,
+        webAssemblyAvailable: true,
+      }).state,
+    ).toBe('ready')
+  })
+
+  it('keeps missing isolation separate from unsupported browsers', () => {
+    const capability = deriveBrowserLocalPreviewCapability({
+      secureContext: true,
+      crossOriginIsolated: false,
+      sharedArrayBufferAvailable: false,
+      webAssemblyAvailable: true,
+    })
+
+    expect(capability.state).toBe('needs_isolation')
+    expect(capability.blockers).toContain('COOP/COEP isolation missing')
+    expect(capability.blockers).toContain('SharedArrayBuffer unavailable')
+  })
+
+  it('marks insecure contexts unsupported for browser-local preview', () => {
+    const capability = deriveBrowserLocalPreviewCapability({
+      secureContext: false,
+      crossOriginIsolated: true,
+      sharedArrayBufferAvailable: true,
+      webAssemblyAvailable: true,
+    })
+
+    expect(capability.state).toBe('unsupported')
+    expect(capability.blockers).toContain('Secure context unavailable')
   })
 })

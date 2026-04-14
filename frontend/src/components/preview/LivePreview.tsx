@@ -5,7 +5,7 @@ import NetworkPanel from './NetworkPanel'
 import PreviewRuntimePane from './PreviewRuntimePane'
 import PreviewStatusCards from './PreviewStatusCards'
 import PreviewToolbar from './PreviewToolbar'
-import { derivePreviewRuntimeState } from './previewState'
+import { derivePreviewRuntimeState, detectBrowserLocalPreviewCapability } from './previewState'
 import type { ActiveTab, ViewportSize } from './types'
 import { usePreviewDevtools } from '@/hooks/usePreviewDevtools'
 import { usePreviewRuntime } from '@/hooks/usePreviewRuntime'
@@ -153,6 +153,7 @@ export default function LivePreview({
       serverStatus,
     ],
   )
+  const browserLocalPreviewCapability = useMemo(() => detectBrowserLocalPreviewCapability(), [])
 
   useEffect(() => {
     if (runtimeStatusActive && previewSrc) {
@@ -302,6 +303,7 @@ export default function LivePreview({
           backendPreviewAvailable={runtime.backendPreviewAvailable}
           backendPreviewReason={runtime.backendPreviewReason}
           bundlerAvailable={runtime.bundlerAvailable}
+          browserLocalPreviewCapability={browserLocalPreviewCapability}
           autoRefreshEnabled={autoRefreshEnabled}
           showDevTools={showDevTools}
           customPath={customPath}

@@ -1,6 +1,7 @@
 import type { PreviewStatus, ServerDetection, ServerStatus } from './types'
 
 export type PreviewRuntimeState = 'starting' | 'running' | 'degraded' | 'backend_down' | 'failed' | 'stopped'
+export type BrowserLocalPreviewCapabilityState = 'ready' | 'needs_isolation' | 'unsupported'
 
 export interface PreviewRuntimeStateInput {
   loading: boolean
@@ -14,6 +15,20 @@ export interface PreviewRuntimeStateInput {
   backendPreviewAvailable?: boolean
 }
 
+export interface BrowserLocalPreviewCapabilityInput {
+  secureContext?: boolean
+  crossOriginIsolated?: boolean
+  sharedArrayBufferAvailable?: boolean
+  webAssemblyAvailable?: boolean
+}
+
+export interface BrowserLocalPreviewCapability {
+  state: BrowserLocalPreviewCapabilityState
+  label: string
+  reason: string
+  blockers: string[]
+}
+
 export const previewRuntimeStateLabels: Record<PreviewRuntimeState, string> = {
   starting: 'Starting',
   running: 'Running',
@@ -21,6 +36,12 @@ export const previewRuntimeStateLabels: Record<PreviewRuntimeState, string> = {
   backend_down: 'Backend Down',
   failed: 'Failed',
   stopped: 'Stopped',
+}
+
+export const browserLocalPreviewCapabilityLabels: Record<BrowserLocalPreviewCapabilityState, string> = {
+  ready: 'Ready',
+  needs_isolation: 'Needs Isolation',
+  unsupported: 'Unsupported',
 }
 
 export function derivePreviewRuntimeState({
@@ -41,4 +62,51 @@ export function derivePreviewRuntimeState({
   if (connected === false) return 'degraded'
   if (sandboxDegraded) return 'degraded'
   return 'running'
+}
+
+export function deriveBrowserLocalPreviewCapability({
+  secureContext = false,
+  crossOriginIsolated = false,
+  sharedArrayBufferAvailable = false,
+  webAssemblyAvailable = true,
+}: BrowserLocalPreviewCapabilityInput): BrowserLocalPreviewCapability {
+  const blockers: string[] = []
+  if (!secureContext) blockers.push('Secure context unavailable')
+  if (!crossOriginIsolated) blockers.push('COOP/COEP isolation missing')
+  if (!sharedArrayBufferAvailable) blockers.push('SharedArrayBuffer unavailable')
+  if (!webAssemblyAvailable) blockers.push('WebAssembly unavailable')
+
+  const isolationOnly = blockers.every((blocker) =>
+    blocker === 'COOP/COEP isolation missing' || blocker === 'SharedArrayBuffer unavailable',
+  )
+  const state: BrowserLocalPreviewCapabilityState = blockers.length === 0
+    ? 'ready'
+    : isolationOnly
+      ? 'needs_isolation'
+      : 'unsupported'
+
+  return {
+    state,
+    label: browserLocalPreviewCapabilityLabels[state],
+    reason: state === 'ready'
+      ? 'Browser-local preview prerequisites are available.'
+      : state === 'needs_isolation'
+        ? 'Enable cross-origin isolation before browser-local preview evaluation.'
+        : 'Browser-local preview prerequisites are not available in this browser context.',
+    blockers,
+  }
+}
+
+export function detectBrowserLocalPreviewCapability(): BrowserLocalPreviewCapability {
+  const runtime = globalThis as typeof globalThis & {
+    crossOriginIsolated?: boolean
+    SharedArrayBuffer?: typeof SharedArrayBuffer
+  }
+
+  return deriveBrowserLocalPreviewCapability({
+    secureContext: Boolean(runtime.isSecureContext),
+    crossOriginIsolated: Boolean(runtime.crossOriginIsolated),
+    sharedArrayBufferAvailable: typeof runtime.SharedArrayBuffer === 'function',
+    webAssemblyAvailable: typeof runtime.WebAssembly === 'object',
+  })
 }
