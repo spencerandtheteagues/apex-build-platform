@@ -2,7 +2,11 @@ import type { PreviewStatus, ServerDetection, ServerStatus } from './types'
 
 export type PreviewRuntimeState = 'starting' | 'running' | 'degraded' | 'backend_down' | 'failed' | 'stopped'
 export type BrowserLocalPreviewCapabilityState = 'ready' | 'needs_isolation' | 'unsupported'
-export type BrowserLocalPreviewRouteState = 'platform_runtime' | 'browser_local_candidate' | 'browser_local_blocked'
+export type BrowserLocalPreviewRouteState =
+  | 'platform_runtime'
+  | 'browser_local_eligible'
+  | 'browser_local_active'
+  | 'browser_local_blocked'
 
 export interface PreviewRuntimeStateInput {
   loading: boolean
@@ -34,6 +38,7 @@ export interface BrowserLocalPreviewRouteInput {
   serverDetection: ServerDetection | null
   bundlerAvailable: boolean
   capability: BrowserLocalPreviewCapability
+  browserLocalRuntimeEnabled?: boolean
 }
 
 export interface BrowserLocalPreviewRoute {
@@ -59,7 +64,8 @@ export const browserLocalPreviewCapabilityLabels: Record<BrowserLocalPreviewCapa
 
 export const browserLocalPreviewRouteLabels: Record<BrowserLocalPreviewRouteState, string> = {
   platform_runtime: 'Platform Runtime',
-  browser_local_candidate: 'Browser-Local Candidate',
+  browser_local_eligible: 'Browser-Local Eligible',
+  browser_local_active: 'Browser-Local Active',
   browser_local_blocked: 'Browser-Local Blocked',
 }
 
@@ -134,6 +140,7 @@ export function deriveBrowserLocalPreviewRoute({
   serverDetection,
   bundlerAvailable,
   capability,
+  browserLocalRuntimeEnabled = false,
 }: BrowserLocalPreviewRouteInput): BrowserLocalPreviewRoute {
   if (serverDetection == null) {
     return {
@@ -157,10 +164,17 @@ export function deriveBrowserLocalPreviewRoute({
     }
   }
   if (capability.state === 'ready') {
+    if (!browserLocalRuntimeEnabled) {
+      return {
+        state: 'browser_local_eligible',
+        label: browserLocalPreviewRouteLabels.browser_local_eligible,
+        reason: 'Frontend-only project is eligible for browser-local preview evaluation, but the runtime adapter is not enabled.',
+      }
+    }
     return {
-      state: 'browser_local_candidate',
-      label: browserLocalPreviewRouteLabels.browser_local_candidate,
-      reason: 'Frontend-only project with browser-local prerequisites available.',
+      state: 'browser_local_active',
+      label: browserLocalPreviewRouteLabels.browser_local_active,
+      reason: 'Frontend-only project can use the enabled browser-local runtime path.',
     }
   }
   return {

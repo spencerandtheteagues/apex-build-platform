@@ -154,6 +154,8 @@ export default function LivePreview({
     ],
   )
   const browserLocalPreviewCapability = useMemo(() => detectBrowserLocalPreviewCapability(), [])
+  const browserLocalPreviewRuntimeEnabled = import.meta.env.VITE_ENABLE_BROWSER_LOCAL_PREVIEW === 'true'
+    || import.meta.env.VITE_ENABLE_WEBCONTAINER_PREVIEW === 'true'
 
   useEffect(() => {
     if (runtimeStatusActive && previewSrc) {
@@ -304,6 +306,7 @@ export default function LivePreview({
           backendPreviewReason={runtime.backendPreviewReason}
           bundlerAvailable={runtime.bundlerAvailable}
           browserLocalPreviewCapability={browserLocalPreviewCapability}
+          browserLocalPreviewRuntimeEnabled={browserLocalPreviewRuntimeEnabled}
           autoRefreshEnabled={autoRefreshEnabled}
           showDevTools={showDevTools}
           customPath={customPath}

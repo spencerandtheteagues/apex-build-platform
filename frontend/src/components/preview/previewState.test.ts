@@ -129,14 +129,26 @@ describe('deriveBrowserLocalPreviewRoute', () => {
     ).toBe('platform_runtime')
   })
 
-  it('marks frontend-only projects as browser-local candidates when prerequisites are ready', () => {
+  it('marks frontend-only projects as browser-local eligible when prerequisites are ready but runtime is disabled', () => {
     expect(
       deriveBrowserLocalPreviewRoute({
         serverDetection: { has_backend: false },
         bundlerAvailable: true,
         capability: readyCapability,
       }).state,
-    ).toBe('browser_local_candidate')
+    ).toBe('browser_local_eligible')
+  })
+
+  it('marks frontend-only projects as browser-local active only when the runtime is enabled', () => {
+    const route = deriveBrowserLocalPreviewRoute({
+      serverDetection: { has_backend: false },
+      bundlerAvailable: true,
+      capability: readyCapability,
+      browserLocalRuntimeEnabled: true,
+    })
+
+    expect(route.state).toBe('browser_local_active')
+    expect(route.reason).toContain('enabled browser-local runtime')
   })
 
   it('blocks frontend-only browser-local routing when isolation is missing', () => {

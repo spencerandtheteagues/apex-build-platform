@@ -18,6 +18,7 @@ interface PreviewStatusCardsProps {
   backendPreviewReason: string
   bundlerAvailable: boolean
   browserLocalPreviewCapability: BrowserLocalPreviewCapability
+  browserLocalPreviewRuntimeEnabled?: boolean
   autoRefreshEnabled: boolean
   showDevTools: boolean
   customPath: string
@@ -35,6 +36,7 @@ export default function PreviewStatusCards({
   backendPreviewReason,
   bundlerAvailable,
   browserLocalPreviewCapability,
+  browserLocalPreviewRuntimeEnabled = false,
   autoRefreshEnabled,
   showDevTools,
   customPath,
@@ -52,6 +54,7 @@ export default function PreviewStatusCards({
     serverDetection,
     bundlerAvailable,
     capability: browserLocalPreviewCapability,
+    browserLocalRuntimeEnabled: browserLocalPreviewRuntimeEnabled,
   })
 
   return (
@@ -88,7 +91,7 @@ export default function PreviewStatusCards({
           Browser-local {browserLocalPreviewCapability.label.toLowerCase()}: {browserLocalDetail}
         </div>
         <div className="mt-1 truncate text-xs text-gray-500" title={browserLocalRoute.reason}>
-          Candidate route: {browserLocalRoute.label}
+          Browser-local route: {browserLocalRoute.label}
         </div>
       </div>
       <div className="rounded-lg border border-gray-800 bg-gray-900/70 px-3 py-3">
