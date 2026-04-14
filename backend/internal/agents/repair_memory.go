@@ -152,7 +152,7 @@ func repairPatchClassFromOperation(op PatchOperation) string {
 		return "missing_file"
 	case strings.Contains(content, "export ") || strings.Contains(content, "import "):
 		return "import_export_mismatch"
-	case op.Type == PatchReplaceFunction || op.Type == PatchReplaceSymbol || op.Type == PatchInsertAfterSymbol:
+	case op.Type == PatchReplaceFunction || op.Type == PatchReplaceSymbol || op.Type == PatchInsertAfterSymbol || op.Type == PatchRenameSymbol:
 		return "symbol_patch"
 	case op.Type == PatchPatchJSONKey:
 		return "json_manifest"

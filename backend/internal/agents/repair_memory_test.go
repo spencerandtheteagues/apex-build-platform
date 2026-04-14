@@ -68,6 +68,15 @@ func TestRepairPatchClassFromBundleClassifiesNarrowRepair(t *testing.T) {
 	if got := repairPatchClassFromBundle(bundle); got != "import_export_mismatch" {
 		t.Fatalf("repairPatchClassFromBundle = %q, want import_export_mismatch", got)
 	}
+
+	renameBundle := &PatchBundle{
+		Operations: []PatchOperation{
+			{Type: PatchRenameSymbol, Path: "src/App.tsx", OldName: "OldCard", NewName: "ClientCard"},
+		},
+	}
+	if got := repairPatchClassFromBundle(renameBundle); got != "symbol_patch" {
+		t.Fatalf("repairPatchClassFromBundle(rename) = %q, want symbol_patch", got)
+	}
 }
 
 func TestRepairMemoryPromptContextReturnsRecentSuccessfulMatch(t *testing.T) {
