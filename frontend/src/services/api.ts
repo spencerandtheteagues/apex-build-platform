@@ -3720,7 +3720,21 @@ export interface BuildLearningSummaryState {
   frequent_warnings?: string[]
   hotspot_files?: string[]
   recommended_avoidance?: string[]
+  prompt_improvement_proposals?: BuildPromptImprovementProposalState[]
   clean_pass_signals?: string[]
+  generated_at?: string
+}
+
+export interface BuildPromptImprovementProposalState {
+  id: string
+  scope: string
+  target_prompt: string
+  failure_cluster: string
+  proposal: string
+  evidence?: string[]
+  benchmark_gate: string
+  requires_approval: boolean
+  review_state: string
   generated_at?: string
 }
 

@@ -222,6 +222,19 @@ describe('OrchestrationOverview', () => {
           observed_builds: 2,
           repair_strategy_win_rates: ['semantic_diff/import_export_mismatch strategy=targeted_symbol_repair win_rate=1/1'],
           semantic_repair_hints: ['patch=import_export_mismatch files=src/App.tsx'],
+          prompt_improvement_proposals: [
+            {
+              id: 'prompt-stack-react-go-preview-repair-preview-verification',
+              scope: 'stack:react+go',
+              target_prompt: 'preview_repair',
+              failure_cluster: 'preview_verification',
+              proposal: 'Emphasize deterministic entrypoint, port, boot-command, and router-context checks before provider critique or visual polish.',
+              evidence: ['failure_class=preview_verification count=2'],
+              benchmark_gate: 'Run preview runtime verification and generated app smoke benchmarks before approval.',
+              requires_approval: true,
+              review_state: 'proposed',
+            },
+          ],
         }}
         truthBySurface={{
           frontend: ['partially_wired'],
@@ -254,6 +267,10 @@ describe('OrchestrationOverview', () => {
     expect(screen.getByText('Repair Signals')).toBeTruthy()
     expect(screen.getByText('Learning Priors')).toBeTruthy()
     expect(screen.getByText('semantic_diff/import_export_mismatch strategy=targeted_symbol_repair win_rate=1/1')).toBeTruthy()
+    expect(screen.getByText('Prompt Proposals')).toBeTruthy()
+    expect(screen.getByText('Review required')).toBeTruthy()
+    expect(screen.getByText(/deterministic entrypoint, port, boot-command/)).toBeTruthy()
+    expect(screen.getByText('Benchmark gate: Run preview runtime verification and generated app smoke benchmarks before approval.')).toBeTruthy()
   })
 
   it('renders paused orchestration phases truthfully', () => {

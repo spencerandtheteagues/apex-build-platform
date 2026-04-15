@@ -676,6 +676,7 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
     ...(props.historicalLearning?.semantic_repair_hints || []),
     ...(props.historicalLearning?.recurring_failure_classes || []),
   ].slice(0, 5)
+  const promptImprovementProposals = (props.historicalLearning?.prompt_improvement_proposals || []).slice(0, 3)
   const verifiedSurfaceCount = Object.values(truthBySurface).filter((tags) => truthHasAny(tags, ['verified', 'production_candidate', 'production_ready'])).length
   const activeBlockerCount = blockers.length
   const unresolvedVerificationCount = (props.verificationReports || []).filter((report) => report.status !== 'passed').length
@@ -954,6 +955,41 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
                       {signal}
                     </div>
                   ))
+                )}
+                {promptImprovementProposals.length > 0 && (
+                  <div className="space-y-3 pt-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-xs uppercase tracking-wide text-gray-500">Prompt Proposals</div>
+                      <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-[11px] text-amber-200">
+                        Review required
+                      </Badge>
+                    </div>
+                    {promptImprovementProposals.map((proposal) => (
+                      <div key={proposal.id} className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" className="border-gray-700 bg-black/40 text-[11px] text-gray-300">
+                            {humanize(proposal.target_prompt)}
+                          </Badge>
+                          <Badge variant="outline" className="border-gray-700 bg-black/40 text-[11px] text-gray-300">
+                            {humanize(proposal.failure_cluster)}
+                          </Badge>
+                        </div>
+                        <div className="mt-2 break-words text-xs leading-5 text-amber-100">{proposal.proposal}</div>
+                        {proposal.evidence && proposal.evidence.length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            {proposal.evidence.slice(0, 3).map((item) => (
+                              <div key={item} className="break-words text-[11px] leading-4 text-amber-200/80">
+                                Evidence: {item}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div className="mt-2 break-words text-[11px] leading-4 text-gray-400">
+                          Benchmark gate: {proposal.benchmark_gate}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </>
             )}

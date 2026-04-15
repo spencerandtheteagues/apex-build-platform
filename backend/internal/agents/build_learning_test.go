@@ -224,6 +224,79 @@ func TestSummarizeHistoricalBuildLearningCountsFailedRepairStrategyAttempts(t *t
 	}
 }
 
+func TestSummarizeHistoricalBuildLearningGeneratesPromptImprovementProposals(t *testing.T) {
+	stateJSON := mustMarshalBuildState(t, BuildSnapshotState{
+		Orchestration: &BuildOrchestrationState{
+			FailureFingerprints: []FailureFingerprint{
+				{
+					ID:            "preview-1",
+					BuildID:       "prior-preview",
+					TaskShape:     TaskShapeVerification,
+					FailureClass:  "preview_verification",
+					FilesInvolved: []string{"src/App.tsx"},
+					CreatedAt:     time.Now().UTC(),
+				},
+				{
+					ID:            "preview-2",
+					BuildID:       "prior-preview",
+					TaskShape:     TaskShapeRepair,
+					FailureClass:  "preview_verification",
+					FilesInvolved: []string{"src/App.tsx"},
+					RepairPathChosen: []string{
+						"preview_repair",
+						"router_context",
+					},
+					RepairStrategy:  "router_context",
+					PatchClass:      "entrypoint_patch",
+					RepairSucceeded: true,
+					CreatedAt:       time.Now().UTC(),
+				},
+			},
+			VerificationReports: []VerificationReport{
+				{
+					ID:          "report-preview",
+					BuildID:     "prior-preview",
+					Phase:       "preview_verification",
+					Surface:     SurfaceFrontend,
+					Status:      VerificationFailed,
+					Warnings:    []string{"runtime/build commands were inferred"},
+					GeneratedAt: time.Now().UTC(),
+				},
+			},
+		},
+	})
+
+	learning := summarizeHistoricalBuildLearning("stack:react+vite", []models.CompletedBuild{{
+		BuildID:   "prior-preview",
+		StateJSON: stateJSON,
+	}})
+	if learning == nil {
+		t.Fatal("expected learning summary")
+	}
+	if len(learning.PromptImprovementProposals) != 1 {
+		t.Fatalf("expected one prompt proposal, got %+v", learning.PromptImprovementProposals)
+	}
+	proposal := learning.PromptImprovementProposals[0]
+	if proposal.TargetPrompt != "preview_repair" {
+		t.Fatalf("target prompt = %q, want preview_repair", proposal.TargetPrompt)
+	}
+	if proposal.FailureCluster != "preview_verification" {
+		t.Fatalf("failure cluster = %q, want preview_verification", proposal.FailureCluster)
+	}
+	if !proposal.RequiresApproval || proposal.ReviewState != "proposed" {
+		t.Fatalf("expected proposal to require review, got %+v", proposal)
+	}
+	if !strings.Contains(proposal.Proposal, "entrypoint") {
+		t.Fatalf("expected preview proposal text, got %q", proposal.Proposal)
+	}
+	if !containsString(proposal.Evidence, "failure_class=preview_verification count=2") {
+		t.Fatalf("expected failure evidence, got %+v", proposal.Evidence)
+	}
+	if proposal.BenchmarkGate == "" {
+		t.Fatal("expected benchmark gate")
+	}
+}
+
 func TestCreateBuildLoadsHistoricalLearningFromPersistedRealOutcomes(t *testing.T) {
 	db := openBuildTestDB(t)
 	persistManager := newTestIterationManager(&stubPreflight{

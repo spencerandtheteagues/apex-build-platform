@@ -13,8 +13,10 @@ import (
 )
 
 const (
-	maxHistoricalBuildSamples = 8
-	maxHistoricalBuildScan    = 24
+	maxHistoricalBuildSamples       = 8
+	maxHistoricalBuildScan          = 24
+	maxPromptImprovementProposals   = 3
+	minPromptProposalFailureSamples = 2
 )
 
 type historicalBuildScope struct {
@@ -291,20 +293,22 @@ func summarizeHistoricalBuildLearning(scope string, snapshots []models.Completed
 	recurringFailures := topCountedStrings(failureCounts, 5)
 	frequentWarnings := topCountedStrings(warningCounts, 5)
 	recommendedAvoidance := deriveHistoricalAvoidanceTips(recurringFailures, frequentWarnings)
+	generatedAt := time.Now().UTC()
 
 	return &BuildLearningSummary{
-		Scope:                   scope,
-		ObservedBuilds:          len(snapshots),
-		SourceBuildIDs:          limitStrings(sourceIDs, 6),
-		RecurringFailureClasses: recurringFailures,
-		SuccessfulRepairPaths:   topCountedStrings(repairPathCounts, 4),
-		RepairStrategyWinRates:  topRepairStrategyWinRates(repairStrategyStats, 4),
-		SemanticRepairHints:     topCountedStrings(semanticRepairHintCounts, 4),
-		FrequentWarnings:        frequentWarnings,
-		HotspotFiles:            topCountedStrings(hotspotCounts, 5),
-		RecommendedAvoidance:    recommendedAvoidance,
-		CleanPassSignals:        topCountedStrings(cleanPassCounts, 4),
-		GeneratedAt:             time.Now().UTC(),
+		Scope:                      scope,
+		ObservedBuilds:             len(snapshots),
+		SourceBuildIDs:             limitStrings(sourceIDs, 6),
+		RecurringFailureClasses:    recurringFailures,
+		SuccessfulRepairPaths:      topCountedStrings(repairPathCounts, 4),
+		RepairStrategyWinRates:     topRepairStrategyWinRates(repairStrategyStats, 4),
+		SemanticRepairHints:        topCountedStrings(semanticRepairHintCounts, 4),
+		FrequentWarnings:           frequentWarnings,
+		HotspotFiles:               topCountedStrings(hotspotCounts, 5),
+		RecommendedAvoidance:       recommendedAvoidance,
+		PromptImprovementProposals: buildPromptImprovementProposals(scope, failureCounts, warningCounts, hotspotCounts, repairStrategyStats, generatedAt),
+		CleanPassSignals:           topCountedStrings(cleanPassCounts, 4),
+		GeneratedAt:                generatedAt,
 	}
 }
 
@@ -544,6 +548,163 @@ func deriveHistoricalAvoidanceTips(failureClasses, warnings []string) []string {
 		}
 	}
 	return limitStrings(dedupeStrings(tips), 6)
+}
+
+type promptImprovementRecipe struct {
+	TargetPrompt  string
+	Proposal      string
+	BenchmarkGate string
+}
+
+func buildPromptImprovementProposals(
+	scope string,
+	failureCounts map[string]int,
+	warningCounts map[string]int,
+	hotspotCounts map[string]int,
+	repairStrategyStats map[string]*repairStrategyWinRate,
+	generatedAt time.Time,
+) []PromptImprovementProposal {
+	if len(failureCounts) == 0 {
+		return nil
+	}
+
+	type failureCluster struct {
+		Class string
+		Count int
+	}
+	clusters := make([]failureCluster, 0, len(failureCounts))
+	for class, count := range failureCounts {
+		normalized := normalizeFailureIdentifier(class)
+		if normalized == "" || count < minPromptProposalFailureSamples {
+			continue
+		}
+		clusters = append(clusters, failureCluster{Class: normalized, Count: count})
+	}
+	sort.SliceStable(clusters, func(i, j int) bool {
+		if clusters[i].Count != clusters[j].Count {
+			return clusters[i].Count > clusters[j].Count
+		}
+		return clusters[i].Class < clusters[j].Class
+	})
+
+	proposals := make([]PromptImprovementProposal, 0, min(len(clusters), maxPromptImprovementProposals))
+	seenTargets := map[string]bool{}
+	topWarnings := topCountedStrings(warningCounts, 2)
+	topHotspots := topCountedStrings(hotspotCounts, 2)
+	topStrategyOutcomes := topRepairStrategyWinRates(repairStrategyStats, 2)
+	for _, cluster := range clusters {
+		recipe := promptImprovementRecipeForFailureClass(cluster.Class)
+		if recipe.TargetPrompt == "" || seenTargets[recipe.TargetPrompt] {
+			continue
+		}
+		seenTargets[recipe.TargetPrompt] = true
+		evidence := []string{
+			fmt.Sprintf("failure_class=%s count=%d", cluster.Class, cluster.Count),
+		}
+		for _, warning := range topWarnings {
+			evidence = append(evidence, "warning="+strings.TrimSpace(warning))
+		}
+		for _, hotspot := range topHotspots {
+			evidence = append(evidence, "hotspot="+strings.TrimSpace(hotspot))
+		}
+		for _, outcome := range topStrategyOutcomes {
+			evidence = append(evidence, "repair_strategy="+strings.TrimSpace(outcome))
+		}
+		proposals = append(proposals, PromptImprovementProposal{
+			ID:               promptImprovementProposalID(scope, recipe.TargetPrompt, cluster.Class),
+			Scope:            strings.TrimSpace(scope),
+			TargetPrompt:     recipe.TargetPrompt,
+			FailureCluster:   cluster.Class,
+			Proposal:         recipe.Proposal,
+			Evidence:         limitStrings(dedupeStrings(evidence), 6),
+			BenchmarkGate:    recipe.BenchmarkGate,
+			RequiresApproval: true,
+			ReviewState:      "proposed",
+			GeneratedAt:      generatedAt,
+		})
+		if len(proposals) >= maxPromptImprovementProposals {
+			break
+		}
+	}
+	return proposals
+}
+
+func promptImprovementRecipeForFailureClass(failureClass string) promptImprovementRecipe {
+	normalized := normalizeFailureIdentifier(failureClass)
+	switch {
+	case strings.Contains(normalized, "contract"):
+		return promptImprovementRecipe{
+			TargetPrompt:  "war_room_contract_planning",
+			Proposal:      "Require the planning prompt to lock API routes, env vars, response shapes, and runtime commands before implementation begins.",
+			BenchmarkGate: "Run contract critique, auth lifecycle, and preflight smoke benchmarks before approval.",
+		}
+	case strings.Contains(normalized, "preview"):
+		return promptImprovementRecipe{
+			TargetPrompt:  "preview_repair",
+			Proposal:      "Emphasize deterministic entrypoint, port, boot-command, and router-context checks before provider critique or visual polish.",
+			BenchmarkGate: "Run preview runtime verification and generated app smoke benchmarks before approval.",
+		}
+	case strings.Contains(normalized, "compile"), strings.Contains(normalized, "typescript"), strings.Contains(normalized, "verification"):
+		return promptImprovementRecipe{
+			TargetPrompt:  "compile_repair",
+			Proposal:      "Bias the repair prompt toward import/export, dependency manifest, and type-surface checks before broad file rewrites.",
+			BenchmarkGate: "Run compile validator, repair memory, and frontend typecheck benchmarks before approval.",
+		}
+	case strings.Contains(normalized, "interaction"):
+		return promptImprovementRecipe{
+			TargetPrompt:  "interaction_canary",
+			Proposal:      "Add a first-click interaction checklist for primary controls, forms, and navigation before promotion.",
+			BenchmarkGate: "Run browser interaction smoke and launch-flow benchmarks before approval.",
+		}
+	case strings.Contains(normalized, "visual"):
+		return promptImprovementRecipe{
+			TargetPrompt:  "visual_review",
+			Proposal:      "Add screenshot-level checks for contrast, overflow, responsive fit, and meaningful empty/loading states after styling edits.",
+			BenchmarkGate: "Run screenshot and responsive layout benchmarks before approval.",
+		}
+	case strings.Contains(normalized, "auth"):
+		return promptImprovementRecipe{
+			TargetPrompt:  "auth_contract",
+			Proposal:      "Require auth/session callback, cookie, CORS, and protected-route contracts to be explicit before route generation.",
+			BenchmarkGate: "Run auth lifecycle, protected route, and preflight benchmarks before approval.",
+		}
+	case strings.Contains(normalized, "database"), strings.Contains(normalized, "schema"):
+		return promptImprovementRecipe{
+			TargetPrompt:  "data_contract",
+			Proposal:      "Require schema ownership, migrations, seed data, and connection env vars to be locked before backend handler generation.",
+			BenchmarkGate: "Run database migration, model typing, and backend route benchmarks before approval.",
+		}
+	default:
+		return promptImprovementRecipe{
+			TargetPrompt:  "general_reliability",
+			Proposal:      "Add a narrowly scoped failure-class checklist to the relevant generation and repair prompts before changing implementation behavior.",
+			BenchmarkGate: "Run the smallest benchmark suite that reproduces this failure class before approval.",
+		}
+	}
+}
+
+func promptImprovementProposalID(scope, targetPrompt, failureClass string) string {
+	parts := []string{
+		"prompt",
+		normalizeRepairMemoryIdentifier(scope),
+		normalizeRepairMemoryIdentifier(targetPrompt),
+		normalizeRepairMemoryIdentifier(failureClass),
+	}
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			filtered = append(filtered, part)
+		}
+	}
+	return limitPromptProposalID(strings.Join(filtered, "-"))
+}
+
+func limitPromptProposalID(id string) string {
+	const maxIDLength = 96
+	if len(id) <= maxIDLength {
+		return id
+	}
+	return strings.TrimRight(id[:maxIDLength], "-_")
 }
 
 func buildLearningPromptContext(summary *BuildLearningSummary) string {

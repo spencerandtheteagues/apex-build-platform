@@ -394,18 +394,32 @@ type BuildReliabilitySummary struct {
 }
 
 type BuildLearningSummary struct {
-	Scope                   string    `json:"scope"`
-	ObservedBuilds          int       `json:"observed_builds"`
-	SourceBuildIDs          []string  `json:"source_build_ids,omitempty"`
-	RecurringFailureClasses []string  `json:"recurring_failure_classes,omitempty"`
-	SuccessfulRepairPaths   []string  `json:"successful_repair_paths,omitempty"`
-	RepairStrategyWinRates  []string  `json:"repair_strategy_win_rates,omitempty"`
-	SemanticRepairHints     []string  `json:"semantic_repair_hints,omitempty"`
-	FrequentWarnings        []string  `json:"frequent_warnings,omitempty"`
-	HotspotFiles            []string  `json:"hotspot_files,omitempty"`
-	RecommendedAvoidance    []string  `json:"recommended_avoidance,omitempty"`
-	CleanPassSignals        []string  `json:"clean_pass_signals,omitempty"`
-	GeneratedAt             time.Time `json:"generated_at"`
+	Scope                      string                      `json:"scope"`
+	ObservedBuilds             int                         `json:"observed_builds"`
+	SourceBuildIDs             []string                    `json:"source_build_ids,omitempty"`
+	RecurringFailureClasses    []string                    `json:"recurring_failure_classes,omitempty"`
+	SuccessfulRepairPaths      []string                    `json:"successful_repair_paths,omitempty"`
+	RepairStrategyWinRates     []string                    `json:"repair_strategy_win_rates,omitempty"`
+	SemanticRepairHints        []string                    `json:"semantic_repair_hints,omitempty"`
+	FrequentWarnings           []string                    `json:"frequent_warnings,omitempty"`
+	HotspotFiles               []string                    `json:"hotspot_files,omitempty"`
+	RecommendedAvoidance       []string                    `json:"recommended_avoidance,omitempty"`
+	PromptImprovementProposals []PromptImprovementProposal `json:"prompt_improvement_proposals,omitempty"`
+	CleanPassSignals           []string                    `json:"clean_pass_signals,omitempty"`
+	GeneratedAt                time.Time                   `json:"generated_at"`
+}
+
+type PromptImprovementProposal struct {
+	ID               string    `json:"id"`
+	Scope            string    `json:"scope"`
+	TargetPrompt     string    `json:"target_prompt"`
+	FailureCluster   string    `json:"failure_cluster"`
+	Proposal         string    `json:"proposal"`
+	Evidence         []string  `json:"evidence,omitempty"`
+	BenchmarkGate    string    `json:"benchmark_gate"`
+	RequiresApproval bool      `json:"requires_approval"`
+	ReviewState      string    `json:"review_state"`
+	GeneratedAt      time.Time `json:"generated_at"`
 }
 
 type FailureFingerprint struct {
