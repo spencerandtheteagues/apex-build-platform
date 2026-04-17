@@ -2792,7 +2792,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [connectWebSocket])
+  }, [])
 
   // Auto-resume last active build on mount (covers mobile browser memory reclaim / page reload)
   const mountResumeAttempted = useRef(false)
@@ -2809,7 +2809,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     if (buildStateRef.current?.id) return
 
     void hydrateBuildContext(resumeId, { reconnectLive: true, notify: true })
-  }, [user?.id, readStoredValue, hydrateBuildContext])
+  }, [user?.id, readStoredValue])
 
   const clampPercent = (value: number) => {
     if (!Number.isFinite(value)) return 0
