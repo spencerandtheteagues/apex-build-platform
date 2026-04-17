@@ -26,16 +26,18 @@ type VerifiableFile struct {
 
 // VerificationResult holds the outcome of a preview verification run.
 type VerificationResult struct {
-	Passed           bool
-	Checks           []CheckResult
-	FailureKind      string   // "missing_entrypoint", "blank_screen", "corrupt_content", "invalid_html", "invalid_package_json", "backend_missing", "backend_no_listen", "backend_no_routes"
-	RepairHints      []string // Actionable repair directives for the agent
-	Details          string   // Human-readable failure description
-	Duration         time.Duration
-	ScreenshotBase64 string
-	CanaryErrors     []string
-	CanaryClickCount int
-	VisionSeverity   string // "critical", "advisory", "clean", or "" when vision skipped
+	Passed                      bool
+	Checks                      []CheckResult
+	FailureKind                 string   // "missing_entrypoint", "blank_screen", "corrupt_content", "invalid_html", "invalid_package_json", "backend_missing", "backend_no_listen", "backend_no_routes"
+	RepairHints                 []string // Actionable repair directives for the agent
+	Details                     string   // Human-readable failure description
+	Duration                    time.Duration
+	ScreenshotBase64            string
+	CanaryErrors                []string
+	CanaryClickCount            int
+	CanaryVisibleControls       int  // number of visible interactive controls detected
+	CanaryPostInteractionHealthy bool // false when the preview blanked after interactions
+	VisionSeverity              string // "critical", "advisory", "clean", or "" when vision skipped
 }
 
 // CheckResult records the outcome of a single named check.
@@ -242,6 +244,8 @@ func (v *Verifier) VerifyFiles(ctx context.Context, files []VerifiableFile, isFu
 				res.RepairHints = appendUniqueStrings(res.RepairHints, rr.RepairHints...)
 				res.CanaryErrors = appendUniqueStrings(res.CanaryErrors, rr.CanaryErrors...)
 				res.CanaryClickCount = rr.CanaryClickCount
+				res.CanaryVisibleControls = rr.CanaryVisibleControls
+				res.CanaryPostInteractionHealthy = rr.CanaryPostInteractionHealthy
 				res.VisionSeverity = rr.VisionSeverity
 				if len(rr.ScreenshotData) > 0 {
 					res.ScreenshotBase64 = base64.StdEncoding.EncodeToString(rr.ScreenshotData)
