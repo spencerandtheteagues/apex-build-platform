@@ -197,6 +197,7 @@ type AgentManager struct {
 	chunkedEditor          *ChunkedEditor       // splits/reassembles large-file edits to stay within output token limits
 	previewVerifier        BuildPreviewVerifier // optional preview readiness verifier (wired in main.go)
 	visionIntake           *VisionIntakeProcessor
+	promptEvolution        *PromptEvolutionStore
 	taskCancels            map[string]context.CancelFunc
 	instanceID             string
 	mu                     sync.RWMutex
@@ -272,6 +273,7 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 		am.db = db[0]
 		am.spendTracker = spend.NewSpendTracker(db[0])
 		am.editStore = NewProposedEditStoreWithDB(db[0])
+		am.promptEvolution = NewPromptEvolutionStore(db[0])
 	}
 
 	am.ensureWorkerInfrastructure()
@@ -7703,6 +7705,14 @@ func (am *AgentManager) activatePromptPackRequest(build *Build, requestID string
 	event = promptPackActivationEventRecordFromRow(eventRow)
 	requestRecord := promptPackActivationRecordFromRow(requestRow, promptPackDraftFromActivationRow(requestRow))
 	currentStatus := currentBuildStatus(build)
+
+	// Phase 10: if prompt evolution is enabled, flip live_prompt_read_enabled
+	// so this pack's guardrails are injected into future build prompts.
+	if promptEvolutionEnabled() {
+		am.enablePromptPackLiveRead(version.ID)
+		log.Printf("[prompt_evolution] live read enabled for version %s (scope=%s)", version.ID, version.Scope)
+	}
+
 	go am.broadcast(build.ID, &WSMessage{
 		Type:      WSBuildProgress,
 		BuildID:   build.ID,
@@ -19957,6 +19967,7 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 	validatedBuildSpecContext := ""
 	reliabilitySummaryContext := ""
 	historicalBuildLearningContext := ""
+	activeGuardrailsContext := ""
 	repairFingerprintCacheContext := ""
 	if build != nil && build.SnapshotState.Orchestration != nil {
 		if build.SnapshotState.Orchestration.ValidatedBuildSpec != nil {
@@ -19968,6 +19979,11 @@ Analyze what went wrong and use a DIFFERENT, CORRECTED approach this time.
 		if build.SnapshotState.Orchestration.HistoricalLearning != nil {
 			historicalBuildLearningContext = buildLearningPromptContext(build.SnapshotState.Orchestration.HistoricalLearning)
 		}
+	}
+	// Phase 10: inject active prompt guardrails derived from approved proposals.
+	if agent != nil {
+		targetPrompt := promptEvolutionTargetForRole(agent.Role, task)
+		activeGuardrailsContext = am.promptEvolutionGuardrailContext(targetPrompt)
 	}
 	if build != nil && agent != nil {
 		if failureClass := repairFingerprintFailureClassForTask(task); failureClass != "" {
@@ -20222,6 +20238,7 @@ App being built: %s
 %s
 %s
 %s
+%s
 %s`,
 		task.Type,
 		task.Description,
@@ -20236,6 +20253,7 @@ App being built: %s
 		validatedBuildSpecContext,
 		reliabilitySummaryContext,
 		historicalBuildLearningContext,
+		activeGuardrailsContext,
 		repairFingerprintCacheContext,
 		workOrderArtifactContext,
 		currentOwnedFilesContext,
