@@ -872,11 +872,11 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
       type="button"
       aria-pressed={isSelected}
       className={cn(
-        "tech-stack-card relative group min-h-[8.6rem] p-4 rounded-xl transition-all duration-300 text-left overflow-hidden",
+        "tech-stack-card relative group min-h-[6rem] sm:min-h-[8.6rem] p-2 sm:p-4 rounded-xl transition-all duration-300 text-left overflow-hidden",
         "border-2 backdrop-blur-sm",
         isSelected
-          ? "is-selected border-red-500 bg-red-950/40 shadow-lg shadow-red-900/40 scale-[1.02]"
-          : "border-gray-800 bg-gray-900/50 hover:border-gray-600 hover:bg-gray-900/70 hover:scale-[1.01]"
+          ? "is-selected border-red-500 bg-red-950/40 shadow-lg shadow-red-900/40 sm:scale-[1.02]"
+          : "border-gray-800 bg-gray-900/50 hover:border-gray-600 hover:bg-gray-900/70 sm:hover:scale-[1.01]"
       )}
     >
       {/* Holographic scan effect */}
@@ -897,9 +897,9 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
       )}
 
       {/* Content */}
-      <div className="relative z-10 flex items-start gap-3">
+      <div className="relative z-10 flex items-start gap-2 sm:gap-3">
         <div className={cn(
-          "tech-stack-icon w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-300 flex-shrink-0",
+          "tech-stack-icon w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center transition-all duration-300 flex-shrink-0",
           isSelected
             ? "bg-red-600 text-white shadow-lg shadow-red-900/50"
             : "bg-gray-800 text-gray-400 group-hover:text-white group-hover:bg-gray-700"
@@ -908,13 +908,13 @@ const TechStackCard: React.FC<TechStackCardProps> = ({ stack, isSelected, onClic
         </div>
         <div className="flex-1 min-w-0 pt-0.5">
           <h4 className={cn(
-            "tech-stack-title [overflow-wrap:anywhere] break-words font-bold text-[0.92rem] leading-tight transition-colors",
+            "tech-stack-title [overflow-wrap:anywhere] break-words font-bold text-xs sm:text-[0.92rem] leading-tight transition-colors",
             isSelected ? "text-white" : "text-gray-200"
           )}>
             {stack.name}
           </h4>
           <p className={cn(
-            "tech-stack-description mt-1 [overflow-wrap:anywhere] break-words text-xs leading-snug transition-colors",
+            "tech-stack-description mt-0.5 sm:mt-1 [overflow-wrap:anywhere] break-words text-[10px] sm:text-xs leading-snug transition-colors",
             isSelected ? "text-red-300" : "text-gray-500"
           )}>{stack.description}</p>
         </div>
@@ -4864,8 +4864,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     // Don't resume if we already have a build loaded
     if (buildStateRef.current?.id) return
 
-    void hydrateBuildContext(resumeId, { reconnectLive: true, notify: true })
-  }, [user?.id, readStoredValue, hydrateBuildContext])
+    void hydrateBuildContext(resumeId, { reconnectLive: true, notify: true }).catch(() => {
+      // Build no longer accessible — clear stored IDs to prevent crash loop on next load
+      clearActiveBuildId()
+      clearLastWorkflowBuildId()
+    })
+  }, [user?.id, readStoredValue, hydrateBuildContext, clearActiveBuildId, clearLastWorkflowBuildId])
 
   useEffect(() => {
     if (!buildState?.id || !isBuildActive) {
@@ -5749,13 +5753,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             <div className="grid grid-cols-1 lg:grid-cols-[1fr,380px] gap-6 items-start">
             {/* Left Column: Build Configuration */}
             <Card variant="cyberpunk" glow="intense" className="builder-main-card border-2 border-red-900/40 bg-black/60 backdrop-blur-xl">
-              <CardContent className="p-8 md:p-10">
+              <CardContent className="p-4 sm:p-6 md:p-8 lg:p-10">
                 {/* Build Mode Toggle */}
-                <div className="flex items-center justify-center gap-6 mb-10">
+                <div className="flex items-center justify-center gap-2 sm:gap-6 mb-6 md:mb-10">
                   <button
                     onClick={() => setBuildMode('fast')}
                     className={cn(
-                      'build-mode-btn relative flex items-center gap-4 px-8 py-4 rounded-xl transition-all duration-300 overflow-hidden group',
+                      'build-mode-btn relative flex flex-1 items-center gap-2 sm:gap-4 px-4 sm:px-8 py-3 sm:py-4 rounded-xl transition-all duration-300 overflow-hidden group min-w-0',
                       buildMode === 'fast' && 'is-active',
                       buildMode === 'fast'
                         ? 'bg-gradient-to-r from-red-900/50 to-orange-900/40 border-2 border-red-500 text-red-400 shadow-xl shadow-red-900/40'
@@ -5765,16 +5769,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     {buildMode === 'fast' && (
                       <div className="build-mode-active-overlay absolute inset-0 bg-gradient-to-r from-red-600/10 via-orange-600/10 to-red-600/10 animate-pulse" />
                     )}
-                    <Zap className={cn("w-6 h-6 relative z-10", buildMode === 'fast' && "animate-pulse")} />
-                    <div className="relative z-10 text-left">
-                      <span className="font-bold block text-lg">Fast Build</span>
-                      <span className="text-sm opacity-70">~3-5 minutes</span>
+                    <Zap className={cn("w-5 h-5 sm:w-6 sm:h-6 relative z-10 shrink-0", buildMode === 'fast' && "animate-pulse")} />
+                    <div className="relative z-10 text-left min-w-0">
+                      <span className="font-bold block text-sm sm:text-lg">Fast Build</span>
+                      <span className="text-xs sm:text-sm opacity-70">~3-5 min</span>
                     </div>
                   </button>
                   <button
                     onClick={() => setBuildMode('full')}
                     className={cn(
-                      'build-mode-btn relative flex items-center gap-4 px-8 py-4 rounded-xl transition-all duration-300 overflow-hidden group',
+                      'build-mode-btn relative flex flex-1 items-center gap-2 sm:gap-4 px-4 sm:px-8 py-3 sm:py-4 rounded-xl transition-all duration-300 overflow-hidden group min-w-0',
                       buildMode === 'full' && 'is-active',
                       buildMode === 'full'
                         ? 'bg-gradient-to-r from-red-900/50 to-orange-900/40 border-2 border-red-500 text-red-400 shadow-xl shadow-red-900/40'
@@ -5784,10 +5788,10 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     {buildMode === 'full' && (
                       <div className="build-mode-active-overlay absolute inset-0 bg-gradient-to-r from-red-600/10 via-orange-600/10 to-red-600/10 animate-pulse" />
                     )}
-                    <Sparkles className={cn("w-6 h-6 relative z-10", buildMode === 'full' && "animate-pulse")} />
-                    <div className="relative z-10 text-left">
-                      <span className="font-bold block text-lg">Full Build</span>
-                      <span className="text-sm opacity-70">10+ minutes</span>
+                    <Sparkles className={cn("w-5 h-5 sm:w-6 sm:h-6 relative z-10 shrink-0", buildMode === 'full' && "animate-pulse")} />
+                    <div className="relative z-10 text-left min-w-0">
+                      <span className="font-bold block text-sm sm:text-lg">Full Build</span>
+                      <span className="text-xs sm:text-sm opacity-70">10+ min</span>
                     </div>
                   </button>
                 </div>
@@ -5796,7 +5800,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 <TemplateGallery onSelect={(prompt) => setAppDescription(prompt)} />
 
                 {/* Premium Textarea */}
-                <div className="mb-10">
+                <div className="mb-6 md:mb-10">
                   <PremiumTextarea
                     value={appDescription}
                     onChange={setAppDescription}
@@ -5815,8 +5819,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
                 {/* Asset Uploader — upload files for AI agents to use */}
                 {createdProjectId && (
-                  <div className="mb-10">
-                    <h3 className="builder-section-heading text-xl font-bold text-gray-200 mb-5 flex items-center gap-3">
+                  <div className="mb-6 md:mb-10">
+                    <h3 className="builder-section-heading text-lg sm:text-xl font-bold text-gray-200 mb-3 sm:mb-5 flex items-center gap-3">
                       <Upload className="w-6 h-6 text-red-400" />
                       Project Files
                     </h3>
@@ -5828,8 +5832,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 )}
 
                 {/* Tech Stack Selection */}
-                <div className="mb-10">
-                  <h3 className="builder-section-heading text-xl font-bold text-gray-200 mb-5 flex items-center gap-3">
+                <div className="mb-6 md:mb-10">
+                  <h3 className="builder-section-heading text-lg sm:text-xl font-bold text-gray-200 mb-3 sm:mb-5 flex items-center gap-3">
                     <Cpu className="w-6 h-6 text-red-400" />
                     Technology Stack
                   </h3>
@@ -5849,12 +5853,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                 </div>
 
                 {/* AI Power Mode */}
-                <div className="mb-10">
-                  <h3 className="builder-section-heading text-xl font-bold text-gray-200 mb-5 flex items-center gap-3">
+                <div className="mb-6 md:mb-10">
+                  <h3 className="builder-section-heading text-lg sm:text-xl font-bold text-gray-200 mb-3 sm:mb-5 flex items-center gap-3">
                     <Sparkles className="w-6 h-6 text-red-400" />
                     AI Power Mode
                   </h3>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     {([
                       { id: 'fast' as const, label: 'Fast & Cheap', icon: <Zap className="w-5 h-5" />, desc: getPowerModeModelSummary('fast'), color: 'green', cost: '1.5x', multiplier: '1.5x', perBuild: 'Lowest cost' },
                       { id: 'balanced' as const, label: 'Balanced', icon: <Sparkles className="w-5 h-5" />, desc: getPowerModeModelSummary('balanced'), color: 'yellow', cost: '1.68x', multiplier: '1.68x', perBuild: 'Best balance' },
@@ -5864,7 +5868,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                         key={mode.id}
                         onClick={() => setPowerMode(mode.id)}
                         className={cn(
-                          'power-mode-card relative group p-4 rounded-xl border-2 transition-all duration-200 text-left',
+                          'power-mode-card relative group p-3 sm:p-4 rounded-xl border-2 transition-all duration-200 text-left',
                           powerMode === mode.id && 'is-active',
                           powerMode === mode.id
                             ? mode.color === 'green' ? 'border-green-500/60 bg-green-500/10 shadow-lg shadow-green-500/10'
@@ -5875,6 +5879,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                       >
                         <div className="flex items-center gap-2 mb-1">
                           <span className={cn(
+                            'shrink-0',
                             powerMode === mode.id
                               ? mode.color === 'green' ? 'text-green-400'
                                 : mode.color === 'yellow' ? 'text-yellow-400'
@@ -5884,20 +5889,20 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                             {mode.icon}
                           </span>
                           <span className={cn(
-                            'font-bold text-sm',
+                            'font-bold text-sm leading-tight',
                             powerMode === mode.id ? 'text-white' : 'text-gray-400'
                           )}>
                             {mode.label}
                           </span>
                           <span className={cn(
-                            'ml-auto text-xs font-mono font-bold',
+                            'ml-auto text-xs font-mono font-bold shrink-0',
                             mode.color === 'green' ? 'text-green-400' : mode.color === 'yellow' ? 'text-yellow-400' : 'text-red-400'
                           )}>
-                            {mode.cost} cost
+                            {mode.cost}
                           </span>
                         </div>
-                        <p className="text-xs text-gray-500 leading-tight">{mode.desc}</p>
-                        <div className="mt-2 flex items-center justify-between">
+                        <p className="text-[11px] sm:text-xs text-gray-500 leading-tight">{mode.desc}</p>
+                        <div className="mt-1.5 hidden sm:flex items-center justify-between">
                           <span className="text-[10px] text-gray-600 font-mono">{mode.multiplier} multiplier</span>
                           <span className="text-[10px] text-gray-600">{mode.perBuild}</span>
                         </div>
