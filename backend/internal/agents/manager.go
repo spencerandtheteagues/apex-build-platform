@@ -5365,6 +5365,8 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 	if output != nil && output.Plan != nil {
 		runProviderCritique := false
 		var critiqueContract *BuildContract
+		var warRoomSpec *ValidatedBuildSpec
+		var warRoomContract *BuildContract
 		build.mu.Lock()
 		build.Plan = output.Plan
 		build.TechStack = &output.Plan.TechStack
@@ -5393,6 +5395,8 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 				warRoomTelemetry = true
 				orchestration.ValidatedBuildSpec = compileWarRoomValidatedBuildSpec(build.ID, orchestration.ValidatedBuildSpec, output.Plan, orchestration.BuildContract)
 				warRoomIssueCount = countWarRoomBuildSpecAdvisories(orchestration.ValidatedBuildSpec)
+				warRoomSpec = orchestration.ValidatedBuildSpec
+				warRoomContract = orchestration.BuildContract
 			}
 			applyReliabilityWorkOrderBias(build.Plan, orchestration.ValidatedBuildSpec, orchestration.ReliabilitySummary)
 			if !contractBlocked && orchestration.Flags.EnableSelectiveEscalation && orchestration.BuildContract != nil &&
@@ -5423,6 +5427,14 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 					"content":    "War Room critique started against the frozen plan and contract.",
 				},
 			})
+
+			// ── LLM Debate: run 2-provider async critique outside the build lock ──
+			if warRoomSpec != nil && am.aiRouter != nil {
+				usesPlatformKeys := am.buildUsesPlatformKeys(build)
+				am.enrichWarRoomSpecWithLLMDebate(build.ID, build.UserID, usesPlatformKeys, warRoomSpec, warRoomContract)
+				warRoomIssueCount = countWarRoomBuildSpecAdvisories(warRoomSpec)
+			}
+
 			am.broadcast(build.ID, &WSMessage{
 				Type:      WSGlassWarRoomCritiqueResolved,
 				BuildID:   build.ID,

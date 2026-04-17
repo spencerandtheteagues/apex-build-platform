@@ -1,7 +1,15 @@
 package agents
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
 	"strings"
+	"sync"
+	"time"
+
+	"apex-build/internal/ai"
 )
 
 type buildSpecCritiqueCategory string
@@ -141,4 +149,186 @@ func buildSpecHasAdvisoryCode(values []BuildSpecAdvisory, code string) bool {
 		}
 	}
 	return false
+}
+
+// ── LLM Debate ───────────────────────────────────────────────────────────────
+
+// llmWarRoomIssue is the JSON shape each provider returns for a single finding.
+type llmWarRoomIssue struct {
+	Code           string `json:"code"`
+	Category       string `json:"category"`   // "security" | "performance"
+	Surface        string `json:"surface"`    // ContractSurface value
+	Summary        string `json:"summary"`
+	Recommendation string `json:"recommendation"`
+}
+
+const warRoomLLMDebateTimeout = 8 * time.Second
+
+// runWarRoomLLMDebate sends the frozen ValidatedBuildSpec to two providers
+// concurrently (Claude for security focus, GPT-5 for architecture focus) and
+// merges their findings into the spec's advisory lists. It is best-effort: any
+// provider error is silently skipped so the build is never blocked.
+func (am *AgentManager) runWarRoomLLMDebate(buildID string, userID uint, usesPlatformKeys bool, spec *ValidatedBuildSpec, contract *BuildContract) []buildSpecCritiqueIssue {
+	if am == nil || am.aiRouter == nil || spec == nil {
+		return nil
+	}
+
+	summary := buildSpecDebateSummary(spec, contract)
+
+	type debateRound struct {
+		provider ai.AIProvider
+		focus    string
+	}
+	rounds := []debateRound{
+		{ai.ProviderClaude, "security vulnerabilities, auth gaps, and data exposure risks"},
+		{ai.ProviderGPT4, "architectural bottlenecks, scalability risks, and missing integration surfaces"},
+	}
+
+	ctx, cancel := context.WithTimeout(am.ctx, warRoomLLMDebateTimeout)
+	defer cancel()
+
+	type roundResult struct {
+		issues []buildSpecCritiqueIssue
+	}
+	results := make([]roundResult, len(rounds))
+	var wg sync.WaitGroup
+
+	for i, round := range rounds {
+		wg.Add(1)
+		go func(idx int, r debateRound) {
+			defer wg.Done()
+			issues := runSingleDebateRound(ctx, am.aiRouter, buildID, userID, usesPlatformKeys, summary, r.provider, r.focus)
+			results[idx] = roundResult{issues: issues}
+		}(i, round)
+	}
+	wg.Wait()
+
+	var all []buildSpecCritiqueIssue
+	for _, r := range results {
+		all = append(all, r.issues...)
+	}
+	return dedupeBuildSpecCritiqueIssues(all)
+}
+
+func runSingleDebateRound(ctx context.Context, router AIRouter, buildID string, userID uint, usesPlatformKeys bool, summary string, provider ai.AIProvider, focus string) []buildSpecCritiqueIssue {
+	prompt := fmt.Sprintf(`You are a senior software architect in a pre-generation War Room review.
+Analyze this build specification and identify concrete issues in the area of: %s.
+
+Build spec:
+%s
+
+Return a JSON array (no prose, no markdown fences) of issues. Each issue:
+{
+  "code": "war_room_llm_<slug>",
+  "category": "security" or "performance",
+  "surface": "frontend" | "backend" | "integration" | "global",
+  "summary": "one sentence",
+  "recommendation": "one actionable sentence"
+}
+
+Return [] if no issues found. Maximum 4 issues. Only flag real problems.`, focus, summary)
+
+	resp, err := router.Generate(ctx, provider, prompt, GenerateOptions{
+		UserID:          userID,
+		MaxTokens:       512,
+		Temperature:     0.15,
+		SystemPrompt:    "You are a strict build spec reviewer. Return a JSON array only.",
+		RoleHint:        string(RoleReviewer),
+		PowerMode:       PowerFast,
+		UsePlatformKeys: usesPlatformKeys,
+	})
+	if err != nil || resp == nil || strings.TrimSpace(resp.Content) == "" {
+		return nil
+	}
+
+	raw := extractJSONArrayBlock(resp.Content)
+	if raw == "" {
+		return nil
+	}
+	var parsed []llmWarRoomIssue
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		log.Printf("[war_room_llm] build=%s provider=%s parse error: %v", buildID, provider, err)
+		return nil
+	}
+
+	issues := make([]buildSpecCritiqueIssue, 0, len(parsed))
+	for _, p := range parsed {
+		code := strings.TrimSpace(p.Code)
+		summary := strings.TrimSpace(p.Summary)
+		rec := strings.TrimSpace(p.Recommendation)
+		if code == "" || summary == "" {
+			continue
+		}
+		if !strings.HasPrefix(code, "war_room_llm_") {
+			code = "war_room_llm_" + strings.ReplaceAll(strings.ToLower(code), " ", "_")
+		}
+		cat := buildSpecCritiqueSecurity
+		if strings.Contains(strings.ToLower(p.Category), "perf") {
+			cat = buildSpecCritiquePerformance
+		}
+		surface := ContractSurface(strings.TrimSpace(p.Surface))
+		if surface == "" {
+			surface = SurfaceGlobal
+		}
+		issues = append(issues, buildSpecCritiqueIssue{
+			Code:           code,
+			Category:       cat,
+			Surface:        surface,
+			Summary:        summary,
+			Recommendation: rec,
+		})
+	}
+	return issues
+}
+
+// buildSpecDebateSummary produces a compact text summary of the spec for LLM consumption.
+func buildSpecDebateSummary(spec *ValidatedBuildSpec, contract *BuildContract) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "AppType: %s\n", spec.AppType)
+	fmt.Fprintf(&b, "DeliveryMode: %s\n", spec.DeliveryMode)
+	if len(spec.PrimaryUserFlows) > 0 {
+		fmt.Fprintf(&b, "UserFlows: %s\n", strings.Join(spec.PrimaryUserFlows, " | "))
+	}
+	if len(spec.APIPaths) > 0 {
+		fmt.Fprintf(&b, "APIPaths: %s\n", strings.Join(spec.APIPaths, ", "))
+	}
+	if len(spec.RoutePlan) > 0 {
+		fmt.Fprintf(&b, "RoutePlan: %s\n", strings.Join(spec.RoutePlan, ", "))
+	}
+	if len(spec.AcceptanceSurfaces) > 0 {
+		fmt.Fprintf(&b, "AcceptanceSurfaces: %s\n", strings.Join(spec.AcceptanceSurfaces, ", "))
+	}
+	if contract != nil {
+		if contract.AuthContract != nil && contract.AuthContract.Required {
+			strategy := firstNonEmptyStr(contract.AuthContract.TokenStrategy, contract.AuthContract.SessionStrategy, contract.AuthContract.CallbackStrategy)
+			fmt.Fprintf(&b, "Auth: required (strategy=%s)\n", strategy)
+		}
+		if len(contract.DBSchemaContract) > 0 {
+			names := make([]string, 0, len(contract.DBSchemaContract))
+			for _, m := range contract.DBSchemaContract {
+				names = append(names, m.Name)
+			}
+			fmt.Fprintf(&b, "DataModels: %s\n", strings.Join(names, ", "))
+		}
+	}
+	return b.String()
+}
+
+func firstNonEmptyStr(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// extractJSONArrayBlock extracts the first [...] block from raw LLM output.
+func extractJSONArrayBlock(raw string) string {
+	start := strings.Index(raw, "[")
+	end := strings.LastIndex(raw, "]")
+	if start < 0 || end <= start {
+		return ""
+	}
+	return strings.TrimSpace(raw[start : end+1])
 }

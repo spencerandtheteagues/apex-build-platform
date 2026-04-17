@@ -51,6 +51,23 @@ func compileWarRoomValidatedBuildSpec(buildID string, existing *ValidatedBuildSp
 	return draft.Spec
 }
 
+// enrichWarRoomSpecWithLLMDebate runs the two-provider LLM debate against the
+// already-locked spec and applies any new advisories it produces. It is called
+// outside the build lock after the static critique has already been applied.
+// If the router is nil or the debate produces no results it is a no-op.
+func (am *AgentManager) enrichWarRoomSpecWithLLMDebate(buildID string, userID uint, usesPlatformKeys bool, spec *ValidatedBuildSpec, contract *BuildContract) {
+	if am == nil || spec == nil || am.aiRouter == nil {
+		return
+	}
+	issues := am.runWarRoomLLMDebate(buildID, userID, usesPlatformKeys, spec, contract)
+	if len(issues) == 0 {
+		return
+	}
+	applyWarRoomCritiqueAdvisories(spec, issues)
+	spec.SecurityAdvisories = dedupeBuildSpecAdvisories(spec.SecurityAdvisories)
+	spec.PerformanceAdvisories = dedupeBuildSpecAdvisories(spec.PerformanceAdvisories)
+}
+
 func countWarRoomBuildSpecAdvisories(spec *ValidatedBuildSpec) int {
 	if spec == nil {
 		return 0
