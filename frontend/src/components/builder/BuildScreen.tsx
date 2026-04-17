@@ -787,19 +787,19 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
                     return (
                       <div key={agent.id} className="rounded-xl border border-gray-800 bg-gray-950/50 p-4">
                         <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold text-white">{humanize(agent.role)}</div>
-                            <div className="mt-1 text-xs text-gray-500 font-mono">{agent.model || 'Model unavailable'}</div>
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-white break-words">{humanize(agent.role)}</div>
+                            <div className="mt-1 text-xs text-gray-500 font-mono break-all">{agent.model || 'Model unavailable'}</div>
                           </div>
-                          <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border border-green-500/30 text-green-300 bg-green-500/10">
+                          <span className="shrink-0 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border border-green-500/30 text-green-300 bg-green-500/10">
                             Working
                           </span>
                         </div>
                         {agent.currentTask?.description && (
-                          <div className="mt-3 text-sm text-gray-300">{agent.currentTask.description}</div>
+                          <div className="mt-3 text-sm text-gray-300 break-words">{agent.currentTask.description}</div>
                         )}
                         <div className="mt-4 rounded-xl border border-gray-800 bg-black/35 px-3 py-3">
-                          <div className="flex items-center justify-between gap-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-gray-500">
                               <MessageSquare className="w-3.5 h-3.5" />
                               Direct Control
@@ -811,7 +811,7 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
                           <div className="mt-2 text-xs text-gray-400">
                             Send an instruction straight to this agent. It stays visible in the planner timeline and this agent&apos;s telemetry.
                           </div>
-                          <div className="mt-3 flex gap-2">
+                          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                             <input
                               type="text"
                               value={messageDraft}
@@ -823,14 +823,14 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
                               }}
                               placeholder={`Message ${humanize(agent.role)} directly...`}
                               disabled={!isBuildActive || sendPending}
-                              className="flex-1 rounded-lg border border-gray-700 bg-black px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-900/30 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="flex-1 min-w-0 rounded-lg border border-gray-700 bg-black px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-900/30 disabled:cursor-not-allowed disabled:opacity-50"
                             />
                             <button
                               type="button"
                               onClick={() => onSendDirectAgentMessage(agent.id)}
                               disabled={!isBuildActive || !messageDraft.trim() || sendPending}
                               aria-label={`Send message to ${humanize(agent.role)}`}
-                              className="px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40"
+                              className="px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40 sm:self-stretch"
                             >
                               <Send className="w-4 h-4" />
                             </button>
@@ -853,7 +853,7 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
                 <div className="space-y-2">
                   {liveTasks.map((task) => (
                     <div key={task.id} className="rounded-xl border border-gray-800 bg-gray-950/50 px-4 py-3">
-                      <div className="text-sm font-semibold text-white">{task.description}</div>
+                      <div className="text-sm font-semibold text-white break-words">{task.description}</div>
                       <div className="mt-1 text-xs text-gray-500 uppercase tracking-widest">{humanize(task.type)}</div>
                     </div>
                   ))}
@@ -870,9 +870,9 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
               No files generated yet
             </div>
           ) : (
-            <div className="flex gap-4 h-full">
+            <div className="flex h-full flex-col gap-4 md:flex-row">
               {/* File tree */}
-              <div className="w-64 shrink-0 overflow-y-auto space-y-3">
+              <div className="w-full shrink-0 overflow-y-auto space-y-3 md:w-64 md:max-h-none max-h-56 rounded-xl border border-gray-800 bg-gray-950/35 p-3">
                 {fileGroups.map(([root, files]) => (
                   <div key={root}>
                     <div className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-1 px-2">
@@ -884,14 +884,14 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
                           key={f.path}
                           onClick={() => setSelectedFile(f)}
                           className={cn(
-                            'w-full text-left px-2 py-1.5 rounded text-xs truncate transition-colors',
+                            'w-full text-left px-2 py-1.5 rounded text-xs transition-colors break-all',
                             selectedFile?.path === f.path
                               ? 'bg-red-700/30 text-red-300'
                               : 'text-gray-400 hover:text-gray-200 hover:bg-gray-900'
                           )}
                         >
-                          <FileCode className="w-3 h-3 inline mr-1.5 opacity-60" />
-                          {f.path.split('/').pop()}
+                          <FileCode className="w-3 h-3 inline mr-1.5 opacity-60 align-text-bottom" />
+                          {f.path}
                         </button>
                       ))}
                     </div>
@@ -900,14 +900,14 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
               </div>
 
               {/* File content preview */}
-              <div className="flex-1 min-w-0 rounded-xl border border-gray-800 bg-gray-950 overflow-auto">
+              <div className="flex-1 min-w-0 min-h-[18rem] rounded-xl border border-gray-800 bg-gray-950 overflow-auto">
                 {selectedFile ? (
                   <pre className="p-4 text-xs font-mono text-gray-300 whitespace-pre-wrap break-all">
-                    <div className="text-gray-600 mb-3 text-[10px] uppercase tracking-widest">{selectedFile.path}</div>
+                    <div className="text-gray-600 mb-3 text-[10px] uppercase tracking-widest break-all">{selectedFile.path}</div>
                     {selectedFile.content}
                   </pre>
                 ) : (
-                  <div className="flex items-center justify-center h-full text-gray-600 text-sm">
+                  <div className="flex items-center justify-center h-full min-h-[18rem] text-gray-600 text-sm px-4 text-center">
                     Select a file to preview
                   </div>
                 )}
@@ -1039,10 +1039,10 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
                       )}
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-semibold text-white">{blocker.title}</div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-white break-words">{blocker.title}</div>
                           {blocker.summary && (
-                            <div className="mt-1 text-sm text-gray-400">{blocker.summary}</div>
+                            <div className="mt-1 text-sm text-gray-400 break-words">{blocker.summary}</div>
                           )}
                         </div>
                         <span className={cn(
@@ -1055,7 +1055,7 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
                         </span>
                       </div>
                       {blocker.unblocks_with && (
-                        <div className="mt-2 text-xs text-gray-300 bg-black/20 rounded px-2 py-1.5">
+                        <div className="mt-2 text-xs text-gray-300 bg-black/20 rounded px-2 py-1.5 break-words">
                           <span className="text-gray-500">Unblock: </span>
                           {blocker.unblocks_with}
                         </div>
@@ -1074,7 +1074,7 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
                 </h3>
                 <div className="space-y-1">
                   {pendingRevisionRequests.map((rev, i) => (
-                    <div key={i} className="text-sm text-gray-300 bg-gray-900/60 rounded px-3 py-2 border border-gray-800">
+                    <div key={i} className="text-sm text-gray-300 bg-gray-900/60 rounded px-3 py-2 border border-gray-800 break-words">
                       {rev}
                     </div>
                   ))}
@@ -1091,16 +1091,16 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
                 <div className="space-y-2">
                   {pendingPermissionRequests.map((req) => (
                     <div key={req.id} className="rounded-xl border border-violet-500/25 bg-violet-950/15 p-4">
-                      <div className="text-sm font-semibold text-white mb-1">
+                      <div className="text-sm font-semibold text-white mb-1 break-words">
                         {humanize(req.scope)}: {req.target}
                       </div>
-                      <div className="text-xs text-gray-400 mb-3">{req.reason}</div>
+                      <div className="text-xs text-gray-400 mb-3 break-words">{req.reason}</div>
                       {req.command_preview && (
                         <pre className="text-xs font-mono text-gray-500 bg-black/40 rounded px-2 py-1 mb-3 overflow-auto">
                           {req.command_preview}
                         </pre>
                       )}
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => onResolvePermission(req.id, 'allow', 'once')}
                           disabled={permissionActionId === req.id}
@@ -1132,14 +1132,14 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
             {/* Diff Review Panel */}
             {buildState.status === 'awaiting_review' && proposedEdits.length > 0 && (
               <div>
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between mb-2 gap-3">
                   <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500">
                     Code Review — {proposedEdits.length} Change{proposedEdits.length !== 1 ? 's' : ''}
                   </h3>
                   {!showDiffReview && (
                     <button
                       onClick={() => onSetShowDiffReview(true)}
-                      className="text-xs text-sky-400 hover:text-sky-300"
+                      className="text-xs text-sky-400 hover:text-sky-300 shrink-0"
                     >
                       Show changes
                     </button>
@@ -1164,15 +1164,15 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
                 <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">Checkpoints</h3>
                 <div className="space-y-2">
                   {(buildState.checkpoints || []).map((cp) => (
-                    <div key={cp.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-800 bg-gray-900/40 px-4 py-3">
-                      <div>
-                        <div className="text-sm font-semibold text-gray-200">{cp.name}</div>
-                        <div className="text-xs text-gray-500">{cp.description} — {cp.progress}%</div>
+                    <div key={cp.id} className="flex flex-col gap-3 rounded-xl border border-gray-800 bg-gray-900/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-gray-200 break-words">{cp.name}</div>
+                        <div className="text-xs text-gray-500 break-words">{cp.description} — {cp.progress}%</div>
                       </div>
                       <button
                         onClick={() => onRollbackCheckpoint(cp.id)}
                         disabled={rollbackCheckpointId === cp.id || cp.restorable === false}
-                        className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 disabled:opacity-30 flex items-center gap-1"
+                        className="w-full sm:w-auto text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 disabled:opacity-30 flex items-center justify-center gap-1"
                       >
                         <RotateCcw className={cn('w-3 h-3', rollbackCheckpointId === cp.id && 'animate-spin')} />
                         Rollback
