@@ -84,6 +84,95 @@ func TestBuildPrunedSymbolContextSupportsJSTSVariants(t *testing.T) {
 	}
 }
 
+func TestBuildPrunedSymbolContextGo(t *testing.T) {
+	t.Parallel()
+
+	source := `package agents
+
+import (
+	"fmt"
+	"strings"
+)
+
+type AgentRole string
+
+const RoleFrontend AgentRole = "frontend"
+
+func NewAgentManager(db interface{}) *int {
+	return nil
+}
+
+func (am *int) Start() error {
+	return fmt.Errorf("not implemented")
+}
+
+func internalHelper(s string) string {
+	return strings.TrimSpace(s)
+}
+`
+
+	ctx, err := BuildPrunedSymbolContext("internal/agents/manager.go", source, []string{"NewAgentManager"}, nil, PrunedSymbolContextOptions{})
+	if err != nil {
+		if strings.Contains(err.Error(), "without cgo") {
+			t.Skip("tree-sitter unavailable in !cgo build")
+		}
+		t.Fatalf("BuildPrunedSymbolContext Go error: %v", err)
+	}
+	if !ctx.ParseSucceeded {
+		t.Fatalf("expected parse success, got %+v", ctx)
+	}
+	if ctx.Language != "golang" {
+		t.Fatalf("expected language=golang, got %q", ctx.Language)
+	}
+	if len(ctx.Imports) == 0 {
+		t.Fatal("expected imports to be extracted")
+	}
+	foundFmt := false
+	for _, imp := range ctx.Imports {
+		if imp == "fmt" {
+			foundFmt = true
+		}
+	}
+	if !foundFmt {
+		t.Fatalf("expected 'fmt' in imports, got %v", ctx.Imports)
+	}
+	if len(ctx.TargetSymbols) == 0 {
+		t.Fatal("expected NewAgentManager in target symbols")
+	}
+	if ctx.TargetSymbols[0].Name != "NewAgentManager" {
+		t.Fatalf("expected NewAgentManager target, got %q", ctx.TargetSymbols[0].Name)
+	}
+	if !strings.Contains(ctx.TargetSymbols[0].Body, "return nil") {
+		t.Fatalf("expected function body in target, got %q", ctx.TargetSymbols[0].Body)
+	}
+	// Exported functions not in target should appear as collapsed signatures
+	if len(ctx.CollapsedSignatures) == 0 {
+		t.Fatal("expected collapsed signatures for non-target declarations")
+	}
+	// Render should use 'go' code fence
+	rendered := renderPrunedSymbolContext("internal/agents/manager.go", ctx)
+	if !strings.Contains(rendered, "```go") {
+		t.Fatalf("expected go code fence in rendered context, got %q", rendered[:200])
+	}
+	// Type and const declarations should be captured
+	foundType := false
+	foundConst := false
+	for _, decl := range ctx.CollapsedSignatures {
+		if strings.Contains(decl, "AgentRole") {
+			foundType = true
+		}
+		if strings.Contains(decl, "RoleFrontend") {
+			foundConst = true
+		}
+	}
+	if !foundType {
+		t.Fatalf("expected AgentRole type in signatures, got %v", ctx.CollapsedSignatures)
+	}
+	if !foundConst {
+		t.Fatalf("expected RoleFrontend const in signatures, got %v", ctx.CollapsedSignatures)
+	}
+}
+
 func TestCVBuildRepairPromptUsesASTPruningWhenEnabled(t *testing.T) {
 	t.Parallel()
 

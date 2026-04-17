@@ -145,33 +145,47 @@ func spanContainsLine(start, end int, lines []int) bool {
 }
 
 func renderPrunedSymbolContext(path string, ctx PrunedSymbolContext) string {
+	fence := codeBlockLanguageForAST(ctx.Language)
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("**Pruned file context** (`%s`):\n", filepath.ToSlash(path)))
 	if len(ctx.Imports) > 0 {
-		sb.WriteString("Imports:\n```typescript\n")
+		sb.WriteString(fmt.Sprintf("Imports:\n```%s\n", fence))
 		sb.WriteString(strings.Join(ctx.Imports, "\n"))
 		sb.WriteString("\n```\n")
 	}
 	if len(ctx.TargetSymbols) > 0 {
 		sb.WriteString("Target symbol bodies:\n")
 		for _, symbol := range ctx.TargetSymbols {
-			sb.WriteString("```typescript\n")
+			sb.WriteString(fmt.Sprintf("```%s\n", fence))
 			sb.WriteString(symbol.Body)
 			sb.WriteString("\n```\n")
 		}
 	}
 	if len(ctx.CollapsedSignatures) > 0 {
-		sb.WriteString("Public signatures:\n```typescript\n")
+		sb.WriteString(fmt.Sprintf("Public signatures:\n```%s\n", fence))
 		sb.WriteString(strings.Join(ctx.CollapsedSignatures, "\n"))
 		sb.WriteString("\n```\n")
 	}
 	if len(ctx.FocusedWindows) > 0 {
 		sb.WriteString("Focused source windows:\n")
 		for _, window := range ctx.FocusedWindows {
-			sb.WriteString("```typescript\n")
+			sb.WriteString(fmt.Sprintf("```%s\n", fence))
 			sb.WriteString(window)
 			sb.WriteString("\n```\n")
 		}
 	}
 	return sb.String()
+}
+
+func codeBlockLanguageForAST(language string) string {
+	switch strings.ToLower(strings.TrimSpace(language)) {
+	case "golang", "go":
+		return "go"
+	case "tsx":
+		return "tsx"
+	case "javascript", "jsx":
+		return "javascript"
+	default:
+		return "typescript"
+	}
 }

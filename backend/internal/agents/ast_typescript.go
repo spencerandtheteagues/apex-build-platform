@@ -25,6 +25,26 @@ type parsedSymbolDeclaration struct {
 
 func parseTypeScriptLikeFile(path, content string) (*parsedASTFile, error) {
 	ext := strings.ToLower(strings.TrimSpace(filepath.Ext(path)))
+
+	if ext == ".go" {
+		parsed, err := parseGoFileWithTreeSitter([]byte(content))
+		if err != nil {
+			return nil, err
+		}
+		if parsed == nil {
+			return nil, fmt.Errorf("tree-sitter Go parser returned nil")
+		}
+		parsed.Language = "golang"
+		parsed.Imports = dedupeNonEmptySortedStrings(parsed.Imports)
+		sort.SliceStable(parsed.Declarations, func(i, j int) bool {
+			if parsed.Declarations[i].StartLine == parsed.Declarations[j].StartLine {
+				return parsed.Declarations[i].Name < parsed.Declarations[j].Name
+			}
+			return parsed.Declarations[i].StartLine < parsed.Declarations[j].StartLine
+		})
+		return parsed, nil
+	}
+
 	language := ""
 	switch ext {
 	case ".ts":
