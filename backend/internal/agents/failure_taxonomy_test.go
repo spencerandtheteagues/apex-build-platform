@@ -137,3 +137,112 @@ func TestUpdateBuildSnapshotStateLockedRecordsPlanningFailureAndDedupesFollowup(
 		t.Fatalf("expected duplicate preview failure to be deduped, got count %d", got)
 	}
 }
+
+func TestPreviewAdvisoryPassFingerprintsRecorded(t *testing.T) {
+	build := &Build{ID: "build-advisory-fp"}
+
+	warnings := []string{
+		"visual:layout overflow on sidebar",
+		"interaction:click target too small",
+	}
+	files := []GeneratedFile{
+		{Path: "src/main.tsx", Content: "// entry"},
+		{Path: "src/App.tsx", Content: "// app"},
+	}
+	frontendFiles := frontendFilePathsFromFiles(files)
+	recordPreviewAdvisoryPassFingerprints(build, warnings, frontendFiles)
+
+	build.mu.RLock()
+	fps := build.SnapshotState.Orchestration.FailureFingerprints
+	build.mu.RUnlock()
+
+	if len(fps) < 2 {
+		t.Fatalf("expected at least 2 fingerprints, got %d", len(fps))
+	}
+	classes := map[string]bool{}
+	for _, fp := range fps {
+		classes[fp.FailureClass] = true
+	}
+	if !classes["visual_layout"] {
+		t.Errorf("expected visual_layout fingerprint, got %v", classes)
+	}
+	if !classes["interaction_canary"] {
+		t.Errorf("expected interaction_canary fingerprint, got %v", classes)
+	}
+	for _, fp := range fps {
+		if !fp.RepairSucceeded {
+			t.Errorf("expected RepairSucceeded=true for advisory pass fingerprint, got false for %q", fp.FailureClass)
+		}
+	}
+}
+
+func TestPreviewRepairLaunchAndOutcomeFingerprints(t *testing.T) {
+	build := &Build{ID: "build-repair-fp"}
+
+	// Seed a failure taxonomy so recordPreviewRepairOutcome can read LastClass
+	recordBuildFailureTaxonomy(&build.SnapshotState, BuildFailureRecord{
+		Category: FailureCategoryVisual,
+		Class:    "visual_layout",
+		Phase:    "preview_verification",
+	})
+
+	files := []string{"src/main.tsx"}
+
+	// Record the launch (failure)
+	recordPreviewRepairLaunch(build, "visual_layout", files)
+
+	// Record the repair succeeding
+	recordPreviewRepairOutcome(build, true, files)
+
+	build.mu.RLock()
+	fps := build.SnapshotState.Orchestration.FailureFingerprints
+	build.mu.RUnlock()
+
+	if len(fps) < 2 {
+		t.Fatalf("expected at least 2 fingerprints, got %d", len(fps))
+	}
+	var hasFailure, hasSuccess bool
+	for _, fp := range fps {
+		if fp.FailureClass == "visual_layout" {
+			if fp.RepairSucceeded {
+				hasSuccess = true
+			} else {
+				hasFailure = true
+			}
+		}
+	}
+	if !hasFailure {
+		t.Error("expected a RepairSucceeded=false fingerprint from launch")
+	}
+	if !hasSuccess {
+		t.Error("expected a RepairSucceeded=true fingerprint from outcome")
+	}
+}
+
+func TestExtractAdvisoryFailureClasses(t *testing.T) {
+	cases := []struct {
+		warnings []string
+		expected []string
+	}{
+		{[]string{"visual:contrast issue"}, []string{"visual_layout"}},
+		{[]string{"interaction:click failed"}, []string{"interaction_canary"}},
+		{[]string{"vision:layout overflow"}, []string{"visual_layout"}},
+		{
+			[]string{"visual:overflow", "interaction:blank after click", "visual:another"},
+			[]string{"visual_layout", "interaction_canary"},
+		},
+		{[]string{"no prefix here"}, nil},
+	}
+	for _, tc := range cases {
+		got := extractAdvisoryFailureClasses(tc.warnings)
+		if len(got) != len(tc.expected) {
+			t.Errorf("input %v: expected %v, got %v", tc.warnings, tc.expected, got)
+			continue
+		}
+		for i, v := range tc.expected {
+			if got[i] != v {
+				t.Errorf("input %v: expected[%d]=%q, got %q", tc.warnings, i, v, got[i])
+			}
+		}
+	}
+}

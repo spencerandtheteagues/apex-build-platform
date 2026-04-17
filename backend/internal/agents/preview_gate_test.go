@@ -375,7 +375,7 @@ func TestBuildPreviewRepairTaskInputIncludesScreenshotForVisionHints(t *testing.
 		"visual: style the primary CTA so it is clearly visible above the fold",
 	}
 
-	input := buildPreviewRepairTaskInput(result, hints)
+	input := buildPreviewRepairTaskInput(nil, result, hints)
 	if got, _ := input["screenshot_base64"].(string); got != result.ScreenshotBase64 {
 		t.Fatalf("expected screenshot_base64 to be included, got %v", input["screenshot_base64"])
 	}
@@ -392,7 +392,7 @@ func TestBuildPreviewRepairTaskInputOmitsScreenshotWithoutVisionHints(t *testing
 	}
 	hints := []string{"Fix the missing app shell so the preview can render."}
 
-	input := buildPreviewRepairTaskInput(result, hints)
+	input := buildPreviewRepairTaskInput(nil, result, hints)
 	if _, exists := input["screenshot_base64"]; exists {
 		t.Fatalf("expected screenshot_base64 to be omitted without vision hints: %#v", input)
 	}

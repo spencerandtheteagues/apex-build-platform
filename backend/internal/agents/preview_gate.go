@@ -127,6 +127,22 @@ func (am *AgentManager) runPreviewVerificationGate(
 			GeneratedAt:      now.UTC(),
 		})
 
+		frontendFiles := frontendFilePathsFromFiles(allFiles)
+
+		// Point 1: record advisory hints as fingerprints (visual/interaction classes).
+		if len(passedWarnings) > 0 {
+			recordPreviewAdvisoryPassFingerprints(build, passedWarnings, frontendFiles)
+		}
+
+		// Point 3: if this is a second-pass result after a repair attempt, record
+		// the outcome — repair succeeded since the gate just passed.
+		build.mu.RLock()
+		prevAttempts := build.PreviewVerificationAttempts
+		build.mu.RUnlock()
+		if prevAttempts >= 1 {
+			recordPreviewRepairOutcome(build, true, frontendFiles)
+		}
+
 		// Vision repair gate: when vision found critical visual issues and the
 		// feature flag is enabled, launch a targeted repair pass before the build
 		// is declared complete. This is best-effort — never a hard blocker.
@@ -134,10 +150,7 @@ func (am *AgentManager) runPreviewVerificationGate(
 		if result != nil && result.VisionSeverity == "critical" &&
 			result.ScreenshotBase64 != "" &&
 			os.Getenv("APEX_VISION_REPAIR") == "true" {
-			build.mu.RLock()
-			alreadyAttempted := build.PreviewVerificationAttempts >= 1
-			build.mu.RUnlock()
-			if !alreadyAttempted {
+			if prevAttempts < 1 {
 				criticalHints := filterVisualCriticalHints(result.RepairHints)
 				if len(criticalHints) > 0 {
 					visionFailResult := &PreviewVerificationResult{
@@ -151,6 +164,8 @@ func (am *AgentManager) runPreviewVerificationGate(
 					}
 					if am.launchPreviewRepairTask(build, allFiles, visionFailResult, now) {
 						log.Printf("Build %s: vision critical repair task launched (%d hints)", build.ID, len(criticalHints))
+						// Point 2: record the repair launch as a failure fingerprint.
+						recordPreviewRepairLaunch(build, "visual_layout", frontendFiles)
 						return true
 					}
 				}
@@ -163,25 +178,24 @@ func (am *AgentManager) runPreviewVerificationGate(
 		// Guarded by PreviewVerificationAttempts; best-effort, never a hard blocker.
 		if result != nil && interactionCriticalSignal(result) &&
 			os.Getenv("APEX_INTERACTION_REPAIR") != "false" {
-			build.mu.RLock()
-			alreadyAttempted := build.PreviewVerificationAttempts >= 1
-			build.mu.RUnlock()
-			if !alreadyAttempted {
+			if prevAttempts < 1 {
 				hints := buildInteractionRepairHints(result)
 				if len(hints) > 0 {
 					interactionFailResult := &PreviewVerificationResult{
-						Passed:                      false,
-						FailureKind:                 "interaction_dead",
-						Details:                     buildInteractionFailureDetail(result),
-						RepairHints:                 hints,
-						CanaryErrors:                result.CanaryErrors,
-						CanaryClickCount:            result.CanaryClickCount,
-						CanaryVisibleControls:       result.CanaryVisibleControls,
+						Passed:                       false,
+						FailureKind:                  "interaction_dead",
+						Details:                      buildInteractionFailureDetail(result),
+						RepairHints:                  hints,
+						CanaryErrors:                 result.CanaryErrors,
+						CanaryClickCount:             result.CanaryClickCount,
+						CanaryVisibleControls:        result.CanaryVisibleControls,
 						CanaryPostInteractionHealthy: result.CanaryPostInteractionHealthy,
 					}
 					if am.launchPreviewRepairTask(build, allFiles, interactionFailResult, now) {
 						log.Printf("Build %s: interaction repair task launched (controls=%d, postHealthy=%t, canaryErrs=%d)",
 							build.ID, result.CanaryVisibleControls, result.CanaryPostInteractionHealthy, len(result.CanaryErrors))
+						// Point 2: record the repair launch as a failure fingerprint.
+						recordPreviewRepairLaunch(build, "interaction_canary", frontendFiles)
 						return true
 					}
 				}
@@ -216,6 +230,8 @@ func (am *AgentManager) runPreviewVerificationGate(
 
 	if attempts >= 1 {
 		// Already tried once. Terminate with failure.
+		// Point 3: record repair outcome — failed second pass.
+		recordPreviewRepairOutcome(build, false, frontendFilePathsFromFiles(allFiles))
 		errMsg := fmt.Sprintf("Preview verification failed after repair attempt (%s): %s", result.FailureKind, result.Details)
 		*status = BuildFailed
 		*buildError = errMsg
@@ -560,7 +576,7 @@ func (am *AgentManager) launchPreviewRepairTask(
 		Type:        TaskReview,
 		Description: "Preview verification",
 		Status:      TaskFailed,
-		Input:       buildPreviewRepairTaskInput(result, hints),
+		Input:       buildPreviewRepairTaskInput(build, result, hints),
 	}
 
 	am.broadcast(build.ID, &WSMessage{
@@ -596,7 +612,7 @@ func previewHintsContainVisionAdvice(hints []string) bool {
 	return false
 }
 
-func buildPreviewRepairTaskInput(result *PreviewVerificationResult, hints []string) map[string]any {
+func buildPreviewRepairTaskInput(build *Build, result *PreviewVerificationResult, hints []string) map[string]any {
 	input := map[string]any{
 		"failure_kind":    result.FailureKind,
 		"failure_details": result.Details,
@@ -605,6 +621,17 @@ func buildPreviewRepairTaskInput(result *PreviewVerificationResult, hints []stri
 	}
 	if result != nil && result.ScreenshotBase64 != "" && previewHintsContainVisionAdvice(hints) {
 		input["screenshot_base64"] = result.ScreenshotBase64
+	}
+	// Inject repair memory so the agent can learn from previous repair strategies
+	// on the same failure class.
+	if build != nil {
+		failureClass := normalizeFailureIdentifier(previewFailureClass(result.FailureKind))
+		if failureClass == "" {
+			failureClass = "preview_verification"
+		}
+		if memCtx := repairMemoryPromptContextForBuild(build, failureClass, nil); memCtx != "" {
+			input["repair_memory_context"] = memCtx
+		}
 	}
 	return input
 }
