@@ -1629,6 +1629,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const wsRef = useRef<WebSocket | null>(null)
   const wsBuildIdRef = useRef<string | null>(null)
   const wsMessageHandlerRef = useRef<(message: any) => Promise<void>>(async () => {})
+  const connectWebSocketRef = useRef<(buildId: string, providedUrl?: string) => void>(() => {})
   const chatEndRef = useRef<HTMLDivElement>(null)
   const wsReconnectAttempts = useRef(0)
   const maxWsReconnectAttempts = 5
@@ -2778,38 +2779,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
   }, [])
 
-  // Mobile: reconnect WebSocket when page becomes visible again (e.g. user switches back to browser)
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) return
-      // Page just became visible — attempt WS reconnect if build is active
-      const activeBuild = buildStateRef.current
-      if (!activeBuild?.id || !isBuildingRef.current) return
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return
-      // Reset reconnect counter so we get fresh attempts
-      wsReconnectAttempts.current = 0
-      connectWebSocket(activeBuild.id, activeBuild.websocketUrl)
-    }
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [])
-
   // Auto-resume last active build on mount (covers mobile browser memory reclaim / page reload)
   const mountResumeAttempted = useRef(false)
-  useEffect(() => {
-    if (mountResumeAttempted.current) return
-    if (!user?.id) return
-    mountResumeAttempted.current = true
-
-    const storedActiveId = readStoredValue(ACTIVE_BUILD_STORAGE_KEY)
-    const storedLastId = readStoredValue(LAST_WORKFLOW_BUILD_STORAGE_KEY)
-    const resumeId = storedActiveId || storedLastId
-    if (!resumeId) return
-    // Don't resume if we already have a build loaded
-    if (buildStateRef.current?.id) return
-
-    void hydrateBuildContext(resumeId, { reconnectLive: true, notify: true })
-  }, [user?.id, readStoredValue])
 
   const clampPercent = (value: number) => {
     if (!Number.isFinite(value)) return 0
@@ -2947,6 +2918,24 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
     wsRef.current = ws
   }, [addSystemMessage, buildWebSocketUrl, hasUsableWebSocketConnection])
+
+  connectWebSocketRef.current = connectWebSocket
+
+  // Mobile: reconnect WebSocket when page becomes visible again (e.g. user switches back to browser)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) return
+      // Page just became visible — attempt WS reconnect if build is active
+      const activeBuild = buildStateRef.current
+      if (!activeBuild?.id || !isBuildingRef.current) return
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return
+      // Reset reconnect counter so we get fresh attempts
+      wsReconnectAttempts.current = 0
+      connectWebSocketRef.current(activeBuild.id, activeBuild.websocketUrl)
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [])
 
   // Handle WebSocket messages
   const handleWebSocketMessage = async (message: any) => {
@@ -4862,6 +4851,21 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
     return false
   }, [hydrateBuildContext])
+
+  useEffect(() => {
+    if (mountResumeAttempted.current) return
+    if (!user?.id) return
+    mountResumeAttempted.current = true
+
+    const storedActiveId = readStoredValue(ACTIVE_BUILD_STORAGE_KEY)
+    const storedLastId = readStoredValue(LAST_WORKFLOW_BUILD_STORAGE_KEY)
+    const resumeId = storedActiveId || storedLastId
+    if (!resumeId) return
+    // Don't resume if we already have a build loaded
+    if (buildStateRef.current?.id) return
+
+    void hydrateBuildContext(resumeId, { reconnectLive: true, notify: true })
+  }, [user?.id, readStoredValue, hydrateBuildContext])
 
   useEffect(() => {
     if (!buildState?.id || !isBuildActive) {
