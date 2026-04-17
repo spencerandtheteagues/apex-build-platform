@@ -1,0 +1,32 @@
+DROP INDEX IF EXISTS idx_prompt_pack_activation_events_deleted_at;
+DROP INDEX IF EXISTS idx_prompt_pack_activation_events_created_at;
+DROP INDEX IF EXISTS idx_prompt_pack_activation_events_rollback_of_version_id;
+DROP INDEX IF EXISTS idx_prompt_pack_activation_events_actor_id;
+DROP INDEX IF EXISTS idx_prompt_pack_activation_events_build_id;
+DROP INDEX IF EXISTS idx_prompt_pack_activation_events_activation_request_id;
+DROP INDEX IF EXISTS idx_prompt_pack_activation_events_prompt_pack_version_id;
+DROP INDEX IF EXISTS idx_prompt_pack_activation_events_event_type;
+DROP INDEX IF EXISTS idx_prompt_pack_activation_events_event_id;
+DROP TABLE IF EXISTS prompt_pack_activation_events;
+
+DROP INDEX IF EXISTS idx_prompt_pack_versions_deleted_at;
+DROP INDEX IF EXISTS idx_prompt_pack_versions_created_at;
+DROP INDEX IF EXISTS idx_prompt_pack_versions_rollback_of_version_id;
+DROP INDEX IF EXISTS idx_prompt_pack_versions_activated_by_id;
+DROP INDEX IF EXISTS idx_prompt_pack_versions_source_request_id;
+DROP INDEX IF EXISTS idx_prompt_pack_versions_source_draft_id;
+DROP INDEX IF EXISTS idx_prompt_pack_versions_source_build_id;
+DROP INDEX IF EXISTS idx_prompt_pack_versions_status;
+DROP INDEX IF EXISTS idx_prompt_pack_versions_scope;
+DROP INDEX IF EXISTS idx_prompt_pack_versions_version_id;
+DROP TABLE IF EXISTS prompt_pack_versions;
+
+DROP INDEX IF EXISTS idx_prompt_pack_activation_requests_deleted_at;
+DROP INDEX IF EXISTS idx_prompt_pack_activation_requests_created_at;
+DROP INDEX IF EXISTS idx_prompt_pack_activation_requests_requested_by_id;
+DROP INDEX IF EXISTS idx_prompt_pack_activation_requests_status;
+DROP INDEX IF EXISTS idx_prompt_pack_activation_requests_draft_id;
+DROP INDEX IF EXISTS idx_prompt_pack_activation_requests_build_id;
+DROP INDEX IF EXISTS idx_prompt_pack_activation_requests_request_id;
+
+DROP TABLE IF EXISTS prompt_pack_activation_requests;

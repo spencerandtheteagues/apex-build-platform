@@ -23,6 +23,10 @@ import (
 
 // testRouter sets up a gin router with auth middleware stub and build handler.
 func testRouter(am *AgentManager) *gin.Engine {
+	return testRouterWithAdmin(am, false)
+}
+
+func testRouterWithAdmin(am *AgentManager, isAdmin bool) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	h := NewBuildHandler(am, nil)
@@ -30,6 +34,8 @@ func testRouter(am *AgentManager) *gin.Engine {
 	// Stub auth middleware: inject user_id=1
 	auth := func(c *gin.Context) {
 		c.Set("user_id", uint(1))
+		c.Set("is_admin", isAdmin)
+		c.Set("is_super_admin", isAdmin)
 		c.Next()
 	}
 
@@ -50,6 +56,13 @@ func testRouter(am *AgentManager) *gin.Engine {
 	build.POST("/:id/reject-all", h.RejectAllEdits)
 	build.POST("/:id/patch-bundles/:bundleId/approve", h.ApprovePatchBundle)
 	build.POST("/:id/patch-bundles/:bundleId/reject", h.RejectPatchBundle)
+	build.POST("/:id/prompt-proposals/:proposalId/approve", h.ApprovePromptImprovementProposal)
+	build.POST("/:id/prompt-proposals/:proposalId/reject", h.RejectPromptImprovementProposal)
+	build.POST("/:id/prompt-proposals/:proposalId/benchmark", h.BenchmarkPromptImprovementProposal)
+	build.POST("/:id/prompt-pack-drafts", h.CreatePromptPackDraft)
+	build.POST("/:id/prompt-pack-drafts/:draftId/request-activation", h.RequestPromptPackDraftActivation)
+	build.POST("/:id/prompt-pack-activation-requests/:requestId/activate", h.ActivatePromptPackRequest)
+	build.POST("/:id/prompt-pack-versions/:versionId/rollback", h.RollbackPromptPackVersion)
 	build.GET("/:id", h.GetBuildDetails)
 	build.GET("/:id/status", h.GetBuildStatus)
 	rg := r.Group("/api/v1", auth)
@@ -67,7 +80,7 @@ func openBuildTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&models.User{}, &models.UserAPIKey{}, &models.CompletedBuild{}, &proposedEditRow{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.UserAPIKey{}, &models.CompletedBuild{}, &models.PromptPackActivationRequest{}, &models.PromptPackVersion{}, &models.PromptPackActivationEvent{}, &proposedEditRow{}); err != nil {
 		t.Fatalf("migrate sqlite: %v", err)
 	}
 	return db
@@ -2447,6 +2460,773 @@ func TestRejectPatchBundleMarksReviewedWithoutApplying(t *testing.T) {
 	if build.Status != BuildInProgress {
 		t.Fatalf("expected build to resume in_progress, got %s", build.Status)
 	}
+}
+
+func TestApprovePromptImprovementProposalMarksReviewedWithoutMutatingPrompt(t *testing.T) {
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+	build := &Build{
+		ID:     "prompt-review-build",
+		UserID: 1,
+		Status: BuildInProgress,
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				HistoricalLearning: &BuildLearningSummary{
+					Scope:          "stack:react+go",
+					ObservedBuilds: 2,
+					PromptAdoptionCandidates: []PromptProposalAdoptionRecord{
+						{
+							ID:              "adoption-prompt-compile",
+							ProposalID:      "prompt-compile",
+							Scope:           "stack:react+go",
+							TargetPrompt:    "compile_repair",
+							FailureCluster:  "typescript_compile",
+							Proposal:        "Bias toward import and manifest checks.",
+							BenchmarkGate:   "Run compile repair benchmarks.",
+							BenchmarkStatus: PromptProposalBenchmarkPassed,
+							Status:          PromptProposalAdoptionReady,
+							PromptMutated:   false,
+							CreatedAt:       time.Now().UTC(),
+						},
+					},
+					PromptImprovementProposals: []PromptImprovementProposal{
+						{
+							ID:               "prompt-stack-react-go-preview-repair-preview-verification",
+							Scope:            "stack:react+go",
+							TargetPrompt:     "preview_repair",
+							FailureCluster:   "preview_verification",
+							Proposal:         "Emphasize deterministic preview checks.",
+							BenchmarkGate:    "Run generated preview smoke benchmarks.",
+							RequiresApproval: true,
+							ReviewState:      PromptProposalReviewProposed,
+							GeneratedAt:      time.Now().UTC(),
+						},
+					},
+				},
+			},
+		},
+	}
+	am.builds[build.ID] = build
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/prompt-review-build/prompt-proposals/prompt-stack-react-go-preview-repair-preview-verification/approve", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected approve prompt proposal 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal approve prompt proposal response: %v", err)
+	}
+	if body["review_status"] != string(PromptProposalReviewApproved) {
+		t.Fatalf("expected review_status approved, got %v", body["review_status"])
+	}
+	if body["prompt_mutated"] != false {
+		t.Fatalf("expected prompt_mutated=false, got %v", body["prompt_mutated"])
+	}
+	if body["benchmark_gate_status"] != "pending" {
+		t.Fatalf("expected pending benchmark gate, got %v", body["benchmark_gate_status"])
+	}
+	proposal := build.SnapshotState.Orchestration.HistoricalLearning.PromptImprovementProposals[0]
+	if proposal.ReviewState != PromptProposalReviewApproved || proposal.ReviewedAt == nil {
+		t.Fatalf("expected proposal approved with reviewed_at, got %+v", proposal)
+	}
+	if !strings.Contains(proposal.ReviewMessage, "benchmark gate") {
+		t.Fatalf("expected benchmark gate review message, got %q", proposal.ReviewMessage)
+	}
+	if proposal.Proposal != "Emphasize deterministic preview checks." {
+		t.Fatalf("expected proposal text to remain unchanged, got %q", proposal.Proposal)
+	}
+}
+
+func TestRejectPromptImprovementProposalMarksReviewed(t *testing.T) {
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+	build := &Build{
+		ID:     "prompt-reject-build",
+		UserID: 1,
+		Status: BuildInProgress,
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				HistoricalLearning: &BuildLearningSummary{
+					Scope:          "stack:react+go",
+					ObservedBuilds: 2,
+					PromptImprovementProposals: []PromptImprovementProposal{
+						{
+							ID:               "prompt-compile",
+							Scope:            "stack:react+go",
+							TargetPrompt:     "compile_repair",
+							FailureCluster:   "typescript_compile",
+							Proposal:         "Bias toward import and manifest checks.",
+							BenchmarkGate:    "Run compile repair benchmarks.",
+							RequiresApproval: true,
+							ReviewState:      PromptProposalReviewProposed,
+							GeneratedAt:      time.Now().UTC(),
+						},
+					},
+				},
+			},
+		},
+	}
+	am.builds[build.ID] = build
+
+	body, _ := json.Marshal(map[string]string{"reason": "Too broad for the current benchmark set"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/prompt-reject-build/prompt-proposals/prompt-compile/reject", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected reject prompt proposal 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal reject prompt proposal response: %v", err)
+	}
+	if response["review_status"] != string(PromptProposalReviewRejected) {
+		t.Fatalf("expected review_status rejected, got %v", response["review_status"])
+	}
+	if response["prompt_mutated"] != false {
+		t.Fatalf("expected prompt_mutated=false, got %v", response["prompt_mutated"])
+	}
+	proposal := build.SnapshotState.Orchestration.HistoricalLearning.PromptImprovementProposals[0]
+	if proposal.ReviewState != PromptProposalReviewRejected || proposal.ReviewedAt == nil || !strings.Contains(proposal.ReviewMessage, "Too broad") {
+		t.Fatalf("expected proposal rejected with review message, got %+v", proposal)
+	}
+	if got := build.SnapshotState.Orchestration.HistoricalLearning.PromptAdoptionCandidates; len(got) != 0 {
+		t.Fatalf("expected rejected proposal to be removed from adoption candidates, got %+v", got)
+	}
+}
+
+func TestBenchmarkPromptImprovementProposalRecordsGateWithoutMutatingPrompt(t *testing.T) {
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+	now := time.Now().UTC()
+	build := &Build{
+		ID:     "prompt-benchmark-build",
+		UserID: 1,
+		Status: BuildInProgress,
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				HistoricalLearning: &BuildLearningSummary{
+					Scope:          "stack:react+go",
+					ObservedBuilds: 2,
+					PromptImprovementProposals: []PromptImprovementProposal{
+						{
+							ID:               "prompt-preview-benchmark",
+							Scope:            "stack:react+go",
+							TargetPrompt:     "preview_repair",
+							FailureCluster:   "preview_verification",
+							Proposal:         "Emphasize deterministic preview checks.",
+							Evidence:         []string{"failure_class=preview_verification count=2"},
+							BenchmarkGate:    "Run generated preview smoke benchmarks.",
+							RequiresApproval: true,
+							ReviewState:      PromptProposalReviewApproved,
+							ReviewedAt:       &now,
+							ReviewMessage:    "Approved for benchmark.",
+							BenchmarkStatus:  PromptProposalBenchmarkNotStarted,
+							GeneratedAt:      now,
+						},
+					},
+				},
+			},
+		},
+	}
+	am.builds[build.ID] = build
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/prompt-benchmark-build/prompt-proposals/prompt-preview-benchmark/benchmark", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected benchmark prompt proposal 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal benchmark prompt proposal response: %v", err)
+	}
+	if response["benchmark_status"] != string(PromptProposalBenchmarkPassed) {
+		t.Fatalf("expected benchmark_status passed, got %v", response["benchmark_status"])
+	}
+	if response["prompt_mutated"] != false {
+		t.Fatalf("expected prompt_mutated=false, got %v", response["prompt_mutated"])
+	}
+	proposal := build.SnapshotState.Orchestration.HistoricalLearning.PromptImprovementProposals[0]
+	if proposal.BenchmarkStatus != PromptProposalBenchmarkPassed || proposal.BenchmarkStartedAt == nil || proposal.BenchmarkCompletedAt == nil {
+		t.Fatalf("expected passed benchmark timestamps, got %+v", proposal)
+	}
+	if len(proposal.BenchmarkResults) == 0 {
+		t.Fatalf("expected benchmark result details")
+	}
+	candidates := build.SnapshotState.Orchestration.HistoricalLearning.PromptAdoptionCandidates
+	if len(candidates) != 1 {
+		t.Fatalf("expected one adoption candidate, got %+v", candidates)
+	}
+	if candidates[0].ProposalID != "prompt-preview-benchmark" || candidates[0].Status != PromptProposalAdoptionReady || candidates[0].PromptMutated {
+		t.Fatalf("expected inert ready adoption candidate, got %+v", candidates[0])
+	}
+	if proposal.Proposal != "Emphasize deterministic preview checks." {
+		t.Fatalf("expected proposal text to remain unchanged, got %q", proposal.Proposal)
+	}
+}
+
+func TestBenchmarkPromptImprovementProposalRequiresApproval(t *testing.T) {
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+	now := time.Now().UTC()
+	build := &Build{
+		ID:     "prompt-benchmark-unapproved-build",
+		UserID: 1,
+		Status: BuildInProgress,
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				HistoricalLearning: &BuildLearningSummary{
+					Scope:          "stack:react+go",
+					ObservedBuilds: 2,
+					PromptImprovementProposals: []PromptImprovementProposal{
+						{
+							ID:               "prompt-unapproved",
+							Scope:            "stack:react+go",
+							TargetPrompt:     "compile_repair",
+							FailureCluster:   "typescript_compile",
+							Proposal:         "Bias toward import and manifest checks.",
+							Evidence:         []string{"failure_class=typescript_compile count=2"},
+							BenchmarkGate:    "Run compile repair benchmarks.",
+							RequiresApproval: true,
+							ReviewState:      PromptProposalReviewProposed,
+							BenchmarkStatus:  PromptProposalBenchmarkNotStarted,
+							GeneratedAt:      now,
+						},
+					},
+				},
+			},
+		},
+	}
+	am.builds[build.ID] = build
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/prompt-benchmark-unapproved-build/prompt-proposals/prompt-unapproved/benchmark", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected benchmark prompt proposal 400, got %d: %s", w.Code, w.Body.String())
+	}
+	proposal := build.SnapshotState.Orchestration.HistoricalLearning.PromptImprovementProposals[0]
+	if proposal.BenchmarkStatus != PromptProposalBenchmarkNotStarted || len(proposal.BenchmarkResults) != 0 {
+		t.Fatalf("expected benchmark state unchanged, got %+v", proposal)
+	}
+}
+
+func TestCreatePromptPackDraftFromAdoptionCandidates(t *testing.T) {
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+	now := time.Now().UTC()
+	build := &Build{
+		ID:     "prompt-draft-build",
+		UserID: 1,
+		Status: BuildInProgress,
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				HistoricalLearning: &BuildLearningSummary{
+					Scope:          "stack:react+go",
+					ObservedBuilds: 2,
+					PromptAdoptionCandidates: []PromptProposalAdoptionRecord{
+						{
+							ID:              "adoption-prompt-preview",
+							ProposalID:      "prompt-preview",
+							BuildID:         "prompt-draft-build",
+							Scope:           "stack:react+go",
+							TargetPrompt:    "preview_repair",
+							FailureCluster:  "preview_verification",
+							Proposal:        "Emphasize deterministic preview checks.",
+							Evidence:        []string{"failure_class=preview_verification count=2"},
+							BenchmarkGate:   "Run preview runtime verification benchmarks.",
+							BenchmarkStatus: PromptProposalBenchmarkPassed,
+							Status:          PromptProposalAdoptionReady,
+							PromptMutated:   false,
+							CreatedAt:       now,
+						},
+					},
+				},
+			},
+		},
+	}
+	am.builds[build.ID] = build
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/prompt-draft-build/prompt-pack-drafts", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected create prompt pack draft 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal create prompt pack draft response: %v", err)
+	}
+	if response["prompt_mutated"] != false || response["activation_ready"] != false {
+		t.Fatalf("expected inactive non-mutating draft response, got %+v", response)
+	}
+	drafts := build.SnapshotState.Orchestration.HistoricalLearning.PromptPackDrafts
+	if len(drafts) != 1 {
+		t.Fatalf("expected one prompt pack draft, got %+v", drafts)
+	}
+	draft := drafts[0]
+	if draft.Status != PromptPackDraftInactive || draft.PromptMutated || draft.ActivationReady {
+		t.Fatalf("expected inactive non-mutating prompt pack draft, got %+v", draft)
+	}
+	if draft.Version != "draft-001" || len(draft.Changes) != 1 || draft.Changes[0].ProposalID != "prompt-preview" {
+		t.Fatalf("expected draft change from adoption candidate, got %+v", draft)
+	}
+}
+
+func TestCreatePromptPackDraftRequiresAdoptionCandidates(t *testing.T) {
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+	}
+	build := &Build{
+		ID:     "prompt-draft-empty-build",
+		UserID: 1,
+		Status: BuildInProgress,
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				HistoricalLearning: &BuildLearningSummary{
+					Scope:          "stack:react+go",
+					ObservedBuilds: 2,
+				},
+			},
+		},
+	}
+	am.builds[build.ID] = build
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/prompt-draft-empty-build/prompt-pack-drafts", nil)
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected create prompt pack draft 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if drafts := build.SnapshotState.Orchestration.HistoricalLearning.PromptPackDrafts; len(drafts) != 0 {
+		t.Fatalf("expected no prompt pack drafts, got %+v", drafts)
+	}
+}
+
+func TestRequestPromptPackDraftActivationRequiresAdminAndFlag(t *testing.T) {
+	t.Setenv(promptPackActivationFeatureFlag, "")
+	db := openBuildTestDB(t)
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		db:          db,
+	}
+	build := &Build{
+		ID:     "prompt-activation-disabled-build",
+		UserID: 1,
+		Status: BuildInProgress,
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				HistoricalLearning: &BuildLearningSummary{
+					Scope: "stack:react+go",
+					PromptPackDrafts: []PromptPackDraft{
+						{
+							ID:                 "prompt-pack-draft-1",
+							Version:            "draft-001",
+							BuildID:            "prompt-activation-disabled-build",
+							Scope:              "stack:react+go",
+							SourceCandidateIDs: []string{"adoption-prompt-preview"},
+							Status:             PromptPackDraftInactive,
+							PromptMutated:      false,
+							ActivationReady:    false,
+							CreatedAt:          time.Now().UTC(),
+							Changes: []PromptPackDraftChange{
+								{
+									CandidateID:    "adoption-prompt-preview",
+									ProposalID:     "prompt-preview",
+									TargetPrompt:   "preview_repair",
+									FailureCluster: "preview_verification",
+									Proposal:       "Emphasize deterministic preview checks.",
+									BenchmarkGate:  "Run preview runtime verification benchmarks.",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	am.builds[build.ID] = build
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/prompt-activation-disabled-build/prompt-pack-drafts/prompt-pack-draft-1/request-activation", nil)
+	testRouterWithAdmin(am, true).ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected disabled activation request 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	t.Setenv(promptPackActivationFeatureFlag, "true")
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/v1/build/prompt-activation-disabled-build/prompt-pack-drafts/prompt-pack-draft-1/request-activation", nil)
+	testRouterWithAdmin(am, false).ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected non-admin activation request 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var count int64
+	if err := db.Model(&models.PromptPackActivationRequest{}).Count(&count).Error; err != nil {
+		t.Fatalf("count activation requests: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no activation request rows, got %d", count)
+	}
+}
+
+func TestRequestPromptPackDraftActivationPersistsSeparateAdminRequest(t *testing.T) {
+	t.Setenv(promptPackActivationFeatureFlag, "true")
+	db := openBuildTestDB(t)
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		db:          db,
+	}
+	now := time.Now().UTC()
+	build := &Build{
+		ID:     "prompt-activation-build",
+		UserID: 1,
+		Status: BuildInProgress,
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{
+				Flags: defaultBuildOrchestrationFlags(),
+				HistoricalLearning: &BuildLearningSummary{
+					Scope: "stack:react+go",
+					PromptPackDrafts: []PromptPackDraft{
+						{
+							ID:                 "prompt-pack-draft-1",
+							Version:            "draft-001",
+							BuildID:            "prompt-activation-build",
+							Scope:              "stack:react+go",
+							SourceCandidateIDs: []string{"adoption-prompt-preview"},
+							Status:             PromptPackDraftInactive,
+							PromptMutated:      false,
+							ActivationReady:    false,
+							CreatedAt:          now,
+							Changes: []PromptPackDraftChange{
+								{
+									CandidateID:    "adoption-prompt-preview",
+									ProposalID:     "prompt-preview",
+									TargetPrompt:   "preview_repair",
+									FailureCluster: "preview_verification",
+									Proposal:       "Emphasize deterministic preview checks.",
+									Evidence:       []string{"failure_class=preview_verification count=2"},
+									BenchmarkGate:  "Run preview runtime verification benchmarks.",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	am.builds[build.ID] = build
+
+	body, _ := json.Marshal(map[string]string{"reason": "Ready for controlled prompt-pack activation review"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/prompt-activation-build/prompt-pack-drafts/prompt-pack-draft-1/request-activation", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouterWithAdmin(am, true).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected activation request 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal activation request response: %v", err)
+	}
+	if response["activation_status"] != string(PromptPackActivationPending) {
+		t.Fatalf("expected pending admin activation, got %v", response["activation_status"])
+	}
+	if response["prompt_mutated"] != false || response["historical_learning_mutated"] != false {
+		t.Fatalf("expected activation request to avoid prompt/historical learning mutation, got %+v", response)
+	}
+	draft := build.SnapshotState.Orchestration.HistoricalLearning.PromptPackDrafts[0]
+	if draft.Status != PromptPackDraftInactive || draft.PromptMutated || draft.ActivationReady {
+		t.Fatalf("expected draft to remain inactive and non-mutating, got %+v", draft)
+	}
+
+	var rows []models.PromptPackActivationRequest
+	if err := db.Find(&rows).Error; err != nil {
+		t.Fatalf("list activation requests: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected one activation request row, got %+v", rows)
+	}
+	if rows[0].BuildID != "prompt-activation-build" || rows[0].DraftVersion != "draft-001" || rows[0].Status != string(PromptPackActivationPending) {
+		t.Fatalf("unexpected activation request row: %+v", rows[0])
+	}
+	if rows[0].PromptMutated {
+		t.Fatalf("expected stored activation request to be non-mutating, got %+v", rows[0])
+	}
+	if !strings.Contains(rows[0].Reason, "controlled prompt-pack activation") {
+		t.Fatalf("expected stored activation reason, got %q", rows[0].Reason)
+	}
+}
+
+func TestActivatePromptPackRequestMaterializesRegistryVersionWithoutPromptMutation(t *testing.T) {
+	t.Setenv(promptPackActivationFeatureFlag, "true")
+	db := openBuildTestDB(t)
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		db:          db,
+	}
+	build := &Build{
+		ID:     "prompt-registry-build",
+		UserID: 1,
+		Status: BuildInProgress,
+	}
+	am.builds[build.ID] = build
+
+	sourceCandidateIDs, _ := json.Marshal([]string{"adoption-prompt-preview"})
+	changes, _ := json.Marshal([]PromptPackDraftChange{
+		{
+			CandidateID:    "adoption-prompt-preview",
+			ProposalID:     "prompt-preview",
+			TargetPrompt:   "preview_repair",
+			FailureCluster: "preview_verification",
+			Proposal:       "Emphasize deterministic preview checks.",
+			Evidence:       []string{"failure_class=preview_verification count=2"},
+			BenchmarkGate:  "Run preview runtime verification benchmarks.",
+		},
+	})
+	request := models.PromptPackActivationRequest{
+		RequestID:              "prompt-pack-activation-request-1",
+		BuildID:                "prompt-registry-build",
+		DraftID:                "prompt-pack-draft-1",
+		DraftVersion:           "draft-001",
+		Scope:                  "stack:react+go",
+		Status:                 string(PromptPackActivationPending),
+		RequestedByID:          1,
+		Reason:                 "Ready for registry activation",
+		FeatureFlag:            promptPackActivationFeatureFlag,
+		SourceCandidateIDsJSON: string(sourceCandidateIDs),
+		ChangesJSON:            string(changes),
+		PromptMutated:          false,
+	}
+	if err := db.Create(&request).Error; err != nil {
+		t.Fatalf("create activation request: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{"reason": "Activate registry version only"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/prompt-registry-build/prompt-pack-activation-requests/prompt-pack-activation-request-1/activate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouterWithAdmin(am, true).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected registry activation 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal registry activation response: %v", err)
+	}
+	if response["activation_status"] != string(PromptPackActivationActive) {
+		t.Fatalf("expected activated registry status, got %v", response["activation_status"])
+	}
+	if response["prompt_mutated"] != false || response["live_prompt_generation_changed"] != false || response["live_prompt_read_enabled"] != false {
+		t.Fatalf("expected registry activation to avoid live prompt mutation, got %+v", response)
+	}
+
+	var updatedRequest models.PromptPackActivationRequest
+	if err := db.Where("request_id = ?", "prompt-pack-activation-request-1").First(&updatedRequest).Error; err != nil {
+		t.Fatalf("load activation request: %v", err)
+	}
+	if updatedRequest.Status != string(PromptPackActivationActive) || updatedRequest.PromptMutated {
+		t.Fatalf("expected request activated without prompt mutation, got %+v", updatedRequest)
+	}
+
+	var versions []models.PromptPackVersion
+	if err := db.Find(&versions).Error; err != nil {
+		t.Fatalf("list prompt pack versions: %v", err)
+	}
+	if len(versions) != 1 {
+		t.Fatalf("expected one prompt pack version, got %+v", versions)
+	}
+	if versions[0].Status != string(PromptPackVersionActive) || versions[0].SourceRequestID != "prompt-pack-activation-request-1" || versions[0].PromptMutated || versions[0].LivePromptReadEnabled {
+		t.Fatalf("expected inert active registry version, got %+v", versions[0])
+	}
+
+	var events []models.PromptPackActivationEvent
+	if err := db.Find(&events).Error; err != nil {
+		t.Fatalf("list prompt pack activation events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected one activation event, got %+v", events)
+	}
+	if events[0].EventType != string(PromptPackActivationEventActivated) || events[0].PromptMutated || events[0].LivePromptReadEnabled {
+		t.Fatalf("expected inert registry activation event, got %+v", events[0])
+	}
+}
+
+func TestRollbackPromptPackVersionCreatesNewRegistryEntryWithoutPromptMutation(t *testing.T) {
+	t.Setenv(promptPackActivationFeatureFlag, "true")
+	db := openBuildTestDB(t)
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		db:          db,
+	}
+	build := &Build{
+		ID:     "prompt-rollback-build",
+		UserID: 1,
+		Status: BuildInProgress,
+	}
+	am.builds[build.ID] = build
+
+	sourceCandidateIDs, _ := json.Marshal([]string{"adoption-prompt-preview"})
+	changes, _ := json.Marshal([]PromptPackDraftChange{
+		{
+			CandidateID:    "adoption-prompt-preview",
+			ProposalID:     "prompt-preview",
+			TargetPrompt:   "preview_repair",
+			FailureCluster: "preview_verification",
+			Proposal:       "Emphasize deterministic preview checks.",
+			Evidence:       []string{"failure_class=preview_verification count=2"},
+			BenchmarkGate:  "Run preview runtime verification benchmarks.",
+		},
+	})
+	activeVersion := models.PromptPackVersion{
+		VersionID:              "prompt-pack-version-active-1",
+		Scope:                  "stack:react+go",
+		Version:                "draft-001",
+		Status:                 string(PromptPackVersionActive),
+		SourceBuildID:          "prompt-rollback-build",
+		SourceDraftID:          "prompt-pack-draft-1",
+		SourceRequestID:        "prompt-pack-activation-request-1",
+		SourceCandidateIDsJSON: string(sourceCandidateIDs),
+		ChangesJSON:            string(changes),
+		ActivatedByID:          1,
+		PromptMutated:          false,
+		LivePromptReadEnabled:  false,
+	}
+	if err := db.Create(&activeVersion).Error; err != nil {
+		t.Fatalf("create active version: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{"reason": "Rolling back to clear registry state"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/prompt-rollback-build/prompt-pack-versions/prompt-pack-version-active-1/rollback", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouterWithAdmin(am, true).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected rollback 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal rollback response: %v", err)
+	}
+	if response["prompt_mutated"] != false || response["live_prompt_generation_changed"] != false || response["live_prompt_read_enabled"] != false {
+		t.Fatalf("expected rollback to avoid live prompt mutation, got %+v", response)
+	}
+	rollbackVersion, ok := response["prompt_pack_version"].(map[string]any)
+	if !ok || rollbackVersion == nil {
+		t.Fatalf("expected rollback version in response, got %+v", response)
+	}
+	if rollbackVersion["rollback_of_version_id"] != "prompt-pack-version-active-1" {
+		t.Fatalf("expected rollback_of_version_id to reference original, got %v", rollbackVersion["rollback_of_version_id"])
+	}
+
+	var versions []models.PromptPackVersion
+	if err := db.Find(&versions).Error; err != nil {
+		t.Fatalf("list prompt pack versions: %v", err)
+	}
+	if len(versions) != 2 {
+		t.Fatalf("expected two prompt pack version rows (original + rollback), got %d", len(versions))
+	}
+
+	var events []models.PromptPackActivationEvent
+	if err := db.Find(&events).Error; err != nil {
+		t.Fatalf("list prompt pack activation events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected one rollback event, got %d", len(events))
+	}
+	if events[0].EventType != string(PromptPackActivationEventRolledBack) || events[0].PromptMutated || events[0].LivePromptReadEnabled {
+		t.Fatalf("expected inert rollback event, got %+v", events[0])
+	}
+	if events[0].RollbackOfVersionID != "prompt-pack-version-active-1" {
+		t.Fatalf("expected rollback event to reference original version, got %q", events[0].RollbackOfVersionID)
+	}
+}
+
+func TestRollbackPromptPackVersionRequiresAdminAndFlag(t *testing.T) {
+	db := openBuildTestDB(t)
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		db:          db,
+	}
+	build := &Build{
+		ID:     "prompt-rollback-nonadmin-build",
+		UserID: 1,
+		Status: BuildInProgress,
+	}
+	am.builds[build.ID] = build
+
+	body, _ := json.Marshal(map[string]string{"reason": "Rollback attempt"})
+
+	t.Run("flag disabled blocks rollback", func(t *testing.T) {
+		t.Setenv(promptPackActivationFeatureFlag, "false")
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/v1/build/prompt-rollback-nonadmin-build/prompt-pack-versions/some-version-id/rollback", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		testRouterWithAdmin(am, true).ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 when flag disabled, got %d", w.Code)
+		}
+	})
+
+	t.Run("non-admin blocks rollback", func(t *testing.T) {
+		t.Setenv(promptPackActivationFeatureFlag, "true")
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/v1/build/prompt-rollback-nonadmin-build/prompt-pack-versions/some-version-id/rollback", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		testRouterWithAdmin(am, false).ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 for non-admin rollback, got %d", w.Code)
+		}
+	})
 }
 
 func TestPauseAndResumeRestoreActiveSnapshot(t *testing.T) {

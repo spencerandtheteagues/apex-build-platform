@@ -688,6 +688,41 @@ export class ApiService {
     return response.data
   }
 
+  async approveBuildPromptProposal(buildId: string, proposalId: string, reason?: string): Promise<BuildPromptProposalReviewResponse> {
+    const response = await this.client.post(`/build/${buildId}/prompt-proposals/${proposalId}/approve`, reason ? { reason } : {})
+    return response.data
+  }
+
+  async rejectBuildPromptProposal(buildId: string, proposalId: string, reason?: string): Promise<BuildPromptProposalReviewResponse> {
+    const response = await this.client.post(`/build/${buildId}/prompt-proposals/${proposalId}/reject`, reason ? { reason } : {})
+    return response.data
+  }
+
+  async benchmarkBuildPromptProposal(buildId: string, proposalId: string): Promise<BuildPromptProposalBenchmarkResponse> {
+    const response = await this.client.post(`/build/${buildId}/prompt-proposals/${proposalId}/benchmark`)
+    return response.data
+  }
+
+  async createBuildPromptPackDraft(buildId: string): Promise<BuildPromptPackDraftResponse> {
+    const response = await this.client.post(`/build/${buildId}/prompt-pack-drafts`)
+    return response.data
+  }
+
+  async requestBuildPromptPackActivation(buildId: string, draftId: string, reason?: string): Promise<BuildPromptPackActivationResponse> {
+    const response = await this.client.post(`/build/${buildId}/prompt-pack-drafts/${draftId}/request-activation`, reason ? { reason } : {})
+    return response.data
+  }
+
+  async activateBuildPromptPackRequest(buildId: string, requestId: string, reason?: string): Promise<BuildPromptPackRegistryActivationResponse> {
+    const response = await this.client.post(`/build/${buildId}/prompt-pack-activation-requests/${requestId}/activate`, reason ? { reason } : {})
+    return response.data
+  }
+
+  async rollbackBuildPromptPackVersion(buildId: string, versionId: string, reason?: string): Promise<BuildPromptPackRollbackResponse> {
+    const response = await this.client.post(`/build/${buildId}/prompt-pack-versions/${versionId}/rollback`, reason ? { reason } : {})
+    return response.data
+  }
+
   async getBuildCheckpoints(buildId: string): Promise<any[]> {
     const response = await this.client.get(`/build/${buildId}/checkpoints`)
     return response.data.checkpoints || []
@@ -2720,6 +2755,23 @@ export class ApiService {
     return response.data
   }
 
+  async changePlan(params: {
+    plan_type: string
+    billing_cycle: 'monthly' | 'annual'
+  }): Promise<{
+    success: boolean
+    data?: {
+      plan_type: string
+      billing_cycle: string
+      status: string
+      current_period_end: string
+    }
+    error?: string
+  }> {
+    const response = await this.client.post('/billing/change-plan', params)
+    return response.data
+  }
+
   async getInvoices(): Promise<{
     success: boolean
     data?: {
@@ -3721,6 +3773,8 @@ export interface BuildLearningSummaryState {
   hotspot_files?: string[]
   recommended_avoidance?: string[]
   prompt_improvement_proposals?: BuildPromptImprovementProposalState[]
+  prompt_adoption_candidates?: BuildPromptProposalAdoptionCandidateState[]
+  prompt_pack_drafts?: BuildPromptPackDraftState[]
   clean_pass_signals?: string[]
   generated_at?: string
 }
@@ -3734,8 +3788,200 @@ export interface BuildPromptImprovementProposalState {
   evidence?: string[]
   benchmark_gate: string
   requires_approval: boolean
-  review_state: string
+  review_state?: 'proposed' | 'approved' | 'rejected' | string
+  reviewed_at?: string
+  review_message?: string
+  benchmark_status?: 'not_started' | 'running' | 'passed' | 'failed' | 'not_applicable' | string
+  benchmark_started_at?: string
+  benchmark_completed_at?: string
+  benchmark_results?: BuildPromptProposalBenchmarkResultState[]
   generated_at?: string
+}
+
+export interface BuildPromptProposalBenchmarkResultState {
+  name: string
+  status: string
+  summary?: string
+  evidence?: string
+  required: boolean
+  generated?: string
+}
+
+export interface BuildPromptProposalAdoptionCandidateState {
+  id: string
+  proposal_id: string
+  build_id?: string
+  scope: string
+  target_prompt: string
+  failure_cluster: string
+  proposal: string
+  evidence?: string[]
+  benchmark_gate: string
+  benchmark_status: 'not_started' | 'running' | 'passed' | 'failed' | 'not_applicable' | string
+  benchmark_completed_at?: string
+  benchmark_results?: BuildPromptProposalBenchmarkResultState[]
+  status: 'ready_for_adoption' | string
+  prompt_mutated: boolean
+  created_at?: string
+}
+
+export interface BuildPromptPackDraftChangeState {
+  candidate_id: string
+  proposal_id: string
+  target_prompt: string
+  failure_cluster: string
+  proposal: string
+  evidence?: string[]
+  benchmark_gate: string
+}
+
+export interface BuildPromptPackDraftState {
+  id: string
+  version: string
+  build_id?: string
+  scope: string
+  source_candidate_ids?: string[]
+  changes?: BuildPromptPackDraftChangeState[]
+  status: 'inactive_draft' | string
+  prompt_mutated: boolean
+  activation_ready: boolean
+  created_at?: string
+}
+
+export interface BuildPromptPackActivationRequestState {
+  id: string
+  build_id: string
+  draft_id: string
+  draft_version: string
+  scope: string
+  source_candidate_ids?: string[]
+  changes?: BuildPromptPackDraftChangeState[]
+  status: 'pending_admin_activation' | 'activated_in_registry' | string
+  requested_by_id: number
+  reason?: string
+  feature_flag: string
+  prompt_mutated: boolean
+  created_at?: string
+}
+
+export interface BuildPromptPackVersionState {
+  id: string
+  scope: string
+  version: string
+  status: 'active_registry_version' | string
+  source_build_id: string
+  source_draft_id: string
+  source_request_id: string
+  source_candidate_ids?: string[]
+  changes?: BuildPromptPackDraftChangeState[]
+  activated_by_id: number
+  activated_at?: string
+  rollback_of_version_id?: string
+  prompt_mutated: boolean
+  live_prompt_read_enabled: boolean
+  created_at?: string
+}
+
+export interface BuildPromptPackActivationEventState {
+  id: string
+  event_type: 'registry_activation' | string
+  prompt_pack_version_id: string
+  activation_request_id: string
+  build_id: string
+  actor_id: number
+  reason?: string
+  rollback_of_version_id?: string
+  prompt_mutated: boolean
+  live_prompt_read_enabled: boolean
+  created_at?: string
+}
+
+export interface BuildPromptProposalReviewResponse {
+  build_id: string
+  proposal_id: string
+  status?: string
+  review_status: 'proposed' | 'approved' | 'rejected'
+  prompt_proposal?: BuildPromptImprovementProposalState
+  historical_learning?: BuildLearningSummaryState
+  message?: string
+  prompt_mutated?: boolean
+  restored_session?: boolean
+  benchmark_gate_status?: 'pending' | 'not_applicable' | string
+}
+
+export interface BuildPromptProposalBenchmarkResponse {
+  build_id: string
+  proposal_id: string
+  status?: string
+  benchmark_status: 'not_started' | 'running' | 'passed' | 'failed' | 'not_applicable' | string
+  prompt_proposal?: BuildPromptImprovementProposalState
+  historical_learning?: BuildLearningSummaryState
+  message?: string
+  prompt_mutated?: boolean
+  restored_session?: boolean
+  benchmark_gate_status?: string
+}
+
+export interface BuildPromptPackDraftResponse {
+  build_id: string
+  status?: string
+  prompt_pack_draft?: BuildPromptPackDraftState
+  historical_learning?: BuildLearningSummaryState
+  message?: string
+  prompt_mutated?: boolean
+  activation_ready?: boolean
+  restored_session?: boolean
+}
+
+export interface BuildPromptPackActivationResponse {
+  build_id: string
+  draft_id: string
+  status?: string
+  activation_status: 'pending_admin_activation' | 'activated_in_registry' | string
+  prompt_pack_draft?: BuildPromptPackDraftState
+  prompt_pack_activation_request?: BuildPromptPackActivationRequestState
+  message?: string
+  prompt_mutated?: boolean
+  restored_session?: boolean
+  feature_flag?: string
+  live_prompt_generation_changed?: boolean
+  historical_learning_mutated?: boolean
+  requires_separate_activation_job?: boolean
+}
+
+export interface BuildPromptPackRegistryActivationResponse {
+  build_id: string
+  request_id: string
+  status?: string
+  activation_status: 'activated_in_registry' | string
+  prompt_pack_activation_request?: BuildPromptPackActivationRequestState
+  prompt_pack_version?: BuildPromptPackVersionState
+  prompt_pack_activation_event?: BuildPromptPackActivationEventState
+  message?: string
+  prompt_mutated?: boolean
+  restored_session?: boolean
+  feature_flag?: string
+  live_prompt_generation_changed?: boolean
+  live_prompt_read_enabled?: boolean
+  requires_separate_live_rollout?: boolean
+  requires_separate_activation_job?: boolean
+}
+
+export interface BuildPromptPackRollbackResponse {
+  build_id: string
+  version_id: string
+  status?: string
+  prompt_pack_version?: BuildPromptPackVersionState
+  rolled_back_version?: BuildPromptPackVersionState
+  prompt_pack_activation_event?: BuildPromptPackActivationEventState
+  message?: string
+  prompt_mutated?: boolean
+  restored_session?: boolean
+  feature_flag?: string
+  live_prompt_generation_changed?: boolean
+  live_prompt_read_enabled?: boolean
+  requires_separate_live_rollout?: boolean
+  requires_separate_activation_job?: boolean
 }
 
 export interface ProposedBuildEdit {

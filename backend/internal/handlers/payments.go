@@ -952,6 +952,95 @@ func (h *PaymentHandlers) ReactivateSubscription(c *gin.Context) {
 	})
 }
 
+// ChangePlan switches an existing paid subscription to a different plan or billing cycle.
+// POST /api/v1/billing/change-plan
+func (h *PaymentHandlers) ChangePlan(c *gin.Context) {
+	userID := c.GetUint("user_id")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "User not authenticated", "code": "UNAUTHORIZED"})
+		return
+	}
+
+	var req struct {
+		PlanType     string `json:"plan_type" binding:"required"`
+		BillingCycle string `json:"billing_cycle" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "plan_type and billing_cycle are required", "code": "INVALID_REQUEST"})
+		return
+	}
+	if req.BillingCycle != "monthly" && req.BillingCycle != "annual" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "billing_cycle must be 'monthly' or 'annual'", "code": "INVALID_BILLING_CYCLE"})
+		return
+	}
+
+	newPlanType := payments.PlanType(req.PlanType)
+	if newPlanType == payments.PlanFree || newPlanType == payments.PlanOwner || !payments.IsValidPlanType(req.PlanType) {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Invalid plan type for upgrade/downgrade", "code": "INVALID_PLAN_TYPE"})
+		return
+	}
+
+	plan := payments.GetPlanByType(newPlanType)
+	if plan == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Plan not found", "code": "PLAN_NOT_FOUND"})
+		return
+	}
+
+	var newPriceID string
+	if req.BillingCycle == "annual" {
+		newPriceID = plan.AnnualPriceID
+	} else {
+		newPriceID = plan.MonthlyPriceID
+	}
+	if payments.IsPlaceholderPriceID(newPriceID) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "Billing is not fully configured for this plan", "code": "PRICE_NOT_CONFIGURED"})
+		return
+	}
+
+	var user models.User
+	if err := h.db.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "error": "User not found", "code": "USER_NOT_FOUND"})
+		return
+	}
+	if user.SubscriptionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "No active subscription to change. Start a new subscription via checkout.", "code": "NO_SUBSCRIPTION"})
+		return
+	}
+	if user.SubscriptionStatus != string(payments.StatusActive) && user.SubscriptionStatus != string(payments.StatusTrialing) {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Subscription is not active", "code": "SUBSCRIPTION_NOT_ACTIVE"})
+		return
+	}
+
+	if !h.stripeService.IsConfigured() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "Payment system is not configured", "code": "STRIPE_NOT_CONFIGURED"})
+		return
+	}
+
+	ctx := context.Background()
+	subInfo, err := h.stripeService.UpdateSubscription(ctx, user.SubscriptionID, newPriceID)
+	if err != nil {
+		log.Printf("Failed to change plan for user %d: %v", userID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to change plan", "code": "PLAN_CHANGE_FAILED"})
+		return
+	}
+
+	h.db.Model(&user).Updates(map[string]interface{}{
+		"subscription_type":   string(newPlanType),
+		"subscription_status": string(subInfo.Status),
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("Plan changed to %s (%s)", plan.Name, req.BillingCycle),
+		"data": gin.H{
+			"plan_type":          string(newPlanType),
+			"billing_cycle":      req.BillingCycle,
+			"status":             string(subInfo.Status),
+			"current_period_end": subInfo.CurrentPeriodEnd,
+		},
+	})
+}
+
 // GetInvoices returns the user's billing history
 // GET /api/v1/billing/invoices
 func (h *PaymentHandlers) GetInvoices(c *gin.Context) {

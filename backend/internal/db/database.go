@@ -349,6 +349,10 @@ func (d *Database) Migrate() error {
 		&hosting.SSLCertificate{},
 		// Completed build history (persist builds across restarts)
 		&models.CompletedBuild{},
+		// Prompt-pack activation requests stay separate from build snapshots.
+		&models.PromptPackActivationRequest{},
+		&models.PromptPackVersion{},
+		&models.PromptPackActivationEvent{},
 		// User-uploaded assets for AI agents (images, CSVs, PDFs, etc.)
 		&models.ProjectAsset{},
 		// Stripe webhook idempotency and credit audit trail

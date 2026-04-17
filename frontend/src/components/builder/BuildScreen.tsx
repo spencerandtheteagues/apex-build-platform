@@ -14,7 +14,15 @@ import { BuildHistory } from './BuildHistory'
 import DiffReviewPanel from '@/components/diff/DiffReviewPanel'
 import AIRepairReviewPanel from '@/components/ide/AIRepairReviewPanel'
 import AITelemetryOverlay from '@/components/ide/AITelemetryOverlay'
-import type { BuildLearningSummaryState, BuildMessageTargetMode, BuildPermissionRequest, BuildInteractionState } from '@/services/api'
+import type {
+  BuildLearningSummaryState,
+  BuildMessageTargetMode,
+  BuildPermissionRequest,
+  BuildInteractionState,
+  BuildPromptPackActivationEventState,
+  BuildPromptPackActivationRequestState,
+  BuildPromptPackVersionState,
+} from '@/services/api'
 
 // ─── Minimal local types matching AppBuilder.tsx structures ──────────────────
 
@@ -139,6 +147,9 @@ interface BSBuildState {
   verificationReports?: BuildVerificationReport[]
   providerScorecards?: BuildProviderScorecard[]
   historicalLearning?: BuildLearningSummaryState
+  promptPackActivationRequests?: BuildPromptPackActivationRequestState[]
+  promptPackVersions?: BuildPromptPackVersionState[]
+  promptPackActivationEvents?: BuildPromptPackActivationEventState[]
 }
 
 interface AIThoughtItem {
@@ -214,6 +225,7 @@ interface BuildScreenProps {
   permissionActionId: string | null
   rollbackCheckpointId: string | null
   patchBundleActionId?: string | null
+  promptProposalActionId?: string | null
   chatInput: string
   setChatInput: (v: string) => void
   plannerSendMode: BuildMessageTargetMode
@@ -235,6 +247,12 @@ interface BuildScreenProps {
   onResolvePermission: (id: string, decision: 'allow' | 'deny', mode: 'once' | 'build') => void
   onApprovePatchBundle: (id: string) => void
   onRejectPatchBundle: (id: string) => void
+  onReviewPromptProposal: (id: string, decision: 'approve' | 'reject') => void
+  onBenchmarkPromptProposal: (id: string) => void
+  onCreatePromptPackDraft: () => void
+  onRequestPromptPackActivation?: (id: string) => void
+  onActivatePromptPackRequest?: (id: string) => void
+  onRollbackPromptPackVersion?: (id: string) => void
   onSetShowDiffReview: (v: boolean) => void
   onLoadProposedEdits: (buildId?: string) => void
   onOpenCompletedBuild: (buildId: string, action?: 'resume' | 'open_files') => void
@@ -666,6 +684,7 @@ interface PanelOverlayProps {
   permissionActionId: string | null
   rollbackCheckpointId: string | null
   patchBundleActionId?: string | null
+  promptProposalActionId?: string | null
   userId: number | null | undefined
   // Callbacks
   onAgentMessageDraftChange: (agentId: string, value: string) => void
@@ -673,6 +692,12 @@ interface PanelOverlayProps {
   onResolvePermission: (id: string, decision: 'allow' | 'deny', mode: 'once' | 'build') => void
   onApprovePatchBundle: (id: string) => void
   onRejectPatchBundle: (id: string) => void
+  onReviewPromptProposal: (id: string, decision: 'approve' | 'reject') => void
+  onBenchmarkPromptProposal: (id: string) => void
+  onCreatePromptPackDraft: () => void
+  onRequestPromptPackActivation?: (id: string) => void
+  onActivatePromptPackRequest?: (id: string) => void
+  onRollbackPromptPackVersion?: (id: string) => void
   onSetShowDiffReview: (v: boolean) => void
   onLoadProposedEdits: (buildId?: string) => void
   onRollbackCheckpoint: (id: string) => void
@@ -694,9 +719,9 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
   providerPanels, visibleBlockers, platformReadinessNotice, agentMessageDrafts, agentMessagePendingId, pendingPermissionRequests,
   pendingRevisionRequests, buildFailureAttribution,
   proposedEdits, showDiffReview, permissionActionId, rollbackCheckpointId,
-  patchBundleActionId,
+  patchBundleActionId, promptProposalActionId,
   userId, onAgentMessageDraftChange, onSendDirectAgentMessage, onResolvePermission, onSetShowDiffReview, onLoadProposedEdits,
-  onApprovePatchBundle, onRejectPatchBundle,
+  onApprovePatchBundle, onRejectPatchBundle, onReviewPromptProposal, onBenchmarkPromptProposal, onCreatePromptPackDraft, onRequestPromptPackActivation, onActivatePromptPackRequest, onRollbackPromptPackVersion,
   onRollbackCheckpoint, onOpenCompletedBuild,
 }) => {
   const [selectedFile, setSelectedFile] = useState<GeneratedFile | null>(null)
@@ -1185,6 +1210,16 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
             patchBundles={buildState.patchBundles}
             providerScorecards={buildState.providerScorecards}
             historicalLearning={buildState.historicalLearning}
+            promptPackActivationRequests={buildState.promptPackActivationRequests}
+            promptPackVersions={buildState.promptPackVersions}
+            promptPackActivationEvents={buildState.promptPackActivationEvents}
+            promptProposalActionId={promptProposalActionId}
+            onReviewPromptProposal={onReviewPromptProposal}
+            onBenchmarkPromptProposal={onBenchmarkPromptProposal}
+            onCreatePromptPackDraft={onCreatePromptPackDraft}
+            onRequestPromptPackActivation={onRequestPromptPackActivation}
+            onActivatePromptPackRequest={onActivatePromptPackRequest}
+            onRollbackPromptPackVersion={onRollbackPromptPackVersion}
           />
         )}
 
@@ -1210,12 +1245,12 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
     buildActionPending, hasBYOK, phaseLabel, visibleBlockers,
     platformReadinessNotice, buildFailureAttribution, showDiffReview, userId,
     isPreparingPreview, isCreatingProject, isStartingOver, createdProjectId,
-    permissionActionId, rollbackCheckpointId, patchBundleActionId, chatInput, setChatInput,
+    permissionActionId, rollbackCheckpointId, patchBundleActionId, promptProposalActionId, chatInput, setChatInput,
     plannerSendMode, setPlannerSendMode, plannerMessagePending,
     agentMessageDrafts, agentMessagePendingId, onAgentMessageDraftChange, onSendDirectAgentMessage,
     onSendChatMessage, onPause, onResume, onRestart, onStartOver,
     onPreviewWorkspace, onOpenInIDE, onDownload, onRollbackCheckpoint,
-    onResolvePermission, onApprovePatchBundle, onRejectPatchBundle, onSetShowDiffReview, onLoadProposedEdits,
+    onResolvePermission, onApprovePatchBundle, onRejectPatchBundle, onReviewPromptProposal, onBenchmarkPromptProposal, onCreatePromptPackDraft, onRequestPromptPackActivation, onActivatePromptPackRequest, onRollbackPromptPackVersion, onSetShowDiffReview, onLoadProposedEdits,
     onOpenCompletedBuild,
   } = props
 
@@ -1354,12 +1389,19 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
           permissionActionId={permissionActionId}
           rollbackCheckpointId={rollbackCheckpointId}
           patchBundleActionId={patchBundleActionId}
+          promptProposalActionId={promptProposalActionId}
           userId={userId}
           onAgentMessageDraftChange={onAgentMessageDraftChange}
           onSendDirectAgentMessage={onSendDirectAgentMessage}
           onResolvePermission={onResolvePermission}
           onApprovePatchBundle={onApprovePatchBundle}
           onRejectPatchBundle={onRejectPatchBundle}
+          onReviewPromptProposal={onReviewPromptProposal}
+          onBenchmarkPromptProposal={onBenchmarkPromptProposal}
+          onCreatePromptPackDraft={onCreatePromptPackDraft}
+          onRequestPromptPackActivation={onRequestPromptPackActivation}
+          onActivatePromptPackRequest={onActivatePromptPackRequest}
+          onRollbackPromptPackVersion={onRollbackPromptPackVersion}
           onSetShowDiffReview={onSetShowDiffReview}
           onLoadProposedEdits={onLoadProposedEdits}
           onRollbackCheckpoint={onRollbackCheckpoint}

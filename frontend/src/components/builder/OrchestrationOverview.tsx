@@ -677,6 +677,8 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
     ...(props.historicalLearning?.recurring_failure_classes || []),
   ].slice(0, 5)
   const promptImprovementProposals = (props.historicalLearning?.prompt_improvement_proposals || []).slice(0, 3)
+  const promptAdoptionCandidates = (props.historicalLearning?.prompt_adoption_candidates || []).slice(0, 3)
+  const promptPackDrafts = (props.historicalLearning?.prompt_pack_drafts || []).slice(0, 3)
   const verifiedSurfaceCount = Object.values(truthBySurface).filter((tags) => truthHasAny(tags, ['verified', 'production_candidate', 'production_ready'])).length
   const activeBlockerCount = blockers.length
   const unresolvedVerificationCount = (props.verificationReports || []).filter((report) => report.status !== 'passed').length
@@ -973,6 +975,28 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
                           <Badge variant="outline" className="border-gray-700 bg-black/40 text-[11px] text-gray-300">
                             {humanize(proposal.failure_cluster)}
                           </Badge>
+                          <Badge variant="outline" className={cn(
+                            'text-[11px]',
+                            proposal.review_state === 'approved'
+                              ? 'border-green-500/40 bg-green-500/10 text-green-200'
+                              : proposal.review_state === 'rejected'
+                                ? 'border-rose-500/40 bg-rose-500/10 text-rose-200'
+                                : 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+                          )}>
+                            {humanize(proposal.review_state || 'proposed')}
+                          </Badge>
+                          {proposal.benchmark_status && (
+                            <Badge variant="outline" className={cn(
+                              'text-[11px]',
+                              proposal.benchmark_status === 'passed'
+                                ? 'border-green-500/40 bg-green-500/10 text-green-200'
+                                : proposal.benchmark_status === 'failed'
+                                  ? 'border-rose-500/40 bg-rose-500/10 text-rose-200'
+                                  : 'border-gray-700 bg-black/40 text-gray-300'
+                            )}>
+                              Benchmark: {humanize(proposal.benchmark_status)}
+                            </Badge>
+                          )}
                         </div>
                         <div className="mt-2 break-words text-xs leading-5 text-amber-100">{proposal.proposal}</div>
                         {proposal.evidence && proposal.evidence.length > 0 && (
@@ -986,6 +1010,57 @@ export function OrchestrationOverview(props: OrchestrationOverviewProps) {
                         )}
                         <div className="mt-2 break-words text-[11px] leading-4 text-gray-400">
                           Benchmark gate: {proposal.benchmark_gate}
+                        </div>
+                        {proposal.review_message && (
+                          <div className="mt-2 break-words text-[11px] leading-4 text-gray-300">
+                            Review note: {proposal.review_message}
+                          </div>
+                        )}
+                        {(proposal.benchmark_results || []).slice(0, 3).map((result) => (
+                          <div key={result.name} className="mt-1 break-words text-[11px] leading-4 text-gray-300">
+                            {humanize(result.name)}: {humanize(result.status)}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {promptAdoptionCandidates.length > 0 && (
+                  <div className="space-y-2 pt-2">
+                    <div className="text-xs uppercase tracking-wide text-gray-500">Adoption Registry</div>
+                    {promptAdoptionCandidates.map((candidate) => (
+                      <div key={candidate.id} className="rounded-lg border border-green-500/20 bg-green-500/10 px-3 py-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" className="border-green-500/40 bg-green-500/10 text-[11px] text-green-200">
+                            {humanize(candidate.status)}
+                          </Badge>
+                          <Badge variant="outline" className="border-gray-700 bg-black/40 text-[11px] text-gray-300">
+                            {humanize(candidate.target_prompt)}
+                          </Badge>
+                        </div>
+                        <div className="mt-2 break-words text-xs leading-5 text-green-100">{candidate.proposal}</div>
+                        <div className="mt-2 break-words text-[11px] leading-4 text-gray-400">
+                          Prompt source unchanged; candidate is ready for adoption storage only.
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {promptPackDrafts.length > 0 && (
+                  <div className="space-y-2 pt-2">
+                    <div className="text-xs uppercase tracking-wide text-gray-500">Prompt-Pack Drafts</div>
+                    {promptPackDrafts.map((draft) => (
+                      <div key={draft.id} className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" className="border-cyan-500/40 bg-cyan-500/10 text-[11px] text-cyan-200">
+                            {draft.version}
+                          </Badge>
+                          <Badge variant="outline" className="border-gray-700 bg-black/40 text-[11px] text-gray-300">
+                            {humanize(draft.status)}
+                          </Badge>
+                        </div>
+                        <div className="mt-2 break-words text-[11px] leading-4 text-gray-400">
+                          Inactive prompt-pack draft with {draft.changes?.length || 0} proposed change{(draft.changes?.length || 0) === 1 ? '' : 's'}.
                         </div>
                       </div>
                     ))}

@@ -46,6 +46,7 @@ const (
 	defaultEstimatedRequestCostUSD  = 0.02
 	frontendApprovalCheckpointID    = "frontend-preview-approval"
 	frontendApprovalPrompt          = "The frontend preview is ready. Reply yes if you are happy with this UI and I should continue the backend/runtime implementation on the same app, or describe the changes you want first."
+	promptPackActivationFeatureFlag = "APEX_PROMPT_PACK_ACTIVATION_REQUESTS"
 )
 
 type consensusDecision string
@@ -7291,6 +7292,38 @@ type patchBundleReviewResult struct {
 	Status  BuildStatus
 }
 
+type promptProposalReviewResult struct {
+	Proposal           PromptImprovementProposal
+	HistoricalLearning *BuildLearningSummary
+	Status             BuildStatus
+}
+
+type promptPackDraftResult struct {
+	Draft              PromptPackDraft
+	HistoricalLearning *BuildLearningSummary
+	Status             BuildStatus
+}
+
+type promptPackActivationRequestResult struct {
+	Request PromptPackActivationRecord
+	Draft   PromptPackDraft
+	Status  BuildStatus
+}
+
+type promptPackRegistryActivationResult struct {
+	Request PromptPackActivationRecord
+	Version PromptPackVersionRecord
+	Event   PromptPackActivationEventRecord
+	Status  BuildStatus
+}
+
+type promptPackRollbackResult struct {
+	RollbackVersion   PromptPackVersionRecord
+	RolledBackVersion PromptPackVersionRecord
+	Event             PromptPackActivationEventRecord
+	Status            BuildStatus
+}
+
 func (am *AgentManager) approvePatchBundle(build *Build, bundleID, reason string) (*patchBundleReviewResult, error) {
 	if build == nil {
 		return nil, fmt.Errorf("build not found")
@@ -7360,6 +7393,461 @@ func (am *AgentManager) rejectPatchBundle(build *Build, bundleID, reason string)
 	return &patchBundleReviewResult{Bundle: reviewed, Applied: false, Status: status}, nil
 }
 
+func (am *AgentManager) approvePromptImprovementProposal(build *Build, proposalID, reason string) (*promptProposalReviewResult, error) {
+	return am.reviewPromptImprovementProposal(build, proposalID, PromptProposalReviewApproved, reason)
+}
+
+func (am *AgentManager) rejectPromptImprovementProposal(build *Build, proposalID, reason string) (*promptProposalReviewResult, error) {
+	return am.reviewPromptImprovementProposal(build, proposalID, PromptProposalReviewRejected, reason)
+}
+
+func (am *AgentManager) benchmarkPromptImprovementProposal(build *Build, proposalID string) (*promptProposalReviewResult, error) {
+	if build == nil {
+		return nil, fmt.Errorf("build not found")
+	}
+	proposalID = strings.TrimSpace(proposalID)
+	if proposalID == "" {
+		return nil, fmt.Errorf("prompt proposal id is required")
+	}
+
+	reviewed, learning, err := markPromptImprovementProposalBenchmarked(build, proposalID)
+	if err != nil {
+		return nil, err
+	}
+	currentStatus := currentBuildStatus(build)
+	message := "Prompt proposal benchmark gate failed"
+	if reviewed.BenchmarkStatus == PromptProposalBenchmarkPassed {
+		message = "Prompt proposal benchmark gate passed"
+	}
+
+	go am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"status":              string(currentStatus),
+			"prompt_proposal_id":  proposalID,
+			"prompt_proposal":     reviewed,
+			"benchmark_status":    string(reviewed.BenchmarkStatus),
+			"historical_learning": learning,
+			"message":             message,
+		},
+	})
+
+	return &promptProposalReviewResult{
+		Proposal:           reviewed,
+		HistoricalLearning: learning,
+		Status:             currentStatus,
+	}, nil
+}
+
+func (am *AgentManager) createPromptPackDraft(build *Build) (*promptPackDraftResult, error) {
+	if build == nil {
+		return nil, fmt.Errorf("build not found")
+	}
+
+	draft, learning, err := createPromptPackDraftLocked(build)
+	if err != nil {
+		return nil, err
+	}
+	currentStatus := currentBuildStatus(build)
+
+	go am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"status":              string(currentStatus),
+			"prompt_pack_draft":   draft,
+			"historical_learning": learning,
+			"message":             "Prompt pack draft created",
+			"prompt_mutated":      false,
+		},
+	})
+
+	return &promptPackDraftResult{
+		Draft:              draft,
+		HistoricalLearning: learning,
+		Status:             currentStatus,
+	}, nil
+}
+
+func (am *AgentManager) requestPromptPackDraftActivation(build *Build, draftID string, requestedByID uint, reason string) (*promptPackActivationRequestResult, error) {
+	if build == nil {
+		return nil, fmt.Errorf("build not found")
+	}
+	if am.db == nil {
+		return nil, fmt.Errorf("prompt pack activation request storage is unavailable")
+	}
+	draftID = strings.TrimSpace(draftID)
+	if draftID == "" {
+		return nil, fmt.Errorf("prompt pack draft id is required")
+	}
+
+	draft, err := promptPackDraftForActivation(build, draftID)
+	if err != nil {
+		return nil, err
+	}
+
+	var existing models.PromptPackActivationRequest
+	existingErr := am.db.Where("build_id = ? AND draft_id = ? AND status = ?", build.ID, draft.ID, string(PromptPackActivationPending)).
+		Order("created_at DESC").
+		Order("id DESC").
+		First(&existing).Error
+	if existingErr == nil {
+		record := promptPackActivationRecordFromRow(existing, draft)
+		return &promptPackActivationRequestResult{
+			Request: record,
+			Draft:   draft,
+			Status:  currentBuildStatus(build),
+		}, nil
+	}
+	if !errors.Is(existingErr, gorm.ErrRecordNotFound) {
+		return nil, existingErr
+	}
+
+	createdAt := time.Now().UTC()
+	record := promptPackActivationRecordFromDraft(draft, build.ID, requestedByID, reason, createdAt)
+	row, err := promptPackActivationRowFromRecord(record)
+	if err != nil {
+		return nil, err
+	}
+	if err := am.db.Create(&row).Error; err != nil {
+		return nil, err
+	}
+	if !row.CreatedAt.IsZero() {
+		record.CreatedAt = row.CreatedAt.UTC()
+	}
+
+	currentStatus := currentBuildStatus(build)
+	go am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"status":                         string(currentStatus),
+			"prompt_pack_activation_request": record,
+			"prompt_pack_draft":              draft,
+			"activation_status":              string(record.Status),
+			"prompt_mutated":                 false,
+			"message":                        "Prompt pack activation request recorded for admin review",
+		},
+	})
+
+	return &promptPackActivationRequestResult{
+		Request: record,
+		Draft:   draft,
+		Status:  currentStatus,
+	}, nil
+}
+
+func (am *AgentManager) activatePromptPackRequest(build *Build, requestID string, activatedByID uint, reason string) (*promptPackRegistryActivationResult, error) {
+	if build == nil {
+		return nil, fmt.Errorf("build not found")
+	}
+	if am.db == nil {
+		return nil, fmt.Errorf("prompt pack registry storage is unavailable")
+	}
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return nil, fmt.Errorf("prompt pack activation request id is required")
+	}
+
+	var requestRow models.PromptPackActivationRequest
+	if err := am.db.Where("request_id = ? AND build_id = ?", requestID, build.ID).First(&requestRow).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("prompt pack activation request not found")
+		}
+		return nil, err
+	}
+	if requestRow.Status != string(PromptPackActivationPending) {
+		return nil, fmt.Errorf("prompt pack activation request is not pending")
+	}
+	if requestRow.PromptMutated {
+		return nil, fmt.Errorf("prompt pack activation request already mutated prompt source")
+	}
+
+	changes, err := promptPackChangesFromJSON(requestRow.ChangesJSON)
+	if err != nil {
+		return nil, err
+	}
+	sourceCandidateIDs, err := promptPackSourceCandidateIDsFromJSON(requestRow.SourceCandidateIDsJSON)
+	if err != nil {
+		return nil, err
+	}
+	if len(changes) == 0 {
+		return nil, fmt.Errorf("prompt pack activation request has no proposed changes")
+	}
+
+	var existingVersion models.PromptPackVersion
+	existingErr := am.db.Where("source_request_id = ?", requestRow.RequestID).First(&existingVersion).Error
+	if existingErr == nil {
+		versionRecord := promptPackVersionRecordFromRow(existingVersion)
+		eventRecord, eventErr := am.latestPromptPackActivationEventRecord(requestRow.RequestID, versionRecord.ID)
+		if eventErr != nil {
+			return nil, eventErr
+		}
+		updatedRequest, updateErr := am.markPromptPackActivationRequestActive(requestRow)
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		return &promptPackRegistryActivationResult{
+			Request: promptPackActivationRecordFromRow(updatedRequest, promptPackDraftFromActivationRow(updatedRequest)),
+			Version: versionRecord,
+			Event:   eventRecord,
+			Status:  currentBuildStatus(build),
+		}, nil
+	}
+	if !errors.Is(existingErr, gorm.ErrRecordNotFound) {
+		return nil, existingErr
+	}
+
+	now := time.Now().UTC()
+	version := PromptPackVersionRecord{
+		ID:                    "prompt-pack-version-" + uuid.NewString(),
+		Scope:                 strings.TrimSpace(requestRow.Scope),
+		Version:               strings.TrimSpace(requestRow.DraftVersion),
+		Status:                PromptPackVersionActive,
+		SourceBuildID:         requestRow.BuildID,
+		SourceDraftID:         requestRow.DraftID,
+		SourceRequestID:       requestRow.RequestID,
+		SourceCandidateIDs:    sourceCandidateIDs,
+		Changes:               changes,
+		ActivatedByID:         activatedByID,
+		ActivatedAt:           &now,
+		PromptMutated:         false,
+		LivePromptReadEnabled: false,
+		CreatedAt:             now,
+	}
+	versionRow, err := promptPackVersionRowFromRecord(version)
+	if err != nil {
+		return nil, err
+	}
+
+	event := PromptPackActivationEventRecord{
+		ID:                    "prompt-pack-event-" + uuid.NewString(),
+		EventType:             PromptPackActivationEventActivated,
+		PromptPackVersionID:   version.ID,
+		ActivationRequestID:   requestRow.RequestID,
+		BuildID:               build.ID,
+		ActorID:               activatedByID,
+		Reason:                strings.TrimSpace(reason),
+		PromptMutated:         false,
+		LivePromptReadEnabled: false,
+		CreatedAt:             now,
+	}
+	eventRow := promptPackActivationEventRowFromRecord(event)
+
+	tx := am.db.Begin()
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	if err := tx.Create(&versionRow).Error; err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if err := tx.Create(&eventRow).Error; err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	requestRow.Status = string(PromptPackActivationActive)
+	requestRow.PromptMutated = false
+	if err := tx.Save(&requestRow).Error; err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return nil, err
+	}
+
+	version = promptPackVersionRecordFromRow(versionRow)
+	event = promptPackActivationEventRecordFromRow(eventRow)
+	requestRecord := promptPackActivationRecordFromRow(requestRow, promptPackDraftFromActivationRow(requestRow))
+	currentStatus := currentBuildStatus(build)
+	go am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"status":                         string(currentStatus),
+			"prompt_pack_activation_request": requestRecord,
+			"prompt_pack_version":            version,
+			"prompt_pack_activation_event":   event,
+			"activation_status":              string(PromptPackActivationActive),
+			"prompt_mutated":                 false,
+			"live_prompt_generation_changed": false,
+			"message":                        "Prompt pack version activated in registry",
+		},
+	})
+
+	return &promptPackRegistryActivationResult{
+		Request: requestRecord,
+		Version: version,
+		Event:   event,
+		Status:  currentStatus,
+	}, nil
+}
+
+func (am *AgentManager) rollbackPromptPackVersion(build *Build, versionID string, actorID uint, reason string) (*promptPackRollbackResult, error) {
+	if build == nil {
+		return nil, fmt.Errorf("build not found")
+	}
+	if am.db == nil {
+		return nil, fmt.Errorf("prompt pack registry storage is unavailable")
+	}
+	versionID = strings.TrimSpace(versionID)
+	if versionID == "" {
+		return nil, fmt.Errorf("prompt pack version id is required")
+	}
+
+	var targetRow models.PromptPackVersion
+	if err := am.db.Where("version_id = ? AND source_build_id = ?", versionID, build.ID).First(&targetRow).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("prompt pack version not found")
+		}
+		return nil, err
+	}
+	if targetRow.Status != string(PromptPackVersionActive) {
+		return nil, fmt.Errorf("prompt pack version is not active")
+	}
+	if targetRow.PromptMutated {
+		return nil, fmt.Errorf("prompt pack version already mutated prompt source")
+	}
+
+	changes, err := promptPackChangesFromJSON(targetRow.ChangesJSON)
+	if err != nil {
+		return nil, err
+	}
+	sourceCandidateIDs, err := promptPackSourceCandidateIDsFromJSON(targetRow.SourceCandidateIDsJSON)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	rollback := PromptPackVersionRecord{
+		ID:                    "prompt-pack-version-" + uuid.NewString(),
+		Scope:                 strings.TrimSpace(targetRow.Scope),
+		Version:               strings.TrimSpace(targetRow.Version),
+		Status:                PromptPackVersionActive,
+		SourceBuildID:         targetRow.SourceBuildID,
+		SourceDraftID:         targetRow.SourceDraftID,
+		SourceRequestID:       targetRow.SourceRequestID,
+		SourceCandidateIDs:    sourceCandidateIDs,
+		Changes:               changes,
+		ActivatedByID:         actorID,
+		ActivatedAt:           &now,
+		RollbackOfVersionID:   targetRow.VersionID,
+		PromptMutated:         false,
+		LivePromptReadEnabled: false,
+		CreatedAt:             now,
+	}
+	rollbackRow, err := promptPackVersionRowFromRecord(rollback)
+	if err != nil {
+		return nil, err
+	}
+
+	event := PromptPackActivationEventRecord{
+		ID:                    "prompt-pack-event-" + uuid.NewString(),
+		EventType:             PromptPackActivationEventRolledBack,
+		PromptPackVersionID:   rollback.ID,
+		ActivationRequestID:   strings.TrimSpace(targetRow.SourceRequestID),
+		BuildID:               build.ID,
+		ActorID:               actorID,
+		Reason:                strings.TrimSpace(reason),
+		RollbackOfVersionID:   targetRow.VersionID,
+		PromptMutated:         false,
+		LivePromptReadEnabled: false,
+		CreatedAt:             now,
+	}
+	eventRow := promptPackActivationEventRowFromRecord(event)
+
+	tx := am.db.Begin()
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	if err := tx.Create(&rollbackRow).Error; err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if err := tx.Create(&eventRow).Error; err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return nil, err
+	}
+
+	rollback = promptPackVersionRecordFromRow(rollbackRow)
+	event = promptPackActivationEventRecordFromRow(eventRow)
+	targetRecord := promptPackVersionRecordFromRow(targetRow)
+	currentStatus := currentBuildStatus(build)
+
+	go am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"status":                         string(currentStatus),
+			"prompt_pack_version":            rollback,
+			"rolled_back_version_id":         targetRow.VersionID,
+			"prompt_pack_activation_event":   event,
+			"prompt_mutated":                 false,
+			"live_prompt_generation_changed": false,
+			"message":                        "Prompt pack version rolled back in registry",
+		},
+	})
+
+	return &promptPackRollbackResult{
+		RollbackVersion:   rollback,
+		RolledBackVersion: targetRecord,
+		Event:             event,
+		Status:            currentStatus,
+	}, nil
+}
+
+func (am *AgentManager) reviewPromptImprovementProposal(build *Build, proposalID string, status PromptProposalReviewState, reason string) (*promptProposalReviewResult, error) {
+	if build == nil {
+		return nil, fmt.Errorf("build not found")
+	}
+	proposalID = strings.TrimSpace(proposalID)
+	if proposalID == "" {
+		return nil, fmt.Errorf("prompt proposal id is required")
+	}
+	if status != PromptProposalReviewApproved && status != PromptProposalReviewRejected {
+		return nil, fmt.Errorf("unsupported prompt proposal review status")
+	}
+
+	reviewed, learning, err := markPromptImprovementProposalReviewed(build, proposalID, status, reason)
+	if err != nil {
+		return nil, err
+	}
+	currentStatus := currentBuildStatus(build)
+
+	message := "Prompt proposal rejected"
+	if status == PromptProposalReviewApproved {
+		message = "Prompt proposal approved for benchmark-gated adoption"
+	}
+	go am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"status":              string(currentStatus),
+			"prompt_proposal_id":  proposalID,
+			"prompt_proposal":     reviewed,
+			"review_status":       string(status),
+			"historical_learning": learning,
+			"message":             message,
+		},
+	})
+
+	return &promptProposalReviewResult{
+		Proposal:           reviewed,
+		HistoricalLearning: learning,
+		Status:             currentStatus,
+	}, nil
+}
+
 func currentBuildStatus(build *Build) BuildStatus {
 	if build == nil {
 		return ""
@@ -7393,6 +7881,562 @@ func patchBundleForReview(build *Build, bundleID string) (PatchBundle, error) {
 		return bundle, nil
 	}
 	return PatchBundle{}, fmt.Errorf("patch bundle not found")
+}
+
+func markPromptImprovementProposalReviewed(build *Build, proposalID string, status PromptProposalReviewState, reason string) (PromptImprovementProposal, *BuildLearningSummary, error) {
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	state := ensureBuildOrchestrationStateLocked(build)
+	if state == nil || state.HistoricalLearning == nil {
+		return PromptImprovementProposal{}, nil, fmt.Errorf("prompt proposal not found")
+	}
+
+	now := time.Now().UTC()
+	for i := range state.HistoricalLearning.PromptImprovementProposals {
+		if strings.TrimSpace(state.HistoricalLearning.PromptImprovementProposals[i].ID) != proposalID {
+			continue
+		}
+		currentReviewState := state.HistoricalLearning.PromptImprovementProposals[i].ReviewState
+		switch currentReviewState {
+		case PromptProposalReviewApproved:
+			return PromptImprovementProposal{}, nil, fmt.Errorf("prompt proposal is already approved")
+		case PromptProposalReviewRejected:
+			return PromptImprovementProposal{}, nil, fmt.Errorf("prompt proposal is already rejected")
+		}
+
+		state.HistoricalLearning.PromptImprovementProposals[i].ReviewState = status
+		state.HistoricalLearning.PromptImprovementProposals[i].ReviewedAt = &now
+		switch status {
+		case PromptProposalReviewApproved:
+			if state.HistoricalLearning.PromptImprovementProposals[i].BenchmarkStatus == "" ||
+				state.HistoricalLearning.PromptImprovementProposals[i].BenchmarkStatus == PromptProposalBenchmarkNotApplicable {
+				state.HistoricalLearning.PromptImprovementProposals[i].BenchmarkStatus = PromptProposalBenchmarkNotStarted
+			}
+		case PromptProposalReviewRejected:
+			state.HistoricalLearning.PromptImprovementProposals[i].BenchmarkStatus = PromptProposalBenchmarkNotApplicable
+			state.HistoricalLearning.PromptImprovementProposals[i].BenchmarkStartedAt = nil
+			state.HistoricalLearning.PromptImprovementProposals[i].BenchmarkCompletedAt = nil
+			state.HistoricalLearning.PromptImprovementProposals[i].BenchmarkResults = nil
+			removePromptProposalAdoptionCandidateLocked(state.HistoricalLearning, proposalID)
+		}
+		message := strings.TrimSpace(reason)
+		if message == "" {
+			switch status {
+			case PromptProposalReviewApproved:
+				message = "Approved by human review; benchmark gate must pass before any prompt source changes."
+			case PromptProposalReviewRejected:
+				message = "Rejected by human review."
+			}
+		}
+		state.HistoricalLearning.PromptImprovementProposals[i].ReviewMessage = message
+		appendSteeringNoteLocked(build, fmt.Sprintf("Prompt improvement proposal %s %s by human review. No prompt source was changed automatically.", proposalID, status))
+		build.UpdatedAt = now
+		return state.HistoricalLearning.PromptImprovementProposals[i], state.HistoricalLearning, nil
+	}
+
+	return PromptImprovementProposal{}, nil, fmt.Errorf("prompt proposal not found")
+}
+
+func markPromptImprovementProposalBenchmarked(build *Build, proposalID string) (PromptImprovementProposal, *BuildLearningSummary, error) {
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	state := ensureBuildOrchestrationStateLocked(build)
+	if state == nil || state.HistoricalLearning == nil {
+		return PromptImprovementProposal{}, nil, fmt.Errorf("prompt proposal not found")
+	}
+
+	now := time.Now().UTC()
+	for i := range state.HistoricalLearning.PromptImprovementProposals {
+		if strings.TrimSpace(state.HistoricalLearning.PromptImprovementProposals[i].ID) != proposalID {
+			continue
+		}
+		if state.HistoricalLearning.PromptImprovementProposals[i].ReviewState != PromptProposalReviewApproved {
+			return PromptImprovementProposal{}, nil, fmt.Errorf("prompt proposal must be approved before benchmark gates can run")
+		}
+
+		proposal := state.HistoricalLearning.PromptImprovementProposals[i]
+		results := benchmarkPromptImprovementProposalChecks(proposal)
+		finalStatus := PromptProposalBenchmarkPassed
+		for _, result := range results {
+			if result.Required && result.Status != "passed" {
+				finalStatus = PromptProposalBenchmarkFailed
+				break
+			}
+		}
+
+		state.HistoricalLearning.PromptImprovementProposals[i].BenchmarkStatus = PromptProposalBenchmarkRunning
+		state.HistoricalLearning.PromptImprovementProposals[i].BenchmarkStartedAt = &now
+		state.HistoricalLearning.PromptImprovementProposals[i].BenchmarkResults = results
+		completed := time.Now().UTC()
+		state.HistoricalLearning.PromptImprovementProposals[i].BenchmarkCompletedAt = &completed
+		state.HistoricalLearning.PromptImprovementProposals[i].BenchmarkStatus = finalStatus
+		if finalStatus == PromptProposalBenchmarkPassed {
+			upsertPromptProposalAdoptionCandidateLocked(build, state.HistoricalLearning, state.HistoricalLearning.PromptImprovementProposals[i], completed)
+		} else {
+			removePromptProposalAdoptionCandidateLocked(state.HistoricalLearning, proposalID)
+		}
+		appendSteeringNoteLocked(build, fmt.Sprintf("Prompt improvement proposal %s benchmark gate %s. No prompt source was changed automatically.", proposalID, finalStatus))
+		build.UpdatedAt = completed
+		return state.HistoricalLearning.PromptImprovementProposals[i], state.HistoricalLearning, nil
+	}
+
+	return PromptImprovementProposal{}, nil, fmt.Errorf("prompt proposal not found")
+}
+
+func upsertPromptProposalAdoptionCandidateLocked(build *Build, learning *BuildLearningSummary, proposal PromptImprovementProposal, now time.Time) {
+	if learning == nil || strings.TrimSpace(proposal.ID) == "" {
+		return
+	}
+	if proposal.ReviewState != PromptProposalReviewApproved || proposal.BenchmarkStatus != PromptProposalBenchmarkPassed {
+		return
+	}
+
+	record := PromptProposalAdoptionRecord{
+		ID:                   "adoption-" + strings.TrimSpace(proposal.ID),
+		ProposalID:           strings.TrimSpace(proposal.ID),
+		Scope:                strings.TrimSpace(proposal.Scope),
+		TargetPrompt:         strings.TrimSpace(proposal.TargetPrompt),
+		FailureCluster:       strings.TrimSpace(proposal.FailureCluster),
+		Proposal:             proposal.Proposal,
+		Evidence:             append([]string(nil), proposal.Evidence...),
+		BenchmarkGate:        proposal.BenchmarkGate,
+		BenchmarkStatus:      proposal.BenchmarkStatus,
+		BenchmarkCompletedAt: proposal.BenchmarkCompletedAt,
+		BenchmarkResults:     append([]PromptProposalBenchmarkResult(nil), proposal.BenchmarkResults...),
+		Status:               PromptProposalAdoptionReady,
+		PromptMutated:        false,
+		CreatedAt:            now,
+	}
+	if build != nil {
+		record.BuildID = build.ID
+	}
+
+	for i := range learning.PromptAdoptionCandidates {
+		if strings.TrimSpace(learning.PromptAdoptionCandidates[i].ProposalID) != record.ProposalID {
+			continue
+		}
+		if !learning.PromptAdoptionCandidates[i].CreatedAt.IsZero() {
+			record.CreatedAt = learning.PromptAdoptionCandidates[i].CreatedAt
+		}
+		learning.PromptAdoptionCandidates[i] = record
+		return
+	}
+	learning.PromptAdoptionCandidates = append(learning.PromptAdoptionCandidates, record)
+}
+
+func removePromptProposalAdoptionCandidateLocked(learning *BuildLearningSummary, proposalID string) {
+	if learning == nil || len(learning.PromptAdoptionCandidates) == 0 {
+		return
+	}
+	proposalID = strings.TrimSpace(proposalID)
+	filtered := learning.PromptAdoptionCandidates[:0]
+	for _, candidate := range learning.PromptAdoptionCandidates {
+		if strings.TrimSpace(candidate.ProposalID) == proposalID {
+			continue
+		}
+		filtered = append(filtered, candidate)
+	}
+	learning.PromptAdoptionCandidates = filtered
+}
+
+func createPromptPackDraftLocked(build *Build) (PromptPackDraft, *BuildLearningSummary, error) {
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	state := ensureBuildOrchestrationStateLocked(build)
+	if state == nil || state.HistoricalLearning == nil {
+		return PromptPackDraft{}, nil, fmt.Errorf("no prompt adoption candidates available")
+	}
+
+	learning := state.HistoricalLearning
+	candidates := make([]PromptProposalAdoptionRecord, 0, len(learning.PromptAdoptionCandidates))
+	for _, candidate := range learning.PromptAdoptionCandidates {
+		if candidate.Status != PromptProposalAdoptionReady ||
+			candidate.BenchmarkStatus != PromptProposalBenchmarkPassed ||
+			candidate.PromptMutated {
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+	if len(candidates) == 0 {
+		return PromptPackDraft{}, nil, fmt.Errorf("no benchmark-passed prompt adoption candidates available")
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		left := strings.TrimSpace(candidates[i].TargetPrompt)
+		right := strings.TrimSpace(candidates[j].TargetPrompt)
+		if left != right {
+			return left < right
+		}
+		return strings.TrimSpace(candidates[i].ProposalID) < strings.TrimSpace(candidates[j].ProposalID)
+	})
+
+	now := time.Now().UTC()
+	nextNumber := len(learning.PromptPackDrafts) + 1
+	draft := PromptPackDraft{
+		ID:              fmt.Sprintf("prompt-pack-draft-%d", nextNumber),
+		Version:         fmt.Sprintf("draft-%03d", nextNumber),
+		Scope:           strings.TrimSpace(learning.Scope),
+		Status:          PromptPackDraftInactive,
+		PromptMutated:   false,
+		ActivationReady: false,
+		CreatedAt:       now,
+	}
+	if build != nil {
+		draft.BuildID = build.ID
+	}
+	for _, candidate := range candidates {
+		draft.SourceCandidateIDs = append(draft.SourceCandidateIDs, candidate.ID)
+		draft.Changes = append(draft.Changes, PromptPackDraftChange{
+			CandidateID:    candidate.ID,
+			ProposalID:     candidate.ProposalID,
+			TargetPrompt:   candidate.TargetPrompt,
+			FailureCluster: candidate.FailureCluster,
+			Proposal:       candidate.Proposal,
+			Evidence:       append([]string(nil), candidate.Evidence...),
+			BenchmarkGate:  candidate.BenchmarkGate,
+		})
+	}
+	learning.PromptPackDrafts = append(learning.PromptPackDrafts, draft)
+	appendSteeringNoteLocked(build, fmt.Sprintf("Prompt pack draft %s created from %d adoption candidate(s). No prompt source was changed automatically.", draft.Version, len(draft.Changes)))
+	build.UpdatedAt = now
+	return draft, learning, nil
+}
+
+func promptPackDraftForActivation(build *Build, draftID string) (PromptPackDraft, error) {
+	build.mu.Lock()
+	defer build.mu.Unlock()
+
+	state := ensureBuildOrchestrationStateLocked(build)
+	if state == nil || state.HistoricalLearning == nil {
+		return PromptPackDraft{}, fmt.Errorf("prompt pack draft not found")
+	}
+
+	draftID = strings.TrimSpace(draftID)
+	for _, draft := range state.HistoricalLearning.PromptPackDrafts {
+		if strings.TrimSpace(draft.ID) != draftID {
+			continue
+		}
+		if draft.Status != PromptPackDraftInactive {
+			return PromptPackDraft{}, fmt.Errorf("only inactive prompt pack drafts can request activation")
+		}
+		if draft.PromptMutated {
+			return PromptPackDraft{}, fmt.Errorf("prompt pack draft has already mutated prompt source")
+		}
+		if len(draft.Changes) == 0 {
+			return PromptPackDraft{}, fmt.Errorf("prompt pack draft has no proposed changes")
+		}
+		return clonePromptPackDraft(draft), nil
+	}
+
+	return PromptPackDraft{}, fmt.Errorf("prompt pack draft not found")
+}
+
+func clonePromptPackDraft(draft PromptPackDraft) PromptPackDraft {
+	out := draft
+	out.SourceCandidateIDs = append([]string(nil), draft.SourceCandidateIDs...)
+	out.Changes = make([]PromptPackDraftChange, 0, len(draft.Changes))
+	for _, change := range draft.Changes {
+		copied := change
+		copied.Evidence = append([]string(nil), change.Evidence...)
+		out.Changes = append(out.Changes, copied)
+	}
+	return out
+}
+
+func promptPackActivationRecordFromDraft(draft PromptPackDraft, buildID string, requestedByID uint, reason string, createdAt time.Time) PromptPackActivationRecord {
+	return PromptPackActivationRecord{
+		ID:                 "prompt-pack-activation-" + uuid.NewString(),
+		BuildID:            strings.TrimSpace(firstNonEmptyString(draft.BuildID, buildID)),
+		DraftID:            strings.TrimSpace(draft.ID),
+		DraftVersion:       strings.TrimSpace(draft.Version),
+		Scope:              strings.TrimSpace(draft.Scope),
+		SourceCandidateIDs: append([]string(nil), draft.SourceCandidateIDs...),
+		Changes:            clonePromptPackDraft(draft).Changes,
+		Status:             PromptPackActivationPending,
+		RequestedByID:      requestedByID,
+		Reason:             strings.TrimSpace(reason),
+		FeatureFlag:        promptPackActivationFeatureFlag,
+		PromptMutated:      false,
+		CreatedAt:          createdAt,
+	}
+}
+
+func promptPackActivationRowFromRecord(record PromptPackActivationRecord) (models.PromptPackActivationRequest, error) {
+	sourceCandidateIDs, err := json.Marshal(record.SourceCandidateIDs)
+	if err != nil {
+		return models.PromptPackActivationRequest{}, err
+	}
+	changes, err := json.Marshal(record.Changes)
+	if err != nil {
+		return models.PromptPackActivationRequest{}, err
+	}
+	return models.PromptPackActivationRequest{
+		RequestID:              record.ID,
+		BuildID:                record.BuildID,
+		DraftID:                record.DraftID,
+		DraftVersion:           record.DraftVersion,
+		Scope:                  record.Scope,
+		Status:                 string(record.Status),
+		RequestedByID:          record.RequestedByID,
+		Reason:                 record.Reason,
+		FeatureFlag:            record.FeatureFlag,
+		SourceCandidateIDsJSON: string(sourceCandidateIDs),
+		ChangesJSON:            string(changes),
+		PromptMutated:          false,
+	}, nil
+}
+
+func promptPackActivationRecordFromRow(row models.PromptPackActivationRequest, fallbackDraft PromptPackDraft) PromptPackActivationRecord {
+	sourceCandidateIDs := append([]string(nil), fallbackDraft.SourceCandidateIDs...)
+	if strings.TrimSpace(row.SourceCandidateIDsJSON) != "" {
+		var parsed []string
+		if err := json.Unmarshal([]byte(row.SourceCandidateIDsJSON), &parsed); err == nil {
+			sourceCandidateIDs = parsed
+		}
+	}
+	changes := clonePromptPackDraft(fallbackDraft).Changes
+	if strings.TrimSpace(row.ChangesJSON) != "" {
+		var parsed []PromptPackDraftChange
+		if err := json.Unmarshal([]byte(row.ChangesJSON), &parsed); err == nil {
+			changes = parsed
+		}
+	}
+	return PromptPackActivationRecord{
+		ID:                 row.RequestID,
+		BuildID:            row.BuildID,
+		DraftID:            row.DraftID,
+		DraftVersion:       row.DraftVersion,
+		Scope:              row.Scope,
+		SourceCandidateIDs: sourceCandidateIDs,
+		Changes:            changes,
+		Status:             PromptPackActivationStatus(row.Status),
+		RequestedByID:      row.RequestedByID,
+		Reason:             row.Reason,
+		FeatureFlag:        row.FeatureFlag,
+		PromptMutated:      row.PromptMutated,
+		CreatedAt:          row.CreatedAt,
+	}
+}
+
+func promptPackDraftFromActivationRow(row models.PromptPackActivationRequest) PromptPackDraft {
+	sourceCandidateIDs, _ := promptPackSourceCandidateIDsFromJSON(row.SourceCandidateIDsJSON)
+	changes, _ := promptPackChangesFromJSON(row.ChangesJSON)
+	return PromptPackDraft{
+		ID:                 row.DraftID,
+		Version:            row.DraftVersion,
+		BuildID:            row.BuildID,
+		Scope:              row.Scope,
+		SourceCandidateIDs: sourceCandidateIDs,
+		Changes:            changes,
+		Status:             PromptPackDraftInactive,
+		PromptMutated:      false,
+		ActivationReady:    false,
+		CreatedAt:          row.CreatedAt,
+	}
+}
+
+func promptPackSourceCandidateIDsFromJSON(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		return nil, fmt.Errorf("invalid prompt pack source candidate ids: %w", err)
+	}
+	return ids, nil
+}
+
+func promptPackChangesFromJSON(raw string) ([]PromptPackDraftChange, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var changes []PromptPackDraftChange
+	if err := json.Unmarshal([]byte(raw), &changes); err != nil {
+		return nil, fmt.Errorf("invalid prompt pack changes: %w", err)
+	}
+	for i := range changes {
+		changes[i].Evidence = append([]string(nil), changes[i].Evidence...)
+	}
+	return changes, nil
+}
+
+func promptPackVersionRowFromRecord(record PromptPackVersionRecord) (models.PromptPackVersion, error) {
+	sourceCandidateIDs, err := json.Marshal(record.SourceCandidateIDs)
+	if err != nil {
+		return models.PromptPackVersion{}, err
+	}
+	changes, err := json.Marshal(record.Changes)
+	if err != nil {
+		return models.PromptPackVersion{}, err
+	}
+	return models.PromptPackVersion{
+		VersionID:              record.ID,
+		Scope:                  record.Scope,
+		Version:                record.Version,
+		Status:                 string(record.Status),
+		SourceBuildID:          record.SourceBuildID,
+		SourceDraftID:          record.SourceDraftID,
+		SourceRequestID:        record.SourceRequestID,
+		SourceCandidateIDsJSON: string(sourceCandidateIDs),
+		ChangesJSON:            string(changes),
+		ActivatedByID:          record.ActivatedByID,
+		ActivatedAt:            record.ActivatedAt,
+		RollbackOfVersionID:    record.RollbackOfVersionID,
+		PromptMutated:          false,
+		LivePromptReadEnabled:  false,
+	}, nil
+}
+
+func promptPackVersionRecordFromRow(row models.PromptPackVersion) PromptPackVersionRecord {
+	sourceCandidateIDs, _ := promptPackSourceCandidateIDsFromJSON(row.SourceCandidateIDsJSON)
+	changes, _ := promptPackChangesFromJSON(row.ChangesJSON)
+	createdAt := row.CreatedAt
+	if createdAt.IsZero() && row.ActivatedAt != nil {
+		createdAt = *row.ActivatedAt
+	}
+	return PromptPackVersionRecord{
+		ID:                    row.VersionID,
+		Scope:                 row.Scope,
+		Version:               row.Version,
+		Status:                PromptPackVersionStatus(row.Status),
+		SourceBuildID:         row.SourceBuildID,
+		SourceDraftID:         row.SourceDraftID,
+		SourceRequestID:       row.SourceRequestID,
+		SourceCandidateIDs:    sourceCandidateIDs,
+		Changes:               changes,
+		ActivatedByID:         row.ActivatedByID,
+		ActivatedAt:           row.ActivatedAt,
+		RollbackOfVersionID:   row.RollbackOfVersionID,
+		PromptMutated:         row.PromptMutated,
+		LivePromptReadEnabled: row.LivePromptReadEnabled,
+		CreatedAt:             createdAt,
+	}
+}
+
+func promptPackActivationEventRowFromRecord(record PromptPackActivationEventRecord) models.PromptPackActivationEvent {
+	return models.PromptPackActivationEvent{
+		EventID:               record.ID,
+		EventType:             string(record.EventType),
+		PromptPackVersionID:   record.PromptPackVersionID,
+		ActivationRequestID:   record.ActivationRequestID,
+		BuildID:               record.BuildID,
+		ActorID:               record.ActorID,
+		Reason:                record.Reason,
+		RollbackOfVersionID:   record.RollbackOfVersionID,
+		PromptMutated:         false,
+		LivePromptReadEnabled: false,
+	}
+}
+
+func promptPackActivationEventRecordFromRow(row models.PromptPackActivationEvent) PromptPackActivationEventRecord {
+	return PromptPackActivationEventRecord{
+		ID:                    row.EventID,
+		EventType:             PromptPackActivationEventType(row.EventType),
+		PromptPackVersionID:   row.PromptPackVersionID,
+		ActivationRequestID:   row.ActivationRequestID,
+		BuildID:               row.BuildID,
+		ActorID:               row.ActorID,
+		Reason:                row.Reason,
+		RollbackOfVersionID:   row.RollbackOfVersionID,
+		PromptMutated:         row.PromptMutated,
+		LivePromptReadEnabled: row.LivePromptReadEnabled,
+		CreatedAt:             row.CreatedAt,
+	}
+}
+
+func (am *AgentManager) latestPromptPackActivationEventRecord(requestID, versionID string) (PromptPackActivationEventRecord, error) {
+	var row models.PromptPackActivationEvent
+	err := am.db.Where("activation_request_id = ? AND prompt_pack_version_id = ?", requestID, versionID).
+		Order("created_at DESC").
+		Order("id DESC").
+		First(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return PromptPackActivationEventRecord{}, fmt.Errorf("prompt pack activation event not found")
+		}
+		return PromptPackActivationEventRecord{}, err
+	}
+	return promptPackActivationEventRecordFromRow(row), nil
+}
+
+func (am *AgentManager) markPromptPackActivationRequestActive(row models.PromptPackActivationRequest) (models.PromptPackActivationRequest, error) {
+	if row.Status == string(PromptPackActivationActive) {
+		return row, nil
+	}
+	row.Status = string(PromptPackActivationActive)
+	row.PromptMutated = false
+	if err := am.db.Save(&row).Error; err != nil {
+		return row, err
+	}
+	return row, nil
+}
+
+func benchmarkPromptImprovementProposalChecks(proposal PromptImprovementProposal) []PromptProposalBenchmarkResult {
+	results := []PromptProposalBenchmarkResult{
+		{
+			Name:     "approved_human_review",
+			Status:   promptProposalCheckStatus(proposal.ReviewState == PromptProposalReviewApproved),
+			Summary:  "Proposal must be approved before benchmark-gated adoption can continue.",
+			Evidence: string(proposal.ReviewState),
+			Required: true,
+		},
+		{
+			Name:     "evidence_present",
+			Status:   promptProposalCheckStatus(len(proposal.Evidence) > 0),
+			Summary:  "Proposal must cite historical failure evidence.",
+			Evidence: strings.Join(limitStrings(proposal.Evidence, 3), "; "),
+			Required: true,
+		},
+		{
+			Name:     "benchmark_gate_declared",
+			Status:   promptProposalCheckStatus(strings.TrimSpace(proposal.BenchmarkGate) != ""),
+			Summary:  "Proposal must declare the benchmark family required before adoption.",
+			Evidence: strings.TrimSpace(proposal.BenchmarkGate),
+			Required: true,
+		},
+		{
+			Name:     "supported_target_prompt",
+			Status:   promptProposalCheckStatus(promptProposalTargetPromptSupported(proposal.TargetPrompt)),
+			Summary:  "Proposal target must map to a known prompt surface before adoption can be stored.",
+			Evidence: strings.TrimSpace(proposal.TargetPrompt),
+			Required: true,
+		},
+		{
+			Name:     "no_automatic_prompt_mutation",
+			Status:   "passed",
+			Summary:  "Benchmark recording is metadata-only and does not rewrite prompt source.",
+			Required: true,
+		},
+	}
+	return results
+}
+
+func promptProposalCheckStatus(ok bool) string {
+	if ok {
+		return "passed"
+	}
+	return "failed"
+}
+
+func promptProposalTargetPromptSupported(target string) bool {
+	switch strings.TrimSpace(target) {
+	case "war_room_contract_planning",
+		"preview_repair",
+		"compile_repair",
+		"interaction_canary",
+		"visual_review",
+		"auth_contract",
+		"data_contract",
+		"general_reliability":
+		return true
+	default:
+		return false
+	}
 }
 
 func markPatchBundleReviewed(build *Build, bundleID string, status PatchBundleReviewStatus, reason string, applied bool) PatchBundle {

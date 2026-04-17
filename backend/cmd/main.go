@@ -1578,6 +1578,7 @@ func setupRoutes(
 				billing.POST("/portal", paymentHandler.CreateBillingPortalSession) // Stripe billing portal
 				billing.GET("/plans", paymentHandler.GetPlans)                     // List available plans
 				billing.GET("/usage", paymentHandler.GetUsage)                     // Get usage stats
+			billing.POST("/change-plan", paymentHandler.ChangePlan)               // Upgrade or downgrade plan
 				billing.POST("/cancel", paymentHandler.CancelSubscription)         // Cancel subscription
 				billing.POST("/reactivate", paymentHandler.ReactivateSubscription) // Reactivate subscription
 				billing.GET("/invoices", paymentHandler.GetInvoices)               // Get invoice history

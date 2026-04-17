@@ -261,12 +261,23 @@ export function BillingSettings() {
     }
     setUpgradeLoading(plan.type)
     setError(null)
+    const hasActiveSub = subscription?.status === 'active' || subscription?.status === 'trialing'
     try {
-      const result = await apiService.createCheckoutSession({ price_id: plan.monthly_price_id })
-      if (result.success && result.data?.checkout_url) window.location.href = result.data.checkout_url
-      else setError(result.error || 'Failed to start checkout. Please try again.')
+      if (hasActiveSub && currentPlanType !== 'free') {
+        const result = await apiService.changePlan({ plan_type: plan.type, billing_cycle: 'monthly' })
+        if (result.success) {
+          setSubscription(prev => prev ? { ...prev, plan_type: plan.type, plan_name: plan.name, status: result.data?.status ?? prev.status } : prev)
+          setNotice({ tone: 'success', message: `Switched to ${plan.name}. Prorated charge or credit applied immediately.` })
+        } else {
+          setError(result.error || 'Failed to change plan. Please try again.')
+        }
+      } else {
+        const result = await apiService.createCheckoutSession({ price_id: plan.monthly_price_id })
+        if (result.success && result.data?.checkout_url) window.location.href = result.data.checkout_url
+        else setError(result.error || 'Failed to start checkout. Please try again.')
+      }
     } catch (err: any) {
-      setError(err?.response?.data?.error || err?.message || 'Failed to start checkout')
+      setError(err?.response?.data?.error || err?.message || 'Failed to change plan')
     } finally { setUpgradeLoading(null) }
   }
 
@@ -571,8 +582,8 @@ export function BillingSettings() {
                     onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = `linear-gradient(135deg, ${cfg.color}22, ${cfg.color}44)` }}
                   >
                     {upgradeLoading === plan.type
-                      ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Redirecting…</>
-                      : <><CreditCard size={13} /> Upgrade to {plan.name}</>
+                      ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> {(subscription?.status === 'active' || subscription?.status === 'trialing') && currentPlanType !== 'free' ? 'Switching…' : 'Redirecting…'}</>
+                      : <><CreditCard size={13} /> {(subscription?.status === 'active' || subscription?.status === 'trialing') && currentPlanType !== 'free' ? `Switch to ${plan.name}` : `Upgrade to ${plan.name}`}</>
                     }
                   </button>
                 )}

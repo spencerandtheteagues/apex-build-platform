@@ -19,6 +19,10 @@ const baseProps = () => ({
     currentPhase: 'planning',
     blockers: [],
     patchBundles: [] as any[],
+    historicalLearning: undefined as any,
+    promptPackActivationRequests: undefined as any,
+    promptPackVersions: undefined as any,
+    promptPackActivationEvents: undefined as any,
     powerMode: 'balanced' as const,
   },
   providerPanels: [],
@@ -67,6 +71,12 @@ const baseProps = () => ({
   onResolvePermission: vi.fn(),
   onApprovePatchBundle: vi.fn(),
   onRejectPatchBundle: vi.fn(),
+  onReviewPromptProposal: vi.fn(),
+  onBenchmarkPromptProposal: vi.fn(),
+  onCreatePromptPackDraft: vi.fn(),
+  onRequestPromptPackActivation: vi.fn(),
+  onActivatePromptPackRequest: vi.fn(),
+  onRollbackPromptPackVersion: vi.fn(),
   onSetShowDiffReview: vi.fn(),
   onLoadProposedEdits: vi.fn(),
   onOpenCompletedBuild: vi.fn(),
@@ -171,6 +181,219 @@ describe('BuildScreen header prompt actions', () => {
 
     expect(screen.queryByText(/Repair Patch Review/i)).toBeNull()
     expect(screen.queryByText(/Already approved repair/i)).toBeNull()
+  })
+
+  it('reviews benchmark-gated prompt proposals from the AI detail overlay', async () => {
+    const props = baseProps()
+    props.buildState.historicalLearning = {
+      scope: 'stack:react+go',
+      observed_builds: 2,
+      prompt_improvement_proposals: [
+        {
+          id: 'prompt-preview',
+          scope: 'stack:react+go',
+          target_prompt: 'preview_repair',
+          failure_cluster: 'preview_verification',
+          proposal: 'Emphasize deterministic preview checks before visual polish.',
+          evidence: ['failure_class=preview_verification count=2'],
+          benchmark_gate: 'Run generated preview smoke benchmarks.',
+          requires_approval: true,
+          review_state: 'proposed',
+          benchmark_status: 'not_started',
+        },
+      ],
+    }
+
+    render(<BuildScreen {...props} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /AI Detail/i }))
+
+    expect(await screen.findByText('Prompt Proposals')).toBeTruthy()
+    expect(screen.getByText(/Run generated preview smoke benchmarks/i)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Approve$/i }))
+    expect(props.onReviewPromptProposal).toHaveBeenCalledWith('prompt-preview', 'approve')
+
+    fireEvent.click(screen.getByRole('button', { name: /^Reject$/i }))
+    expect(props.onReviewPromptProposal).toHaveBeenCalledWith('prompt-preview', 'reject')
+  })
+
+  it('runs benchmark gates for approved prompt proposals from the AI detail overlay', async () => {
+    const props = baseProps()
+    props.buildState.historicalLearning = {
+      scope: 'stack:react+go',
+      observed_builds: 2,
+      prompt_improvement_proposals: [
+        {
+          id: 'prompt-approved',
+          scope: 'stack:react+go',
+          target_prompt: 'preview_repair',
+          failure_cluster: 'preview_verification',
+          proposal: 'Emphasize deterministic preview checks before visual polish.',
+          evidence: ['failure_class=preview_verification count=2'],
+          benchmark_gate: 'Run generated preview smoke benchmarks.',
+          requires_approval: true,
+          review_state: 'approved',
+          benchmark_status: 'not_started',
+        },
+      ],
+      prompt_adoption_candidates: [
+        {
+          id: 'adoption-prompt-approved',
+          proposal_id: 'prompt-approved',
+          scope: 'stack:react+go',
+          target_prompt: 'preview_repair',
+          failure_cluster: 'preview_verification',
+          proposal: 'Emphasize deterministic preview checks before visual polish.',
+          benchmark_gate: 'Run generated preview smoke benchmarks.',
+          benchmark_status: 'passed',
+          status: 'ready_for_adoption',
+          prompt_mutated: false,
+        },
+      ],
+      prompt_pack_drafts: [
+        {
+          id: 'prompt-pack-draft-1',
+          version: 'draft-001',
+          scope: 'stack:react+go',
+          source_candidate_ids: ['adoption-prompt-approved'],
+          changes: [
+            {
+              candidate_id: 'adoption-prompt-approved',
+              proposal_id: 'prompt-approved',
+              target_prompt: 'preview_repair',
+              failure_cluster: 'preview_verification',
+              proposal: 'Emphasize deterministic preview checks before visual polish.',
+              benchmark_gate: 'Run generated preview smoke benchmarks.',
+            },
+          ],
+          status: 'inactive_draft',
+          prompt_mutated: false,
+          activation_ready: false,
+        },
+      ],
+    }
+
+    render(<BuildScreen {...props} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /AI Detail/i }))
+
+    expect(await screen.findByText(/Benchmark: Not Started/i)).toBeTruthy()
+    expect(screen.getByText('Adoption Registry')).toBeTruthy()
+    expect(screen.getByText(/live prompt generation has not changed/i)).toBeTruthy()
+    expect(screen.getByText('Prompt-Pack Drafts')).toBeTruthy()
+    expect(screen.getByText('draft-001')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /run benchmark/i }))
+    expect(props.onBenchmarkPromptProposal).toHaveBeenCalledWith('prompt-approved')
+    fireEvent.click(screen.getByRole('button', { name: /create prompt-pack draft/i }))
+    expect(props.onCreatePromptPackDraft).toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: /request admin activation/i }))
+    expect(props.onRequestPromptPackActivation).toHaveBeenCalledWith('prompt-pack-draft-1')
+  })
+
+  it('activates pending prompt-pack requests into the registry from the AI detail overlay', async () => {
+    const props = baseProps()
+    props.buildState.historicalLearning = {
+      scope: 'stack:react+go',
+      observed_builds: 2,
+      prompt_pack_drafts: [
+        {
+          id: 'prompt-pack-draft-1',
+          version: 'draft-001',
+          scope: 'stack:react+go',
+          source_candidate_ids: ['adoption-prompt-approved'],
+          changes: [
+            {
+              candidate_id: 'adoption-prompt-approved',
+              proposal_id: 'prompt-approved',
+              target_prompt: 'preview_repair',
+              failure_cluster: 'preview_verification',
+              proposal: 'Emphasize deterministic preview checks before visual polish.',
+              benchmark_gate: 'Run generated preview smoke benchmarks.',
+            },
+          ],
+          status: 'inactive_draft',
+          prompt_mutated: false,
+          activation_ready: false,
+        },
+      ],
+    }
+    props.buildState.promptPackActivationRequests = [
+      {
+        id: 'prompt-pack-activation-request-1',
+        build_id: 'build-1',
+        draft_id: 'prompt-pack-draft-1',
+        draft_version: 'draft-001',
+        scope: 'stack:react+go',
+        status: 'pending_admin_activation',
+        requested_by_id: 7,
+        feature_flag: 'APEX_PROMPT_PACK_ACTIVATION_REQUESTS',
+        prompt_mutated: false,
+      },
+    ]
+
+    render(<BuildScreen {...props} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /AI Detail/i }))
+
+    expect(await screen.findByText(/Pending Admin Activation/i)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /activate registry version/i }))
+    expect(props.onActivatePromptPackRequest).toHaveBeenCalledWith('prompt-pack-activation-request-1')
+  })
+
+  it('rolls back an active registry version from the AI detail overlay', async () => {
+    const props = baseProps()
+    props.buildState.historicalLearning = {
+      scope: 'stack:react+go',
+      observed_builds: 2,
+      prompt_pack_drafts: [
+        {
+          id: 'prompt-pack-draft-1',
+          version: 'draft-001',
+          scope: 'stack:react+go',
+          source_candidate_ids: ['adoption-prompt-approved'],
+          changes: [],
+          status: 'inactive_draft',
+          prompt_mutated: false,
+          activation_ready: false,
+        },
+      ],
+    }
+    props.buildState.promptPackActivationRequests = [
+      {
+        id: 'prompt-pack-activation-request-1',
+        build_id: 'build-1',
+        draft_id: 'prompt-pack-draft-1',
+        draft_version: 'draft-001',
+        scope: 'stack:react+go',
+        status: 'activated_in_registry',
+        requested_by_id: 7,
+        feature_flag: 'APEX_PROMPT_PACK_ACTIVATION_REQUESTS',
+        prompt_mutated: false,
+      },
+    ]
+    props.buildState.promptPackVersions = [
+      {
+        id: 'prompt-pack-version-active-1',
+        scope: 'stack:react+go',
+        version: 'draft-001',
+        status: 'active_registry_version',
+        source_build_id: 'build-1',
+        source_draft_id: 'prompt-pack-draft-1',
+        source_request_id: 'prompt-pack-activation-request-1',
+        activated_by_id: 7,
+        prompt_mutated: false,
+        live_prompt_read_enabled: false,
+      },
+    ]
+
+    render(<BuildScreen {...props} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /AI Detail/i }))
+
+    expect(await screen.findByText(/Active Registry Version/i)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /rollback registry version/i }))
+    expect(props.onRollbackPromptPackVersion).toHaveBeenCalledWith('prompt-pack-version-active-1')
   })
 
   it('opens proposed edit review from review-required repair bundles', async () => {

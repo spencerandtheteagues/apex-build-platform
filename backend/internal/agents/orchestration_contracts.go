@@ -394,32 +394,188 @@ type BuildReliabilitySummary struct {
 }
 
 type BuildLearningSummary struct {
-	Scope                      string                      `json:"scope"`
-	ObservedBuilds             int                         `json:"observed_builds"`
-	SourceBuildIDs             []string                    `json:"source_build_ids,omitempty"`
-	RecurringFailureClasses    []string                    `json:"recurring_failure_classes,omitempty"`
-	SuccessfulRepairPaths      []string                    `json:"successful_repair_paths,omitempty"`
-	RepairStrategyWinRates     []string                    `json:"repair_strategy_win_rates,omitempty"`
-	SemanticRepairHints        []string                    `json:"semantic_repair_hints,omitempty"`
-	FrequentWarnings           []string                    `json:"frequent_warnings,omitempty"`
-	HotspotFiles               []string                    `json:"hotspot_files,omitempty"`
-	RecommendedAvoidance       []string                    `json:"recommended_avoidance,omitempty"`
-	PromptImprovementProposals []PromptImprovementProposal `json:"prompt_improvement_proposals,omitempty"`
-	CleanPassSignals           []string                    `json:"clean_pass_signals,omitempty"`
-	GeneratedAt                time.Time                   `json:"generated_at"`
+	Scope                      string                         `json:"scope"`
+	ObservedBuilds             int                            `json:"observed_builds"`
+	SourceBuildIDs             []string                       `json:"source_build_ids,omitempty"`
+	RecurringFailureClasses    []string                       `json:"recurring_failure_classes,omitempty"`
+	SuccessfulRepairPaths      []string                       `json:"successful_repair_paths,omitempty"`
+	RepairStrategyWinRates     []string                       `json:"repair_strategy_win_rates,omitempty"`
+	SemanticRepairHints        []string                       `json:"semantic_repair_hints,omitempty"`
+	FrequentWarnings           []string                       `json:"frequent_warnings,omitempty"`
+	HotspotFiles               []string                       `json:"hotspot_files,omitempty"`
+	RecommendedAvoidance       []string                       `json:"recommended_avoidance,omitempty"`
+	PromptImprovementProposals []PromptImprovementProposal    `json:"prompt_improvement_proposals,omitempty"`
+	PromptAdoptionCandidates   []PromptProposalAdoptionRecord `json:"prompt_adoption_candidates,omitempty"`
+	PromptPackDrafts           []PromptPackDraft              `json:"prompt_pack_drafts,omitempty"`
+	CleanPassSignals           []string                       `json:"clean_pass_signals,omitempty"`
+	GeneratedAt                time.Time                      `json:"generated_at"`
+}
+
+type PromptProposalReviewState string
+
+const (
+	PromptProposalReviewProposed PromptProposalReviewState = "proposed"
+	PromptProposalReviewApproved PromptProposalReviewState = "approved"
+	PromptProposalReviewRejected PromptProposalReviewState = "rejected"
+)
+
+type PromptProposalBenchmarkStatus string
+
+const (
+	PromptProposalBenchmarkNotStarted    PromptProposalBenchmarkStatus = "not_started"
+	PromptProposalBenchmarkRunning       PromptProposalBenchmarkStatus = "running"
+	PromptProposalBenchmarkPassed        PromptProposalBenchmarkStatus = "passed"
+	PromptProposalBenchmarkFailed        PromptProposalBenchmarkStatus = "failed"
+	PromptProposalBenchmarkNotApplicable PromptProposalBenchmarkStatus = "not_applicable"
+)
+
+type PromptProposalBenchmarkResult struct {
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	Summary   string `json:"summary,omitempty"`
+	Evidence  string `json:"evidence,omitempty"`
+	Required  bool   `json:"required"`
+	Generated string `json:"generated,omitempty"`
+}
+
+type PromptProposalAdoptionStatus string
+
+const (
+	PromptProposalAdoptionReady PromptProposalAdoptionStatus = "ready_for_adoption"
+)
+
+type PromptProposalAdoptionRecord struct {
+	ID                   string                          `json:"id"`
+	ProposalID           string                          `json:"proposal_id"`
+	BuildID              string                          `json:"build_id,omitempty"`
+	Scope                string                          `json:"scope"`
+	TargetPrompt         string                          `json:"target_prompt"`
+	FailureCluster       string                          `json:"failure_cluster"`
+	Proposal             string                          `json:"proposal"`
+	Evidence             []string                        `json:"evidence,omitempty"`
+	BenchmarkGate        string                          `json:"benchmark_gate"`
+	BenchmarkStatus      PromptProposalBenchmarkStatus   `json:"benchmark_status"`
+	BenchmarkCompletedAt *time.Time                      `json:"benchmark_completed_at,omitempty"`
+	BenchmarkResults     []PromptProposalBenchmarkResult `json:"benchmark_results,omitempty"`
+	Status               PromptProposalAdoptionStatus    `json:"status"`
+	PromptMutated        bool                            `json:"prompt_mutated"`
+	CreatedAt            time.Time                       `json:"created_at"`
+}
+
+type PromptPackDraftStatus string
+
+const (
+	PromptPackDraftInactive PromptPackDraftStatus = "inactive_draft"
+)
+
+type PromptPackDraftChange struct {
+	CandidateID    string   `json:"candidate_id"`
+	ProposalID     string   `json:"proposal_id"`
+	TargetPrompt   string   `json:"target_prompt"`
+	FailureCluster string   `json:"failure_cluster"`
+	Proposal       string   `json:"proposal"`
+	Evidence       []string `json:"evidence,omitempty"`
+	BenchmarkGate  string   `json:"benchmark_gate"`
+}
+
+type PromptPackDraft struct {
+	ID                 string                  `json:"id"`
+	Version            string                  `json:"version"`
+	BuildID            string                  `json:"build_id,omitempty"`
+	Scope              string                  `json:"scope"`
+	SourceCandidateIDs []string                `json:"source_candidate_ids,omitempty"`
+	Changes            []PromptPackDraftChange `json:"changes,omitempty"`
+	Status             PromptPackDraftStatus   `json:"status"`
+	PromptMutated      bool                    `json:"prompt_mutated"`
+	ActivationReady    bool                    `json:"activation_ready"`
+	CreatedAt          time.Time               `json:"created_at"`
+}
+
+type PromptPackActivationStatus string
+
+const (
+	PromptPackActivationPending PromptPackActivationStatus = "pending_admin_activation"
+	PromptPackActivationActive  PromptPackActivationStatus = "activated_in_registry"
+)
+
+type PromptPackActivationRecord struct {
+	ID                 string                     `json:"id"`
+	BuildID            string                     `json:"build_id"`
+	DraftID            string                     `json:"draft_id"`
+	DraftVersion       string                     `json:"draft_version"`
+	Scope              string                     `json:"scope"`
+	SourceCandidateIDs []string                   `json:"source_candidate_ids,omitempty"`
+	Changes            []PromptPackDraftChange    `json:"changes,omitempty"`
+	Status             PromptPackActivationStatus `json:"status"`
+	RequestedByID      uint                       `json:"requested_by_id"`
+	Reason             string                     `json:"reason,omitempty"`
+	FeatureFlag        string                     `json:"feature_flag"`
+	PromptMutated      bool                       `json:"prompt_mutated"`
+	CreatedAt          time.Time                  `json:"created_at"`
+}
+
+type PromptPackVersionStatus string
+
+const (
+	PromptPackVersionActive PromptPackVersionStatus = "active_registry_version"
+)
+
+type PromptPackVersionRecord struct {
+	ID                    string                  `json:"id"`
+	Scope                 string                  `json:"scope"`
+	Version               string                  `json:"version"`
+	Status                PromptPackVersionStatus `json:"status"`
+	SourceBuildID         string                  `json:"source_build_id"`
+	SourceDraftID         string                  `json:"source_draft_id"`
+	SourceRequestID       string                  `json:"source_request_id"`
+	SourceCandidateIDs    []string                `json:"source_candidate_ids,omitempty"`
+	Changes               []PromptPackDraftChange `json:"changes,omitempty"`
+	ActivatedByID         uint                    `json:"activated_by_id"`
+	ActivatedAt           *time.Time              `json:"activated_at,omitempty"`
+	RollbackOfVersionID   string                  `json:"rollback_of_version_id,omitempty"`
+	PromptMutated         bool                    `json:"prompt_mutated"`
+	LivePromptReadEnabled bool                    `json:"live_prompt_read_enabled"`
+	CreatedAt             time.Time               `json:"created_at"`
+}
+
+type PromptPackActivationEventType string
+
+const (
+	PromptPackActivationEventActivated  PromptPackActivationEventType = "registry_activation"
+	PromptPackActivationEventRolledBack PromptPackActivationEventType = "registry_rollback"
+)
+
+type PromptPackActivationEventRecord struct {
+	ID                    string                        `json:"id"`
+	EventType             PromptPackActivationEventType `json:"event_type"`
+	PromptPackVersionID   string                        `json:"prompt_pack_version_id"`
+	ActivationRequestID   string                        `json:"activation_request_id"`
+	BuildID               string                        `json:"build_id"`
+	ActorID               uint                          `json:"actor_id"`
+	Reason                string                        `json:"reason,omitempty"`
+	RollbackOfVersionID   string                        `json:"rollback_of_version_id,omitempty"`
+	PromptMutated         bool                          `json:"prompt_mutated"`
+	LivePromptReadEnabled bool                          `json:"live_prompt_read_enabled"`
+	CreatedAt             time.Time                     `json:"created_at"`
 }
 
 type PromptImprovementProposal struct {
-	ID               string    `json:"id"`
-	Scope            string    `json:"scope"`
-	TargetPrompt     string    `json:"target_prompt"`
-	FailureCluster   string    `json:"failure_cluster"`
-	Proposal         string    `json:"proposal"`
-	Evidence         []string  `json:"evidence,omitempty"`
-	BenchmarkGate    string    `json:"benchmark_gate"`
-	RequiresApproval bool      `json:"requires_approval"`
-	ReviewState      string    `json:"review_state"`
-	GeneratedAt      time.Time `json:"generated_at"`
+	ID                   string                          `json:"id"`
+	Scope                string                          `json:"scope"`
+	TargetPrompt         string                          `json:"target_prompt"`
+	FailureCluster       string                          `json:"failure_cluster"`
+	Proposal             string                          `json:"proposal"`
+	Evidence             []string                        `json:"evidence,omitempty"`
+	BenchmarkGate        string                          `json:"benchmark_gate"`
+	RequiresApproval     bool                            `json:"requires_approval"`
+	ReviewState          PromptProposalReviewState       `json:"review_state"`
+	ReviewedAt           *time.Time                      `json:"reviewed_at,omitempty"`
+	ReviewMessage        string                          `json:"review_message,omitempty"`
+	BenchmarkStatus      PromptProposalBenchmarkStatus   `json:"benchmark_status,omitempty"`
+	BenchmarkStartedAt   *time.Time                      `json:"benchmark_started_at,omitempty"`
+	BenchmarkCompletedAt *time.Time                      `json:"benchmark_completed_at,omitempty"`
+	BenchmarkResults     []PromptProposalBenchmarkResult `json:"benchmark_results,omitempty"`
+	GeneratedAt          time.Time                       `json:"generated_at"`
 }
 
 type FailureFingerprint struct {

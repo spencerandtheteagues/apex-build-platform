@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -249,6 +250,23 @@ func retryBuildHistoryRead(operation string, fn func() error) error {
 		log.Printf("build history read %s exhausted retries: %v", operation, lastErr)
 	}
 	return lastErr
+}
+
+func promptPackActivationRequestsEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv(promptPackActivationFeatureFlag)), "true")
+}
+
+func requestContextIsAdmin(c *gin.Context) bool {
+	for _, key := range []string{"is_admin", "is_super_admin"} {
+		value, exists := c.Get(key)
+		if !exists {
+			continue
+		}
+		if isAdmin, ok := value.(bool); ok && isAdmin {
+			return true
+		}
+	}
+	return false
 }
 
 func writeBuildLookupError(c *gin.Context, err error, fallbackErr error) {
@@ -2997,6 +3015,315 @@ func (h *BuildHandler) RejectPatchBundle(c *gin.Context) {
 	})
 }
 
+// ApprovePromptImprovementProposal records human approval for a prompt proposal.
+// POST /api/v1/build/:id/prompt-proposals/:proposalId/approve
+func (h *BuildHandler) ApprovePromptImprovementProposal(c *gin.Context) {
+	buildID := c.Param("id")
+	proposalID := c.Param("proposalId")
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
+
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID, false)
+	if err != nil {
+		writeBuildActionSessionError(c, err)
+		return
+	}
+
+	result, err := h.manager.approvePromptImprovementProposal(build, proposalID, patchBundleReviewReason(c))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"build_id":              buildID,
+		"proposal_id":           proposalID,
+		"status":                string(result.Status),
+		"review_status":         string(PromptProposalReviewApproved),
+		"prompt_proposal":       result.Proposal,
+		"historical_learning":   result.HistoricalLearning,
+		"message":               "Prompt proposal approved for benchmark-gated adoption",
+		"prompt_mutated":        false,
+		"restored_session":      restoredSession,
+		"benchmark_gate_status": "pending",
+	})
+}
+
+// RejectPromptImprovementProposal records human rejection for a prompt proposal.
+// POST /api/v1/build/:id/prompt-proposals/:proposalId/reject
+func (h *BuildHandler) RejectPromptImprovementProposal(c *gin.Context) {
+	buildID := c.Param("id")
+	proposalID := c.Param("proposalId")
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
+
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID, false)
+	if err != nil {
+		writeBuildActionSessionError(c, err)
+		return
+	}
+
+	result, err := h.manager.rejectPromptImprovementProposal(build, proposalID, patchBundleReviewReason(c))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"build_id":              buildID,
+		"proposal_id":           proposalID,
+		"status":                string(result.Status),
+		"review_status":         string(PromptProposalReviewRejected),
+		"prompt_proposal":       result.Proposal,
+		"historical_learning":   result.HistoricalLearning,
+		"message":               "Prompt proposal rejected",
+		"prompt_mutated":        false,
+		"restored_session":      restoredSession,
+		"benchmark_gate_status": "not_applicable",
+	})
+}
+
+// BenchmarkPromptImprovementProposal records benchmark-gate results for an approved prompt proposal.
+// POST /api/v1/build/:id/prompt-proposals/:proposalId/benchmark
+func (h *BuildHandler) BenchmarkPromptImprovementProposal(c *gin.Context) {
+	buildID := c.Param("id")
+	proposalID := c.Param("proposalId")
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
+
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID, false)
+	if err != nil {
+		writeBuildActionSessionError(c, err)
+		return
+	}
+
+	result, err := h.manager.benchmarkPromptImprovementProposal(build, proposalID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"build_id":              buildID,
+		"proposal_id":           proposalID,
+		"status":                string(result.Status),
+		"benchmark_status":      string(result.Proposal.BenchmarkStatus),
+		"prompt_proposal":       result.Proposal,
+		"historical_learning":   result.HistoricalLearning,
+		"message":               "Prompt proposal benchmark gate recorded",
+		"prompt_mutated":        false,
+		"restored_session":      restoredSession,
+		"benchmark_gate_status": string(result.Proposal.BenchmarkStatus),
+	})
+}
+
+// CreatePromptPackDraft creates an inactive prompt-pack draft from ready adoption candidates.
+// POST /api/v1/build/:id/prompt-pack-drafts
+func (h *BuildHandler) CreatePromptPackDraft(c *gin.Context) {
+	buildID := c.Param("id")
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
+
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID, false)
+	if err != nil {
+		writeBuildActionSessionError(c, err)
+		return
+	}
+
+	result, err := h.manager.createPromptPackDraft(build)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"build_id":            buildID,
+		"status":              string(result.Status),
+		"prompt_pack_draft":   result.Draft,
+		"historical_learning": result.HistoricalLearning,
+		"message":             "Prompt pack draft created",
+		"prompt_mutated":      false,
+		"activation_ready":    false,
+		"restored_session":    restoredSession,
+	})
+}
+
+// RequestPromptPackDraftActivation records an admin-only activation request for a draft.
+// POST /api/v1/build/:id/prompt-pack-drafts/:draftId/request-activation
+func (h *BuildHandler) RequestPromptPackDraftActivation(c *gin.Context) {
+	if !promptPackActivationRequestsEnabled() {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":          "prompt pack activation requests are disabled",
+			"feature_flag":   promptPackActivationFeatureFlag,
+			"prompt_mutated": false,
+		})
+		return
+	}
+	if !requestContextIsAdmin(c) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":          "admin access required",
+			"prompt_mutated": false,
+		})
+		return
+	}
+
+	buildID := c.Param("id")
+	draftID := c.Param("draftId")
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
+
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID, false)
+	if err != nil {
+		writeBuildActionSessionError(c, err)
+		return
+	}
+
+	result, err := h.manager.requestPromptPackDraftActivation(build, draftID, uid, patchBundleReviewReason(c))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"build_id":                         buildID,
+		"draft_id":                         draftID,
+		"status":                           string(result.Status),
+		"activation_status":                string(result.Request.Status),
+		"prompt_pack_draft":                result.Draft,
+		"prompt_pack_activation_request":   result.Request,
+		"message":                          "Prompt pack activation request recorded for admin review",
+		"prompt_mutated":                   false,
+		"restored_session":                 restoredSession,
+		"feature_flag":                     promptPackActivationFeatureFlag,
+		"live_prompt_generation_changed":   false,
+		"historical_learning_mutated":      false,
+		"requires_separate_activation_job": true,
+	})
+}
+
+// ActivatePromptPackRequest materializes a pending activation request into the global registry.
+// POST /api/v1/build/:id/prompt-pack-activation-requests/:requestId/activate
+func (h *BuildHandler) ActivatePromptPackRequest(c *gin.Context) {
+	if !promptPackActivationRequestsEnabled() {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":          "prompt pack activation is disabled",
+			"feature_flag":   promptPackActivationFeatureFlag,
+			"prompt_mutated": false,
+		})
+		return
+	}
+	if !requestContextIsAdmin(c) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":          "admin access required",
+			"prompt_mutated": false,
+		})
+		return
+	}
+
+	buildID := c.Param("id")
+	requestID := c.Param("requestId")
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
+
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID, false)
+	if err != nil {
+		writeBuildActionSessionError(c, err)
+		return
+	}
+
+	result, err := h.manager.activatePromptPackRequest(build, requestID, uid, patchBundleReviewReason(c))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"build_id":                         buildID,
+		"request_id":                       requestID,
+		"status":                           string(result.Status),
+		"activation_status":                string(result.Request.Status),
+		"prompt_pack_activation_request":   result.Request,
+		"prompt_pack_version":              result.Version,
+		"prompt_pack_activation_event":     result.Event,
+		"message":                          "Prompt pack version activated in registry",
+		"prompt_mutated":                   false,
+		"restored_session":                 restoredSession,
+		"feature_flag":                     promptPackActivationFeatureFlag,
+		"live_prompt_generation_changed":   false,
+		"live_prompt_read_enabled":         false,
+		"requires_separate_live_rollout":   true,
+		"requires_separate_activation_job": false,
+	})
+}
+
+// RollbackPromptPackVersion creates a new registry entry that rolls back an active version.
+// POST /api/v1/build/:id/prompt-pack-versions/:versionId/rollback
+func (h *BuildHandler) RollbackPromptPackVersion(c *gin.Context) {
+	if !promptPackActivationRequestsEnabled() {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":          "prompt pack activation requests are disabled",
+			"feature_flag":   promptPackActivationFeatureFlag,
+			"prompt_mutated": false,
+		})
+		return
+	}
+	if !requestContextIsAdmin(c) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":          "admin access required",
+			"prompt_mutated": false,
+		})
+		return
+	}
+
+	buildID := c.Param("id")
+	versionID := c.Param("versionId")
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
+
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID, false)
+	if err != nil {
+		writeBuildActionSessionError(c, err)
+		return
+	}
+
+	result, err := h.manager.rollbackPromptPackVersion(build, versionID, uid, patchBundleReviewReason(c))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"build_id":                         buildID,
+		"version_id":                       versionID,
+		"status":                           string(result.Status),
+		"prompt_pack_version":              result.RollbackVersion,
+		"rolled_back_version":              result.RolledBackVersion,
+		"prompt_pack_activation_event":     result.Event,
+		"message":                          "Prompt pack version rolled back in registry",
+		"prompt_mutated":                   false,
+		"restored_session":                 restoredSession,
+		"feature_flag":                     promptPackActivationFeatureFlag,
+		"live_prompt_generation_changed":   false,
+		"live_prompt_read_enabled":         false,
+		"requires_separate_live_rollout":   true,
+		"requires_separate_activation_job": false,
+	})
+}
+
 // RegisterRoutes registers all build routes on the router
 func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	build := rg.Group("/build")
@@ -3030,6 +3357,13 @@ func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		build.POST("/:id/reject-all", h.RejectAllEdits)
 		build.POST("/:id/patch-bundles/:bundleId/approve", h.ApprovePatchBundle)
 		build.POST("/:id/patch-bundles/:bundleId/reject", h.RejectPatchBundle)
+		build.POST("/:id/prompt-proposals/:proposalId/approve", h.ApprovePromptImprovementProposal)
+		build.POST("/:id/prompt-proposals/:proposalId/reject", h.RejectPromptImprovementProposal)
+		build.POST("/:id/prompt-proposals/:proposalId/benchmark", h.BenchmarkPromptImprovementProposal)
+		build.POST("/:id/prompt-pack-drafts", h.CreatePromptPackDraft)
+		build.POST("/:id/prompt-pack-drafts/:draftId/request-activation", h.RequestPromptPackDraftActivation)
+		build.POST("/:id/prompt-pack-activation-requests/:requestId/activate", h.ActivatePromptPackRequest)
+		build.POST("/:id/prompt-pack-versions/:versionId/rollback", h.RollbackPromptPackVersion)
 	}
 
 	// Build history endpoints

@@ -233,6 +233,43 @@ describe('OrchestrationOverview', () => {
               benchmark_gate: 'Run preview runtime verification and generated app smoke benchmarks before approval.',
               requires_approval: true,
               review_state: 'proposed',
+              review_message: 'Awaiting benchmark owner review.',
+              benchmark_status: 'not_started',
+            },
+          ],
+          prompt_adoption_candidates: [
+            {
+              id: 'adoption-prompt-stack-react-go-preview-repair-preview-verification',
+              proposal_id: 'prompt-stack-react-go-preview-repair-preview-verification',
+              scope: 'stack:react+go',
+              target_prompt: 'preview_repair',
+              failure_cluster: 'preview_verification',
+              proposal: 'Emphasize deterministic entrypoint, port, boot-command, and router-context checks before provider critique or visual polish.',
+              benchmark_gate: 'Run preview runtime verification and generated app smoke benchmarks before approval.',
+              benchmark_status: 'passed',
+              status: 'ready_for_adoption',
+              prompt_mutated: false,
+            },
+          ],
+          prompt_pack_drafts: [
+            {
+              id: 'prompt-pack-draft-1',
+              version: 'draft-001',
+              scope: 'stack:react+go',
+              source_candidate_ids: ['adoption-prompt-stack-react-go-preview-repair-preview-verification'],
+              changes: [
+                {
+                  candidate_id: 'adoption-prompt-stack-react-go-preview-repair-preview-verification',
+                  proposal_id: 'prompt-stack-react-go-preview-repair-preview-verification',
+                  target_prompt: 'preview_repair',
+                  failure_cluster: 'preview_verification',
+                  proposal: 'Emphasize deterministic entrypoint, port, boot-command, and router-context checks before provider critique or visual polish.',
+                  benchmark_gate: 'Run preview runtime verification and generated app smoke benchmarks before approval.',
+                },
+              ],
+              status: 'inactive_draft',
+              prompt_mutated: false,
+              activation_ready: false,
             },
           ],
         }}
@@ -269,8 +306,13 @@ describe('OrchestrationOverview', () => {
     expect(screen.getByText('semantic_diff/import_export_mismatch strategy=targeted_symbol_repair win_rate=1/1')).toBeTruthy()
     expect(screen.getByText('Prompt Proposals')).toBeTruthy()
     expect(screen.getByText('Review required')).toBeTruthy()
-    expect(screen.getByText(/deterministic entrypoint, port, boot-command/)).toBeTruthy()
+    expect(screen.getAllByText(/deterministic entrypoint, port, boot-command/).length).toBeGreaterThan(0)
     expect(screen.getByText('Benchmark gate: Run preview runtime verification and generated app smoke benchmarks before approval.')).toBeTruthy()
+    expect(screen.getByText(/Awaiting benchmark owner review/i)).toBeTruthy()
+    expect(screen.getAllByText(/ready for adoption/i).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Prompt source unchanged/i)).toBeTruthy()
+    expect(screen.getByText('Prompt-Pack Drafts')).toBeTruthy()
+    expect(screen.getByText('draft-001')).toBeTruthy()
   })
 
   it('renders paused orchestration phases truthfully', () => {

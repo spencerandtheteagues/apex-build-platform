@@ -561,6 +561,74 @@ type CompletedBuild struct {
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 }
 
+// PromptPackActivationRequest stores admin-gated prompt-pack activation intent
+// separately from build-local historical learning snapshots. Rows in this table
+// are review queue entries only; they do not mutate live prompt source.
+type PromptPackActivationRequest struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at" gorm:"index"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	RequestID              string `json:"request_id" gorm:"uniqueIndex;not null;size:96"`
+	BuildID                string `json:"build_id" gorm:"not null;index;size:64"`
+	DraftID                string `json:"draft_id" gorm:"not null;index;size:96"`
+	DraftVersion           string `json:"draft_version" gorm:"not null;size:64"`
+	Scope                  string `json:"scope" gorm:"size:255"`
+	Status                 string `json:"status" gorm:"not null;index;size:64"`
+	RequestedByID          uint   `json:"requested_by_id" gorm:"not null;index"`
+	Reason                 string `json:"reason,omitempty" gorm:"type:text"`
+	FeatureFlag            string `json:"feature_flag" gorm:"not null;size:96"`
+	SourceCandidateIDsJSON string `json:"-" gorm:"column:source_candidate_ids_json;type:text"`
+	ChangesJSON            string `json:"-" gorm:"column:changes_json;type:text"`
+	PromptMutated          bool   `json:"prompt_mutated" gorm:"not null;default:false"`
+}
+
+// PromptPackVersion is the global prompt-pack registry entry created from an
+// admin-approved activation request. Runtime prompt generation does not read
+// this table until a separate rollout path is explicitly wired.
+type PromptPackVersion struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at" gorm:"index"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	VersionID              string     `json:"version_id" gorm:"uniqueIndex;not null;size:96"`
+	Scope                  string     `json:"scope" gorm:"not null;index;size:255"`
+	Version                string     `json:"version" gorm:"not null;size:64"`
+	Status                 string     `json:"status" gorm:"not null;index;size:64"`
+	SourceBuildID          string     `json:"source_build_id" gorm:"not null;index;size:64"`
+	SourceDraftID          string     `json:"source_draft_id" gorm:"not null;index;size:96"`
+	SourceRequestID        string     `json:"source_request_id" gorm:"not null;index;size:96"`
+	SourceCandidateIDsJSON string     `json:"-" gorm:"column:source_candidate_ids_json;type:text"`
+	ChangesJSON            string     `json:"-" gorm:"column:changes_json;type:text"`
+	ActivatedByID          uint       `json:"activated_by_id" gorm:"not null;index"`
+	ActivatedAt            *time.Time `json:"activated_at,omitempty"`
+	RollbackOfVersionID    string     `json:"rollback_of_version_id,omitempty" gorm:"size:96;index"`
+	PromptMutated          bool       `json:"prompt_mutated" gorm:"not null;default:false"`
+	LivePromptReadEnabled  bool       `json:"live_prompt_read_enabled" gorm:"not null;default:false"`
+}
+
+// PromptPackActivationEvent records registry transitions for prompt-pack
+// versions. Events are audit metadata and never mutate live prompt source.
+type PromptPackActivationEvent struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at" gorm:"index"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	EventID               string `json:"event_id" gorm:"uniqueIndex;not null;size:96"`
+	EventType             string `json:"event_type" gorm:"not null;index;size:64"`
+	PromptPackVersionID   string `json:"prompt_pack_version_id" gorm:"not null;index;size:96"`
+	ActivationRequestID   string `json:"activation_request_id" gorm:"not null;index;size:96"`
+	BuildID               string `json:"build_id" gorm:"not null;index;size:64"`
+	ActorID               uint   `json:"actor_id" gorm:"not null;index"`
+	Reason                string `json:"reason,omitempty" gorm:"type:text"`
+	RollbackOfVersionID   string `json:"rollback_of_version_id,omitempty" gorm:"size:96;index"`
+	PromptMutated         bool   `json:"prompt_mutated" gorm:"not null;default:false"`
+	LivePromptReadEnabled bool   `json:"live_prompt_read_enabled" gorm:"not null;default:false"`
+}
+
 // ProcessedStripeEvent tracks Stripe webhook events that have already been handled.
 // The unique index on StripeEventID is the idempotency guard: if a duplicate webhook
 // arrives, the INSERT fails and the handler returns 200 immediately without reprocessing.

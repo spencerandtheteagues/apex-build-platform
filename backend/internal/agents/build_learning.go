@@ -619,7 +619,8 @@ func buildPromptImprovementProposals(
 			Evidence:         limitStrings(dedupeStrings(evidence), 6),
 			BenchmarkGate:    recipe.BenchmarkGate,
 			RequiresApproval: true,
-			ReviewState:      "proposed",
+			ReviewState:      PromptProposalReviewProposed,
+			BenchmarkStatus:  PromptProposalBenchmarkNotStarted,
 			GeneratedAt:      generatedAt,
 		})
 		if len(proposals) >= maxPromptImprovementProposals {

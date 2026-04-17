@@ -16,10 +16,14 @@ import apiService, {
   BuildContractSummary,
   BuildPatchBundleState,
   BuildPolicyState,
+  BuildPromptImprovementProposalState,
   BuildPromotionDecisionState,
   BuildProviderScorecardState,
   BuildFailureFingerprintState,
   BuildLearningSummaryState,
+  BuildPromptPackActivationEventState,
+  BuildPromptPackActivationRequestState,
+  BuildPromptPackVersionState,
   BuildVerificationReportState,
   BuildWorkOrderState,
   BuildConversationMessage as ApiBuildConversationMessage,
@@ -208,6 +212,9 @@ interface BuildState {
   providerScorecards?: BuildProviderScorecardState[]
   failureFingerprints?: BuildFailureFingerprintState[]
   historicalLearning?: BuildLearningSummaryState
+  promptPackActivationRequests?: BuildPromptPackActivationRequestState[]
+  promptPackVersions?: BuildPromptPackVersionState[]
+  promptPackActivationEvents?: BuildPromptPackActivationEventState[]
   truthBySurface?: Record<string, string[]>
   interaction?: ApiBuildInteractionState
   platformIssue?: BuildPlatformIssueContext
@@ -537,6 +544,45 @@ const getConversationRouteLabel = (message: ChatMessage) => {
       : 'System'
   const target = getConversationTargetLabel(message)
   return target ? `${source} -> ${target}` : source
+}
+
+const upsertPromptPackActivationRequest = (
+  existing: BuildPromptPackActivationRequestState[] | undefined,
+  request: BuildPromptPackActivationRequestState
+): BuildPromptPackActivationRequestState[] => {
+  if (!request?.id) return existing || []
+  const current = existing || []
+  const index = current.findIndex(candidate => candidate.id === request.id)
+  if (index >= 0) {
+    return current.map(candidate => candidate.id === request.id ? { ...candidate, ...request } : candidate)
+  }
+  return [...current, request]
+}
+
+const upsertPromptPackVersion = (
+  existing: BuildPromptPackVersionState[] | undefined,
+  version: BuildPromptPackVersionState
+): BuildPromptPackVersionState[] => {
+  if (!version?.id) return existing || []
+  const current = existing || []
+  const index = current.findIndex(candidate => candidate.id === version.id)
+  if (index >= 0) {
+    return current.map(candidate => candidate.id === version.id ? { ...candidate, ...version } : candidate)
+  }
+  return [...current, version]
+}
+
+const upsertPromptPackActivationEvent = (
+  existing: BuildPromptPackActivationEventState[] | undefined,
+  event: BuildPromptPackActivationEventState
+): BuildPromptPackActivationEventState[] => {
+  if (!event?.id) return existing || []
+  const current = existing || []
+  const index = current.findIndex(candidate => candidate.id === event.id)
+  if (index >= 0) {
+    return current.map(candidate => candidate.id === event.id ? { ...candidate, ...event } : candidate)
+  }
+  return [...current, event]
 }
 
 const ThinkingDots: React.FC<{ className?: string }> = ({ className }) => {
@@ -1554,6 +1600,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [proposedEdits, setProposedEdits] = useState<ProposedEdit[]>([])
   const [showDiffReview, setShowDiffReview] = useState(true)
   const [patchBundleActionId, setPatchBundleActionId] = useState<string | null>(null)
+  const [promptProposalActionId, setPromptProposalActionId] = useState<string | null>(null)
 
   // AI Activity state
   const [aiThoughts, setAiThoughts] = useState<AIThought[]>([])
@@ -2901,6 +2948,21 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             providerScorecards: Array.isArray(data.provider_scorecards) ? data.provider_scorecards : prev?.providerScorecards,
             failureFingerprints: Array.isArray(data.failure_fingerprints) ? data.failure_fingerprints : prev?.failureFingerprints,
             historicalLearning: data.historical_learning || prev?.historicalLearning,
+            promptPackActivationRequests: data.prompt_pack_activation_request
+              ? upsertPromptPackActivationRequest(prev?.promptPackActivationRequests, data.prompt_pack_activation_request)
+              : Array.isArray(data.prompt_pack_activation_requests)
+                ? data.prompt_pack_activation_requests
+                : prev?.promptPackActivationRequests,
+            promptPackVersions: data.prompt_pack_version
+              ? upsertPromptPackVersion(prev?.promptPackVersions, data.prompt_pack_version)
+              : Array.isArray(data.prompt_pack_versions)
+                ? data.prompt_pack_versions
+                : prev?.promptPackVersions,
+            promptPackActivationEvents: data.prompt_pack_activation_event
+              ? upsertPromptPackActivationEvent(prev?.promptPackActivationEvents, data.prompt_pack_activation_event)
+              : Array.isArray(data.prompt_pack_activation_events)
+                ? data.prompt_pack_activation_events
+                : prev?.promptPackActivationEvents,
             truthBySurface: data.truth_by_surface || prev?.truthBySurface,
             qualityGateStatus:
               typeof data.quality_gate_passed === 'boolean'
@@ -2987,6 +3049,21 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           }
           if (data.historical_learning) {
             updates.historicalLearning = data.historical_learning
+          }
+          if (data.prompt_pack_activation_request) {
+            updates.promptPackActivationRequests = upsertPromptPackActivationRequest(prev.promptPackActivationRequests, data.prompt_pack_activation_request)
+          } else if (Array.isArray(data.prompt_pack_activation_requests)) {
+            updates.promptPackActivationRequests = data.prompt_pack_activation_requests
+          }
+          if (data.prompt_pack_version) {
+            updates.promptPackVersions = upsertPromptPackVersion(prev.promptPackVersions, data.prompt_pack_version)
+          } else if (Array.isArray(data.prompt_pack_versions)) {
+            updates.promptPackVersions = data.prompt_pack_versions
+          }
+          if (data.prompt_pack_activation_event) {
+            updates.promptPackActivationEvents = upsertPromptPackActivationEvent(prev.promptPackActivationEvents, data.prompt_pack_activation_event)
+          } else if (Array.isArray(data.prompt_pack_activation_events)) {
+            updates.promptPackActivationEvents = data.prompt_pack_activation_events
           }
           if (data.truth_by_surface) {
             updates.truthBySurface = data.truth_by_surface
@@ -4043,6 +4120,47 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     })
   }, [])
 
+  const updateReviewedPromptProposal = useCallback((proposal: BuildPromptImprovementProposalState, historicalLearning?: BuildLearningSummaryState) => {
+    if (!proposal?.id) return
+    setBuildState(prev => {
+      if (!prev) return prev
+      const currentLearning = historicalLearning || prev.historicalLearning
+      if (!currentLearning) return prev
+      const existing = currentLearning.prompt_improvement_proposals || []
+      const index = existing.findIndex(candidate => candidate.id === proposal.id)
+      const promptImprovementProposals = index >= 0
+        ? existing.map(candidate => candidate.id === proposal.id ? { ...candidate, ...proposal } : candidate)
+        : [...existing, proposal]
+      return {
+        ...prev,
+        historicalLearning: {
+          ...currentLearning,
+          prompt_improvement_proposals: promptImprovementProposals,
+        },
+      }
+    })
+  }, [])
+
+  const markPromptProposalReviewStatus = useCallback((proposalId: string, reviewStatus: 'approved' | 'rejected') => {
+    setBuildState(prev => {
+      if (!prev?.historicalLearning) return prev
+      return {
+        ...prev,
+        historicalLearning: {
+          ...prev.historicalLearning,
+          prompt_improvement_proposals: (prev.historicalLearning.prompt_improvement_proposals || []).map(proposal => proposal.id === proposalId
+            ? {
+                ...proposal,
+                review_state: reviewStatus,
+                reviewed_at: proposal.reviewed_at || new Date().toISOString(),
+              }
+            : proposal
+          ),
+        },
+      }
+    })
+  }, [])
+
   const reviewPatchBundle = useCallback(async (bundleId: string, decision: 'approve' | 'reject') => {
     const buildId = buildStateRef.current?.id
     if (!buildId || !bundleId || patchBundleActionId) return
@@ -4068,6 +4186,172 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       setPatchBundleActionId(null)
     }
   }, [addSystemMessage, markPatchBundleReviewStatus, patchBundleActionId, updateReviewedPatchBundle])
+
+  const reviewPromptProposal = useCallback(async (proposalId: string, decision: 'approve' | 'reject') => {
+    const buildId = buildStateRef.current?.id
+    if (!buildId || !proposalId || promptProposalActionId) return
+
+    setPromptProposalActionId(proposalId)
+    try {
+      const response = decision === 'approve'
+        ? await apiService.approveBuildPromptProposal(buildId, proposalId)
+        : await apiService.rejectBuildPromptProposal(buildId, proposalId)
+      if (response.prompt_proposal) {
+        updateReviewedPromptProposal(response.prompt_proposal, response.historical_learning)
+      } else {
+        markPromptProposalReviewStatus(proposalId, decision === 'approve' ? 'approved' : 'rejected')
+      }
+      const nextStatus = normalizeBuildStatus(response.status)
+      if (nextStatus) {
+        setBuildState(prev => prev ? { ...prev, status: nextStatus as BuildState['status'] } : prev)
+      }
+      addSystemMessage(response.message || (decision === 'approve' ? 'Prompt proposal approved' : 'Prompt proposal rejected'))
+    } catch (error) {
+      addSystemMessage(`Prompt proposal review failed: ${error instanceof Error ? error.message : 'Unable to update prompt proposal'}`)
+    } finally {
+      setPromptProposalActionId(null)
+    }
+  }, [addSystemMessage, markPromptProposalReviewStatus, promptProposalActionId, updateReviewedPromptProposal])
+
+  const updatePromptLearning = useCallback((historicalLearning?: BuildLearningSummaryState) => {
+    if (!historicalLearning) return
+    setBuildState(prev => prev ? { ...prev, historicalLearning } : prev)
+  }, [])
+
+  const benchmarkPromptProposal = useCallback(async (proposalId: string) => {
+    const buildId = buildStateRef.current?.id
+    if (!buildId || !proposalId || promptProposalActionId) return
+
+    setPromptProposalActionId(proposalId)
+    try {
+      const response = await apiService.benchmarkBuildPromptProposal(buildId, proposalId)
+      if (response.prompt_proposal) {
+        updateReviewedPromptProposal(response.prompt_proposal, response.historical_learning)
+      }
+      const nextStatus = normalizeBuildStatus(response.status)
+      if (nextStatus) {
+        setBuildState(prev => prev ? { ...prev, status: nextStatus as BuildState['status'] } : prev)
+      }
+      addSystemMessage(response.message || `Prompt proposal benchmark ${response.benchmark_status || 'recorded'}`)
+    } catch (error) {
+      addSystemMessage(`Prompt proposal benchmark failed: ${error instanceof Error ? error.message : 'Unable to run prompt proposal benchmark'}`)
+    } finally {
+      setPromptProposalActionId(null)
+    }
+  }, [addSystemMessage, promptProposalActionId, updateReviewedPromptProposal])
+
+  const createPromptPackDraft = useCallback(async () => {
+    const buildId = buildStateRef.current?.id
+    if (!buildId || promptProposalActionId) return
+
+    setPromptProposalActionId('prompt-pack-draft')
+    try {
+      const response = await apiService.createBuildPromptPackDraft(buildId)
+      updatePromptLearning(response.historical_learning)
+      const nextStatus = normalizeBuildStatus(response.status)
+      if (nextStatus) {
+        setBuildState(prev => prev ? { ...prev, status: nextStatus as BuildState['status'] } : prev)
+      }
+      addSystemMessage(response.message || 'Prompt pack draft created')
+    } catch (error) {
+      addSystemMessage(`Prompt pack draft failed: ${error instanceof Error ? error.message : 'Unable to create prompt pack draft'}`)
+    } finally {
+      setPromptProposalActionId(null)
+    }
+  }, [addSystemMessage, promptProposalActionId, updatePromptLearning])
+
+  const requestPromptPackActivation = useCallback(async (draftId: string) => {
+    const buildId = buildStateRef.current?.id
+    if (!buildId || !draftId || promptProposalActionId) return
+
+    setPromptProposalActionId(`prompt-pack-activation:${draftId}`)
+    try {
+      const response = await apiService.requestBuildPromptPackActivation(buildId, draftId)
+      if (response.prompt_pack_activation_request) {
+        setBuildState(prev => prev
+          ? {
+              ...prev,
+              promptPackActivationRequests: upsertPromptPackActivationRequest(prev.promptPackActivationRequests, response.prompt_pack_activation_request!),
+            }
+          : prev
+        )
+      }
+      const nextStatus = normalizeBuildStatus(response.status)
+      if (nextStatus) {
+        setBuildState(prev => prev ? { ...prev, status: nextStatus as BuildState['status'] } : prev)
+      }
+      addSystemMessage(response.message || 'Prompt pack activation request recorded')
+    } catch (error) {
+      addSystemMessage(`Prompt pack activation request failed: ${error instanceof Error ? error.message : 'Unable to request prompt pack activation'}`)
+    } finally {
+      setPromptProposalActionId(null)
+    }
+  }, [addSystemMessage, promptProposalActionId])
+
+  const activatePromptPackRequest = useCallback(async (requestId: string) => {
+    const buildId = buildStateRef.current?.id
+    if (!buildId || !requestId || promptProposalActionId) return
+
+    setPromptProposalActionId(`prompt-pack-registry:${requestId}`)
+    try {
+      const response = await apiService.activateBuildPromptPackRequest(buildId, requestId)
+      setBuildState(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          promptPackActivationRequests: response.prompt_pack_activation_request
+            ? upsertPromptPackActivationRequest(prev.promptPackActivationRequests, response.prompt_pack_activation_request)
+            : prev.promptPackActivationRequests,
+          promptPackVersions: response.prompt_pack_version
+            ? upsertPromptPackVersion(prev.promptPackVersions, response.prompt_pack_version)
+            : prev.promptPackVersions,
+          promptPackActivationEvents: response.prompt_pack_activation_event
+            ? upsertPromptPackActivationEvent(prev.promptPackActivationEvents, response.prompt_pack_activation_event)
+            : prev.promptPackActivationEvents,
+        }
+      })
+      const nextStatus = normalizeBuildStatus(response.status)
+      if (nextStatus) {
+        setBuildState(prev => prev ? { ...prev, status: nextStatus as BuildState['status'] } : prev)
+      }
+      addSystemMessage(response.message || 'Prompt pack version activated in registry')
+    } catch (error) {
+      addSystemMessage(`Prompt pack registry activation failed: ${error instanceof Error ? error.message : 'Unable to activate prompt pack request'}`)
+    } finally {
+      setPromptProposalActionId(null)
+    }
+  }, [addSystemMessage, promptProposalActionId])
+
+  const rollbackPromptPackVersion = useCallback(async (versionId: string) => {
+    const buildId = buildStateRef.current?.id
+    if (!buildId || !versionId || promptProposalActionId) return
+
+    setPromptProposalActionId(`prompt-pack-rollback:${versionId}`)
+    try {
+      const response = await apiService.rollbackBuildPromptPackVersion(buildId, versionId)
+      setBuildState(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          promptPackVersions: response.prompt_pack_version
+            ? upsertPromptPackVersion(prev.promptPackVersions, response.prompt_pack_version)
+            : prev.promptPackVersions,
+          promptPackActivationEvents: response.prompt_pack_activation_event
+            ? upsertPromptPackActivationEvent(prev.promptPackActivationEvents, response.prompt_pack_activation_event)
+            : prev.promptPackActivationEvents,
+        }
+      })
+      const nextStatus = normalizeBuildStatus(response.status)
+      if (nextStatus) {
+        setBuildState(prev => prev ? { ...prev, status: nextStatus as BuildState['status'] } : prev)
+      }
+      addSystemMessage(response.message || 'Prompt pack version rolled back in registry')
+    } catch (error) {
+      addSystemMessage(`Prompt pack rollback failed: ${error instanceof Error ? error.message : 'Unable to rollback prompt pack version'}`)
+    } finally {
+      setPromptProposalActionId(null)
+    }
+  }, [addSystemMessage, promptProposalActionId])
 
   const normalizeGeneratedFiles = useCallback((files: Array<any>) => {
     if (!Array.isArray(files)) return []
@@ -5800,6 +6084,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             permissionActionId={permissionActionId}
             rollbackCheckpointId={rollbackCheckpointId}
             patchBundleActionId={patchBundleActionId}
+            promptProposalActionId={promptProposalActionId}
             chatInput={chatInput}
             setChatInput={setChatInput}
             plannerSendMode={plannerSendMode}
@@ -5828,6 +6113,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             onResolvePermission={handleResolvePermissionRequest}
             onApprovePatchBundle={(bundleId) => { void reviewPatchBundle(bundleId, 'approve') }}
             onRejectPatchBundle={(bundleId) => { void reviewPatchBundle(bundleId, 'reject') }}
+            onReviewPromptProposal={(proposalId, decision) => { void reviewPromptProposal(proposalId, decision) }}
+            onBenchmarkPromptProposal={(proposalId) => { void benchmarkPromptProposal(proposalId) }}
+            onCreatePromptPackDraft={() => { void createPromptPackDraft() }}
+            onRequestPromptPackActivation={(user?.is_admin || user?.is_super_admin) ? (draftId) => { void requestPromptPackActivation(draftId) } : undefined}
+            onActivatePromptPackRequest={(user?.is_admin || user?.is_super_admin) ? (requestId) => { void activatePromptPackRequest(requestId) } : undefined}
+            onRollbackPromptPackVersion={(user?.is_admin || user?.is_super_admin) ? (versionId) => { void rollbackPromptPackVersion(versionId) } : undefined}
             onSetShowDiffReview={setShowDiffReview}
             onLoadProposedEdits={loadProposedEdits}
             onOpenCompletedBuild={openCompletedBuild}
