@@ -392,11 +392,16 @@ func (d *Database) seedAdminUser() error {
 	var existingUser models.User
 	result := d.DB.Where("email = ?", "spencerandtheteagues@gmail.com").First(&existingUser)
 
-	// Admin password hash - credentials managed via environment variables
-	// Use ADMIN_PASSWORD_HASH env var in production
+	// Admin password hash - MUST be set via ADMIN_PASSWORD_HASH env var.
 	passwordHash := os.Getenv("ADMIN_PASSWORD_HASH")
 	if passwordHash == "" {
-		// Fallback hash for development only - change in production
+		env := strings.ToLower(strings.TrimSpace(os.Getenv("ENVIRONMENT")))
+		if env == "production" || env == "staging" {
+			log.Println("CRITICAL: ADMIN_PASSWORD_HASH is not set in production/staging. Admin seeding skipped for security.")
+			return nil
+		}
+		// Fallback hash for local development only.
+		log.Println("WARNING: Using default admin password hash. Set ADMIN_PASSWORD_HASH for production.")
 		passwordHash = "$2a$10$gkuvs.57YtZctLHfPY8Jr.OKcM725LVvlFV7/8agtpyyEBDNiTvA."
 	}
 

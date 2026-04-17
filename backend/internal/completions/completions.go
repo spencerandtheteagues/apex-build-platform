@@ -305,7 +305,7 @@ func (s *CompletionService) GetCompletions(ctx context.Context, userID uint, req
 			isBYOK,
 		)
 		if estimatedCost > 0 {
-			res, err := s.byokManager.ReserveCredits(userID, estimatedCost)
+			res, err := s.byokManager.ReserveCredits(userID, estimatedCost, isBYOK)
 			if err != nil {
 				if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
 					return nil, fmt.Errorf("INSUFFICIENT_CREDITS")

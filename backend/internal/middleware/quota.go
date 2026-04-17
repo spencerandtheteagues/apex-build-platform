@@ -250,6 +250,15 @@ func (q *QuotaChecker) getUserPlan(c *gin.Context) usage.PlanType {
 	// First check if plan is already in context (set by auth middleware)
 	if plan, exists := c.Get("subscription_type"); exists {
 		if planStr, ok := plan.(string); ok {
+			// Enforce billing status: users with past_due or canceled subscriptions
+			// are downgraded to free-tier limits until payment is resolved.
+			if status, sOk := c.Get("subscription_status"); sOk {
+				if statusStr, ok2 := status.(string); ok2 {
+					if statusStr == "past_due" || statusStr == "canceled" || statusStr == "inactive" {
+						return usage.PlanFree
+					}
+				}
+			}
 			return usage.PlanType(planStr)
 		}
 	}

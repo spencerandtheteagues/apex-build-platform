@@ -496,8 +496,17 @@ type CreditReservation struct {
 }
 
 // ReserveCredits pre-authorizes credits by deducting an estimated amount up front.
-func (m *BYOKManager) ReserveCredits(userID uint, amount float64) (*CreditReservation, error) {
+// For BYOK users the reservation is skipped — they pay the AI provider directly and
+// only owe the platform routing fee, which is settled via RecordUsage / FinalizeCredits.
+// The deduction is recorded in the immutable CreditLedgerEntry table so that every
+// balance mutation is auditable.
+func (m *BYOKManager) ReserveCredits(userID uint, amount float64, isBYOK bool) (*CreditReservation, error) {
 	if amount <= 0 {
+		return &CreditReservation{UserID: userID, Reserved: 0, Skipped: true}, nil
+	}
+
+	// BYOK users pay the provider directly; skip platform credit reservation.
+	if isBYOK {
 		return &CreditReservation{UserID: userID, Reserved: 0, Skipped: true}, nil
 	}
 
@@ -510,22 +519,48 @@ func (m *BYOKManager) ReserveCredits(userID uint, amount float64) (*CreditReserv
 		return &CreditReservation{UserID: userID, Reserved: 0, Skipped: true}, nil
 	}
 
-	res := m.db.Model(&models.User{}).
-		Where("id = ? AND credit_balance >= ?", userID, amount).
-		Updates(map[string]interface{}{
-			"credit_balance": gorm.Expr("credit_balance - ?", amount),
-		})
-	if res.Error != nil {
-		return nil, res.Error
-	}
-	if res.RowsAffected == 0 {
+	if user.CreditBalance < amount {
 		return nil, fmt.Errorf("INSUFFICIENT_CREDITS")
+	}
+
+	// Atomic: deduct balance AND write ledger entry inside a transaction.
+	txErr := m.db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&models.User{}).
+			Where("id = ? AND credit_balance >= ?", userID, amount).
+			Updates(map[string]interface{}{
+				"credit_balance": gorm.Expr("credit_balance - ?", amount),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return fmt.Errorf("INSUFFICIENT_CREDITS")
+		}
+
+		// Read back the new balance for the ledger entry.
+		var updated models.User
+		if err := tx.Select("credit_balance").First(&updated, userID).Error; err != nil {
+			return err
+		}
+
+		entry := models.CreditLedgerEntry{
+			UserID:          userID,
+			AmountUSD:       -amount,
+			BalanceAfterUSD: updated.CreditBalance,
+			EntryType:       "spend_deduction",
+			Description:     "AI request credit reservation",
+		}
+		return tx.Create(&entry).Error
+	})
+	if txErr != nil {
+		return nil, txErr
 	}
 
 	return &CreditReservation{UserID: userID, Reserved: amount}, nil
 }
 
 // FinalizeCredits settles the difference between reserved and actual cost.
+// Every balance mutation is recorded in the immutable CreditLedgerEntry table.
 func (m *BYOKManager) FinalizeCredits(res *CreditReservation, actualCost float64) error {
 	if res == nil || res.Skipped {
 		return nil
@@ -536,34 +571,63 @@ func (m *BYOKManager) FinalizeCredits(res *CreditReservation, actualCost float64
 		return nil
 	}
 
-	if delta > 0 {
-		// Refund unused credits
-		return m.db.Model(&models.User{}).
-			Where("id = ?", res.UserID).
-			Updates(map[string]interface{}{
-				"credit_balance": gorm.Expr("credit_balance + ?", delta),
-			}).Error
-	}
+	return m.db.Transaction(func(tx *gorm.DB) error {
+		if delta > 0 {
+			// Refund unused credits
+			if err := tx.Model(&models.User{}).
+				Where("id = ?", res.UserID).
+				Updates(map[string]interface{}{
+					"credit_balance": gorm.Expr("credit_balance + ?", delta),
+				}).Error; err != nil {
+				return err
+			}
+		} else {
+			// Actual cost exceeded reservation — deduct extra.
+			extra := -delta
+			resUpdate := tx.Model(&models.User{}).
+				Where("id = ? AND credit_balance >= ?", res.UserID, extra).
+				Updates(map[string]interface{}{
+					"credit_balance": gorm.Expr("credit_balance - ?", extra),
+				})
+			if resUpdate.Error != nil {
+				return resUpdate.Error
+			}
+			if resUpdate.RowsAffected == 0 {
+				// Clamp to zero if we couldn't collect the remainder
+				if err := tx.Model(&models.User{}).
+					Where("id = ?", res.UserID).
+					Updates(map[string]interface{}{
+						"credit_balance": 0.0,
+					}).Error; err != nil {
+					return err
+				}
+			}
+		}
 
-	// If actual cost exceeds reserved (should be rare), attempt to deduct extra.
-	extra := -delta
-	resUpdate := m.db.Model(&models.User{}).
-		Where("id = ? AND credit_balance >= ?", res.UserID, extra).
-		Updates(map[string]interface{}{
-			"credit_balance": gorm.Expr("credit_balance - ?", extra),
-		})
-	if resUpdate.Error != nil {
-		return resUpdate.Error
-	}
-	if resUpdate.RowsAffected == 0 {
-		// Clamp to zero if we couldn't collect the remainder
-		return m.db.Model(&models.User{}).
-			Where("id = ?", res.UserID).
-			Updates(map[string]interface{}{
-				"credit_balance": 0.0,
-			}).Error
-	}
-	return nil
+		// Read back the new balance for the ledger entry.
+		var updated models.User
+		if err := tx.Select("credit_balance").First(&updated, res.UserID).Error; err != nil {
+			return err
+		}
+
+		entryType := "refund"
+		desc := fmt.Sprintf("Credit reservation settlement (refund $%.4f)", math.Abs(delta))
+		ledgerAmount := delta // positive for refund
+		if delta < 0 {
+			entryType = "spend_deduction"
+			desc = fmt.Sprintf("Credit reservation settlement (extra charge $%.4f)", math.Abs(delta))
+			ledgerAmount = delta // negative for extra charge
+		}
+
+		entry := models.CreditLedgerEntry{
+			UserID:          res.UserID,
+			AmountUSD:       ledgerAmount,
+			BalanceAfterUSD: updated.CreditBalance,
+			EntryType:       entryType,
+			Description:     desc,
+		}
+		return tx.Create(&entry).Error
+	})
 }
 
 // EstimateCost provides a conservative estimate for an AI request.

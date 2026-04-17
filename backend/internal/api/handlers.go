@@ -581,7 +581,7 @@ func (s *Server) AIGenerate(c *gin.Context) {
 			isBYOK,
 		)
 		if estimatedCost > 0 {
-			res, err := s.byok.ReserveCredits(uid, estimatedCost)
+			res, err := s.byok.ReserveCredits(uid, estimatedCost, isBYOK)
 			if err != nil {
 				if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
 					c.JSON(http.StatusPaymentRequired, gin.H{
