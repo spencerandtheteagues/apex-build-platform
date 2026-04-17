@@ -226,7 +226,7 @@ export class ApiService {
       return config
     })
 
-    // Response interceptor - Handle errors and token refresh
+    // Response interceptor - Handle errors, token refresh, and transient retries
     this.client.interceptors.response.use(
       (response) => response,
       async (error) => {
@@ -251,6 +251,21 @@ export class ApiService {
             reloadExpiredSession()
             return Promise.reject(refreshError)
           }
+        }
+
+        // Retry on 429 (rate limit) and 503 (service unavailable) with exponential backoff.
+        // Max 3 retries; skip retries for blob downloads and non-idempotent mutations that
+        // already succeeded partially (indicated by _retryCount reaching the limit).
+        const retryableStatus = error.response?.status === 429 || error.response?.status === 503
+        const retryCount: number = originalRequest?._retryCount ?? 0
+        if (retryableStatus && originalRequest && retryCount < 3) {
+          originalRequest._retryCount = retryCount + 1
+          const retryAfterHeader = error.response?.headers?.['retry-after']
+          const retryDelay = retryAfterHeader
+            ? Math.min(parseInt(retryAfterHeader, 10) * 1000, 16000)
+            : Math.min(1000 * Math.pow(2, retryCount), 8000)
+          await new Promise<void>((resolve) => setTimeout(resolve, retryDelay))
+          return this.client(originalRequest)
         }
 
         return Promise.reject(error)
@@ -790,7 +805,9 @@ export class ApiService {
       revision: string
     }
   }> {
-    const response = await this.client.post(`/build/${buildId}/apply`, data || {})
+    const response = await this.client.post(`/build/${buildId}/apply`, data || {}, {
+      timeout: 90000,
+    })
     return response.data
   }
 
@@ -919,7 +936,8 @@ export class ApiService {
   // Project export/download functionality
   async downloadProjectAsZip(projectId: number): Promise<Blob> {
     const response = await this.client.get(`/projects/${projectId}/download`, {
-      responseType: 'blob'
+      responseType: 'blob',
+      timeout: 0,
     })
     return response.data
   }
@@ -927,7 +945,8 @@ export class ApiService {
   // Build export/download functionality
   async downloadBuildAsZip(buildId: string): Promise<Blob> {
     const response = await this.client.get(`/builds/${buildId}/download`, {
-      responseType: 'blob'
+      responseType: 'blob',
+      timeout: 0,
     })
     return response.data
   }

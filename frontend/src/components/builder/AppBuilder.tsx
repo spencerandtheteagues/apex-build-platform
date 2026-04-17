@@ -1632,7 +1632,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const connectWebSocketRef = useRef<(buildId: string, providedUrl?: string) => void>(() => {})
   const chatEndRef = useRef<HTMLDivElement>(null)
   const wsReconnectAttempts = useRef(0)
-  const maxWsReconnectAttempts = 5
+  const maxWsReconnectAttempts = 8
 
   // Ref to track current isBuilding state (prevents stale closure in WebSocket onclose)
   const isBuildingRef = useRef(isBuilding)
