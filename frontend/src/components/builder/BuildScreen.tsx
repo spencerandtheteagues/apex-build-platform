@@ -751,15 +751,21 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
   }, [generatedFiles])
 
   return (
-    <div className="absolute inset-0 z-50 flex flex-col bg-black/97 backdrop-blur-sm">
+    <div
+      className="absolute inset-0 z-50 flex flex-col bg-black/97 backdrop-blur-sm"
+      style={{
+        paddingTop: 'env(safe-area-inset-top, 0px)',
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+      }}
+    >
       {/* Panel header */}
-      <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-800">
-        <h2 className="text-sm font-bold text-gray-200 uppercase tracking-widest">
+      <div className="shrink-0 flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-800">
+        <h2 className="min-w-0 text-sm font-bold text-gray-200 uppercase tracking-widest break-words">
           {OVERLAY_TITLES[overlay]}
         </h2>
         <button
           onClick={onClose}
-          className="p-1.5 rounded-lg text-gray-500 hover:text-gray-200 hover:bg-gray-800 transition-colors"
+          className="shrink-0 p-2 rounded-lg text-gray-500 hover:text-gray-200 hover:bg-gray-800 transition-colors"
         >
           <X className="w-4 h-4" />
         </button>
