@@ -99,6 +99,7 @@ import DiffReviewPanel from '@/components/diff/DiffReviewPanel'
 import OrchestrationOverview from './OrchestrationOverview'
 import BuildPieProgress from './BuildPieProgress'
 import BuildScreen from './BuildScreen'
+import TemplateGallery from './TemplateGallery'
 
 // ============================================================================
 // TYPES
@@ -5753,6 +5754,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                     </div>
                   </button>
                 </div>
+
+                {/* Template Gallery */}
+                <TemplateGallery onSelect={(prompt) => setAppDescription(prompt)} />
 
                 {/* Premium Textarea */}
                 <div className="mb-10">
