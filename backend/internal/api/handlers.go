@@ -268,7 +268,7 @@ func (s *Server) Register(c *gin.Context) {
 	err = s.db.DB.Transaction(func(tx *gorm.DB) error {
 		// Check if user already exists within transaction
 		var existingUser models.User
-		if err := tx.Where("username = ? OR email = ?", req.Username, req.Email).First(&existingUser).Error; err == nil {
+		if err := tx.Where("LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)", req.Username, req.Email).First(&existingUser).Error; err == nil {
 			return fmt.Errorf("user already exists")
 		}
 
@@ -362,12 +362,13 @@ func (s *Server) Login(c *gin.Context) {
 	}
 
 	// Find user — if identifier contains '@', look up by email; otherwise try both
+	// Use case-insensitive matching so "Admin", "admin", "ADMIN" all work
 	var user models.User
 	var dbErr error
 	if strings.Contains(identifier, "@") {
-		dbErr = s.db.DB.Where("email = ?", identifier).First(&user).Error
+		dbErr = s.db.DB.Where("LOWER(email) = LOWER(?)", identifier).First(&user).Error
 	} else {
-		dbErr = s.db.DB.Where("username = ?", identifier).First(&user).Error
+		dbErr = s.db.DB.Where("LOWER(username) = LOWER(?)", identifier).First(&user).Error
 	}
 	if dbErr != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
