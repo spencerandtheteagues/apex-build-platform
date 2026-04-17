@@ -37,10 +37,25 @@ export function usePreviewRuntime({
 
   const activeProjectIdRef = useRef(projectId)
   const lastAutoStartedProjectRef = useRef<number | null>(null)
+  const activeSandboxRef = useRef(activeSandbox)
+  const useSandboxRef = useRef(useSandbox)
+  const statusActiveRef = useRef(status?.active)
 
   useEffect(() => {
     activeProjectIdRef.current = projectId
   }, [projectId])
+
+  useEffect(() => {
+    activeSandboxRef.current = activeSandbox
+  }, [activeSandbox])
+
+  useEffect(() => {
+    useSandboxRef.current = useSandbox
+  }, [useSandbox])
+
+  useEffect(() => {
+    statusActiveRef.current = status?.active
+  }, [status?.active])
 
   useEffect(() => {
     const checkCapabilities = async () => {
@@ -86,21 +101,9 @@ export function usePreviewRuntime({
     lastAutoStartedProjectRef.current = null
   }, [clearDevTools, onServerStatusHint, projectId, setError])
 
-  useEffect(() => {
-    if (status?.active && previewUrl) {
-      setIframeLoading(true)
-      setIframeError(null)
-      return
-    }
-    if (!status?.active) {
-      setIframeLoading(false)
-      setIframeError(null)
-    }
-  }, [previewUrl, status?.active])
-
   const fetchStatus = useCallback(async () => {
     const requestProjectId = projectId
-    const statusRequestSandbox = status?.active ? activeSandbox : useSandbox
+    const statusRequestSandbox = statusActiveRef.current ? activeSandboxRef.current : useSandboxRef.current
 
     try {
       const response = await apiService.client.get(`/preview/status/${projectId}`, {
@@ -147,7 +150,7 @@ export function usePreviewRuntime({
       }
       setConnected(false)
     }
-  }, [activeSandbox, onServerStatusHint, projectId, status?.active, useSandbox])
+  }, [onServerStatusHint, projectId])
 
   useEffect(() => {
     void fetchStatus()

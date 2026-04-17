@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import apiService from '@/services/api'
 import type { ServerDetection, ServerStatus } from '@/components/preview/types'
 
@@ -9,6 +9,7 @@ interface UsePreviewServerOptions {
 
 export function usePreviewServer({ projectId, setError }: UsePreviewServerOptions) {
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
+  const serverRunningRef = useRef(false)
   const [serverDetection, setServerDetection] = useState<ServerDetection | null>(null)
   const [serverLoading, setServerLoading] = useState(false)
   const [serverLogs, setServerLogs] = useState<{ stdout: string; stderr: string }>({ stdout: '', stderr: '' })
@@ -114,18 +115,22 @@ export function usePreviewServer({ projectId, setError }: UsePreviewServerOption
   }, [fetchServerLogs, showServerLogs])
 
   useEffect(() => {
+    serverRunningRef.current = serverStatus?.running ?? false
+  }, [serverStatus?.running])
+
+  useEffect(() => {
     if (!showServerLogs || !serverDetection?.has_backend) {
       return
     }
 
     void fetchServerLogs()
-    if (!serverStatus?.running) {
+    if (!serverRunningRef.current) {
       return
     }
 
     const interval = setInterval(fetchServerLogs, 2000)
     return () => clearInterval(interval)
-  }, [fetchServerLogs, serverDetection?.has_backend, serverStatus?.running, showServerLogs])
+  }, [fetchServerLogs, serverDetection?.has_backend, showServerLogs])
 
   return {
     serverStatus,
