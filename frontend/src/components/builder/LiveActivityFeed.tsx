@@ -106,12 +106,13 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
   ), [])
 
   const scrollToLatest = useCallback((behavior: ScrollBehavior = 'auto') => {
-    if (bottomAnchorRef.current) {
-      bottomAnchorRef.current.scrollIntoView({ block: 'end', behavior })
-      return
-    }
-    if (feedRef.current) {
-      feedRef.current.scrollTop = feedRef.current.scrollHeight
+    const el = feedRef.current
+    if (!el) return
+    // Use scrollTop directly — scrollIntoView can fight with mobile browser chrome
+    if (behavior === 'smooth') {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    } else {
+      el.scrollTop = el.scrollHeight
     }
   }, [])
 
@@ -170,8 +171,14 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
         ref={feedRef}
         onScroll={handleFeedScroll}
         aria-label="Live activity feed"
-        className="flex-1 overflow-y-auto px-4 py-3"
-        style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.08) transparent' }}
+        className="flex-1 overflow-y-auto px-4 py-3 overscroll-contain"
+        style={{
+          scrollbarWidth: 'thin',
+          scrollbarColor: 'rgba(255,255,255,0.08) transparent',
+          WebkitOverflowScrolling: 'touch',
+          touchAction: 'pan-y',
+          overscrollBehavior: 'contain',
+        }}
       >
         {displayThoughts.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center gap-4 text-center">
@@ -181,7 +188,7 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
             </div>
           </div>
         ) : (
-          <div className="space-y-0.5 font-mono text-sm">
+          <div className="space-y-1 sm:space-y-0.5 font-mono text-sm">
             {displayThoughts.map((thought, i) => {
               const prov = normalizeProvider(thought.provider)
               const badge = PROVIDER_BADGE[prov] || 'bg-gray-500/20 text-gray-300 border-gray-500/30'
@@ -197,21 +204,21 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
                 <div
                   key={thought.id || i}
                   className={cn(
-                    'flex items-start gap-2 py-[3px] leading-relaxed',
+                    'flex items-start gap-1.5 sm:gap-2 py-1 sm:py-[3px] leading-relaxed',
                     isError && 'text-red-400'
                   )}
                 >
-                  <span className="text-gray-700 text-[10px] shrink-0 mt-px w-[54px] tabular-nums">
+                  <span className="text-gray-700 text-[11px] sm:text-[10px] shrink-0 mt-px w-[52px] sm:w-[54px] tabular-nums">
                     {ts}
                   </span>
                   <span className={cn(
-                    'text-[10px] font-bold uppercase border rounded px-1 py-px shrink-0 mt-px',
+                    'text-[10px] sm:text-[10px] font-bold uppercase border rounded px-1 py-px shrink-0 mt-px',
                     badge
                   )}>
                     {label}
                   </span>
                   <span className={cn(
-                    'flex-1 break-words text-gray-300',
+                    'flex-1 break-words text-[13px] sm:text-sm leading-snug text-gray-300',
                     isError && 'text-red-400',
                     thought.isInternal && 'text-gray-500 italic'
                   )}>

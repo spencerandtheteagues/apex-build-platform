@@ -357,24 +357,24 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
   }, [desc])
 
   return (
-    <div className="shrink-0 flex items-center gap-3 px-4 border-b border-gray-900 bg-black/60"
-      style={{ height: '60px' }}>
+    <div className="shrink-0 flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-0 border-b border-gray-900 bg-black/60"
+      style={{ minHeight: '56px' }}>
 
       {/* Title + status */}
-      <div className="flex-1 min-w-0 flex items-center gap-3">
+      <div className="flex-1 min-w-0 flex items-center gap-2 sm:gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-gray-200 truncate select-text" title={desc}>
+          <div className="text-xs sm:text-sm font-semibold text-gray-200 truncate select-text" title={desc}>
             {desc}
           </div>
-          <div className="text-[10px] text-gray-600 font-mono">{phaseLabel}</div>
+          <div className="text-[10px] sm:text-[11px] text-gray-600 font-mono">{phaseLabel}</div>
         </div>
-        <span className={cn('shrink-0 text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border', statusColor)}>
+        <span className={cn('shrink-0 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest px-1.5 sm:px-2 py-0.5 rounded border', statusColor)}>
           {statusText}
         </span>
       </div>
 
-      {/* Progress bar + % */}
-      <div className="hidden sm:flex items-center gap-2 w-44">
+      {/* Progress bar (mobile: show inline, smaller) */}
+      <div className="flex items-center gap-2 w-24 sm:w-44">
         <div className="flex-1 h-1.5 rounded-full bg-gray-800 overflow-hidden">
           <div
             className={cn(
@@ -508,14 +508,14 @@ const ChatInputBar: React.FC<ChatInputBarProps> = ({
         : 'Message the planner...')
 
   return (
-    <div className="shrink-0 flex items-center gap-2 px-3 py-2.5 border-t border-gray-900 bg-black/60">
+    <div className="shrink-0 flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-2 sm:py-2.5 border-t border-gray-900 bg-black/60">
       {/* Mode toggle */}
       <div className="flex rounded-lg overflow-hidden border border-gray-800 shrink-0">
         <button
           onClick={() => setPlannerSendMode('lead')}
           aria-label="Lead Planner"
           className={cn(
-            'px-2 py-1 text-[10px] font-bold uppercase tracking-wide transition-colors',
+            'px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide transition-colors',
             plannerSendMode === 'lead'
               ? 'bg-red-700 text-white'
               : 'bg-transparent text-gray-600 hover:text-gray-400'
@@ -528,7 +528,7 @@ const ChatInputBar: React.FC<ChatInputBarProps> = ({
           disabled={!isBuildActive}
           aria-label="All Agents"
           className={cn(
-            'px-2 py-1 text-[10px] font-bold uppercase tracking-wide transition-colors',
+            'px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide transition-colors',
             plannerSendMode === 'all_agents'
               ? 'bg-cyan-700 text-white'
               : 'bg-transparent text-gray-600 hover:text-gray-400 disabled:opacity-30'
@@ -545,13 +545,13 @@ const ChatInputBar: React.FC<ChatInputBarProps> = ({
         onChange={(e) => setChatInput(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && !pending && onSend()}
         placeholder={placeholder}
-        className="flex-1 bg-gray-950/80 border border-gray-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-red-700/60 focus:ring-1 focus:ring-red-900/30 transition-all"
+        className="flex-1 min-w-0 bg-gray-950/80 border border-gray-800 rounded-xl px-3 sm:px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-red-700/60 focus:ring-1 focus:ring-red-900/30 transition-all"
       />
 
       <button
         onClick={onSend}
         disabled={!chatInput.trim() || pending}
-        className="shrink-0 px-4 py-2.5 bg-red-700 hover:bg-red-600 text-white rounded-xl text-sm font-semibold disabled:opacity-40 flex items-center gap-2"
+        className="shrink-0 px-3 sm:px-4 py-2.5 bg-red-700 hover:bg-red-600 text-white rounded-xl text-sm font-semibold disabled:opacity-40 flex items-center gap-2"
       >
         {pending ? (
           <span className="inline-flex gap-0.5">
@@ -596,19 +596,20 @@ const BottomNavStrip: React.FC<BottomNavStripProps> = ({
   isBuildActive, generatedFilesCount, issueCount, hasUrgentIssue, buildStatus,
 }) => {
   return (
-    <div className="shrink-0 flex items-center gap-1 px-3 py-1.5 border-t border-gray-900 bg-black/80 overflow-x-auto">
+    <div className="shrink-0 flex items-center gap-0.5 sm:gap-1 px-2 sm:px-3 py-1 sm:py-1.5 border-t border-gray-900 bg-black/80 overflow-x-auto"
+      style={{ WebkitOverflowScrolling: 'touch' }}>
       {/* Preview — special, always direct action */}
       <button
         onClick={onOpenPreview}
         className={cn(
-          'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all',
+          'flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all',
           buildStatus === 'completed'
             ? 'bg-green-700/80 hover:bg-green-600 text-white shadow-[0_0_12px_rgba(34,197,94,0.2)]'
             : 'text-gray-500 hover:text-gray-300 hover:bg-gray-900'
         )}
       >
         <Eye className="w-3.5 h-3.5" />
-        Preview
+        <span className="hidden sm:inline">Preview</span>
       </button>
 
       {/* Other nav buttons */}
@@ -622,7 +623,7 @@ const BottomNavStrip: React.FC<BottomNavStripProps> = ({
             key={id}
             onClick={() => onSelectOverlay(isActive ? null : id)}
             className={cn(
-              'relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all',
+              'relative flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all',
               isActive
                 ? 'bg-red-700/80 text-white'
                 : urgent
@@ -631,7 +632,7 @@ const BottomNavStrip: React.FC<BottomNavStripProps> = ({
             )}
           >
             <Icon className="w-3.5 h-3.5" />
-            {label}
+            <span className="hidden xs:inline">{label}</span>
             {badge > 0 && (
               <span className={cn(
                 'ml-0.5 px-1.5 py-px rounded-full text-[9px] font-bold',
@@ -651,10 +652,10 @@ const BottomNavStrip: React.FC<BottomNavStripProps> = ({
       <button
         onClick={onStartOver}
         disabled={isBuildActive || isStartingOver}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-600 hover:text-gray-400 hover:bg-gray-900 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 sm:py-1.5 rounded-lg text-xs text-gray-600 hover:text-gray-400 hover:bg-gray-900 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed transition-all"
       >
         <ChevronLeft className="w-3.5 h-3.5" />
-        Back to Setup
+        <span className="hidden sm:inline">Back to Setup</span>
       </button>
     </div>
   )
@@ -765,7 +766,8 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
       </div>
 
       {/* Panel content */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-4">
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 overscroll-contain"
+        style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y', overscrollBehavior: 'contain' }}>
 
         {/* ── ACTIVITY ───────────────────────────────────────── */}
         {overlay === 'activity' && (

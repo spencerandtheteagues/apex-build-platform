@@ -106,7 +106,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
   }
 
   return (
-    <div className="flex border-b border-gray-900 shrink-0" style={{ height: '108px' }}>
+    <div className="flex border-b border-gray-900 shrink-0 overflow-x-auto" style={{ minHeight: '80px' }}>
       {DISPLAY_ORDER.map((provider) => {
         const panel = panelMap[provider]
         const cfg = PROVIDER_CONFIG[provider]
@@ -131,7 +131,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
           <div
             key={provider}
             className={cn(
-              'flex-1 border-r last:border-r-0 flex flex-col justify-between px-3 py-2.5 transition-all duration-500',
+              'flex-1 min-w-[90px] border-r last:border-r-0 flex flex-col justify-between px-2 sm:px-3 py-2 sm:py-2.5 transition-all duration-500',
               isActive
                 ? `${cfg.borderActive} ${cfg.bgActive} ${cfg.glowActive}`
                 : `${cfg.borderIdle} bg-black/30`,
@@ -178,7 +178,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
       {/* Local / Ollama — 5th box, always rendered */}
       <div
         className={cn(
-          'flex-1 flex flex-col justify-between px-3 py-2.5 transition-all duration-500',
+          'flex-1 min-w-[90px] flex flex-col justify-between px-2 sm:px-3 py-2 sm:py-2.5 transition-all duration-500',
           hasBYOK
             ? 'border-l border-gray-600/40 bg-gradient-to-br from-gray-800/30 via-black to-gray-800/15'
             : 'border-l border-gray-900/60 bg-black/20 opacity-30 grayscale',

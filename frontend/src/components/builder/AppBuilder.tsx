@@ -2778,6 +2778,39 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     }
   }, [])
 
+  // Mobile: reconnect WebSocket when page becomes visible again (e.g. user switches back to browser)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) return
+      // Page just became visible — attempt WS reconnect if build is active
+      const activeBuild = buildStateRef.current
+      if (!activeBuild?.id || !isBuildingRef.current) return
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return
+      // Reset reconnect counter so we get fresh attempts
+      wsReconnectAttempts.current = 0
+      connectWebSocket(activeBuild.id, activeBuild.websocketUrl)
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [connectWebSocket])
+
+  // Auto-resume last active build on mount (covers mobile browser memory reclaim / page reload)
+  const mountResumeAttempted = useRef(false)
+  useEffect(() => {
+    if (mountResumeAttempted.current) return
+    if (!user?.id) return
+    mountResumeAttempted.current = true
+
+    const storedActiveId = readStoredValue(ACTIVE_BUILD_STORAGE_KEY)
+    const storedLastId = readStoredValue(LAST_WORKFLOW_BUILD_STORAGE_KEY)
+    const resumeId = storedActiveId || storedLastId
+    if (!resumeId) return
+    // Don't resume if we already have a build loaded
+    if (buildStateRef.current?.id) return
+
+    void hydrateBuildContext(resumeId, { reconnectLive: true, notify: true })
+  }, [user?.id, readStoredValue, hydrateBuildContext])
+
   const clampPercent = (value: number) => {
     if (!Number.isFinite(value)) return 0
     return Math.max(0, Math.min(100, Math.round(value)))
@@ -5643,7 +5676,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       </div>
 
       {/* Main content */}
-      <div className={buildState ? "relative z-10 flex-1 min-h-0 flex flex-col overflow-hidden" : "relative z-10 p-6 pb-10 md:p-8 md:pb-12 lg:p-12 lg:pb-16"}>
+      <div className={buildState ? "relative z-10 flex-1 min-h-0 flex flex-col overflow-hidden" : "relative z-10 p-4 pb-8 sm:p-6 sm:pb-10 md:p-8 md:pb-12 lg:p-12 lg:pb-16"}>
         {/* Replit Import Modal */}
         {showImportModal && (
           <div className="fixed inset-0 z-[100] overflow-y-auto bg-black/95 p-4 backdrop-blur-md">
