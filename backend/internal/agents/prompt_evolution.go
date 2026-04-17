@@ -35,10 +35,10 @@ const (
 
 func promptEvolutionEnabled() bool {
 	switch strings.TrimSpace(strings.ToLower(os.Getenv(promptEvolutionFeatureFlag))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
+	case "0", "false", "no", "off":
 		return false
+	default:
+		return true
 	}
 }
 

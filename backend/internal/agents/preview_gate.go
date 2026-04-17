@@ -149,7 +149,7 @@ func (am *AgentManager) runPreviewVerificationGate(
 		// Guarded by PreviewVerificationAttempts so we only attempt once.
 		if result != nil && result.VisionSeverity == "critical" &&
 			result.ScreenshotBase64 != "" &&
-			os.Getenv("APEX_VISION_REPAIR") == "true" {
+			os.Getenv("APEX_VISION_REPAIR") != "false" {
 			if prevAttempts < 1 {
 				criticalHints := filterVisualCriticalHints(result.RepairHints)
 				if len(criticalHints) > 0 {
