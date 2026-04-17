@@ -185,6 +185,7 @@ type AgentManager struct {
 	resultQueue            chan *TaskResult
 	subscribers            map[string][]chan *WSMessage
 	buildMonitors          map[string]struct{}
+	inFlightTasks          map[string]bool // Tracks task IDs currently in the queue or executing to prevent double-dispatch
 	aiRouter               AIRouter
 	db                     *gorm.DB // Database connection for persisting completed builds
 	editStore              *ProposedEditStore
@@ -254,6 +255,7 @@ func NewAgentManager(aiRouter AIRouter, db ...*gorm.DB) *AgentManager {
 		resultQueue:   make(chan *TaskResult, 100),
 		subscribers:   make(map[string][]chan *WSMessage),
 		buildMonitors: make(map[string]struct{}),
+		inFlightTasks: make(map[string]bool),
 		aiRouter:      aiRouter,
 		editStore:     NewProposedEditStore(),
 		pathGuard:     NewPathGuard(),
@@ -4096,6 +4098,31 @@ func (am *AgentManager) markQueuedTaskExecutionStarted(agent *Agent, task *Task)
 	task.StartedAt = &now
 
 	return true
+}
+
+// safeEnqueueTask enqueues a task only if it is not already in-flight.
+// Returns true if the task was enqueued, false if it was already dispatched.
+func (am *AgentManager) safeEnqueueTask(task *Task) bool {
+	if task == nil {
+		return false
+	}
+	am.mu.Lock()
+	if am.inFlightTasks[task.ID] {
+		am.mu.Unlock()
+		log.Printf("safeEnqueueTask: task %s already in-flight, skipping duplicate dispatch", task.ID)
+		return false
+	}
+	am.inFlightTasks[task.ID] = true
+	am.mu.Unlock()
+	am.taskQueue <- task
+	return true
+}
+
+// clearInFlight removes a task from the in-flight set (called when task reaches terminal state).
+func (am *AgentManager) clearInFlight(taskID string) {
+	am.mu.Lock()
+	delete(am.inFlightTasks, taskID)
+	am.mu.Unlock()
 }
 
 // executeTask runs a task using the appropriate AI agent

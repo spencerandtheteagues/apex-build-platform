@@ -384,8 +384,15 @@ func (eas *EnterpriseAuthService) requiresMFA(user *models.User, riskScore float
 	}
 
 	// Check user's MFA preferences
-	// TODO: Add MFA preference to user model
-	return false
+	switch user.MFAPreference {
+	case "always":
+		return true
+	case "never":
+		return false
+	default:
+		// "optional" — only require MFA if risk is elevated (handled above)
+		return false
+	}
 }
 
 // AuthResult represents the result of an authentication attempt

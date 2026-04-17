@@ -254,7 +254,7 @@ For code files, use this exact format:
 	if a.byokManager != nil && opts.UserID > 0 {
 		estimatedCost := a.byokManager.EstimateCost(string(aiProvider), model, len(fullPrompt), maxTokens, string(opts.PowerMode), isBYOK)
 		if estimatedCost > 0 {
-			res, err := a.byokManager.ReserveCredits(opts.UserID, estimatedCost)
+			res, err := a.byokManager.ReserveCredits(opts.UserID, estimatedCost, isBYOK)
 			if err != nil {
 				if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
 					return nil, fmt.Errorf("INSUFFICIENT_CREDITS: %s", insufficientCreditsBuildMessage)

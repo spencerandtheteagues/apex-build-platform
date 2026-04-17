@@ -13,9 +13,35 @@ import (
 	"time"
 
 	"apex-build/internal/cache"
+	"apex-build/internal/payments"
 
 	"gorm.io/gorm"
 )
+
+// paymentsPlanTypeFromUsage converts usage.PlanType to payments.PlanType.
+func paymentsPlanTypeFromUsage(p PlanType) payments.PlanType {
+	switch p {
+	case PlanFree:
+		return payments.PlanFree
+	case PlanBuilder:
+		return payments.PlanBuilder
+	case PlanPro:
+		return payments.PlanPro
+	case PlanTeam:
+		return payments.PlanTeam
+	case PlanEnterprise:
+		return payments.PlanEnterprise
+	case PlanOwner:
+		return payments.PlanEnterprise // owner uses enterprise limits
+	default:
+		return payments.PlanFree
+	}
+}
+
+// paymentsGetPlanLimits wraps payments.GetPlanLimits to keep the import local.
+func paymentsGetPlanLimits(pt payments.PlanType) *payments.PlanLimits {
+	return payments.GetPlanLimits(pt)
+}
 
 // UsageType represents different usage metrics
 type UsageType string
@@ -47,47 +73,53 @@ type PlanLimits struct {
 	ExecutionMinutes int   `json:"execution_minutes"` // Max execution minutes per day
 }
 
-// GetPlanLimits returns the limits for a given plan
+// GetPlanLimits returns the limits for a given plan.
+// It delegates to payments.GetAllPlans() as the single source of truth for plan
+// definitions, converting the payments.PlanLimits into the usage.PlanLimits struct
+// that the quota enforcement layer expects.
 func GetPlanLimits(plan PlanType) PlanLimits {
+	// Canonical limits live in payments/plans.go — derive usage limits from there.
+	paymentsPlanType := paymentsPlanTypeFromUsage(plan)
+	pLimits := paymentsGetPlanLimits(paymentsPlanType)
+	if pLimits == nil {
+		// Fallback: free tier
+		return PlanLimits{Projects: 3, StorageBytes: 1 * 1024 * 1024 * 1024, AIRequests: 1000, ExecutionMinutes: 10}
+	}
+
+	storageBytes := int64(pLimits.StorageGB) * 1024 * 1024 * 1024
+	if pLimits.StorageGB < 0 {
+		storageBytes = -1 // unlimited
+	}
+
+	// Map CodeExecutionsPerDay to ExecutionMinutes heuristic:
+	// Free=10min, Builder=240min, Pro=720min, Team=1440min, Enterprise/Owner=unlimited
+	execMinutes := executionMinutesForPlan(plan)
+
+	return PlanLimits{
+		Projects:         pLimits.ProjectsLimit,
+		StorageBytes:     storageBytes,
+		AIRequests:       pLimits.AIRequestsPerMonth,
+		ExecutionMinutes: execMinutes,
+	}
+}
+
+// executionMinutesForPlan maps plan type to execution minutes per day.
+// These are kept here because the payments package tracks CodeExecutionsPerDay
+// (count-based) while usage tracking needs minutes.
+func executionMinutesForPlan(plan PlanType) int {
 	switch plan {
 	case PlanFree:
-		return PlanLimits{
-			Projects:         3,
-			StorageBytes:     1 * 1024 * 1024 * 1024, // 1GB (matches plans.go display)
-			AIRequests:       1000,                    // 1000/month
-			ExecutionMinutes: 20,                      // 20 min/day (per free-tier-guardrails.md)
-		}
+		return 20
 	case PlanBuilder:
-		return PlanLimits{
-			Projects:         -1,
-			StorageBytes:     5 * 1024 * 1024 * 1024, // 5GB
-			AIRequests:       -1,                     // Credit-based billing
-			ExecutionMinutes: 240,                    // 4 hours/day
-		}
+		return 240
 	case PlanPro:
-		return PlanLimits{
-			Projects:         -1,
-			StorageBytes:     20 * 1024 * 1024 * 1024, // 20GB
-			AIRequests:       -1,                      // Credit-based billing
-			ExecutionMinutes: 720,                     // 12 hours/day
-		}
+		return 720
 	case PlanTeam:
-		return PlanLimits{
-			Projects:         -1,
-			StorageBytes:     100 * 1024 * 1024 * 1024, // 100GB
-			AIRequests:       -1,                       // Credit-based billing
-			ExecutionMinutes: 1440,                     // 24 hours/day
-		}
+		return 1440
 	case PlanEnterprise, PlanOwner:
-		return PlanLimits{
-			Projects:         -1, // Unlimited
-			StorageBytes:     -1, // Unlimited
-			AIRequests:       -1, // Unlimited
-			ExecutionMinutes: -1, // Unlimited
-		}
+		return -1
 	default:
-		// Default to free limits for unknown plans
-		return GetPlanLimits(PlanFree)
+		return 10
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"apex-build/internal/email"
 	"apex-build/internal/origins"
 	"apex-build/internal/payments"
 	"apex-build/pkg/models"
@@ -28,14 +29,19 @@ import (
 type PaymentHandlers struct {
 	db            *gorm.DB
 	stripeService *payments.StripeService
+	emailService  *email.Service
 }
 
 // NewPaymentHandlers creates a new payment handlers instance
-func NewPaymentHandlers(db *gorm.DB, stripeSecretKey string) *PaymentHandlers {
-	return &PaymentHandlers{
+func NewPaymentHandlers(db *gorm.DB, stripeSecretKey string, emailSvc ...*email.Service) *PaymentHandlers {
+	ph := &PaymentHandlers{
 		db:            db,
 		stripeService: payments.NewStripeService(stripeSecretKey),
 	}
+	if len(emailSvc) > 0 {
+		ph.emailService = emailSvc[0]
+	}
+	return ph
 }
 
 func isDuplicateInsertError(err error) bool {
@@ -280,20 +286,28 @@ func (h *PaymentHandlers) HandleWebhook(c *gin.Context) {
 	// Events that mutate credit_balance go through the idempotent transactional path.
 	// All others (subscription metadata updates) are idempotent by nature — a repeated
 	// overwrite of the same status value is harmless — so they go through the normal path.
+	// We propagate handler errors so Stripe retries on transient DB failures.
+	var handlerErr error
 	switch event.Type {
 	case "checkout.session.completed":
-		h.handleCheckoutCompleted(event)
+		handlerErr = h.handleCheckoutCompleted(event)
 	case "customer.subscription.created", "customer.subscription.updated":
-		h.handleSubscriptionUpdate(event)
+		handlerErr = h.handleSubscriptionUpdate(event)
 	case "customer.subscription.deleted":
-		h.handleSubscriptionDeleted(event)
+		handlerErr = h.handleSubscriptionDeleted(event)
 	case "invoice.paid":
-		h.handleInvoicePaid(event)
+		handlerErr = h.handleInvoicePaid(event)
 	case "invoice.payment_failed":
-		h.handleInvoicePaymentFailed(event)
+		handlerErr = h.handleInvoicePaymentFailed(event)
 	}
 
-	// Always 200 — Stripe will retry on non-2xx.
+	if handlerErr != nil {
+		log.Printf("Webhook handler error for event %s (id=%s): %v", event.Type, event.EventID, handlerErr)
+		// Return 500 so Stripe retries the webhook delivery.
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "handler failed, will retry"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"success": true, "received": true})
 }
 
@@ -320,13 +334,12 @@ func (h *PaymentHandlers) applyCredit(
 }
 
 // handleCheckoutCompleted processes checkout.session.completed events
-func (h *PaymentHandlers) handleCheckoutCompleted(event *payments.WebhookEvent) {
+func (h *PaymentHandlers) handleCheckoutCompleted(event *payments.WebhookEvent) error {
 	log.Printf("Checkout completed for customer: %s, type: %s", event.CustomerID, event.Metadata["type"])
 
 	// Route to the right handler based on purchase type
 	if event.Metadata["type"] == "credit_purchase" {
-		h.handleCreditPurchaseCompleted(event)
-		return
+		return h.handleCreditPurchaseCompleted(event)
 	}
 
 	// Default: subscription checkout
@@ -339,13 +352,13 @@ func (h *PaymentHandlers) handleCheckoutCompleted(event *payments.WebhookEvent) 
 		if userIDStr, ok := event.Metadata["user_id"]; ok {
 			if err := h.db.First(&user, userIDStr).Error; err != nil {
 				log.Printf("User not found for checkout: %v", err)
-				return
+				return fmt.Errorf("user not found for checkout: %w", err)
 			}
 			// Update Stripe customer ID
 			user.StripeCustomerID = event.CustomerID
 		} else {
 			log.Printf("User not found for checkout completion")
-			return
+			return fmt.Errorf("user not found for checkout completion")
 		}
 	}
 
@@ -363,6 +376,7 @@ func (h *PaymentHandlers) handleCheckoutCompleted(event *payments.WebhookEvent) 
 
 	if err := h.db.Model(&user).Updates(updates).Error; err != nil {
 		log.Printf("Failed to update user subscription: %v", err)
+		return fmt.Errorf("failed to update user subscription: %w", err)
 	}
 
 	// Grant initial credits for the new subscription — invoice.paid will also fire,
@@ -370,20 +384,21 @@ func (h *PaymentHandlers) handleCheckoutCompleted(event *payments.WebhookEvent) 
 	// are handled exclusively by invoice.paid, so we skip the initial grant here to
 	// avoid double-crediting. (Stripe always fires invoice.paid for subscription payments.)
 	log.Printf("User %s subscription updated to %s", user.Email, event.PlanType)
+	return nil
 }
 
 // handleCreditPurchaseCompleted credits the user's account after a successful one-time payment.
 // Uses applyCredit inside a transaction so duplicate webhook deliveries are no-ops.
-func (h *PaymentHandlers) handleCreditPurchaseCompleted(event *payments.WebhookEvent) {
+func (h *PaymentHandlers) handleCreditPurchaseCompleted(event *payments.WebhookEvent) error {
 	creditUSDStr, ok := event.Metadata["credit_usd"]
 	if !ok || creditUSDStr == "" {
 		log.Printf("Credit purchase webhook missing credit_usd metadata (event=%s)", event.EventID)
-		return
+		return nil // bad payload, don't retry
 	}
 	creditAmt, err := strconv.ParseFloat(creditUSDStr, 64)
 	if err != nil || creditAmt <= 0 {
 		log.Printf("Invalid credit_usd in webhook metadata: %s (event=%s)", creditUSDStr, event.EventID)
-		return
+		return nil // bad payload, don't retry
 	}
 
 	// Locate user — prefer stripe_customer_id, fall back to metadata user_id.
@@ -392,11 +407,11 @@ func (h *PaymentHandlers) handleCreditPurchaseCompleted(event *payments.WebhookE
 		userIDStr, ok := event.Metadata["user_id"]
 		if !ok {
 			log.Printf("Cannot locate user for credit purchase: no customer or user_id (event=%s)", event.EventID)
-			return
+			return fmt.Errorf("cannot locate user for credit purchase (event=%s)", event.EventID)
 		}
 		if err2 := h.db.First(&user, userIDStr).Error; err2 != nil {
 			log.Printf("User not found for credit purchase webhook: %v (event=%s)", err2, event.EventID)
-			return
+			return fmt.Errorf("user not found for credit purchase: %w", err2)
 		}
 		// Persist the Stripe customer ID for future lookups.
 		if err3 := h.db.Model(&user).Update("stripe_customer_id", event.CustomerID).Error; err3 != nil {
@@ -418,11 +433,13 @@ func (h *PaymentHandlers) handleCreditPurchaseCompleted(event *payments.WebhookE
 	})
 	if txErr != nil {
 		log.Printf("Credit purchase transaction failed for user %d: %v", user.ID, txErr)
+		return txErr
 	}
+	return nil
 }
 
 // handleSubscriptionUpdate processes subscription update events
-func (h *PaymentHandlers) handleSubscriptionUpdate(event *payments.WebhookEvent) {
+func (h *PaymentHandlers) handleSubscriptionUpdate(event *payments.WebhookEvent) error {
 	log.Printf("Subscription update for customer: %s, status: %s, plan: %s",
 		event.CustomerID, event.Status, event.PlanType)
 
@@ -430,7 +447,7 @@ func (h *PaymentHandlers) handleSubscriptionUpdate(event *payments.WebhookEvent)
 	var user models.User
 	if err := h.db.Where("stripe_customer_id = ?", event.CustomerID).First(&user).Error; err != nil {
 		log.Printf("User not found for subscription update: %v", err)
-		return
+		return fmt.Errorf("user not found for subscription update: %w", err)
 	}
 
 	// Update subscription details
@@ -447,20 +464,22 @@ func (h *PaymentHandlers) handleSubscriptionUpdate(event *payments.WebhookEvent)
 
 	if err := h.db.Model(&user).Updates(updates).Error; err != nil {
 		log.Printf("Failed to update user subscription: %v", err)
+		return fmt.Errorf("failed to update subscription: %w", err)
 	}
 
 	log.Printf("User %s subscription updated: status=%s, plan=%s", user.Email, event.Status, event.PlanType)
+	return nil
 }
 
 // handleSubscriptionDeleted processes subscription deletion events
-func (h *PaymentHandlers) handleSubscriptionDeleted(event *payments.WebhookEvent) {
+func (h *PaymentHandlers) handleSubscriptionDeleted(event *payments.WebhookEvent) error {
 	log.Printf("Subscription deleted for customer: %s", event.CustomerID)
 
 	// Find user by Stripe customer ID
 	var user models.User
 	if err := h.db.Where("stripe_customer_id = ?", event.CustomerID).First(&user).Error; err != nil {
 		log.Printf("User not found for subscription deletion: %v", err)
-		return
+		return fmt.Errorf("user not found for subscription deletion: %w", err)
 	}
 
 	// Downgrade to free plan
@@ -472,21 +491,23 @@ func (h *PaymentHandlers) handleSubscriptionDeleted(event *payments.WebhookEvent
 
 	if err := h.db.Model(&user).Updates(updates).Error; err != nil {
 		log.Printf("Failed to update user after subscription deletion: %v", err)
+		return fmt.Errorf("failed to downgrade user: %w", err)
 	}
 
 	log.Printf("User %s downgraded to free plan", user.Email)
+	return nil
 }
 
 // handleInvoicePaid processes invoice.paid events — marks subscription active and allocates monthly credits.
 // Credit allocation is guarded by applyCredit's idempotency so retried webhooks are safe.
-func (h *PaymentHandlers) handleInvoicePaid(event *payments.WebhookEvent) {
+func (h *PaymentHandlers) handleInvoicePaid(event *payments.WebhookEvent) error {
 	log.Printf("Invoice paid for customer: %s, amount: %d %s (event=%s)",
 		event.CustomerID, event.Amount, event.Currency, event.EventID)
 
 	var user models.User
 	if err := h.db.Where("stripe_customer_id = ?", event.CustomerID).First(&user).Error; err != nil {
 		log.Printf("User not found for invoice payment: %v (event=%s)", err, event.EventID)
-		return
+		return fmt.Errorf("user not found for invoice payment: %w", err)
 	}
 
 	// Mark subscription active outside the credit transaction — this update is idempotent.
@@ -501,7 +522,7 @@ func (h *PaymentHandlers) handleInvoicePaid(event *payments.WebhookEvent) {
 	plan := payments.GetPlanByType(planType)
 	if plan == nil || plan.MonthlyCreditsUSD <= 0 {
 		log.Printf("No credits to allocate for plan %s (user=%s event=%s)", planType, user.Email, event.EventID)
-		return
+		return nil
 	}
 
 	txErr := h.db.Transaction(func(tx *gorm.DB) error {
@@ -518,14 +539,15 @@ func (h *PaymentHandlers) handleInvoicePaid(event *payments.WebhookEvent) {
 	})
 	if txErr != nil {
 		log.Printf("Monthly allocation transaction failed for user %d: %v", user.ID, txErr)
-		return
+		return txErr
 	}
 
 	log.Printf("Invoice payment processed for user %s (plan=%s credits=$%.2f)", user.Email, planType, plan.MonthlyCreditsUSD)
+	return nil
 }
 
 // handleInvoicePaymentFailed processes invoice.payment_failed events
-func (h *PaymentHandlers) handleInvoicePaymentFailed(event *payments.WebhookEvent) {
+func (h *PaymentHandlers) handleInvoicePaymentFailed(event *payments.WebhookEvent) error {
 	log.Printf("Invoice payment failed for customer: %s, amount: %d %s",
 		event.CustomerID, event.Amount, event.Currency)
 
@@ -533,16 +555,31 @@ func (h *PaymentHandlers) handleInvoicePaymentFailed(event *payments.WebhookEven
 	var user models.User
 	if err := h.db.Where("stripe_customer_id = ?", event.CustomerID).First(&user).Error; err != nil {
 		log.Printf("User not found for failed payment: %v", err)
-		return
+		return fmt.Errorf("user not found for failed payment: %w", err)
 	}
 
 	// Update subscription status to past_due
 	if err := h.db.Model(&user).Update("subscription_status", string(payments.StatusPastDue)).Error; err != nil {
 		log.Printf("Failed to update subscription status: %v", err)
+		return fmt.Errorf("failed to update subscription status: %w", err)
 	}
 
-	// TODO: Send notification email to user about failed payment
+	// Send payment failure email notification
+	if h.emailService != nil {
+		invoiceID := ""
+		if event.InvoiceID != "" {
+			invoiceID = event.InvoiceID
+		}
+		if err := h.emailService.SendPaymentFailed(user.Email, user.Username, invoiceID); err != nil {
+			log.Printf("Failed to send payment failure email to %s: %v", user.Email, err)
+			// Non-fatal: don't fail the webhook because of email issues
+		} else {
+			log.Printf("Payment failure email sent to %s", user.Email)
+		}
+	}
+
 	log.Printf("Payment failed for user %s - status set to past_due", user.Email)
+	return nil
 }
 
 // GetSubscription returns the user's current subscription details

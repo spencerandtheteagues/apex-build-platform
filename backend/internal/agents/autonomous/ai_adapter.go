@@ -112,7 +112,7 @@ For code files, use this exact format:
 			isBYOK,
 		)
 		if estimatedCost > 0 {
-			res, err := a.byokManager.ReserveCredits(userID, estimatedCost)
+			res, err := a.byokManager.ReserveCredits(userID, estimatedCost, isBYOK)
 			if err != nil {
 				if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
 					return "", fmt.Errorf("INSUFFICIENT_CREDITS")
@@ -216,7 +216,7 @@ Content to analyze:
 			isBYOK,
 		)
 		if estimatedCost > 0 {
-			res, err := a.byokManager.ReserveCredits(userID, estimatedCost)
+			res, err := a.byokManager.ReserveCredits(userID, estimatedCost, isBYOK)
 			if err != nil {
 				if strings.Contains(err.Error(), "INSUFFICIENT_CREDITS") {
 					return "", fmt.Errorf("INSUFFICIENT_CREDITS")
