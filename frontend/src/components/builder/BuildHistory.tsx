@@ -216,58 +216,58 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild 
           <div
             key={build.build_id}
             className={cn(
-              'group flex items-center gap-4 p-4 rounded-xl',
-              'bg-gray-900/40 border border-gray-800/80',
-              'hover:bg-gray-900/60 hover:border-gray-700 transition-all duration-200',
-              'cursor-pointer'
+              'group flex flex-col gap-3 rounded-xl border border-gray-800/80 bg-gray-900/40 p-4 transition-all duration-200',
+              'hover:bg-gray-900/60 hover:border-gray-700 cursor-pointer sm:flex-row sm:items-center sm:gap-4'
             )}
             onClick={() => onOpenBuild?.(build.build_id, 'resume')}
           >
-            {/* Status icon */}
-            <div className="shrink-0">{statusIcon(build.status)}</div>
+            <div className="flex items-start gap-3 sm:flex-1 sm:min-w-0 sm:items-center">
+              <div className="shrink-0 pt-0.5 sm:pt-0">{statusIcon(build.status)}</div>
 
-            {/* Main info */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-white font-medium text-sm truncate">
-                  {build.description.length > 60
-                    ? build.description.slice(0, 60) + '...'
-                    : build.description}
-                </span>
-              </div>
-              <div className="flex items-center gap-3 text-xs text-gray-500">
-                {build.tech_stack && (
-                  <span className="text-gray-400">
-                    {[build.tech_stack.frontend, build.tech_stack.backend, build.tech_stack.database]
-                      .filter(Boolean)
-                      .join(' + ')}
+              <div className="min-w-0 flex-1">
+                <div className="mb-1 flex items-start justify-between gap-3 sm:block">
+                  <span className="block text-sm font-medium text-white break-words pr-1 sm:truncate sm:pr-0">
+                    {build.description.length > 80
+                      ? build.description.slice(0, 80) + '...'
+                      : build.description}
                   </span>
-                )}
-                <span className="flex items-center gap-1">
-                  <FileCode className="w-3 h-3" />
-                  {build.files_count} files
-                </span>
-                {build.duration_ms > 0 && (
-                  <span>{formatDuration(build.duration_ms)}</span>
-                )}
-                <span className="flex items-center gap-1">
-                  {powerModeIcon(build.power_mode)}
-                  {build.power_mode}
-                </span>
+                  <span className="shrink-0 text-[11px] text-gray-600 sm:hidden">
+                    {formatDate(build.created_at)}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                  {build.tech_stack && (
+                    <span className="min-w-0 break-words text-gray-400">
+                      {[build.tech_stack.frontend, build.tech_stack.backend, build.tech_stack.database]
+                        .filter(Boolean)
+                        .join(' + ')}
+                    </span>
+                  )}
+                  <span className="flex items-center gap-1 whitespace-nowrap">
+                    <FileCode className="w-3 h-3" />
+                    {build.files_count} files
+                  </span>
+                  {build.duration_ms > 0 && (
+                    <span className="whitespace-nowrap">{formatDuration(build.duration_ms)}</span>
+                  )}
+                  <span className="flex items-center gap-1 whitespace-nowrap">
+                    {powerModeIcon(build.power_mode)}
+                    {build.power_mode}
+                  </span>
+                </div>
               </div>
             </div>
 
-            {/* Timestamp */}
-            <span className="text-xs text-gray-600 shrink-0">
+            <div className="hidden shrink-0 text-xs text-gray-600 sm:block">
               {formatDate(build.created_at)}
-            </span>
+            </div>
 
-            {/* Actions */}
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap sm:justify-end sm:gap-1.5 sm:shrink-0">
               {build.resumable ? (
                 <button
                   onClick={(e) => { e.stopPropagation(); void handleCancel(build) }}
-                  className="inline-flex items-center gap-1 rounded-lg border border-red-900/50 px-2 py-1.5 text-xs font-medium text-red-200 hover:bg-red-900/20 transition-colors"
+                  className="inline-flex min-h-[34px] items-center gap-1 rounded-lg border border-red-900/50 px-2.5 py-1.5 text-xs font-medium text-red-200 transition-colors hover:bg-red-900/20"
                   title="Cancel active build"
                   aria-label={`Cancel build ${build.description}`}
                   disabled={actingBuildId === build.build_id}
@@ -282,7 +282,7 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild 
               ) : (
                 <button
                   onClick={(e) => { e.stopPropagation(); void handleDelete(build) }}
-                  className="inline-flex items-center gap-1 rounded-lg border border-gray-800 px-2 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+                  className="inline-flex min-h-[34px] items-center gap-1 rounded-lg border border-gray-800 px-2.5 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
                   title="Remove saved build"
                   aria-label={`Remove build ${build.description}`}
                   disabled={actingBuildId === build.build_id}
@@ -295,37 +295,38 @@ export const BuildHistory: React.FC<BuildHistoryProps> = ({ userId, onOpenBuild 
                   Remove
                 </button>
               )}
-              <div className="flex items-center gap-1.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-              <button
-                onClick={(e) => { e.stopPropagation(); onOpenBuild?.(build.build_id, 'resume') }}
-                className="hidden md:inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
-                title="Continue workflow"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-                Continue
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); handleDownload(build) }}
-                className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-colors"
-                title="Download files"
-              >
-                {downloading === build.build_id ? (
-                  <div className="w-4 h-4 border-2 border-gray-500 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <Download className="w-4 h-4" />
-                )}
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); onOpenBuild?.(build.build_id, 'open_files') }}
-                className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition-colors"
-                title="Open code in IDE"
-              >
-                <FolderOpen className="w-4 h-4" />
-              </button>
+
+              <div className="flex flex-wrap items-center gap-1.5 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+                <button
+                  onClick={(e) => { e.stopPropagation(); onOpenBuild?.(build.build_id, 'resume') }}
+                  className="inline-flex min-h-[34px] items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
+                  title="Continue workflow"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                  Continue
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDownload(build) }}
+                  className="inline-flex min-h-[34px] items-center justify-center rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-800 hover:text-white"
+                  title="Download files"
+                >
+                  {downloading === build.build_id ? (
+                    <div className="w-4 h-4 border-2 border-gray-500 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4" />
+                  )}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onOpenBuild?.(build.build_id, 'open_files') }}
+                  className="inline-flex min-h-[34px] items-center justify-center rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-800 hover:text-white"
+                  title="Open code in IDE"
+                >
+                  <FolderOpen className="w-4 h-4" />
+                </button>
               </div>
             </div>
 
-            <ChevronRight className="w-4 h-4 text-gray-700 group-hover:text-gray-500 transition-colors shrink-0" />
+            <ChevronRight className="hidden w-4 h-4 shrink-0 text-gray-700 transition-colors group-hover:text-gray-500 sm:block" />
           </div>
         ))}
       </div>
