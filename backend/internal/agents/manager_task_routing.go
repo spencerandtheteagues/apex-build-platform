@@ -264,6 +264,7 @@ Return JSON only:
 	defer cancel()
 	resp, err := am.aiRouter.Generate(ctx, provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
+		BuildID:         build.ID,
 		MaxTokens:       300,
 		Temperature:     0.1,
 		SystemPrompt:    "You are a strict build verifier. Return concise JSON only.",
@@ -378,6 +379,7 @@ Return JSON only:
 	defer cancel()
 	resp, err := am.aiRouter.Generate(ctx, provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
+		BuildID:         build.ID,
 		MaxTokens:       180,
 		Temperature:     0.1,
 		SystemPrompt:    "You are a strict build judge. Return concise JSON only.",
@@ -528,6 +530,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 
 	response, err := am.aiRouter.Generate(ctx, provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
+		BuildID:         build.ID,
 		MaxTokens:       maxTokens,
 		Temperature:     temperature,
 		SystemPrompt:    systemPrompt,

@@ -326,6 +326,7 @@ type AIRouter interface {
 // GenerateOptions for AI generation requests
 type GenerateOptions struct {
 	UserID        uint
+	BuildID       string // For pipeline telemetry correlation.
 	MaxTokens     int
 	Temperature   float64
 	SystemPrompt  string
@@ -628,6 +629,8 @@ func (am *AgentManager) StartBuild(buildID string) error {
 	}
 
 	log.Printf("Build %s status updated, broadcasting", buildID)
+
+	pLog(buildID).BuildStart(string(build.Mode), string(build.PowerMode), build.ProviderMode, build.Description)
 
 	// Broadcast build started
 	am.broadcast(buildID, &WSMessage{
@@ -2193,6 +2196,12 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 	// Log final assignments
 	for role, provider := range assignments {
 		log.Printf("Agent %s -> Provider %s", role, provider)
+		model := selectModelForPowerMode(provider, build.PowerMode)
+		buildID := ""
+		if build != nil {
+			buildID = build.ID
+		}
+		pLog(buildID).AgentAssigned(string(role), string(role), string(provider), model)
 	}
 
 	return assignments
@@ -3170,6 +3179,7 @@ Contract:
 
 	resp, err := am.aiRouter.Generate(critiqueCtx, provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
+		BuildID:         build.ID,
 		MaxTokens:       600,
 		Temperature:     0.1,
 		SystemPrompt:    "You are a strict contract verifier. Output JSON only.",
@@ -4072,6 +4082,24 @@ func (am *AgentManager) recordTaskExecutionOutcome(build *Build, agent *Agent, t
 	if build == nil || agent == nil || task == nil {
 		return
 	}
+
+	{
+		errMsg := ""
+		if !success {
+			if task.Error != "" {
+				errMsg = task.Error
+			} else if failureClass != "" {
+				errMsg = failureClass
+			}
+		}
+		fileCount := 0
+		if output != nil {
+			fileCount = len(output.Files)
+		}
+		plTaskDone := pLog(build.ID).TaskDone(task.ID, string(task.Type), agent.ID, string(agent.Role), string(agent.Provider))
+		plTaskDone(success, errMsg, fileCount)
+	}
+
 	shape := taskExecutionShape(task, agent)
 	if shape == "" {
 		return
@@ -4274,6 +4302,8 @@ func (am *AgentManager) executeTask(task *Task) {
 		return
 	}
 	log.Printf("Found build %s for task execution", build.ID)
+
+	pLog(build.ID).TaskStart(task.ID, string(task.Type), agent.ID, string(agent.Role), string(agent.Provider), agent.Model, task.RetryCount)
 
 	requeuedTaskStarted := am.markQueuedTaskExecutionStarted(agent, task)
 	if requeuedTaskStarted {
@@ -14638,10 +14668,12 @@ func (am *AgentManager) launchFinalValidationSolverRecovery(
 	build.mu.Lock()
 	if build.ReadinessRecoveryAttempts >= maxAutomatedRecoveryAttempts(build.PowerMode) {
 		build.mu.Unlock()
+		pLog(build.ID).ReadinessRecoveryDone(build.ReadinessRecoveryAttempts, false)
 		return false
 	}
 
 	build.ReadinessRecoveryAttempts++
+	pLog(build.ID).ReadinessRecoveryStart(build.ReadinessRecoveryAttempts, errorSummary)
 	build.Status = BuildReviewing
 	build.CompletedAt = nil
 	build.UpdatedAt = now
@@ -14998,6 +15030,19 @@ completion_finalize:
 	// Emit structured quality telemetry and test artifact summary before persisting.
 	emitBuildQualityTelemetry(build, allFiles, now)
 	emitTestArtifactSummary(build, allFiles, now)
+
+	{
+		build.mu.RLock()
+		failCat, failClass := "", ""
+		if ft := build.SnapshotState.FailureTaxonomy; ft != nil {
+			failCat = string(ft.CurrentCategory)
+			failClass = ft.CurrentClass
+		}
+		durationMS := now.Sub(build.CreatedAt).Milliseconds()
+		pLog(build.ID).BuildEnd(string(build.Status), failCat, failClass, durationMS,
+			build.CompileValidationAttempts, build.PreviewVerificationAttempts, build.ReadinessRecoveryAttempts)
+		build.mu.RUnlock()
+	}
 
 	// Persist to database
 	am.persistCompletedBuild(build, allFiles)
@@ -18456,6 +18501,7 @@ Rules:
 
 	response, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
+		BuildID:         build.ID,
 		MaxTokens:       2000,
 		Temperature:     am.getTemperatureForRole(RoleLead),
 		SystemPrompt:    am.getSystemPrompt(RoleLead, build),
@@ -25528,6 +25574,7 @@ func (am *AgentManager) runFailureConsensus(
 
 		resp, err := am.aiRouter.Generate(ctx, provider, prompt, GenerateOptions{
 			UserID:          build.UserID,
+			BuildID:         build.ID,
 			MaxTokens:       180,
 			Temperature:     0.2,
 			SystemPrompt:    "You are an incident commander. Vote for the safest path to complete the build.",
@@ -25951,6 +25998,7 @@ func (am *AgentManager) completeTruncatedFiles(
 
 		resp, err := am.aiRouter.Generate(ctx, agent.Provider, continuationPrompt, GenerateOptions{
 			UserID:      build.UserID,
+			BuildID:     build.ID,
 			MaxTokens:   8000,
 			Temperature: 0.1,
 			SystemPrompt: "You are completing a source file that was truncated. " +
@@ -26110,6 +26158,7 @@ func (am *AgentManager) executeChunkedFileRepair(
 
 		resp, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
 			UserID:      build.UserID,
+			BuildID:     build.ID,
 			MaxTokens:   2000,
 			Temperature: 0.1,
 			SystemPrompt: "You are a precise code editor. Apply the given instruction to the " +

@@ -358,6 +358,8 @@ func (am *OptimizedAgentManager) executeTaskCore(ctx context.Context, task *Task
 	defer cancel()
 
 	response, err := am.aiRouter.Generate(taskCtx, agent.Provider, prompt, GenerateOptions{
+		UserID:          build.UserID,
+		BuildID:         build.ID,
 		MaxTokens:       8000,
 		Temperature:     0.7,
 		SystemPrompt:    systemPrompt,

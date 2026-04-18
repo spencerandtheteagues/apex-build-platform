@@ -95,8 +95,29 @@ func (am *AgentManager) runPreviewVerificationGate(
 	ctx, cancel := context.WithTimeout(am.ctx, 30*time.Second)
 	defer cancel()
 
+	pLog(build.ID).PreviewGateStart(len(vFiles), isFS)
+	gateStart := time.Now()
+
 	checksRun := []string{"preview_entrypoint", "preview_content", "preview_structure"}
 	result := am.previewVerifier.VerifyBuildFiles(ctx, vFiles, isFS)
+
+	// Emit gate telemetry for all outcomes.
+	{
+		passed := result == nil || result.Passed
+		failureKind := ""
+		visionSev := ""
+		canaryClicked, canaryErrors := 0, 0
+		if result != nil {
+			if !result.Passed {
+				failureKind = result.FailureKind
+			}
+			visionSev = result.VisionSeverity
+			canaryClicked = result.CanaryClickCount
+			canaryErrors = len(result.CanaryErrors)
+		}
+		pLog(build.ID).PreviewGateDone(passed, failureKind, visionSev, canaryClicked, canaryErrors, time.Since(gateStart).Milliseconds())
+	}
+
 	if result == nil || result.Passed {
 		passedWarnings := []string(nil)
 		canaryClicked := 0

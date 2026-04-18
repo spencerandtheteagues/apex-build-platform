@@ -327,6 +327,8 @@ For code files, use this exact format:
 	log.Printf("Calling AI router.Generate with capability=%s, provider=%s, model=%s, prompt_length=%d, max_tokens=%d",
 		capability, aiProvider, model, len(fullPrompt), maxTokens)
 
+	plDone := pLog(opts.BuildID).AICallStart(string(aiProvider), model, string(capability), len(fullPrompt), maxTokens)
+
 	// Reserve credits before making the AI call
 	var reservation *ai.CreditReservation
 	if a.byokManager != nil && opts.UserID > 0 {
@@ -355,6 +357,7 @@ For code files, use this exact format:
 
 	response, err := targetRouter.Generate(genCtx, request)
 	if err != nil {
+		plDone(0, 0, 0, 0, err)
 		if a.byokManager != nil && reservation != nil {
 			_ = a.byokManager.FinalizeCredits(reservation, 0)
 		}
@@ -366,29 +369,39 @@ For code files, use this exact format:
 	}
 
 	if response == nil || response.Content == "" {
+		plDone(0, 0, 0, 0, fmt.Errorf("empty response"))
 		log.Printf("AI generation returned empty response")
 		return nil, fmt.Errorf("AI generation returned empty response")
 	}
 
 	// Record BYOK usage if applicable
+	var finalCost float64
 	if a.byokManager != nil && opts.UserID > 0 && response != nil {
 		inputTokens := 0
 		outputTokens := 0
-		cost := 0.0
 		if response.Usage != nil {
 			inputTokens = response.Usage.PromptTokens
 			outputTokens = response.Usage.CompletionTokens
 		}
 		modelUsed := ai.GetModelUsed(response, request)
-		cost = a.byokManager.BilledCost(string(response.Provider), modelUsed, inputTokens, outputTokens, string(opts.PowerMode), isBYOK)
+		finalCost = a.byokManager.BilledCost(string(response.Provider), modelUsed, inputTokens, outputTokens, string(opts.PowerMode), isBYOK)
 		if response.Usage != nil {
-			response.Usage.Cost = cost
+			response.Usage.Cost = finalCost
 		}
 		a.byokManager.RecordUsage(opts.UserID, nil, string(response.Provider), modelUsed, isBYOK,
-			inputTokens, outputTokens, cost, string(request.Capability), response.Duration, "success")
+			inputTokens, outputTokens, finalCost, string(request.Capability), response.Duration, "success")
 		if reservation != nil {
-			_ = a.byokManager.FinalizeCredits(reservation, cost)
+			_ = a.byokManager.FinalizeCredits(reservation, finalCost)
 		}
+	}
+
+	{
+		inTok, outTok := 0, 0
+		if response.Usage != nil {
+			inTok = response.Usage.PromptTokens
+			outTok = response.Usage.CompletionTokens
+		}
+		plDone(len(response.Content), inTok, outTok, finalCost, nil)
 	}
 
 	log.Printf("AI generation succeeded, response length: %d", len(response.Content))

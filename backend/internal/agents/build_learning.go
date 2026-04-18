@@ -110,13 +110,16 @@ func (am *AgentManager) deriveHistoricalBuildLearningResult(build *Build, req *B
 		}
 	}
 	if len(matches) == 0 {
+		pLog(buildID).LearnLookup(scope.Name, len(snapshots), false)
 		return historicalBuildLearningResult{}
 	}
 
-	return historicalBuildLearningResult{
+	result := historicalBuildLearningResult{
 		Summary:            summarizeHistoricalBuildLearning(scope.Name, matches),
 		ProviderScorecards: summarizeHistoricalProviderScorecards(matches, build.ProviderMode),
 	}
+	pLog(buildID).LearnLookup(scope.Name, len(matches), result.Summary != nil)
+	return result
 }
 
 func resolveHistoricalBuildScopeLocked(build *Build, req *BuildRequest) historicalBuildScope {

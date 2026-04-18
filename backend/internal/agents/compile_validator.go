@@ -218,9 +218,18 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 
 		// ── TypeScript type check ─────────────────────────────────────────────
 		tscErrors := cvRunTscCheck(ctx, tmpDir)
+		{
+			msgs := make([]string, len(tscErrors))
+			for i, e := range tscErrors {
+				msgs[i] = e.Message
+			}
+			pLog(build.ID).CompileCheck("tsc", len(tscErrors), msgs)
+		}
 		if len(tscErrors) > 0 {
 			log.Printf("[compile_validator] build %s attempt %d: tsc found %d error(s)", build.ID, attempt+1, len(tscErrors))
+			pLog(build.ID).CompileRepairStart("tsc_inline", attempt, len(*allFiles))
 			repaired := am.cvRunInlineRepair(ctx, build, tscErrors, allFiles, tmpDir)
+			pLog(build.ID).CompileRepairDone("tsc_inline", attempt, repaired, len(tscErrors))
 			if repaired {
 				// Rematerialise updated source files (not node_modules) and continue.
 				if err := cvRematerializeSourceFiles(*allFiles, tmpDir); err != nil {
@@ -244,11 +253,19 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 			build.CompileValidationAttempts = result.Attempts
 			build.mu.Unlock()
 			log.Printf("[compile_validator] build %s: compile validation passed (Next.js tsc-only) after %d attempt(s)", build.ID, result.Attempts)
+			pLog(build.ID).CompileCheck("nextjs_tsc_pass", 0, nil)
 			am.cvBroadcastResult(build, true, nil)
 			return result
 		}
 
 		viteErrors := cvRunViteBuild(ctx, tmpDir)
+		{
+			msgs := make([]string, len(viteErrors))
+			for i, e := range viteErrors {
+				msgs[i] = e.Message
+			}
+			pLog(build.ID).CompileCheck("vite", len(viteErrors), msgs)
+		}
 		if len(viteErrors) == 0 {
 			// Build succeeded cleanly.
 			result.Passed = true
@@ -262,7 +279,9 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		}
 
 		log.Printf("[compile_validator] build %s attempt %d: vite build found %d error(s)", build.ID, attempt+1, len(viteErrors))
+		pLog(build.ID).CompileRepairStart("vite_inline", attempt, len(*allFiles))
 		repaired := am.cvRunInlineRepair(ctx, build, viteErrors, allFiles, tmpDir)
+		pLog(build.ID).CompileRepairDone("vite_inline", attempt, repaired, len(viteErrors))
 		if repaired {
 			if err := cvRematerializeSourceFiles(*allFiles, tmpDir); err != nil {
 				log.Printf("[compile_validator] build %s: rematerialise failed: %v", build.ID, err)
@@ -553,6 +572,14 @@ func (am *AgentManager) cvRunHydraRepair(
 		return false
 	}
 
+	{
+		names := make([]string, len(strategies))
+		for i, s := range strategies {
+			names[i] = s.Name
+		}
+		pLog(build.ID).HydraStart(names, len(*allFiles))
+	}
+
 	hydraCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -617,7 +644,9 @@ func (am *AgentManager) cvRunHydraRepair(
 				})
 				return
 			}
-			if !cvValidateCandidateWorkspace(hydraCtx, candidateFiles, baseDir) {
+			passed := cvValidateCandidateWorkspace(hydraCtx, candidateFiles, baseDir)
+			pLog(build.ID).HydraResult(strategy.Name, passed, len(errors))
+			if !passed {
 				if hydraCtx.Err() != nil {
 					return
 				}
@@ -699,10 +728,12 @@ func (am *AgentManager) cvRunHydraRepair(
 				}
 			}
 			log.Printf("[compile_validator] build %s: hydra repair winner=%s", build.ID, candidate.Strategy.Name)
+			pLog(build.ID).HydraDone(candidate.Strategy.Name, true)
 			return true
 		}
 	}
 
+	pLog(build.ID).HydraDone("", false)
 	return false
 }
 
@@ -829,6 +860,7 @@ func (am *AgentManager) cvGenerateTaskOutput(
 
 	resp, err := am.aiRouter.Generate(repairCtx, provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
+		BuildID:         build.ID,
 		MaxTokens:       cvRepairTokens,
 		Temperature:     strategy.Temperature,
 		SystemPrompt:    compileRepairSystemPrompt,
