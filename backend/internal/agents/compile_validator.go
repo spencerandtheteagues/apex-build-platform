@@ -188,6 +188,12 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 		return result
 	}
 
+	// Inject Next.js stubs so tsc doesn't fail on generated files (next-env.d.ts,
+	// .next/types/) that don't exist until `next dev` or `next build` runs.
+	if cvIsNextJSProject(*allFiles) {
+		cvPrepareNextJSWorkspace(tmpDir)
+	}
+
 	maxAttempts := maxCompileAttempts(build.PowerMode)
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -228,7 +234,20 @@ func (am *AgentManager) runCompileValidationLoop(build *Build, allFiles *[]Gener
 			return result
 		}
 
-		// ── Vite / bundler build ──────────────────────────────────────────────
+		// ── Bundler build (skip for Next.js — tsc is sufficient) ────────────
+		// next build is too heavy for the validation sandbox (needs env vars,
+		// DB connections, ports). For Next.js, a clean tsc pass is enough.
+		if cvIsNextJSProject(*allFiles) {
+			result.Passed = true
+			build.mu.Lock()
+			build.CompileValidationPassed = true
+			build.CompileValidationAttempts = result.Attempts
+			build.mu.Unlock()
+			log.Printf("[compile_validator] build %s: compile validation passed (Next.js tsc-only) after %d attempt(s)", build.ID, result.Attempts)
+			am.cvBroadcastResult(build, true, nil)
+			return result
+		}
+
 		viteErrors := cvRunViteBuild(ctx, tmpDir)
 		if len(viteErrors) == 0 {
 			// Build succeeded cleanly.
@@ -977,6 +996,49 @@ func cvPatchBundleRecordingEnabled(build *Build) bool {
 	return build.SnapshotState.Orchestration != nil && build.SnapshotState.Orchestration.Flags.EnablePatchBundles
 }
 
+// cvIsNextJSProject returns true when the file set contains a Next.js project —
+// detected by next.config.* presence or "next" in package.json dependencies.
+func cvIsNextJSProject(files []GeneratedFile) bool {
+	for _, f := range files {
+		p := strings.ToLower(strings.TrimSpace(f.Path))
+		if p == "next.config.js" || p == "next.config.ts" || p == "next.config.mjs" {
+			return true
+		}
+		if p == "package.json" && strings.Contains(f.Content, `"next"`) {
+			return true
+		}
+	}
+	return false
+}
+
+// cvIsNextJSWorkspace returns true when the materialised directory looks like
+// a Next.js project (next.config.* present on disk).
+func cvIsNextJSWorkspace(dir string) bool {
+	for _, name := range []string{"next.config.js", "next.config.ts", "next.config.mjs"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// cvPrepareNextJSWorkspace writes the generated files that Next.js produces at
+// dev/build time but that tsc needs at check time:
+//   - next-env.d.ts  (type references injected by Next.js)
+//   - .next/types/   (empty dir so the tsconfig glob resolves without error)
+func cvPrepareNextJSWorkspace(dir string) {
+	nextEnvContent := "/// <reference types=\"next\" />\n/// <reference types=\"next/image-types/global\" />\n"
+	_ = os.WriteFile(filepath.Join(dir, "next-env.d.ts"), []byte(nextEnvContent), 0644)
+	_ = os.MkdirAll(filepath.Join(dir, ".next", "types"), 0755)
+}
+
+// cvValidateCandidateWorkspace runs tsc (and, for non-Next.js projects, the
+// bundler build) on a candidate file set in an isolated workspace. It symlinks
+// the base workspace's node_modules so we don't re-install.
+//
+// For Next.js projects: skip `next build` (too heavy for a sandbox; requires
+// env vars, DB, etc.) and only validate with tsc. Stubs for generated files
+// that tsc references (next-env.d.ts, .next/types/) are injected before the check.
 func cvValidateCandidateWorkspace(ctx context.Context, files []GeneratedFile, baseDir string) bool {
 	if strings.TrimSpace(baseDir) == "" {
 		return false
@@ -997,11 +1059,21 @@ func cvValidateCandidateWorkspace(ctx context.Context, files []GeneratedFile, ba
 		_ = os.Symlink(nodeModules, filepath.Join(candidateDir, "node_modules"))
 	}
 
+	isNext := cvIsNextJSWorkspace(candidateDir) || cvIsNextJSProject(files)
+	if isNext {
+		cvPrepareNextJSWorkspace(candidateDir)
+	}
+
 	if errs := cvRunTscCheck(ctx, candidateDir); len(errs) > 0 {
 		return false
 	}
-	if errs := cvRunViteBuild(ctx, candidateDir); len(errs) > 0 {
-		return false
+
+	// Skip next build in the sandbox — tsc alone is sufficient to validate
+	// type correctness for Next.js projects.
+	if !isNext {
+		if errs := cvRunViteBuild(ctx, candidateDir); len(errs) > 0 {
+			return false
+		}
 	}
 	return true
 }
