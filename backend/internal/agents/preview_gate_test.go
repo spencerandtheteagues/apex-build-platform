@@ -364,6 +364,39 @@ func TestRunPreviewVerificationGatePassingReportPreservesAdvisoryWarnings(t *tes
 	}
 }
 
+func TestInteractionCriticalSignalRequiresProvenCriticalCanarySignal(t *testing.T) {
+	advisoryOnly := &PreviewVerificationResult{
+		Passed:                true,
+		CanaryErrors:          []string{"interaction: TypeError: Cannot read properties of undefined"},
+		CanaryVisibleControls: 0,
+	}
+	if interactionCriticalSignal(advisoryOnly) {
+		t.Fatalf("expected advisory-only canary warning not to block preview completion")
+	}
+
+	postClickBlank := &PreviewVerificationResult{
+		Passed:                       true,
+		CanaryClickCount:             2,
+		CanaryVisibleControls:        3,
+		CanaryPostInteractionChecked: true,
+		CanaryPostInteractionHealthy: false,
+	}
+	if !interactionCriticalSignal(postClickBlank) {
+		t.Fatalf("expected a checked post-interaction blank preview to trigger repair")
+	}
+
+	noControls := &PreviewVerificationResult{
+		Passed:                true,
+		CanaryVisibleControls: 0,
+		RepairHints: []string{
+			"interaction: The preview mounted but exposes no visible buttons, links, menus, or toggles on first load.",
+		},
+	}
+	if !interactionCriticalSignal(noControls) {
+		t.Fatalf("expected explicit no-visible-controls canary hint to trigger repair")
+	}
+}
+
 func TestBuildPreviewRepairTaskInputIncludesScreenshotForVisionHints(t *testing.T) {
 	result := &PreviewVerificationResult{
 		FailureKind:      "blank_screen",

@@ -1578,7 +1578,7 @@ func setupRoutes(
 				billing.POST("/portal", paymentHandler.CreateBillingPortalSession) // Stripe billing portal
 				billing.GET("/plans", paymentHandler.GetPlans)                     // List available plans
 				billing.GET("/usage", paymentHandler.GetUsage)                     // Get usage stats
-			billing.POST("/change-plan", paymentHandler.ChangePlan)               // Upgrade or downgrade plan
+				billing.POST("/change-plan", paymentHandler.ChangePlan)            // Upgrade or downgrade plan
 				billing.POST("/cancel", paymentHandler.CancelSubscription)         // Cancel subscription
 				billing.POST("/reactivate", paymentHandler.ReactivateSubscription) // Reactivate subscription
 				billing.GET("/invoices", paymentHandler.GetInvoices)               // Get invoice history
@@ -1836,15 +1836,16 @@ func (b *previewVerifierBridge) VerifyBuildFiles(
 		return &agents.PreviewVerificationResult{Passed: true}
 	}
 	return &agents.PreviewVerificationResult{
-		Passed:                      res.Passed,
-		FailureKind:                 res.FailureKind,
-		RepairHints:                 res.RepairHints,
-		Details:                     res.Details,
-		ScreenshotBase64:            res.ScreenshotBase64,
-		CanaryErrors:                res.CanaryErrors,
-		CanaryClickCount:            res.CanaryClickCount,
-		CanaryVisibleControls:       res.CanaryVisibleControls,
+		Passed:                       res.Passed,
+		FailureKind:                  res.FailureKind,
+		RepairHints:                  res.RepairHints,
+		Details:                      res.Details,
+		ScreenshotBase64:             res.ScreenshotBase64,
+		CanaryErrors:                 res.CanaryErrors,
+		CanaryClickCount:             res.CanaryClickCount,
+		CanaryVisibleControls:        res.CanaryVisibleControls,
+		CanaryPostInteractionChecked: res.CanaryPostInteractionChecked,
 		CanaryPostInteractionHealthy: res.CanaryPostInteractionHealthy,
-		VisionSeverity:              res.VisionSeverity,
+		VisionSeverity:               res.VisionSeverity,
 	}
 }

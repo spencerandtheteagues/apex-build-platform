@@ -65,6 +65,22 @@ const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
   </div>
 )
 
+const AppLoadingIntro: React.FC = () => (
+  <div className="fixed inset-0 overflow-hidden bg-[#02030a]" role="status" aria-label="APEX-BUILD loading">
+    <video
+      className="h-full w-full object-cover"
+      src="/apex-build-loading.mp4"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="auto"
+      aria-hidden="true"
+    />
+    <span className="sr-only">APEX-BUILD loading</span>
+  </div>
+)
+
 const getProjectIdFromPath = (): number | null => {
   if (typeof window === 'undefined') return null
 
@@ -817,21 +833,7 @@ function App() {
 
   // Loading screen
   if (isLoading || !sessionBootstrapComplete) {
-    return (
-      <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
-        {/* Animated cyberpunk background */}
-        <AnimatedBackground variant="full" intensity="medium" interactive={false} />
-
-        <div className="flex flex-col items-center space-y-6 relative z-10">
-          <div className="w-48 h-48 flex items-center justify-center animate-pulse">
-            <img src={logoSrc} alt="APEX Logo" className="w-full h-full object-contain drop-shadow-[0_0_30px_rgba(239,68,68,0.5)]" />
-          </div>
-          <div className="flex flex-col items-center gap-2">
-            <p className="text-red-400 text-sm animate-pulse">Initializing System...</p>
-          </div>
-        </div>
-      </div>
-    )
+    return <AppLoadingIntro />
   }
 
   const legalDocumentModal = activeLegalDocument ? (

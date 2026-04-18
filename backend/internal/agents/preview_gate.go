@@ -24,16 +24,17 @@ type VerifiableFile struct {
 
 // PreviewVerificationResult is the result of a preview readiness check.
 type PreviewVerificationResult struct {
-	Passed                      bool
-	FailureKind                 string   // e.g. "missing_entrypoint", "blank_screen", "corrupt_content"
-	RepairHints                 []string // Actionable directives for the repair agent
-	Details                     string   // Human-readable failure description
-	ScreenshotBase64            string
-	CanaryErrors                []string
-	CanaryClickCount            int
-	CanaryVisibleControls       int  // number of visible interactive controls detected on first load
-	CanaryPostInteractionHealthy bool // false when the preview blanked after basic interactions
-	VisionSeverity              string // "critical", "advisory", "clean", or "" when vision skipped
+	Passed                       bool
+	FailureKind                  string   // e.g. "missing_entrypoint", "blank_screen", "corrupt_content"
+	RepairHints                  []string // Actionable directives for the repair agent
+	Details                      string   // Human-readable failure description
+	ScreenshotBase64             string
+	CanaryErrors                 []string
+	CanaryClickCount             int
+	CanaryVisibleControls        int    // number of visible interactive controls detected on first load
+	CanaryPostInteractionChecked bool   // true when the canary completed the post-click settle check
+	CanaryPostInteractionHealthy bool   // false when the preview blanked after basic interactions
+	VisionSeverity               string // "critical", "advisory", "clean", or "" when vision skipped
 }
 
 // BuildPreviewVerifier is the interface the agent manager uses for preview verification.
@@ -129,11 +130,6 @@ func (am *AgentManager) runPreviewVerificationGate(
 
 		frontendFiles := frontendFilePathsFromFiles(allFiles)
 
-		// Point 1: record advisory hints as fingerprints (visual/interaction classes).
-		if len(passedWarnings) > 0 {
-			recordPreviewAdvisoryPassFingerprints(build, passedWarnings, frontendFiles)
-		}
-
 		// Point 3: if this is a second-pass result after a repair attempt, record
 		// the outcome — repair succeeded since the gate just passed.
 		build.mu.RLock()
@@ -189,6 +185,7 @@ func (am *AgentManager) runPreviewVerificationGate(
 						CanaryErrors:                 result.CanaryErrors,
 						CanaryClickCount:             result.CanaryClickCount,
 						CanaryVisibleControls:        result.CanaryVisibleControls,
+						CanaryPostInteractionChecked: result.CanaryPostInteractionChecked,
 						CanaryPostInteractionHealthy: result.CanaryPostInteractionHealthy,
 					}
 					if am.launchPreviewRepairTask(build, allFiles, interactionFailResult, now) {
@@ -612,6 +609,22 @@ func previewHintsContainVisionAdvice(hints []string) bool {
 	return false
 }
 
+func previewHintsContainNoVisibleControls(hints []string) bool {
+	for _, hint := range hints {
+		normalized := strings.ToLower(strings.TrimSpace(hint))
+		if normalized == "" {
+			continue
+		}
+		if strings.Contains(normalized, "no visible buttons") ||
+			strings.Contains(normalized, "zero visible interactive") ||
+			strings.Contains(normalized, "no visible interactive") ||
+			strings.Contains(normalized, "exposes no visible") {
+			return true
+		}
+	}
+	return false
+}
+
 func buildPreviewRepairTaskInput(build *Build, result *PreviewVerificationResult, hints []string) map[string]any {
 	input := map[string]any{
 		"failure_kind":    result.FailureKind,
@@ -732,14 +745,13 @@ func interactionCriticalSignal(result *PreviewVerificationResult) bool {
 		return false
 	}
 	// Preview blanked or crashed after basic interactions.
-	if result.CanaryClickCount > 0 && !result.CanaryPostInteractionHealthy {
+	if result.CanaryClickCount > 0 && result.CanaryPostInteractionChecked && !result.CanaryPostInteractionHealthy {
 		return true
 	}
-	// App mounted but has zero interactive controls — only meaningful when the
-	// canary actually ran (CanaryClickCount==0 and CanaryVisibleControls==0 both
-	// being zero also happens when canary was skipped entirely, so require at least
-	// one canary error as confirmation that the probe ran and found problems).
-	if result.CanaryVisibleControls == 0 && len(result.CanaryErrors) > 0 {
+	// App mounted but has zero interactive controls. Treat this as blocking only
+	// when the runtime canary emitted its explicit no-controls hint; generic
+	// advisory interaction errors can be reported on otherwise-passing previews.
+	if result.CanaryVisibleControls == 0 && previewHintsContainNoVisibleControls(result.RepairHints) {
 		return true
 	}
 	return false
@@ -749,10 +761,10 @@ func buildInteractionFailureDetail(result *PreviewVerificationResult) string {
 	if result == nil {
 		return "interaction canary detected a non-interactive preview"
 	}
-	if result.CanaryClickCount > 0 && !result.CanaryPostInteractionHealthy {
+	if result.CanaryClickCount > 0 && result.CanaryPostInteractionChecked && !result.CanaryPostInteractionHealthy {
 		return fmt.Sprintf("preview blanked or crashed after %d interaction(s) — post-click settle check failed", result.CanaryClickCount)
 	}
-	if result.CanaryVisibleControls == 0 {
+	if result.CanaryVisibleControls == 0 && previewHintsContainNoVisibleControls(result.RepairHints) {
 		return "preview mounted but exposes zero visible interactive controls on first load"
 	}
 	return fmt.Sprintf("interaction canary errors: %s", strings.Join(result.CanaryErrors, "; "))
@@ -763,13 +775,13 @@ func buildInteractionRepairHints(result *PreviewVerificationResult) []string {
 		return nil
 	}
 	var hints []string
-	if result.CanaryClickCount > 0 && !result.CanaryPostInteractionHealthy {
+	if result.CanaryClickCount > 0 && result.CanaryPostInteractionChecked && !result.CanaryPostInteractionHealthy {
 		hints = append(hints,
 			"The preview blanked or crashed after basic interactions. Ensure the app does not unmount or throw unhandled errors when buttons, links, or form controls are clicked.",
 			"Wrap the root app in an error boundary and ensure routing does not render a blank screen on navigation.",
 		)
 	}
-	if result.CanaryVisibleControls == 0 {
+	if result.CanaryVisibleControls == 0 && previewHintsContainNoVisibleControls(result.RepairHints) {
 		hints = append(hints,
 			"The preview loaded but has no visible buttons, links, menus, or form controls on the first screen. Add at least one interactive element (CTA button, nav link, or form) to the initial view.",
 		)

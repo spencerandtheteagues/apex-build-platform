@@ -79,14 +79,17 @@
   <body>
     <!-- Loading Screen -->
     <div id="loading-screen" class="loading-screen">
-      <div class="loading-content">
-        <div class="loading-logo">
-          <img src="/apex-build-logo-transparent.png" alt="APEX-BUILD" style="width:100%;height:100%;object-fit:contain;" />
-        </div>
-        <div class="loading-text">APEX-BUILD</div>
-        <div class="loading-subtitle">Initializing Cyberpunk Development Environment</div>
-        <div class="loading-spinner"></div>
-      </div>
+      <video
+        class="loading-video"
+        src="/apex-build-loading.mp4"
+        autoplay
+        muted
+        loop
+        playsinline
+        preload="auto"
+        aria-hidden="true"
+      ></video>
+      <div class="loading-fallback" aria-live="polite">APEX-BUILD loading</div>
     </div>
 
     <!-- App Root -->

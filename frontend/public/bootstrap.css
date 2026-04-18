@@ -19,51 +19,31 @@ body {
 .loading-screen {
   position: fixed;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #0a0a0f 0%, #001133 100%);
+  display: block;
+  background: #02030a;
   z-index: 9999;
+  overflow: hidden;
 }
 
-.loading-content {
-  text-align: center;
-  animation: pulse 2s ease-in-out infinite;
+.loading-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  object-position: center;
+  background: #02030a;
 }
 
-.loading-logo {
-  width: 120px;
-  height: 120px;
-  background: transparent;
-  border-radius: 0;
-  margin: 0 auto 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  filter: drop-shadow(0 0 18px rgba(239, 68, 68, 0.7));
-}
-
-.loading-text {
-  font-size: 24px;
-  font-weight: bold;
-  color: #ffffff;
-  margin-bottom: 8px;
-}
-
-.loading-subtitle {
-  font-size: 14px;
-  color: #00f5ff;
-  margin-bottom: 24px;
-}
-
-.loading-spinner {
-  width: 32px;
-  height: 32px;
-  border: 2px solid rgba(0, 245, 255, 0.2);
-  border-top: 2px solid #00f5ff;
-  border-radius: 50%;
-  margin: 0 auto;
-  animation: spin 1s linear infinite;
+.loading-fallback {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .container {
@@ -86,29 +66,8 @@ body {
     font-size: 14px;
   }
 
-  .loading-text {
-    font-size: 20px;
-  }
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.8;
-  }
-}
-
-@keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-
-  100% {
-    transform: rotate(360deg);
+  .loading-video {
+    object-position: center;
   }
 }
 
