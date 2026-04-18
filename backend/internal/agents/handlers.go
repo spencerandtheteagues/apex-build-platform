@@ -1135,9 +1135,14 @@ func (h *BuildHandler) loadReadableBuild(buildID string, userID uint) (*Build, *
 		return nil, nil, false, snapErr
 	}
 
+	// Read-only build endpoints must never restart execution. The takeover below
+	// restores the in-memory build for state display only (resumeExecution: false).
+	// Actual resumption is exclusive to write/control paths (getBuildActionSession).
+	// Using resumeExecution: true here caused old interrupted/failed builds to
+	// randomly restart whenever their status was polled.
 	if claimedSnapshot, claimed, claimErr := h.manager.claimActiveSnapshotTakeover(snapshot); claimErr == nil && claimed {
 		build, restored, restoreErr := h.manager.restoreBuildSessionFromSnapshotWithOptions(claimedSnapshot, restoreBuildSessionOptions{
-			resumeExecution: true,
+			resumeExecution: false,
 		})
 		if restoreErr == nil {
 			if build.UserID != userID {
@@ -1151,11 +1156,6 @@ func (h *BuildHandler) loadReadableBuild(buildID string, userID uint) (*Build, *
 		snapshot = claimedSnapshot
 	}
 
-	// Read-only build endpoints must never materialize active snapshots into a
-	// second in-memory session. In autoscaled production that creates a fake
-	// "live" copy on a non-owner instance, causing status polling to oscillate
-	// between the true live build and stale snapshot state. Execution resumption
-	// remains exclusive to write/control paths.
 	return nil, snapshot, false, nil
 }
 
@@ -2677,22 +2677,26 @@ func (h *BuildHandler) DeleteBuild(c *gin.Context) {
 		return
 	}
 
-	displayStatus := presentedSnapshotStatus(snapshot)
-	if isActiveBuildStatus(string(displayStatus)) {
-		c.JSON(http.StatusConflict, gin.H{
-			"error":   "build must be cancelled before removal",
-			"details": "Only completed, failed, or cancelled builds can be removed from history",
-		})
-		return
-	}
-
+	// If the build is live and active, cancel it automatically so the user
+	// doesn't need a separate cancel step before deleting.
 	if liveBuild, liveErr := h.manager.GetBuild(buildID); liveErr == nil && liveBuild != nil &&
 		liveBuild.Status != BuildCompleted && liveBuild.Status != BuildFailed && liveBuild.Status != BuildCancelled {
-		c.JSON(http.StatusConflict, gin.H{
-			"error":   "build must be cancelled before removal",
-			"details": "Cancel the active build before removing it from history",
-		})
-		return
+		_ = h.manager.CancelBuild(buildID)
+	}
+
+	// If the snapshot still shows an active status but there is no live build
+	// in memory, the snapshot is orphaned (e.g. the server restarted mid-build).
+	// Allow deletion — requiring a manual cancel on a build that no longer runs
+	// is not actionable and traps history entries permanently.
+	displayStatus := presentedSnapshotStatus(snapshot)
+	if isActiveBuildStatus(string(displayStatus)) {
+		if _, liveErr := h.manager.GetBuild(buildID); liveErr != nil {
+			// No live build — orphaned snapshot, proceed with deletion.
+			log.Printf("DeleteBuild: build %s snapshot shows active status %q but no live build found; treating as orphaned snapshot and deleting", buildID, displayStatus)
+		} else {
+			// Live build still exists and cancel may still be in progress;
+			// allow deletion anyway since we just issued the cancel above.
+		}
 	}
 
 	if err := h.db.Unscoped().Where("build_id = ? AND user_id = ?", buildID, uid).Delete(&models.CompletedBuild{}).Error; err != nil {
