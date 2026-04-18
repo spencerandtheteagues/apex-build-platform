@@ -186,6 +186,13 @@ interface ProviderPanelItem {
   currentTaskLabel?: string
 }
 
+type SupportedProvider = ProviderPanelItem['provider']
+
+interface ProviderModelOption {
+  id: string
+  name: string
+}
+
 interface GeneratedFile {
   path: string
   content: string
@@ -231,11 +238,15 @@ interface BuildScreenProps {
   plannerSendMode: BuildMessageTargetMode
   setPlannerSendMode: (m: BuildMessageTargetMode) => void
   plannerMessagePending: boolean
+  providerModelOverrides: Record<SupportedProvider, string>
+  providerModelOptions: Record<SupportedProvider, ProviderModelOption[]>
+  providerModelPendingProvider: SupportedProvider | null
   agentMessageDrafts: Record<string, string>
   agentMessagePendingId: string | null
   onAgentMessageDraftChange: (agentId: string, value: string) => void
   onSendDirectAgentMessage: (agentId: string) => void
   onSendChatMessage: () => void
+  onSelectProviderModel: (provider: SupportedProvider, model: string) => void
   onPause: () => void
   onResume: () => void
   onRestart: () => void
@@ -1254,9 +1265,9 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
     platformReadinessNotice, buildFailureAttribution, showDiffReview, userId,
     isPreparingPreview, isCreatingProject, isStartingOver, createdProjectId,
     permissionActionId, rollbackCheckpointId, patchBundleActionId, promptProposalActionId, chatInput, setChatInput,
-    plannerSendMode, setPlannerSendMode, plannerMessagePending,
+    plannerSendMode, setPlannerSendMode, plannerMessagePending, providerModelOverrides, providerModelOptions, providerModelPendingProvider,
     agentMessageDrafts, agentMessagePendingId, onAgentMessageDraftChange, onSendDirectAgentMessage,
-    onSendChatMessage, onPause, onResume, onRestart, onStartOver,
+    onSendChatMessage, onSelectProviderModel, onPause, onResume, onRestart, onStartOver,
     onPreviewWorkspace, onOpenInIDE, onDownload, onRollbackCheckpoint,
     onResolvePermission, onApprovePatchBundle, onRejectPatchBundle, onReviewPromptProposal, onBenchmarkPromptProposal, onCreatePromptPackDraft, onRequestPromptPackActivation, onActivatePromptPackRequest, onRollbackPromptPackVersion, onSetShowDiffReview, onLoadProposedEdits,
     onOpenCompletedBuild,
@@ -1324,6 +1335,10 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
         providerPanels={providerPanels}
         hasBYOK={hasBYOK}
         isBuildActive={isBuildActive}
+        selectedModels={providerModelOverrides}
+        modelOptions={providerModelOptions}
+        modelUpdatePendingProvider={providerModelPendingProvider}
+        onModelSelect={onSelectProviderModel}
       />
 
       {/* Row 3: Live Activity Feed (flex-1) */}

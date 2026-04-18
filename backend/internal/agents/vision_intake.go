@@ -225,6 +225,7 @@ func cloneBuildRequestForCreation(req *BuildRequest) *BuildRequest {
 	cloned := *req
 	cloned.TechStack = cloneTechStack(req.TechStack)
 	cloned.RoleAssignments = cloneStringMap(req.RoleAssignments)
+	cloned.ProviderModelOverrides = cloneStringMap(req.ProviderModelOverrides)
 	return &cloned
 }
 

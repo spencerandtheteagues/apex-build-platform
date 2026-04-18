@@ -565,6 +565,7 @@ export class ApiService {
     }
     diff_mode?: boolean
     role_assignments?: Record<string, string>
+    provider_model_overrides?: Record<string, string>
     wireframe_image?: string
   }): Promise<{
     build_id: string
@@ -665,6 +666,18 @@ export class ApiService {
     interaction: BuildInteractionState
   }> {
     const response = await this.client.post(`/build/${buildId}/resume`, reason ? { reason } : {})
+    return response.data
+  }
+
+  async setBuildProviderModel(buildId: string, data: {
+    provider: string
+    model: string
+  }): Promise<{
+    status: string
+    provider_model_overrides?: Record<string, string>
+    agents?: any[]
+  }> {
+    const response = await this.client.post(`/build/${buildId}/provider-model`, data)
     return response.data
   }
 

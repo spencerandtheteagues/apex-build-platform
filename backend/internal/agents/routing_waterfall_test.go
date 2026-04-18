@@ -203,3 +203,54 @@ func TestGenerateTaskOutputWithProviderFallsBackWhenWaterfallDisabled(t *testing
 		t.Fatalf("expected build power mode in fallback path, got %+v", router.lastOpts)
 	}
 }
+
+func TestGenerateTaskOutputWithProviderHonorsManualProviderModelOverride(t *testing.T) {
+	t.Parallel()
+
+	router := &waterfallProbeRouter{}
+	am := &AgentManager{
+		aiRouter: router,
+		builds:   map[string]*Build{},
+	}
+
+	flags := defaultBuildOrchestrationFlags()
+	flags.EnableRoutingWaterfall = true
+	build := &Build{
+		ID:                     "build-waterfall-manual-override",
+		UserID:                 13,
+		PowerMode:              PowerMax,
+		ProviderMode:           "platform",
+		ProviderModelOverrides: map[string]string{"gpt4": "gpt-4.1"},
+		SnapshotState: BuildSnapshotState{
+			Orchestration: &BuildOrchestrationState{Flags: flags},
+		},
+		Agents: map[string]*Agent{},
+	}
+	agent := &Agent{
+		ID:       "agent-waterfall-manual-override",
+		Role:     RoleBackend,
+		Provider: ai.ProviderGPT4,
+		BuildID:  build.ID,
+	}
+	task := &Task{
+		ID:          "task-waterfall-manual-override",
+		Type:        TaskGenerateAPI,
+		Description: "Generate route",
+	}
+	build.Agents[agent.ID] = agent
+	am.builds[build.ID] = build
+
+	candidate, err := am.generateTaskOutputWithProvider(context.Background(), build, agent, task, "prompt", "system", ai.ProviderGPT4, 1200, 0.1)
+	if err != nil {
+		t.Fatalf("generateTaskOutputWithProvider returned error: %v", err)
+	}
+	if candidate == nil || candidate.Output == nil {
+		t.Fatalf("expected candidate output")
+	}
+	if router.lastOpts.ModelOverride != "gpt-4.1" {
+		t.Fatalf("expected manual provider model override to win, got %+v", router.lastOpts)
+	}
+	if candidate.WaterfallReason != "provider_model_override" {
+		t.Fatalf("expected manual override reason, got %+v", candidate)
+	}
+}

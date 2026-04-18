@@ -469,6 +469,7 @@ type BuildRestoreContext struct {
 	PhasedPipelineComplete      bool              `json:"phased_pipeline_complete,omitempty"`
 	DiffMode                    bool              `json:"diff_mode,omitempty"`
 	RoleAssignments             map[string]string `json:"role_assignments,omitempty"`
+	ProviderModelOverrides      map[string]string `json:"provider_model_overrides,omitempty"`
 	TechStack                   *TechStack        `json:"tech_stack,omitempty"`
 	Plan                        *BuildPlan        `json:"plan,omitempty"`
 }
@@ -504,6 +505,7 @@ type Build struct {
 	PhasedPipelineComplete      bool                  `json:"phased_pipeline_complete,omitempty"`
 	DiffMode                    bool                  `json:"diff_mode,omitempty"`        // When true, changes require user review before applying
 	RoleAssignments             map[string]string     `json:"role_assignments,omitempty"` // User-specified provider per role category
+	ProviderModelOverrides      map[string]string     `json:"provider_model_overrides,omitempty"`
 	Interaction                 BuildInteractionState `json:"interaction,omitempty"`
 	ActivityTimeline            []BuildActivityEntry  `json:"activity_timeline,omitempty"`
 	SnapshotState               BuildSnapshotState    `json:"snapshot_state,omitempty"`
@@ -817,18 +819,19 @@ type WSMessage struct {
 
 // BuildRequest is the input for starting a new build
 type BuildRequest struct {
-	Description          string            `json:"description"`
-	Prompt               string            `json:"prompt,omitempty"` // Detailed build prompt (falls back to Description)
-	WireframeImage       string            `json:"wireframe_image,omitempty"`
-	WireframeDescription string            `json:"wireframe_description,omitempty"`
-	Mode                 BuildMode         `json:"mode"`
-	PowerMode            PowerMode         `json:"power_mode,omitempty"`    // max, balanced, fast — controls model quality
-	ProviderMode         string            `json:"provider_mode,omitempty"` // platform or byok
-	RequirePreviewReady  bool              `json:"require_preview_ready,omitempty"`
-	ProjectName          string            `json:"project_name,omitempty"`
-	TechStack            *TechStack        `json:"tech_stack,omitempty"`       // Optional override
-	DiffMode             bool              `json:"diff_mode,omitempty"`        // When true, proposed changes require user approval
-	RoleAssignments      map[string]string `json:"role_assignments,omitempty"` // Optional: user-specified provider per role category (architect→claude, coder→gpt4, etc.)
+	Description            string            `json:"description"`
+	Prompt                 string            `json:"prompt,omitempty"` // Detailed build prompt (falls back to Description)
+	WireframeImage         string            `json:"wireframe_image,omitempty"`
+	WireframeDescription   string            `json:"wireframe_description,omitempty"`
+	Mode                   BuildMode         `json:"mode"`
+	PowerMode              PowerMode         `json:"power_mode,omitempty"`    // max, balanced, fast — controls model quality
+	ProviderMode           string            `json:"provider_mode,omitempty"` // platform or byok
+	RequirePreviewReady    bool              `json:"require_preview_ready,omitempty"`
+	ProjectName            string            `json:"project_name,omitempty"`
+	TechStack              *TechStack        `json:"tech_stack,omitempty"`       // Optional override
+	DiffMode               bool              `json:"diff_mode,omitempty"`        // When true, proposed changes require user approval
+	RoleAssignments        map[string]string `json:"role_assignments,omitempty"` // Optional: user-specified provider per role category (architect→claude, coder→gpt4, etc.)
+	ProviderModelOverrides map[string]string `json:"provider_model_overrides,omitempty"`
 }
 
 // BuildResponse is returned when a build is created

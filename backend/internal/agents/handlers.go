@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"apex-build/internal/ai"
 	"apex-build/internal/applog"
 	appmiddleware "apex-build/internal/middleware"
 	"apex-build/pkg/models"
@@ -533,6 +534,34 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"error":   "invalid provider for hosted build",
 					"details": "Ollama is local/BYOK-only. Hosted platform builds may only assign Claude, GPT, Gemini, or Grok.",
+				})
+				return
+			}
+		}
+	}
+
+	if req.ProviderModelOverrides != nil {
+		validProvs := map[string]bool{"claude": true, "gpt4": true, "gemini": true, "grok": true, "ollama": true}
+		for provider, model := range req.ProviderModelOverrides {
+			if !validProvs[provider] {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "invalid provider",
+					"details": fmt.Sprintf("Unknown provider: %s. Valid: claude, gpt4, gemini, grok, ollama", provider),
+				})
+				return
+			}
+			if provider == "ollama" && strings.ToLower(strings.TrimSpace(req.ProviderMode)) != "byok" {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "invalid provider for hosted build",
+					"details": "Ollama is local/BYOK-only. Hosted platform builds may only override Claude, GPT, Gemini, or Grok models.",
+				})
+				return
+			}
+			normalizedModel := strings.TrimSpace(model)
+			if normalizedModel != "" && !strings.EqualFold(normalizedModel, "auto") && !modelBelongsToProvider(ai.AIProvider(provider), normalizedModel) {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "invalid provider model override",
+					"details": fmt.Sprintf("Model %s does not belong to provider %s", model, provider),
 				})
 				return
 			}
@@ -1173,24 +1202,25 @@ func (h *BuildHandler) readLiveBuildStatusPayload(build *Build, userPlan string,
 		displayProgress := presentedLiveBuildProgress(build.Progress, snapshotState, build.Status)
 
 		response := gin.H{
-			"id":                     build.ID,
-			"status":                 string(build.Status),
-			"mode":                   string(build.Mode),
-			"power_mode":             string(build.PowerMode),
-			"provider_mode":          build.ProviderMode,
-			"require_preview_ready":  build.RequirePreviewReady,
-			"description":            build.Description,
-			"progress":               displayProgress,
-			"agents_count":           len(build.Agents),
-			"tasks_count":            len(build.Tasks),
-			"checkpoints":            len(build.Checkpoints),
-			"created_at":             build.CreatedAt,
-			"updated_at":             build.UpdatedAt,
-			"completed_at":           build.CompletedAt,
-			"error":                  errorMessage,
-			"interaction":            interaction,
-			"live":                   true,
-			"restored_from_snapshot": restored,
+			"id":                       build.ID,
+			"status":                   string(build.Status),
+			"mode":                     string(build.Mode),
+			"power_mode":               string(build.PowerMode),
+			"provider_mode":            build.ProviderMode,
+			"require_preview_ready":    build.RequirePreviewReady,
+			"description":              build.Description,
+			"provider_model_overrides": cloneStringMap(build.ProviderModelOverrides),
+			"progress":                 displayProgress,
+			"agents_count":             len(build.Agents),
+			"tasks_count":              len(build.Tasks),
+			"checkpoints":              len(build.Checkpoints),
+			"created_at":               build.CreatedAt,
+			"updated_at":               build.UpdatedAt,
+			"completed_at":             build.CompletedAt,
+			"error":                    errorMessage,
+			"interaction":              interaction,
+			"live":                     true,
+			"restored_from_snapshot":   restored,
 		}
 		for key, value := range buildSnapshotStateResponseFields(snapshotState, string(build.Status), userPlan) {
 			response[key] = value
@@ -1215,30 +1245,31 @@ func (h *BuildHandler) readLiveBuildDetailsPayload(build *Build, userPlan string
 		displayProgress := presentedLiveBuildProgress(build.Progress, snapshotState, build.Status)
 
 		response := gin.H{
-			"id":                     build.ID,
-			"user_id":                build.UserID,
-			"project_id":             build.ProjectID,
-			"status":                 string(build.Status),
-			"mode":                   string(build.Mode),
-			"power_mode":             string(build.PowerMode),
-			"provider_mode":          build.ProviderMode,
-			"require_preview_ready":  build.RequirePreviewReady,
-			"description":            build.Description,
-			"plan":                   build.Plan,
-			"agents":                 agents,
-			"tasks":                  build.Tasks,
-			"checkpoints":            build.Checkpoints,
-			"progress":               displayProgress,
-			"created_at":             build.CreatedAt,
-			"updated_at":             build.UpdatedAt,
-			"completed_at":           build.CompletedAt,
-			"error":                  build.Error,
-			"files":                  h.manager.collectGeneratedFiles(build),
-			"messages":               interaction.Messages,
-			"interaction":            interaction,
-			"activity_timeline":      copyBuildActivityTimelineLocked(build),
-			"live":                   isActiveBuildStatus(string(build.Status)),
-			"restored_from_snapshot": restored,
+			"id":                       build.ID,
+			"user_id":                  build.UserID,
+			"project_id":               build.ProjectID,
+			"status":                   string(build.Status),
+			"mode":                     string(build.Mode),
+			"power_mode":               string(build.PowerMode),
+			"provider_mode":            build.ProviderMode,
+			"require_preview_ready":    build.RequirePreviewReady,
+			"description":              build.Description,
+			"provider_model_overrides": cloneStringMap(build.ProviderModelOverrides),
+			"plan":                     build.Plan,
+			"agents":                   agents,
+			"tasks":                    build.Tasks,
+			"checkpoints":              build.Checkpoints,
+			"progress":                 displayProgress,
+			"created_at":               build.CreatedAt,
+			"updated_at":               build.UpdatedAt,
+			"completed_at":             build.CompletedAt,
+			"error":                    build.Error,
+			"files":                    h.manager.collectGeneratedFiles(build),
+			"messages":                 interaction.Messages,
+			"interaction":              interaction,
+			"activity_timeline":        copyBuildActivityTimelineLocked(build),
+			"live":                     isActiveBuildStatus(string(build.Status)),
+			"restored_from_snapshot":   restored,
 		}
 		for key, value := range buildSnapshotStateResponseFields(snapshotState, string(build.Status), userPlan) {
 			response[key] = value
@@ -1624,6 +1655,80 @@ func (h *BuildHandler) ResumeBuild(c *gin.Context) {
 		"interaction":      interaction,
 		"live":             true,
 		"restored_session": restoredSession,
+	})
+}
+
+// SetProviderModelOverride updates the build's per-provider model lock.
+// POST /api/v1/build/:id/provider-model
+func (h *BuildHandler) SetProviderModelOverride(c *gin.Context) {
+	buildID := c.Param("id")
+	uid, ok := appmiddleware.RequireUserID(c)
+	if !ok {
+		return
+	}
+
+	build, restoredSession, err := h.getBuildActionSession(uid, buildID, false)
+	if err != nil {
+		writeBuildActionSessionError(c, err)
+		return
+	}
+
+	var req struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid request",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	provider := ai.AIProvider(strings.TrimSpace(strings.ToLower(req.Provider)))
+	switch provider {
+	case ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama:
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid provider",
+			"details": fmt.Sprintf("Unknown provider: %s", req.Provider),
+		})
+		return
+	}
+
+	if provider == ai.ProviderOllama && strings.ToLower(strings.TrimSpace(build.ProviderMode)) != "byok" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid provider for hosted build",
+			"details": "Ollama is local/BYOK-only.",
+		})
+		return
+	}
+
+	model := strings.TrimSpace(req.Model)
+	if model != "" && !strings.EqualFold(model, "auto") && !modelBelongsToProvider(provider, model) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid provider model override",
+			"details": fmt.Sprintf("Model %s does not belong to provider %s", model, provider),
+		})
+		return
+	}
+
+	if err := h.manager.SetProviderModelOverride(buildID, provider, model); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	build.mu.RLock()
+	overrides := cloneStringMap(build.ProviderModelOverrides)
+	agents := orderedBuildAgents(build.Agents)
+	build.mu.RUnlock()
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":                   "updated",
+		"provider_model_overrides": overrides,
+		"agents":                   agents,
+		"live":                     true,
+		"restored_session":         restoredSession,
 	})
 }
 
@@ -3334,6 +3439,7 @@ func (h *BuildHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		build.GET("/:id/status", h.GetBuildStatus)
 		build.POST("/:id/message", h.SendMessage)
 		build.GET("/:id/messages", h.GetMessages)
+		build.POST("/:id/provider-model", h.SetProviderModelOverride)
 		build.GET("/:id/permissions", h.GetPermissions)
 		build.POST("/:id/permissions/rules", h.SetPermissionRule)
 		build.POST("/:id/permissions/requests/:requestId/resolve", h.ResolvePermissionRequest)

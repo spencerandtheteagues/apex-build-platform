@@ -191,6 +191,7 @@ interface BuildState {
   description: string
   availableProviders?: string[]
   powerMode?: 'fast' | 'balanced' | 'max'
+  providerModelOverrides?: Partial<Record<SupportedBuildProvider, string>>
   currentPhase?: string
   qualityGateRequired?: boolean
   qualityGateStatus?: 'pending' | 'running' | 'passed' | 'failed'
@@ -427,9 +428,17 @@ const getModelTier = (mode: 'fast' | 'balanced' | 'max') => POWER_MODE_MODEL_CAT
 const getPowerModeModelSummary = (mode: 'fast' | 'balanced' | 'max') =>
   MODEL_PANEL_ORDER.map((provider) => getModelTier(mode)[provider].name).join(' / ')
 
+const DEFAULT_PROVIDER_MODEL_SELECTIONS: Record<SupportedBuildProvider, string> = {
+  claude: 'auto',
+  gpt4: 'auto',
+  gemini: 'auto',
+  grok: 'auto',
+}
+
 const canonicalizeModelId = (model?: string) => {
   const value = String(model || '').trim()
   if (!value) return ''
+  if (value.toLowerCase() === 'auto') return 'auto'
 
   if (value.startsWith('gpt-5.4')) return 'gpt-5.4'
   if (value.startsWith('gpt-4.1')) return 'gpt-4.1'
@@ -475,6 +484,7 @@ const modelBelongsToProvider = (provider: SupportedBuildProvider, model?: string
 const getModelDisplayName = (model?: string, fallbackMode: 'fast' | 'balanced' | 'max' = 'fast') => {
   const canonicalModel = canonicalizeModelId(model)
   if (!canonicalModel) return ''
+  if (canonicalModel === 'auto') return 'Auto'
   for (const tier of Object.values(POWER_MODE_MODEL_CATALOG)) {
     for (const entry of Object.values(tier)) {
       if (entry.id === canonicalModel) return entry.name
@@ -484,6 +494,52 @@ const getModelDisplayName = (model?: string, fallbackMode: 'fast' | 'balanced' |
   if (provider) return getModelTier(fallbackMode)[provider].name
   return canonicalModel
 }
+
+const normalizeProviderModelOverrides = (
+  overrides?: Record<string, string> | null
+): Record<SupportedBuildProvider, string> => {
+  const normalized = { ...DEFAULT_PROVIDER_MODEL_SELECTIONS }
+  for (const provider of MODEL_PANEL_ORDER) {
+    const raw = typeof overrides?.[provider] === 'string' ? canonicalizeModelId(overrides[provider]) : ''
+    if (raw === 'auto' || !raw) {
+      normalized[provider] = 'auto'
+      continue
+    }
+    if (modelBelongsToProvider(provider, raw)) {
+      normalized[provider] = raw
+    }
+  }
+  return normalized
+}
+
+const serializeProviderModelOverrides = (
+  overrides: Record<SupportedBuildProvider, string>
+): Record<string, string> | undefined => {
+  const serialized = MODEL_PANEL_ORDER.reduce<Record<string, string>>((acc, provider) => {
+    const model = canonicalizeModelId(overrides[provider])
+    if (model && model !== 'auto' && modelBelongsToProvider(provider, model)) {
+      acc[provider] = model
+    }
+    return acc
+  }, {})
+  return Object.keys(serialized).length > 0 ? serialized : undefined
+}
+
+const PROVIDER_MODEL_OPTIONS: Record<SupportedBuildProvider, ProviderModelTier[]> = MODEL_PANEL_ORDER.reduce(
+  (acc, provider) => {
+    const seen = new Set<string>()
+    acc[provider] = []
+    for (const mode of ['max', 'balanced', 'fast'] as const) {
+      const model = POWER_MODE_MODEL_CATALOG[mode][provider]
+      if (!seen.has(model.id)) {
+        seen.add(model.id)
+        acc[provider].push(model)
+      }
+    }
+    return acc
+  },
+  {} as Record<SupportedBuildProvider, ProviderModelTier[]>
+)
 
 const humanizeIdentifier = (value?: string) => {
   const normalized = String(value || '')
@@ -1605,6 +1661,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   // Model role assignment state
   const [roleConfigMode, setRoleConfigMode] = useState<'auto' | 'manual'>('auto')
   const [roleAssignments, setRoleAssignments] = useState<Record<string, string>>({})
+  const [providerModelOverrides, setProviderModelOverrides] = useState<Record<SupportedBuildProvider, string>>(DEFAULT_PROVIDER_MODEL_SELECTIONS)
+  const [providerModelPendingProvider, setProviderModelPendingProvider] = useState<SupportedBuildProvider | null>(null)
   const [providerStatuses, setProviderStatuses] = useState<Record<string, string>>({})
   const [hasBYOK, setHasBYOK] = useState(false)
 
@@ -1910,6 +1968,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       .filter((thought): thought is AIThought => thought !== null)
   }, [])
   const activePowerMode = buildState?.powerMode || powerMode
+  const activeProviderModelOverrides = buildState?.providerModelOverrides
+    ? normalizeProviderModelOverrides(buildState.providerModelOverrides)
+    : providerModelOverrides
   const activeBuildStatuses = useMemo(
     () => new Set<BuildState['status']>(['planning', 'in_progress', 'testing', 'reviewing', 'awaiting_review']),
     []
@@ -2020,7 +2081,13 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     )
 
     return MODEL_PANEL_ORDER.map((provider) => {
-      const configuredModel = configuredTier[provider]
+      const manualModel = activeProviderModelOverrides[provider]
+      const configuredModel = manualModel !== 'auto' && modelBelongsToProvider(provider, manualModel)
+        ? {
+            id: manualModel,
+            name: getModelDisplayName(manualModel, activePowerMode) || manualModel,
+          }
+        : configuredTier[provider]
       const providerAgents = (buildState?.agents || []).filter((agent) => normalizeProviderKey(agent.provider) === provider)
       const thoughts = aiThoughts
         .filter((thought) => normalizeProviderKey(thought.provider) === provider)
@@ -2091,7 +2158,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         multipleLiveModels: actualModelIds.length > 1,
       }
     })
-  }, [activePowerMode, aiThoughts, buildState?.agents, buildState?.availableProviders, isBuildActive])
+  }, [activePowerMode, activeProviderModelOverrides, aiThoughts, buildState?.agents, buildState?.availableProviders, isBuildActive])
 
   useEffect(() => {
     if (aiThoughts.length === 0) return
@@ -2980,6 +3047,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
               : (typeof data.progress === 'number' ? clampPercent(data.progress) : prev?.progress ?? 0),
             agents: Object.values(data.agents || {}),
             powerMode: data.power_mode || data.powerMode || prev?.powerMode,
+            providerModelOverrides: data.provider_model_overrides
+              ? normalizeProviderModelOverrides(data.provider_model_overrides)
+              : prev?.providerModelOverrides,
             currentPhase: data.phase_key || data.phase || data.current_phase || prev?.currentPhase,
             qualityGateRequired: typeof data.quality_gate_required === 'boolean' ? data.quality_gate_required : prev?.qualityGateRequired,
             qualityGateStage: data.quality_gate_stage || prev?.qualityGateStage,
@@ -3054,6 +3124,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           if (data.phase === 'provider_check' && data.available_providers) {
             updates.availableProviders = data.available_providers
             addSystemMessage(`AI Providers available: ${data.available_providers.join(', ')} (${data.provider_count} total)`)
+          }
+          if (data.provider_model_overrides) {
+            updates.providerModelOverrides = normalizeProviderModelOverrides(data.provider_model_overrides)
           }
 
           if (typeof (data.phase_key || data.phase || data.current_phase) === 'string' && String(data.phase_key || data.phase || data.current_phase).trim()) {
@@ -4756,6 +4829,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       checkpoints,
       description: String(payload.description || appDescription || ''),
       powerMode: payload.power_mode || payload.powerMode || powerMode,
+      providerModelOverrides: normalizeProviderModelOverrides(payload.provider_model_overrides),
       currentPhase: payload.phase || payload.current_phase || payload.currentPhase || undefined,
       qualityGateRequired: typeof payload.quality_gate_required === 'boolean' ? payload.quality_gate_required : true,
       qualityGateStatus: typeof payload.quality_gate_status === 'string'
@@ -5186,6 +5260,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         tech_stack: techStackOverride || undefined,
         diff_mode: false,
         role_assignments: roleConfigMode === 'manual' ? roleAssignments : undefined,
+        provider_model_overrides: serializeProviderModelOverrides(providerModelOverrides),
         wireframe_image: wireframeImage || undefined,
       })
 
@@ -5207,6 +5282,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         checkpoints: [],
         description: appDescription,
         powerMode,
+        providerModelOverrides: normalizeProviderModelOverrides(serializeProviderModelOverrides(providerModelOverrides)),
         currentPhase: 'Planning',
         qualityGateRequired: true,
         qualityGateStatus: 'pending',
@@ -5321,6 +5397,44 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       addSystemMessage('Failed to resume build')
     } finally {
       setBuildActionPending(null)
+    }
+  }
+
+  const handleSelectProviderModel = async (provider: SupportedBuildProvider, model: string) => {
+    const nextOverrides = normalizeProviderModelOverrides({
+      ...activeProviderModelOverrides,
+      [provider]: model,
+    })
+    setProviderModelOverrides(nextOverrides)
+
+    if (!buildState?.id || !isBuildActive) {
+      setBuildState((prev) => prev ? { ...prev, providerModelOverrides: nextOverrides } : prev)
+      return
+    }
+
+    setProviderModelPendingProvider(provider)
+    try {
+      const response = await apiService.setBuildProviderModel(buildState.id, {
+        provider,
+        model,
+      })
+      const persistedOverrides = normalizeProviderModelOverrides(response.provider_model_overrides || nextOverrides)
+      setProviderModelOverrides(persistedOverrides)
+      setBuildState((prev) => prev ? {
+        ...prev,
+        providerModelOverrides: persistedOverrides,
+        agents: Array.isArray(response.agents) ? response.agents : prev.agents,
+      } : prev)
+      if (canonicalizeModelId(model) === 'auto') {
+        addSystemMessage(`${humanizeIdentifier(provider)} returned to Auto model selection`)
+      } else {
+        addSystemMessage(`${humanizeIdentifier(provider)} locked to ${getModelDisplayName(model, activePowerMode) || model}`)
+      }
+    } catch (error) {
+      setProviderModelOverrides(normalizeProviderModelOverrides(buildState.providerModelOverrides))
+      addSystemMessage(`Failed to update ${humanizeIdentifier(provider)} model selection`)
+    } finally {
+      setProviderModelPendingProvider(null)
     }
   }
 
@@ -6161,6 +6275,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             plannerSendMode={plannerSendMode}
             setPlannerSendMode={setPlannerSendMode}
             plannerMessagePending={plannerMessagePending}
+            providerModelOverrides={activeProviderModelOverrides}
+            providerModelOptions={PROVIDER_MODEL_OPTIONS}
+            providerModelPendingProvider={providerModelPendingProvider}
             agentMessageDrafts={agentMessageDrafts}
             agentMessagePendingId={agentMessagePendingId}
             onAgentMessageDraftChange={(agentId, value) => {
@@ -6173,6 +6290,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
               }
             }}
             onSendChatMessage={sendChatMessage}
+            onSelectProviderModel={handleSelectProviderModel}
             onPause={handlePauseBuild}
             onResume={handleResumeBuild}
             onRestart={handleRestartFailedBuild}

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"apex-build/internal/ai"
+
 	"github.com/google/uuid"
 )
 
@@ -721,6 +723,75 @@ func (am *AgentManager) ResumeBuild(buildID string, reason string) (BuildInterac
 	})
 	am.broadcastInteractionUpdate(buildID, interaction)
 	return interaction, nil
+}
+
+func (am *AgentManager) SetProviderModelOverride(buildID string, provider ai.AIProvider, model string) error {
+	build, err := am.GetBuild(buildID)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	normalizedModel := normalizeProviderModelOverride(provider, model)
+
+	build.mu.Lock()
+	if build.Status == BuildCompleted || build.Status == BuildFailed || build.Status == BuildCancelled {
+		build.mu.Unlock()
+		return fmt.Errorf("build %s already in terminal state: %s", buildID, build.Status)
+	}
+	if build.ProviderModelOverrides == nil {
+		build.ProviderModelOverrides = make(map[string]string)
+	}
+	if normalizedModel == "" {
+		delete(build.ProviderModelOverrides, string(provider))
+	} else {
+		build.ProviderModelOverrides[string(provider)] = normalizedModel
+	}
+	updatedModel := selectBuildModelForProviderLocked(build, provider)
+	for _, agent := range build.Agents {
+		if agent == nil || agent.Provider != provider {
+			continue
+		}
+		agent.mu.Lock()
+		agent.Model = updatedModel
+		agent.UpdatedAt = now
+		agent.mu.Unlock()
+	}
+	build.UpdatedAt = now
+	providerLabel := map[ai.AIProvider]string{
+		ai.ProviderClaude: "Claude",
+		ai.ProviderGPT4:   "ChatGPT",
+		ai.ProviderGemini: "Gemini",
+		ai.ProviderGrok:   "Grok",
+		ai.ProviderOllama: "Local",
+	}[provider]
+	message := fmt.Sprintf("%s model control returned to Auto", providerLabel)
+	if normalizedModel != "" {
+		message = fmt.Sprintf("%s locked to %s", providerLabel, normalizedModel)
+	}
+	appendBuildConversationMessageLocked(build, BuildConversationMessage{
+		Role:      ConversationRoleSystem,
+		Kind:      ConversationKindDirective,
+		Content:   message,
+		Timestamp: now,
+	})
+	overrides := cloneStringMap(build.ProviderModelOverrides)
+	build.mu.Unlock()
+
+	am.persistBuildSnapshot(build, nil)
+	am.broadcast(buildID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   buildID,
+		Timestamp: now,
+		Data: map[string]any{
+			"user_update":              true,
+			"message":                  message,
+			"provider":                 string(provider),
+			"model":                    firstNonEmptyString(normalizedModel, "auto"),
+			"provider_model_overrides": overrides,
+		},
+	})
+	return nil
 }
 
 func (am *AgentManager) SetPermissionRule(buildID string, scope BuildPermissionScope, target string, decision BuildPermissionDecision, mode BuildPermissionMode, reason string) (BuildInteractionState, *BuildPermissionRule, error) {

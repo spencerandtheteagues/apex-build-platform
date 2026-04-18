@@ -501,23 +501,24 @@ func (am *AgentManager) CreateBuild(userID uint, subscriptionPlan string, req *B
 	}
 
 	build := &Build{
-		ID:                  buildID,
-		UserID:              userID,
-		Status:              BuildPending,
-		Mode:                mode,
-		PowerMode:           powerMode,
-		SubscriptionPlan:    strings.ToLower(strings.TrimSpace(subscriptionPlan)),
-		ProviderMode:        providerMode,
-		RequirePreviewReady: req.RequirePreviewReady,
-		Description:         effectiveDescription,
-		TechStack:           req.TechStack,
-		RoleAssignments:     req.RoleAssignments,
-		Agents:              make(map[string]*Agent),
-		Tasks:               make([]*Task, 0),
-		Checkpoints:         make([]*Checkpoint, 0),
-		Progress:            0,
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		ID:                     buildID,
+		UserID:                 userID,
+		Status:                 BuildPending,
+		Mode:                   mode,
+		PowerMode:              powerMode,
+		SubscriptionPlan:       strings.ToLower(strings.TrimSpace(subscriptionPlan)),
+		ProviderMode:           providerMode,
+		RequirePreviewReady:    req.RequirePreviewReady,
+		Description:            effectiveDescription,
+		TechStack:              req.TechStack,
+		RoleAssignments:        req.RoleAssignments,
+		ProviderModelOverrides: cloneStringMap(req.ProviderModelOverrides),
+		Agents:                 make(map[string]*Agent),
+		Tasks:                  make([]*Task, 0),
+		Checkpoints:            make([]*Checkpoint, 0),
+		Progress:               0,
+		CreatedAt:              now,
+		UpdatedAt:              now,
 	}
 	if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil && orchestration.Flags.EnableIntentBrief {
 		orchestration.IntentBrief = compileIntentBriefFromRequest(req, providerMode)
@@ -1825,7 +1826,7 @@ func (am *AgentManager) spawnAgent(buildID string, role AgentRole, provider ai.A
 	agentID := uuid.New().String()
 	now := time.Now()
 
-	model := selectModelForPowerMode(provider, build.PowerMode)
+	model := selectBuildModelForProvider(build, provider)
 	if model == "" {
 		model = "auto"
 	}
@@ -2470,7 +2471,7 @@ func (am *AgentManager) alignAgentProviderToTaskPreference(build *Build, agent *
 
 	oldProvider := agent.Provider
 	agent.Provider = preferred
-	agent.Model = selectModelForPowerMode(preferred, build.PowerMode)
+	agent.Model = selectBuildModelForProvider(build, preferred)
 
 	am.broadcast(agent.BuildID, &WSMessage{
 		Type:      "agent:provider_switched",
@@ -4318,7 +4319,7 @@ func (am *AgentManager) executeTask(task *Task) {
 				oldProvider := agent.Provider
 				agent.mu.Lock()
 				agent.Provider = newProvider
-				agent.Model = selectModelForPowerMode(newProvider, build.PowerMode)
+				agent.Model = selectBuildModelForProvider(build, newProvider)
 				agent.mu.Unlock()
 				log.Printf("Switch provider strategy: %s → %s (model: %s)", oldProvider, newProvider, agent.Model)
 				am.broadcast(agent.BuildID, &WSMessage{
@@ -17475,7 +17476,7 @@ func (am *AgentManager) activateRestoredLeadAgent(build *Build, availableProvide
 				agent.BuildID = build.ID
 			}
 			if agent.Model == "" {
-				agent.Model = selectModelForPowerMode(agent.Provider, build.PowerMode)
+				agent.Model = selectBuildModelForProviderLocked(build, agent.Provider)
 			}
 			agent.Status = StatusWorking
 			agent.UpdatedAt = now
@@ -17529,6 +17530,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 	readinessRecoveryAttempts := 0
 	previewVerificationAttempts := 0
 	roleAssignments := map[string]string(nil)
+	providerModelOverrides := map[string]string(nil)
 	phasedPipelineComplete := false
 	diffMode := false
 	var techStack *TechStack
@@ -17554,6 +17556,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 			maxTokens = restoreContext.MaxTokensPerRequest
 		}
 		roleAssignments = cloneStringMap(restoreContext.RoleAssignments)
+		providerModelOverrides = cloneStringMap(restoreContext.ProviderModelOverrides)
 		phasedPipelineComplete = restoreContext.PhasedPipelineComplete
 		diffMode = restoreContext.DiffMode
 		techStack = cloneTechStack(restoreContext.TechStack)
@@ -17594,6 +17597,7 @@ func (am *AgentManager) restoreBuildSessionFromSnapshotWithOptions(snapshot *mod
 		PhasedPipelineComplete:      phasedPipelineComplete,
 		DiffMode:                    diffMode,
 		RoleAssignments:             roleAssignments,
+		ProviderModelOverrides:      providerModelOverrides,
 		Interaction:                 parseBuildInteraction(snapshot.InteractionJSON),
 		ActivityTimeline:            parseBuildActivityTimeline(snapshot.ActivityJSON),
 		SnapshotState:               snapshotState,

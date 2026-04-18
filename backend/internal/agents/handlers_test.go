@@ -43,6 +43,7 @@ func testRouterWithAdmin(am *AgentManager, isAdmin bool) *gin.Engine {
 	build.POST("/preflight", h.PreflightCheck)
 	build.POST("/start", h.StartBuild)
 	build.POST("/:id/message", h.SendMessage)
+	build.POST("/:id/provider-model", h.SetProviderModelOverride)
 	build.POST("/:id/pause", h.PauseBuild)
 	build.POST("/:id/resume", h.ResumeBuild)
 	build.POST("/:id/cancel", h.CancelBuild)

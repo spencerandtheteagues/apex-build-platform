@@ -479,6 +479,11 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 		waterfallStage = decision.Stage
 		waterfallReason = decision.Reason
 	}
+	if explicitModel := providerModelOverrideForBuild(build, provider); explicitModel != "" {
+		model = explicitModel
+		waterfallStage = "manual_override"
+		waterfallReason = "provider_model_override"
+	}
 
 	model = normalizeModelForProvider(provider, model, callPowerMode)
 

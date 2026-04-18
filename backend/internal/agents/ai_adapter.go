@@ -95,6 +95,53 @@ func normalizeModelForProvider(provider ai.AIProvider, model string, mode PowerM
 	return selectModelForPowerMode(provider, mode)
 }
 
+func normalizeProviderModelOverride(provider ai.AIProvider, model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" || strings.EqualFold(model, "auto") {
+		return ""
+	}
+	if !modelBelongsToProvider(provider, model) {
+		return ""
+	}
+	return model
+}
+
+func providerModelOverrideForBuildLocked(build *Build, provider ai.AIProvider) string {
+	if build == nil {
+		return ""
+	}
+	return normalizeProviderModelOverride(provider, build.ProviderModelOverrides[string(provider)])
+}
+
+func providerModelOverrideForBuild(build *Build, provider ai.AIProvider) string {
+	if build == nil {
+		return ""
+	}
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	return providerModelOverrideForBuildLocked(build, provider)
+}
+
+func selectBuildModelForProviderLocked(build *Build, provider ai.AIProvider) string {
+	if override := providerModelOverrideForBuildLocked(build, provider); override != "" {
+		return override
+	}
+	mode := PowerFast
+	if build != nil && build.PowerMode != "" {
+		mode = build.PowerMode
+	}
+	return selectModelForPowerMode(provider, mode)
+}
+
+func selectBuildModelForProvider(build *Build, provider ai.AIProvider) string {
+	if build == nil {
+		return selectModelForPowerMode(provider, PowerFast)
+	}
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+	return selectBuildModelForProviderLocked(build, provider)
+}
+
 func selectOllamaModelOverride(mode PowerMode) string {
 	switch mode {
 	case PowerMax:

@@ -232,6 +232,31 @@ func TestBuildRequest_RoleAssignments_PartialAssignment(t *testing.T) {
 	}
 }
 
+func TestBuildRequest_ProviderModelOverrides_MarshalRoundTrip(t *testing.T) {
+	original := BuildRequest{
+		Description:            "Build a news app",
+		Mode:                   ModeFull,
+		ProviderModelOverrides: map[string]string{"gpt4": "gpt-5.4", "grok": "grok-4.20-0309-reasoning"},
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	var decoded BuildRequest
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	if len(decoded.ProviderModelOverrides) != 2 {
+		t.Fatalf("expected 2 provider model overrides, got %d", len(decoded.ProviderModelOverrides))
+	}
+	if decoded.ProviderModelOverrides["gpt4"] != "gpt-5.4" {
+		t.Fatalf("expected gpt4 override to survive roundtrip, got %+v", decoded.ProviderModelOverrides)
+	}
+}
+
 func TestBuildRequest_JSONFieldName(t *testing.T) {
 	// Verify the JSON key is "role_assignments", not "RoleAssignments".
 	req := BuildRequest{
@@ -348,6 +373,45 @@ func TestStartBuild_RejectsInvalidProvider(t *testing.T) {
 				t.Errorf("expected error='invalid provider', got %q", respBody["error"])
 			}
 		})
+	}
+}
+
+func TestStartBuild_RejectsCrossProviderModelOverride(t *testing.T) {
+	am := validationOnlyManager()
+
+	body, _ := json.Marshal(map[string]any{
+		"description":              "Build me a fully functional e-commerce platform with payments",
+		"provider_model_overrides": map[string]string{"grok": "gpt-5.4"},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/start", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for cross-provider model override, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestStartBuild_AcceptsProviderModelOverrides(t *testing.T) {
+	am := validationOnlyManager()
+
+	body, _ := json.Marshal(map[string]any{
+		"description":              "Build me a fully functional e-commerce platform with payments",
+		"provider_model_overrides": map[string]string{"gpt4": "gpt-5.4", "grok": "grok-4.20-0309-reasoning"},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/start", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code == http.StatusBadRequest {
+		var respBody map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &respBody)
+		errMsg, _ := respBody["error"].(string)
+		if errMsg == "invalid provider model override" || errMsg == "invalid provider" {
+			t.Fatalf("valid provider model overrides were rejected: %s", w.Body.String())
+		}
 	}
 }
 

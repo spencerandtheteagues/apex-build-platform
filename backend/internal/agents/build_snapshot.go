@@ -86,6 +86,7 @@ func snapshotStateForPersistenceLocked(build *Build) BuildSnapshotState {
 		PhasedPipelineComplete:      build.PhasedPipelineComplete,
 		DiffMode:                    build.DiffMode,
 		RoleAssignments:             cloneStringMap(build.RoleAssignments),
+		ProviderModelOverrides:      cloneStringMap(build.ProviderModelOverrides),
 		TechStack:                   cloneTechStack(build.TechStack),
 		Plan:                        cloneBuildPlan(build.Plan),
 	}

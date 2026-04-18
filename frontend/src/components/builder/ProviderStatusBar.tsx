@@ -19,6 +19,10 @@ interface ProviderStatusBarProps {
   providerPanels: PanelData[]
   hasBYOK: boolean
   isBuildActive: boolean
+  selectedModels?: Partial<Record<SupportedProvider, string>>
+  modelOptions?: Partial<Record<SupportedProvider, Array<{ id: string; name: string }>>>
+  modelUpdatePendingProvider?: SupportedProvider | null
+  onModelSelect?: (provider: SupportedProvider, model: string) => void
 }
 
 // Display order per user request: ChatGPT, Gemini, Grok, Claude, Local
@@ -90,6 +94,10 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
   providerPanels,
   hasBYOK,
   isBuildActive,
+  selectedModels,
+  modelOptions,
+  modelUpdatePendingProvider,
+  onModelSelect,
 }) => {
   const panelMap = Object.fromEntries(
     providerPanels.map((p) => [p.provider, p])
@@ -106,7 +114,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
   }
 
   return (
-    <div className="flex border-b border-gray-900 shrink-0 overflow-x-auto" style={{ minHeight: '80px' }}>
+    <div className="flex border-b border-gray-900 shrink-0 overflow-x-auto" style={{ minHeight: '108px' }}>
       {DISPLAY_ORDER.map((provider) => {
         const panel = panelMap[provider]
         const cfg = PROVIDER_CONFIG[provider]
@@ -126,12 +134,15 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
         )
 
         const statusLabel = getStatusLabel(panel, provider)
+        const selectedModel = selectedModels?.[provider] || 'auto'
+        const providerModelOptions = modelOptions?.[provider] || []
+        const canConfigureModel = Boolean(onModelSelect && providerModelOptions.length > 0)
 
         return (
           <div
             key={provider}
             className={cn(
-              'flex-1 min-w-[90px] border-r last:border-r-0 flex flex-col justify-between px-2 sm:px-3 py-2 sm:py-2.5 transition-all duration-500',
+              'flex-1 min-w-[90px] border-r last:border-r-0 flex flex-col justify-between gap-1 px-2 sm:px-3 py-2 sm:py-2.5 transition-all duration-500',
               isActive
                 ? `${cfg.borderActive} ${cfg.bgActive} ${cfg.glowActive}`
                 : `${cfg.borderIdle} bg-black/30`,
@@ -160,6 +171,21 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
             )}>
               {panel?.liveModelName || '—'}
             </div>
+
+            {canConfigureModel ? (
+              <select
+                aria-label={`${cfg.label} model`}
+                className="w-full rounded border border-gray-800 bg-black/70 px-1.5 py-1 text-[10px] text-gray-200 outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                value={selectedModel}
+                disabled={!isBuildActive || isUnavailable || modelUpdatePendingProvider === provider}
+                onChange={(event) => onModelSelect?.(provider, event.target.value)}
+              >
+                <option value="auto">Auto</option>
+                {providerModelOptions.map((option) => (
+                  <option key={option.id} value={option.id}>{option.name}</option>
+                ))}
+              </select>
+            ) : null}
 
             {/* Status badge */}
             <div className={cn(
