@@ -5095,6 +5095,7 @@ func (am *AgentManager) processResult(result *TaskResult) {
 				now := time.Now()
 				task.CompletedAt = &now
 				task.Output = result.Output
+				stripForbiddenFilesFromOutput(task)
 			}
 			agent.UpdatedAt = time.Now()
 			agent.mu.Unlock()
@@ -15416,11 +15417,18 @@ func (am *AgentManager) collectGeneratedFiles(build *Build) []GeneratedFile {
 		appendFile(file, "snapshot")
 	}
 
+	taskIDByPath := make(map[string]string)
 	for _, task := range build.Tasks {
 		if task == nil || task.Output == nil || !am.isCodeGenerationTask(task.Type) {
 			continue
 		}
 		for _, file := range task.Output.Files {
+			if sanitized := sanitizeFilePath(file.Path); sanitized != "" {
+				if prevID, exists := taskIDByPath[sanitized]; exists && prevID != task.ID {
+					log.Printf("FILE CONFLICT: %q produced by tasks %s and %s — later writer wins", sanitized, prevID, task.ID)
+				}
+				taskIDByPath[sanitized] = task.ID
+			}
 			appendFile(file, "task")
 		}
 		for _, path := range task.Output.DeletedFiles {
@@ -15460,6 +15468,34 @@ func (am *AgentManager) collectGeneratedFiles(build *Build) []GeneratedFile {
 		result = append(result, file)
 	}
 	return result
+}
+
+// stripForbiddenFilesFromOutput removes any files from a completed task's output that the
+// task was explicitly told not to touch. This enforces work-order boundaries at runtime
+// rather than relying solely on prompt instructions. Violations are logged as warnings.
+func stripForbiddenFilesFromOutput(task *Task) {
+	if task == nil || task.Output == nil || task.Input == nil {
+		return
+	}
+	forbidden := taskInputStringList(task.Input["forbidden_files"])
+	if len(forbidden) == 0 {
+		return
+	}
+	forbiddenSet := make(map[string]bool, len(forbidden))
+	for _, f := range forbidden {
+		if s := sanitizeFilePath(f); s != "" {
+			forbiddenSet[s] = true
+		}
+	}
+	kept := make([]GeneratedFile, 0, len(task.Output.Files))
+	for _, file := range task.Output.Files {
+		if forbiddenSet[sanitizeFilePath(file.Path)] {
+			log.Printf("BOUNDARY VIOLATION: task %s (%s) generated forbidden file %q — stripped from output", task.ID, task.Type, file.Path)
+			continue
+		}
+		kept = append(kept, file)
+	}
+	task.Output.Files = kept
 }
 
 // stripPatchOrMergeMarkersFromContent removes SEARCH/REPLACE diff blocks and git merge
