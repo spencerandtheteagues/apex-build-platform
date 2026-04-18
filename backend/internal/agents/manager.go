@@ -5610,20 +5610,28 @@ func (am *AgentManager) handlePlanCompletion(build *Build, output *TaskOutput) {
 			if critiqueReport := am.providerAssistedContractCritique(build, critiqueContract); critiqueReport != nil {
 				build.mu.Lock()
 				if orchestration := ensureBuildOrchestrationStateLocked(build); orchestration != nil && orchestration.BuildContract != nil {
-					orchestration.VerificationReports = append(orchestration.VerificationReports, *critiqueReport)
-					// In the default path, LLM critique findings are surfaced as warnings only.
-					// Deterministic validation owns hard blocks because planning-time critique
-					// can still false-positive on rough contracts.
+					// In the default path LLM critique findings are surfaced as warnings only —
+					// deterministic validation owns hard blocks because planning-time critique
+					// can false-positive on rough contracts. Downgrade the stored report status
+					// so deriveBlockers never surfaces critique findings as UI blockers.
 					allCritiqueFindings := dedupeStrings(append(critiqueReport.Warnings, critiqueReport.Blockers...))
 					orchestration.BuildContract.VerificationWarnings = dedupeStrings(append(orchestration.BuildContract.VerificationWarnings, allCritiqueFindings...))
-					// If deterministic contract verification has been explicitly disabled,
-					// let provider critique act as the fallback hard gate so broken plans do
-					// not flow straight into generation unchecked.
+
+					// If deterministic verification is disabled, the critique acts as fallback
+					// hard gate. Only in that case do we allow a Blocked status to propagate.
 					if critiqueReport.Status == VerificationBlocked && !orchestration.Flags.EnableContractVerification {
 						contractBlocked = true
 						contractBlocker = strings.Join(critiqueReport.Blockers, "; ")
 						orchestration.BuildContract.VerificationBlockers = dedupeStrings(append(orchestration.BuildContract.VerificationBlockers, critiqueReport.Blockers...))
+					} else {
+						// Default path: downgrade to VerificationPassed with all findings as
+						// warnings so the report is stored for telemetry without creating UI blockers.
+						critiqueReport.Status = VerificationPassed
+						critiqueReport.Warnings = allCritiqueFindings
+						critiqueReport.Blockers = nil
+						critiqueReport.Errors = nil
 					}
+					orchestration.VerificationReports = append(orchestration.VerificationReports, *critiqueReport)
 				}
 				build.mu.Unlock()
 			}

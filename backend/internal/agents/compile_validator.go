@@ -65,11 +65,35 @@ const (
 	cvTscTimeout       = 40 * time.Second
 	cvBuildTimeout     = 90 * time.Second
 	cvInstallTimeout   = 2 * time.Minute
-	cvRepairTokens     = 4096
 	cvMaxErrorsPerFile = 3 // cap errors per file in the repair prompt
 	cvMaxFilesInPrompt = 5 // cap distinct files in the repair prompt
 	cvContextLines     = 8 // source lines to show around each error location
 )
+
+// cvRepairTokens returns the token budget for a compile repair call.
+// Larger budget = better at multi-file fixes; scale with power mode.
+func cvRepairTokens(mode PowerMode) int {
+	switch mode {
+	case PowerMax:
+		return 16384
+	case PowerBalanced:
+		return 8192
+	default:
+		return 4096
+	}
+}
+
+// cvRepairPowerMode returns the power mode to use for compile repair calls.
+// We use the build's mode capped at Balanced to keep repair fast while still
+// using a capable model — frontier models aren't needed for syntax repair.
+func cvRepairPowerMode(buildMode PowerMode) PowerMode {
+	switch buildMode {
+	case PowerMax:
+		return PowerBalanced
+	default:
+		return buildMode
+	}
+}
 
 const compileRepairSystemPrompt = `You are a TypeScript/React build repair expert.
 You will receive structured build errors with file paths, line numbers, and source context.
@@ -814,6 +838,17 @@ func (am *AgentManager) cvSelectInlineRepairProvider(build *Build) ai.AIProvider
 		log.Printf("[compile_validator] build %s: no AI provider available for inline repair", build.ID)
 		return ""
 	}
+	available := make(map[ai.AIProvider]bool, len(providers))
+	for _, p := range providers {
+		available[p] = true
+	}
+	// Prefer Claude for structural reasoning, then Grok for speed/code quality,
+	// then whatever is available.
+	for _, preferred := range []ai.AIProvider{ai.ProviderClaude, ai.ProviderGrok, ai.ProviderGPT4, ai.ProviderGemini} {
+		if available[preferred] {
+			return preferred
+		}
+	}
 	return providers[0]
 }
 
@@ -858,14 +893,15 @@ func (am *AgentManager) cvGenerateTaskOutput(
 	repairCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
+	repairPowerMode := cvRepairPowerMode(build.PowerMode)
 	resp, err := am.aiRouter.Generate(repairCtx, provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
 		BuildID:         build.ID,
-		MaxTokens:       cvRepairTokens,
+		MaxTokens:       cvRepairTokens(build.PowerMode),
 		Temperature:     strategy.Temperature,
 		SystemPrompt:    compileRepairSystemPrompt,
 		RoleHint:        string(RoleSolver),
-		PowerMode:       PowerFast,
+		PowerMode:       repairPowerMode,
 		UsePlatformKeys: build.ProviderMode != "byok",
 	})
 	if err != nil {
