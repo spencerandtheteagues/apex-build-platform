@@ -645,7 +645,7 @@ func defaultBuildOrchestrationFlags() BuildOrchestrationFlags {
 		EnableBuildContract:            envBool("APEX_ENABLE_BUILD_CONTRACT", true),
 		EnableValidatedBuildSpec:       envBool("APEX_ENABLE_VALIDATED_BUILD_SPEC", true),
 		EnableASTContextDiet:           envBool("APEX_AST_CONTEXT_DIET", false),
-		EnableRoutingWaterfall:         envBool("APEX_ROUTING_WATERFALL", false),
+		EnableRoutingWaterfall:         envBool("APEX_ROUTING_WATERFALL", true),
 		EnableDeterministicTaskGates:   envBool("APEX_DETERMINISTIC_TASK_GATES", false),
 		EnableContractVerification:     envBool("APEX_ENABLE_CONTRACT_VERIFICATION", true),
 		EnablePatchBundles:             envBool("APEX_ENABLE_PATCH_BUNDLES", true),

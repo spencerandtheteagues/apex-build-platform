@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -128,10 +129,9 @@ func (g *GeminiClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	if req.Model != "" {
 		model = req.Model
 	}
-	url := fmt.Sprintf("%s/%s:generateContent?key=%s", g.baseURL, model, g.apiKey)
 
 	// Make API request
-	resp, err := g.makeRequest(ctx, url, geminiReq)
+	resp, resolvedModel, err := g.generateWithModelFallback(ctx, model, geminiReq)
 	if err != nil {
 		g.incrementErrorCount()
 		return &AIResponse{
@@ -144,7 +144,7 @@ func (g *GeminiClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	}
 
 	// Calculate cost based on Gemini pricing
-	cost := g.calculateCost(resp.UsageMetadata.PromptTokenCount, resp.UsageMetadata.CandidatesTokenCount, model)
+	cost := g.calculateCost(resp.UsageMetadata.PromptTokenCount, resp.UsageMetadata.CandidatesTokenCount, resolvedModel)
 
 	// Update usage statistics
 	g.updateUsage(resp.UsageMetadata.TotalTokenCount, cost, time.Since(startTime))
@@ -160,7 +160,7 @@ func (g *GeminiClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		Provider: ProviderGemini,
 		Content:  content,
 		Metadata: map[string]interface{}{
-			"model": model,
+			"model": resolvedModel,
 		},
 		Usage: &Usage{
 			PromptTokens:     resp.UsageMetadata.PromptTokenCount,
@@ -171,6 +171,51 @@ func (g *GeminiClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		Duration:  time.Since(startTime),
 		CreatedAt: time.Now(),
 	}, nil
+}
+
+func (g *GeminiClient) generateWithModelFallback(ctx context.Context, model string, req *geminiRequest) (*geminiResponse, string, error) {
+	models := geminiModelFallbacks(model)
+	var lastErr error
+	for idx, candidate := range models {
+		url := fmt.Sprintf("%s/%s:generateContent?key=%s", g.baseURL, candidate, g.apiKey)
+		resp, err := g.makeRequest(ctx, url, req)
+		if err == nil {
+			return resp, candidate, nil
+		}
+		lastErr = err
+		if idx == len(models)-1 || !shouldFallbackGeminiModel(err) {
+			break
+		}
+	}
+	return nil, model, lastErr
+}
+
+func geminiModelFallbacks(model string) []string {
+	switch model {
+	case "gemini-3.1-pro":
+		return []string{"gemini-3.1-pro", "gemini-3.1-pro-preview"}
+	default:
+		return []string{model}
+	}
+}
+
+func shouldFallbackGeminiModel(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "quota") ||
+		strings.Contains(msg, "rate_limit") ||
+		strings.Contains(msg, "unauthorized") ||
+		strings.Contains(msg, "forbidden") {
+		return false
+	}
+	return strings.Contains(msg, "status 400") ||
+		strings.Contains(msg, "status 404") ||
+		strings.Contains(msg, "not_found") ||
+		strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "not supported") ||
+		strings.Contains(msg, "not available")
 }
 
 // buildSystemPrompt creates capability-specific system prompts for Gemini

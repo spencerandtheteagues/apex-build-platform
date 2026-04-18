@@ -480,9 +480,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 		waterfallReason = decision.Reason
 	}
 
-	if provider != agent.Provider || strings.TrimSpace(model) == "" {
-		model = selectModelForPowerMode(provider, callPowerMode)
-	}
+	model = normalizeModelForProvider(provider, model, callPowerMode)
 
 	if am.budgetEnforcer != nil {
 		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, agent.BuildID, estimatedRequestCostUSDForBuild(build))

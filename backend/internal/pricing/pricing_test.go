@@ -460,7 +460,7 @@ func TestDefaultModel(t *testing.T) {
 		{"gpt4", "max", "gpt-5.4"},
 		{"gemini", "fast", "gemini-2.5-flash-lite"},
 		{"gemini", "balanced", "gemini-3-flash-preview"},
-		{"gemini", "max", "gemini-3.1-pro-preview"},
+		{"gemini", "max", "gemini-3.1-pro"},
 		{"grok", "fast", "grok-3-mini"},
 		{"grok", "balanced", "grok-3"},
 		{"grok", "max", "grok-4.20-0309-reasoning"},

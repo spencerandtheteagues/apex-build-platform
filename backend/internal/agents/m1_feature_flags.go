@@ -11,7 +11,7 @@ func routingWaterfallEnabledForBuild(build *Build) bool {
 	if build != nil && build.SnapshotState.Orchestration != nil {
 		return build.SnapshotState.Orchestration.Flags.EnableRoutingWaterfall
 	}
-	return envBool("APEX_ROUTING_WATERFALL", false)
+	return envBool("APEX_ROUTING_WATERFALL", true)
 }
 
 func deterministicTaskGatesEnabledForBuild(build *Build) bool {

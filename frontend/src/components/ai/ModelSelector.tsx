@@ -51,12 +51,13 @@ const FALLBACK_MODELS: Record<string, ModelInfo[]> = {
     { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
   ],
   gpt4: [
-    { id: 'gpt-5.4', name: 'GPT-5.4', speed: 'slow', cost_tier: 'high', description: 'Max tier — latest frontier OpenAI model' },
+    { id: 'gpt-5.4', name: 'ChatGPT 5.4', speed: 'slow', cost_tier: 'high', description: 'Max tier — latest frontier OpenAI model' },
     { id: 'gpt-4.1', name: 'GPT-4.1', speed: 'medium', cost_tier: 'medium', description: 'Balanced tier — best current mid-tier coder' },
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
   ],
   gemini: [
-    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview', speed: 'slow', cost_tier: 'high', description: 'Max tier — latest Gemini frontier model' },
+    { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro', speed: 'slow', cost_tier: 'high', description: 'Max tier — Pro first' },
+    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview', speed: 'slow', cost_tier: 'high', description: 'Max fallback — preview tier' },
     { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview', speed: 'medium', cost_tier: 'medium', description: 'Balanced tier — fast reasoning' },
     { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', speed: 'fast', cost_tier: 'low', description: 'Fast mini tier' },
   ],

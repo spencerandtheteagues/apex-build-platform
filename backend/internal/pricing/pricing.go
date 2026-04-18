@@ -96,6 +96,7 @@ func newEngineFromEnv() *Engine {
 			"gemini": {
 				Default: ModelPricing{InputPer1M: 0.75, OutputPer1M: 3.00},
 				Models: map[string]ModelPricing{
+					"gemini-3.1-pro":         {InputPer1M: 3.00, OutputPer1M: 15.00},
 					"gemini-3.1-pro-preview": {InputPer1M: 3.00, OutputPer1M: 15.00},
 					"gemini-3-pro-preview":   {InputPer1M: 2.00, OutputPer1M: 6.00},
 					"gemini-3-flash-preview": {InputPer1M: 0.75, OutputPer1M: 3.00},
@@ -227,7 +228,7 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 		return "gpt-4o-mini"
 	case "gemini":
 		if mode == ModeMax {
-			return "gemini-3.1-pro-preview"
+			return "gemini-3.1-pro"
 		}
 		if mode == ModeBalanced {
 			return "gemini-3-flash-preview"

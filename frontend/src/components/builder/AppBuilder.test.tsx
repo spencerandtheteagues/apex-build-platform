@@ -504,6 +504,94 @@ describe('AppBuilder control surface', () => {
     expect(screen.queryByText('Verifier false positive on mocks')).toBeNull()
   })
 
+  it('does not display an OpenAI model under the Claude provider panel', async () => {
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+      power_mode: 'max',
+      powerMode: 'max',
+      agents: [
+        {
+          id: 'lead-1',
+          role: 'lead',
+          provider: 'claude',
+          model: 'gpt-4o-mini',
+          status: 'completed',
+          progress: 100,
+          current_task: {
+            type: 'plan',
+            description: 'Completed with stale mismatched telemetry',
+          },
+        },
+      ],
+      available_providers: ['claude', 'gpt4', 'gemini', 'grok'],
+    }))
+    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+      power_mode: 'max',
+      powerMode: 'max',
+      agents: [
+        {
+          id: 'lead-1',
+          role: 'lead',
+          provider: 'claude',
+          model: 'gpt-4o-mini',
+          status: 'completed',
+          progress: 100,
+          current_task: {
+            type: 'plan',
+            description: 'Completed with stale mismatched telemetry',
+          },
+        },
+      ],
+      available_providers: ['claude', 'gpt4', 'gemini', 'grok'],
+    }))
+
+    render(<AppBuilder />)
+
+    await openMockedBuild()
+
+    expect(await screen.findByText('Claude Opus 4.6')).toBeTruthy()
+    expect(screen.queryByText('GPT-4o Mini')).toBeNull()
+    expect(screen.getByText('ChatGPT 5.4')).toBeTruthy()
+    expect(screen.getByText('Gemini 3.1 Pro')).toBeTruthy()
+  })
+
+  it('does not display a Gemini model under the Grok provider panel', async () => {
+    const grokBuild = buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+      power_mode: 'max',
+      powerMode: 'max',
+      agents: [
+        {
+          id: 'repair-1',
+          role: 'repair',
+          provider: 'grok',
+          model: 'gemini-2.5-flash',
+          status: 'working',
+          progress: 64,
+          current_task: {
+            type: 'repair',
+            description: 'Repairing backend route',
+          },
+        },
+      ],
+      available_providers: ['claude', 'gpt4', 'gemini', 'grok'],
+    })
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(grokBuild)
+    ;(apiService.getBuildDetails as any).mockResolvedValue(grokBuild)
+
+    render(<AppBuilder />)
+
+    await openMockedBuild()
+
+    expect(await screen.findByText('Grok 4.20')).toBeTruthy()
+    expect(screen.queryByText('gemini-2.5-flash')).toBeNull()
+    expect(screen.getByText('Gemini 3.1 Pro')).toBeTruthy()
+  })
+
   it('issues a restart command for failed builds', async () => {
     ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
       id: 'failed-build-123',

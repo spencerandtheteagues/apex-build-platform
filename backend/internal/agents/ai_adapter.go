@@ -27,8 +27,8 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 		PowerFast:     "gpt-4o-mini",
 	},
 	ai.ProviderGemini: {
-		PowerMax:      "gemini-2.5-pro",
-		PowerBalanced: "gemini-2.5-flash",
+		PowerMax:      "gemini-3.1-pro",
+		PowerBalanced: "gemini-3-flash-preview",
 		PowerFast:     "gemini-2.5-flash-lite",
 	},
 	ai.ProviderGrok: {
@@ -59,6 +59,40 @@ func selectModelForPowerMode(provider ai.AIProvider, mode PowerMode) string {
 		}
 	}
 	return "" // Empty string = let the AI client pick its own default
+}
+
+func modelBelongsToProvider(provider ai.AIProvider, model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if normalized == "" || normalized == "auto" || provider == "" {
+		return false
+	}
+
+	switch provider {
+	case ai.ProviderClaude:
+		return strings.HasPrefix(normalized, "claude-")
+	case ai.ProviderGPT4:
+		return strings.HasPrefix(normalized, "gpt-") ||
+			strings.HasPrefix(normalized, "chatgpt-") ||
+			strings.HasPrefix(normalized, "o1") ||
+			strings.HasPrefix(normalized, "o3") ||
+			strings.HasPrefix(normalized, "o4")
+	case ai.ProviderGemini:
+		return strings.HasPrefix(normalized, "gemini-")
+	case ai.ProviderGrok:
+		return strings.HasPrefix(normalized, "grok-")
+	case ai.ProviderOllama:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeModelForProvider(provider ai.AIProvider, model string, mode PowerMode) string {
+	model = strings.TrimSpace(model)
+	if modelBelongsToProvider(provider, model) {
+		return model
+	}
+	return selectModelForPowerMode(provider, mode)
 }
 
 func selectOllamaModelOverride(mode PowerMode) string {
@@ -228,10 +262,7 @@ For code files, use this exact format:
 
 	// Select model using the explicit override when provided; static power-mode
 	// mapping remains a deterministic fallback policy.
-	model := strings.TrimSpace(opts.ModelOverride)
-	if model == "" {
-		model = selectModelForPowerMode(aiProvider, opts.PowerMode)
-	}
+	model := normalizeModelForProvider(aiProvider, opts.ModelOverride, opts.PowerMode)
 
 	// Create AI request
 	request := &ai.AIRequest{

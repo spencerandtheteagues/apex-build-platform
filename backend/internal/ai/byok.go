@@ -739,13 +739,14 @@ func GetAvailableModels() map[string][]ModelInfo {
 			{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", Speed: "fast", CostTier: "low", Description: "FAST — cheapest Claude tier"},
 		},
 		"gpt4": {
-			{ID: "gpt-5.4", Name: "GPT-5.4", Speed: "slow", CostTier: "high", Description: "MAX — latest frontier OpenAI model"},
+			{ID: "gpt-5.4", Name: "ChatGPT 5.4", Speed: "slow", CostTier: "high", Description: "MAX — latest frontier OpenAI model"},
 			{ID: "gpt-4.1", Name: "GPT-4.1", Speed: "medium", CostTier: "medium", Description: "BALANCED — best current mid-tier OpenAI coding model"},
 			{ID: "gpt-4o-mini", Name: "GPT-4o Mini", Speed: "fast", CostTier: "low", Description: "FAST — mini OpenAI tier"},
 		},
 		"gemini": {
-			{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", Speed: "slow", CostTier: "high", Description: "MAX — latest Gemini frontier model"},
-			{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", Speed: "medium", CostTier: "medium", Description: "BALANCED — fast Gemini reasoning tier"},
+			{ID: "gemini-3.1-pro", Name: "Gemini 3.1 Pro", Speed: "slow", CostTier: "high", Description: "MAX — Gemini 3.1 Pro tier"},
+			{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview", Speed: "slow", CostTier: "high", Description: "MAX fallback — preview tier when Pro is unavailable"},
+			{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash Preview", Speed: "medium", CostTier: "medium", Description: "BALANCED — fast Gemini reasoning tier"},
 			{ID: "gemini-2.5-flash-lite", Name: "Gemini 2.5 Flash Lite", Speed: "fast", CostTier: "low", Description: "FAST — lowest-cost Gemini tier"},
 		},
 		"grok": {

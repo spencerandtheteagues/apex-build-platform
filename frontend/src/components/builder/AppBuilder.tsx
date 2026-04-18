@@ -367,8 +367,8 @@ const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<Suppo
   },
   max: {
     claude: { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
-    gpt4: { id: 'gpt-5.4', name: 'GPT-5.4' },
-    gemini: { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview' },
+    gpt4: { id: 'gpt-5.4', name: 'ChatGPT 5.4' },
+    gemini: { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
     grok: { id: 'grok-4.20-0309-reasoning', name: 'Grok 4.20' },
   },
 }
@@ -441,6 +441,8 @@ const canonicalizeModelId = (model?: string) => {
   if (value.startsWith('claude-haiku-4-5')) return 'claude-haiku-4-5-20251001'
 
   if (value.startsWith('gemini-3.1-pro-preview')) return 'gemini-3.1-pro-preview'
+  if (value.startsWith('gemini-3.1-pro')) return 'gemini-3.1-pro'
+  if (value.startsWith('gemini-3-pro')) return 'gemini-3-pro-preview'
   if (value.startsWith('gemini-3-flash-preview')) return 'gemini-3-flash-preview'
   if (value.startsWith('gemini-2.5-flash-lite')) return 'gemini-2.5-flash-lite'
 
@@ -450,6 +452,25 @@ const canonicalizeModelId = (model?: string) => {
 
   return value
 }
+
+const providerForModelId = (model?: string): SupportedBuildProvider | null => {
+  const canonicalModel = canonicalizeModelId(model)
+  if (!canonicalModel) return null
+  if (canonicalModel.startsWith('claude-')) return 'claude'
+  if (
+    canonicalModel.startsWith('gpt-') ||
+    canonicalModel.startsWith('chatgpt-') ||
+    canonicalModel.startsWith('o1') ||
+    canonicalModel.startsWith('o3') ||
+    canonicalModel.startsWith('o4')
+  ) return 'gpt4'
+  if (canonicalModel.startsWith('gemini-')) return 'gemini'
+  if (canonicalModel.startsWith('grok-')) return 'grok'
+  return null
+}
+
+const modelBelongsToProvider = (provider: SupportedBuildProvider, model?: string) =>
+  providerForModelId(model) === provider
 
 const getModelDisplayName = (model?: string, fallbackMode: 'fast' | 'balanced' | 'max' = 'fast') => {
   const canonicalModel = canonicalizeModelId(model)
@@ -2009,8 +2030,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         [
           ...providerAgents.map((agent) => canonicalizeModelId(agent.model)).filter(Boolean),
           ...thoughts.map((thought) => canonicalizeModelId(thought.model)).filter(Boolean),
-        ]
+        ].filter((modelId) => modelBelongsToProvider(provider, modelId))
       ))
+      const incompatibleModelIds = [
+        ...providerAgents.map((agent) => canonicalizeModelId(agent.model)).filter(Boolean),
+        ...thoughts.map((thought) => canonicalizeModelId(thought.model)).filter(Boolean),
+      ].filter((modelId) => !modelBelongsToProvider(provider, modelId))
       const liveModelId = actualModelIds[actualModelIds.length - 1] || configuredModel.id
       const available = availableProviders.size === 0 || availableProviders.has(provider)
 
@@ -2062,7 +2087,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         currentTaskLabel: latestThought?.content || latestTaskDescription || (latestTaskType ? humanizeIdentifier(latestTaskType) : undefined),
         latestThought,
         thoughts,
-        mismatch: actualModelIds.some((modelId) => modelId !== configuredModel.id),
+        mismatch: actualModelIds.some((modelId) => modelId !== configuredModel.id) || incompatibleModelIds.length > 0,
         multipleLiveModels: actualModelIds.length > 1,
       }
     })
