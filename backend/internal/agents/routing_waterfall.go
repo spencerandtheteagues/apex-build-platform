@@ -19,6 +19,17 @@ type RoutingWaterfallDecision struct {
 
 func planRoutingWaterfall(build *Build, task *Task, provider ai.AIProvider) RoutingWaterfallDecision {
 	triage := triageTaskForWaterfall(task)
+	if build != nil && build.PowerMode == PowerMax {
+		model := selectModelForPowerMode(provider, PowerMax)
+		return RoutingWaterfallDecision{
+			Stage:        routingWaterfallStageExpensive,
+			PowerMode:    PowerMax,
+			Model:        model,
+			Reason:       "locked_to_max_power",
+			Triage:       triage,
+			UsedFallback: model == "",
+		}
+	}
 
 	stage := routingWaterfallStageMedium
 	reason := "bounded_generation"

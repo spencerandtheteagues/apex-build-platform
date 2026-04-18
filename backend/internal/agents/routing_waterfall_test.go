@@ -60,6 +60,32 @@ func TestPlanRoutingWaterfallCapsToBuildPower(t *testing.T) {
 	}
 }
 
+func TestPlanRoutingWaterfallLocksMaxBuildToMaxModels(t *testing.T) {
+	t.Parallel()
+
+	build := &Build{PowerMode: PowerMax}
+	task := &Task{
+		Type: TaskReview,
+		Input: map[string]any{
+			"work_order_artifact": WorkOrder{
+				TaskShape: TaskShapeVerification,
+				RiskLevel: RiskLow,
+			},
+		},
+	}
+
+	decision := planRoutingWaterfall(build, task, ai.ProviderGrok)
+	if decision.PowerMode != PowerMax {
+		t.Fatalf("expected max power mode to remain locked, got %+v", decision)
+	}
+	if decision.Model != "grok-4.20-0309-reasoning" {
+		t.Fatalf("expected grok max model, got %+v", decision)
+	}
+	if decision.Reason != "locked_to_max_power" {
+		t.Fatalf("expected max-lock reason, got %+v", decision)
+	}
+}
+
 func TestGenerateTaskOutputWithProviderUsesRoutingWaterfallWhenEnabled(t *testing.T) {
 	t.Parallel()
 

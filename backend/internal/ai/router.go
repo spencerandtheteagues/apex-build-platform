@@ -191,7 +191,7 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 				if fallbackClient, exists := r.clients[fallbackProvider]; exists {
 					log.Printf("Rate limited for %s, using fallback %s", provider, fallbackProvider)
 					fallbackReq := r.requestForProvider(primaryReq, fallbackProvider)
-					return fallbackClient.Generate(ctx, fallbackReq)
+					return r.generateWithAttemptBudget(ctx, fallbackProvider, fallbackClient, fallbackReq, len(fallbacks))
 				}
 			}
 		}
@@ -215,7 +215,7 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 			case <-time.After(backoff):
 			}
 		}
-		response, genErr = client.Generate(ctx, primaryReq)
+		response, genErr = r.generateWithAttemptBudget(ctx, provider, client, primaryReq, 1+len(r.config.FallbackOrder[provider]))
 		if genErr == nil || !isTransientError(genErr) {
 			break
 		}
@@ -239,12 +239,12 @@ func (r *AIRouter) Generate(ctx context.Context, req *AIRequest) (*AIResponse, e
 
 		// Try fallback providers
 		fallbacks := r.config.FallbackOrder[provider]
-		for _, fallbackProvider := range fallbacks {
+		for idx, fallbackProvider := range fallbacks {
 			if fallbackClient, exists := r.clients[fallbackProvider]; exists {
 				if r.checkRateLimit(fallbackProvider) && r.isHealthyOrUnknown(fallbackProvider) {
 					log.Printf("Falling back to provider %s", fallbackProvider)
 					fallbackReq := r.requestForProvider(primaryReq, fallbackProvider)
-					fallbackResponse, fallbackErr := fallbackClient.Generate(ctx, fallbackReq)
+					fallbackResponse, fallbackErr := r.generateWithAttemptBudget(ctx, fallbackProvider, fallbackClient, fallbackReq, len(fallbacks)-idx)
 					if fallbackErr == nil {
 						return fallbackResponse, nil
 					}
@@ -298,6 +298,94 @@ func isTransientError(err error) bool {
 		strings.Contains(msg, "i/o timeout")
 }
 
+func providerAttemptBaseTimeout(provider AIProvider) time.Duration {
+	switch provider {
+	case ProviderGemini:
+		return 70 * time.Second
+	case ProviderOllama:
+		return 3 * time.Minute
+	default:
+		return 90 * time.Second
+	}
+}
+
+func providerFallbackReserve(provider AIProvider) time.Duration {
+	if provider == ProviderOllama {
+		return 45 * time.Second
+	}
+	return 20 * time.Second
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a <= 0 {
+		return b
+	}
+	if b <= 0 || a < b {
+		return a
+	}
+	return b
+}
+
+func providerAttemptSafetyMargin(remaining time.Duration) time.Duration {
+	if remaining <= 0 {
+		return 0
+	}
+	margin := remaining / 10
+	if margin <= 0 {
+		return time.Millisecond
+	}
+	if margin > 250*time.Millisecond {
+		return 250 * time.Millisecond
+	}
+	return margin
+}
+
+func (r *AIRouter) generateWithAttemptBudget(
+	ctx context.Context,
+	provider AIProvider,
+	client AIClient,
+	req *AIRequest,
+	attemptsRemaining int,
+) (*AIResponse, error) {
+	if client == nil {
+		return nil, fmt.Errorf("client not available for provider: %s", provider)
+	}
+	if attemptsRemaining < 1 {
+		attemptsRemaining = 1
+	}
+
+	attemptCtx := ctx
+	cancel := func() {}
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		safetyMargin := providerAttemptSafetyMargin(remaining)
+		if remaining <= safetyMargin {
+			return nil, context.DeadlineExceeded
+		}
+
+		budget := remaining - safetyMargin
+		if attemptsRemaining > 1 {
+			reserve := time.Duration(attemptsRemaining-1) * providerFallbackReserve(provider)
+			maxReserve := budget / 2
+			if reserve > maxReserve {
+				reserve = maxReserve
+			}
+			budget -= reserve
+		}
+		budget = minDuration(providerAttemptBaseTimeout(provider), budget)
+		if budget <= 0 {
+			return nil, context.DeadlineExceeded
+		}
+		attemptCtx, cancel = context.WithTimeout(ctx, budget)
+		defer cancel()
+	} else {
+		attemptCtx, cancel = context.WithTimeout(ctx, providerAttemptBaseTimeout(provider))
+		defer cancel()
+	}
+
+	return client.Generate(attemptCtx, req)
+}
+
 // requestForProvider prepares a provider-specific request copy.
 // If provider changes, model override is cleared to avoid cross-provider model mismatches.
 func (r *AIRouter) requestForProvider(req *AIRequest, provider AIProvider) *AIRequest {
@@ -321,19 +409,6 @@ func (r *AIRouter) selectProvider(req *AIRequest) (AIProvider, error) {
 	// Respect explicit provider requests when possible (with fallbacks)
 	if req.Provider != "" {
 		requested := req.Provider
-		if r.isAvailable(requested) && r.isHealthyOrUnknown(requested) {
-			return requested, nil
-		}
-		if fallbacks, ok := r.config.FallbackOrder[requested]; ok {
-			for _, provider := range fallbacks {
-				if r.isAvailable(provider) && r.isHealthyOrUnknown(provider) {
-					return provider, nil
-				}
-			}
-		}
-		// Last resort: try the requested provider only if it is not definitively
-		// known-bad (no_credits, auth_error). Unknown / transient states are
-		// acceptable here because the provider may recover mid-request.
 		if r.isAvailable(requested) {
 			knownBad := false
 			if status, ok := r.healthStatus[requested]; ok {
@@ -341,6 +416,13 @@ func (r *AIRouter) selectProvider(req *AIRequest) (AIProvider, error) {
 			}
 			if !knownBad {
 				return requested, nil
+			}
+		}
+		if fallbacks, ok := r.config.FallbackOrder[requested]; ok {
+			for _, provider := range fallbacks {
+				if r.isAvailable(provider) && r.isHealthyOrUnknown(provider) {
+					return provider, nil
+				}
 			}
 		}
 		// Requested provider is definitively unhealthy and no fallback worked —
@@ -404,7 +486,6 @@ func (r *AIRouter) selectByLoadBalancing() (AIProvider, error) {
 	// Fallback to first healthy provider
 	return healthyProviders[0], nil
 }
-
 
 // checkRateLimit checks if a provider is within rate limits
 func (r *AIRouter) checkRateLimit(provider AIProvider) bool {

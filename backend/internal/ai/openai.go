@@ -155,18 +155,22 @@ func (o *OpenAIClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 			totalTokens = responsesResp.Usage.TotalTokens
 			effectiveModel = responsesResp.Model
 		} else {
-			// Fallback keeps builds progressing when newer models are temporarily unavailable.
-			openAIReq.Model = "gpt-4o-mini"
-			var chatResp *openAIResponse
-			chatResp, err = o.makeRequest(ctx, openAIReq)
-			if err == nil {
-				if len(chatResp.Choices) > 0 {
-					content = chatResp.Choices[0].Message.Content
+			// When the caller explicitly selected a GPT-5 tier, preserve that contract
+			// and let the outer router choose a different provider rather than silently
+			// downgrading to a cheaper OpenAI model.
+			if strings.TrimSpace(req.Model) == "" {
+				openAIReq.Model = "gpt-4o-mini"
+				var chatResp *openAIResponse
+				chatResp, err = o.makeRequest(ctx, openAIReq)
+				if err == nil {
+					if len(chatResp.Choices) > 0 {
+						content = chatResp.Choices[0].Message.Content
+					}
+					inputTokens = chatResp.Usage.PromptTokens
+					outputTokens = chatResp.Usage.CompletionTokens
+					totalTokens = chatResp.Usage.TotalTokens
+					effectiveModel = chatResp.Model
 				}
-				inputTokens = chatResp.Usage.PromptTokens
-				outputTokens = chatResp.Usage.CompletionTokens
-				totalTokens = chatResp.Usage.TotalTokens
-				effectiveModel = chatResp.Model
 			}
 		}
 	} else {
