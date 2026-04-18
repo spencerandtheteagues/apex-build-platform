@@ -518,6 +518,9 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 		},
 	})
 
+	stopHeartbeat := am.startAgentActivityHeartbeat(ctx, build.ID, agent, task, "agent:generating", "generation", provider, model)
+	defer stopHeartbeat()
+
 	response, err := am.aiRouter.Generate(ctx, provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
 		MaxTokens:       maxTokens,

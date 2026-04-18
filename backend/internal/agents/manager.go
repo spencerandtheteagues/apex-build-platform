@@ -49,6 +49,8 @@ const (
 	promptPackActivationFeatureFlag = "APEX_PROMPT_PACK_ACTIVATION_REQUESTS"
 )
 
+var agentActivityHeartbeatInterval = 10 * time.Second
+
 type consensusDecision string
 
 const (
@@ -82,6 +84,112 @@ func estimatedRequestCostUSDForBuild(build *Build) float64 {
 		return 0.06
 	}
 	return defaultEstimatedRequestCostUSD
+}
+
+func buildAgentHeartbeatLabel(task *Task) string {
+	if task == nil {
+		return "current task"
+	}
+	if trimmed := strings.TrimSpace(task.Description); trimmed != "" {
+		return trimmed
+	}
+	if trimmed := strings.TrimSpace(string(task.Type)); trimmed != "" {
+		return trimmed
+	}
+	return "current task"
+}
+
+func formatAgentHeartbeatContent(role AgentRole, provider ai.AIProvider, model string, task *Task, stage string, elapsed time.Duration) string {
+	taskLabel := buildAgentHeartbeatLabel(task)
+	elapsedLabel := elapsed.Round(time.Second).String()
+	roleLabel := firstNonEmptyString(strings.TrimSpace(string(role)), "agent")
+	providerLabel := firstNonEmptyString(strings.TrimSpace(string(provider)), "configured provider")
+	modelLabel := strings.TrimSpace(model)
+
+	switch stage {
+	case "planning":
+		return fmt.Sprintf("%s agent is still analyzing %s with %s (%s elapsed)", roleLabel, taskLabel, providerLabel, elapsedLabel)
+	case "generation":
+		if modelLabel != "" {
+			return fmt.Sprintf("%s agent is still generating %s with %s / %s (%s elapsed)", roleLabel, taskLabel, providerLabel, modelLabel, elapsedLabel)
+		}
+		return fmt.Sprintf("%s agent is still generating %s with %s (%s elapsed)", roleLabel, taskLabel, providerLabel, elapsedLabel)
+	default:
+		return fmt.Sprintf("%s agent is still working on %s (%s elapsed)", roleLabel, taskLabel, elapsedLabel)
+	}
+}
+
+func (am *AgentManager) startAgentActivityHeartbeat(
+	ctx context.Context,
+	buildID string,
+	agent *Agent,
+	task *Task,
+	messageType WSMessageType,
+	stage string,
+	provider ai.AIProvider,
+	model string,
+) func() {
+	if am == nil || agent == nil || task == nil || strings.TrimSpace(buildID) == "" {
+		return func() {}
+	}
+	interval := agentActivityHeartbeatInterval
+	if interval <= 0 {
+		return func() {}
+	}
+
+	stopCh := make(chan struct{})
+	var stopOnce sync.Once
+	startedAt := time.Now()
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-stopCh:
+				return
+			case now := <-ticker.C:
+				content := formatAgentHeartbeatContent(agent.Role, provider, model, task, stage, now.Sub(startedAt))
+				if strings.TrimSpace(content) == "" {
+					continue
+				}
+
+				data := map[string]any{
+					"agent_role":      agent.Role,
+					"provider":        provider,
+					"model":           model,
+					"task_id":         task.ID,
+					"task_type":       string(task.Type),
+					"heartbeat":       true,
+					"elapsed_seconds": int(now.Sub(startedAt).Seconds()),
+				}
+				switch messageType {
+				case WSAgentWorking:
+					data["description"] = content
+					data["content"] = content
+				default:
+					data["content"] = content
+				}
+
+				am.broadcast(buildID, &WSMessage{
+					Type:      messageType,
+					BuildID:   buildID,
+					AgentID:   agent.ID,
+					Timestamp: now,
+					Data:      data,
+				})
+			}
+		}
+	}()
+
+	return func() {
+		stopOnce.Do(func() {
+			close(stopCh)
+		})
+	}
 }
 
 func buildNeedsFrontendApprovalCheckpoint(build *Build) bool {
@@ -4354,6 +4462,8 @@ func (am *AgentManager) executeTask(task *Task) {
 		}
 		ctx, cancel := context.WithTimeout(am.ctx, planTimeout)
 		defer cancel()
+		stopHeartbeat := am.startAgentActivityHeartbeat(ctx, agent.BuildID, agent, task, WSAgentWorking, "planning", agent.Provider, agent.Model)
+		defer stopHeartbeat()
 
 		output, err := am.executeStructuredPlanningTask(ctx, task, build, agent)
 		if err != nil {
