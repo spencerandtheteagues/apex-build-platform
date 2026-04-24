@@ -520,12 +520,6 @@ export const useStore = create<StoreState & StoreActions>()(
         proposedEdits: [],
         diffMode: false,
 
-        // FSM
-        fsmStates: new Map(),
-        fsmActiveBuilds: [],
-        fsmLoading: false,
-        fsmError: null,
-
         // Auth actions
         login: async (usernameOrEmail: string, password: string) => {
           set((state) => {
