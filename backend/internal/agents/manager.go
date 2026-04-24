@@ -3179,6 +3179,24 @@ Contract:
 	critiqueCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
+	if am.budgetEnforcer != nil {
+		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, build.ID, estimatedRequestCostUSDForBuild(build))
+		if preAuthErr == nil && !preAuth.Allowed {
+			am.broadcast(build.ID, &WSMessage{
+				Type:      "budget:exceeded",
+				BuildID:   build.ID,
+				Timestamp: time.Now(),
+				Data: map[string]any{
+					"reason":      preAuth.Reason,
+					"cap_type":    preAuth.CapType,
+					"limit_usd":   preAuth.LimitUSD,
+					"current_usd": preAuth.CurrentUSD,
+				},
+			})
+			return nil
+		}
+	}
+
 	resp, err := am.aiRouter.Generate(critiqueCtx, provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
 		BuildID:         build.ID,
@@ -3191,6 +3209,27 @@ Contract:
 	})
 	if err != nil || resp == nil || strings.TrimSpace(resp.Content) == "" {
 		return nil
+	}
+
+	if am.spendTracker != nil && resp.Usage != nil {
+		projectID := build.ProjectID
+		if _, spendErr := am.spendTracker.RecordSpend(spend.RecordSpendInput{
+			UserID:       build.UserID,
+			ProjectID:    projectID,
+			BuildID:      build.ID,
+			AgentID:      "contract-critique",
+			AgentRole:    string(RoleArchitect),
+			Provider:     string(provider),
+			Model:        ai.GetModelUsed(resp, nil),
+			Capability:   "contract_critique",
+			IsBYOK:       !am.buildUsesPlatformKeys(build),
+			InputTokens:  resp.Usage.PromptTokens,
+			OutputTokens: resp.Usage.CompletionTokens,
+			PowerMode:    string(build.PowerMode),
+			Status:       "success",
+		}); spendErr != nil {
+			log.Printf("spend: failed to record contract critique spend for build %s: %v", build.ID, spendErr)
+		}
 	}
 
 	var critique contractCritiquePayload
@@ -26006,6 +26045,15 @@ func (am *AgentManager) completeTruncatedFiles(
 			path, len(ctxLines), ctxText,
 		)
 
+		if am.budgetEnforcer != nil {
+			preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, build.ID, estimatedRequestCostUSDForBuild(build))
+			if preAuthErr == nil && !preAuth.Allowed {
+				log.Printf("[chunked] continuation blocked by budget cap for %s in task %s", path, task.ID)
+				remainingTruncated = append(remainingTruncated, path)
+				continue
+			}
+		}
+
 		resp, err := am.aiRouter.Generate(ctx, agent.Provider, continuationPrompt, GenerateOptions{
 			UserID:      build.UserID,
 			BuildID:     build.ID,
@@ -26026,6 +26074,27 @@ func (am *AgentManager) completeTruncatedFiles(
 			log.Printf("[chunked] continuation returned nil response for %s in task %s", path, task.ID)
 			remainingTruncated = append(remainingTruncated, path)
 			continue
+		}
+
+		if am.spendTracker != nil && resp.Usage != nil {
+			projectID := build.ProjectID
+			if _, spendErr := am.spendTracker.RecordSpend(spend.RecordSpendInput{
+				UserID:       build.UserID,
+				ProjectID:    projectID,
+				BuildID:      build.ID,
+				AgentID:      string(RoleSolver),
+				AgentRole:    string(RoleSolver),
+				Provider:     string(agent.Provider),
+				Model:        ai.GetModelUsed(resp, nil),
+				Capability:   "chunked_continuation",
+				IsBYOK:       !am.buildUsesPlatformKeys(build),
+				InputTokens:  resp.Usage.PromptTokens,
+				OutputTokens: resp.Usage.CompletionTokens,
+				PowerMode:    string(build.PowerMode),
+				Status:       "success",
+			}); spendErr != nil {
+				log.Printf("spend: failed to record chunked continuation spend for build %s: %v", build.ID, spendErr)
+			}
 		}
 
 		continuation := stripCodeFences(strings.TrimSpace(resp.Content))
@@ -26165,6 +26234,19 @@ func (am *AgentManager) executeChunkedFileRepair(
 
 	for _, chunk := range chunks {
 		prompt := am.chunkedEditor.BuildChunkPrompt(chunk, repairInstruction)
+
+		if am.budgetEnforcer != nil {
+			preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, build.ID, estimatedRequestCostUSDForBuild(build))
+			if preAuthErr == nil && !preAuth.Allowed {
+				log.Printf("[chunked] chunk repair blocked by budget cap for %s", filePath)
+				results = append(results, ChunkEditResult{
+					ChunkIndex:  chunk.Index,
+					EditedText:  chunk.Content,
+					ChangesMade: false,
+				})
+				continue
+			}
+		}
 
 		resp, err := am.aiRouter.Generate(ctx, agent.Provider, prompt, GenerateOptions{
 			UserID:      build.UserID,
