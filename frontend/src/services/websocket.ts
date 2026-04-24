@@ -11,7 +11,9 @@ import {
   WSMessage,
   FileChangeMessage,
   CursorUpdateMessage,
+  FSMWSMessageType,
 } from '@/types'
+import { useStore } from '@/hooks/useStore'
 
 const DEFAULT_PRODUCTION_WS_URL = 'wss://api.apex-build.dev/ws'
 
@@ -268,6 +270,15 @@ export class WebSocketService {
 
     this.socket.on('ai-response', (data: CollaborationEventData['ai-response']) => {
       this.emit('ai-response', data)
+    })
+
+    // FSM events (build:fsm:*) — wired to zustand store
+    this.socket.onAny((event: string, ...args: any[]) => {
+      if (event.startsWith('build:fsm:')) {
+        const data = args[0] || {}
+        const buildID = data?.build_id || data?.buildId || ''
+        useStore.getState().handleFSMEvent(event as FSMWSMessageType, buildID, data)
+      }
     })
 
     // Error handling
