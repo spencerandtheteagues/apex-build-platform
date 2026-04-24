@@ -10,6 +10,15 @@ import (
 	"gorm.io/gorm"
 )
 
+// SpendTrackerInterface is the subset of *spend.SpendTracker that BudgetEnforcer needs.
+// It exists so tests can inject a lightweight mock instead of a real DB-backed tracker.
+type SpendTrackerInterface interface {
+	GetDailySpend(userID uint, day time.Time) (float64, int, error)
+	GetMonthlySpend(userID uint, month time.Time) (float64, int, error)
+	GetBuildSpend(buildID string) (float64, []spend.SpendEvent, error)
+	SetCache(c *cache.RedisCache)
+}
+
 // BudgetCap is a GORM model for the budget_caps table
 type BudgetCap struct {
 	ID        uint       `gorm:"primaryKey" json:"id"`
@@ -40,11 +49,11 @@ type PreAuthResult struct {
 // BudgetEnforcer checks and enforces budget caps
 type BudgetEnforcer struct {
 	db      *gorm.DB
-	tracker *spend.SpendTracker
+	tracker SpendTrackerInterface
 }
 
 // NewBudgetEnforcer creates a new enforcer
-func NewBudgetEnforcer(db *gorm.DB, tracker *spend.SpendTracker) *BudgetEnforcer {
+func NewBudgetEnforcer(db *gorm.DB, tracker SpendTrackerInterface) *BudgetEnforcer {
 	return &BudgetEnforcer{db: db, tracker: tracker}
 }
 
