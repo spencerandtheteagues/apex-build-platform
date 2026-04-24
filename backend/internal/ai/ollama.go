@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -71,12 +73,27 @@ type ollamaModelsResponse struct {
 }
 
 // NewOllamaClient creates a new Ollama API client
+// Supports embedded API key in URL: http://apikey@host/v1
 func NewOllamaClient(baseURL string) *OllamaClient {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
+
+	// Extract API key from embedded auth in URL (e.g., http://apikey@host/v1)
+	apiKey := ""
+	if strings.Contains(baseURL, "@") {
+		if parsed, err := url.Parse(baseURL); err == nil {
+			if parsed.User != nil {
+				apiKey = parsed.User.Username()
+				parsed.User = nil
+				baseURL = parsed.String()
+			}
+		}
+	}
+
 	return &OllamaClient{
 		baseURL: baseURL,
+		apiKey:  apiKey,
 		httpClient: &http.Client{
 			Timeout: 900 * time.Second, // 15-minute timeout for local inference (large models can be slow)
 		},
@@ -344,12 +361,8 @@ func (o *OllamaClient) GetProvider() AIProvider {
 
 // Health checks if Ollama server is accessible
 func (o *OllamaClient) Health(ctx context.Context) error {
-	// For Ollama Cloud (OpenAI-compatible), prefer /v1/models or /health over /api/tags
-	endpoints := []string{"/api/tags"}
-	if o.apiKey != "" {
-		// Cloud endpoint: try /v1/models first, then /health
-		endpoints = []string{"/v1/models", "/health", "/api/tags"}
-	}
+	// For Ollama Cloud (OpenAI-compatible), try OpenAI-compatible endpoints first.
+	endpoints := []string{"/v1/models", "/health", "/api/tags"}
 
 	for _, path := range endpoints {
 		url := o.baseURL + path
@@ -368,7 +381,8 @@ func (o *OllamaClient) Health(ctx context.Context) error {
 		}
 		resp.Body.Close()
 
-		if resp.StatusCode == http.StatusOK {
+		// 200 = healthy, 401 = server reachable but auth required (still healthy for our purposes)
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusUnauthorized {
 			return nil
 		}
 	}
