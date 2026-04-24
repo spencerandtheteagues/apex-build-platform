@@ -188,4 +188,20 @@ describe('IDELayout preview workspace', () => {
 
     expect(await screen.findByText('Deployment Panel')).toBeTruthy()
   })
+
+  it('resets stale split preview state when a new launch request targets dashboard', async () => {
+    const { rerender } = render(<IDELayout launchTarget="dashboard" launchRequestId={1} />)
+
+    const editorButton = await screen.findByRole('button', { name: /editor/i })
+    fireEvent.click(editorButton)
+
+    const splitPreviewButton = await screen.findByRole('button', { name: /split preview/i })
+    fireEvent.click(splitPreviewButton)
+    expect(await screen.findByText('Live Preview 22')).toBeTruthy()
+
+    rerender(<IDELayout launchTarget="dashboard" launchRequestId={2} />)
+
+    expect(await screen.findByText('Project Dashboard')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /split preview/i })).toBeNull()
+  })
 })

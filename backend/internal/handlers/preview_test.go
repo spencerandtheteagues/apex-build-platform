@@ -176,6 +176,7 @@ func TestPreviewHandlerGetDockerStatusIncludesSecureModeFlags(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"sandbox_required":true`)
 	require.Contains(t, recorder.Body.String(), `"sandbox_degraded":true`)
 	require.Contains(t, recorder.Body.String(), `"backend_preview_available":true`)
+	require.Contains(t, recorder.Body.String(), `"diagnostic":"preview container factory is disabled"`)
 }
 
 func TestPreviewHandlerGetDockerStatusTreatsE2BRuntimeAsBackendPreviewAvailable(t *testing.T) {

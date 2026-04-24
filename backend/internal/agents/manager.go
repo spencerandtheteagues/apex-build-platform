@@ -2196,11 +2196,13 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 	// Log final assignments
 	for role, provider := range assignments {
 		log.Printf("Agent %s -> Provider %s", role, provider)
-		model := selectModelForPowerMode(provider, build.PowerMode)
+		powerMode := PowerFast
 		buildID := ""
 		if build != nil {
+			powerMode = build.PowerMode
 			buildID = build.ID
 		}
+		model := selectModelForPowerMode(provider, powerMode)
 		pLog(buildID).AgentAssigned(string(role), string(role), string(provider), model)
 	}
 

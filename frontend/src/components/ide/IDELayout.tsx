@@ -104,6 +104,7 @@ export interface IDELayoutProps {
   className?: string
   onNavigateToAgent?: () => void
   launchTarget?: 'dashboard' | 'editor' | 'preview'
+  launchRequestId?: number
 }
 
 type ViewMode = 'projects' | 'dashboard' | 'editor' | 'preview'
@@ -121,7 +122,12 @@ const idePanelTabClass = (active: boolean) => cn(
     : '!bg-transparent !text-gray-400 hover:!bg-gray-800/85 hover:!text-white'
 )
 
-export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAgent, launchTarget = 'dashboard' }) => {
+export const IDELayout: React.FC<IDELayoutProps> = ({
+  className,
+  onNavigateToAgent,
+  launchTarget = 'dashboard',
+  launchRequestId = 0,
+}) => {
   // Responsive hooks
   const isMobile = useIsMobile()
   const isTablet = useIsTablet()
@@ -210,6 +216,7 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
   } = useStore()
   const initializedProjectViewRef = useRef(false)
   const lastLaunchTargetRef = useRef<'dashboard' | 'editor' | 'preview' | null>(null)
+  const lastLaunchRequestIdRef = useRef<number | null>(null)
 
   const openProjectsView = useCallback(() => {
     setShowPreview(false)
@@ -248,12 +255,16 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
     if (!currentProject) {
       initializedProjectViewRef.current = false
       lastLaunchTargetRef.current = null
+      lastLaunchRequestIdRef.current = null
       openProjectsView()
       return
     }
 
     const nextLaunchTarget = launchTarget || 'dashboard'
-    if (!initializedProjectViewRef.current || lastLaunchTargetRef.current !== nextLaunchTarget) {
+    const launchTargetChanged = lastLaunchTargetRef.current !== nextLaunchTarget
+    const launchRequestChanged = lastLaunchRequestIdRef.current !== launchRequestId
+
+    if (!initializedProjectViewRef.current || launchTargetChanged || launchRequestChanged) {
       if (nextLaunchTarget === 'preview') {
         openPreviewWorkspace()
       } else if (nextLaunchTarget === 'editor') {
@@ -263,8 +274,9 @@ export const IDELayout: React.FC<IDELayoutProps> = ({ className, onNavigateToAge
       }
       initializedProjectViewRef.current = true
       lastLaunchTargetRef.current = nextLaunchTarget
+      lastLaunchRequestIdRef.current = launchRequestId
     }
-  }, [currentProject, launchTarget, openDashboardView, openEditorWorkspace, openPreviewWorkspace, openProjectsView])
+  }, [currentProject, launchRequestId, launchTarget, openDashboardView, openEditorWorkspace, openPreviewWorkspace, openProjectsView])
 
   // Update panel states when responsive breakpoints change
   useEffect(() => {

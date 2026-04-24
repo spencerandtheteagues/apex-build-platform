@@ -218,13 +218,16 @@ func (f *PreviewServerFactory) Cleanup() error {
 
 // DockerStatusInfo provides Docker availability information
 type DockerStatusInfo struct {
-	Available       bool   `json:"available"`
-	ContainerCount  int32  `json:"container_count"`
-	MaxContainers   int32  `json:"max_containers"`
-	TotalCreated    int64  `json:"total_created"`
-	FailedCount     int64  `json:"failed_count"`
-	TotalBuildTime  int64  `json:"total_build_time_ms"`
-	TotalRuntime    int64  `json:"total_runtime_ms"`
+	Available      bool   `json:"available"`
+	DockerHost     string `json:"docker_host,omitempty"`
+	DockerContext  string `json:"docker_context,omitempty"`
+	Diagnostic     string `json:"diagnostic,omitempty"`
+	ContainerCount int32  `json:"container_count"`
+	MaxContainers  int32  `json:"max_containers"`
+	TotalCreated   int64  `json:"total_created"`
+	FailedCount    int64  `json:"failed_count"`
+	TotalBuildTime int64  `json:"total_build_time_ms"`
+	TotalRuntime   int64  `json:"total_runtime_ms"`
 }
 
 // GetDockerStatus returns Docker availability and statistics
@@ -234,6 +237,13 @@ func (f *PreviewServerFactory) GetDockerStatus() *DockerStatusInfo {
 
 	info := &DockerStatusInfo{
 		Available: f.dockerAvailable,
+	}
+
+	if f.containerServer != nil {
+		conn := f.containerServer.DockerConnectionInfo()
+		info.DockerHost = conn.Host
+		info.DockerContext = conn.Context
+		info.Diagnostic = conn.Diagnostic
 	}
 
 	if f.containerServer != nil && f.dockerAvailable {

@@ -1196,10 +1196,22 @@ func appendPreviewTokenToProxyAssets(html string, prefix string, previewToken st
 // GET /api/v1/preview/docker/status
 func (h *PreviewHandler) GetDockerStatus(c *gin.Context) {
 	if h.factory == nil {
+		configuredHost := strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_HOST"))
+		if configuredHost == "" {
+			configuredHost = strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_SOCKET"))
+		}
+		configuredContext := strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_CONTEXT"))
+		if configuredContext == "" {
+			configuredContext = strings.TrimSpace(os.Getenv("DOCKER_CONTEXT"))
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"success":                   true,
 			"available":                 false,
 			"message":                   "Docker container previews not configured",
+			"diagnostic":                "preview container factory is disabled",
+			"docker_host":               configuredHost,
+			"docker_context":            configuredContext,
 			"sandbox_required":          h.requireSandbox,
 			"sandbox_degraded":          h.sandboxFallbackActive(),
 			"backend_preview_available": h.backendPreviewAvailable(),
@@ -1214,6 +1226,9 @@ func (h *PreviewHandler) GetDockerStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success":                   true,
 		"available":                 status.Available,
+		"docker_host":               status.DockerHost,
+		"docker_context":            status.DockerContext,
+		"diagnostic":                status.Diagnostic,
 		"container_count":           status.ContainerCount,
 		"max_containers":            status.MaxContainers,
 		"total_created":             status.TotalCreated,

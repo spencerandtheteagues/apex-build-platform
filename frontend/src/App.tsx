@@ -249,6 +249,7 @@ function App() {
   const [recoverableProjectId, setRecoverableProjectId] = useState<number | null>(null)
   const [isRestoringProject, setIsRestoringProject] = useState(false)
   const [ideLaunchTarget, setIdeLaunchTarget] = useState<IDELaunchTarget>('dashboard')
+  const [ideLaunchRequestId, setIdeLaunchRequestId] = useState(0)
   const [isAuthMode, setIsAuthMode] = useState<'login' | 'register'>('login')
   const [verifyCode, setVerifyCode] = useState('')
   const [isVerifying, setIsVerifying] = useState(false)
@@ -332,6 +333,7 @@ function App() {
     pendingProjectIdRef.current = targetProjectId
     pendingLaunchTargetRef.current = target
     setIdeLaunchTarget(target)
+    setIdeLaunchRequestId((prev) => prev + 1)
     navigateToView('ide', {
       replace: options?.replace,
       projectId: targetProjectId,
@@ -797,6 +799,7 @@ function App() {
       setShowHelpCenter(shouldOpenHelpCenterFromLocation())
       if (routeState.currentView === 'ide') {
         setIdeLaunchTarget('dashboard')
+        setIdeLaunchRequestId((prev) => prev + 1)
         pendingLaunchTargetRef.current = 'dashboard'
       }
       setVisitedViews((prev) => addVisitedView(prev, routeState.currentView))
@@ -1411,6 +1414,7 @@ function App() {
                 <IDELayout
                   key={currentProject?.id ?? 'no-project'}
                   launchTarget={ideLaunchTarget}
+                  launchRequestId={ideLaunchRequestId}
                 />
               </Suspense>
             </ErrorBoundary>

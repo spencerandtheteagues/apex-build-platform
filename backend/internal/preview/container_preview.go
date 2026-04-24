@@ -31,6 +31,9 @@ type ContainerPreviewServer struct {
 	containerMu       sync.RWMutex
 	config            *ContainerPreviewConfig
 	dockerAvailable   bool
+	dockerHost        string
+	dockerContext     string
+	dockerDiagnostic  string
 	seccompProfile    string
 	baseTempDir       string
 	stats             *ContainerPreviewStats
@@ -57,26 +60,27 @@ type ContainerSession struct {
 
 // ContainerConfig holds container-specific configuration
 type ContainerConfig struct {
-	Image           string        // Base image (auto-detected if empty)
-	MemoryMB        int64         // Memory limit in MB (default 256)
-	CPUPercent      float64       // CPU limit as fraction (default 0.5)
-	NetworkMode     string        // "none", "bridge" (default: "bridge" for previews)
-	Timeout         time.Duration // Max runtime (default: 30 minutes)
-	ReadOnly        bool          // Read-only root filesystem (default: true for security)
-	PidsLimit       int64         // Max processes (default: 100)
-	EnableSeccomp   bool          // Use seccomp profile (default: true)
-	DropCapabilities bool         // Drop all Linux capabilities (default: true)
+	Image            string        // Base image (auto-detected if empty)
+	MemoryMB         int64         // Memory limit in MB (default 256)
+	CPUPercent       float64       // CPU limit as fraction (default 0.5)
+	NetworkMode      string        // "none", "bridge" (default: "bridge" for previews)
+	Timeout          time.Duration // Max runtime (default: 30 minutes)
+	ReadOnly         bool          // Read-only root filesystem (default: true for security)
+	PidsLimit        int64         // Max processes (default: 100)
+	EnableSeccomp    bool          // Use seccomp profile (default: true)
+	DropCapabilities bool          // Drop all Linux capabilities (default: true)
 }
 
 // ContainerPreviewConfig holds global container preview configuration
 type ContainerPreviewConfig struct {
 	// Docker settings
-	DockerSocket      string
-	ImagePrefix       string
-	BasePort          int
-	MaxContainers     int32
-	MaxContainerAge   time.Duration
-	CleanupInterval   time.Duration
+	DockerSocket    string
+	DockerContext   string
+	ImagePrefix     string
+	BasePort        int
+	MaxContainers   int32
+	MaxContainerAge time.Duration
+	CleanupInterval time.Duration
 
 	// Default resource limits
 	DefaultMemoryMB   int64
@@ -85,10 +89,10 @@ type ContainerPreviewConfig struct {
 	DefaultPidsLimit  int64
 
 	// Security settings
-	EnableSeccomp        bool
-	EnableReadOnlyRoot   bool
-	DropAllCapabilities  bool
-	NoNewPrivileges      bool
+	EnableSeccomp       bool
+	EnableReadOnlyRoot  bool
+	DropAllCapabilities bool
+	NoNewPrivileges     bool
 
 	// Temp directory for build contexts
 	TempDir string
@@ -100,13 +104,13 @@ type ContainerPreviewConfig struct {
 
 // ContainerPreviewStats tracks container preview statistics
 type ContainerPreviewStats struct {
-	TotalContainersCreated int64
-	ActiveContainers       int32
+	TotalContainersCreated  int64
+	ActiveContainers        int32
 	MaxConcurrentContainers int32
-	FailedContainers       int64
-	TimeoutContainers      int64
-	TotalBuildTime         int64 // milliseconds
-	TotalRuntime           int64 // milliseconds
+	FailedContainers        int64
+	TimeoutContainers       int64
+	TotalBuildTime          int64 // milliseconds
+	TotalRuntime            int64 // milliseconds
 }
 
 // SeccompProfile represents the seccomp security profile for containers
@@ -132,24 +136,33 @@ type SeccompArg struct {
 
 // DefaultContainerPreviewConfig returns production-ready defaults
 func DefaultContainerPreviewConfig() *ContainerPreviewConfig {
+	dockerHost := strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_HOST"))
+	if dockerHost == "" {
+		dockerHost = strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_SOCKET"))
+	}
+
 	return &ContainerPreviewConfig{
-		DockerSocket:         "/var/run/docker.sock",
-		ImagePrefix:          "apex-preview",
-		BasePort:             10000,
-		MaxContainers:        50,
-		MaxContainerAge:      30 * time.Minute,
-		CleanupInterval:      5 * time.Minute,
-		DefaultMemoryMB:      256,
-		DefaultCPUPercent:    0.5,
-		DefaultTimeout:       30 * time.Minute,
-		DefaultPidsLimit:     100,
-		EnableSeccomp:        true,
-		EnableReadOnlyRoot:   true,
-		DropAllCapabilities:  true,
-		NoNewPrivileges:      true,
-		TempDir:              filepath.Join(os.TempDir(), "apex-preview-containers"),
-		EnableAuditLog:       true,
-		AuditLogPath:         "/var/log/apex-preview/audit.log",
+		// Leave host blank by default so Docker CLI context resolution works.
+		// Operators can force a specific endpoint via APEX_PREVIEW_DOCKER_HOST
+		// or the legacy APEX_PREVIEW_DOCKER_SOCKET.
+		DockerSocket:        dockerHost,
+		DockerContext:       strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_CONTEXT")),
+		ImagePrefix:         "apex-preview",
+		BasePort:            10000,
+		MaxContainers:       50,
+		MaxContainerAge:     30 * time.Minute,
+		CleanupInterval:     5 * time.Minute,
+		DefaultMemoryMB:     256,
+		DefaultCPUPercent:   0.5,
+		DefaultTimeout:      30 * time.Minute,
+		DefaultPidsLimit:    100,
+		EnableSeccomp:       true,
+		EnableReadOnlyRoot:  true,
+		DropAllCapabilities: true,
+		NoNewPrivileges:     true,
+		TempDir:             filepath.Join(os.TempDir(), "apex-preview-containers"),
+		EnableAuditLog:      true,
+		AuditLogPath:        "/var/log/apex-preview/audit.log",
 	}
 }
 
@@ -202,8 +215,25 @@ func (s *ContainerPreviewServer) IsDockerAvailable() bool {
 	return s.dockerAvailable
 }
 
+type DockerConnectionInfo struct {
+	Host       string
+	Context    string
+	Diagnostic string
+}
+
+func (s *ContainerPreviewServer) DockerConnectionInfo() DockerConnectionInfo {
+	return DockerConnectionInfo{
+		Host:       s.dockerHost,
+		Context:    s.dockerContext,
+		Diagnostic: s.dockerDiagnostic,
+	}
+}
+
 func (s *ContainerPreviewServer) dockerEnv() []string {
 	env := append([]string(nil), os.Environ()...)
+	if configuredContext := strings.TrimSpace(s.config.DockerContext); configuredContext != "" && envValue(env, "DOCKER_CONTEXT") == "" {
+		env = append(env, "DOCKER_CONTEXT="+configuredContext)
+	}
 	host := strings.TrimSpace(s.config.DockerSocket)
 	if host == "" {
 		return env
@@ -229,9 +259,66 @@ func (s *ContainerPreviewServer) dockerCommandContext(ctx context.Context, args 
 
 // checkDockerAvailable verifies Docker daemon is accessible
 func (s *ContainerPreviewServer) checkDockerAvailable() bool {
-	cmd := s.dockerCommand("info")
-	err := cmd.Run()
-	return err == nil
+	env := s.dockerEnv()
+	s.dockerHost = envValue(env, "DOCKER_HOST")
+	s.dockerContext = envValue(env, "DOCKER_CONTEXT")
+	if s.dockerContext == "" {
+		s.dockerContext = s.detectDockerContext(env)
+	}
+
+	if _, err := osexec.LookPath("docker"); err != nil {
+		s.dockerDiagnostic = "docker CLI not found in PATH"
+		return false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	cmd := osexec.CommandContext(ctx, "docker", "info", "--format", "{{.ServerVersion}}")
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		s.dockerDiagnostic = "docker info timed out after 8 seconds"
+		return false
+	}
+	if err != nil {
+		detail := strings.TrimSpace(string(output))
+		if detail == "" {
+			detail = err.Error()
+		}
+		s.dockerDiagnostic = detail
+		return false
+	}
+
+	serverVersion := strings.TrimSpace(string(output))
+	if serverVersion == "" {
+		serverVersion = "unknown"
+	}
+	s.dockerDiagnostic = fmt.Sprintf("docker daemon reachable (server version %s)", serverVersion)
+	return true
+}
+
+func (s *ContainerPreviewServer) detectDockerContext(env []string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := osexec.CommandContext(ctx, "docker", "context", "show")
+	cmd.Env = env
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(entry, prefix))
+		}
+	}
+	return ""
 }
 
 // StartContainerPreview starts a container-based preview session

@@ -46,7 +46,7 @@ func TestSelectModelForPowerModeUsesProviderOwnedMaxModels(t *testing.T) {
 		want     string
 	}{
 		{name: "claude max uses opus", provider: ai.ProviderClaude, mode: PowerMax, want: "claude-opus-4-6"},
-		{name: "openai max uses chatgpt", provider: ai.ProviderGPT4, mode: PowerMax, want: "gpt-5.4"},
+		{name: "openai max uses chatgpt", provider: ai.ProviderGPT4, mode: PowerMax, want: "gpt-5.4-pro"},
 		{name: "openai fast owns gpt 4o mini", provider: ai.ProviderGPT4, mode: PowerFast, want: "gpt-4o-mini"},
 		{name: "gemini max uses pro before preview", provider: ai.ProviderGemini, mode: PowerMax, want: "gemini-3.1-pro"},
 		{name: "grok max uses 4.20", provider: ai.ProviderGrok, mode: PowerMax, want: "grok-4.20-0309-reasoning"},

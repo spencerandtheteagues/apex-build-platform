@@ -58,12 +58,25 @@ import (
 func main() {
 	log.Println("Starting APEX.BUILD - Multi-AI Cloud Development Platform")
 
-	// Load .env file
-	if err := godotenv.Load(); err != nil {
-		// Try parent directory for .env
-		if err := godotenv.Load("../.env"); err != nil {
-			log.Println("WARNING: No .env file found, using environment variables")
+	// Load environment files from common local run locations.
+	// `godotenv.Load` does not overwrite variables that are already exported.
+	envPaths := []string{
+		".env",
+		".env.local",
+		".env.docker.local",
+		"backend/.env.docker.local",
+		"../.env",
+		"../.env.local",
+		"../backend/.env.docker.local",
+	}
+	loadedEnv := false
+	for _, path := range envPaths {
+		if err := godotenv.Load(path); err == nil {
+			loadedEnv = true
 		}
+	}
+	if !loadedEnv {
+		log.Println("WARNING: No .env file found, using environment variables")
 	}
 	log.Println("Environment configuration loaded")
 

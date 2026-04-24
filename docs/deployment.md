@@ -68,6 +68,37 @@ Optional local tooling:
 
 Local compose defaults are for local use only. Seed accounts are disabled unless you provide `ADMIN_SEED_PASSWORD` / `SPENCER_SEED_PASSWORD` or explicitly set `ALLOW_DEFAULT_SEED_PASSWORDS=true`.
 
+### Docker endpoint setup for preview reliability
+
+Preview sandbox startup now respects Docker CLI context resolution by default, and can be pinned with explicit Apex env overrides when needed.
+
+Quick setup:
+
+```bash
+cd /path/to/apex-build
+scripts/setup_apex_docker.sh --env-file backend/.env.docker.local
+```
+
+Then source or copy those values into your backend environment:
+
+- `APEX_PREVIEW_DOCKER_CONTEXT`
+- `APEX_PREVIEW_DOCKER_HOST` (optional but recommended for deterministic behavior)
+
+You can verify backend-side detection at:
+
+- `GET /api/v1/preview/docker/status`
+
+The response includes:
+
+- `available`
+- `docker_context`
+- `docker_host`
+- `diagnostic`
+
+### Hosted platform note
+
+The hosted Apex backend cannot directly access Docker running on an end user's laptop unless a dedicated bridge/runtime is deployed for that user session. For hosted environments without host Docker access, use managed sandbox execution (`E2B_API_KEY`) or run the Apex backend where Docker is reachable.
+
 ## Standalone Docker deploy script
 
 [`deploy.sh`](../deploy.sh) is now a guarded backend deployment path. It requires explicit values for:
