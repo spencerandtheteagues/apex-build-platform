@@ -344,27 +344,36 @@ func (o *OllamaClient) GetProvider() AIProvider {
 
 // Health checks if Ollama server is accessible
 func (o *OllamaClient) Health(ctx context.Context) error {
-	url := o.baseURL + "/api/tags"
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create health check request: %w", err)
+	// For Ollama Cloud (OpenAI-compatible), prefer /v1/models or /health over /api/tags
+	endpoints := []string{"/api/tags"}
+	if o.apiKey != "" {
+		// Cloud endpoint: try /v1/models first, then /health
+		endpoints = []string{"/v1/models", "/health", "/api/tags"}
 	}
 
-	// Bypass ngrok browser warning for free tunnels
-	req.Header.Set("ngrok-skip-browser-warning", "true")
+	for _, path := range endpoints {
+		url := o.baseURL + path
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			continue
+		}
+		if o.apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+o.apiKey)
+		}
+		req.Header.Set("ngrok-skip-browser-warning", "true")
 
-	resp, err := o.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("Ollama server not reachable at %s: %w", o.baseURL, err)
+		resp, err := o.httpClient.Do(req)
+		if err != nil {
+			continue
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			return nil
+		}
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Ollama health check failed with status %d", resp.StatusCode)
-	}
-
-	return nil
+	return fmt.Errorf("Ollama server not reachable at %s (tried %v)", o.baseURL, endpoints)
 }
 
 // GetAvailableModels fetches the list of installed models from Ollama
