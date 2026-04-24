@@ -97,14 +97,14 @@ const PROVIDERS: ProviderConfig[] = [
   },
   {
     id: 'ollama',
-    name: 'Ollama (Local)',
-    description: 'Free, private, local',
+    name: 'Ollama (Local / Cloud)',
+    description: 'Free local inference or Ollama Cloud BYOK (e.g. kimi-k2.6:cloud)',
     color: 'text-cyan-400',
     bgColor: 'bg-cyan-500/10',
     bgGlow: 'shadow-cyan-500/20',
     borderColor: 'border-cyan-500/30',
     activeBorder: 'border-cyan-500',
-    placeholder: 'http://localhost:11434',
+    placeholder: 'http://localhost:11434   or   http://key@host/v1',
     models: [
       { id: 'kimi-k2.6:cloud', name: 'Kimi K2.6 Cloud', speed: 'fast', cost: 'free', description: '1T MoE reasoning + generation via Ollama Cloud' },
       { id: 'deepseek-r1:18b', name: 'DeepSeek-R1 (18b)', speed: 'medium', cost: 'free', description: 'Reasoning model' },

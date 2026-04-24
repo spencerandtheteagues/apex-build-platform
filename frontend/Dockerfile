@@ -25,6 +25,8 @@ ARG VITE_API_URL=http://localhost:8080/api/v1
 ARG VITE_WS_URL=ws://localhost:8080/ws
 ARG VERSION=dev
 ARG NODE_ENV=production
+ARG BUILD_TIMESTAMP=0
+ARG BUILD_TIMESTAMP=0
 
 WORKDIR /app
 
@@ -34,14 +36,20 @@ COPY --from=deps /app/node_modules ./node_modules
 # Copy source code
 COPY . .
 
+# Clear Vite cache to prevent stale bundles across Docker layer rebuilds
+# Also write a build-id so the HTML changes on every deploy → busts CDN cache
+RUN rm -rf node_modules/.vite .vite \
+    && echo "${BUILD_TIMESTAMP}" > /app/.build-id
+
 # Set environment variables for build
 ENV VITE_API_URL=${VITE_API_URL}
 ENV VITE_WS_URL=${VITE_WS_URL}
 ENV VITE_VERSION=${VERSION}
 ENV NODE_ENV=${NODE_ENV}
 
-# Build the application
-RUN npm run build
+# Build the application (force fresh) — inject BUILD_TIMESTAMP into HTML for CDN cache busting
+RUN npm run build \
+    && sed -i "s|BUILD_TIMESTAMP_PLACEHOLDER|${BUILD_TIMESTAMP}|g" /app/dist/index.html
 
 # ==================================================
 # Stage 3: Production Runtime (Nginx)

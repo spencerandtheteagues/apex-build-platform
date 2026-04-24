@@ -9,7 +9,7 @@ import './styles/globals.css'
 // Console welcome message
 console.log(`
 🚀 APEX-BUILD v1.0.0
-⚡ Cyberpunk Cloud Development Platform
+⚡ Cyberpunk Cloud Development Platform (rebuilt)
 
 🔥 Features:
    • Multi-AI Integration (Claude + OpenAI + Gemini + Grok)

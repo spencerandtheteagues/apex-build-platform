@@ -528,7 +528,20 @@ function App() {
       }
     }
 
+    // Safety timeout: never stay on loading screen for more than 8s
+    const bootstrapTimeout = setTimeout(() => {
+      if (!cancelled) {
+        console.warn('[APEX] Bootstrap safety timeout — forcing app mount')
+        setSessionBootstrapComplete(true)
+      }
+    }, 8000)
+
     void bootstrapSession()
+
+    return () => {
+      cancelled = true
+      clearTimeout(bootstrapTimeout)
+    }
 
     return () => {
       cancelled = true
