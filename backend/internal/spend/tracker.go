@@ -2,11 +2,14 @@ package spend
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
 
+	"apex-build/internal/cache"
 	"apex-build/internal/pricing"
 
 	"gorm.io/gorm"
@@ -14,12 +17,17 @@ import (
 
 // SpendTracker records and queries AI spend events.
 type SpendTracker struct {
-	db *gorm.DB
+	db    *gorm.DB
+	cache *cache.RedisCache
 }
 
 // NewSpendTracker creates a new SpendTracker backed by the given database.
-func NewSpendTracker(db *gorm.DB) *SpendTracker {
-	return &SpendTracker{db: db}
+func NewSpendTracker(db *gorm.DB, cacheClient ...*cache.RedisCache) *SpendTracker {
+	st := &SpendTracker{db: db}
+	if len(cacheClient) > 0 {
+		st.cache = cacheClient[0]
+	}
+	return st
 }
 
 // RecordSpend computes costs via the pricing engine, persists a SpendEvent, and returns it.
@@ -59,45 +67,97 @@ func (t *SpendTracker) RecordSpend(input RecordSpendInput) (*SpendEvent, error) 
 	if err := t.db.Create(&event).Error; err != nil {
 		return nil, fmt.Errorf("spend: failed to create event: %w", err)
 	}
+
+	// Invalidate cached spend totals so subsequent PreAuthorize calls see fresh data.
+	t.invalidateSpendCache(event.UserID, event.DayKey, event.MonthKey)
+
 	return &event, nil
+}
+
+// SetCache injects the Redis cache into the tracker (call once after creation).
+func (t *SpendTracker) SetCache(c *cache.RedisCache) {
+	t.cache = c
+}
+
+// spendCacheTTL is the TTL for cached spend totals.
+const spendCacheTTL = 5 * time.Minute
+
+// invalidateSpendCache clears the daily and monthly spend cache for a user.
+func (t *SpendTracker) invalidateSpendCache(userID uint, dayKey, monthKey string) {
+	if t.cache == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	t.cache.Delete(ctx, cache.SpendCacheKey(userID, "daily", dayKey))
+	t.cache.Delete(ctx, cache.SpendCacheKey(userID, "monthly", monthKey))
+}
+
+// getOrSetSpendTotal reads from cache, or queries the DB and populates cache.
+func (t *SpendTracker) getOrSetSpendTotal(userID uint, period, key string, loader func() (float64, int, error)) (float64, int, error) {
+	if t.cache != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+		data, err := t.cache.Get(ctx, cache.SpendCacheKey(userID, period, key))
+		if err == nil {
+			var cached struct {
+				Total float64 `json:"total"`
+				Count int     `json:"count"`
+			}
+			if json.Unmarshal(data, &cached) == nil {
+				return cached.Total, cached.Count, nil
+			}
+		}
+	}
+	total, count, err := loader()
+	if err != nil {
+		return 0, 0, err
+	}
+	if t.cache != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		payload, _ := json.Marshal(map[string]interface{}{"total": total, "count": count})
+		t.cache.Set(ctx, cache.SpendCacheKey(userID, period, key), payload, spendCacheTTL)
+	}
+	return total, count, nil
 }
 
 // GetDailySpend returns the total billed cost and event count for a user on a given day.
 func (t *SpendTracker) GetDailySpend(userID uint, day time.Time) (float64, int, error) {
 	dayKey := day.Format("2006-01-02")
-
-	var result struct {
-		Total float64
-		Count int
-	}
-
-	err := t.db.Model(&SpendEvent{}).
-		Select("COALESCE(SUM(billed_cost), 0) as total, COUNT(*) as count").
-		Where("user_id = ? AND day_key = ?", userID, dayKey).
-		Scan(&result).Error
-	if err != nil {
-		return 0, 0, fmt.Errorf("spend: daily query failed: %w", err)
-	}
-	return result.Total, result.Count, nil
+	return t.getOrSetSpendTotal(userID, "daily", dayKey, func() (float64, int, error) {
+		var result struct {
+			Total float64
+			Count int
+		}
+		err := t.db.Model(&SpendEvent{}).
+			Select("COALESCE(SUM(billed_cost), 0) as total, COUNT(*) as count").
+			Where("user_id = ? AND day_key = ?", userID, dayKey).
+			Scan(&result).Error
+		if err != nil {
+			return 0, 0, fmt.Errorf("spend: daily query failed: %w", err)
+		}
+		return result.Total, result.Count, nil
+	})
 }
 
 // GetMonthlySpend returns the total billed cost and event count for a user in a given month.
 func (t *SpendTracker) GetMonthlySpend(userID uint, month time.Time) (float64, int, error) {
 	monthKey := month.Format("2006-01")
-
-	var result struct {
-		Total float64
-		Count int
-	}
-
-	err := t.db.Model(&SpendEvent{}).
-		Select("COALESCE(SUM(billed_cost), 0) as total, COUNT(*) as count").
-		Where("user_id = ? AND month_key = ?", userID, monthKey).
-		Scan(&result).Error
-	if err != nil {
-		return 0, 0, fmt.Errorf("spend: monthly query failed: %w", err)
-	}
-	return result.Total, result.Count, nil
+	return t.getOrSetSpendTotal(userID, "monthly", monthKey, func() (float64, int, error) {
+		var result struct {
+			Total float64
+			Count int
+		}
+		err := t.db.Model(&SpendEvent{}).
+			Select("COALESCE(SUM(billed_cost), 0) as total, COUNT(*) as count").
+			Where("user_id = ? AND month_key = ?", userID, monthKey).
+			Scan(&result).Error
+		if err != nil {
+			return 0, 0, fmt.Errorf("spend: monthly query failed: %w", err)
+		}
+		return result.Total, result.Count, nil
+	})
 }
 
 // GetSummary returns a combined daily and monthly spend summary for the current period.

@@ -27,6 +27,8 @@ import {
 import { themes, getTheme } from '@/styles/themes'
 import apiService from '@/services/api'
 import collaborationService, { type ChatMessage as CollaborationChatMessage, type UserPresence } from '@/services/collaboration'
+import { createFSMSlice } from '@/store/fsmSlice'
+import type { FSMStateSlice, FSMActions } from '@/store/fsmSlice'
 
 // Helper function to extract error message from unknown error type
 const getErrorMessage = (error: unknown): string => {
@@ -423,7 +425,8 @@ interface StoreState
     UIState,
     SpendState,
     BudgetState,
-    DiffState {
+    DiffState,
+    FSMStateSlice {
       apiService: typeof apiService
     }
 
@@ -437,7 +440,8 @@ interface StoreActions
     UIActions,
     SpendActions,
     BudgetActions,
-    DiffActions {}
+    DiffActions,
+    FSMActions {}
 
 // Create the store
 export const useStore = create<StoreState & StoreActions>()(
@@ -515,6 +519,12 @@ export const useStore = create<StoreState & StoreActions>()(
         // Diff
         proposedEdits: [],
         diffMode: false,
+
+        // FSM
+        fsmStates: new Map(),
+        fsmActiveBuilds: [],
+        fsmLoading: false,
+        fsmError: null,
 
         // Auth actions
         login: async (usernameOrEmail: string, password: string) => {
@@ -1546,6 +1556,9 @@ export const useStore = create<StoreState & StoreActions>()(
         clearProposedEdits: () => {
           set((state) => { state.proposedEdits = [] })
         },
+
+        // FSM — spread slice so actions exist in the store
+        ...createFSMSlice(set, get),
       }))
     ),
     {

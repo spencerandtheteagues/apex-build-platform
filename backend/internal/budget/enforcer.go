@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"apex-build/internal/cache"
 	"apex-build/internal/spend"
 
 	"gorm.io/gorm"
@@ -45,6 +46,13 @@ type BudgetEnforcer struct {
 // NewBudgetEnforcer creates a new enforcer
 func NewBudgetEnforcer(db *gorm.DB, tracker *spend.SpendTracker) *BudgetEnforcer {
 	return &BudgetEnforcer{db: db, tracker: tracker}
+}
+
+// SetCache injects the Redis cache so the tracker can cache spend lookups.
+func (be *BudgetEnforcer) SetCache(c *cache.RedisCache) {
+	if be.tracker != nil {
+		be.tracker.SetCache(c)
+	}
 }
 
 // PreAuthorize loads active caps for the user and checks whether spending

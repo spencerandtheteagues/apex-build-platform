@@ -615,6 +615,9 @@ func main() {
 		log.Println("WARNING: REDIS_URL not set - using in-memory cache (set for production)")
 		redisCache = cache.NewRedisCache(cacheConfig)
 	}
+	if redisCache != nil {
+		spendTracker.SetCache(redisCache)
+	}
 	cacheStatus := redisCache.Status()
 	cacheDetails := map[string]any{
 		"backend":              cacheStatus.Backend,

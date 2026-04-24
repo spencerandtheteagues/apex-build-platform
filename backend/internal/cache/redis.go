@@ -591,5 +591,11 @@ func UserProjectsPattern(userID uint) string {
 	return fmt.Sprintf("projects:user:%d:*", userID)
 }
 
+// SpendCacheKey returns the cache key for a user's spend total for a given period.
+// period should be "daily" or "monthly".
+func SpendCacheKey(userID uint, period string, key string) string {
+	return fmt.Sprintf("user:%d:%s_spend:%s", userID, period, key)
+}
+
 // Errors
 var ErrCacheMiss = fmt.Errorf("cache miss")
