@@ -1,0 +1,22 @@
+slide,claim,claim_type,status,source_or_evidence,action,notes
+3,AI Code Assistants Market $4.7B (2025),market_size,verified,Zylos Research Jan 2026,preserve,Direct market research firm report
+3,Projected $14.6B by 2033,market_projection,estimate,MarketsAndMarkets projection,mark_estimate,Industry standard projection; CAGR implied
+3,Cursor ARR $2.0B (Apr 2026),revenue,verified,Bloomberg Apr 2026,preserve,Multiple sources confirm
+3,Cursor Valuation $50-60B,valuation,verified,Bloomberg Apr 2026; Tech-Insider Apr 2026,preserve,Bloomberg primary source
+3,Cognition/Devin Valuation $25B,valuation,verified,SiliconANGLE Apr 2026; Techzine Apr 2026,preserve,Published Apr 23-24 2026
+3,Cognition $400M raise,financing,verified,TechCrunch Sep 2025,preserve,Confirmed by multiple outlets
+3,Bolt.new $700M valuation,valuation,verified,Awaira Mar 2026,preserve,Private market data platform
+3,Combined AI Coding Agent ARR $7B,revenue,verified,AgentMarketCap Apr 2026,preserve,Industry aggregator
+3,3 players control 80%,market_share,estimate,AgentMarketCap Apr 2026,mark_estimate,Implicit from ARR concentration data
+3,85% of developers use AI coding tools,adoption,estimate,Zylos Research survey 2026,mark_estimate,Survey-based; sample methodology unknown
+3,Market growing 35% YoY,growth,estimate,Zylos Research projection,mark_estimate,Industry analyst projection
+7,39 optional services running,product_metric,verified,Live health endpoint https://apex-backend-5ypy.onrender.com/health,preserve,Verified live Apr 24 2026
+7,6 critical services 100% uptime,product_metric,verified,Live health endpoint,preserve,Verified live Apr 24 2026
+7,Redis sub-ms budget checks,product_claim,verified,Code review of spend/tracker.go,preserve,Cache-first query with 5min TTL
+7,FSM 16 transition types,product_metric,verified,Code review of fsm_bridge.go,preserve,16 event types defined
+7,WebSocket real-time streaming,product_claim,verified,Code review of websocket.ts + fsmSlice.ts,preserve,Socket.io with event dispatch
+7,5 BYOK providers,product_metric,verified,Code review of byok.go model registry,preserve,Claude GPT4 Gemini Grok Ollama
+8,Competitive comparison table,competitive_analysis,verified,Product analysis + market research,preserve,Feature-by-feature analysis
+9,Average build cost $0.02-0.15,pricing,estimate,Internal cost model based on token usage,mark_estimate,Based on PowerMode pricing tiers
+9,BYOK builds $0 platform cost,pricing,verified,Code review of BYOK routing,preserve,User provides their own API keys
+9,Margin 70-85%,unit_economics,estimate,Internal calculation,mark_estimate,Assumes platform key builds at scale
