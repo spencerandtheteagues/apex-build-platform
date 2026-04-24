@@ -756,6 +756,7 @@ func GetAvailableModels() map[string][]ModelInfo {
 			{ID: "grok-3-mini", Name: "Grok 3 Mini", Speed: "fast", CostTier: "low", Description: "FAST — lightweight Grok tier"},
 		},
 		"ollama": {
+			{ID: "kimi-k2.6:cloud", Name: "Kimi K2.6 Cloud", Speed: "fast", CostTier: "free", Description: "1T MoE parameter model via Ollama Cloud — reasoning + generation"},
 			{ID: "deepseek-r1:18b", Name: "DeepSeek-R1 (18b)", Speed: "variable", CostTier: "free", Description: "Reasoning model (local)"},
 			{ID: "deepseek-r1:8b", Name: "DeepSeek-R1 (8b)", Speed: "variable", CostTier: "free", Description: "Reasoning model (local)"},
 			{ID: "llama3.3-70b", Name: "Llama 3.3 70B", Speed: "variable", CostTier: "free", Description: "405B performance (local)"},

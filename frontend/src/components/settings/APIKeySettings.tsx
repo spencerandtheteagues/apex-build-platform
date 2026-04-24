@@ -106,6 +106,7 @@ const PROVIDERS: ProviderConfig[] = [
     activeBorder: 'border-cyan-500',
     placeholder: 'http://localhost:11434',
     models: [
+      { id: 'kimi-k2.6:cloud', name: 'Kimi K2.6 Cloud', speed: 'fast', cost: 'free', description: '1T MoE reasoning + generation via Ollama Cloud' },
       { id: 'deepseek-r1:18b', name: 'DeepSeek-R1 (18b)', speed: 'medium', cost: 'free', description: 'Reasoning model' },
       { id: 'deepseek-r1:8b', name: 'DeepSeek-R1 (8b)', speed: 'medium', cost: 'free', description: 'Reasoning model' },
       { id: 'qwen3-coder:30b', name: 'Qwen 3 Coder (30b)', speed: 'fast', cost: 'free', description: 'Advanced coding' },

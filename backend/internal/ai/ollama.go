@@ -16,6 +16,7 @@ import (
 // https://ollama.com/blog/openai-compatibility
 type OllamaClient struct {
 	baseURL    string
+	apiKey     string
 	httpClient *http.Client
 	usage      *ProviderUsage
 	usageMu    sync.RWMutex
@@ -78,6 +79,24 @@ func NewOllamaClient(baseURL string) *OllamaClient {
 		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 900 * time.Second, // 15-minute timeout for local inference (large models can be slow)
+		},
+		usage: &ProviderUsage{
+			Provider: ProviderOllama,
+			LastUsed: time.Now(),
+		},
+	}
+}
+
+// NewOllamaCloudClient creates an Ollama client configured for Ollama Cloud (e.g., kimi-k2.6:cloud)
+func NewOllamaCloudClient(baseURL, apiKey string) *OllamaClient {
+	if baseURL == "" {
+		baseURL = "http://127.0.0.1:11434"
+	}
+	return &OllamaClient{
+		baseURL: baseURL,
+		apiKey:  apiKey,
+		httpClient: &http.Client{
+			Timeout: 15 * time.Minute, // 15-minute timeout for large cloud models
 		},
 		usage: &ProviderUsage{
 			Provider: ProviderOllama,
@@ -216,16 +235,32 @@ func (o *OllamaClient) getModel(req *AIRequest) string {
 		return req.Model
 	}
 
+	// Check if this is an Ollama Cloud client (has apiKey set)
+	isCloud := o.apiKey != ""
+
 	// Default models based on capability
-	// Users should have these installed via `ollama pull <model>`
+	// For Ollama Cloud, use kimi-k2.6:cloud as the default
+	// For local Ollama, use deepseek-r1:14b
 	switch req.Capability {
 	case CapabilityCodeGeneration, CapabilityRefactoring, CapabilityArchitecture:
+		if isCloud {
+			return "kimi-k2.6:cloud" // Best for complex code tasks (cloud)
+		}
 		return "deepseek-r1:14b" // Best for complex code tasks (local)
 	case CapabilityCodeCompletion:
+		if isCloud {
+			return "kimi-k2.6:cloud" // Fast completions via cloud
+		}
 		return "deepseek-r1:14b" // Fast for completions
 	case CapabilityCodeReview, CapabilityDebugging:
+		if isCloud {
+			return "kimi-k2.6:cloud" // Good at analysis (cloud)
+		}
 		return "deepseek-r1:14b" // Good at analysis (local)
 	default:
+		if isCloud {
+			return "kimi-k2.6:cloud" // General purpose fallback (cloud)
+		}
 		return "deepseek-r1:14b" // General purpose fallback
 	}
 }
@@ -246,6 +281,10 @@ func (o *OllamaClient) makeRequest(ctx context.Context, req *ollamaRequest) (*ol
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
+	// Add Authorization header for Ollama Cloud (BYOK with API key)
+	if o.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
+	}
 	// Bypass ngrok browser warning for free tunnels
 	httpReq.Header.Set("ngrok-skip-browser-warning", "true")
 	// No Authorization header — Ollama runs locally without auth
@@ -424,4 +463,18 @@ func (o *OllamaClient) incrementErrorCount() {
 	o.usageMu.Lock()
 	defer o.usageMu.Unlock()
 	o.usage.ErrorCount++
+}
+
+// SetAPIKey configures the API key for Ollama Cloud BYOK usage
+func (o *OllamaClient) SetAPIKey(key string) {
+	o.usageMu.Lock()
+	defer o.usageMu.Unlock()
+	o.apiKey = key
+}
+
+// GetAPIKey returns the configured API key
+func (o *OllamaClient) GetAPIKey() string {
+	o.usageMu.RLock()
+	defer o.usageMu.RUnlock()
+	return o.apiKey
 }

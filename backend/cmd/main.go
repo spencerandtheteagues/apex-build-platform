@@ -227,6 +227,16 @@ func main() {
 	geminiKey := appConfig.GeminiAPIKey
 	grokKey := appConfig.GrokAPIKey
 
+	// Ollama Cloud BYOK mode: if OLLAMA_API_KEY is set (even in production),
+	// enable Ollama Cloud provider with the provided key and base URL.
+	ollamaCloudEnabled := appConfig.OllamaAPIKey != ""
+	if ollamaCloudEnabled {
+		if appConfig.OllamaBaseURL == "" {
+			appConfig.OllamaBaseURL = "http://127.0.0.1:11434"
+		}
+		log.Printf("OLLAMA CLOUD BYOK: Enabling Ollama Cloud provider at %s", appConfig.OllamaBaseURL)
+	}
+
 	if !config.IsProductionEnvironment() && appConfig.OllamaBaseURL != "" {
 		ollamaRouterURL = appConfig.OllamaBaseURL
 		// Suppress cloud keys so the router sees only Ollama and the single-provider
@@ -236,6 +246,10 @@ func main() {
 		geminiKey = ""
 		grokKey = ""
 		log.Printf("DEV MODE: Ollama-only mode — cloud API keys suppressed, using %s", ollamaRouterURL)
+	} else if ollamaCloudEnabled {
+		// In production with OLLAMA_API_KEY set, add Ollama Cloud alongside other providers
+		ollamaRouterURL = appConfig.OllamaBaseURL
+		log.Printf("PROD MODE: Ollama Cloud BYOK enabled at %s", ollamaRouterURL)
 	}
 
 	aiRouter := ai.NewAIRouter(
@@ -245,6 +259,16 @@ func main() {
 		grokKey,
 		ollamaRouterURL,
 	)
+
+	// If Ollama Cloud BYOK is enabled, upgrade the Ollama client to cloud mode
+	if ollamaCloudEnabled && ollamaRouterURL != "" {
+		if ollamaClient, ok := aiRouter.GetClient(ai.ProviderOllama); ok {
+			if cloudClient, ok := ollamaClient.(*ai.OllamaClient); ok {
+				cloudClient.SetAPIKey(appConfig.OllamaAPIKey)
+				log.Println("OLLAMA CLOUD: API key configured for BYOK")
+			}
+		}
+	}
 
 	log.Println("Multi-AI integration initialized:")
 	log.Printf("   - Claude API: %s", getStatusIcon(claudeKey != ""))
@@ -1126,6 +1150,7 @@ type AppConfig struct {
 	GeminiAPIKey  string
 	GrokAPIKey    string
 	OllamaBaseURL string // Ollama local server URL (e.g., http://localhost:11434)
+	OllamaAPIKey  string // Ollama Cloud API key for BYOK (e.g., for kimi-k2.6:cloud)
 
 	// Authentication (fallback for development)
 	JWTSecret string
@@ -1165,6 +1190,7 @@ func loadConfig() *AppConfig {
 		GeminiAPIKey:  getEnvAny([]string{"GEMINI_API_KEY", "GOOGLE_AI_API_KEY", "GOOGLE_GEMINI_API_KEY"}, ""),
 		GrokAPIKey:    getEnv("XAI_API_KEY", ""),
 		OllamaBaseURL: getEnv("OLLAMA_BASE_URL", ""), // Empty = disabled, or "http://localhost:11434"
+		OllamaAPIKey:  getEnv("OLLAMA_API_KEY", ""),  // Ollama Cloud API key for BYOK
 		JWTSecret:     jwtSecret,
 		Port:          getEnv("PORT", "8080"),
 		Environment:   environment,

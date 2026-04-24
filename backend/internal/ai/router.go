@@ -764,3 +764,11 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// GetClient returns the client for a specific provider (used for BYOK reconfiguration)
+func (r *AIRouter) GetClient(provider AIProvider) (AIClient, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	client, ok := r.clients[provider]
+	return client, ok
+}
