@@ -483,7 +483,17 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 
 	planType := h.currentSubscriptionType(c, uid)
 	if requiresUpgrade, reason := buildSubscriptionRequirement(&req); requiresUpgrade && !isPaidBuildPlan(planType) {
-		log.Printf("StartBuild: free-tier request includes paid runtime scope (%s); continuing with truthful frontend-only fallback", reason)
+		log.Printf("StartBuild: free-tier request includes paid runtime scope (%s); enforcing frontend-only mode", reason)
+		// Strip backend/database from the request so the build runs as frontend-only.
+		// The preview pane backend proxy is still available for rendering the UI.
+		if req.TechStack != nil {
+			req.TechStack.Backend = ""
+			req.TechStack.Database = ""
+		}
+		// Surface a clear upgrade CTA to the client.
+		c.Header("X-Plan-Limit", "frontend-only")
+		c.Header("X-Upgrade-Reason", reason)
+		c.Header("X-Upgrade-URL", "/settings/billing")
 	}
 
 	// Validate power mode against plan tier.

@@ -295,6 +295,31 @@ func (s *Server) Register(c *gin.Context) {
 		}
 		user.CreditBalance = payments.FreeSignupTrialCreditsUSD
 
+		// Create a hard spending cap matching the free trial balance so
+		// PreAuthorize blocks builds once credits are exhausted.
+		// Without this row GetCaps returns empty → unlimited spending.
+		now := time.Now().UTC()
+		cap := struct {
+			CreatedAt time.Time
+			UpdatedAt time.Time
+			UserID    uint
+			CapType   string
+			LimitUSD  float64
+			Action    string
+			IsActive  bool
+		}{
+			CreatedAt: now,
+			UpdatedAt: now,
+			UserID:    user.ID,
+			CapType:   "monthly",
+			LimitUSD:  payments.FreeSignupTrialCreditsUSD,
+			Action:    "stop",
+			IsActive:  true,
+		}
+		if err := tx.Table("budget_caps").Create(&cap).Error; err != nil {
+			return fmt.Errorf("failed to create free-tier budget cap: %w", err)
+		}
+
 		return nil
 	})
 
