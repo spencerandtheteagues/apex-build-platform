@@ -1174,12 +1174,12 @@ function App() {
 
               {isAuthMode === 'register' && (
                 <div className="rounded-xl border border-red-900/40 bg-red-950/20 p-4">
-                  <label className="flex items-start gap-3">
+                  <label className="flex items-start gap-3 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={authData.acceptLegalTerms}
                       onChange={(e) => setAuthData(prev => ({ ...prev, acceptLegalTerms: e.target.checked }))}
-                      className="mt-1 h-4 w-4 rounded border border-red-500/40 bg-black text-red-500 focus:ring-red-500"
+                      className="mt-1 h-5 w-5 flex-shrink-0 rounded border border-red-500/40 bg-black text-red-500 focus:ring-red-500 cursor-pointer relative z-10"
                     />
                     <span className="text-sm leading-6 text-gray-300">
                       I agree to the Terms of Service, Privacy Policy, Acceptable Use Policy, Billing and Refund Policy, and AI and Content Policy version {LEGAL_POLICY_VERSION}.
