@@ -63,7 +63,6 @@ type ollamaResponse struct {
 	} `json:"error,omitempty"`
 }
 
-<<<<<<< HEAD
 // ollamaModelsResponse represents the response from /api/tags
 type ollamaModelsResponse struct {
 	Models []struct {
@@ -360,13 +359,8 @@ func (o *OllamaClient) GetProvider() AIProvider {
 // Health checks if Ollama server is accessible.
 // Uses /v1/models (OpenAI-compatible) which works for both local and cloud.
 func (o *OllamaClient) Health(ctx context.Context) error {
-<<<<<<< HEAD
 	// For Ollama Cloud (OpenAI-compatible), try OpenAI-compatible endpoints first.
-	// baseURL already includes /v1 suffix, so use relative paths.
-	endpoints := []string{"/models", "/health", "/tags"}
-=======
-	url := o.baseURL + "/v1/models"
->>>>>>> b6fb69f (feat: add Ollama Pro cloud API support with Bearer auth)
+	endpoints := []string{"/v1/models", "/v1/health", "/api/tags"}
 
 	for _, path := range endpoints {
 		url := o.baseURL + path
