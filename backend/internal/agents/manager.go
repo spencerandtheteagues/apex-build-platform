@@ -22066,6 +22066,10 @@ func (am *AgentManager) checkIntegrationCoherence(build *Build, files []Generate
 	// Check: any frontend /api/... or health call must have a matching backend route.
 	if len(frontendPaths) > 0 && len(resolvedBackendRoutes) > 0 {
 		for fePath := range frontendPaths {
+			// Skip health endpoint checks — not all backends expose one.
+			if fePath == "/api/health" || fePath == "/health" {
+				continue
+			}
 			matched := false
 			for bePath := range resolvedBackendRoutes {
 				if integrationRoutePathsMatch(fePath, bePath) {
