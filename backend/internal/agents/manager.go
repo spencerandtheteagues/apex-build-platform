@@ -952,10 +952,10 @@ func (am *AgentManager) buildTimeoutHandler(buildID string) {
 }
 
 func (am *AgentManager) buildTimeoutForMode(mode BuildMode) time.Duration {
-	defaultSeconds := 240 // fast: 4 minutes
+	defaultSeconds := 900 // fast: 15 minutes (cloud providers + preview verification)
 	envKey := "BUILD_TIMEOUT_FAST_SECONDS"
 	if mode == ModeFull {
-		defaultSeconds = 600 // full: 10 minutes
+		defaultSeconds = 2400 // full: 40 minutes (complex builds with review + preview)
 		envKey = "BUILD_TIMEOUT_FULL_SECONDS"
 	}
 
@@ -963,9 +963,9 @@ func (am *AgentManager) buildTimeoutForMode(mode BuildMode) time.Duration {
 	// Raise the default timeout only when the operator has not already set an explicit timeout.
 	if _, explicitlySet := os.LookupEnv(envKey); !explicitlySet && am.isLocalDevSingleOllamaProfile() {
 		if mode == ModeFull {
-			defaultSeconds = 1800 // 30 minutes for local full builds
+			defaultSeconds = 3600 // 60 minutes for local full builds
 		} else {
-			defaultSeconds = 900 // 15 minutes for local fast builds
+			defaultSeconds = 1800 // 30 minutes for local fast builds
 		}
 	}
 

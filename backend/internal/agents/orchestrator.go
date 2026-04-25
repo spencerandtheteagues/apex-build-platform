@@ -874,7 +874,7 @@ func (o *BuildOrchestrator) executeReviewPhase(build *Build, state *Orchestratio
 	state.PhaseStarted = time.Now()
 	o.broadcastPhase(build.ID, state.Phase, "Reviewing generated code...")
 
-	return o.waitForTasksOfType(build, state, TaskReview, 5*time.Minute)
+	return o.waitForTasksOfType(build, state, TaskReview, 8*time.Minute)
 }
 
 // waitForTasksOfType waits for all tasks of a specific type to complete
