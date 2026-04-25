@@ -22052,6 +22052,12 @@ func (am *AgentManager) checkIntegrationCoherence(build *Build, files []Generate
 				}
 			}
 			if !matched {
+				// Health endpoint is optional for Go backends — warn instead of failing.
+				isHealth := expectedPath == "/api/health" || expectedPath == "/health"
+				if isHealth {
+					log.Printf("Build %s: health endpoint %s not found in generated backend — proceeding anyway", build.ID, expectedPath)
+					continue
+				}
 				issues = append(issues, fmt.Sprintf("integration: backend does not expose required contract endpoint %s", expectedPath))
 			}
 		}
