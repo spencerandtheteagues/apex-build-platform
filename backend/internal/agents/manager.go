@@ -51,6 +51,32 @@ const (
 
 var agentActivityHeartbeatInterval = 10 * time.Second
 
+// shadcnNamespaceRE holds pre-compiled open/close tag regexes for each shadcn
+// component that LLMs commonly mis-generate with dot-notation (e.g. <Dialog.Content>).
+type shadcnComponentRE struct {
+	comp    string
+	reOpen  *regexp.Regexp
+	reClose *regexp.Regexp
+}
+
+var shadcnNamespaceREs = func() []shadcnComponentRE {
+	comps := []string{
+		"Dialog", "Sheet", "Alert", "AlertDialog", "Card",
+		"DropdownMenu", "Select", "Popover", "Tooltip", "HoverCard",
+		"NavigationMenu", "ContextMenu", "Menubar", "Accordion",
+		"Collapsible", "Command", "Drawer", "Tabs",
+	}
+	out := make([]shadcnComponentRE, len(comps))
+	for i, c := range comps {
+		out[i] = shadcnComponentRE{
+			comp:    c,
+			reOpen:  regexp.MustCompile(`<` + regexp.QuoteMeta(c) + `\.([A-Z][A-Za-z]*)`),
+			reClose: regexp.MustCompile(`</` + regexp.QuoteMeta(c) + `\.([A-Z][A-Za-z]*)`),
+		}
+	}
+	return out
+}()
+
 type consensusDecision string
 
 const (
@@ -10852,15 +10878,6 @@ func (am *AgentManager) applyDeterministicShadcnNamespaceRepair(build *Build, re
 		return nil, ""
 	}
 
-	// shadcn components that are commonly misused with dot-notation.
-	// The pattern is always <ComponentName.SubName> → <ComponentNameSubName>.
-	shadcnComponents := []string{
-		"Dialog", "Sheet", "Alert", "AlertDialog", "Card",
-		"DropdownMenu", "Select", "Popover", "Tooltip", "HoverCard",
-		"NavigationMenu", "ContextMenu", "Menubar", "Accordion",
-		"Collapsible", "Command", "Drawer", "Tabs",
-	}
-
 	applied := make([]string, 0)
 	for _, f := range files {
 		ext := strings.ToLower(filepath.Ext(f.Path))
@@ -10874,12 +10891,11 @@ func (am *AgentManager) applyDeterministicShadcnNamespaceRepair(build *Build, re
 
 		rewritten := content
 		changed := false
-		for _, comp := range shadcnComponents {
-			// Match JSX open tags: <Dialog.Content, <Dialog.Overlay, etc.
-			reOpen := regexp.MustCompile(`<` + regexp.QuoteMeta(comp) + `\.([A-Z][A-Za-z]*)`)
-			if reOpen.MatchString(rewritten) {
-				rewritten = reOpen.ReplaceAllStringFunc(rewritten, func(m string) string {
-					sub := reOpen.FindStringSubmatch(m)
+		for _, cre := range shadcnNamespaceREs {
+			comp := cre.comp
+			if cre.reOpen.MatchString(rewritten) {
+				rewritten = cre.reOpen.ReplaceAllStringFunc(rewritten, func(m string) string {
+					sub := cre.reOpen.FindStringSubmatch(m)
 					if len(sub) == 2 {
 						return "<" + comp + sub[1]
 					}
@@ -10887,11 +10903,9 @@ func (am *AgentManager) applyDeterministicShadcnNamespaceRepair(build *Build, re
 				})
 				changed = true
 			}
-			// Match JSX close tags: </Dialog.Content>
-			reClose := regexp.MustCompile(`</` + regexp.QuoteMeta(comp) + `\.([A-Z][A-Za-z]*)`)
-			if reClose.MatchString(rewritten) {
-				rewritten = reClose.ReplaceAllStringFunc(rewritten, func(m string) string {
-					sub := reClose.FindStringSubmatch(m)
+			if cre.reClose.MatchString(rewritten) {
+				rewritten = cre.reClose.ReplaceAllStringFunc(rewritten, func(m string) string {
+					sub := cre.reClose.FindStringSubmatch(m)
 					if len(sub) == 2 {
 						return "</" + comp + sub[1]
 					}

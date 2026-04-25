@@ -102,7 +102,7 @@ export type AICapability =
   | 'testing'
   | 'documentation'
 
-export type AIProvider = 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama'
+export type AIProvider = 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama' | 'deepseek' | 'glm'
 
 export interface AIUsage {
   total_requests: number

@@ -161,13 +161,15 @@ export const StatusBadge = ({ status, ...props }: { status: 'online' | 'offline'
 }
 
 // AI provider badge
-export const AIProviderBadge = ({ provider, ...props }: { provider: 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama' | 'auto' } & Omit<BadgeProps, 'variant' | 'children'>) => {
+export const AIProviderBadge = ({ provider, ...props }: { provider: 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama' | 'deepseek' | 'glm' | 'auto' } & Omit<BadgeProps, 'variant' | 'children'>) => {
   const config: Record<string, { variant: BadgeProps['variant']; text: string }> = {
     claude: { variant: 'primary', text: 'Claude' },
     gpt4: { variant: 'success', text: 'OpenAI' },
     gemini: { variant: 'warning', text: 'Gemini' },
     grok: { variant: 'neonCity', text: 'Grok' },
     ollama: { variant: 'info', text: 'Ollama' },
+    deepseek: { variant: 'info', text: 'DeepSeek' },
+    glm: { variant: 'success', text: 'GLM' },
     auto: { variant: 'synthwave', text: 'Auto' },
   }
 

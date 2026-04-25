@@ -114,6 +114,38 @@ const PROVIDERS: ProviderConfig[] = [
       { id: 'llama3.3-70b', name: 'Llama 3.3 70B', speed: 'medium', cost: 'free', description: '405B performance' },
     ],
   },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    description: 'DeepSeek API — frontier reasoning and coding models',
+    color: 'text-blue-400',
+    bgColor: 'bg-blue-500/10',
+    bgGlow: 'shadow-blue-500/20',
+    borderColor: 'border-blue-500/30',
+    activeBorder: 'border-blue-500',
+    placeholder: 'sk-...',
+    models: [
+      { id: 'deepseek-chat', name: 'DeepSeek-V3', speed: 'fast', cost: 'low', description: 'Latest V3 chat model' },
+      { id: 'deepseek-reasoner', name: 'DeepSeek-R1', speed: 'medium', cost: 'low', description: 'Chain-of-thought reasoning' },
+      { id: 'deepseek-coder', name: 'DeepSeek Coder', speed: 'fast', cost: 'low', description: 'Code-specialized model' },
+    ],
+  },
+  {
+    id: 'glm',
+    name: 'GLM (Zhipu AI)',
+    description: 'Zhipu AI GLM-4 series — strong multilingual and coding capabilities',
+    color: 'text-emerald-400',
+    bgColor: 'bg-emerald-500/10',
+    bgGlow: 'shadow-emerald-500/20',
+    borderColor: 'border-emerald-500/30',
+    activeBorder: 'border-emerald-500',
+    placeholder: 'your-zhipu-api-key',
+    models: [
+      { id: 'glm-4-plus', name: 'GLM-4 Plus', speed: 'fast', cost: 'low', description: 'Top-tier GLM flagship' },
+      { id: 'glm-4-air', name: 'GLM-4 Air', speed: 'fast', cost: 'low', description: 'Efficient and cost-effective' },
+      { id: 'glm-4-flash', name: 'GLM-4 Flash', speed: 'fast', cost: 'free', description: 'Free-tier flash model' },
+    ],
+  },
 ]
 
 interface KeyState {
