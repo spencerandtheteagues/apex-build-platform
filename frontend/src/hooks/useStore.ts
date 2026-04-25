@@ -32,22 +32,43 @@ import type { FSMStateSlice, FSMActions } from '@/store/fsmSlice'
 
 // Helper function to extract error message from unknown error type
 const getErrorMessage = (error: unknown): string => {
-  if (error instanceof Error) {
-    return error.message
-  }
   if (typeof error === 'object' && error !== null) {
     const errObj = error as Record<string, unknown>
     if (errObj.response && typeof errObj.response === 'object') {
       const response = errObj.response as Record<string, unknown>
+      const status = typeof response.status === 'number' ? response.status : 0
       if (response.data && typeof response.data === 'object') {
         const data = response.data as Record<string, unknown>
-        if (typeof data.error === 'string') return data.error
-        if (typeof data.message === 'string') return data.message
+        const serverMsg = (typeof data.error === 'string' ? data.error : null)
+          ?? (typeof data.message === 'string' ? data.message : null)
+          ?? (typeof data.details === 'string' ? data.details : null)
+        if (serverMsg) {
+          // Don't expose raw internal messages for server errors
+          if (status >= 500) return STATUS_CODE_MESSAGES[status] ?? 'Something went wrong on our end. Please try again.'
+          return serverMsg.charAt(0).toUpperCase() + serverMsg.slice(1)
+        }
       }
+      if (STATUS_CODE_MESSAGES[status]) return STATUS_CODE_MESSAGES[status]
     }
-    if (typeof errObj.message === 'string') return errObj.message
+    if (typeof errObj.message === 'string' && !String(errObj.message).includes('status code')) {
+      return errObj.message as string
+    }
   }
-  return 'An unknown error occurred'
+  if (error instanceof Error && !error.message.includes('status code')) return error.message
+  return 'Something went wrong. Please try again.'
+}
+
+const STATUS_CODE_MESSAGES: Record<number, string> = {
+  400: 'Something looks off with your request. Check your details and try again.',
+  401: 'Incorrect email or password.',
+  403: 'You don\'t have permission to do that.',
+  404: 'Not found.',
+  409: 'An account with that email or username already exists. Try logging in instead.',
+  422: 'Some of the information you provided isn\'t valid.',
+  429: 'Too many attempts. Please wait a moment and try again.',
+  500: 'Something went wrong on our end. Please try again in a moment.',
+  502: 'The server is temporarily unavailable. Please try again shortly.',
+  503: 'We\'re under maintenance. Please check back soon.',
 }
 
 const collaborationPresenceToUser = (presence: UserPresence): User => {

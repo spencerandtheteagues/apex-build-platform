@@ -11,6 +11,7 @@ import { LEGAL_POLICY_VERSION, type LegalDocumentId } from './components/setting
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input, AnimatedBackground } from './components/ui'
 import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown, Key, Palette, CreditCard, FileText, X } from 'lucide-react'
+import { getApiErrorMessage } from './lib/errors'
 import './styles/globals.css'
 import './styles/auth-animations.css'
 
@@ -709,9 +710,8 @@ function App() {
       })
     } catch (error: unknown) {
       console.error('Authentication error:', error)
-      const message = error instanceof Error ? error.message : 'Authentication failed'
       setAuthErrors({
-        general: message
+        general: getApiErrorMessage(error, 'Authentication failed. Please try again.')
       })
     } finally {
       setIsAuthenticating(false)
