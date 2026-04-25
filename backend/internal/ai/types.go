@@ -145,32 +145,35 @@ type RouterConfig struct {
 func DefaultRouterConfig() *RouterConfig {
 	return &RouterConfig{
 		DefaultProviders: map[AICapability]AIProvider{
-			CapabilityCodeGeneration:        ProviderGPT4,
-			CapabilityNaturalLanguageToCode: ProviderGPT4,
-			CapabilityCodeReview:            ProviderClaude,
-			CapabilityCodeCompletion:        ProviderGPT4,
-			CapabilityDebugging:             ProviderGPT4,
-			CapabilityExplanation:           ProviderClaude,
-			CapabilityRefactoring:           ProviderGPT4,
-			CapabilityTesting:               ProviderGemini,
-			CapabilityDocumentation:         ProviderClaude,
-			CapabilityArchitecture:          ProviderClaude,
+			// Ollama (kimi-k2.6:cloud) is the primary orchestrator for all capabilities.
+			// Cloud providers are fallback only.
+			CapabilityCodeGeneration:        ProviderOllama,
+			CapabilityNaturalLanguageToCode: ProviderOllama,
+			CapabilityCodeReview:            ProviderOllama,
+			CapabilityCodeCompletion:        ProviderOllama,
+			CapabilityDebugging:             ProviderOllama,
+			CapabilityExplanation:           ProviderOllama,
+			CapabilityRefactoring:           ProviderOllama,
+			CapabilityTesting:               ProviderOllama,
+			CapabilityDocumentation:         ProviderOllama,
+			CapabilityArchitecture:          ProviderOllama,
 		},
 		FallbackOrder: map[AIProvider][]AIProvider{
-			ProviderClaude: {ProviderGPT4, ProviderGemini, ProviderGrok},
-			ProviderGPT4:   {ProviderClaude, ProviderGemini, ProviderGrok},
-			ProviderGemini: {ProviderClaude, ProviderGPT4, ProviderGrok},
-			ProviderGrok:   {ProviderGPT4, ProviderClaude, ProviderGemini},
-			// Ollama remains local/BYOK-only. If it is chosen explicitly and fails, it may
-			// degrade to cloud providers as a last resort for continuity.
-			ProviderOllama: {ProviderGPT4, ProviderClaude, ProviderGemini, ProviderGrok},
+			// Ollama (kimi-k2.6:cloud) is the primary orchestrator.
+			// If Ollama fails, fall back to Claude, then GPT4, then Gemini, then Grok.
+			ProviderOllama: {ProviderClaude, ProviderGPT4, ProviderGemini, ProviderGrok},
+			ProviderClaude: {ProviderOllama, ProviderGPT4, ProviderGemini, ProviderGrok},
+			ProviderGPT4:   {ProviderOllama, ProviderClaude, ProviderGemini, ProviderGrok},
+			ProviderGemini: {ProviderOllama, ProviderClaude, ProviderGPT4, ProviderGrok},
+			ProviderGrok:   {ProviderOllama, ProviderGPT4, ProviderClaude, ProviderGemini},
 		},
 		LoadBalancing: map[AIProvider]float64{
-			ProviderClaude: 0.25,
-			ProviderGPT4:   0.25,
-			ProviderGrok:   0.20,
-			ProviderGemini: 0.15,
-			ProviderOllama: 0.15,
+			// Ollama (kimi-k2.6:cloud) is the primary orchestrator — highest weight.
+			ProviderOllama: 0.50,
+			ProviderClaude: 0.15,
+			ProviderGPT4:   0.15,
+			ProviderGrok:   0.10,
+			ProviderGemini: 0.10,
 		},
 		RateLimits: map[AIProvider]int{
 			ProviderClaude: 100,  // requests per minute

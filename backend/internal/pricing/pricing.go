@@ -115,8 +115,12 @@ func newEngineFromEnv() *Engine {
 				},
 			},
 			"ollama": {
-				Default: ModelPricing{InputPer1M: 0.0, OutputPer1M: 0.0},
-				Models:  map[string]ModelPricing{},
+				Default: ModelPricing{InputPer1M: 0.50, OutputPer1M: 2.00},
+				Models: map[string]ModelPricing{
+					"kimi-k2.6":  {InputPer1M: 0.50, OutputPer1M: 2.00},
+					"kimi-k2.6:cloud": {InputPer1M: 0.50, OutputPer1M: 2.00},
+					"glm-5.1":    {InputPer1M: 0.30, OutputPer1M: 1.00},
+				},
 			},
 		},
 
@@ -242,6 +246,14 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 			return "grok-3"
 		}
 		return "grok-3-mini"
+	case "ollama":
+		if mode == ModeMax {
+			return "kimi-k2.6:cloud"
+		}
+		if mode == ModeBalanced {
+			return "kimi-k2.6:cloud"
+		}
+		return "glm-5.1"
 	default:
 		return ""
 	}
