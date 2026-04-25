@@ -14,7 +14,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -76,8 +75,8 @@ func DefaultSandboxConfig() *SandboxConfig {
 	return &SandboxConfig{
 		Timeout:         30 * time.Second,
 		MemoryLimit:     256 * 1024 * 1024, // 256MB
-		CPULimit:        30,                 // 30 seconds CPU time
-		MaxOutputSize:   1024 * 1024,        // 1MB
+		CPULimit:        30,                // 30 seconds CPU time
+		MaxOutputSize:   1024 * 1024,       // 1MB
 		AllowNetwork:    false,
 		RunAsUser:       -1,
 		RunAsGroup:      -1,
@@ -90,8 +89,8 @@ type Sandbox struct {
 	config *SandboxConfig
 
 	// Active executions
-	executions     map[string]*activeExecution
-	executionsMu   sync.RWMutex
+	executions   map[string]*activeExecution
+	executionsMu sync.RWMutex
 
 	// Base temp directory for all executions
 	baseTempDir string
@@ -111,12 +110,12 @@ type activeExecution struct {
 
 // ResourceTracker tracks resource usage across executions
 type ResourceTracker struct {
-	totalExecutions     int64
-	totalCPUTime        int64
-	totalMemoryUsed     int64
-	concurrentExecs     int32
-	maxConcurrentExecs  int32
-	mu                  sync.Mutex
+	totalExecutions    int64
+	totalCPUTime       int64
+	totalMemoryUsed    int64
+	concurrentExecs    int32
+	maxConcurrentExecs int32
+	mu                 sync.Mutex
 }
 
 // NewSandbox creates a new execution sandbox
@@ -347,8 +346,8 @@ func (s *Sandbox) executeCommand(ctx context.Context, execID string, cmd *exec.C
 	case <-execCtx.Done():
 		// Timeout or cancellation
 		if cmd.Process != nil {
-			// Send SIGTERM first for graceful shutdown
-			cmd.Process.Signal(syscall.SIGTERM)
+			// Ask the process to exit first, then force-kill if it ignores us.
+			signalProcess(cmd)
 
 			// Give it a moment to terminate gracefully
 			select {
@@ -394,21 +393,7 @@ func (s *Sandbox) executeCommand(ctx context.Context, execID string, cmd *exec.C
 				result.ExitCode = exitErr.ExitCode()
 				result.Status = "failed"
 
-				// Try to get resource usage
-				if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-					if status.Signaled() {
-						switch status.Signal() {
-						case syscall.SIGKILL:
-							result.Status = "killed"
-							result.Killed = true
-							result.ErrorOutput = "Process killed (possible memory limit exceeded)"
-						case syscall.SIGXCPU:
-							result.Status = "timeout"
-							result.TimedOut = true
-							result.ErrorOutput = "CPU time limit exceeded"
-						}
-					}
-				}
+				classifyProcessExit(exitErr, result)
 			} else {
 				result.Status = "failed"
 				result.ExitCode = 1
@@ -419,13 +404,7 @@ func (s *Sandbox) executeCommand(ctx context.Context, execID string, cmd *exec.C
 			result.ExitCode = 0
 		}
 
-		// Get resource usage on Unix systems
-		if cmd.ProcessState != nil {
-			if rusage, ok := cmd.ProcessState.SysUsage().(*syscall.Rusage); ok {
-				result.MemoryUsed = rusage.Maxrss * 1024 // Convert KB to bytes
-				result.CPUTime = rusage.Utime.Nano()/1e6 + rusage.Stime.Nano()/1e6
-			}
-		}
+		collectProcessUsage(cmd, result)
 
 		return result, nil
 	}
@@ -437,10 +416,7 @@ func (s *Sandbox) applyResourceLimits(cmd *exec.Cmd) {
 		return
 	}
 
-	// Create a new process group so we can kill all children
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
+	configureProcessGroup(cmd)
 
 	// On Linux, we can use prlimit for more precise control
 	// For now, we use ulimit-style limits via shell wrapper
@@ -518,13 +494,7 @@ func (s *Sandbox) Kill(execID string) error {
 
 	// Kill the process and its children
 	if activeExec.Cmd.Process != nil {
-		// Kill the process group
-		pgid, err := syscall.Getpgid(activeExec.Cmd.Process.Pid)
-		if err == nil {
-			syscall.Kill(-pgid, syscall.SIGKILL)
-		} else {
-			activeExec.Cmd.Process.Kill()
-		}
+		killProcessTree(activeExec.Cmd)
 	}
 
 	return nil

@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"apex-build/internal/metrics"
@@ -167,7 +166,7 @@ func (h *hostRuntime) StartProcess(cfg *ProcessStartConfig) (*ProcessHandle, err
 	cmd := exec.Command(cfg.Command, cfg.Args...)
 	cmd.Dir = cfg.Dir
 	cmd.Env = cfg.Env
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureHostProcess(cmd)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -181,8 +180,6 @@ func (h *hostRuntime) StartProcess(cfg *ProcessStartConfig) (*ProcessHandle, err
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-
-	pgid := -cmd.Process.Pid
 
 	return &ProcessHandle{
 		Pid:        cmd.Process.Pid,
@@ -199,10 +196,10 @@ func (h *hostRuntime) StartProcess(cfg *ProcessStartConfig) (*ProcessHandle, err
 			return 0, nil
 		},
 		SignalStop: func() {
-			syscall.Kill(pgid, syscall.SIGTERM)
+			signalHostProcess(cmd)
 		},
 		ForceKill: func() {
-			syscall.Kill(pgid, syscall.SIGKILL)
+			forceKillHostProcess(cmd)
 		},
 	}, nil
 }
