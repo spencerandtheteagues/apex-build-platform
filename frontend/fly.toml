@@ -1,4 +1,4 @@
-# Fly.io configuration for APEX.BUILD Frontend
+# Fly.io configuration for APEX-BUILD Frontend
 app = 'apex-build-frontend'
 primary_region = 'sjc'
 

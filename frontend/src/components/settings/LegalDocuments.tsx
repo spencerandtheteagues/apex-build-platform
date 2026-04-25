@@ -55,7 +55,7 @@ export const LegalDocuments: React.FC<LegalDocumentsProps> = ({
               Terms, privacy, and platform policies
             </h3>
             <p className="mt-2 max-w-2xl text-sm text-gray-400">
-              Effective {LEGAL_POLICY_VERSION}. These documents govern access to APEX.BUILD and are incorporated into account registration and continued platform use.
+              Effective {LEGAL_POLICY_VERSION}. These documents govern access to APEX-BUILD and are incorporated into account registration and continued platform use.
             </p>
           </div>
           <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-100">

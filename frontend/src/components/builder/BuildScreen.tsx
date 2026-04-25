@@ -580,6 +580,110 @@ const ChatInputBar: React.FC<ChatInputBarProps> = ({
 
 // ─── Bottom Nav Strip ────────────────────────────────────────────────────────
 
+const BuildCommandSurface: React.FC<{
+  buildStatus: BuildStatus
+  generatedFilesCount: number
+  issueCount: number
+  hasBYOK: boolean
+  createdProjectId: number | null
+  isPreparingPreview: boolean
+  onSelectOverlay: (overlay: OverlayId) => void
+  onOpenPreview: () => void
+  onOpenInIDE: () => void
+  onDownload: () => void
+}> = ({
+  buildStatus,
+  generatedFilesCount,
+  issueCount,
+  hasBYOK,
+  createdProjectId,
+  isPreparingPreview,
+  onSelectOverlay,
+  onOpenPreview,
+  onOpenInIDE,
+  onDownload,
+}) => {
+  const items: Array<{
+    label: string
+    value: string
+    icon: React.ReactNode
+    action: () => void
+    disabled?: boolean
+  }> = [
+    {
+      label: 'File stream',
+      value: generatedFilesCount ? `${generatedFilesCount} files` : 'streaming',
+      icon: <FileCode className="w-4 h-4" />,
+      action: () => onSelectOverlay('files'),
+    },
+    {
+      label: 'Agent console',
+      value: 'steer agents',
+      icon: <Terminal className="w-4 h-4" />,
+      action: () => onSelectOverlay('console'),
+    },
+    {
+      label: 'Issues and gates',
+      value: issueCount ? `${issueCount} open` : 'clear',
+      icon: <AlertCircle className="w-4 h-4" />,
+      action: () => onSelectOverlay('issues'),
+    },
+    {
+      label: 'Preview',
+      value: isPreparingPreview ? 'preparing' : buildStatus === 'completed' ? 'ready' : 'queued',
+      icon: <Eye className="w-4 h-4" />,
+      action: onOpenPreview,
+      disabled: buildStatus !== 'completed',
+    },
+    {
+      label: 'IDE handoff',
+      value: createdProjectId ? `project ${createdProjectId}` : 'create on completion',
+      icon: <ExternalLink className="w-4 h-4" />,
+      action: onOpenInIDE,
+      disabled: !createdProjectId && buildStatus !== 'completed',
+    },
+    {
+      label: 'Export',
+      value: 'ZIP/GitHub',
+      icon: <Download className="w-4 h-4" />,
+      action: onDownload,
+      disabled: !generatedFilesCount,
+    },
+    {
+      label: 'BYOK route',
+      value: hasBYOK ? 'active' : 'platform keys',
+      icon: <Cpu className="w-4 h-4" />,
+      action: () => onSelectOverlay('detail'),
+    },
+    {
+      label: 'Review evidence',
+      value: 'scorecards',
+      icon: <CheckCircle2 className="w-4 h-4" />,
+      action: () => onSelectOverlay('detail'),
+    },
+  ]
+
+  return (
+    <div className="build-command-surface">
+      {items.map((item) => (
+        <button
+          key={item.label}
+          type="button"
+          onClick={item.action}
+          disabled={item.disabled}
+          className="build-command-surface__item"
+        >
+          <span className="build-command-surface__icon">{item.icon}</span>
+          <span>
+            <strong>{item.label}</strong>
+            <em>{item.value}</em>
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 interface BottomNavStripProps {
   activeOverlay: OverlayId
   onSelectOverlay: (id: OverlayId) => void
@@ -1341,7 +1445,21 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
         onModelSelect={onSelectProviderModel}
       />
 
-      {/* Row 3: Live Activity Feed (flex-1) */}
+      {/* Row 3: Production command surface */}
+      <BuildCommandSurface
+        buildStatus={buildState.status}
+        generatedFilesCount={generatedFiles.length}
+        issueCount={issueCount}
+        hasBYOK={hasBYOK}
+        createdProjectId={createdProjectId}
+        isPreparingPreview={isPreparingPreview}
+        onSelectOverlay={setActiveOverlay}
+        onOpenPreview={onPreviewWorkspace}
+        onOpenInIDE={onOpenInIDE}
+        onDownload={onDownload}
+      />
+
+      {/* Row 4: Live Activity Feed (flex-1) */}
       <div className="relative flex-1 min-h-0 overflow-hidden">
         <LiveActivityFeed
           aiThoughts={aiThoughts}
@@ -1361,7 +1479,7 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
         />
       </div>
 
-      {/* Row 4: Chat Input */}
+      {/* Row 5: Chat Input */}
       <ChatInputBar
         chatInput={chatInput}
         setChatInput={setChatInput}
@@ -1375,7 +1493,7 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
         inputRef={chatInputRef}
       />
 
-      {/* Row 5: Bottom Nav Strip */}
+      {/* Row 6: Bottom Nav Strip */}
       <BottomNavStrip
         activeOverlay={activeOverlay}
         onSelectOverlay={setActiveOverlay}

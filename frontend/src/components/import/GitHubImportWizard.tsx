@@ -584,7 +584,7 @@ export const GitHubImportWizard: React.FC<GitHubImportWizardProps> = ({ onClose,
             <p>
               Tip: You can also paste URLs directly like{' '}
               <code className="bg-gray-700 px-2 py-0.5 rounded text-cyan-400">
-                apex.build/import/github.com/owner/repo
+                apex-build.dev/import/github.com/owner/repo
               </code>
             </p>
           </div>

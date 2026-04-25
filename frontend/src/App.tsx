@@ -287,7 +287,7 @@ function App() {
       return 'auto'
     }
   })
-  const logoSrc = uiColorScheme === 'blue-light' ? '/logo-blue.png' : '/apex-build-logo-transparent.png'
+  const logoSrc = '/apex-build-mark-metal.png'
 
   const {
     user,
@@ -908,7 +908,7 @@ function App() {
               <div className="flex flex-col items-center gap-4">
                 <img src={logoSrc} alt="APEX Logo" className="auth-logo" style={{ height: '7rem', width: 'auto' }} />
                 <div>
-                  <h1 className="auth-title text-3xl font-black tracking-wider">APEX<span style={{ color: '#6366f1' }}>.BUILD</span></h1>
+                  <h1 className="auth-title text-3xl font-black tracking-wider">APEX<span style={{ color: '#6366f1' }}>-BUILD</span></h1>
                 </div>
               </div>
             </div>

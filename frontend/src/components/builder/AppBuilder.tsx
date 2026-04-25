@@ -75,7 +75,12 @@ import {
   Globe,
   Layers,
   Github,
-  Upload
+  Upload,
+  KeyRound,
+  PlugZap,
+  LockKeyhole,
+  CreditCard,
+  MonitorUp
 } from 'lucide-react'
 import { GitHubImportWizard } from '@/components/import/GitHubImportWizard'
 import { BuyCreditsModal } from '@/components/billing/BuyCreditsModal'
@@ -1633,6 +1638,126 @@ const TerminalOutput: React.FC<{ messages: ChatMessage[]; isBuilding: boolean }>
   )
 }
 
+const BuilderControlSurface: React.FC<{
+  onImportReplit: () => void
+  onImportGitHub: () => void
+  onAttachImage: () => void
+  onOpenIDE: () => void
+}> = ({ onImportReplit, onImportGitHub, onAttachImage, onOpenIDE }) => {
+  const controls: Array<{
+    title: string
+    body: string
+    icon: React.ReactNode
+    actionLabel: string
+    onClick?: () => void
+    href?: string
+  }> = [
+    {
+      title: 'GitHub import/export',
+      body: 'Bring in a repo now; push or download generated code after the build.',
+      icon: <Github className="w-5 h-5" />,
+      actionLabel: 'Import GitHub',
+      onClick: onImportGitHub,
+    },
+    {
+      title: 'Replit migration',
+      body: 'Analyze an existing Replit app and rebuild it with Apex contracts.',
+      icon: <Download className="w-5 h-5" />,
+      actionLabel: 'Import Replit',
+      onClick: onImportReplit,
+    },
+    {
+      title: 'Files and images',
+      body: 'Attach wireframes, screenshots, ZIPs, and assets as agent context.',
+      icon: <Upload className="w-5 h-5" />,
+      actionLabel: 'Attach image',
+      onClick: onAttachImage,
+    },
+    {
+      title: 'BYOK model roles',
+      body: 'OpenAI, Claude, Gemini, Grok, Kimi, and Ollama keys stay configurable.',
+      icon: <KeyRound className="w-5 h-5" />,
+      actionLabel: 'Open settings',
+      href: '/settings',
+    },
+    {
+      title: 'MCP connectors',
+      body: 'Connect external tools and APIs through the project integration surface.',
+      icon: <PlugZap className="w-5 h-5" />,
+      actionLabel: 'Open IDE',
+      onClick: onOpenIDE,
+    },
+    {
+      title: 'Secrets vault',
+      body: 'Store API keys, OAuth values, DB URLs, SSH credentials, and env vars.',
+      icon: <LockKeyhole className="w-5 h-5" />,
+      actionLabel: 'Open IDE',
+      onClick: onOpenIDE,
+    },
+    {
+      title: 'Deploy and preview',
+      body: 'Preview, verify, export, and deploy from the workspace after generation.',
+      icon: <MonitorUp className="w-5 h-5" />,
+      actionLabel: 'Open IDE',
+      onClick: onOpenIDE,
+    },
+    {
+      title: 'Billing controls',
+      body: 'Budget caps, credits, trials, and live spend stay visible before runs.',
+      icon: <CreditCard className="w-5 h-5" />,
+      actionLabel: 'Billing',
+      href: '/settings/billing',
+    },
+  ]
+
+  return (
+    <section className="builder-control-surface mb-6 md:mb-8">
+      <div className="builder-control-surface__header">
+        <div>
+          <div className="builder-control-surface__kicker">Production control surface</div>
+          <h2>Everything around the prompt is configurable.</h2>
+        </div>
+        <div className="builder-control-surface__badges" aria-label="Included surfaces">
+          <span>Monaco IDE</span>
+          <span>Terminal</span>
+          <span>Git</span>
+          <span>Deploy</span>
+          <span>BYOK</span>
+        </div>
+      </div>
+
+      <div className="builder-control-surface__grid">
+        {controls.map((control) => {
+          const content = (
+            <>
+              <div className="builder-control-surface__icon">{control.icon}</div>
+              <div className="min-w-0">
+                <h3>{control.title}</h3>
+                <p>{control.body}</p>
+                <span>{control.actionLabel}</span>
+              </div>
+            </>
+          )
+
+          if (control.href) {
+            return (
+              <a key={control.title} className="builder-control-surface__card" href={control.href}>
+                {content}
+              </a>
+            )
+          }
+
+          return (
+            <button key={control.title} type="button" className="builder-control-surface__card" onClick={control.onClick}>
+              {content}
+            </button>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 // ============================================================================
 // MAIN APP BUILDER COMPONENT
 // ============================================================================
@@ -2870,9 +2995,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       wsBuildIdRef.current = null
     }
   }, [])
-
-  // Auto-resume last active build on mount (covers mobile browser memory reclaim / page reload)
-  const mountResumeAttempted = useRef(false)
 
   const clampPercent = (value: number) => {
     if (!Number.isFinite(value)) return 0
@@ -4951,24 +5073,6 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     return false
   }, [hydrateBuildContext])
 
-  useEffect(() => {
-    if (mountResumeAttempted.current) return
-    if (!user?.id) return
-    mountResumeAttempted.current = true
-
-    const storedActiveId = readStoredValue(ACTIVE_BUILD_STORAGE_KEY)
-    const storedLastId = readStoredValue(LAST_WORKFLOW_BUILD_STORAGE_KEY)
-    const resumeId = storedActiveId || storedLastId
-    if (!resumeId) return
-    // Don't resume if we already have a build loaded
-    if (buildStateRef.current?.id) return
-
-    void hydrateBuildContext(resumeId, { reconnectLive: true, notify: true }).catch(() => {
-      // Build no longer accessible — clear stored IDs to prevent crash loop on next load
-      clearActiveBuildId()
-      clearLastWorkflowBuildId()
-    })
-  }, [user?.id, readStoredValue, hydrateBuildContext, clearActiveBuildId, clearLastWorkflowBuildId])
 
   useEffect(() => {
     if (!buildState?.id || !isBuildActive) {
@@ -5889,6 +5993,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         {!buildState ? (
           // App Description Input + Model Config (2-column layout)
           <div className="max-w-7xl mx-auto">
+            <BuilderControlSurface
+              onImportReplit={() => setShowImportModal(true)}
+              onImportGitHub={() => setShowGitHubImport(true)}
+              onAttachImage={() => wireframeInputRef.current?.click()}
+              onOpenIDE={() => onNavigateToIDE?.({ target: 'editor', projectId: createdProjectId })}
+            />
             <div className="grid grid-cols-1 lg:grid-cols-[1fr,380px] gap-6 items-start">
             {/* Left Column: Build Configuration */}
             <Card variant="cyberpunk" glow="intense" className="builder-main-card border-2 border-red-900/40 bg-black/60 backdrop-blur-xl">

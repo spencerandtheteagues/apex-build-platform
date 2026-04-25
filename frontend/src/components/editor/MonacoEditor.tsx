@@ -249,7 +249,7 @@ const LANGUAGE_CONFIGS = {
   cpp: { id: 'cpp', defaultCode: '#include <iostream>\n\nint main() {\n    std::cout << "Hello APEX-BUILD!" << std::endl;\n    return 0;\n}' },
   html: { id: 'html', defaultCode: '<!DOCTYPE html>\n<html>\n<head>\n    <title>APEX-BUILD</title>\n</head>\n<body>\n    <h1>Hello APEX-BUILD!</h1>\n</body>\n</html>' },
   css: { id: 'css', defaultCode: 'body {\n    font-family: "Fira Code", monospace;\n    background: linear-gradient(135deg, #0a0a0f 0%, #001133 100%);\n    color: #00f5ff;\n}' },
-  json: { id: 'json', defaultCode: '{\n  "name": "apex-build",\n  "version": "1.0.0",\n  "description": "Cyberpunk cloud development platform"\n}' },
+  json: { id: 'json', defaultCode: '{\n  "name": "apex-build",\n  "version": "1.0.0",\n  "description": "Multi-agent AI app builder"\n}' },
 }
 
 type MonacoCodeEditor = MonacoTypes.editor.IStandaloneCodeEditor

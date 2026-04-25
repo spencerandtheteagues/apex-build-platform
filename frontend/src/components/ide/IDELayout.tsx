@@ -38,6 +38,9 @@ import { SearchPanel } from '@/components/ide/SearchPanel'
 import { GitPanel } from '@/components/ide/GitPanel'
 import { SplitPaneEditor, SplitPaneEditorRef } from '@/components/ide/SplitPaneEditor'
 import { usePaneManager } from '@/hooks/usePaneManager'
+import APIKeySettings from '@/components/settings/APIKeySettings'
+import MCPManager from '@/components/mcp/MCPManager'
+import SecretsManager from '@/components/secrets/SecretsManager'
 
 // Lazy load heavy components for better initial load performance
 // Monaco Editor is ~800KB-1.2MB, XTerminal is ~200KB
@@ -79,6 +82,10 @@ import {
   Bot,
   MessageSquare,
   AlertCircle,
+  KeyRound,
+  PlugZap,
+  LockKeyhole,
+  CreditCard,
 } from 'lucide-react'
 
 // Loading fallback for lazy-loaded components
@@ -755,24 +762,56 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
         ) : null
       case 'settings':
         return (
-          <Card variant="cyberpunk" padding="md" className="h-full border-0">
-            <h3 className="text-lg font-semibold text-white mb-4">Settings</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-gray-300">Theme</label>
-                <select
-                  value={theme.id}
-                  onChange={(e) => setTheme(e.target.value)}
-                  className="w-full mt-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white focus:border-red-500 focus:outline-none touch-target"
-                >
-                  <option value="cyberpunk">Cyberpunk</option>
-                  <option value="matrix">Matrix</option>
-                  <option value="synthwave">Synthwave</option>
-                  <option value="neonCity">Neon City</option>
-                </select>
-              </div>
+          <div className="ide-control-surface h-full overflow-auto bg-black/40 p-3">
+            <div className="mb-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-cyan-300">Workspace controls</div>
+              <h3 className="mt-1 text-lg font-semibold text-white">Keys, connectors, secrets, billing, and UI</h3>
+              <p className="mt-2 text-xs leading-relaxed text-gray-400">
+                These are the real production surfaces behind Apex builds. Configure provider keys, local model routes,
+                MCP tools, encrypted project secrets, budget visibility, and the IDE theme without leaving the workspace.
+              </p>
             </div>
-          </Card>
+
+            <div className="mb-3 grid grid-cols-2 gap-2 text-xs">
+              {[
+                { icon: <KeyRound className="h-4 w-4" />, label: 'BYOK models' },
+                { icon: <PlugZap className="h-4 w-4" />, label: 'MCP tools' },
+                { icon: <LockKeyhole className="h-4 w-4" />, label: 'Secrets vault' },
+                { icon: <CreditCard className="h-4 w-4" />, label: 'Spend controls' },
+              ].map((item) => (
+                <div key={item.label} className="flex items-center gap-2 rounded-lg border border-gray-800 bg-gray-950/70 px-3 py-2 text-gray-300">
+                  <span className="text-cyan-300">{item.icon}</span>
+                  {item.label}
+                </div>
+              ))}
+            </div>
+
+            <div className="mb-4 rounded-xl border border-gray-800 bg-gray-950/70 p-4">
+              <label className="text-sm font-medium text-gray-300">Theme</label>
+              <select
+                value={theme.id}
+                onChange={(e) => setTheme(e.target.value)}
+                className="touch-target mt-2 w-full rounded-lg border border-gray-700 bg-black px-3 py-2 text-white focus:border-cyan-400 focus:outline-none"
+              >
+                <option value="cyberpunk">Apex dark</option>
+                <option value="matrix">Matrix</option>
+                <option value="synthwave">Synthwave</option>
+                <option value="neonCity">Neon City</option>
+              </select>
+            </div>
+
+            <div className="space-y-4">
+              <section className="ide-control-surface__section">
+                <APIKeySettings />
+              </section>
+              <section className="ide-control-surface__section">
+                <SecretsManager projectId={currentProject?.id} />
+              </section>
+              <section className="ide-control-surface__section">
+                <MCPManager projectId={currentProject?.id} />
+              </section>
+            </div>
+          </div>
         )
       default:
         return null
@@ -1096,14 +1135,14 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded overflow-hidden flex items-center justify-center">
               <img
-                src="/apex-build-logo-transparent.png"
+                src="/apex-build-mark-metal.png"
                 alt="APEX"
-                className="w-6 h-6 object-contain drop-shadow-[0_0_6px_rgba(239,68,68,0.6)]"
+                className="w-6 h-6 object-contain drop-shadow-[0_0_8px_rgba(125,231,255,0.62)]"
                 onError={(e) => {
                   const img = e.currentTarget
                   img.style.display = 'none'
                   const fallback = document.createElement('div')
-                  fallback.className = 'w-6 h-6 bg-gradient-to-br from-red-500 to-red-900 rounded'
+                  fallback.className = 'w-6 h-6 bg-gradient-to-br from-cyan-300 to-sky-700 rounded'
                   img.parentElement?.appendChild(fallback)
                 }}
               />

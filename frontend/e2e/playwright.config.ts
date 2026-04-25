@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * APEX.BUILD E2E Test Configuration
+ * APEX-BUILD E2E Test Configuration
  * Comprehensive Playwright setup for testing the cloud development platform
  */
 

@@ -1,4 +1,4 @@
-# APEX.BUILD Frontend Dockerfile
+# APEX-BUILD Frontend Dockerfile
 # Multi-stage production build for React/Vite application
 # Optimized for security, size, and performance
 
@@ -56,9 +56,9 @@ RUN npm run build \
 FROM nginx:1.25-alpine AS production
 
 # Labels for image metadata
-LABEL org.opencontainers.image.title="APEX.BUILD Frontend"
+LABEL org.opencontainers.image.title="APEX-BUILD Frontend"
 LABEL org.opencontainers.image.description="Multi-AI Cloud Development Platform UI"
-LABEL org.opencontainers.image.vendor="APEX.BUILD"
+LABEL org.opencontainers.image.vendor="APEX-BUILD"
 LABEL org.opencontainers.image.source="https://github.com/apex-build/apex-build"
 
 # Install runtime dependencies and security updates

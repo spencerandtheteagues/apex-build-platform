@@ -1,11 +1,11 @@
 #!/bin/sh
 
-# APEX.BUILD Frontend Docker Entrypoint
+# APEX-BUILD Frontend Docker Entrypoint
 # Handles runtime configuration and starts nginx
 
 set -e
 
-echo "🚀 APEX.BUILD Frontend starting..."
+echo "🚀 APEX-BUILD Frontend starting..."
 PORT="${PORT:-3000}"
 API_URL="${VITE_API_URL:-${VITE_API_BASE_URL:-}}"
 WS_URL="${VITE_WS_URL:-}"
@@ -107,7 +107,7 @@ chown -R nginx:nginx /usr/share/nginx/html 2>/dev/null || true
 echo "🔧 Testing nginx configuration..."
 nginx -t
 
-echo "🌐 Starting APEX.BUILD Frontend on port ${PORT}..."
+echo "🌐 Starting APEX-BUILD Frontend on port ${PORT}..."
 echo "📡 API URL: ${API_URL:-<auto>}"
 echo "🔌 WebSocket URL: ${WS_URL:-<auto>}"
 echo "↪️ API proxy target: ${API_PROXY_PASS}"

@@ -1,4 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('@/hooks/useStore', () => ({
+  useStore: {
+    getState: () => ({
+      handleFSMEvent: vi.fn(),
+    }),
+  },
+}))
+
 import { WebSocketService } from './websocket'
 
 describe('WebSocketService', () => {

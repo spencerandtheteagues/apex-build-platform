@@ -7,7 +7,7 @@ import path from 'path';
  * Runs once before all tests
  */
 async function globalSetup(config: FullConfig) {
-  console.log('\n[Global Setup] Starting APEX.BUILD E2E test suite...\n');
+  console.log('\n[Global Setup] Starting APEX-BUILD E2E test suite...\n');
 
   // Create necessary directories
   const dirs = [

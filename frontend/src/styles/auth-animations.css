@@ -1,4 +1,4 @@
-/* APEX.BUILD Auth Screen Animations */
+/* APEX-BUILD Auth Screen Animations */
 
 @keyframes particleFloat {
   0%, 100% { transform: translateY(0) translateX(0) rotate(0deg); opacity: 0.6; }

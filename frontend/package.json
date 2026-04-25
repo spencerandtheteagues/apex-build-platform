@@ -1,7 +1,7 @@
 {
   "name": "apex-build-frontend",
   "version": "1.0.0",
-  "description": "APEX.BUILD - Multi-AI Cloud Development Platform Frontend",
+  "description": "APEX-BUILD - Multi-AI Cloud Development Platform Frontend",
   "private": true,
   "dependencies": {
     "@heroicons/react": "^2.2.0",

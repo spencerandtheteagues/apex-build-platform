@@ -32,10 +32,10 @@ const defaultProps = () => ({
 })
 
 describe('LiveActivityFeed', () => {
-  const scrollIntoView = vi.fn()
+  const scrollTo = vi.fn()
 
   beforeEach(() => {
-    scrollIntoView.mockReset()
+    scrollTo.mockReset()
     Object.defineProperty(window, 'requestAnimationFrame', {
       configurable: true,
       value: (callback: FrameRequestCallback) => {
@@ -47,9 +47,9 @@ describe('LiveActivityFeed', () => {
       configurable: true,
       value: vi.fn(),
     })
-    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
       configurable: true,
-      value: scrollIntoView,
+      value: scrollTo,
     })
   })
 
@@ -66,7 +66,7 @@ describe('LiveActivityFeed', () => {
       />
     )
 
-    scrollIntoView.mockClear()
+    scrollTo.mockClear()
 
     rerender(
       <LiveActivityFeed
@@ -78,7 +78,7 @@ describe('LiveActivityFeed', () => {
       />
     )
 
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'end', behavior: 'auto' })
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'auto' })
   })
 
   it('stops auto-scrolling after the user scrolls up and resumes on demand', () => {
@@ -113,7 +113,7 @@ describe('LiveActivityFeed', () => {
     })
 
     fireEvent.scroll(feed)
-    scrollIntoView.mockClear()
+    scrollTo.mockClear()
 
     rerender(
       <LiveActivityFeed
@@ -125,10 +125,10 @@ describe('LiveActivityFeed', () => {
       />
     )
 
-    expect(scrollIntoView).not.toHaveBeenCalled()
+    expect(scrollTo).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: /latest/i }))
 
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'end', behavior: 'smooth' })
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1000, behavior: 'smooth' })
   })
 })

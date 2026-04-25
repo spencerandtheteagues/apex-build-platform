@@ -109,11 +109,11 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
     const el = feedRef.current
     if (!el) return
     // Use scrollTop directly — scrollIntoView can fight with mobile browser chrome
-    if (behavior === 'smooth') {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-    } else {
-      el.scrollTop = el.scrollHeight
+    if (typeof el.scrollTo === 'function') {
+      el.scrollTo({ top: el.scrollHeight, behavior })
+      return
     }
+    el.scrollTop = el.scrollHeight
   }, [])
 
   // Keep the feed pinned to the latest event unless the user intentionally scrolls away.
