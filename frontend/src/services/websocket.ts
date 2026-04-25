@@ -1,11 +1,9 @@
-// APEX-BUILD WebSocket Service
-// Real-time collaboration with sub-20ms latency
+// APEX-BUILD Collaboration WebSocket Service
+// Raw WebSocket implementation matching backend gorilla/websocket hub
 
 import { getConfiguredWsUrl } from '@/config/runtime'
-import { io, Socket } from 'socket.io-client'
 import {
   User,
-  File,
   CursorPosition,
   ChatMessage,
   WSMessage,
@@ -15,8 +13,9 @@ import {
 } from '@/types'
 import { useStore } from '@/hooks/useStore'
 
-const DEFAULT_PRODUCTION_WS_URL = 'wss://api.apex-build.dev/ws'
+const DEFAULT_PRODUCTION_WS_URL = 'wss://apex-backend-5ypy.onrender.com/ws'
 
+// Collaboration event types (kebab-case, matching frontend consumers)
 export type CollaborationEvent =
   | 'user-joined'
   | 'user-left'
@@ -26,8 +25,6 @@ export type CollaborationEvent =
   | 'file-locked'
   | 'file-unlocked'
   | 'project-updated'
-  | 'ai-request'
-  | 'ai-response'
 
 export interface CollaborationEventData {
   'user-joined': { user: User; room_id: string }
@@ -38,37 +35,40 @@ export interface CollaborationEventData {
   'file-locked': { file_id: number; user_id: number; user: User }
   'file-unlocked': { file_id: number; user_id: number }
   'project-updated': { project_id: number; changes: Record<string, any> }
-  'ai-request': { request_id: string; user_id: number; capability: string }
-  'ai-response': { request_id: string; content: string; provider: string }
 }
 
-// Debug mode - only log in development
+// Backend message type mapping
+const BACKEND_TO_FRONTEND_EVENT: Record<string, CollaborationEvent> = {
+  'user_joined': 'user-joined',
+  'user_left': 'user-left',
+  'file_change': 'file-changed',
+  'cursor_update': 'cursor-moved',
+  'chat': 'chat-message',
+}
+
+const FRONTEND_TO_BACKEND_TYPE: Record<string, string> = {
+  'join-room': 'join_room',
+  'leave-room': 'leave_room',
+  'file-change': 'file_change',
+  'cursor-update': 'cursor_update',
+  'chat-message': 'chat',
+}
+
 const DEBUG = import.meta.env.DEV
 
-export const isSocketIoEndpointUnavailableError = (error: unknown): boolean => {
-  const message = typeof error === 'string'
-    ? error
-    : (error && typeof error === 'object' && 'message' in error && typeof (error as any).message === 'string'
-      ? (error as any).message
-      : '')
-
-  return /\b404\b|not found|xhr poll error/i.test(message)
-}
-
 export class WebSocketService {
-  private socket: Socket | null = null
+  private ws: WebSocket | null = null
   private reconnectAttempts = 0
   private maxReconnectAttempts = 5
   private reconnectDelay = 1000
-  private heartbeatInterval: NodeJS.Timeout | null = null
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null
   private isConnecting = false
   private currentRoom: string | null = null
   private listeners: Map<CollaborationEvent, Set<Function>> = new Map()
+  private pendingJoinRoom: { resolve: () => void; reject: (err: Error) => void } | null = null
 
   private log(...args: any[]): void {
-    if (DEBUG) {
-      console.log('[WS]', ...args)
-    }
+    if (DEBUG) console.log('[WS-Collab]', ...args)
   }
 
   constructor() {
@@ -76,7 +76,6 @@ export class WebSocketService {
   }
 
   private initializeListeners(): void {
-    // Initialize listener sets for each event type
     const events: CollaborationEvent[] = [
       'user-joined',
       'user-left',
@@ -86,222 +85,169 @@ export class WebSocketService {
       'file-locked',
       'file-unlocked',
       'project-updated',
-      'ai-request',
-      'ai-response',
     ]
-
     events.forEach((event) => {
       this.listeners.set(event, new Set())
     })
   }
 
-  private getSocketIoConnectionConfig(): { url?: string; path: string } {
-    const baseUrl = this.getWsUrl().replace(/\/$/, '')
-    if (!baseUrl) {
-      return { path: '/ws/socket.io' }
-    }
-    return { url: baseUrl, path: '/ws/socket.io' }
-  }
-
-  // Get WebSocket URL for current environment
   private getWsUrl(): string {
     const configuredWsUrl = getConfiguredWsUrl()
     if (configuredWsUrl) {
-      return configuredWsUrl
+      return configuredWsUrl.replace(/\/ws$/, '') + '/ws/collab'
     }
 
-    // Production detection - if running on Render, Firebase, or production domain
     const hostname = typeof window !== 'undefined' ? window.location.hostname : ''
     const productionHosts = ['onrender.com', 'apex-build.dev', 'apex.build', 'web.app', 'firebaseapp.com']
-    const isProduction = productionHosts.some(host => hostname.includes(host))
+    const isProduction = productionHosts.some((h) => hostname.includes(h))
       || hostname === 'apex-frontend-gigq.onrender.com'
 
     if (isProduction) {
-      return DEFAULT_PRODUCTION_WS_URL
+      return DEFAULT_PRODUCTION_WS_URL + '/collab'
     }
 
-    // Fallback for local development
-    return ''
+    // Local development — derive from current host
+    const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${protocol}//${window.location.host}/ws/collab`
   }
 
-  // Connect to WebSocket server
   async connect(): Promise<void> {
-    if (this.isConnecting) {
-      return
-    }
-    if (this.socket?.connected) {
-      return
-    }
-    // Tear down any stale socket before creating a new one to prevent
-    // duplicate event listeners from accumulating on reconnect.
-    if (this.socket) {
-      this.socket.removeAllListeners()
-      this.socket.disconnect()
-      this.socket = null
-    }
+    if (this.isConnecting) return
+    if (this.ws?.readyState === WebSocket.OPEN) return
 
+    this.closeExisting()
     this.isConnecting = true
-    const { url, path } = this.getSocketIoConnectionConfig()
 
-    try {
-      this.socket = io(url, {
-        path,
-        transports: ['websocket', 'polling'],
-        withCredentials: true,
-        timeout: 10000,
-        reconnection: false,
-        reconnectionAttempts: this.maxReconnectAttempts,
-        reconnectionDelay: this.reconnectDelay,
-        reconnectionDelayMax: 5000,
-      })
+    const url = this.getWsUrl()
+    this.log('Connecting to', url)
 
-      this.setupSocketEvents()
-
-      return new Promise((resolve, reject) => {
-        const connectTimeout = setTimeout(() => {
-          reject(new Error('Connection timeout'))
-        }, 15000)
-
-        this.socket!.on('connect', () => {
-          clearTimeout(connectTimeout)
-          this.isConnecting = false
-          this.reconnectAttempts = 0
-          this.startHeartbeat()
-          this.log('✅ APEX-BUILD WebSocket connected')
-          resolve()
-        })
-
-        this.socket!.on('connect_error', (error) => {
-          clearTimeout(connectTimeout)
-          this.isConnecting = false
-          const unsupported = isSocketIoEndpointUnavailableError(error)
-          if (unsupported) {
-            this.socket?.disconnect()
-            this.socket = null
-            if (DEBUG) {
-              console.warn('[WS] Collaboration Socket.IO endpoint unavailable on this deployment; disabling realtime collaboration socket.')
-            }
-            reject(new Error('Real-time collaboration is unavailable on this deployment.'))
-            return
-          }
-          console.error('❌ WebSocket connection error:', error)
-          reject(error)
-        })
-      })
-    } catch (error) {
-      this.isConnecting = false
-      throw error
-    }
-  }
-
-  private setupSocketEvents(): void {
-    if (!this.socket) return
-
-    // Connection events
-    this.socket.on('connect', () => {
-      this.log('🔌 WebSocket connected')
-      this.reconnectAttempts = 0
-    })
-
-    this.socket.on('disconnect', (reason) => {
-      this.log('🔌 WebSocket disconnected:', reason)
-      this.stopHeartbeat()
-
-      if (reason === 'io server disconnect') {
-        // Server initiated disconnect, don't auto-reconnect
+    return new Promise((resolve, reject) => {
+      try {
+        this.ws = new WebSocket(url)
+      } catch (err) {
+        this.isConnecting = false
+        reject(new Error('Failed to create WebSocket: ' + (err as Error).message))
         return
       }
 
-      // Auto-reconnect for other reasons
-      this.scheduleReconnect()
-    })
+      const timeout = setTimeout(() => {
+        this.isConnecting = false
+        this.ws?.close()
+        reject(new Error('Connection timeout'))
+      }, 15000)
 
-    this.socket.on('reconnect', (attemptNumber) => {
-      this.log(`🔄 WebSocket reconnected after ${attemptNumber} attempts`)
-      if (this.currentRoom) {
-        this.joinRoom(this.currentRoom)
+      this.ws.onopen = () => {
+        clearTimeout(timeout)
+        this.isConnecting = false
+        this.reconnectAttempts = 0
+        this.startHeartbeat()
+        this.log('✅ Connected to collaboration hub')
+        resolve()
       }
-    })
 
-    this.socket.on('reconnect_error', (error) => {
-      console.error('🔄 WebSocket reconnect error:', error)
-    })
-
-    this.socket.on('reconnect_failed', () => {
-      console.error('🔄 WebSocket reconnect failed - maximum attempts reached')
-    })
-
-    // Collaboration events
-    this.socket.on('user-joined', (data: CollaborationEventData['user-joined']) => {
-      this.emit('user-joined', data)
-    })
-
-    this.socket.on('user-left', (data: CollaborationEventData['user-left']) => {
-      this.emit('user-left', data)
-    })
-
-    this.socket.on('file-changed', (data: CollaborationEventData['file-changed']) => {
-      this.emit('file-changed', data)
-    })
-
-    this.socket.on('cursor-moved', (data: CollaborationEventData['cursor-moved']) => {
-      this.emit('cursor-moved', data)
-    })
-
-    this.socket.on('chat-message', (data: CollaborationEventData['chat-message']) => {
-      this.emit('chat-message', data)
-    })
-
-    this.socket.on('file-locked', (data: CollaborationEventData['file-locked']) => {
-      this.emit('file-locked', data)
-    })
-
-    this.socket.on('file-unlocked', (data: CollaborationEventData['file-unlocked']) => {
-      this.emit('file-unlocked', data)
-    })
-
-    this.socket.on('project-updated', (data: CollaborationEventData['project-updated']) => {
-      this.emit('project-updated', data)
-    })
-
-    this.socket.on('ai-request', (data: CollaborationEventData['ai-request']) => {
-      this.emit('ai-request', data)
-    })
-
-    this.socket.on('ai-response', (data: CollaborationEventData['ai-response']) => {
-      this.emit('ai-response', data)
-    })
-
-    // FSM events (build:fsm:*) — wired to zustand store
-    this.socket.onAny((event: string, ...args: any[]) => {
-      if (event.startsWith('build:fsm:')) {
-        const data = args[0] || {}
-        const buildID = data?.build_id || data?.buildId || ''
-        useStore.getState().handleFSMEvent(event as FSMWSMessageType, buildID, data)
+      this.ws.onmessage = (event) => {
+        this.handleMessage(event.data)
       }
-    })
 
-    // Error handling
-    this.socket.on('error', (error) => {
-      console.error('🚨 WebSocket error:', error)
-    })
+      this.ws.onerror = (error) => {
+        clearTimeout(timeout)
+        this.isConnecting = false
+        console.error('❌ WebSocket error:', error)
+      }
 
-    // Heartbeat response
-    this.socket.on('pong', () => {
-      // Heartbeat acknowledged
+      this.ws.onclose = (event) => {
+        clearTimeout(timeout)
+        this.isConnecting = false
+        this.stopHeartbeat()
+        this.log('🔌 Connection closed', event.code, event.reason)
+
+        if (this.pendingJoinRoom) {
+          this.pendingJoinRoom.reject(new Error('Connection closed before join completed'))
+          this.pendingJoinRoom = null
+        }
+
+        if (!event.wasClean && this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.scheduleReconnect()
+        }
+      }
     })
   }
 
-  private startHeartbeat(): void {
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval)
+  private handleMessage(rawData: string | ArrayBuffer | Blob): void {
+    let message: any
+    try {
+      if (typeof rawData === 'string') {
+        message = JSON.parse(rawData)
+      } else {
+        this.log('Received non-text message, ignoring')
+        return
+      }
+    } catch {
+      this.log('Failed to parse message:', rawData)
+      return
     }
 
-    this.heartbeatInterval = setInterval(() => {
-      if (this.socket?.connected) {
-        this.socket.emit('ping')
+    const msgType = message.type as string
+    const data = message.data || message
+
+    this.log('←', msgType, data)
+
+    // Map backend event names to frontend event names
+    const frontendEvent = BACKEND_TO_FRONTEND_EVENT[msgType]
+    if (frontendEvent) {
+      this.emit(frontendEvent, data)
+      return
+    }
+
+    // FSM build events — pass through to zustand store
+    if (msgType?.startsWith('build:fsm:')) {
+      const buildID = data?.build_id || data?.buildId || ''
+      useStore.getState().handleFSMEvent(msgType as FSMWSMessageType, buildID, data)
+      return
+    }
+
+    // Handle join-room response
+    if (msgType === 'join_room' && this.pendingJoinRoom) {
+      if (data?.success) {
+        this.pendingJoinRoom.resolve()
+      } else {
+        this.pendingJoinRoom.reject(new Error(data?.error || 'Failed to join room'))
       }
-    }, 30000) // Every 30 seconds
+      this.pendingJoinRoom = null
+      return
+    }
+
+    // Other backend events we don't map
+    this.log('Unhandled message type:', msgType)
+  }
+
+  private send(type: string, data?: Record<string, any>): void {
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      console.warn('Cannot send — WebSocket not open')
+      return
+    }
+    const payload = data ? { type, ...data } : { type }
+    this.ws.send(JSON.stringify(payload))
+  }
+
+  private closeExisting(): void {
+    if (this.ws) {
+      this.ws.onclose = null
+      this.ws.onmessage = null
+      this.ws.onerror = null
+      this.ws.close()
+      this.ws = null
+    }
+    this.stopHeartbeat()
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat()
+    this.heartbeatInterval = setInterval(() => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.send('heartbeat')
+      }
+    }, 30000)
   }
 
   private stopHeartbeat(): void {
@@ -312,21 +258,19 @@ export class WebSocketService {
   }
 
   private scheduleReconnect(): void {
-    if (!this.socket) {
-      return
-    }
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error('🔄 Maximum reconnect attempts reached')
       return
     }
-
     this.reconnectAttempts++
     const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), 10000)
+    this.log(`🔄 Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
 
     setTimeout(() => {
-      if (!this.socket?.connected && !this.isConnecting) {
-        this.log(`🔄 Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
-        this.socket?.connect()
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        this.connect().catch(() => {
+          // Reconnect handled by onclose
+        })
       }
     }, delay)
   }
@@ -373,70 +317,62 @@ export class WebSocketService {
 
   // Room management
   async joinRoom(roomId: string): Promise<void> {
-    if (!this.socket?.connected) {
+    if (this.ws?.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected')
     }
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
+        this.pendingJoinRoom = null
         reject(new Error('Join room timeout'))
       }, 10000)
 
-      this.socket!.emit('join-room', { room_id: roomId }, (response: any) => {
-        clearTimeout(timeout)
-        if (response.success) {
+      this.pendingJoinRoom = {
+        resolve: () => {
+          clearTimeout(timeout)
           this.currentRoom = roomId
-          this.log(`🏠 Joined collaboration room: ${roomId}`)
+          this.log(`🏠 Joined room: ${roomId}`)
           resolve()
-        } else {
-          reject(new Error(response.error || 'Failed to join room'))
-        }
-      })
+        },
+        reject: (err: Error) => {
+          clearTimeout(timeout)
+          reject(err)
+        },
+      }
+
+      this.send('join_room', { room_id: roomId })
     })
   }
 
   async leaveRoom(): Promise<void> {
-    if (!this.socket?.connected || !this.currentRoom) {
+    if (!this.currentRoom || this.ws?.readyState !== WebSocket.OPEN) {
+      this.currentRoom = null
       return
     }
 
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Leave room timeout'))
-      }, 5000)
-
-      this.socket!.emit('leave-room', { room_id: this.currentRoom }, (response: any) => {
-        clearTimeout(timeout)
-        if (response.success) {
-          this.log(`🚪 Left collaboration room: ${this.currentRoom}`)
-          this.currentRoom = null
-          resolve()
-        } else {
-          reject(new Error(response.error || 'Failed to leave room'))
-        }
-      })
+    return new Promise((resolve) => {
+      this.send('leave_room', { room_id: this.currentRoom })
+      this.currentRoom = null
+      this.log('🚪 Left room')
+      // No acknowledgment from backend, just resolve
+      setTimeout(resolve, 500)
     })
   }
 
   // File operations
   sendFileChange(fileId: number, content: string, line: number, column: number): void {
-    if (!this.socket?.connected || !this.currentRoom) {
+    if (this.ws?.readyState !== WebSocket.OPEN || !this.currentRoom) {
       console.warn('Cannot send file change: WebSocket not connected or not in room')
       return
     }
 
-    const message: FileChangeMessage = {
+    this.send('file_change', {
+      room_id: this.currentRoom,
       file_id: fileId,
       content,
       line,
       column,
       change_type: 'replace',
-      user_id: 0, // Will be set by server
-    }
-
-    this.socket.emit('file-change', {
-      room_id: this.currentRoom,
-      ...message,
     })
   }
 
@@ -451,142 +387,61 @@ export class WebSocketService {
       endColumn: number
     }
   ): void {
-    if (!this.socket?.connected || !this.currentRoom) {
+    if (this.ws?.readyState !== WebSocket.OPEN || !this.currentRoom) {
+      console.warn('Cannot send cursor update: WebSocket not connected or not in room')
       return
     }
 
-    const message: CursorUpdateMessage = {
-      user_id: 0, // Will be set by server
+    this.send('cursor_update', {
+      room_id: this.currentRoom,
       file_id: fileId,
       line,
       column,
       selection,
-    }
-
-    this.socket.emit('cursor-update', {
-      room_id: this.currentRoom,
-      ...message,
     })
   }
 
-  // Chat operations
-  sendChatMessage(message: string, type: 'text' | 'code' | 'file' = 'text'): void {
-    if (!this.socket?.connected || !this.currentRoom) {
-      console.warn('Cannot send chat message: WebSocket not connected or not in room')
+  sendChatMessage(message: string): void {
+    if (this.ws?.readyState !== WebSocket.OPEN || !this.currentRoom) {
+      console.warn('Cannot send chat: WebSocket not connected or not in room')
       return
     }
 
-    this.socket.emit('chat-message', {
+    this.send('chat', {
       room_id: this.currentRoom,
-      message,
-      type,
+      content: message,
     })
   }
 
-  // File locking
-  lockFile(fileId: number): void {
-    if (!this.socket?.connected || !this.currentRoom) {
-      return
-    }
-
-    this.socket.emit('lock-file', {
-      room_id: this.currentRoom,
-      file_id: fileId,
-    })
-  }
-
-  unlockFile(fileId: number): void {
-    if (!this.socket?.connected || !this.currentRoom) {
-      return
-    }
-
-    this.socket.emit('unlock-file', {
-      room_id: this.currentRoom,
-      file_id: fileId,
-    })
-  }
-
-  // AI collaboration
-  broadcastAIRequest(requestId: string, capability: string): void {
-    if (!this.socket?.connected || !this.currentRoom) {
-      return
-    }
-
-    this.socket.emit('ai-request', {
-      room_id: this.currentRoom,
-      request_id: requestId,
-      capability,
-    })
-  }
-
-  shareAIResponse(requestId: string, content: string, provider: string): void {
-    if (!this.socket?.connected || !this.currentRoom) {
-      return
-    }
-
-    this.socket.emit('ai-response', {
-      room_id: this.currentRoom,
-      request_id: requestId,
-      content,
-      provider,
-    })
-  }
-
-  // Connection status
-  isConnected(): boolean {
-    return this.socket?.connected || false
-  }
-
-  getConnectionStatus(): {
-    connected: boolean
-    room: string | null
-    reconnectAttempts: number
-  } {
-    return {
-      connected: this.socket?.connected || false,
-      room: this.currentRoom,
-      reconnectAttempts: this.reconnectAttempts,
-    }
-  }
-
-  // Disconnect
   disconnect(): void {
-    if (this.socket) {
-      this.stopHeartbeat()
-      this.socket.disconnect()
-      this.socket = null
-      this.currentRoom = null
-      this.reconnectAttempts = 0
-      this.isConnecting = false
-      this.log('🔌 WebSocket manually disconnected')
-    }
+    this.closeExisting()
+    this.currentRoom = null
+    this.reconnectAttempts = 0
+    this.log('🔌 Disconnected')
   }
 
-  // Performance monitoring
-  measureLatency(): Promise<number> {
-    if (!this.socket?.connected) {
-      return Promise.reject(new Error('WebSocket not connected'))
-    }
+  isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN
+  }
 
-    const startTime = performance.now()
-
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Latency measurement timeout'))
-      }, 5000)
-
-      this.socket!.emit('ping-latency', { timestamp: startTime }, (response: any) => {
-        clearTimeout(timeout)
-        const endTime = performance.now()
-        const latency = endTime - startTime
-        resolve(latency)
-      })
-    })
+  getCurrentRoom(): string | null {
+    return this.currentRoom
   }
 }
 
-// Create singleton instance
-export const websocketService = new WebSocketService()
+// Singleton instance
+let wsInstance: WebSocketService | null = null
 
-// Export for easy importing
-export default websocketService
+export function getWebSocketService(): WebSocketService {
+  if (!wsInstance) {
+    wsInstance = new WebSocketService()
+  }
+  return wsInstance
+}
+
+export function resetWebSocketService(): void {
+  if (wsInstance) {
+    wsInstance.disconnect()
+    wsInstance = null
+  }
+}

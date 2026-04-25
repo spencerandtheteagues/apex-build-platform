@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest'
+import { WebSocketService } from './websocket'
 
-import { isSocketIoEndpointUnavailableError } from './websocket'
-
-describe('isSocketIoEndpointUnavailableError', () => {
-  it('detects common socket.io 404 handshake failures', () => {
-    expect(isSocketIoEndpointUnavailableError(new Error('websocket error 404'))).toBe(true)
-    expect(isSocketIoEndpointUnavailableError({ message: 'xhr poll error' })).toBe(true)
-    expect(isSocketIoEndpointUnavailableError('Not Found')).toBe(true)
+describe('WebSocketService', () => {
+  it('creates an instance', () => {
+    const svc = new WebSocketService()
+    expect(svc.isConnected()).toBe(false)
+    expect(svc.getCurrentRoom()).toBeNull()
   })
 
-  it('does not classify unrelated connection errors as unsupported endpoint', () => {
-    expect(isSocketIoEndpointUnavailableError(new Error('timeout exceeded'))).toBe(false)
-    expect(isSocketIoEndpointUnavailableError({ message: 'ECONNRESET' })).toBe(false)
+  it('tracks listeners', () => {
+    const svc = new WebSocketService()
+    const handler = vi.fn()
+    const unsub = svc.on('user-joined', handler)
+    expect(typeof unsub).toBe('function')
+    unsub()
   })
 })
