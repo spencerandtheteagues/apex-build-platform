@@ -100,8 +100,30 @@ func (s *Service) BundleProject(ctx context.Context, projectID uint, config Bund
 	// Set sensible defaults based on framework
 	config = s.applyFrameworkDefaults(config)
 
-	log.Printf("[bundler-service] Bundling project %d with entry point %s (framework: %s)",
-		projectID, config.EntryPoint, config.Framework)
+	// Extract dependencies from package.json and mark them as external
+	// This prevents esbuild from trying to resolve node_modules imports
+	// (node_modules is never installed in the bundler temp workspace)
+	if files.PackageJSON != nil {
+		if config.ExternalDeps == nil {
+			config.ExternalDeps = make([]string, 0)
+		}
+		for dep := range files.PackageJSON.Dependencies {
+			config.ExternalDeps = append(config.ExternalDeps, dep)
+		}
+		for dep := range files.PackageJSON.DevDependencies {
+			// Only externalize runtime deps, not build tools
+			if dep != "vite" && dep != "@vitejs/plugin-react" &&
+				dep != "tailwindcss" && dep != "postcss" &&
+				dep != "typescript" && dep != "@types/*" {
+				config.ExternalDeps = append(config.ExternalDeps, dep)
+			}
+		}
+		log.Printf("[bundler-service] Externalizing %d dependencies for project %d",
+			len(config.ExternalDeps), projectID)
+	}
+
+	log.Printf("[bundler-service] Bundling project %d with entry point %s (framework: %s, externals: %d)",
+		projectID, config.EntryPoint, config.Framework, len(config.ExternalDeps))
 
 	// Bundle the files
 	return s.bundler.BundleFromFiles(ctx, projectID, *files, config)

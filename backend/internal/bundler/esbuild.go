@@ -716,6 +716,40 @@ func GenerateHTML(result *BundleResult, config BundleConfig) string {
   <div id="app"></div>
 `)
 
+	// Add import map for ESM dependencies so externally-resolved packages
+	// (marked via --external) are loaded from CDN at runtime.
+	if len(config.ExternalDeps) > 0 {
+		// Exclude deps that already have local shims (react ecosystem)
+		shimmed := map[string]bool{
+			"react": true, "react-dom": true, "react-dom/client": true,
+			"react/jsx-runtime": true, "react/jsx-dev-runtime": true,
+		}
+		var externals []string
+		for _, dep := range config.ExternalDeps {
+			if !shimmed[dep] {
+				externals = append(externals, dep)
+			}
+		}
+		if len(externals) > 0 {
+			sb.WriteString(`  <script type="importmap">
+  {
+    "imports": {
+`)
+			for i, dep := range externals {
+				cdnURL := cdnURLFor(dep)
+				comma := ","
+				if i == len(externals)-1 {
+					comma = ""
+				}
+				sb.WriteString(fmt.Sprintf(`      "%s": "%s"%s\n`, dep, cdnURL, comma))
+			}
+			sb.WriteString(`    }
+  }
+  </script>
+`)
+		}
+	}
+
 	// Add bundled JavaScript
 	if len(result.OutputJS) > 0 {
 		if config.Format == "esm" {
@@ -735,6 +769,34 @@ func GenerateHTML(result *BundleResult, config BundleConfig) string {
 </html>`)
 
 	return sb.String()
+}
+
+// cdnURLFor maps a package name to a best-effort CDN URL for use in an import map.
+// For React ecosystem packages it uses esm.sh so bare imports work at runtime.
+func cdnURLFor(pkg string) string {
+	switch pkg {
+	case "react":
+		return "https://esm.sh/react@18"
+	case "react-dom":
+		return "https://esm.sh/react-dom@18"
+	case "react-dom/client":
+		return "https://esm.sh/react-dom@18/client"
+	case "react/jsx-runtime":
+		return "https://esm.sh/react@18/jsx-runtime"
+	case "lucide-react":
+		return "https://esm.sh/lucide-react"
+	case "clsx":
+		return "https://esm.sh/clsx"
+	case "tailwind-merge":
+		return "https://esm.sh/tailwind-merge"
+	case "tailwindcss-animate":
+		return "https://esm.sh/tailwindcss-animate"
+	}
+	// Scoped packages and unknown packages fallback to esm.sh
+	if strings.HasPrefix(pkg, "@") {
+		return fmt.Sprintf("https://esm.sh/%s", pkg)
+	}
+	return fmt.Sprintf("https://esm.sh/%s", pkg)
 }
 
 // StreamBundle streams the bundled output to a writer (useful for large bundles)
