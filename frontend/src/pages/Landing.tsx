@@ -112,16 +112,22 @@ const CONTROL_SURFACES: Array<{ icon: IconType; title: string; body: string; sta
   },
 ]
 
-const AGENTS = [
-  ['01', 'Kimi K2.6 Conductor', 'Task routing, dependency tracking, context, spend optimization'],
-  ['02', 'Lead Architect', 'Architecture, data model, API contracts, security shape'],
-  ['03', 'Planner', 'Build contract, work orders, checkpoints, acceptance criteria'],
-  ['04', 'Frontend', 'React surfaces, layout systems, state, visual polish'],
-  ['05', 'Backend', 'APIs, middleware, auth, billing, integrations, jobs'],
-  ['06', 'Database', 'Schema, migrations, seed data, query boundaries'],
-  ['07', 'Logic and Debug', 'Business rules, failure repair, integration conflicts'],
-  ['08', 'Testing', 'Unit, integration, E2E, accessibility, smoke checks'],
-  ['09', 'Reviewer and Docs', 'Security review, code review, handoff, README, runbooks'],
+const AGENTS: Array<{
+  number: string
+  name: string
+  model: string
+  body: string
+  icon: IconType
+}> = [
+  { number: '01', name: 'Kimi K2.6 Conductor', model: 'Orchestration', body: 'Routes work, tracks dependencies, protects context, and keeps spend inside the build contract.', icon: Workflow },
+  { number: '02', name: 'Lead Architect', model: 'Claude Code lane', body: 'Owns architecture, data models, API contracts, security boundaries, and system shape.', icon: Layers3 },
+  { number: '03', name: 'Planner', model: 'Gemini context lane', body: 'Turns the prompt into work orders, checkpoints, acceptance criteria, and cross-agent memory.', icon: Brain },
+  { number: '04', name: 'Frontend', model: 'Codex builder lane', body: 'Builds React surfaces, layouts, state, accessibility, visual polish, and product flows.', icon: Code2 },
+  { number: '05', name: 'Backend', model: 'Codex builder lane', body: 'Builds APIs, middleware, auth, billing, integrations, background jobs, and services.', icon: TerminalSquare },
+  { number: '06', name: 'Database', model: 'Schema lane', body: 'Designs schema, migrations, seed data, query boundaries, and persistence contracts.', icon: Database },
+  { number: '07', name: 'Logic and Debug', model: 'Grok reasoning lane', body: 'Handles business rules, failure repair, integration conflicts, and complex edge cases.', icon: Cpu },
+  { number: '08', name: 'Testing', model: 'Verification lane', body: 'Runs unit, integration, E2E, accessibility, smoke, and deploy-readiness checks.', icon: ShieldCheck },
+  { number: '09', name: 'Reviewer and Docs', model: 'Review lane', body: 'Audits security, code quality, handoff docs, READMEs, runbooks, and launch evidence.', icon: FileCode2 },
 ]
 
 const COMPARISON = [
@@ -764,40 +770,281 @@ const launchCss = `
     font-weight: 850;
   }
 
+  .agents-section {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .agents-section::before {
+    content: "";
+    position: absolute;
+    inset: 8% -10% auto auto;
+    width: 48vw;
+    height: 48vw;
+    max-width: 760px;
+    max-height: 760px;
+    pointer-events: none;
+    background:
+      radial-gradient(circle, rgba(35, 211, 238, .18), transparent 60%),
+      conic-gradient(from 110deg, rgba(56, 189, 248, .22), transparent 28%, rgba(110, 231, 183, .12), transparent 58%);
+    filter: blur(42px);
+    opacity: .42;
+  }
+
+  .agents-shell {
+    position: relative;
+    z-index: 1;
+  }
+
+  .agents-layout {
+    display: grid;
+    grid-template-columns: minmax(0, .95fr) minmax(420px, .72fr);
+    gap: clamp(24px, 4vw, 62px);
+    align-items: end;
+  }
+
+  .agents-title {
+    max-width: 880px;
+  }
+
+  .agent-proof-rail {
+    margin-top: 26px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .agent-proof-rail span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid rgba(125, 231, 255, .16);
+    border-radius: 999px;
+    background: rgba(7, 15, 25, .74);
+    color: #dbeafe;
+    padding: 10px 13px;
+    font-size: .84rem;
+    font-weight: 850;
+  }
+
+  .agent-proof-rail svg {
+    color: #38d7ff;
+  }
+
+  .agent-command-panel {
+    position: relative;
+    border: 1px solid rgba(125, 231, 255, .16);
+    border-radius: 22px;
+    background:
+      linear-gradient(145deg, rgba(14, 21, 32, .88), rgba(2, 6, 12, .94)),
+      radial-gradient(circle at 80% 0%, rgba(56, 189, 248, .2), transparent 18rem);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.08),
+      0 24px 90px rgba(0, 0, 0, .35),
+      0 0 52px rgba(56, 189, 248, .08);
+    padding: 22px;
+    overflow: hidden;
+  }
+
+  .agent-command-panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+    background-size: 38px 38px;
+    mask-image: linear-gradient(to bottom, black, transparent 82%);
+  }
+
+  .agent-panel-top,
+  .agent-pipeline,
+  .agent-budget-line {
+    position: relative;
+    z-index: 1;
+  }
+
+  .agent-panel-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    align-items: start;
+    border-bottom: 1px solid rgba(255,255,255,.09);
+    padding-bottom: 18px;
+  }
+
+  .agent-panel-top span,
+  .agent-budget-line span,
+  .agent-step em {
+    color: #8da0b8;
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    font-style: normal;
+  }
+
+  .agent-panel-top strong {
+    color: #fff;
+    font-size: 1.18rem;
+  }
+
+  .agent-panel-meter {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #8ff9cf;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: .82rem;
+    font-weight: 900;
+  }
+
+  .agent-panel-meter::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #24d3ee;
+    box-shadow: 0 0 18px rgba(36, 211, 238, .75);
+  }
+
+  .agent-pipeline {
+    display: grid;
+    gap: 10px;
+    margin-top: 18px;
+  }
+
+  .agent-step {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 14px;
+    background: rgba(255,255,255,.035);
+    padding: 12px;
+  }
+
+  .agent-step span {
+    color: #38d7ff;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-weight: 950;
+  }
+
+  .agent-step strong {
+    color: #f8fbff;
+  }
+
+  .agent-budget-line {
+    margin-top: 16px;
+    border: 1px solid rgba(110, 231, 183, .16);
+    border-radius: 16px;
+    background: rgba(6, 78, 59, .12);
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 14px;
+  }
+
+  .agent-budget-line strong {
+    color: #9ff4d0;
+    font-family: "JetBrains Mono", Consolas, monospace;
+  }
+
   .agent-board {
-    margin-top: 38px;
+    margin-top: 28px;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px;
+    gap: 14px;
   }
 
   .agent-row {
+    position: relative;
+    overflow: hidden;
     display: grid;
-    grid-template-columns: 48px minmax(0, 1fr);
-    gap: 14px;
+    grid-template-columns: 46px minmax(0, 1fr);
+    gap: 15px;
+    min-height: 184px;
     border: 1px solid rgba(255,255,255,.09);
-    border-radius: 14px;
-    background: rgba(255,255,255,.035);
-    padding: 16px;
+    border-radius: 18px;
+    background:
+      linear-gradient(145deg, rgba(16, 24, 36, .66), rgba(3, 7, 14, .9)),
+      radial-gradient(circle at 100% 0%, rgba(56, 189, 248, .12), transparent 13rem);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.055);
+    padding: 18px;
   }
 
-  .agent-row span {
-    color: #38bdf8;
+  .agent-row::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #24d3ee, rgba(110, 231, 183, .2), transparent);
+    opacity: .62;
+  }
+
+  .agent-row:hover {
+    border-color: rgba(125, 231, 255, .24);
+    transform: translateY(-2px);
+  }
+
+  .agent-icon {
+    position: relative;
+    z-index: 1;
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #7dd3fc;
+    border: 1px solid rgba(125, 211, 252, .2);
+    background: rgba(14, 165, 233, .11);
+  }
+
+  .agent-row-content {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+  }
+
+  .agent-card-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: start;
+  }
+
+  .agent-number {
+    color: #38d7ff;
     font-family: "JetBrains Mono", Consolas, monospace;
-    font-weight: 900;
+    font-weight: 950;
+    font-size: .86rem;
+  }
+
+  .agent-model {
+    color: #8da0b8;
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    text-align: right;
   }
 
   .agent-row strong {
     display: block;
     color: #fff;
-    margin-bottom: 5px;
+    margin-top: 12px;
+    margin-bottom: 6px;
+    font-size: 1.08rem;
   }
 
   .agent-row p {
     margin: 0;
-    color: #94a3b8;
-    font-size: .9rem;
-    line-height: 1.45;
+    color: #aeb8c6;
+    font-size: .94rem;
+    line-height: 1.55;
   }
 
   .comparison-wrap {
@@ -932,6 +1179,19 @@ const launchCss = `
     .pricing-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+
+    .agents-layout {
+      grid-template-columns: 1fr;
+      align-items: start;
+    }
+
+    .agent-command-panel {
+      max-width: 760px;
+    }
+
+    .agent-board {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
 
   @media (max-width: 820px) {
@@ -988,6 +1248,19 @@ const launchCss = `
     .surface-grid,
     .agent-board,
     .pricing-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .agents-title {
+      font-size: clamp(2.5rem, 11vw, 4.8rem);
+    }
+
+    .agent-command-panel {
+      padding: 16px;
+    }
+
+    .agent-step,
+    .agent-budget-line {
       grid-template-columns: 1fr;
     }
 
@@ -1292,23 +1565,55 @@ const Surfaces = () => (
 )
 
 const Agents = () => (
-  <section id="agents" className="landing-section">
-    <div className="launch-shell">
-      <motion.div {...fadeUp}>
-        <div className="section-kicker">Agent architecture</div>
-        <h2 className="section-title">A coordinated engineering team, conducted in real time.</h2>
-        <p className="section-copy">
-          Apex splits complex requests into owned work orders, then runs agents in parallel with
-          model-specific responsibilities, cost tracking, checkpoints, and review gates.
-        </p>
-      </motion.div>
-      <div className="agent-board">
-        {AGENTS.map(([number, name, body]) => (
-          <motion.div key={name} className="agent-row" {...fadeUp}>
-            <span>{number}</span>
+  <section id="agents" className="landing-section agents-section">
+    <div className="launch-shell agents-shell">
+      <div className="agents-layout">
+        <motion.div className="agents-copy" {...fadeUp}>
+          <div className="section-kicker">Agent architecture</div>
+          <h2 className="section-title agents-title">Nine specialists. One governed build.</h2>
+          <p className="section-copy">
+            Apex breaks complex software requests into owned work orders, routes them to the right
+            model lane, then keeps every agent moving in parallel with checkpoints, budget caps,
+            review evidence, and deploy gates.
+          </p>
+          <div className="agent-proof-rail" aria-label="Agent system controls">
+            <span><Workflow width={15} height={15} /> Parallel work orders</span>
+            <span><DollarSign width={15} height={15} /> Spend guardrails</span>
+            <span><ShieldCheck width={15} height={15} /> Review gates</span>
+            <span><Github width={15} height={15} /> GitHub handoff</span>
+          </div>
+        </motion.div>
+        <motion.aside className="agent-command-panel" aria-label="Live orchestration preview" {...fadeUp}>
+          <div className="agent-panel-top">
             <div>
-              <strong>{name}</strong>
-              <p>{body}</p>
+              <span>orchestration live</span>
+              <strong>Build contract executing</strong>
+            </div>
+            <div className="agent-panel-meter">09 active</div>
+          </div>
+          <div className="agent-pipeline">
+            <div className="agent-step"><span>01</span><strong>Plan</strong><em>locked</em></div>
+            <div className="agent-step"><span>02</span><strong>Build</strong><em>parallel</em></div>
+            <div className="agent-step"><span>03</span><strong>Review</strong><em>running</em></div>
+            <div className="agent-step"><span>04</span><strong>Deploy</strong><em>gated</em></div>
+          </div>
+          <div className="agent-budget-line">
+            <span>current spend</span>
+            <strong>$0.144 / $0.500</strong>
+          </div>
+        </motion.aside>
+      </div>
+      <div className="agent-board">
+        {AGENTS.map((agent) => (
+          <motion.div key={agent.name} className="agent-row" {...fadeUp}>
+            <div className="agent-icon"><agent.icon width={21} height={21} /></div>
+            <div className="agent-row-content">
+              <div className="agent-card-top">
+                <span className="agent-number">{agent.number}</span>
+                <span className="agent-model">{agent.model}</span>
+              </div>
+              <strong>{agent.name}</strong>
+              <p>{agent.body}</p>
             </div>
           </motion.div>
         ))}
