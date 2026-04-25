@@ -13,8 +13,8 @@ import (
 	"time"
 )
 
-// OllamaClient implements the Ollama local AI API client
-// Ollama uses an OpenAI-compatible chat completions endpoint
+// OllamaClient implements the Ollama AI API client (local or cloud).
+// Ollama uses an OpenAI-compatible chat completions endpoint.
 // https://ollama.com/blog/openai-compatibility
 type OllamaClient struct {
 	baseURL    string
@@ -63,6 +63,7 @@ type ollamaResponse struct {
 	} `json:"error,omitempty"`
 }
 
+<<<<<<< HEAD
 // ollamaModelsResponse represents the response from /api/tags
 type ollamaModelsResponse struct {
 	Models []struct {
@@ -72,16 +73,16 @@ type ollamaModelsResponse struct {
 	} `json:"models"`
 }
 
-// NewOllamaClient creates a new Ollama API client
-// Supports embedded API key in URL: http://apikey@host/v1
-func NewOllamaClient(baseURL string) *OllamaClient {
+// NewOllamaClient creates a new Ollama API client.
+// apiKey is the Ollama Pro cloud API key; leave empty for local installs.
+// Also supports embedded API key in URL: http://apikey@host (if apiKey param is empty).
+// baseURL may include or omit the /v1 suffix — normalized away internally.
+func NewOllamaClient(baseURL, apiKey string) *OllamaClient {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
-
-	// Extract API key from embedded auth in URL (e.g., http://apikey@host/v1)
-	apiKey := ""
-	if strings.Contains(baseURL, "@") {
+	// Extract API key from embedded auth in URL as fallback (e.g., http://apikey@host/v1)
+	if apiKey == "" && strings.Contains(baseURL, "@") {
 		if parsed, err := url.Parse(baseURL); err == nil {
 			if parsed.User != nil {
 				apiKey = parsed.User.Username()
@@ -90,12 +91,13 @@ func NewOllamaClient(baseURL string) *OllamaClient {
 			}
 		}
 	}
-
+	// Strip trailing /v1 so makeRequest can always append /v1/<path> without doubling it.
+	baseURL = strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
 	return &OllamaClient{
 		baseURL: baseURL,
 		apiKey:  apiKey,
 		httpClient: &http.Client{
-			Timeout: 900 * time.Second, // 15-minute timeout for local inference (large models can be slow)
+			Timeout: 900 * time.Second,
 		},
 		usage: &ProviderUsage{
 			Provider: ProviderOllama,
@@ -289,7 +291,6 @@ func (o *OllamaClient) makeRequest(ctx context.Context, req *ollamaRequest) (*ol
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Ollama's OpenAI-compatible endpoint
 	url := o.baseURL + "/v1/chat/completions"
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
@@ -298,13 +299,10 @@ func (o *OllamaClient) makeRequest(ctx context.Context, req *ollamaRequest) (*ol
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	// Add Authorization header for Ollama Cloud (BYOK with API key)
+	httpReq.Header.Set("ngrok-skip-browser-warning", "true")
 	if o.apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
 	}
-	// Bypass ngrok browser warning for free tunnels
-	httpReq.Header.Set("ngrok-skip-browser-warning", "true")
-	// No Authorization header — Ollama runs locally without auth
 
 	resp, err := o.httpClient.Do(httpReq)
 	if err != nil {
@@ -359,11 +357,16 @@ func (o *OllamaClient) GetProvider() AIProvider {
 	return ProviderOllama
 }
 
-// Health checks if Ollama server is accessible
+// Health checks if Ollama server is accessible.
+// Uses /v1/models (OpenAI-compatible) which works for both local and cloud.
 func (o *OllamaClient) Health(ctx context.Context) error {
+<<<<<<< HEAD
 	// For Ollama Cloud (OpenAI-compatible), try OpenAI-compatible endpoints first.
 	// baseURL already includes /v1 suffix, so use relative paths.
 	endpoints := []string{"/models", "/health", "/tags"}
+=======
+	url := o.baseURL + "/v1/models"
+>>>>>>> b6fb69f (feat: add Ollama Pro cloud API support with Bearer auth)
 
 	for _, path := range endpoints {
 		url := o.baseURL + path
@@ -391,17 +394,26 @@ func (o *OllamaClient) Health(ctx context.Context) error {
 	return fmt.Errorf("Ollama server not reachable at %s (tried %v)", o.baseURL, endpoints)
 }
 
-// GetAvailableModels fetches the list of installed models from Ollama
+// openAIModelsResponse is the response from GET /v1/models
+type openAIModelsResponse struct {
+	Data []struct {
+		ID string `json:"id"`
+	} `json:"data"`
+}
+
+// GetAvailableModels fetches available models using the OpenAI-compatible /v1/models endpoint.
 func (o *OllamaClient) GetAvailableModels(ctx context.Context) ([]string, error) {
-	url := o.baseURL + "/api/tags"
+	url := o.baseURL + "/v1/models"
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Bypass ngrok browser warning for free tunnels
 	req.Header.Set("ngrok-skip-browser-warning", "true")
+	if o.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+o.apiKey)
+	}
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -413,14 +425,14 @@ func (o *OllamaClient) GetAvailableModels(ctx context.Context) ([]string, error)
 		return nil, fmt.Errorf("failed to fetch models: status %d", resp.StatusCode)
 	}
 
-	var modelsResp ollamaModelsResponse
+	var modelsResp openAIModelsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&modelsResp); err != nil {
 		return nil, fmt.Errorf("failed to decode models response: %w", err)
 	}
 
-	models := make([]string, len(modelsResp.Models))
-	for i, m := range modelsResp.Models {
-		models[i] = m.Name
+	models := make([]string, len(modelsResp.Data))
+	for i, m := range modelsResp.Data {
+		models[i] = m.ID
 	}
 
 	return models, nil

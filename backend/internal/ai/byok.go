@@ -245,7 +245,7 @@ func (m *BYOKManager) ValidateKey(ctx context.Context, userID uint, provider str
 		if !strings.HasPrefix(apiKey, "http://") && !strings.HasPrefix(apiKey, "https://") {
 			return false, fmt.Errorf("invalid Ollama URL: must start with http:// or https://")
 		}
-		client = NewOllamaClient(apiKey)
+		client = NewOllamaClient(apiKey, "")
 	default:
 		return false, fmt.Errorf("unsupported provider: %s", provider)
 	}
@@ -364,7 +364,7 @@ func (m *BYOKManager) GetRouterForUser(userID uint) (*AIRouter, bool, error) {
 			hasValidClient = true
 		case ProviderOllama:
 			// For Ollama, the "apiKey" is actually the base URL
-			client := AIClient(NewOllamaClient(apiKey))
+			client := AIClient(NewOllamaClient(apiKey, ""))
 			if key.ModelPreference != "" {
 				client = &modelOverrideClient{base: client, defaultModel: key.ModelPreference}
 			}

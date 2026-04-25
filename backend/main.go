@@ -233,8 +233,8 @@ func initAI() (*ai.AIRouter, error) {
 		log.Println("⚠️  No AI clients configured - some features will use mock responses")
 	}
 
-	// Initialize AI router with available keys (Grok passed as first extra key, Ollama URL as second)
-	return ai.NewAIRouter(claudeKey, openAIKey, geminiKey, grokKey, ollamaURL), nil
+	// Initialize AI router with available keys (Grok=extraKeys[0], Ollama URL=extraKeys[1], Ollama key=extraKeys[2])
+	return ai.NewAIRouter(claudeKey, openAIKey, geminiKey, grokKey, ollamaURL, ""), nil
 }
 
 func setupRouter(handler *handlers.Handler) *gin.Engine {

@@ -37,9 +37,9 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 		PowerFast:     "grok-3-mini",
 	},
 	ai.ProviderOllama: {
-		PowerMax:      "kimi-k2.6:cloud",
-		PowerBalanced: "kimi-k2.6:cloud",
-		PowerFast:     "kimi-k2.6:cloud",
+		PowerMax:      "kimi-k2.6",
+		PowerBalanced: "kimi-k2.6",
+		PowerFast:     "glm-5.1",
 	},
 }
 

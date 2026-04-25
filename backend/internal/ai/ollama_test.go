@@ -8,7 +8,7 @@ import (
 func TestOllamaBuildMessagesSeparatesSystemAndUserPrompts(t *testing.T) {
 	t.Parallel()
 
-	client := NewOllamaClient("")
+	client := NewOllamaClient("", "")
 	req := &AIRequest{
 		Capability: CapabilityCodeGeneration,
 		Language:   "typescript",

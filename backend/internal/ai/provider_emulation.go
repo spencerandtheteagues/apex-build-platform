@@ -66,7 +66,7 @@ func (f *forceModelClient) Health(ctx context.Context) error { return f.base.Hea
 func (f *forceModelClient) GetUsage() *ProviderUsage         { return f.base.GetUsage() }
 
 func newAliasedOllamaProviderClient(alias AIProvider, baseURL, model string) AIClient {
-	var client AIClient = NewOllamaClient(baseURL)
+	var client AIClient = NewOllamaClient(baseURL, "")
 	model = strings.TrimSpace(model)
 	if model == "" {
 		model = firstEnv("OLLAMA_MODEL_DEFAULT", "OLLAMA_MODEL_BALANCED", "OLLAMA_MODEL_FAST")

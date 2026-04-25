@@ -214,14 +214,13 @@ func main() {
 	authService.SetDB(database.DB)
 	startupRegistry.MarkReady("auth_service", startup.TierCritical, "Authentication service initialized", nil)
 
-	// Initialize AI router with all providers (Claude, OpenAI, Gemini, Grok).
-	// Production keeps Ollama disabled globally to preserve strict BYOK behavior.
-	// In development, when OLLAMA_BASE_URL is explicitly set, run in Ollama-only mode:
-	// cloud API keys from the OS environment are excluded so the build pipeline uses
-	// only the local model. This prevents ambient shell exports (e.g. XAI_API_KEY set
-	// globally in /etc/profile.d) from leaking into the agent router and causing
-	// the multi-provider team path to activate when Ollama-only is intended.
-	ollamaRouterURL := ""
+	// Initialize AI router with all providers (Claude, OpenAI, Gemini, Grok, Ollama).
+	// Ollama is enabled whenever OLLAMA_BASE_URL is set — in any environment.
+	// In development with Ollama-only mode (OLLAMA_BASE_URL set, no cloud keys), cloud
+	// keys from the OS environment are suppressed so only the local/cloud Ollama model
+	// is used. This prevents ambient shell exports from leaking into the router.
+	ollamaRouterURL := appConfig.OllamaBaseURL
+	ollamaAPIKey := appConfig.OllamaAPIKey
 	claudeKey := appConfig.ClaudeAPIKey
 	openaiKey := appConfig.OpenAIAPIKey
 	geminiKey := appConfig.GeminiAPIKey
@@ -258,6 +257,7 @@ func main() {
 		geminiKey,
 		grokKey,
 		ollamaRouterURL,
+		ollamaAPIKey,
 	)
 
 	// If Ollama Cloud BYOK is enabled, upgrade the Ollama client to cloud mode
@@ -276,9 +276,9 @@ func main() {
 	log.Printf("   - Gemini API: %s", getStatusIcon(geminiKey != ""))
 	log.Printf("   - Grok API:   %s", getStatusIcon(grokKey != ""))
 	if ollamaRouterURL != "" {
-		log.Printf("   - Ollama:     ✅ Dev fallback enabled (%s)", ollamaRouterURL)
+		log.Printf("   - Ollama:     ✅ Enabled (%s, key=%s)", ollamaRouterURL, getStatusIcon(ollamaAPIKey != ""))
 	} else {
-		log.Printf("   - Ollama:     ❌ Disabled globally (BYOK-only in production)")
+		log.Printf("   - Ollama:     ❌ Disabled (set OLLAMA_BASE_URL to enable)")
 	}
 	platformAIProviders := 0
 	if claudeKey != "" {
@@ -1152,8 +1152,8 @@ type AppConfig struct {
 	OpenAIAPIKey  string
 	GeminiAPIKey  string
 	GrokAPIKey    string
-	OllamaBaseURL string // Ollama local server URL (e.g., http://localhost:11434)
-	OllamaAPIKey  string // Ollama Cloud API key for BYOK (e.g., for kimi-k2.6:cloud)
+	OllamaBaseURL string // Ollama server URL; local (http://localhost:11434) or cloud (https://ollama.com/v1)
+	OllamaAPIKey  string // Ollama Pro cloud API key; leave empty for local installs
 
 	// Authentication (fallback for development)
 	JWTSecret string
@@ -1192,8 +1192,8 @@ func loadConfig() *AppConfig {
 		OpenAIAPIKey:  getEnvAny([]string{"OPENAI_API_KEY", "CHATGPT_API_KEY", "GPT_API_KEY", "OPENAI_PLATFORM_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN", "OPENAI_SECRET_KEY"}, ""),
 		GeminiAPIKey:  getEnvAny([]string{"GEMINI_API_KEY", "GOOGLE_AI_API_KEY", "GOOGLE_GEMINI_API_KEY"}, ""),
 		GrokAPIKey:    getEnv("XAI_API_KEY", ""),
-		OllamaBaseURL: getEnv("OLLAMA_BASE_URL", ""), // Empty = disabled, or "http://localhost:11434"
-		OllamaAPIKey:  getEnv("OLLAMA_API_KEY", ""),  // Ollama Cloud API key for BYOK
+		OllamaBaseURL: getEnv("OLLAMA_BASE_URL", ""),
+		OllamaAPIKey:  getEnv("OLLAMA_API_KEY", ""),
 		JWTSecret:     jwtSecret,
 		Port:          getEnv("PORT", "8080"),
 		Environment:   environment,

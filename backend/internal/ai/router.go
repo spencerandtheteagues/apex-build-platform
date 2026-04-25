@@ -88,13 +88,17 @@ func NewAIRouter(claudeKey, openAIKey, geminiKey string, extraKeys ...string) *A
 		clients[ProviderGrok] = NewGrokClient(grokKey)
 	}
 
-	// Ollama URL is the second extra key if provided
+	// Ollama URL is extraKeys[1], API key is extraKeys[2]
 	ollamaURL := ""
+	ollamaAPIKey := ""
 	if len(extraKeys) > 1 {
 		ollamaURL = extraKeys[1]
 	}
+	if len(extraKeys) > 2 {
+		ollamaAPIKey = extraKeys[2]
+	}
 	if ollamaURL != "" {
-		clients[ProviderOllama] = NewOllamaClient(ollamaURL)
+		clients[ProviderOllama] = NewOllamaClient(ollamaURL, ollamaAPIKey)
 	}
 
 	for provider, emulation := range configuredOllamaEmulations() {
