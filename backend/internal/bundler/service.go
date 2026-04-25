@@ -111,12 +111,13 @@ func (s *Service) BundleProject(ctx context.Context, projectID uint, config Bund
 			config.ExternalDeps = append(config.ExternalDeps, dep)
 		}
 		for dep := range files.PackageJSON.DevDependencies {
-			// Only externalize runtime deps, not build tools
-			if dep != "vite" && dep != "@vitejs/plugin-react" &&
-				dep != "tailwindcss" && dep != "postcss" &&
-				dep != "typescript" && dep != "@types/*" {
-				config.ExternalDeps = append(config.ExternalDeps, dep)
+			// Only externalize runtime deps, not build tools or type declarations
+			if dep == "vite" || dep == "@vitejs/plugin-react" ||
+				dep == "tailwindcss" || dep == "postcss" ||
+				dep == "typescript" || strings.HasPrefix(dep, "@types/") {
+				continue
 			}
+			config.ExternalDeps = append(config.ExternalDeps, dep)
 		}
 		log.Printf("[bundler-service] Externalizing %d dependencies for project %d",
 			len(config.ExternalDeps), projectID)

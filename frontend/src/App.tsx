@@ -543,10 +543,6 @@ function App() {
       cancelled = true
       clearTimeout(bootstrapTimeout)
     }
-
-    return () => {
-      cancelled = true
-    }
   }, [isAuthenticated, refreshUser])
 
   useEffect(() => {

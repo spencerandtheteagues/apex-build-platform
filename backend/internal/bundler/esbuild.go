@@ -741,7 +741,7 @@ func GenerateHTML(result *BundleResult, config BundleConfig) string {
 				if i == len(externals)-1 {
 					comma = ""
 				}
-				sb.WriteString(fmt.Sprintf(`      "%s": "%s"%s\n`, dep, cdnURL, comma))
+				sb.WriteString(fmt.Sprintf("      \"%s\": \"%s\"%s\n", dep, cdnURL, comma))
 			}
 			sb.WriteString(`    }
   }
