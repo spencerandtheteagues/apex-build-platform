@@ -740,8 +740,7 @@ function App() {
   }
 
   // Switch between login and register
-  const switchAuthMode = () => {
-    setIsAuthMode(isAuthMode === 'login' ? 'register' : 'login')
+  const resetAuthForm = () => {
     setAuthErrors({})
     setAuthData({
       username: '',
@@ -750,6 +749,17 @@ function App() {
       confirmPassword: '',
       acceptLegalTerms: false,
     })
+  }
+
+  const selectAuthMode = (mode: 'login' | 'register') => {
+    if (isAuthMode === mode) return
+    setIsAuthMode(mode)
+    resetAuthForm()
+  }
+
+  const switchAuthMode = () => {
+    setIsAuthMode(isAuthMode === 'login' ? 'register' : 'login')
+    resetAuthForm()
   }
 
   // Resend cooldown countdown
@@ -1011,8 +1021,8 @@ function App() {
   if (!isAuthenticated) {
     return (
       <>
-        <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
-          {/* Animated cyberpunk background with full effects */}
+        <div className="min-h-screen flex items-center justify-center px-4 py-10 relative overflow-hidden bg-[#02050b]">
+          {/* Animated landing-page background with full effects */}
           <AnimatedBackground variant="full" intensity="high" interactive={true} />
 
           {/* Premium glassmorphism card */}
@@ -1034,23 +1044,50 @@ function App() {
                   <h1 className="auth-title text-3xl font-black tracking-wider">
                     APEX-BUILD
                   </h1>
-                  <p className="auth-tagline text-sm text-red-400/80 mt-1 flex items-center justify-center gap-2">
-                    <Sparkles size={14} className="text-red-500" />
+                  <p className="auth-tagline text-sm text-cyan-200/85 mt-1 flex items-center justify-center gap-2">
+                    <Sparkles size={14} className="text-cyan-300" />
                     Cloud Development Platform
-                    <Sparkles size={14} className="text-red-500" />
+                    <Sparkles size={14} className="text-cyan-300" />
                   </p>
                 </div>
+              </div>
+
+              <div className="mt-6 grid grid-cols-2 gap-2 rounded-xl border border-slate-700/50 bg-black/50 p-1 shadow-inner shadow-black/50">
+                <button
+                  type="button"
+                  onClick={() => selectAuthMode('login')}
+                  className={`rounded-lg px-3 py-2.5 text-sm font-bold tracking-wide transition-all ${
+                    isAuthMode === 'login'
+                      ? 'bg-cyan-300 text-slate-950 shadow-lg shadow-cyan-400/20'
+                      : 'text-slate-400 hover:bg-slate-900/80 hover:text-white'
+                  }`}
+                  aria-pressed={isAuthMode === 'login'}
+                >
+                  Log in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => selectAuthMode('register')}
+                  className={`rounded-lg px-3 py-2.5 text-sm font-bold tracking-wide transition-all ${
+                    isAuthMode === 'register'
+                      ? 'bg-cyan-300 text-slate-950 shadow-lg shadow-cyan-400/20'
+                      : 'text-slate-400 hover:bg-slate-900/80 hover:text-white'
+                  }`}
+                  aria-pressed={isAuthMode === 'register'}
+                >
+                  Create account
+                </button>
               </div>
 
               {/* Welcome text with mode transition */}
               <div className="mt-6 auth-mode-transition">
                 <h2 className="text-xl font-bold text-white mb-2">
-                  {isAuthMode === 'login' ? 'Welcome Back' : 'Join the Future'}
+                  {isAuthMode === 'login' ? 'Welcome Back' : 'Create Your Workspace'}
                 </h2>
-                <p className="text-sm text-gray-400">
+                <p className="text-sm text-slate-400">
                   {isAuthMode === 'login'
-                    ? 'Sign in to continue your development journey'
-                    : 'Create an account to start building tomorrow'}
+                    ? 'Log in to an existing APEX-BUILD account.'
+                    : 'Start a card-backed trial and build with the full platform.'}
                 </p>
               </div>
             </div>
@@ -1069,7 +1106,7 @@ function App() {
                     onChange={(e) => setAuthData(prev => ({ ...prev, username: e.target.value }))}
                     onFocus={(e) => e.target.closest('.auth-input-wrapper')?.classList.add('focused')}
                     onBlur={(e) => e.target.closest('.auth-input-wrapper')?.classList.remove('focused')}
-                    className="w-full bg-black/50 border border-gray-700/50 rounded-xl py-3.5 pl-11 pr-4 text-white placeholder-transparent focus:outline-none focus:border-red-600/60 transition-all duration-300"
+                    className="w-full bg-black/50 border border-slate-700/60 rounded-xl py-3.5 pl-11 pr-4 text-white placeholder-transparent focus:outline-none focus:border-cyan-400/70 transition-all duration-300"
                     placeholder="Username"
                     required
                   />
@@ -1095,7 +1132,7 @@ function App() {
                       onChange={(e) => setAuthData(prev => ({ ...prev, email: e.target.value }))}
                       onFocus={(e) => e.target.closest('.auth-input-wrapper')?.classList.add('focused')}
                       onBlur={(e) => e.target.closest('.auth-input-wrapper')?.classList.remove('focused')}
-                      className="w-full bg-black/50 border border-gray-700/50 rounded-xl py-3.5 pl-11 pr-4 text-white placeholder-transparent focus:outline-none focus:border-red-600/60 transition-all duration-300"
+                      className="w-full bg-black/50 border border-slate-700/60 rounded-xl py-3.5 pl-11 pr-4 text-white placeholder-transparent focus:outline-none focus:border-cyan-400/70 transition-all duration-300"
                       placeholder="Email"
                       required
                     />
@@ -1121,7 +1158,7 @@ function App() {
                     onChange={(e) => setAuthData(prev => ({ ...prev, password: e.target.value }))}
                     onFocus={(e) => e.target.closest('.auth-input-wrapper')?.classList.add('focused')}
                     onBlur={(e) => e.target.closest('.auth-input-wrapper')?.classList.remove('focused')}
-                    className="w-full bg-black/50 border border-gray-700/50 rounded-xl py-3.5 pl-11 pr-12 text-white placeholder-transparent focus:outline-none focus:border-red-600/60 transition-all duration-300"
+                    className="w-full bg-black/50 border border-slate-700/60 rounded-xl py-3.5 pl-11 pr-12 text-white placeholder-transparent focus:outline-none focus:border-cyan-400/70 transition-all duration-300"
                     placeholder="Password"
                     required
                   />
@@ -1131,7 +1168,7 @@ function App() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-red-400 transition-colors duration-200 p-1"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-cyan-300 transition-colors duration-200 p-1"
                   >
                     {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
@@ -1154,7 +1191,7 @@ function App() {
                       onChange={(e) => setAuthData(prev => ({ ...prev, confirmPassword: e.target.value }))}
                       onFocus={(e) => e.target.closest('.auth-input-wrapper')?.classList.add('focused')}
                       onBlur={(e) => e.target.closest('.auth-input-wrapper')?.classList.remove('focused')}
-                      className="w-full bg-black/50 border border-gray-700/50 rounded-xl py-3.5 pl-11 pr-4 text-white placeholder-transparent focus:outline-none focus:border-red-600/60 transition-all duration-300"
+                      className="w-full bg-black/50 border border-slate-700/60 rounded-xl py-3.5 pl-11 pr-4 text-white placeholder-transparent focus:outline-none focus:border-cyan-400/70 transition-all duration-300"
                       placeholder="Confirm Password"
                       required
                     />
@@ -1169,13 +1206,13 @@ function App() {
               )}
 
               {isAuthMode === 'register' && (
-                <div className="rounded-xl border border-red-900/40 bg-red-950/20 p-4">
+                <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.06] p-4 shadow-inner shadow-cyan-950/20">
                   <label className="flex items-start gap-3 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={authData.acceptLegalTerms}
                       onChange={(e) => setAuthData(prev => ({ ...prev, acceptLegalTerms: e.target.checked }))}
-                      className="mt-1 h-5 w-5 flex-shrink-0 rounded border border-red-500/40 bg-black text-red-500 focus:ring-red-500 cursor-pointer relative z-10"
+                      className="mt-1 h-5 w-5 flex-shrink-0 rounded border border-cyan-300/40 bg-black text-cyan-300 focus:ring-cyan-300 cursor-pointer relative z-10"
                     />
                     <span className="text-sm leading-6 text-gray-300">
                       I agree to the Terms of Service, Privacy Policy, Acceptable Use Policy, Billing and Refund Policy, and AI and Content Policy version {LEGAL_POLICY_VERSION}.
@@ -1234,7 +1271,7 @@ function App() {
                   <button
                     type="button"
                     onClick={switchAuthMode}
-                    className="auth-link text-red-400 font-medium transition-colors duration-200"
+                    className="auth-link text-cyan-300 font-medium transition-colors duration-200"
                   >
                     {isAuthMode === 'login' ? 'Sign up' : 'Sign in'}
                   </button>
@@ -1250,11 +1287,11 @@ function App() {
           {/* Premium Footer */}
           <div className="auth-footer absolute bottom-6 left-1/2 transform -translate-x-1/2 text-center">
             <p className="text-xs text-gray-600 flex items-center gap-2">
-              <span className="inline-block w-8 h-px bg-gradient-to-r from-transparent via-red-900/50 to-transparent" />
+              <span className="inline-block w-8 h-px bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent" />
               <span className="text-gray-500">
-                <span className="text-red-500/70">2026</span> APEX-BUILD - The Future of Development
+                <span className="text-cyan-300/80">2026</span> APEX-BUILD - The Future of Development
               </span>
-              <span className="inline-block w-8 h-px bg-gradient-to-r from-transparent via-red-900/50 to-transparent" />
+              <span className="inline-block w-8 h-px bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent" />
             </p>
           </div>
         </div>

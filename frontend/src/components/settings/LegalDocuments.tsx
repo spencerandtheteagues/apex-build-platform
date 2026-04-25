@@ -23,7 +23,7 @@ export const LegalDocumentLinks: React.FC<{
           key={document.id}
           type="button"
           onClick={() => onSelect(document.id)}
-          className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-200 transition hover:border-red-400 hover:bg-red-500/20"
+          className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1 text-xs font-semibold text-cyan-100 transition hover:border-cyan-200/60 hover:bg-cyan-300/15"
         >
           {document.title}
         </button>
@@ -50,7 +50,7 @@ export const LegalDocuments: React.FC<LegalDocumentsProps> = ({
       <div className={`flex ${compact ? 'flex-col gap-4' : 'flex-col gap-6'}`}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-red-300/80">Legal</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-300/80">Legal</p>
             <h3 className={`${compact ? 'mt-1 text-xl' : 'mt-2 text-2xl'} font-black text-white`}>
               Terms, privacy, and platform policies
             </h3>
@@ -58,7 +58,7 @@ export const LegalDocuments: React.FC<LegalDocumentsProps> = ({
               Effective {LEGAL_POLICY_VERSION}. These documents govern access to APEX-BUILD and are incorporated into account registration and continued platform use.
             </p>
           </div>
-          <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-100">
+          <div className="rounded-xl border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs text-cyan-100">
             Version {LEGAL_POLICY_VERSION}
           </div>
         </div>
@@ -75,12 +75,12 @@ export const LegalDocuments: React.FC<LegalDocumentsProps> = ({
                   onClick={() => setSelectedDocumentId(document.id)}
                   className={`w-full rounded-xl border p-4 text-left transition ${
                     isSelected
-                      ? 'border-red-500/50 bg-red-500/10 shadow-[0_0_0_1px_rgba(239,68,68,0.2)]'
-                      : 'border-gray-800 bg-black/40 hover:border-red-500/30 hover:bg-red-500/5'
+                      ? 'border-cyan-300/50 bg-cyan-300/10 shadow-[0_0_0_1px_rgba(56,189,248,0.2)]'
+                      : 'border-gray-800 bg-black/40 hover:border-cyan-300/30 hover:bg-cyan-300/5'
                   }`}
                 >
                   <div className="flex items-start gap-3">
-                    <Icon className={`mt-0.5 h-5 w-5 ${isSelected ? 'text-red-300' : 'text-gray-500'}`} />
+                    <Icon className={`mt-0.5 h-5 w-5 ${isSelected ? 'text-cyan-300' : 'text-gray-500'}`} />
                     <div>
                       <div className={`font-semibold ${isSelected ? 'text-white' : 'text-gray-200'}`}>{document.title}</div>
                       <p className="mt-1 text-xs leading-5 text-gray-400">{document.summary}</p>
@@ -93,8 +93,8 @@ export const LegalDocuments: React.FC<LegalDocumentsProps> = ({
 
           <div className="rounded-2xl border border-gray-800 bg-black/50 p-5">
             <div className="flex items-start gap-3">
-              <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-2">
-                <SelectedIcon className="h-5 w-5 text-red-300" />
+              <div className="rounded-xl border border-cyan-300/20 bg-cyan-300/10 p-2">
+                <SelectedIcon className="h-5 w-5 text-cyan-300" />
               </div>
               <div>
                 <h4 className="text-xl font-bold text-white">{selectedDocument.title}</h4>
@@ -106,8 +106,8 @@ export const LegalDocuments: React.FC<LegalDocumentsProps> = ({
               {selectedDocument.sections.map((section) => (
                 <section key={section.heading} className="space-y-3">
                   <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-red-300" />
-                    <h5 className="text-sm font-semibold uppercase tracking-[0.18em] text-red-200">{section.heading}</h5>
+                    <FileText className="h-4 w-4 text-cyan-300" />
+                    <h5 className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-100">{section.heading}</h5>
                   </div>
                   <div className="space-y-3">
                     {section.paragraphs.map((paragraph) => (
