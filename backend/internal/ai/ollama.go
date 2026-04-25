@@ -362,7 +362,8 @@ func (o *OllamaClient) GetProvider() AIProvider {
 // Health checks if Ollama server is accessible
 func (o *OllamaClient) Health(ctx context.Context) error {
 	// For Ollama Cloud (OpenAI-compatible), try OpenAI-compatible endpoints first.
-	endpoints := []string{"/v1/models", "/health", "/api/tags"}
+	// baseURL already includes /v1 suffix, so use relative paths.
+	endpoints := []string{"/models", "/health", "/tags"}
 
 	for _, path := range endpoints {
 		url := o.baseURL + path
