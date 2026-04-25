@@ -294,6 +294,17 @@ func (s *ContainerPreviewServer) checkDockerAvailable() bool {
 	if serverVersion == "" {
 		serverVersion = "unknown"
 	}
+	// Sanity-check: the output might be an error message even when err == nil
+	// (e.g. docker CLI prints to stdout and exits 0 on some platforms).
+	lowerVersion := strings.ToLower(serverVersion)
+	if strings.Contains(lowerVersion, "cannot connect") ||
+		strings.Contains(lowerVersion, "docker daemon") ||
+		strings.Contains(lowerVersion, "permission denied") ||
+		strings.Contains(lowerVersion, "no such host") ||
+		strings.Contains(lowerVersion, "connection refused") {
+		s.dockerDiagnostic = serverVersion
+		return false
+	}
 	s.dockerDiagnostic = fmt.Sprintf("docker daemon reachable (server version %s)", serverVersion)
 	return true
 }
