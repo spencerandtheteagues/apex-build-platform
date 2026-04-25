@@ -92,7 +92,7 @@ func (am *AgentManager) runPreviewVerificationGate(
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(am.ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(am.ctx, 120*time.Second)
 	defer cancel()
 
 	pLog(build.ID).PreviewGateStart(len(vFiles), isFS)
