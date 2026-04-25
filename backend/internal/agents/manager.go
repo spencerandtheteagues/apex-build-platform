@@ -21239,6 +21239,14 @@ IMPORT PATH RULES — CRITICAL FOR COMPILATION:
 - Add the "@" alias to vite.config.ts resolve.alias map pointing to path.resolve(__dirname, './src')
 - NEVER include file extensions in import paths for TypeScript files: write './App' not './App.tsx'
 
+SHADCN COMPONENT RULES — CRITICAL. Violations cause build-breaking TypeScript errors:
+- shadcn/ui components use NAMED imports ONLY. Example: import { Dialog, DialogContent, DialogHeader, DialogOverlay } from '@/components/ui/dialog'
+- NEVER use dot-notation sub-components: Dialog.Overlay, Dialog.Content, Dialog.Title DO NOT EXIST in shadcn
+- Dot-notation is a Radix UI pattern, NOT a shadcn pattern. shadcn exports individual named components.
+- Same rule for ALL shadcn components: Sheet, Alert, AlertDialog, Card, DropdownMenu, Select, Popover, Tooltip, HoverCard, NavigationMenu, ContextMenu, Menubar, Accordion, Collapsible, Command, Drawer, Tabs
+- Every component referenced in JSX must be in the named import list
+- If you need DialogOverlay, it must be: import { DialogOverlay } from '@/components/ui/dialog' and used as <DialogOverlay> (NOT <Dialog.Overlay>)
+
 PRE-OUTPUT SELF-CHECK (run mentally before returning your files):
 □ Does every local import correspond to a file I actually generated?
 □ Does src/App.tsx have "export default"?
