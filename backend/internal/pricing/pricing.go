@@ -85,9 +85,10 @@ func newEngineFromEnv() *Engine {
 			"gpt4": {
 				Default: ModelPricing{InputPer1M: 2.00, OutputPer1M: 8.00},
 				Models: map[string]ModelPricing{
-					"gpt-5.4":       {InputPer1M: 2.50, OutputPer1M: 15.00},
+					"gpt-5.4-pro":   {InputPer1M: 2.50, OutputPer1M: 15.00},
 					"gpt-4.1":       {InputPer1M: 2.00, OutputPer1M: 8.00},
 					"gpt-4o-mini":   {InputPer1M: 0.15, OutputPer1M: 0.60},
+					"gpt-5.4":       {InputPer1M: 2.50, OutputPer1M: 15.00}, // legacy alias
 					"gpt-5.2-codex": {InputPer1M: 1.75, OutputPer1M: 14.00}, // legacy
 					"gpt-5":         {InputPer1M: 1.25, OutputPer1M: 10.00}, // legacy
 					"gpt-4o":        {InputPer1M: 2.50, OutputPer1M: 10.00}, // legacy
@@ -117,9 +118,12 @@ func newEngineFromEnv() *Engine {
 			"ollama": {
 				Default: ModelPricing{InputPer1M: 0.50, OutputPer1M: 2.00},
 				Models: map[string]ModelPricing{
-					"kimi-k2.6":  {InputPer1M: 0.50, OutputPer1M: 2.00},
-					"kimi-k2.6:cloud": {InputPer1M: 0.50, OutputPer1M: 2.00},
-					"glm-5.1":    {InputPer1M: 0.30, OutputPer1M: 1.00},
+					"kimi-k2.6":          {InputPer1M: 0.50, OutputPer1M: 2.00},
+					"kimi-k2.6:cloud":    {InputPer1M: 0.50, OutputPer1M: 2.00},
+					"glm-5.1":            {InputPer1M: 0.30, OutputPer1M: 1.00},
+					"qwen-3.6-27b":       {InputPer1M: 0.20, OutputPer1M: 0.80},
+					"devstral-small-24b": {InputPer1M: 0.20, OutputPer1M: 0.80},
+					"deepseek-v4-flash":  {InputPer1M: 0.17, OutputPer1M: 0.70},
 				},
 			},
 		},
@@ -224,7 +228,7 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 		return "claude-haiku-4-5-20251001"
 	case "gpt4":
 		if mode == ModeMax {
-			return "gpt-5.4"
+			return "gpt-5.4-pro"
 		}
 		if mode == ModeBalanced {
 			return "gpt-4.1"
@@ -248,10 +252,10 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 		return "grok-3-mini"
 	case "ollama":
 		if mode == ModeMax {
-			return "kimi-k2.6:cloud"
+			return "kimi-k2.6"
 		}
 		if mode == ModeBalanced {
-			return "kimi-k2.6:cloud"
+			return "kimi-k2.6"
 		}
 		return "glm-5.1"
 	default:

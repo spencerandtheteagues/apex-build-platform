@@ -356,7 +356,7 @@ func (ebs *EnterpriseBillingService) getFreePlanFeatures() []PlanFeature {
 		{ID: "collaborators", Name: "Collaborators", Description: "Team members", Enabled: false, Value: 0},
 		{ID: "custom_domains", Name: "Custom Domains", Description: "Custom domain support", Enabled: false},
 		{ID: "priority_support", Name: "Priority Support", Description: "Priority customer support", Enabled: false},
-		{ID: "advanced_ai", Name: "Advanced AI Models", Description: "Access to max-tier models like ChatGPT 5.4 and Gemini 3.1 Pro", Enabled: false},
+		{ID: "advanced_ai", Name: "Advanced AI Models", Description: "Access to max-tier models like ChatGPT 5.4 Pro and Gemini 3.1 Pro", Enabled: false},
 		{ID: "version_control", Name: "Git Integration", Description: "Git repository integration", Enabled: true},
 	}
 }
@@ -369,7 +369,7 @@ func (ebs *EnterpriseBillingService) getProPlanFeatures() []PlanFeature {
 		{ID: "collaborators", Name: "Collaborators", Description: "Team members", Enabled: true, Value: 3},
 		{ID: "custom_domains", Name: "Custom Domains", Description: "Custom domain support", Enabled: true, Value: 1},
 		{ID: "priority_support", Name: "Priority Support", Description: "Priority customer support", Enabled: true},
-		{ID: "advanced_ai", Name: "Advanced AI Models", Description: "Access to max-tier models like ChatGPT 5.4 and Gemini 3.1 Pro", Enabled: true},
+		{ID: "advanced_ai", Name: "Advanced AI Models", Description: "Access to max-tier models like ChatGPT 5.4 Pro and Gemini 3.1 Pro", Enabled: true},
 		{ID: "version_control", Name: "Git Integration", Description: "Git repository integration", Enabled: true},
 		{ID: "real_time_collab", Name: "Real-time Collaboration", Description: "Live collaborative editing", Enabled: true},
 	}

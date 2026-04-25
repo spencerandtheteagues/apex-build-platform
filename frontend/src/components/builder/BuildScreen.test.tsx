@@ -25,8 +25,8 @@ const baseProps = () => ({
     promptPackActivationEvents: undefined as any,
     powerMode: 'balanced' as const,
   },
-  providerPanels: [],
-  aiThoughts: [],
+  providerPanels: [] as any[],
+  aiThoughts: [] as any[],
   chatMessages: [],
   generatedFiles: [],
   proposedEdits: [],
@@ -60,12 +60,14 @@ const baseProps = () => ({
     gpt4: 'auto',
     gemini: 'auto',
     grok: 'auto',
+    ollama: 'auto',
   },
   providerModelOptions: {
     claude: [{ id: 'claude-opus-4-6', name: 'Claude Opus 4.6' }],
-    gpt4: [{ id: 'gpt-5.4', name: 'ChatGPT 5.4' }],
+    gpt4: [{ id: 'gpt-5.4-pro', name: 'ChatGPT 5.4 Pro' }],
     gemini: [{ id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' }],
     grok: [{ id: 'grok-4.20-0309-reasoning', name: 'Grok 4.20' }],
+    ollama: [{ id: 'kimi-k2.6', name: 'Kimi K2.6' }],
   },
   providerModelPendingProvider: null,
   agentMessageDrafts: {},
@@ -122,6 +124,34 @@ describe('BuildScreen header prompt actions', () => {
     })
 
     expect(await screen.findByText('Copied')).toBeTruthy()
+  })
+
+  it('shows provider, model, agent, event, retry, and file metadata in the live stream', () => {
+    const props = baseProps()
+    props.aiThoughts = [
+      {
+        id: 'thought-1',
+        agentId: 'agent-kimi',
+        agentRole: 'orchestrator',
+        provider: 'ollama',
+        model: 'kimi-k2.6',
+        type: 'error',
+        content: 'Build verification failed, retrying with error context...',
+        timestamp: new Date('2026-04-25T12:00:00Z'),
+        eventType: 'agent:verification_failed',
+        taskType: 'code_generation',
+        files: ['src/App.tsx', 'server/api.ts'],
+        filesCount: 2,
+        retryCount: 2,
+        maxRetries: 3,
+      },
+    ]
+
+    render(<BuildScreen {...props} />)
+
+    expect(screen.getByText('Kimi')).toBeTruthy()
+    expect(screen.getByText(/Orchestrator \/ kimi-k2\.6 \/ verification retry \/ Code Generation \/ 2 files \/ try 2\/3/i)).toBeTruthy()
+    expect(screen.getByText(/src\/App\.tsx, server\/api\.ts/i)).toBeTruthy()
   })
 
   it('surfaces review-required patch bundles in the issues overlay', async () => {

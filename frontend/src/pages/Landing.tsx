@@ -120,20 +120,20 @@ const AGENTS: Array<{
   icon: IconType
 }> = [
   { number: '01', name: 'Kimi K2.6 Conductor', model: 'Default: Kimi K2.6', body: 'Routes work, tracks dependencies, protects context, and keeps spend inside the build contract.', icon: Workflow },
-  { number: '02', name: 'Lead Architect', model: 'Default: Claude Code 4.7', body: 'Owns architecture, data models, API contracts, security boundaries, and system shape.', icon: Layers3 },
+  { number: '02', name: 'Lead Architect', model: 'Default: Claude Opus 4.6', body: 'Owns architecture, data models, API contracts, security boundaries, and system shape.', icon: Layers3 },
   { number: '03', name: 'Planner', model: 'Default: Gemini 3.1 Pro', body: 'Turns the prompt into work orders, checkpoints, acceptance criteria, and cross-agent memory.', icon: Brain },
-  { number: '04', name: 'Frontend', model: 'Default: ChatGPT Codex 5.5', body: 'Builds React surfaces, layouts, state, accessibility, visual polish, and product flows.', icon: Code2 },
-  { number: '05', name: 'Backend', model: 'Default: ChatGPT Codex 5.5', body: 'Builds APIs, middleware, auth, billing, integrations, background jobs, and services.', icon: TerminalSquare },
+  { number: '04', name: 'Frontend', model: 'Default: ChatGPT 5.4 Pro', body: 'Builds React surfaces, layouts, state, accessibility, visual polish, and product flows.', icon: Code2 },
+  { number: '05', name: 'Backend', model: 'Default: ChatGPT 5.4 Pro', body: 'Builds APIs, middleware, auth, billing, integrations, background jobs, and services.', icon: TerminalSquare },
   { number: '06', name: 'Database', model: 'Default: Gemini 3.1 Pro', body: 'Designs schema, migrations, seed data, query boundaries, and persistence contracts.', icon: Database },
   { number: '07', name: 'Logic and Debug', model: 'Default: Grok 4.20', body: 'Handles business rules, failure repair, integration conflicts, and complex edge cases.', icon: Cpu },
-  { number: '08', name: 'Testing', model: 'Default: Claude Code 4.7', body: 'Runs unit, integration, E2E, accessibility, smoke, and deploy-readiness checks.', icon: ShieldCheck },
-  { number: '09', name: 'Reviewer and Docs', model: 'Default: Claude Code 4.7 + Gemini 3.1 Pro', body: 'Audits security, code quality, handoff docs, READMEs, runbooks, and launch evidence.', icon: FileCode2 },
+  { number: '08', name: 'Testing', model: 'Default: Claude Opus 4.6', body: 'Runs unit, integration, E2E, accessibility, smoke, and deploy-readiness checks.', icon: ShieldCheck },
+  { number: '09', name: 'Reviewer and Docs', model: 'Default: Claude Opus 4.6 + Gemini 3.1 Pro', body: 'Audits security, code quality, handoff docs, READMEs, runbooks, and launch evidence.', icon: FileCode2 },
 ]
 
 const MODEL_ASSIGNMENTS = [
   ['Conductor', 'Kimi K2.6'],
-  ['Architecture + review', 'Claude Code 4.7'],
-  ['Frontend + backend', 'ChatGPT Codex 5.5'],
+  ['Architecture + review', 'Claude Opus 4.6'],
+  ['Frontend + backend', 'ChatGPT 5.4 Pro'],
   ['Planning + database', 'Gemini 3.1 Pro'],
   ['Logic + debug', 'Grok 4.20'],
 ]

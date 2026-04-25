@@ -329,7 +329,7 @@ const isActiveBuildStatus = (status?: string) =>
   status === 'reviewing' ||
   status === 'awaiting_review'
 
-type SupportedBuildProvider = 'claude' | 'gpt4' | 'gemini' | 'grok'
+type SupportedBuildProvider = 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama'
 
 type ProviderModelTier = {
   id: string
@@ -354,7 +354,7 @@ type ProviderPanelState = {
   multipleLiveModels: boolean
 }
 
-const MODEL_PANEL_ORDER: SupportedBuildProvider[] = ['claude', 'gpt4', 'gemini', 'grok']
+const MODEL_PANEL_ORDER: SupportedBuildProvider[] = ['claude', 'gpt4', 'gemini', 'grok', 'ollama']
 const MAX_AI_THOUGHTS = 240
 const MAX_PROVIDER_THOUGHTS = 36
 
@@ -364,18 +364,21 @@ const POWER_MODE_MODEL_CATALOG: Record<'fast' | 'balanced' | 'max', Record<Suppo
     gpt4: { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
     gemini: { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite' },
     grok: { id: 'grok-3-mini', name: 'Grok 3 Mini' },
+    ollama: { id: 'glm-5.1', name: 'GLM-5.1' },
   },
   balanced: {
     claude: { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
     gpt4: { id: 'gpt-4.1', name: 'GPT-4.1' },
     gemini: { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
     grok: { id: 'grok-3', name: 'Grok 3' },
+    ollama: { id: 'kimi-k2.6', name: 'Kimi K2.6' },
   },
   max: {
     claude: { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
-    gpt4: { id: 'gpt-5.4', name: 'ChatGPT 5.4' },
+    gpt4: { id: 'gpt-5.4-pro', name: 'ChatGPT 5.4 Pro' },
     gemini: { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
     grok: { id: 'grok-4.20-0309-reasoning', name: 'Grok 4.20' },
+    ollama: { id: 'kimi-k2.6', name: 'Kimi K2.6' },
   },
 }
 
@@ -419,11 +422,20 @@ const PROVIDER_UI: Record<SupportedBuildProvider, {
     titleClass: 'text-fuchsia-200',
     dotClass: 'bg-fuchsia-400',
   },
+  ollama: {
+    label: 'Local',
+    badgeClass: 'border-cyan-500/60 text-cyan-200 bg-cyan-500/10',
+    cardClass: 'border-cyan-500/35 bg-gradient-to-br from-cyan-950/45 via-black to-slate-950/35',
+    activeClass: 'shadow-[0_0_28px_rgba(34,211,238,0.18)]',
+    titleClass: 'text-cyan-100',
+    dotClass: 'bg-cyan-300',
+  },
 }
 
 const normalizeProviderKey = (provider?: string): SupportedBuildProvider | null => {
   const value = String(provider || '').toLowerCase()
   if (value === 'gpt' || value === 'gpt4' || value === 'openai') return 'gpt4'
+  if (value === 'ollama' || value === 'local' || value === 'kimi' || value === 'kimi-k2.6') return 'ollama'
   if (value === 'claude' || value === 'gemini' || value === 'grok') return value
   return null
 }
@@ -438,6 +450,7 @@ const DEFAULT_PROVIDER_MODEL_SELECTIONS: Record<SupportedBuildProvider, string> 
   gpt4: 'auto',
   gemini: 'auto',
   grok: 'auto',
+  ollama: 'auto',
 }
 
 const canonicalizeModelId = (model?: string) => {
@@ -445,7 +458,8 @@ const canonicalizeModelId = (model?: string) => {
   if (!value) return ''
   if (value.toLowerCase() === 'auto') return 'auto'
 
-  if (value.startsWith('gpt-5.4')) return 'gpt-5.4'
+  if (value.startsWith('gpt-5.4-pro')) return 'gpt-5.4-pro'
+  if (value.startsWith('gpt-5.4')) return value
   if (value.startsWith('gpt-4.1')) return 'gpt-4.1'
   if (value.startsWith('gpt-4o-mini')) return 'gpt-4o-mini'
   if (value.startsWith('gpt-4o')) return 'gpt-4o'
@@ -464,6 +478,12 @@ const canonicalizeModelId = (model?: string) => {
   if (value.startsWith('grok-3-mini')) return 'grok-3-mini'
   if (value.startsWith('grok-3')) return 'grok-3'
 
+  if (value.startsWith('kimi-k2.6') || value.startsWith('kimi-k2')) return 'kimi-k2.6'
+  if (value.startsWith('glm-5.1')) return 'glm-5.1'
+  if (value.startsWith('qwen-3.6-27b')) return 'qwen-3.6-27b'
+  if (value.startsWith('devstral-small-24b') || value.startsWith('devstral-24b')) return 'devstral-small-24b'
+  if (value.startsWith('deepseek-v4-flash')) return 'deepseek-v4-flash'
+
   return value
 }
 
@@ -480,11 +500,22 @@ const providerForModelId = (model?: string): SupportedBuildProvider | null => {
   ) return 'gpt4'
   if (canonicalModel.startsWith('gemini-')) return 'gemini'
   if (canonicalModel.startsWith('grok-')) return 'grok'
+  if (
+    canonicalModel.startsWith('kimi-') ||
+    canonicalModel.startsWith('glm-') ||
+    canonicalModel.startsWith('qwen-') ||
+    canonicalModel.startsWith('devstral') ||
+    canonicalModel.startsWith('deepseek') ||
+    canonicalModel.startsWith('llama') ||
+    canonicalModel.startsWith('mistral')
+  ) return 'ollama'
   return null
 }
 
 const modelBelongsToProvider = (provider: SupportedBuildProvider, model?: string) =>
-  providerForModelId(model) === provider
+  provider === 'ollama'
+    ? Boolean(canonicalizeModelId(model)) && canonicalizeModelId(model) !== 'auto'
+    : providerForModelId(model) === provider
 
 const getModelDisplayName = (model?: string, fallbackMode: 'fast' | 'balanced' | 'max' = 'fast') => {
   const canonicalModel = canonicalizeModelId(model)
@@ -556,6 +587,8 @@ const humanizeIdentifier = (value?: string) => {
 
 const getThoughtEventLabel = (thought: AIThought) => {
   switch (thought.eventType) {
+    case 'agent:spawned':
+      return 'Agent Joined'
     case 'agent:working':
       return 'Task Started'
     case 'agent:thinking':
@@ -564,6 +597,10 @@ const getThoughtEventLabel = (thought: AIThought) => {
       return 'Generating'
     case 'agent:retrying':
       return 'Retrying'
+    case 'agent:verification_failed':
+      return 'Verification Retry'
+    case 'agent:coordination_failed':
+      return 'Coordination Retry'
     case 'agent:provider_switched':
       return 'Provider Switch'
     case 'agent:message':
@@ -1814,6 +1851,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     gpt4: null,
     gemini: null,
     grok: null,
+    ollama: null,
   })
   const previewPreparedRef = useRef(false)
   const [showBuyCredits, setShowBuyCredits] = useState(false)
@@ -3363,6 +3401,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           }
           return { ...prev, agents: [...prev.agents, newAgent] }
         })
+        addAiThought(
+          message.agent_id,
+          data.role,
+          data.provider,
+          data.model,
+          'action',
+          `${formatRole(data.role)} agent joined with ${humanizeIdentifier(data.provider) || 'configured provider'}${data.model ? ` / ${getModelDisplayName(data.model, activePowerMode) || data.model}` : ''}`,
+          { eventType: 'agent:spawned' }
+        )
         break
 
       case 'agent:working':
@@ -3890,6 +3937,54 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         }
         break
 
+      case 'agent:verification_failed':
+      case 'agent:coordination_failed': {
+        const knownAgent = buildStateRef.current?.agents.find(a => a.id === message.agent_id)
+        const errors = Array.isArray(data.errors)
+          ? data.errors.map((entry: unknown) => String(entry)).filter(Boolean)
+          : []
+        const isVerificationFailure = type === 'agent:verification_failed'
+        const content = [
+          data.message || (isVerificationFailure
+            ? 'Build verification failed; retrying with error context.'
+            : 'Coordination contract failed; retrying with work-order context.'),
+          errors.length > 0 ? errors.slice(0, 3).join('; ') : '',
+        ].filter(Boolean).join(' ')
+        setBuildState(prev => {
+          if (!prev) return null
+          return {
+            ...prev,
+            agents: prev.agents.map(a =>
+              a.id === message.agent_id
+                ? {
+                  ...a,
+                  status: 'working' as Agent['status'],
+                  provider: data.provider ?? a.provider,
+                  model: data.model ?? a.model,
+                }
+                : a
+            ),
+          }
+        })
+        addSystemMessage(`${knownAgent?.role || data.agent_role || 'Agent'} ${isVerificationFailure ? 'verification' : 'coordination'} retry: ${errors[0] || data.message || 'repairing failed output'}`)
+        addAiThought(
+          message.agent_id,
+          data.agent_role || knownAgent?.role || 'agent',
+          data.provider || knownAgent?.provider || '',
+          data.model || knownAgent?.model,
+          'error',
+          content,
+          {
+            eventType: type,
+            taskId: data.task_id,
+            taskType: data.task_type,
+            retryCount: Number.isFinite(Number(data.retry_count ?? data.attempt)) ? Number(data.retry_count ?? data.attempt) : undefined,
+            maxRetries: Number.isFinite(Number(data.max_retries)) ? Number(data.max_retries) : undefined,
+          }
+        )
+        break
+      }
+
       case 'code:generated':
         setBuildState(prev => {
           if (!prev) return null
@@ -4211,7 +4306,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     content: string,
     metadata: Partial<Omit<AIThought, 'id' | 'agentId' | 'agentRole' | 'provider' | 'model' | 'type' | 'content' | 'timestamp'>> = {}
   ) => {
-    const knownAgent = buildState?.agents.find(a => a.id === agentId)
+    const knownAgent = buildStateRef.current?.agents.find(a => a.id === agentId)
     const thought: AIThought = {
       id: Date.now().toString() + Math.random(),
       agentId,

@@ -1,11 +1,10 @@
-// Provider Status Bar — 5 color-coded AI provider boxes
-// Shows ChatGPT, Gemini, Grok, Claude, and Local/Ollama (BYOK only)
+// Provider Status Bar - live model control for every build provider.
 
 import React from 'react'
 import { cn } from '@/lib/utils'
 
 type ProviderStatus = 'idle' | 'working' | 'thinking' | 'completed' | 'error' | 'unavailable'
-type SupportedProvider = 'claude' | 'gpt4' | 'gemini' | 'grok'
+type SupportedProvider = 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama'
 
 interface PanelData {
   provider: SupportedProvider
@@ -25,8 +24,7 @@ interface ProviderStatusBarProps {
   onModelSelect?: (provider: SupportedProvider, model: string) => void
 }
 
-// Display order per user request: ChatGPT, Gemini, Grok, Claude, Local
-const DISPLAY_ORDER: SupportedProvider[] = ['gpt4', 'gemini', 'grok', 'claude']
+const DISPLAY_ORDER: SupportedProvider[] = ['gpt4', 'gemini', 'grok', 'claude', 'ollama']
 
 const PROVIDER_CONFIG: Record<SupportedProvider, {
   label: string
@@ -88,6 +86,18 @@ const PROVIDER_CONFIG: Record<SupportedProvider, {
     dotThinking: 'bg-yellow-400',
     badgeActive: 'bg-orange-500/20 border-orange-500/40 text-orange-300',
   },
+  ollama: {
+    label: 'Kimi / Local',
+    tagline: 'Ollama BYOK',
+    borderActive: 'border-cyan-500/70',
+    borderIdle: 'border-cyan-500/15',
+    bgActive: 'bg-gradient-to-br from-cyan-950/60 via-black to-slate-950/40',
+    textActive: 'text-cyan-200',
+    glowActive: 'shadow-[0_0_24px_rgba(34,211,238,0.2)]',
+    dotWorking: 'bg-cyan-300',
+    dotThinking: 'bg-yellow-400',
+    badgeActive: 'bg-cyan-500/20 border-cyan-500/40 text-cyan-200',
+  },
 }
 
 export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
@@ -105,6 +115,7 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
 
   const getStatusLabel = (panel: PanelData | undefined, provider: SupportedProvider): string => {
     const status = panel?.status || 'idle'
+    if (provider === 'ollama' && !hasBYOK) return 'BYOK ONLY'
     if (status === 'thinking') return 'THINKING'
     if (status === 'working') return 'WORKING'
     if (status === 'completed') return 'DONE'
@@ -122,15 +133,18 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
         const isActive = status === 'working' || status === 'thinking'
         const isCompleted = status === 'completed'
         const isError = status === 'error'
-        const isUnavailable = status === 'unavailable'
+        const isLocalProvider = provider === 'ollama'
+        const localDisabled = isLocalProvider && !hasBYOK
+        const isUnavailable = status === 'unavailable' || localDisabled
 
         const dotClass = cn(
           'w-2 h-2 rounded-full shrink-0',
           status === 'thinking' ? `${cfg.dotThinking} animate-pulse` :
-          status === 'working' ? `${cfg.dotWorking} animate-pulse` :
-          isCompleted ? 'bg-green-500' :
-          isError ? 'bg-red-500 animate-pulse' :
-          'bg-gray-800'
+            status === 'working' ? `${cfg.dotWorking} animate-pulse` :
+              isCompleted ? 'bg-green-500' :
+                isError ? 'bg-red-500 animate-pulse' :
+                  localDisabled ? 'bg-gray-900' :
+                    'bg-gray-800'
         )
 
         const statusLabel = getStatusLabel(panel, provider)
@@ -142,20 +156,19 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
           <div
             key={provider}
             className={cn(
-              'flex-1 min-w-[90px] border-r last:border-r-0 flex flex-col justify-between gap-1 px-2 sm:px-3 py-2 sm:py-2.5 transition-all duration-500',
+              'flex-1 min-w-[104px] border-r last:border-r-0 flex flex-col justify-between gap-1 px-2 sm:px-3 py-2 sm:py-2.5 transition-all duration-500',
               isActive
                 ? `${cfg.borderActive} ${cfg.bgActive} ${cfg.glowActive}`
                 : `${cfg.borderIdle} bg-black/30`,
-              isUnavailable && 'opacity-25',
-              isError && 'border-red-500/30 bg-red-950/15',
+              isUnavailable && 'opacity-35 grayscale',
+              isError && 'border-red-500/30 bg-red-950/15 opacity-100 grayscale-0',
             )}
           >
-            {/* Name row */}
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <div className={cn(
                   'text-sm font-bold leading-tight truncate',
-                  isActive ? cfg.textActive : 'text-gray-500'
+                  isActive ? cfg.textActive : localDisabled ? 'text-gray-700' : 'text-gray-500'
                 )}>
                   {cfg.label}
                 </div>
@@ -164,12 +177,11 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
               <div className={dotClass} />
             </div>
 
-            {/* Model name */}
             <div className={cn(
               'text-[10px] font-mono leading-tight truncate',
-              isActive ? 'text-gray-400' : 'text-gray-700'
+              isActive ? 'text-gray-300' : localDisabled ? 'text-gray-800' : 'text-gray-700'
             )}>
-              {panel?.liveModelName || '—'}
+              {panel?.liveModelName || (localDisabled ? 'connect key' : '-')}
             </div>
 
             {canConfigureModel ? (
@@ -187,50 +199,19 @@ export const ProviderStatusBar: React.FC<ProviderStatusBarProps> = ({
               </select>
             ) : null}
 
-            {/* Status badge */}
             <div className={cn(
               'text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border self-start',
               isActive ? cfg.badgeActive :
-              isCompleted ? 'bg-green-500/15 border-green-500/25 text-green-500' :
-              isError ? 'bg-red-500/15 border-red-500/25 text-red-400' :
-              'bg-gray-900/60 border-gray-800 text-gray-600'
+                isCompleted ? 'bg-green-500/15 border-green-500/25 text-green-500' :
+                  isError ? 'bg-red-500/15 border-red-500/25 text-red-400' :
+                    localDisabled ? 'bg-gray-900/40 border-gray-800 text-gray-700' :
+                      'bg-gray-900/60 border-gray-800 text-gray-600'
             )}>
               {statusLabel}
             </div>
           </div>
         )
       })}
-
-      {/* Local / Ollama — 5th box, always rendered */}
-      <div
-        className={cn(
-          'flex-1 min-w-[90px] flex flex-col justify-between px-2 sm:px-3 py-2 sm:py-2.5 transition-all duration-500',
-          hasBYOK
-            ? 'border-l border-gray-600/40 bg-gradient-to-br from-gray-800/30 via-black to-gray-800/15'
-            : 'border-l border-gray-900/60 bg-black/20 opacity-30 grayscale',
-        )}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <div className={cn('text-sm font-bold leading-tight', hasBYOK ? 'text-gray-300' : 'text-gray-700')}>
-              Local
-            </div>
-            <div className="text-[9px] text-gray-700 font-mono">Ollama / BYOK</div>
-          </div>
-          <div className={cn('w-2 h-2 rounded-full shrink-0', hasBYOK ? 'bg-gray-500' : 'bg-gray-900')} />
-        </div>
-        <div className="text-[10px] font-mono text-gray-700 truncate">
-          {hasBYOK ? 'local model' : 'not active'}
-        </div>
-        <div className={cn(
-          'text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border self-start',
-          hasBYOK
-            ? 'bg-gray-700/40 border-gray-600 text-gray-400'
-            : 'bg-gray-900/40 border-gray-800 text-gray-700'
-        )}>
-          {hasBYOK ? 'ACTIVE' : 'BYOK ONLY'}
-        </div>
-      </div>
     </div>
   )
 }

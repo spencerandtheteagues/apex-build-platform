@@ -545,7 +545,7 @@ const (
 type PowerMode string
 
 const (
-	PowerMax      PowerMode = "max"      // Latest frontier tier (Opus 4.6, ChatGPT 5.4, Gemini 3.1 Pro, Grok 4.20)
+	PowerMax      PowerMode = "max"      // Latest frontier tier (Opus 4.6, ChatGPT 5.4 Pro, Gemini 3.1 Pro, Grok 4.20)
 	PowerBalanced PowerMode = "balanced" // Mid-tier quality/speed balance (Sonnet 4.6, GPT-4.1, Gemini 3 Flash, Grok 3)
 	PowerFast     PowerMode = "fast"     // Cheapest mini tier (Haiku 4.5, GPT-4o-mini, Gemini 2.5 Flash Lite, Grok 3 Mini)
 )
@@ -737,33 +737,33 @@ type Checkpoint struct {
 type WSMessageType string
 
 const (
-	WSBuildStarted    WSMessageType = "build:started"
-	WSBuildState      WSMessageType = "build:state"
-	WSBuildPhase      WSMessageType = "build:phase"
-	WSBuildProgress   WSMessageType = "build:progress"
-	WSBuildCheckpoint WSMessageType = "build:checkpoint"
-	WSBuildCompleted  WSMessageType = "build:completed"
-	WSBuildError      WSMessageType = "build:error"
-	WSAgentSpawned    WSMessageType = "agent:spawned"
-	WSAgentWorking    WSMessageType = "agent:working"
-	WSAgentProgress   WSMessageType = "agent:progress"
-	WSAgentCompleted  WSMessageType = "agent:completed"
-	WSAgentError      WSMessageType = "agent:error"
-	WSAgentMessage    WSMessageType = "agent:message"
-	WSAgentThinking   WSMessageType = "agent:thinking"
-	WSAgentAction     WSMessageType = "agent:action"
-	WSAgentOutput     WSMessageType = "agent:output"
+	WSBuildStarted          WSMessageType = "build:started"
+	WSBuildState            WSMessageType = "build:state"
+	WSBuildPhase            WSMessageType = "build:phase"
+	WSBuildProgress         WSMessageType = "build:progress"
+	WSBuildCheckpoint       WSMessageType = "build:checkpoint"
+	WSBuildCompleted        WSMessageType = "build:completed"
+	WSBuildError            WSMessageType = "build:error"
+	WSAgentSpawned          WSMessageType = "agent:spawned"
+	WSAgentWorking          WSMessageType = "agent:working"
+	WSAgentProgress         WSMessageType = "agent:progress"
+	WSAgentCompleted        WSMessageType = "agent:completed"
+	WSAgentError            WSMessageType = "agent:error"
+	WSAgentMessage          WSMessageType = "agent:message"
+	WSAgentThinking         WSMessageType = "agent:thinking"
+	WSAgentAction           WSMessageType = "agent:action"
+	WSAgentOutput           WSMessageType = "agent:output"
 	WSAgentGenerationFailed WSMessageType = "agent:generation_failed"
-	WSAgentGenerating WSMessageType = "agent:generating"
-	WSAgentRetrying   WSMessageType = "agent:retrying"
+	WSAgentGenerating       WSMessageType = "agent:generating"
+	WSAgentRetrying         WSMessageType = "agent:retrying"
 	WSAgentProviderSwitched WSMessageType = "agent:provider_switched"
-	WSFileCreated     WSMessageType = "file:created"
-	WSFileUpdated     WSMessageType = "file:updated"
-	WSCodeGenerated   WSMessageType = "code:generated"
-	WSTerminalOutput  WSMessageType = "terminal:output"
-	WSPreviewReady    WSMessageType = "preview:ready"
-	WSUserMessage     WSMessageType = "user:message"
-	WSLeadResponse    WSMessageType = "lead:response"
+	WSFileCreated           WSMessageType = "file:created"
+	WSFileUpdated           WSMessageType = "file:updated"
+	WSCodeGenerated         WSMessageType = "code:generated"
+	WSTerminalOutput        WSMessageType = "terminal:output"
+	WSPreviewReady          WSMessageType = "preview:ready"
+	WSUserMessage           WSMessageType = "user:message"
+	WSLeadResponse          WSMessageType = "lead:response"
 
 	// FSM integration message types (bridged from core.AgentFSM)
 	WSBuildFSMStarted        WSMessageType = "build:fsm:started"

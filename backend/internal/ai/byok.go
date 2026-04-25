@@ -739,7 +739,7 @@ func GetAvailableModels() map[string][]ModelInfo {
 			{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", Speed: "fast", CostTier: "low", Description: "FAST — cheapest Claude tier"},
 		},
 		"gpt4": {
-			{ID: "gpt-5.4", Name: "ChatGPT 5.4", Speed: "slow", CostTier: "high", Description: "MAX — latest frontier OpenAI model"},
+			{ID: "gpt-5.4-pro", Name: "ChatGPT 5.4 Pro", Speed: "slow", CostTier: "high", Description: "MAX - latest frontier OpenAI model"},
 			{ID: "gpt-4.1", Name: "GPT-4.1", Speed: "medium", CostTier: "medium", Description: "BALANCED — best current mid-tier OpenAI coding model"},
 			{ID: "gpt-4o-mini", Name: "GPT-4o Mini", Speed: "fast", CostTier: "low", Description: "FAST — mini OpenAI tier"},
 		},
@@ -756,10 +756,11 @@ func GetAvailableModels() map[string][]ModelInfo {
 			{ID: "grok-3-mini", Name: "Grok 3 Mini", Speed: "fast", CostTier: "low", Description: "FAST — lightweight Grok tier"},
 		},
 		"ollama": {
-			{ID: "kimi-k2.6:cloud", Name: "Kimi K2.6 Cloud", Speed: "fast", CostTier: "free", Description: "1T MoE parameter model via Ollama Cloud — reasoning + generation"},
-			{ID: "deepseek-r1:18b", Name: "DeepSeek-R1 (18b)", Speed: "variable", CostTier: "free", Description: "Reasoning model (local)"},
-			{ID: "deepseek-r1:8b", Name: "DeepSeek-R1 (8b)", Speed: "variable", CostTier: "free", Description: "Reasoning model (local)"},
-			{ID: "llama3.3-70b", Name: "Llama 3.3 70B", Speed: "variable", CostTier: "free", Description: "405B performance (local)"},
+			{ID: "kimi-k2.6", Name: "Kimi K2.6", Speed: "fast", CostTier: "free", Description: "Default conductor/local max model"},
+			{ID: "glm-5.1", Name: "GLM-5.1", Speed: "fast", CostTier: "free", Description: "Fast local/open-weight coding model"},
+			{ID: "qwen-3.6-27b", Name: "Qwen 3.6 27B", Speed: "fast", CostTier: "free", Description: "Efficient local coding model"},
+			{ID: "devstral-small-24b", Name: "Devstral Small 24B", Speed: "medium", CostTier: "free", Description: "Agentic coding model"},
+			{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", Speed: "fast", CostTier: "free", Description: "Budget local/cloud model"},
 		},
 	}
 }

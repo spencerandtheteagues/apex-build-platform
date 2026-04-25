@@ -251,7 +251,7 @@ The user avatar in the top-right shows your username. Your session persists acro
 - Best for: Most real-world applications
 
 **Max Power (2.0x platform cost)**
-- Models: Claude Opus 4.6, ChatGPT 5.4, Gemini 3.1 Pro, Grok 4.20
+- Models: Claude Opus 4.6, ChatGPT 5.4 Pro, Gemini 3.1 Pro, Grok 4.20, plus Kimi K2.6/local when BYOK is enabled
 - Speed: Slower (larger models take longer)
 - Quality: Highest possible — most capable models
 - Best for: Complex apps, mission-critical code, production builds
@@ -713,7 +713,7 @@ Choose which AI provider to use, or leave on "Auto" for intelligent routing.`,
 - Best for: Complex code generation, debugging, architecture
 
 **GPT (OpenAI)**
-- Models: ChatGPT 5.4 (most capable), GPT-4.1 (balanced), GPT-4o Mini (fast)
+- Models: ChatGPT 5.4 Pro (most capable), GPT-4.1 (balanced), GPT-4o Mini (fast)
 - Strengths: Wide knowledge, creative solutions, strong at many languages
 - Best for: General coding tasks, multi-language projects
 
@@ -728,7 +728,7 @@ Choose which AI provider to use, or leave on "Auto" for intelligent routing.`,
 - Best for: Cutting-edge tasks, up-to-date solutions
 
 **Ollama (Local)**
-- Models: DeepSeek-R1, Qwen 3 Coder, Llama 3.3, and more
+- Models: Kimi K2.6, GLM-5.1, Qwen 3.6 27B, Devstral Small 24B, DeepSeek V4 Flash, and more
 - Strengths: Runs on your own hardware, no cloud-model API bill, strong privacy
 - Best for: Privacy-sensitive work, unlimited usage
 - Requires: Builder or higher for BYOK access, plus a running Ollama server on your machine or network

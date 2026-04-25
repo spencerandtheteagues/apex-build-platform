@@ -8,11 +8,20 @@ import type { BuildInteractionState } from '@/services/api'
 
 interface AIThoughtEntry {
   id: string
+  agentId?: string
+  agentRole?: string
   provider: string
+  model?: string
   type: 'thinking' | 'action' | 'output' | 'error'
   content: string
   timestamp: Date
   isInternal?: boolean
+  eventType?: string
+  taskType?: string
+  files?: string[]
+  filesCount?: number
+  retryCount?: number
+  maxRetries?: number
 }
 
 interface ChatMsgEntry {
@@ -58,7 +67,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   gpt4: 'ChatGPT',
   gemini: 'Gemini',
   grok: 'Grok',
-  ollama: 'Local',
+  ollama: 'Kimi',
 }
 
 const PROVIDER_BADGE: Record<string, string> = {
@@ -66,7 +75,44 @@ const PROVIDER_BADGE: Record<string, string> = {
   gpt4: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
   gemini: 'bg-sky-500/20 text-sky-300 border-sky-500/30',
   grok: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30',
-  ollama: 'bg-gray-500/20 text-gray-300 border-gray-500/30',
+  ollama: 'bg-cyan-500/20 text-cyan-200 border-cyan-500/30',
+}
+
+const humanize = (value?: string): string =>
+  String(value || '')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (part) => part.toUpperCase())
+
+const eventLabel = (eventType?: string): string => {
+  switch (eventType) {
+    case 'agent:spawned':
+      return 'joined'
+    case 'agent:working':
+      return 'started'
+    case 'agent:thinking':
+      return 'thinking'
+    case 'agent:generating':
+      return 'generating'
+    case 'agent:completed':
+      return 'completed'
+    case 'agent:output':
+      return 'output'
+    case 'code:generated':
+      return 'files'
+    case 'agent:retrying':
+      return 'retrying'
+    case 'agent:verification_failed':
+      return 'verification retry'
+    case 'agent:coordination_failed':
+      return 'coordination retry'
+    case 'agent:provider_switched':
+      return 'provider switch'
+    case 'spend:update':
+      return 'spend'
+    default:
+      return eventType ? humanize(eventType.replace(/^agent:/, '').replace(/^build:/, '').replace(/^glassbox:/, '')) : ''
+  }
 }
 
 export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
@@ -194,6 +240,14 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
               const badge = PROVIDER_BADGE[prov] || 'bg-gray-500/20 text-gray-300 border-gray-500/30'
               const label = PROVIDER_LABEL[prov] || thought.provider || 'AI'
               const isError = thought.type === 'error'
+              const metaItems = [
+                humanize(thought.agentRole),
+                thought.model,
+                eventLabel(thought.eventType),
+                humanize(thought.taskType),
+                thought.filesCount ? `${thought.filesCount} files` : '',
+                thought.retryCount && thought.maxRetries ? `try ${thought.retryCount}/${thought.maxRetries}` : '',
+              ].filter(Boolean)
               const ts = thought.timestamp instanceof Date
                 ? thought.timestamp.toLocaleTimeString('en-US', {
                     hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -222,7 +276,17 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
                     isError && 'text-red-400',
                     thought.isInternal && 'text-gray-500 italic'
                   )}>
-                    {thought.content}
+                    {metaItems.length > 0 && (
+                      <span className="mr-2 text-[10px] uppercase tracking-[0.12em] text-gray-600 not-italic">
+                        {metaItems.join(' / ')}
+                      </span>
+                    )}
+                    <span>{thought.content}</span>
+                    {Array.isArray(thought.files) && thought.files.length > 0 && (
+                      <span className="ml-2 text-[11px] text-gray-600 not-italic">
+                        {thought.files.slice(0, 3).join(', ')}{thought.files.length > 3 ? ` (+${thought.files.length - 3})` : ''}
+                      </span>
+                    )}
                   </span>
                 </div>
               )

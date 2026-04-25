@@ -154,7 +154,10 @@ interface BSBuildState {
 
 interface AIThoughtItem {
   id: string
+  agentId?: string
+  agentRole?: string
   provider: string
+  model?: string
   type: 'thinking' | 'action' | 'output' | 'error'
   content: string
   timestamp: Date
@@ -177,7 +180,7 @@ interface ChatMsgItem {
 }
 
 interface ProviderPanelItem {
-  provider: 'claude' | 'gpt4' | 'gemini' | 'grok'
+  provider: 'claude' | 'gpt4' | 'gemini' | 'grok' | 'ollama'
   liveModelName: string
   available: boolean
   status: 'idle' | 'working' | 'thinking' | 'completed' | 'error' | 'unavailable'

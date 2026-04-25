@@ -57,7 +57,7 @@ const PROVIDERS: ProviderConfig[] = [
     activeBorder: 'border-green-500',
     placeholder: 'sk-...',
     models: [
-      { id: 'gpt-5.4', name: 'ChatGPT 5.4', speed: 'slow', cost: 'high', description: 'Max tier — latest frontier model' },
+      { id: 'gpt-5.4-pro', name: 'ChatGPT 5.4 Pro', speed: 'slow', cost: 'high', description: 'Max tier - latest frontier model' },
       { id: 'gpt-4.1', name: 'GPT-4.1', speed: 'medium', cost: 'medium', description: 'Balanced tier — best current mid-tier coder' },
       { id: 'gpt-4o-mini', name: 'GPT-4o Mini', speed: 'fast', cost: 'low', description: 'Fast mini tier' },
     ],
@@ -106,12 +106,11 @@ const PROVIDERS: ProviderConfig[] = [
     activeBorder: 'border-cyan-500',
     placeholder: 'http://localhost:11434   or   http://key@host/v1',
     models: [
-      { id: 'kimi-k2.6:cloud', name: 'Kimi K2.6 Cloud', speed: 'fast', cost: 'free', description: '1T MoE reasoning + generation via Ollama Cloud' },
-      { id: 'deepseek-r1:18b', name: 'DeepSeek-R1 (18b)', speed: 'medium', cost: 'free', description: 'Reasoning model' },
-      { id: 'deepseek-r1:8b', name: 'DeepSeek-R1 (8b)', speed: 'medium', cost: 'free', description: 'Reasoning model' },
-      { id: 'qwen3-coder:30b', name: 'Qwen 3 Coder (30b)', speed: 'fast', cost: 'free', description: 'Advanced coding' },
-      { id: 'deepseek-v3.2', name: 'DeepSeek-V3.2', speed: 'fast', cost: 'free', description: 'Efficient' },
-      { id: 'llama3.3-70b', name: 'Llama 3.3 70B', speed: 'medium', cost: 'free', description: '405B performance' },
+      { id: 'kimi-k2.6', name: 'Kimi K2.6', speed: 'fast', cost: 'free', description: 'Default conductor/local max model' },
+      { id: 'glm-5.1', name: 'GLM-5.1', speed: 'fast', cost: 'free', description: 'Fast local/open-weight coding model' },
+      { id: 'qwen-3.6-27b', name: 'Qwen 3.6 27B', speed: 'fast', cost: 'free', description: 'Efficient local coding model' },
+      { id: 'devstral-small-24b', name: 'Devstral Small 24B', speed: 'medium', cost: 'free', description: 'Agentic coding model' },
+      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', speed: 'fast', cost: 'free', description: 'Budget local/cloud model' },
     ],
   },
 ]
