@@ -17,6 +17,14 @@
 | **M12 (Microsoft)** | Matt Goldstein | Enterprise AI | ❌ Cold | 🔲 Not contacted | Co-led Entire. Microsoft AI ecosystem. |
 | **Madrona** | Matt McIlwain | Pacific NW, dev tools | ❌ Cold | 🔲 Not contacted | Co-led Entire. Seattle-based. |
 
+### Recent Competitive Intelligence (Apr 2026)
+| Company | Round | Amount | Valuation | Lead Investors | Notes |
+|---------|-------|--------|-----------|----------------|-------|
+| **Factory** | Series C | $150M | $1.5B | Khosla Ventures + Sequoia | Enterprise AI coding agents. SF-based. |
+| **Entire** | Seed | $60M | $300M | Felicis + M12 + Madrona | Git-centric agent platform. Former GitHub CEO. |
+
+**Key insight:** Both Factory ($1.5B) and Entire ($300M) raised massive rounds WITHOUT deployment guarantees or rollback. The "deploy + guarantee" gap remains wide open.
+
 ### Tier 2: Strong Fit (Developer Tools, Seed Stage)
 | Firm | Partner | Focus | Warm Intro? | Status | Notes |
 |------|---------|-------|-------------|--------|-------|
