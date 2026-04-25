@@ -25,24 +25,27 @@ func (s *Server) GetUserProfile(c *gin.Context) {
 
 	// Don't return sensitive information
 	c.JSON(http.StatusOK, gin.H{
-		"user": gin.H{
-			"id":                    user.ID,
-			"username":              user.Username,
-			"email":                 user.Email,
-			"full_name":             user.FullName,
-			"avatar_url":            user.AvatarURL,
-			"is_verified":           user.IsVerified,
-			"subscription_type":     user.SubscriptionType,
-			"subscription_end":      user.SubscriptionEnd,
-			"monthly_ai_requests":   user.MonthlyAIRequests,
-			"monthly_ai_cost":       user.MonthlyAICost,
-			"credit_balance":        user.CreditBalance,
-			"has_unlimited_credits": user.HasUnlimitedCredits,
-			"bypass_billing":        user.BypassBilling,
-			"preferred_theme":       user.PreferredTheme,
-			"preferred_ai":          user.PreferredAI,
-			"created_at":            user.CreatedAt,
-			"updated_at":            user.UpdatedAt,
+		"success": true,
+		"data": gin.H{
+			"user": gin.H{
+				"id":                    user.ID,
+				"username":              user.Username,
+				"email":                 user.Email,
+				"full_name":             user.FullName,
+				"avatar_url":            user.AvatarURL,
+				"is_verified":           user.IsVerified,
+				"subscription_type":     user.SubscriptionType,
+				"subscription_end":      user.SubscriptionEnd,
+				"monthly_ai_requests":   user.MonthlyAIRequests,
+				"monthly_ai_cost":       user.MonthlyAICost,
+				"credit_balance":        user.CreditBalance,
+				"has_unlimited_credits": user.HasUnlimitedCredits,
+				"bypass_billing":        user.BypassBilling,
+				"preferred_theme":       user.PreferredTheme,
+				"preferred_ai":          user.PreferredAI,
+				"created_at":            user.CreatedAt,
+				"updated_at":            user.UpdatedAt,
+			},
 		},
 	})
 }
@@ -72,6 +75,7 @@ func (s *Server) UpdateUserProfile(c *gin.Context) {
 		"matrix":    true,
 		"synthwave": true,
 		"neonCity":  true,
+		"steampunk": true,
 	}
 
 	if req.PreferredTheme != "" && !validThemes[req.PreferredTheme] {
@@ -132,18 +136,20 @@ func (s *Server) UpdateUserProfile(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Profile updated successfully",
-		"user": gin.H{
-			"id":                    user.ID,
-			"username":              user.Username,
-			"email":                 user.Email,
-			"full_name":             user.FullName,
-			"avatar_url":            user.AvatarURL,
-			"preferred_theme":       user.PreferredTheme,
-			"preferred_ai":          user.PreferredAI,
-			"credit_balance":        user.CreditBalance,
-			"has_unlimited_credits": user.HasUnlimitedCredits,
-			"bypass_billing":        user.BypassBilling,
+		"success": true,
+		"data": gin.H{
+			"user": gin.H{
+				"id":                    user.ID,
+				"username":              user.Username,
+				"email":                 user.Email,
+				"full_name":             user.FullName,
+				"avatar_url":            user.AvatarURL,
+				"preferred_theme":       user.PreferredTheme,
+				"preferred_ai":          user.PreferredAI,
+				"credit_balance":        user.CreditBalance,
+				"has_unlimited_credits": user.HasUnlimitedCredits,
+				"bypass_billing":        user.BypassBilling,
+			},
 		},
 	})
 }

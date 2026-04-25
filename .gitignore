@@ -99,3 +99,4 @@ $RECYCLE.BIN/
 .Trash-*
 .nfs*
 backend/apex-backend
+.audit/
