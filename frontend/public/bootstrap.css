@@ -19,31 +19,31 @@ body {
 .loading-screen {
   position: fixed;
   inset: 0;
-  display: block;
-  background: #02030a;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 50% 36%, rgba(36, 211, 238, 0.18), transparent 18rem),
+    linear-gradient(135deg, #03060d 0%, #000 100%);
   z-index: 9999;
   overflow: hidden;
 }
 
-.loading-video {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
-  object-position: center;
-  background: #02030a;
+.loading-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  color: #f8fbff;
+  font-size: clamp(1.35rem, 3vw, 2.25rem);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  text-shadow: 0 0 18px rgba(170, 235, 255, 0.42);
 }
 
-.loading-fallback {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+.loading-brand img {
+  width: clamp(48px, 8vw, 86px);
+  height: clamp(48px, 8vw, 86px);
+  object-fit: contain;
+  filter: drop-shadow(0 0 20px rgba(100, 224, 255, 0.55));
 }
 
 .container {
@@ -66,8 +66,8 @@ body {
     font-size: 14px;
   }
 
-  .loading-video {
-    object-position: center;
+  .loading-brand {
+    gap: 10px;
   }
 }
 
