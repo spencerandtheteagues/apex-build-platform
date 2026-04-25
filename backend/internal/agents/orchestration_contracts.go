@@ -1343,7 +1343,7 @@ func hostedPlatformProviders(providers []ai.AIProvider) []ai.AIProvider {
 	filtered := make([]ai.AIProvider, 0, len(providers))
 	for _, provider := range providers {
 		switch provider {
-		case ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok:
+		case ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderDeepSeek, ai.ProviderGLM:
 			filtered = append(filtered, provider)
 		}
 	}
