@@ -105,7 +105,7 @@ func NewAIRouter(claudeKey, openAIKey, geminiKey string, extraKeys ...string) *A
 		if _, exists := clients[provider]; exists {
 			continue
 		}
-		clients[provider] = newAliasedOllamaProviderClient(provider, emulation.URL, emulation.Model)
+		clients[provider] = newAliasedOllamaProviderClient(provider, emulation.URL, ollamaAPIKey, emulation.Model)
 		log.Printf("Local provider emulation enabled: slot=%s -> ollama(%s, model=%s)", provider, emulation.URL, emulation.Model)
 	}
 

@@ -41,6 +41,16 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 		PowerBalanced: "kimi-k2.6",
 		PowerFast:     "glm-5.1",
 	},
+	ai.ProviderDeepSeek: {
+		PowerMax:      "deepseek-r1:14b",
+		PowerBalanced: "deepseek-r1:14b",
+		PowerFast:     "deepseek-coder:6.7b",
+	},
+	ai.ProviderGLM: {
+		PowerMax:      "glm-5.1",
+		PowerBalanced: "glm-5.1",
+		PowerFast:     "glm-4.5",
+	},
 }
 
 // selectModelForPowerMode returns the best model ID for a given provider and power mode
@@ -80,6 +90,10 @@ func modelBelongsToProvider(provider ai.AIProvider, model string) bool {
 		return strings.HasPrefix(normalized, "gemini-")
 	case ai.ProviderGrok:
 		return strings.HasPrefix(normalized, "grok-")
+	case ai.ProviderDeepSeek:
+		return strings.HasPrefix(normalized, "deepseek-")
+	case ai.ProviderGLM:
+		return strings.HasPrefix(normalized, "glm-")
 	case ai.ProviderOllama:
 		return true
 	default:
@@ -809,8 +823,10 @@ func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []ai.AIProvi
 				allowedBYOKProviders[ai.ProviderGemini] = true
 			case "ollama":
 				allowedBYOKProviders[ai.ProviderOllama] = true
-			case "grok", "xai", "x.ai":
-				allowedBYOKProviders[ai.ProviderGrok] = true
+			case "deepseek":
+				allowedBYOKProviders[ai.ProviderDeepSeek] = true
+			case "glm":
+				allowedBYOKProviders[ai.ProviderGLM] = true
 			}
 		}
 	}
@@ -824,11 +840,13 @@ func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []ai.AIProvi
 
 	// Map AI router providers to agent providers and check health
 	providerMappings := map[ai.AIProvider]ai.AIProvider{
-		ai.ProviderClaude: ai.ProviderClaude,
-		ai.ProviderGPT4:   ai.ProviderGPT4,
-		ai.ProviderGemini: ai.ProviderGemini,
-		ai.ProviderGrok:   ai.ProviderGrok,
-		ai.ProviderOllama: ai.ProviderOllama,
+		ai.ProviderClaude:   ai.ProviderClaude,
+		ai.ProviderGPT4:     ai.ProviderGPT4,
+		ai.ProviderGemini:   ai.ProviderGemini,
+		ai.ProviderGrok:     ai.ProviderGrok,
+		ai.ProviderOllama:   ai.ProviderOllama,
+		ai.ProviderDeepSeek: ai.ProviderDeepSeek,
+		ai.ProviderGLM:      ai.ProviderGLM,
 	}
 
 	// Startup grace period: 30 seconds after adapter creation
@@ -873,11 +891,13 @@ func (a *AIRouterAdapter) GetAvailableProviders() []ai.AIProvider {
 
 	// Map AI router providers to agent providers and check health
 	providerMappings := map[ai.AIProvider]ai.AIProvider{
-		ai.ProviderClaude: ai.ProviderClaude,
-		ai.ProviderGPT4:   ai.ProviderGPT4,
-		ai.ProviderGemini: ai.ProviderGemini,
-		ai.ProviderGrok:   ai.ProviderGrok,
-		ai.ProviderOllama: ai.ProviderOllama,
+		ai.ProviderClaude:   ai.ProviderClaude,
+		ai.ProviderGPT4:     ai.ProviderGPT4,
+		ai.ProviderGemini:   ai.ProviderGemini,
+		ai.ProviderGrok:     ai.ProviderGrok,
+		ai.ProviderOllama:   ai.ProviderOllama,
+		ai.ProviderDeepSeek: ai.ProviderDeepSeek,
+		ai.ProviderGLM:      ai.ProviderGLM,
 	}
 
 	for aiProvider, agentProvider := range providerMappings {

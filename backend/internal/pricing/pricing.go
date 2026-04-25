@@ -122,6 +122,21 @@ func newEngineFromEnv() *Engine {
 					"glm-5.1":    {InputPer1M: 0.30, OutputPer1M: 1.00},
 				},
 			},
+			"deepseek": {
+				Default: ModelPricing{InputPer1M: 0.30, OutputPer1M: 1.00},
+				Models: map[string]ModelPricing{
+					"deepseek-r1:14b":     {InputPer1M: 0.30, OutputPer1M: 1.00},
+					"deepseek-r1:8b":      {InputPer1M: 0.25, OutputPer1M: 0.80},
+					"deepseek-coder:6.7b": {InputPer1M: 0.20, OutputPer1M: 0.60},
+				},
+			},
+			"glm": {
+				Default: ModelPricing{InputPer1M: 0.25, OutputPer1M: 0.80},
+				Models: map[string]ModelPricing{
+					"glm-5.1": {InputPer1M: 0.25, OutputPer1M: 0.80},
+					"glm-4.5": {InputPer1M: 0.20, OutputPer1M: 0.60},
+				},
+			},
 		},
 
 		// Our profit margin: 1.5 = 50% markup on API cost.
@@ -254,6 +269,19 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 			return "kimi-k2.6:cloud"
 		}
 		return "glm-5.1"
+	case "deepseek":
+		if mode == ModeMax {
+			return "deepseek-r1:14b"
+		}
+		if mode == ModeBalanced {
+			return "deepseek-r1:8b"
+		}
+		return "deepseek-coder:6.7b"
+	case "glm":
+		if mode == ModeMax || mode == ModeBalanced {
+			return "glm-5.1"
+		}
+		return "glm-4.5"
 	default:
 		return ""
 	}
@@ -296,6 +324,10 @@ func normalizeProvider(provider string) string {
 	switch p {
 	case "openai":
 		return "gpt4"
+	case "deepseek":
+		return "deepseek"
+	case "glm":
+		return "glm"
 	default:
 		return p
 	}

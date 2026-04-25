@@ -9,11 +9,13 @@ import (
 type AIProvider string
 
 const (
-	ProviderClaude AIProvider = "claude"
-	ProviderGPT4   AIProvider = "gpt4"
-	ProviderGemini AIProvider = "gemini"
-	ProviderGrok   AIProvider = "grok"
-	ProviderOllama AIProvider = "ollama"
+	ProviderClaude   AIProvider = "claude"
+	ProviderGPT4     AIProvider = "gpt4"
+	ProviderGemini   AIProvider = "gemini"
+	ProviderGrok     AIProvider = "grok"
+	ProviderOllama   AIProvider = "ollama"
+	ProviderDeepSeek AIProvider = "deepseek"
+	ProviderGLM      AIProvider = "glm"
 )
 
 // AICapability represents different AI use cases
@@ -145,59 +147,61 @@ type RouterConfig struct {
 func DefaultRouterConfig() *RouterConfig {
 	return &RouterConfig{
 		DefaultProviders: map[AICapability]AIProvider{
-			// Ollama (kimi-k2.6:cloud) is the primary orchestrator for all capabilities.
-			// Cloud providers are fallback only.
 			CapabilityCodeGeneration:        ProviderOllama,
 			CapabilityNaturalLanguageToCode: ProviderOllama,
-			CapabilityCodeReview:            ProviderOllama,
-			CapabilityCodeCompletion:        ProviderOllama,
-			CapabilityDebugging:             ProviderOllama,
-			CapabilityExplanation:           ProviderOllama,
-			CapabilityRefactoring:           ProviderOllama,
-			CapabilityTesting:               ProviderOllama,
-			CapabilityDocumentation:         ProviderOllama,
-			CapabilityArchitecture:          ProviderOllama,
+			CapabilityCodeReview:            ProviderDeepSeek,
+			CapabilityCodeCompletion:        ProviderGPT4,
+			CapabilityDebugging:             ProviderGPT4,
+			CapabilityExplanation:           ProviderGPT4,
+			CapabilityRefactoring:           ProviderGPT4,
+			CapabilityTesting:               ProviderGLM,
+			CapabilityDocumentation:         ProviderClaude,
+			CapabilityArchitecture:          ProviderClaude,
 		},
 		FallbackOrder: map[AIProvider][]AIProvider{
-			// Ollama (kimi-k2.6:cloud) is the primary orchestrator.
-			// If Ollama fails, fall back to Claude, then GPT4, then Gemini, then Grok.
-			ProviderOllama: {ProviderClaude, ProviderGPT4, ProviderGemini, ProviderGrok},
-			ProviderClaude: {ProviderOllama, ProviderGPT4, ProviderGemini, ProviderGrok},
-			ProviderGPT4:   {ProviderOllama, ProviderClaude, ProviderGemini, ProviderGrok},
-			ProviderGemini: {ProviderOllama, ProviderClaude, ProviderGPT4, ProviderGrok},
-			ProviderGrok:   {ProviderOllama, ProviderGPT4, ProviderClaude, ProviderGemini},
+			ProviderOllama:   {ProviderDeepSeek, ProviderClaude, ProviderGPT4, ProviderGLM},
+			ProviderDeepSeek: {ProviderOllama, ProviderClaude, ProviderGPT4, ProviderGLM},
+			ProviderGLM:      {ProviderOllama, ProviderDeepSeek, ProviderClaude, ProviderGPT4},
+			ProviderClaude:   {ProviderOllama, ProviderDeepSeek, ProviderGPT4, ProviderGLM},
+			ProviderGPT4:     {ProviderOllama, ProviderDeepSeek, ProviderClaude, ProviderGLM},
+			ProviderGemini:   {ProviderOllama, ProviderDeepSeek, ProviderClaude, ProviderGPT4},
+			ProviderGrok:     {ProviderOllama, ProviderDeepSeek, ProviderClaude, ProviderGPT4},
 		},
 		LoadBalancing: map[AIProvider]float64{
-			// Ollama (kimi-k2.6:cloud) is the primary orchestrator — highest weight.
-			ProviderOllama: 0.50,
-			ProviderClaude: 0.15,
-			ProviderGPT4:   0.15,
-			ProviderGrok:   0.10,
-			ProviderGemini: 0.10,
+			ProviderOllama:   0.35,
+			ProviderDeepSeek: 0.20,
+			ProviderClaude:   0.15,
+			ProviderGPT4:     0.15,
+			ProviderGLM:      0.15,
 		},
 		RateLimits: map[AIProvider]int{
-			ProviderClaude: 100,  // requests per minute
-			ProviderGPT4:   80,   // requests per minute
-			ProviderGemini: 120,  // requests per minute
-			ProviderGrok:   100,  // requests per minute
-			ProviderOllama: 1000, // Local — no real limit
+			ProviderClaude:   100,
+			ProviderGPT4:     80,
+			ProviderGemini:   120,
+			ProviderGrok:     100,
+			ProviderOllama:   1000,
+			ProviderDeepSeek: 200,
+			ProviderGLM:      200,
 		},
 		CostThresholds: map[AIProvider]float64{
-			ProviderClaude: 0.10, // max cost per request
-			ProviderGPT4:   0.15, // max cost per request
-			ProviderGemini: 0.08, // max cost per request
-			ProviderGrok:   0.05, // max cost per request
-			ProviderOllama: 0.00, // Free — runs locally
+			ProviderClaude:   0.10,
+			ProviderGPT4:     0.15,
+			ProviderGemini:   0.08,
+			ProviderGrok:     0.05,
+			ProviderOllama:   0.00,
+			ProviderDeepSeek: 0.05,
+			ProviderGLM:      0.04,
 		},
 		// Enable emergency fallback for BYOK scenarios to prevent build failures
 		EnableBYOKEmergencyFallback: true,
-		// Retry local models multiple times before falling back to cloud
 		MaxRetryAttempts: map[AIProvider]int{
-			ProviderClaude: 2, // Cloud providers get fewer retries
-			ProviderGPT4:   2, // Cloud providers get fewer retries
-			ProviderGemini: 2, // Cloud providers get fewer retries
-			ProviderGrok:   2, // Cloud providers get fewer retries
-			ProviderOllama: 5, // Local model gets more retries (network/startup issues)
+			ProviderClaude:   2,
+			ProviderGPT4:     2,
+			ProviderGemini:   2,
+			ProviderGrok:     2,
+			ProviderOllama:   5,
+			ProviderDeepSeek: 3,
+			ProviderGLM:      3,
 		},
 	}
 }

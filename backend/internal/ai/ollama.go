@@ -256,6 +256,14 @@ func (o *OllamaClient) getModel(req *AIRequest) string {
 	// Check if this is an Ollama Cloud client (has apiKey set)
 	isCloud := o.apiKey != ""
 
+	// DeepSeek and GLM family defaults
+	if o.GetProvider() == ProviderDeepSeek {
+		return "deepseek-r1:14b"
+	}
+	if o.GetProvider() == ProviderGLM {
+		return "glm-5.1"
+	}
+
 	// Default models based on capability
 	// For Ollama Cloud, use kimi-k2.6:cloud as the default
 	// For local Ollama, use deepseek-r1:14b

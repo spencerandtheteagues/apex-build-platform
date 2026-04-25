@@ -65,8 +65,8 @@ func (f *forceModelClient) GetProvider() AIProvider          { return f.base.Get
 func (f *forceModelClient) Health(ctx context.Context) error { return f.base.Health(ctx) }
 func (f *forceModelClient) GetUsage() *ProviderUsage         { return f.base.GetUsage() }
 
-func newAliasedOllamaProviderClient(alias AIProvider, baseURL, model string) AIClient {
-	var client AIClient = NewOllamaClient(baseURL, "")
+func newAliasedOllamaProviderClient(alias AIProvider, baseURL, apiKey, model string) AIClient {
+	var client AIClient = NewOllamaClient(baseURL, apiKey)
 	model = strings.TrimSpace(model)
 	if model == "" {
 		model = firstEnv("OLLAMA_MODEL_DEFAULT", "OLLAMA_MODEL_BALANCED", "OLLAMA_MODEL_FAST")
@@ -96,6 +96,10 @@ func providerOllamaEmulationConfig(provider AIProvider) (string, string) {
 		return firstEnv("GEMINI_OLLAMA_URL", "GEMINI_LOCAL_OLLAMA_URL"), firstEnv("GEMINI_OLLAMA_MODEL", "GEMINI_LOCAL_OLLAMA_MODEL")
 	case ProviderGrok:
 		return firstEnv("GROK_OLLAMA_URL", "GROK_LOCAL_OLLAMA_URL"), firstEnv("GROK_OLLAMA_MODEL", "GROK_LOCAL_OLLAMA_MODEL")
+	case ProviderDeepSeek:
+		return firstEnv("DEEPSEEK_OLLAMA_URL", "OLLAMA_URL"), firstEnv("DEEPSEEK_OLLAMA_MODEL", "OLLAMA_MODEL_DEFAULT")
+	case ProviderGLM:
+		return firstEnv("GLM_OLLAMA_URL", "OLLAMA_URL"), firstEnv("GLM_OLLAMA_MODEL", "OLLAMA_MODEL_DEFAULT")
 	default:
 		return "", ""
 	}
@@ -109,7 +113,7 @@ func configuredOllamaEmulations() map[AIProvider]struct {
 		URL   string
 		Model string
 	}{}
-	for _, provider := range []AIProvider{ProviderClaude, ProviderGPT4, ProviderGemini, ProviderGrok} {
+	for _, provider := range []AIProvider{ProviderClaude, ProviderGPT4, ProviderGemini, ProviderGrok, ProviderDeepSeek, ProviderGLM} {
 		url, model := providerOllamaEmulationConfig(provider)
 		if strings.TrimSpace(url) == "" {
 			continue
