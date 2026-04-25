@@ -1504,8 +1504,10 @@ func (am *AgentManager) taskExecutionTimeoutForTask(build *Build, task *Task, ag
 	}
 	if task != nil {
 		switch task.Type {
-		case TaskFix, TaskTest, TaskReview:
+		case TaskFix, TaskTest:
 			timeout += 30 * time.Second
+		case TaskReview:
+			timeout += 5 * time.Minute
 		}
 		if task.RetryCount > 0 {
 			timeout += 15 * time.Second
