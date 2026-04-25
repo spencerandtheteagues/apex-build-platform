@@ -813,7 +813,7 @@ func (o *BuildOrchestrator) attemptAutoFix(build *Build, state *OrchestrationSta
 	}
 
 	// Wait for fix task
-	if err := o.waitForTasksOfType(build, state, TaskReview, 3*time.Minute); err != nil {
+	if err := o.waitForTasksOfType(build, state, TaskReview, 5*time.Minute); err != nil {
 		log.Printf("Orchestrator: Fix task failed: %v", err)
 		return false
 	}
