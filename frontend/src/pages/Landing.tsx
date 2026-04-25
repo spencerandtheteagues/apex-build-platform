@@ -1893,8 +1893,8 @@ const CTA = ({ onGetStarted }: LandingProps) => (
           <div className="section-kicker">Launch-ready positioning</div>
           <h2 className="section-title">Stop paying prompt boxes to guess. Put a build system to work.</h2>
           <p className="section-copy">
-            Start with a card-backed trial, import an existing project, attach context, set a budget,
-            pick your models, and watch the agents build with controls you can actually inspect.
+            Import an existing project or start a brand new one from scratch. Then attach context,
+            set a budget, pick your models, and watch the agents build with controls you can actually inspect.
           </p>
         </div>
         <button className="launch-btn launch-btn-primary" onClick={() => onGetStarted('register', 'pro')}>
