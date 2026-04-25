@@ -97,9 +97,9 @@ func providerOllamaEmulationConfig(provider AIProvider) (string, string) {
 	case ProviderGrok:
 		return firstEnv("GROK_OLLAMA_URL", "GROK_LOCAL_OLLAMA_URL"), firstEnv("GROK_OLLAMA_MODEL", "GROK_LOCAL_OLLAMA_MODEL")
 	case ProviderDeepSeek:
-		return firstEnv("DEEPSEEK_OLLAMA_URL", "OLLAMA_URL"), firstEnv("DEEPSEEK_OLLAMA_MODEL", "OLLAMA_MODEL_DEFAULT")
+		return firstEnv("DEEPSEEK_OLLAMA_URL", "OLLAMA_URL"), firstEnv("DEEPSEEK_OLLAMA_MODEL", "deepseek-v3.2")
 	case ProviderGLM:
-		return firstEnv("GLM_OLLAMA_URL", "OLLAMA_URL"), firstEnv("GLM_OLLAMA_MODEL", "OLLAMA_MODEL_DEFAULT")
+		return firstEnv("GLM_OLLAMA_URL", "OLLAMA_URL"), firstEnv("GLM_OLLAMA_MODEL", "glm-5.1")
 	default:
 		return "", ""
 	}
