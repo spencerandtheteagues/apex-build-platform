@@ -1634,6 +1634,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			Acceptance: []BuildAcceptanceCheck{
 				{ID: "fullstack-go-backend", Description: "Go backend must compile and expose a health route on PORT", Owner: RoleBackend, Required: true},
 				{ID: "fullstack-react-frontend", Description: "Frontend must render a usable shell from src/main.tsx and src/App.tsx", Owner: RoleFrontend, Required: true},
+				{ID: "fullstack-integration", Description: "Frontend and backend communicate through the API contract", Owner: RoleTesting, Required: true},
 			},
 			APIContract: &BuildAPIContract{
 				FrontendPort: 5173,
@@ -1682,6 +1683,7 @@ func selectBuildScaffold(appType string, stack TechStack) buildScaffold {
 			Acceptance: []BuildAcceptanceCheck{
 				{ID: "fullstack-fastapi-backend", Description: "FastAPI backend must start and expose a health route on PORT", Owner: RoleBackend, Required: true},
 				{ID: "fullstack-react-frontend", Description: "Frontend must render a usable shell from src/main.tsx and src/App.tsx", Owner: RoleFrontend, Required: true},
+				{ID: "fullstack-integration", Description: "Frontend and backend communicate through the API contract", Owner: RoleTesting, Required: true},
 			},
 			APIContract: &BuildAPIContract{
 				FrontendPort: 5173,
