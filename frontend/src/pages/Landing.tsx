@@ -64,51 +64,51 @@ const FEATURE_PILLARS: Array<{
 const CONTROL_SURFACES: Array<{ icon: IconType; title: string; body: string; status: string }> = [
   {
     icon: Github,
-    title: 'GitHub import and export',
-    body: 'Connect repos, migrate existing code, commit generated work, export ZIPs, and push finished projects back to GitHub.',
-    status: 'wired in app',
+    title: 'GitHub handoff',
+    body: 'Import repos, branch generated work, export ZIPs, and push finished projects back to GitHub with ownership intact.',
+    status: 'repo control',
   },
   {
     icon: UploadCloud,
-    title: 'Replit, ZIP, files, images',
-    body: 'Migrate Replit apps, attach screenshots or wireframes, upload project assets, and keep every artifact in agent context.',
-    status: 'builder surface',
+    title: 'Project intake',
+    body: 'Bring Replit apps, ZIPs, files, screenshots, images, wireframes, and product context into the build contract.',
+    status: 'context control',
   },
   {
     icon: KeyRound,
-    title: 'BYOK model routing',
-    body: 'Bring OpenAI, Anthropic, Gemini, xAI, and Ollama keys, pick model roles, and watch routing fees separately from provider spend.',
-    status: 'settings surface',
+    title: 'BYOK routing',
+    body: 'Assign OpenAI, Anthropic, Gemini, xAI, Kimi, Ollama, or local models by role while spend stays visible per provider.',
+    status: 'model control',
   },
   {
     icon: PlugZap,
     title: 'MCP connectors',
-    body: 'Add tool servers, inspect available tools/resources, connect external systems, and call tools from the project context.',
-    status: 'integration surface',
+    body: 'Connect tool servers, inspect resources, wire external systems, and let agents call approved tools from project context.',
+    status: 'tool control',
   },
   {
     icon: LockKeyhole,
     title: 'Secrets vault',
-    body: 'Store environment variables, API keys, OAuth credentials, SSH keys, rotate them, and keep values encrypted at rest.',
-    status: 'security surface',
+    body: 'Manage environment variables, API keys, OAuth credentials, SSH keys, rotation, and encrypted handoff rules.',
+    status: 'security control',
   },
   {
     icon: Rocket,
-    title: 'Deploy controls',
-    body: 'Preview, verify, publish, and hand off to deploy targets from the IDE with build logs and rollback context visible.',
-    status: 'IDE surface',
+    title: 'Deploy gates',
+    body: 'Preview, verify, publish, rollback, and hand off deploy targets with logs, approvals, and launch readiness visible.',
+    status: 'release control',
   },
   {
     icon: TerminalSquare,
-    title: 'Monaco plus terminal',
-    body: 'Full editor, file explorer, search, Git, xterm terminal, output, problems, live preview, comments, and collaboration panels.',
-    status: 'cloud IDE',
+    title: 'Cloud IDE',
+    body: 'Monaco editor, file explorer, search, Git, terminal, output, problems, preview, comments, and collaboration panels.',
+    status: 'editor control',
   },
   {
     icon: Database,
-    title: 'Database and APIs',
-    body: 'Track schema, migrations, API contracts, generated services, test status, and production readiness for real backend work.',
-    status: 'project surface',
+    title: 'Backend readiness',
+    body: 'Track schema, migrations, API contracts, generated services, tests, review gates, and production risk before deploy.',
+    status: 'system control',
   },
 ]
 
@@ -671,15 +671,90 @@ const launchCss = `
 
   .surface-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
   }
 
   .surface-card {
-    min-height: 236px;
+    position: relative;
+    min-height: 252px;
+    overflow: hidden;
+    background:
+      linear-gradient(145deg, rgba(17, 27, 39, .78), rgba(4, 8, 15, .96)),
+      radial-gradient(circle at 82% 0%, rgba(56, 189, 248, .18), transparent 16rem);
+  }
+
+  .surface-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(90deg, transparent, rgba(125, 231, 255, .08), transparent);
+    opacity: 0;
+    transform: translateX(-80%);
+    transition: opacity .2s ease, transform .5s ease;
+  }
+
+  .surface-card:hover::before {
+    opacity: 1;
+    transform: translateX(80%);
+  }
+
+  .surface-index {
+    position: absolute;
+    top: 20px;
+    right: 22px;
+    color: rgba(174, 184, 198, .22);
+    font-family: "Arial Black", Impact, Inter, system-ui, sans-serif;
+    font-size: 2.1rem;
+    line-height: 1;
+  }
+
+  .surface-card h3,
+  .surface-card p,
+  .surface-card .card-icon,
+  .surface-card .surface-status {
+    position: relative;
+    z-index: 1;
+  }
+
+  .surface-command {
+    margin-top: 30px;
+    border: 1px solid rgba(125, 231, 255, .14);
+    border-radius: 18px;
+    background: rgba(4, 10, 18, .7);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 18px 70px rgba(0, 0, 0, .24);
+    padding: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .surface-command span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 999px;
+    background: rgba(255,255,255,.035);
+    color: #d8e6f7;
+    padding: 9px 12px;
+    font-size: .82rem;
+    font-weight: 850;
+  }
+
+  .surface-command span::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: #24d3ee;
+    box-shadow: 0 0 14px rgba(36, 211, 238, .7);
   }
 
   .surface-status {
     display: inline-flex;
-    margin-top: 18px;
+    margin-top: 20px;
     color: #9ff4d0;
     border: 1px solid rgba(110, 231, 183, .2);
     background: rgba(16, 185, 129, .08);
@@ -1185,16 +1260,26 @@ const Surfaces = () => (
   <section className="landing-section">
     <div className="launch-shell">
       <motion.div {...fadeUp}>
-        <div className="section-kicker">Full platform surface</div>
-        <h2 className="section-title">Every serious feature gets a control surface.</h2>
+        <div className="section-kicker">Platform cockpit</div>
+        <h2 className="section-title">Control the build from import to deploy.</h2>
         <p className="section-copy">
-          The website now mirrors the actual product: builder controls, IDE controls, billing controls,
-          account controls, integrations, secrets, imports, exports, deploy, and review workflows.
+          Apex gives serious builders the levers they expect: context intake, model routing,
+          MCP tools, secrets, GitHub handoff, database readiness, review gates, deploy controls,
+          and live spend visibility in one connected workflow.
         </p>
       </motion.div>
+      <div className="surface-command" aria-label="Platform control rail">
+        <span>Import context</span>
+        <span>Route models</span>
+        <span>Attach tools</span>
+        <span>Secure secrets</span>
+        <span>Review evidence</span>
+        <span>Ship anywhere</span>
+      </div>
       <div className="surface-grid">
-        {CONTROL_SURFACES.map((item) => (
+        {CONTROL_SURFACES.map((item, index) => (
           <motion.article key={item.title} className="launch-card surface-card" {...fadeUp}>
+            <span className="surface-index">{String(index + 1).padStart(2, '0')}</span>
             <div className="card-icon"><item.icon width={22} height={22} /></div>
             <h3>{item.title}</h3>
             <p>{item.body}</p>
