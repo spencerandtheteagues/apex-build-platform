@@ -2114,7 +2114,7 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 	for _, role := range roles {
 		switch role {
 		case RolePlanner, RoleArchitect, RoleReviewer:
-			assignments[role] = pick(role, ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok)
+			assignments[role] = pick(role, ai.ProviderDeepSeek, ai.ProviderClaude, ai.ProviderGrok, ai.ProviderGPT4)
 		case RoleBackend, RoleSolver:
 			// Grok-4.20-reasoning excels at complex backend logic and repair
 			assignments[role] = pick(role, ai.ProviderGrok, ai.ProviderGPT4, ai.ProviderClaude, ai.ProviderGemini)
@@ -2160,7 +2160,9 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 			if !assigned {
 				switch role {
 				case RolePlanner, RoleArchitect, RoleReviewer:
-					if available[ai.ProviderClaude] {
+					if available[ai.ProviderDeepSeek] {
+						assignments[role] = ai.ProviderDeepSeek
+					} else if available[ai.ProviderClaude] {
 						assignments[role] = ai.ProviderClaude
 					}
 				case RoleFrontend, RoleBackend, RoleDatabase, RoleSolver:
@@ -2168,7 +2170,9 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 						assignments[role] = ai.ProviderGPT4
 					}
 				case RoleTesting:
-					if available[ai.ProviderGemini] {
+					if available[ai.ProviderGLM] {
+						assignments[role] = ai.ProviderGLM
+					} else if available[ai.ProviderGemini] {
 						assignments[role] = ai.ProviderGemini
 					}
 				}

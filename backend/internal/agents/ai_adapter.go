@@ -827,6 +827,8 @@ func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []ai.AIProvi
 				allowedBYOKProviders[ai.ProviderDeepSeek] = true
 			case "glm":
 				allowedBYOKProviders[ai.ProviderGLM] = true
+			case "grok", "xai", "x.ai":
+				allowedBYOKProviders[ai.ProviderGrok] = true
 			}
 		}
 	}

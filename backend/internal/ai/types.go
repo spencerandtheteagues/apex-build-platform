@@ -172,7 +172,9 @@ func DefaultRouterConfig() *RouterConfig {
 			ProviderDeepSeek: 0.20,
 			ProviderClaude:   0.15,
 			ProviderGPT4:     0.15,
-			ProviderGLM:      0.15,
+			ProviderGLM:      0.10,
+			ProviderGemini:   0.03,
+			ProviderGrok:     0.02,
 		},
 		RateLimits: map[AIProvider]int{
 			ProviderClaude:   100,

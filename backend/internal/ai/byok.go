@@ -246,6 +246,12 @@ func (m *BYOKManager) ValidateKey(ctx context.Context, userID uint, provider str
 			return false, fmt.Errorf("invalid Ollama URL: must start with http:// or https://")
 		}
 		client = NewOllamaClient(apiKey, "")
+	case ProviderDeepSeek:
+		// DeepSeek uses the Ollama-compatible endpoint with an API key
+		client = NewOllamaClient("https://api.deepseek.com/v1", apiKey)
+	case ProviderGLM:
+		// GLM uses the Ollama-compatible endpoint with an API key
+		client = NewOllamaClient("https://open.bigmodel.cn/api/paas/v4", apiKey)
 	default:
 		return false, fmt.Errorf("unsupported provider: %s", provider)
 	}
