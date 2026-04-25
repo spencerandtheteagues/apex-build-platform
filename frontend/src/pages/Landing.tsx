@@ -119,15 +119,23 @@ const AGENTS: Array<{
   body: string
   icon: IconType
 }> = [
-  { number: '01', name: 'Kimi K2.6 Conductor', model: 'Orchestration', body: 'Routes work, tracks dependencies, protects context, and keeps spend inside the build contract.', icon: Workflow },
-  { number: '02', name: 'Lead Architect', model: 'Claude Code lane', body: 'Owns architecture, data models, API contracts, security boundaries, and system shape.', icon: Layers3 },
-  { number: '03', name: 'Planner', model: 'Gemini context lane', body: 'Turns the prompt into work orders, checkpoints, acceptance criteria, and cross-agent memory.', icon: Brain },
-  { number: '04', name: 'Frontend', model: 'Codex builder lane', body: 'Builds React surfaces, layouts, state, accessibility, visual polish, and product flows.', icon: Code2 },
-  { number: '05', name: 'Backend', model: 'Codex builder lane', body: 'Builds APIs, middleware, auth, billing, integrations, background jobs, and services.', icon: TerminalSquare },
-  { number: '06', name: 'Database', model: 'Schema lane', body: 'Designs schema, migrations, seed data, query boundaries, and persistence contracts.', icon: Database },
-  { number: '07', name: 'Logic and Debug', model: 'Grok reasoning lane', body: 'Handles business rules, failure repair, integration conflicts, and complex edge cases.', icon: Cpu },
-  { number: '08', name: 'Testing', model: 'Verification lane', body: 'Runs unit, integration, E2E, accessibility, smoke, and deploy-readiness checks.', icon: ShieldCheck },
-  { number: '09', name: 'Reviewer and Docs', model: 'Review lane', body: 'Audits security, code quality, handoff docs, READMEs, runbooks, and launch evidence.', icon: FileCode2 },
+  { number: '01', name: 'Kimi K2.6 Conductor', model: 'Default: Kimi K2.6', body: 'Routes work, tracks dependencies, protects context, and keeps spend inside the build contract.', icon: Workflow },
+  { number: '02', name: 'Lead Architect', model: 'Default: Claude Code 4.7', body: 'Owns architecture, data models, API contracts, security boundaries, and system shape.', icon: Layers3 },
+  { number: '03', name: 'Planner', model: 'Default: Gemini 3.1 Pro', body: 'Turns the prompt into work orders, checkpoints, acceptance criteria, and cross-agent memory.', icon: Brain },
+  { number: '04', name: 'Frontend', model: 'Default: ChatGPT Codex 5.5', body: 'Builds React surfaces, layouts, state, accessibility, visual polish, and product flows.', icon: Code2 },
+  { number: '05', name: 'Backend', model: 'Default: ChatGPT Codex 5.5', body: 'Builds APIs, middleware, auth, billing, integrations, background jobs, and services.', icon: TerminalSquare },
+  { number: '06', name: 'Database', model: 'Default: Gemini 3.1 Pro', body: 'Designs schema, migrations, seed data, query boundaries, and persistence contracts.', icon: Database },
+  { number: '07', name: 'Logic and Debug', model: 'Default: Grok 4.20', body: 'Handles business rules, failure repair, integration conflicts, and complex edge cases.', icon: Cpu },
+  { number: '08', name: 'Testing', model: 'Default: Claude Code 4.7', body: 'Runs unit, integration, E2E, accessibility, smoke, and deploy-readiness checks.', icon: ShieldCheck },
+  { number: '09', name: 'Reviewer and Docs', model: 'Default: Claude Code 4.7 + Gemini 3.1 Pro', body: 'Audits security, code quality, handoff docs, READMEs, runbooks, and launch evidence.', icon: FileCode2 },
+]
+
+const MODEL_ASSIGNMENTS = [
+  ['Conductor', 'Kimi K2.6'],
+  ['Architecture + review', 'Claude Code 4.7'],
+  ['Frontend + backend', 'ChatGPT Codex 5.5'],
+  ['Planning + database', 'Gemini 3.1 Pro'],
+  ['Logic + debug', 'Grok 4.20'],
 ]
 
 const COMPARISON = [
@@ -833,10 +841,11 @@ const launchCss = `
 
   .agent-command-panel {
     position: relative;
+    isolation: isolate;
     border: 1px solid rgba(125, 231, 255, .16);
     border-radius: 22px;
     background:
-      linear-gradient(145deg, rgba(14, 21, 32, .88), rgba(2, 6, 12, .94)),
+      linear-gradient(145deg, rgba(10, 16, 26, .98), rgba(2, 6, 12, .99)),
       radial-gradient(circle at 80% 0%, rgba(56, 189, 248, .2), transparent 18rem);
     box-shadow:
       inset 0 1px 0 rgba(255,255,255,.08),
@@ -951,6 +960,67 @@ const launchCss = `
     font-family: "JetBrains Mono", Consolas, monospace;
   }
 
+  .agent-model-map {
+    position: relative;
+    z-index: 1;
+    margin-top: 16px;
+    border: 1px solid rgba(125, 231, 255, .12);
+    border-radius: 16px;
+    background: rgba(255,255,255,.035);
+    padding: 14px;
+  }
+
+  .agent-model-map > span,
+  .agent-custom-note span {
+    display: block;
+    color: #8da0b8;
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    margin-bottom: 10px;
+  }
+
+  .agent-model-map ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 8px;
+  }
+
+  .agent-model-map li {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    color: #aeb8c6;
+    font-size: .88rem;
+  }
+
+  .agent-model-map strong {
+    color: #f8fbff;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: .82rem;
+    text-align: right;
+  }
+
+  .agent-custom-note {
+    position: relative;
+    z-index: 1;
+    margin-top: 16px;
+    border: 1px solid rgba(110, 231, 183, .18);
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(6, 78, 59, .18), rgba(14, 165, 233, .08));
+    padding: 14px;
+  }
+
+  .agent-custom-note p {
+    margin: 0;
+    color: #d8e6f7;
+    line-height: 1.5;
+    font-size: .92rem;
+  }
+
   .agent-board {
     margin-top: 28px;
     display: grid;
@@ -1025,11 +1095,12 @@ const launchCss = `
   }
 
   .agent-model {
-    color: #8da0b8;
+    color: #b7eaff;
     font-size: .72rem;
     text-transform: uppercase;
-    letter-spacing: .1em;
+    letter-spacing: .08em;
     text-align: right;
+    max-width: 210px;
   }
 
   .agent-row strong {
@@ -1262,6 +1333,18 @@ const launchCss = `
     .agent-step,
     .agent-budget-line {
       grid-template-columns: 1fr;
+    }
+
+    .agent-model-map li,
+    .agent-budget-line {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .agent-model {
+      text-align: left;
+      max-width: none;
     }
 
     .cta-inner,
@@ -1597,9 +1680,27 @@ const Agents = () => (
             <div className="agent-step"><span>03</span><strong>Review</strong><em>running</em></div>
             <div className="agent-step"><span>04</span><strong>Deploy</strong><em>gated</em></div>
           </div>
+          <div className="agent-model-map" aria-label="Default model assignments">
+            <span>default model map</span>
+            <ul>
+              {MODEL_ASSIGNMENTS.map(([task, model]) => (
+                <li key={task}>
+                  {task}
+                  <strong>{model}</strong>
+                </li>
+              ))}
+            </ul>
+          </div>
           <div className="agent-budget-line">
             <span>current spend</span>
             <strong>$0.144 / $0.500</strong>
+          </div>
+          <div className="agent-custom-note">
+            <span>customizable routing</span>
+            <p>
+              These are default assignments. Swap any role to your own OpenAI, Anthropic,
+              Gemini, xAI, Kimi, Ollama cloud, or local model setup whenever you want.
+            </p>
           </div>
         </motion.aside>
       </div>
