@@ -9470,29 +9470,57 @@ func parseMissingLocalModuleRepairTargets(errors []string) []missingLocalModuleR
 		return nil
 	}
 
-	re := regexp.MustCompile(`source imports local module "([^"]+)" from "([^"]+)" but generated file "([^"]+)" is missing`)
+	// Pattern 1: from validateGeneratedLocalModuleImports pre-build static check
+	reStatic := regexp.MustCompile(`source imports local module "([^"]+)" from "([^"]+)" but generated file "([^"]+)" is missing`)
+	// Pattern 2: TypeScript compiler TS2307 errors from npm run build output
+	// e.g. src/App.tsx(5,1): error TS2307: Cannot find module './components/Foo' or its corresponding type declarations.
+	reTS2307 := regexp.MustCompile(`([^\s(:\n]+)\(\d+,\d+\): error TS2307: Cannot find module ['"]([^'"]+)['"]`)
+
 	seen := map[string]bool{}
 	targets := make([]missingLocalModuleRepairTarget, 0)
+
+	addTarget := func(specifier, sourcePath, targetPath string) {
+		specifier = strings.TrimSpace(specifier)
+		sourcePath = sanitizeFilePath(strings.TrimSpace(sourcePath))
+		targetPath = sanitizeFilePath(strings.TrimSpace(targetPath))
+		if sourcePath == "" || targetPath == "" || specifier == "" {
+			return
+		}
+		key := sourcePath + "|" + specifier + "|" + targetPath
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		targets = append(targets, missingLocalModuleRepairTarget{
+			Specifier:  specifier,
+			SourcePath: sourcePath,
+			TargetPath: targetPath,
+		})
+	}
+
 	for _, msg := range errors {
-		matches := re.FindAllStringSubmatch(msg, -1)
-		for _, match := range matches {
-			if len(match) != 4 {
+		// Static pre-build checker format (3 capture groups: specifier, source, target)
+		for _, match := range reStatic.FindAllStringSubmatch(msg, -1) {
+			if len(match) == 4 {
+				addTarget(match[1], match[2], match[3])
+			}
+		}
+		// TypeScript compiler TS2307 format (2 capture groups: source, specifier)
+		// Only handle relative and @/ imports — npm package 404s are handled separately.
+		for _, match := range reTS2307.FindAllStringSubmatch(msg, -1) {
+			if len(match) != 3 {
 				continue
 			}
-			target := missingLocalModuleRepairTarget{
-				Specifier:  strings.TrimSpace(match[1]),
-				SourcePath: sanitizeFilePath(strings.TrimSpace(match[2])),
-				TargetPath: sanitizeFilePath(strings.TrimSpace(match[3])),
-			}
-			if target.SourcePath == "" || target.TargetPath == "" || target.Specifier == "" {
+			sourcePath := strings.TrimSpace(match[1])
+			specifier := strings.TrimSpace(match[2])
+			if !strings.HasPrefix(specifier, ".") && !strings.HasPrefix(specifier, "@/") && !strings.HasPrefix(specifier, "~/") {
 				continue
 			}
-			key := target.SourcePath + "|" + target.Specifier + "|" + target.TargetPath
-			if seen[key] {
+			candidates := localImportResolutionCandidates(sourcePath, specifier)
+			if len(candidates) == 0 {
 				continue
 			}
-			seen[key] = true
-			targets = append(targets, target)
+			addTarget(specifier, sourcePath, candidates[0])
 		}
 	}
 	sort.Slice(targets, func(i, j int) bool {
@@ -10804,6 +10832,86 @@ func (am *AgentManager) applyDeterministicSequelizeTypescriptTableRepair(build *
 
 	summary := "sequelize table option normalization on " + strings.Join(applied, ", ")
 	return am.bundleFromPatchPlan(build.ID, files, plan, "sequelize_typescript_table_repair: "+summary), summary
+}
+
+// applyDeterministicShadcnNamespaceRepair rewrites incorrect dot-notation shadcn component
+// usage (e.g. <Dialog.Content>, <Sheet.Overlay>) to the correct named exports
+// (e.g. <DialogContent>, <SheetOverlay>). LLMs frequently generate this pattern because
+// they confuse shadcn/ui's named-export API with Radix's namespace-object API.
+func (am *AgentManager) applyDeterministicShadcnNamespaceRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
+	if build == nil {
+		return nil, ""
+	}
+
+	files, plan := am.buildGeneratedFilePatchPlan(build)
+	if len(files) == 0 {
+		return nil, ""
+	}
+
+	// shadcn components that are commonly misused with dot-notation.
+	// The pattern is always <ComponentName.SubName> → <ComponentNameSubName>.
+	shadcnComponents := []string{
+		"Dialog", "Sheet", "Alert", "AlertDialog", "Card",
+		"DropdownMenu", "Select", "Popover", "Tooltip", "HoverCard",
+		"NavigationMenu", "ContextMenu", "Menubar", "Accordion",
+		"Collapsible", "Command", "Drawer", "Tabs",
+	}
+
+	applied := make([]string, 0)
+	for _, f := range files {
+		ext := strings.ToLower(filepath.Ext(f.Path))
+		if ext != ".tsx" && ext != ".jsx" {
+			continue
+		}
+		content := plan.content(f.Path)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+
+		rewritten := content
+		changed := false
+		for _, comp := range shadcnComponents {
+			// Match JSX open tags: <Dialog.Content, <Dialog.Overlay, etc.
+			reOpen := regexp.MustCompile(`<` + regexp.QuoteMeta(comp) + `\.([A-Z][A-Za-z]*)`)
+			if reOpen.MatchString(rewritten) {
+				rewritten = reOpen.ReplaceAllStringFunc(rewritten, func(m string) string {
+					sub := reOpen.FindStringSubmatch(m)
+					if len(sub) == 2 {
+						return "<" + comp + sub[1]
+					}
+					return m
+				})
+				changed = true
+			}
+			// Match JSX close tags: </Dialog.Content>
+			reClose := regexp.MustCompile(`</` + regexp.QuoteMeta(comp) + `\.([A-Z][A-Za-z]*)`)
+			if reClose.MatchString(rewritten) {
+				rewritten = reClose.ReplaceAllStringFunc(rewritten, func(m string) string {
+					sub := reClose.FindStringSubmatch(m)
+					if len(sub) == 2 {
+						return "</" + comp + sub[1]
+					}
+					return m
+				})
+				changed = true
+			}
+		}
+
+		if !changed {
+			continue
+		}
+		if !plan.patchFile(f.Path, rewritten, am.detectLanguage(f.Path)) {
+			continue
+		}
+		applied = append(applied, f.Path)
+	}
+
+	if len(applied) == 0 {
+		return nil, ""
+	}
+
+	summary := "shadcn namespace-to-named-export rewrite on " + strings.Join(applied, ", ")
+	return am.bundleFromPatchPlan(build.ID, files, plan, "shadcn_namespace_repair: "+summary), summary
 }
 
 func (am *AgentManager) applyDeterministicBrokenGeneratedTestRepair(build *Build, readinessErrors []string) (*PatchBundle, string) {
@@ -14543,6 +14651,12 @@ func (am *AgentManager) applyDeterministicValidationRepairs(
 			errorFormat: "Final output validation failed: %s (applied missing local module repair: %s)",
 			message:     "Applied deterministic local module repair for missing generated frontend files. Re-running final validation before solver recovery.",
 			summaryKey:  "missing_local_module_repair",
+		},
+		{
+			apply:       am.applyDeterministicShadcnNamespaceRepair,
+			errorFormat: "Final output validation failed: %s (applied shadcn namespace repair: %s)",
+			message:     "Applied deterministic shadcn dot-notation repair (rewrote Dialog.Content → DialogContent etc.). Re-running final validation before solver recovery.",
+			summaryKey:  "shadcn_namespace_repair",
 		},
 		{
 			apply:       am.applyDeterministicExportMismatchRepair,
