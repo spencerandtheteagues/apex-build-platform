@@ -2624,6 +2624,25 @@ func markTaskAssignmentFailure(build *Build, task *Task, err error) {
 	build.mu.Unlock()
 }
 
+func releaseCancelledTaskFromAgent(agent *Agent, taskID string, now time.Time) {
+	if agent == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
+
+	if agent.CurrentTask == nil || agent.CurrentTask.ID != taskID {
+		return
+	}
+	agent.CurrentTask = nil
+	if agent.Status == StatusWorking || agent.Status == StatusWaiting {
+		agent.Status = StatusIdle
+	}
+	agent.Error = ""
+	agent.UpdatedAt = now
+}
+
 func removeBuildTaskByID(tasks []*Task, taskID string) []*Task {
 	if len(tasks) == 0 || strings.TrimSpace(taskID) == "" {
 		return tasks
@@ -5278,8 +5297,20 @@ func (am *AgentManager) processResult(result *TaskResult) {
 		return
 	}
 	if task.Status == TaskCancelled {
+		now := time.Now()
+		if agent.CurrentTask != nil && agent.CurrentTask.ID == task.ID {
+			agent.CurrentTask = nil
+		}
+		if agent.Status == StatusWorking || agent.Status == StatusWaiting {
+			agent.Status = StatusIdle
+		}
+		agent.Error = ""
+		agent.UpdatedAt = now
 		agent.mu.Unlock()
 		log.Printf("Dropping result for cancelled task %s (agent %s)", task.ID, result.AgentID)
+		if build, err := am.GetBuild(agent.BuildID); err == nil {
+			am.checkBuildCompletion(build)
+		}
 		return
 	}
 
@@ -5312,8 +5343,16 @@ func (am *AgentManager) processResult(result *TaskResult) {
 		if task != nil && task.Status != TaskCompleted && task.Status != TaskFailed {
 			task.Status = TaskCancelled
 		}
-		agent.UpdatedAt = time.Now()
+		now := time.Now()
+		if task != nil && agent.CurrentTask != nil && agent.CurrentTask.ID == task.ID {
+			agent.CurrentTask = nil
+		}
+		if agent.Status == StatusWorking || agent.Status == StatusWaiting {
+			agent.Status = StatusIdle
+		}
+		agent.UpdatedAt = now
 		agent.mu.Unlock()
+		am.checkBuildCompletion(build)
 		return
 	}
 
@@ -9990,6 +10029,9 @@ func (am *AgentManager) applyDeterministicMissingLocalModuleRepair(build *Build,
 			continue
 		}
 		sourceContent := plan.content(target.SourcePath)
+		if !sourceContentImportsSpecifier(sourceContent, target.Specifier) {
+			continue
+		}
 		binding := parseGeneratedImportBinding(sourceContent, target.Specifier)
 		content := missingLocalModulePlaceholderContent(target.TargetPath, binding)
 		language := am.detectLanguage(target.TargetPath)
@@ -14545,9 +14587,14 @@ func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
 	}
 
 	build.mu.Lock()
-	defer build.mu.Unlock()
 
 	cancelled := 0
+	now := time.Now()
+	type agentRelease struct {
+		agent  *Agent
+		taskID string
+	}
+	releases := make([]agentRelease, 0)
 	for _, task := range build.Tasks {
 		if task == nil {
 			continue
@@ -14559,12 +14606,25 @@ func (am *AgentManager) cancelAutomatedRecoveryTasksForLoopCap(build *Build) {
 		if !isRecoveryAction(action) {
 			continue
 		}
+		if task.Status == TaskInProgress {
+			if assignedID := strings.TrimSpace(task.AssignedTo); assignedID != "" {
+				if agent := build.Agents[assignedID]; agent != nil {
+					releases = append(releases, agentRelease{agent: agent, taskID: task.ID})
+				}
+			}
+		}
 		task.Status = TaskCancelled
+		task.CompletedAt = &now
 		cancelled++
 	}
 	if cancelled > 0 {
-		build.UpdatedAt = time.Now()
+		build.UpdatedAt = now
 		log.Printf("Build %s: cancelled %d automated recovery task(s) after loop cap", build.ID, cancelled)
+	}
+	build.mu.Unlock()
+
+	for _, release := range releases {
+		releaseCancelledTaskFromAgent(release.agent, release.taskID, now)
 	}
 }
 

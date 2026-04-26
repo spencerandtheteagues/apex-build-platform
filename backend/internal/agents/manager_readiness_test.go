@@ -2011,11 +2011,21 @@ func TestTaskHasRecentTruncationError(t *testing.T) {
 func TestCancelAutomatedRecoveryTasksForLoopCap(t *testing.T) {
 	t.Parallel()
 
+	agent := &Agent{
+		ID:     "solver-1",
+		Role:   RoleSolver,
+		Status: StatusWorking,
+	}
+	recoveryTask := &Task{ID: "t1", Type: TaskFix, Status: TaskInProgress, AssignedTo: agent.ID, Input: map[string]any{"action": "fix_review_issues"}}
+	agent.CurrentTask = recoveryTask
 	am := &AgentManager{}
 	build := &Build{
 		ID: "b1",
+		Agents: map[string]*Agent{
+			agent.ID: agent,
+		},
 		Tasks: []*Task{
-			{ID: "t1", Type: TaskFix, Status: TaskInProgress, Input: map[string]any{"action": "fix_review_issues"}},
+			recoveryTask,
 			{ID: "t2", Type: TaskTest, Status: TaskPending, Input: map[string]any{"action": "regression_test"}},
 			{ID: "t3", Type: TaskReview, Status: TaskPending, Input: map[string]any{"action": "post_fix_review"}},
 			{ID: "t4", Type: TaskReview, Status: TaskCompleted, Input: map[string]any{"action": "post_fix_review"}},
@@ -2039,6 +2049,12 @@ func TestCancelAutomatedRecoveryTasksForLoopCap(t *testing.T) {
 	}
 	if build.Tasks[4].Status != TaskInProgress {
 		t.Fatalf("expected non-recovery task unchanged, got %s", build.Tasks[4].Status)
+	}
+	if agent.CurrentTask != nil {
+		t.Fatalf("expected cancelled recovery task to be released from agent, got %+v", agent.CurrentTask)
+	}
+	if agent.Status != StatusIdle {
+		t.Fatalf("expected agent to return to idle after loop-cap cancellation, got %s", agent.Status)
 	}
 }
 
@@ -3018,6 +3034,49 @@ async function seed() {
 	}
 	if !strings.Contains(decl.Content, "export = defaultExport;") {
 		t.Fatalf("expected CommonJS declaration export assignment, got %q", decl.Content)
+	}
+}
+
+func TestApplyDeterministicMissingLocalModuleRepairSkipsStaleTargets(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		ID:        "build-stale-missing-local-module-repair",
+		Status:    BuildReviewing,
+		Mode:      ModeFull,
+		PowerMode: PowerBalanced,
+		SnapshotFiles: []GeneratedFile{
+			{
+				Path: "src/components/dashboard/DashboardHome.tsx",
+				Content: `import KPICard from './KPICard';
+
+export default function DashboardHome() {
+  return <KPICard />;
+}
+`,
+				IsNew: true,
+			},
+			{
+				Path: "src/components/dashboard/KPICard.tsx",
+				Content: `export default function KPICard() {
+  return <div>kpi</div>;
+}
+`,
+				IsNew: true,
+			},
+		},
+	}
+
+	bundle, summary := am.applyDeterministicMissingLocalModuleRepair(
+		build,
+		[]string{
+			`Preview verification build failed: src/components/dashboard/DashboardHome.tsx(7,22): error TS2307: Cannot find module './StatCard' or its corresponding type declarations.`,
+			`Preview verification local import check failed: source imports local module "./StatCard.cjs" from "src/components/dashboard/DashboardHome.tsx" but generated file "src/components/dashboard/StatCard.cjs" is missing`,
+		},
+	)
+	if bundle != nil || summary != "" {
+		t.Fatalf("expected stale missing-module errors to be ignored, got bundle=%+v summary=%q", bundle, summary)
 	}
 }
 
