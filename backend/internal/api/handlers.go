@@ -414,10 +414,9 @@ func (s *Server) Login(c *gin.Context) {
 
 	// Block unverified users — admin/super-admin bypass for convenience
 	if !user.IsVerified && user.EmailVerifiedAt == nil && !user.IsAdmin {
-		// Re-issue a fresh code so they can complete verification without extra steps
-		go func() { _ = s.issueVerificationCode(&user) }()
+		go func(user models.User) { _ = s.issueVerificationCodeIfNeeded(&user) }(user)
 		c.JSON(http.StatusForbidden, gin.H{
-			"error":      "Email not verified. A new code has been sent to your email address.",
+			"error":      "Email not verified. Enter the latest verification code from your email, or request a new one.",
 			"error_code": "email_not_verified",
 			"email":      maskEmail(user.Email),
 		})

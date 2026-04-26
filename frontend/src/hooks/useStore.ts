@@ -614,9 +614,9 @@ export const useStore = create<StoreState & StoreActions>()(
 
         verifyEmail: async (code: string) => {
           const { verificationPending, user } = get()
-          // Authenticated path (just registered): no email needed
-          // Unauthenticated path (failed login): pass stored email
-          const emailForVerify = user ? undefined : (verificationPending?.email || undefined)
+          // Authenticated requests use cookies; include email as a fallback for
+          // browsers/environments where the verification cookie was not present.
+          const emailForVerify = user?.email || verificationPending?.email || undefined
           const response = await apiService.verifyEmail(code, emailForVerify)
 
           if (response.user) {
@@ -638,7 +638,7 @@ export const useStore = create<StoreState & StoreActions>()(
 
         resendVerification: async () => {
           const { verificationPending, user } = get()
-          const email = user ? undefined : (verificationPending?.email || undefined)
+          const email = user?.email || verificationPending?.email || undefined
           await apiService.resendVerification(email)
           get().addNotification({
             type: 'info',

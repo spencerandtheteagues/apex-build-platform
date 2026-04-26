@@ -782,8 +782,7 @@ function App() {
       await verifyEmail(trimmed)
       setVerifyCode('')
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Invalid or expired code.'
-      setVerifyError(msg)
+      setVerifyError(getApiErrorMessage(err, 'Invalid or expired code.'))
     } finally {
       setIsVerifying(false)
     }
