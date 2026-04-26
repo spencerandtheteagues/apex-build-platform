@@ -73,3 +73,39 @@ func TestGetCurrentlyAvailableProvidersForBuild_UsesBYOKProviders(t *testing.T) 
 		t.Fatalf("expected BYOK user providers [ollama], got %v", got)
 	}
 }
+
+func TestGetCurrentlyAvailableProvidersForBuild_RetainsRecentSuccessfulOllama(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4},
+			hasConfiguredProvider: true,
+		},
+	}
+
+	completedAt := time.Now().Add(-30 * time.Second)
+	build := &Build{
+		ID:           "sticky-ollama-build",
+		ProviderMode: "platform",
+		Agents: map[string]*Agent{
+			"lead-1": {
+				ID:       "lead-1",
+				Role:     RoleLead,
+				Provider: ai.ProviderOllama,
+			},
+		},
+		Tasks: []*Task{
+			{
+				ID:          "plan-1",
+				Type:        TaskPlan,
+				Status:      TaskCompleted,
+				AssignedTo:  "lead-1",
+				CompletedAt: &completedAt,
+			},
+		},
+	}
+
+	got := am.getCurrentlyAvailableProvidersForBuild(build)
+	if len(got) != 3 || got[0] != ai.ProviderOllama {
+		t.Fatalf("expected retained providers [ollama claude gpt4], got %v", got)
+	}
+}

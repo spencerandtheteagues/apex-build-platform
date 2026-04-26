@@ -830,7 +830,10 @@ func (am *AgentManager) cvSelectInlineRepairProvider(build *Build) ai.AIProvider
 		}
 		return ""
 	}
-	providers := am.aiRouter.GetAvailableProvidersForUser(build.UserID)
+	providers := am.getCurrentlyAvailableProvidersForBuild(build)
+	if len(providers) == 0 {
+		providers = am.aiRouter.GetAvailableProvidersForUser(build.UserID)
+	}
 	if len(providers) == 0 {
 		providers = am.aiRouter.GetAvailableProviders()
 	}
@@ -842,9 +845,9 @@ func (am *AgentManager) cvSelectInlineRepairProvider(build *Build) ai.AIProvider
 	for _, p := range providers {
 		available[p] = true
 	}
-	// Prefer Claude for structural reasoning, then Grok for speed/code quality,
-	// then whatever is available.
-	for _, preferred := range []ai.AIProvider{ai.ProviderClaude, ai.ProviderGrok, ai.ProviderGPT4, ai.ProviderGemini} {
+	// Prefer managed Ollama/Kimi first so inline repair follows the same primary
+	// model family as the active build, then fall back to the cloud providers.
+	for _, preferred := range []ai.AIProvider{ai.ProviderOllama, ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok} {
 		if available[preferred] {
 			return preferred
 		}

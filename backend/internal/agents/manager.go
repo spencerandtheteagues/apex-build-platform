@@ -1123,12 +1123,13 @@ func (am *AgentManager) getAvailableProvidersWithGracePeriodForBuild(build *Buil
 	}
 	if build != nil && !am.buildUsesPlatformKeys(build) {
 		providers := am.aiRouter.GetAvailableProvidersForUser(build.UserID)
+		providers = am.retainRecentSuccessfulBuildProviders(build, providers)
 		if len(providers) == 0 {
 			log.Printf("No BYOK providers available for user %d", build.UserID)
 		}
 		return providers
 	}
-	return hostedPlatformProviders(am.getAvailableProvidersWithGracePeriod())
+	return am.retainRecentSuccessfulBuildProviders(build, hostedPlatformProviders(am.getAvailableProvidersWithGracePeriod()))
 }
 
 func (am *AgentManager) getCurrentlyAvailableProvidersForBuild(build *Build) []ai.AIProvider {
@@ -1136,9 +1137,62 @@ func (am *AgentManager) getCurrentlyAvailableProvidersForBuild(build *Build) []a
 		return nil
 	}
 	if build != nil && !am.buildUsesPlatformKeys(build) {
-		return am.aiRouter.GetAvailableProvidersForUser(build.UserID)
+		return am.retainRecentSuccessfulBuildProviders(build, am.aiRouter.GetAvailableProvidersForUser(build.UserID))
 	}
-	return hostedPlatformProviders(am.aiRouter.GetAvailableProviders())
+	return am.retainRecentSuccessfulBuildProviders(build, hostedPlatformProviders(am.aiRouter.GetAvailableProviders()))
+}
+
+func (am *AgentManager) retainRecentSuccessfulBuildProviders(build *Build, providers []ai.AIProvider) []ai.AIProvider {
+	if build == nil || providerListContains(providers, ai.ProviderOllama) {
+		return providers
+	}
+	if !buildRecentlySucceededWithProvider(build, ai.ProviderOllama, 5*time.Minute) {
+		return providers
+	}
+
+	next := make([]ai.AIProvider, 0, len(providers)+1)
+	next = append(next, ai.ProviderOllama)
+	for _, provider := range providers {
+		if provider != ai.ProviderOllama {
+			next = append(next, provider)
+		}
+	}
+	log.Printf("Build %s: retaining ollama for the active build because a recent task already succeeded with it", build.ID)
+	return next
+}
+
+func providerListContains(providers []ai.AIProvider, target ai.AIProvider) bool {
+	for _, provider := range providers {
+		if provider == target {
+			return true
+		}
+	}
+	return false
+}
+
+func buildRecentlySucceededWithProvider(build *Build, provider ai.AIProvider, window time.Duration) bool {
+	if build == nil || provider == "" {
+		return false
+	}
+
+	cutoff := time.Now().Add(-window)
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+
+	for _, task := range build.Tasks {
+		if task == nil || task.Status != TaskCompleted {
+			continue
+		}
+		if task.CompletedAt != nil && task.CompletedAt.Before(cutoff) {
+			continue
+		}
+		agent := build.Agents[strings.TrimSpace(task.AssignedTo)]
+		if agent == nil || agent.Provider != provider {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // inactivityMonitor checks for build inactivity and broadcasts errors if AI isn't responding.
@@ -2622,6 +2676,37 @@ func markTaskAssignmentFailure(build *Build, task *Task, err error) {
 	task.Status = assignmentFailureTerminalStatus(err)
 	build.UpdatedAt = now
 	build.mu.Unlock()
+}
+
+func isAutomatedFixWriterAction(action string) bool {
+	switch strings.TrimSpace(action) {
+	case "fix_review_issues", "fix_tests", "fix_integration_contract", "solve_build_failure", "fix_preview_verification":
+		return true
+	default:
+		return false
+	}
+}
+
+func (am *AgentManager) hasActiveAutomatedFixWriterTask(build *Build) bool {
+	if build == nil {
+		return false
+	}
+
+	build.mu.RLock()
+	defer build.mu.RUnlock()
+
+	for _, task := range build.Tasks {
+		if task == nil || task.Type != TaskFix {
+			continue
+		}
+		if task.Status != TaskPending && task.Status != TaskInProgress {
+			continue
+		}
+		if isAutomatedFixWriterAction(taskInputStringValue(task.Input, "action")) {
+			return true
+		}
+	}
+	return false
 }
 
 func releaseCancelledTaskFromAgent(agent *Agent, taskID string, now time.Time) {
@@ -6345,7 +6430,7 @@ func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task
 	}
 	build.mu.RUnlock()
 
-	newTasks := make([]*Task, 0, 2)
+	newTasks := make([]*Task, 0, 1)
 	now := time.Now()
 
 	if testAgent != nil {
@@ -6357,16 +6442,15 @@ func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task
 			Status:      TaskPending,
 			MaxRetries:  build.MaxRetries,
 			Input: map[string]any{
-				"action":             "regression_test",
-				"trigger_task":       sourceTask.ID,
-				"app_description":    build.Description,
-				"fix_context_action": sourceTask.Input["action"],
+				"action":                   "regression_test",
+				"trigger_task":             sourceTask.ID,
+				"app_description":          build.Description,
+				"fix_context_action":       sourceTask.Input["action"],
+				"schedule_post_fix_review": reviewAgent != nil,
 			},
 			CreatedAt: now,
 		})
-	}
-
-	if reviewAgent != nil {
+	} else if reviewAgent != nil {
 		newTasks = append(newTasks, &Task{
 			ID:          uuid.New().String(),
 			Type:        TaskReview,
@@ -6416,10 +6500,69 @@ func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task
 		Data: map[string]any{
 			"phase":                 "validation",
 			"status":                string(BuildReviewing),
-			"message":               "Automated fixes applied. Running regression testing and review.",
+			"message":               "Automated fixes applied. Running regression testing before the final review.",
 			"quality_gate_required": true,
 			"quality_gate_active":   true,
 			"quality_gate_stage":    "validation",
+		},
+	})
+}
+
+func (am *AgentManager) schedulePostFixReviewAfterRegression(build *Build, sourceTask *Task) {
+	if build == nil || sourceTask == nil {
+		return
+	}
+
+	var reviewAgent *Agent
+	build.mu.RLock()
+	for _, agent := range build.Agents {
+		if agent.Role == RoleReviewer {
+			reviewAgent = agent
+			break
+		}
+	}
+	build.mu.RUnlock()
+	if reviewAgent == nil {
+		return
+	}
+
+	task := &Task{
+		ID:          uuid.New().String(),
+		Type:        TaskReview,
+		Description: "Final review after successful regression testing",
+		Priority:    87,
+		Status:      TaskPending,
+		MaxRetries:  build.MaxRetries,
+		Input: map[string]any{
+			"action":             "post_fix_review",
+			"trigger_task":       sourceTask.ID,
+			"app_description":    build.Description,
+			"fix_context_action": sourceTask.Input["fix_context_action"],
+		},
+		CreatedAt: time.Now(),
+	}
+
+	build.mu.Lock()
+	build.Tasks = append(build.Tasks, task)
+	build.UpdatedAt = time.Now()
+	build.mu.Unlock()
+
+	if err := am.AssignTask(reviewAgent.ID, task); err != nil {
+		log.Printf("Build %s: failed to assign post-regression review task %s: %v", build.ID, task.ID, err)
+		markTaskAssignmentFailure(build, task, fmt.Errorf("post-regression review task could not be assigned: %w", err))
+	}
+
+	am.broadcast(build.ID, &WSMessage{
+		Type:      WSBuildProgress,
+		BuildID:   build.ID,
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"phase":                 "validation",
+			"status":                string(BuildReviewing),
+			"message":               "Regression checks passed. Running the final review.",
+			"quality_gate_required": true,
+			"quality_gate_active":   true,
+			"quality_gate_stage":    "review",
 		},
 	})
 }
@@ -6525,6 +6668,12 @@ func (am *AgentManager) handleTestCompletion(build *Build, sourceTask *Task, out
 		} else if err := am.AssignTask(agent.ID, fixTask); err != nil {
 			log.Printf("Failed to assign test fix task %s to agent %s: %v", fixTask.ID, agent.ID, err)
 			markTaskAssignmentFailure(build, fixTask, fmt.Errorf("test fix task could not be assigned: %w", err))
+		}
+	}
+
+	if !hasFailures && sourceTask != nil {
+		if scheduleReview, _ := sourceTask.Input["schedule_post_fix_review"].(bool); scheduleReview {
+			am.schedulePostFixReviewAfterRegression(build, sourceTask)
 		}
 	}
 
@@ -6705,6 +6854,9 @@ func (am *AgentManager) canCreateAutomatedFixTask(build *Build, action string) b
 		return true
 	}
 
+	if isAutomatedFixWriterAction(action) && am.hasActiveAutomatedFixWriterTask(build) {
+		return false
+	}
 	if am.hasRecentOrActiveAutomatedFixTask(build, action) {
 		return false
 	}
@@ -16196,6 +16348,7 @@ func normalizeGeneratedFileContent(path, content string) string {
 	// Strip patch/merge markers that deepseek and other models sometimes emit.
 	// Must run before other normalization so downstream checks see clean content.
 	content = stripPatchOrMergeMarkersFromContent(content)
+	content = stripTaskProtocolArtifacts(content)
 	content = unwrapGeneratedFilePresentation(path, content)
 
 	if strings.TrimSpace(content) == "" || !strings.Contains(content, "''") {
@@ -16231,6 +16384,29 @@ func normalizeGeneratedFileContent(path, content string) string {
 	content = strings.ReplaceAll(content, "''", "'")
 	content = normalizeGeneratedTypeScriptInteropPatterns(path, content)
 	return normalizeGeneratedTSConfigBuildExcludes(path, content)
+}
+
+func stripTaskProtocolArtifacts(content string) string {
+	if strings.TrimSpace(content) == "" {
+		return content
+	}
+
+	clean, _, _ := extractTaskCheckins(content)
+	if !strings.Contains(clean, "<task_start_ack>") && !strings.Contains(clean, "<task_completion_report>") &&
+		!strings.Contains(clean, "</task_start_ack>") && !strings.Contains(clean, "</task_completion_report>") {
+		return clean
+	}
+
+	replacements := []string{
+		"<task_start_ack>",
+		"</task_start_ack>",
+		"<task_completion_report>",
+		"</task_completion_report>",
+	}
+	for _, marker := range replacements {
+		clean = strings.ReplaceAll(clean, marker, "")
+	}
+	return strings.TrimSpace(clean)
 }
 
 func unwrapGeneratedFilePresentation(path, content string) string {

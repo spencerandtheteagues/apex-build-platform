@@ -1458,6 +1458,19 @@ export default function App() {
 		}
 	})
 
+	t.Run("strips_task_protocol_tags_from_generated_source", func(t *testing.T) {
+		t.Parallel()
+
+		in := "import React from 'react';\n<task_completion_report>{\"summary\":\"done\"}</task_completion_report>\nexport default function App() {\n  return <h1>Preview Smoke Pass</h1>;\n}\n"
+		got := normalizeGeneratedFileContent("src/App.tsx", in)
+		if strings.Contains(got, "task_completion_report") {
+			t.Fatalf("expected task protocol tags to be removed, got %q", got)
+		}
+		if !strings.Contains(got, "export default function App()") {
+			t.Fatalf("expected component body to remain intact, got %q", got)
+		}
+	})
+
 	t.Run("does_not_touch_non_code_without_strong_indicators", func(t *testing.T) {
 		t.Parallel()
 
@@ -1617,6 +1630,30 @@ func TestCanCreateAutomatedFixTask_DedupesActiveAndRecent(t *testing.T) {
 	build.Tasks[0].CreatedAt = time.Now().Add(-30 * time.Second)
 	if !am.canCreateAutomatedFixTask(build, "fix_review_issues") {
 		t.Fatalf("expected old completed fix task to allow new creation")
+	}
+}
+
+func TestCanCreateAutomatedFixTask_BlocksConcurrentWriterAcrossActions(t *testing.T) {
+	t.Parallel()
+
+	am := &AgentManager{}
+	build := &Build{
+		Mode: ModeFast,
+		Tasks: []*Task{
+			{
+				ID:        "writer-1",
+				Type:      TaskFix,
+				Status:    TaskInProgress,
+				CreatedAt: time.Now(),
+				Input: map[string]any{
+					"action": "fix_review_issues",
+				},
+			},
+		},
+	}
+
+	if am.canCreateAutomatedFixTask(build, "fix_tests") {
+		t.Fatalf("expected active fix_review_issues task to block concurrent fix_tests writer")
 	}
 }
 

@@ -96,6 +96,22 @@ func modelBelongsToProvider(provider ai.AIProvider, model string) bool {
 	case ai.ProviderGLM:
 		return strings.HasPrefix(normalized, "glm-")
 	case ai.ProviderOllama:
+		for _, foreignPrefix := range []string{
+			"claude-",
+			"gpt-",
+			"chatgpt-",
+			"o1",
+			"o3",
+			"o4",
+			"gemini-",
+			"grok-",
+			"deepseek-",
+			"glm-",
+		} {
+			if strings.HasPrefix(normalized, foreignPrefix) {
+				return false
+			}
+		}
 		return true
 	default:
 		return false
@@ -138,6 +154,9 @@ func providerModelOverrideForBuild(build *Build, provider ai.AIProvider) string 
 }
 
 func selectBuildModelForProviderLocked(build *Build, provider ai.AIProvider) string {
+	if build != nil && provider == ai.ProviderOllama && strings.TrimSpace(strings.ToLower(build.ProviderMode)) != "byok" {
+		return defaultOllamaModelForMode()
+	}
 	if override := providerModelOverrideForBuildLocked(build, provider); override != "" {
 		return override
 	}

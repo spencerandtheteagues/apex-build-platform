@@ -211,16 +211,71 @@ func TestSchedulePostFixValidation_AssignmentFailureFailsValidationTasks(t *test
 
 	manager.schedulePostFixValidation(build, sourceTask)
 
-	if len(build.Tasks) != 3 {
-		t.Fatalf("expected test and review validation tasks, got %d tasks", len(build.Tasks))
+	if len(build.Tasks) != 2 {
+		t.Fatalf("expected only the regression validation task, got %d tasks", len(build.Tasks))
 	}
-	for _, task := range build.Tasks[1:] {
-		if task.Status != TaskFailed {
-			t.Fatalf("expected validation task %s to fail fast on assignment error, got %s", task.ID, task.Status)
-		}
-		if !strings.Contains(task.Error, "could not be assigned") {
-			t.Fatalf("expected assignment error on %s, got %q", task.ID, task.Error)
-		}
+	task := build.Tasks[1]
+	if task.Type != TaskTest {
+		t.Fatalf("expected regression validation task, got %s", task.Type)
+	}
+	if task.Status != TaskFailed {
+		t.Fatalf("expected validation task %s to fail fast on assignment error, got %s", task.ID, task.Status)
+	}
+	if !strings.Contains(task.Error, "could not be assigned") {
+		t.Fatalf("expected assignment error on %s, got %q", task.ID, task.Error)
+	}
+}
+
+func TestHandleTestCompletion_SchedulesPostFixReviewAfterPassingRegression(t *testing.T) {
+	t.Parallel()
+
+	manager := newTestIterationManager(nil)
+	manager.taskQueue = make(chan *Task, 8)
+	build := &Build{
+		ID:          "post-fix-regression-pass-build",
+		Status:      BuildReviewing,
+		Description: "Exercise serialized post-fix validation",
+		MaxRetries:  2,
+		Agents: map[string]*Agent{
+			"reviewer-1": {
+				ID:      "reviewer-1",
+				BuildID: "post-fix-regression-pass-build",
+				Role:    RoleReviewer,
+				Status:  StatusIdle,
+				Model:   "kimi-k2.6:cloud",
+			},
+		},
+	}
+	sourceTask := &Task{
+		ID:     "regression-task",
+		Type:   TaskTest,
+		Status: TaskCompleted,
+		Input: map[string]any{
+			"action":                   "regression_test",
+			"schedule_post_fix_review": true,
+			"fix_context_action":       "solve_build_failure",
+		},
+	}
+	build.Tasks = []*Task{sourceTask}
+	manager.builds[build.ID] = build
+	manager.agents["reviewer-1"] = build.Agents["reviewer-1"]
+
+	manager.handleTestCompletion(build, sourceTask, &TaskOutput{
+		Messages: []string{"All regression checks passed"},
+	})
+
+	if len(build.Tasks) != 2 {
+		t.Fatalf("expected a follow-up review task, got %d tasks", len(build.Tasks))
+	}
+	reviewTask := build.Tasks[1]
+	if reviewTask.Type != TaskReview {
+		t.Fatalf("expected follow-up task type %s, got %s", TaskReview, reviewTask.Type)
+	}
+	if got := taskInputStringValue(reviewTask.Input, "action"); got != "post_fix_review" {
+		t.Fatalf("expected post-fix review action, got %q", got)
+	}
+	if reviewTask.Status != TaskInProgress {
+		t.Fatalf("expected review task to be assigned immediately, got %s", reviewTask.Status)
 	}
 }
 

@@ -89,6 +89,25 @@ func TestNormalizeModelForProviderRejectsCrossProviderModel(t *testing.T) {
 	if got := normalizeModelForProvider(ai.ProviderGemini, "gemini-3.1-pro-preview", PowerMax); got != "gemini-3.1-pro-preview" {
 		t.Fatalf("Gemini preview fallback should remain valid, got %q", got)
 	}
+	if got := normalizeModelForProvider(ai.ProviderOllama, "glm-5.1", PowerFast); got != "kimi-k2.6" {
+		t.Fatalf("Ollama model normalization = %q, want Kimi fallback", got)
+	}
+}
+
+func TestSelectBuildModelForProviderLocked_IgnoresManagedOllamaOverride(t *testing.T) {
+	t.Setenv("OLLAMA_API_KEY", "managed-key-present")
+
+	build := &Build{
+		ProviderMode: "platform",
+		PowerMode:    PowerFast,
+		ProviderModelOverrides: map[string]string{
+			"ollama": "glm-5.1",
+		},
+	}
+
+	if got := selectBuildModelForProviderLocked(build, ai.ProviderOllama); got != "kimi-k2.6:cloud" {
+		t.Fatalf("managed ollama model = %q, want kimi-k2.6:cloud", got)
+	}
 }
 
 func TestMapProviderToCapabilityPrefersExplicitRoleHint(t *testing.T) {
