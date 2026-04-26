@@ -389,6 +389,10 @@ type GenerateOptions struct {
 	PowerMode     PowerMode // Controls which model tier is used (max/balanced/fast)
 	// Platform-key app builds should not route through user BYOK state.
 	UsePlatformKeys bool
+	// CacheSystemPrompt enables provider-level system-prompt caching.
+	// Set true for lead/planner/solver agents whose system prompts are reused
+	// across many calls. Cuts Claude costs 50-80%; enables Moonshot context cache.
+	CacheSystemPrompt bool
 }
 
 // Message for AI context

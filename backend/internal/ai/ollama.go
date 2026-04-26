@@ -26,11 +26,12 @@ type OllamaClient struct {
 
 // Ollama uses OpenAI-compatible request/response format
 type ollamaRequest struct {
-	Model       string          `json:"model"`
-	Messages    []ollamaMessage `json:"messages"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
-	Temperature float32         `json:"temperature,omitempty"`
-	Stream      bool            `json:"stream"`
+	Model           string          `json:"model"`
+	Messages        []ollamaMessage `json:"messages"`
+	MaxTokens       int             `json:"max_tokens,omitempty"`
+	Temperature     float32         `json:"temperature,omitempty"`
+	Stream          bool            `json:"stream"`
+	UseContextCache bool            `json:"use_context_cache,omitempty"` // Moonshot direct API only
 }
 
 type ollamaMessage struct {
@@ -52,9 +53,11 @@ type ollamaResponse struct {
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
+		PromptTokens          int `json:"prompt_tokens"`
+		CompletionTokens      int `json:"completion_tokens"`
+		TotalTokens           int `json:"total_tokens"`
+		PromptCacheHitTokens  int `json:"prompt_cache_hit_tokens"`
+		PromptCacheMissTokens int `json:"prompt_cache_miss_tokens"`
 	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
@@ -131,11 +134,12 @@ func (o *OllamaClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	model := o.getModel(req)
 
 	ollamaReq := &ollamaRequest{
-		Model:       model,
-		Messages:    messages,
-		MaxTokens:   o.getMaxTokens(req),
-		Temperature: req.Temperature,
-		Stream:      false,
+		Model:           model,
+		Messages:        messages,
+		MaxTokens:       o.getMaxTokens(req),
+		Temperature:     req.Temperature,
+		Stream:          false,
+		UseContextCache: req.CacheSystemPrompt && o.isMoonshotAPI(),
 	}
 
 	resp, err := o.makeRequest(ctx, ollamaReq)
@@ -150,8 +154,8 @@ func (o *OllamaClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		}, err
 	}
 
-	// Ollama runs locally — cost is always $0
-	cost := 0.0
+	// Moonshot direct API has per-token pricing; Ollama local is $0.
+	cost := o.calculateCost(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.PromptCacheHitTokens, o.getModel(req))
 	o.updateUsage(resp.Usage.TotalTokens, cost, time.Since(startTime))
 
 	content := ""
@@ -159,17 +163,22 @@ func (o *OllamaClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		content = resp.Choices[0].Message.Content
 	}
 
+	meta := map[string]interface{}{"model": resp.Model}
+	if resp.Usage.PromptCacheHitTokens > 0 {
+		meta["prompt_cache_hit_tokens"] = resp.Usage.PromptCacheHitTokens
+		meta["prompt_cache_miss_tokens"] = resp.Usage.PromptCacheMissTokens
+	}
+
 	return &AIResponse{
 		ID:       req.ID,
 		Provider: ProviderOllama,
 		Content:  content,
-		Metadata: map[string]interface{}{
-			"model": resp.Model,
-		},
+		Metadata: meta,
 		Usage: &Usage{
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,
 			TotalTokens:      resp.Usage.TotalTokens,
+			CacheHitTokens:   resp.Usage.PromptCacheHitTokens,
 			Cost:             cost,
 		},
 		Duration:  time.Since(startTime),
@@ -510,6 +519,35 @@ func (o *OllamaClient) incrementErrorCount() {
 	o.usageMu.Lock()
 	defer o.usageMu.Unlock()
 	o.usage.ErrorCount++
+}
+
+// isMoonshotAPI returns true when the client is pointed at api.moonshot.cn.
+// Moonshot supports use_context_cache and has non-zero per-token pricing.
+func (o *OllamaClient) isMoonshotAPI() bool {
+	return strings.Contains(o.baseURL, "moonshot.cn")
+}
+
+// calculateCost returns the estimated USD cost for a Moonshot/Kimi call.
+// For local Ollama the cost is always 0.
+// Moonshot kimi-k2.6 pricing (approximate): $0.60/$2.50 per MTok in/out.
+// Cache hits are charged at ~10% of normal input price.
+func (o *OllamaClient) calculateCost(promptTokens, completionTokens, cacheHitTokens int, model string) float64 {
+	if !o.isMoonshotAPI() {
+		return 0.0
+	}
+	var inPer1M, outPer1M float64
+	switch {
+	case strings.Contains(model, "kimi-k2"):
+		inPer1M, outPer1M = 0.60, 2.50
+	case strings.Contains(model, "moonshot-v1"):
+		inPer1M, outPer1M = 0.12, 0.12
+	default:
+		inPer1M, outPer1M = 0.60, 2.50
+	}
+	normalIn := float64(promptTokens-cacheHitTokens) / 1_000_000.0 * inPer1M
+	cachedIn := float64(cacheHitTokens) / 1_000_000.0 * inPer1M * 0.10
+	out := float64(completionTokens) / 1_000_000.0 * outPer1M
+	return normalIn + cachedIn + out
 }
 
 // SetAPIKey configures the API key for Ollama Cloud BYOK usage

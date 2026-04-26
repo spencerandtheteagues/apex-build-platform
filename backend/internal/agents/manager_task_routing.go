@@ -550,16 +550,21 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	}
 	defer attemptCancel()
 
+	// Lead, planner, and solver agents reuse the same large system prompt on every
+	// call — enabling caching cuts their token costs by 50-80%.
+	cacheSystemPrompt := agent.Role == RoleLead || agent.Role == RolePlanner || agent.Role == RoleSolver
+
 	response, err := am.aiRouter.Generate(attemptCtx, provider, prompt, GenerateOptions{
-		UserID:          build.UserID,
-		BuildID:         build.ID,
-		MaxTokens:       maxTokens,
-		Temperature:     temperature,
-		SystemPrompt:    systemPrompt,
-		RoleHint:        string(agent.Role),
-		ModelOverride:   model,
-		PowerMode:       callPowerMode,
-		UsePlatformKeys: am.buildUsesPlatformKeys(build),
+		UserID:            build.UserID,
+		BuildID:           build.ID,
+		MaxTokens:         maxTokens,
+		Temperature:       temperature,
+		SystemPrompt:      systemPrompt,
+		RoleHint:          string(agent.Role),
+		ModelOverride:     model,
+		PowerMode:         callPowerMode,
+		UsePlatformKeys:   am.buildUsesPlatformKeys(build),
+		CacheSystemPrompt: cacheSystemPrompt,
 	})
 	if err != nil {
 		return nil, err

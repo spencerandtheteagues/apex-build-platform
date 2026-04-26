@@ -28,7 +28,8 @@ type claudeRequest struct {
 	MaxTokens   int             `json:"max_tokens"`
 	Messages    []claudeMessage `json:"messages"`
 	Temperature float32         `json:"temperature,omitempty"`
-	System      string          `json:"system,omitempty"`
+	// System is either a plain string or []claudeSystemContent (for cache_control support).
+	System interface{} `json:"system,omitempty"`
 }
 
 type claudeMessage struct {
@@ -40,6 +41,17 @@ type claudeMessageContent struct {
 	Type   string             `json:"type"`
 	Text   string             `json:"text,omitempty"`
 	Source *claudeImageSource `json:"source,omitempty"`
+}
+
+// claudeSystemContent is used when the system prompt needs a cache_control marker.
+type claudeSystemContent struct {
+	Type         string              `json:"type"`
+	Text         string              `json:"text"`
+	CacheControl *claudeCacheControl `json:"cache_control,omitempty"`
+}
+
+type claudeCacheControl struct {
+	Type string `json:"type"` // "ephemeral"
 }
 
 type claudeImageSource struct {
@@ -68,8 +80,10 @@ type claudeResponse struct {
 		Text string `json:"text"`
 	} `json:"content"`
 	Usage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	} `json:"usage"`
 	Error *struct {
 		Type    string `json:"type"`
@@ -109,7 +123,22 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		model = req.Model
 	}
 
-	// Create Claude API request
+	// Create Claude API request — use ephemeral cache_control on the system prompt
+	// when the caller opts in. The system message stays identical across requests
+	// for the same capability, so Anthropic can serve it from cache (10% of normal cost).
+	var system interface{}
+	if req.CacheSystemPrompt && systemPrompt != "" {
+		system = []claudeSystemContent{
+			{
+				Type:         "text",
+				Text:         systemPrompt,
+				CacheControl: &claudeCacheControl{Type: "ephemeral"},
+			},
+		}
+	} else {
+		system = systemPrompt
+	}
+
 	claudeReq := &claudeRequest{
 		Model:     model,
 		MaxTokens: c.getMaxTokens(req),
@@ -120,7 +149,7 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 			},
 		},
 		Temperature: req.Temperature,
-		System:      systemPrompt,
+		System:      system,
 	}
 
 	// Make API request
@@ -136,11 +165,11 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		}, err
 	}
 
-	// Calculate cost based on actual model used
-	cost := c.calculateCost(resp.Usage.InputTokens, resp.Usage.OutputTokens, model)
+	// Calculate cost based on actual model used, accounting for cache hits/misses.
+	cost := c.calculateCost(resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheCreationInputTokens, resp.Usage.CacheReadInputTokens, model)
 
-	// Update usage statistics
-	c.updateUsage(resp.Usage.InputTokens+resp.Usage.OutputTokens, cost, time.Since(startTime))
+	// Update usage statistics (count cache creation tokens as billed input)
+	c.updateUsage(resp.Usage.InputTokens+resp.Usage.OutputTokens+resp.Usage.CacheCreationInputTokens, cost, time.Since(startTime))
 
 	// Extract response content
 	content := ""
@@ -153,12 +182,15 @@ func (c *ClaudeClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 		Provider: ProviderClaude,
 		Content:  content,
 		Metadata: map[string]interface{}{
-			"model": model,
+			"model":                       model,
+			"cache_creation_input_tokens": resp.Usage.CacheCreationInputTokens,
+			"cache_read_input_tokens":     resp.Usage.CacheReadInputTokens,
 		},
 		Usage: &Usage{
 			PromptTokens:     resp.Usage.InputTokens,
 			CompletionTokens: resp.Usage.OutputTokens,
 			TotalTokens:      resp.Usage.InputTokens + resp.Usage.OutputTokens,
+			CacheHitTokens:   resp.Usage.CacheReadInputTokens,
 			Cost:             cost,
 		},
 		Duration:  time.Since(startTime),
@@ -205,7 +237,7 @@ func (c *ClaudeClient) AnalyzeImage(ctx context.Context, imageData []byte, promp
 		return "", err
 	}
 
-	cost := c.calculateCost(resp.Usage.InputTokens, resp.Usage.OutputTokens, claudeReq.Model)
+	cost := c.calculateCost(resp.Usage.InputTokens, resp.Usage.OutputTokens, 0, 0, claudeReq.Model)
 	c.updateUsage(resp.Usage.InputTokens+resp.Usage.OutputTokens, cost, 0)
 
 	var parts []string
@@ -382,7 +414,9 @@ func (c *ClaudeClient) getMaxTokens(req *AIRequest) int {
 
 // calculateCost estimates raw API cost based on Claude pricing.
 // Must stay in sync with pricing.go model table.
-func (c *ClaudeClient) calculateCost(inputTokens, outputTokens int, model string) float64 {
+// Cache creation tokens are charged at 1.25× base input price (one-time write).
+// Cache read tokens are charged at 0.10× base input price (90% savings vs. normal).
+func (c *ClaudeClient) calculateCost(inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int, model string) float64 {
 	var inputPer1M, outputPer1M float64
 	switch model {
 	case "claude-opus-4-6":
@@ -394,9 +428,13 @@ func (c *ClaudeClient) calculateCost(inputTokens, outputTokens int, model string
 	case "claude-haiku-4-5-20251001":
 		inputPer1M, outputPer1M = 1.00, 5.00
 	default:
-		inputPer1M, outputPer1M = 3.00, 15.00 // default to Sonnet pricing
+		inputPer1M, outputPer1M = 3.00, 15.00
 	}
-	return float64(inputTokens)/1_000_000.0*inputPer1M + float64(outputTokens)/1_000_000.0*outputPer1M
+	normal := float64(inputTokens) / 1_000_000.0 * inputPer1M
+	creation := float64(cacheCreationTokens) / 1_000_000.0 * inputPer1M * 1.25
+	read := float64(cacheReadTokens) / 1_000_000.0 * inputPer1M * 0.10
+	output := float64(outputTokens) / 1_000_000.0 * outputPer1M
+	return normal + creation + read + output
 }
 
 // updateUsage updates internal usage statistics (thread-safe)

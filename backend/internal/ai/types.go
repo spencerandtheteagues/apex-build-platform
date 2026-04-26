@@ -52,6 +52,10 @@ type AIRequest struct {
 	MaxResponseTime    time.Duration          `json:"max_response_time,omitempty"`
 	QualityRequirement float64                `json:"quality_requirement,omitempty"`
 	MaxCost            float64                `json:"max_cost,omitempty"`
+	// CacheSystemPrompt enables provider-level prompt caching on the system message.
+	// For Claude: uses cache_control ephemeral blocks. For Moonshot direct API: sets use_context_cache.
+	// Cuts orchestrator costs 50-80% when the same system prompt is reused across calls.
+	CacheSystemPrompt bool `json:"cache_system_prompt,omitempty"`
 }
 
 // GetCacheKey generates a cache key for the request
@@ -86,6 +90,7 @@ type Usage struct {
 	PromptTokens     int     `json:"prompt_tokens"`
 	CompletionTokens int     `json:"completion_tokens"`
 	TotalTokens      int     `json:"total_tokens"`
+	CacheHitTokens   int     `json:"cache_hit_tokens,omitempty"`
 	Cost             float64 `json:"cost"`
 }
 

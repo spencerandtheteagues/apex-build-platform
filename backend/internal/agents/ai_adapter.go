@@ -371,12 +371,13 @@ For code files, use this exact format:
 
 	// Create AI request
 	request := &ai.AIRequest{
-		Model:       model,
-		Capability:  capability,
-		Prompt:      fullPrompt,
-		MaxTokens:   maxTokens,
-		Temperature: float32(temperature),
-		Provider:    aiProvider,
+		Model:             model,
+		Capability:        capability,
+		Prompt:            fullPrompt,
+		MaxTokens:         maxTokens,
+		Temperature:       float32(temperature),
+		Provider:          aiProvider,
+		CacheSystemPrompt: opts.CacheSystemPrompt,
 	}
 	if opts.UserID > 0 {
 		request.UserID = fmt.Sprintf("%d", opts.UserID)
