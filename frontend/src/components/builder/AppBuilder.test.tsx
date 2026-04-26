@@ -414,7 +414,7 @@ describe('AppBuilder control surface', () => {
     fireEvent.keyDown(plannerInput, { key: 'Enter', code: 'Enter' })
 
     await screen.findByText(/UPGRADE TO CONTINUE BACKEND WORK/i)
-    expect(screen.getByText(/frontend preview stays available now/i)).toBeTruthy()
+    expect(screen.getByText(/frontend preview is (available|still building)/i)).toBeTruthy()
     expect(screen.getByRole('button', { name: /Upgrade to Builder/i })).toBeTruthy()
   })
 

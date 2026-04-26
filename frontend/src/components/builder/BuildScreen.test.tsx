@@ -124,6 +124,48 @@ describe('BuildScreen header prompt actions', () => {
     expect(await screen.findByText('Copied')).toBeTruthy()
   })
 
+  it('surfaces the frontend preview before the full-stack build is complete once files exist', async () => {
+    const props = baseProps()
+    ;(props.buildState as any).status = 'reviewing'
+    props.buildState.progress = 96
+    ;(props as any).generatedFiles = [
+      {
+        path: 'src/App.tsx',
+        content: 'export default function App(){return <main>Preview ready</main>}',
+        language: 'typescript',
+      },
+    ]
+
+    render(<BuildScreen {...props} />)
+
+    expect(screen.getByText(/Frontend preview is ready/i)).toBeTruthy()
+
+    const previewButtons = screen.getAllByRole('button', { name: /open frontend preview/i })
+    expect(previewButtons.length).toBeGreaterThan(0)
+
+    fireEvent.click(previewButtons[0])
+    expect(props.onPreviewWorkspace).toHaveBeenCalled()
+  })
+
+  it('shows an honest preview-building state for free-plan frontend fallback before files exist', async () => {
+    const props = baseProps()
+    ;(props.buildState as any).status = 'reviewing'
+    props.buildState.progress = 92
+    ;(props as any).createdProjectId = null
+    ;(props.buildState as any).policyState = {
+      plan_type: 'free',
+      classification: 'upgrade_required',
+      upgrade_required: true,
+      static_frontend_only: true,
+      required_plan: 'builder',
+    }
+
+    render(<BuildScreen {...props} />)
+
+    expect(screen.getByText(/Frontend preview is still building/i)).toBeTruthy()
+    expect((screen.getAllByRole('button', { name: /preview is still building/i })[0] as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('surfaces review-required patch bundles in the issues overlay', async () => {
     const props = baseProps()
     props.buildState.patchBundles = [

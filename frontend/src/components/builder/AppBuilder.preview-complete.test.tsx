@@ -6,11 +6,14 @@ import {
   AppBuilder,
   apiService,
   buildDetail,
+  fireEvent,
   installWebSocketMock,
   MOCK_HISTORY_BUILD_ID,
   openMockedBuild,
   primeAppBuilderHistoryTestEnv,
   render,
+  screen,
+  storeMocks,
   teardownAppBuilderHistoryTestEnv,
   vi,
   waitFor,
@@ -76,6 +79,58 @@ describe('AppBuilder preview completion flow', () => {
     await waitFor(() => {
       expect(apiService.applyBuildArtifacts).toHaveBeenCalledWith(MOCK_HISTORY_BUILD_ID)
       expect(onNavigateToIDE).toHaveBeenCalledWith({ target: 'preview', projectId: 42 })
+    })
+  })
+
+  it('opens a near-complete frontend preview from streamed files when canonical artifacts are not ready', async () => {
+    const onNavigateToIDE = vi.fn()
+
+    ;(apiService.getCompletedBuild as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+      status: 'reviewing',
+      progress: 96,
+      live: false,
+      files: [
+        {
+          path: 'src/App.tsx',
+          content: 'export default function App(){return <main>Preview ready</main>}',
+          language: 'typescript',
+        },
+      ],
+    }))
+    ;(apiService.getBuildDetails as any).mockResolvedValue(buildDetail({
+      id: MOCK_HISTORY_BUILD_ID,
+      build_id: MOCK_HISTORY_BUILD_ID,
+      status: 'reviewing',
+      progress: 96,
+      live: false,
+      files: [
+        {
+          path: 'src/App.tsx',
+          content: 'export default function App(){return <main>Preview ready</main>}',
+          language: 'typescript',
+        },
+      ],
+    }))
+    ;(apiService.applyBuildArtifacts as any).mockRejectedValueOnce(new Error('Artifacts are still syncing'))
+    ;(apiService.createFile as any).mockResolvedValue({})
+
+    render(<AppBuilder onNavigateToIDE={onNavigateToIDE} />)
+
+    await openMockedBuild()
+
+    const previewButtons = await screen.findAllByRole('button', { name: /open frontend preview/i })
+    fireEvent.click(previewButtons[0])
+
+    await waitFor(() => {
+      expect(apiService.applyBuildArtifacts).toHaveBeenCalledWith(MOCK_HISTORY_BUILD_ID, expect.any(Object))
+      expect(storeMocks.createProject).toHaveBeenCalled()
+      expect(apiService.createFile).toHaveBeenCalledWith(77, expect.objectContaining({
+        path: 'src/App.tsx',
+        content: expect.stringContaining('Preview ready'),
+      }))
+      expect(onNavigateToIDE).toHaveBeenCalledWith({ target: 'preview', projectId: 77 })
     })
   })
 })

@@ -1119,11 +1119,33 @@ interface PlanUpgradeModalProps {
   currentPlan?: string
   upgrade: UpgradePromptState
   loading?: boolean
+  previewAvailable: boolean
+  previewPending: boolean
+  previewLoading?: boolean
   onClose: () => void
   onUpgrade: () => void
+  onPreview: () => void
 }
 
-const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({ currentPlan, upgrade, loading, onClose, onUpgrade }) => {
+const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
+  currentPlan,
+  upgrade,
+  loading,
+  previewAvailable,
+  previewPending,
+  previewLoading,
+  onClose,
+  onUpgrade,
+  onPreview,
+}) => {
+  const previewButtonLabel = previewLoading
+    ? 'Opening Preview...'
+    : previewAvailable
+      ? 'Open Frontend Preview'
+      : previewPending
+        ? 'Keep Building Preview'
+        : 'Keep Preview Only'
+
   return (
     <div
       style={{
@@ -1169,7 +1191,9 @@ const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({ currentPlan, upgrad
               UPGRADE TO CONTINUE BACKEND WORK
             </div>
             <div style={{ marginTop: 6, fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)' }}>
-              The frontend preview stays available now. Runtime implementation unlocks after payment.
+              {previewAvailable
+                ? 'The frontend preview is available now. Runtime implementation unlocks after payment.'
+                : 'The frontend preview is still building. Runtime implementation unlocks after payment.'}
             </div>
           </div>
           <button
@@ -1212,7 +1236,11 @@ const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({ currentPlan, upgrad
           </div>
 
           <div style={{ display: 'grid', gap: 10, color: 'rgba(255,255,255,0.72)', fontSize: '0.9rem', lineHeight: 1.55 }}>
-            <div>What you keep right now: the preview-first frontend build continues so the app stays visible in the interactive preview pane.</div>
+            <div>
+              {previewAvailable
+                ? 'What you keep right now: open the frontend preview, inspect files, export ZIPs, and keep iterating on the UI.'
+                : 'What you keep right now: the preview-first frontend build continues, and the Preview control unlocks as soon as UI artifacts are ready.'}
+            </div>
             <div>What payment unlocks: {upgrade.reason || 'backend/runtime implementation'} on this same app without starting over.</div>
             <div>
               {upgrade.source === 'start'
@@ -1232,12 +1260,15 @@ const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({ currentPlan, upgrad
             </Button>
             <Button
               type="button"
-              onClick={onClose}
-              disabled={loading}
+              onClick={previewAvailable ? onPreview : onClose}
+              disabled={loading || previewLoading}
               variant="outline"
-              className="min-h-[48px] flex-1 border border-gray-700 text-gray-300 hover:bg-gray-900"
+              className={cn(
+                "min-h-[48px] flex-1 border text-gray-300 hover:bg-gray-900",
+                previewAvailable ? "border-cyan-500/60 text-cyan-100 hover:bg-cyan-950/30" : "border-gray-700"
+              )}
             >
-              Keep Preview Only
+              {previewButtonLabel}
             </Button>
           </div>
         </div>
@@ -1743,7 +1774,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   }) => {
     const requiredPlan = (payload.requiredPlan || 'builder').trim() || 'builder'
     const reason = (payload.reason || 'backend/runtime implementation').trim() || 'backend/runtime implementation'
-    const suggestion = (payload.suggestion || `The frontend preview stays available right now. Upgrade to ${requiredPlan.replace(/\b\w/g, (match) => match.toUpperCase())} or higher to unlock ${reason} on this same app.`).trim()
+    const suggestion = (payload.suggestion || `The frontend preview remains available as soon as UI artifacts are ready. Upgrade to ${requiredPlan.replace(/\b\w/g, (match) => match.toUpperCase())} or higher to unlock ${reason} on this same app.`).trim()
 
     setUpgradePrompt({
       requiredPlan,
@@ -2606,6 +2637,17 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
     aiThoughts.length > 0 ||
     proposedEdits.length > 0 ||
     createdProjectId
+  )
+  const frontendPreviewLaunchable = Boolean(
+    createdProjectId ||
+    generatedFiles.length > 0 ||
+    buildState?.status === 'completed'
+  )
+  const frontendPreviewPending = Boolean(
+    !frontendPreviewLaunchable &&
+    buildState?.policyState?.static_frontend_only &&
+    buildState.status !== 'failed' &&
+    buildState.status !== 'cancelled'
   )
   const platformReadinessNotice = useMemo(() => {
     if (buildState?.status === 'failed' || !platformReadiness || platformReadiness.status === 'healthy') {
@@ -4593,6 +4635,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       const projectDescription = options?.description || appDescription || buildState?.description || ''
       const buildIdForApply = options?.buildId || buildState?.id
 
+      let fallbackFiles: Array<{ path: string; content: string; language: string }> | null = null
+
       if (buildIdForApply) {
         try {
           const applyResponse = await apiService.applyBuildArtifacts(buildIdForApply, {
@@ -4609,14 +4653,23 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           return appliedProject
         } catch (applyError: any) {
           const errorMsg = applyError?.response?.data?.error || applyError?.message || 'Unknown error'
-          addSystemMessage(`Failed to apply build artifacts: ${errorMsg}`)
-          throw new Error(`Build artifact apply failed: ${errorMsg}`)
+          const streamedFiles = options?.files && options.files.length > 0
+            ? options.files
+            : await resolveGeneratedFiles(buildIdForApply)
+
+          if (streamedFiles.length === 0) {
+            addSystemMessage(`Failed to apply build artifacts: ${errorMsg}`)
+            throw new Error(`Build artifact apply failed: ${errorMsg}`)
+          }
+
+          fallbackFiles = streamedFiles
+          addSystemMessage(`Canonical build artifacts are still syncing; opening preview from ${streamedFiles.length} streamed file${streamedFiles.length === 1 ? '' : 's'}.`)
         }
       }
 
-      const files = options?.files && options.files.length > 0
+      const files = fallbackFiles || (options?.files && options.files.length > 0
         ? options.files
-        : await resolveGeneratedFiles(options?.buildId)
+        : await resolveGeneratedFiles(options?.buildId))
 
       if (files.length === 0) {
         throw new Error('No files available to create project from')
@@ -5747,8 +5800,15 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
           currentPlan={buildState?.policyState?.plan_type || user?.subscription_type}
           upgrade={upgradePrompt}
           loading={upgradeCheckoutPending}
+          previewAvailable={frontendPreviewLaunchable}
+          previewPending={frontendPreviewPending}
+          previewLoading={isPreparingPreview}
           onClose={dismissUpgradePrompt}
           onUpgrade={handleUpgradeCheckout}
+          onPreview={() => {
+            dismissUpgradePrompt()
+            void openPreviewWorkspace()
+          }}
         />
       )}
 
@@ -6263,6 +6323,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             showDiffReview={showDiffReview}
             userId={user?.id}
             isPreparingPreview={isPreparingPreview}
+            previewAvailable={frontendPreviewLaunchable}
+            previewPending={frontendPreviewPending}
             isCreatingProject={isCreatingProject}
             isStartingOver={isStartingOver}
             createdProjectId={createdProjectId}

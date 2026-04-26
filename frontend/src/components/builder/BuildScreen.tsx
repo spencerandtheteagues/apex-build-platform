@@ -146,6 +146,14 @@ interface BSBuildState {
   workOrders?: BuildWorkOrder[]
   verificationReports?: BuildVerificationReport[]
   providerScorecards?: BuildProviderScorecard[]
+  policyState?: {
+    plan_type?: string
+    classification?: string
+    upgrade_required?: boolean
+    upgrade_reason?: string
+    required_plan?: string
+    static_frontend_only?: boolean
+  }
   historicalLearning?: BuildLearningSummaryState
   promptPackActivationRequests?: BuildPromptPackActivationRequestState[]
   promptPackVersions?: BuildPromptPackVersionState[]
@@ -226,6 +234,8 @@ interface BuildScreenProps {
   showDiffReview: boolean
   userId: number | null | undefined
   isPreparingPreview: boolean
+  previewAvailable?: boolean
+  previewPending?: boolean
   isCreatingProject: boolean
   isStartingOver: boolean
   createdProjectId: number | null
@@ -327,6 +337,8 @@ interface BuildHeaderProps {
   onResume: () => void
   onRestart: () => void
   isPreparingPreview: boolean
+  previewAvailable: boolean
+  previewPending: boolean
   onPreviewWorkspace: () => void
   onOpenInIDE: () => void
   onDownload: () => void
@@ -337,7 +349,7 @@ interface BuildHeaderProps {
 const BuildHeader: React.FC<BuildHeaderProps> = ({
   buildState, phaseLabel, isBuildActive, buildPaused,
   buildActionPending, onPause, onResume, onRestart,
-  isPreparingPreview, onPreviewWorkspace, onOpenInIDE, onDownload, onOpenPlannerConsole, createdProjectId,
+  isPreparingPreview, previewAvailable, previewPending, onPreviewWorkspace, onOpenInIDE, onDownload, onOpenPlannerConsole, createdProjectId,
 }) => {
   const { status, progress } = buildState
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
@@ -353,6 +365,16 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
     : humanize(status)
 
   const desc = buildState.description || 'Building your app...'
+  const showPreviewControl = previewAvailable || previewPending || status === 'completed'
+  const previewDisabled = isPreparingPreview || !previewAvailable
+  const previewLabel = isPreparingPreview
+    ? 'Opening...'
+    : previewAvailable
+      ? 'Preview'
+      : 'Preview building'
+  const previewAriaLabel = previewAvailable
+    ? 'Open frontend preview'
+    : 'Preview is still building'
 
   useEffect(() => {
     if (copyState === 'idle') return undefined
@@ -421,6 +443,24 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
             {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Retry Copy' : 'Copy Prompt'}
           </span>
         </button>
+        {showPreviewControl && (
+          <button
+            type="button"
+            onClick={onPreviewWorkspace}
+            disabled={previewDisabled}
+            aria-label={previewAriaLabel}
+            title={previewAvailable ? 'Open the frontend preview workspace' : 'Frontend artifacts are still being generated'}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg border text-xs font-bold uppercase tracking-wide transition-all disabled:cursor-not-allowed',
+              previewAvailable
+                ? 'border-cyan-400/60 bg-cyan-500/15 text-cyan-100 shadow-[0_0_18px_rgba(34,211,238,0.18)] hover:bg-cyan-500/25'
+                : 'border-gray-700 bg-gray-950/60 text-gray-500 disabled:opacity-75'
+            )}
+          >
+            <Eye className="w-3 h-3" />
+            <span>{previewLabel}</span>
+          </button>
+        )}
         {(isBuildActive || status === 'awaiting_review') && (
           <button
             type="button"
@@ -434,14 +474,6 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
         )}
         {status === 'completed' && (
           <>
-            <button
-              onClick={onPreviewWorkspace}
-              disabled={isPreparingPreview}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-bold uppercase tracking-wide disabled:opacity-50"
-            >
-              <Eye className="w-3 h-3" />
-              {isPreparingPreview ? '...' : 'Preview'}
-            </button>
             <button
               onClick={onOpenInIDE}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-600 text-xs"
@@ -591,6 +623,9 @@ interface BottomNavStripProps {
   issueCount: number
   hasUrgentIssue: boolean
   buildStatus: string
+  previewAvailable: boolean
+  previewPending: boolean
+  isPreparingPreview: boolean
 }
 
 const NAV_BUTTONS = [
@@ -605,22 +640,40 @@ const NAV_BUTTONS = [
 const BottomNavStrip: React.FC<BottomNavStripProps> = ({
   activeOverlay, onSelectOverlay, onOpenPreview, onStartOver, isStartingOver,
   isBuildActive, generatedFilesCount, issueCount, hasUrgentIssue, buildStatus,
+  previewAvailable, previewPending, isPreparingPreview,
 }) => {
+  const previewDisabled = isPreparingPreview || !previewAvailable
+  const previewLabel = isPreparingPreview
+    ? 'Opening preview'
+    : previewAvailable
+      ? 'Preview'
+      : previewPending
+        ? 'Preview building'
+        : 'Preview'
+  const previewAriaLabel = previewAvailable
+    ? 'Open frontend preview'
+    : 'Preview is still building'
+
   return (
     <div className="shrink-0 flex items-center gap-0.5 sm:gap-1 px-2 sm:px-3 py-1 sm:py-1.5 border-t border-gray-900 bg-black/80 overflow-x-auto"
       style={{ WebkitOverflowScrolling: 'touch' }}>
       {/* Preview — special, always direct action */}
       <button
         onClick={onOpenPreview}
+        disabled={previewDisabled}
+        aria-label={previewAriaLabel}
+        title={previewAvailable ? 'Open the frontend preview workspace' : 'Frontend artifacts are still being generated'}
         className={cn(
-          'flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all',
-          buildStatus === 'completed'
-            ? 'bg-green-700/80 hover:bg-green-600 text-white shadow-[0_0_12px_rgba(34,197,94,0.2)]'
-            : 'text-gray-500 hover:text-gray-300 hover:bg-gray-900'
+          'flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all disabled:cursor-not-allowed',
+          previewAvailable
+            ? 'bg-cyan-700/80 hover:bg-cyan-600 text-white shadow-[0_0_12px_rgba(34,211,238,0.2)]'
+            : previewPending
+              ? 'border border-gray-800 bg-gray-950/70 text-gray-500 disabled:opacity-75'
+              : 'text-gray-600 hover:text-gray-300 hover:bg-gray-900 disabled:opacity-50'
         )}
       >
         <Eye className="w-3.5 h-3.5" />
-        <span className="hidden sm:inline">Preview</span>
+        <span>{previewLabel}</span>
       </button>
 
       {/* Other nav buttons */}
@@ -1263,7 +1316,7 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
     pendingQuestion, pendingPermissionRequests, pendingRevisionRequests,
     buildActionPending, hasBYOK, phaseLabel, visibleBlockers,
     platformReadinessNotice, buildFailureAttribution, showDiffReview, userId,
-    isPreparingPreview, isCreatingProject, isStartingOver, createdProjectId,
+    isPreparingPreview, previewAvailable: previewAvailableProp, previewPending: previewPendingProp, isCreatingProject, isStartingOver, createdProjectId,
     permissionActionId, rollbackCheckpointId, patchBundleActionId, promptProposalActionId, chatInput, setChatInput,
     plannerSendMode, setPlannerSendMode, plannerMessagePending, providerModelOverrides, providerModelOptions, providerModelPendingProvider,
     agentMessageDrafts, agentMessagePendingId, onAgentMessageDraftChange, onSendDirectAgentMessage,
@@ -1292,6 +1345,13 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
   }, [setPlannerSendMode])
 
   const buildCompleted = buildState.status === 'completed'
+  const previewAvailable = previewAvailableProp ?? Boolean(createdProjectId || generatedFiles.length > 0 || buildCompleted)
+  const previewPending = previewPendingProp ?? Boolean(
+    !previewAvailable &&
+    buildState.policyState?.static_frontend_only &&
+    buildState.status !== 'failed' &&
+    buildState.status !== 'cancelled'
+  )
   const hasUrgentIssue = Boolean(
     pendingQuestion ||
     buildPaused ||
@@ -1323,6 +1383,8 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
         onResume={onResume}
         onRestart={onRestart}
         isPreparingPreview={isPreparingPreview}
+        previewAvailable={previewAvailable}
+        previewPending={previewPending}
         onPreviewWorkspace={onPreviewWorkspace}
         onOpenInIDE={onOpenInIDE}
         onDownload={onDownload}
@@ -1358,24 +1420,12 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
           buildCompleted={buildCompleted}
           onOpenPreview={onPreviewWorkspace}
           isPreparingPreview={isPreparingPreview}
+          previewAvailable={previewAvailable}
+          previewPending={previewPending}
         />
       </div>
 
-      {/* Row 4: Chat Input */}
-      <ChatInputBar
-        chatInput={chatInput}
-        setChatInput={setChatInput}
-        plannerSendMode={plannerSendMode}
-        setPlannerSendMode={setPlannerSendMode}
-        onSend={onSendChatMessage}
-        pending={plannerMessagePending}
-        isBuildActive={isBuildActive}
-        pendingQuestion={pendingQuestion}
-        buildPaused={buildPaused}
-        inputRef={chatInputRef}
-      />
-
-      {/* Row 5: Bottom Nav Strip */}
+      {/* Row 4: Bottom Nav Strip */}
       <BottomNavStrip
         activeOverlay={activeOverlay}
         onSelectOverlay={setActiveOverlay}
@@ -1387,6 +1437,23 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
         issueCount={issueCount}
         hasUrgentIssue={hasUrgentIssue}
         buildStatus={buildState.status}
+        previewAvailable={previewAvailable}
+        previewPending={previewPending}
+        isPreparingPreview={isPreparingPreview}
+      />
+
+      {/* Row 5: Chat Input */}
+      <ChatInputBar
+        chatInput={chatInput}
+        setChatInput={setChatInput}
+        plannerSendMode={plannerSendMode}
+        setPlannerSendMode={setPlannerSendMode}
+        onSend={onSendChatMessage}
+        pending={plannerMessagePending}
+        isBuildActive={isBuildActive}
+        pendingQuestion={pendingQuestion}
+        buildPaused={buildPaused}
+        inputRef={chatInputRef}
       />
 
       {/* Overlay panels */}

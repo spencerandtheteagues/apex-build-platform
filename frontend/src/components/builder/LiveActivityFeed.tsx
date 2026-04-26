@@ -45,6 +45,8 @@ interface LiveActivityFeedProps {
   buildCompleted: boolean
   onOpenPreview: () => void
   isPreparingPreview: boolean
+  previewAvailable?: boolean
+  previewPending?: boolean
 }
 
 const normalizeProvider = (p: string): string => {
@@ -84,6 +86,8 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
   buildCompleted,
   onOpenPreview,
   isPreparingPreview,
+  previewAvailable = buildCompleted,
+  previewPending = false,
 }) => {
   const feedRef = useRef<HTMLDivElement>(null)
   const bottomAnchorRef = useRef<HTMLDivElement>(null)
@@ -279,6 +283,55 @@ export const LiveActivityFeed: React.FC<LiveActivityFeedProps> = ({
                 Preview
               </>
             )}
+          </button>
+        </div>
+      ) : previewAvailable ? (
+        <div className="shrink-0 border-t border-cyan-500/30 bg-cyan-950/20 px-4 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-5 h-5 rounded-full bg-cyan-500/25 flex items-center justify-center shrink-0">
+              <Play className="w-3 h-3 text-cyan-300" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-cyan-300">Frontend preview is ready</div>
+              <div className="text-sm text-gray-300 leading-snug">
+                Backend work may still be gated, but the generated UI can be opened now.
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onOpenPreview}
+            disabled={isPreparingPreview}
+            aria-label="Open frontend preview"
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold uppercase tracking-wide disabled:opacity-50"
+          >
+            {isPreparingPreview ? (
+              <span className="animate-pulse">Opening...</span>
+            ) : (
+              <>
+                <Play className="w-3 h-3" />
+                Preview
+              </>
+            )}
+          </button>
+        </div>
+      ) : previewPending ? (
+        <div className="shrink-0 border-t border-cyan-500/20 bg-cyan-950/10 px-4 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-5 h-5 rounded-full border border-cyan-500/35 border-t-cyan-300 animate-spin shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-cyan-300">Frontend preview is still building</div>
+              <div className="text-sm text-gray-400 leading-snug">
+                The free-plan fallback is generating UI artifacts; the Preview control unlocks when files are ready.
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled
+            aria-label="Preview is still building"
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-800 bg-gray-950/70 text-gray-500 text-xs font-bold uppercase tracking-wide cursor-not-allowed"
+          >
+            Preview building
           </button>
         </div>
       ) : (

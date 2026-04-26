@@ -5,6 +5,23 @@ import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 
+type StoreMocks = {
+  createProject: ReturnType<typeof vi.fn>
+  setCurrentProject: ReturnType<typeof vi.fn>
+  addNotification: ReturnType<typeof vi.fn>
+}
+
+const getStoreMocks = (): StoreMocks => {
+  if (!(globalThis as any).__APEX_APP_BUILDER_STORE_MOCKS__) {
+    ;(globalThis as any).__APEX_APP_BUILDER_STORE_MOCKS__ = {
+      createProject: vi.fn(),
+      setCurrentProject: vi.fn(),
+      addNotification: vi.fn(),
+    }
+  }
+  return (globalThis as any).__APEX_APP_BUILDER_STORE_MOCKS__ as StoreMocks
+}
+
 vi.mock('@/services/api', () => ({
   default: {
     applyBuildArtifacts: vi.fn(),
@@ -25,13 +42,16 @@ vi.mock('@/services/api', () => ({
 }))
 
 vi.mock('@/hooks/useStore', () => ({
-  useStore: () => ({
-    user: { id: 7, username: 'tester' },
-    currentProject: null,
-    createProject: vi.fn(),
-    setCurrentProject: vi.fn(),
-    addNotification: vi.fn(),
-  }),
+  useStore: () => {
+    const storeMocks = getStoreMocks()
+    return {
+      user: { id: 7, username: 'tester' },
+      currentProject: null,
+      createProject: storeMocks.createProject,
+      setCurrentProject: storeMocks.setCurrentProject,
+      addNotification: storeMocks.addNotification,
+    }
+  },
 }))
 
 vi.mock('@/hooks/useThemeLogo', () => ({
@@ -101,6 +121,18 @@ vi.mock('@/components/diff/DiffReviewPanel', () => ({
 
 import { AppBuilder } from './AppBuilder'
 import apiService from '@/services/api'
+
+export const storeMocks = {
+  get createProject() {
+    return getStoreMocks().createProject
+  },
+  get setCurrentProject() {
+    return getStoreMocks().setCurrentProject
+  },
+  get addNotification() {
+    return getStoreMocks().addNotification
+  },
+}
 
 export { act, AppBuilder, apiService, cleanup, fireEvent, render, screen, vi, waitFor }
 
@@ -235,6 +267,9 @@ export const primeAppBuilderHistoryTestEnv = () => {
   ;(apiService.startBuild as any).mockReset()
   ;(apiService.getPlans as any).mockReset()
   ;(apiService.createCheckoutSession as any).mockReset()
+  storeMocks.createProject.mockReset()
+  storeMocks.setCurrentProject.mockReset()
+  storeMocks.addNotification.mockReset()
 
   ;(apiService.buildPreflight as any).mockResolvedValue({
     provider_statuses: {
@@ -270,6 +305,12 @@ export const primeAppBuilderHistoryTestEnv = () => {
     id: 42,
     name: 'Preview Canary',
     description: 'Preview-ready project',
+    language: 'typescript',
+  })
+  storeMocks.createProject.mockResolvedValue({
+    id: 77,
+    name: 'Streamed Preview',
+    description: 'Created from streamed files',
     language: 'typescript',
   })
   window.history.replaceState({}, '', '/')
