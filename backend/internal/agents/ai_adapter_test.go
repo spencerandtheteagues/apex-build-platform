@@ -110,6 +110,15 @@ func TestSelectBuildModelForProviderLocked_IgnoresManagedOllamaOverride(t *testi
 	}
 }
 
+func TestNormalizeExecutionModelForProvider_IgnoresManagedOllamaEnvOverride(t *testing.T) {
+	t.Setenv("OLLAMA_API_KEY", "managed-key-present")
+	t.Setenv("OLLAMA_MODEL_DEFAULT", "glm-5.1")
+
+	if got := normalizeExecutionModelForProvider(ai.ProviderOllama, "glm-5.1", PowerFast, true); got != "kimi-k2.6:cloud" {
+		t.Fatalf("managed ollama execution model = %q, want kimi-k2.6:cloud", got)
+	}
+}
+
 func TestMapProviderToCapabilityPrefersExplicitRoleHint(t *testing.T) {
 	t.Parallel()
 

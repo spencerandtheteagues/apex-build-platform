@@ -481,13 +481,20 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 		waterfallStage = decision.Stage
 		waterfallReason = decision.Reason
 	}
-	if explicitModel := providerModelOverrideForBuild(build, provider); explicitModel != "" {
-		model = explicitModel
-		waterfallStage = "manual_override"
-		waterfallReason = "provider_model_override"
+	managedPlatformOllama := provider == ai.ProviderOllama && am.buildUsesPlatformKeys(build)
+	if !managedPlatformOllama {
+		if explicitModel := providerModelOverrideForBuild(build, provider); explicitModel != "" {
+			model = explicitModel
+			waterfallStage = "manual_override"
+			waterfallReason = "provider_model_override"
+		}
 	}
 
-	model = normalizeModelForProvider(provider, model, callPowerMode)
+	model = normalizeExecutionModelForProvider(provider, model, callPowerMode, am.buildUsesPlatformKeys(build))
+	if managedPlatformOllama {
+		waterfallStage = "managed_ollama"
+		waterfallReason = "platform_forces_kimi_cloud"
+	}
 
 	if am.budgetEnforcer != nil {
 		preAuth, preAuthErr := am.budgetEnforcer.PreAuthorize(build.UserID, agent.BuildID, estimatedRequestCostUSDForBuild(build))
@@ -561,6 +568,13 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 		return nil, fmt.Errorf("AI generation returned empty response")
 	}
 
+	providerUsed := firstNonEmptyProvider(response.Provider, provider)
+	actualProviderUsed := providerUsed
+	if response != nil && response.Metadata != nil {
+		if actual := parseAIProvider(fmt.Sprintf("%v", response.Metadata["actual_provider"])); actual != "" {
+			actualProviderUsed = actual
+		}
+	}
 	modelUsed := firstNonEmptyString(ai.GetModelUsed(response, nil), model)
 
 	if am.spendTracker != nil && response.Usage != nil {
@@ -573,7 +587,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 			BuildID:      agent.BuildID,
 			AgentID:      agent.ID,
 			AgentRole:    string(agent.Role),
-			Provider:     string(provider),
+			Provider:     string(providerUsed),
 			Model:        modelUsed,
 			Capability:   string(task.Type),
 			IsBYOK:       !usesPlatformKeys,
@@ -597,12 +611,15 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	output.Metrics["routing_waterfall_stage"] = waterfallStage
 	output.Metrics["routing_waterfall_reason"] = waterfallReason
 	output.Metrics["routing_waterfall_power_mode"] = string(callPowerMode)
-	attachAIResponseMetrics(output, provider, modelUsed, response)
+	output.Metrics["requested_provider"] = string(provider)
+	output.Metrics["selected_provider"] = string(providerUsed)
+	output.Metrics["actual_provider"] = string(actualProviderUsed)
+	attachAIResponseMetrics(output, providerUsed, modelUsed, response)
 	am.materializeStructuredPatchOutput(build, task, output)
 	trackLikelyTruncatedSourceFiles(output)
 
 	candidateAgent := *agent
-	candidateAgent.Provider = provider
+	candidateAgent.Provider = providerUsed
 	candidateAgent.Model = modelUsed
 	if len(output.TruncatedFiles) > 0 {
 		am.completeTruncatedFiles(ctx, task, build, &candidateAgent, output)
@@ -614,7 +631,7 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	}
 
 	candidate := &taskGenerationCandidate{
-		Provider:           provider,
+		Provider:           providerUsed,
 		Model:              modelUsed,
 		Output:             output,
 		RawContent:         response.Content,

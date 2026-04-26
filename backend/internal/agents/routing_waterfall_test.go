@@ -11,11 +11,15 @@ import (
 type waterfallProbeRouter struct {
 	lastProvider ai.AIProvider
 	lastOpts     GenerateOptions
+	response     *ai.AIResponse
 }
 
 func (r *waterfallProbeRouter) Generate(_ context.Context, provider ai.AIProvider, _ string, opts GenerateOptions) (*ai.AIResponse, error) {
 	r.lastProvider = provider
 	r.lastOpts = opts
+	if r.response != nil {
+		return r.response, nil
+	}
 	return &ai.AIResponse{
 		Content: "// File: src/App.tsx\n```typescript\nexport default function App() { return <main>ok</main>; }\n```",
 		Usage:   &ai.Usage{},
@@ -322,5 +326,101 @@ func TestGenerateTaskOutputWithProviderUsesPerProviderAttemptTimeout(t *testing.
 	}
 	if router.lastDeadlineWindow > 7*time.Minute {
 		t.Fatalf("provider attempt deadline = %v, want <= 7m so fallback providers can still run", router.lastDeadlineWindow)
+	}
+}
+
+func TestGenerateTaskOutputWithProvider_ForcesManagedOllamaKimiCloud(t *testing.T) {
+	t.Setenv("OLLAMA_API_KEY", "managed-key-present")
+	t.Setenv("OLLAMA_MODEL_DEFAULT", "glm-5.1")
+
+	router := &waterfallProbeRouter{}
+	am := &AgentManager{
+		aiRouter: router,
+		builds:   map[string]*Build{},
+	}
+
+	build := &Build{
+		ID:           "build-managed-ollama-model",
+		UserID:       22,
+		PowerMode:    PowerFast,
+		ProviderMode: "platform",
+		Agents:       map[string]*Agent{},
+	}
+	agent := &Agent{
+		ID:       "agent-managed-ollama-model",
+		Role:     RoleLead,
+		Provider: ai.ProviderOllama,
+		BuildID:  build.ID,
+		Model:    "kimi-k2.6:cloud",
+	}
+	task := &Task{
+		ID:          "task-managed-ollama-model",
+		Type:        TaskGenerateUI,
+		Description: "Generate UI",
+	}
+	build.Agents[agent.ID] = agent
+	am.builds[build.ID] = build
+
+	if _, err := am.generateTaskOutputWithProvider(context.Background(), build, agent, task, "prompt", "system", ai.ProviderOllama, 1200, 0.1); err != nil {
+		t.Fatalf("generateTaskOutputWithProvider returned error: %v", err)
+	}
+	if router.lastOpts.ModelOverride != "kimi-k2.6:cloud" {
+		t.Fatalf("managed ollama model override = %q, want kimi-k2.6:cloud", router.lastOpts.ModelOverride)
+	}
+}
+
+func TestGenerateTaskOutputWithProvider_TracksActualResponseProvider(t *testing.T) {
+	router := &waterfallProbeRouter{
+		response: &ai.AIResponse{
+			Provider: ai.ProviderClaude,
+			Content:  "// File: src/App.tsx\n```typescript\nexport default function App() { return <main>ok</main>; }\n```",
+			Metadata: map[string]any{
+				"model": "claude-haiku-4-5-20251001",
+			},
+			Usage: &ai.Usage{},
+		},
+	}
+	am := &AgentManager{
+		aiRouter: router,
+		builds:   map[string]*Build{},
+	}
+
+	build := &Build{
+		ID:           "build-actual-provider",
+		UserID:       23,
+		PowerMode:    PowerFast,
+		ProviderMode: "platform",
+		Agents:       map[string]*Agent{},
+	}
+	agent := &Agent{
+		ID:       "agent-actual-provider",
+		Role:     RoleReviewer,
+		Provider: ai.ProviderOllama,
+		BuildID:  build.ID,
+		Model:    "kimi-k2.6:cloud",
+	}
+	task := &Task{
+		ID:          "task-actual-provider",
+		Type:        TaskReview,
+		Description: "Review app",
+	}
+	build.Agents[agent.ID] = agent
+	am.builds[build.ID] = build
+
+	candidate, err := am.generateTaskOutputWithProvider(context.Background(), build, agent, task, "prompt", "system", ai.ProviderOllama, 1200, 0.1)
+	if err != nil {
+		t.Fatalf("generateTaskOutputWithProvider returned error: %v", err)
+	}
+	if candidate.Provider != ai.ProviderClaude {
+		t.Fatalf("candidate provider = %s, want claude", candidate.Provider)
+	}
+	if got := taskOutputMetricString(candidate.Output, "provider"); got != "claude" {
+		t.Fatalf("output provider metric = %q, want claude", got)
+	}
+	if got := taskOutputMetricString(candidate.Output, "selected_provider"); got != "claude" {
+		t.Fatalf("selected_provider metric = %q, want claude", got)
+	}
+	if got := taskOutputMetricString(candidate.Output, "requested_provider"); got != "ollama" {
+		t.Fatalf("requested_provider metric = %q, want ollama", got)
 	}
 }

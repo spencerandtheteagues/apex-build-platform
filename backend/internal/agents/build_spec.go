@@ -34,6 +34,8 @@ type plannerRouterAdapter struct {
 	userID          uint
 	powerMode       PowerMode
 	usePlatformKeys bool
+	lastProvider    ai.AIProvider
+	lastModel       string
 }
 
 func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts autonomous.AIOptions) (string, error) {
@@ -52,6 +54,8 @@ func (a *plannerRouterAdapter) Generate(ctx context.Context, prompt string, opts
 	if resp == nil {
 		return "", fmt.Errorf("empty response from planning provider")
 	}
+	a.lastProvider = firstNonEmptyProvider(resp.Provider, a.provider)
+	a.lastModel = firstNonEmptyString(ai.GetModelUsed(resp, nil), a.lastModel)
 	return resp.Content, nil
 }
 

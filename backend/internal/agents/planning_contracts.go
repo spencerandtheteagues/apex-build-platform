@@ -102,13 +102,14 @@ func (am *AgentManager) executeStructuredPlanningTask(ctx context.Context, task 
 		provider = ai.ProviderClaude
 	}
 
-	planner := autonomous.NewPlanner(&plannerRouterAdapter{
+	plannerAdapter := &plannerRouterAdapter{
 		router:          am.aiRouter,
 		provider:        provider,
 		userID:          build.UserID,
 		powerMode:       build.PowerMode,
 		usePlatformKeys: am.buildUsesPlatformKeys(build),
-	})
+	}
+	planner := autonomous.NewPlanner(plannerAdapter)
 
 	bundle, err := planner.CreatePlanningBundle(ctx, planningDescriptionForBuild(build))
 	if err != nil {
@@ -124,10 +125,13 @@ func (am *AgentManager) executeStructuredPlanningTask(ctx context.Context, task 
 	return &TaskOutput{
 		Messages: []string{summarizeBuildPlan(plan)},
 		Metrics: map[string]any{
-			"spec_hash":     plan.SpecHash,
-			"scaffold_id":   plan.ScaffoldID,
-			"work_orders":   len(plan.WorkOrders),
-			"planned_files": len(plan.Files),
+			"spec_hash":         plan.SpecHash,
+			"scaffold_id":       plan.ScaffoldID,
+			"work_orders":       len(plan.WorkOrders),
+			"planned_files":     len(plan.Files),
+			"provider":          string(firstNonEmptyProvider(plannerAdapter.lastProvider, provider)),
+			"selected_provider": string(firstNonEmptyProvider(plannerAdapter.lastProvider, provider)),
+			"model":             firstNonEmptyString(plannerAdapter.lastModel, agent.Model),
 		},
 		Plan: plan,
 	}, nil

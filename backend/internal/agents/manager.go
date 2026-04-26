@@ -1187,7 +1187,11 @@ func buildRecentlySucceededWithProvider(build *Build, provider ai.AIProvider, wi
 			continue
 		}
 		agent := build.Agents[strings.TrimSpace(task.AssignedTo)]
-		if agent == nil || agent.Provider != provider {
+		fallbackProvider := ai.AIProvider("")
+		if agent != nil {
+			fallbackProvider = agent.Provider
+		}
+		if recordedProviderForOutput(task.Output, fallbackProvider) != provider {
 			continue
 		}
 		return true
@@ -4420,6 +4424,8 @@ func (am *AgentManager) recordTaskExecutionOutcome(build *Build, agent *Agent, t
 		return
 	}
 
+	providerUsed := recordedProviderForOutput(output, agent.Provider)
+
 	{
 		errMsg := ""
 		if !success {
@@ -4433,7 +4439,7 @@ func (am *AgentManager) recordTaskExecutionOutcome(build *Build, agent *Agent, t
 		if output != nil {
 			fileCount = len(output.Files)
 		}
-		plTaskDone := pLog(build.ID).TaskDone(task.ID, string(task.Type), agent.ID, string(agent.Role), string(agent.Provider))
+		plTaskDone := pLog(build.ID).TaskDone(task.ID, string(task.Type), agent.ID, string(agent.Role), string(providerUsed))
 		plTaskDone(success, errMsg, fileCount)
 	}
 
@@ -4447,7 +4453,7 @@ func (am *AgentManager) recordTaskExecutionOutcome(build *Build, agent *Agent, t
 	cost := taskOutputMetricFloat(output, "billed_cost")
 	latency := taskOutputMetricFloat(output, "latency_seconds")
 	recordProviderTaskOutcome(build, providerTaskOutcome{
-		Provider:             agent.Provider,
+		Provider:             providerUsed,
 		TaskShape:            shape,
 		Success:              success,
 		FirstPass:            task.RetryCount == 0,
@@ -4484,7 +4490,7 @@ func (am *AgentManager) recordTaskExecutionOutcome(build *Build, agent *Agent, t
 		BuildID:             build.ID,
 		StackCombination:    stackCombinationFromBuild(build),
 		TaskShape:           shape,
-		Provider:            agent.Provider,
+		Provider:            providerUsed,
 		Model:               firstNonEmptyString(taskOutputMetricString(output, "model"), agent.Model),
 		FailureClass:        normalizedFailure,
 		FilesInvolved:       taskFingerprintFiles(task, output),
@@ -4511,6 +4517,34 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func parseAIProvider(value string) ai.AIProvider {
+	provider := ai.AIProvider(strings.TrimSpace(value))
+	switch provider {
+	case ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama, ai.ProviderDeepSeek, ai.ProviderGLM:
+		return provider
+	default:
+		return ""
+	}
+}
+
+func firstNonEmptyProvider(values ...ai.AIProvider) ai.AIProvider {
+	for _, value := range values {
+		if trimmed := parseAIProvider(string(value)); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func recordedProviderForOutput(output *TaskOutput, fallback ai.AIProvider) ai.AIProvider {
+	for _, key := range []string{"selected_provider", "provider"} {
+		if provider := parseAIProvider(taskOutputMetricString(output, key)); provider != "" {
+			return provider
+		}
+	}
+	return firstNonEmptyProvider(fallback)
 }
 
 func ensureTaskInputMap(task *Task) map[string]any {

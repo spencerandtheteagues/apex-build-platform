@@ -109,3 +109,45 @@ func TestGetCurrentlyAvailableProvidersForBuild_RetainsRecentSuccessfulOllama(t 
 		t.Fatalf("expected retained providers [ollama claude gpt4], got %v", got)
 	}
 }
+
+func TestGetCurrentlyAvailableProvidersForBuild_DoesNotRetainFallbackProvider(t *testing.T) {
+	am := &AgentManager{
+		aiRouter: &stubAIRouter{
+			providers:             []ai.AIProvider{ai.ProviderClaude, ai.ProviderGPT4},
+			hasConfiguredProvider: true,
+		},
+	}
+
+	completedAt := time.Now().Add(-30 * time.Second)
+	build := &Build{
+		ID:           "fallback-success-build",
+		ProviderMode: "platform",
+		Agents: map[string]*Agent{
+			"lead-1": {
+				ID:       "lead-1",
+				Role:     RoleLead,
+				Provider: ai.ProviderOllama,
+			},
+		},
+		Tasks: []*Task{
+			{
+				ID:          "plan-1",
+				Type:        TaskPlan,
+				Status:      TaskCompleted,
+				AssignedTo:  "lead-1",
+				CompletedAt: &completedAt,
+				Output: &TaskOutput{
+					Metrics: map[string]any{
+						"selected_provider": "claude",
+						"model":             "claude-haiku-4-5-20251001",
+					},
+				},
+			},
+		},
+	}
+
+	got := am.getCurrentlyAvailableProvidersForBuild(build)
+	if len(got) != 2 || got[0] != ai.ProviderClaude || got[1] != ai.ProviderGPT4 {
+		t.Fatalf("expected no ollama retention after claude fallback, got %v", got)
+	}
+}

@@ -126,6 +126,13 @@ func normalizeModelForProvider(provider ai.AIProvider, model string, mode PowerM
 	return selectModelForPowerMode(provider, mode)
 }
 
+func normalizeExecutionModelForProvider(provider ai.AIProvider, model string, mode PowerMode, usePlatformKeys bool) string {
+	if provider == ai.ProviderOllama && usePlatformKeys {
+		return defaultOllamaModelForMode()
+	}
+	return normalizeModelForProvider(provider, model, mode)
+}
+
 func normalizeProviderModelOverride(provider ai.AIProvider, model string) string {
 	model = strings.TrimSpace(model)
 	if model == "" || strings.EqualFold(model, "auto") {
@@ -360,7 +367,7 @@ For code files, use this exact format:
 
 	// Select model using the explicit override when provided; static power-mode
 	// mapping remains a deterministic fallback policy.
-	model := normalizeModelForProvider(aiProvider, opts.ModelOverride, opts.PowerMode)
+	model := normalizeExecutionModelForProvider(aiProvider, opts.ModelOverride, opts.PowerMode, opts.UsePlatformKeys)
 
 	// Create AI request
 	request := &ai.AIRequest{
