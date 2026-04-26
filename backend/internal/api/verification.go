@@ -44,10 +44,49 @@ func generateVerificationCode() (string, error) {
 	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
+func normalizeVerificationCode(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(raw))
+	for _, r := range raw {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func verificationEmailLookup(raw string) (string, string, bool) {
+	emailAddr := strings.ToLower(strings.TrimSpace(raw))
+	if emailAddr == "" {
+		return "", "", false
+	}
+	return "LOWER(email) = LOWER(?)", emailAddr, true
+}
+
+func shouldIssueVerificationCode(user *models.User, now time.Time) bool {
+	if user == nil || user.IsVerified || user.EmailVerifiedAt != nil {
+		return false
+	}
+	if user.VerificationCode == "" || user.VerificationCodeExpiresAt == nil {
+		return true
+	}
+	return !now.Before(*user.VerificationCodeExpiresAt)
+}
+
+func (s *Server) issueVerificationCodeIfNeeded(user *models.User) error {
+	if !shouldIssueVerificationCode(user, time.Now()) {
+		return nil
+	}
+	return s.issueVerificationCode(user)
+}
+
 // issueVerificationCode generates a new code, hashes it, persists it to the
-// user record, and sends the email. Returns the plain code (for logging only in
-// dev) and any error. The email send failure does NOT abort the operation —
-// we still persist the hashed code so a resend can be triggered.
+// user record, and sends the email. Email send failure does NOT abort the
+// operation; we still persist the hashed code so a resend can be triggered.
 func (s *Server) issueVerificationCode(user *models.User) error {
 	code, err := generateVerificationCode()
 	if err != nil {
@@ -94,7 +133,14 @@ func (s *Server) VerifyEmail(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "code is required"})
 		return
 	}
-	code := strings.TrimSpace(req.Code)
+	code := normalizeVerificationCode(req.Code)
+	if len(code) != 6 {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error":      "Invalid verification code",
+			"error_code": "code_invalid",
+		})
+		return
+	}
 
 	var user models.User
 	if userID, ok := getAuthUserID(c); ok {
@@ -105,12 +151,12 @@ func (s *Server) VerifyEmail(c *gin.Context) {
 		}
 	} else {
 		// Unauthenticated path — require email in body
-		emailAddr := strings.ToLower(strings.TrimSpace(req.Email))
-		if emailAddr == "" {
+		clause, emailAddr, ok := verificationEmailLookup(req.Email)
+		if !ok {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication or email required"})
 			return
 		}
-		if err := s.db.DB.Where("email = ?", emailAddr).First(&user).Error; err != nil {
+		if err := s.db.DB.Where(clause, emailAddr).First(&user).Error; err != nil {
 			// Return same error to avoid enumeration
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error":      "Invalid verification code",
@@ -208,7 +254,12 @@ func (s *Server) ResendVerification(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
 			return
 		}
-		if err := s.db.DB.Where("email = ?", strings.ToLower(strings.TrimSpace(req.Email))).First(&user).Error; err != nil {
+		clause, emailAddr, ok := verificationEmailLookup(req.Email)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
+			return
+		}
+		if err := s.db.DB.Where(clause, emailAddr).First(&user).Error; err != nil {
 			// Return 200 to avoid user enumeration.
 			c.JSON(http.StatusOK, gin.H{"message": "If that email is registered and unverified, a code has been sent"})
 			return
