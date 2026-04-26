@@ -82,6 +82,8 @@ type ContainerSandboxConfig struct {
 	MaxConcurrentExecs int32
 }
 
+var sandboxImageLanguages = []string{"python", "javascript", "go", "rust", "java", "c", "cpp"}
+
 // LanguageResourceLimits defines per-language resource constraints
 type LanguageResourceLimits struct {
 	MemoryLimit int64         // bytes
@@ -276,10 +278,10 @@ func NewContainerSandbox(config *ContainerSandboxConfig) (*ContainerSandbox, err
 		}
 	}
 
-	// Ensure sandbox images exist
-	if err := sandbox.ensureImages(); err != nil {
-		return nil, fmt.Errorf("failed to ensure sandbox images: %w", err)
-	}
+	// Prime capabilities from images that already exist locally, then warm missing
+	// enhanced images in the background so startup readiness is not gated on Docker builds.
+	sandbox.primeImageCache()
+	go sandbox.warmImages()
 
 	// Start cleanup goroutine
 	if config.AutoCleanup {
@@ -414,35 +416,51 @@ type SeccompArg struct {
 	Op    string `json:"op"`
 }
 
-// ensureImages ensures all sandbox images are available
-func (s *ContainerSandbox) ensureImages() error {
-	languages := []string{"python", "javascript", "go", "rust", "java", "c", "cpp"}
+func (s *ContainerSandbox) primeImageCache() {
+	for _, language := range sandboxImageLanguages {
+		if s.inspectImage(language) {
+			s.markImageReady(language)
+		}
+	}
+}
 
-	for _, lang := range languages {
-		imageName := fmt.Sprintf("%s-%s:latest", s.config.ImagePrefix, lang)
-
-		// Check if image exists
-		cmd := osexec.Command("docker", "image", "inspect", imageName)
-		if cmd.Run() == nil {
-			s.imageCacheMu.Lock()
-			s.imageCache[lang] = true
-			s.imageCacheMu.Unlock()
+func (s *ContainerSandbox) warmImages() {
+	for _, language := range sandboxImageLanguages {
+		if s.imageReady(language) {
+			continue
+		}
+		if s.inspectImage(language) {
+			s.markImageReady(language)
 			continue
 		}
 
-		// Build the image
-		dockerfile := s.generateDockerfile(lang)
-		if err := s.buildImage(lang, dockerfile); err != nil {
-			// Log warning but continue - will use fallback base images
-			fmt.Printf("Warning: could not build sandbox image for %s: %v\n", lang, err)
-		} else {
-			s.imageCacheMu.Lock()
-			s.imageCache[lang] = true
-			s.imageCacheMu.Unlock()
+		dockerfile := s.generateDockerfile(language)
+		if err := s.buildImage(language, dockerfile); err != nil {
+			// Non-fatal: code execution falls back to public language images until the
+			// enhanced sandbox image is available.
+			fmt.Printf("Warning: could not build sandbox image for %s: %v\n", language, err)
+			continue
 		}
+		s.markImageReady(language)
 	}
+}
 
-	return nil
+func (s *ContainerSandbox) inspectImage(language string) bool {
+	imageName := fmt.Sprintf("%s-%s:latest", s.config.ImagePrefix, language)
+	cmd := osexec.Command("docker", "image", "inspect", imageName)
+	return cmd.Run() == nil
+}
+
+func (s *ContainerSandbox) imageReady(language string) bool {
+	s.imageCacheMu.RLock()
+	defer s.imageCacheMu.RUnlock()
+	return s.imageCache[language]
+}
+
+func (s *ContainerSandbox) markImageReady(language string) {
+	s.imageCacheMu.Lock()
+	defer s.imageCacheMu.Unlock()
+	s.imageCache[language] = true
 }
 
 // generateDockerfile creates a minimal, secure Dockerfile for a language

@@ -10,7 +10,7 @@ func TestEnhancedToolchainProfileForJavaScriptIncludesDeploymentAndDatabaseCLIs(
 
 	profile := enhancedToolchainProfileForLanguage("javascript")
 
-	for _, command := range []string{"pnpm", "vercel", "wrangler", "railway", "supabase", "psql", "mysql", "redis-cli", "prisma"} {
+	for _, command := range []string{"pnpm", "vercel", "wrangler", "railway", "psql", "mysql", "redis-cli", "prisma"} {
 		if !containsCLI(profile.AvailableCLIs, command) {
 			t.Fatalf("expected javascript toolchain to include %q, got %+v", command, profile.AvailableCLIs)
 		}
@@ -31,6 +31,15 @@ func TestGenerateDockerfileIncludesExpandedCLIInstalls(t *testing.T) {
 			t.Fatalf("expected javascript dockerfile to contain %q, got %q", snippet, jsDockerfile)
 		}
 	}
+	if strings.Contains(jsDockerfile, "npm install -g pnpm yarn ") {
+		t.Fatalf("expected javascript dockerfile to avoid reinstalling yarn, got %q", jsDockerfile)
+	}
+	if strings.Contains(jsDockerfile, "supabase") {
+		t.Fatalf("expected javascript dockerfile to avoid unsupported Supabase global install, got %q", jsDockerfile)
+	}
+	if !strings.Contains(jsDockerfile, "npm install -g pnpm typescript tsx vite serve prisma drizzle-kit vercel netlify-cli wrangler @railway/cli") {
+		t.Fatalf("expected javascript dockerfile to retain enhanced CLI installs, got %q", jsDockerfile)
+	}
 
 	pythonDockerfile := sandbox.generateDockerfile("python")
 	if !strings.Contains(pythonDockerfile, "uv poetry pipenv") {
@@ -42,7 +51,7 @@ func TestDefaultAgentCommandCatalogIncludesExpandedCLIs(t *testing.T) {
 	t.Parallel()
 
 	catalog := DefaultAgentCommandCatalog()
-	for _, command := range []string{"pnpm", "vercel", "railway", "psql", "mysql", "redis-cli", "wrangler", "supabase"} {
+	for _, command := range []string{"pnpm", "vercel", "railway", "psql", "mysql", "redis-cli", "wrangler"} {
 		if !containsCLI(catalog, command) {
 			t.Fatalf("expected command catalog to include %q, got %+v", command, catalog)
 		}

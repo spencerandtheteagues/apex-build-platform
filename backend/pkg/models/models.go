@@ -51,7 +51,7 @@ type User struct {
 
 	// Preferences
 	PreferredTheme string `json:"preferred_theme" gorm:"default:'cyberpunk'"` // cyberpunk, matrix, synthwave, neonCity
-	PreferredAI    string `json:"preferred_ai" gorm:"default:'auto'"`         // auto, claude, gpt4, gemini, grok, ollama (paid/BYOK only)
+	PreferredAI    string `json:"preferred_ai" gorm:"default:'auto'"`         // auto, claude, gpt4, gemini, grok, ollama
 	MFAPreference  string `json:"mfa_preference" gorm:"default:'optional'"`   // optional, always, never (enterprise users default to always)
 
 	// Legal acceptance

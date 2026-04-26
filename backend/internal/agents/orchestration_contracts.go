@@ -1053,9 +1053,14 @@ func compileWorkOrdersFromPlanWithCost(buildID string, contract *BuildContract, 
 		return nil
 	}
 	orders := make([]WorkOrder, 0, len(plan.WorkOrders))
+	frontendPreviewFast := strings.EqualFold(strings.TrimSpace(plan.DeliveryMode), "frontend_preview_only") && sensitivity == CostSensitivityHigh
 	for _, order := range plan.WorkOrders {
 		surface := contractSurfaceForRole(order.Role)
 		taskShape := taskShapeForRole(order.Role)
+		preferredProvider := preferredProviderForTaskShapeWithCost(taskShape, scorecards, sensitivity)
+		if frontendPreviewFast && order.Role == RoleFrontend {
+			preferredProvider = ai.ProviderClaude
+		}
 		orders = append(orders, WorkOrder{
 			ID:                 uuid.New().String(),
 			BuildID:            buildID,
@@ -1074,7 +1079,7 @@ func compileWorkOrdersFromPlanWithCost(buildID string, contract *BuildContract, 
 			MaxContextBudget:   contextBudgetForRole(order.Role),
 			RiskLevel:          riskLevelForWorkOrder(order.Role, contract),
 			RoutingMode:        routingModeForRole(order.Role, contract),
-			PreferredProvider:  preferredProviderForTaskShapeWithCost(taskShape, scorecards, sensitivity),
+			PreferredProvider:  preferredProvider,
 		})
 	}
 	return orders
@@ -1220,7 +1225,6 @@ func compilePromotionDecision(build *Build, readinessErrors []string) *Promotion
 }
 
 func defaultProviderScorecards(providerMode string) []ProviderScorecard {
-	hostedEligible := hostedProviderMode(providerMode)
 	scorecards := []ProviderScorecard{
 		{Provider: ai.ProviderClaude, TaskShape: TaskShapeContract, CompilePassRate: 0.92, FirstPassVerificationRate: 0.89, RepairSuccessRate: 0.84, TruncationRate: 0.04, AverageAcceptedTokens: 9500, AverageCostPerSuccess: 0.11, AverageLatencySeconds: 8.0, FailureClassRecurrence: 0.15, PromotionRate: 0.83, HostedEligible: true},
 		{Provider: ai.ProviderClaude, TaskShape: TaskShapeDiagnosis, CompilePassRate: 0.90, FirstPassVerificationRate: 0.91, RepairSuccessRate: 0.88, TruncationRate: 0.03, AverageAcceptedTokens: 8200, AverageCostPerSuccess: 0.10, AverageLatencySeconds: 7.8, FailureClassRecurrence: 0.13, PromotionRate: 0.85, HostedEligible: true},
@@ -1234,17 +1238,7 @@ func defaultProviderScorecards(providerMode string) []ProviderScorecard {
 		{Provider: ai.ProviderGrok, TaskShape: TaskShapeRepair, CompilePassRate: 0.91, FirstPassVerificationRate: 0.87, RepairSuccessRate: 0.91, TruncationRate: 0.04, AverageAcceptedTokens: 6800, AverageCostPerSuccess: 0.09, AverageLatencySeconds: 7.2, FailureClassRecurrence: 0.13, PromotionRate: 0.85, HostedEligible: true},
 		{Provider: ai.ProviderGrok, TaskShape: TaskShapeDiagnosis, CompilePassRate: 0.88, FirstPassVerificationRate: 0.89, RepairSuccessRate: 0.87, TruncationRate: 0.04, AverageAcceptedTokens: 7200, AverageLatencySeconds: 7.0, FailureClassRecurrence: 0.14, PromotionRate: 0.84, HostedEligible: true},
 		{Provider: ai.ProviderGrok, TaskShape: TaskShapeAdversarialCritique, CompilePassRate: 0.81, FirstPassVerificationRate: 0.84, RepairSuccessRate: 0.68, TruncationRate: 0.05, AverageAcceptedTokens: 4300, AverageCostPerSuccess: 0.04, AverageLatencySeconds: 4.8, FailureClassRecurrence: 0.21, PromotionRate: 0.74, HostedEligible: true},
-		{Provider: ai.ProviderOllama, TaskShape: TaskShapeRepair, CompilePassRate: 0.74, FirstPassVerificationRate: 0.70, RepairSuccessRate: 0.72, TruncationRate: 0.09, AverageAcceptedTokens: 6800, AverageCostPerSuccess: 0, AverageLatencySeconds: 14.0, FailureClassRecurrence: 0.27, PromotionRate: 0.68, HostedEligible: !hostedEligible},
-	}
-	if hostedEligible {
-		filtered := make([]ProviderScorecard, 0, len(scorecards))
-		for _, scorecard := range scorecards {
-			if scorecard.Provider == ai.ProviderOllama {
-				continue
-			}
-			filtered = append(filtered, scorecard)
-		}
-		return filtered
+		{Provider: ai.ProviderOllama, TaskShape: TaskShapeRepair, CompilePassRate: 0.74, FirstPassVerificationRate: 0.70, RepairSuccessRate: 0.72, TruncationRate: 0.09, AverageAcceptedTokens: 6800, AverageCostPerSuccess: 0, AverageLatencySeconds: 14.0, FailureClassRecurrence: 0.27, PromotionRate: 0.68, HostedEligible: true},
 	}
 	return scorecards
 }
@@ -1326,6 +1320,18 @@ func hostedProviderMode(providerMode string) bool {
 	return strings.TrimSpace(strings.ToLower(providerMode)) != "byok"
 }
 
+func providerHostedEligible(providerMode string, provider ai.AIProvider) bool {
+	if !hostedProviderMode(providerMode) {
+		return true
+	}
+	switch provider {
+	case ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama, ai.ProviderDeepSeek, ai.ProviderGLM:
+		return true
+	default:
+		return false
+	}
+}
+
 func providerModeHintForProviders(providers []ai.AIProvider) string {
 	if len(providers) == 0 {
 		return "platform"
@@ -1343,7 +1349,7 @@ func hostedPlatformProviders(providers []ai.AIProvider) []ai.AIProvider {
 	filtered := make([]ai.AIProvider, 0, len(providers))
 	for _, provider := range providers {
 		switch provider {
-		case ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderDeepSeek, ai.ProviderGLM:
+		case ai.ProviderClaude, ai.ProviderGPT4, ai.ProviderGemini, ai.ProviderGrok, ai.ProviderOllama, ai.ProviderDeepSeek, ai.ProviderGLM:
 			filtered = append(filtered, provider)
 		}
 	}
@@ -2491,7 +2497,7 @@ func ensureProviderScorecardLocked(state *BuildOrchestrationState, providerMode 
 	scorecard := ProviderScorecard{
 		Provider:       provider,
 		TaskShape:      shape,
-		HostedEligible: !hostedProviderMode(providerMode) || provider != ai.ProviderOllama,
+		HostedEligible: providerHostedEligible(providerMode, provider),
 	}
 	state.ProviderScorecards = append(state.ProviderScorecards, scorecard)
 	return &state.ProviderScorecards[len(state.ProviderScorecards)-1]
@@ -2989,10 +2995,10 @@ func normalizeFailureClass(message string) string {
 		return "contract_violation"
 	case strings.Contains(lower, "coordination"):
 		return "coordination_violation"
-	case strings.Contains(lower, "verification"):
-		return "verification_failure"
 	case strings.Contains(lower, "truncat") || strings.Contains(lower, "unterminated code block") || strings.Contains(lower, "abrupt eof"):
 		return "truncation"
+	case strings.Contains(lower, "verification"):
+		return "verification_failure"
 	case strings.Contains(lower, "validation"):
 		return "final_validation_failure"
 	case strings.Contains(lower, "timeout"), strings.Contains(lower, "deadline exceeded"), strings.Contains(lower, "context canceled"):

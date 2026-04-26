@@ -353,8 +353,9 @@ func (am *OptimizedAgentManager) executeTaskCore(ctx context.Context, task *Task
 	prompt := am.buildTaskPromptFromBuild(task, build, agent)
 	systemPrompt := am.getSystemPromptForRole(agent.Role)
 
-	// Execute with timeout
-	taskCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	// Mirror the main manager timeout policy so long-tail review/fix work does
+	// not get cut off by the legacy optimized path.
+	taskCtx, cancel := context.WithTimeout(ctx, computeTaskExecutionTimeout(build, task, agent, false))
 	defer cancel()
 
 	response, err := am.aiRouter.Generate(taskCtx, agent.Provider, prompt, GenerateOptions{

@@ -37,7 +37,7 @@ func TestDefaultGenerateTimeout(t *testing.T) {
 }
 
 func TestSelectModelForPowerModeUsesProviderOwnedMaxModels(t *testing.T) {
-	t.Parallel()
+	t.Setenv("OLLAMA_API_KEY", "")
 
 	tests := []struct {
 		name     string
@@ -50,6 +50,7 @@ func TestSelectModelForPowerModeUsesProviderOwnedMaxModels(t *testing.T) {
 		{name: "openai fast owns gpt 4o mini", provider: ai.ProviderGPT4, mode: PowerFast, want: "gpt-4o-mini"},
 		{name: "gemini max uses pro before preview", provider: ai.ProviderGemini, mode: PowerMax, want: "gemini-3.1-pro"},
 		{name: "grok max uses 4.20", provider: ai.ProviderGrok, mode: PowerMax, want: "grok-4.20-0309-reasoning"},
+		{name: "ollama fast uses kimi", provider: ai.ProviderOllama, mode: PowerFast, want: "kimi-k2.6"},
 	}
 
 	for _, tt := range tests {
@@ -59,6 +60,17 @@ func TestSelectModelForPowerModeUsesProviderOwnedMaxModels(t *testing.T) {
 				t.Fatalf("selectModelForPowerMode(%s, %s) = %q, want %q", tt.provider, tt.mode, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSelectModelForPowerModeUsesKimiCloudWhenManagedOllamaEnabled(t *testing.T) {
+	t.Setenv("OLLAMA_API_KEY", "managed-key-present")
+
+	if got := selectModelForPowerMode(ai.ProviderOllama, PowerMax); got != "kimi-k2.6:cloud" {
+		t.Fatalf("selectModelForPowerMode(ollama, max) = %q, want kimi-k2.6:cloud", got)
+	}
+	if got := selectModelForPowerMode(ai.ProviderOllama, PowerFast); got != "kimi-k2.6:cloud" {
+		t.Fatalf("selectModelForPowerMode(ollama, fast) = %q, want kimi-k2.6:cloud", got)
 	}
 }
 
@@ -118,5 +130,57 @@ func TestMapProviderToCapabilityFallsBackToPromptHints(t *testing.T) {
 	}
 	if got := adapter.mapProviderToCapability(ai.ProviderClaude, GenerateOptions{SystemPrompt: "You are a strict code review assistant."}); got != ai.CapabilityCodeReview {
 		t.Fatalf("expected code review capability from review prompt, got %s", got)
+	}
+}
+
+func TestPartitionPlatformProvidersByHealth_PrefersHealthyProviders(t *testing.T) {
+	t.Parallel()
+
+	healthy, degraded := partitionPlatformProvidersByHealth(map[ai.AIProvider]bool{
+		ai.ProviderClaude: true,
+		ai.ProviderGPT4:   true,
+		ai.ProviderGrok:   false,
+		ai.ProviderGemini: false,
+	})
+
+	if len(healthy) != 2 || healthy[0] != ai.ProviderClaude || healthy[1] != ai.ProviderGPT4 {
+		t.Fatalf("healthy providers = %+v, want [claude gpt4]", healthy)
+	}
+	if len(degraded) != 2 || degraded[0] != ai.ProviderGemini || degraded[1] != ai.ProviderGrok {
+		t.Fatalf("degraded providers = %+v, want [gemini grok]", degraded)
+	}
+}
+
+func TestPartitionPlatformProvidersByHealth_FallsBackToDegradedWhenNeeded(t *testing.T) {
+	t.Parallel()
+
+	healthy, degraded := partitionPlatformProvidersByHealth(map[ai.AIProvider]bool{
+		ai.ProviderClaude: false,
+		ai.ProviderGPT4:   false,
+	})
+
+	if len(healthy) != 0 {
+		t.Fatalf("healthy providers = %+v, want none", healthy)
+	}
+	if len(degraded) != 2 || degraded[0] != ai.ProviderClaude || degraded[1] != ai.ProviderGPT4 {
+		t.Fatalf("degraded providers = %+v, want [claude gpt4]", degraded)
+	}
+}
+
+func TestPartitionPlatformProvidersByHealth_PrefersManagedOllamaFirst(t *testing.T) {
+	t.Parallel()
+
+	healthy, degraded := partitionPlatformProvidersByHealth(map[ai.AIProvider]bool{
+		ai.ProviderOllama: true,
+		ai.ProviderClaude: true,
+		ai.ProviderGPT4:   true,
+		ai.ProviderGemini: false,
+	})
+
+	if len(healthy) != 3 || healthy[0] != ai.ProviderOllama {
+		t.Fatalf("healthy providers = %+v, want ollama first", healthy)
+	}
+	if len(degraded) != 1 || degraded[0] != ai.ProviderGemini {
+		t.Fatalf("degraded providers = %+v, want [gemini]", degraded)
 	}
 }

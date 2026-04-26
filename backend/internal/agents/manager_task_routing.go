@@ -528,7 +528,22 @@ func (am *AgentManager) generateTaskOutputWithProvider(
 	stopHeartbeat := am.startAgentActivityHeartbeat(ctx, build.ID, agent, task, "agent:generating", "generation", provider, model)
 	defer stopHeartbeat()
 
-	response, err := am.aiRouter.Generate(ctx, provider, prompt, GenerateOptions{
+	attemptCtx := ctx
+	attemptCancel := func() {}
+	if defaultTimeout := defaultGenerateTimeout(provider, callPowerMode); defaultTimeout > 0 {
+		if deadline, hasDeadline := ctx.Deadline(); hasDeadline {
+			remaining := time.Until(deadline)
+			if remaining < defaultTimeout {
+				defaultTimeout = remaining
+			}
+		}
+		if defaultTimeout > 0 {
+			attemptCtx, attemptCancel = context.WithTimeout(ctx, defaultTimeout)
+		}
+	}
+	defer attemptCancel()
+
+	response, err := am.aiRouter.Generate(attemptCtx, provider, prompt, GenerateOptions{
 		UserID:          build.UserID,
 		BuildID:         build.ID,
 		MaxTokens:       maxTokens,

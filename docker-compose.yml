@@ -97,6 +97,7 @@ services:
       REDIS_URL: redis://redis:6379
 
       # AI API Keys
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       OLLAMA_MODEL_DEFAULT: ${OLLAMA_MODEL_DEFAULT:-}
       OLLAMA_MODEL_FAST: ${OLLAMA_MODEL_FAST:-}

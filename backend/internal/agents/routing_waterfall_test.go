@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"testing"
+	"time"
 
 	"apex-build/internal/ai"
 )
@@ -30,6 +31,30 @@ func (r *waterfallProbeRouter) GetAvailableProvidersForUser(_ uint) []ai.AIProvi
 }
 
 func (r *waterfallProbeRouter) HasConfiguredProviders() bool { return true }
+
+type routingDeadlineProbeRouter struct {
+	lastDeadlineWindow time.Duration
+}
+
+func (r *routingDeadlineProbeRouter) Generate(ctx context.Context, _ ai.AIProvider, _ string, _ GenerateOptions) (*ai.AIResponse, error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		r.lastDeadlineWindow = time.Until(deadline)
+	}
+	return &ai.AIResponse{
+		Content: "// File: src/App.tsx\n```typescript\nexport default function App() { return <main>ok</main>; }\n```",
+		Usage:   &ai.Usage{},
+	}, nil
+}
+
+func (r *routingDeadlineProbeRouter) GetAvailableProviders() []ai.AIProvider {
+	return []ai.AIProvider{ai.ProviderOllama, ai.ProviderClaude}
+}
+
+func (r *routingDeadlineProbeRouter) GetAvailableProvidersForUser(_ uint) []ai.AIProvider {
+	return r.GetAvailableProviders()
+}
+
+func (r *routingDeadlineProbeRouter) HasConfiguredProviders() bool { return true }
 
 func TestPlanRoutingWaterfallCapsToBuildPower(t *testing.T) {
 	t.Parallel()
@@ -252,5 +277,50 @@ func TestGenerateTaskOutputWithProviderHonorsManualProviderModelOverride(t *test
 	}
 	if candidate.WaterfallReason != "provider_model_override" {
 		t.Fatalf("expected manual override reason, got %+v", candidate)
+	}
+}
+
+func TestGenerateTaskOutputWithProviderUsesPerProviderAttemptTimeout(t *testing.T) {
+	t.Parallel()
+
+	router := &routingDeadlineProbeRouter{}
+	am := &AgentManager{
+		aiRouter: router,
+		builds:   map[string]*Build{},
+	}
+
+	build := &Build{
+		ID:           "build-provider-attempt-timeout",
+		UserID:       21,
+		PowerMode:    PowerMax,
+		ProviderMode: "platform",
+		Agents:       map[string]*Agent{},
+	}
+	agent := &Agent{
+		ID:       "agent-provider-attempt-timeout",
+		Role:     RoleBackend,
+		Provider: ai.ProviderOllama,
+		BuildID:  build.ID,
+		Model:    "kimi-k2.6:cloud",
+	}
+	task := &Task{
+		ID:          "task-provider-attempt-timeout",
+		Type:        TaskGenerateAPI,
+		Description: "Generate API",
+	}
+	build.Agents[agent.ID] = agent
+	am.builds[build.ID] = build
+
+	outerCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	if _, err := am.generateTaskOutputWithProvider(outerCtx, build, agent, task, "prompt", "system", ai.ProviderOllama, 1200, 0.1); err != nil {
+		t.Fatalf("generateTaskOutputWithProvider returned error: %v", err)
+	}
+	if router.lastDeadlineWindow <= 0 {
+		t.Fatal("expected provider attempt deadline to be applied")
+	}
+	if router.lastDeadlineWindow > 7*time.Minute {
+		t.Fatalf("provider attempt deadline = %v, want <= 7m so fallback providers can still run", router.lastDeadlineWindow)
 	}
 }

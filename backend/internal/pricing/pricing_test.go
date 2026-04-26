@@ -464,6 +464,9 @@ func TestDefaultModel(t *testing.T) {
 		{"grok", "fast", "grok-3-mini"},
 		{"grok", "balanced", "grok-3"},
 		{"grok", "max", "grok-4.20-0309-reasoning"},
+		{"ollama", "fast", "kimi-k2.6:cloud"},
+		{"ollama", "balanced", "kimi-k2.6:cloud"},
+		{"ollama", "max", "kimi-k2.6:cloud"},
 	}
 
 	for _, tt := range tests {
@@ -473,5 +476,25 @@ func TestDefaultModel(t *testing.T) {
 				t.Errorf("DefaultModel(%s, %s) = %s, want %s", tt.provider, tt.powerMode, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBilledCost_BillsManagedOllamaButKeepsBYOKFree(t *testing.T) {
+	e := newTestEngine()
+	e.providers["ollama"] = ProviderPricing{
+		Default: ModelPricing{InputPer1M: 0.50, OutputPer1M: 2.00},
+		Models: map[string]ModelPricing{
+			"kimi-k2.6:cloud": {InputPer1M: 0.50, OutputPer1M: 2.00},
+		},
+	}
+
+	managed := e.BilledCost("ollama", "kimi-k2.6:cloud", 1000, 500, ModeFast, false)
+	if managed <= 0 {
+		t.Fatalf("managed ollama billed cost = %f, want > 0", managed)
+	}
+
+	byok := e.BilledCost("ollama", "kimi-k2.6:cloud", 1000, 500, ModeFast, true)
+	if byok != 0 {
+		t.Fatalf("BYOK ollama billed cost = %f, want 0", byok)
 	}
 }

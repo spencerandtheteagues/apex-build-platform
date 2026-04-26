@@ -226,14 +226,14 @@ func main() {
 	geminiKey := appConfig.GeminiAPIKey
 	grokKey := appConfig.GrokAPIKey
 
-	// Ollama Cloud BYOK mode: if OLLAMA_API_KEY is set (even in production),
-	// enable Ollama Cloud provider with the provided key and base URL.
+	// Ollama Cloud / managed mode: if OLLAMA_API_KEY is set (even in production),
+	// enable the Ollama provider with the provided key and base URL.
 	ollamaCloudEnabled := appConfig.OllamaAPIKey != ""
 	if ollamaCloudEnabled {
 		if appConfig.OllamaBaseURL == "" {
-			appConfig.OllamaBaseURL = "http://127.0.0.1:11434"
+			appConfig.OllamaBaseURL = "https://ollama.com/v1"
 		}
-		log.Printf("OLLAMA CLOUD BYOK: Enabling Ollama Cloud provider at %s", appConfig.OllamaBaseURL)
+		log.Printf("OLLAMA CLOUD: Enabling Ollama provider at %s", appConfig.OllamaBaseURL)
 	}
 
 	if !config.IsProductionEnvironment() && appConfig.OllamaBaseURL != "" {
@@ -246,9 +246,9 @@ func main() {
 		grokKey = ""
 		log.Printf("DEV MODE: Ollama-only mode — cloud API keys suppressed, using %s", ollamaRouterURL)
 	} else if ollamaCloudEnabled {
-		// In production with OLLAMA_API_KEY set, add Ollama Cloud alongside other providers
+		// In production with OLLAMA_API_KEY set, add Ollama alongside other providers.
 		ollamaRouterURL = appConfig.OllamaBaseURL
-		log.Printf("PROD MODE: Ollama Cloud BYOK enabled at %s", ollamaRouterURL)
+		log.Printf("PROD MODE: Ollama enabled at %s", ollamaRouterURL)
 	}
 
 	aiRouter := ai.NewAIRouter(
@@ -278,7 +278,7 @@ func main() {
 	if ollamaRouterURL != "" {
 		log.Printf("   - Ollama:     ✅ Enabled (%s, key=%s)", ollamaRouterURL, getStatusIcon(ollamaAPIKey != ""))
 	} else {
-		log.Printf("   - Ollama:     ❌ Disabled (set OLLAMA_BASE_URL to enable)")
+		log.Printf("   - Ollama:     ❌ Disabled (set OLLAMA_BASE_URL or OLLAMA_API_KEY to enable)")
 	}
 	platformAIProviders := 0
 	if claudeKey != "" {

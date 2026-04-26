@@ -467,21 +467,13 @@ func (h *Handler) UpdateProfile(c *gin.Context) {
 			"gpt4":   true,
 			"gemini": true,
 			"grok":   true,
+			"ollama": true,
 		}
 
-		if preferredAI == "ollama" && !hasPaidBackendPlan(c, h.DB, userID) {
+		if !validAIs[preferredAI] {
 			c.JSON(http.StatusBadRequest, StandardResponse{
 				Success: false,
-				Error:   "Ollama preference requires a paid plan because BYOK is unavailable on free",
-				Code:    "INVALID_AI_PREFERENCE",
-			})
-			return
-		}
-
-		if preferredAI != "ollama" && !validAIs[preferredAI] {
-			c.JSON(http.StatusBadRequest, StandardResponse{
-				Success: false,
-				Error:   "Invalid AI preference. Must be one of: auto, claude, gpt4, gemini, grok, or ollama on paid plans",
+				Error:   "Invalid AI preference. Must be one of: auto, claude, gpt4, gemini, grok, or ollama",
 				Code:    "INVALID_AI_PREFERENCE",
 			})
 			return

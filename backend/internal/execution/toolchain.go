@@ -174,10 +174,10 @@ func enhancedToolchainProfileForLanguage(language string) SandboxToolchainProfil
 		return mergeToolchainProfiles(common, newSandboxToolchainProfile(
 			[]string{"node", "npm", "npx", "pnpm", "yarn"},
 			nil,
-			[]string{"netlify", "railway", "supabase", "vercel", "wrangler"},
+			[]string{"netlify", "railway", "vercel", "wrangler"},
 			[]string{"drizzle-kit", "node", "npm", "npx", "prisma", "serve", "tsc", "tsx", "vite"},
 			nil,
-			[]string{"netlify", "railway", "supabase", "vercel", "wrangler"},
+			[]string{"netlify", "railway", "vercel", "wrangler"},
 		))
 	case "go":
 		return mergeToolchainProfiles(common, newSandboxToolchainProfile(
@@ -337,7 +337,7 @@ func sandboxGlobalInstallCommands(language string) []string {
 		}
 	case "javascript":
 		return []string{
-			"npm install -g pnpm yarn typescript tsx vite serve prisma drizzle-kit vercel netlify-cli wrangler @railway/cli supabase",
+			"npm install -g pnpm typescript tsx vite serve prisma drizzle-kit vercel netlify-cli wrangler @railway/cli",
 		}
 	default:
 		return nil
@@ -350,6 +350,6 @@ func DefaultAgentCommandCatalog() []string {
 		"gradle", "java", "javac", "jq", "make", "mvn", "mysql", "nc", "netlify", "node",
 		"npm", "npx", "pip", "pip3", "pipenv", "pnpm", "poetry", "prisma",
 		"psql", "python", "python3", "railway", "redis-cli", "rg", "rustc", "serve",
-		"sqlite3", "supabase", "tsc", "tsx", "uv", "vercel", "vite", "wget", "wrangler", "yarn",
+		"sqlite3", "tsc", "tsx", "uv", "vercel", "vite", "wget", "wrangler", "yarn",
 	})
 }

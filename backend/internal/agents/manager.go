@@ -145,6 +145,31 @@ func formatAgentHeartbeatContent(role AgentRole, provider ai.AIProvider, model s
 	}
 }
 
+func (am *AgentManager) touchBuildExecutionHeartbeat(buildID string, agent *Agent, now time.Time) {
+	if am == nil || strings.TrimSpace(buildID) == "" {
+		return
+	}
+
+	am.mu.RLock()
+	build := am.builds[buildID]
+	am.mu.RUnlock()
+	if build == nil {
+		return
+	}
+
+	build.mu.Lock()
+	if build.Status != BuildCompleted && build.Status != BuildFailed && build.Status != BuildCancelled {
+		build.UpdatedAt = now.UTC()
+	}
+	build.mu.Unlock()
+
+	if agent != nil {
+		agent.mu.Lock()
+		agent.UpdatedAt = now.UTC()
+		agent.mu.Unlock()
+	}
+}
+
 func (am *AgentManager) startAgentActivityHeartbeat(
 	ctx context.Context,
 	buildID string,
@@ -178,6 +203,8 @@ func (am *AgentManager) startAgentActivityHeartbeat(
 			case <-stopCh:
 				return
 			case now := <-ticker.C:
+				am.touchBuildExecutionHeartbeat(buildID, agent, now)
+
 				content := formatAgentHeartbeatContent(agent.Role, provider, model, task, stage, now.Sub(startedAt))
 				if strings.TrimSpace(content) == "" {
 					continue
@@ -982,53 +1009,56 @@ func (am *AgentManager) buildTimeoutForBuild(build *Build) time.Duration {
 		return am.buildTimeoutForMode(ModeFast)
 	}
 
-	defaultSeconds := 240 // fast: 4 minutes
-	envKey := "BUILD_TIMEOUT_FAST_SECONDS"
-	if build.Mode == ModeFull {
-		defaultSeconds = 600 // full: 10 minutes
-		envKey = "BUILD_TIMEOUT_FULL_SECONDS"
-	}
+	timeout := am.buildTimeoutForMode(build.Mode)
 
-	explicitSeconds, explicitlySet := os.LookupEnv(envKey)
-	if !explicitlySet {
-		switch {
-		case am.isLocalDevSingleOllamaProfile():
-			if build.Mode == ModeFull {
-				defaultSeconds = 1800
-			} else {
-				defaultSeconds = 900
-			}
-		case am.isLocalDevStrictPreviewBuild(build):
-			// Strict preview-ready verification (including install/build/preview smoke)
-			// needs more headroom locally, even with cloud providers.
-			if build.Mode == ModeFull {
-				defaultSeconds = 1800
-			} else {
-				defaultSeconds = 900
-			}
-		case build.Mode == ModeFull && build.Plan != nil && strings.EqualFold(strings.TrimSpace(build.Plan.AppType), "fullstack"):
-			if defaultSeconds < 1800 {
-				defaultSeconds = 1800
-			}
-		case build.Mode == ModeFull && build.TechStack != nil &&
-			(strings.TrimSpace(build.TechStack.Backend) != "" || strings.TrimSpace(build.TechStack.Database) != ""):
-			if defaultSeconds < 1500 {
-				defaultSeconds = 1500
-			}
+	switch build.PowerMode {
+	case PowerMax:
+		if build.Mode == ModeFull && timeout < 60*time.Minute {
+			timeout = 60 * time.Minute
+		} else if build.Mode != ModeFull && timeout < 20*time.Minute {
+			timeout = 20 * time.Minute
+		}
+	case PowerBalanced:
+		if build.Mode == ModeFull && timeout < 50*time.Minute {
+			timeout = 50 * time.Minute
+		} else if build.Mode != ModeFull && timeout < 18*time.Minute {
+			timeout = 18 * time.Minute
+		}
+	default:
+		if build.Mode == ModeFull && timeout < 40*time.Minute {
+			timeout = 40 * time.Minute
+		} else if build.Mode != ModeFull && timeout < 15*time.Minute {
+			timeout = 15 * time.Minute
 		}
 	}
 
-	seconds := defaultSeconds
-	if explicitlySet {
-		if parsed, err := strconv.Atoi(strings.TrimSpace(explicitSeconds)); err == nil {
-			seconds = parsed
+	switch {
+	case am.isLocalDevSingleOllamaProfile():
+		if build.Mode == ModeFull && timeout < 75*time.Minute {
+			timeout = 75 * time.Minute
+		} else if build.Mode != ModeFull && timeout < 30*time.Minute {
+			timeout = 30 * time.Minute
+		}
+	case am.isLocalDevStrictPreviewBuild(build):
+		// Strict preview-ready verification (including install/build/preview smoke)
+		// needs more headroom locally, even with cloud providers.
+		if build.Mode == ModeFull && timeout < 60*time.Minute {
+			timeout = 60 * time.Minute
+		} else if build.Mode != ModeFull && timeout < 20*time.Minute {
+			timeout = 20 * time.Minute
+		}
+	case build.Mode == ModeFull && build.Plan != nil && strings.EqualFold(strings.TrimSpace(build.Plan.AppType), "fullstack"):
+		if timeout < 50*time.Minute {
+			timeout = 50 * time.Minute
+		}
+	case build.Mode == ModeFull && build.TechStack != nil &&
+		(strings.TrimSpace(build.TechStack.Backend) != "" || strings.TrimSpace(build.TechStack.Database) != ""):
+		if timeout < 45*time.Minute {
+			timeout = 45 * time.Minute
 		}
 	}
-	if seconds < 30 {
-		seconds = 30
-	}
 
-	return time.Duration(seconds) * time.Second
+	return timeout
 }
 
 func (am *AgentManager) isLocalDevStrictPreviewBuild(build *Build) bool {
@@ -1301,28 +1331,31 @@ func (am *AgentManager) runInactivityMonitor(buildID string) (normalExit bool) {
 }
 
 func (am *AgentManager) buildStallTimeoutForBuild(build *Build) time.Duration {
-	defaultSeconds := 300 // fast builds: 5 minutes before stall fires
+	defaultTimeout := 10 * time.Minute
 	envKey := "BUILD_STALL_TIMEOUT_FAST_SECONDS"
 	if build != nil && build.Mode == ModeFull {
-		defaultSeconds = 480 // full builds: 8 minutes of headroom
+		defaultTimeout = 15 * time.Minute
 		envKey = "BUILD_STALL_TIMEOUT_FULL_SECONDS"
 	}
-	// Local Ollama builds are substantially slower — give them much more idle time.
 	if _, explicitlySet := os.LookupEnv(envKey); !explicitlySet && am.isLocalDevSingleOllamaProfile() {
-		defaultSeconds = 1200 // 20 minutes for local Ollama builds
+		defaultTimeout = 25 * time.Minute
 	}
-	seconds := envInt(envKey, defaultSeconds)
-	if seconds < 90 {
-		seconds = 90
+
+	stallTimeout := defaultTimeout
+	if seconds := envInt(envKey, int(defaultTimeout.Seconds())); seconds > 0 {
+		stallTimeout = time.Duration(seconds) * time.Second
+	}
+	if stallTimeout < 90*time.Second {
+		stallTimeout = 90 * time.Second
 	}
 
 	// Never exceed the global build timeout minus a small buffer.
 	buildTimeout := am.buildTimeoutForBuild(build)
-	maxAllowed := int(buildTimeout.Seconds()) - 30
-	if maxAllowed >= 90 && seconds > maxAllowed {
-		seconds = maxAllowed
+	maxAllowed := buildTimeout - 30*time.Second
+	if maxAllowed >= 90*time.Second && stallTimeout > maxAllowed {
+		stallTimeout = maxAllowed
 	}
-	return time.Duration(seconds) * time.Second
+	return stallTimeout
 }
 
 func activeBuildLeaseStaleAfter() time.Duration {
@@ -1477,7 +1510,7 @@ func (am *AgentManager) refreshActiveBuildLease(build *Build) {
 	am.persistBuildSnapshot(build, nil)
 }
 
-func (am *AgentManager) taskExecutionTimeoutForTask(build *Build, task *Task, agent *Agent) time.Duration {
+func computeTaskExecutionTimeout(build *Build, task *Task, agent *Agent, localSingleOllama bool) time.Duration {
 	mode := PowerFast
 	if build != nil && build.PowerMode != "" {
 		mode = build.PowerMode
@@ -1514,7 +1547,76 @@ func (am *AgentManager) taskExecutionTimeoutForTask(build *Build, task *Task, ag
 		}
 	}
 
+	if floor := reviewStageTaskTimeoutFloor(build, task, provider, localSingleOllama); floor > timeout {
+		timeout = floor
+	}
+
 	return timeout
+}
+
+func (am *AgentManager) taskExecutionTimeoutForTask(build *Build, task *Task, agent *Agent) time.Duration {
+	return computeTaskExecutionTimeout(build, task, agent, am.isLocalDevSingleOllamaProfile())
+}
+
+func reviewStageTaskTimeoutFloor(build *Build, task *Task, provider ai.AIProvider, localSingleOllama bool) time.Duration {
+	if !taskUsesExtendedReviewTimeout(build, task) {
+		return 0
+	}
+
+	floor := 10 * time.Minute
+	if build != nil {
+		switch build.PowerMode {
+		case PowerMax:
+			floor = 14 * time.Minute
+		case PowerBalanced:
+			floor = 12 * time.Minute
+		case PowerFast:
+			floor = 10 * time.Minute
+		}
+		if build.Mode == ModeFull && floor < 12*time.Minute {
+			floor = 12 * time.Minute
+		}
+	}
+
+	if localSingleOllama || provider == ai.ProviderOllama {
+		if floor < 18*time.Minute {
+			floor = 18 * time.Minute
+		}
+	}
+
+	return floor
+}
+
+func taskUsesExtendedReviewTimeout(build *Build, task *Task) bool {
+	if task == nil {
+		return false
+	}
+
+	if task.Type == TaskReview {
+		return true
+	}
+
+	action := strings.ToLower(taskInputStringValue(task.Input, "action"))
+	switch action {
+	case "solve_build_failure", "post_fix_review", "regression_test", "fix_review_issues", "fix_preview_verification":
+		return true
+	}
+
+	if build == nil {
+		return false
+	}
+
+	phase := strings.ToLower(strings.TrimSpace(build.SnapshotState.CurrentPhase))
+	if build.Status == BuildReviewing || build.Status == BuildAwaitingReview {
+		return task.Type == TaskFix || task.Type == TaskTest
+	}
+
+	switch phase {
+	case "review", "validation", "preview_verification":
+		return task.Type == TaskFix || task.Type == TaskTest
+	default:
+		return false
+	}
 }
 
 func (am *AgentManager) registerTaskExecutionCancel(taskID string, cancel context.CancelFunc) {
@@ -2110,6 +2212,17 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 		available[p] = true
 	}
 
+	// When Ollama/Kimi is available, make it the primary model family across the
+	// build. Other providers remain available later as fallbacks if Ollama fails.
+	if available[ai.ProviderOllama] {
+		log.Printf("Assigning providers to roles: %d providers available (forcing ollama across all roles)", len(providers))
+		for _, role := range roles {
+			assignments[role] = ai.ProviderOllama
+		}
+		am.logProviderAssignments(build, assignments)
+		return assignments
+	}
+
 	// CAPABILITY-BASED LEAD SELECTION
 	// The most capable available model becomes the lead, regardless of type
 	leadProvider := am.selectLeadProvider(providers)
@@ -2225,7 +2338,11 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 		log.Printf("Provider policy notice: Gemini unavailable, testing role will use fallback providers")
 	}
 
-	// Log final assignments
+	am.logProviderAssignments(build, assignments)
+	return assignments
+}
+
+func (am *AgentManager) logProviderAssignments(build *Build, assignments map[AgentRole]ai.AIProvider) {
 	for role, provider := range assignments {
 		log.Printf("Agent %s -> Provider %s", role, provider)
 		powerMode := PowerFast
@@ -2237,8 +2354,6 @@ func (am *AgentManager) assignProvidersToRolesForBuild(build *Build, providers [
 		model := selectModelForPowerMode(provider, powerMode)
 		pLog(buildID).AgentAssigned(string(role), string(role), string(provider), model)
 	}
-
-	return assignments
 }
 
 // assignProvidersToRolesWithOverrides applies user-specified role assignments
@@ -2296,6 +2411,13 @@ func (am *AgentManager) assignProvidersToRolesWithOverrides(
 // selectLeadProvider chooses the most capable provider from available options
 // Lead provider handles critical planning, architecture, and decision-making tasks
 func (am *AgentManager) selectLeadProvider(providers []ai.AIProvider) ai.AIProvider {
+	for _, provider := range providers {
+		if provider == ai.ProviderOllama {
+			log.Printf("Provider capability analysis: selected %s as preferred managed/local orchestrator from %v", provider, providers)
+			return provider
+		}
+	}
+
 	// Provider capability ranking (highest to lowest)
 	// Claude: Best for reasoning, planning, architecture decisions
 	// GPT-4: Strong for complex code generation and problem-solving
@@ -2477,6 +2599,44 @@ func (am *AgentManager) AssignTask(agentID string, task *Task) error {
 
 	am.taskQueue <- task
 	return nil
+}
+
+func assignmentFailureTerminalStatus(err error) TaskStatus {
+	if errors.Is(err, errBuildNotActive) {
+		return TaskCancelled
+	}
+	return TaskFailed
+}
+
+func markTaskAssignmentFailure(build *Build, task *Task, err error) {
+	if build == nil || task == nil || err == nil {
+		return
+	}
+
+	now := time.Now()
+	build.mu.Lock()
+	task.AssignedTo = ""
+	task.StartedAt = nil
+	task.CompletedAt = &now
+	task.Error = strings.TrimSpace(err.Error())
+	task.Status = assignmentFailureTerminalStatus(err)
+	build.UpdatedAt = now
+	build.mu.Unlock()
+}
+
+func removeBuildTaskByID(tasks []*Task, taskID string) []*Task {
+	if len(tasks) == 0 || strings.TrimSpace(taskID) == "" {
+		return tasks
+	}
+
+	filtered := tasks[:0]
+	for _, task := range tasks {
+		if task != nil && task.ID == taskID {
+			continue
+		}
+		filtered = append(filtered, task)
+	}
+	return filtered
 }
 
 func taskPreferredProvider(task *Task) ai.AIProvider {
@@ -4017,7 +4177,7 @@ func (am *AgentManager) determineRetryStrategyWithHistory(build *Build, agent *A
 
 	switch failureClass {
 	case "truncation":
-		if insight.ReduceContextFailures >= 1 && insight.SameProviderFailures >= 2 && hasAltProvider {
+		if insight.ReduceContextFailures >= 1 && insight.SameProviderFailures >= 1 && hasAltProvider {
 			return "switch_provider"
 		}
 		if base == "standard_retry" || base == "fix_and_retry" {
@@ -5242,27 +5402,33 @@ func (am *AgentManager) processResult(result *TaskResult) {
 			}
 			if !verificationPassed {
 				log.Printf("Build verification failed for task %s: %v", task.ID, verifyErrors)
+				verificationFailure := fmt.Sprintf("build verification failed: %s", strings.Join(verifyErrors, "; "))
+				retryStrategy := am.determineRetryStrategyWithHistory(build, agent, verificationFailure, task)
 
-				// Track verification failure for learning
-				task.ErrorHistory = append(task.ErrorHistory, ErrorAttempt{
-					AttemptNumber: task.RetryCount + 1,
-					Error:         fmt.Sprintf("Build verification failed: %v", verifyErrors),
-					Timestamp:     time.Now(),
-					Context:       "build_verification",
-				})
-
-				// If we can retry, add verification errors to context and retry
-				if task.RetryCount < task.MaxRetries {
+				// If we can retry in-place, add verification errors to context and retry
+				if task.RetryCount < task.MaxRetries && retryStrategy != "spawn_solver" {
+					task.RetryStrategy = RetryStrategy(retryStrategy)
 					if buildErr == nil {
-						am.recordTaskExecutionOutcome(build, agent, task, result.Output, false, true, false, normalizeFailureClass("verification failed: "+strings.Join(verifyErrors, "; ")))
+						am.recordTaskExecutionOutcome(build, agent, task, result.Output, false, true, false, normalizeFailureClass(verificationFailure))
 					}
+					task.ErrorHistory = append(task.ErrorHistory, ErrorAttempt{
+						AttemptNumber: task.RetryCount + 1,
+						Error:         fmt.Sprintf("Build verification failed: %v", verifyErrors),
+						Timestamp:     time.Now(),
+						Context:       "build_verification",
+					})
 					task.RetryCount++
 					task.Status = TaskPending
+					task.Error = ""
 					taskInput := ensureTaskInputMap(task)
 					taskInput["verification_errors"] = verifyErrors
 					taskInput["retry_guidance"] = "Previous code failed build verification. Fix the following errors:"
+					taskInput["previous_errors"] = task.ErrorHistory
+					taskInput["retry_strategy"] = retryStrategy
 
 					agent.Status = StatusWorking
+					agent.Error = ""
+					agent.UpdatedAt = time.Now()
 					agent.mu.Unlock()
 
 					// Broadcast retry with verification context
@@ -5276,7 +5442,10 @@ func (am *AgentManager) processResult(result *TaskResult) {
 							"errors":      verifyErrors,
 							"retry_count": task.RetryCount,
 							"max_retries": task.MaxRetries,
-							"message":     "Build verification failed, retrying with error context...",
+							"strategy":    retryStrategy,
+							"provider":    agent.Provider,
+							"model":       agent.Model,
+							"message":     fmt.Sprintf("Build verification failed, retrying with %s strategy...", retryStrategy),
 						},
 					})
 
@@ -5284,9 +5453,19 @@ func (am *AgentManager) processResult(result *TaskResult) {
 					return
 				}
 
-				// Max retries exceeded with verification failures
-				result.Success = false
-				result.Error = fmt.Errorf("build verification failed after %d attempts: %v", task.RetryCount, verifyErrors)
+				taskInput := ensureTaskInputMap(task)
+				taskInput["verification_errors"] = verifyErrors
+				taskInput["retry_guidance"] = "Previous code failed build verification. Fix the following errors:"
+				taskInput["retry_strategy"] = retryStrategy
+				if retryStrategy == "spawn_solver" {
+					task.RetryStrategy = RetryStrategy(retryStrategy)
+					result.Success = false
+					result.Error = fmt.Errorf("build verification failed: %v", verifyErrors)
+				} else {
+					// Max retries exceeded with verification failures
+					result.Success = false
+					result.Error = fmt.Errorf("build verification failed after %d attempts: %v", task.RetryCount, verifyErrors)
+				}
 			}
 		}
 
@@ -5457,6 +5636,7 @@ func (am *AgentManager) processResult(result *TaskResult) {
 			taskInput := ensureTaskInputMap(task)
 			taskInput["previous_errors"] = task.ErrorHistory
 			taskInput["retry_guidance"] = "Previous attempt failed. Analyze the error and try a different approach."
+			taskInput["retry_strategy"] = retryStrategy
 
 			// Put task back in queue
 			am.taskQueue <- task
@@ -5970,9 +6150,9 @@ func (am *AgentManager) ensureProblemSolverAgent(buildID string) *Agent {
 	return nil
 }
 
-func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, err error) {
+func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, err error) bool {
 	if failedTask == nil || err == nil {
-		return
+		return false
 	}
 	// Track recovery depth to allow one 2nd-level recovery but prevent infinite loops.
 	currentRecoveryDepth := 0
@@ -5984,19 +6164,39 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 			currentRecoveryDepth = taskInputInt(failedTask.Input, "recovery_depth")
 			if currentRecoveryDepth >= 2 {
 				log.Printf("Build %s: recovery depth limit reached for task %s, skipping further recovery", buildID, failedTask.ID)
-				return
+				return false
 			}
 		}
 	}
 
 	build, getErr := am.GetBuild(buildID)
 	if getErr != nil {
-		return
+		return false
 	}
 	if !am.canCreateAutomatedFixTask(build, "solve_build_failure") {
 		log.Printf("Build %s: skipping recovery solver task for failed task %s (loop cap or active recovery task already present)",
 			buildID, failedTask.ID)
-		return
+		return false
+	}
+
+	solver := am.ensureProblemSolverAgent(buildID)
+	if solver == nil {
+		// Fallback: use existing specialists if solver could not be spawned.
+		solver = am.selectFixAgent(build, []AgentRole{RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
+	}
+	if solver == nil {
+		log.Printf("Build %s: no solver or fallback agent available for recovery of failed task %s", buildID, failedTask.ID)
+		am.broadcast(buildID, &WSMessage{
+			Type:      WSBuildProgress,
+			BuildID:   buildID,
+			Timestamp: time.Now(),
+			Data: map[string]any{
+				"phase":   "auto_recovery",
+				"message": "Automated recovery could not start because no solver agent is available. The build will fail fast instead of waiting on an unassigned recovery task.",
+				"status":  "warning",
+			},
+		})
+		return false
 	}
 
 	failedTaskID := failedTask.ID
@@ -6007,7 +6207,7 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 	build.mu.Lock()
 	if flag, ok := failedTask.Input["recovery_queued"].(bool); ok && flag {
 		build.mu.Unlock()
-		return
+		return false
 	}
 	if failedTask.Input == nil {
 		failedTask.Input = map[string]any{}
@@ -6043,24 +6243,33 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 	build.UpdatedAt = time.Now()
 	build.mu.Unlock()
 
-	solver := am.ensureProblemSolverAgent(buildID)
-	if solver == nil {
-		// Fallback: use existing specialists if solver could not be spawned.
-		solver = am.selectFixAgent(build, []AgentRole{RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
-	}
-	if solver == nil {
-		log.Printf("Build %s: no solver or fallback agent available for recovery task %s", buildID, recoveryTask.ID)
+	if assignErr := am.AssignTask(solver.ID, recoveryTask); assignErr != nil {
+		log.Printf("Build %s: failed to assign recovery task %s to %s: %v", buildID, recoveryTask.ID, solver.ID, assignErr)
+		build.mu.Lock()
+		if failedTask.Input != nil {
+			delete(failedTask.Input, "recovery_queued")
+			if taskInputStringValue(failedTask.Input, "superseded_by_recovery") == recoveryTask.ID {
+				delete(failedTask.Input, "superseded_by_recovery")
+			}
+		}
+		failedTask.Status = TaskFailed
+		if strings.TrimSpace(failedTask.Error) == "" {
+			failedTask.Error = failureMessage
+		}
+		build.Tasks = removeBuildTaskByID(build.Tasks, recoveryTask.ID)
+		build.UpdatedAt = time.Now()
+		build.mu.Unlock()
 		am.broadcast(buildID, &WSMessage{
 			Type:      WSBuildProgress,
 			BuildID:   buildID,
 			Timestamp: time.Now(),
 			Data: map[string]any{
 				"phase":   "auto_recovery",
-				"message": "Recovery agent unavailable — build will attempt to continue without solver assistance",
+				"message": "Automated recovery could not be assigned. The original task failure will terminate the build instead of leaving a pending review task behind.",
 				"status":  "warning",
 			},
 		})
-		return
+		return false
 	}
 
 	am.broadcast(buildID, &WSMessage{
@@ -6077,10 +6286,7 @@ func (am *AgentManager) enqueueRecoveryTask(buildID string, failedTask *Task, er
 			"quality_gate_stage":    "validation",
 		},
 	})
-
-	if assignErr := am.AssignTask(solver.ID, recoveryTask); assignErr != nil {
-		log.Printf("Build %s: failed to assign recovery task %s to %s: %v", buildID, recoveryTask.ID, solver.ID, assignErr)
-	}
+	return true
 }
 
 func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task) {
@@ -6160,6 +6366,7 @@ func (am *AgentManager) schedulePostFixValidation(build *Build, sourceTask *Task
 		}
 		if err := am.AssignTask(assignee.ID, task); err != nil {
 			log.Printf("Build %s: failed to assign post-fix validation task %s: %v", build.ID, task.ID, err)
+			markTaskAssignmentFailure(build, task, fmt.Errorf("post-fix validation task could not be assigned: %w", err))
 		}
 	}
 
@@ -6247,6 +6454,13 @@ func (am *AgentManager) handleTestCompletion(build *Build, sourceTask *Task, out
 			fixTask.Input["trigger_task"] = sourceTask.ID
 		}
 
+		agent := am.selectFixAgent(build, []AgentRole{RoleSolver, RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
+		assignmentErr := error(nil)
+		if agent == nil {
+			assignmentErr = fmt.Errorf("no available agent to handle test fix task %s", fixTask.ID)
+			log.Print(assignmentErr.Error())
+		}
+
 		build.mu.Lock()
 		build.Tasks = append(build.Tasks, fixTask)
 		build.UpdatedAt = time.Now()
@@ -6267,13 +6481,11 @@ func (am *AgentManager) handleTestCompletion(build *Build, sourceTask *Task, out
 			},
 		})
 
-		agent := am.selectFixAgent(build, []AgentRole{RoleSolver, RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
-		if agent != nil {
-			if err := am.AssignTask(agent.ID, fixTask); err != nil {
-				log.Printf("Failed to assign test fix task %s to agent %s: %v", fixTask.ID, agent.ID, err)
-			}
-		} else {
-			log.Printf("No available agent to handle test fix task %s", fixTask.ID)
+		if assignmentErr != nil {
+			markTaskAssignmentFailure(build, fixTask, assignmentErr)
+		} else if err := am.AssignTask(agent.ID, fixTask); err != nil {
+			log.Printf("Failed to assign test fix task %s to agent %s: %v", fixTask.ID, agent.ID, err)
+			markTaskAssignmentFailure(build, fixTask, fmt.Errorf("test fix task could not be assigned: %w", err))
 		}
 	}
 
@@ -6397,6 +6609,13 @@ func (am *AgentManager) handleReviewCompletion(build *Build, sourceTask *Task, o
 			fixTask.Input["trigger_task"] = sourceTask.ID
 		}
 
+		agent := am.selectFixAgent(build, []AgentRole{RoleSolver, RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
+		assignmentErr := error(nil)
+		if agent == nil {
+			assignmentErr = fmt.Errorf("no available agent to handle review fix task %s", fixTask.ID)
+			log.Print(assignmentErr.Error())
+		}
+
 		build.mu.Lock()
 		build.Tasks = append(build.Tasks, fixTask)
 		build.UpdatedAt = time.Now()
@@ -6417,13 +6636,11 @@ func (am *AgentManager) handleReviewCompletion(build *Build, sourceTask *Task, o
 			},
 		})
 
-		agent := am.selectFixAgent(build, []AgentRole{RoleSolver, RoleBackend, RoleFrontend, RoleDatabase, RoleReviewer})
-		if agent != nil {
-			if err := am.AssignTask(agent.ID, fixTask); err != nil {
-				log.Printf("Failed to assign review fix task %s to agent %s: %v", fixTask.ID, agent.ID, err)
-			}
-		} else {
-			log.Printf("No available agent to handle review fix task %s", fixTask.ID)
+		if assignmentErr != nil {
+			markTaskAssignmentFailure(build, fixTask, assignmentErr)
+		} else if err := am.AssignTask(agent.ID, fixTask); err != nil {
+			log.Printf("Failed to assign review fix task %s to agent %s: %v", fixTask.ID, agent.ID, err)
+			markTaskAssignmentFailure(build, fixTask, fmt.Errorf("review fix task could not be assigned: %w", err))
 		}
 	}
 
@@ -14894,8 +15111,7 @@ func (am *AgentManager) launchFinalValidationSolverRecovery(
 		failedTask.Input["repair_hints"] = hints
 	}
 
-	am.enqueueRecoveryTask(build.ID, failedTask, fmt.Errorf("final output validation failed: %s", errorSummary))
-	return true
+	return am.enqueueRecoveryTask(build.ID, failedTask, fmt.Errorf("final output validation failed: %s", errorSummary))
 }
 
 // checkBuildCompletion determines if the build is finished
@@ -17252,6 +17468,7 @@ func (am *AgentManager) assignPhaseAgents(build *Build, agents []agentPriority, 
 
 		if err := am.AssignTask(agent.ID, task); err != nil {
 			log.Printf("Failed to assign task to agent %s: %v", agent.ID, err)
+			markTaskAssignmentFailure(build, task, fmt.Errorf("phase task could not be assigned: %w", err))
 		} else {
 			log.Printf("Assigned task %s (%s) to agent %s (%s)", task.ID, task.Type, agent.ID, agent.Role)
 		}
@@ -17281,17 +17498,28 @@ func (am *AgentManager) waitForPhaseCompletion(build *Build, taskIDs []string) b
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	// Scale phase timeout by provider profile and power mode.
-	// Each retry can take up to ~60s (LLM round-trip + verification), so with maxRetries=3
-	// and solver/reviewer passes, the testing phase alone can need 10-15 minutes.
-	// Ollama needs enough time for task + potential retry (15min task * 2 = 30min).
+	// Scale phase timeout from the active build budget so one long review/fix or
+	// generation phase cannot consume the whole deadline, but also cannot be cut off
+	// prematurely before provider fallback and verification have a chance to run.
 	phaseTimeout := 15 * time.Minute
+	if buildTimeout := am.buildTimeoutForBuild(build); buildTimeout > 0 {
+		derived := buildTimeout / 2
+		if derived > phaseTimeout {
+			phaseTimeout = derived
+		}
+	}
 	if am.isLocalDevSingleOllamaProfile() {
-		phaseTimeout = 35 * time.Minute
+		if phaseTimeout < 45*time.Minute {
+			phaseTimeout = 45 * time.Minute
+		}
 	} else if build.PowerMode == PowerMax {
-		phaseTimeout = 25 * time.Minute // frontier models + multiple retries
+		if phaseTimeout < 30*time.Minute {
+			phaseTimeout = 30 * time.Minute
+		}
 	} else if build.PowerMode == PowerBalanced {
-		phaseTimeout = 20 * time.Minute
+		if phaseTimeout < 25*time.Minute {
+			phaseTimeout = 25 * time.Minute
+		}
 	}
 	timeout := time.After(phaseTimeout)
 
@@ -18029,10 +18257,12 @@ func (am *AgentManager) resumeBuildExecution(build *Build, startMonitors bool) {
 		agentID := restoredTaskAgentID(build, task)
 		if agentID == "" {
 			log.Printf("Build %s: restored task %s has no resumable assignee", build.ID, task.ID)
+			markTaskAssignmentFailure(build, task, fmt.Errorf("restored task %s has no resumable assignee", task.ID))
 			continue
 		}
 		if err := am.AssignTask(agentID, task); err != nil {
 			log.Printf("Build %s: failed to resume restored task %s with agent %s: %v", build.ID, task.ID, agentID, err)
+			markTaskAssignmentFailure(build, task, fmt.Errorf("restored task %s could not be resumed: %w", task.ID, err))
 			continue
 		}
 		requeued = true

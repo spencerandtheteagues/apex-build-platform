@@ -340,6 +340,29 @@ func TestGetNextFallbackProviderForTask_UsesLiveScorecards(t *testing.T) {
 	}
 }
 
+func TestAssignProvidersToRolesForBuild_ForcesOllamaWhenAvailable(t *testing.T) {
+	am := &AgentManager{}
+	build := &Build{
+		ID:           "build-ollama-primary",
+		ProviderMode: "platform",
+		PowerMode:    PowerBalanced,
+	}
+
+	roles := []AgentRole{RoleArchitect, RoleFrontend, RoleBackend, RoleTesting, RoleReviewer}
+	assignments := am.assignProvidersToRolesForBuild(build, []ai.AIProvider{
+		ai.ProviderClaude,
+		ai.ProviderGPT4,
+		ai.ProviderGemini,
+		ai.ProviderOllama,
+	}, roles)
+
+	for _, role := range roles {
+		if got := assignments[role]; got != ai.ProviderOllama {
+			t.Fatalf("%s provider = %s, want %s", role, got, ai.ProviderOllama)
+		}
+	}
+}
+
 func TestGetNextFallbackProviderForTask_PrefersTaskPreferredProvider(t *testing.T) {
 	am := &AgentManager{
 		aiRouter: &stubAIRouter{

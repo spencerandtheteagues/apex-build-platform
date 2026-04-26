@@ -117,9 +117,9 @@ func newEngineFromEnv() *Engine {
 			"ollama": {
 				Default: ModelPricing{InputPer1M: 0.50, OutputPer1M: 2.00},
 				Models: map[string]ModelPricing{
-					"kimi-k2.6":  {InputPer1M: 0.50, OutputPer1M: 2.00},
+					"kimi-k2.6":       {InputPer1M: 0.50, OutputPer1M: 2.00},
 					"kimi-k2.6:cloud": {InputPer1M: 0.50, OutputPer1M: 2.00},
-					"glm-5.1":    {InputPer1M: 0.30, OutputPer1M: 1.00},
+					"glm-5.1":         {InputPer1M: 0.30, OutputPer1M: 1.00},
 				},
 			},
 			"deepseek": {
@@ -177,7 +177,7 @@ func newEngineFromEnv() *Engine {
 // For BYOK users we only charge a flat routing fee since they pay the API directly.
 func (e *Engine) BilledCost(provider, model string, inputTokens, outputTokens int, powerMode string, isBYOK bool) float64 {
 	providerKey := normalizeProvider(provider)
-	if providerKey == "ollama" {
+	if providerKey == "ollama" && isBYOK {
 		return 0.0
 	}
 	if isBYOK {
@@ -268,7 +268,7 @@ func (e *Engine) DefaultModel(provider, powerMode string) string {
 		if mode == ModeBalanced {
 			return "kimi-k2.6:cloud"
 		}
-		return "glm-5.1"
+		return "kimi-k2.6:cloud"
 	case "deepseek":
 		if mode == ModeMax {
 			return "deepseek-r1:14b"

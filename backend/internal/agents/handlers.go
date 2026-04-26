@@ -540,13 +540,6 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 				})
 				return
 			}
-			if prov == "ollama" && strings.ToLower(strings.TrimSpace(req.ProviderMode)) != "byok" {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error":   "invalid provider for hosted build",
-					"details": "Ollama is local/BYOK-only. Hosted platform builds may only assign Claude, GPT, Gemini, or Grok.",
-				})
-				return
-			}
 		}
 	}
 
@@ -557,13 +550,6 @@ func (h *BuildHandler) StartBuild(c *gin.Context) {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"error":   "invalid provider",
 					"details": fmt.Sprintf("Unknown provider: %s. Valid: claude, gpt4, gemini, grok, ollama", provider),
-				})
-				return
-			}
-			if provider == "ollama" && strings.ToLower(strings.TrimSpace(req.ProviderMode)) != "byok" {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error":   "invalid provider for hosted build",
-					"details": "Ollama is local/BYOK-only. Hosted platform builds may only override Claude, GPT, Gemini, or Grok models.",
 				})
 				return
 			}
@@ -1701,14 +1687,6 @@ func (h *BuildHandler) SetProviderModelOverride(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "invalid provider",
 			"details": fmt.Sprintf("Unknown provider: %s", req.Provider),
-		})
-		return
-	}
-
-	if provider == ai.ProviderOllama && strings.ToLower(strings.TrimSpace(build.ProviderMode)) != "byok" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid provider for hosted build",
-			"details": "Ollama is local/BYOK-only.",
 		})
 		return
 	}

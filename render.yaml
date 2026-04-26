@@ -68,9 +68,13 @@ services:
       - key: BUILD_MAX_REQUESTS_FULL
         value: "150"
       - key: BUILD_TIMEOUT_FAST_SECONDS
-        value: "300"
+        value: "1200"
       - key: BUILD_TIMEOUT_FULL_SECONDS
-        value: "900"
+        value: "3600"
+      - key: BUILD_STALL_TIMEOUT_FAST_SECONDS
+        value: "600"
+      - key: BUILD_STALL_TIMEOUT_FULL_SECONDS
+        value: "1200"
       - key: APEX_PREVIEW_RUNTIME_VERIFY
         value: "true"
       - key: ANTHROPIC_API_KEY
@@ -82,7 +86,7 @@ services:
       - key: OLLAMA_API_KEY
         sync: false  # Ollama Cloud / OpenAI-compatible proxy API key (e.g. Together AI, Fireworks)
       - key: OLLAMA_BASE_URL
-        sync: false  # Optional: override default Ollama Cloud URL (default: http://127.0.0.1:11434)
+        sync: false  # Optional: override default Ollama Cloud URL (default: https://ollama.com/v1)
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET

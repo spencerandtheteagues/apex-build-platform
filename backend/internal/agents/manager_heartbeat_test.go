@@ -50,10 +50,14 @@ func TestAgentActivityHeartbeatAppendsTimelineUpdates(t *testing.T) {
 	time.Sleep(5 * time.Millisecond)
 
 	build.mu.RLock()
+	lastUpdated := build.UpdatedAt
 	defer build.mu.RUnlock()
 
 	if len(build.ActivityTimeline) == 0 {
 		t.Fatal("expected heartbeat activity to be appended")
+	}
+	if lastUpdated.IsZero() {
+		t.Fatal("expected heartbeat to refresh build updated_at")
 	}
 	entry := build.ActivityTimeline[len(build.ActivityTimeline)-1]
 	if entry.EventType != "agent:generating" {
@@ -70,5 +74,11 @@ func TestAgentActivityHeartbeatAppendsTimelineUpdates(t *testing.T) {
 	}
 	if entry.Content == "" {
 		t.Fatal("expected heartbeat content")
+	}
+
+	agent.mu.RLock()
+	defer agent.mu.RUnlock()
+	if agent.UpdatedAt.IsZero() {
+		t.Fatal("expected heartbeat to refresh agent updated_at")
 	}
 }

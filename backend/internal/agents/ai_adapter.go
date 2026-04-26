@@ -39,7 +39,7 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 	ai.ProviderOllama: {
 		PowerMax:      "kimi-k2.6",
 		PowerBalanced: "kimi-k2.6",
-		PowerFast:     "glm-5.1",
+		PowerFast:     "kimi-k2.6",
 	},
 	ai.ProviderDeepSeek: {
 		PowerMax:      "deepseek-r1:14b",
@@ -62,6 +62,7 @@ func selectModelForPowerMode(provider ai.AIProvider, mode PowerMode) string {
 		if model := selectOllamaModelOverride(mode); model != "" {
 			return model
 		}
+		return defaultOllamaModelForMode()
 	}
 	if providerModels, ok := modelsByPowerMode[provider]; ok {
 		if model, ok := providerModels[mode]; ok {
@@ -177,11 +178,28 @@ func selectOllamaModelOverride(mode PowerMode) string {
 	return ""
 }
 
+func defaultOllamaModelForMode() string {
+	if strings.TrimSpace(os.Getenv("OLLAMA_API_KEY")) != "" {
+		return "kimi-k2.6:cloud"
+	}
+	return "kimi-k2.6"
+}
+
 // AIRouterAdapter adapts the existing AI router to the agent system interface
 type AIRouterAdapter struct {
 	router      *ai.AIRouter
 	byokManager *ai.BYOKManager
 	startupTime time.Time // Track when adapter was created for grace period
+}
+
+var platformProviderPreferenceOrder = []ai.AIProvider{
+	ai.ProviderOllama,
+	ai.ProviderClaude,
+	ai.ProviderGPT4,
+	ai.ProviderGemini,
+	ai.ProviderGrok,
+	ai.ProviderDeepSeek,
+	ai.ProviderGLM,
 }
 
 // NewAIRouterAdapter creates a new adapter wrapping the existing AI router
@@ -888,44 +906,31 @@ func (a *AIRouterAdapter) GetAvailableProvidersForUser(userID uint) []ai.AIProvi
 // GetAvailableProviders returns a list of healthy, available AI providers (Platform default)
 func (a *AIRouterAdapter) GetAvailableProviders() []ai.AIProvider {
 	healthStatus := a.router.GetHealthStatus()
-	healthyAvailable := make([]ai.AIProvider, 0)
-	degradedAvailable := make([]ai.AIProvider, 0)
 
-	// Map AI router providers to agent providers and check health
-	providerMappings := map[ai.AIProvider]ai.AIProvider{
-		ai.ProviderClaude:   ai.ProviderClaude,
-		ai.ProviderGPT4:     ai.ProviderGPT4,
-		ai.ProviderGemini:   ai.ProviderGemini,
-		ai.ProviderGrok:     ai.ProviderGrok,
-		ai.ProviderOllama:   ai.ProviderOllama,
-		ai.ProviderDeepSeek: ai.ProviderDeepSeek,
-		ai.ProviderGLM:      ai.ProviderGLM,
+	healthyAvailable, degradedAvailable := partitionPlatformProvidersByHealth(healthStatus)
+	for _, provider := range healthyAvailable {
+		log.Printf("Provider %s is available and healthy", provider)
+	}
+	for _, provider := range degradedAvailable {
+		log.Printf("Provider %s is configured but unhealthy (kept as degraded fallback)", provider)
 	}
 
-	for aiProvider, agentProvider := range providerMappings {
-		if healthy, exists := healthStatus[aiProvider]; exists {
-			if healthy {
-				healthyAvailable = append(healthyAvailable, agentProvider)
-				log.Printf("Provider %s is available and healthy", agentProvider)
-			} else {
-				// Keep configured-but-unhealthy providers as degraded fallbacks.
-				// This prevents one flaky health check from completely removing a provider.
-				degradedAvailable = append(degradedAvailable, agentProvider)
-				log.Printf("Provider %s is configured but unhealthy (kept as degraded fallback)", agentProvider)
-			}
+	if len(healthyAvailable) > 0 {
+		if len(degradedAvailable) > 0 {
+			log.Printf("Healthy providers present; withholding %d degraded provider(s) from initial assignment", len(degradedAvailable))
 		}
+		log.Printf("Available providers: %v", healthyAvailable)
+		return healthyAvailable
 	}
 
-	available := make([]ai.AIProvider, 0, len(healthyAvailable)+len(degradedAvailable))
-	available = append(available, healthyAvailable...)
-	available = append(available, degradedAvailable...)
-
-	if len(healthyAvailable) == 0 && len(degradedAvailable) > 0 {
+	if len(degradedAvailable) > 0 {
 		log.Printf("No healthy providers reported; using %d degraded configured provider(s)", len(degradedAvailable))
+		log.Printf("Available providers: %v", degradedAvailable)
+		return degradedAvailable
 	}
 
-	log.Printf("Available providers: %v", available)
-	return available
+	log.Printf("Available providers: []")
+	return nil
 }
 
 // HasConfiguredProviders reports whether any platform/BYOK provider client is configured.
@@ -936,4 +941,23 @@ func (a *AIRouterAdapter) HasConfiguredProviders() bool {
 
 	healthStatus := a.router.GetHealthStatus()
 	return len(healthStatus) > 0
+}
+
+func partitionPlatformProvidersByHealth(healthStatus map[ai.AIProvider]bool) ([]ai.AIProvider, []ai.AIProvider) {
+	healthyAvailable := make([]ai.AIProvider, 0, len(platformProviderPreferenceOrder))
+	degradedAvailable := make([]ai.AIProvider, 0, len(platformProviderPreferenceOrder))
+
+	for _, provider := range platformProviderPreferenceOrder {
+		healthy, exists := healthStatus[provider]
+		if !exists {
+			continue
+		}
+		if healthy {
+			healthyAvailable = append(healthyAvailable, provider)
+			continue
+		}
+		degradedAvailable = append(degradedAvailable, provider)
+	}
+
+	return healthyAvailable, degradedAvailable
 }

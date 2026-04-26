@@ -98,18 +98,9 @@ func (s *Server) UpdateUserProfile(c *gin.Context) {
 			"gpt4":   true,
 			"gemini": true,
 			"grok":   true,
+			"ollama": true,
 		}
-		isPaidPlan := false
-		switch strings.ToLower(strings.TrimSpace(user.SubscriptionType)) {
-		case "builder", "pro", "team", "enterprise", "owner":
-			isPaidPlan = true
-		}
-
-		if preferredAI == "ollama" && !isPaidPlan {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Ollama preference requires a paid plan because BYOK is unavailable on free"})
-			return
-		}
-		if preferredAI != "ollama" && !validAI[preferredAI] {
+		if !validAI[preferredAI] {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid AI preference"})
 			return
 		}

@@ -1538,7 +1538,7 @@ func TestStartBuildFallsBackToFrontendPreviewForFreeFullStackRequests(t *testing
 	}
 }
 
-func TestStartBuildRejectsHostedOllamaRoleAssignments(t *testing.T) {
+func TestStartBuildAllowsHostedOllamaRoleAssignments(t *testing.T) {
 	db := openBuildTestDB(t)
 	if err := db.Create(&models.User{
 		ID:               1,
@@ -1576,11 +1576,42 @@ func TestStartBuildRejectsHostedOllamaRoleAssignments(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	testRouter(am).ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "Ollama is local/BYOK-only") {
-		t.Fatalf("expected hosted ollama rejection, got %s", w.Body.String())
+}
+
+func TestSetProviderModelOverrideAllowsHostedOllama(t *testing.T) {
+	am := &AgentManager{
+		builds:      make(map[string]*Build),
+		agents:      make(map[string]*Agent),
+		subscribers: make(map[string][]chan *WSMessage),
+		ctx:         context.Background(),
+	}
+	build := &Build{
+		ID:           "build-ollama-override",
+		UserID:       1,
+		ProviderMode: "platform",
+		Status:       BuildInProgress,
+		PowerMode:    PowerBalanced,
+		Agents:       map[string]*Agent{},
+	}
+	am.builds[build.ID] = build
+
+	body, _ := json.Marshal(map[string]any{
+		"provider": "ollama",
+		"model":    "kimi-k2.6",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/v1/build/"+build.ID+"/provider-model", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	testRouter(am).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := build.ProviderModelOverrides["ollama"]; got != "kimi-k2.6" {
+		t.Fatalf("ollama provider override = %q, want kimi-k2.6", got)
 	}
 }
 

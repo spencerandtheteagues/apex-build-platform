@@ -108,7 +108,7 @@ func NewOllamaClient(baseURL, apiKey string) *OllamaClient {
 // NewOllamaCloudClient creates an Ollama client configured for Ollama Cloud (e.g., kimi-k2.6:cloud)
 func NewOllamaCloudClient(baseURL, apiKey string) *OllamaClient {
 	if baseURL == "" {
-		baseURL = "http://127.0.0.1:11434"
+		baseURL = "https://ollama.com/v1"
 	}
 	return &OllamaClient{
 		baseURL: baseURL,
@@ -393,9 +393,12 @@ func (o *OllamaClient) Health(ctx context.Context) error {
 		}
 		resp.Body.Close()
 
-		// 200 = healthy, 401 = server reachable but auth required (still healthy for our purposes)
-		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusUnauthorized {
+		// 200 = healthy, 401 = auth failed (bad key — treat as unhealthy so router falls back)
+		if resp.StatusCode == http.StatusOK {
 			return nil
+		}
+		if resp.StatusCode == http.StatusUnauthorized {
+			return fmt.Errorf("Ollama auth failed (401): API key is invalid or missing")
 		}
 	}
 

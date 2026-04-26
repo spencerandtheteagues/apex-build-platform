@@ -383,7 +383,7 @@ func summarizeHistoricalProviderScorecards(snapshots []models.CompletedBuild, pr
 			key := providerScorecardKey(scorecard.Provider, scorecard.TaskShape)
 			merged := scorecardsByKey[key]
 			if merged == nil {
-				scorecard.HostedEligible = !hostedProviderMode(providerMode) || scorecard.Provider != ai.ProviderOllama
+				scorecard.HostedEligible = providerHostedEligible(providerMode, scorecard.Provider)
 				scorecard = normalizeProviderScorecardRates(scorecard)
 				scorecardsByKey[key] = &scorecard
 				continue
@@ -428,7 +428,7 @@ func mergeHistoricalProviderScorecards(base []ProviderScorecard, historical []Pr
 			}
 		}
 		if idx == -1 {
-			historicalScorecard.HostedEligible = !hostedProviderMode(providerMode) || historicalScorecard.Provider != ai.ProviderOllama
+			historicalScorecard.HostedEligible = providerHostedEligible(providerMode, historicalScorecard.Provider)
 			merged = append(merged, normalizeProviderScorecardRates(historicalScorecard))
 			continue
 		}

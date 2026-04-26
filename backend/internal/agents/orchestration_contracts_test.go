@@ -540,7 +540,7 @@ func TestVerifyAndNormalizeBuildContractFillsPartialFrontendPreviewDefaults(t *t
 	}
 }
 
-func TestGetAvailableProvidersWithGracePeriodForBuildFiltersOllamaForPlatform(t *testing.T) {
+func TestGetAvailableProvidersWithGracePeriodForBuildIncludesOllamaForPlatform(t *testing.T) {
 	am := &AgentManager{
 		aiRouter: &stubAIRouter{
 			providers:             []ai.AIProvider{ai.ProviderOllama, ai.ProviderClaude, ai.ProviderGPT4},
@@ -554,13 +554,11 @@ func TestGetAvailableProvidersWithGracePeriodForBuildFiltersOllamaForPlatform(t 
 	}
 
 	got := am.getAvailableProvidersWithGracePeriodForBuild(build)
-	if len(got) != 2 {
-		t.Fatalf("expected hosted providers only, got %v", got)
+	if len(got) != 3 {
+		t.Fatalf("expected hosted providers to include ollama, got %v", got)
 	}
-	for _, provider := range got {
-		if provider == ai.ProviderOllama {
-			t.Fatalf("expected ollama to be filtered from platform build providers, got %v", got)
-		}
+	if got[0] != ai.ProviderOllama || got[1] != ai.ProviderClaude || got[2] != ai.ProviderGPT4 {
+		t.Fatalf("platform providers = %v, want [ollama claude gpt4]", got)
 	}
 }
 
