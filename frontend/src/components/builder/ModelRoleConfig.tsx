@@ -9,6 +9,7 @@ import {
   Code2,
   TestTube,
   Server,
+  Network,
   Sparkles,
   Settings,
   AlertCircle,
@@ -17,6 +18,7 @@ import {
 
 // User-facing role categories (maps to backend UserRoleCategory)
 const ROLE_CATEGORIES = [
+  { id: 'orchestrator', label: 'Orchestrator', desc: 'Coordinates all agents', icon: Network, color: 'rose' },
   { id: 'architect', label: 'Architect', desc: 'Planning, design, review', icon: Brain, color: 'purple' },
   { id: 'coder', label: 'Coder', desc: 'Frontend, backend, database', icon: Code2, color: 'blue' },
   { id: 'tester', label: 'Tester', desc: 'Testing & QA', icon: TestTube, color: 'green' },
@@ -35,6 +37,7 @@ const OLLAMA_PROVIDER = { id: 'ollama', label: 'Ollama', subtitle: 'Local', lett
 
 // Default assignments matching backend policy
 const DEFAULT_ASSIGNMENTS: Record<string, string> = {
+  orchestrator: 'claude',
   architect: 'claude',
   coder: 'gpt4',
   tester: 'gemini',
@@ -43,6 +46,7 @@ const DEFAULT_ASSIGNMENTS: Record<string, string> = {
 
 // Chip color classes per role
 const CHIP_COLORS: Record<string, { active: string; ring: string }> = {
+  rose: { active: 'border-rose-500/70 bg-rose-500/20 text-rose-300', ring: 'ring-rose-500/30' },
   purple: { active: 'border-purple-500/70 bg-purple-500/20 text-purple-300', ring: 'ring-purple-500/30' },
   blue: { active: 'border-blue-500/70 bg-blue-500/20 text-blue-300', ring: 'ring-blue-500/30' },
   green: { active: 'border-green-500/70 bg-green-500/20 text-green-300', ring: 'ring-green-500/30' },
@@ -70,7 +74,7 @@ export default function ModelRoleConfig({
     ? [...PLATFORM_PROVIDERS, OLLAMA_PROVIDER]
     : [...PLATFORM_PROVIDERS]
 
-  const isValid = 'architect' in assignments && 'coder' in assignments
+  const isValid = 'orchestrator' in assignments && 'architect' in assignments && 'coder' in assignments
 
   const toggleRole = (roleId: string, providerId: string) => {
     const updated = { ...assignments }
@@ -186,6 +190,8 @@ export default function ModelRoleConfig({
                   cat => assignments[cat.id] === provider.id
                 )
 
+                // Ollama always shows its cyan identity border, even with no roles assigned.
+                const isOllama = provider.id === 'ollama'
                 return (
                   <div
                     key={provider.id}
@@ -194,7 +200,9 @@ export default function ModelRoleConfig({
                       available
                         ? assignedRoles.length > 0
                           ? `${provider.borderActive} ${provider.bgActive} shadow-lg ${provider.shadow}`
-                          : 'border-gray-700/50 bg-gray-900/30 hover:border-gray-600/60'
+                          : isOllama
+                            ? `${provider.borderActive} bg-gray-900/30`
+                            : 'border-gray-700/50 bg-gray-900/30 hover:border-gray-600/60'
                         : 'border-gray-800/40 bg-gray-950/30 opacity-40'
                     )}
                   >
@@ -259,7 +267,7 @@ export default function ModelRoleConfig({
               <div className="mt-4 p-3 rounded-lg bg-red-900/20 border border-red-800/40">
                 <p className="text-xs text-red-400 flex items-center gap-1.5">
                   <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                  Assign at least <strong>Architect</strong> and <strong>Coder</strong> roles to start a build.
+                  Assign at least <strong>Orchestrator</strong>, <strong>Architect</strong>, and <strong>Coder</strong> roles to start a build.
                 </p>
               </div>
             )}

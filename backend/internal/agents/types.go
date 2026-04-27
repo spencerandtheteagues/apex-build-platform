@@ -31,15 +31,18 @@ const (
 type UserRoleCategory string
 
 const (
-	CategoryArchitect UserRoleCategory = "architect" // planner + architect + reviewer
-	CategoryCoder     UserRoleCategory = "coder"     // frontend + backend + database
-	CategoryTester    UserRoleCategory = "tester"    // testing
-	CategoryDevOps    UserRoleCategory = "devops"    // devops + solver
+	CategoryOrchestrator UserRoleCategory = "orchestrator" // lead — coordinates all agents
+	CategoryArchitect    UserRoleCategory = "architect"    // planner + architect + reviewer
+	CategoryCoder        UserRoleCategory = "coder"        // frontend + backend + database
+	CategoryTester       UserRoleCategory = "tester"       // testing
+	CategoryDevOps       UserRoleCategory = "devops"       // devops + solver
 )
 
 // ExpandUserCategory returns the backend agent roles for a user-facing category.
 func ExpandUserCategory(cat UserRoleCategory) []AgentRole {
 	switch cat {
+	case CategoryOrchestrator:
+		return []AgentRole{RoleLead}
 	case CategoryArchitect:
 		return []AgentRole{RolePlanner, RoleArchitect, RoleReviewer}
 	case CategoryCoder:
