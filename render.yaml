@@ -13,7 +13,7 @@ services:
     dockerContext: ./backend
     region: oregon
     plan: starter
-    branch: main
+    branch: codex/apex-enterprise-redesign-launch
     healthCheckPath: /health
     envVars:
       - key: ENVIRONMENT
@@ -135,7 +135,7 @@ services:
     dockerContext: ./frontend
     region: oregon
     plan: starter
-    branch: main
+    branch: codex/apex-enterprise-redesign-launch
     healthCheckPath: /health
     envVars:
       - key: VITE_API_URL
