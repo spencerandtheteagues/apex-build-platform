@@ -405,38 +405,38 @@ function App() {
       {
         view: 'builder',
         label: 'Build App',
-        icon: <img src={logoSrc} alt="APEX" className="desktop-tab-logo w-5 h-5 object-contain" />,
-        color: '#ff4466',
-        glow: 'rgba(255,0,51,0.5)',
-        activeClassName: 'border-[#ff0033] text-[#ff4466] bg-[rgba(255,0,51,0.15)] shadow-[0_0_12px_rgba(255,0,51,0.4)]',
-        inactiveClassName: 'border-[rgba(255,0,51,0.3)] text-[rgba(255,68,102,0.6)] hover:border-[#ff0033] hover:text-[#ff4466] hover:bg-[rgba(255,0,51,0.08)]',
+        icon: <img src={logoSrc} alt="APEX" className="desktop-tab-logo w-4 h-4 object-contain" />,
+        color: '#8adfff',
+        glow: 'rgba(138,223,255,0.4)',
+        activeClassName: 'border-[rgba(188,239,255,0.5)] text-white bg-[rgba(47,168,255,0.15)] shadow-[0_0_14px_rgba(47,168,255,0.3)]',
+        inactiveClassName: 'border-white/[0.08] text-[#aeb8c6] hover:border-white/20 hover:text-white hover:bg-white/[0.04]',
       },
       {
         view: 'ide',
         label: 'IDE',
         icon: <Code2 className="w-4 h-4" />,
-        color: '#7dc4ff',
-        glow: 'rgba(96,165,250,0.5)',
-        activeClassName: 'border-[#60a5fa] text-[#7dc4ff] bg-[rgba(96,165,250,0.15)] shadow-[0_0_12px_rgba(96,165,250,0.4)]',
-        inactiveClassName: 'border-[rgba(96,165,250,0.3)] text-[rgba(125,196,255,0.6)] hover:border-[#60a5fa] hover:text-[#7dc4ff] hover:bg-[rgba(96,165,250,0.08)]',
+        color: '#8adfff',
+        glow: 'rgba(138,223,255,0.4)',
+        activeClassName: 'border-[rgba(188,239,255,0.5)] text-white bg-[rgba(47,168,255,0.15)] shadow-[0_0_14px_rgba(47,168,255,0.3)]',
+        inactiveClassName: 'border-white/[0.08] text-[#aeb8c6] hover:border-white/20 hover:text-white hover:bg-white/[0.04]',
       },
       {
         view: 'explore',
         label: 'Explore',
         icon: <Globe className="w-4 h-4" />,
-        color: '#b89eff',
-        glow: 'rgba(167,139,250,0.5)',
-        activeClassName: 'border-[#a78bfa] text-[#b89eff] bg-[rgba(167,139,250,0.15)] shadow-[0_0_12px_rgba(167,139,250,0.4)]',
-        inactiveClassName: 'border-[rgba(167,139,250,0.3)] text-[rgba(184,158,255,0.6)] hover:border-[#a78bfa] hover:text-[#b89eff] hover:bg-[rgba(167,139,250,0.08)]',
+        color: '#8adfff',
+        glow: 'rgba(138,223,255,0.4)',
+        activeClassName: 'border-[rgba(188,239,255,0.5)] text-white bg-[rgba(47,168,255,0.15)] shadow-[0_0_14px_rgba(47,168,255,0.3)]',
+        inactiveClassName: 'border-white/[0.08] text-[#aeb8c6] hover:border-white/20 hover:text-white hover:bg-white/[0.04]',
       },
       {
         view: 'spending',
         label: 'Spend',
         icon: <Zap className="w-4 h-4" />,
-        color: '#ffd166',
-        glow: 'rgba(251,191,36,0.5)',
-        activeClassName: 'border-[#fbbf24] text-[#ffd166] bg-[rgba(251,191,36,0.15)] shadow-[0_0_12px_rgba(251,191,36,0.4)]',
-        inactiveClassName: 'border-[rgba(251,191,36,0.3)] text-[rgba(255,209,102,0.6)] hover:border-[#fbbf24] hover:text-[#ffd166] hover:bg-[rgba(251,191,36,0.08)]',
+        color: '#8adfff',
+        glow: 'rgba(138,223,255,0.4)',
+        activeClassName: 'border-[rgba(188,239,255,0.5)] text-white bg-[rgba(47,168,255,0.15)] shadow-[0_0_14px_rgba(47,168,255,0.3)]',
+        inactiveClassName: 'border-white/[0.08] text-[#aeb8c6] hover:border-white/20 hover:text-white hover:bg-white/[0.04]',
       },
     ]
 
@@ -445,10 +445,10 @@ function App() {
         view: 'admin',
         label: 'Admin',
         icon: <Shield className="w-4 h-4" />,
-        color: '#4eedb0',
-        glow: 'rgba(52,211,153,0.5)',
-        activeClassName: 'border-[#34d399] text-[#4eedb0] bg-[rgba(52,211,153,0.15)] shadow-[0_0_12px_rgba(52,211,153,0.4)]',
-        inactiveClassName: 'border-[rgba(52,211,153,0.3)] text-[rgba(78,237,176,0.6)] hover:border-[#34d399] hover:text-[#4eedb0] hover:bg-[rgba(52,211,153,0.08)]',
+        color: '#8adfff',
+        glow: 'rgba(138,223,255,0.4)',
+        activeClassName: 'border-[rgba(188,239,255,0.5)] text-white bg-[rgba(47,168,255,0.15)] shadow-[0_0_14px_rgba(47,168,255,0.3)]',
+        inactiveClassName: 'border-white/[0.08] text-[#aeb8c6] hover:border-white/20 hover:text-white hover:bg-white/[0.04]',
       })
     }
 
@@ -497,7 +497,7 @@ function App() {
         label: viewMetadata.settings.label,
         description: viewMetadata.settings.description,
         icon: <Settings className="w-4 h-4" />,
-        activeClassName: 'bg-red-900/20 text-red-400 border border-red-900/50 shadow-sm shadow-red-900/20',
+        activeClassName: 'border-[rgba(188,239,255,0.4)] text-white bg-[rgba(47,168,255,0.12)] border',
       },
     ],
     [navigationItems, viewMetadata]
@@ -1309,21 +1309,21 @@ function App() {
 
   // Main application with view switching
   return (
-    <div className="h-screen flex flex-col bg-black">
+    <div className="h-screen flex flex-col bg-[#020408]">
       {/* Top Navigation */}
-      <div className="shrink-0 bg-black/90 border-b border-red-900/30 px-4 py-3 z-50 relative">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+      <div className="shrink-0 bg-[rgba(2,4,8,0.88)] border-b border-white/[0.08] px-4 py-2 z-50 relative backdrop-blur-xl">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           {/* Logo */}
           <div className="flex items-center gap-3 shrink-0">
-            <div className="w-16 h-16 flex items-center justify-center">
+            <div className="w-12 h-12 flex items-center justify-center">
               <img
                 src={logoSrc}
                 alt="APEX Logo"
-                className="desktop-header-logo w-full h-full object-contain drop-shadow-[0_0_12px_rgba(239,68,68,0.5)]"
+                className="desktop-header-logo w-full h-full object-contain drop-shadow-[0_0_14px_rgba(126,231,255,0.58)]"
               />
             </div>
             <div className="min-w-0">
-              <span className="desktop-header-wordmark hidden sm:inline text-xl font-bold bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
+              <span className="desktop-header-wordmark hidden sm:inline text-lg font-black uppercase tracking-wider text-white">
                 APEX-BUILD
               </span>
               <div className="sm:hidden text-[11px] uppercase tracking-[0.2em] text-gray-500">
@@ -1354,11 +1354,11 @@ function App() {
               </div>
             </div>
 
-            <div className="hidden 2xl:flex shrink-0 items-center gap-2 min-w-0 max-w-[24rem] text-xs text-gray-500">
-              <span className="shrink-0 rounded-full border border-gray-800 bg-gray-900/70 px-2.5 py-1 uppercase tracking-[0.18em] text-gray-400">
+            <div className="hidden 2xl:flex shrink-0 items-center gap-2 min-w-0 max-w-[24rem] text-xs">
+              <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 uppercase tracking-[0.18em] text-[#aeb8c6]">
                 {currentViewMeta.label}
               </span>
-              <span className="truncate text-gray-500">{currentViewMeta.description}</span>
+              <span className="truncate text-white/30">{currentViewMeta.description}</span>
             </div>
           </div>
 
@@ -1406,31 +1406,31 @@ function App() {
 
           {/* User Info */}
           {user && (
-            <div className="ml-auto flex items-center gap-2 shrink-0 rounded-2xl border border-gray-900/80 bg-black/40 px-2 py-1 backdrop-blur-sm">
+            <div className="ml-auto flex items-center gap-2 shrink-0">
               <button
                 onClick={handleStartNewBuild}
-                className="flex items-center gap-2 whitespace-nowrap rounded-md border border-red-900/50 bg-red-950/30 px-3 py-1.5 text-red-300 transition-all duration-200 hover:bg-red-900/30 hover:text-white"
+                className="flex items-center gap-2 whitespace-nowrap rounded-xl border border-[rgba(188,239,255,0.5)] bg-gradient-to-r from-white/90 via-[#8adfff] to-[#2fa8ff] px-3.5 py-1.5 text-[#00111d] font-bold text-sm transition-all duration-200 hover:shadow-[0_0_20px_rgba(47,168,255,0.4)] hover:scale-[1.02]"
                 title="Start a new build"
               >
                 <Rocket className="w-4 h-4" />
-                <span className="hidden sm:inline text-sm font-medium">New Build</span>
+                <span className="hidden sm:inline">New Build</span>
               </button>
               <div className="hidden xl:block">
                 <CostTicker />
               </div>
               <button
                 onClick={() => navigateToView('settings')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-all duration-200 ${
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md border transition-all duration-200 ${
                   currentView === 'settings'
-                    ? 'bg-red-900/20 text-red-400 border border-red-900/50'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                    ? 'border-[rgba(188,239,255,0.4)] bg-[rgba(47,168,255,0.12)] text-white'
+                    : 'border-white/[0.08] text-[#aeb8c6] hover:text-white hover:bg-white/[0.04]'
                 }`}
                 title="Settings & API Keys"
               >
                 <Settings className="w-4 h-4" />
               </button>
-              <span className="hidden lg:inline max-w-[10rem] truncate text-sm text-gray-400">{user.username}</span>
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-red-900/30">
+              <span className="hidden lg:inline max-w-[10rem] truncate text-sm text-[#aeb8c6]">{user.username}</span>
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#2fa8ff] to-[#8adfff] flex items-center justify-center text-[#00111d] text-sm font-black shadow-lg shadow-[rgba(47,168,255,0.3)]">
                 {user.username?.charAt(0).toUpperCase()}
               </div>
             </div>
