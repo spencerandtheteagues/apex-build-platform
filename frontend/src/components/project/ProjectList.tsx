@@ -1,39 +1,34 @@
 // APEX-BUILD Project List
-// Cyberpunk project browser and creator
+// Redesigned project browser for the blue/navy workspace shell
 
 import React, { useState, useEffect } from 'react'
-import { cn, formatRelativeTime, getFileIcon } from '@/lib/utils'
+import { cn, formatRelativeTime } from '@/lib/utils'
 import { useStore } from '@/hooks/useStore'
 import { Project, LanguageConfig } from '@/types'
 import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-  CardFooter,
   Button,
   Badge,
   Loading,
-  Input,
   Avatar
 } from '@/components/ui'
 import {
   Plus,
   Search,
-  Filter,
   Grid,
   List,
-  Star,
   Clock,
-  Users,
   Eye,
   EyeOff,
   Code,
-  Settings,
   Trash2,
   GitBranch,
   Play,
-  Edit3
+  Edit3,
+  FolderOpen,
+  Sparkles,
+  Globe2,
+  Lock,
+  ChevronRight,
 } from 'lucide-react'
 
 // Language configurations
@@ -253,35 +248,63 @@ export const ProjectList: React.FC<ProjectListProps> = ({
     return LANGUAGE_CONFIGS.find(lang => lang.id === languageId) || LANGUAGE_CONFIGS[0]
   }
 
+  const panelClass = 'rounded-[30px] border border-[rgba(138,223,255,0.14)] bg-[linear-gradient(180deg,rgba(6,12,24,0.94),rgba(4,8,16,0.9))] shadow-[0_24px_70px_rgba(0,0,0,0.34)]'
+  const shellInputClass = 'h-11 w-full rounded-2xl border border-[#17314d] bg-[rgba(7,13,24,0.84)] px-4 text-sm text-white placeholder:text-[#51667f] transition focus:border-[rgba(138,223,255,0.42)] focus:outline-none focus:ring-2 focus:ring-[rgba(47,168,255,0.18)]'
+  const shellSelectClass = 'h-11 rounded-2xl border border-[#17314d] bg-[rgba(7,13,24,0.84)] px-4 text-sm text-white transition focus:border-[rgba(138,223,255,0.42)] focus:outline-none focus:ring-2 focus:ring-[rgba(47,168,255,0.18)]'
+
   // Render project card
   const renderProjectCard = (project: Project) => {
     const langConfig = getLanguageConfig(project.language)
+    const ownerLabel = project.owner?.username || 'Private workspace'
 
     return (
-      <Card
+      <article
         key={project.id}
-        variant="interactive"
-        className="group hover:shadow-cyan-500/20 transition-all duration-300"
+        className="group relative overflow-hidden rounded-[30px] border border-[rgba(138,223,255,0.16)] bg-[linear-gradient(180deg,rgba(8,14,28,0.94),rgba(4,8,16,0.92))] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.28)] transition duration-200 hover:border-[rgba(138,223,255,0.28)] hover:bg-[linear-gradient(180deg,rgba(10,18,35,0.96),rgba(6,10,18,0.94))]"
         onClick={() => handleProjectSelect(project)}
       >
-        <CardHeader>
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-3">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top_left,rgba(138,223,255,0.2),transparent_58%)]" />
+        <div className="relative flex h-full flex-col gap-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex items-start gap-4">
               <div
-                className="w-10 h-10 rounded-lg flex items-center justify-center text-lg border border-gray-700"
-                style={{ backgroundColor: `${langConfig.color}20`, borderColor: `${langConfig.color}40` }}
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border text-xl shadow-[0_12px_30px_rgba(0,0,0,0.22)]"
+                style={{ backgroundColor: `${langConfig.color}18`, borderColor: `${langConfig.color}3f`, color: langConfig.color }}
               >
                 {langConfig.icon}
               </div>
-              <div>
-                <CardTitle className="text-lg">{project.name}</CardTitle>
-                {project.description && (
-                  <p className="text-sm text-gray-400 mt-1 line-clamp-2">{project.description}</p>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="truncate text-xl font-semibold tracking-tight text-white">{project.name}</h3>
+                  {project.is_public ? (
+                    <Badge
+                      variant="outline"
+                      size="xs"
+                      className="border-[rgba(125,226,164,0.28)] bg-[rgba(92,214,143,0.12)] text-[#b8f3cf]"
+                      icon={<Globe2 size={10} />}
+                    >
+                      Public
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      size="xs"
+                      className="border-[rgba(138,223,255,0.2)] bg-[rgba(47,168,255,0.1)] text-[#cbeeff]"
+                      icon={<Lock size={10} />}
+                    >
+                      Private
+                    </Badge>
+                  )}
+                </div>
+                {project.description ? (
+                  <p className="mt-2 line-clamp-2 text-sm leading-6 text-[#91a6bc]">{project.description}</p>
+                ) : (
+                  <p className="mt-2 text-sm leading-6 text-[#6c8299]">Ready for builds, edits, previews, and deployment handoff.</p>
                 )}
               </div>
             </div>
 
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-1 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
               <Button
                 size="xs"
                 variant="ghost"
@@ -290,6 +313,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
                   handleEditProject(project)
                 }}
                 icon={<Edit3 size={12} />}
+                className="rounded-xl border border-[#17314d] bg-[rgba(7,13,24,0.76)] text-[#cfe6ff] hover:bg-[rgba(12,21,36,0.92)] hover:text-white"
               />
               <Button
                 size="xs"
@@ -299,62 +323,50 @@ export const ProjectList: React.FC<ProjectListProps> = ({
                   handleDeleteProject(project)
                 }}
                 icon={<Trash2 size={12} />}
+                className="rounded-xl border border-[rgba(255,126,126,0.18)] bg-[rgba(42,10,14,0.72)] text-[#ffb0b0] hover:bg-[rgba(64,14,20,0.92)] hover:text-white"
               />
             </div>
           </div>
-        </CardHeader>
 
-        <CardContent>
-          <div className="flex items-center gap-2 mb-3">
-            <Badge variant="outline" size="xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" size="xs" className="border-[#17314d] bg-[rgba(7,13,24,0.8)] text-[#d9ebff]">
               {langConfig.name}
             </Badge>
             {project.framework && (
-              <Badge variant="outline" size="xs">
+              <Badge variant="outline" size="xs" className="border-[#17314d] bg-[rgba(7,13,24,0.8)] text-[#d9ebff]">
                 {project.framework}
               </Badge>
             )}
-            {project.is_public ? (
-              <Badge variant="success" size="xs" icon={<Eye size={10} />}>
-                Public
-              </Badge>
-            ) : (
-              <Badge variant="neutral" size="xs" icon={<EyeOff size={10} />}>
-                Private
-              </Badge>
-            )}
           </div>
 
-          <div className="text-xs text-gray-400 space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1">
+          <div className="grid gap-3 text-xs text-[#7f95ad] sm:grid-cols-2">
+            <div className="rounded-2xl border border-[#13283f] bg-[rgba(7,13,24,0.66)] px-3 py-2.5">
+              <div className="mb-1 flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-[#67819d]">
                 <Clock size={12} />
-                Updated {formatRelativeTime(project.updated_at)}
-              </span>
-              {project.owner && (
-                <div className="flex items-center gap-1">
-                  <Avatar
-                    size="xs"
-                    src={project.owner.avatar_url}
-                    fallback={project.owner.username}
-                  />
-                  <span>{project.owner.username}</span>
-                </div>
-              )}
+                Updated
+              </div>
+              <div className="text-sm text-[#dceeff]">{formatRelativeTime(project.updated_at)}</div>
+            </div>
+            <div className="rounded-2xl border border-[#13283f] bg-[rgba(7,13,24,0.66)] px-3 py-2.5">
+              <div className="mb-1 flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-[#67819d]">
+                <GitBranch size={12} />
+                Branch
+              </div>
+              <div className="text-sm text-[#dceeff]">main</div>
             </div>
           </div>
-        </CardContent>
 
-        <CardFooter>
-          <div className="flex items-center justify-between w-full">
-            <div className="flex items-center gap-2 text-xs text-gray-400">
-              <span className="flex items-center gap-1">
-                <GitBranch size={12} />
-                main
-              </span>
+          <div className="mt-auto flex items-center justify-between gap-3 border-t border-[rgba(138,223,255,0.08)] pt-4">
+            <div className="flex min-w-0 items-center gap-2 text-xs text-[#88a0b8]">
+              <Avatar
+                size="xs"
+                src={project.owner?.avatar_url}
+                fallback={project.owner?.username || project.name}
+              />
+              <span className="truncate">{ownerLabel}</span>
             </div>
 
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-2">
               <Button
                 size="xs"
                 variant="ghost"
@@ -363,22 +375,24 @@ export const ProjectList: React.FC<ProjectListProps> = ({
                   handleRunProject(project)
                 }}
                 icon={<Play size={12} />}
+                className="rounded-xl border border-[#17314d] bg-[rgba(7,13,24,0.76)] text-[#cfe6ff] hover:bg-[rgba(12,21,36,0.92)] hover:text-white"
               />
               <Button
                 size="xs"
-                variant="primary"
+                variant="ghost"
                 onClick={(e) => {
                   e.stopPropagation()
                   handleProjectSelect(project)
                 }}
-                icon={<Code size={12} />}
+                icon={<ChevronRight size={12} />}
+                className="rounded-xl border border-[rgba(138,223,255,0.3)] bg-[linear-gradient(135deg,rgba(138,223,255,0.22),rgba(47,168,255,0.2))] text-white hover:bg-[linear-gradient(135deg,rgba(138,223,255,0.28),rgba(47,168,255,0.28))]"
               >
                 Open
               </Button>
             </div>
           </div>
-        </CardFooter>
-      </Card>
+        </div>
+      </article>
     )
   }
 
@@ -389,65 +403,94 @@ export const ProjectList: React.FC<ProjectListProps> = ({
     return (
       <div
         key={project.id}
-        className="flex items-center gap-4 p-4 hover:bg-gray-800/50 rounded-lg cursor-pointer group transition-colors border border-transparent hover:border-gray-700"
+        className="group grid cursor-pointer gap-4 rounded-[26px] border border-[rgba(138,223,255,0.12)] bg-[rgba(7,13,24,0.76)] p-4 transition hover:border-[rgba(138,223,255,0.24)] hover:bg-[rgba(10,18,31,0.9)] lg:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)_auto]"
         onClick={() => handleProjectSelect(project)}
       >
-        <div
-          className="w-8 h-8 rounded flex items-center justify-center text-sm border border-gray-700"
-          style={{ backgroundColor: `${langConfig.color}20`, borderColor: `${langConfig.color}40` }}
-        >
-          {langConfig.icon}
-        </div>
-
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h3 className="font-medium text-white">{project.name}</h3>
-            <Badge variant="outline" size="xs">
-              {langConfig.name}
-            </Badge>
-            {project.framework && (
-              <Badge variant="outline" size="xs">
-                {project.framework}
-              </Badge>
-            )}
-            {project.is_public ? (
-              <Badge variant="success" size="xs" icon={<Eye size={10} />}>
-                Public
-              </Badge>
-            ) : (
-              <Badge variant="neutral" size="xs" icon={<EyeOff size={10} />}>
-                Private
-              </Badge>
-            )}
+        <div className="min-w-0">
+          <div className="flex items-start gap-3">
+            <div
+              className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border text-base"
+              style={{ backgroundColor: `${langConfig.color}18`, borderColor: `${langConfig.color}3f`, color: langConfig.color }}
+            >
+              {langConfig.icon}
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="truncate text-base font-semibold text-white">{project.name}</h3>
+                <Badge variant="outline" size="xs" className="border-[#17314d] bg-[rgba(7,13,24,0.8)] text-[#d9ebff]">
+                  {langConfig.name}
+                </Badge>
+                {project.framework && (
+                  <Badge variant="outline" size="xs" className="border-[#17314d] bg-[rgba(7,13,24,0.8)] text-[#d9ebff]">
+                    {project.framework}
+                  </Badge>
+                )}
+              </div>
+              {project.description ? (
+                <p className="mt-1 truncate text-sm text-[#8ea4bb]">{project.description}</p>
+              ) : (
+                <p className="mt-1 truncate text-sm text-[#6d849c]">No description yet.</p>
+              )}
+            </div>
           </div>
-          {project.description && (
-            <p className="text-sm text-gray-400 truncate">{project.description}</p>
-          )}
         </div>
 
-        <div className="flex items-center gap-4 text-sm text-gray-400">
-          <span>{formatRelativeTime(project.updated_at)}</span>
+        <div className="flex flex-wrap items-center gap-3 text-sm text-[#88a0b8] lg:justify-end">
+          <span className="flex items-center gap-1">
+            <Clock size={12} />
+            {formatRelativeTime(project.updated_at)}
+          </span>
           {project.owner && (
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-2">
               <Avatar
                 size="xs"
                 src={project.owner.avatar_url}
                 fallback={project.owner.username}
               />
-              <span>{project.owner.username}</span>
+              <span className="truncate">{project.owner.username}</span>
             </div>
+          )}
+          {project.is_public ? (
+            <Badge
+              variant="outline"
+              size="xs"
+              className="border-[rgba(125,226,164,0.28)] bg-[rgba(92,214,143,0.12)] text-[#b8f3cf]"
+              icon={<Eye size={10} />}
+            >
+              Public
+            </Badge>
+          ) : (
+            <Badge
+              variant="outline"
+              size="xs"
+              className="border-[rgba(138,223,255,0.2)] bg-[rgba(47,168,255,0.1)] text-[#cbeeff]"
+              icon={<EyeOff size={10} />}
+            >
+              Private
+            </Badge>
           )}
         </div>
 
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center justify-end gap-2 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
           <Button
             size="xs"
-            variant="primary"
+            variant="ghost"
+            onClick={(e) => {
+              e.stopPropagation()
+              handleRunProject(project)
+            }}
+            icon={<Play size={12} />}
+            className="rounded-xl border border-[#17314d] bg-[rgba(7,13,24,0.76)] text-[#cfe6ff] hover:bg-[rgba(12,21,36,0.92)] hover:text-white"
+          />
+          <Button
+            size="xs"
+            variant="ghost"
             onClick={(e) => {
               e.stopPropagation()
               handleProjectSelect(project)
             }}
             icon={<Code size={12} />}
+            className="rounded-xl border border-[rgba(138,223,255,0.3)] bg-[linear-gradient(135deg,rgba(138,223,255,0.22),rgba(47,168,255,0.2))] text-white hover:bg-[linear-gradient(135deg,rgba(138,223,255,0.28),rgba(47,168,255,0.28))]"
           >
             Open
           </Button>
@@ -458,99 +501,149 @@ export const ProjectList: React.FC<ProjectListProps> = ({
 
   return (
     <div className={cn('space-y-6', className)}>
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Projects</h1>
-          <p className="text-gray-400">Manage your development projects</p>
-        </div>
+      <section className={cn(panelClass, 'relative overflow-hidden p-6 md:p-7')}>
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-[radial-gradient(circle_at_top_left,rgba(138,223,255,0.18),transparent_60%)]" />
+        <div className="relative flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+          <div className="space-y-4">
+            <div className="flex items-start gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-[22px] border border-[rgba(138,223,255,0.22)] bg-[rgba(47,168,255,0.12)]">
+                <FolderOpen className="h-7 w-7 text-[#8adfff]" />
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.26em] text-[#8adfff]/80">Workspace Index</div>
+                <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white md:text-4xl">Projects</h1>
+                <p className="mt-2 max-w-2xl text-sm leading-7 text-[#95a9be] md:text-base">
+                  Open recent workspaces, restart existing builds, or spin up a clean project shell without dropping back into the legacy card stack.
+                </p>
+              </div>
+            </div>
 
-        {showCreateButton && (
-          <Button
-            onClick={() => setShowCreateModal(true)}
-            icon={<Plus size={16} />}
-            variant="primary"
-          >
-            New Project
-          </Button>
-        )}
-      </div>
-
-      {/* Filters and Controls */}
-      <Card variant="cyberpunk" padding="md">
-        <div className="flex items-center gap-4 flex-wrap">
-          <div className="flex-1 min-w-64">
-            <Input
-              placeholder="Search projects..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              leftIcon={<Search size={14} />}
-              size="sm"
-            />
+            <div className="flex flex-wrap gap-2">
+              <div className="rounded-2xl border border-[#17314d] bg-[rgba(7,13,24,0.82)] px-3 py-2 text-sm text-[#c4d6e7]">
+                <span className="mr-2 text-[#6f89a4]">Projects</span>
+                <span className="font-medium text-white">{projects.length}</span>
+              </div>
+              <div className="rounded-2xl border border-[#17314d] bg-[rgba(7,13,24,0.82)] px-3 py-2 text-sm text-[#c4d6e7]">
+                <span className="mr-2 text-[#6f89a4]">Visible</span>
+                <span className="font-medium text-white">{filteredProjects.length}</span>
+              </div>
+              <div className="rounded-2xl border border-[#17314d] bg-[rgba(7,13,24,0.82)] px-3 py-2 text-sm text-[#c4d6e7]">
+                <span className="mr-2 text-[#6f89a4]">Mode</span>
+                <span className="font-medium text-white capitalize">{viewMode}</span>
+              </div>
+            </div>
           </div>
 
-          <select
-            value={filterLanguage}
-            onChange={(e) => setFilterLanguage(e.target.value)}
-            className="bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-cyan-400 focus:outline-none"
-          >
-            <option value="">All Languages</option>
-            {LANGUAGE_CONFIGS.map(lang => (
-              <option key={lang.id} value={lang.id}>
-                {lang.name}
-              </option>
-            ))}
-          </select>
+          {showCreateButton && (
+            <Button
+              onClick={() => setShowCreateModal(true)}
+              icon={<Plus size={16} />}
+              variant="ghost"
+              className="rounded-2xl border border-[rgba(138,223,255,0.3)] bg-[linear-gradient(135deg,rgba(138,223,255,0.22),rgba(47,168,255,0.2))] px-5 text-white hover:bg-[linear-gradient(135deg,rgba(138,223,255,0.28),rgba(47,168,255,0.28))]"
+            >
+              New Project
+            </Button>
+          )}
+        </div>
+      </section>
 
-          <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-1">
-            <Button
-              size="xs"
-              variant={viewMode === 'grid' ? 'primary' : 'ghost'}
-              onClick={() => setViewMode('grid')}
-              icon={<Grid size={14} />}
-            />
-            <Button
-              size="xs"
-              variant={viewMode === 'list' ? 'primary' : 'ghost'}
-              onClick={() => setViewMode('list')}
-              icon={<List size={14} />}
-            />
+      <section className={cn(panelClass, 'p-4 md:p-5')}>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-1 flex-col gap-4 md:flex-row">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5f7892]" />
+              <input
+                placeholder="Search projects, prompts, and descriptions"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className={cn(shellInputClass, 'pl-11')}
+              />
+            </div>
+
+            <select
+              value={filterLanguage}
+              onChange={(e) => setFilterLanguage(e.target.value)}
+              className={cn(shellSelectClass, 'min-w-[220px]')}
+            >
+              <option value="">All languages</option>
+              {LANGUAGE_CONFIGS.map(lang => (
+                <option key={lang.id} value={lang.id}>
+                  {lang.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 rounded-2xl border border-[#17314d] bg-[rgba(7,13,24,0.82)] p-1">
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => setViewMode('grid')}
+                icon={<Grid size={14} />}
+                className={cn(
+                  'rounded-xl border px-3 text-[#b8d6f4] hover:text-white',
+                  viewMode === 'grid'
+                    ? 'border-[rgba(138,223,255,0.3)] bg-[rgba(47,168,255,0.18)] text-white'
+                    : 'border-transparent bg-transparent'
+                )}
+              >
+                Grid
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => setViewMode('list')}
+                icon={<List size={14} />}
+                className={cn(
+                  'rounded-xl border px-3 text-[#b8d6f4] hover:text-white',
+                  viewMode === 'list'
+                    ? 'border-[rgba(138,223,255,0.3)] bg-[rgba(47,168,255,0.18)] text-white'
+                    : 'border-transparent bg-transparent'
+                )}
+              >
+                List
+              </Button>
+            </div>
           </div>
         </div>
-      </Card>
+      </section>
 
       {/* Projects */}
       {isLoading ? (
-        <div className="flex items-center justify-center py-16">
+        <div className={cn(panelClass, 'flex items-center justify-center py-20')}>
           <Loading variant="orb" color="cyberpunk" text="Loading projects..." />
         </div>
       ) : filteredProjects.length > 0 ? (
         <div className={cn(
           viewMode === 'grid'
-            ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'
-            : 'space-y-2'
+            ? 'grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3'
+            : 'space-y-3'
         )}>
           {filteredProjects.map(project =>
             viewMode === 'grid' ? renderProjectCard(project) : renderProjectRow(project)
           )}
         </div>
       ) : (
-        <div className="text-center py-16">
-          <Code className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-gray-300 mb-2">
+        <div className={cn(panelClass, 'px-6 py-20 text-center')}>
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl border border-[rgba(138,223,255,0.18)] bg-[rgba(47,168,255,0.08)]">
+            <Sparkles className="h-8 w-8 text-[#8adfff]" />
+          </div>
+          <h3 className="mt-5 text-xl font-semibold text-white">
             {searchQuery || filterLanguage ? 'No matching projects' : 'No projects yet'}
           </h3>
-          <p className="text-gray-400 mb-6">
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-[#8ea4bb]">
             {searchQuery || filterLanguage
-              ? 'Try adjusting your search or filters'
-              : 'Create your first project to get started'
+              ? 'Adjust the search terms or language filter to widen the project list.'
+              : 'Create your first project shell here, then hand it off to builds, previews, edits, and deployment.'
             }
           </p>
           {showCreateButton && (
             <Button
               onClick={() => setShowCreateModal(true)}
               icon={<Plus size={16} />}
-              variant="primary"
+              variant="ghost"
+              className="mt-6 rounded-2xl border border-[rgba(138,223,255,0.3)] bg-[linear-gradient(135deg,rgba(138,223,255,0.22),rgba(47,168,255,0.2))] px-5 text-white hover:bg-[linear-gradient(135deg,rgba(138,223,255,0.28),rgba(47,168,255,0.28))]"
             >
               Create Project
             </Button>
@@ -562,111 +655,119 @@ export const ProjectList: React.FC<ProjectListProps> = ({
       {showCreateModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 backdrop-blur-sm p-4">
           <div className="flex min-h-full items-center justify-center">
-            <Card variant="cyberpunk" className="w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Plus className="w-5 h-5 text-cyan-400" />
-                Create New Project
-              </CardTitle>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              <Input
-                label="Project Name"
-                placeholder="My Awesome Project"
-                value={newProject.name}
-                onChange={(e) => setNewProject(prev => ({ ...prev, name: e.target.value }))}
-                variant="cyberpunk"
-              />
-
-              <Input
-                label="Description (optional)"
-                placeholder="A brief description of your project"
-                value={newProject.description}
-                onChange={(e) => setNewProject(prev => ({ ...prev, description: e.target.value }))}
-                variant="cyberpunk"
-              />
-
-              <div className="grid grid-cols-2 gap-4">
+            <div className="w-full max-w-2xl rounded-[32px] border border-[rgba(138,223,255,0.18)] bg-[linear-gradient(180deg,rgba(7,15,31,0.98),rgba(4,8,16,0.96))] p-6 shadow-[0_30px_90px_rgba(0,0,0,0.4)]">
+              <div className="flex items-start justify-between gap-4">
                 <div>
-                  <label className="text-sm font-medium text-gray-300 block mb-2">
-                    Language
-                  </label>
-                  <select
-                    value={newProject.language}
-                    onChange={(e) => setNewProject(prev => ({
-                      ...prev,
-                      language: e.target.value,
-                      framework: '' // Reset framework when language changes
-                    }))}
-                    className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:border-cyan-400 focus:outline-none"
-                    required
-                  >
-                    <option value="">Select Language</option>
-                    {LANGUAGE_CONFIGS.map(lang => (
-                      <option key={lang.id} value={lang.id}>
-                        {lang.icon} {lang.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-gray-300 block mb-2">
-                    Framework (optional)
-                  </label>
-                  <select
-                    value={newProject.framework}
-                    onChange={(e) => setNewProject(prev => ({ ...prev, framework: e.target.value }))}
-                    className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:border-cyan-400 focus:outline-none"
-                    disabled={!newProject.language}
-                  >
-                    <option value="">Select Framework</option>
-                    {newProject.language && FRAMEWORKS[newProject.language as keyof typeof FRAMEWORKS]?.map(framework => (
-                      <option key={framework} value={framework}>
-                        {framework}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="text-[11px] uppercase tracking-[0.26em] text-[#8adfff]/80">Create workspace</div>
+                  <h2 className="mt-2 flex items-center gap-2 text-2xl font-semibold text-white">
+                    <Plus className="h-5 w-5 text-[#8adfff]" />
+                    New Project
+                  </h2>
+                  <p className="mt-2 text-sm leading-7 text-[#8ea4bb]">Define the shell now and let builds, previews, and deployment bind to this workspace later.</p>
                 </div>
               </div>
 
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={newProject.is_public}
-                  onChange={(e) => setNewProject(prev => ({ ...prev, is_public: e.target.checked }))}
-                  className="w-4 h-4 bg-gray-800 border border-gray-600 rounded focus:ring-cyan-400"
-                  disabled={!canPublishProjects}
-                />
-                <span className="text-sm text-gray-300">Make project public</span>
-              </label>
-              {!canPublishProjects && (
-                <p className="text-xs text-amber-400">Publishing projects requires Builder or higher.</p>
-              )}
-            </CardContent>
+              <div className="mt-6 space-y-4">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-[#d9ebff]">Project Name</label>
+                  <input
+                    placeholder="My Awesome Project"
+                    value={newProject.name}
+                    onChange={(e) => setNewProject(prev => ({ ...prev, name: e.target.value }))}
+                    className={shellInputClass}
+                  />
+                </div>
 
-            <CardFooter>
-              <div className="flex justify-end gap-2 w-full">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-[#d9ebff]">Description</label>
+                  <textarea
+                    placeholder="A brief description of your project"
+                    value={newProject.description}
+                    onChange={(e) => setNewProject(prev => ({ ...prev, description: e.target.value }))}
+                    className="min-h-[112px] w-full rounded-2xl border border-[#17314d] bg-[rgba(7,13,24,0.84)] px-4 py-3 text-sm text-white placeholder:text-[#51667f] transition focus:border-[rgba(138,223,255,0.42)] focus:outline-none focus:ring-2 focus:ring-[rgba(47,168,255,0.18)]"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-[#d9ebff]">
+                      Language
+                    </label>
+                    <select
+                      value={newProject.language}
+                      onChange={(e) => setNewProject(prev => ({
+                        ...prev,
+                        language: e.target.value,
+                        framework: '' // Reset framework when language changes
+                      }))}
+                      className={cn(shellSelectClass, 'w-full')}
+                      required
+                    >
+                      <option value="">Select Language</option>
+                      {LANGUAGE_CONFIGS.map(lang => (
+                        <option key={lang.id} value={lang.id}>
+                          {lang.icon} {lang.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-[#d9ebff]">
+                      Framework
+                    </label>
+                    <select
+                      value={newProject.framework}
+                      onChange={(e) => setNewProject(prev => ({ ...prev, framework: e.target.value }))}
+                      className={cn(shellSelectClass, 'w-full')}
+                      disabled={!newProject.language}
+                    >
+                      <option value="">Select Framework</option>
+                      {newProject.language && FRAMEWORKS[newProject.language as keyof typeof FRAMEWORKS]?.map(framework => (
+                        <option key={framework} value={framework}>
+                          {framework}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-3 rounded-2xl border border-[#17314d] bg-[rgba(7,13,24,0.68)] px-4 py-3 text-sm text-[#d7e9fb]">
+                  <input
+                    type="checkbox"
+                    checked={newProject.is_public}
+                    onChange={(e) => setNewProject(prev => ({ ...prev, is_public: e.target.checked }))}
+                    className="h-4 w-4 rounded border-[#2d4764] bg-[rgba(7,13,24,0.84)]"
+                    disabled={!canPublishProjects}
+                  />
+                  Make project public
+                </label>
+                {!canPublishProjects && (
+                  <p className="text-xs text-amber-300">Publishing projects requires Builder or higher.</p>
+                )}
+              </div>
+
+              <div className="mt-6 flex justify-end gap-2">
                 <Button
                   variant="ghost"
                   onClick={() => setShowCreateModal(false)}
                   disabled={isCreating}
+                  className="rounded-2xl border border-[#17314d] bg-[rgba(7,13,24,0.82)] text-[#d8ebff] hover:bg-[rgba(11,20,35,0.92)]"
                 >
                   Cancel
                 </Button>
                 <Button
-                  variant="primary"
+                  variant="ghost"
                   onClick={handleCreateProject}
                   loading={isCreating}
                   disabled={!newProject.name.trim() || !newProject.language}
                   icon={<Plus size={16} />}
+                  className="rounded-2xl border border-[rgba(138,223,255,0.3)] bg-[linear-gradient(135deg,rgba(138,223,255,0.22),rgba(47,168,255,0.2))] text-white hover:bg-[linear-gradient(135deg,rgba(138,223,255,0.28),rgba(47,168,255,0.28))]"
                 >
                   Create Project
                 </Button>
               </div>
-            </CardFooter>
-            </Card>
+            </div>
           </div>
         </div>
       )}
@@ -675,92 +776,96 @@ export const ProjectList: React.FC<ProjectListProps> = ({
       {showEditModal && editProject && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 backdrop-blur-sm p-4">
           <div className="flex min-h-full items-center justify-center">
-            <Card variant="cyberpunk" className="w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Edit3 className="w-5 h-5 text-cyan-400" />
-                Edit Project
-              </CardTitle>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              <Input
-                label="Project Name"
-                placeholder="My Awesome Project"
-                value={editProject.name}
-                onChange={(e) => setEditProject(prev => prev ? ({ ...prev, name: e.target.value }) : prev)}
-                variant="cyberpunk"
-              />
-
-              <Input
-                label="Description (optional)"
-                placeholder="A brief description of your project"
-                value={editProject.description}
-                onChange={(e) => setEditProject(prev => prev ? ({ ...prev, description: e.target.value }) : prev)}
-                variant="cyberpunk"
-              />
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium text-gray-300 block mb-2">
-                    Language
-                  </label>
-                  <select
-                    value={editProject.language}
-                    onChange={(e) => setEditProject(prev => prev ? ({
-                      ...prev,
-                      language: e.target.value,
-                      framework: ''
-                    }) : prev)}
-                    className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:border-cyan-400 focus:outline-none"
-                    required
-                  >
-                    <option value="">Select Language</option>
-                    {LANGUAGE_CONFIGS.map(lang => (
-                      <option key={lang.id} value={lang.id}>
-                        {lang.icon} {lang.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-gray-300 block mb-2">
-                    Framework (optional)
-                  </label>
-                  <select
-                    value={editProject.framework}
-                    onChange={(e) => setEditProject(prev => prev ? ({ ...prev, framework: e.target.value }) : prev)}
-                    className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:border-cyan-400 focus:outline-none"
-                    disabled={!editProject.language}
-                  >
-                    <option value="">Select Framework</option>
-                    {editProject.language && FRAMEWORKS[editProject.language as keyof typeof FRAMEWORKS]?.map(framework => (
-                      <option key={framework} value={framework}>
-                        {framework}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+            <div className="w-full max-w-2xl rounded-[32px] border border-[rgba(138,223,255,0.18)] bg-[linear-gradient(180deg,rgba(7,15,31,0.98),rgba(4,8,16,0.96))] p-6 shadow-[0_30px_90px_rgba(0,0,0,0.4)]">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.26em] text-[#8adfff]/80">Refine workspace</div>
+                <h2 className="mt-2 flex items-center gap-2 text-2xl font-semibold text-white">
+                  <Edit3 className="h-5 w-5 text-[#8adfff]" />
+                  Edit Project
+                </h2>
               </div>
 
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={editProject.is_public}
-                  onChange={(e) => setEditProject(prev => prev ? ({ ...prev, is_public: e.target.checked }) : prev)}
-                  className="w-4 h-4 bg-gray-800 border border-gray-600 rounded focus:ring-cyan-400"
-                  disabled={!canPublishProjects && !editProject.is_public}
-                />
-                <span className="text-sm text-gray-300">Make project public</span>
-              </label>
-              {!canPublishProjects && !editProject.is_public && (
-                <p className="text-xs text-amber-400">Publishing projects requires Builder or higher.</p>
-              )}
-            </CardContent>
+              <div className="mt-6 space-y-4">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-[#d9ebff]">Project Name</label>
+                  <input
+                    placeholder="My Awesome Project"
+                    value={editProject.name}
+                    onChange={(e) => setEditProject(prev => prev ? ({ ...prev, name: e.target.value }) : prev)}
+                    className={shellInputClass}
+                  />
+                </div>
 
-            <CardFooter>
-              <div className="flex justify-end gap-2 w-full">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-[#d9ebff]">Description</label>
+                  <textarea
+                    placeholder="A brief description of your project"
+                    value={editProject.description}
+                    onChange={(e) => setEditProject(prev => prev ? ({ ...prev, description: e.target.value }) : prev)}
+                    className="min-h-[112px] w-full rounded-2xl border border-[#17314d] bg-[rgba(7,13,24,0.84)] px-4 py-3 text-sm text-white placeholder:text-[#51667f] transition focus:border-[rgba(138,223,255,0.42)] focus:outline-none focus:ring-2 focus:ring-[rgba(47,168,255,0.18)]"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-[#d9ebff]">
+                      Language
+                    </label>
+                    <select
+                      value={editProject.language}
+                      onChange={(e) => setEditProject(prev => prev ? ({
+                        ...prev,
+                        language: e.target.value,
+                        framework: ''
+                      }) : prev)}
+                      className={cn(shellSelectClass, 'w-full')}
+                      required
+                    >
+                      <option value="">Select Language</option>
+                      {LANGUAGE_CONFIGS.map(lang => (
+                        <option key={lang.id} value={lang.id}>
+                          {lang.icon} {lang.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-[#d9ebff]">
+                      Framework
+                    </label>
+                    <select
+                      value={editProject.framework}
+                      onChange={(e) => setEditProject(prev => prev ? ({ ...prev, framework: e.target.value }) : prev)}
+                      className={cn(shellSelectClass, 'w-full')}
+                      disabled={!editProject.language}
+                    >
+                      <option value="">Select Framework</option>
+                      {editProject.language && FRAMEWORKS[editProject.language as keyof typeof FRAMEWORKS]?.map(framework => (
+                        <option key={framework} value={framework}>
+                          {framework}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-3 rounded-2xl border border-[#17314d] bg-[rgba(7,13,24,0.68)] px-4 py-3 text-sm text-[#d7e9fb]">
+                  <input
+                    type="checkbox"
+                    checked={editProject.is_public}
+                    onChange={(e) => setEditProject(prev => prev ? ({ ...prev, is_public: e.target.checked }) : prev)}
+                    className="h-4 w-4 rounded border-[#2d4764] bg-[rgba(7,13,24,0.84)]"
+                    disabled={!canPublishProjects && !editProject.is_public}
+                  />
+                  Make project public
+                </label>
+                {!canPublishProjects && !editProject.is_public && (
+                  <p className="text-xs text-amber-300">Publishing projects requires Builder or higher.</p>
+                )}
+              </div>
+
+              <div className="mt-6 flex justify-end gap-2">
                 <Button
                   variant="ghost"
                   onClick={() => {
@@ -768,21 +873,22 @@ export const ProjectList: React.FC<ProjectListProps> = ({
                     setEditProject(null)
                   }}
                   disabled={isUpdating}
+                  className="rounded-2xl border border-[#17314d] bg-[rgba(7,13,24,0.82)] text-[#d8ebff] hover:bg-[rgba(11,20,35,0.92)]"
                 >
                   Cancel
                 </Button>
                 <Button
-                  variant="primary"
+                  variant="ghost"
                   onClick={handleUpdateProject}
                   loading={isUpdating}
                   disabled={!editProject.name.trim() || !editProject.language}
                   icon={<Edit3 size={16} />}
+                  className="rounded-2xl border border-[rgba(138,223,255,0.3)] bg-[linear-gradient(135deg,rgba(138,223,255,0.22),rgba(47,168,255,0.2))] text-white hover:bg-[linear-gradient(135deg,rgba(138,223,255,0.28),rgba(47,168,255,0.28))]"
                 >
                   Save Changes
                 </Button>
               </div>
-            </CardFooter>
-            </Card>
+            </div>
           </div>
         </div>
       )}
