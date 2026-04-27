@@ -1466,6 +1466,7 @@ function App() {
                   key={currentProject?.id ?? 'no-project'}
                   launchTarget={ideLaunchTarget}
                   launchRequestId={ideLaunchRequestId}
+                  onNavigateToAgent={() => setCurrentView('builder')}
                 />
               </Suspense>
             </ErrorBoundary>
