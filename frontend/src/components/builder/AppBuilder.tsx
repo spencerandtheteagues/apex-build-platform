@@ -1992,14 +1992,14 @@ const BuilderLaunchpad: React.FC<BuilderLaunchpadProps> = ({
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1.2fr),minmax(320px,0.8fr)] lg:items-end">
           <div className="space-y-5">
             <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(138,223,255,0.35)] bg-[rgba(47,168,255,0.08)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-[#8adfff]">
-              Authenticated Build Surface
+              Build control surface
             </div>
             <div className="space-y-3">
               <h1 className="max-w-4xl text-4xl font-black tracking-[-0.04em] text-white sm:text-5xl lg:text-6xl">
-                One builder. One control surface. No fallback to the legacy shell.
+                Design the build, lock the routing, and launch from one workspace.
               </h1>
               <p className="max-w-3xl text-sm leading-7 text-[#9eb3c7] sm:text-base">
-                Describe the product, choose the build depth, lock the model routing, attach visual references, and launch the workflow without dropping back into the older card stack.
+                Define the product, choose the build depth, set provider routing, attach visual references, and start the workflow without leaving the primary build surface.
               </p>
             </div>
             <div className="flex flex-wrap gap-2 text-[11px] font-medium text-[#c8f4ff]">

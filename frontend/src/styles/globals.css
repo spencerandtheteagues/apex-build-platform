@@ -1423,16 +1423,16 @@ html[data-ui-theme="blue"] {
 }
 
 html[data-ui-theme="blue"] .app-builder-root {
-  background: linear-gradient(180deg, #f6f9ff 0%, #edf3ff 46%, #e9f1ff 100%) !important;
-  color: #0f172a !important;
+  background: linear-gradient(180deg, #02060f 0%, #051226 48%, #040816 100%) !important;
+  color: #eef7ff !important;
 }
 
 html[data-ui-theme="blue"] .app-builder-bg-base {
   background:
-    radial-gradient(ellipse at 20% 0%, rgba(37, 99, 235, 0.2) 0%, transparent 58%),
-    radial-gradient(ellipse at 80% 8%, rgba(14, 165, 233, 0.18) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 100%, rgba(99, 102, 241, 0.12) 0%, transparent 55%),
-    linear-gradient(180deg, #f6f9ff 0%, #eef4ff 48%, #e7efff 100%) !important;
+    radial-gradient(ellipse at 18% 0%, rgba(37, 99, 235, 0.16) 0%, transparent 52%),
+    radial-gradient(ellipse at 82% 8%, rgba(14, 165, 233, 0.14) 0%, transparent 46%),
+    radial-gradient(ellipse at 50% 100%, rgba(59, 130, 246, 0.1) 0%, transparent 54%),
+    linear-gradient(180deg, #02060f 0%, #051226 46%, #040816 100%) !important;
 }
 
 html[data-ui-theme="blue"] .app-builder-animated-bg {
@@ -1446,15 +1446,15 @@ html[data-ui-theme="blue"] .app-builder-accent {
 }
 
 html[data-ui-theme="blue"] .app-builder-accent-a {
-  background: rgba(37, 99, 235, 0.2) !important;
+  background: rgba(37, 99, 235, 0.12) !important;
 }
 
 html[data-ui-theme="blue"] .app-builder-accent-b {
-  background: rgba(14, 165, 233, 0.16) !important;
+  background: rgba(14, 165, 233, 0.1) !important;
 }
 
 html[data-ui-theme="blue"] .app-builder-accent-c {
-  background: rgba(99, 102, 241, 0.1) !important;
+  background: rgba(15, 23, 42, 0.42) !important;
 }
 
 html[data-ui-theme="blue"] .app-builder-logo-image {
