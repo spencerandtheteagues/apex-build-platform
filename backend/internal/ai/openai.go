@@ -24,11 +24,21 @@ type OpenAIClient struct {
 
 // OpenAI API request/response structures
 type openAIRequest struct {
-	Model       string          `json:"model"`
-	Messages    []openAIMessage `json:"messages"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
-	Temperature float32         `json:"temperature,omitempty"`
-	Stream      bool            `json:"stream"`
+	Model                string          `json:"model"`
+	Messages             []openAIMessage `json:"messages"`
+	MaxTokens            int             `json:"max_tokens,omitempty"`
+	MaxCompletionTokens  int             `json:"max_completion_tokens,omitempty"`
+	Temperature          float32         `json:"temperature,omitempty"`
+	Stream               bool            `json:"stream"`
+}
+
+// useMaxCompletionTokens returns true for o1/o3/o4 reasoning models that
+// reject max_tokens and require max_completion_tokens instead.
+func useMaxCompletionTokens(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(m, "o1") ||
+		strings.HasPrefix(m, "o3") ||
+		strings.HasPrefix(m, "o4")
 }
 
 type openAIMessage struct {
@@ -127,13 +137,19 @@ func (o *OpenAIClient) Generate(ctx context.Context, req *AIRequest) (*AIRespons
 	// Build messages with system and user prompts
 	messages := o.buildMessages(req)
 
-	// Create OpenAI API request
+	// Create OpenAI API request — o1/o3/o4 reasoning models require
+	// max_completion_tokens; standard chat models use max_tokens.
+	maxTok := o.getMaxTokens(req)
 	openAIReq := &openAIRequest{
 		Model:       model,
 		Messages:    messages,
-		MaxTokens:   o.getMaxTokens(req),
 		Temperature: req.Temperature,
 		Stream:      false,
+	}
+	if useMaxCompletionTokens(model) {
+		openAIReq.MaxCompletionTokens = maxTok
+	} else {
+		openAIReq.MaxTokens = maxTok
 	}
 
 	var (
@@ -558,6 +574,15 @@ func (o *OpenAIClient) calculateCost(inputTokens, outputTokens int, model string
 	var inputCostPer1K, outputCostPer1K float64
 
 	switch model {
+	case "o3", "o3-2025-04-16", "o3-pro", "o3-pro-2025-06-10":
+		inputCostPer1K = 0.010
+		outputCostPer1K = 0.040
+	case "o4-mini", "o4-mini-2025-04-16":
+		inputCostPer1K = 0.0011
+		outputCostPer1K = 0.0044
+	case "o1", "o1-2024-12-17", "o1-pro":
+		inputCostPer1K = 0.015
+		outputCostPer1K = 0.060
 	case "gpt-5.4", "gpt-5.4-pro", "gpt-5.4-2026-03-05", "gpt-5.4-pro-2026-03-05":
 		inputCostPer1K = 0.0025
 		outputCostPer1K = 0.015
@@ -577,7 +602,7 @@ func (o *OpenAIClient) calculateCost(inputTokens, outputTokens int, model string
 		inputCostPer1K = 0.00015
 		outputCostPer1K = 0.0006
 	default:
-		inputCostPer1K = 0.00015 // Default to cheapest pricing
+		inputCostPer1K = 0.00015
 		outputCostPer1K = 0.0006
 	}
 
