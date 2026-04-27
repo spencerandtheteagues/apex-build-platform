@@ -193,7 +193,14 @@ func (g *GeminiClient) generateWithModelFallback(ctx context.Context, model stri
 func geminiModelFallbacks(model string) []string {
 	switch model {
 	case "gemini-3.1-pro":
-		return []string{"gemini-3.1-pro", "gemini-3.1-pro-preview"}
+		// The stable alias doesn't exist yet; go straight to preview.
+		return []string{"gemini-3.1-pro-preview", "gemini-2.5-pro"}
+	case "gemini-3.1-pro-preview":
+		return []string{"gemini-3.1-pro-preview", "gemini-2.5-pro"}
+	case "gemini-3-pro-preview":
+		return []string{"gemini-3-pro-preview", "gemini-3.1-pro-preview", "gemini-2.5-pro"}
+	case "gemini-3-flash-preview":
+		return []string{"gemini-3-flash-preview", "gemini-2.5-flash"}
 	default:
 		return []string{model}
 	}
@@ -418,9 +425,15 @@ func (g *GeminiClient) calculateCost(inputTokens, outputTokens int, model string
 	var inputCostPer1K, outputCostPer1K float64
 
 	switch model {
+	case "gemini-3.1-pro-preview", "gemini-3.1-pro", "gemini-3-pro-preview":
+		inputCostPer1K = 0.00250
+		outputCostPer1K = 0.01500
+	case "gemini-3-flash-preview":
+		inputCostPer1K = 0.00020
+		outputCostPer1K = 0.00080
 	case "gemini-2.5-pro":
 		inputCostPer1K = 0.00125
-		outputCostPer1K = 0.010
+		outputCostPer1K = 0.01000
 	case "gemini-2.5-flash":
 		inputCostPer1K = 0.00015
 		outputCostPer1K = 0.00060

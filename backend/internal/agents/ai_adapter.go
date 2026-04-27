@@ -27,7 +27,7 @@ var modelsByPowerMode = map[ai.AIProvider]map[PowerMode]string{
 		PowerFast:     "gpt-4o-mini",
 	},
 	ai.ProviderGemini: {
-		PowerMax:      "gemini-3.1-pro",
+		PowerMax:      "gemini-3.1-pro-preview",
 		PowerBalanced: "gemini-3-flash-preview",
 		PowerFast:     "gemini-2.5-flash-lite",
 	},
