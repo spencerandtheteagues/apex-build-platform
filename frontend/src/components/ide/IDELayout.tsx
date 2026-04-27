@@ -1692,6 +1692,28 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
           <span className="absolute inset-0 rounded-full bg-cyan-400/20 animate-ping" />
         </button>
       )}
+
+      {/* CodeSearch Overlay */}
+      {showCodeSearch && currentProject && (
+        <div className="fixed inset-0 z-[60] flex items-start justify-center pt-24 bg-black/60 backdrop-blur-sm" onClick={() => setShowCodeSearch(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-2xl mx-4">
+            <CodeSearch
+              projectId={currentProject.id}
+              onFileSelect={(fileId: number) => {
+                setShowCodeSearch(false)
+                // Open file in editor via file lookup
+                apiService.getFile(fileId).then(file => {
+                  handleFileSelect(file)
+                }).catch(() => {
+                  // File not found — ignore
+                })
+              }}
+              isOpen={true}
+              onClose={() => setShowCodeSearch(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
