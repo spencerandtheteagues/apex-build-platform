@@ -241,6 +241,7 @@ interface BuildState {
   interaction?: ApiBuildInteractionState
   platformIssue?: BuildPlatformIssueContext
   guarantee?: BuildGuaranteeState
+  previewUrl?: string
 }
 
 interface UpgradePromptState {
@@ -4374,7 +4375,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
       case 'preview:ready':
         if (data.url) {
-          addSystemMessage('Preview ready')
+          addSystemMessage(`Preview ready: ${data.url}`)
+          setBuildState(prev => prev ? { ...prev, previewUrl: data.url } : null)
         }
         break
 
