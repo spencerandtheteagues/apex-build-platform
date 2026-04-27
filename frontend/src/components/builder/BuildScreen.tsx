@@ -124,6 +124,19 @@ interface BuildProviderScorecard {
   promotion_attempt_count?: number
 }
 
+interface BuildGuaranteeState {
+  status: 'validating' | 'retrying' | 'rolling_back' | 'passed' | 'failed'
+  verdict?: 'pass' | 'soft_fail' | 'hard_fail'
+  attempts: number
+  score?: number
+  rolledBack: boolean
+  durationMs?: number
+  error?: string
+  taskId?: string
+  taskType?: string
+  updatedAt: string
+}
+
 interface BSBuildState {
   id: string
   status: BuildStatus
@@ -148,6 +161,7 @@ interface BSBuildState {
   verificationReports?: BuildVerificationReport[]
   providerScorecards?: BuildProviderScorecard[]
   historicalLearning?: BuildLearningSummaryState
+  guarantee?: BuildGuaranteeState
   promptPackActivationRequests?: BuildPromptPackActivationRequestState[]
   promptPackVersions?: BuildPromptPackVersionState[]
   promptPackActivationEvents?: BuildPromptPackActivationEventState[]
@@ -355,6 +369,37 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
     : status === 'failed' ? 'Failed'
     : buildPaused ? 'Paused'
     : humanize(status)
+  const guarantee = buildState.guarantee
+  const gateStatusText = guarantee
+    ? guarantee.status === 'passed'
+      ? `Validation Passed${typeof guarantee.score === 'number' ? ` • ${Math.round(guarantee.score)}%` : ''}`
+      : guarantee.status === 'retrying'
+        ? `Retrying Validation${guarantee.attempts > 1 ? ` • Attempt ${guarantee.attempts}` : ''}`
+        : guarantee.status === 'rolling_back'
+          ? 'Rolling Back'
+          : guarantee.rolledBack
+            ? 'Rolled Back'
+            : guarantee.error
+              ? 'Validation Failed'
+              : 'Validating'
+    : buildState.qualityGateStatus === 'passed'
+      ? 'Validation Passed'
+      : buildState.qualityGateStatus === 'failed'
+        ? 'Validation Failed'
+        : buildState.qualityGateStatus === 'running'
+          ? humanize(buildState.qualityGateStage || 'validation')
+          : ''
+  const gateStatusClass = guarantee?.status === 'passed' || buildState.qualityGateStatus === 'passed'
+    ? 'text-green-300 bg-green-500/10 border-green-500/30'
+    : guarantee?.status === 'retrying'
+      ? 'text-amber-300 bg-amber-500/10 border-amber-500/30'
+      : guarantee?.status === 'rolling_back'
+        ? 'text-red-300 bg-red-500/10 border-red-500/30'
+        : guarantee?.status === 'failed' || buildState.qualityGateStatus === 'failed'
+          ? 'text-red-300 bg-red-500/10 border-red-500/30'
+          : buildState.qualityGateStatus === 'running'
+            ? 'text-sky-300 bg-sky-500/10 border-sky-500/30'
+            : 'text-gray-300 bg-gray-500/10 border-gray-500/20'
 
   const desc = buildState.description || 'Building your app...'
 
@@ -381,7 +426,14 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
           <div className="text-xs sm:text-sm font-semibold text-gray-200 truncate select-text" title={desc}>
             {desc}
           </div>
-          <div className="text-[10px] sm:text-[11px] text-gray-600 font-mono">{phaseLabel}</div>
+          <div className="flex flex-wrap items-center gap-2 text-[10px] sm:text-[11px] text-gray-600 font-mono">
+            <span>{phaseLabel}</span>
+            {gateStatusText && (
+              <span className={cn('text-[9px] sm:text-[10px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border', gateStatusClass)}>
+                {gateStatusText}
+              </span>
+            )}
+          </div>
         </div>
         <span className={cn('shrink-0 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest px-1.5 sm:px-2 py-0.5 rounded border', statusColor)}>
           {statusText}
@@ -590,6 +642,9 @@ const BuildCommandSurface: React.FC<{
   generatedFilesCount: number
   issueCount: number
   hasBYOK: boolean
+  qualityGateStatus?: BSBuildState['qualityGateStatus']
+  qualityGateStage?: string
+  guarantee?: BuildGuaranteeState
   createdProjectId: number | null
   isPreparingPreview: boolean
   onSelectOverlay: (overlay: OverlayId) => void
@@ -601,6 +656,9 @@ const BuildCommandSurface: React.FC<{
   generatedFilesCount,
   issueCount,
   hasBYOK,
+  qualityGateStatus,
+  qualityGateStage,
+  guarantee,
   createdProjectId,
   isPreparingPreview,
   onSelectOverlay,
@@ -608,6 +666,23 @@ const BuildCommandSurface: React.FC<{
   onOpenInIDE,
   onDownload,
 }) => {
+  const qualityGateSummary = guarantee
+    ? guarantee.status === 'passed'
+      ? `${Math.round(guarantee.score ?? 100)}% pass`
+      : guarantee.status === 'retrying'
+        ? `retry ${guarantee.attempts}`
+        : guarantee.status === 'rolling_back'
+          ? 'rollback'
+          : guarantee.rolledBack
+            ? 'rolled back'
+            : 'failed'
+    : qualityGateStatus === 'passed'
+      ? 'passed'
+      : qualityGateStatus === 'failed'
+        ? 'failed'
+        : qualityGateStatus === 'running'
+          ? (qualityGateStage ? humanize(qualityGateStage) : 'running')
+          : 'pending'
   const items: Array<{
     label: string
     value: string
@@ -662,7 +737,7 @@ const BuildCommandSurface: React.FC<{
     },
     {
       label: 'Review evidence',
-      value: 'scorecards',
+      value: qualityGateSummary,
       icon: <CheckCircle2 className="w-4 h-4" />,
       action: () => onSelectOverlay('detail'),
     },
@@ -1255,6 +1330,58 @@ const PanelOverlay: React.FC<PanelOverlayProps> = ({
               </div>
             )}
 
+            {(buildState.guarantee || (buildState.qualityGateStatus && buildState.qualityGateStatus !== 'pending')) && (
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">
+                  Validation & Guarantee
+                </h3>
+                <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={cn(
+                      'text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded border',
+                      buildState.guarantee?.status === 'passed' || buildState.qualityGateStatus === 'passed'
+                        ? 'border-green-500/30 bg-green-500/10 text-green-300'
+                        : buildState.guarantee?.status === 'retrying'
+                          ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                          : buildState.guarantee?.status === 'rolling_back'
+                            ? 'border-red-500/30 bg-red-500/10 text-red-300'
+                            : buildState.guarantee?.status === 'failed' || buildState.qualityGateStatus === 'failed'
+                              ? 'border-red-500/30 bg-red-500/10 text-red-300'
+                              : 'border-sky-500/30 bg-sky-500/10 text-sky-300'
+                    )}>
+                      {buildState.guarantee?.status === 'passed' ? 'Passed'
+                        : buildState.guarantee?.status === 'retrying' ? `Retrying • Attempt ${buildState.guarantee.attempts}`
+                          : buildState.guarantee?.status === 'rolling_back' ? 'Rolling Back'
+                            : buildState.guarantee?.rolledBack ? 'Rolled Back'
+                              : buildState.guarantee?.status === 'failed' ? 'Failed'
+                                : buildState.qualityGateStatus === 'passed' ? 'Passed'
+                                  : buildState.qualityGateStatus === 'failed' ? 'Failed'
+                                    : humanize(buildState.qualityGateStage || 'validation')}
+                    </span>
+                    {typeof buildState.guarantee?.score === 'number' && (
+                      <span className="text-xs font-mono text-gray-400">
+                        Score {Math.round(buildState.guarantee.score)}%
+                      </span>
+                    )}
+                    {typeof buildState.guarantee?.durationMs === 'number' && (
+                      <span className="text-xs font-mono text-gray-500">
+                        {buildState.guarantee.durationMs}ms
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-2 text-sm text-gray-300 break-words">
+                    {buildState.guarantee?.error
+                      ? buildState.guarantee.error
+                      : buildState.guarantee?.taskType
+                        ? `Latest guarantee result came from ${humanize(buildState.guarantee.taskType)}.`
+                        : buildState.qualityGateStage
+                          ? `Current quality gate stage: ${humanize(buildState.qualityGateStage)}.`
+                          : 'Validation telemetry is active for this build.'}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Diff Review Panel */}
             {buildState.status === 'awaiting_review' && proposedEdits.length > 0 && (
               <div>
@@ -1456,6 +1583,9 @@ export const BuildScreen: React.FC<BuildScreenProps> = (props) => {
         generatedFilesCount={generatedFiles.length}
         issueCount={issueCount}
         hasBYOK={hasBYOK}
+        qualityGateStatus={buildState.qualityGateStatus}
+        qualityGateStage={buildState.qualityGateStage}
+        guarantee={buildState.guarantee}
         createdProjectId={createdProjectId}
         isPreparingPreview={isPreparingPreview}
         onSelectOverlay={setActiveOverlay}

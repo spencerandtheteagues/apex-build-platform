@@ -133,6 +133,7 @@ interface Task {
   output?: {
     files?: Array<{ path: string; language: string }>
     messages?: string[]
+    metrics?: Record<string, any>
   }
 }
 
@@ -187,6 +188,19 @@ interface BuildPlatformIssueContext {
   maintenanceWindow?: boolean
 }
 
+interface BuildGuaranteeState {
+  status: 'validating' | 'retrying' | 'rolling_back' | 'passed' | 'failed'
+  verdict?: 'pass' | 'soft_fail' | 'hard_fail'
+  attempts: number
+  score?: number
+  rolledBack: boolean
+  durationMs?: number
+  error?: string
+  taskId?: string
+  taskType?: string
+  updatedAt: string
+}
+
 interface BuildState {
   id: string
   status: 'idle' | 'pending' | 'planning' | 'in_progress' | 'testing' | 'reviewing' | 'awaiting_review' | 'completed' | 'failed' | 'cancelled'
@@ -226,6 +240,7 @@ interface BuildState {
   truthBySurface?: Record<string, string[]>
   interaction?: ApiBuildInteractionState
   platformIssue?: BuildPlatformIssueContext
+  guarantee?: BuildGuaranteeState
 }
 
 interface UpgradePromptState {
@@ -292,6 +307,83 @@ const extractPlatformIssue = (source: any): BuildPlatformIssueContext | undefine
     retryable: typeof payload.retryable === 'boolean' ? payload.retryable : undefined,
     maintenanceWindow: payload.maintenance_window === true,
   }
+}
+
+const asFiniteNumber = (value: unknown): number | undefined => {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : undefined
+}
+
+const normalizeGuaranteeVerdict = (value: unknown): BuildGuaranteeState['verdict'] | undefined => {
+  const verdict = String(value || '').trim().toLowerCase()
+  if (verdict === 'pass' || verdict === 'soft_fail' || verdict === 'hard_fail') {
+    return verdict
+  }
+  return undefined
+}
+
+const extractGuaranteeState = (source: any): BuildGuaranteeState | undefined => {
+  const payload = source?.output?.metrics ?? source?.metrics ?? source
+  if (!payload || typeof payload !== 'object') return undefined
+
+  const attempts = asFiniteNumber(payload.guarantee_attempts ?? payload.attempts)
+  const score = asFiniteNumber(payload.guarantee_score ?? payload.score)
+  const durationMs = asFiniteNumber(payload.guarantee_duration_ms ?? payload.duration_ms)
+  const verdict = normalizeGuaranteeVerdict(payload.guarantee_verdict ?? payload.verdict)
+  const rolledBack = payload.guarantee_rolled_back === true || payload.rolled_back === true
+  const error = typeof payload.error === 'string' ? payload.error : undefined
+  const taskId = typeof payload.task_id === 'string' ? payload.task_id : undefined
+  const taskType = typeof payload.task_type === 'string' ? payload.task_type : undefined
+
+  if (
+    attempts === undefined &&
+    score === undefined &&
+    durationMs === undefined &&
+    verdict === undefined &&
+    !rolledBack &&
+    !error
+  ) {
+    return undefined
+  }
+
+  let status: BuildGuaranteeState['status']
+  if (rolledBack) {
+    status = 'failed'
+  } else if (verdict === 'hard_fail') {
+    status = 'failed'
+  } else if (verdict === 'soft_fail') {
+    status = 'retrying'
+  } else if (verdict === 'pass') {
+    status = 'passed'
+  } else {
+    status = 'validating'
+  }
+
+  return {
+    status,
+    verdict,
+    attempts: attempts ?? 1,
+    score,
+    rolledBack,
+    durationMs,
+    error,
+    taskId,
+    taskType,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+const extractLatestGuaranteeStateFromTasks = (tasks: Task[]): BuildGuaranteeState | undefined => {
+  for (let index = tasks.length - 1; index >= 0; index -= 1) {
+    const task = tasks[index]
+    const guarantee = extractGuaranteeState({
+      metrics: task.output?.metrics,
+      task_id: task.id,
+      task_type: task.type,
+    })
+    if (guarantee) return guarantee
+  }
+  return undefined
 }
 
 const BUILD_WORKFLOW_STAGE_DEFS = [
@@ -2286,18 +2378,20 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       const latestTaskType = latestThought?.taskType || providerAgents
         .map((agent) => agent.currentTask?.type)
         .find(Boolean)
+      const hasActiveProviderError = providerAgents.some((agent) => agent.status === 'error') ||
+        (providerAgents.length > 0 && latestThought?.type === 'error')
 
       let status: ProviderPanelState['status'] = 'idle'
       if (!available) {
         status = 'unavailable'
-      } else if (latestThought?.type === 'error' || providerAgents.some((agent) => agent.status === 'error')) {
+      } else if (providerAgents.some((agent) => agent.status === 'working')) {
+        status = latestThought?.type === 'thinking' && latestThought.isInternal ? 'thinking' : 'working'
+      } else if (providerAgents.some((agent) => agent.status === 'completed')) {
+        status = 'completed'
+      } else if (hasActiveProviderError) {
         status = 'error'
       } else if (isBuildActive && latestThought?.type === 'thinking' && latestThought.isInternal) {
         status = 'thinking'
-      } else if (providerAgents.some((agent) => agent.status === 'working')) {
-        status = latestThought?.eventType === 'agent:generating' ? 'working' : 'working'
-      } else if (providerAgents.some((agent) => agent.status === 'completed')) {
-        status = 'completed'
       }
 
       const statusLabel = status === 'unavailable'
@@ -3209,6 +3303,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         setBuildState(prev => {
           const nextStatus = mergeBuildStatusWithTerminalPrecedence(prev?.status, data.status)
           const nextErrorMessage = extractBuildFailureReason(data)
+          const nextGuarantee = Array.isArray(data.tasks)
+            ? extractLatestGuaranteeStateFromTasks(data.tasks)
+            : extractGuaranteeState(data)
           return ({
             ...prev,
             ...data,
@@ -3261,6 +3358,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
                   : prev?.qualityGateStatus,
             errorMessage: nextErrorMessage || prev?.errorMessage,
             interaction: normalizeInteraction(data.interaction, data.messages) || prev?.interaction,
+            guarantee: nextGuarantee || prev?.guarantee,
           })
         })
         syncInteractionState(data.interaction, data.messages)
@@ -3459,6 +3557,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         break
 
       case 'agent:completed':
+        {
+          const guarantee = extractGuaranteeState(data)
+          if (guarantee) {
+            setBuildState(prev => prev ? { ...prev, guarantee } : prev)
+          }
+        }
         setBuildState(prev => {
           if (!prev) return null
           const nextAgents: Agent[] = prev.agents.map((a): Agent =>
@@ -3733,7 +3837,18 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             ...prev,
             agents: prev.agents.map(a =>
               a.id === message.agent_id
-                ? { ...a, provider: data.provider ?? a.provider, model: data.model ?? a.model }
+                ? {
+                  ...a,
+                  status: 'working' as Agent['status'],
+                  provider: data.provider ?? a.provider,
+                  model: data.model ?? a.model,
+                  currentTask: data.task_type
+                    ? {
+                      type: data.task_type,
+                      description: a.currentTask?.description || humanizeIdentifier(data.task_type),
+                    }
+                    : a.currentTask,
+                }
                 : a
             ),
           }
@@ -3904,7 +4019,18 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             ...prev,
             agents: prev.agents.map(a =>
               a.id === message.agent_id
-                ? { ...a, provider: data.provider ?? a.provider, model: data.model ?? a.model }
+                ? {
+                  ...a,
+                  status: 'working' as Agent['status'],
+                  provider: data.provider ?? a.provider,
+                  model: data.model ?? a.model,
+                  currentTask: data.task_type
+                    ? {
+                      type: data.task_type,
+                      description: data.content || a.currentTask?.description || humanizeIdentifier(data.task_type),
+                    }
+                    : a.currentTask,
+                }
                 : a
             ),
           }
@@ -4076,6 +4202,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
               a.id === message.agent_id
                 ? {
                   ...a,
+                  status: 'working' as Agent['status'],
                   progress: typeof data.progress === 'number' ? clampPercent(data.progress) : a.progress,
                   provider: data.provider ?? a.provider,
                   model: data.model ?? a.model,
@@ -4094,7 +4221,12 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             ...prev,
             agents: prev.agents.map(a =>
               a.id === message.agent_id
-                ? { ...a, provider: data.new_provider ?? a.provider, model: data.model ?? a.model }
+                ? {
+                  ...a,
+                  status: 'working' as Agent['status'],
+                  provider: data.new_provider ?? a.provider,
+                  model: data.model ?? a.model,
+                }
                 : a
             )
           }
@@ -4224,6 +4356,18 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
             ...prev,
             status: 'in_progress',
             progress: typeof data.progress === 'number' ? data.progress : prev.progress,
+            guarantee: {
+              status: 'retrying',
+              verdict: prev.guarantee?.verdict || 'soft_fail',
+              attempts: prev.guarantee?.attempts || 1,
+              score: prev.guarantee?.score,
+              rolledBack: true,
+              durationMs: prev.guarantee?.durationMs,
+              error: prev.guarantee?.error,
+              taskId: prev.guarantee?.taskId,
+              taskType: prev.guarantee?.taskType,
+              updatedAt: new Date().toISOString(),
+            },
           }
         })
         break
@@ -4256,32 +4400,137 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
       case 'build:fsm:all_steps_complete':
         addSystemMessage(`All build steps complete — validating`)
-        setBuildState(prev => prev ? { ...prev, status: 'reviewing', progress: 95 } : null)
+        setBuildState(prev => prev ? {
+          ...prev,
+          status: 'reviewing',
+          progress: 95,
+          qualityGateStatus: 'running',
+          guarantee: prev.guarantee || {
+            status: 'validating',
+            attempts: 1,
+            rolledBack: false,
+            updatedAt: new Date().toISOString(),
+          },
+        } : null)
         break
 
       case 'build:fsm:validation_pass':
         addSystemMessage(`Build validated successfully`)
-        setBuildState(prev => prev ? { ...prev, qualityGateStatus: 'passed', progress: 100 } : null)
+        setBuildState(prev => prev ? {
+          ...prev,
+          qualityGateStatus: 'passed',
+          progress: 100,
+          guarantee: {
+            status: 'passed',
+            verdict: 'pass',
+            attempts: prev.guarantee?.attempts || 1,
+            score: prev.guarantee?.score ?? 100,
+            rolledBack: false,
+            durationMs: prev.guarantee?.durationMs,
+            error: undefined,
+            taskId: prev.guarantee?.taskId,
+            taskType: prev.guarantee?.taskType,
+            updatedAt: new Date().toISOString(),
+          },
+        } : null)
         break
 
       case 'build:fsm:validation_fail':
         addSystemMessage(`Validation failed — retrying (attempt ${(data.retry_count ?? 0) + 1})`)
-        setBuildState(prev => prev ? { ...prev, qualityGateStatus: 'failed' } : null)
+        setBuildState(prev => prev ? {
+          ...prev,
+          qualityGateStatus: 'failed',
+          guarantee: {
+            status: 'retrying',
+            verdict: 'soft_fail',
+            attempts: Number.isFinite(Number(data.retry_count)) ? Number(data.retry_count) + 1 : (prev.guarantee?.attempts || 1),
+            score: prev.guarantee?.score,
+            rolledBack: false,
+            durationMs: prev.guarantee?.durationMs,
+            error: typeof data.error === 'string' ? data.error : prev.guarantee?.error,
+            taskId: prev.guarantee?.taskId,
+            taskType: prev.guarantee?.taskType,
+            updatedAt: new Date().toISOString(),
+          },
+        } : null)
         break
 
       case 'build:fsm:retry_exhausted':
         addSystemMessage(`All retry attempts exhausted — initiating rollback`)
+        setBuildState(prev => prev ? {
+          ...prev,
+          guarantee: {
+            status: 'rolling_back',
+            verdict: prev.guarantee?.verdict || 'hard_fail',
+            attempts: prev.guarantee?.attempts || 1,
+            score: prev.guarantee?.score,
+            rolledBack: false,
+            durationMs: prev.guarantee?.durationMs,
+            error: prev.guarantee?.error,
+            taskId: prev.guarantee?.taskId,
+            taskType: prev.guarantee?.taskType,
+            updatedAt: new Date().toISOString(),
+          },
+        } : null)
         break
 
       case 'build:fsm:rollback_complete':
         addSystemMessage(`Rollback complete — build failed after exhausting retries`)
-        setBuildState(prev => prev ? { ...prev, status: 'failed', errorMessage: 'Build failed after exhausting all retry attempts' } : null)
+        setBuildState(prev => prev ? {
+          ...prev,
+          status: 'failed',
+          errorMessage: 'Build failed after exhausting all retry attempts',
+          guarantee: {
+            status: 'failed',
+            verdict: 'hard_fail',
+            attempts: prev.guarantee?.attempts || 1,
+            score: prev.guarantee?.score,
+            rolledBack: true,
+            durationMs: prev.guarantee?.durationMs,
+            error: 'Build failed after exhausting all retry attempts',
+            taskId: prev.guarantee?.taskId,
+            taskType: prev.guarantee?.taskType,
+            updatedAt: new Date().toISOString(),
+          },
+        } : null)
         break
 
       case 'build:fsm:rollback_failed':
         addSystemMessage(`Rollback failed: ${data.error || 'unknown error'}`)
-        setBuildState(prev => prev ? { ...prev, status: 'failed', errorMessage: data.error || 'Rollback failed' } : null)
+        setBuildState(prev => prev ? {
+          ...prev,
+          status: 'failed',
+          errorMessage: data.error || 'Rollback failed',
+          guarantee: {
+            status: 'failed',
+            verdict: 'hard_fail',
+            attempts: prev.guarantee?.attempts || 1,
+            score: prev.guarantee?.score,
+            rolledBack: true,
+            durationMs: prev.guarantee?.durationMs,
+            error: data.error || 'Rollback failed',
+            taskId: prev.guarantee?.taskId,
+            taskType: prev.guarantee?.taskType,
+            updatedAt: new Date().toISOString(),
+          },
+        } : null)
         break
+
+      case 'build:guarantee:result': {
+        const guarantee = extractGuaranteeState(data)
+        if (guarantee) {
+          const summary = guarantee.status === 'passed'
+            ? `Guarantee check passed at ${Math.round(guarantee.score ?? 100)}% confidence`
+            : guarantee.status === 'retrying'
+              ? `Guarantee loop requested retry ${guarantee.attempts}`
+              : guarantee.rolledBack
+                ? 'Guarantee loop rolled the build back'
+                : 'Guarantee check reported a failure'
+          addSystemMessage(summary)
+          setBuildState(prev => prev ? { ...prev, guarantee } : prev)
+        }
+        break
+      }
 
       case 'build:fsm:paused':
         addSystemMessage(`Build paused`)
@@ -5039,6 +5288,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         output: task.output,
       }))
       : []
+    const guarantee = extractLatestGuaranteeStateFromTasks(tasks)
 
     const checkpoints: Checkpoint[] = Array.isArray(payload.checkpoints)
       ? payload.checkpoints.map((checkpoint: any, index: number) => ({
@@ -5107,6 +5357,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
       truthBySurface: payload.truth_by_surface || payload.promotion_decision?.truth_by_surface || payload.build_contract?.truth_by_surface,
       errorMessage: extractBuildFailureReason(payload),
       platformIssue: extractPlatformIssue(payload) || loadPlatformIssue,
+      guarantee,
       websocketUrl: typeof payload.websocket_url === 'string' ? payload.websocket_url : undefined,
       liveSession: liveSessionAvailable,
       artifactRevision: typeof payload.artifact_revision === 'string' ? payload.artifact_revision : undefined,

@@ -488,6 +488,11 @@ func (c *WSConnection) sendBuildState() {
 		}
 		if task.Output != nil {
 			taskData["files_count"] = len(task.Output.Files)
+			if len(task.Output.Metrics) > 0 {
+				taskData["output"] = map[string]any{
+					"metrics": task.Output.Metrics,
+				}
+			}
 		}
 		tasksList = append(tasksList, taskData)
 	}

@@ -5296,6 +5296,33 @@ func (am *AgentManager) processResult(result *TaskResult) {
 				},
 			})
 
+			if result.Output != nil && len(result.Output.Metrics) > 0 {
+				if attempts, ok := result.Output.Metrics["guarantee_attempts"]; ok {
+					taskType := ""
+					if task != nil {
+						taskType = string(task.Type)
+					}
+					am.broadcast(agent.BuildID, &WSMessage{
+						Type:      WSBuildGuaranteeResult,
+						BuildID:   agent.BuildID,
+						AgentID:   agent.ID,
+						Timestamp: time.Now(),
+						Data: map[string]any{
+							"task_id":     result.TaskID,
+							"task_type":   taskType,
+							"agent_role":  agent.Role,
+							"provider":    agent.Provider,
+							"model":       agent.Model,
+							"attempts":    attempts,
+							"score":       result.Output.Metrics["guarantee_score"],
+							"verdict":     result.Output.Metrics["guarantee_verdict"],
+							"rolled_back": result.Output.Metrics["guarantee_rolled_back"],
+							"duration_ms": result.Output.Metrics["guarantee_duration_ms"],
+						},
+					})
+				}
+			}
+
 			// Handle task completion - may trigger next tasks
 			if task != nil {
 				am.handleTaskCompletion(agent.BuildID, task, result.Output)
