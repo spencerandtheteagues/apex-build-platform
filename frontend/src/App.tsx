@@ -10,7 +10,7 @@ import { LEGAL_POLICY_VERSION, type LegalDocumentId } from './components/setting
 // Import ErrorBoundary directly to be safe
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input, AnimatedBackground } from './components/ui'
-import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown, Key, Palette, CreditCard, FileText, X, Building } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown, Key, Palette, CreditCard, FileText, X, Building, Activity } from 'lucide-react'
 import { getApiErrorMessage } from './lib/errors'
 import './styles/globals.css'
 import './styles/auth-animations.css'
@@ -61,6 +61,10 @@ const HelpButton = lazy(() =>
 const HelpCenterModal = lazy(() =>
   import('./components/help/HelpCenter').then((m) => ({ default: m.HelpCenter }))
 )
+const UsageDashboard = lazy(() => import('./components/usage/UsageDashboard'))
+const ExternalDeploymentPanel = lazy(() => import('./components/deployment/ExternalDeploymentPanel'))
+const CodeSearch = lazy(() => import('./components/search/CodeSearch'))
+const AgentPanel = lazy(() => import('./components/agent/AgentPanel'))
 
 const ViewLoadingFallback: React.FC<{ label: string }> = ({ label }) => (
   <div className="h-full flex items-center justify-center bg-black/40">
@@ -1641,6 +1645,21 @@ function App() {
                         </p>
                         <Suspense fallback={<div className="text-sm text-gray-500">Loading billing controls…</div>}>
                           <BillingSettings />
+                        </Suspense>
+                      </div>
+                    </ErrorBoundary>
+
+                    <ErrorBoundary fallback={renderSettingsSectionFallback('Usage & Quotas', 'Usage dashboard failed to render. Other settings are still available.')}>
+                      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                          <Activity className="w-5 h-5 text-red-400" />
+                          Usage & Quotas
+                        </h2>
+                        <p className="text-gray-400 text-sm mb-6">
+                          Track your plan quotas, token consumption, and platform usage against your current tier.
+                        </p>
+                        <Suspense fallback={<div className="text-sm text-gray-500">Loading usage dashboard…</div>}>
+                          <UsageDashboard />
                         </Suspense>
                       </div>
                     </ErrorBoundary>

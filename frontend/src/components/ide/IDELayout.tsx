@@ -26,6 +26,9 @@ import {
   LoadingOverlay
 } from '@/components/ui'
 import { AIAssistant } from '@/components/ai/AIAssistant'
+import { AIChatPanel } from '@/components/ai/AIChatPanel'
+import { ExternalDeploymentPanel } from '@/components/deployment'
+import CodeSearch from '@/components/search/CodeSearch'
 import { FileTree } from '@/components/explorer/FileTree'
 import { ProjectDashboard } from '@/components/project/ProjectDashboard'
 import { ProjectList } from '@/components/project/ProjectList'
@@ -89,6 +92,7 @@ import {
   PlugZap,
   LockKeyhole,
   CreditCard,
+  Globe,
 } from 'lucide-react'
 
 // Loading fallback for lazy-loaded components
@@ -153,11 +157,12 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
   const [rightPanelState, setRightPanelState] = useState<PanelState>(isMobile ? 'collapsed' : 'normal')
   const [bottomPanelState, setBottomPanelState] = useState<PanelState>('collapsed')
   const [activeLeftTab, setActiveLeftTab] = useState<'explorer' | 'search' | 'git' | 'history'>('explorer')
-  const [activeRightTab, setActiveRightTab] = useState<'ai' | 'comments' | 'collab' | 'database' | 'deploy' | 'settings'>('ai')
+  const [activeRightTab, setActiveRightTab] = useState<'ai' | 'comments' | 'collab' | 'database' | 'deploy' | 'external_deploy' | 'chat' | 'settings'>('ai')
   const [activeBottomTab, setActiveBottomTab] = useState<'terminal' | 'output' | 'problems'>('terminal')
   const [showPreview, setShowPreview] = useState(false)
   const [previewAutoRefresh, setPreviewAutoRefresh] = useState(true)
   const [showNotifications, setShowNotifications] = useState(false)
+  const [showCodeSearch, setShowCodeSearch] = useState(false)
 
   // Mobile-specific state
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('editor')
@@ -331,6 +336,21 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
       }
     },
   })
+
+  // Keyboard shortcut for CodeSearch overlay
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        setShowCodeSearch(prev => !prev)
+      }
+      if (e.key === 'Escape' && showCodeSearch) {
+        setShowCodeSearch(false)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [showCodeSearch])
 
   // Handle file selection
   const handleFileSelect = useCallback(async (file: File) => {
@@ -759,6 +779,25 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
             <DeploymentPanel
               projectId={currentProject.id}
               projectName={currentProject.name}
+              className="min-h-full"
+            />
+          </div>
+        ) : null
+      case 'external_deploy':
+        return currentProject ? (
+          <div className="h-full overflow-auto">
+            <ExternalDeploymentPanel
+              projectId={currentProject.id}
+              projectName={currentProject.name}
+              className="min-h-full"
+            />
+          </div>
+        ) : null
+      case 'chat':
+        return currentProject ? (
+          <div className="h-full overflow-auto">
+            <AIChatPanel
+              projectId={currentProject.id}
               className="min-h-full"
             />
           </div>
@@ -1576,6 +1615,26 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
                       title="Deploy"
                     >
                       Deploy
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={activeRightTab === 'external_deploy' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveRightTab('external_deploy')}
+                      icon={<Globe size={14} />}
+                      className={idePanelTabClass(activeRightTab === 'external_deploy')}
+                      title="External Deploy"
+                    >
+                      Ext
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={activeRightTab === 'chat' ? 'primary' : 'ghost'}
+                      onClick={() => setActiveRightTab('chat')}
+                      icon={<MessageSquare size={14} />}
+                      className={idePanelTabClass(activeRightTab === 'chat')}
+                      title="AI Chat"
+                    >
+                      Chat
                     </Button>
                     <Button
                       size="sm"
