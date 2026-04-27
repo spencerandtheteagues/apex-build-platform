@@ -190,3 +190,22 @@ func TestPreviewWebSocketOriginAllowsSandboxedProxyOrigin(t *testing.T) {
 		t.Fatal("expected preview websocket origin check to allow null origin from sandboxed preview iframes")
 	}
 }
+
+func TestConnectHostFromDockerEndpoint(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "ssh endpoint", in: "ssh://apexrunner@177.7.36.223", want: "177.7.36.223"},
+		{name: "tcp endpoint", in: "tcp://runner.example.com:2376", want: "runner.example.com"},
+		{name: "unix socket", in: "/var/run/docker.sock", want: ""},
+		{name: "empty", in: "", want: ""},
+	}
+
+	for _, tc := range tests {
+		if got := connectHostFromDockerEndpoint(tc.in); got != tc.want {
+			t.Fatalf("%s: connectHostFromDockerEndpoint(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+}

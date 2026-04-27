@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -76,6 +77,7 @@ type ContainerPreviewConfig struct {
 	// Docker settings
 	DockerSocket    string
 	DockerContext   string
+	ConnectHost     string
 	ImagePrefix     string
 	BasePort        int
 	MaxContainers   int32
@@ -140,6 +142,10 @@ func DefaultContainerPreviewConfig() *ContainerPreviewConfig {
 	if dockerHost == "" {
 		dockerHost = strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_SOCKET"))
 	}
+	connectHost := strings.TrimSpace(os.Getenv("APEX_PREVIEW_CONNECT_HOST"))
+	if connectHost == "" {
+		connectHost = connectHostFromDockerEndpoint(dockerHost)
+	}
 
 	return &ContainerPreviewConfig{
 		// Leave host blank by default so Docker CLI context resolution works.
@@ -147,6 +153,7 @@ func DefaultContainerPreviewConfig() *ContainerPreviewConfig {
 		// or the legacy APEX_PREVIEW_DOCKER_SOCKET.
 		DockerSocket:        dockerHost,
 		DockerContext:       strings.TrimSpace(os.Getenv("APEX_PREVIEW_DOCKER_CONTEXT")),
+		ConnectHost:         connectHost,
 		ImagePrefix:         "apex-preview",
 		BasePort:            10000,
 		MaxContainers:       50,
@@ -330,6 +337,31 @@ func envValue(env []string, key string) string {
 		}
 	}
 	return ""
+}
+
+func connectHostFromDockerEndpoint(raw string) string {
+	endpoint := strings.TrimSpace(raw)
+	if endpoint == "" || !strings.Contains(endpoint, "://") {
+		return ""
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return ""
+	}
+	switch parsed.Scheme {
+	case "ssh", "tcp", "http", "https":
+		return parsed.Hostname()
+	default:
+		return ""
+	}
+}
+
+func (s *ContainerPreviewServer) previewConnectHost() string {
+	host := strings.TrimSpace(s.config.ConnectHost)
+	if host == "" {
+		return "127.0.0.1"
+	}
+	return host
 }
 
 // StartContainerPreview starts a container-based preview session
@@ -627,7 +659,7 @@ func (s *ContainerPreviewServer) runContainer(ctx context.Context, imageName, co
 // waitForContainerReady waits for the container to be ready to accept connections
 func (s *ContainerPreviewServer) waitForContainerReady(ctx context.Context, port int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	address := fmt.Sprintf("localhost:%d", port)
+	address := fmt.Sprintf("%s:%d", s.previewConnectHost(), port)
 
 	for time.Now().Before(deadline) {
 		select {
@@ -871,7 +903,7 @@ func (s *ContainerPreviewServer) getContainerStatus(session *ContainerSession) *
 		ProjectID:  session.ProjectID,
 		Active:     true,
 		Port:       session.Port,
-		URL:        fmt.Sprintf("http://localhost:%d", session.Port),
+		URL:        fmt.Sprintf("http://%s:%d", s.previewConnectHost(), session.Port),
 		StartedAt:  session.StartedAt,
 		LastAccess: session.LastAccess,
 		Clients:    0, // Container previews don't track WebSocket clients

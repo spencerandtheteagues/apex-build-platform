@@ -222,6 +222,16 @@ func TestPreviewHandlerBuildBackendProxyURLUsesForwardedPublicOrigin(t *testing.
 	require.Equal(t, "https://preview.apex-build.dev/api/v1/preview/backend-proxy/"+strconv.FormatUint(uint64(projectID), 10), url)
 }
 
+func TestPreviewProxyTargetURLUsesStatusURLWhenProvided(t *testing.T) {
+	targetURL, err := previewProxyTargetURL(&preview.PreviewStatus{
+		Active: true,
+		Port:   10000,
+		URL:    "http://177.7.36.223:10000",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "http://177.7.36.223:10000", targetURL.String())
+}
+
 func TestRewritePreviewHTMLForProxyWithBackendAppendsPreviewTokenToAssets(t *testing.T) {
 	handler, projectID := newPreviewHandlerTestFixture(t, false)
 

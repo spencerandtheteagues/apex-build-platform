@@ -80,6 +80,12 @@ func main() {
 	}
 	log.Println("Environment configuration loaded")
 
+	if prepared, err := startup.PrepareDockerSSHMaterial(); err != nil {
+		log.Printf("WARNING: Failed to prepare Docker SSH material: %v", err)
+	} else if prepared {
+		log.Println("Docker SSH material prepared")
+	}
+
 	// Init structured logger (JSON in production, text in dev)
 	applog.Init()
 

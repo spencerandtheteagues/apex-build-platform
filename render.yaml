@@ -57,6 +57,16 @@ services:
         sync: false
       - key: EXECUTION_FORCE_CONTAINER
         value: "true"  # Production requires container isolation; execution degrades safely if Docker is unavailable
+      - key: APEX_EXECUTION_DOCKER_HOST
+        sync: false  # Optional remote Docker host for execution sandboxes (e.g. ssh://apexrunner@runner.example.com)
+      - key: APEX_PREVIEW_DOCKER_HOST
+        sync: false  # Optional remote Docker host for preview containers
+      - key: APEX_PREVIEW_CONNECT_HOST
+        sync: false  # Public/IP host the API should use when proxying remote preview containers
+      - key: DOCKER_SSH_PRIVATE_KEY
+        sync: false  # SSH private key used by docker CLI when APEX_*_DOCKER_HOST uses ssh://
+      - key: DOCKER_SSH_KNOWN_HOSTS
+        sync: false  # known_hosts entries for the runner SSH host
       - key: APEX_ENABLE_HOST_TERMINAL
         value: "false"
       - key: DB_MAX_OPEN_CONNS

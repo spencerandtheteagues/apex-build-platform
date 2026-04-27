@@ -63,6 +63,7 @@ RUN apk --no-cache add \
     tzdata \
     curl \
     docker-cli \
+    openssh-client-default \
     nodejs \
     npm \
     python3 \

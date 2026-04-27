@@ -714,7 +714,7 @@ func (h *PreviewHandler) ProxyPreview(c *gin.Context) {
 		return
 	}
 
-	targetURL, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", status.Port))
+	targetURL, err := previewProxyTargetURL(status)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build preview proxy"})
 		return
@@ -1038,6 +1038,17 @@ func backendProxyTargetURL(serverStatus *preview.ServerStatus) (*url.URL, error)
 	target := strings.TrimSpace(serverStatus.URL)
 	if target == "" {
 		target = fmt.Sprintf("http://127.0.0.1:%d", serverStatus.Port)
+	}
+	return url.Parse(target)
+}
+
+func previewProxyTargetURL(status *preview.PreviewStatus) (*url.URL, error) {
+	if status == nil || !status.Active {
+		return nil, fmt.Errorf("preview not running")
+	}
+	target := strings.TrimSpace(status.URL)
+	if target == "" {
+		target = fmt.Sprintf("http://127.0.0.1:%d", status.Port)
 	}
 	return url.Parse(target)
 }

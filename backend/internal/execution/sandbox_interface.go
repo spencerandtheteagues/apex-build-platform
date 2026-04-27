@@ -593,8 +593,14 @@ func CheckDockerStatus() DockerStatus {
 		return status
 	}
 
+	env := append([]string(nil), os.Environ()...)
+	if dockerHost := normalizeDockerHost(strings.TrimSpace(os.Getenv("APEX_EXECUTION_DOCKER_HOST"))); dockerHost != "" {
+		env = append(env, "DOCKER_HOST="+dockerHost)
+	}
+
 	// Check docker version
 	cmd := exec.Command(dockerPath, "version", "--format", "{{.Server.Version}}")
+	cmd.Env = env
 	output, err := cmd.Output()
 	if err != nil {
 		status.Error = fmt.Sprintf("Docker daemon not accessible: %v", err)
@@ -606,6 +612,7 @@ func CheckDockerStatus() DockerStatus {
 
 	// Get API version
 	cmd = exec.Command(dockerPath, "version", "--format", "{{.Server.APIVersion}}")
+	cmd.Env = env
 	output, err = cmd.Output()
 	if err == nil {
 		status.APIVersion = string(output)

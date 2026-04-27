@@ -47,6 +47,15 @@ func TestNewContainerSandbox(t *testing.T) {
 	}
 }
 
+func TestDefaultContainerSandboxConfigUsesConfiguredDockerHost(t *testing.T) {
+	t.Setenv("APEX_EXECUTION_DOCKER_HOST", "ssh://apexrunner@runner.example.com")
+
+	cfg := DefaultContainerSandboxConfig()
+	if cfg.DockerSocket != "ssh://apexrunner@runner.example.com" {
+		t.Fatalf("DockerSocket = %q, want remote docker host", cfg.DockerSocket)
+	}
+}
+
 func TestContainerSandboxUsesIsolatedTempRoots(t *testing.T) {
 	skipIfNoDocker(t)
 

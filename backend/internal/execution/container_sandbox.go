@@ -146,8 +146,16 @@ type SandboxStats struct {
 
 // DefaultContainerSandboxConfig returns production-ready default configuration
 func DefaultContainerSandboxConfig() *ContainerSandboxConfig {
+	dockerHost := strings.TrimSpace(os.Getenv("APEX_EXECUTION_DOCKER_HOST"))
+	if dockerHost == "" {
+		dockerHost = strings.TrimSpace(os.Getenv("DOCKER_HOST"))
+	}
+	if dockerHost == "" {
+		dockerHost = "/var/run/docker.sock"
+	}
+
 	return &ContainerSandboxConfig{
-		DockerSocket:        "/var/run/docker.sock",
+		DockerSocket:        dockerHost,
 		ImagePrefix:         "apex-sandbox",
 		DefaultMemoryLimit:  256 * 1024 * 1024, // 256MB
 		DefaultCPULimit:     0.5,
@@ -289,10 +297,43 @@ func NewContainerSandbox(config *ContainerSandboxConfig) (*ContainerSandbox, err
 	return sandbox, nil
 }
 
+func normalizeDockerHost(raw string) string {
+	host := strings.TrimSpace(raw)
+	if host == "" {
+		return ""
+	}
+	if strings.Contains(host, "://") {
+		return host
+	}
+	if strings.HasPrefix(host, "/") {
+		return "unix://" + host
+	}
+	return host
+}
+
+func (s *ContainerSandbox) dockerEnv() []string {
+	env := append([]string(nil), os.Environ()...)
+	if host := normalizeDockerHost(s.config.DockerSocket); host != "" {
+		env = append(env, "DOCKER_HOST="+host)
+	}
+	return env
+}
+
+func (s *ContainerSandbox) dockerCommand(args ...string) *osexec.Cmd {
+	cmd := osexec.Command("docker", args...)
+	cmd.Env = s.dockerEnv()
+	return cmd
+}
+
+func (s *ContainerSandbox) dockerCommandContext(ctx context.Context, args ...string) *osexec.Cmd {
+	cmd := osexec.CommandContext(ctx, "docker", args...)
+	cmd.Env = s.dockerEnv()
+	return cmd
+}
+
 // checkDockerAvailable verifies Docker daemon is accessible
 func (s *ContainerSandbox) checkDockerAvailable() bool {
-	cmd := osexec.Command("docker", "info")
-	cmd.Env = append(os.Environ(), "DOCKER_HOST=unix://"+s.config.DockerSocket)
+	cmd := s.dockerCommand("info")
 	return cmd.Run() == nil
 }
 
@@ -422,7 +463,7 @@ func (s *ContainerSandbox) ensureImages() error {
 		imageName := fmt.Sprintf("%s-%s:latest", s.config.ImagePrefix, lang)
 
 		// Check if image exists
-		cmd := osexec.Command("docker", "image", "inspect", imageName)
+		cmd := s.dockerCommand("image", "inspect", imageName)
 		if cmd.Run() == nil {
 			s.imageCacheMu.Lock()
 			s.imageCache[lang] = true
@@ -557,7 +598,7 @@ func (s *ContainerSandbox) buildImage(language, dockerfile string) error {
 	}
 
 	// Build image
-	cmd := osexec.Command("docker", "build", "-t", imageName, "-f", dockerfilePath, tmpDir)
+	cmd := s.dockerCommand("build", "-t", imageName, "-f", dockerfilePath, tmpDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker build failed: %s", string(output))
@@ -900,7 +941,7 @@ func (s *ContainerSandbox) runContainer(
 	}
 
 	// Create docker command
-	cmd := osexec.CommandContext(ctx, "docker", args...)
+	cmd := s.dockerCommandContext(ctx, args...)
 
 	// Setup stdio
 	var stdout, stderr bytes.Buffer
@@ -1128,11 +1169,11 @@ func (s *ContainerSandbox) forceKillContainer(containerID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	stopCmd := osexec.CommandContext(ctx, "docker", "stop", "-t", "2", containerID)
+	stopCmd := s.dockerCommandContext(ctx, "stop", "-t", "2", containerID)
 	stopCmd.Run()
 
 	// Then force remove
-	rmCmd := osexec.Command("docker", "rm", "-f", containerID)
+	rmCmd := s.dockerCommand("rm", "-f", containerID)
 	rmCmd.Run()
 }
 
@@ -1181,7 +1222,7 @@ func (s *ContainerSandbox) cleanupLoop() {
 
 // cleanupOrphanedContainers removes any orphaned sandbox containers
 func (s *ContainerSandbox) cleanupOrphanedContainers() {
-	cmd := osexec.Command("docker", "ps", "-a", "--filter", "name=apex-sandbox-", "--format", "{{.Names}}\t{{.Status}}")
+	cmd := s.dockerCommand("ps", "-a", "--filter", "name=apex-sandbox-", "--format", "{{.Names}}\t{{.Status}}")
 	output, err := cmd.Output()
 	if err != nil {
 		return
@@ -1203,7 +1244,7 @@ func (s *ContainerSandbox) cleanupOrphanedContainers() {
 
 		// Remove exited or created containers
 		if strings.Contains(status, "Exited") || strings.Contains(status, "Created") {
-			osexec.Command("docker", "rm", "-f", containerName).Run()
+			s.dockerCommand("rm", "-f", containerName).Run()
 		}
 	}
 }
