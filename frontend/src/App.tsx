@@ -1306,7 +1306,7 @@ function App() {
     <div className="h-screen flex flex-col bg-[#020408]">
       {/* Top Navigation */}
       <div className="shrink-0 bg-[rgba(2,4,8,0.88)] border-b border-white/[0.08] px-3 sm:px-4 py-2 z-50 relative backdrop-blur-xl">
-        <div className="grid grid-cols-[auto,1fr,auto] items-center gap-2 sm:gap-3">
+        <div className="grid items-center gap-2 sm:gap-3" style={{ gridTemplateColumns: 'auto 1fr auto' }}>
           {/* Logo */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <div className="w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center shrink-0">
