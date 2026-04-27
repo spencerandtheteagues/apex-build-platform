@@ -48,6 +48,12 @@ import {
   CompletionResponse,
   CompletionItem,
   CompletionStats,
+  Organization,
+  OrganizationMember,
+  Role,
+  Permission,
+  AuditLog,
+  SSOConfigRequest,
 } from '@/types'
 
 const DEFAULT_PRODUCTION_API_BASE_URL = 'https://api.apex-build.dev/api/v1'
@@ -2821,11 +2827,64 @@ export class ApiService {
     const response = await this.client.get('/billing/invoices')
     return response.data
   }
-}
 
-// ---------------------------------------------------------------------------
-// Terminal Session types
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Enterprise API
+  // ---------------------------------------------------------------------------
+
+  async getOrganizations(): Promise<{
+    success: boolean
+    organizations?: Organization[]
+    error?: string
+  }> {
+    const response = await this.client.get('/enterprise/organizations')
+    return response.data
+  }
+
+  async getOrganization(id: number): Promise<{
+    success: boolean
+    organization?: Organization
+    error?: string
+  }> {
+    const response = await this.client.get(`/enterprise/organizations/${id}`)
+    return response.data
+  }
+
+  async configureSSO(id: number, config: SSOConfigRequest): Promise<{
+    success: boolean
+    message?: string
+    error?: string
+  }> {
+    const response = await this.client.post(`/enterprise/organizations/${id}/sso`, config)
+    return response.data
+  }
+
+  async getAuditLogs(id: number, params?: {
+    action?: string
+    category?: string
+    page?: number
+    page_size?: number
+  }): Promise<{
+    success: boolean
+    audit_logs?: AuditLog[]
+    total?: number
+    page?: number
+    page_size?: number
+    error?: string
+  }> {
+    const response = await this.client.get(`/enterprise/organizations/${id}/audit-logs`, { params })
+    return response.data
+  }
+
+  async getRoles(id: number): Promise<{
+    success: boolean
+    roles?: Role[]
+    error?: string
+  }> {
+    const response = await this.client.get(`/enterprise/organizations/${id}/roles`)
+    return response.data
+  }
+}
 
 export interface TerminalSessionResponse {
   session_id: string

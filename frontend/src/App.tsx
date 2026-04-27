@@ -10,7 +10,7 @@ import { LEGAL_POLICY_VERSION, type LegalDocumentId } from './components/setting
 // Import ErrorBoundary directly to be safe
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { LoadingOverlay, Card, CardContent, CardHeader, CardTitle, Button, Input, AnimatedBackground } from './components/ui'
-import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown, Key, Palette, CreditCard, FileText, X } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Zap, Rocket, Code2, Shield, AlertTriangle, Check, Sparkles, Globe, Settings, Github, ChevronDown, Key, Palette, CreditCard, FileText, X, Building } from 'lucide-react'
 import { getApiErrorMessage } from './lib/errors'
 import './styles/globals.css'
 import './styles/auth-animations.css'
@@ -52,6 +52,7 @@ const ModelSelector = lazy(() => import('./components/ai/ModelSelector'))
 const SpendDashboard = lazy(() => import('./components/spend/SpendDashboard'))
 const BudgetSettings = lazy(() => import('./components/budget/BudgetSettings'))
 const BillingSettings = lazy(() => import('./components/billing/BillingSettings'))
+const OrganizationSettings = lazy(() => import('./components/enterprise/OrganizationSettings').then(m => ({ default: m.OrganizationSettings })))
 const ProtectedPathsEditor = lazy(() => import('./components/project/ProtectedPathsEditor').then(m => ({ default: m.ProtectedPathsEditor })))
 const LandingPage = lazy(() => import('./pages/Landing').then(m => ({ default: m.LandingPage })))
 const HelpButton = lazy(() =>
@@ -1675,6 +1676,23 @@ function App() {
                         </button>
                       </div>
                     </div>
+
+                    {user != null && ['team', 'enterprise', 'owner'].includes(user.subscription_type) && (
+                      <ErrorBoundary fallback={renderSettingsSectionFallback('Enterprise Workspace', 'Organization settings failed to render. Other settings are still available.')}>
+                        <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                          <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                            <Building className="w-5 h-5 text-red-400" />
+                            Enterprise Workspace
+                          </h2>
+                          <p className="text-gray-400 text-sm mb-6">
+                            Manage your organization, team members, roles & permissions, SSO/SAML configuration, and audit logs.
+                          </p>
+                          <Suspense fallback={<div className="text-sm text-gray-500">Loading enterprise settings…</div>}>
+                            <OrganizationSettings />
+                          </Suspense>
+                        </div>
+                      </ErrorBoundary>
+                    )}
 
                     <ErrorBoundary fallback={renderSettingsSectionFallback('Legal & Policies', 'The legal documentation center failed to render. Billing and platform settings are still available.')}>
                       <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
