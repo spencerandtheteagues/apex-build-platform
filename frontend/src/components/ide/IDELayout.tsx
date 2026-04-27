@@ -41,6 +41,9 @@ import { usePaneManager } from '@/hooks/usePaneManager'
 import APIKeySettings from '@/components/settings/APIKeySettings'
 import MCPManager from '@/components/mcp/MCPManager'
 import SecretsManager from '@/components/secrets/SecretsManager'
+import { BudgetSettings } from '@/components/budget/BudgetSettings'
+import ProtectedPathsEditor from '@/components/project/ProtectedPathsEditor'
+import { EnvironmentPanel } from '@/components/ide/panels/EnvironmentPanel'
 
 // Lazy load heavy components for better initial load performance
 // Monaco Editor is ~800KB-1.2MB, XTerminal is ~200KB
@@ -810,6 +813,19 @@ export const IDELayout: React.FC<IDELayoutProps> = ({
               <section className="ide-control-surface__section">
                 <MCPManager projectId={currentProject?.id} />
               </section>
+              {currentProject && (
+                <section className="ide-control-surface__section">
+                  <EnvironmentPanel projectId={currentProject.id} />
+                </section>
+              )}
+              <section className="ide-control-surface__section">
+                <BudgetSettings />
+              </section>
+              {currentProject && (
+                <section className="ide-control-surface__section">
+                  <ProtectedPathsEditor projectId={currentProject.id} />
+                </section>
+              )}
             </div>
           </div>
         )

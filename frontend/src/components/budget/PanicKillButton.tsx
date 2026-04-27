@@ -20,7 +20,7 @@ export const PanicKillButton: React.FC<PanicKillButtonProps> = ({ visible = true
     }
     setKilling(true)
     try {
-      await apiService.post('/budget/kill-all')
+      await apiService.post('/build/kill-all')
     } catch (err) {
       console.error('Kill all failed:', err)
     } finally {

@@ -52,6 +52,7 @@ const ModelSelector = lazy(() => import('./components/ai/ModelSelector'))
 const SpendDashboard = lazy(() => import('./components/spend/SpendDashboard'))
 const BudgetSettings = lazy(() => import('./components/budget/BudgetSettings'))
 const BillingSettings = lazy(() => import('./components/billing/BillingSettings'))
+const ProtectedPathsEditor = lazy(() => import('./components/project/ProtectedPathsEditor').then(m => ({ default: m.ProtectedPathsEditor })))
 const LandingPage = lazy(() => import('./pages/Landing').then(m => ({ default: m.LandingPage })))
 const HelpButton = lazy(() =>
   import('./components/help/HelpCenter').then((m) => ({ default: m.HelpButton }))
@@ -1608,6 +1609,24 @@ function App() {
                         </Suspense>
                       </div>
                     </ErrorBoundary>
+
+                    {/* Protected Paths Section */}
+                    {currentProject && (
+                      <ErrorBoundary fallback={renderSettingsSectionFallback('Protected Paths', 'Protected paths editor failed to render.')}>
+                        <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+                          <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                            <Shield className="w-5 h-5 text-red-400" />
+                            Protected Paths
+                          </h2>
+                          <p className="text-gray-400 text-sm mb-6">
+                            Define glob patterns for files the AI cannot modify without explicit approval.
+                          </p>
+                          <Suspense fallback={<div className="text-sm text-gray-500">Loading path controls…</div>}>
+                            <ProtectedPathsEditor projectId={currentProject.id} />
+                          </Suspense>
+                        </div>
+                      </ErrorBoundary>
+                    )}
 
                     {/* Billing & Credits Section */}
                     <ErrorBoundary fallback={renderSettingsSectionFallback('Billing & Credits', 'Billing controls failed to render. The rest of the settings page is still usable.')}>

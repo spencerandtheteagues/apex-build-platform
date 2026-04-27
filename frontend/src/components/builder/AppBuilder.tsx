@@ -101,6 +101,7 @@ import {
 import { buildAuthenticatedWebSocketUrl } from '@/services/authSession'
 import { AssetUploader } from '@/components/project/AssetUploader'
 import DiffReviewPanel from '@/components/diff/DiffReviewPanel'
+import SpendToast from '@/components/spend/SpendToast'
 import OrchestrationOverview from './OrchestrationOverview'
 import BuildPieProgress from './BuildPieProgress'
 import BuildScreen from './BuildScreen'
@@ -1841,6 +1842,16 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
   const [platformReadiness, setPlatformReadiness] = useState<FeatureReadinessSummary | null>(null)
   const [proposedEdits, setProposedEdits] = useState<ProposedEdit[]>([])
   const [showDiffReview, setShowDiffReview] = useState(true)
+  const [spendToasts, setSpendToasts] = useState<Array<{ id: string; agentRole: string; cost: number }>>([])
+
+  const addSpendToast = useCallback((agentRole: string, cost: number) => {
+    const id = `${Date.now()}-${Math.random()}`
+    setSpendToasts(prev => [...prev.slice(-4), { id, agentRole, cost }])
+  }, [])
+
+  const dismissSpendToast = useCallback((id: string) => {
+    setSpendToasts(prev => prev.filter(t => t.id !== id))
+  }, [])
   const [patchBundleActionId, setPatchBundleActionId] = useState<string | null>(null)
   const [promptProposalActionId, setPromptProposalActionId] = useState<string | null>(null)
 
@@ -3531,6 +3542,22 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
         }
         break
 
+      case 'file:updated':
+        if (data.path && data.content !== undefined) {
+          setGeneratedFiles(prev => prev.map(f =>
+            f.path === data.path
+              ? { ...f, content: data.content, language: data.language || f.language }
+              : f
+          ))
+        }
+        break
+
+      case 'terminal:output':
+        if (data.output) {
+          addSystemMessage(data.output)
+        }
+        break
+
       case 'build:checkpoint':
         addSystemMessage(`Checkpoint ${data.number}: ${data.name}`)
         setBuildState(prev => {
@@ -4087,7 +4114,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
       case 'spend:update':
         if (data.billed_cost) {
-          addSystemMessage(`Agent ${data.agent_role || 'unknown'} spent $${Number(data.billed_cost).toFixed(4)}`)
+          addSpendToast(data.agent_role || 'agent', Number(data.billed_cost))
           addAiThought(
             message.agent_id,
             data.agent_role || 'agent',
@@ -5934,6 +5961,14 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, startOv
 
   return (
     <div ref={builderRootRef} className={cn("app-builder-root h-full min-h-0 bg-black text-white relative", buildState ? "overflow-hidden flex flex-col" : "overflow-y-auto overscroll-contain")}>
+      {/* Spend toasts */}
+      {spendToasts.length > 0 && (
+        <div className="fixed bottom-20 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+          {spendToasts.map(t => (
+            <SpendToast key={t.id} agentRole={t.agentRole} cost={t.cost} onDismiss={() => dismissSpendToast(t.id)} />
+          ))}
+        </div>
+      )}
       {/* Buy Credits Modal */}
       {showBuyCredits && (
         <BuyCreditsModal
