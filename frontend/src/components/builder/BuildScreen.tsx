@@ -14,6 +14,7 @@ import { BuildHistory } from './BuildHistory'
 import DiffReviewPanel from '@/components/diff/DiffReviewPanel'
 import AIRepairReviewPanel from '@/components/ide/AIRepairReviewPanel'
 import AITelemetryOverlay from '@/components/ide/AITelemetryOverlay'
+import { PanicKillButton } from '@/components/budget/PanicKillButton'
 import type {
   BuildLearningSummaryState,
   BuildMessageTargetMode,
@@ -490,6 +491,7 @@ const BuildHeader: React.FC<BuildHeaderProps> = ({
             </button>
           )
         )}
+        <PanicKillButton visible={isBuildActive} />
       </div>
     </div>
   )
