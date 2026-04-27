@@ -843,11 +843,13 @@ function App() {
     }
   }, [currentProject?.id, currentView])
 
-  // Lock the authenticated app to the redesigned theme and clear legacy theme drift.
+  // Clear legacy theme attributes that would apply light backgrounds.
   useLayoutEffect(() => {
     if (typeof window === 'undefined') return
     localStorage.setItem('apex_ui_color_scheme', uiColorScheme)
-    document.documentElement.setAttribute('data-ui-theme', 'blue')
+    document.documentElement.removeAttribute('data-ui-theme')
+    document.documentElement.style.background = '#020408'
+    document.body.style.background = '#020408'
   }, [uiColorScheme])
 
   // Loading screen
@@ -1303,108 +1305,103 @@ function App() {
   return (
     <div className="h-screen flex flex-col bg-[#020408]">
       {/* Top Navigation */}
-      <div className="shrink-0 bg-[rgba(2,4,8,0.88)] border-b border-white/[0.08] px-4 py-2 z-50 relative backdrop-blur-xl">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <div className="shrink-0 bg-[rgba(2,4,8,0.88)] border-b border-white/[0.08] px-3 sm:px-4 py-2 z-50 relative backdrop-blur-xl">
+        <div className="grid grid-cols-[auto,1fr,auto] items-center gap-2 sm:gap-3">
           {/* Logo */}
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="w-12 h-12 flex items-center justify-center">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center shrink-0">
               <img
                 src={logoSrc}
                 alt="APEX Logo"
                 className="desktop-header-logo w-full h-full object-contain drop-shadow-[0_0_14px_rgba(126,231,255,0.58)]"
               />
             </div>
-            <div className="min-w-0">
-              <span className="desktop-header-wordmark hidden sm:inline text-lg font-black uppercase tracking-wider text-white">
-                APEX-BUILD
-              </span>
-              <div className="sm:hidden text-[11px] uppercase tracking-[0.2em] text-gray-500">
-                {currentViewMeta.label}
-              </div>
-            </div>
+            <span className="hidden sm:inline text-base font-black uppercase tracking-wider text-white whitespace-nowrap">
+              APEX-BUILD
+            </span>
           </div>
 
-          {/* View Toggle */}
-          <div className="hidden md:flex md:min-w-0 md:flex-1 md:items-center md:gap-4">
-            <div className="min-w-0 flex-1 overflow-x-auto py-1.5 -my-1.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-              <div className="flex min-w-max items-center gap-2 pr-4">
-                {navigationItems.map((item) => (
-                  <button
-                    key={item.view}
-                    onClick={() => handleWorkspaceNavigation(item.view)}
-                    title={item.view === 'spending' ? 'Spending' : item.label}
-                    className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border px-3.5 py-1.5 text-sm font-bold tracking-wide transition-all duration-200 ${
-                      currentView === item.view
-                        ? item.activeClassName
-                        : item.inactiveClassName
-                    }`}
-                  >
-                    {item.icon}
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="hidden 2xl:flex shrink-0 items-center gap-2 min-w-0 max-w-[24rem] text-xs">
-              <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 uppercase tracking-[0.18em] text-[#aeb8c6]">
-                {currentViewMeta.label}
-              </span>
-              <span className="truncate text-white/30">{currentViewMeta.description}</span>
-            </div>
-          </div>
-
-          <div className="md:hidden flex-1 min-w-0" ref={workspaceMenuRef}>
-            <button
-              type="button"
-              onClick={() => setShowSettingsDropdown((prev) => !prev)}
-              className="w-full flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/60 px-3 py-2 text-left"
-              aria-haspopup="menu"
-              aria-expanded={showSettingsDropdown}
-            >
-              <div className="min-w-0">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">Workspace</div>
-                <div className="truncate text-sm font-medium text-white">{currentViewMeta.label}</div>
-              </div>
-              <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showSettingsDropdown ? 'rotate-180' : ''}`} />
-            </button>
-
-            {showSettingsDropdown && (
-              <div className="absolute left-4 right-4 top-full mt-2 rounded-xl border border-gray-800 bg-black/95 p-2 shadow-2xl shadow-black/60 backdrop-blur-xl">
-                <div className="max-h-[calc(100vh-9rem)] overflow-y-auto space-y-1 pr-1">
-                  {workspaceMenuItems.map((item) => (
+          {/* Center: desktop nav tabs or mobile workspace picker */}
+          <div className="min-w-0 overflow-hidden">
+            {/* Desktop nav */}
+            <div className="hidden md:flex min-w-0 items-center gap-3">
+              <div className="min-w-0 flex-1 overflow-x-auto py-1 -my-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="flex min-w-max items-center gap-1.5">
+                  {navigationItems.map((item) => (
                     <button
                       key={item.view}
-                      type="button"
                       onClick={() => handleWorkspaceNavigation(item.view)}
-                      className={`w-full flex items-start gap-3 rounded-lg border px-3 py-3 text-left transition-all ${
+                      title={item.label}
+                      className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border px-3 py-1.5 text-sm font-bold tracking-wide transition-all duration-200 ${
                         currentView === item.view
                           ? item.activeClassName
-                          : 'border-transparent text-gray-300 hover:border-gray-800 hover:bg-gray-900/70'
+                          : item.inactiveClassName
                       }`}
-                      role="menuitem"
                     >
-                      <span className="mt-0.5 shrink-0">{item.icon}</span>
-                      <span className="min-w-0">
-                        <span className="block text-sm font-semibold">{item.label}</span>
-                        <span className="block text-xs text-gray-500 leading-relaxed">{item.description}</span>
-                      </span>
+                      {item.icon}
+                      <span>{item.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
-            )}
+              <div className="hidden 2xl:flex shrink-0 items-center gap-2 min-w-0 max-w-[20rem] text-xs">
+                <span className="truncate text-white/30">{currentViewMeta.description}</span>
+              </div>
+            </div>
+
+            {/* Mobile workspace picker */}
+            <div className="md:hidden w-full" ref={workspaceMenuRef}>
+              <button
+                type="button"
+                onClick={() => setShowSettingsDropdown((prev) => !prev)}
+                className="w-full flex items-center justify-between gap-2 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-left"
+                aria-haspopup="menu"
+                aria-expanded={showSettingsDropdown}
+              >
+                <div className="min-w-0 flex items-center gap-2">
+                  <span className="shrink-0 text-[#aeb8c6]">{workspaceMenuItems.find(i => i.view === currentView)?.icon}</span>
+                  <span className="truncate text-sm font-semibold text-white">{currentViewMeta.label}</span>
+                </div>
+                <ChevronDown className={`w-4 h-4 shrink-0 text-gray-400 transition-transform ${showSettingsDropdown ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showSettingsDropdown && (
+                <div className="absolute left-3 right-3 top-full mt-1.5 rounded-xl border border-white/[0.08] bg-[rgba(2,6,14,0.97)] p-2 shadow-2xl shadow-black/80 backdrop-blur-xl z-50">
+                  <div className="max-h-[60vh] overflow-y-auto space-y-0.5">
+                    {workspaceMenuItems.map((item) => (
+                      <button
+                        key={item.view}
+                        type="button"
+                        onClick={() => handleWorkspaceNavigation(item.view)}
+                        className={`w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-all ${
+                          currentView === item.view
+                            ? item.activeClassName
+                            : 'border-transparent text-gray-300 hover:border-white/[0.06] hover:bg-white/[0.03]'
+                        }`}
+                        role="menuitem"
+                      >
+                        <span className="shrink-0">{item.icon}</span>
+                        <span className="min-w-0">
+                          <span className="block text-sm font-semibold">{item.label}</span>
+                          <span className="block text-xs text-gray-500 leading-snug">{item.description}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* User Info */}
+          {/* Right: user controls — always on same row, never wraps */}
           {user && (
-            <div className="ml-auto flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               <button
                 onClick={handleStartNewBuild}
-                className="flex items-center gap-2 whitespace-nowrap rounded-xl border border-[rgba(188,239,255,0.5)] bg-gradient-to-r from-white/90 via-[#8adfff] to-[#2fa8ff] px-3.5 py-1.5 text-[#00111d] font-bold text-sm transition-all duration-200 hover:shadow-[0_0_20px_rgba(47,168,255,0.4)] hover:scale-[1.02]"
+                className="flex items-center gap-1.5 whitespace-nowrap rounded-xl border border-[rgba(188,239,255,0.5)] bg-gradient-to-r from-white/90 via-[#8adfff] to-[#2fa8ff] px-2.5 sm:px-3.5 py-1.5 text-[#00111d] font-bold text-sm transition-all duration-200 hover:shadow-[0_0_20px_rgba(47,168,255,0.4)] active:scale-95"
                 title="Start a new build"
               >
-                <Rocket className="w-4 h-4" />
+                <Rocket className="w-4 h-4 shrink-0" />
                 <span className="hidden sm:inline">New Build</span>
               </button>
               <div className="hidden xl:block">
@@ -1412,7 +1409,7 @@ function App() {
               </div>
               <button
                 onClick={() => navigateToView('settings')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md border transition-all duration-200 ${
+                className={`p-2 rounded-md border transition-all duration-200 ${
                   currentView === 'settings'
                     ? 'border-[rgba(188,239,255,0.4)] bg-[rgba(47,168,255,0.12)] text-white'
                     : 'border-white/[0.08] text-[#aeb8c6] hover:text-white hover:bg-white/[0.04]'
@@ -1421,8 +1418,8 @@ function App() {
               >
                 <Settings className="w-4 h-4" />
               </button>
-              <span className="hidden lg:inline max-w-[10rem] truncate text-sm text-[#aeb8c6]">{user.username}</span>
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#2fa8ff] to-[#8adfff] flex items-center justify-center text-[#00111d] text-sm font-black shadow-lg shadow-[rgba(47,168,255,0.3)]">
+              <span className="hidden lg:inline max-w-[9rem] truncate text-sm text-[#aeb8c6]">{user.username}</span>
+              <div className="w-8 h-8 shrink-0 rounded-full bg-gradient-to-br from-[#2fa8ff] to-[#8adfff] flex items-center justify-center text-[#00111d] text-sm font-black shadow-lg shadow-[rgba(47,168,255,0.3)]">
                 {user.username?.charAt(0).toUpperCase()}
               </div>
             </div>
