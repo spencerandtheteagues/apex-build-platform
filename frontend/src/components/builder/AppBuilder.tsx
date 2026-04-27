@@ -80,7 +80,12 @@ import {
   PlugZap,
   LockKeyhole,
   CreditCard,
-  MonitorUp
+  MonitorUp,
+  Paperclip,
+  FileText,
+  FileArchive,
+  ImageIcon,
+  X as XIcon,
 } from 'lucide-react'
 import { GitHubImportWizard } from '@/components/import/GitHubImportWizard'
 import { BuyCreditsModal } from '@/components/billing/BuyCreditsModal'
@@ -976,6 +981,53 @@ const TypewriterSubtitle: React.FC<{ text: string }> = ({ text }) => {
 }
 
 // ============================================================================
+// ATTACHMENT TYPES
+// ============================================================================
+
+export interface AttachedFile {
+  id: string
+  name: string
+  fileType: 'image' | 'text' | 'binary'
+  size: number
+  content: string   // raw text for text files; dataURL for image/binary
+}
+
+const TEXT_EXTENSIONS = new Set([
+  'txt','md','mdx','ts','tsx','js','jsx','json','jsonc','css','scss','less',
+  'html','htm','xml','svg','yaml','yml','toml','env','sh','bash','zsh',
+  'py','go','rs','java','kt','rb','php','c','cpp','h','cs','sql','graphql',
+  'prisma','lock','gitignore','dockerignore','editorconfig','nvmrc',
+])
+
+const isTextFile = (file: File): boolean => {
+  if (file.type.startsWith('text/')) return true
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+  return TEXT_EXTENSIONS.has(ext)
+}
+
+const readFileAsText = (file: File): Promise<string> =>
+  new Promise((res, rej) => {
+    const r = new FileReader()
+    r.onload = () => res(r.result as string)
+    r.onerror = rej
+    r.readAsText(file)
+  })
+
+const readFileAsDataURL = (file: File): Promise<string> =>
+  new Promise((res, rej) => {
+    const r = new FileReader()
+    r.onload = () => res(r.result as string)
+    r.onerror = rej
+    r.readAsDataURL(file)
+  })
+
+const formatFileSize = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+}
+
+// ============================================================================
 // PREMIUM TEXTAREA COMPONENT
 // ============================================================================
 
@@ -983,6 +1035,9 @@ interface PremiumTextareaProps {
   value: string
   onChange: (value: string) => void
   maxLength?: number
+  attachments?: AttachedFile[]
+  attachInputRef?: React.RefObject<HTMLInputElement | null>
+  onRemoveAttachment?: (id: string) => void
 }
 
 const FAST_BUILD_PROMPT_MAX_LENGTH = 2000
@@ -998,26 +1053,34 @@ const getBuildPromptMaxLength = (mode: BuildMode, powerMode: 'fast' | 'balanced'
         ? BALANCED_FULL_BUILD_PROMPT_MAX_LENGTH
         : FAST_BUILD_PROMPT_MAX_LENGTH
 
-const PremiumTextarea: React.FC<PremiumTextareaProps> = ({ value, onChange, maxLength = FAST_BUILD_PROMPT_MAX_LENGTH }) => {
+const PremiumTextarea: React.FC<PremiumTextareaProps> = ({
+  value,
+  onChange,
+  maxLength = FAST_BUILD_PROMPT_MAX_LENGTH,
+  attachments = [],
+  attachInputRef,
+  onRemoveAttachment,
+}) => {
   const [isFocused, setIsFocused] = useState(false)
   const isEmpty = value.length === 0
   const progressPercent = (value.length / maxLength) * 100
+  const hasAttachments = attachments.length > 0
 
   return (
     <div className="premium-textarea relative group">
-      {/* Animated border container */}
+      {/* Animated border */}
       <div className={cn(
         "premium-textarea-border absolute -inset-[2px] rounded-2xl transition-all duration-500",
-        isEmpty && !isFocused && "animate-pulse",
-        isFocused
+        isEmpty && !isFocused && !hasAttachments && "animate-pulse",
+        isFocused || hasAttachments
           ? "bg-gradient-to-r from-[#8adfff] via-[#2fa8ff] to-[#8adfff] shadow-lg shadow-[rgba(47,168,255,0.28)]"
           : "bg-gradient-to-r from-[rgba(138,223,255,0.28)] to-[rgba(47,168,255,0.18)]"
-      )} style={isFocused ? { backgroundSize: '200% auto', animation: 'gradient-shift 2s linear infinite' } : {}} />
+      )} style={isFocused || hasAttachments ? { backgroundSize: '200% auto', animation: 'gradient-shift 2s linear infinite' } : {}} />
 
-      {/* Glass effect background */}
+      {/* Glass background */}
       <div className="premium-textarea-shell absolute inset-0 rounded-xl bg-black/90 backdrop-blur-xl" />
 
-      {/* Inner glow on focus */}
+      {/* Inner glow */}
       {isFocused && (
         <div className="absolute inset-0 rounded-xl bg-gradient-to-b from-[rgba(47,168,255,0.14)] via-transparent to-[rgba(47,168,255,0.08)] pointer-events-none" />
       )}
@@ -1036,37 +1099,71 @@ For example:
 - Create a personal finance dashboard that connects to mock bank data, categorizes transactions automatically, shows spending trends with interactive charts, supports budget goals, and sends alerts when limits are exceeded. Use React, TypeScript, and a Node.js API.
 - Build a real-time collaborative whiteboard app where multiple users can draw, add sticky notes, shapes, and text together. Include room creation with shareable links, undo/redo history, and export to PNG."
         className={cn(
-          "relative w-full h-56 bg-transparent rounded-xl px-5 py-4",
+          "relative w-full bg-transparent rounded-xl px-5 py-4",
+          hasAttachments ? "h-44" : "h-56",
           "text-white placeholder-gray-500 text-base leading-relaxed",
-          "focus:outline-none resize-none",
-          "transition-all duration-300",
-          "z-10"
+          "focus:outline-none resize-none transition-all duration-300 z-10"
         )}
       />
 
-      {/* Character count and progress bar */}
-      <div className="absolute bottom-4 right-4 flex items-center gap-3 z-20">
-        <div className="w-28 h-2 bg-gray-800 rounded-full overflow-hidden border border-gray-700">
-          <div
-            className={cn(
-              "h-full rounded-full transition-all duration-500 relative overflow-hidden",
-              progressPercent > 80 ? "bg-orange-500" : progressPercent > 50 ? "bg-yellow-500" : "bg-red-500"
-            )}
-            style={{ width: `${Math.min(progressPercent, 100)}%` }}
-          >
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent" style={{ animation: 'shimmer 1.5s infinite' }} />
-          </div>
+      {/* Attached file chips */}
+      {hasAttachments && (
+        <div className="relative z-10 flex flex-wrap gap-1.5 px-4 pb-1 pt-0">
+          {attachments.map((f) => {
+            const Icon = f.fileType === 'image' ? ImageIcon : f.fileType === 'binary' ? FileArchive : FileText
+            return (
+              <div
+                key={f.id}
+                className="flex items-center gap-1.5 rounded-lg border border-[rgba(138,223,255,0.3)] bg-[rgba(47,168,255,0.1)] px-2 py-1 text-[11px] text-[#c8f4ff] max-w-[180px]"
+              >
+                <Icon className="w-3 h-3 shrink-0 text-[#8adfff]" />
+                <span className="truncate">{f.name}</span>
+                <span className="shrink-0 text-[#6f89a3]">{formatFileSize(f.size)}</span>
+                <button
+                  type="button"
+                  onClick={() => onRemoveAttachment?.(f.id)}
+                  className="shrink-0 rounded p-0.5 hover:bg-white/10 text-[#6f89a3] hover:text-white transition-colors"
+                  aria-label={`Remove ${f.name}`}
+                >
+                  <XIcon className="w-2.5 h-2.5" />
+                </button>
+              </div>
+            )
+          })}
         </div>
-        <span className="text-xs text-gray-500 font-mono tabular-nums">
-          {value.length.toLocaleString()}/{maxLength.toLocaleString()}
-        </span>
+      )}
+
+      {/* Bottom toolbar: paperclip left, char count right */}
+      <div className="relative z-10 flex items-center justify-between px-4 pb-3 pt-1">
+        <button
+          type="button"
+          onClick={() => attachInputRef?.current?.click()}
+          title="Attach files (images, text, ZIP)"
+          className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-medium text-[#6f89a3] transition-all hover:border-[rgba(138,223,255,0.35)] hover:text-[#c8f4ff] hover:bg-[rgba(47,168,255,0.08)]"
+        >
+          <Paperclip className="w-3.5 h-3.5" />
+          <span>Attach</span>
+        </button>
+
+        <div className="flex items-center gap-2">
+          <div className="w-20 h-1.5 bg-gray-800 rounded-full overflow-hidden border border-gray-700/50">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all duration-500",
+                progressPercent > 80 ? "bg-orange-500" : progressPercent > 50 ? "bg-yellow-500" : "bg-[#2fa8ff]"
+              )}
+              style={{ width: `${Math.min(progressPercent, 100)}%` }}
+            />
+          </div>
+          <span className="text-[11px] text-gray-600 font-mono tabular-nums">
+            {value.length.toLocaleString()}/{maxLength.toLocaleString()}
+          </span>
+        </div>
       </div>
 
       {/* Corner decorations */}
       <div className="absolute top-2 left-2 w-5 h-5 border-t-2 border-l-2 border-[rgba(188,239,255,0.3)] rounded-tl pointer-events-none" />
       <div className="absolute top-2 right-2 w-5 h-5 border-t-2 border-r-2 border-[rgba(188,239,255,0.3)] rounded-tr pointer-events-none" />
-      <div className="absolute bottom-12 left-2 w-5 h-5 border-b-2 border-l-2 border-[rgba(188,239,255,0.3)] rounded-bl pointer-events-none" />
-      <div className="absolute bottom-12 right-2 w-5 h-5 border-b-2 border-r-2 border-[rgba(188,239,255,0.3)] rounded-br pointer-events-none" />
     </div>
   )
 }
@@ -1929,6 +2026,9 @@ interface BuilderLaunchpadProps {
   userPlan?: string
   userId?: number | null
   wireframeInputRef: React.RefObject<HTMLInputElement | null>
+  attachedFiles: AttachedFile[]
+  attachInputRef: React.RefObject<HTMLInputElement | null>
+  onAttachedFilesChange: (files: AttachedFile[]) => void
   onSetBuildMode: (mode: BuildMode) => void
   onSetPowerMode: (mode: 'fast' | 'balanced' | 'max') => void
   onSetAppDescription: (value: string) => void
@@ -1967,6 +2067,9 @@ const BuilderLaunchpad: React.FC<BuilderLaunchpadProps> = ({
   userPlan,
   userId,
   wireframeInputRef,
+  attachedFiles,
+  attachInputRef,
+  onAttachedFilesChange,
   onSetBuildMode,
   onSetPowerMode,
   onSetAppDescription,
@@ -2075,10 +2178,32 @@ const BuilderLaunchpad: React.FC<BuilderLaunchpadProps> = ({
                     {buildMode === 'full' ? 'Full orchestration path' : 'Fast delivery path'}
                   </div>
                 </div>
+                <input
+                  ref={attachInputRef as React.RefObject<HTMLInputElement>}
+                  type="file"
+                  accept="*"
+                  multiple
+                  className="hidden"
+                  onChange={async (e) => {
+                    const files = Array.from(e.target.files ?? [])
+                    if (!files.length) return
+                    const next: AttachedFile[] = []
+                    for (const file of files) {
+                      const fileType = file.type.startsWith('image/') ? 'image' : isTextFile(file) ? 'text' : 'binary'
+                      const content = fileType === 'text' ? await readFileAsText(file) : await readFileAsDataURL(file)
+                      next.push({ id: `${file.name}-${Date.now()}-${Math.random()}`, name: file.name, fileType, size: file.size, content })
+                    }
+                    onAttachedFilesChange([...attachedFiles, ...next])
+                    e.target.value = ''
+                  }}
+                />
                 <PremiumTextarea
                   value={appDescription}
                   onChange={onSetAppDescription}
                   maxLength={promptMaxLength}
+                  attachments={attachedFiles}
+                  attachInputRef={attachInputRef}
+                  onRemoveAttachment={(id) => onAttachedFilesChange(attachedFiles.filter(f => f.id !== id))}
                 />
                 <p className="mt-3 text-xs leading-6 text-[#7e97ad]">
                   {maxPowerPromptLimitEnabled
@@ -2267,6 +2392,8 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, onNavig
   const [appDescription, setAppDescription] = useState('')
   const [wireframeImage, setWireframeImage] = useState<string>('')
   const wireframeInputRef = useRef<HTMLInputElement>(null)
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([])
+  const attachInputRef = useRef<HTMLInputElement>(null)
   const [buildState, setBuildState] = useState<BuildState | null>(null)
   const [isBuilding, setIsBuilding] = useState(false)
   const [showChat, setShowChat] = useState(true)
@@ -6085,9 +6212,22 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, onNavig
         console.warn('Preflight check failed (non-fatal):', preflightErr)
       }
 
+      // Prepend any text-file attachments to the prompt as XML-style blocks
+      let effectiveDescription = appDescription
+      const textAttachments = attachedFiles.filter(f => f.fileType === 'text')
+      if (textAttachments.length > 0) {
+        const fileBlocks = textAttachments
+          .map(f => `<file name="${f.name}">\n${f.content}\n</file>`)
+          .join('\n\n')
+        effectiveDescription = `${fileBlocks}\n\n${appDescription}`
+      }
+      // Use the first image attachment as wireframe context if none already provided
+      const imageAttachment = attachedFiles.find(f => f.fileType === 'image')
+      const effectiveWireframe = wireframeImage || imageAttachment?.content || undefined
+
       const response = await apiService.startBuild({
-        description: appDescription,
-        prompt: appDescription,
+        description: effectiveDescription,
+        prompt: effectiveDescription,
         mode: buildMode,
         power_mode: powerMode,
         provider_mode: freshProviderMode,
@@ -6096,7 +6236,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, onNavig
         diff_mode: false,
         role_assignments: roleConfigMode === 'manual' ? roleAssignments : undefined,
         provider_model_overrides: serializeProviderModelOverrides(providerModelOverrides),
-        wireframe_image: wireframeImage || undefined,
+        wireframe_image: effectiveWireframe,
       })
 
       if (!response || !response.build_id) {
@@ -6107,6 +6247,7 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, onNavig
       persistActiveBuildId(buildId)
       persistLastWorkflowBuildId(buildId)
       setWireframeImage('')
+      setAttachedFiles([])
 
       setBuildState({
         id: buildId,
@@ -6731,6 +6872,9 @@ export const AppBuilder: React.FC<AppBuilderProps> = ({ onNavigateToIDE, onNavig
             userPlan={user?.subscription_type}
             userId={user?.id ?? null}
             wireframeInputRef={wireframeInputRef}
+            attachedFiles={attachedFiles}
+            attachInputRef={attachInputRef}
+            onAttachedFilesChange={setAttachedFiles}
             onSetBuildMode={setBuildMode}
             onSetPowerMode={setPowerMode}
             onSetAppDescription={setAppDescription}
