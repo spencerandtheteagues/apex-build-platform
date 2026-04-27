@@ -175,10 +175,10 @@ export default function CostTicker({ className }: CostTickerProps) {
       {isExpanded && (
         <div
           className={cn(
-            'absolute bottom-full left-0 mb-2 z-50 w-[320px]',
+            'absolute top-full right-0 mt-2 z-50 w-[320px]',
             'bg-gray-900/95 backdrop-blur-xl border border-gray-700/70 rounded-xl',
             'shadow-2xl shadow-black/50',
-            'animate-in fade-in slide-in-from-bottom-2 duration-150'
+            'animate-in fade-in slide-in-from-top-2 duration-150'
           )}
         >
           {/* Header */}

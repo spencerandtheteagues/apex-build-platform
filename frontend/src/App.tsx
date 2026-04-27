@@ -1404,7 +1404,7 @@ function App() {
                 <Rocket className="w-4 h-4 shrink-0" />
                 <span className="hidden sm:inline">New Build</span>
               </button>
-              <div className="hidden xl:block">
+              <div className="hidden 2xl:block">
                 <CostTicker />
               </div>
               <button
